@@ -1,7 +1,7 @@
 {
  "row": "CLI-PAIRING",
  "platform": "linux",
- "oracle_commit": "e7ba7f3c830fe79324b8822a64612af01210901b",
+ "oracle_commit": "42aee201378a780e4259d3f8d3502a68de268771",
  "oracle_commit_source": "git",
  "cases": {
   "container-rust": {
@@ -11,8 +11,8 @@
    "stdout": "Y29udGFpbmVyLWludml0ZQo=",
    "stderr": "",
    "window": [
-    1793646324.41939,
-    1793646324.9300327
+    1793654161.82031,
+    1793654162.344436
    ],
    "files": {
     "cwd": "dir",
@@ -30,8 +30,8 @@
    "stdout": "Y29udGFpbmVyLWludml0ZQo=",
    "stderr": "",
    "window": [
-    1793646324.931345,
-    1793646325.446259
+    1793654162.3462403,
+    1793654162.8777359
    ],
    "files": {
     "cwd": "dir",
@@ -49,8 +49,8 @@
    "stdout": "Y29udGFpbmVyLWludml0ZQo=",
    "stderr": "",
    "window": [
-    1793646325.4471447,
-    1793646325.9519846
+    1793654162.878633,
+    1793654163.4074483
    ],
    "files": {
     "cwd": "dir",
@@ -61,15 +61,72 @@
     "docker.jsonl": "0o644"
    }
   },
+  "container-v2-someone-else": {
+   "home": null,
+   "utc_offset": 0,
+   "exit": 0,
+   "stdout": "Y29udGFpbmVyLWludml0ZQo=",
+   "stderr": "",
+   "window": [
+    1793654163.4083712,
+    1793654163.9314456
+   ],
+   "files": {
+    "cwd": "dir",
+    "docker.jsonl": "file:eyJhcmd2IjogWyJpbnNwZWN0IiwgIi1mIiwgInt7LlN0YXRlLlJ1bm5pbmd9fSIsICJwc2V1ZG9saWZlLW1jcC1kYWVtb24iXSwgInN0ZGluIjogIiJ9CnsiYXJndiI6IFsiaW5zcGVjdCIsICItZiIsICJ7e2luZGV4IC5Db25maWcuTGFiZWxzIFwib3JnLnBzZXVkb2xpZmUuZW5naW5lXCJ9fSIsICJwc2V1ZG9saWZlLW1jcC1kYWVtb24iXSwgInN0ZGluIjogIiJ9CnsiYXJndiI6IFsiZXhlYyIsICItZSIsICJQU0VVRE9MSUZFX0RBRU1PTl9FWEVDPTEiLCAicHNldWRvbGlmZS1tY3AtZGFlbW9uIiwgInBzZXVkb2xpZmUtbWNwIiwgImludml0ZSIsICItLXZlcnNpb24tY2hlY2siXSwgInN0ZGluIjogIiJ9CnsiYXJndiI6IFsiZXhlYyIsICItaSIsICItZSIsICJQU0VVRE9MSUZFX0RBRU1PTl9FWEVDPTEiLCAicHNldWRvbGlmZS1tY3AtZGFlbW9uIiwgInBzZXVkb2xpZmUtbWNwIiwgImludml0ZSIsICJsYXB0b3AiLCAiLS1leHBpcmVzIiwgIjkwMHMiLCAiLS1zb21lb25lLWVsc2UiLCAiLS11cmwiLCAiaHR0cHM6Ly9leGFtcGxlLmNvbSJdLCAic3RkaW4iOiAiIn0K"
+   },
+   "modes": {
+    "cwd": "0o755",
+    "docker.jsonl": "0o644"
+   }
+  },
+  "container-v1-someone-else": {
+   "home": null,
+   "utc_offset": 0,
+   "exit": 4,
+   "stdout": "",
+   "stderr": "aW52aXRlOiB0aGUgZGFlbW9uJ3MgaW1hZ2UgcHJlZGF0ZXMgLS1zb21lb25lLWVsc2UgYW5kIC0tbWluZTogdXBkYXRlIHRoZSBkYWVtb24gdG8gc2NoZW1hIDU5IChwc2V1ZG9saWZlLW1jcCB1cGRhdGUpLCB0aGVuIHJlLXJ1bi4gTm90aGluZyB3YXMgY2hhbmdlZAo=",
+   "window": [
+    1793654163.932234,
+    1793654164.375864
+   ],
+   "files": {
+    "cwd": "dir",
+    "docker.jsonl": "file:eyJhcmd2IjogWyJpbnNwZWN0IiwgIi1mIiwgInt7LlN0YXRlLlJ1bm5pbmd9fSIsICJwc2V1ZG9saWZlLW1jcC1kYWVtb24iXSwgInN0ZGluIjogIiJ9CnsiYXJndiI6IFsiaW5zcGVjdCIsICItZiIsICJ7e2luZGV4IC5Db25maWcuTGFiZWxzIFwib3JnLnBzZXVkb2xpZmUuZW5naW5lXCJ9fSIsICJwc2V1ZG9saWZlLW1jcC1kYWVtb24iXSwgInN0ZGluIjogIiJ9CnsiYXJndiI6IFsiZXhlYyIsICItZSIsICJQU0VVRE9MSUZFX0RBRU1PTl9FWEVDPTEiLCAicHNldWRvbGlmZS1tY3AtZGFlbW9uIiwgInBzZXVkb2xpZmUtbWNwIiwgImludml0ZSIsICItLXZlcnNpb24tY2hlY2siXSwgInN0ZGluIjogIiJ9Cg=="
+   },
+   "modes": {
+    "cwd": "0o755",
+    "docker.jsonl": "0o644"
+   }
+  },
   "stopped-list-v58": {
    "home": null,
    "utc_offset": 0,
    "exit": 0,
-   "stdout": "ewogICJlcnJvciI6IG51bGwsCiAgIm5vdGVzIjogW10sCiAgImV4aXQiOiAwLAogICJwcmluY2lwYWxzIjogWwogICAgewogICAgICAicHJpbmNpcGFsIjogImxhcHRvcCIsCiAgICAgICJzdGF0ZSI6ICJwYWlyZWQiLAogICAgICAicGFpcmVkIjogdHJ1ZSwKICAgICAgInRpZXIiOiAiY29yZSIsCiAgICAgICJib2FyZCI6IHRydWUsCiAgICAgICJjb2RlX2V4cGlyZXNfYXQiOiBudWxsLAogICAgICAiY3JlYXRlZF9hdCI6IDE3MDAwMDAwMDAuMCwKICAgICAgInBhaXJlZF9hdCI6IDE3MDAwMDAwMDEuMCwKICAgICAgInJldm9rZWRfYXQiOiBudWxsLAogICAgICAibGFzdF9zZWVuX2F0IjogbnVsbCwKICAgICAgIm93bmVyIjogdHJ1ZQogICAgfQogIF0sCiAgInJlamVjdGVkIjogW10KfQo=",
+   "stdout": "ewogICJlcnJvciI6IG51bGwsCiAgIm5vdGVzIjogW10sCiAgImV4aXQiOiAwLAogICJwcmluY2lwYWxzIjogWwogICAgewogICAgICAicHJpbmNpcGFsIjogImNvZGV4IiwKICAgICAgInN0YXRlIjogImVudmlyb25tZW50IiwKICAgICAgInBhaXJlZCI6IGZhbHNlLAogICAgICAidGllciI6IG51bGwsCiAgICAgICJib2FyZCI6IG51bGwsCiAgICAgICJjb2RlX2V4cGlyZXNfYXQiOiBudWxsLAogICAgICAiY3JlYXRlZF9hdCI6IG51bGwsCiAgICAgICJwYWlyZWRfYXQiOiBudWxsLAogICAgICAicmV2b2tlZF9hdCI6IG51bGwsCiAgICAgICJsYXN0X3NlZW5fYXQiOiAxNzAwMDAwMDA1LjAsCiAgICAgICJvd25lciI6IG51bGwKICAgIH0sCiAgICB7CiAgICAgICJwcmluY2lwYWwiOiAibGFwdG9wIiwKICAgICAgInN0YXRlIjogInBhaXJlZCIsCiAgICAgICJwYWlyZWQiOiB0cnVlLAogICAgICAidGllciI6ICJjb3JlIiwKICAgICAgImJvYXJkIjogdHJ1ZSwKICAgICAgImNvZGVfZXhwaXJlc19hdCI6IG51bGwsCiAgICAgICJjcmVhdGVkX2F0IjogMTcwMDAwMDAwMC4wLAogICAgICAicGFpcmVkX2F0IjogMTcwMDAwMDAwMS4wLAogICAgICAicmV2b2tlZF9hdCI6IG51bGwsCiAgICAgICJsYXN0X3NlZW5fYXQiOiBudWxsLAogICAgICAib3duZXIiOiBmYWxzZQogICAgfQogIF0sCiAgInJlamVjdGVkIjogW10KfQo=",
    "stderr": "",
    "window": [
-    1793646325.9529083,
-    1793646326.4684134
+    1793654164.3766968,
+    1793654164.860948
+   ],
+   "files": {
+    "cwd": "dir",
+    "docker.jsonl": "file:eyJhcmd2IjogWyJpbnNwZWN0IiwgIi1mIiwgInt7LlN0YXRlLlJ1bm5pbmd9fSIsICJwc2V1ZG9saWZlLW1jcC1kYWVtb24iXSwgInN0ZGluIjogIiJ9CnsiYXJndiI6IFsiZXhlYyIsICItaSIsICJwc2V1ZG9saWZlLW1jcC1wb3N0Z3JlcyIsICJzaCIsICItYyIsICJwc3FsIC1YIC1xIC10QSAtdiBPTl9FUlJPUl9TVE9QPTEgLVUgXCIkUE9TVEdSRVNfVVNFUlwiIC1kIFwiJFBPU1RHUkVTX0RCXCIiXSwgInN0ZGluIjogIlNFTEVDVCB0b19yZWdjbGFzcygncHVibGljLnByaW5jaXBhbF9hY3Rpdml0eScpIElTIE5PVCBOVUxMO1xuIn0KeyJhcmd2IjogWyJleGVjIiwgIi1pIiwgInBzZXVkb2xpZmUtbWNwLXBvc3RncmVzIiwgInNoIiwgIi1jIiwgInBzcWwgLVggLXEgLXRBIC12IE9OX0VSUk9SX1NUT1A9MSAtVSBcIiRQT1NUR1JFU19VU0VSXCIgLWQgXCIkUE9TVEdSRVNfREJcIiJdLCAic3RkaW4iOiAiU0VMRUNUIGpzb25fYnVpbGRfb2JqZWN0KCdwcmluY2lwYWxzJywgKFNFTEVDVCBjb2FsZXNjZShqc29uX2FnZyhqc29uX2J1aWxkX2FycmF5KGwucHJpbmNpcGFsLCBsLnRpZXIsIGwuYm9hcmQsIGwucGFpcmVkLCBsLnBlbmRpbmcsIGwuY29kZV9leHBpcmVzX2F0LCBsLmNyZWF0ZWRfYXQsIGwucGFpcmVkX2F0LCBsLnJldm9rZWRfYXQsIGwubm93LCBsLmxhc3Rfc2Vlbl9hdCwgbC5zdG9yZWQsIGwub3duZWQpIE9SREVSIEJZIGwucHJpbmNpcGFsKSwgJ1tdJzo6anNvbikgRlJPTSAoU0VMRUNUIHAucHJpbmNpcGFsLCBwLnRpZXIsIHAuYm9hcmQsIHAudG9rZW5faGFzaCBJUyBOT1QgTlVMTCBBUyBwYWlyZWQsIHAuY29kZV9oYXNoIElTIE5PVCBOVUxMIEFTIHBlbmRpbmcsIHAuY29kZV9leHBpcmVzX2F0LCBwLmNyZWF0ZWRfYXQsIHAucGFpcmVkX2F0LCBwLnJldm9rZWRfYXQsIEVYVFJBQ1QoRVBPQ0ggRlJPTSBjbG9ja190aW1lc3RhbXAoKSk6OmRvdWJsZSBwcmVjaXNpb24gQVMgbm93LCBhLmxhc3Rfc2Vlbl9hdCwgVFJVRSBBUyBzdG9yZWQsIENPQUxFU0NFKCh0b19qc29uYihwKSAtPj4gJ293bmVkJyk6OmJvb2xlYW4sIFRSVUUpIEFTIG93bmVkIEZST00gcHVibGljLnByaW5jaXBhbHMgcCBMRUZUIEpPSU4gcHVibGljLnByaW5jaXBhbF9hY3Rpdml0eSBhIE9OIGEucHJpbmNpcGFsID0gcC5wcmluY2lwYWwgVU5JT04gQUxMIFNFTEVDVCBhLnByaW5jaXBhbCwgTlVMTCwgTlVMTCwgRkFMU0UsIEZBTFNFLCBOVUxMLCBOVUxMLCBOVUxMLCBOVUxMLCBFWFRSQUNUKEVQT0NIIEZST00gY2xvY2tfdGltZXN0YW1wKCkpOjpkb3VibGUgcHJlY2lzaW9uLCBhLmxhc3Rfc2Vlbl9hdCwgRkFMU0UsIE5VTEwgRlJPTSBwdWJsaWMucHJpbmNpcGFsX2FjdGl2aXR5IGEgV0hFUkUgTk9UIEVYSVNUUyAoU0VMRUNUIDEgRlJPTSBwdWJsaWMucHJpbmNpcGFscyBwIFdIRVJFIHAucHJpbmNpcGFsID0gYS5wcmluY2lwYWwpKSBsKSwgJ3JlamVjdGVkJywgKFNFTEVDVCBjb2FsZXNjZShqc29uX2FnZyhqc29uX2J1aWxkX2FycmF5KGhhc2hfcHJlZml4LCByZWplY3Rpb25zLCBmaXJzdF9zZWVuX2F0LCBsYXN0X3NlZW5fYXQpIE9SREVSIEJZIGxhc3Rfc2Vlbl9hdCBERVNDLCBoYXNoX3ByZWZpeCksICdbXSc6Ompzb24pIEZST00gcHVibGljLnJlamVjdGVkX2JlYXJlcnMpKTtcbiJ9Cg=="
+   },
+   "modes": {
+    "cwd": "0o755",
+    "docker.jsonl": "0o644"
+   }
+  },
+  "stopped-list-v58-text": {
+   "home": null,
+   "utc_offset": 0,
+   "exit": 0,
+   "stdout": "ICBuYW1lICAgICAgICAgICAgICAgICAgICAgc3RhdGUgICAgICAgbGFzdCBzZWVuICAgICAgICAgICAgIHRpZXIgICAgIGJvYXJkICBvd25lciAgY3JlYXRlZCAgICAgICAgICAgICAgIHBhaXJlZCAgICAgICAgICAgICAgICByZXZva2VkCiAgY29kZXggICAgICAgICAgICAgICAgICAgIGVudmlyb25tZW50IDIwMjMtMTEtMTQgMjI6MTMgVVRDICBkZWZhdWx0ICAtICAgICAgLSAgICAgIC0gICAgICAgICAgICAgICAgICAgICAtICAgICAgICAgICAgICAgICAgICAgLQogIGxhcHRvcCAgICAgICAgICAgICAgICAgICBwYWlyZWQgICAgICBuZXZlciAgICAgICAgICAgICAgICAgY29yZSAgICAgb24gICAgIG5vICAgICAyMDIzLTExLTE0IDIyOjEzIFVUQyAgMjAyMy0xMS0xNCAyMjoxMyBVVEMgIC0KICAoZW52aXJvbm1lbnQ6IGEgdG9rZW4gaW4gdGhlIGRhZW1vbidzIFBTRVVET0xJRkVfTUNQX1RPS0VOUyBvciBQU0VVRE9MSUZFX01DUF9UT0tFTjsgbGFzdCBzZWVuOiBpdHMgbGFzdCBhY2NlcHRlZCByZXF1ZXN0LCB3cml0dGVuIG9uY2UgYSBtaW51dGU7CiAgIG93bmVyOiB0aGUgYmFuayBvd25lcidzIG1hY2hpbmUsIHdob3NlIGJvYXJkIG1haWwgdGhlIG93bmVyJ3MgQ29uc29sZSBzaG93czsgYGludml0ZSAtLXNvbWVvbmUtZWxzZWAgYW5kIGNvb3JkaW5hdGlvbi5ub3Rfb3duZXJfcHJpbmNpcGFscyBzYXkgb3RoZXJ3aXNlKQoKbm8gcmVmdXNlZCB0b2tlbnMgcmVjb3JkZWQK",
+   "stderr": "",
+   "window": [
+    1793654164.9001923,
+    1793654165.3780408
    ],
    "files": {
     "cwd": "dir",
@@ -84,11 +141,11 @@
    "home": null,
    "utc_offset": 0,
    "exit": 0,
-   "stdout": "ICBuYW1lICAgICAgICAgICAgICAgICAgICAgc3RhdGUgICAgICAgbGFzdCBzZWVuICAgICAgICAgICAgIHRpZXIgICAgIGJvYXJkICBvd25lciAgY3JlYXRlZCAgICAgICAgICAgICAgIHBhaXJlZCAgICAgICAgICAgICAgICByZXZva2VkCiAgbGFwdG9wICAgICAgICAgICAgICAgICAgIHBhaXJlZCAgICAgIG5ldmVyICAgICAgICAgICAgICAgICBjb3JlICAgICBvbiAgICAgeWVzICAgIDIwMjMtMTEtMTQgMjI6MTMgVVRDICAyMDIzLTExLTE0IDIyOjEzIFVUQyAgLQogIChlbnZpcm9ubWVudDogYSB0b2tlbiBpbiB0aGUgZGFlbW9uJ3MgUFNFVURPTElGRV9NQ1BfVE9LRU5TIG9yIFBTRVVET0xJRkVfTUNQX1RPS0VOOyBsYXN0IHNlZW46IGl0cyBsYXN0IGFjY2VwdGVkIHJlcXVlc3QsIHdyaXR0ZW4gb25jZSBhIG1pbnV0ZTsKICAgb3duZXI6IHRoZSBiYW5rIG93bmVyJ3MgbWFjaGluZSwgd2hvc2UgYm9hcmQgbWFpbCB0aGUgb3duZXIncyBDb25zb2xlIHNob3dzOyBgaW52aXRlIC0tc29tZW9uZS1lbHNlYCBhbmQgY29vcmRpbmF0aW9uLm5vdF9vd25lcl9wcmluY2lwYWxzIHNheSBvdGhlcndpc2UpCgpubyByZWZ1c2VkIHRva2VucyByZWNvcmRlZAo=",
+   "stdout": "ICBuYW1lICAgICAgICAgICAgICAgICAgICAgc3RhdGUgICAgICAgbGFzdCBzZWVuICAgICAgICAgICAgIHRpZXIgICAgIGJvYXJkICBvd25lciAgY3JlYXRlZCAgICAgICAgICAgICAgIHBhaXJlZCAgICAgICAgICAgICAgICByZXZva2VkCiAgbGFwdG9wICAgICAgICAgICAgICAgICAgIHBhaXJlZCAgICAgIG5ldmVyICAgICAgICAgICAgICAgICBjb3JlICAgICBvbiAgICAgbm8gICAgIDIwMjMtMTEtMTQgMjI6MTMgVVRDICAyMDIzLTExLTE0IDIyOjEzIFVUQyAgLQogIChlbnZpcm9ubWVudDogYSB0b2tlbiBpbiB0aGUgZGFlbW9uJ3MgUFNFVURPTElGRV9NQ1BfVE9LRU5TIG9yIFBTRVVET0xJRkVfTUNQX1RPS0VOOyBsYXN0IHNlZW46IGl0cyBsYXN0IGFjY2VwdGVkIHJlcXVlc3QsIHdyaXR0ZW4gb25jZSBhIG1pbnV0ZTsKICAgb3duZXI6IHRoZSBiYW5rIG93bmVyJ3MgbWFjaGluZSwgd2hvc2UgYm9hcmQgbWFpbCB0aGUgb3duZXIncyBDb25zb2xlIHNob3dzOyBgaW52aXRlIC0tc29tZW9uZS1lbHNlYCBhbmQgY29vcmRpbmF0aW9uLm5vdF9vd25lcl9wcmluY2lwYWxzIHNheSBvdGhlcndpc2UpCgpubyByZWZ1c2VkIHRva2VucyByZWNvcmRlZAo=",
    "stderr": "",
    "window": [
-    1793646326.5064063,
-    1793646327.0305119
+    1793654165.3790493,
+    1793654165.876135
    ],
    "files": {
     "cwd": "dir",
@@ -106,8 +163,8 @@
    "stdout": "bGFwdG9wOiByZXZva2VkOyB0aGUgZGFlbW9uIHN0b3BzIGFjY2VwdGluZyBpdHMgdG9rZW4gd2l0aGluIDEwIHNlY29uZHMgb2Ygc3RhcnRpbmcgYWdhaW4K",
    "stderr": "",
    "window": [
-    1793646327.0313737,
-    1793646327.434462
+    1793654165.8770783,
+    1793654166.3190446
    ],
    "files": {
     "cwd": "dir",
@@ -125,8 +182,8 @@
    "stdout": "ewogICJlcnJvciI6ICJubyBkYXRhYmFzZSBmb3VuZCBpbnNpZGUgdGhlIGRhZW1vbiBjb250YWluZXI6IHNldCBQU0VVRE9MSUZFX01DUF9EQVRBQkFTRV9VUkwiLAogICJub3RlcyI6IFtdLAogICJleGl0IjogNAp9Cg==",
    "stderr": "",
    "window": [
-    1793646327.4352775,
-    1793646327.653294
+    1793654166.319957,
+    1793654166.547054
    ],
    "files": {
     "cwd": "dir"
@@ -142,8 +199,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiBnaXZlIG9uZSBvZjogYSBuYW1lIHRvIGludml0ZSwgLS1saXN0LCBvciAtLXJldm9rZSBOQU1FCg==",
    "window": [
-    1793646328.0470703,
-    1793646328.2685406
+    1793654166.97151,
+    1793654167.1918223
    ],
    "arm": "python",
    "before": {
@@ -167,8 +224,8 @@
    "stdout": "ewogICJlcnJvciI6ICJnaXZlIG9uZSBvZjogYSBuYW1lIHRvIGludml0ZSwgLS1saXN0LCBvciAtLXJldm9rZSBOQU1FIiwKICAibm90ZXMiOiBbXSwKICAiZXhpdCI6IDIKfQo=",
    "stderr": "",
    "window": [
-    1793646328.3013504,
-    1793646328.5209599
+    1793654167.2272642,
+    1793654167.441243
    ],
    "arm": "python",
    "before": {
@@ -192,8 +249,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiBnaXZlIG9uZSBvZjogYSBuYW1lIHRvIGludml0ZSwgLS1saXN0LCBvciAtLXJldm9rZSBOQU1FCg==",
    "window": [
-    1793646328.5545244,
-    1793646328.771921
+    1793654167.4835744,
+    1793654167.7034957
    ],
    "arm": "python",
    "before": {
@@ -217,8 +274,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiAnTGFwdG9wJyBpcyBub3QgYSBwcmluY2lwYWwgbmFtZTogbG93ZXJjYXNlIGxldHRlcnMsIGRpZ2l0cywgJy4nLCAnXycgYW5kICctJywgc3RhcnRpbmcgd2l0aCBhIGxldHRlciBvciBkaWdpdCwgYXQgbW9zdCA2NCBjaGFyYWN0ZXJzCg==",
    "window": [
-    1793646328.8064506,
-    1793646329.0267413
+    1793654167.7382982,
+    1793654167.9594584
    ],
    "arm": "python",
    "before": {
@@ -242,8 +299,8 @@
    "stdout": "ewogICJlcnJvciI6ICInYS9iJyBpcyBub3QgYSBwcmluY2lwYWwgbmFtZTogbG93ZXJjYXNlIGxldHRlcnMsIGRpZ2l0cywgJy4nLCAnXycgYW5kICctJywgc3RhcnRpbmcgd2l0aCBhIGxldHRlciBvciBkaWdpdCwgYXQgbW9zdCA2NCBjaGFyYWN0ZXJzIiwKICAibm90ZXMiOiBbXSwKICAiZXhpdCI6IDIKfQo=",
    "stderr": "",
    "window": [
-    1793646329.0616713,
-    1793646329.2907858
+    1793654167.994289,
+    1793654168.2157712
    ],
    "arm": "python",
    "before": {
@@ -267,8 +324,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiAnYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWEnIGlzIG5vdCBhIHByaW5jaXBhbCBuYW1lOiBsb3dlcmNhc2UgbGV0dGVycywgZGlnaXRzLCAnLicsICdfJyBhbmQgJy0nLCBzdGFydGluZyB3aXRoIGEgbGV0dGVyIG9yIGRpZ2l0LCBhdCBtb3N0IDY0IGNoYXJhY3RlcnMK",
    "window": [
-    1793646329.3268874,
-    1793646329.5570066
+    1793654168.2614894,
+    1793654168.481284
    ],
    "arm": "python",
    "before": {
@@ -292,8 +349,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiAnLi4nIGlzIG5vdCBhIHByaW5jaXBhbCBuYW1lOiBsb3dlcmNhc2UgbGV0dGVycywgZGlnaXRzLCAnLicsICdfJyBhbmQgJy0nLCBzdGFydGluZyB3aXRoIGEgbGV0dGVyIG9yIGRpZ2l0LCBhdCBtb3N0IDY0IGNoYXJhY3RlcnMK",
    "window": [
-    1793646329.5964086,
-    1793646329.8244424
+    1793654168.5230048,
+    1793654168.7424414
    ],
    "arm": "python",
    "before": {
@@ -317,8 +374,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiAnZGFlbW9uJyBpcyByZXNlcnZlZDsgY2hvb3NlIGFub3RoZXIgbmFtZQo=",
    "window": [
-    1793646329.861564,
-    1793646330.0887458
+    1793654168.7812486,
+    1793654169.0196793
    ],
    "arm": "python",
    "before": {
@@ -342,8 +399,8 @@
    "stdout": "ewogICJlcnJvciI6ICInbWFpbnRhaW5lcicgaXMgcmVzZXJ2ZWQ7IGNob29zZSBhbm90aGVyIG5hbWUiLAogICJub3RlcyI6IFtdLAogICJleGl0IjogNAp9Cg==",
    "stderr": "",
    "window": [
-    1793646330.1214652,
-    1793646330.3363402
+    1793654169.0537488,
+    1793654169.274139
    ],
    "arm": "python",
    "before": {
@@ -367,8 +424,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiBsYXB0b3AgYWxyZWFkeSBoYXMgYSB0b2tlbiBpbiBQU0VVRE9MSUZFX01DUF9UT0tFTlM7IGFuIGVudmlyb25tZW50IHByaW5jaXBhbCBrZWVwcyB3b3JraW5nIGFzIGl0IGlzLCBhbmQgYSBzdG9yZWQgb25lIG9mIHRoZSBzYW1lIG5hbWUgd291bGQgYmUgc2hhZG93ZWQgYnkgaXQK",
    "window": [
-    1793646330.392832,
-    1793646330.6159368
+    1793654169.3321497,
+    1793654169.5557358
    ],
    "arm": "python",
    "before": {
@@ -392,8 +449,8 @@
    "stdout": "ewogICJlcnJvciI6ICJsYXB0b3AgaXMgbmFtZWQgaW4gUFNFVURPTElGRV9NQ1BfVElFUl9NQVA7IHJlbW92ZSBpdCB0aGVyZSBmaXJzdCwgb3IgY2hvb3NlIGFub3RoZXIgbmFtZSIsCiAgIm5vdGVzIjogW10sCiAgImV4aXQiOiA0Cn0K",
    "stderr": "",
    "window": [
-    1793646330.6707456,
-    1793646330.8961177
+    1793654169.6152008,
+    1793654169.8350244
    ],
    "arm": "python",
    "before": {
@@ -417,8 +474,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiBub3QgaW50ZXJhY3RpdmU6IHJlLXJ1biB3aXRoIC0teWVzIHRvIHJldm9rZQo=",
    "window": [
-    1793646330.9296935,
-    1793646331.1527107
+    1793654169.8695376,
+    1793654170.1380649
    ],
    "arm": "python",
    "before": {
@@ -439,11 +496,11 @@
    "home": null,
    "utc_offset": 0,
    "exit": 0,
-   "stdout": "cHNldWRvbGlmZS1tY3AgaW52aXRlIDIK",
+   "stdout": "cHNldWRvbGlmZS1tY3AgaW52aXRlIDEKcHNldWRvbGlmZS1tY3AgaW52aXRlIDIK",
    "stderr": "",
    "window": [
-    1793646331.1873722,
-    1793646331.4116514
+    1793654170.1738362,
+    1793654170.3964348
    ],
    "arm": "python",
    "before": {
@@ -465,10 +522,10 @@
    "utc_offset": 0,
    "exit": 4,
    "stdout": "",
-   "stderr": "aW52aXRlOiBubyBoZWFsdGh5IGRhZW1vbiBhbnN3ZXJzIGF0IGh0dHA6Ly8xMjcuMC4wLjE6MzM2ODEvaGVhbHRoOiBzdGFydCBpdCAob3IgcGFzcyAtLXBvcnQpLCB0aGVuIHJlLXJ1bgo=",
+   "stderr": "aW52aXRlOiBubyBoZWFsdGh5IGRhZW1vbiBhbnN3ZXJzIGF0IGh0dHA6Ly8xMjcuMC4wLjE6NDE1NzEvaGVhbHRoOiBzdGFydCBpdCAob3IgcGFzcyAtLXBvcnQpLCB0aGVuIHJlLXJ1bgo=",
    "window": [
-    1793646331.4491365,
-    1793646331.853539
+    1793654170.432764,
+    1793654170.85228
    ],
    "arm": "python",
    "before": {
@@ -477,7 +534,7 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "33681",
+   "argv_port": "41571",
    "db": "unchanged",
    "files": {
     "cwd": "dir"
@@ -493,8 +550,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiBubyBoZWFsdGh5IGRhZW1vbiBhbnN3ZXJzIGF0IHtEQUVNT059L2hlYWx0aDogc3RhcnQgaXQgKG9yIHBhc3MgLS1wb3J0KSwgdGhlbiByZS1ydW4K",
    "window": [
-    1793646331.9155588,
-    1793646332.3198128
+    1793654170.916208,
+    1793654171.3333006
    ],
    "requests": [
     {
@@ -511,7 +568,7 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "55143",
+   "argv_port": "49087",
    "db": "unchanged",
    "files": {
     "cwd": "dir"
@@ -527,8 +584,8 @@
    "stdout": "ewogICJlcnJvciI6ICJ0aGUgZGFlbW9uIGF0IHtEQUVNT059IGRvZXMgbm90IHJlcG9ydCBcImF1dGhcIjogdHJ1ZS4gU3RvcmVkIHByaW5jaXBhbHMgZG8gbm90IHR1cm4gYXV0aGVudGljYXRpb24gb246IGdpdmUgdGhlIGRhZW1vbiBhIHRva2VuIGZpcnN0IChkb2NzL2d1aWRlL3JlbW90ZS1iYW5rLm1kKSIsCiAgIm5vdGVzIjogW10sCiAgImV4aXQiOiA0LAogICJkYWVtb24iOiB7CiAgICAiYXV0aCI6IGZhbHNlLAogICAgInNjaGVtYSI6IDU1LAogICAgImJhbmsiOiAiN2Y4NDAyMjM4Mzk3MzY1YyIKICB9Cn0K",
    "stderr": "",
    "window": [
-    1793646332.8257096,
-    1793646333.2276206
+    1793654171.837212,
+    1793654172.2764852
    ],
    "requests": [
     {
@@ -545,7 +602,7 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "54091",
+   "argv_port": "52493",
    "db": "unchanged",
    "files": {
     "cwd": "dir"
@@ -561,8 +618,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiB0aGUgZGFlbW9uIGF0IHtEQUVNT059IGRvZXMgbm90IHJlcG9ydCAiYXV0aCI6IHRydWUuIFN0b3JlZCBwcmluY2lwYWxzIGRvIG5vdCB0dXJuIGF1dGhlbnRpY2F0aW9uIG9uOiBnaXZlIHRoZSBkYWVtb24gYSB0b2tlbiBmaXJzdCAoZG9jcy9ndWlkZS9yZW1vdGUtYmFuay5tZCkK",
    "window": [
-    1793646333.7323155,
-    1793646334.1428719
+    1793654172.7785532,
+    1793654173.200771
    ],
    "requests": [
     {
@@ -579,7 +636,7 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "38637",
+   "argv_port": "46313",
    "db": "unchanged",
    "files": {
     "cwd": "dir"
@@ -595,8 +652,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiB0aGUgZGFlbW9uIHJ1bnMgc2NoZW1hIDUyLCBvbGRlciB0aGFuIGludml0ZSAodjUzKTogdXBkYXRlIHRoZSBkYWVtb24gZmlyc3QK",
    "window": [
-    1793646334.649112,
-    1793646335.0655482
+    1793654173.7029462,
+    1793654174.116551
    ],
    "requests": [
     {
@@ -613,7 +670,7 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "36751",
+   "argv_port": "60597",
    "db": "unchanged",
    "files": {
     "cwd": "dir"
@@ -629,8 +686,8 @@
    "stdout": "ewogICJlcnJvciI6ICJ0aGUgZGFlbW9uIHJ1bnMgc2NoZW1hIE5vbmUsIG9sZGVyIHRoYW4gaW52aXRlICh2NTMpOiB1cGRhdGUgdGhlIGRhZW1vbiBmaXJzdCIsCiAgIm5vdGVzIjogW10sCiAgImV4aXQiOiA0LAogICJkYWVtb24iOiB7CiAgICAiYXV0aCI6IHRydWUsCiAgICAic2NoZW1hIjogbnVsbCwKICAgICJiYW5rIjogIjdmODQwMjIzODM5NzM2NWMiCiAgfQp9Cg==",
    "stderr": "",
    "window": [
-    1793646335.5684562,
-    1793646335.9863605
+    1793654174.6210628,
+    1793654175.0333276
    ],
    "requests": [
     {
@@ -647,7 +704,7 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "37847",
+   "argv_port": "59257",
    "db": "unchanged",
    "files": {
     "cwd": "dir"
@@ -663,8 +720,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiB0aGUgZGFlbW9uIHJ1bnMgc2NoZW1hIDU1LCBvbGRlciB0aGFuIGludml0ZSAodjUzKTogdXBkYXRlIHRoZSBkYWVtb24gZmlyc3QK",
    "window": [
-    1793646336.4837544,
-    1793646336.8924587
+    1793654175.5357563,
+    1793654175.9555666
    ],
    "requests": [
     {
@@ -681,7 +738,7 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "34941",
+   "argv_port": "46595",
    "db": "unchanged",
    "files": {
     "cwd": "dir"
@@ -697,8 +754,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiB0aGUgZGFlbW9uIHJ1bnMgc2NoZW1hIFRydWUsIG9sZGVyIHRoYW4gaW52aXRlICh2NTMpOiB1cGRhdGUgdGhlIGRhZW1vbiBmaXJzdAo=",
    "window": [
-    1793646337.3987298,
-    1793646337.815514
+    1793654176.4584064,
+    1793654176.8729048
    ],
    "requests": [
     {
@@ -715,7 +772,7 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "48769",
+   "argv_port": "56353",
    "db": "unchanged",
    "files": {
     "cwd": "dir"
@@ -731,8 +788,8 @@
    "stdout": "ewogICJlcnJvciI6ICJ0aGUgZGFlbW9uIGhhcyBub3QgcmVwb3J0ZWQgd2hpY2ggYmFuayBpdCBzZXJ2ZXMgeWV0ICgvaGVhbHRoIGJhbmsgaXMgbnVsbCB1bnRpbCBpdHMgc3RvcmFnZSBoYXMgc3RhcnRlZCBhbmQgdGhlIGFnZW50IGJvYXJkIGhhcyBiZWVuIHVzZWQgb25jZSk6IHN0YXJ0IGEgc2Vzc2lvbiBhZ2FpbnN0IGl0LCB0aGVuIHJlLXJ1biIsCiAgIm5vdGVzIjogW10sCiAgImV4aXQiOiA0LAogICJkYWVtb24iOiB7CiAgICAiYXV0aCI6IHRydWUsCiAgICAic2NoZW1hIjogNTUsCiAgICAiYmFuayI6IG51bGwKICB9Cn0K",
    "stderr": "",
    "window": [
-    1793646338.3211946,
-    1793646338.7323651
+    1793654177.3779645,
+    1793654177.8064022
    ],
    "requests": [
     {
@@ -749,7 +806,7 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "43351",
+   "argv_port": "34483",
    "db": "unchanged",
    "files": {
     "cwd": "dir"
@@ -765,8 +822,8 @@
    "stdout": "ewogICJlcnJvciI6ICJubyBoZWFsdGh5IGRhZW1vbiBhbnN3ZXJzIGF0IHtEQUVNT059L2hlYWx0aDogc3RhcnQgaXQgKG9yIHBhc3MgLS1wb3J0KSwgdGhlbiByZS1ydW4iLAogICJub3RlcyI6IFtdLAogICJleGl0IjogNAp9Cg==",
    "stderr": "",
    "window": [
-    1793646339.239349,
-    1793646339.646258
+    1793654178.3090968,
+    1793654178.728105
    ],
    "requests": [
     {
@@ -783,7 +840,7 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "53339",
+   "argv_port": "48727",
    "db": "unchanged",
    "files": {
     "cwd": "dir"
@@ -799,8 +856,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiBubyBoZWFsdGh5IGRhZW1vbiBhbnN3ZXJzIGF0IHtEQUVNT059L2hlYWx0aDogc3RhcnQgaXQgKG9yIHBhc3MgLS1wb3J0KSwgdGhlbiByZS1ydW4K",
    "window": [
-    1793646340.1529362,
-    1793646340.5689383
+    1793654179.232956,
+    1793654179.6515672
    ],
    "requests": [
     {
@@ -817,7 +874,7 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "38345",
+   "argv_port": "57011",
    "db": "unchanged",
    "files": {
     "cwd": "dir"
@@ -831,10 +888,10 @@
    "utc_offset": 0,
    "exit": 4,
    "stdout": "",
-   "stderr": "aW52aXRlOiB0aGlzIGRhdGFiYXNlIGhvbGRzIGJhbmsgN2Y4NDAyMjM4Mzk3MzY1YywgYnV0IHRoZSBkYWVtb24gb24gcG9ydCA0MzUyNyBzZXJ2ZXMgaXMgYmFuayAwMTIzNDU2Nzg5YWJjZGVmOiBpdCBpcyBhbm90aGVyIGRhdGFiYXNlLiBOb3RoaW5nIHdhcyBjaGFuZ2VkCg==",
+   "stderr": "aW52aXRlOiB0aGlzIGRhdGFiYXNlIGhvbGRzIGJhbmsgN2Y4NDAyMjM4Mzk3MzY1YywgYnV0IHRoZSBkYWVtb24gb24gcG9ydCA1NDM2MSBzZXJ2ZXMgaXMgYmFuayAwMTIzNDU2Nzg5YWJjZGVmOiBpdCBpcyBhbm90aGVyIGRhdGFiYXNlLiBOb3RoaW5nIHdhcyBjaGFuZ2VkCg==",
    "window": [
-    1793646341.0760834,
-    1793646341.5291898
+    1793654180.1580057,
+    1793654180.6431568
    ],
    "requests": [
     {
@@ -851,7 +908,7 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "43527",
+   "argv_port": "54361",
    "db": "unchanged",
    "files": {
     "cwd": "dir"
@@ -864,11 +921,11 @@
    "home": null,
    "utc_offset": 0,
    "exit": 4,
-   "stdout": "ewogICJlcnJvciI6ICJ0aGlzIGRhdGFiYXNlIGhvbGRzIGJhbmsgKG5vbmUpLCBidXQgdGhlIGRhZW1vbiBvbiBwb3J0IDU2MTE1IHNlcnZlcyBpcyBiYW5rIDdmODQwMjIzODM5NzM2NWM6IGl0IGlzIGFub3RoZXIgZGF0YWJhc2UuIE5vdGhpbmcgd2FzIGNoYW5nZWQiLAogICJub3RlcyI6IFtdLAogICJleGl0IjogNCwKICAiZGFlbW9uIjogewogICAgImF1dGgiOiB0cnVlLAogICAgInNjaGVtYSI6IDU1LAogICAgImJhbmsiOiAiN2Y4NDAyMjM4Mzk3MzY1YyIKICB9Cn0K",
+   "stdout": "ewogICJlcnJvciI6ICJ0aGlzIGRhdGFiYXNlIGhvbGRzIGJhbmsgKG5vbmUpLCBidXQgdGhlIGRhZW1vbiBvbiBwb3J0IDM4ODEzIHNlcnZlcyBpcyBiYW5rIDdmODQwMjIzODM5NzM2NWM6IGl0IGlzIGFub3RoZXIgZGF0YWJhc2UuIE5vdGhpbmcgd2FzIGNoYW5nZWQiLAogICJub3RlcyI6IFtdLAogICJleGl0IjogNCwKICAiZGFlbW9uIjogewogICAgImF1dGgiOiB0cnVlLAogICAgInNjaGVtYSI6IDU1LAogICAgImJhbmsiOiAiN2Y4NDAyMjM4Mzk3MzY1YyIKICB9Cn0K",
    "stderr": "",
    "window": [
-    1793646342.1457267,
-    1793646342.623286
+    1793654181.2998977,
+    1793654181.8025727
    ],
    "requests": [
     {
@@ -885,7 +942,7 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "56115",
+   "argv_port": "38813",
    "db": "unchanged",
    "files": {
     "cwd": "dir"
@@ -901,8 +958,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiB0aGlzIGJhbmsgaGFzIG5vIHByaW5jaXBhbHMgdGFibGUgeWV0IChzY2hlbWEgdjUzKTogdXBkYXRlIHRoZSBkYWVtb24gYW5kIGxldCBpdCBzdGFydCwgdGhlbiByZS1ydW4K",
    "window": [
-    1793646343.123963,
-    1793646343.5740826
+    1793654182.2952995,
+    1793654182.7906783
    ],
    "requests": [
     {
@@ -919,7 +976,7 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "42001",
+   "argv_port": "56459",
    "db": "unchanged",
    "files": {
     "cwd": "dir"
@@ -935,8 +992,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiB0aGUgZGFlbW9uIHJ1bnMgc2NoZW1hIFx1ZDgwMHgsIG9sZGVyIHRoYW4gaW52aXRlICh2NTMpOiB1cGRhdGUgdGhlIGRhZW1vbiBmaXJzdAo=",
    "window": [
-    1793646344.0292265,
-    1793646344.4440815
+    1793654183.2397463,
+    1793654183.696848
    ],
    "requests": [
     {
@@ -953,7 +1010,7 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "51115",
+   "argv_port": "53653",
    "db": "unchanged",
    "files": {
     "cwd": "dir"
@@ -969,8 +1026,8 @@
    "stdout": "ewogICJlcnJvciI6ICJ0aGUgZGFlbW9uIHJ1bnMgc2NoZW1hIFx1ZDgwMHgsIG9sZGVyIHRoYW4gaW52aXRlICh2NTMpOiB1cGRhdGUgdGhlIGRhZW1vbiBmaXJzdCIsCiAgIm5vdGVzIjogW10sCiAgImV4aXQiOiA0LAogICJkYWVtb24iOiB7CiAgICAiYXV0aCI6IHRydWUsCiAgICAic2NoZW1hIjogIlx1ZDgwMHgiLAogICAgImJhbmsiOiAiN2Y4NDAyMjM4Mzk3MzY1YyIKICB9Cn0K",
    "stderr": "",
    "window": [
-    1793646344.9511585,
-    1793646345.3600554
+    1793654184.2005453,
+    1793654184.6330469
    ],
    "requests": [
     {
@@ -987,7 +1044,7 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "40493",
+   "argv_port": "34305",
    "db": "unchanged",
    "files": {
     "cwd": "dir"
@@ -1001,10 +1058,10 @@
    "utc_offset": 0,
    "exit": 4,
    "stdout": "",
-   "stderr": "aW52aXRlOiB0aGlzIGRhdGFiYXNlIGhvbGRzIGJhbmsgN2Y4NDAyMjM4Mzk3MzY1YywgYnV0IHRoZSBkYWVtb24gb24gcG9ydCAzOTA1NyBzZXJ2ZXMgaXMgYmFuayBiXHVkYzAwOiBpdCBpcyBhbm90aGVyIGRhdGFiYXNlLiBOb3RoaW5nIHdhcyBjaGFuZ2VkCg==",
+   "stderr": "aW52aXRlOiB0aGlzIGRhdGFiYXNlIGhvbGRzIGJhbmsgN2Y4NDAyMjM4Mzk3MzY1YywgYnV0IHRoZSBkYWVtb24gb24gcG9ydCA2MDc1NSBzZXJ2ZXMgaXMgYmFuayBiXHVkYzAwOiBpdCBpcyBhbm90aGVyIGRhdGFiYXNlLiBOb3RoaW5nIHdhcyBjaGFuZ2VkCg==",
    "window": [
-    1793646345.8672354,
-    1793646346.3186975
+    1793654185.136998,
+    1793654185.681462
    ],
    "requests": [
     {
@@ -1021,7 +1078,7 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "39057",
+   "argv_port": "60755",
    "db": "unchanged",
    "files": {
     "cwd": "dir"
@@ -1034,11 +1091,11 @@
    "home": null,
    "utc_offset": 0,
    "exit": 4,
-   "stdout": "ewogICJlcnJvciI6ICJ0aGlzIGRhdGFiYXNlIGhvbGRzIGJhbmsgN2Y4NDAyMjM4Mzk3MzY1YywgYnV0IHRoZSBkYWVtb24gb24gcG9ydCA0NTQwMSBzZXJ2ZXMgaXMgYmFuayBiXHVkYzAwOiBpdCBpcyBhbm90aGVyIGRhdGFiYXNlLiBOb3RoaW5nIHdhcyBjaGFuZ2VkIiwKICAibm90ZXMiOiBbXSwKICAiZXhpdCI6IDQsCiAgImRhZW1vbiI6IHsKICAgICJhdXRoIjogdHJ1ZSwKICAgICJzY2hlbWEiOiA1NSwKICAgICJiYW5rIjogImJcdWRjMDAiCiAgfQp9Cg==",
+   "stdout": "ewogICJlcnJvciI6ICJ0aGlzIGRhdGFiYXNlIGhvbGRzIGJhbmsgN2Y4NDAyMjM4Mzk3MzY1YywgYnV0IHRoZSBkYWVtb24gb24gcG9ydCA1NjU2OSBzZXJ2ZXMgaXMgYmFuayBiXHVkYzAwOiBpdCBpcyBhbm90aGVyIGRhdGFiYXNlLiBOb3RoaW5nIHdhcyBjaGFuZ2VkIiwKICAibm90ZXMiOiBbXSwKICAiZXhpdCI6IDQsCiAgImRhZW1vbiI6IHsKICAgICJhdXRoIjogdHJ1ZSwKICAgICJzY2hlbWEiOiA1NSwKICAgICJiYW5rIjogImJcdWRjMDAiCiAgfQp9Cg==",
    "stderr": "",
    "window": [
-    1793646346.7716897,
-    1793646347.2275176
+    1793654186.1281695,
+    1793654186.6429827
    ],
    "requests": [
     {
@@ -1055,7 +1112,7 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "45401",
+   "argv_port": "56569",
    "db": "unchanged",
    "files": {
     "cwd": "dir"
@@ -1071,8 +1128,8 @@
    "stdout": "ewogICJlcnJvciI6ICJ0aGUgZGFlbW9uIHJ1bnMgc2NoZW1hIFsnXFx1ZDgwMCcsIHsnXFx1ZGMwMCc6IDF9XSwgb2xkZXIgdGhhbiBpbnZpdGUgKHY1Myk6IHVwZGF0ZSB0aGUgZGFlbW9uIGZpcnN0IiwKICAibm90ZXMiOiBbXSwKICAiZXhpdCI6IDQsCiAgImRhZW1vbiI6IHsKICAgICJhdXRoIjogdHJ1ZSwKICAgICJzY2hlbWEiOiBbCiAgICAgICJcdWQ4MDAiLAogICAgICB7CiAgICAgICAgIlx1ZGMwMCI6IDEKICAgICAgfQogICAgXSwKICAgICJiYW5rIjogIjdmODQwMjIzODM5NzM2NWMiCiAgfQp9Cg==",
    "stderr": "",
    "window": [
-    1793646347.6809103,
-    1793646348.0891855
+    1793654187.063621,
+    1793654187.504585
    ],
    "requests": [
     {
@@ -1089,7 +1146,7 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "55129",
+   "argv_port": "41963",
    "db": "unchanged",
    "files": {
     "cwd": "dir"
@@ -1105,8 +1162,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiB0aGUgZGFlbW9uIGF0IHtEQUVNT059IGRvZXMgbm90IHJlcG9ydCAiYXV0aCI6IHRydWUuIFN0b3JlZCBwcmluY2lwYWxzIGRvIG5vdCB0dXJuIGF1dGhlbnRpY2F0aW9uIG9uOiBnaXZlIHRoZSBkYWVtb24gYSB0b2tlbiBmaXJzdCAoZG9jcy9ndWlkZS9yZW1vdGUtYmFuay5tZCkK",
    "window": [
-    1793646348.5957572,
-    1793646349.0144808
+    1793654188.008553,
+    1793654188.4283142
    ],
    "requests": [
     {
@@ -1123,7 +1180,7 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "41233",
+   "argv_port": "35577",
    "db": "unchanged",
    "files": {
     "cwd": "dir"
@@ -1137,10 +1194,10 @@
    "utc_offset": 0,
    "exit": 1,
    "stdout": "",
-   "stderr": "VHJhY2ViYWNrIChtb3N0IHJlY2VudCBjYWxsIGxhc3QpOgogIEZpbGUgIjxmcm96ZW4gcnVucHk+IiwgbGluZSAxOTgsIGluIF9ydW5fbW9kdWxlX2FzX21haW4KICBGaWxlICI8ZnJvemVuIHJ1bnB5PiIsIGxpbmUgODgsIGluIF9ydW5fY29kZQogIEZpbGUgIntPUkFDTEV9L3BzZXVkb2xpZmVfbWVtb3J5L2NsaS5weSIsIGxpbmUgMjMzLCBpbiA8bW9kdWxlPgogICAgbWFpbigpCiAgRmlsZSAie09SQUNMRX0vcHNldWRvbGlmZV9tZW1vcnkvY2xpLnB5IiwgbGluZSAxODEsIGluIG1haW4KICAgIHN5cy5leGl0KGludml0ZV9tYWluKHN5cy5hcmd2WzI6XSkpCiAgICAgICAgICAgICBeXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eCiAgRmlsZSAie09SQUNMRX0vcHNldWRvbGlmZV9tZW1vcnkvaW52aXRlX2NsaS5weSIsIGxpbmUgNjczLCBpbiBtYWluCiAgICByZXR1cm4gX2xvY2FsKGFyZ3MsIHJlcG9ydCwgZHNuKQogICAgICAgICAgIF5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl4KICBGaWxlICJ7T1JBQ0xFfS9wc2V1ZG9saWZlX21lbW9yeS9pbnZpdGVfY2xpLnB5IiwgbGluZSAzNjIsIGluIF9sb2NhbAogICAgaGVhbHRoLCByZWZ1c2FsID0gX2RhZW1vbl9jaGVjayhhcmdzLnBvcnQsIHJlcG9ydCwgbmVlZF9hdXRoPVRydWUpCiAgICAgICAgICAgICAgICAgICAgICBeXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl4KICBGaWxlICJ7T1JBQ0xFfS9wc2V1ZG9saWZlX21lbW9yeS9pbnZpdGVfY2xpLnB5IiwgbGluZSAyNjEsIGluIF9kYWVtb25fY2hlY2sKICAgIGhlYWx0aCA9IHByb2JlX2hlYWx0aChsb2NhbCkKICAgICAgICAgICAgIF5eXl5eXl5eXl5eXl5eXl5eXl4KICBGaWxlICJ7T1JBQ0xFfS9wc2V1ZG9saWZlX21lbW9yeS9pbnZpdGVfY2xpLnB5IiwgbGluZSAxMzcsIGluIHByb2JlX2hlYWx0aAogICAgcmV0dXJuIGV4cG9zZV9jbGkucHJvYmVfaGVhbHRoKHVybCwgZXhwb3NlX2NsaS5MT0NBTF9IRUFMVEhfVElNRU9VVF9TKQogICAgICAgICAgIF5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXgogIEZpbGUgIntPUkFDTEV9L3BzZXVkb2xpZmVfbWVtb3J5L2V4cG9zZV9jbGkucHkiLCBsaW5lIDE0NiwgaW4gcHJvYmVfaGVhbHRoCiAgICByZXR1cm4gZmV0Y2hfaGVhbHRoKHVybCwgdGltZW91dClbMV0KICAgICAgICAgICBeXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXgogIEZpbGUgIntPUkFDTEV9L3BzZXVkb2xpZmVfbWVtb3J5L2V4cG9zZV9jbGkucHkiLCBsaW5lIDEzNywgaW4gZmV0Y2hfaGVhbHRoCiAgICBwYXlsb2FkID0ganNvbi5sb2Fkcyhib2R5LmRlY29kZSgidXRmLTgiKSkKICAgICAgICAgICAgICBeXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXgogIEZpbGUgIntQWVRIT059L2xpYi9weXRob24zLjExL2pzb24vX19pbml0X18ucHkiLCBsaW5lIDM0NiwgaW4gbG9hZHMKICAgIHJldHVybiBfZGVmYXVsdF9kZWNvZGVyLmRlY29kZShzKQogICAgICAgICAgIF5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eCiAgRmlsZSAie1BZVEhPTn0vbGliL3B5dGhvbjMuMTEvanNvbi9kZWNvZGVyLnB5IiwgbGluZSAzMzcsIGluIGRlY29kZQogICAgb2JqLCBlbmQgPSBzZWxmLnJhd19kZWNvZGUocywgaWR4PV93KHMsIDApLmVuZCgpKQogICAgICAgICAgICAgICBeXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXgogIEZpbGUgIntQWVRIT059L2xpYi9weXRob24zLjExL2pzb24vZGVjb2Rlci5weSIsIGxpbmUgMzUzLCBpbiByYXdfZGVjb2RlCiAgICBvYmosIGVuZCA9IHNlbGYuc2Nhbl9vbmNlKHMsIGlkeCkKICAgICAgICAgICAgICAgXl5eXl5eXl5eXl5eXl5eXl5eXl5eXgpSZWN1cnNpb25FcnJvcjogbWF4aW11bSByZWN1cnNpb24gZGVwdGggZXhjZWVkZWQgd2hpbGUgZGVjb2RpbmcgYSBKU09OIGFycmF5IGZyb20gYSB1bmljb2RlIHN0cmluZwo=",
+   "stderr": "VHJhY2ViYWNrIChtb3N0IHJlY2VudCBjYWxsIGxhc3QpOgogIEZpbGUgIjxmcm96ZW4gcnVucHk+IiwgbGluZSAxOTgsIGluIF9ydW5fbW9kdWxlX2FzX21haW4KICBGaWxlICI8ZnJvemVuIHJ1bnB5PiIsIGxpbmUgODgsIGluIF9ydW5fY29kZQogIEZpbGUgIntPUkFDTEV9L3BzZXVkb2xpZmVfbWVtb3J5L2NsaS5weSIsIGxpbmUgMjMzLCBpbiA8bW9kdWxlPgogICAgbWFpbigpCiAgRmlsZSAie09SQUNMRX0vcHNldWRvbGlmZV9tZW1vcnkvY2xpLnB5IiwgbGluZSAxODEsIGluIG1haW4KICAgIHN5cy5leGl0KGludml0ZV9tYWluKHN5cy5hcmd2WzI6XSkpCiAgICAgICAgICAgICBeXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eCiAgRmlsZSAie09SQUNMRX0vcHNldWRvbGlmZV9tZW1vcnkvaW52aXRlX2NsaS5weSIsIGxpbmUgNjg5LCBpbiBtYWluCiAgICByZXR1cm4gX2xvY2FsKGFyZ3MsIHJlcG9ydCwgZHNuKQogICAgICAgICAgIF5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl4KICBGaWxlICJ7T1JBQ0xFfS9wc2V1ZG9saWZlX21lbW9yeS9pbnZpdGVfY2xpLnB5IiwgbGluZSAzNjYsIGluIF9sb2NhbAogICAgaGVhbHRoLCByZWZ1c2FsID0gX2RhZW1vbl9jaGVjayhhcmdzLnBvcnQsIHJlcG9ydCwgbmVlZF9hdXRoPVRydWUpCiAgICAgICAgICAgICAgICAgICAgICBeXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl4KICBGaWxlICJ7T1JBQ0xFfS9wc2V1ZG9saWZlX21lbW9yeS9pbnZpdGVfY2xpLnB5IiwgbGluZSAyNjUsIGluIF9kYWVtb25fY2hlY2sKICAgIGhlYWx0aCA9IHByb2JlX2hlYWx0aChsb2NhbCkKICAgICAgICAgICAgIF5eXl5eXl5eXl5eXl5eXl5eXl4KICBGaWxlICJ7T1JBQ0xFfS9wc2V1ZG9saWZlX21lbW9yeS9pbnZpdGVfY2xpLnB5IiwgbGluZSAxNDEsIGluIHByb2JlX2hlYWx0aAogICAgcmV0dXJuIGV4cG9zZV9jbGkucHJvYmVfaGVhbHRoKHVybCwgZXhwb3NlX2NsaS5MT0NBTF9IRUFMVEhfVElNRU9VVF9TKQogICAgICAgICAgIF5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXgogIEZpbGUgIntPUkFDTEV9L3BzZXVkb2xpZmVfbWVtb3J5L2V4cG9zZV9jbGkucHkiLCBsaW5lIDE0NiwgaW4gcHJvYmVfaGVhbHRoCiAgICByZXR1cm4gZmV0Y2hfaGVhbHRoKHVybCwgdGltZW91dClbMV0KICAgICAgICAgICBeXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXgogIEZpbGUgIntPUkFDTEV9L3BzZXVkb2xpZmVfbWVtb3J5L2V4cG9zZV9jbGkucHkiLCBsaW5lIDEzNywgaW4gZmV0Y2hfaGVhbHRoCiAgICBwYXlsb2FkID0ganNvbi5sb2Fkcyhib2R5LmRlY29kZSgidXRmLTgiKSkKICAgICAgICAgICAgICBeXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXgogIEZpbGUgIntQWVRIT059L2xpYi9weXRob24zLjExL2pzb24vX19pbml0X18ucHkiLCBsaW5lIDM0NiwgaW4gbG9hZHMKICAgIHJldHVybiBfZGVmYXVsdF9kZWNvZGVyLmRlY29kZShzKQogICAgICAgICAgIF5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eCiAgRmlsZSAie1BZVEhPTn0vbGliL3B5dGhvbjMuMTEvanNvbi9kZWNvZGVyLnB5IiwgbGluZSAzMzcsIGluIGRlY29kZQogICAgb2JqLCBlbmQgPSBzZWxmLnJhd19kZWNvZGUocywgaWR4PV93KHMsIDApLmVuZCgpKQogICAgICAgICAgICAgICBeXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXgogIEZpbGUgIntQWVRIT059L2xpYi9weXRob24zLjExL2pzb24vZGVjb2Rlci5weSIsIGxpbmUgMzUzLCBpbiByYXdfZGVjb2RlCiAgICBvYmosIGVuZCA9IHNlbGYuc2Nhbl9vbmNlKHMsIGlkeCkKICAgICAgICAgICAgICAgXl5eXl5eXl5eXl5eXl5eXl5eXl5eXgpSZWN1cnNpb25FcnJvcjogbWF4aW11bSByZWN1cnNpb24gZGVwdGggZXhjZWVkZWQgd2hpbGUgZGVjb2RpbmcgYSBKU09OIGFycmF5IGZyb20gYSB1bmljb2RlIHN0cmluZwo=",
    "window": [
-    1793646349.520094,
-    1793646349.9365356
+    1793654188.9323404,
+    1793654189.355109
    ],
    "requests": [
     {
@@ -1157,7 +1214,7 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "36299",
+   "argv_port": "59707",
    "db": "unchanged",
    "files": {
     "cwd": "dir"
@@ -1173,8 +1230,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiBubyBoZWFsdGh5IGRhZW1vbiBhbnN3ZXJzIGF0IHtEQUVNT059L2hlYWx0aDogc3RhcnQgaXQgKG9yIHBhc3MgLS1wb3J0KSwgdGhlbiByZS1ydW4K",
    "window": [
-    1793646350.4422672,
-    1793646350.8541071
+    1793654189.8606763,
+    1793654190.2812536
    ],
    "requests": [
     {
@@ -1191,7 +1248,7 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "37699",
+   "argv_port": "34967",
    "db": "unchanged",
    "files": {
     "cwd": "dir"
@@ -1207,8 +1264,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiAnJyBpcyBub3QgYSBwcmluY2lwYWwgbmFtZTogbG93ZXJjYXNlIGxldHRlcnMsIGRpZ2l0cywgJy4nLCAnXycgYW5kICctJywgc3RhcnRpbmcgd2l0aCBhIGxldHRlciBvciBkaWdpdCwgYXQgbW9zdCA2NCBjaGFyYWN0ZXJzCg==",
    "window": [
-    1793646351.3384416,
-    1793646351.5520275
+    1793654190.761056,
+    1793654190.9919865
    ],
    "arm": "python",
    "before": {
@@ -1232,8 +1289,8 @@
    "stdout": "ewogICJlcnJvciI6ICInJyBpcyBub3QgYSBwcmluY2lwYWwgbmFtZTogbG93ZXJjYXNlIGxldHRlcnMsIGRpZ2l0cywgJy4nLCAnXycgYW5kICctJywgc3RhcnRpbmcgd2l0aCBhIGxldHRlciBvciBkaWdpdCwgYXQgbW9zdCA2NCBjaGFyYWN0ZXJzIiwKICAibm90ZXMiOiBbXSwKICAiZXhpdCI6IDIKfQo=",
    "stderr": "",
    "window": [
-    1793646351.583781,
-    1793646351.8022096
+    1793654191.027848,
+    1793654191.3245437
    ],
    "arm": "python",
    "before": {
@@ -1257,8 +1314,8 @@
    "stdout": "ewogICJlcnJvciI6ICJ0aGlzIGRhdGFiYXNlIGhvbGRzIGJhbmsgN2Y4NDAyMjM4Mzk3MzY1YywgYnV0IC0tYmFuayBpcyBiYW5rIDAxMjM0NTY3ODlhYmNkZWY6IGl0IGlzIGFub3RoZXIgZGF0YWJhc2UuIE5vdGhpbmcgd2FzIGNoYW5nZWQiLAogICJub3RlcyI6IFtdLAogICJleGl0IjogNAp9Cg==",
    "stderr": "",
    "window": [
-    1793646351.8334785,
-    1793646352.2875488
+    1793654191.3597853,
+    1793654191.836757
    ],
    "arm": "python",
    "before": {
@@ -1282,8 +1339,8 @@
    "stdout": "ICBuYW1lICAgICAgICAgICAgICAgICAgICAgc3RhdGUgICAgICAgbGFzdCBzZWVuICAgICAgICAgICAgIHRpZXIgICAgIGJvYXJkICBvd25lciAgY3JlYXRlZCAgICAgICAgICAgICAgIHBhaXJlZCAgICAgICAgICAgICAgICByZXZva2VkCiAgY29kZXggICAgICAgICAgICAgICAgICAgIGVudmlyb25tZW50IDIwMjYtMTAtMjYgMDc6MzMgVVRDICBkZWZhdWx0ICAtICAgICAgeWVzICAgIC0gICAgICAgICAgICAgICAgICAgICAtICAgICAgICAgICAgICAgICAgICAgLQogIGRlZmF1bHQgICAgICAgICAgICAgICAgICBlbnZpcm9ubWVudCAyMDI2LTEwLTI1IDAzOjQ2IFVUQyAgZGVmYXVsdCAgLSAgICAgIHllcyAgICAtICAgICAgICAgICAgICAgICAgICAgLSAgICAgICAgICAgICAgICAgICAgIC0KICBkZXNrICAgICAgICAgICAgICAgICAgICAgZW52aXJvbm1lbnQgbmV2ZXIgICAgICAgICAgICAgICAgIGRlZmF1bHQgIC0gICAgICB5ZXMgICAgLSAgICAgICAgICAgICAgICAgICAgIC0gICAgICAgICAgICAgICAgICAgICAtCiAgb2xkLWxhcHRvcCAgICAgICAgICAgICAgIGVudmlyb25tZW50IDIwMjYtMTAtMTQgMTc6NDYgVVRDICBkZWZhdWx0ICAtICAgICAgeWVzICAgIC0gICAgICAgICAgICAgICAgICAgICAtICAgICAgICAgICAgICAgICAgICAgLQogIChlbnZpcm9ubWVudDogYSB0b2tlbiBpbiB0aGUgZGFlbW9uJ3MgUFNFVURPTElGRV9NQ1BfVE9LRU5TIG9yIFBTRVVET0xJRkVfTUNQX1RPS0VOOyBsYXN0IHNlZW46IGl0cyBsYXN0IGFjY2VwdGVkIHJlcXVlc3QsIHdyaXR0ZW4gb25jZSBhIG1pbnV0ZTsKICAgb3duZXI6IHRoZSBiYW5rIG93bmVyJ3MgbWFjaGluZSwgd2hvc2UgYm9hcmQgbWFpbCB0aGUgb3duZXIncyBDb25zb2xlIHNob3dzOyBgaW52aXRlIC0tc29tZW9uZS1lbHNlYCBhbmQgY29vcmRpbmF0aW9uLm5vdF9vd25lcl9wcmluY2lwYWxzIHNheSBvdGhlcndpc2UpCgpyZWZ1c2VkIHRva2VucywgYnkgdGhlIGZpcnN0IDggY2hhcmFjdGVycyBvZiB0aGVpciBTSEEtMjU2IChgcHNldWRvbGlmZS1tY3AgZG9jdG9yYCBvbiBhIGNsaWVudCBwcmludHMgaXRzIG93biB0b2tlbidzIGFzIHRva2VuX3NoYTI1Nl9wcmVmaXgpOgogIHByZWZpeCAgICByZWZ1c2VkICBmaXJzdCAgICAgICAgICAgICAgICAgbGFzdAogIGFiMTJjZDM0ICAgICAgIDM3ICAyMDI2LTEwLTE0IDE3OjQ2IFVUQyAgMjAyNi0xMC0yNiAwNzozMyBVVEMKICBmZmZmZmZmZiAxMjM0NTY3OCAgMjAyNi0xMC0wMyAwNDowMCBVVEMgIDIwMjYtMTAtMjYgMDc6MzMgVVRDCiAgMDBmZjAwZmYgICAgICAgIDEgIDIwMjYtMTAtMjAgMTI6NDAgVVRDICAyMDI2LTEwLTIwIDEyOjQwIFVUQwo=",
    "stderr": "",
    "window": [
-    1793646352.5070188,
-    1793646352.9660141
+    1793654192.0696368,
+    1793654192.5911813
    ],
    "arm": "python",
    "before": {
@@ -1307,8 +1364,8 @@
    "stdout": "ewogICJlcnJvciI6IG51bGwsCiAgIm5vdGVzIjogW10sCiAgImV4aXQiOiAwLAogICJwcmluY2lwYWxzIjogWwogICAgewogICAgICAicHJpbmNpcGFsIjogImNvZGV4IiwKICAgICAgInN0YXRlIjogImVudmlyb25tZW50IiwKICAgICAgInBhaXJlZCI6IGZhbHNlLAogICAgICAidGllciI6IG51bGwsCiAgICAgICJib2FyZCI6IG51bGwsCiAgICAgICJjb2RlX2V4cGlyZXNfYXQiOiBudWxsLAogICAgICAiY3JlYXRlZF9hdCI6IG51bGwsCiAgICAgICJwYWlyZWRfYXQiOiBudWxsLAogICAgICAicmV2b2tlZF9hdCI6IG51bGwsCiAgICAgICJsYXN0X3NlZW5fYXQiOiAxNzkzMDAwMDAwLjAsCiAgICAgICJvd25lciI6IHRydWUKICAgIH0sCiAgICB7CiAgICAgICJwcmluY2lwYWwiOiAiZGVmYXVsdCIsCiAgICAgICJzdGF0ZSI6ICJlbnZpcm9ubWVudCIsCiAgICAgICJwYWlyZWQiOiBmYWxzZSwKICAgICAgInRpZXIiOiBudWxsLAogICAgICAiYm9hcmQiOiBudWxsLAogICAgICAiY29kZV9leHBpcmVzX2F0IjogbnVsbCwKICAgICAgImNyZWF0ZWRfYXQiOiBudWxsLAogICAgICAicGFpcmVkX2F0IjogbnVsbCwKICAgICAgInJldm9rZWRfYXQiOiBudWxsLAogICAgICAibGFzdF9zZWVuX2F0IjogMTc5MjkwMDAwMC41LAogICAgICAib3duZXIiOiB0cnVlCiAgICB9LAogICAgewogICAgICAicHJpbmNpcGFsIjogImRlc2siLAogICAgICAic3RhdGUiOiAiZW52aXJvbm1lbnQiLAogICAgICAicGFpcmVkIjogZmFsc2UsCiAgICAgICJ0aWVyIjogbnVsbCwKICAgICAgImJvYXJkIjogbnVsbCwKICAgICAgImNvZGVfZXhwaXJlc19hdCI6IG51bGwsCiAgICAgICJjcmVhdGVkX2F0IjogbnVsbCwKICAgICAgInBhaXJlZF9hdCI6IG51bGwsCiAgICAgICJyZXZva2VkX2F0IjogbnVsbCwKICAgICAgImxhc3Rfc2Vlbl9hdCI6IG51bGwsCiAgICAgICJvd25lciI6IHRydWUKICAgIH0sCiAgICB7CiAgICAgICJwcmluY2lwYWwiOiAib2xkLWxhcHRvcCIsCiAgICAgICJzdGF0ZSI6ICJlbnZpcm9ubWVudCIsCiAgICAgICJwYWlyZWQiOiBmYWxzZSwKICAgICAgInRpZXIiOiBudWxsLAogICAgICAiYm9hcmQiOiBudWxsLAogICAgICAiY29kZV9leHBpcmVzX2F0IjogbnVsbCwKICAgICAgImNyZWF0ZWRfYXQiOiBudWxsLAogICAgICAicGFpcmVkX2F0IjogbnVsbCwKICAgICAgInJldm9rZWRfYXQiOiBudWxsLAogICAgICAibGFzdF9zZWVuX2F0IjogMTc5MjAwMDAwMC4wLAogICAgICAib3duZXIiOiB0cnVlCiAgICB9CiAgXSwKICAicmVqZWN0ZWQiOiBbCiAgICB7CiAgICAgICJoYXNoX3ByZWZpeCI6ICJhYjEyY2QzNCIsCiAgICAgICJyZWplY3Rpb25zIjogMzcsCiAgICAgICJmaXJzdF9zZWVuX2F0IjogMTc5MjAwMDAwMC4wLAogICAgICAibGFzdF9zZWVuX2F0IjogMTc5MzAwMDAwMC4wCiAgICB9LAogICAgewogICAgICAiaGFzaF9wcmVmaXgiOiAiZmZmZmZmZmYiLAogICAgICAicmVqZWN0aW9ucyI6IDEyMzQ1Njc4LAogICAgICAiZmlyc3Rfc2Vlbl9hdCI6IDE3OTEwMDAwMDAuMCwKICAgICAgImxhc3Rfc2Vlbl9hdCI6IDE3OTMwMDAwMDAuMAogICAgfSwKICAgIHsKICAgICAgImhhc2hfcHJlZml4IjogIjAwZmYwMGZmIiwKICAgICAgInJlamVjdGlvbnMiOiAxLAogICAgICAiZmlyc3Rfc2Vlbl9hdCI6IDE3OTI1MDAwMDAuMCwKICAgICAgImxhc3Rfc2Vlbl9hdCI6IDE3OTI1MDAwMDAuMAogICAgfQogIF0KfQo=",
    "stderr": "",
    "window": [
-    1793646352.9983656,
-    1793646353.4688296
+    1793654192.6303306,
+    1793654193.122328
    ],
    "arm": "python",
    "before": {
@@ -1332,8 +1389,8 @@
    "stdout": "ICBuYW1lICAgICAgICAgICAgICAgICAgICAgc3RhdGUgICAgICAgbGFzdCBzZWVuICAgICAgICAgICAgIHRpZXIgICAgIGJvYXJkICBvd25lciAgY3JlYXRlZCAgICAgICAgICAgICAgIHBhaXJlZCAgICAgICAgICAgICAgICByZXZva2VkCiAgY29kZXggICAgICAgICAgICAgICAgICAgIGVudmlyb25tZW50IDIwMjYtMTAtMjYgMDc6MzMgVVRDICBkZWZhdWx0ICAtICAgICAgeWVzICAgIC0gICAgICAgICAgICAgICAgICAgICAtICAgICAgICAgICAgICAgICAgICAgLQogIGRlZmF1bHQgICAgICAgICAgICAgICAgICBlbnZpcm9ubWVudCAyMDI2LTEwLTI1IDAzOjQ2IFVUQyAgZGVmYXVsdCAgLSAgICAgIHllcyAgICAtICAgICAgICAgICAgICAgICAgICAgLSAgICAgICAgICAgICAgICAgICAgIC0KICBvbGQtbGFwdG9wICAgICAgICAgICAgICAgZW52aXJvbm1lbnQgMjAyNi0xMC0xNCAxNzo0NiBVVEMgIGRlZmF1bHQgIC0gICAgICB5ZXMgICAgLSAgICAgICAgICAgICAgICAgICAgIC0gICAgICAgICAgICAgICAgICAgICAtCiAgKGVudmlyb25tZW50OiBhIHRva2VuIGluIHRoZSBkYWVtb24ncyBQU0VVRE9MSUZFX01DUF9UT0tFTlMgb3IgUFNFVURPTElGRV9NQ1BfVE9LRU47IGxhc3Qgc2VlbjogaXRzIGxhc3QgYWNjZXB0ZWQgcmVxdWVzdCwgd3JpdHRlbiBvbmNlIGEgbWludXRlOwogICBvd25lcjogdGhlIGJhbmsgb3duZXIncyBtYWNoaW5lLCB3aG9zZSBib2FyZCBtYWlsIHRoZSBvd25lcidzIENvbnNvbGUgc2hvd3M7IGBpbnZpdGUgLS1zb21lb25lLWVsc2VgIGFuZCBjb29yZGluYXRpb24ubm90X293bmVyX3ByaW5jaXBhbHMgc2F5IG90aGVyd2lzZSkKCnJlZnVzZWQgdG9rZW5zLCBieSB0aGUgZmlyc3QgOCBjaGFyYWN0ZXJzIG9mIHRoZWlyIFNIQS0yNTYgKGBwc2V1ZG9saWZlLW1jcCBkb2N0b3JgIG9uIGEgY2xpZW50IHByaW50cyBpdHMgb3duIHRva2VuJ3MgYXMgdG9rZW5fc2hhMjU2X3ByZWZpeCk6CiAgcHJlZml4ICAgIHJlZnVzZWQgIGZpcnN0ICAgICAgICAgICAgICAgICBsYXN0CiAgYWIxMmNkMzQgICAgICAgMzcgIDIwMjYtMTAtMTQgMTc6NDYgVVRDICAyMDI2LTEwLTI2IDA3OjMzIFVUQwogIGZmZmZmZmZmIDEyMzQ1Njc4ICAyMDI2LTEwLTAzIDA0OjAwIFVUQyAgMjAyNi0xMC0yNiAwNzozMyBVVEMKICAwMGZmMDBmZiAgICAgICAgMSAgMjAyNi0xMC0yMCAxMjo0MCBVVEMgIDIwMjYtMTAtMjAgMTI6NDAgVVRDCg==",
    "stderr": "",
    "window": [
-    1793646353.5226002,
-    1793646353.9809582
+    1793654193.1806445,
+    1793654193.6582909
    ],
    "arm": "python",
    "before": {
@@ -1357,8 +1414,8 @@
    "stdout": "bm8gc3RvcmVkIHByaW5jaXBhbHMKCm5vIHJlZnVzZWQgdG9rZW5zIHJlY29yZGVkCg==",
    "stderr": "",
    "window": [
-    1793646354.1988385,
-    1793646354.6528718
+    1793654193.8918784,
+    1793654194.366754
    ],
    "arm": "python",
    "before": {
@@ -1382,8 +1439,8 @@
    "stdout": "ewogICJlcnJvciI6IG51bGwsCiAgIm5vdGVzIjogW10sCiAgImV4aXQiOiAwLAogICJwcmluY2lwYWxzIjogW10sCiAgInJlamVjdGVkIjogW10KfQo=",
    "stderr": "",
    "window": [
-    1793646354.6859155,
-    1793646355.1503904
+    1793654194.4049113,
+    1793654194.8826656
    ],
    "arm": "python",
    "before": {
@@ -1407,8 +1464,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiB0aGlzIGJhbmsgaGFzIG5vIHByaW5jaXBhbHMgdGFibGUgeWV0IChzY2hlbWEgdjUzKTogdXBkYXRlIHRoZSBkYWVtb24gYW5kIGxldCBpdCBzdGFydCwgdGhlbiByZS1ydW4K",
    "window": [
-    1793646355.2054484,
-    1793646355.6676915
+    1793654194.9447536,
+    1793654195.500487
    ],
    "arm": "python",
    "before": {
@@ -1432,8 +1489,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiB0aGlzIGRhdGFiYXNlIGhvbGRzIGJhbmsgKG5vbmUpLCBidXQgLS1iYW5rIGlzIGJhbmsgN2Y4NDAyMjM4Mzk3MzY1YzogaXQgaXMgYW5vdGhlciBkYXRhYmFzZS4gTm90aGluZyB3YXMgY2hhbmdlZAo=",
    "window": [
-    1793646355.7013993,
-    1793646356.145056
+    1793654195.539436,
+    1793654196.0239563
    ],
    "arm": "python",
    "before": {
@@ -1457,8 +1514,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiBicmF2byBpcyBhbHJlYWR5IHBhaXJlZDsgcGFzcyAtLXJlcGxhY2UgdG8gZ2l2ZSBpdCBhIG5ldyBjb2RlIChpdHMgY3VycmVudCB0b2tlbiBrZWVwcyB3b3JraW5nIHVudGlsIHRoZSBuZXcgY29kZSBpcyByZWRlZW1lZCwgc28gaXQgbmVlZCBub3QgcGFpciBhZ2FpbiksIG9yIC0tcmV2b2tlIGJyYXZvIGZpcnN0LiAtLW1pbmUgb3IgLS1zb21lb25lLWVsc2UgYWxvbmUgY2hhbmdlcyB3aG9zZSBtYWNoaW5lIGl0IGlzLCB3aXRoIG5vIG5ldyBjb2RlLiBOb3RoaW5nIHdhcyBjaGFuZ2VkCg==",
    "window": [
-    1793646356.380112,
-    1793646356.8895807
+    1793654196.2741964,
+    1793654196.80148
    ],
    "requests": [
     {
@@ -1475,7 +1532,7 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "52991",
+   "argv_port": "51095",
    "ttl": 900,
    "seed_rows": [
     {
@@ -1483,64 +1540,64 @@
      "board": true,
      "owned": true,
      "code_hash": null,
-     "paired_at": 1793646328.008371,
+     "paired_at": 1793654166.921207,
      "principal": "bravo",
-     "created_at": 1793646328.001697,
+     "created_at": 1793654166.913273,
      "revoked_at": null,
      "token_hash": "217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d",
      "code_expires_at": null,
-     "paired_code_hash": "c5dbe1f6260dbecbb9b4be3d8c55ab8f730fb9d5e34f5d752a19371930de2d59"
+     "paired_code_hash": "404a05303b01708cdbb0c116b6a90c8b2bc49cfc6cca59f7ab160a71c44a4a5f"
     },
     {
      "tier": "full",
      "board": true,
      "owned": true,
-     "code_hash": "91e18e14dbb9f475369c98b0bc7fc46643a44fb09085099e2de120b729369b4a",
+     "code_hash": "32144ef0fc389392652c65d9418c7ac33816277915c48109893f565a6259db28",
      "paired_at": null,
      "principal": "a-rather-long-principal-name.x",
-     "created_at": 1793646328.01265,
+     "created_at": 1793654166.926236,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793649928.012648,
+     "code_expires_at": 1793657766.926233,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": false,
      "owned": true,
-     "code_hash": "44228350135f3f3bd0ead4da06fe19c7ac3ea94ab8a4867df158c02635d31630",
+     "code_hash": "d1455ad97fdb8a6e679c4659fe67208321cfdb16c1be94db0805dd4c8e9402c7",
      "paired_at": null,
      "principal": "delta",
-     "created_at": 1793646328.011672,
+     "created_at": 1793654166.925073,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793646268.01167,
+     "code_expires_at": 1793654106.925071,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
      "owned": false,
-     "code_hash": "6a23055a4a9b1526607a24cc15e2ca838b31e1fcaf4012fa38a67adf46a29a5c",
+     "code_hash": "9ff93f4499340ff37f52cf168e179de5fde7a84e63edac82d666569f691fe501",
      "paired_at": null,
      "principal": "echo",
-     "created_at": 1793646328.014287,
+     "created_at": 1793654166.928274,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793647228.014285,
+     "code_expires_at": 1793655066.928272,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
      "owned": true,
-     "code_hash": "b3f5f9dde3c73ef0609538081ce7a77f1a9374c9b3851227432ffd1755f6a378",
+     "code_hash": "e0b108dfc0ecc226b1ccb110637195025e5848ee37e8f6db7c41bced4d4aea13",
      "paired_at": null,
      "principal": "alpha",
-     "created_at": 1793646328.000564,
+     "created_at": 1793654166.912014,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793647228.000528,
+     "code_expires_at": 1793655066.911976,
      "paired_code_hash": null
     },
     {
@@ -1550,8 +1607,8 @@
      "code_hash": null,
      "paired_at": null,
      "principal": "charlie",
-     "created_at": 1793646328.009765,
-     "revoked_at": 1793646328.010667,
+     "created_at": 1793654166.922858,
+     "revoked_at": 1793654166.923887,
      "token_hash": null,
      "code_expires_at": null,
      "paired_code_hash": null
@@ -1572,8 +1629,8 @@
    "stdout": "ewogICJlcnJvciI6ICJicmF2byBpcyBhbHJlYWR5IHBhaXJlZDsgcGFzcyAtLXJlcGxhY2UgdG8gZ2l2ZSBpdCBhIG5ldyBjb2RlIChpdHMgY3VycmVudCB0b2tlbiBrZWVwcyB3b3JraW5nIHVudGlsIHRoZSBuZXcgY29kZSBpcyByZWRlZW1lZCwgc28gaXQgbmVlZCBub3QgcGFpciBhZ2FpbiksIG9yIC0tcmV2b2tlIGJyYXZvIGZpcnN0LiAtLW1pbmUgb3IgLS1zb21lb25lLWVsc2UgYWxvbmUgY2hhbmdlcyB3aG9zZSBtYWNoaW5lIGl0IGlzLCB3aXRoIG5vIG5ldyBjb2RlLiBOb3RoaW5nIHdhcyBjaGFuZ2VkIiwKICAibm90ZXMiOiBbXSwKICAiZXhpdCI6IDQsCiAgImRhZW1vbiI6IHsKICAgICJhdXRoIjogdHJ1ZSwKICAgICJzY2hlbWEiOiA1NSwKICAgICJiYW5rIjogIjdmODQwMjIzODM5NzM2NWMiCiAgfQp9Cg==",
    "stderr": "",
    "window": [
-    1793646358.3038116,
-    1793646358.8195438
+    1793654198.2639196,
+    1793654198.790437
    ],
    "requests": [
     {
@@ -1590,7 +1647,7 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "35757",
+   "argv_port": "46435",
    "ttl": 900,
    "seed_rows": [
     {
@@ -1598,64 +1655,64 @@
      "board": true,
      "owned": true,
      "code_hash": null,
-     "paired_at": 1793646328.008371,
+     "paired_at": 1793654166.921207,
      "principal": "bravo",
-     "created_at": 1793646328.001697,
+     "created_at": 1793654166.913273,
      "revoked_at": null,
      "token_hash": "217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d",
      "code_expires_at": null,
-     "paired_code_hash": "c5dbe1f6260dbecbb9b4be3d8c55ab8f730fb9d5e34f5d752a19371930de2d59"
+     "paired_code_hash": "404a05303b01708cdbb0c116b6a90c8b2bc49cfc6cca59f7ab160a71c44a4a5f"
     },
     {
      "tier": "full",
      "board": true,
      "owned": true,
-     "code_hash": "91e18e14dbb9f475369c98b0bc7fc46643a44fb09085099e2de120b729369b4a",
+     "code_hash": "32144ef0fc389392652c65d9418c7ac33816277915c48109893f565a6259db28",
      "paired_at": null,
      "principal": "a-rather-long-principal-name.x",
-     "created_at": 1793646328.01265,
+     "created_at": 1793654166.926236,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793649928.012648,
+     "code_expires_at": 1793657766.926233,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": false,
      "owned": true,
-     "code_hash": "44228350135f3f3bd0ead4da06fe19c7ac3ea94ab8a4867df158c02635d31630",
+     "code_hash": "d1455ad97fdb8a6e679c4659fe67208321cfdb16c1be94db0805dd4c8e9402c7",
      "paired_at": null,
      "principal": "delta",
-     "created_at": 1793646328.011672,
+     "created_at": 1793654166.925073,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793646268.01167,
+     "code_expires_at": 1793654106.925071,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
      "owned": false,
-     "code_hash": "6a23055a4a9b1526607a24cc15e2ca838b31e1fcaf4012fa38a67adf46a29a5c",
+     "code_hash": "9ff93f4499340ff37f52cf168e179de5fde7a84e63edac82d666569f691fe501",
      "paired_at": null,
      "principal": "echo",
-     "created_at": 1793646328.014287,
+     "created_at": 1793654166.928274,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793647228.014285,
+     "code_expires_at": 1793655066.928272,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
      "owned": true,
-     "code_hash": "b3f5f9dde3c73ef0609538081ce7a77f1a9374c9b3851227432ffd1755f6a378",
+     "code_hash": "e0b108dfc0ecc226b1ccb110637195025e5848ee37e8f6db7c41bced4d4aea13",
      "paired_at": null,
      "principal": "alpha",
-     "created_at": 1793646328.000564,
+     "created_at": 1793654166.912014,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793647228.000528,
+     "code_expires_at": 1793655066.911976,
      "paired_code_hash": null
     },
     {
@@ -1665,8 +1722,8 @@
      "code_hash": null,
      "paired_at": null,
      "principal": "charlie",
-     "created_at": 1793646328.009765,
-     "revoked_at": 1793646328.010667,
+     "created_at": 1793654166.922858,
+     "revoked_at": 1793654166.923887,
      "token_hash": null,
      "code_expires_at": null,
      "paired_code_hash": null
@@ -1687,8 +1744,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiBicmF2byBpcyBhbHJlYWR5IHBhaXJlZDsgcGFzcyAtLXJlcGxhY2UgdG8gZ2l2ZSBpdCBhIG5ldyBjb2RlIChpdHMgY3VycmVudCB0b2tlbiBrZWVwcyB3b3JraW5nIHVudGlsIHRoZSBuZXcgY29kZSBpcyByZWRlZW1lZCwgc28gaXQgbmVlZCBub3QgcGFpciBhZ2FpbiksIG9yIC0tcmV2b2tlIGJyYXZvIGZpcnN0LiAtLW1pbmUgb3IgLS1zb21lb25lLWVsc2UgYWxvbmUgY2hhbmdlcyB3aG9zZSBtYWNoaW5lIGl0IGlzLCB3aXRoIG5vIG5ldyBjb2RlLiBOb3RoaW5nIHdhcyBjaGFuZ2VkCg==",
    "window": [
-    1793646359.4299517,
-    1793646359.9438782
+    1793654199.4058151,
+    1793654200.0574262
    ],
    "requests": [
     {
@@ -1705,7 +1762,7 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "56161",
+   "argv_port": "53713",
    "ttl": 900,
    "seed_rows": [
     {
@@ -1713,64 +1770,64 @@
      "board": true,
      "owned": true,
      "code_hash": null,
-     "paired_at": 1793646328.008371,
+     "paired_at": 1793654166.921207,
      "principal": "bravo",
-     "created_at": 1793646328.001697,
+     "created_at": 1793654166.913273,
      "revoked_at": null,
      "token_hash": "217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d",
      "code_expires_at": null,
-     "paired_code_hash": "c5dbe1f6260dbecbb9b4be3d8c55ab8f730fb9d5e34f5d752a19371930de2d59"
+     "paired_code_hash": "404a05303b01708cdbb0c116b6a90c8b2bc49cfc6cca59f7ab160a71c44a4a5f"
     },
     {
      "tier": "full",
      "board": true,
      "owned": true,
-     "code_hash": "91e18e14dbb9f475369c98b0bc7fc46643a44fb09085099e2de120b729369b4a",
+     "code_hash": "32144ef0fc389392652c65d9418c7ac33816277915c48109893f565a6259db28",
      "paired_at": null,
      "principal": "a-rather-long-principal-name.x",
-     "created_at": 1793646328.01265,
+     "created_at": 1793654166.926236,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793649928.012648,
+     "code_expires_at": 1793657766.926233,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": false,
      "owned": true,
-     "code_hash": "44228350135f3f3bd0ead4da06fe19c7ac3ea94ab8a4867df158c02635d31630",
+     "code_hash": "d1455ad97fdb8a6e679c4659fe67208321cfdb16c1be94db0805dd4c8e9402c7",
      "paired_at": null,
      "principal": "delta",
-     "created_at": 1793646328.011672,
+     "created_at": 1793654166.925073,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793646268.01167,
+     "code_expires_at": 1793654106.925071,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
      "owned": false,
-     "code_hash": "6a23055a4a9b1526607a24cc15e2ca838b31e1fcaf4012fa38a67adf46a29a5c",
+     "code_hash": "9ff93f4499340ff37f52cf168e179de5fde7a84e63edac82d666569f691fe501",
      "paired_at": null,
      "principal": "echo",
-     "created_at": 1793646328.014287,
+     "created_at": 1793654166.928274,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793647228.014285,
+     "code_expires_at": 1793655066.928272,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
      "owned": true,
-     "code_hash": "b3f5f9dde3c73ef0609538081ce7a77f1a9374c9b3851227432ffd1755f6a378",
+     "code_hash": "e0b108dfc0ecc226b1ccb110637195025e5848ee37e8f6db7c41bced4d4aea13",
      "paired_at": null,
      "principal": "alpha",
-     "created_at": 1793646328.000564,
+     "created_at": 1793654166.912014,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793647228.000528,
+     "code_expires_at": 1793655066.911976,
      "paired_code_hash": null
     },
     {
@@ -1780,8 +1837,8 @@
      "code_hash": null,
      "paired_at": null,
      "principal": "charlie",
-     "created_at": 1793646328.009765,
-     "revoked_at": 1793646328.010667,
+     "created_at": 1793654166.922858,
+     "revoked_at": 1793654166.923887,
      "token_hash": null,
      "code_expires_at": null,
      "paired_code_hash": null
@@ -1802,8 +1859,8 @@
    "stdout": "ICBuYW1lICAgICAgICAgICAgICAgICAgICAgc3RhdGUgICAgICAgbGFzdCBzZWVuICAgICAgICAgICAgIHRpZXIgICAgIGJvYXJkICBvd25lciAgY3JlYXRlZCAgICAgICAgICAgICAgIHBhaXJlZCAgICAgICAgICAgICAgICByZXZva2VkCiAgYWxwaGEgICAgICAgICAgICAgICAgICAgIHBhaXJlZCAgICAgIG5ldmVyICAgICAgICAgICAgICAgICBkZWZhdWx0ICBvbiAgICAgeWVzICAgIDIwMjYtMTAtMjYgMDc6MzMgVVRDICAyMDI2LTEwLTI2IDA3OjM0IFVUQyAgLQogIGJyYXZvICAgICAgICAgICAgICAgICAgICBleHBpcmVkICAgICBuZXZlciAgICAgICAgICAgICAgICAgY29yZSAgICAgb2ZmICAgIHllcyAgICAyMDI2LTEwLTI2IDA3OjM1IFVUQyAgLSAgICAgICAgICAgICAgICAgICAgIC0KICAoZW52aXJvbm1lbnQ6IGEgdG9rZW4gaW4gdGhlIGRhZW1vbidzIFBTRVVET0xJRkVfTUNQX1RPS0VOUyBvciBQU0VVRE9MSUZFX01DUF9UT0tFTjsgbGFzdCBzZWVuOiBpdHMgbGFzdCBhY2NlcHRlZCByZXF1ZXN0LCB3cml0dGVuIG9uY2UgYSBtaW51dGU7CiAgIG93bmVyOiB0aGUgYmFuayBvd25lcidzIG1hY2hpbmUsIHdob3NlIGJvYXJkIG1haWwgdGhlIG93bmVyJ3MgQ29uc29sZSBzaG93czsgYGludml0ZSAtLXNvbWVvbmUtZWxzZWAgYW5kIGNvb3JkaW5hdGlvbi5ub3Rfb3duZXJfcHJpbmNpcGFscyBzYXkgb3RoZXJ3aXNlKQoKbm8gcmVmdXNlZCB0b2tlbnMgcmVjb3JkZWQK",
    "stderr": "",
    "window": [
-    1793646360.5094697,
-    1793646360.977717
+    1793654200.6196146,
+    1793654201.0942197
    ],
    "arm": "python",
    "before": {
@@ -1827,8 +1884,8 @@
    "stdout": "ewogICJlcnJvciI6IG51bGwsCiAgIm5vdGVzIjogW10sCiAgImV4aXQiOiAwLAogICJwcmluY2lwYWxzIjogWwogICAgewogICAgICAicHJpbmNpcGFsIjogImFscGhhIiwKICAgICAgInN0YXRlIjogInBhaXJlZCIsCiAgICAgICJwYWlyZWQiOiB0cnVlLAogICAgICAidGllciI6IG51bGwsCiAgICAgICJib2FyZCI6IHRydWUsCiAgICAgICJjb2RlX2V4cGlyZXNfYXQiOiBudWxsLAogICAgICAiY3JlYXRlZF9hdCI6IDE3OTMwMDAwMDAuMCwKICAgICAgInBhaXJlZF9hdCI6IDE3OTMwMDAwNjAuMCwKICAgICAgInJldm9rZWRfYXQiOiBudWxsLAogICAgICAibGFzdF9zZWVuX2F0IjogbnVsbCwKICAgICAgIm93bmVyIjogdHJ1ZQogICAgfSwKICAgIHsKICAgICAgInByaW5jaXBhbCI6ICJicmF2byIsCiAgICAgICJzdGF0ZSI6ICJleHBpcmVkIiwKICAgICAgInBhaXJlZCI6IGZhbHNlLAogICAgICAidGllciI6ICJjb3JlIiwKICAgICAgImJvYXJkIjogZmFsc2UsCiAgICAgICJjb2RlX2V4cGlyZXNfYXQiOiAxNzkzMDAwNDAwLjAsCiAgICAgICJjcmVhdGVkX2F0IjogMTc5MzAwMDEwMC4wLAogICAgICAicGFpcmVkX2F0IjogbnVsbCwKICAgICAgInJldm9rZWRfYXQiOiBudWxsLAogICAgICAibGFzdF9zZWVuX2F0IjogbnVsbCwKICAgICAgIm93bmVyIjogdHJ1ZQogICAgfQogIF0sCiAgInJlamVjdGVkIjogW10KfQo=",
    "stderr": "",
    "window": [
-    1793646361.0116062,
-    1793646361.4758873
+    1793654201.1277518,
+    1793654201.6124966
    ],
    "arm": "python",
    "before": {
@@ -1849,11 +1906,11 @@
    "home": null,
    "utc_offset": 0,
    "exit": 0,
-   "stdout": "enVsdS4xOiBpbnZpdGVkOyB0aWVyIHRoZSBkYWVtb24gZGVmYXVsdCwgYWdlbnQgYm9hcmQgb24KICBjb2RlICAgICBHWFhaLTg2NE4tRVRBWCAgIHNpbmdsZSB1c2UsIGV4cGlyZXMgaW4gMTUgbWluICgyMDI2LTExLTAyIDE5OjIxIFVUQykKICBvbiB0aGUgbmV3IG1hY2hpbmU6ICBwc2V1ZG9saWZlLW1jcCBwYWlyIHUgR1hYWi04NjROLUVUQVgKICBvciBydW4gdGhlIGluc3RhbGxlciB0aGVyZSBhbmQgYW5zd2VyIDIsIGdpdmluZyB0aGlzIGNvZGUgd2hlcmUgaXQgYXNrcyBmb3IgdGhlIHRva2VuCmFuIGludml0ZWQgbWFjaGluZSBjYW4gcmVhZCBhbmQgd3JpdGUgdGhlIHdob2xlIGJhbmsgYW5kIHVzZSB0aGUgYWdlbnQgYm9hcmQsIGJ1dCBub3QgY2hhbmdlIHRoZSBkYWVtb24ncyBjb25maWd1cmF0aW9uCg==",
+   "stdout": "enVsdS4xOiBpbnZpdGVkOyB0aWVyIHRoZSBkYWVtb24gZGVmYXVsdCwgYWdlbnQgYm9hcmQgb24KICBjb2RlICAgICBGNkFYLTNBU0UtV1o5QSAgIHNpbmdsZSB1c2UsIGV4cGlyZXMgaW4gMTUgbWluICgyMDI2LTExLTAyIDIxOjMxIFVUQykKICBvbiB0aGUgbmV3IG1hY2hpbmU6ICBwc2V1ZG9saWZlLW1jcCBwYWlyIHUgRjZBWC0zQVNFLVdaOUEKICBvciBydW4gdGhlIGluc3RhbGxlciB0aGVyZSBhbmQgYW5zd2VyIDIsIGdpdmluZyB0aGlzIGNvZGUgd2hlcmUgaXQgYXNrcyBmb3IgdGhlIHRva2VuCmFuIGludml0ZWQgbWFjaGluZSBjYW4gcmVhZCBhbmQgd3JpdGUgdGhlIHdob2xlIGJhbmsgYW5kIHVzZSB0aGUgYWdlbnQgYm9hcmQsIGJ1dCBub3QgY2hhbmdlIHRoZSBkYWVtb24ncyBjb25maWd1cmF0aW9uCg==",
    "stderr": "",
    "window": [
-    1793646361.9265513,
-    1793646362.456235
+    1793654202.1059499,
+    1793654202.6311178
    ],
    "requests": [
     {
@@ -1870,7 +1927,7 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "56443",
+   "argv_port": "33733",
    "ttl": 900,
    "seed_rows": [
     {
@@ -1943,12 +2000,12 @@
      ],
      "outcome_signals": [],
      "pl_cf_clock": [
-      "{\"at\": 1793646362.434254, \"principal\": \"zulu.1\"}"
+      "{\"at\": 1793654202.606404, \"principal\": \"zulu.1\"}"
      ],
      "principal_activity": [],
      "principals": [
       "{\"tier\": \"core\", \"board\": false, \"code_hash\": \"baf62c13bbf1c48b81f05896d8b4980a18aeb31408e94d9a7a64059024ede47d\", \"paired_at\": null, \"principal\": \"bravo\", \"created_at\": 1793000100, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793000400, \"paired_code_hash\": null}",
-      "{\"tier\": null, \"board\": true, \"code_hash\": \"aae1357c5b331ec9c1c7468b51161b8493b7c3e4e3fd6300495891817d8802fc\", \"paired_at\": null, \"principal\": \"zulu.1\", \"created_at\": 1793646362.433535, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793647262.433495, \"paired_code_hash\": null}",
+      "{\"tier\": null, \"board\": true, \"code_hash\": \"420f44b36f6351f4da4a9e51a991d4370ae52a3a0782777215e8e069df3d0d66\", \"paired_at\": null, \"principal\": \"zulu.1\", \"created_at\": 1793654202.605604, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793655102.605563, \"paired_code_hash\": null}",
       "{\"tier\": null, \"board\": true, \"code_hash\": null, \"paired_at\": 1793000060, \"principal\": \"alpha\", \"created_at\": 1793000000, \"revoked_at\": null, \"token_hash\": \"971d937fc02de9d2a57363670d218df29e8ba4c97bbc19c9463ae63588275f11\", \"code_expires_at\": null, \"paired_code_hash\": null}"
      ],
      "reference_chunks": [],
@@ -8885,11 +8942,11 @@
    "home": null,
    "utc_offset": 0,
    "exit": 0,
-   "stdout": "ewogICJlcnJvciI6IG51bGwsCiAgIm5vdGVzIjogWwogICAgImFuIGludml0ZWQgbWFjaGluZSBjYW4gcmVhZCBhbmQgd3JpdGUgdGhlIHdob2xlIGJhbmsgYW5kIHVzZSB0aGUgYWdlbnQgYm9hcmQsIGJ1dCBub3QgY2hhbmdlIHRoZSBkYWVtb24ncyBjb25maWd1cmF0aW9uIgogIF0sCiAgImV4aXQiOiAwLAogICJkYWVtb24iOiB7CiAgICAiYXV0aCI6IHRydWUsCiAgICAic2NoZW1hIjogNTUsCiAgICAiYmFuayI6ICI3Zjg0MDIyMzgzOTczNjVjIgogIH0sCiAgInByaW5jaXBhbCI6ICJ6dWx1LjEiLAogICJzdGF0ZSI6ICJuZXciLAogICJjb2RlIjogIkFEQ0YtUEdYQy0yTUtTIiwKICAiZXhwaXJlc19hdCI6IDE3OTM2NDcyNjMuNTc4NzY4LAogICJ0aWVyIjogbnVsbCwKICAiYm9hcmQiOiB0cnVlLAogICJvd25lZCI6IHRydWUsCiAgInVybCI6ICJ1IiwKICAicGFpcl9jb21tYW5kIjogInBzZXVkb2xpZmUtbWNwIHBhaXIgdSBBRENGLVBHWEMtMk1LUyIKfQo=",
+   "stdout": "ewogICJlcnJvciI6IG51bGwsCiAgIm5vdGVzIjogWwogICAgImFuIGludml0ZWQgbWFjaGluZSBjYW4gcmVhZCBhbmQgd3JpdGUgdGhlIHdob2xlIGJhbmsgYW5kIHVzZSB0aGUgYWdlbnQgYm9hcmQsIGJ1dCBub3QgY2hhbmdlIHRoZSBkYWVtb24ncyBjb25maWd1cmF0aW9uIgogIF0sCiAgImV4aXQiOiAwLAogICJkYWVtb24iOiB7CiAgICAiYXV0aCI6IHRydWUsCiAgICAic2NoZW1hIjogNTUsCiAgICAiYmFuayI6ICI3Zjg0MDIyMzgzOTczNjVjIgogIH0sCiAgInByaW5jaXBhbCI6ICJ6dWx1LjEiLAogICJzdGF0ZSI6ICJuZXciLAogICJjb2RlIjogIkdQRTQtRjhLMC1BWEhDIiwKICAiZXhwaXJlc19hdCI6IDE3OTM2NTUxMDMuNzg2NDc1LAogICJ0aWVyIjogbnVsbCwKICAiYm9hcmQiOiB0cnVlLAogICJvd25lZCI6IHRydWUsCiAgInVybCI6ICJ1IiwKICAicGFpcl9jb21tYW5kIjogInBzZXVkb2xpZmUtbWNwIHBhaXIgdSBHUEU0LUY4SzAtQVhIQyIKfQo=",
    "stderr": "",
    "window": [
-    1793646363.0957413,
-    1793646363.6009185
+    1793654203.2752345,
+    1793654203.8129938
    ],
    "requests": [
     {
@@ -8906,7 +8963,7 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "40715",
+   "argv_port": "38491",
    "ttl": 900,
    "seed_rows": [
     {
@@ -8979,12 +9036,12 @@
      ],
      "outcome_signals": [],
      "pl_cf_clock": [
-      "{\"at\": 1793646363.579561, \"principal\": \"zulu.1\"}"
+      "{\"at\": 1793654203.787495, \"principal\": \"zulu.1\"}"
      ],
      "principal_activity": [],
      "principals": [
       "{\"tier\": \"core\", \"board\": false, \"code_hash\": \"baf62c13bbf1c48b81f05896d8b4980a18aeb31408e94d9a7a64059024ede47d\", \"paired_at\": null, \"principal\": \"bravo\", \"created_at\": 1793000100, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793000400, \"paired_code_hash\": null}",
-      "{\"tier\": null, \"board\": true, \"code_hash\": \"3b4728d9c7b924832456a7d4176606455917d0a40234722589d9e4fbc027a5eb\", \"paired_at\": null, \"principal\": \"zulu.1\", \"created_at\": 1793646363.578806, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793647263.578768, \"paired_code_hash\": null}",
+      "{\"tier\": null, \"board\": true, \"code_hash\": \"e3f2a359913e238ba7c0f6eef6985db20fe53a5d8b4860539e4127c2ab879512\", \"paired_at\": null, \"principal\": \"zulu.1\", \"created_at\": 1793654203.786527, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793655103.786475, \"paired_code_hash\": null}",
       "{\"tier\": null, \"board\": true, \"code_hash\": null, \"paired_at\": 1793000060, \"principal\": \"alpha\", \"created_at\": 1793000000, \"revoked_at\": null, \"token_hash\": \"971d937fc02de9d2a57363670d218df29e8ba4c97bbc19c9463ae63588275f11\", \"code_expires_at\": null, \"paired_code_hash\": null}"
      ],
      "reference_chunks": [],
@@ -15921,11 +15978,11 @@
    "home": null,
    "utc_offset": 0,
    "exit": 0,
-   "stdout": "YnJhdm86IHJlLWludml0ZWQgKHRoZSBlYXJsaWVyIGNvZGUgbm8gbG9uZ2VyIHdvcmtzKTsgdGllciBjb3JlLCBhZ2VudCBib2FyZCBvZmYKICBjb2RlICAgICAyOEdOLVFITjktRVNDRCAgIHNpbmdsZSB1c2UsIGV4cGlyZXMgaW4gMTUgbWluICgyMDI2LTExLTAyIDE5OjIxIFVUQykKICBvbiB0aGUgbmV3IG1hY2hpbmU6ICBwc2V1ZG9saWZlLW1jcCBwYWlyIHUgMjhHTi1RSE45LUVTQ0QKICBvciBydW4gdGhlIGluc3RhbGxlciB0aGVyZSBhbmQgYW5zd2VyIDIsIGdpdmluZyB0aGlzIGNvZGUgd2hlcmUgaXQgYXNrcyBmb3IgdGhlIHRva2VuCmFuIGludml0ZWQgbWFjaGluZSBjYW4gcmVhZCBhbmQgd3JpdGUgdGhlIHdob2xlIGJhbmsgYW5kIHVzZSB0aGUgYWdlbnQgYm9hcmQsIGJ1dCBub3QgY2hhbmdlIHRoZSBkYWVtb24ncyBjb25maWd1cmF0aW9uCg==",
+   "stdout": "YnJhdm86IHJlLWludml0ZWQgKHRoZSBlYXJsaWVyIGNvZGUgbm8gbG9uZ2VyIHdvcmtzKTsgdGllciBjb3JlLCBhZ2VudCBib2FyZCBvZmYKICBjb2RlICAgICAxRDBQLVBLRlMtSFlISiAgIHNpbmdsZSB1c2UsIGV4cGlyZXMgaW4gMTUgbWluICgyMDI2LTExLTAyIDIxOjMxIFVUQykKICBvbiB0aGUgbmV3IG1hY2hpbmU6ICBwc2V1ZG9saWZlLW1jcCBwYWlyIHUgMUQwUC1QS0ZTLUhZSEoKICBvciBydW4gdGhlIGluc3RhbGxlciB0aGVyZSBhbmQgYW5zd2VyIDIsIGdpdmluZyB0aGlzIGNvZGUgd2hlcmUgaXQgYXNrcyBmb3IgdGhlIHRva2VuCmFuIGludml0ZWQgbWFjaGluZSBjYW4gcmVhZCBhbmQgd3JpdGUgdGhlIHdob2xlIGJhbmsgYW5kIHVzZSB0aGUgYWdlbnQgYm9hcmQsIGJ1dCBub3QgY2hhbmdlIHRoZSBkYWVtb24ncyBjb25maWd1cmF0aW9uCg==",
    "stderr": "",
    "window": [
-    1793646364.2412908,
-    1793646364.7651696
+    1793654204.4520934,
+    1793654205.007207
    ],
    "requests": [
     {
@@ -15942,7 +15999,7 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "56141",
+   "argv_port": "48109",
    "ttl": 900,
    "seed_rows": [
     {
@@ -16015,11 +16072,11 @@
      ],
      "outcome_signals": [],
      "pl_cf_clock": [
-      "{\"at\": 1793646364.737302, \"principal\": \"bravo\"}"
+      "{\"at\": 1793654204.984518, \"principal\": \"bravo\"}"
      ],
      "principal_activity": [],
      "principals": [
-      "{\"tier\": \"core\", \"board\": false, \"code_hash\": \"043f4f5d75c76b0868c6b636f03c58d1036566fc1e2d3f099290e2d5f66dc22a\", \"paired_at\": null, \"principal\": \"bravo\", \"created_at\": 1793000100, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793647264.736475, \"paired_code_hash\": null}",
+      "{\"tier\": \"core\", \"board\": false, \"code_hash\": \"f7d1067f408e51eb887e52829f1200e29371bb3aed5d0bb67bdf6002aa935592\", \"paired_at\": null, \"principal\": \"bravo\", \"created_at\": 1793000100, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793655104.983701, \"paired_code_hash\": null}",
       "{\"tier\": null, \"board\": true, \"code_hash\": null, \"paired_at\": 1793000060, \"principal\": \"alpha\", \"created_at\": 1793000000, \"revoked_at\": null, \"token_hash\": \"971d937fc02de9d2a57363670d218df29e8ba4c97bbc19c9463ae63588275f11\", \"code_expires_at\": null, \"paired_code_hash\": null}"
      ],
      "reference_chunks": [],
@@ -22959,8 +23016,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiAtLXNvbWVvbmUtZWxzZSBhbmQgLS1taW5lIG5lZWQgc2NoZW1hIHY1OSwgYW5kIHRoaXMgYmFuayBpcyBvbGRlcjogdXBkYXRlIHRoZSBkYWVtb24gdG8gc2NoZW1hIDU5IChgcHNldWRvbGlmZS1tY3AgdXBkYXRlYCkgYW5kIGxldCBpdCBzdGFydCwgdGhlbiByZS1ydW4uIE5vdGhpbmcgd2FzIGNoYW5nZWQK",
    "window": [
-    1793646365.393327,
-    1793646365.899772
+    1793654205.6936736,
+    1793654206.2351649
    ],
    "requests": [
     {
@@ -22977,7 +23034,7 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "36105",
+   "argv_port": "43761",
    "ttl": 900,
    "seed_rows": [
     {
@@ -23020,8 +23077,8 @@
    "stdout": "ewogICJlcnJvciI6ICItLXNvbWVvbmUtZWxzZSBhbmQgLS1taW5lIG5lZWQgc2NoZW1hIHY1OSwgYW5kIHRoaXMgYmFuayBpcyBvbGRlcjogdXBkYXRlIHRoZSBkYWVtb24gdG8gc2NoZW1hIDU5IChgcHNldWRvbGlmZS1tY3AgdXBkYXRlYCkgYW5kIGxldCBpdCBzdGFydCwgdGhlbiByZS1ydW4uIE5vdGhpbmcgd2FzIGNoYW5nZWQiLAogICJub3RlcyI6IFtdLAogICJleGl0IjogNCwKICAiZGFlbW9uIjogewogICAgImF1dGgiOiB0cnVlLAogICAgInNjaGVtYSI6IDU1LAogICAgImJhbmsiOiAiN2Y4NDAyMjM4Mzk3MzY1YyIKICB9Cn0K",
    "stderr": "",
    "window": [
-    1793646366.5091147,
-    1793646367.0147119
+    1793654206.8722591,
+    1793654207.5234249
    ],
    "requests": [
     {
@@ -23038,7 +23095,7 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "58153",
+   "argv_port": "33243",
    "ttl": 900,
    "seed_rows": [
     {
@@ -23081,8 +23138,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiB0aGlzIGRhdGFiYXNlIGhvbGRzIGJhbmsgN2Y4NDAyMjM4Mzk3MzY1YywgYnV0IC0tYmFuayBpcyBiYW5rIDAxMjM0NTY3ODlhYmNkZWY6IGl0IGlzIGFub3RoZXIgZGF0YWJhc2UuIE5vdGhpbmcgd2FzIGNoYW5nZWQK",
    "window": [
-    1793646367.6223369,
-    1793646368.0777113
+    1793654208.098246,
+    1793654208.6013277
    ],
    "requests": [
     {
@@ -23099,7 +23156,7 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "38247",
+   "argv_port": "45581",
    "ttl": 900,
    "seed_rows": [
     {
@@ -23107,64 +23164,64 @@
      "board": true,
      "owned": true,
      "code_hash": null,
-     "paired_at": 1793646328.008371,
+     "paired_at": 1793654166.921207,
      "principal": "bravo",
-     "created_at": 1793646328.001697,
+     "created_at": 1793654166.913273,
      "revoked_at": null,
      "token_hash": "217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d",
      "code_expires_at": null,
-     "paired_code_hash": "c5dbe1f6260dbecbb9b4be3d8c55ab8f730fb9d5e34f5d752a19371930de2d59"
+     "paired_code_hash": "404a05303b01708cdbb0c116b6a90c8b2bc49cfc6cca59f7ab160a71c44a4a5f"
     },
     {
      "tier": "full",
      "board": true,
      "owned": true,
-     "code_hash": "91e18e14dbb9f475369c98b0bc7fc46643a44fb09085099e2de120b729369b4a",
+     "code_hash": "32144ef0fc389392652c65d9418c7ac33816277915c48109893f565a6259db28",
      "paired_at": null,
      "principal": "a-rather-long-principal-name.x",
-     "created_at": 1793646328.01265,
+     "created_at": 1793654166.926236,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793649928.012648,
+     "code_expires_at": 1793657766.926233,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": false,
      "owned": true,
-     "code_hash": "44228350135f3f3bd0ead4da06fe19c7ac3ea94ab8a4867df158c02635d31630",
+     "code_hash": "d1455ad97fdb8a6e679c4659fe67208321cfdb16c1be94db0805dd4c8e9402c7",
      "paired_at": null,
      "principal": "delta",
-     "created_at": 1793646328.011672,
+     "created_at": 1793654166.925073,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793646268.01167,
+     "code_expires_at": 1793654106.925071,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
      "owned": false,
-     "code_hash": "6a23055a4a9b1526607a24cc15e2ca838b31e1fcaf4012fa38a67adf46a29a5c",
+     "code_hash": "9ff93f4499340ff37f52cf168e179de5fde7a84e63edac82d666569f691fe501",
      "paired_at": null,
      "principal": "echo",
-     "created_at": 1793646328.014287,
+     "created_at": 1793654166.928274,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793647228.014285,
+     "code_expires_at": 1793655066.928272,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
      "owned": true,
-     "code_hash": "b3f5f9dde3c73ef0609538081ce7a77f1a9374c9b3851227432ffd1755f6a378",
+     "code_hash": "e0b108dfc0ecc226b1ccb110637195025e5848ee37e8f6db7c41bced4d4aea13",
      "paired_at": null,
      "principal": "alpha",
-     "created_at": 1793646328.000564,
+     "created_at": 1793654166.912014,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793647228.000528,
+     "code_expires_at": 1793655066.911976,
      "paired_code_hash": null
     },
     {
@@ -23174,8 +23231,8 @@
      "code_hash": null,
      "paired_at": null,
      "principal": "charlie",
-     "created_at": 1793646328.009765,
-     "revoked_at": 1793646328.010667,
+     "created_at": 1793654166.922858,
+     "revoked_at": 1793654166.923887,
      "token_hash": null,
      "code_expires_at": null,
      "paired_code_hash": null
@@ -23193,11 +23250,11 @@
    "home": null,
    "utc_offset": 0,
    "exit": 0,
-   "stdout": "ewogICJlcnJvciI6IG51bGwsCiAgIm5vdGVzIjogWwogICAgImZvciBhIG1hY2hpbmUgdGhhdCBpcyBub3QgeW91cnMsIGFkZCAtLXNvbWVvbmUtZWxzZSIsCiAgICAiYW4gaW52aXRlZCBtYWNoaW5lIGNhbiByZWFkIGFuZCB3cml0ZSB0aGUgd2hvbGUgYmFuayBhbmQgdXNlIHRoZSBhZ2VudCBib2FyZCwgYnV0IG5vdCBjaGFuZ2UgdGhlIGRhZW1vbidzIGNvbmZpZ3VyYXRpb24iCiAgXSwKICAiZXhpdCI6IDAsCiAgImRhZW1vbiI6IHsKICAgICJhdXRoIjogdHJ1ZSwKICAgICJzY2hlbWEiOiA1NSwKICAgICJiYW5rIjogIjdmODQwMjIzODM5NzM2NWMiCiAgfSwKICAicHJpbmNpcGFsIjogInp1bHUuMSIsCiAgInN0YXRlIjogIm5ldyIsCiAgImNvZGUiOiAiQkozRy1YSlRILU5EMDgiLAogICJleHBpcmVzX2F0IjogMTc5MzY0NzI2OS4yMjY0OTksCiAgInRpZXIiOiBudWxsLAogICJib2FyZCI6IHRydWUsCiAgIm93bmVkIjogdHJ1ZSwKICAidXJsIjogInUiLAogICJwYWlyX2NvbW1hbmQiOiAicHNldWRvbGlmZS1tY3AgcGFpciB1IEJKM0ctWEpUSC1ORDA4Igp9Cg==",
+   "stdout": "ewogICJlcnJvciI6IG51bGwsCiAgIm5vdGVzIjogWwogICAgImZvciBhIG1hY2hpbmUgdGhhdCBpcyBub3QgeW91cnMsIGFkZCAtLXNvbWVvbmUtZWxzZSIsCiAgICAiYW4gaW52aXRlZCBtYWNoaW5lIGNhbiByZWFkIGFuZCB3cml0ZSB0aGUgd2hvbGUgYmFuayBhbmQgdXNlIHRoZSBhZ2VudCBib2FyZCwgYnV0IG5vdCBjaGFuZ2UgdGhlIGRhZW1vbidzIGNvbmZpZ3VyYXRpb24iCiAgXSwKICAiZXhpdCI6IDAsCiAgImRhZW1vbiI6IHsKICAgICJhdXRoIjogdHJ1ZSwKICAgICJzY2hlbWEiOiA1NSwKICAgICJiYW5rIjogIjdmODQwMjIzODM5NzM2NWMiCiAgfSwKICAicHJpbmNpcGFsIjogInp1bHUuMSIsCiAgInN0YXRlIjogIm5ldyIsCiAgImNvZGUiOiAiM04zMi01U0Y5LUtHRDAiLAogICJleHBpcmVzX2F0IjogMTc5MzY1NTEwOS43ODE0OTUsCiAgInRpZXIiOiBudWxsLAogICJib2FyZCI6IHRydWUsCiAgIm93bmVkIjogdHJ1ZSwKICAidXJsIjogInUiLAogICJwYWlyX2NvbW1hbmQiOiAicHNldWRvbGlmZS1tY3AgcGFpciB1IDNOMzItNVNGOS1LR0QwIgp9Cg==",
    "stderr": "",
    "window": [
-    1793646368.7384448,
-    1793646369.2514424
+    1793654209.26612,
+    1793654209.8083673
    ],
    "requests": [
     {
@@ -23214,7 +23271,7 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "42827",
+   "argv_port": "45911",
    "ttl": 900,
    "seed_rows": [],
    "db": {
@@ -23262,11 +23319,11 @@
      ],
      "outcome_signals": [],
      "pl_cf_clock": [
-      "{\"at\": 1793646369.227281, \"principal\": \"zulu.1\"}"
+      "{\"at\": 1793654209.782328, \"principal\": \"zulu.1\"}"
      ],
      "principal_activity": [],
      "principals": [
-      "{\"tier\": null, \"board\": true, \"owned\": true, \"code_hash\": \"87324ca45fde61317f356a80e3255cf0c00caafcbbce1547e8ade0e3d32cb30c\", \"paired_at\": null, \"principal\": \"zulu.1\", \"created_at\": 1793646369.226541, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793647269.226499, \"paired_code_hash\": null}"
+      "{\"tier\": null, \"board\": true, \"owned\": true, \"code_hash\": \"306c2d865ac2a76a4c18e7bc8f0c41d69658d614f63d68f6076e6c53499b503e\", \"paired_at\": null, \"principal\": \"zulu.1\", \"created_at\": 1793654209.781538, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793655109.781495, \"paired_code_hash\": null}"
      ],
      "reference_chunks": [],
      "rejected_bearers": [],
@@ -30218,8 +30275,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiBubyBzdG9yZWQgcHJpbmNpcGFsIGlzIG5hbWVkIG5vYm9keQo=",
    "window": [
-    1793646369.8812032,
-    1793646370.28565
+    1793654210.4601128,
+    1793654210.9018238
    ],
    "arm": "python",
    "before": {
@@ -30235,64 +30292,64 @@
      "board": true,
      "owned": true,
      "code_hash": null,
-     "paired_at": 1793646328.008371,
+     "paired_at": 1793654166.921207,
      "principal": "bravo",
-     "created_at": 1793646328.001697,
+     "created_at": 1793654166.913273,
      "revoked_at": null,
      "token_hash": "217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d",
      "code_expires_at": null,
-     "paired_code_hash": "c5dbe1f6260dbecbb9b4be3d8c55ab8f730fb9d5e34f5d752a19371930de2d59"
+     "paired_code_hash": "404a05303b01708cdbb0c116b6a90c8b2bc49cfc6cca59f7ab160a71c44a4a5f"
     },
     {
      "tier": "full",
      "board": true,
      "owned": true,
-     "code_hash": "91e18e14dbb9f475369c98b0bc7fc46643a44fb09085099e2de120b729369b4a",
+     "code_hash": "32144ef0fc389392652c65d9418c7ac33816277915c48109893f565a6259db28",
      "paired_at": null,
      "principal": "a-rather-long-principal-name.x",
-     "created_at": 1793646328.01265,
+     "created_at": 1793654166.926236,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793649928.012648,
+     "code_expires_at": 1793657766.926233,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": false,
      "owned": true,
-     "code_hash": "44228350135f3f3bd0ead4da06fe19c7ac3ea94ab8a4867df158c02635d31630",
+     "code_hash": "d1455ad97fdb8a6e679c4659fe67208321cfdb16c1be94db0805dd4c8e9402c7",
      "paired_at": null,
      "principal": "delta",
-     "created_at": 1793646328.011672,
+     "created_at": 1793654166.925073,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793646268.01167,
+     "code_expires_at": 1793654106.925071,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
      "owned": false,
-     "code_hash": "6a23055a4a9b1526607a24cc15e2ca838b31e1fcaf4012fa38a67adf46a29a5c",
+     "code_hash": "9ff93f4499340ff37f52cf168e179de5fde7a84e63edac82d666569f691fe501",
      "paired_at": null,
      "principal": "echo",
-     "created_at": 1793646328.014287,
+     "created_at": 1793654166.928274,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793647228.014285,
+     "code_expires_at": 1793655066.928272,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
      "owned": true,
-     "code_hash": "b3f5f9dde3c73ef0609538081ce7a77f1a9374c9b3851227432ffd1755f6a378",
+     "code_hash": "e0b108dfc0ecc226b1ccb110637195025e5848ee37e8f6db7c41bced4d4aea13",
      "paired_at": null,
      "principal": "alpha",
-     "created_at": 1793646328.000564,
+     "created_at": 1793654166.912014,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793647228.000528,
+     "code_expires_at": 1793655066.911976,
      "paired_code_hash": null
     },
     {
@@ -30302,8 +30359,8 @@
      "code_hash": null,
      "paired_at": null,
      "principal": "charlie",
-     "created_at": 1793646328.009765,
-     "revoked_at": 1793646328.010667,
+     "created_at": 1793654166.922858,
+     "revoked_at": 1793654166.923887,
      "token_hash": null,
      "code_expires_at": null,
      "paired_code_hash": null
@@ -30324,8 +30381,8 @@
    "stdout": "ewogICJlcnJvciI6ICJubyBzdG9yZWQgcHJpbmNpcGFsIGlzIG5hbWVkIGRlZmF1bHQiLAogICJub3RlcyI6IFtdLAogICJleGl0IjogNAp9Cg==",
    "stderr": "",
    "window": [
-    1793646370.5198028,
-    1793646370.9248817
+    1793654211.1707237,
+    1793654211.6407835
    ],
    "arm": "python",
    "before": {
@@ -30341,64 +30398,64 @@
      "board": true,
      "owned": true,
      "code_hash": null,
-     "paired_at": 1793646328.008371,
+     "paired_at": 1793654166.921207,
      "principal": "bravo",
-     "created_at": 1793646328.001697,
+     "created_at": 1793654166.913273,
      "revoked_at": null,
      "token_hash": "217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d",
      "code_expires_at": null,
-     "paired_code_hash": "c5dbe1f6260dbecbb9b4be3d8c55ab8f730fb9d5e34f5d752a19371930de2d59"
+     "paired_code_hash": "404a05303b01708cdbb0c116b6a90c8b2bc49cfc6cca59f7ab160a71c44a4a5f"
     },
     {
      "tier": "full",
      "board": true,
      "owned": true,
-     "code_hash": "91e18e14dbb9f475369c98b0bc7fc46643a44fb09085099e2de120b729369b4a",
+     "code_hash": "32144ef0fc389392652c65d9418c7ac33816277915c48109893f565a6259db28",
      "paired_at": null,
      "principal": "a-rather-long-principal-name.x",
-     "created_at": 1793646328.01265,
+     "created_at": 1793654166.926236,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793649928.012648,
+     "code_expires_at": 1793657766.926233,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": false,
      "owned": true,
-     "code_hash": "44228350135f3f3bd0ead4da06fe19c7ac3ea94ab8a4867df158c02635d31630",
+     "code_hash": "d1455ad97fdb8a6e679c4659fe67208321cfdb16c1be94db0805dd4c8e9402c7",
      "paired_at": null,
      "principal": "delta",
-     "created_at": 1793646328.011672,
+     "created_at": 1793654166.925073,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793646268.01167,
+     "code_expires_at": 1793654106.925071,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
      "owned": false,
-     "code_hash": "6a23055a4a9b1526607a24cc15e2ca838b31e1fcaf4012fa38a67adf46a29a5c",
+     "code_hash": "9ff93f4499340ff37f52cf168e179de5fde7a84e63edac82d666569f691fe501",
      "paired_at": null,
      "principal": "echo",
-     "created_at": 1793646328.014287,
+     "created_at": 1793654166.928274,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793647228.014285,
+     "code_expires_at": 1793655066.928272,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
      "owned": true,
-     "code_hash": "b3f5f9dde3c73ef0609538081ce7a77f1a9374c9b3851227432ffd1755f6a378",
+     "code_hash": "e0b108dfc0ecc226b1ccb110637195025e5848ee37e8f6db7c41bced4d4aea13",
      "paired_at": null,
      "principal": "alpha",
-     "created_at": 1793646328.000564,
+     "created_at": 1793654166.912014,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793647228.000528,
+     "code_expires_at": 1793655066.911976,
      "paired_code_hash": null
     },
     {
@@ -30408,8 +30465,8 @@
      "code_hash": null,
      "paired_at": null,
      "principal": "charlie",
-     "created_at": 1793646328.009765,
-     "revoked_at": 1793646328.010667,
+     "created_at": 1793654166.922858,
+     "revoked_at": 1793654166.923887,
      "token_hash": null,
      "code_expires_at": null,
      "paired_code_hash": null
@@ -30430,8 +30487,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiB0aGlzIGRhdGFiYXNlIGhvbGRzIGJhbmsgN2Y4NDAyMjM4Mzk3MzY1YywgYnV0IC0tYmFuayBpcyBiYW5rIDAxMjM0NTY3ODlhYmNkZWY6IGl0IGlzIGFub3RoZXIgZGF0YWJhc2UuIE5vdGhpbmcgd2FzIGNoYW5nZWQK",
    "window": [
-    1793646371.1622603,
-    1793646371.607897
+    1793654212.0298512,
+    1793654212.7232819
    ],
    "arm": "python",
    "before": {
@@ -30447,64 +30504,64 @@
      "board": true,
      "owned": true,
      "code_hash": null,
-     "paired_at": 1793646328.008371,
+     "paired_at": 1793654166.921207,
      "principal": "bravo",
-     "created_at": 1793646328.001697,
+     "created_at": 1793654166.913273,
      "revoked_at": null,
      "token_hash": "217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d",
      "code_expires_at": null,
-     "paired_code_hash": "c5dbe1f6260dbecbb9b4be3d8c55ab8f730fb9d5e34f5d752a19371930de2d59"
+     "paired_code_hash": "404a05303b01708cdbb0c116b6a90c8b2bc49cfc6cca59f7ab160a71c44a4a5f"
     },
     {
      "tier": "full",
      "board": true,
      "owned": true,
-     "code_hash": "91e18e14dbb9f475369c98b0bc7fc46643a44fb09085099e2de120b729369b4a",
+     "code_hash": "32144ef0fc389392652c65d9418c7ac33816277915c48109893f565a6259db28",
      "paired_at": null,
      "principal": "a-rather-long-principal-name.x",
-     "created_at": 1793646328.01265,
+     "created_at": 1793654166.926236,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793649928.012648,
+     "code_expires_at": 1793657766.926233,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": false,
      "owned": true,
-     "code_hash": "44228350135f3f3bd0ead4da06fe19c7ac3ea94ab8a4867df158c02635d31630",
+     "code_hash": "d1455ad97fdb8a6e679c4659fe67208321cfdb16c1be94db0805dd4c8e9402c7",
      "paired_at": null,
      "principal": "delta",
-     "created_at": 1793646328.011672,
+     "created_at": 1793654166.925073,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793646268.01167,
+     "code_expires_at": 1793654106.925071,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
      "owned": false,
-     "code_hash": "6a23055a4a9b1526607a24cc15e2ca838b31e1fcaf4012fa38a67adf46a29a5c",
+     "code_hash": "9ff93f4499340ff37f52cf168e179de5fde7a84e63edac82d666569f691fe501",
      "paired_at": null,
      "principal": "echo",
-     "created_at": 1793646328.014287,
+     "created_at": 1793654166.928274,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793647228.014285,
+     "code_expires_at": 1793655066.928272,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
      "owned": true,
-     "code_hash": "b3f5f9dde3c73ef0609538081ce7a77f1a9374c9b3851227432ffd1755f6a378",
+     "code_hash": "e0b108dfc0ecc226b1ccb110637195025e5848ee37e8f6db7c41bced4d4aea13",
      "paired_at": null,
      "principal": "alpha",
-     "created_at": 1793646328.000564,
+     "created_at": 1793654166.912014,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793647228.000528,
+     "code_expires_at": 1793655066.911976,
      "paired_code_hash": null
     },
     {
@@ -30514,8 +30571,8 @@
      "code_hash": null,
      "paired_at": null,
      "principal": "charlie",
-     "created_at": 1793646328.009765,
-     "revoked_at": 1793646328.010667,
+     "created_at": 1793654166.922858,
+     "revoked_at": 1793654166.923887,
      "token_hash": null,
      "code_expires_at": null,
      "paired_code_hash": null
@@ -30536,8 +30593,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiBubyBkYXRhYmFzZSBmb3VuZDogc2V0IFBTRVVET0xJRkVfTUNQX0RBVEFCQVNFX1VSTCwgb3IgcnVuIHRoaXMgb24gdGhlIGRhZW1vbidzIGhvc3QgKGEgRG9ja2VyIGluc3RhbGwgcnVucyBpdCBpbiB0aGUgZGFlbW9uIGNvbnRhaW5lcikK",
    "window": [
-    1793646371.864882,
-    1793646372.0820074
+    1793654213.0656404,
+    1793654213.4039192
    ],
    "requests": [],
    "arm": "python",
@@ -30547,7 +30604,7 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "35327",
+   "argv_port": "37839",
    "ttl": 900,
    "seed_rows": [
     {
@@ -30555,64 +30612,64 @@
      "board": true,
      "owned": true,
      "code_hash": null,
-     "paired_at": 1793646328.008371,
+     "paired_at": 1793654166.921207,
      "principal": "bravo",
-     "created_at": 1793646328.001697,
+     "created_at": 1793654166.913273,
      "revoked_at": null,
      "token_hash": "217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d",
      "code_expires_at": null,
-     "paired_code_hash": "c5dbe1f6260dbecbb9b4be3d8c55ab8f730fb9d5e34f5d752a19371930de2d59"
+     "paired_code_hash": "404a05303b01708cdbb0c116b6a90c8b2bc49cfc6cca59f7ab160a71c44a4a5f"
     },
     {
      "tier": "full",
      "board": true,
      "owned": true,
-     "code_hash": "91e18e14dbb9f475369c98b0bc7fc46643a44fb09085099e2de120b729369b4a",
+     "code_hash": "32144ef0fc389392652c65d9418c7ac33816277915c48109893f565a6259db28",
      "paired_at": null,
      "principal": "a-rather-long-principal-name.x",
-     "created_at": 1793646328.01265,
+     "created_at": 1793654166.926236,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793649928.012648,
+     "code_expires_at": 1793657766.926233,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": false,
      "owned": true,
-     "code_hash": "44228350135f3f3bd0ead4da06fe19c7ac3ea94ab8a4867df158c02635d31630",
+     "code_hash": "d1455ad97fdb8a6e679c4659fe67208321cfdb16c1be94db0805dd4c8e9402c7",
      "paired_at": null,
      "principal": "delta",
-     "created_at": 1793646328.011672,
+     "created_at": 1793654166.925073,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793646268.01167,
+     "code_expires_at": 1793654106.925071,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
      "owned": false,
-     "code_hash": "6a23055a4a9b1526607a24cc15e2ca838b31e1fcaf4012fa38a67adf46a29a5c",
+     "code_hash": "9ff93f4499340ff37f52cf168e179de5fde7a84e63edac82d666569f691fe501",
      "paired_at": null,
      "principal": "echo",
-     "created_at": 1793646328.014287,
+     "created_at": 1793654166.928274,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793647228.014285,
+     "code_expires_at": 1793655066.928272,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
      "owned": true,
-     "code_hash": "b3f5f9dde3c73ef0609538081ce7a77f1a9374c9b3851227432ffd1755f6a378",
+     "code_hash": "e0b108dfc0ecc226b1ccb110637195025e5848ee37e8f6db7c41bced4d4aea13",
      "paired_at": null,
      "principal": "alpha",
-     "created_at": 1793646328.000564,
+     "created_at": 1793654166.912014,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793647228.000528,
+     "code_expires_at": 1793655066.911976,
      "paired_code_hash": null
     },
     {
@@ -30622,8 +30679,8 @@
      "code_hash": null,
      "paired_at": null,
      "principal": "charlie",
-     "created_at": 1793646328.009765,
-     "revoked_at": 1793646328.010667,
+     "created_at": 1793654166.922858,
+     "revoked_at": 1793654166.923887,
      "token_hash": null,
      "code_expires_at": null,
      "paired_code_hash": null
@@ -30644,8 +30701,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiBjb3VsZCBub3QgY29ubmVjdCB0byB0aGUgYmFuaydzIGRhdGFiYXNlIChPcGVyYXRpb25hbEVycm9yKQo=",
    "window": [
-    1793646372.368053,
-    1793646372.7788925
+    1793654214.0285451,
+    1793654214.4816728
    ],
    "requests": [
     {
@@ -30662,7 +30719,7 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "58911",
+   "argv_port": "36969",
    "ttl": 900,
    "seed_rows": [
     {
@@ -30670,64 +30727,64 @@
      "board": true,
      "owned": true,
      "code_hash": null,
-     "paired_at": 1793646328.008371,
+     "paired_at": 1793654166.921207,
      "principal": "bravo",
-     "created_at": 1793646328.001697,
+     "created_at": 1793654166.913273,
      "revoked_at": null,
      "token_hash": "217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d",
      "code_expires_at": null,
-     "paired_code_hash": "c5dbe1f6260dbecbb9b4be3d8c55ab8f730fb9d5e34f5d752a19371930de2d59"
+     "paired_code_hash": "404a05303b01708cdbb0c116b6a90c8b2bc49cfc6cca59f7ab160a71c44a4a5f"
     },
     {
      "tier": "full",
      "board": true,
      "owned": true,
-     "code_hash": "91e18e14dbb9f475369c98b0bc7fc46643a44fb09085099e2de120b729369b4a",
+     "code_hash": "32144ef0fc389392652c65d9418c7ac33816277915c48109893f565a6259db28",
      "paired_at": null,
      "principal": "a-rather-long-principal-name.x",
-     "created_at": 1793646328.01265,
+     "created_at": 1793654166.926236,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793649928.012648,
+     "code_expires_at": 1793657766.926233,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": false,
      "owned": true,
-     "code_hash": "44228350135f3f3bd0ead4da06fe19c7ac3ea94ab8a4867df158c02635d31630",
+     "code_hash": "d1455ad97fdb8a6e679c4659fe67208321cfdb16c1be94db0805dd4c8e9402c7",
      "paired_at": null,
      "principal": "delta",
-     "created_at": 1793646328.011672,
+     "created_at": 1793654166.925073,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793646268.01167,
+     "code_expires_at": 1793654106.925071,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
      "owned": false,
-     "code_hash": "6a23055a4a9b1526607a24cc15e2ca838b31e1fcaf4012fa38a67adf46a29a5c",
+     "code_hash": "9ff93f4499340ff37f52cf168e179de5fde7a84e63edac82d666569f691fe501",
      "paired_at": null,
      "principal": "echo",
-     "created_at": 1793646328.014287,
+     "created_at": 1793654166.928274,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793647228.014285,
+     "code_expires_at": 1793655066.928272,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
      "owned": true,
-     "code_hash": "b3f5f9dde3c73ef0609538081ce7a77f1a9374c9b3851227432ffd1755f6a378",
+     "code_hash": "e0b108dfc0ecc226b1ccb110637195025e5848ee37e8f6db7c41bced4d4aea13",
      "paired_at": null,
      "principal": "alpha",
-     "created_at": 1793646328.000564,
+     "created_at": 1793654166.912014,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793647228.000528,
+     "code_expires_at": 1793655066.911976,
      "paired_code_hash": null
     },
     {
@@ -30737,8 +30794,8 @@
      "code_hash": null,
      "paired_at": null,
      "principal": "charlie",
-     "created_at": 1793646328.009765,
-     "revoked_at": 1793646328.010667,
+     "created_at": 1793654166.922858,
+     "revoked_at": 1793654166.923887,
      "token_hash": null,
      "code_expires_at": null,
      "paired_code_hash": null
@@ -30759,8 +30816,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiBubyBkYXRhYmFzZSBmb3VuZDogc2V0IFBTRVVET0xJRkVfTUNQX0RBVEFCQVNFX1VSTCwgb3IgcnVuIHRoaXMgb24gdGhlIGRhZW1vbidzIGhvc3QgKGEgRG9ja2VyIGluc3RhbGwgcnVucyBpdCBpbiB0aGUgZGFlbW9uIGNvbnRhaW5lcikK",
    "window": [
-    1793646373.4895701,
-    1793646373.7280827
+    1793654215.204527,
+    1793654215.4323564
    ],
    "requests": [],
    "arm": "python",
@@ -30770,7 +30827,7 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "35191",
+   "argv_port": "40115",
    "ttl": 900,
    "seed_rows": [
     {
@@ -30778,64 +30835,64 @@
      "board": true,
      "owned": true,
      "code_hash": null,
-     "paired_at": 1793646328.008371,
+     "paired_at": 1793654166.921207,
      "principal": "bravo",
-     "created_at": 1793646328.001697,
+     "created_at": 1793654166.913273,
      "revoked_at": null,
      "token_hash": "217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d",
      "code_expires_at": null,
-     "paired_code_hash": "c5dbe1f6260dbecbb9b4be3d8c55ab8f730fb9d5e34f5d752a19371930de2d59"
+     "paired_code_hash": "404a05303b01708cdbb0c116b6a90c8b2bc49cfc6cca59f7ab160a71c44a4a5f"
     },
     {
      "tier": "full",
      "board": true,
      "owned": true,
-     "code_hash": "91e18e14dbb9f475369c98b0bc7fc46643a44fb09085099e2de120b729369b4a",
+     "code_hash": "32144ef0fc389392652c65d9418c7ac33816277915c48109893f565a6259db28",
      "paired_at": null,
      "principal": "a-rather-long-principal-name.x",
-     "created_at": 1793646328.01265,
+     "created_at": 1793654166.926236,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793649928.012648,
+     "code_expires_at": 1793657766.926233,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": false,
      "owned": true,
-     "code_hash": "44228350135f3f3bd0ead4da06fe19c7ac3ea94ab8a4867df158c02635d31630",
+     "code_hash": "d1455ad97fdb8a6e679c4659fe67208321cfdb16c1be94db0805dd4c8e9402c7",
      "paired_at": null,
      "principal": "delta",
-     "created_at": 1793646328.011672,
+     "created_at": 1793654166.925073,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793646268.01167,
+     "code_expires_at": 1793654106.925071,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
      "owned": false,
-     "code_hash": "6a23055a4a9b1526607a24cc15e2ca838b31e1fcaf4012fa38a67adf46a29a5c",
+     "code_hash": "9ff93f4499340ff37f52cf168e179de5fde7a84e63edac82d666569f691fe501",
      "paired_at": null,
      "principal": "echo",
-     "created_at": 1793646328.014287,
+     "created_at": 1793654166.928274,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793647228.014285,
+     "code_expires_at": 1793655066.928272,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
      "owned": true,
-     "code_hash": "b3f5f9dde3c73ef0609538081ce7a77f1a9374c9b3851227432ffd1755f6a378",
+     "code_hash": "e0b108dfc0ecc226b1ccb110637195025e5848ee37e8f6db7c41bced4d4aea13",
      "paired_at": null,
      "principal": "alpha",
-     "created_at": 1793646328.000564,
+     "created_at": 1793654166.912014,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793647228.000528,
+     "code_expires_at": 1793655066.911976,
      "paired_code_hash": null
     },
     {
@@ -30845,8 +30902,8 @@
      "code_hash": null,
      "paired_at": null,
      "principal": "charlie",
-     "created_at": 1793646328.009765,
-     "revoked_at": 1793646328.010667,
+     "created_at": 1793654166.922858,
+     "revoked_at": 1793654166.923887,
      "token_hash": null,
      "code_expires_at": null,
      "paired_code_hash": null
@@ -30867,8 +30924,8 @@
    "stdout": "",
    "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGludml0ZSBbLWhdIFstLXRpZXIge21pbmltYWwsY29yZSxmdWxsfV0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1ib2FyZCB8IC0tbm8tYm9hcmRdIFstLWV4cGlyZXMgRVhQSVJFU10KICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1zb21lb25lLWVsc2UgfCAtLW1pbmVdIFstLXJlcGxhY2VdIFstLXVybCBVUkxdCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tcG9ydCBQT1JUXSBbLS1iYW5rIEZJTkdFUlBSSU5UXSBbLS1saXN0XQogICAgICAgICAgICAgICAgICAgICAgICAgICAgIFstLXJldm9rZSBOQU1FXSBbLS15ZXNdIFstLWpzb25dCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgW25hbWVdCnBzZXVkb2xpZmUtbWNwIGludml0ZTogZXJyb3I6IGFyZ3VtZW50IC0tc29tZW9uZS1lbHNlOiBub3QgYWxsb3dlZCB3aXRoIGFyZ3VtZW50IC0tbWluZQo=",
    "window": [
-    1793646374.4962604,
-    1793646374.715212
+    1793654216.2180016,
+    1793654216.4589696
    ],
    "requests": [],
    "arm": "python",
@@ -30878,7 +30935,7 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "58947",
+   "argv_port": "47475",
    "ttl": 900,
    "seed_rows": [
     {
@@ -30886,64 +30943,64 @@
      "board": true,
      "owned": true,
      "code_hash": null,
-     "paired_at": 1793646328.008371,
+     "paired_at": 1793654166.921207,
      "principal": "bravo",
-     "created_at": 1793646328.001697,
+     "created_at": 1793654166.913273,
      "revoked_at": null,
      "token_hash": "217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d",
      "code_expires_at": null,
-     "paired_code_hash": "c5dbe1f6260dbecbb9b4be3d8c55ab8f730fb9d5e34f5d752a19371930de2d59"
+     "paired_code_hash": "404a05303b01708cdbb0c116b6a90c8b2bc49cfc6cca59f7ab160a71c44a4a5f"
     },
     {
      "tier": "full",
      "board": true,
      "owned": true,
-     "code_hash": "91e18e14dbb9f475369c98b0bc7fc46643a44fb09085099e2de120b729369b4a",
+     "code_hash": "32144ef0fc389392652c65d9418c7ac33816277915c48109893f565a6259db28",
      "paired_at": null,
      "principal": "a-rather-long-principal-name.x",
-     "created_at": 1793646328.01265,
+     "created_at": 1793654166.926236,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793649928.012648,
+     "code_expires_at": 1793657766.926233,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": false,
      "owned": true,
-     "code_hash": "44228350135f3f3bd0ead4da06fe19c7ac3ea94ab8a4867df158c02635d31630",
+     "code_hash": "d1455ad97fdb8a6e679c4659fe67208321cfdb16c1be94db0805dd4c8e9402c7",
      "paired_at": null,
      "principal": "delta",
-     "created_at": 1793646328.011672,
+     "created_at": 1793654166.925073,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793646268.01167,
+     "code_expires_at": 1793654106.925071,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
      "owned": false,
-     "code_hash": "6a23055a4a9b1526607a24cc15e2ca838b31e1fcaf4012fa38a67adf46a29a5c",
+     "code_hash": "9ff93f4499340ff37f52cf168e179de5fde7a84e63edac82d666569f691fe501",
      "paired_at": null,
      "principal": "echo",
-     "created_at": 1793646328.014287,
+     "created_at": 1793654166.928274,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793647228.014285,
+     "code_expires_at": 1793655066.928272,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
      "owned": true,
-     "code_hash": "b3f5f9dde3c73ef0609538081ce7a77f1a9374c9b3851227432ffd1755f6a378",
+     "code_hash": "e0b108dfc0ecc226b1ccb110637195025e5848ee37e8f6db7c41bced4d4aea13",
      "paired_at": null,
      "principal": "alpha",
-     "created_at": 1793646328.000564,
+     "created_at": 1793654166.912014,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793647228.000528,
+     "code_expires_at": 1793655066.911976,
      "paired_code_hash": null
     },
     {
@@ -30953,8 +31010,8 @@
      "code_hash": null,
      "paired_at": null,
      "principal": "charlie",
-     "created_at": 1793646328.009765,
-     "revoked_at": 1793646328.010667,
+     "created_at": 1793654166.922858,
+     "revoked_at": 1793654166.923887,
      "token_hash": null,
      "code_expires_at": null,
      "paired_code_hash": null
@@ -30972,11 +31029,11 @@
    "home": null,
    "utc_offset": 0,
    "exit": 0,
-   "stdout": "bGFwdG9wOiBpbnZpdGVkOyB0aWVyIHRoZSBkYWVtb24gZGVmYXVsdCwgYWdlbnQgYm9hcmQgb24KICBjb2RlICAgICBTS1o0LTlBRDctMDVBQSAgIHNpbmdsZSB1c2UsIGV4cGlyZXMgaW4gMTUgbWluICgyMDI2LTExLTAyIDE5OjIxIFVUQykKICBvbiB0aGUgbmV3IG1hY2hpbmU6ICBwc2V1ZG9saWZlLW1jcCBwYWlyIHUgU0taNC05QUQ3LTA1QUEKICBvciBydW4gdGhlIGluc3RhbGxlciB0aGVyZSBhbmQgYW5zd2VyIDIsIGdpdmluZyB0aGlzIGNvZGUgd2hlcmUgaXQgYXNrcyBmb3IgdGhlIHRva2VuCmZvciBhIG1hY2hpbmUgdGhhdCBpcyBub3QgeW91cnMsIGFkZCAtLXNvbWVvbmUtZWxzZQphbiBpbnZpdGVkIG1hY2hpbmUgY2FuIHJlYWQgYW5kIHdyaXRlIHRoZSB3aG9sZSBiYW5rIGFuZCB1c2UgdGhlIGFnZW50IGJvYXJkLCBidXQgbm90IGNoYW5nZSB0aGUgZGFlbW9uJ3MgY29uZmlndXJhdGlvbgo=",
+   "stdout": "bGFwdG9wOiBpbnZpdGVkOyB0aWVyIHRoZSBkYWVtb24gZGVmYXVsdCwgYWdlbnQgYm9hcmQgb24KICBjb2RlICAgICA3OVFaLTBUSzktVkJRViAgIHNpbmdsZSB1c2UsIGV4cGlyZXMgaW4gMTUgbWluICgyMDI2LTExLTAyIDIxOjMxIFVUQykKICBvbiB0aGUgbmV3IG1hY2hpbmU6ICBwc2V1ZG9saWZlLW1jcCBwYWlyIHUgNzlRWi0wVEs5LVZCUVYKICBvciBydW4gdGhlIGluc3RhbGxlciB0aGVyZSBhbmQgYW5zd2VyIDIsIGdpdmluZyB0aGlzIGNvZGUgd2hlcmUgaXQgYXNrcyBmb3IgdGhlIHRva2VuCmZvciBhIG1hY2hpbmUgdGhhdCBpcyBub3QgeW91cnMsIGFkZCAtLXNvbWVvbmUtZWxzZQphbiBpbnZpdGVkIG1hY2hpbmUgY2FuIHJlYWQgYW5kIHdyaXRlIHRoZSB3aG9sZSBiYW5rIGFuZCB1c2UgdGhlIGFnZW50IGJvYXJkLCBidXQgbm90IGNoYW5nZSB0aGUgZGFlbW9uJ3MgY29uZmlndXJhdGlvbgo=",
    "stderr": "dG9rZW4tbWFwIGVudHJ5ICMxIG1hbGZvcm1lZCAod2FudCB0b2tlbjpwcmluY2lwYWwpIOKAlCBza2lwcGVkOyB0aGF0IHRva2VuIHdpbGwgbm90IGF1dGhlbnRpY2F0ZQo=",
    "window": [
-    1793646374.986625,
-    1793646375.4977338
+    1793654217.2289097,
+    1793654217.7963026
    ],
    "requests": [
     {
@@ -30993,7 +31050,7 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "58849",
+   "argv_port": "56757",
    "ttl": 900,
    "seed_rows": [
     {
@@ -31001,64 +31058,64 @@
      "board": true,
      "owned": true,
      "code_hash": null,
-     "paired_at": 1793646328.008371,
+     "paired_at": 1793654166.921207,
      "principal": "bravo",
-     "created_at": 1793646328.001697,
+     "created_at": 1793654166.913273,
      "revoked_at": null,
      "token_hash": "217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d",
      "code_expires_at": null,
-     "paired_code_hash": "c5dbe1f6260dbecbb9b4be3d8c55ab8f730fb9d5e34f5d752a19371930de2d59"
+     "paired_code_hash": "404a05303b01708cdbb0c116b6a90c8b2bc49cfc6cca59f7ab160a71c44a4a5f"
     },
     {
      "tier": "full",
      "board": true,
      "owned": true,
-     "code_hash": "91e18e14dbb9f475369c98b0bc7fc46643a44fb09085099e2de120b729369b4a",
+     "code_hash": "32144ef0fc389392652c65d9418c7ac33816277915c48109893f565a6259db28",
      "paired_at": null,
      "principal": "a-rather-long-principal-name.x",
-     "created_at": 1793646328.01265,
+     "created_at": 1793654166.926236,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793649928.012648,
+     "code_expires_at": 1793657766.926233,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": false,
      "owned": true,
-     "code_hash": "44228350135f3f3bd0ead4da06fe19c7ac3ea94ab8a4867df158c02635d31630",
+     "code_hash": "d1455ad97fdb8a6e679c4659fe67208321cfdb16c1be94db0805dd4c8e9402c7",
      "paired_at": null,
      "principal": "delta",
-     "created_at": 1793646328.011672,
+     "created_at": 1793654166.925073,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793646268.01167,
+     "code_expires_at": 1793654106.925071,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
      "owned": false,
-     "code_hash": "6a23055a4a9b1526607a24cc15e2ca838b31e1fcaf4012fa38a67adf46a29a5c",
+     "code_hash": "9ff93f4499340ff37f52cf168e179de5fde7a84e63edac82d666569f691fe501",
      "paired_at": null,
      "principal": "echo",
-     "created_at": 1793646328.014287,
+     "created_at": 1793654166.928274,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793647228.014285,
+     "code_expires_at": 1793655066.928272,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
      "owned": true,
-     "code_hash": "b3f5f9dde3c73ef0609538081ce7a77f1a9374c9b3851227432ffd1755f6a378",
+     "code_hash": "e0b108dfc0ecc226b1ccb110637195025e5848ee37e8f6db7c41bced4d4aea13",
      "paired_at": null,
      "principal": "alpha",
-     "created_at": 1793646328.000564,
+     "created_at": 1793654166.912014,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793647228.000528,
+     "code_expires_at": 1793655066.911976,
      "paired_code_hash": null
     },
     {
@@ -31068,8 +31125,8 @@
      "code_hash": null,
      "paired_at": null,
      "principal": "charlie",
-     "created_at": 1793646328.009765,
-     "revoked_at": 1793646328.010667,
+     "created_at": 1793654166.922858,
+     "revoked_at": 1793654166.923887,
      "token_hash": null,
      "code_expires_at": null,
      "paired_code_hash": null
@@ -31120,17 +31177,17 @@
      ],
      "outcome_signals": [],
      "pl_cf_clock": [
-      "{\"at\": 1793646375.473932, \"principal\": \"laptop\"}"
+      "{\"at\": 1793654217.768675, \"principal\": \"laptop\"}"
      ],
      "principal_activity": [],
      "principals": [
-      "{\"tier\": \"core\", \"board\": true, \"owned\": true, \"code_hash\": null, \"paired_at\": 1793646328.008371, \"principal\": \"bravo\", \"created_at\": 1793646328.001697, \"revoked_at\": null, \"token_hash\": \"217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d\", \"code_expires_at\": null, \"paired_code_hash\": \"c5dbe1f6260dbecbb9b4be3d8c55ab8f730fb9d5e34f5d752a19371930de2d59\"}",
-      "{\"tier\": \"full\", \"board\": true, \"owned\": true, \"code_hash\": \"91e18e14dbb9f475369c98b0bc7fc46643a44fb09085099e2de120b729369b4a\", \"paired_at\": null, \"principal\": \"a-rather-long-principal-name.x\", \"created_at\": 1793646328.01265, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793649928.012648, \"paired_code_hash\": null}",
-      "{\"tier\": null, \"board\": false, \"owned\": true, \"code_hash\": \"44228350135f3f3bd0ead4da06fe19c7ac3ea94ab8a4867df158c02635d31630\", \"paired_at\": null, \"principal\": \"delta\", \"created_at\": 1793646328.011672, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793646268.01167, \"paired_code_hash\": null}",
-      "{\"tier\": null, \"board\": true, \"owned\": false, \"code_hash\": \"6a23055a4a9b1526607a24cc15e2ca838b31e1fcaf4012fa38a67adf46a29a5c\", \"paired_at\": null, \"principal\": \"echo\", \"created_at\": 1793646328.014287, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793647228.014285, \"paired_code_hash\": null}",
-      "{\"tier\": null, \"board\": true, \"owned\": true, \"code_hash\": \"b3f5f9dde3c73ef0609538081ce7a77f1a9374c9b3851227432ffd1755f6a378\", \"paired_at\": null, \"principal\": \"alpha\", \"created_at\": 1793646328.000564, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793647228.000528, \"paired_code_hash\": null}",
-      "{\"tier\": null, \"board\": true, \"owned\": true, \"code_hash\": \"f6a329b7e20e5ae03f4baf4b3ed59483aa8e228d37165fca896995d4ec2705fe\", \"paired_at\": null, \"principal\": \"laptop\", \"created_at\": 1793646375.473197, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793647275.473156, \"paired_code_hash\": null}",
-      "{\"tier\": null, \"board\": true, \"owned\": true, \"code_hash\": null, \"paired_at\": null, \"principal\": \"charlie\", \"created_at\": 1793646328.009765, \"revoked_at\": 1793646328.010667, \"token_hash\": null, \"code_expires_at\": null, \"paired_code_hash\": null}"
+      "{\"tier\": \"core\", \"board\": true, \"owned\": true, \"code_hash\": null, \"paired_at\": 1793654166.921207, \"principal\": \"bravo\", \"created_at\": 1793654166.913273, \"revoked_at\": null, \"token_hash\": \"217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d\", \"code_expires_at\": null, \"paired_code_hash\": \"404a05303b01708cdbb0c116b6a90c8b2bc49cfc6cca59f7ab160a71c44a4a5f\"}",
+      "{\"tier\": \"full\", \"board\": true, \"owned\": true, \"code_hash\": \"32144ef0fc389392652c65d9418c7ac33816277915c48109893f565a6259db28\", \"paired_at\": null, \"principal\": \"a-rather-long-principal-name.x\", \"created_at\": 1793654166.926236, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793657766.926233, \"paired_code_hash\": null}",
+      "{\"tier\": null, \"board\": false, \"owned\": true, \"code_hash\": \"d1455ad97fdb8a6e679c4659fe67208321cfdb16c1be94db0805dd4c8e9402c7\", \"paired_at\": null, \"principal\": \"delta\", \"created_at\": 1793654166.925073, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793654106.925071, \"paired_code_hash\": null}",
+      "{\"tier\": null, \"board\": true, \"owned\": false, \"code_hash\": \"9ff93f4499340ff37f52cf168e179de5fde7a84e63edac82d666569f691fe501\", \"paired_at\": null, \"principal\": \"echo\", \"created_at\": 1793654166.928274, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793655066.928272, \"paired_code_hash\": null}",
+      "{\"tier\": null, \"board\": true, \"owned\": true, \"code_hash\": \"560c72f1b4e97b0cfd1ad1f40fea6dd2de7639965c45490cb6a6ebbe61377507\", \"paired_at\": null, \"principal\": \"laptop\", \"created_at\": 1793654217.767891, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793655117.767848, \"paired_code_hash\": null}",
+      "{\"tier\": null, \"board\": true, \"owned\": true, \"code_hash\": \"e0b108dfc0ecc226b1ccb110637195025e5848ee37e8f6db7c41bced4d4aea13\", \"paired_at\": null, \"principal\": \"alpha\", \"created_at\": 1793654166.912014, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793655066.911976, \"paired_code_hash\": null}",
+      "{\"tier\": null, \"board\": true, \"owned\": true, \"code_hash\": null, \"paired_at\": null, \"principal\": \"charlie\", \"created_at\": 1793654166.922858, \"revoked_at\": 1793654166.923887, \"token_hash\": null, \"code_expires_at\": null, \"paired_code_hash\": null}"
      ],
      "reference_chunks": [],
      "rejected_bearers": [],
@@ -38082,8 +38139,8 @@
    "stdout": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGludml0ZSBbLWhdIFstLXRpZXIge21pbmltYWwsY29yZSxmdWxsfV0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1ib2FyZCB8IC0tbm8tYm9hcmRdIFstLWV4cGlyZXMgRVhQSVJFU10KICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1zb21lb25lLWVsc2UgfCAtLW1pbmVdIFstLXJlcGxhY2VdIFstLXVybCBVUkxdCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tcG9ydCBQT1JUXSBbLS1iYW5rIEZJTkdFUlBSSU5UXSBbLS1saXN0XQogICAgICAgICAgICAgICAgICAgICAgICAgICAgIFstLXJldm9rZSBOQU1FXSBbLS15ZXNdIFstLWpzb25dCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgW25hbWVdCgpHaXZlIGFub3RoZXIgbWFjaGluZSBpdHMgb3duIHByaW5jaXBhbCBvbiB0aGlzIGJhbms6IHByaW50cyBhIHNob3J0LWxpdmVkLApzaW5nbGUtdXNlIHBhaXJpbmcgY29kZSBmb3IgYHBzZXVkb2xpZmUtbWNwIHBhaXJgLiBFeGl0IGNvZGVzOiAwIGRvbmUsIDEgdGhlCmRhdGFiYXNlIGZhaWxlZCwgMiB1c2FnZSBvciBub3QgY29uZmlybWVkLCA0IHJlZnVzZWQgYmVmb3JlIGFueSBjaGFuZ2UuCgpwb3NpdGlvbmFsIGFyZ3VtZW50czoKICBuYW1lICAgICAgICAgICAgICAgICAgdGhlIG5ldyBtYWNoaW5lJ3MgcHJpbmNpcGFsLCBlLmcuIGxhcHRvcAoKb3B0aW9uczoKICAtaCwgLS1oZWxwICAgICAgICAgICAgc2hvdyB0aGlzIGhlbHAgbWVzc2FnZSBhbmQgZXhpdAogIC0tdGllciB7bWluaW1hbCxjb3JlLGZ1bGx9CiAgICAgICAgICAgICAgICAgICAgICAgIGl0cyBkZWZhdWx0IHRvb2xzZXQgdGllciAoZGVmYXVsdDogdGhlIGRhZW1vbidzKQogIC0tYm9hcmQgICAgICAgICAgICAgICBhZG1pdCBpdCB0byB0aGUgYWdlbnQgYm9hcmQgKGEgbmV3IHByaW5jaXBhbCdzCiAgICAgICAgICAgICAgICAgICAgICAgIGRlZmF1bHQpCiAgLS1uby1ib2FyZCAgICAgICAgICAgIGRvIG5vdCBhZG1pdCBpdCB0byB0aGUgYWdlbnQgYm9hcmQKICAtLWV4cGlyZXMgRVhQSVJFUyAgICAgaG93IGxvbmcgdGhlIGNvZGUgbGl2ZXM6IDE1bSAoZGVmYXVsdCksIGF0IG1vc3QgMjRoCiAgLS1zb21lb25lLWVsc2UgICAgICAgIHRoZSBtYWNoaW5lIGlzIG5vdCB5b3VyczogdGhlIGJhbmsgb3duZXIncyBDb25zb2xlCiAgICAgICAgICAgICAgICAgICAgICAgIGRvZXMgbm90IHNob3cgaXRzIGJvYXJkIG1haWwgKGEgcmUtaW52aXRlIGtlZXBzIHdoYXQKICAgICAgICAgICAgICAgICAgICAgICAgdGhlIG5hbWUgd2FzKQogIC0tbWluZSAgICAgICAgICAgICAgICB0aGUgbWFjaGluZSBpcyB5b3VycyAoYSBuZXcgbmFtZSdzIGRlZmF1bHQ7IHVuZG9lcwogICAgICAgICAgICAgICAgICAgICAgICAtLXNvbWVvbmUtZWxzZSkKICAtLXJlcGxhY2UgICAgICAgICAgICAgZ2l2ZSBhIHBhaXJlZCBwcmluY2lwYWwgYSBuZXcgY29kZSAoaXRzIHRva2VuIHdvcmtzCiAgICAgICAgICAgICAgICAgICAgICAgIHVudGlsIHJlZGVlbWVkKQogIC0tdXJsIFVSTCAgICAgICAgICAgICB0aGUgZGFlbW9uIFVSTCB0byBwcmludCAoZGVmYXVsdDogZXhwb3NlIHN0YXR1cykKICAtLXBvcnQgUE9SVCAgICAgICAgICAgdGhlIGxvY2FsIGRhZW1vbidzIHBvcnQgKGRlZmF1bHQ6IFBTRVVET0xJRkVfTUNQX1BPUlQsCiAgICAgICAgICAgICAgICAgICAgICAgIGVsc2UgODc2NSkKICAtLWJhbmsgRklOR0VSUFJJTlQgICAgcmVmdXNlIHVubGVzcyB0aGUgZGF0YWJhc2UgaG9sZHMgdGhpcyBiYW5rICgvaGVhbHRoJ3MKICAgICAgICAgICAgICAgICAgICAgICAgYmFuaykKICAtLWxpc3QgICAgICAgICAgICAgICAgbGlzdCBwcmluY2lwYWxzIHdpdGggd2hlbiBlYWNoIGxhc3QgY29ubmVjdGVkLCBhbmQKICAgICAgICAgICAgICAgICAgICAgICAgcmVmdXNlZCB0b2tlbnMKICAtLXJldm9rZSBOQU1FICAgICAgICAgcmV2b2tlIGEgc3RvcmVkIHByaW5jaXBhbAogIC0teWVzICAgICAgICAgICAgICAgICByZXZva2Ugd2l0aG91dCBhc2tpbmcKICAtLWpzb24gICAgICAgICAgICAgICAgb25lIEpTT04gcmVwb3J0IG9uIHN0ZG91dAo=",
    "stderr": "",
    "window": [
-    1793646376.1395214,
-    1793646376.3545237
+    1793654218.4749975,
+    1793654218.7155464
    ],
    "requests": [],
    "arm": "python",
@@ -38093,7 +38150,7 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "59197",
+   "argv_port": "38343",
    "ttl": 900,
    "seed_rows": [
     {
@@ -38101,64 +38158,64 @@
      "board": true,
      "owned": true,
      "code_hash": null,
-     "paired_at": 1793646328.008371,
+     "paired_at": 1793654166.921207,
      "principal": "bravo",
-     "created_at": 1793646328.001697,
+     "created_at": 1793654166.913273,
      "revoked_at": null,
      "token_hash": "217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d",
      "code_expires_at": null,
-     "paired_code_hash": "c5dbe1f6260dbecbb9b4be3d8c55ab8f730fb9d5e34f5d752a19371930de2d59"
+     "paired_code_hash": "404a05303b01708cdbb0c116b6a90c8b2bc49cfc6cca59f7ab160a71c44a4a5f"
     },
     {
      "tier": "full",
      "board": true,
      "owned": true,
-     "code_hash": "91e18e14dbb9f475369c98b0bc7fc46643a44fb09085099e2de120b729369b4a",
+     "code_hash": "32144ef0fc389392652c65d9418c7ac33816277915c48109893f565a6259db28",
      "paired_at": null,
      "principal": "a-rather-long-principal-name.x",
-     "created_at": 1793646328.01265,
+     "created_at": 1793654166.926236,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793649928.012648,
+     "code_expires_at": 1793657766.926233,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": false,
      "owned": true,
-     "code_hash": "44228350135f3f3bd0ead4da06fe19c7ac3ea94ab8a4867df158c02635d31630",
+     "code_hash": "d1455ad97fdb8a6e679c4659fe67208321cfdb16c1be94db0805dd4c8e9402c7",
      "paired_at": null,
      "principal": "delta",
-     "created_at": 1793646328.011672,
+     "created_at": 1793654166.925073,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793646268.01167,
+     "code_expires_at": 1793654106.925071,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
      "owned": false,
-     "code_hash": "6a23055a4a9b1526607a24cc15e2ca838b31e1fcaf4012fa38a67adf46a29a5c",
+     "code_hash": "9ff93f4499340ff37f52cf168e179de5fde7a84e63edac82d666569f691fe501",
      "paired_at": null,
      "principal": "echo",
-     "created_at": 1793646328.014287,
+     "created_at": 1793654166.928274,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793647228.014285,
+     "code_expires_at": 1793655066.928272,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
      "owned": true,
-     "code_hash": "b3f5f9dde3c73ef0609538081ce7a77f1a9374c9b3851227432ffd1755f6a378",
+     "code_hash": "e0b108dfc0ecc226b1ccb110637195025e5848ee37e8f6db7c41bced4d4aea13",
      "paired_at": null,
      "principal": "alpha",
-     "created_at": 1793646328.000564,
+     "created_at": 1793654166.912014,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793647228.000528,
+     "code_expires_at": 1793655066.911976,
      "paired_code_hash": null
     },
     {
@@ -38168,8 +38225,8 @@
      "code_hash": null,
      "paired_at": null,
      "principal": "charlie",
-     "created_at": 1793646328.009765,
-     "revoked_at": 1793646328.010667,
+     "created_at": 1793654166.922858,
+     "revoked_at": 1793654166.923887,
      "token_hash": null,
      "code_expires_at": null,
      "paired_code_hash": null
@@ -38190,8 +38247,8 @@
    "stdout": "",
    "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGludml0ZSBbLWhdIFstLXRpZXIge21pbmltYWwsY29yZSxmdWxsfV0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1ib2FyZCB8IC0tbm8tYm9hcmRdIFstLWV4cGlyZXMgRVhQSVJFU10KICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1zb21lb25lLWVsc2UgfCAtLW1pbmVdIFstLXJlcGxhY2VdIFstLXVybCBVUkxdCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tcG9ydCBQT1JUXSBbLS1iYW5rIEZJTkdFUlBSSU5UXSBbLS1saXN0XQogICAgICAgICAgICAgICAgICAgICAgICAgICAgIFstLXJldm9rZSBOQU1FXSBbLS15ZXNdIFstLWpzb25dCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgW25hbWVdCnBzZXVkb2xpZmUtbWNwIGludml0ZTogZXJyb3I6IGFyZ3VtZW50IC0tZXhwaXJlczogLS1leHBpcmVzIG11c3QgYmUgYmV0d2VlbiAxIG1pbnV0ZSBhbmQgMjQgaG91cnMK",
    "window": [
-    1793646376.639039,
-    1793646376.8526723
+    1793654219.465842,
+    1793654219.7061806
    ],
    "requests": [],
    "arm": "python",
@@ -38201,7 +38258,7 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "54293",
+   "argv_port": "52975",
    "ttl": 900,
    "seed_rows": [
     {
@@ -38209,64 +38266,64 @@
      "board": true,
      "owned": true,
      "code_hash": null,
-     "paired_at": 1793646328.008371,
+     "paired_at": 1793654166.921207,
      "principal": "bravo",
-     "created_at": 1793646328.001697,
+     "created_at": 1793654166.913273,
      "revoked_at": null,
      "token_hash": "217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d",
      "code_expires_at": null,
-     "paired_code_hash": "c5dbe1f6260dbecbb9b4be3d8c55ab8f730fb9d5e34f5d752a19371930de2d59"
+     "paired_code_hash": "404a05303b01708cdbb0c116b6a90c8b2bc49cfc6cca59f7ab160a71c44a4a5f"
     },
     {
      "tier": "full",
      "board": true,
      "owned": true,
-     "code_hash": "91e18e14dbb9f475369c98b0bc7fc46643a44fb09085099e2de120b729369b4a",
+     "code_hash": "32144ef0fc389392652c65d9418c7ac33816277915c48109893f565a6259db28",
      "paired_at": null,
      "principal": "a-rather-long-principal-name.x",
-     "created_at": 1793646328.01265,
+     "created_at": 1793654166.926236,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793649928.012648,
+     "code_expires_at": 1793657766.926233,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": false,
      "owned": true,
-     "code_hash": "44228350135f3f3bd0ead4da06fe19c7ac3ea94ab8a4867df158c02635d31630",
+     "code_hash": "d1455ad97fdb8a6e679c4659fe67208321cfdb16c1be94db0805dd4c8e9402c7",
      "paired_at": null,
      "principal": "delta",
-     "created_at": 1793646328.011672,
+     "created_at": 1793654166.925073,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793646268.01167,
+     "code_expires_at": 1793654106.925071,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
      "owned": false,
-     "code_hash": "6a23055a4a9b1526607a24cc15e2ca838b31e1fcaf4012fa38a67adf46a29a5c",
+     "code_hash": "9ff93f4499340ff37f52cf168e179de5fde7a84e63edac82d666569f691fe501",
      "paired_at": null,
      "principal": "echo",
-     "created_at": 1793646328.014287,
+     "created_at": 1793654166.928274,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793647228.014285,
+     "code_expires_at": 1793655066.928272,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
      "owned": true,
-     "code_hash": "b3f5f9dde3c73ef0609538081ce7a77f1a9374c9b3851227432ffd1755f6a378",
+     "code_hash": "e0b108dfc0ecc226b1ccb110637195025e5848ee37e8f6db7c41bced4d4aea13",
      "paired_at": null,
      "principal": "alpha",
-     "created_at": 1793646328.000564,
+     "created_at": 1793654166.912014,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793647228.000528,
+     "code_expires_at": 1793655066.911976,
      "paired_code_hash": null
     },
     {
@@ -38276,8 +38333,8 @@
      "code_hash": null,
      "paired_at": null,
      "principal": "charlie",
-     "created_at": 1793646328.009765,
-     "revoked_at": 1793646328.010667,
+     "created_at": 1793654166.922858,
+     "revoked_at": 1793654166.923887,
      "token_hash": null,
      "code_expires_at": null,
      "paired_code_hash": null
@@ -38298,8 +38355,8 @@
    "stdout": "",
    "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGludml0ZSBbLWhdIFstLXRpZXIge21pbmltYWwsY29yZSxmdWxsfV0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1ib2FyZCB8IC0tbm8tYm9hcmRdIFstLWV4cGlyZXMgRVhQSVJFU10KICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1zb21lb25lLWVsc2UgfCAtLW1pbmVdIFstLXJlcGxhY2VdIFstLXVybCBVUkxdCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tcG9ydCBQT1JUXSBbLS1iYW5rIEZJTkdFUlBSSU5UXSBbLS1saXN0XQogICAgICAgICAgICAgICAgICAgICAgICAgICAgIFstLXJldm9rZSBOQU1FXSBbLS15ZXNdIFstLWpzb25dCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgW25hbWVdCnBzZXVkb2xpZmUtbWNwIGludml0ZTogZXJyb3I6IGFyZ3VtZW50IC0tdGllcjogaW52YWxpZCBjaG9pY2U6ICd3cml0ZXInIChjaG9vc2UgZnJvbSAnbWluaW1hbCcsICdjb3JlJywgJ2Z1bGwnKQo=",
    "window": [
-    1793646377.140569,
-    1793646377.3548238
+    1793654220.4588025,
+    1793654220.701726
    ],
    "requests": [],
    "arm": "python",
@@ -38309,7 +38366,7 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "35427",
+   "argv_port": "45775",
    "ttl": 900,
    "seed_rows": [
     {
@@ -38317,64 +38374,64 @@
      "board": true,
      "owned": true,
      "code_hash": null,
-     "paired_at": 1793646328.008371,
+     "paired_at": 1793654166.921207,
      "principal": "bravo",
-     "created_at": 1793646328.001697,
+     "created_at": 1793654166.913273,
      "revoked_at": null,
      "token_hash": "217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d",
      "code_expires_at": null,
-     "paired_code_hash": "c5dbe1f6260dbecbb9b4be3d8c55ab8f730fb9d5e34f5d752a19371930de2d59"
+     "paired_code_hash": "404a05303b01708cdbb0c116b6a90c8b2bc49cfc6cca59f7ab160a71c44a4a5f"
     },
     {
      "tier": "full",
      "board": true,
      "owned": true,
-     "code_hash": "91e18e14dbb9f475369c98b0bc7fc46643a44fb09085099e2de120b729369b4a",
+     "code_hash": "32144ef0fc389392652c65d9418c7ac33816277915c48109893f565a6259db28",
      "paired_at": null,
      "principal": "a-rather-long-principal-name.x",
-     "created_at": 1793646328.01265,
+     "created_at": 1793654166.926236,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793649928.012648,
+     "code_expires_at": 1793657766.926233,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": false,
      "owned": true,
-     "code_hash": "44228350135f3f3bd0ead4da06fe19c7ac3ea94ab8a4867df158c02635d31630",
+     "code_hash": "d1455ad97fdb8a6e679c4659fe67208321cfdb16c1be94db0805dd4c8e9402c7",
      "paired_at": null,
      "principal": "delta",
-     "created_at": 1793646328.011672,
+     "created_at": 1793654166.925073,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793646268.01167,
+     "code_expires_at": 1793654106.925071,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
      "owned": false,
-     "code_hash": "6a23055a4a9b1526607a24cc15e2ca838b31e1fcaf4012fa38a67adf46a29a5c",
+     "code_hash": "9ff93f4499340ff37f52cf168e179de5fde7a84e63edac82d666569f691fe501",
      "paired_at": null,
      "principal": "echo",
-     "created_at": 1793646328.014287,
+     "created_at": 1793654166.928274,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793647228.014285,
+     "code_expires_at": 1793655066.928272,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
      "owned": true,
-     "code_hash": "b3f5f9dde3c73ef0609538081ce7a77f1a9374c9b3851227432ffd1755f6a378",
+     "code_hash": "e0b108dfc0ecc226b1ccb110637195025e5848ee37e8f6db7c41bced4d4aea13",
      "paired_at": null,
      "principal": "alpha",
-     "created_at": 1793646328.000564,
+     "created_at": 1793654166.912014,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793647228.000528,
+     "code_expires_at": 1793655066.911976,
      "paired_code_hash": null
     },
     {
@@ -38384,8 +38441,8 @@
      "code_hash": null,
      "paired_at": null,
      "principal": "charlie",
-     "created_at": 1793646328.009765,
-     "revoked_at": 1793646328.010667,
+     "created_at": 1793654166.922858,
+     "revoked_at": 1793654166.923887,
      "token_hash": null,
      "code_expires_at": null,
      "paired_code_hash": null
@@ -38403,11 +38460,11 @@
    "home": null,
    "utc_offset": 0,
    "exit": 0,
-   "stdout": "bGFwdG9wOiBpbnZpdGVkOyB0aWVyIHRoZSBkYWVtb24gZGVmYXVsdCwgYWdlbnQgYm9hcmQgb24KICBjb2RlICAgICA1WTlZLUgwWUUtQjMwUiAgIHNpbmdsZSB1c2UsIGV4cGlyZXMgaW4gMTUgbWluICgyMDI2LTExLTAyIDE5OjIxIFVUQykKICBvbiB0aGUgbmV3IG1hY2hpbmU6ICBwc2V1ZG9saWZlLW1jcCBwYWlyIHYgNVk5WS1IMFlFLUIzMFIKICBvciBydW4gdGhlIGluc3RhbGxlciB0aGVyZSBhbmQgYW5zd2VyIDIsIGdpdmluZyB0aGlzIGNvZGUgd2hlcmUgaXQgYXNrcyBmb3IgdGhlIHRva2VuCmZvciBhIG1hY2hpbmUgdGhhdCBpcyBub3QgeW91cnMsIGFkZCAtLXNvbWVvbmUtZWxzZQphbiBpbnZpdGVkIG1hY2hpbmUgY2FuIHJlYWQgYW5kIHdyaXRlIHRoZSB3aG9sZSBiYW5rIGFuZCB1c2UgdGhlIGFnZW50IGJvYXJkLCBidXQgbm90IGNoYW5nZSB0aGUgZGFlbW9uJ3MgY29uZmlndXJhdGlvbgo=",
+   "stdout": "bGFwdG9wOiBpbnZpdGVkOyB0aWVyIHRoZSBkYWVtb24gZGVmYXVsdCwgYWdlbnQgYm9hcmQgb24KICBjb2RlICAgICA3RkUyLTBFSlAtR0hIRSAgIHNpbmdsZSB1c2UsIGV4cGlyZXMgaW4gMTUgbWluICgyMDI2LTExLTAyIDIxOjMyIFVUQykKICBvbiB0aGUgbmV3IG1hY2hpbmU6ICBwc2V1ZG9saWZlLW1jcCBwYWlyIHYgN0ZFMi0wRUpQLUdISEUKICBvciBydW4gdGhlIGluc3RhbGxlciB0aGVyZSBhbmQgYW5zd2VyIDIsIGdpdmluZyB0aGlzIGNvZGUgd2hlcmUgaXQgYXNrcyBmb3IgdGhlIHRva2VuCmZvciBhIG1hY2hpbmUgdGhhdCBpcyBub3QgeW91cnMsIGFkZCAtLXNvbWVvbmUtZWxzZQphbiBpbnZpdGVkIG1hY2hpbmUgY2FuIHJlYWQgYW5kIHdyaXRlIHRoZSB3aG9sZSBiYW5rIGFuZCB1c2UgdGhlIGFnZW50IGJvYXJkLCBidXQgbm90IGNoYW5nZSB0aGUgZGFlbW9uJ3MgY29uZmlndXJhdGlvbgo=",
    "stderr": "",
    "window": [
-    1793646377.6375008,
-    1793646378.149496
+    1793654221.4933698,
+    1793654222.0529017
    ],
    "requests": [
     {
@@ -38424,7 +38481,7 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "43881",
+   "argv_port": "56857",
    "ttl": 900,
    "seed_rows": [
     {
@@ -38432,64 +38489,64 @@
      "board": true,
      "owned": true,
      "code_hash": null,
-     "paired_at": 1793646328.008371,
+     "paired_at": 1793654166.921207,
      "principal": "bravo",
-     "created_at": 1793646328.001697,
+     "created_at": 1793654166.913273,
      "revoked_at": null,
      "token_hash": "217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d",
      "code_expires_at": null,
-     "paired_code_hash": "c5dbe1f6260dbecbb9b4be3d8c55ab8f730fb9d5e34f5d752a19371930de2d59"
+     "paired_code_hash": "404a05303b01708cdbb0c116b6a90c8b2bc49cfc6cca59f7ab160a71c44a4a5f"
     },
     {
      "tier": "full",
      "board": true,
      "owned": true,
-     "code_hash": "91e18e14dbb9f475369c98b0bc7fc46643a44fb09085099e2de120b729369b4a",
+     "code_hash": "32144ef0fc389392652c65d9418c7ac33816277915c48109893f565a6259db28",
      "paired_at": null,
      "principal": "a-rather-long-principal-name.x",
-     "created_at": 1793646328.01265,
+     "created_at": 1793654166.926236,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793649928.012648,
+     "code_expires_at": 1793657766.926233,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": false,
      "owned": true,
-     "code_hash": "44228350135f3f3bd0ead4da06fe19c7ac3ea94ab8a4867df158c02635d31630",
+     "code_hash": "d1455ad97fdb8a6e679c4659fe67208321cfdb16c1be94db0805dd4c8e9402c7",
      "paired_at": null,
      "principal": "delta",
-     "created_at": 1793646328.011672,
+     "created_at": 1793654166.925073,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793646268.01167,
+     "code_expires_at": 1793654106.925071,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
      "owned": false,
-     "code_hash": "6a23055a4a9b1526607a24cc15e2ca838b31e1fcaf4012fa38a67adf46a29a5c",
+     "code_hash": "9ff93f4499340ff37f52cf168e179de5fde7a84e63edac82d666569f691fe501",
      "paired_at": null,
      "principal": "echo",
-     "created_at": 1793646328.014287,
+     "created_at": 1793654166.928274,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793647228.014285,
+     "code_expires_at": 1793655066.928272,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
      "owned": true,
-     "code_hash": "b3f5f9dde3c73ef0609538081ce7a77f1a9374c9b3851227432ffd1755f6a378",
+     "code_hash": "e0b108dfc0ecc226b1ccb110637195025e5848ee37e8f6db7c41bced4d4aea13",
      "paired_at": null,
      "principal": "alpha",
-     "created_at": 1793646328.000564,
+     "created_at": 1793654166.912014,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793647228.000528,
+     "code_expires_at": 1793655066.911976,
      "paired_code_hash": null
     },
     {
@@ -38499,8 +38556,8 @@
      "code_hash": null,
      "paired_at": null,
      "principal": "charlie",
-     "created_at": 1793646328.009765,
-     "revoked_at": 1793646328.010667,
+     "created_at": 1793654166.922858,
+     "revoked_at": 1793654166.923887,
      "token_hash": null,
      "code_expires_at": null,
      "paired_code_hash": null
@@ -38551,17 +38608,17 @@
      ],
      "outcome_signals": [],
      "pl_cf_clock": [
-      "{\"at\": 1793646378.126981, \"principal\": \"laptop\"}"
+      "{\"at\": 1793654222.026119, \"principal\": \"laptop\"}"
      ],
      "principal_activity": [],
      "principals": [
-      "{\"tier\": \"core\", \"board\": true, \"owned\": true, \"code_hash\": null, \"paired_at\": 1793646328.008371, \"principal\": \"bravo\", \"created_at\": 1793646328.001697, \"revoked_at\": null, \"token_hash\": \"217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d\", \"code_expires_at\": null, \"paired_code_hash\": \"c5dbe1f6260dbecbb9b4be3d8c55ab8f730fb9d5e34f5d752a19371930de2d59\"}",
-      "{\"tier\": \"full\", \"board\": true, \"owned\": true, \"code_hash\": \"91e18e14dbb9f475369c98b0bc7fc46643a44fb09085099e2de120b729369b4a\", \"paired_at\": null, \"principal\": \"a-rather-long-principal-name.x\", \"created_at\": 1793646328.01265, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793649928.012648, \"paired_code_hash\": null}",
-      "{\"tier\": null, \"board\": false, \"owned\": true, \"code_hash\": \"44228350135f3f3bd0ead4da06fe19c7ac3ea94ab8a4867df158c02635d31630\", \"paired_at\": null, \"principal\": \"delta\", \"created_at\": 1793646328.011672, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793646268.01167, \"paired_code_hash\": null}",
-      "{\"tier\": null, \"board\": true, \"owned\": false, \"code_hash\": \"6a23055a4a9b1526607a24cc15e2ca838b31e1fcaf4012fa38a67adf46a29a5c\", \"paired_at\": null, \"principal\": \"echo\", \"created_at\": 1793646328.014287, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793647228.014285, \"paired_code_hash\": null}",
-      "{\"tier\": null, \"board\": true, \"owned\": true, \"code_hash\": \"688aeb5d130532061dd05b94e52a2e8edcf61096981c0e4b73c027271a76070a\", \"paired_at\": null, \"principal\": \"laptop\", \"created_at\": 1793646378.126099, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793647278.126059, \"paired_code_hash\": null}",
-      "{\"tier\": null, \"board\": true, \"owned\": true, \"code_hash\": \"b3f5f9dde3c73ef0609538081ce7a77f1a9374c9b3851227432ffd1755f6a378\", \"paired_at\": null, \"principal\": \"alpha\", \"created_at\": 1793646328.000564, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793647228.000528, \"paired_code_hash\": null}",
-      "{\"tier\": null, \"board\": true, \"owned\": true, \"code_hash\": null, \"paired_at\": null, \"principal\": \"charlie\", \"created_at\": 1793646328.009765, \"revoked_at\": 1793646328.010667, \"token_hash\": null, \"code_expires_at\": null, \"paired_code_hash\": null}"
+      "{\"tier\": \"core\", \"board\": true, \"owned\": true, \"code_hash\": null, \"paired_at\": 1793654166.921207, \"principal\": \"bravo\", \"created_at\": 1793654166.913273, \"revoked_at\": null, \"token_hash\": \"217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d\", \"code_expires_at\": null, \"paired_code_hash\": \"404a05303b01708cdbb0c116b6a90c8b2bc49cfc6cca59f7ab160a71c44a4a5f\"}",
+      "{\"tier\": \"full\", \"board\": true, \"owned\": true, \"code_hash\": \"32144ef0fc389392652c65d9418c7ac33816277915c48109893f565a6259db28\", \"paired_at\": null, \"principal\": \"a-rather-long-principal-name.x\", \"created_at\": 1793654166.926236, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793657766.926233, \"paired_code_hash\": null}",
+      "{\"tier\": null, \"board\": false, \"owned\": true, \"code_hash\": \"d1455ad97fdb8a6e679c4659fe67208321cfdb16c1be94db0805dd4c8e9402c7\", \"paired_at\": null, \"principal\": \"delta\", \"created_at\": 1793654166.925073, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793654106.925071, \"paired_code_hash\": null}",
+      "{\"tier\": null, \"board\": true, \"owned\": false, \"code_hash\": \"9ff93f4499340ff37f52cf168e179de5fde7a84e63edac82d666569f691fe501\", \"paired_at\": null, \"principal\": \"echo\", \"created_at\": 1793654166.928274, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793655066.928272, \"paired_code_hash\": null}",
+      "{\"tier\": null, \"board\": true, \"owned\": true, \"code_hash\": \"4b39ea284819118c3b56af4dace5ba73df551f8f5e831c9173f5ba02a55c42a8\", \"paired_at\": null, \"principal\": \"laptop\", \"created_at\": 1793654222.025256, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793655122.025209, \"paired_code_hash\": null}",
+      "{\"tier\": null, \"board\": true, \"owned\": true, \"code_hash\": \"e0b108dfc0ecc226b1ccb110637195025e5848ee37e8f6db7c41bced4d4aea13\", \"paired_at\": null, \"principal\": \"alpha\", \"created_at\": 1793654166.912014, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793655066.911976, \"paired_code_hash\": null}",
+      "{\"tier\": null, \"board\": true, \"owned\": true, \"code_hash\": null, \"paired_at\": null, \"principal\": \"charlie\", \"created_at\": 1793654166.922858, \"revoked_at\": 1793654166.923887, \"token_hash\": null, \"code_expires_at\": null, \"paired_code_hash\": null}"
      ],
      "reference_chunks": [],
      "rejected_bearers": [],
@@ -45510,11 +45567,11 @@
    "home": null,
    "utc_offset": 0,
    "exit": 0,
-   "stdout": "bGFwdG9wOiBpbnZpdGVkOyB0aWVyIHRoZSBkYWVtb24gZGVmYXVsdCwgYWdlbnQgYm9hcmQgb24KICBjb2RlICAgICBSMkNBLVBBTlAtTTRFOCAgIHNpbmdsZSB1c2UsIGV4cGlyZXMgaW4gMTUgbWluICgyMDI2LTExLTAyIDE5OjIxIFVUQykKICBvbiB0aGUgbmV3IG1hY2hpbmU6ICBwc2V1ZG9saWZlLW1jcCBwYWlyIHUgUjJDQS1QQU5QLU00RTgKICBvciBydW4gdGhlIGluc3RhbGxlciB0aGVyZSBhbmQgYW5zd2VyIDIsIGdpdmluZyB0aGlzIGNvZGUgd2hlcmUgaXQgYXNrcyBmb3IgdGhlIHRva2VuCmZvciBhIG1hY2hpbmUgdGhhdCBpcyBub3QgeW91cnMsIGFkZCAtLXNvbWVvbmUtZWxzZQphbiBpbnZpdGVkIG1hY2hpbmUgY2FuIHJlYWQgYW5kIHdyaXRlIHRoZSB3aG9sZSBiYW5rIGFuZCB1c2UgdGhlIGFnZW50IGJvYXJkLCBidXQgbm90IGNoYW5nZSB0aGUgZGFlbW9uJ3MgY29uZmlndXJhdGlvbgo=",
+   "stdout": "bGFwdG9wOiBpbnZpdGVkOyB0aWVyIHRoZSBkYWVtb24gZGVmYXVsdCwgYWdlbnQgYm9hcmQgb24KICBjb2RlICAgICA2U1ZGLVAxWjgtUThHViAgIHNpbmdsZSB1c2UsIGV4cGlyZXMgaW4gMTUgbWluICgyMDI2LTExLTAyIDIxOjMyIFVUQykKICBvbiB0aGUgbmV3IG1hY2hpbmU6ICBwc2V1ZG9saWZlLW1jcCBwYWlyIHUgNlNWRi1QMVo4LVE4R1YKICBvciBydW4gdGhlIGluc3RhbGxlciB0aGVyZSBhbmQgYW5zd2VyIDIsIGdpdmluZyB0aGlzIGNvZGUgd2hlcmUgaXQgYXNrcyBmb3IgdGhlIHRva2VuCmZvciBhIG1hY2hpbmUgdGhhdCBpcyBub3QgeW91cnMsIGFkZCAtLXNvbWVvbmUtZWxzZQphbiBpbnZpdGVkIG1hY2hpbmUgY2FuIHJlYWQgYW5kIHdyaXRlIHRoZSB3aG9sZSBiYW5rIGFuZCB1c2UgdGhlIGFnZW50IGJvYXJkLCBidXQgbm90IGNoYW5nZSB0aGUgZGFlbW9uJ3MgY29uZmlndXJhdGlvbgo=",
    "stderr": "",
    "window": [
-    1793646378.7880976,
-    1793646379.302722
+    1793654222.739951,
+    1793654223.333719
    ],
    "requests": [
     {
@@ -45531,7 +45588,7 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "46159",
+   "argv_port": "58485",
    "ttl": 900,
    "seed_rows": [
     {
@@ -45539,64 +45596,64 @@
      "board": true,
      "owned": true,
      "code_hash": null,
-     "paired_at": 1793646328.008371,
+     "paired_at": 1793654166.921207,
      "principal": "bravo",
-     "created_at": 1793646328.001697,
+     "created_at": 1793654166.913273,
      "revoked_at": null,
      "token_hash": "217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d",
      "code_expires_at": null,
-     "paired_code_hash": "c5dbe1f6260dbecbb9b4be3d8c55ab8f730fb9d5e34f5d752a19371930de2d59"
+     "paired_code_hash": "404a05303b01708cdbb0c116b6a90c8b2bc49cfc6cca59f7ab160a71c44a4a5f"
     },
     {
      "tier": "full",
      "board": true,
      "owned": true,
-     "code_hash": "91e18e14dbb9f475369c98b0bc7fc46643a44fb09085099e2de120b729369b4a",
+     "code_hash": "32144ef0fc389392652c65d9418c7ac33816277915c48109893f565a6259db28",
      "paired_at": null,
      "principal": "a-rather-long-principal-name.x",
-     "created_at": 1793646328.01265,
+     "created_at": 1793654166.926236,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793649928.012648,
+     "code_expires_at": 1793657766.926233,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": false,
      "owned": true,
-     "code_hash": "44228350135f3f3bd0ead4da06fe19c7ac3ea94ab8a4867df158c02635d31630",
+     "code_hash": "d1455ad97fdb8a6e679c4659fe67208321cfdb16c1be94db0805dd4c8e9402c7",
      "paired_at": null,
      "principal": "delta",
-     "created_at": 1793646328.011672,
+     "created_at": 1793654166.925073,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793646268.01167,
+     "code_expires_at": 1793654106.925071,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
      "owned": false,
-     "code_hash": "6a23055a4a9b1526607a24cc15e2ca838b31e1fcaf4012fa38a67adf46a29a5c",
+     "code_hash": "9ff93f4499340ff37f52cf168e179de5fde7a84e63edac82d666569f691fe501",
      "paired_at": null,
      "principal": "echo",
-     "created_at": 1793646328.014287,
+     "created_at": 1793654166.928274,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793647228.014285,
+     "code_expires_at": 1793655066.928272,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
      "owned": true,
-     "code_hash": "b3f5f9dde3c73ef0609538081ce7a77f1a9374c9b3851227432ffd1755f6a378",
+     "code_hash": "e0b108dfc0ecc226b1ccb110637195025e5848ee37e8f6db7c41bced4d4aea13",
      "paired_at": null,
      "principal": "alpha",
-     "created_at": 1793646328.000564,
+     "created_at": 1793654166.912014,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793647228.000528,
+     "code_expires_at": 1793655066.911976,
      "paired_code_hash": null
     },
     {
@@ -45606,8 +45663,8 @@
      "code_hash": null,
      "paired_at": null,
      "principal": "charlie",
-     "created_at": 1793646328.009765,
-     "revoked_at": 1793646328.010667,
+     "created_at": 1793654166.922858,
+     "revoked_at": 1793654166.923887,
      "token_hash": null,
      "code_expires_at": null,
      "paired_code_hash": null
@@ -45658,17 +45715,17 @@
      ],
      "outcome_signals": [],
      "pl_cf_clock": [
-      "{\"at\": 1793646379.279073, \"principal\": \"laptop\"}"
+      "{\"at\": 1793654223.306105, \"principal\": \"laptop\"}"
      ],
      "principal_activity": [],
      "principals": [
-      "{\"tier\": \"core\", \"board\": true, \"owned\": true, \"code_hash\": null, \"paired_at\": 1793646328.008371, \"principal\": \"bravo\", \"created_at\": 1793646328.001697, \"revoked_at\": null, \"token_hash\": \"217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d\", \"code_expires_at\": null, \"paired_code_hash\": \"c5dbe1f6260dbecbb9b4be3d8c55ab8f730fb9d5e34f5d752a19371930de2d59\"}",
-      "{\"tier\": \"full\", \"board\": true, \"owned\": true, \"code_hash\": \"91e18e14dbb9f475369c98b0bc7fc46643a44fb09085099e2de120b729369b4a\", \"paired_at\": null, \"principal\": \"a-rather-long-principal-name.x\", \"created_at\": 1793646328.01265, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793649928.012648, \"paired_code_hash\": null}",
-      "{\"tier\": null, \"board\": false, \"owned\": true, \"code_hash\": \"44228350135f3f3bd0ead4da06fe19c7ac3ea94ab8a4867df158c02635d31630\", \"paired_at\": null, \"principal\": \"delta\", \"created_at\": 1793646328.011672, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793646268.01167, \"paired_code_hash\": null}",
-      "{\"tier\": null, \"board\": true, \"owned\": false, \"code_hash\": \"6a23055a4a9b1526607a24cc15e2ca838b31e1fcaf4012fa38a67adf46a29a5c\", \"paired_at\": null, \"principal\": \"echo\", \"created_at\": 1793646328.014287, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793647228.014285, \"paired_code_hash\": null}",
-      "{\"tier\": null, \"board\": true, \"owned\": true, \"code_hash\": \"883e65d004052705dc6d0e3c83f25bc64040a63b368ae373f13f8f96ab85d150\", \"paired_at\": null, \"principal\": \"laptop\", \"created_at\": 1793646379.278344, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793647279.2783, \"paired_code_hash\": null}",
-      "{\"tier\": null, \"board\": true, \"owned\": true, \"code_hash\": \"b3f5f9dde3c73ef0609538081ce7a77f1a9374c9b3851227432ffd1755f6a378\", \"paired_at\": null, \"principal\": \"alpha\", \"created_at\": 1793646328.000564, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793647228.000528, \"paired_code_hash\": null}",
-      "{\"tier\": null, \"board\": true, \"owned\": true, \"code_hash\": null, \"paired_at\": null, \"principal\": \"charlie\", \"created_at\": 1793646328.009765, \"revoked_at\": 1793646328.010667, \"token_hash\": null, \"code_expires_at\": null, \"paired_code_hash\": null}"
+      "{\"tier\": \"core\", \"board\": true, \"owned\": true, \"code_hash\": null, \"paired_at\": 1793654166.921207, \"principal\": \"bravo\", \"created_at\": 1793654166.913273, \"revoked_at\": null, \"token_hash\": \"217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d\", \"code_expires_at\": null, \"paired_code_hash\": \"404a05303b01708cdbb0c116b6a90c8b2bc49cfc6cca59f7ab160a71c44a4a5f\"}",
+      "{\"tier\": \"full\", \"board\": true, \"owned\": true, \"code_hash\": \"32144ef0fc389392652c65d9418c7ac33816277915c48109893f565a6259db28\", \"paired_at\": null, \"principal\": \"a-rather-long-principal-name.x\", \"created_at\": 1793654166.926236, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793657766.926233, \"paired_code_hash\": null}",
+      "{\"tier\": null, \"board\": false, \"owned\": true, \"code_hash\": \"d1455ad97fdb8a6e679c4659fe67208321cfdb16c1be94db0805dd4c8e9402c7\", \"paired_at\": null, \"principal\": \"delta\", \"created_at\": 1793654166.925073, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793654106.925071, \"paired_code_hash\": null}",
+      "{\"tier\": null, \"board\": true, \"owned\": false, \"code_hash\": \"9ff93f4499340ff37f52cf168e179de5fde7a84e63edac82d666569f691fe501\", \"paired_at\": null, \"principal\": \"echo\", \"created_at\": 1793654166.928274, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793655066.928272, \"paired_code_hash\": null}",
+      "{\"tier\": null, \"board\": true, \"owned\": true, \"code_hash\": \"e0b108dfc0ecc226b1ccb110637195025e5848ee37e8f6db7c41bced4d4aea13\", \"paired_at\": null, \"principal\": \"alpha\", \"created_at\": 1793654166.912014, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793655066.911976, \"paired_code_hash\": null}",
+      "{\"tier\": null, \"board\": true, \"owned\": true, \"code_hash\": \"e823fbcfe57a8419e1b336f54dfa0182cb8db00d28f3328141f45a7068ca900c\", \"paired_at\": null, \"principal\": \"laptop\", \"created_at\": 1793654223.305068, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793655123.305011, \"paired_code_hash\": null}",
+      "{\"tier\": null, \"board\": true, \"owned\": true, \"code_hash\": null, \"paired_at\": null, \"principal\": \"charlie\", \"created_at\": 1793654166.922858, \"revoked_at\": 1793654166.923887, \"token_hash\": null, \"code_expires_at\": null, \"paired_code_hash\": null}"
      ],
      "reference_chunks": [],
      "rejected_bearers": [],
@@ -52617,11 +52674,11 @@
    "home": null,
    "utc_offset": 0,
    "exit": 0,
-   "stdout": "bGFwdG9wOiBpbnZpdGVkOyB0aWVyIHRoZSBkYWVtb24gZGVmYXVsdCwgYWdlbnQgYm9hcmQgb24KICBjb2RlICAgICBDRDFRLTZEV0ItSFlUNyAgIHNpbmdsZSB1c2UsIGV4cGlyZXMgaW4gMTUgbWluICgyMDI2LTExLTAyIDE5OjIxIFVUQykKICBvbiB0aGUgbmV3IG1hY2hpbmU6ICBwc2V1ZG9saWZlLW1jcCBwYWlyIHUgQ0QxUS02RFdCLUhZVDcKICBvciBydW4gdGhlIGluc3RhbGxlciB0aGVyZSBhbmQgYW5zd2VyIDIsIGdpdmluZyB0aGlzIGNvZGUgd2hlcmUgaXQgYXNrcyBmb3IgdGhlIHRva2VuCmZvciBhIG1hY2hpbmUgdGhhdCBpcyBub3QgeW91cnMsIGFkZCAtLXNvbWVvbmUtZWxzZQphbiBpbnZpdGVkIG1hY2hpbmUgY2FuIHJlYWQgYW5kIHdyaXRlIHRoZSB3aG9sZSBiYW5rIGFuZCB1c2UgdGhlIGFnZW50IGJvYXJkLCBidXQgbm90IGNoYW5nZSB0aGUgZGFlbW9uJ3MgY29uZmlndXJhdGlvbgo=",
+   "stdout": "bGFwdG9wOiBpbnZpdGVkOyB0aWVyIHRoZSBkYWVtb24gZGVmYXVsdCwgYWdlbnQgYm9hcmQgb24KICBjb2RlICAgICAyWUgzLTcyQ1YtNldKQiAgIHNpbmdsZSB1c2UsIGV4cGlyZXMgaW4gMTUgbWluICgyMDI2LTExLTAyIDIxOjMyIFVUQykKICBvbiB0aGUgbmV3IG1hY2hpbmU6ICBwc2V1ZG9saWZlLW1jcCBwYWlyIHUgMllIMy03MkNWLTZXSkIKICBvciBydW4gdGhlIGluc3RhbGxlciB0aGVyZSBhbmQgYW5zd2VyIDIsIGdpdmluZyB0aGlzIGNvZGUgd2hlcmUgaXQgYXNrcyBmb3IgdGhlIHRva2VuCmZvciBhIG1hY2hpbmUgdGhhdCBpcyBub3QgeW91cnMsIGFkZCAtLXNvbWVvbmUtZWxzZQphbiBpbnZpdGVkIG1hY2hpbmUgY2FuIHJlYWQgYW5kIHdyaXRlIHRoZSB3aG9sZSBiYW5rIGFuZCB1c2UgdGhlIGFnZW50IGJvYXJkLCBidXQgbm90IGNoYW5nZSB0aGUgZGFlbW9uJ3MgY29uZmlndXJhdGlvbgo=",
    "stderr": "",
    "window": [
-    1793646379.9399445,
-    1793646380.4619884
+    1793654223.9932995,
+    1793654224.5883207
    ],
    "requests": [
     {
@@ -52638,7 +52695,7 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "34703",
+   "argv_port": "44579",
    "ttl": 900,
    "seed_rows": [
     {
@@ -52646,64 +52703,64 @@
      "board": true,
      "owned": true,
      "code_hash": null,
-     "paired_at": 1793646328.008371,
+     "paired_at": 1793654166.921207,
      "principal": "bravo",
-     "created_at": 1793646328.001697,
+     "created_at": 1793654166.913273,
      "revoked_at": null,
      "token_hash": "217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d",
      "code_expires_at": null,
-     "paired_code_hash": "c5dbe1f6260dbecbb9b4be3d8c55ab8f730fb9d5e34f5d752a19371930de2d59"
+     "paired_code_hash": "404a05303b01708cdbb0c116b6a90c8b2bc49cfc6cca59f7ab160a71c44a4a5f"
     },
     {
      "tier": "full",
      "board": true,
      "owned": true,
-     "code_hash": "91e18e14dbb9f475369c98b0bc7fc46643a44fb09085099e2de120b729369b4a",
+     "code_hash": "32144ef0fc389392652c65d9418c7ac33816277915c48109893f565a6259db28",
      "paired_at": null,
      "principal": "a-rather-long-principal-name.x",
-     "created_at": 1793646328.01265,
+     "created_at": 1793654166.926236,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793649928.012648,
+     "code_expires_at": 1793657766.926233,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": false,
      "owned": true,
-     "code_hash": "44228350135f3f3bd0ead4da06fe19c7ac3ea94ab8a4867df158c02635d31630",
+     "code_hash": "d1455ad97fdb8a6e679c4659fe67208321cfdb16c1be94db0805dd4c8e9402c7",
      "paired_at": null,
      "principal": "delta",
-     "created_at": 1793646328.011672,
+     "created_at": 1793654166.925073,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793646268.01167,
+     "code_expires_at": 1793654106.925071,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
      "owned": false,
-     "code_hash": "6a23055a4a9b1526607a24cc15e2ca838b31e1fcaf4012fa38a67adf46a29a5c",
+     "code_hash": "9ff93f4499340ff37f52cf168e179de5fde7a84e63edac82d666569f691fe501",
      "paired_at": null,
      "principal": "echo",
-     "created_at": 1793646328.014287,
+     "created_at": 1793654166.928274,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793647228.014285,
+     "code_expires_at": 1793655066.928272,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
      "owned": true,
-     "code_hash": "b3f5f9dde3c73ef0609538081ce7a77f1a9374c9b3851227432ffd1755f6a378",
+     "code_hash": "e0b108dfc0ecc226b1ccb110637195025e5848ee37e8f6db7c41bced4d4aea13",
      "paired_at": null,
      "principal": "alpha",
-     "created_at": 1793646328.000564,
+     "created_at": 1793654166.912014,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793647228.000528,
+     "code_expires_at": 1793655066.911976,
      "paired_code_hash": null
     },
     {
@@ -52713,8 +52770,8 @@
      "code_hash": null,
      "paired_at": null,
      "principal": "charlie",
-     "created_at": 1793646328.009765,
-     "revoked_at": 1793646328.010667,
+     "created_at": 1793654166.922858,
+     "revoked_at": 1793654166.923887,
      "token_hash": null,
      "code_expires_at": null,
      "paired_code_hash": null
@@ -52765,17 +52822,17 @@
      ],
      "outcome_signals": [],
      "pl_cf_clock": [
-      "{\"at\": 1793646380.437125, \"principal\": \"laptop\"}"
+      "{\"at\": 1793654224.561229, \"principal\": \"laptop\"}"
      ],
      "principal_activity": [],
      "principals": [
-      "{\"tier\": \"core\", \"board\": true, \"owned\": true, \"code_hash\": null, \"paired_at\": 1793646328.008371, \"principal\": \"bravo\", \"created_at\": 1793646328.001697, \"revoked_at\": null, \"token_hash\": \"217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d\", \"code_expires_at\": null, \"paired_code_hash\": \"c5dbe1f6260dbecbb9b4be3d8c55ab8f730fb9d5e34f5d752a19371930de2d59\"}",
-      "{\"tier\": \"full\", \"board\": true, \"owned\": true, \"code_hash\": \"91e18e14dbb9f475369c98b0bc7fc46643a44fb09085099e2de120b729369b4a\", \"paired_at\": null, \"principal\": \"a-rather-long-principal-name.x\", \"created_at\": 1793646328.01265, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793649928.012648, \"paired_code_hash\": null}",
-      "{\"tier\": null, \"board\": false, \"owned\": true, \"code_hash\": \"44228350135f3f3bd0ead4da06fe19c7ac3ea94ab8a4867df158c02635d31630\", \"paired_at\": null, \"principal\": \"delta\", \"created_at\": 1793646328.011672, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793646268.01167, \"paired_code_hash\": null}",
-      "{\"tier\": null, \"board\": true, \"owned\": false, \"code_hash\": \"6a23055a4a9b1526607a24cc15e2ca838b31e1fcaf4012fa38a67adf46a29a5c\", \"paired_at\": null, \"principal\": \"echo\", \"created_at\": 1793646328.014287, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793647228.014285, \"paired_code_hash\": null}",
-      "{\"tier\": null, \"board\": true, \"owned\": true, \"code_hash\": \"b3f5f9dde3c73ef0609538081ce7a77f1a9374c9b3851227432ffd1755f6a378\", \"paired_at\": null, \"principal\": \"alpha\", \"created_at\": 1793646328.000564, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793647228.000528, \"paired_code_hash\": null}",
-      "{\"tier\": null, \"board\": true, \"owned\": true, \"code_hash\": \"fe85325e3a8fb17db86cf32beca7053b26cafd337dbdd92caa972d45db80a59a\", \"paired_at\": null, \"principal\": \"laptop\", \"created_at\": 1793646380.436338, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793647280.436296, \"paired_code_hash\": null}",
-      "{\"tier\": null, \"board\": true, \"owned\": true, \"code_hash\": null, \"paired_at\": null, \"principal\": \"charlie\", \"created_at\": 1793646328.009765, \"revoked_at\": 1793646328.010667, \"token_hash\": null, \"code_expires_at\": null, \"paired_code_hash\": null}"
+      "{\"tier\": \"core\", \"board\": true, \"owned\": true, \"code_hash\": null, \"paired_at\": 1793654166.921207, \"principal\": \"bravo\", \"created_at\": 1793654166.913273, \"revoked_at\": null, \"token_hash\": \"217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d\", \"code_expires_at\": null, \"paired_code_hash\": \"404a05303b01708cdbb0c116b6a90c8b2bc49cfc6cca59f7ab160a71c44a4a5f\"}",
+      "{\"tier\": \"full\", \"board\": true, \"owned\": true, \"code_hash\": \"32144ef0fc389392652c65d9418c7ac33816277915c48109893f565a6259db28\", \"paired_at\": null, \"principal\": \"a-rather-long-principal-name.x\", \"created_at\": 1793654166.926236, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793657766.926233, \"paired_code_hash\": null}",
+      "{\"tier\": null, \"board\": false, \"owned\": true, \"code_hash\": \"d1455ad97fdb8a6e679c4659fe67208321cfdb16c1be94db0805dd4c8e9402c7\", \"paired_at\": null, \"principal\": \"delta\", \"created_at\": 1793654166.925073, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793654106.925071, \"paired_code_hash\": null}",
+      "{\"tier\": null, \"board\": true, \"owned\": false, \"code_hash\": \"9ff93f4499340ff37f52cf168e179de5fde7a84e63edac82d666569f691fe501\", \"paired_at\": null, \"principal\": \"echo\", \"created_at\": 1793654166.928274, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793655066.928272, \"paired_code_hash\": null}",
+      "{\"tier\": null, \"board\": true, \"owned\": true, \"code_hash\": \"e0b108dfc0ecc226b1ccb110637195025e5848ee37e8f6db7c41bced4d4aea13\", \"paired_at\": null, \"principal\": \"alpha\", \"created_at\": 1793654166.912014, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793655066.911976, \"paired_code_hash\": null}",
+      "{\"tier\": null, \"board\": true, \"owned\": true, \"code_hash\": \"e5a87a59d6943b56b168b78e37fca930445bce3f6de682a1433cbac34d629dba\", \"paired_at\": null, \"principal\": \"laptop\", \"created_at\": 1793654224.56044, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793655124.560389, \"paired_code_hash\": null}",
+      "{\"tier\": null, \"board\": true, \"owned\": true, \"code_hash\": null, \"paired_at\": null, \"principal\": \"charlie\", \"created_at\": 1793654166.922858, \"revoked_at\": 1793654166.923887, \"token_hash\": null, \"code_expires_at\": null, \"paired_code_hash\": null}"
      ],
      "reference_chunks": [],
      "rejected_bearers": [],
