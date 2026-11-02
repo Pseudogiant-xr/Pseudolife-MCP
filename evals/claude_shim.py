@@ -63,6 +63,7 @@ import secrets
 import shutil
 import signal
 import subprocess
+import tempfile
 import sys
 import threading
 import time
@@ -588,9 +589,13 @@ class ClaudeCli:
             # model precedence); unset everywhere = no flag, the CLI's own
             # per-model default serves.
             cmd += ["--effort", effort or self.reasoning_effort]
-        if system and len(system) <= _MAX_ARGV_SYSTEM:
+        # cmd.exe truncates literal newlines in an npm .cmd/.bat launch.
+        # Keep the system role and exact UTF-8 text through the CLI's file flag.
+        file_system = bool(system and sys.platform == "win32"
+                           and self.cli.suffix.lower() in (".cmd", ".bat"))
+        if system and not file_system and len(system) <= _MAX_ARGV_SYSTEM:
             cmd += ["--system-prompt", system]
-        elif system:
+        elif system and not file_system:
             # Too long for argv — prepend to stdin instead (rare; vocab hints
             # keep the system message a few KB).
             user = f"{system}\n\n{user}"
@@ -598,7 +603,14 @@ class ClaudeCli:
             self.calls += 1
             n = self.calls
             t0 = time.monotonic()
-            rc, stdout, stderr = self._run(cmd, user.encode("utf-8"))
+            if file_system:
+                with tempfile.TemporaryDirectory(prefix="claude-shim-", ignore_cleanup_errors=True) as tmp:
+                    prompt = Path(tmp) / "system.txt"
+                    prompt.write_text(system, encoding="utf-8", newline="")
+                    rc, stdout, stderr = self._run(
+                        cmd + ["--system-prompt-file", str(prompt)], user.encode("utf-8"))
+            else:
+                rc, stdout, stderr = self._run(cmd, user.encode("utf-8"))
         if rc != 0:
             raise _cli_failure(f"claude -p rc={rc}", stdout, stderr)
         out = json.loads(stdout.decode("utf-8", "replace"))

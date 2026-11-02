@@ -600,6 +600,7 @@ jobs:
           --deselect tests/test_tunnel_runtime.py::test_initial_registration_cancellation_reaps_actual_child
           --deselect tests/test_tunnel_runtime.py::test_refresh_registration_sigint_reaps_actual_child
           tests/test_shim.py::test_shim_forwards_initialize_instructions_and_tool_annotations
+          tests/test_claude_shim_windows_prompt.py
           tests/test_shim.py::test_spawn_daemon_never_allocates_a_console_window
           tests/test_shim.py::test_concurrent_shims_spawn_exactly_one_daemon
           tests/test_shim.py::test_spawn_lock_is_released_after_the_daemon_is_up
