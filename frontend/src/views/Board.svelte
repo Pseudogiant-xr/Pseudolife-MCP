@@ -462,7 +462,7 @@
             <p class="empty">
               {scope === "peer" && selected
                 ? `No retained mail or wake event involves ${agentName(selected)}.`
-                : "No retained mail or wake events are visible to this token. This bounded view follows the configured audit retention."}
+                : "No retained mail or wake events are visible to the account this Console is signed in as. This bounded view follows the configured audit retention."}
             </p>
           {:else}
             <ol class="events">

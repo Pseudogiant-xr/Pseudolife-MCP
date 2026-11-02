@@ -183,7 +183,7 @@ describe("peer facts", () => {
   it("pending mail is a count for your principal, and not visible otherwise", () => {
     expect(pendingText(agent({ pending_count: 2 }))).toBe("2 unread");
     expect(pendingText(agent({ pending_count: 0 }))).toBe("None unread");
-    expect(pendingText(agent({ pending_count: null }))).toBe("Not visible to this token");
+    expect(pendingText(agent({ pending_count: null }))).toBe("Hidden: another account's session");
   });
 
   it("names the adapter state when the daemon serves it", () => {
