@@ -113,7 +113,10 @@ pub(super) fn problem(rp: &str, origin: &str) -> Option<String> {
 
 pub(super) fn rate_limit_problem(section: &Value) -> Option<String> {
     let cap = section.get("maintainer_per_recipient_per_hour")?;
-    if cap.as_u64().is_some() {
+    if cap
+        .as_number()
+        .is_some_and(|n| n.to_string().bytes().all(|b| b.is_ascii_digit()))
+    {
         None
     } else {
         Some("coordination.maintainer.maintainer_per_recipient_per_hour must be a whole number, 0 or more".into())
@@ -202,9 +205,9 @@ fn scalar(
             Some("tag:yaml.org,2002:timestamp" | "tag:yaml.org,2002:binary")
         )
     {
-        // State only projects maintainer settings. These safe values elsewhere
-        // need no JSON representation because the file is never rewritten.
-        return Ok((value, TScalarStyle::DoubleQuoted, None));
+        // JSON has no date or binary scalar. Preserve their non-string status
+        // for maintainer validation; unrelated values are never rewritten.
+        return Ok(("null".into(), TScalarStyle::Plain, None));
     }
     if tag.is_some_and(|t| {
         !matches!(
@@ -240,10 +243,9 @@ fn scalar(
     } else if tag == Some("tag:yaml.org,2002:null") || tag.is_none() && null {
         value = "null".into();
     } else if tag == Some("tag:yaml.org,2002:int") || tag.is_none() && int.is_match(&value) {
-        match integer(&value) {
-            Some(number) => value = number.to_string(),
-            None if reading => return Ok((value, TScalarStyle::DoubleQuoted, None)),
-            None => return Err("config.yaml holds an integer outside the supported range; edit it on the daemon host instead".into()),
+        value = integer(&value).ok_or_else(|| "invalid YAML integer".to_owned())?;
+        if !reading && value.parse::<i64>().is_err() {
+            return Err("config.yaml holds an integer outside the supported range; edit it on the daemon host instead".into());
         }
     } else if tag == Some("tag:yaml.org,2002:float") || tag.is_none() && float.is_match(&value) {
         let text = value.replace('_', "");
@@ -270,7 +272,10 @@ fn scalar(
         // Match PyYAML's timestamp resolver, including short month/day fields
         // in datetimes; date-like plain strings must remain writable strings.
         let timestamp = regex::Regex::new(r"^(?:[0-9]{4}-[0-9]{2}-[0-9]{2}|[0-9]{4}-[0-9]{1,2}-[0-9]{1,2}(?:[Tt]|[ \t]+)[0-9]{1,2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]*)?(?:[ \t]*(?:Z|[-+][0-9]{1,2}(?::[0-9]{2})?))?)$").unwrap();
-        if !reading && tag.is_none() && timestamp.is_match(&value) {
+        if tag.is_none() && timestamp.is_match(&value) {
+            if reading {
+                return Ok(("null".into(), TScalarStyle::Plain, None));
+            }
             return Err("config.yaml holds a YAML timestamp this command cannot rewrite; edit it on the daemon host instead".into());
         }
         return Ok((value, TScalarStyle::DoubleQuoted, None));
@@ -278,32 +283,85 @@ fn scalar(
     Ok((value, TScalarStyle::Plain, None))
 }
 
-fn integer(value: &str) -> Option<i64> {
+fn integer(value: &str) -> Option<String> {
     let digits = value.replace('_', "");
     let (sign, digits) = if let Some(v) = digits.strip_prefix('-') {
-        (-1i128, v)
+        (true, v)
     } else {
-        (1, digits.strip_prefix('+').unwrap_or(&digits))
+        (false, digits.strip_prefix('+').unwrap_or(&digits))
     };
-    let magnitude = if let Some(v) = digits.strip_prefix("0x") {
-        i128::from_str_radix(v, 16).ok()
+    let (base, parts) = if let Some(v) = digits.strip_prefix("0x") {
+        (
+            16,
+            v.chars()
+                .map(|c| c.to_digit(16))
+                .collect::<Option<Vec<_>>>()?,
+        )
     } else if let Some(v) = digits.strip_prefix("0b") {
-        i128::from_str_radix(v, 2).ok()
+        (
+            2,
+            v.chars()
+                .map(|c| c.to_digit(2))
+                .collect::<Option<Vec<_>>>()?,
+        )
     } else if digits.len() > 1 && digits.starts_with('0') {
-        i128::from_str_radix(digits, 8).ok()
+        (
+            8,
+            digits
+                .chars()
+                .map(|c| c.to_digit(8))
+                .collect::<Option<Vec<_>>>()?,
+        )
     } else if digits.contains(':') && !digits.starts_with('0') {
-        digits.split(':').enumerate().try_fold(0i128, |n, (i, p)| {
-            let p = p.parse::<i128>().ok()?;
-            if i > 0 && p >= 60 {
-                None
-            } else {
-                n.checked_mul(60)?.checked_add(p)
-            }
-        })
+        let (first, rest) = digits.split_once(':')?;
+        let mut result = integer(first)?;
+        for part in rest.split(':') {
+            let part = part.parse::<u32>().ok().filter(|n| *n < 60)?;
+            decimal_step(&mut result, 60, part);
+        }
+        return Some(if sign && result != "0" {
+            format!("-{result}")
+        } else {
+            result
+        });
     } else {
-        digits.parse::<i128>().ok()
-    }?;
-    i64::try_from(magnitude.checked_mul(sign)?).ok()
+        (
+            10,
+            digits
+                .chars()
+                .map(|c| c.to_digit(10))
+                .collect::<Option<Vec<_>>>()?,
+        )
+    };
+    if parts.is_empty() {
+        return None;
+    }
+    let mut result = "0".to_owned();
+    for part in parts {
+        decimal_step(&mut result, base, part);
+    }
+    Some(if sign && result != "0" {
+        format!("-{result}")
+    } else {
+        result
+    })
+}
+
+// PyYAML integers are unbounded. Keep their exact decimal spelling through
+// the read-only JSON projection instead of converting them to strings/floats.
+fn decimal_step(value: &mut String, base: u32, mut carry: u32) {
+    let mut digits = Vec::with_capacity(value.len() + 2);
+    for digit in value.bytes().rev() {
+        carry += u32::from(digit - b'0') * base;
+        digits.push(b'0' + (carry % 10) as u8);
+        carry /= 10;
+    }
+    while carry > 0 {
+        digits.push(b'0' + (carry % 10) as u8);
+        carry /= 10;
+    }
+    digits.reverse();
+    *value = String::from_utf8(digits).expect("decimal digits");
 }
 
 fn json_value(value: &Yaml) -> Result<Value> {
@@ -317,13 +375,17 @@ fn projected_value(value: &Yaml, merge_key: Option<&str>) -> Result<Value> {
         Yaml::Integer(v) => json!(v),
         Yaml::String(v) => json!(v),
         Yaml::Real(v) => {
-            let n = v
-                .parse::<f64>()
-                .ok()
-                .and_then(serde_json::Number::from_f64)
-                .ok_or_else(|| {
-                    Error::refused("config.yaml holds an unsupported non-finite number")
-                })?;
+            let n = if v
+                .strip_prefix('-')
+                .unwrap_or(v)
+                .bytes()
+                .all(|b| b.is_ascii_digit())
+            {
+                v.parse::<serde_json::Number>().ok()
+            } else {
+                v.parse::<f64>().ok().and_then(serde_json::Number::from_f64)
+            }
+            .ok_or_else(|| Error::refused("config.yaml holds an unsupported non-finite number"))?;
             Value::Number(n)
         }
         Yaml::Array(v) => Value::Array(
@@ -576,7 +638,9 @@ fn json_yaml(value: &Value) -> String {
             .expect("string serialization")
             .chars()
             .map(|c| match c {
-                '\u{7f}'..='\u{9f}' | '\u{2028}' | '\u{2029}' => format!("\\u{:04x}", c as u32),
+                '\u{7f}'..='\u{9f}' | '\u{2028}' | '\u{2029}' | '\u{fffe}' | '\u{ffff}' => {
+                    format!("\\u{:04x}", c as u32)
+                }
                 c => c.to_string(),
             })
             .collect(),
@@ -628,6 +692,28 @@ mod tests {
             let mut loader = Loader::default();
             Parser::new_from_str(text).load(&mut loader, true).unwrap();
             assert_eq!(loader.loader.documents(), &[want]);
+        }
+    }
+
+    #[test]
+    fn unbounded_integer_projection_preserves_value_and_type() {
+        for (input, expected) in [
+            ("18446744073709551616", "18446744073709551616"),
+            ("0x10000000000000000", "18446744073709551616"),
+            ("02000000000000000000000", "18446744073709551616"),
+            ("-18446744073709551616", "-18446744073709551616"),
+            ("1:00:00", "3600"),
+            ("-0", "0"),
+        ] {
+            assert_eq!(integer(input).as_deref(), Some(expected));
+            let mut loader = Loader {
+                reading: true,
+                ..Default::default()
+            };
+            Parser::new_from_str(input).load(&mut loader, true).unwrap();
+            let value = json_value(&loader.loader.documents()[0]).unwrap();
+            assert!(value.is_number());
+            assert_eq!(value.to_string(), expected);
         }
     }
 

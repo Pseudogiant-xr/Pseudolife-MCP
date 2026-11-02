@@ -216,7 +216,7 @@ def test_native_host_state_resolves_yaml_merge_precedence(tmp_path, monkeypatch,
     assert path.read_text(encoding="utf-8") == text
 
 
-@pytest.mark.parametrize("special", ["\u2028", "\u2029", *map(chr, range(0x7f, 0xa0))])
+@pytest.mark.parametrize("special", ["\u2028", "\u2029", "\ufffe", "\uffff", *map(chr, range(0x7f, 0xa0))])
 def test_native_config_write_keeps_yaml_sensitive_unicode(tmp_path, special):
     import yaml
     path = tmp_path / "config.yaml"
@@ -240,6 +240,57 @@ def test_native_config_write_keeps_date_like_strings(tmp_path, text):
                             env=_native_env(tmp_path), capture_output=True, text=True, timeout=20)
     assert result.returncode == 0, result.stderr
     assert yaml.safe_load(path.read_text(encoding="utf-8"))["other"] == text
+
+
+@pytest.mark.parametrize("value", [
+    "2026-01-02", "!!timestamp 2026-01-02", "2026-01-02T01:02:03Z",
+    "!!binary MjAyNi0wMS0wMg==", "'2026-01-02'", "!!str 2026-01-02",
+])
+@pytest.mark.parametrize("merged", [False, True])
+def test_native_host_state_preserves_name_scalar_validation(tmp_path, monkeypatch, value, merged):
+    from pseudolife_memory import maintainer_setup as setup
+    section = f"rp_id: {value}, origin: https://2026-01-02"
+    original = (f"defaults: &base {{{section}}}\ncoordination: {{maintainer: {{<<: *base}}}}\n"
+                if merged else f"coordination: {{maintainer: {{{section}}}}}\n")
+    path = tmp_path / "config.yaml"
+    path.write_text(original, encoding="utf-8")
+    monkeypatch.setenv("PSEUDOLIFE_MCP_CONFIG", str(path))
+    monkeypatch.setattr(setup, "_bank_keys", lambda: (None, "NoBank"))
+    oracle = setup._state()
+    result = subprocess.run([_native(), "maintainer", "setup", "--host-state"],
+                            env=_native_env(tmp_path), capture_output=True, text=True, timeout=20)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["problem"] == oracle["problem"]
+    if oracle["problem"]:
+        checked = subprocess.run([_native(), "maintainer", "setup", "--check"],
+                                 env=_native_env(tmp_path), capture_output=True, text=True, timeout=20)
+        assert checked.returncode == 1, checked.stderr
+        assert "not set up" in checked.stdout
+    assert path.read_text(encoding="utf-8") == original
+    assert list(tmp_path.iterdir()) == [path]
+
+
+@pytest.mark.parametrize("cap", [
+    "9223372036854775808", "18446744073709551616", "1" + "0" * 60,
+    "0x1" + "0" * 50, "0b1" + "0" * 200, "01" + "0" * 70,
+    "1" + ":00" * 30, "-1" + "0" * 60, "'18446744073709551616'",
+])
+def test_native_host_state_preserves_large_integer_validation(tmp_path, monkeypatch, cap):
+    from pseudolife_memory import maintainer_setup as setup
+    original = ("coordination:\n  maintainer:\n    rp_id: localhost\n"
+                "    origin: http://localhost:8765\n"
+                f"    maintainer_per_recipient_per_hour: {cap}\n")
+    path = tmp_path / "config.yaml"
+    path.write_text(original, encoding="utf-8")
+    monkeypatch.setenv("PSEUDOLIFE_MCP_CONFIG", str(path))
+    monkeypatch.setattr(setup, "_bank_keys", lambda: (None, "NoBank"))
+    oracle = setup._state()
+    result = subprocess.run([_native(), "maintainer", "setup", "--host-state"],
+                            env=_native_env(tmp_path), capture_output=True, text=True, timeout=20)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["problem"] == oracle["problem"]
+    assert path.read_text(encoding="utf-8") == original
+    assert list(tmp_path.iterdir()) == [path]
 
 
 @pytest.mark.parametrize("cap", [-1, True, 1.5, "7", None])
