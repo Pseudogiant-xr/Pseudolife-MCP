@@ -65,7 +65,7 @@ import time
 from urllib.parse import urlsplit
 
 from pseudolife_memory import expose_cli
-from pseudolife_memory.daemon_exec import CONTAINER as DAEMON_CONTAINER, docker_cmd, rust_operator_refusal
+from pseudolife_memory.daemon_exec import CONTAINER as DAEMON_CONTAINER, docker_cmd, operator_cli
 
 EXIT_OK = 0
 EXIT_USAGE = 2
@@ -197,7 +197,10 @@ def _state() -> dict:
     section = ((_read_config(path).get("coordination") or {}).get("maintainer") or {})
     rp_id, origin = section.get("rp_id", ""), section.get("origin", "")
     try:
-        problem = MaintainerConfig(rp_id=rp_id, origin=origin).problem()
+        problem = MaintainerConfig(
+            rp_id=rp_id, origin=origin,
+            maintainer_per_recipient_per_hour=section.get("maintainer_per_recipient_per_hour", 30),
+        ).problem()
     except ValueError as exc:
         problem = str(exc)
     keys, keys_error = _bank_keys()
@@ -217,6 +220,11 @@ def _write(rp_id: str, origin: str) -> dict:
     section = coordination.setdefault("maintainer", {})
     if not isinstance(section, dict):
         raise ValueError("coordination.maintainer in the config file is not a mapping")
+    from pseudolife_memory.utils.config import MaintainerConfig
+    MaintainerConfig(
+        rp_id=rp_id, origin=origin,
+        maintainer_per_recipient_per_hour=section.get("maintainer_per_recipient_per_hour", 30),
+    )
     section.update(rp_id=rp_id, origin=origin)
     path.parent.mkdir(parents=True, exist_ok=True)
     backup = None
@@ -281,10 +289,6 @@ def _tier() -> str:
     if proc.returncode == 0:
         if proc.stdout.strip() != "true":
             raise _Refused(f"the {DAEMON_CONTAINER} container is not running: start it first")
-        if rust_operator_refusal(docker, runner=lambda command: run(command, timeout=60)):
-            raise _Refused("the Rust daemon image has no Python setup runtime: run "
-                           "`pseudolife-mcp update --engine python --checkout <repo>`, "
-                           "then retry maintainer setup; nothing was changed")
         return "docker"
     if "no such" in (proc.stderr + proc.stdout).lower():
         return "local"
@@ -301,11 +305,22 @@ def _python(tier: str) -> list[str]:
 
 
 def _maintainer(tier: str, *args: str) -> list[str]:
+    if tier == "docker":
+        docker = docker_cmd()
+        cli = operator_cli(docker, runner=lambda command: run(command, timeout=60))
+        return [docker, "exec", DAEMON_CONTAINER, *cli, "maintainer", *args]
     return [*_python(tier), "-m", "pseudolife_memory.cli", "maintainer", *args]
 
 
 def _host(tier: str, *args: str) -> dict:
-    proc = run([*_python(tier), "-m", MODULE, *args], timeout=120)
+    command = [*_python(tier), "-m", MODULE, *args]
+    if tier == "docker":
+        docker = docker_cmd()
+        cli = operator_cli(docker, runner=lambda command: run(command, timeout=60))
+        if cli == ["pseudolife-mcp"]:
+            command = [docker, "exec", DAEMON_CONTAINER, *cli, "maintainer", "setup",
+                       "--host-" + args[0], *args[1:]]
+    proc = run(command, timeout=120)
     if proc.returncode != 0:
         detail = (proc.stderr or proc.stdout).strip()
         if MODULE in detail and "No module named" in detail:

@@ -1,0 +1,27 @@
+usage: pseudolife-mcp coordination-recovery [-h] --config CONFIG
+                                            [--confirm-daemon-stopped]
+                                            [--confirm-restore]
+                                            [--agent AGENT]
+                                            [--principal PRINCIPAL]
+                                            [--bank-url BANK_URL]
+                                            [--state STATE]
+                                            {recover,rebind}
+
+Offline, operator-only mailbox recovery after an explicit database restore.
+Never starts a daemon, opens a model session, migrates a schema, or prints
+keys. Stopping the daemon is an operator precondition, not inferred from a
+config file.
+
+positional arguments:
+  {recover,rebind}
+
+options:
+  -h, --help            show this help message and exit
+  --config CONFIG       Restored daemon configuration file
+  --confirm-daemon-stopped
+  --confirm-restore
+  --agent AGENT         the mailbox to rebind: a full id, or a unique prefix
+                        of 8 or more characters
+  --principal PRINCIPAL
+  --bank-url BANK_URL
+  --state STATE         New private adapter state file outside the repository
