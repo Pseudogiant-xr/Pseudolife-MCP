@@ -101,6 +101,7 @@ pub struct BellState {
     covered: u64,
     outstanding: bool,
     last_ring: Option<(String, String, f64)>,
+    deferred_privileged: Option<(Value, u64)>,
     pending: PendingNotice,
     watch_cancel: CancellationToken,
     adapter: Arc<Adapter>,
@@ -227,6 +228,7 @@ impl Doorbell {
                 covered,
                 outstanding,
                 last_ring: None,
+                deferred_privileged: None,
                 pending,
                 watch_cancel: watch_cancel.clone(),
                 adapter: adapter.clone(),
@@ -252,6 +254,7 @@ impl Doorbell {
                 && arguments.get("action").and_then(Value::as_str) == Some("receive")
             {
                 bell.covered = bell.covered.max(bell.arrival);
+                bell.deferred_privileged = None;
             }
         }
     }
@@ -290,6 +293,38 @@ impl Doorbell {
             return;
         }
         let Some(count) = view.count else { return };
+        // The wire offer cannot identify an individual acknowledgment amid
+        // other pending mail. Retain a deferred privileged bell until handoff,
+        // delivery, an empty mailbox or its origin expiry; a stale ack can
+        // therefore keep it pending only until one of those bounds.
+        if bell
+            .deferred_privileged
+            .as_ref()
+            .is_some_and(|(wake, watermark)| {
+                count == 0
+                    || view.delivered >= *watermark
+                    || wake["message_expires_at"]
+                        .as_f64()
+                        .is_none_or(|at| at <= now())
+            })
+        {
+            bell.deferred_privileged = None;
+        }
+        if bell.deferred_privileged.is_none()
+            && count > 0
+            && let Some(wake) = view.wake.as_ref()
+            && wake["decision"] == "rung"
+            && let Some(reason) = wake["reason"].as_str()
+            && matches!(reason, "maintainer_message" | "conductor" | "lease_grant")
+            && let Some(ring_at) = wake["ring_at"].as_f64().filter(|at| at.is_finite())
+            && wake["message_expires_at"]
+                .as_f64()
+                .is_some_and(|at| at.is_finite() && at > now())
+            && let Some(watermark) = view.wake_watermark.filter(|mark| view.delivered < *mark)
+            && bell.last_ring.as_ref() != Some(&("rung".into(), reason.into(), ring_at))
+        {
+            bell.deferred_privileged = Some((wake.clone(), watermark));
+        }
         let unknown = view
             .preview
             .iter()
@@ -335,11 +370,15 @@ impl Doorbell {
             bell.covered = bell.arrival;
             return;
         }
-        let Some(wake) = &view.wake else { return };
-        if view
-            .wake_watermark
-            .is_none_or(|watermark| view.delivered >= watermark)
-        {
+        let selected = bell
+            .deferred_privileged
+            .as_ref()
+            .map(|(wake, watermark)| (wake, Some(*watermark)))
+            .or_else(|| view.wake.as_ref().map(|wake| (wake, view.wake_watermark)));
+        let Some((wake, watermark)) = selected else {
+            return;
+        };
+        if watermark.is_none_or(|watermark| view.delivered >= watermark) {
             return;
         }
         let decision = wake.get("decision").and_then(Value::as_str);
@@ -404,6 +443,7 @@ impl Doorbell {
             .await;
             return;
         };
+        bell.deferred_privileged = None;
         bell.last_ring = Some(ring.clone());
         bell.covered = bell.arrival;
         bell.outstanding = true;

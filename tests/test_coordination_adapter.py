@@ -1889,3 +1889,49 @@ def test_codex_repeated_valid_rung_keeps_offer_and_deduplicates_consumption(tmp_
                 await coordination._heartbeat()
                 assert coordination.ring_due() is None
     asyncio.run(drive())
+
+
+@pytest.mark.parametrize("reason", ["maintainer_message", "conductor", "lease_grant"])
+def test_deferred_privileged_offer_survives_new_peer_attention(tmp_path, reason):
+    ring = {"decision": "rung", "reason": reason, "ring_at": 0.0,
+            "message_expires_at": time.time() + 3600}
+    peer = {"decision": "attention", "reason": "urgent", "ring_at": 1.0,
+            "queue_allowed": True, "recipient_state": "unknown"}
+    daemon = _mailbox_daemon([(0, [], None), (1, _preview("m1"), ring),
+                              (2, _preview("m1", "m2"), peer),
+                              (3, _preview("m1", "m2", "m3"), {**peer, "ring_at": 2.0})])
+    async def drive():
+        client, coordination = adapter(daemon, delivery_transport="codex",
+                                       digest_path=tmp_path / "digest.txt")
+        async with client:
+            async with coordination:
+                await coordination._heartbeat()
+                decision = coordination.ring_due()
+                coordination.restore_ring(decision)  # native reservation deferred
+                await coordination._heartbeat()
+                assert coordination.ring_due() == ("rung", reason)
+                assert coordination.ring_context["message_expires_at"] == ring["message_expires_at"]
+                await coordination._heartbeat()
+                assert coordination.ring_due() == ("attention", "urgent")
+    asyncio.run(drive())
+
+
+@pytest.mark.parametrize("end", ["empty", "expired", "seen"])
+def test_deferred_privileged_offer_is_bounded(tmp_path, end):
+    ring = {"decision": "rung", "reason": "conductor", "ring_at": 0.0,
+            "message_expires_at": time.time() + 3600}
+    daemon = _mailbox_daemon([(0, [], None), (1, _preview("m1"), ring), (0, [], None)])
+    async def drive():
+        client, coordination = adapter(daemon, delivery_transport="codex",
+                                       digest_path=tmp_path / "digest.txt")
+        async with client:
+            async with coordination:
+                await coordination._heartbeat()
+                if end == "empty":
+                    await coordination._heartbeat()
+                elif end == "expired":
+                    coordination._ring_context["message_expires_at"] = time.time() - 1
+                else:
+                    (tmp_path / "digest.seen").write_text(str(coordination.digest_watermark))
+                assert coordination.ring_due() is None
+    asyncio.run(drive())

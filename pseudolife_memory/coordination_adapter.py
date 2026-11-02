@@ -377,12 +377,26 @@ class CoordinationAdapter:
         a ring names the daemon's decision and reason."""
         self._ledger(kind, self._digest_watermark, size, reason)
 
+    def _privileged_offer_live(self) -> bool:
+        offer = self._ring_offer
+        expiry = self._ring_context.get("message_expires_at")
+        return (offer is not None and offer[0] == "rung"
+                and offer[1] in {"maintainer_message", "conductor", "lease_grant"}
+                and type(expiry) in (int, float) and math.isfinite(expiry)
+                and expiry > time.time() and bool(self._pending_count)
+                and self._read_seen() < offer[3])
+
     def ring_due(self):
         """The ring the daemon decided, once its ``ring_at`` has come, as
         ``(decision, reason)``; taken once. The Codex doorbell asks at the
         moment it would otherwise ring. ``None`` when nothing is due."""
         offer = self._ring_offer
         if offer is None:
+            return None
+        if (offer[1] in {"maintainer_message", "conductor", "lease_grant"}
+                and self._ring_context.get("message_expires_at") is not None
+                and not self._privileged_offer_live()):
+            self._withdraw_ring()
             return None
         if self._read_seen() >= offer[3]:
             # The prompt hook or a hint already showed the rung mail: the
@@ -423,6 +437,12 @@ class CoordinationAdapter:
         old non-Codex daemons retain their offer-lapsed retry contract.
         Nothing here may ring on a guess."""
         codex = "codex" in self._registration["capabilities"]
+        # A deferred privileged bell survives newer peer attention until
+        # handoff, empty mailbox, delivery or origin expiry. The protocol
+        # cannot prove an individual ack amid other pending mail, so it may
+        # retain an already-acked bell until one of those bounds is reached.
+        if codex and self._privileged_offer_live():
+            return
         wake = result.get("wake")
         if not isinstance(wake, dict):
             if codex:

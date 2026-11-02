@@ -1410,3 +1410,67 @@ fn resolver_pathext_preserves_supported_extensions_and_path_directory_order() {
         std::fs::remove_file(selected).unwrap();
     }
 }
+
+#[tokio::test]
+async fn deferred_privileged_bell_survives_peer_attention() {
+    for reason in ["maintainer_message", "conductor", "lease_grant"] {
+        let rig = Harness::new(true, Duration::ZERO).await;
+        state::private_dir(rig.pending.path.parent().unwrap()).unwrap();
+        let lock = state::create(&rig.pending.path.with_extension("bell-lock"))
+            .unwrap()
+            .file;
+        lock.lock().unwrap();
+        let mut privileged = view(&[1, 2], 2, 2, 1.0);
+        privileged.wake.as_mut().unwrap()["reason"] = json!(reason);
+        privileged.wake.as_mut().unwrap()["message_expires_at"] = json!(now() + 3600.0);
+        rig.bell.observe(BANK, &privileged).await;
+        assert_eq!(rig.calls(), 0);
+        lock.unlock().unwrap();
+        let mut peer = view(&[1, 2, 3], 3, 3, 2.0);
+        peer.wake = Some(
+            json!({"decision":"attention", "reason":"urgent", "ring_at":2.0,
+            "queue_allowed":true, "recipient_state":"unknown", "message_expires_at":now()+7200.0}),
+        );
+        rig.bell.observe(BANK, &peer).await;
+        rig.accepted().await;
+        assert_eq!(rig.calls(), 1);
+        rig.close().await;
+        assert!(
+            rig.ledger()
+                .iter()
+                .any(|row| row[5].starts_with(&format!("rung {reason} ")))
+        );
+    }
+}
+
+#[tokio::test]
+async fn deferred_privileged_bell_drops_on_empty_expired_or_delivered() {
+    for end in ["empty", "expired", "delivered"] {
+        let rig = Harness::paused(true, Duration::from_secs(60)).await;
+        let mut privileged = view(&[1, 2], 2, 2, 1.0);
+        privileged.wake.as_mut().unwrap()["reason"] = json!("conductor");
+        privileged.wake.as_mut().unwrap()["message_expires_at"] = json!(if end == "expired" {
+            now() + 0.2
+        } else {
+            now() + 3600.0
+        });
+        rig.bell.observe(BANK, &privileged).await;
+        let mut next = view(&[1, 2], 2, 2, 2.0);
+        next.wake = None;
+        if end == "empty" {
+            next.count = Some(0);
+        }
+        if end == "delivered" {
+            next.delivered = 2;
+        }
+        tokio::time::advance(Duration::from_secs(61)).await;
+        tokio::time::resume();
+        if end == "expired" {
+            tokio::time::sleep(Duration::from_millis(250)).await;
+        }
+        rig.bell.observe(BANK, &next).await;
+        assert_eq!(rig.calls(), 0);
+        assert!(!rig.pending.path.exists());
+        rig.close().await;
+    }
+}
