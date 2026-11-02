@@ -85,6 +85,11 @@ Native timeout checks observe descendant termination and pipe reaping through a
 socket witness. Separate Python-only fixture controls cover a slow correct kill
 and a root-only mutation; those controls do not mutate the Rust implementation.
 HTTP round-trip duration is not used as evidence that a descendant survived.
+The separate lifecycle test holds health probes at a provider socket handshake,
+checks cached responses while a refresh is blocked, then observes failure and
+recovery after releasing each probe. Ordinary calls have a separate startup
+budget from the intentional timeout condition; a blocked provider witnesses
+the latter. Every lifecycle failure identifies its provider and oracle arm.
 
 ```sh
 cargo test --manifest-path rust/Cargo.toml -p pseudolife-stdio --test extractor_shim

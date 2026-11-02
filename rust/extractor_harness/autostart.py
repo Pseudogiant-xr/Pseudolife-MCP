@@ -148,7 +148,9 @@ def proof(binary, root, fixture, launcher_exe, provider):
     windows = os.name == "nt"
     if windows:
         wrapper_forwarding(root)
-        for case in ("PasswordRollback", "LegacyMigration"):
+        for case in ("PasswordRollback", "LegacyMigration", "DelayedStop", "DelayedRemoval",
+                     "StopTimeout", "RemovalTimeout", "ProcessExitRace", "ProcessStopFailure",
+                     "ProcessIdentityChanged"):
             checked(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(Path(__file__).with_name("scheduler_failures.ps1")),
                      "-Source", str(run.ROOT / "rust/shim/src/extractor_shim/autostart.ps1"), "-Root", str(root), "-Case", case], step=case)
     repo = root / "settings with spaces"

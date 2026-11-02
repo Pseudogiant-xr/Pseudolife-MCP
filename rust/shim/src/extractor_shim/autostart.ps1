@@ -70,7 +70,11 @@ function Get-RegisteredInvocation($task) {
 function Stop-CapturedProcess($old) {
     $current = Get-CimInstance Win32_Process -Filter "ProcessId = $($old.ProcessId)" -ErrorAction SilentlyContinue
     if ($current -and $current.CreationDate -eq $old.CreationDate -and $current.CommandLine -eq $old.CommandLine) {
-        Stop-Process -Id $old.ProcessId -Force
+        try { Stop-Process -Id $old.ProcessId -Force -ErrorAction Stop }
+        catch {
+            # Scheduler stop can finish between the identity check and this call.
+            if ($_.FullyQualifiedErrorId -ne 'NoProcessFoundForGivenId,Microsoft.PowerShell.Commands.StopProcessCommand') { throw }
+        }
     }
 }
 function Get-OwnedTaskProcesses($task) {
@@ -108,6 +112,17 @@ function Get-OwnedTaskProcesses($task) {
     } while ($added.Count)
     $captured
 }
+function Wait-TaskStopped([string]$taskName) {
+    # Windows autostart stress (2026-11-02) left a terminated task visible;
+    # reuse the existing 15-second port-release budget for scheduler settlement.
+    $deadline = (Get-Date).AddSeconds(15)
+    while ($true) {
+        $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+        if (-not $task -or $task.State -notin @('Running', 'Queued')) { return }
+        if ((Get-Date) -ge $deadline) { throw "task $taskName did not stop; inspect its scheduler state" }
+        Start-Sleep -Milliseconds 200
+    }
+}
 function Remove-OwnedTask([string]$taskName) {
     $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
     if (-not $task) { return }
@@ -116,8 +131,13 @@ function Remove-OwnedTask([string]$taskName) {
     # Capture children before stopping the wrapper: its exit can orphan them.
     Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
     foreach ($process in @($captured | Sort-Object CreationDate -Descending)) { Stop-CapturedProcess $process }
+    Wait-TaskStopped $taskName
     Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
-    if (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue) { throw "could not remove $taskName" }
+    $deadline = (Get-Date).AddSeconds(15)
+    while (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue) {
+        if ((Get-Date) -ge $deadline) { throw "could not remove $taskName" }
+        Start-Sleep -Milliseconds 200
+    }
 }
 if ($c.Remove) {
     $script:removedRegistration = $false
@@ -207,6 +227,8 @@ try {
         Stop-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
         if ($legacy) { Stop-ScheduledTask -TaskName $legacy.TaskName -ErrorAction SilentlyContinue }
         foreach ($old in $stale) { Stop-CapturedProcess $old }
+        Wait-TaskStopped $name
+        if ($legacy) { Wait-TaskStopped $legacy.TaskName }
         $deadline = (Get-Date).AddSeconds(15)
         while ((Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 200 }
         if (Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue) { throw "port $port did not become free; restoring the previous registration" }

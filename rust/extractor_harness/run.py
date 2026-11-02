@@ -31,7 +31,7 @@ autostart_oracle = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(autostart_oracle)
 STUB_EXE = None
 STUB = r'''
-import base64, json, os, subprocess, sys, time
+import base64, json, os, socket, subprocess, sys, time
 from pathlib import Path
 args = sys.argv[1:]
 stdin = sys.stdin.buffer.read()
@@ -55,6 +55,11 @@ timeline = Path(os.environ['R6_JOURNAL'] + '.timeline')
 with timeline.open('a') as f:
     f.write('start\n')
 plan = json.loads(Path(os.environ['R6_PLAN']).read_text())
+if plan.get('gate'):
+    with socket.create_connection(('127.0.0.1', plan['gate'])) as gate:
+        gate.sendall(b'ready')
+        gate.settimeout(30)
+        gate.recv(1)
 if plan.get('descendant'):
     witness_port = plan['descendant']
     subprocess.Popen([sys.executable, '-c', 'import socket;s=socket.create_connection(("127.0.0.1",' + str(witness_port) + '));s.sendall(b"ready");s.settimeout(30);s.recv(1)'])
@@ -324,41 +329,115 @@ def lifecycle(binary, root):
     for kind in ("claude", "codex"):
         timeout_answers = []
         for arm, exe in (("python", None), ("rust", binary)):
-            with server(exe, kind, root / f"lifecycle-{kind}-{arm}", canned(kind, "OK"), timeout=.25) as (port, plan, journal, _, cli):
+            print(f"START lifecycle {kind}/{arm}", flush=True)
+            # Normal calls need a process-start budget independent of the tiny
+            # timeout formerly used to exercise the timeout error format.
+            with server(exe, kind, root / f"lifecycle-{kind}-{arm}", canned(kind, "OK"), timeout=5) as (port, plan, journal, _, cli):
                 plan.write_text(json.dumps({**canned(kind, "OK"), "sleep": .1}))
                 with concurrent.futures.ThreadPoolExecutor(2) as pool:
                     calls = [pool.submit(call, port, "POST", "/chat/completions", {}) for _ in range(2)]
-                    assert all(c.result()[0] == 200 for c in calls)
+                    answers = [c.result() for c in calls]
+                    assert all(answer[0] == 200 for answer in answers), (kind, arm, "serialized calls", answers)
                 timeline = Path(str(journal) + ".timeline").read_text().splitlines()
                 assert timeline == ["start", "end"] * 3, (arm, "calls overlapped", timeline)
-                plan.write_text(json.dumps({"sleep": 2}))
-                status, body = call(port, "POST", "/chat/completions", {})
-                assert status == 500 and b"timed out after 0.25 seconds" in body, (status, body)
+                with provider_gate() as gate, concurrent.futures.ThreadPoolExecutor(1) as pool:
+                    plan.write_text(json.dumps({"gate": gate.getsockname()[1]}))
+                    response = pool.submit(call, port, "POST", "/chat/completions", {})
+                    with accept_provider(gate) as witness:
+                        status, body = response.result(timeout=10)
+                        assert status == 500 and b"timed out after 5.0 seconds" in body, (kind, arm, status, body)
+                        # The timeout must kill this blocked provider; it cannot
+                        # succeed because a fixed-duration stub sleep elapsed.
+                        try:
+                            assert witness.recv(1) == b"", (kind, arm, "provider survived timeout")
+                        except ConnectionResetError:
+                            pass
                 encoded_cli = json.dumps(repr(str(cli)))[1:-1].encode()
                 body = body.replace(encoded_cli, b"'<cli>'")
                 timeout_answers.append(body)
                 plan.write_text(json.dumps(canned(kind, "recovered")))
-                assert call(port, "POST", "/chat/completions", {})[0] == 200
+                recovered = call(port, "POST", "/chat/completions", {})
+                assert recovered[0] == 200, (kind, arm, "recovery", recovered)
                 count += 3
+            print(f"END lifecycle {kind}/{arm}", flush=True)
         assert timeout_answers[0] == timeout_answers[1], (kind, "timeout bytes", timeout_answers)
     for arm, exe in (("python", None), ("rust", binary)):
-        with server(exe, "codex", root / f"refresh-{arm}", canned("codex", "OK"), ttl=.15) as (port, plan, journal, _, _):
-            time.sleep(.16)
-            plan.write_text(json.dumps({"rc": 1, "stderr": "Not logged in", "sleep": .35}))
-            start = time.monotonic()
-            assert call(port, "GET", "/health")[0] == 200
-            assert call(port, "GET", "/health")[0] == 200
-            assert time.monotonic() - start < .25, (arm, "stale health blocked")
-            time.sleep(.45)
-            assert call(port, "GET", "/health")[0] == 503
-            assert len(journal_rows(journal)) == 2, (arm, "duplicate refresh")
-            plan.write_text(json.dumps(canned("codex", "OK")))
-            time.sleep(.17)
-            assert call(port, "GET", "/health")[0] == 503
-            time.sleep(.1)
-            assert call(port, "GET", "/health")[0] == 200
-            count += 3
+        print(f"START health refresh {arm}", flush=True)
+        with server(exe, "codex", root / f"refresh-{arm}", canned("codex", "OK"), ttl=0) as (port, plan, journal, _, _):
+            with provider_gate() as failed, provider_gate() as recovered, concurrent.futures.ThreadPoolExecutor(1) as pool:
+                plan.write_text(json.dumps({"rc": 1, "stderr": "Not logged in", "gate": failed.getsockname()[1]}))
+                # TTL zero requests refresh immediately. The provider handshake
+                # holds it in flight until every stale response has returned.
+                first = pool.submit(call, port, "GET", "/health")
+                with accept_provider(failed) as failing:
+                    answer = first.result(timeout=10)
+                    assert answer[0] == 200, (arm, "initial cached health", answer)
+                    for _ in range(2):
+                        answer = call(port, "GET", "/health")
+                        assert answer[0] == 200, (arm, "stale health", answer)
+                    assert len(journal_rows(journal)) == 2, (arm, "duplicate failed refresh")
+                    # Change the next plan only after the in-flight provider
+                    # acknowledged reading the failure plan.
+                    plan.write_text(json.dumps({**canned("codex", "OK"), "gate": recovered.getsockname()[1]}))
+                    failing.sendall(b"release")
+                wait_health(port, 503, arm)
+                # Seeing the new snapshot need not mean the refresh worker has
+                # cleared its in-flight flag yet; keep driving health until the
+                # recovery provider acknowledges its invocation.
+                with accept_provider(recovered, lambda: wait_health(port, 503, arm)) as recovering:
+                    answer = call(port, "GET", "/health")
+                    assert answer[0] == 503, (arm, "cached failure while recovering", answer)
+                    assert len(journal_rows(journal)) == 3, (arm, "duplicate recovery refresh")
+                    plan.write_text(json.dumps(canned("codex", "OK")))
+                    recovering.sendall(b"release")
+                wait_health(port, 200, arm)
+                count += 3
+        print(f"END health refresh {arm}", flush=True)
     return count
+
+
+@contextlib.contextmanager
+def provider_gate():
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen()
+        listener.settimeout(10)
+        yield listener
+
+
+def accept_provider(listener, trigger=None):
+    deadline = time.monotonic() + 10
+    if trigger:
+        listener.settimeout(.1)
+    while True:
+        if trigger:
+            trigger()
+        try:
+            connection, _ = listener.accept()
+            break
+        except TimeoutError:
+            if not trigger or time.monotonic() >= deadline:
+                raise AssertionError("provider did not reach its handshake") from None
+    connection.settimeout(10)
+    ready = b""
+    while len(ready) < 5:
+        chunk = connection.recv(5 - len(ready))
+        if not chunk:
+            connection.close()
+            raise AssertionError("provider exited before handshake")
+        ready += chunk
+    assert ready == b"ready", "provider handshake failed"
+    return connection
+
+
+def wait_health(port, expected, arm):
+    deadline = time.monotonic() + 10
+    while True:
+        answer = call(port, "GET", "/health")
+        if answer[0] == expected:
+            return
+        assert time.monotonic() < deadline, (arm, "health transition", expected, answer)
+        time.sleep(.01)
 
 
 def native_tree_cleanup(binary, root):
@@ -403,31 +482,37 @@ def native_tree_cleanup(binary, root):
 
 def main():
     global STUB_EXE
-    subprocess.run([sys.executable, str(Path(__file__).with_name("test_prompt.py"))], check=True)
-    subprocess.run([sys.executable, str(Path(__file__).with_name("test_lifecycle.py"))], check=True)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", required=True, type=Path)
     parser.add_argument("--stub-exe", required=True, type=Path)
+    parser.add_argument("--suite", choices=("all", "contract", "lifecycle"), default="all")
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
+    if args.suite != "lifecycle":
+        subprocess.run([sys.executable, str(Path(__file__).with_name("test_prompt.py"))], check=True)
+    if args.suite != "contract":
+        subprocess.run([sys.executable, str(Path(__file__).with_name("test_lifecycle.py"))], check=True)
     with tempfile.TemporaryDirectory(prefix="r6-extractor-") as scratch:
         root = Path(scratch)
         if os.name == "nt":
             # Native executables and npm-style batch launchers are separate
             # fixtures; both must preserve the complete system prompt.
             STUB_EXE = args.stub_exe.resolve(strict=True)
-        count = differential(args.binary.resolve(), root)
-        count += tools_differential(args.binary.resolve(), root)
-        count += health_differential(args.binary.resolve(), root)
-        count += lifecycle(args.binary.resolve(), root)
-        count += native_tree_cleanup(args.binary.resolve(), root)
-        count += configuration(args.binary.resolve(), root)
-        count += settings_privacy(args.binary.resolve(), root)
-        count += native_regressions(args.binary.resolve(), root)
-        if os.name == "nt":
-            STUB_EXE = None
-            count += differential(args.binary.resolve(), root / "batch")
-            count += tools_differential(args.binary.resolve(), root / "batch")
+        count = 0
+        if args.suite != "contract":
+            count += lifecycle(args.binary.resolve(), root)
+            count += native_tree_cleanup(args.binary.resolve(), root)
+        if args.suite != "lifecycle":
+            count += differential(args.binary.resolve(), root)
+            count += tools_differential(args.binary.resolve(), root)
+            count += health_differential(args.binary.resolve(), root)
+            count += configuration(args.binary.resolve(), root)
+            count += settings_privacy(args.binary.resolve(), root)
+            count += native_regressions(args.binary.resolve(), root)
+            if os.name == "nt":
+                STUB_EXE = None
+                count += differential(args.binary.resolve(), root / "batch")
+                count += tools_differential(args.binary.resolve(), root / "batch")
     result = {"cases": count, "status": "passed", "real_cli_calls": 0}
     if args.output:
         args.output.write_text(json.dumps(result, indent=2) + "\n")

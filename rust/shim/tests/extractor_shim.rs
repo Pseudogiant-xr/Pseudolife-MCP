@@ -79,6 +79,20 @@ fn extractor_shim_stub_differential() {
     assert!(
         fixtures
             .command("run.py")
+            .args(["--suite", "contract"])
+            .status()
+            .expect("Python test oracle must be installed")
+            .success()
+    );
+}
+
+#[test]
+fn extractor_shim_lifecycle() {
+    let fixtures = Fixtures::new();
+    assert!(
+        fixtures
+            .command("run.py")
+            .args(["--suite", "lifecycle"])
             .status()
             .expect("Python test oracle must be installed")
             .success()
