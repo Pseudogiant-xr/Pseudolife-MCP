@@ -111,6 +111,15 @@ pub(super) fn problem(rp: &str, origin: &str) -> Option<String> {
     Some(text.into())
 }
 
+pub(super) fn rate_limit_problem(section: &Value) -> Option<String> {
+    let cap = section.get("maintainer_per_recipient_per_hour")?;
+    if cap.as_u64().is_some() {
+        None
+    } else {
+        Some("coordination.maintainer.maintainer_per_recipient_per_hour must be a whole number, 0 or more".into())
+    }
+}
+
 /// YAML 1.1 scalar resolution through yaml-rust2's event loader. Quoted values
 /// stay strings. JSON output is YAML and preserves all represented value types.
 #[derive(Default)]
@@ -119,6 +128,8 @@ struct Loader {
     problem: Option<String>,
     collection_anchors: std::collections::BTreeSet<usize>,
     shared: bool,
+    reading: bool,
+    merge_key: Option<String>,
 }
 impl MarkedEventReceiver for Loader {
     fn on_event(&mut self, event: Event, mark: Marker) {
@@ -130,7 +141,11 @@ impl MarkedEventReceiver for Loader {
                 if id != 0 {
                     self.collection_anchors.insert(id);
                 }
-                if tag.is_some() {
+                let safe_tag = tag.as_ref().is_some_and(|t| {
+                    t.handle == "tag:yaml.org,2002:"
+                        && matches!(t.suffix.as_str(), "map" | "seq" | "set" | "omap" | "pairs")
+                });
+                if tag.is_some() && !(self.reading && safe_tag) {
                     self.problem = Some("unsupported YAML collection tag".into());
                 }
                 event
@@ -141,7 +156,20 @@ impl MarkedEventReceiver for Loader {
                 }
                 event
             }
-            Event::Scalar(value, style, id, tag) => match scalar(value, style, tag) {
+            Event::Scalar(value, style, id, tag)
+                if self.reading
+                    && (tag.as_ref().is_some_and(|t| {
+                        t.handle == "tag:yaml.org,2002:" && t.suffix == "merge"
+                    }) || tag.is_none() && style == TScalarStyle::Plain && value == "<<") =>
+            {
+                Event::Scalar(
+                    self.merge_key.clone().unwrap(),
+                    TScalarStyle::DoubleQuoted,
+                    id,
+                    None,
+                )
+            }
+            Event::Scalar(value, style, id, tag) => match scalar(value, style, tag, self.reading) {
                 Ok((value, style, tag)) => Event::Scalar(value, style, id, tag),
                 Err(problem) => {
                     self.problem = Some(problem);
@@ -158,6 +186,7 @@ fn scalar(
     mut value: String,
     style: TScalarStyle,
     tag: Option<Tag>,
+    reading: bool,
 ) -> std::result::Result<(String, TScalarStyle, Option<Tag>), String> {
     if tag.is_none() && style == TScalarStyle::Plain && value == "<<" {
         return Err("config.yaml uses YAML merge keys; edit it on the daemon host instead".into());
@@ -167,6 +196,16 @@ fn scalar(
     }
     let explicit = tag.as_ref().map(|t| format!("{}{}", t.handle, t.suffix));
     let tag = explicit.as_deref();
+    if reading
+        && matches!(
+            tag,
+            Some("tag:yaml.org,2002:timestamp" | "tag:yaml.org,2002:binary")
+        )
+    {
+        // State only projects maintainer settings. These safe values elsewhere
+        // need no JSON representation because the file is never rewritten.
+        return Ok((value, TScalarStyle::DoubleQuoted, None));
+    }
     if tag.is_some_and(|t| {
         !matches!(
             t,
@@ -201,7 +240,11 @@ fn scalar(
     } else if tag == Some("tag:yaml.org,2002:null") || tag.is_none() && null {
         value = "null".into();
     } else if tag == Some("tag:yaml.org,2002:int") || tag.is_none() && int.is_match(&value) {
-        value=integer(&value).ok_or_else(||"config.yaml holds an integer outside the supported range; edit it on the daemon host instead".to_owned())?.to_string();
+        match integer(&value) {
+            Some(number) => value = number.to_string(),
+            None if reading => return Ok((value, TScalarStyle::DoubleQuoted, None)),
+            None => return Err("config.yaml holds an integer outside the supported range; edit it on the daemon host instead".into()),
+        }
     } else if tag == Some("tag:yaml.org,2002:float") || tag.is_none() && float.is_match(&value) {
         let text = value.replace('_', "");
         let (sign, digits) = if let Some(v) = text.strip_prefix('-') {
@@ -217,18 +260,17 @@ fn scalar(
         } else {
             text.parse::<f64>().ok()
         };
-        let number = number
-            .filter(|n| n.is_finite())
-            .ok_or_else(|| "config.yaml holds an unsupported non-finite number".to_owned())?;
+        let number = match number.filter(|n| n.is_finite()) {
+            Some(number) => number,
+            None if reading => return Ok(("null".into(), TScalarStyle::Plain, None)),
+            None => return Err("config.yaml holds an unsupported non-finite number".into()),
+        };
         value = format!("{number:?}");
     } else {
-        let bytes = value.as_bytes();
-        if tag.is_none()
-            && bytes.len() >= 10
-            && bytes[4] == b'-'
-            && bytes[7] == b'-'
-            && bytes[..4].iter().all(u8::is_ascii_digit)
-        {
+        // Match PyYAML's timestamp resolver, including short month/day fields
+        // in datetimes; date-like plain strings must remain writable strings.
+        let timestamp = regex::Regex::new(r"^(?:[0-9]{4}-[0-9]{2}-[0-9]{2}|[0-9]{4}-[0-9]{1,2}-[0-9]{1,2}(?:[Tt]|[ \t]+)[0-9]{1,2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]*)?(?:[ \t]*(?:Z|[-+][0-9]{1,2}(?::[0-9]{2})?))?)$").unwrap();
+        if !reading && tag.is_none() && timestamp.is_match(&value) {
             return Err("config.yaml holds a YAML timestamp this command cannot rewrite; edit it on the daemon host instead".into());
         }
         return Ok((value, TScalarStyle::DoubleQuoted, None));
@@ -265,6 +307,10 @@ fn integer(value: &str) -> Option<i64> {
 }
 
 fn json_value(value: &Yaml) -> Result<Value> {
+    projected_value(value, None)
+}
+
+fn projected_value(value: &Yaml, merge_key: Option<&str>) -> Result<Value> {
     Ok(match value {
         Yaml::Null | Yaml::BadValue => Value::Null,
         Yaml::Boolean(v) => json!(v),
@@ -280,14 +326,38 @@ fn json_value(value: &Yaml) -> Result<Value> {
                 })?;
             Value::Number(n)
         }
-        Yaml::Array(v) => Value::Array(v.iter().map(json_value).collect::<Result<_>>()?),
+        Yaml::Array(v) => Value::Array(
+            v.iter()
+                .map(|v| projected_value(v, merge_key))
+                .collect::<Result<_>>()?,
+        ),
         Yaml::Hash(v) => {
             let mut out = serde_json::Map::new();
+            if let Some(key) = merge_key
+                && let Some(merged) = v.get(&Yaml::String(key.into()))
+            {
+                let sources = match merged {
+                    Yaml::Hash(_) => vec![merged],
+                    Yaml::Array(sources) => sources.iter().collect(),
+                    _ => return Err(Error::refused("invalid YAML merge value")),
+                };
+                for source in sources.into_iter().rev() {
+                    let Value::Object(source) = projected_value(source, merge_key)? else {
+                        return Err(Error::refused("invalid YAML merge value"));
+                    };
+                    out.extend(source);
+                }
+            }
             for (key, value) in v {
-                let key = key
-                    .as_str()
-                    .ok_or_else(|| Error::refused("config.yaml holds a non-string mapping key"))?;
-                out.insert(key.into(), json_value(value)?);
+                let Some(key) = key.as_str() else {
+                    if merge_key.is_some() {
+                        continue;
+                    }
+                    return Err(Error::refused("config.yaml holds a non-string mapping key"));
+                };
+                if Some(key) != merge_key {
+                    out.insert(key.into(), projected_value(value, merge_key)?);
+                }
             }
             Value::Object(out)
         }
@@ -304,10 +374,35 @@ pub(super) fn read(path: &Path, rewriting: bool) -> Result<Value> {
     // The ordinary loader first validates structure and duplicate mapping keys.
     let raw = YamlLoader::load_from_str(&text)
         .map_err(|_| Error::refused("cannot read the daemon configuration: invalid YAML"))?;
-    let mut loader = Loader::default();
+    #[derive(Default)]
+    struct Events(Vec<(Event, Marker)>);
+    impl MarkedEventReceiver for Events {
+        fn on_event(&mut self, event: Event, mark: Marker) {
+            self.0.push((event, mark));
+        }
+    }
+    let mut events = Events::default();
     Parser::new_from_str(&text)
-        .load(&mut loader, true)
+        .load(&mut events, true)
         .map_err(|_| Error::refused("cannot read the daemon configuration: invalid YAML"))?;
+    // A decoded scalar can contain escaped NULs. Choose a marker absent from
+    // every decoded scalar so a quoted literal `<<` never becomes a merge key.
+    let mut merge_key = "\0maintainer-merge".to_owned();
+    while events
+        .0
+        .iter()
+        .any(|(event, _)| matches!(event, Event::Scalar(value, ..) if value == &merge_key))
+    {
+        merge_key.push('-');
+    }
+    let mut loader = Loader {
+        reading: !rewriting,
+        merge_key: (!rewriting).then_some(merge_key),
+        ..Default::default()
+    };
+    for (event, mark) in events.0 {
+        loader.on_event(event, mark);
+    }
     if let Some(problem) = loader.problem {
         return Err(Error::refused(problem));
     }
@@ -329,7 +424,13 @@ pub(super) fn read(path: &Path, rewriting: bool) -> Result<Value> {
     }
     let value = docs
         .first()
-        .map(json_value)
+        .map(|value| {
+            if rewriting {
+                json_value(value)
+            } else {
+                projected_value(value, loader.merge_key.as_deref())
+            }
+        })
         .transpose()?
         .unwrap_or_else(|| json!({}));
     Ok(if value.is_object() { value } else { json!({}) })
@@ -355,6 +456,9 @@ pub(super) fn write(rp: &str, origin: &str) -> Result<Value> {
     let section = section.as_object_mut().ok_or_else(|| {
         Error::refused("coordination.maintainer in the config file is not a mapping")
     })?;
+    if let Some(problem) = rate_limit_problem(&Value::Object(section.clone())) {
+        return Err(Error::new(problem, 2));
+    }
     section.insert("rp_id".into(), json!(rp));
     section.insert("origin".into(), json!(origin));
     let bytes = json_yaml(&data).into_bytes();
@@ -462,12 +566,20 @@ fn json_yaml(value: &Value) -> String {
                 .iter()
                 .map(|(key, value)| format!(
                     "{}:{}",
-                    serde_json::to_string(key).expect("string serialization"),
+                    json_yaml(&Value::String(key.clone())),
                     json_yaml(value)
                 ))
                 .collect::<Vec<_>>()
                 .join(",")
         ),
+        Value::String(_) => serde_json::to_string(value)
+            .expect("string serialization")
+            .chars()
+            .map(|c| match c {
+                '\u{7f}'..='\u{9f}' | '\u{2028}' | '\u{2029}' => format!("\\u{:04x}", c as u32),
+                c => c.to_string(),
+            })
+            .collect(),
         _ => serde_json::to_string(value).expect("scalar serialization"),
     }
 }

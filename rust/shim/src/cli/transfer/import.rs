@@ -613,6 +613,16 @@ async fn admit(
             "{others} other connection(s) hold this database — a running daemon? Stop it first (Docker tier: `docker compose -f ops/docker-compose.yml stop pseudolife-daemon`; pip tiers: stop the serve process), then retry. Pass --force only if you know the connections are inert."
         )));
     }
+    // psycopg uses the server encoding; the native client decodes UTF-8.
+    // Defer before ensure_schema can commit migrations or compatibility repairs.
+    if sql::scalar(client, "SHOW server_encoding")
+        .await
+        .map_err(defer)?
+        .as_deref()
+        != Some("UTF8")
+    {
+        return Err(Stop::Defer);
+    }
     super::schema::ensure(client)
         .await
         .map_err(|error| match error {

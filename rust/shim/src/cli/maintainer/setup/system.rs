@@ -207,8 +207,9 @@ pub(super) async fn host(tier: &Tier, args: &[&str]) -> Result<Value> {
             let reading = args[0] == "--host-state";
             Error::new(
                 format!(
-                    "{} the daemon's config failed: {error}",
-                    if reading { "reading" } else { "writing" }
+                    "{} the daemon's config failed: {}{error}",
+                    if reading { "reading" } else { "writing" },
+                    if reading { "" } else { "refused: " }
                 ),
                 if reading { 4 } else { 5 },
             )

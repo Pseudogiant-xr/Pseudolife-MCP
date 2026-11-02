@@ -57,7 +57,7 @@ the `principals` / `meta` column types and the database clock, so nothing
 after the request can meet a value this client cannot decode or a date it
 cannot print. List and revoke make no request.
 
-- The lite tier's embedded bank remains outside this transport slice.
+- The lite tier's embedded bank remains outside this transport slice: without a database URL or daemon container, native invite refuses instead of opening the embedded bank.
 - A DSN the shared client does not admit, or a connection it cannot open or
   set up. The oracle asks `/health` first and then prints `could not connect
   to the bank's database (<Class>)`, exit 1 (or the health refusal, when

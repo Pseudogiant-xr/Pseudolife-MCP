@@ -1290,7 +1290,7 @@ jobs:
           }
           if ($rows -contains 'maintainer_setup') {
             $env:R1_PAIR_CANDIDATE = $candidate
-            python -m pytest -q rust/cli_harness/test_maintainer_setup_terminal.py rust/cli_harness/test_operator_transport.py::test_recovery_drop_checks_database_before_terminating -ra --durations=30 --junitxml (Join-Path $env:RUNNER_TEMP 'junit/cli-setup-terminal.xml')
+            python -m pytest -q rust/cli_harness/test_maintainer_setup_terminal.py rust/cli_harness/test_operator_transport.py rust/cli_harness/test_audit_stats.py rust/cli_harness/test_maintainer_setup_native.py -ra --durations=30 --junitxml (Join-Path $env:RUNNER_TEMP 'junit/cli-setup-terminal.xml')
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
           $live = $rows | ForEach-Object { '--row'; $_ }

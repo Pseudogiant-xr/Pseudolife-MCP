@@ -1408,7 +1408,9 @@ function python {
         expected_terminals.append("rust/cli_harness/test_maintainer_setup_terminal.py")
     assert [call[3] for call in terminals] == expected_terminals
     if "maintainer_setup" in rows:
-        assert "rust/cli_harness/test_operator_transport.py::test_recovery_drop_checks_database_before_terminating" in terminals[-1]
+        for required in ("test_operator_transport.py", "test_audit_stats.py",
+                         "test_maintainer_setup_native.py"):
+            assert f"rust/cli_harness/{required}" in terminals[-1]
     calls = [call for call in calls if call not in terminals]
     assert len(calls) == 2
     for call, golden in zip(calls, (False, True)):

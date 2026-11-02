@@ -248,7 +248,9 @@ async fn host(args: &[&str]) -> Result<Value> {
                 origin.clone()
             };
             let problem = match (rp.as_str(), origin.as_str()) {
-                (Some(rp), Some(origin)) => config::problem(rp, origin),
+                (Some(rp), Some(origin)) => {
+                    config::rate_limit_problem(section).or_else(|| config::problem(rp, origin))
+                }
                 _ => Some("coordination.maintainer.rp_id and .origin must be strings".into()),
             };
             let (keys, error) = match keys().await {
@@ -259,7 +261,10 @@ async fn host(args: &[&str]) -> Result<Value> {
                 json!({"config_path":path,"rp_id":rp,"origin":origin,"problem":problem,"keys":keys,"keys_error":error}),
             )
         }
-        ["--host-write", rp, origin] => config::write(rp, origin),
+        ["--host-write", rp, origin] => {
+            refuse_lite()?;
+            config::write(rp, origin)
+        }
         _ => Err(Error::new(
             "usage: pseudolife-mcp maintainer setup --host-state | --host-write <rp_id> <origin>",
             2,
@@ -269,35 +274,17 @@ async fn host(args: &[&str]) -> Result<Value> {
 
 async fn keys() -> Result<Value> {
     let (data, _) = config::data_dir()?;
-    let mut embedded = None;
     let dsn = if let Some(value) = std::env::var("PSEUDOLIFE_MCP_DATABASE_URL")
         .ok()
         .filter(|v| !v.is_empty())
     {
         value
     } else if data.join("embedded_pg/PG_VERSION").is_file() {
-        let platform = pg::embedded::Platform::current();
-        let root = pg::runtime::default_root(
-            platform,
-            &|key| std::env::var_os(key),
-            dirs::home_dir().as_deref(),
-        )
-        .ok_or_else(|| Error::refused("native PostgreSQL runtime is unavailable"))?;
-        let artifacts = pg::runtime::current_artifacts()
-            .map_err(|_| Error::refused("native PostgreSQL runtime is unavailable"))?;
-        let runtime = pg::runtime::locate(&root, artifacts)
-            .map_err(|_| Error::refused("native PostgreSQL runtime is unavailable"))?
-            .ok_or_else(|| Error::refused("native PostgreSQL runtime is unavailable"))?;
-        let instance =
-            pg::embedded::attach_or_start(&data, &runtime, &pg::embedded_secret::CredentialSecrets)
-                .map_err(|_| Error::refused("could not open the existing lite bank"))?;
-        let dsn = instance.dsn();
-        embedded = Some(instance);
-        dsn
+        return Err(lite_refusal());
     } else {
         return Err(Error::refused("NoBank"));
     };
-    let result = async {
+    async {
         let dsn = pg::Dsn::parse(&dsn).map_err(|_| Error::refused("OperationalError"))?;
         let session = tokio::time::timeout(std::time::Duration::from_secs(5), pg::Session::open(&dsn))
             .await.map_err(|_| Error::refused("OperationalError"))?
@@ -320,13 +307,27 @@ async fn keys() -> Result<Value> {
         }
         let _ = session.close().await;
         Ok(json!(keys))
-    }.await;
-    if let Some(instance) = embedded {
-        instance
-            .stop()
-            .map_err(|_| Error::refused("could not stop the lite bank started by setup"))?;
+    }.await
+}
+
+fn lite_refusal() -> Error {
+    Error::refused(
+        "phase4-embedded-pg-deferred: native maintainer setup does not support the lite tier; run `python -m pseudolife_memory.cli maintainer setup` for this bank",
+    )
+}
+
+fn refuse_lite() -> Result<()> {
+    if std::env::var_os("PSEUDOLIFE_MCP_DATABASE_URL").is_some_and(|v| !v.is_empty()) {
+        return Ok(());
     }
-    result
+    if config::data_dir()?
+        .0
+        .join("embedded_pg/PG_VERSION")
+        .is_file()
+    {
+        return Err(lite_refusal());
+    }
+    Ok(())
 }
 
 fn bank_error(error: tokio_postgres::Error) -> Error {
@@ -351,6 +352,9 @@ async fn setup(args: Args, pending: Pending) -> Result<u8> {
         )));
     }
     let tier = system::tier().await?;
+    if matches!(tier, Tier::Local) {
+        refuse_lite()?;
+    }
     let state = system::host(&tier, &["--host-state"]).await?;
     let configured = state["problem"].is_null();
     let ts = if configured {

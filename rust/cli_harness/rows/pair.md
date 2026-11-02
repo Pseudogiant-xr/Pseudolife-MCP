@@ -80,8 +80,6 @@ Others:
   oracle's own way) where the oracle renames without replace; on a volume
   without hard links the native move refuses (kept-name warning, exit 0)
   where Python renames.
-- Token verification follows neither same-origin nor cross-origin redirects;
-  both refusal cases preserve the token for recovery and record no redirected request.
 - Windows registry proxy settings: the native token check never uses a
   proxy through registry settings; urllib's `getproxies()` reads the registry when no proxy variable
   is set.
@@ -91,6 +89,12 @@ Others:
   some other errnos to further subclasses.
 
 ## Hosted CI and goldens
+
+Both Python and Rust token verification refuse same-origin and cross-origin
+redirects, preserve the token for recovery, and record no redirected request.
+The plain-HTTP warning fixtures use the DNS-independent numeric origin `127.1`,
+which reaches the loopback fixture without passing either arm's strict loopback
+classification; both cases must pair successfully and emit the warning.
 
 Both Parity lanes run the row live and against `goldens/pair.<os>.json`.
 `refused-unreachable` names core's closed loopback port (`127.0.0.1:9`)

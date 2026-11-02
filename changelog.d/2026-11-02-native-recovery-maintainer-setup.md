@@ -6,3 +6,6 @@
   state before committing a credential. Setup preserves unrelated configuration,
   backs up replaced files, asks before host changes, and keeps the separate
   Console passkey verification step.
+- Setup refuses unsupported lite banks before changing configuration, validates
+  retained recipient limits, reads safe YAML tags and merges, and escapes
+  YAML-sensitive Unicode when writing configuration.

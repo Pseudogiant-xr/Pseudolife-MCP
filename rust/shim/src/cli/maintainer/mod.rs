@@ -81,9 +81,11 @@ fn help(arguments: &[OsString]) -> Option<&'static str> {
 }
 
 /// Run the action after `maintainer`; `None` defers before any effect.
-pub fn run(arguments: Vec<OsString>) -> Option<u8> {
+pub fn run(arguments: Vec<OsString>) -> Option<i32> {
     if arguments.first().is_some_and(|value| value == "setup") {
-        return Some(setup::run(arguments.into_iter().skip(1).collect()));
+        return Some(i32::from(setup::run(
+            arguments.into_iter().skip(1).collect(),
+        )));
     }
     if let Some(help) = help(&arguments) {
         let _ = print(&help.replace("\r\n", "\n"));
@@ -96,14 +98,14 @@ pub fn run(arguments: Vec<OsString>) -> Option<u8> {
         .ok()?;
     runtime.block_on(async {
         if let Some(dsn) = dsn() {
-            return bank::run(&dsn, action).await;
+            return bank::run(&dsn, action).await.map(i32::from);
         }
         if std::env::var_os("PSEUDOLIFE_MCP_DATABASE_URL").is_some_and(|v| !v.is_empty()) {
             // Preserve the shared client's explicit DSN-domain boundary.
             return None;
         }
         if let Some(code) = crate::pg::resolution::run_in_daemon("maintainer", &arguments, None, None).await {
-            return Some(code as u8);
+            return Some(code);
         }
         crate::stderrln!("error: no bank found: set PSEUDOLIFE_MCP_DATABASE_URL to the bank's database URL, or run where the lite tier's data dir holds one (Docker tier: start the daemon, or run `docker exec -it pseudolife-mcp-daemon pseudolife-mcp maintainer ...` on its host)");
         Some(2)

@@ -427,7 +427,10 @@ def case(case_id: str, argv: list[str], *, port: int | None = None, url: str | N
 
 def target(remote: bool = False) -> tuple[int, str]:
     port = free_port()
-    return port, (f"http://localhost.:{port}" if remote else f"http://127.0.0.1:{port}")
+    # The legacy numeric form resolves to loopback without DNS, but neither
+    # arm's strict IP parser classifies it as a loopback origin. This exercises
+    # the plain-HTTP warning without depending on a localhost DNS search path.
+    return port, (f"http://127.1:{port}" if remote else f"http://127.0.0.1:{port}")
 
 
 def seed_file(rel: str, token: str):

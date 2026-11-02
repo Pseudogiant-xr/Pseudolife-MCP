@@ -14,7 +14,8 @@ import pytest
 
 @pytest.mark.skipif(os.name != "posix", reason="POSIX pipe interruption regression")
 @pytest.mark.parametrize("arm", ["python", "rust"])
-def test_interrupt_with_open_partial_stdin(tmp_path, arm):
+@pytest.mark.parametrize("termination", ["SIGINT", "SIGTERM", "SIGHUP", "SIGKILL"])
+def test_interrupt_with_open_partial_stdin(tmp_path, arm, termination):
     import array
     import fcntl
     import termios
@@ -45,9 +46,13 @@ def test_interrupt_with_open_partial_stdin(tmp_path, arm):
             assert child.poll() is None, child.communicate()
             assert time.monotonic() < deadline, "CLI never read its input"
             time.sleep(0.01)
-        child.send_signal(signal.SIGINT)
-        assert child.wait(timeout=3) in (-signal.SIGINT, 130)
+        assert child.poll() is None, child.communicate()
+        during = fcntl.fcntl(reader, fcntl.F_GETFL)
+        signum = getattr(signal, termination)
+        child.send_signal(signum)
+        assert child.wait(timeout=3) in (-signum, 128 + signum)
         assert fcntl.fcntl(reader, fcntl.F_GETFL) == flags
+        assert during == flags, "reading a partial line changed the shared pipe flags"
         assert not token.exists()
     finally:
         if child.poll() is None:

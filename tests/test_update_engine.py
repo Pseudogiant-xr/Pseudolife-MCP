@@ -982,6 +982,35 @@ def test_python_operator_path_remains_available(engine_host, monkeypatch, return
     assert commands[-1][1] == "exec"
 
 
+@pytest.mark.parametrize("helper,args,tail", [
+    ("host", ("state",), ["maintainer", "setup", "--host-state"]),
+    ("host", ("write", "localhost", "http://localhost:8765"),
+     ["maintainer", "setup", "--host-write", "localhost", "http://localhost:8765"]),
+    ("maintainer", ("enrol-code",), ["maintainer", "enrol-code"]),
+])
+def test_setup_after_rust_activation_uses_the_native_cli(engine_host, monkeypatch, helper, args, tail):
+    from pseudolife_memory import maintainer_setup, update_engine as eng
+
+    state = engine_host
+    eng.deploy_engine(state["update"](), state["repo"])
+    monkeypatch.setenv("PSEUDOLIFE_DOCKER", "fixture-docker")
+    commands = []
+
+    def docker(argv, **kwargs):
+        commands.append(argv)
+        output = (state["running"]["Config"]["Labels"][eng.ENGINE_LABEL]
+                  if argv[1] == "inspect" else '{"fixture": true}')
+        return subprocess.CompletedProcess(argv, 0, output, "")
+
+    monkeypatch.setattr(maintainer_setup, "run", docker)
+    expected = ["fixture-docker", "exec", maintainer_setup.DAEMON_CONTAINER, "pseudolife-mcp", *tail]
+    if helper == "host":
+        assert maintainer_setup._host("docker", *args) == {"fixture": True}
+        assert commands[-1] == expected
+    else:
+        assert maintainer_setup._maintainer("docker", *args) == expected
+
+
 @pytest.mark.parametrize("docker_exit", [0, 7])
 @pytest.mark.parametrize("auth_source", ["shell", "env-file"])
 def test_rust_rollback_commits_selection_only_after_recreate(engine_host, monkeypatch, docker_exit, auth_source):

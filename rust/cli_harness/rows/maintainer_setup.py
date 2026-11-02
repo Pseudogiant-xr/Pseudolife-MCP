@@ -190,6 +190,13 @@ def cases():
         core.Case("setup-check-unreadable-keys", ["maintainer", "setup", "--check"], env=dict(env),
                   setup=_setup(CONFIGURED), after=_config_after(False), programs=("docker",)),
     ]
+    for name, cap in [("negative", "-1"), ("boolean", "true"), ("fraction", "1.5"),
+                      ("string", "'7'"), ("null", "null")]:
+        original = ("coordination:\n  maintainer:\n"
+                    f"    maintainer_per_recipient_per_hour: {cap}\n")
+        result.append(core.Case("setup-invalid-cap-" + name, base + ["--yes"], env=dict(env),
+                                daemon=_daemon(), setup=_setup(original), after=_config_after(False),
+                                programs=("docker", "tailscale")))
     for engine in ("rust", "python", "unlabelled"):
         for mode, extra, expected in [
             ("active", ["--check"], ["--host-state"]),

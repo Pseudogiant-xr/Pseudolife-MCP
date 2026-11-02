@@ -159,32 +159,47 @@ fn normalize_code(text: &str) -> Result<Option<String>, Defer> {
 /// line end (universal newlines), decoding the UTF-8 CLI stream.
 #[allow(unsafe_code)]
 async fn read_line() -> Result<String, Defer> {
+    #[cfg(not(unix))]
     use std::io::Read;
-    #[cfg(unix)]
-    let _flags = {
-        struct Restore(i32);
-        impl Drop for Restore {
-            fn drop(&mut self) {
-                // stdin remains open throughout this CLI invocation.
-                unsafe { libc::fcntl(libc::STDIN_FILENO, libc::F_SETFL, self.0) };
-            }
-        }
-        // A blocking stdin read would prevent the surrounding SIGINT select
-        // from running. Restore the shared descriptor flags on cancellation.
-        let flags = unsafe { libc::fcntl(libc::STDIN_FILENO, libc::F_GETFL) };
-        if flags < 0
-            || unsafe { libc::fcntl(libc::STDIN_FILENO, libc::F_SETFL, flags | libc::O_NONBLOCK) }
-                < 0
-        {
-            return Err(Defer);
-        }
-        Restore(flags)
-    };
     let mut line = Vec::new();
+    #[cfg(not(unix))]
     let mut stdin = std::io::stdin().lock();
     let mut byte = [0u8; 1];
     loop {
-        match stdin.read(&mut byte) {
+        #[cfg(unix)]
+        let read = {
+            // Check readiness without changing the open-file-description flags
+            // shared with the parent. SIGTERM/SIGHUP/SIGKILL cannot run Drop.
+            // poll also accepts regular files, unlike epoll registration.
+            let mut descriptor = libc::pollfd {
+                fd: libc::STDIN_FILENO,
+                events: libc::POLLIN,
+                revents: 0,
+            };
+            let ready = unsafe { libc::poll(&mut descriptor, 1, 0) };
+            if ready == 0 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+                continue;
+            }
+            if ready < 0 {
+                if std::io::Error::last_os_error().kind() == std::io::ErrorKind::Interrupted {
+                    tokio::task::yield_now().await;
+                    continue;
+                }
+                return Err(Defer);
+            }
+            // Read exactly one byte directly: StdinLock can buffer ahead, and
+            // buffered bytes would no longer appear in the readiness check.
+            let count = unsafe { libc::read(libc::STDIN_FILENO, byte.as_mut_ptr().cast(), 1) };
+            if count < 0 {
+                Err(std::io::Error::last_os_error())
+            } else {
+                Ok(count as usize)
+            }
+        };
+        #[cfg(not(unix))]
+        let read = stdin.read(&mut byte);
+        match read {
             Ok(0) => break,
             Ok(_) => {
                 if matches!(byte[0], b'\n' | b'\r') {
@@ -197,8 +212,6 @@ async fn read_line() -> Result<String, Defer> {
                 tokio::task::yield_now().await;
             }
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                // Regular redirected files cannot be registered with epoll;
-                // this also handles pipes without a blocking runtime worker.
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
             Err(_) => return Err(Defer),

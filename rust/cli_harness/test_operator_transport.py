@@ -1,11 +1,24 @@
 """Exercise the oracle side of native transport rows with real child processes."""
 import sys
+import base64
 from pathlib import Path
 
 import pytest
 
 from . import core
 from .rows import invite, lease_transport, pair
+
+
+@pytest.mark.parametrize("case", [case for case in pair.cases()
+                                 if case.id in ("remote-plain-http", "remote-plain-http-json")],
+                         ids=lambda case: case.id)
+def test_plain_http_warning_reaches_successful_pairing(case, tmp_path):
+    target = core.python_target(sys.executable, Path(__file__).resolve().parents[2])
+    obs = core.run_arm(case, target, tmp_path / "arm")
+    assert obs["exit"] == 0
+    output = base64.b64decode(obs["stdout"]) + base64.b64decode(obs["stderr"])
+    assert b"plain HTTP" in output
+    assert any(request["target"] == "/api/pair" for request in obs["requests"])
 
 
 @pytest.mark.parametrize("case", invite._transport_cases(), ids=lambda case: case.id)

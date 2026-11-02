@@ -197,7 +197,10 @@ def _state() -> dict:
     section = ((_read_config(path).get("coordination") or {}).get("maintainer") or {})
     rp_id, origin = section.get("rp_id", ""), section.get("origin", "")
     try:
-        problem = MaintainerConfig(rp_id=rp_id, origin=origin).problem()
+        problem = MaintainerConfig(
+            rp_id=rp_id, origin=origin,
+            maintainer_per_recipient_per_hour=section.get("maintainer_per_recipient_per_hour", 30),
+        ).problem()
     except ValueError as exc:
         problem = str(exc)
     keys, keys_error = _bank_keys()
@@ -217,6 +220,11 @@ def _write(rp_id: str, origin: str) -> dict:
     section = coordination.setdefault("maintainer", {})
     if not isinstance(section, dict):
         raise ValueError("coordination.maintainer in the config file is not a mapping")
+    from pseudolife_memory.utils.config import MaintainerConfig
+    MaintainerConfig(
+        rp_id=rp_id, origin=origin,
+        maintainer_per_recipient_per_hour=section.get("maintainer_per_recipient_per_hour", 30),
+    )
     section.update(rp_id=rp_id, origin=origin)
     path.parent.mkdir(parents=True, exist_ok=True)
     backup = None

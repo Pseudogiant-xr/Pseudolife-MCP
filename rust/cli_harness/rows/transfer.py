@@ -520,10 +520,20 @@ def _export_after(bank: str):
     return after
 
 
-def _import_setup(archive: str, seed=None, holder=False, schema=True):
+def _import_setup(archive: str, seed=None, holder=False, schema=True, ascii_bank=False):
     def setup(arm: core.Arm) -> None:
         _sources()
-        _create(TGT, schema=schema)
+        if ascii_bank:
+            assert not schema
+            _CREATED.add(TGT)
+            _bank.drop(TGT)
+            # template0 allows a different encoding without changing the shared
+            # vector template. Native admission must defer before needing DDL.
+            with _bank._admin() as conn:
+                conn.execute(f'CREATE DATABASE "{TGT}" TEMPLATE template0 '
+                             "ENCODING 'SQL_ASCII' LC_COLLATE 'C' LC_CTYPE 'C'")
+        else:
+            _create(TGT, schema=schema)
         if seed:
             with _bank.connect(TGT) as conn:
                 seed(conn)
@@ -776,6 +786,12 @@ def _cases() -> list[core.Case]:
                   rules=("transfer-schema-refusal",)) for label,value in
           [("string",'"58"'),("null","null"),("bool","true"),("zero","0")]],
         _import("import-blank-bank-guard-first", "current", schema=False, holder=True),
+        _import("import-non-utf8-defers", "current", schema=False, ascii_bank=True,
+                rules=("expect-import-deferred",),
+                note="SQL_ASCII: defer before schema initialization changes the blank bank"),
+        _import("import-non-utf8-bank-guard-first", "current", schema=False,
+                ascii_bank=True, holder=True,
+                note="other connections are refused before checking the server encoding"),
         # Review of #678 (2026-10-10): what a failed COMMIT may claim.
         _import("import-commit-refused-fails", "current", seed=_commit_trigger("raise"),
                 rules=("expect-import-commit-refused",),
