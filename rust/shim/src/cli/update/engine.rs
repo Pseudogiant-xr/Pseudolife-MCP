@@ -118,8 +118,8 @@ pub(super) fn selected_checkout(u: &mut Update) -> Result<Option<PathBuf>> {
     if current != "rust" || u.o.clients_only {
         return Ok(None);
     }
+    u.selected_engine = current.into();
     if let Some(repo) = repo {
-        u.selected_engine = current.into();
         return Ok(Some(repo));
     }
     if labels[RELEASE_LABEL].as_str().is_some() {
@@ -190,6 +190,44 @@ pub(super) fn verify_identity(config: &Value, running: &Value, url: &str) -> Res
     verify_bank_identity(config, running)?;
     verify_endpoint(config, url)
 }
+pub(super) fn verify_checkout_identity(
+    config: &Value,
+    running: &Value,
+    daemon: &str,
+) -> Result<()> {
+    let project = config["name"].as_str().filter(|name| !name.is_empty());
+    let labels = &running["Config"]["Labels"];
+    if running["Id"] != daemon
+        || project.is_none()
+        || project != labels["com.docker.compose.project"].as_str()
+        || labels["com.docker.compose.service"] != DAEMON_SERVICE
+    {
+        return Err(UpdateError::usage(
+            "the daemon does not belong to this checkout's Compose project; restore its project files and container before updating; nothing was deployed",
+        ));
+    }
+    verify_bank_identity(config, running)
+}
+fn bind_source(source: &str) -> String {
+    let slashes = source.replace('\\', "/");
+    let path = slashes
+        .strip_prefix("//./")
+        .or_else(|| slashes.strip_prefix("//?/"))
+        .unwrap_or(&slashes);
+    if let Some(host) = path.strip_prefix("/run/desktop/mnt/host/")
+        && host.as_bytes().first().is_some_and(u8::is_ascii_alphabetic)
+        && host.as_bytes().get(1) == Some(&b'/')
+    {
+        return format!("{}:{}", host[..1].to_ascii_lowercase(), &host[1..]);
+    }
+    if path.as_bytes().first().is_some_and(u8::is_ascii_alphabetic)
+        && path.as_bytes().get(1..3) == Some(b":/")
+    {
+        return format!("{}{}", path[..1].to_ascii_lowercase(), &path[1..]);
+    }
+    // Preserve POSIX case and backslashes: they can name distinct files.
+    source.to_owned()
+}
 pub(super) fn verify_bank_identity(config: &Value, running: &Value) -> Result<()> {
     let service = &config["services"][DAEMON_SERVICE];
     let env = &service["environment"];
@@ -226,6 +264,9 @@ pub(super) fn verify_bank_identity(config: &Value, running: &Value) -> Result<()
         "cannot read the daemon's mounts; restore its Compose project and retry; nothing was changed"
     ))?;
     for volume in service["volumes"].as_array().into_iter().flatten() {
+        if volume["type"] == "tmpfs" || volume["source"].as_str().is_none_or(str::is_empty) {
+            continue;
+        }
         let target = volume["target"].as_str();
         let actual = mounts.iter().find(|m| m["Destination"].as_str() == target);
         let expected_source = if volume["type"] == "volume" {
@@ -241,8 +282,14 @@ pub(super) fn verify_bank_identity(config: &Value, running: &Value) -> Result<()
             } else {
                 m["Source"].as_str()
             };
-            expected_source.is_some()
-                && source == expected_source
+            let same_source = match (source, expected_source) {
+                (Some(actual), Some(expected)) if volume["type"] == "bind" => {
+                    bind_source(actual) == bind_source(expected)
+                }
+                (Some(actual), Some(expected)) => actual == expected,
+                _ => false,
+            };
+            same_source
                 && m["Type"] == volume["type"]
                 && m["RW"].as_bool() == Some(volume["read_only"] != true)
         });
@@ -253,6 +300,12 @@ pub(super) fn verify_bank_identity(config: &Value, running: &Value) -> Result<()
         }
     }
     for mount in mounts {
+        if mount["Type"] == "tmpfs"
+            || (mount["Source"].as_str().is_none_or(str::is_empty)
+                && mount["Name"].as_str().is_none_or(str::is_empty))
+        {
+            continue;
+        }
         if !service["volumes"]
             .as_array()
             .is_some_and(|volumes| volumes.iter().any(|v| v["target"] == mount["Destination"]))

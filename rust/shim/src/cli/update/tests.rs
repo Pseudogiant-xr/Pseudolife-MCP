@@ -230,6 +230,49 @@ fn native_update_identity_checks_every_effective_mount() {
         .pop();
     assert!(engine::verify_bank_identity(&config, &running).is_err());
 }
+
+#[test]
+fn native_update_mount_identity_normalizes_windows_docker_desktop_sources() {
+    for actual in [
+        r"c:\fixture\config.yaml",
+        "c:/fixture/config.yaml",
+        "/run/desktop/mnt/host/c/fixture/config.yaml",
+        "//./C:/fixture/config.yaml",
+        r"\\?\C:\fixture\config.yaml",
+    ] {
+        let config = json!({"services":{DAEMON_SERVICE:{"environment":{"PSEUDOLIFE_MCP_DATABASE_URL":"fixture"},"volumes":[
+            {"type":"volume","source":"state","target":"/data"},
+            {"type":"bind","source":r"C:\fixture\config.yaml","target":"/config","read_only":true}
+        ]}},"volumes":{"state":{"name":"fixture-state"}}});
+        let mut running = json!({"Config":{"Env":["PSEUDOLIFE_MCP_DATABASE_URL=fixture"]},"Mounts":[
+            {"Type":"volume","Name":"fixture-state","Destination":"/data","RW":true},
+            {"Type":"bind","Source":actual,"Destination":"/config","RW":false}
+        ]});
+        assert!(
+            engine::verify_bank_identity(&config, &running).is_ok(),
+            "{actual}"
+        );
+        running["Mounts"][1]["Source"] = json!("/run/desktop/mnt/host/d/fixture/config.yaml");
+        assert!(engine::verify_bank_identity(&config, &running).is_err());
+    }
+}
+
+#[test]
+fn native_update_mount_identity_ignores_tmpfs_and_sourceless_mounts() {
+    let config = json!({"services":{DAEMON_SERVICE:{"environment":{"PSEUDOLIFE_MCP_DATABASE_URL":"fixture"},"volumes":[
+        {"type":"volume","source":"state","target":"/data"},
+        {"type":"volume","target":"/cache"},
+        {"type":"tmpfs","target":"/tmp"}
+    ]}},"volumes":{"state":{"name":"fixture-state"}}});
+    let running = json!({"Config":{"Env":["PSEUDOLIFE_MCP_DATABASE_URL=fixture"]},"Mounts":[
+        {"Type":"volume","Name":"fixture-state","Destination":"/data","RW":true},
+        {"Type":"volume","Name":"generated-anonymous","Destination":"/cache","RW":true},
+        {"Type":"tmpfs","Destination":"/tmp","RW":true},
+        {"Type":"tmpfs","Destination":"/other-tmp","RW":true},
+        {"Type":"bind","Destination":"/sourceless","RW":true}
+    ]});
+    assert!(engine::verify_bank_identity(&config, &running).is_ok());
+}
 #[test]
 fn native_update_rollback_records_commit_after_recreation() {
     let temp = Temp::new();

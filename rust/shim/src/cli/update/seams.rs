@@ -162,7 +162,14 @@ pub(crate) fn download(url: &str) -> Result<Vec<u8>> {
             .timeout(Duration::from_secs(120))
             .build()
             .map_err(|_| UpdateError::new("cannot initialize release download"))?;
-        let response = client.get(url).send().await.and_then(|r| r.error_for_status())
+        let response = client.get(url).send().await
+            .map_err(|_| UpdateError::usage("cannot download the release asset; check the published version and retry; nothing was deployed"))?;
+        if response.status() == reqwest::StatusCode::NOT_FOUND {
+            return Err(UpdateError::usage(
+                "this release does not publish the native Compose bundle and checksums; use the Python updater, or --tag a release that ships pseudolife-compose-<version>.tar.gz; nothing was deployed",
+            ));
+        }
+        let response = response.error_for_status()
             .map_err(|_| UpdateError::usage("cannot download the release asset; check the published version and retry; nothing was deployed"))?;
         if response
             .content_length()

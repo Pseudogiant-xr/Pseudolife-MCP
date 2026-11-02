@@ -26,6 +26,11 @@ pub(super) fn verified_compose(
         .filter_map(|line| line.split_once("  "))
         .filter(|(_, file)| *file == name)
         .collect();
+    if matches.is_empty() {
+        return Err(UpdateError::usage(
+            "this release does not publish checksums for its native Compose bundle; use the Python updater, or --tag a release that ships pseudolife-compose-<version>.tar.gz; nothing was deployed",
+        ));
+    }
     if matches.len() != 1
         || matches[0].0.len() != 64
         || !matches[0]
@@ -149,11 +154,6 @@ pub(super) fn publish_compose(
 
 impl Update {
     fn release_compose(&self, target: &str) -> Result<PathBuf> {
-        if version_key(target) <= version_key("0.21.0") {
-            return Err(UpdateError::usage(
-                "this release predates the native Compose bundle; use the Python updater, or --tag a release that ships pseudolife-compose-<version>.tar.gz; nothing was deployed",
-            ));
-        }
         let base = std::env::var("PSEUDOLIFE_RELEASE_BASE_URL").unwrap_or_else(|_| {
             "https://github.com/Pseudogiant-xr/Pseudolife-MCP/releases/download".into()
         });
@@ -313,7 +313,8 @@ impl Update {
                 "Rust images are not published; use --engine rust --checkout <repo> (checkout mode); nothing was changed",
             ));
         }
-        let activating = self.o.engine.is_some() || truthy(&labels[engine::ACTIVATION_LABEL]);
+        let activating = self.o.engine.is_some()
+            || (choice != "python" && truthy(&labels[engine::ACTIVATION_LABEL]));
         if current.as_deref() == Some(&target) && !self.o.reinstall && choice == selected {
             self.step(format!("the daemon already runs {target}; nothing to do (--reinstall to recreate it anyway, --clients-only for the shim and plugin)"));
             return Ok(());
@@ -630,7 +631,8 @@ impl Update {
         let env = compose_environment(&[env_file], &engine::build_environment(&tree));
         let before = self.daemon_health();
         self.schema_before = before.as_ref().and_then(|v| v["schema"].as_i64());
-        // Resolve this project's bank and health endpoint before backup.
+        // Resolve this project's container and bank before backup. Plain
+        // deployments may reach health through a proxy or a non-loopback bind.
         let mut discovery = vec!["compose".into()];
         discovery.extend(compose.clone());
         discovery.extend(["config".into(), "--format".into(), "json".into()]);
@@ -647,7 +649,7 @@ impl Update {
         // daemon or back up a different bank while recreating this project.
         let daemon = engine::container(self, &compose, Some(&env), DAEMON_SERVICE)?;
         let running = engine::inspect(self, &daemon)?;
-        engine::verify_identity(&config, &running, &self.o.daemon_url)?;
+        engine::verify_checkout_identity(&config, &running, &daemon)?;
         if self.o.no_backup {
             self.backup(None)?;
         } else {
