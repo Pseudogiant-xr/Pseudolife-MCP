@@ -266,9 +266,7 @@ TRIAGED = """\
 **UNUSED:** No shipped caller. D7 bucket: behaviour with no caller.
 """
 
-INDEX = """\
-# Divergence triage
-
+COUNT_TABLE = """\
 | D7 bucket | Entries |
 |---|---:|
 | presentation | 1 |
@@ -276,6 +274,12 @@ INDEX = """\
 | behaviour with a caller | 1 |
 | closed | 1 |
 | **Total** | **4** |
+"""
+
+INDEX = """\
+# Divergence triage
+
+The totals are derived: `python rust/daemon/split_divergences.py --counts`.
 
 | Entry | Caller | Closing stream or batch |
 |---|---|---|
@@ -312,17 +316,60 @@ def test_check_rejects_missing_unknown_or_duplicate_buckets(tmp_path, filename, 
     assert any("D7 bucket" in p for p in sd.check(root, pointer))
 
 
-@pytest.mark.parametrize("before, after", [
-    ("| closed | 1 |", "| closed | 2 |"),
-    ("| closed | 1 |\n", ""),
-    ("| closed | 1 |", "| closed | 1 |\n| closed | 1 |"),
-    ("| **Total** | **4** |", "| **Total** | **5** |"),
-    ("| closed | 1 |", "| wontfix | 1 |"),
+@pytest.mark.parametrize("table", [
+    COUNT_TABLE,
+    COUNT_TABLE.replace("| D7 bucket | Entries |", "| D7 bucket | Count |"),
+    "| Bucket | D7 bucket |\n|---|---|\n| closed | 1 |\n",
 ])
-def test_check_rejects_inaccurate_summary_counts(tmp_path, before, after):
+def test_check_rejects_a_committed_count_table(tmp_path, table):
+    # Pull requests that each edited a shared count line merged into wrong
+    # sums or conflicted (three batches on 2026-11-02); totals are derived.
     root, pointer = triaged(tmp_path)
-    (root / "README.md").write_text(INDEX.replace(before, after), encoding="utf-8", newline="\n")
-    assert any("counts" in p for p in sd.check(root, pointer))
+    text = INDEX.replace("\n| Entry", "\n" + table + "\n| Entry")
+    (root / "README.md").write_text(text, encoding="utf-8", newline="\n")
+    problems = sd.check(root, pointer)
+    assert any("--counts" in p for p in problems), problems
+
+
+def test_the_committed_index_carries_no_count_table():
+    text = (sd.ROOT_DIR / "README.md").read_text(encoding="utf-8")
+    assert "| D7 bucket |" not in text and "**Total**" not in text
+
+
+def test_counts_prints_the_totals_derived_from_the_entry_files(monkeypatch, tmp_path, capsys):
+    root, pointer = triaged(tmp_path)
+    monkeypatch.setattr(sd, "ROOT_DIR", root)
+    monkeypatch.setattr(sd, "LEDGER", pointer)
+    entry = root / "rows/unused.md"
+    entry.write_text(entry.read_text(encoding="utf-8").replace("behaviour with no caller", "closed"),
+                     encoding="utf-8", newline="\n")
+    before = {p: p.read_bytes() for p in root.rglob("*") if p.is_file()}
+
+    assert sd.main(["--counts"]) == 0
+
+    rows = [line.rsplit(None, 1) for line in capsys.readouterr().out.splitlines()]
+    assert {label.strip(): int(n) for label, n in rows} == {
+        "presentation": 1, "behaviour with no caller": 0, "behaviour with a caller": 1,
+        "closed": 2, "Total": 4}
+    assert [label.strip() for label, _ in rows] == [*sd.D7_BUCKETS, "Total"]
+    assert {p: p.read_bytes() for p in root.rglob("*") if p.is_file()} == before
+
+
+def test_counts_refuses_an_entry_without_a_bucket(monkeypatch, tmp_path, capsys):
+    root, pointer = triaged(tmp_path)
+    monkeypatch.setattr(sd, "ROOT_DIR", root)
+    entry = root / "rows/unused.md"
+    entry.write_text(entry.read_text(encoding="utf-8").replace("D7 bucket:", "Disposition:"),
+                     encoding="utf-8", newline="\n")
+    assert sd.main(["--counts"]) == 1
+    assert "D7 bucket" in capsys.readouterr().err
+
+
+def test_counts_of_the_committed_ledger_cover_every_entry():
+    ledger = sd.load_dir()
+    counts = sd.bucket_counts(sd.ROOT_DIR, ledger)
+    entries = sum(len(s["entries"]) for s in ledger.values())
+    assert counts["Total"] == entries == sum(counts[b] for b in sd.D7_BUCKETS)
 
 
 @pytest.mark.parametrize("replacement", [

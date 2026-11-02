@@ -1,0 +1,21 @@
+usage: pseudolife-mcp maintainer [-h]
+                                 {setup,enrol-code,confirm,revoke,reset,list}
+                                 ...
+
+Host-side management of the maintainer's passkeys (operator-only). Reads
+PSEUDOLIFE_MCP_DATABASE_URL, or the lite tier's bank, else runs inside the
+pseudolife-mcp-daemon container when it runs here.
+
+positional arguments:
+  {setup,enrol-code,confirm,revoke,reset,list}
+    setup               guided: the Console's HTTPS name, the daemon's config
+                        and the first passkey (see `maintainer setup --help`)
+    enrol-code          print a one-time code for the first passkey
+    confirm             activate the pending bootstrap passkey
+    revoke              revoke one passkey
+    reset               revoke every passkey, rotate the secret, reopen
+                        bootstrap
+    list                print every passkey
+
+options:
+  -h, --help            show this help message and exit

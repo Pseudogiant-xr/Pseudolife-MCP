@@ -1,9 +1,5 @@
-//! `pseudolife-mcp pair <daemon-url> [<code> | --read-code] [--token-file
-//! PATH] [--json]` (pair_cli.py). Canonical argv: the URL first, the code
-//! (when given) right after it, then options, each at most once, a value as
-//! the next argument. An `https` URL, environment proxies, a terminal on
-//! stdin for `--read-code`, a non-ASCII code and every other argv shape
-//! defer before any effect.
+//! Native HTTP(S) pairing: mint an owner-only local token, send its hash,
+//! retain it on uncertain outcomes, and verify authenticated access.
 use super::pyjson::{self, J};
 use super::token_file::{self, Failure, Moved};
 use super::{Defer, net, url};
@@ -144,14 +140,10 @@ impl Report {
     }
 }
 
-/// `principals.normalize_pairing_code` for ASCII text (non-ASCII defers:
-/// `str.upper` can turn it into ASCII letters).
+/// `principals.normalize_pairing_code`, including Unicode uppercase expansion.
 fn normalize_code(text: &str) -> Result<Option<String>, Defer> {
-    if !text.is_ascii() {
-        return Err(Defer);
-    }
     let code: String = pyjson::py_strip(text)
-        .to_ascii_uppercase()
+        .to_uppercase()
         .chars()
         .filter(|c| *c != '-')
         .map(|c| match c {
@@ -164,31 +156,71 @@ fn normalize_code(text: &str) -> Result<Option<String>, Defer> {
 }
 
 /// `sys.stdin.readline()` on a piped stdin: up to and including the first
-/// line end (universal newlines). Non-ASCII bytes defer (the text stream's
-/// encoding is the locale's).
-fn read_line() -> Result<String, Defer> {
+/// line end (universal newlines), decoding the UTF-8 CLI stream.
+#[allow(unsafe_code)]
+async fn read_line() -> Result<String, Defer> {
+    #[cfg(not(unix))]
     use std::io::Read;
-    let mut line = String::new();
+    let mut line = Vec::new();
+    #[cfg(not(unix))]
     let mut stdin = std::io::stdin().lock();
     let mut byte = [0u8; 1];
     loop {
-        match stdin.read(&mut byte) {
+        #[cfg(unix)]
+        let read = {
+            // Check readiness without changing the open-file-description flags
+            // shared with the parent. SIGTERM/SIGHUP/SIGKILL cannot run Drop.
+            // poll also accepts regular files, unlike epoll registration.
+            let mut descriptor = libc::pollfd {
+                fd: libc::STDIN_FILENO,
+                events: libc::POLLIN,
+                revents: 0,
+            };
+            let ready = unsafe { libc::poll(&mut descriptor, 1, 0) };
+            if ready == 0 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+                continue;
+            }
+            if ready < 0 {
+                if std::io::Error::last_os_error().kind() == std::io::ErrorKind::Interrupted {
+                    tokio::task::yield_now().await;
+                    continue;
+                }
+                return Err(Defer);
+            }
+            // Read exactly one byte directly: StdinLock can buffer ahead, and
+            // buffered bytes would no longer appear in the readiness check.
+            let count = unsafe { libc::read(libc::STDIN_FILENO, byte.as_mut_ptr().cast(), 1) };
+            if count < 0 {
+                Err(std::io::Error::last_os_error())
+            } else {
+                Ok(count as usize)
+            }
+        };
+        #[cfg(not(unix))]
+        let read = stdin.read(&mut byte);
+        match read {
             Ok(0) => break,
             Ok(_) => {
-                if !byte[0].is_ascii() {
-                    return Err(Defer);
-                }
                 if matches!(byte[0], b'\n' | b'\r') {
-                    line.push('\n');
+                    line.push(b'\n');
                     break;
                 }
-                line.push(char::from(byte[0]));
+                line.push(byte[0]);
             }
-            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {
+                tokio::task::yield_now().await;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
             Err(_) => return Err(Defer),
         }
+        if !line.is_empty() && line.len().is_multiple_of(1024) {
+            tokio::task::yield_now().await;
+        }
     }
-    Ok(line)
+    String::from_utf8(line).map_err(|_| Defer)
 }
 
 /// `runtimes.home()`: `USERPROFILE`, else `HOME`, as pathlib prints it.
@@ -227,7 +259,63 @@ fn text(value: Option<&J>) -> Option<String> {
     ((1..=128).contains(&count) && value.chars().all(super::printable)).then(|| value.to_owned())
 }
 
+fn resolve_target(token_file: Option<&str>) -> Result<(PathBuf, Option<PathBuf>), Defer> {
+    match token_file {
+        Some(value) => Ok((
+            crate::credentials::absolute_expanded(Path::new(value)).map_err(|_| Defer)?,
+            None,
+        )),
+        None => {
+            let suffix: String = super::random_bytes(4)?
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect();
+            let directory = home()?.join(".pseudolife-mcp");
+            Ok((
+                directory.join(format!("pairing-{suffix}.token")),
+                Some(directory),
+            ))
+        }
+    }
+}
+
+/// Redeem a normalized code without printing, for the native connect workflow.
+pub(super) async fn redeem_for_connect(
+    url: &str,
+    code: &str,
+    token_file: Option<&str>,
+) -> Result<serde_json::Value, ()> {
+    let (target, bank_directory) = resolve_target(token_file).map_err(|_| ())?;
+    let report = redeem(url, code, target, bank_directory.as_deref())
+        .await
+        .map_err(|_| ())?;
+    serde_json::from_str(&pyjson::dumps_line(&report.json())).map_err(|_| ())
+}
+
+pub(super) fn normalize_for_connect(text: &str) -> Option<String> {
+    normalize_code(text).ok().flatten()
+}
+
 pub(super) async fn run(arguments: &[String]) -> Result<u8, Defer> {
+    #[cfg(unix)]
+    {
+        // Tokio retains its process signal handler after a listener is dropped.
+        // Keep a listener through the requests following terminal code input;
+        // cancellation drops the prompt guard and retains any minted token.
+        let mut interrupt =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())
+                .map_err(|_| Defer)?;
+        tokio::select! {
+            biased;
+            _ = interrupt.recv() => Ok(130),
+            result = run_inner(arguments) => result,
+        }
+    }
+    #[cfg(not(unix))]
+    run_inner(arguments).await
+}
+
+async fn run_inner(arguments: &[String]) -> Result<u8, Defer> {
     let args = parse(arguments)?;
     let usage = |line: &str, url: Option<&str>| {
         Report::new(url)
@@ -246,9 +334,6 @@ pub(super) async fn run(arguments: &[String]) -> Result<u8, Defer> {
             ));
         }
     };
-    if !url.starts_with("http://") || net::proxies_configured() {
-        return Err(Defer);
-    }
     if args.code.is_some() && args.read_code {
         return Ok(usage(
             "give the pairing code as an argument or with --read-code, not both",
@@ -263,28 +348,17 @@ pub(super) async fn run(arguments: &[String]) -> Result<u8, Defer> {
     }
     // Resolved before stdin is read; every deferral here is pre-effect.
     let remote = !url::is_loopback(&url)?;
-    let (target, bank_directory) = match &args.token_file {
-        Some(value) => (
-            crate::credentials::absolute_expanded(Path::new(value)).map_err(|_| Defer)?,
-            None,
-        ),
-        None => {
-            let suffix: String = super::random_bytes(4)?
-                .iter()
-                .map(|byte| format!("{byte:02x}"))
-                .collect();
-            let directory = home()?.join(".pseudolife-mcp");
-            (
-                directory.join(format!("pairing-{suffix}.token")),
-                Some(directory),
-            )
-        }
-    };
+    let (target, bank_directory) = resolve_target(args.token_file.as_deref())?;
     let text = if args.read_code {
-        if super::stdin_is_terminal() {
-            return Err(Defer);
-        }
-        let line = read_line()?;
+        let line = if super::stdin_is_terminal() {
+            match super::prompt::password().await {
+                Ok(line) => line,
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => return Ok(130),
+                Err(_) => return Err(Defer),
+            }
+        } else {
+            read_line().await?
+        };
         if pyjson::py_strip(&line).is_empty() {
             return Ok(usage("--read-code read no code on stdin", Some(&url)));
         }
@@ -299,7 +373,7 @@ pub(super) async fn run(arguments: &[String]) -> Result<u8, Defer> {
         ));
     };
     let mut report = redeem(&url, &code, target, bank_directory.as_deref()).await?;
-    if remote {
+    if remote && url.starts_with("http://") {
         report.warnings.insert(0, format!("WARNING: {url} is plain HTTP: the link itself is unencrypted, so it must be a private network such as a tailnet, or a TLS reverse proxy must front the daemon."));
     }
     Ok(report.emit(args.json))
@@ -561,7 +635,10 @@ mod tests {
         ] {
             assert_eq!(normalize_code(bad).unwrap(), None, "{bad}");
         }
-        assert!(normalize_code("\u{131}bcd-efgh-jkmn").is_err());
+        assert_eq!(
+            normalize_code("\u{131}bcd-efgh-jkmn").unwrap(),
+            Some("1BCDEFGHJKMN".into())
+        );
     }
 
     #[test]

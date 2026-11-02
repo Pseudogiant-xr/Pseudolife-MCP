@@ -449,10 +449,24 @@ normalize.rule("expect-export-deferred-any")(
     _expect(_GENERIC.format("export"), False, _ran))
 normalize.rule("expect-import-deferred")(
     _expect(_GENERIC.format("import"), False, _ran))
-normalize.rule("expect-import-schema-deferred")(_expect(
-    "pseudolife-stdio: import into a bank not at this build's schema "
-    f"({SCHEMA_META_VERSION}) is deferred in this candidate (needs native "
-    "ensure_schema)", False, _ran))
+@normalize.rule("transfer-schema-refusal")
+def schema_refusal(obs):
+    if obs.get("arm") != "python":
+        return
+    stderr = base64.b64decode(obs["stderr"]).decode("utf-8")
+    assert obs["exit"] == 1 and "Traceback (most recent call last)" in stderr
+    match = re.search(r"^RuntimeError: (Refusing to start: [^\r\n]+)\r?$", stderr, re.MULTILINE)
+    assert match, stderr
+    assert obs["db"] == obs["db_before"], "schema refusal changed the bank"
+    obs["stderr"] = base64.b64encode(("pseudolife-stdio: import schema initialization refused: " + match[1] + _EOL).encode()).decode()
+
+
+normalize.rule("transfer-schema-lock-failure")(_expect(
+    "pseudolife-stdio: import failed (native-pg-diagnostics); archive rows were not committed",
+    True, lambda obs, stderr: _traceback(obs, stderr)
+    and "psycopg.errors.LockNotAvailable" in stderr))
+
+
 _NO_DATABASE = "no database configured — set PSEUDOLIFE_MCP_DATABASE_URL"
 # Host-independent: an oracle with pg0 refuses the unreadable marker with a
 # traceback, one without pg0 never attaches and prints the no-database
@@ -469,14 +483,14 @@ COMMIT_UNKNOWN = ("pseudolife-stdio: import lost the answer to its COMMIT "
                   "(native-pg-diagnostics); it may have been committed: inspect the "
                   "target bank before retrying")
 normalize.rule("expect-import-commit-refused")(_expect(
-    "pseudolife-stdio: import failed (native-pg-diagnostics); nothing was committed",
+    "pseudolife-stdio: import failed (native-pg-diagnostics); archive rows were not committed",
     True, lambda obs, stderr: _traceback(obs, stderr)
     and "harness: refused at commit" in stderr))
 normalize.rule("expect-import-commit-unknown")(_expect(
     COMMIT_UNKNOWN, True, lambda obs, stderr: _traceback(obs, stderr)
     and "AdminShutdown" in stderr))
 normalize.rule("expect-import-native-failure")(_expect(
-    "pseudolife-stdio: import failed (native-pg-diagnostics); nothing was committed",
+    "pseudolife-stdio: import failed (native-pg-diagnostics); archive rows were not committed",
     True, lambda obs, stderr: _traceback(obs, stderr)
     and "psycopg.errors.ForeignKeyViolation" in stderr))
 
@@ -506,10 +520,23 @@ def _export_after(bank: str):
     return after
 
 
-def _import_setup(archive: str, seed=None, holder=False, schema=True):
+def _import_setup(archive: str, seed=None, holder=False, schema=True, ascii_bank=False):
     def setup(arm: core.Arm) -> None:
         _sources()
-        _create(TGT, schema=schema)
+        if ascii_bank:
+            assert not schema
+            _CREATED.add(TGT)
+            _bank.drop(TGT)
+            # template0 allows a different encoding without changing the shared
+            # vector template. Native admission must defer before needing DDL.
+            with _bank._admin() as conn:
+                conn.execute(f'CREATE DATABASE "{TGT}" TEMPLATE template0 '
+                             "ENCODING 'SQL_ASCII' LC_COLLATE 'C' LC_CTYPE 'C'")
+                # Keep fixture observers' catalog names as text; this does not
+                # change the server_encoding that native admission checks.
+                conn.execute(f'ALTER DATABASE "{TGT}" SET client_encoding TO \'UTF8\'')
+        else:
+            _create(TGT, schema=schema)
         if seed:
             with _bank.connect(TGT) as conn:
                 seed(conn)
@@ -566,6 +593,10 @@ def _seed_null_stamps(conn) -> None:
         storage.upsert_edge(2, "uses", 1, origin="agent")
     finally:
         storage.close()
+    conn.execute("UPDATE edges SET asserted_at=150.0 WHERE tx_time IS NULL")
+    # PostgresStorage initializes built-in relations before this arm starts.
+    # Keep that seed deterministic; runtime backfilled edge stamps still compare.
+    conn.execute("UPDATE relations SET created_at=90 WHERE builtin AND created_at>90")
     row = conn.execute("SELECT count(*) FROM edges WHERE tx_time IS NULL").fetchone()
     assert row[0] == 1, "the daemon writer no longer leaves NULL stamps"
 
@@ -602,6 +633,16 @@ def _commit_trigger(action: str):
                      "DEFERRABLE INITIALLY DEFERRED FOR EACH ROW "
                      "EXECUTE FUNCTION pl_cf_at_commit()")
     return seed
+
+
+def _schema_stamp(value):
+    def seed(conn):
+        conn.execute("UPDATE meta SET value=%s::jsonb WHERE key='schema_version'", (value,))
+    return seed
+
+
+def _missing_table(conn):
+    conn.execute("DROP TABLE reference_chunks")
 
 
 def _schema_54(conn) -> None:
@@ -739,10 +780,21 @@ def _cases() -> list[core.Case]:
         _import("import-format-missing", "format-missing"),
         _import("import-format-float", "format-float"),
         _import("import-no-manifest", "no-manifest"),
-        _import("import-schema-54-defers", "current", seed=_schema_54,
-                rules=("expect-import-schema-deferred",)),
-        _import("import-blank-database-defers", "current", schema=False,
-                rules=("expect-import-schema-deferred",)),
+        _import("import-schema-54", "current", seed=_schema_54),
+        _import("import-blank-database", "current", schema=False),
+        _import("import-missing-table", "current", seed=_missing_table),
+        _import("import-schema-refuse-future", "current", seed=_schema_stamp("999999"),
+                rules=("transfer-schema-refusal",)),
+        *[_import("import-schema-refuse-"+label, "current", seed=_schema_stamp(value),
+                  rules=("transfer-schema-refusal",)) for label,value in
+          [("string",'"58"'),("null","null"),("bool","true"),("zero","0")]],
+        _import("import-blank-bank-guard-first", "current", schema=False, holder=True),
+        _import("import-non-utf8-defers", "current", schema=False, ascii_bank=True,
+                rules=("expect-import-deferred",),
+                note="SQL_ASCII: defer before schema initialization changes the blank bank"),
+        _import("import-non-utf8-bank-guard-first", "current", schema=False,
+                ascii_bank=True, holder=True,
+                note="other connections are refused before checking the server encoding"),
         # Review of #678 (2026-10-10): what a failed COMMIT may claim.
         _import("import-commit-refused-fails", "current", seed=_commit_trigger("raise"),
                 rules=("expect-import-commit-refused",),
@@ -777,11 +829,10 @@ def _cases() -> list[core.Case]:
         _export("export-unknown-table-defers", ["--out", _SEP.join(["{CWD}", "n", "x.zip"])],
                 bank=FUTURE, rules=("expect-export-deferred-any",),
                 note="a public table no roster classifies: deferred before any effect"),
-        _import("import-null-stamps-defers", "current", seed=_seed_null_stamps,
-                rules=("expect-import-deferred",),
-                note="ensure_schema would backfill daemon-written stamps before refusing"),
-        _import("import-force-locked-holder-defers", "current", argv=("--force",),
-                holder="locked", rules=("expect-import-deferred",),
+        _import("import-null-stamps", "current", seed=_seed_null_stamps,
+                note="schema stamps are committed before the nonempty-bank refusal"),
+        _import("import-force-locked-holder", "current", argv=("--force",),
+                holder="locked", rules=("transfer-schema-lock-failure",),
                 note="a holder lock ensure_schema's DDL cannot take within 5 s"),
         _import("import-string-in-float-defers", "string-in-float",
                 rules=("expect-import-deferred",)),
@@ -794,6 +845,9 @@ def _cases() -> list[core.Case]:
 
 
 MUTANTS = [
+    Mutant("transfer-server-encoding", ROW, "shim/src/cli/transfer/import.rs",
+           '!= Some("UTF8")', '== Some("unsupported-encoding")',
+           ("import-non-utf8-defers",)),
     Mutant("transfer-roster-guard", ROW, "shim/src/cli/transfer/export.rs",
            "if !EXPORTED_TABLES.contains(&name.as_str()) && !EXCLUDED_TABLES.contains(&name.as_str()) {",
            "if false && !EXCLUDED_TABLES.contains(&name.as_str()) {",
@@ -834,8 +888,8 @@ MUTANTS = [
     Mutant("transfer-entry-sequence", ROW, "shim/src/cli/transfer/import.rs",
            'if highwater == "0" {', 'if highwater != "-1" {', ("import-seeded",)),
     Mutant("transfer-refusal-exit", ROW, "shim/src/cli/transfer.rs",
-           "            1,\n        ),\n        Outcome::SchemaDeferred",
-           "            2,\n        ),\n        Outcome::SchemaDeferred", ("import-format-9",)),
+           "            1,\n        ),\n        Outcome::SchemaRefused",
+           "            2,\n        ),\n        Outcome::SchemaRefused", ("import-format-9",)),
     Mutant("transfer-drop-inverses", ROW, "shim/src/cli/transfer/import.rs",
            "    send(pass, &inverses).await?;", "    let _ = &inverses;",
            ("import-reversed-relations",)),
@@ -844,12 +898,14 @@ MUTANTS = [
            '"DECLARE {cursor} CURSOR FOR SELECT * FROM {} ORDER BY 1 DESC"',
            ("export-seeded",)),
     # Review round 1 (2026-10-09): each guard below is load-bearing.
-    Mutant("transfer-null-stamps", ROW, "shim/src/cli/transfer/import.rs",
-           'if unstamped.as_deref() != Some("f") {', 'if unstamped.as_deref() == Some("x") {',
-           ("import-null-stamps-defers",)),
-    Mutant("transfer-probe-share", ROW, "shim/src/cli/transfer/import.rs",
-           'IN ACCESS EXCLUSIVE MODE"', 'IN ACCESS SHARE MODE"',
-           ("import-force-locked-holder-defers",)),
+    Mutant("transfer-null-stamps", ROW, "shim/src/cli/transfer/schema.rs",
+           'if let Err(error) = execute(client).await {',
+           'if let Err(error) = Ok::<(), Error>(()) {',
+           ("import-null-stamps",)),
+    Mutant("transfer-schema-lock-deferred", ROW, "shim/src/cli/transfer/import.rs",
+           'super::schema::Error::Db => Stop::Fail,',
+           'super::schema::Error::Db => Stop::Defer,',
+           ("import-force-locked-holder",)),
     Mutant("transfer-int-type", ROW, "shim/src/cli/transfer/import.rs",
            '_ => "numeric",', '_ => "int8",', ("import-huge-int-float",)),
     Mutant("transfer-float4-loads", ROW, "shim/src/cli/transfer/import.rs",

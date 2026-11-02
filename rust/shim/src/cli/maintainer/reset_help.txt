@@ -1,0 +1,5 @@
+usage: pseudolife-mcp maintainer reset [-h] [--yes]
+
+options:
+  -h, --help  show this help message and exit
+  --yes       confirm: every passkey stops working at once
