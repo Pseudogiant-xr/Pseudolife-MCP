@@ -222,6 +222,12 @@ fn forward(args: &Args, url: Option<String>) -> Vec<OsString> {
             "--expires".into(),
             format!("{}s", args.expires.unwrap_or(900)),
         ]);
+        // v59: whose machine, in `_forward`'s place, so the container's
+        // invite records it (never dropped: an omission would make someone
+        // else's machine the owner's).
+        if let Some(owned) = args.owned {
+            out.push(if owned { "--mine" } else { "--someone-else" }.into());
+        }
         if args.replace {
             out.push("--replace".into());
         }
@@ -486,6 +492,31 @@ mod tests {
         assert_eq!(rejected[0].rejections, 3);
         assert!(decode_list(r#"{"principals":[[]],"rejected":[]}"#, &[]).is_err());
         assert!(rows.iter().all(|row| row.owner));
+    }
+
+    #[test]
+    fn the_container_invite_carries_whose_machine_it_is() {
+        let base = |owned| Args {
+            name: Some("laptop".into()),
+            owned,
+            ..Args::default()
+        };
+        let argv = |args: &Args| -> Vec<String> {
+            forward(args, Some("https://example.com".into()))
+                .into_iter()
+                .map(|a| a.to_string_lossy().into_owned())
+                .collect()
+        };
+        let mine = argv(&base(Some(true)));
+        let theirs = argv(&base(Some(false)));
+        assert!(mine.contains(&"--mine".to_owned()) && !mine.contains(&"--someone-else".to_owned()));
+        assert!(theirs.contains(&"--someone-else".to_owned()) && !theirs.contains(&"--mine".to_owned()));
+        // Python's order: after --expires, before --replace and --url.
+        let at = |v: &[String], s: &str| v.iter().position(|a| a == s).unwrap();
+        assert!(at(&theirs, "--expires") < at(&theirs, "--someone-else"));
+        assert!(at(&theirs, "--someone-else") < at(&theirs, "--url"));
+        let neither = argv(&base(None));
+        assert!(!neither.iter().any(|a| a == "--mine" || a == "--someone-else"));
     }
 
     #[test]
