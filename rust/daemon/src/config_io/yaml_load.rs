@@ -29,10 +29,9 @@ fn construct_startup(
     mut tag: Option<Tag>,
 ) -> Result<Node, String> {
     // PyYAML resolves a non-specific tag using the scalar's own style.
-    if tag
-        .as_ref()
-        .is_some_and(|t| t.handle == "!" && t.suffix.is_empty())
-    {
+    if tag.as_ref().is_some_and(|t| {
+        (t.handle == "!" && t.suffix.is_empty()) || (t.handle.is_empty() && t.suffix == "!")
+    }) {
         tag = None;
     }
     let resolved = match &tag {
