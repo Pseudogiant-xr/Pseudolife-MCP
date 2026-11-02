@@ -476,9 +476,20 @@ impl Update {
         }
         let mut candidates = vec![];
         for reference in out.lines().map(str::trim).filter(|s| {
-            s.starts_with(&format!("{repository}:"))
-                && s.split_once(':')
-                    .is_some_and(|(_, tag)| tag.contains(&marker))
+            s.strip_prefix(&format!("{repository}:"))
+                .and_then(|tag| tag.split_once(&marker))
+                .is_some_and(|(_, stamp)| {
+                    // Only our complete automatic timestamp grants retention
+                    // authority; operator suffixes such as -keep stay intact.
+                    stamp.len() == 15
+                        && stamp.bytes().enumerate().all(|(i, byte)| {
+                            if i == 8 {
+                                byte == b'-'
+                            } else {
+                                byte.is_ascii_digit()
+                            }
+                        })
+                })
         }) {
             let (code, out) = self.docker_call(&[
                 "image",

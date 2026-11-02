@@ -373,7 +373,25 @@ pub(super) fn verify_bank_identity_with(
     let mounts = running["Mounts"].as_array().ok_or_else(|| UpdateError::usage(
         "cannot read the daemon's mounts; restore its Compose project and retry; nothing was changed"
     ))?;
-    for volume in service["volumes"].as_array().into_iter().flatten() {
+    let mut volumes = service["volumes"].as_array().cloned().unwrap_or_default();
+    // Compose retains service-level tmpfs separately from long-form volumes.
+    // Include both forms in the same persistent-mount checks.
+    if !service["tmpfs"].is_null() {
+        let unreadable = || {
+            UpdateError::usage(
+                "cannot read the daemon's Compose tmpfs destinations; restore its tmpfs configuration before updating; nothing was changed",
+            )
+        };
+        for entry in service["tmpfs"].as_array().ok_or_else(unreadable)? {
+            let target = entry
+                .as_str()
+                .and_then(|value| value.split(':').next())
+                .filter(|target| target.starts_with('/'))
+                .ok_or_else(unreadable)?;
+            volumes.push(json!({"type": "tmpfs", "target": target}));
+        }
+    }
+    for volume in &volumes {
         let target = volume["target"].as_str();
         let actual = mounts.iter().find(|m| m["Destination"].as_str() == target);
         // A new destination must not hide data below an existing mount, or
@@ -442,10 +460,7 @@ pub(super) fn verify_bank_identity_with(
         {
             continue;
         }
-        if !service["volumes"]
-            .as_array()
-            .is_some_and(|volumes| volumes.iter().any(|v| v["target"] == mount["Destination"]))
-        {
+        if !volumes.iter().any(|v| v["target"] == mount["Destination"]) {
             return Err(UpdateError::usage(
                 "the Compose configuration drops a daemon mount; restore its original mounts before updating; nothing was changed",
             ));

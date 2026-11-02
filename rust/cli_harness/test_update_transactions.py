@@ -390,6 +390,25 @@ def test_new_mount_cannot_shadow_existing_data(tmp_path, target, kind):
         assert stages(json.loads(state_path.read_text())) == []
 
 
+@pytest.mark.parametrize("target,allowed", [("/data/cache:mode=1777", False), ("/data", False), ("/", False), ("/new-cache", True)])
+def test_service_tmpfs_mounts_cannot_shadow_persistent_data(tmp_path, target, allowed):
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY to the built native CLI")
+    with host(tmp_path, mode="checkout") as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        # Captured from `docker compose config --format json`: service-level
+        # tmpfs remains a separate list, including mount options after ':'.
+        state["config"]["services"][SERVICE]["tmpfs"] = [target]
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary, ["--checkout", str(repo), "--json", "--no-test-login", "--no-cache-prune"])
+        assert result.returncode == (0 if allowed else 2), result.stdout + result.stderr
+        if not allowed:
+            assert "overlaps" in result.stdout or "persistent mount" in result.stdout
+            assert "remove" in result.stdout or "restore" in result.stdout
+            assert stages(json.loads(state_path.read_text())) == []
+
+
 def test_optional_test_login_uses_selected_project_postgres(tmp_path):
     binary = _native_binary()
     if not binary:
@@ -435,7 +454,8 @@ def test_rollback_retention_leaves_other_projects_and_current_tag(tmp_path):
         own = prefix + "-20000101-000000"
         other = "pseudolife-daemon:0.21.0-pre-update-other-project-20000101-000000"
         legacy = "pseudolife-daemon:0.21.0-pre-update-19990101-000000"
-        state["images"].update({own:"sha256:old-own", other:"sha256:other", legacy:"sha256:legacy"})
+        manual = own + "-keep"
+        state["images"].update({own:"sha256:old-own", other:"sha256:other", legacy:"sha256:legacy", manual:"sha256:manual"})
         state.update(calls=[], deployed=False, list_images=True)
         state["running"]["Image"] = "sha256:validated"
         state_path.write_text(json.dumps(state))
@@ -445,6 +465,7 @@ def test_rollback_retention_leaves_other_projects_and_current_tag(tmp_path):
         removed = [call[-1] for call in calls if call[:1] == ["rmi"]]
         assert own in removed
         assert other not in removed and legacy not in removed and tag not in removed
+        assert manual not in removed
 
 
 @pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
