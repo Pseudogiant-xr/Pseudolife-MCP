@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import pytest
 
 
@@ -200,7 +201,8 @@ def _admission_models(root):
     return root
 
 
-@pytest.mark.parametrize("option", ["sslmode=require", "sslmode=verify-full", "sslrootcert=relative.pem"])
+@pytest.mark.parametrize("option", ["sslmode=require", "sslmode=verify-full", "sslrootcert=relative.pem",
+                                 "sslcert=relative.pem", "sslkey=relative.pem", "sslcrl=relative.pem"])
 def test_unsupported_daemon_tls_refuses_before_create(tmp_path, option):
     (tmp_path / ("pseudolife-daemon.exe" if os.name == "nt" else "pseudolife-daemon")).write_bytes(b"must not execute")
     result = _run(tmp_path, dsn=f"host=127.0.0.1 port=1 user=fixture dbname=r2_admission {option}",
@@ -258,7 +260,7 @@ def test_corrupt_model_names_repair_and_removes_owned_bank(tmp_path, damage):
     assert banks() == before
 
 
-@pytest.mark.parametrize("fault", ["create-denied", "create-query-canceled", "relative-runtime", "create-timeout", "drop-lost-reply", "drop-checkpoint-delay", pytest.param(
+@pytest.mark.parametrize("fault", ["create-denied", "create-query-canceled", "create-timeout", "drop-lost-reply", "drop-checkpoint-delay", pytest.param(
     "create-interrupt", marks=pytest.mark.skipif(os.name == "nt", reason="POSIX SIGTERM contract")), pytest.param(
     "drop-interrupt", marks=pytest.mark.skipif(os.name == "nt", reason="POSIX SIGTERM contract"))])
 def test_lost_database_replies_are_bounded_and_cleanup_is_reported(tmp_path, fault):
@@ -309,8 +311,6 @@ def test_lost_database_replies_are_bounded_and_cleanup_is_reported(tmp_path, fau
                         self.frame(b"E", b"SERROR\0C" + code + b"\0Msynthetic refusal\0\0")
                         self.frame(b"Z", b"I")
                         continue
-                    if query.startswith("CREATE DATABASE") and fault == "relative-runtime":
-                        reached.set()
                     dropping = query.startswith("DROP DATABASE")
                     if dropping and fault in ("drop-checkpoint-delay", "drop-interrupt"):
                         reached.set()
@@ -342,24 +342,6 @@ def test_lost_database_replies_are_bounded_and_cleanup_is_reported(tmp_path, fau
     shutil.copy2(source, candidate)
     daemon = tmp_path / ("pseudolife-daemon.exe" if os.name == "nt" else "pseudolife-daemon")
     daemon.write_bytes(b"intentionally not executable")
-    marker = tmp_path / "runtime-observation.json"
-    if fault == "relative-runtime":
-        runtime = tmp_path / "runtime" / "synthetic-library"
-        runtime.parent.mkdir()
-        runtime.write_bytes(b"synthetic runtime")
-        fixture_source = tmp_path / "runtime_fixture.rs"
-        fixture_source.write_text(r'''use std::{env, fs, path::PathBuf};
-fn main() {
-    let library = PathBuf::from(env::var_os("ORT_DYLIB_PATH").unwrap());
-    let same_bytes = fs::read(&library).is_ok_and(|v| v == b"synthetic runtime");
-    let report = format!("{{\"absolute\":{},\"same_bytes\":{}}}", library.is_absolute(), same_bytes);
-    fs::write(env::current_exe().unwrap().with_file_name("runtime-observation.json"), report).unwrap();
-}
-''')
-        compiler = shutil.which("rustc")
-        assert compiler, "the native runtime-path regression requires rustc"
-        subprocess.run([compiler, "--edition=2021", str(fixture_source), "-o", str(daemon)],
-                       check=True, capture_output=True, text=True, timeout=60)
     models = _admission_models(tmp_path / "models")
     with Server(("127.0.0.1", 0), Handler) as server:
         thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
@@ -368,8 +350,6 @@ fn main() {
         env.update(HOME=str(tmp_path), USERPROFILE=str(tmp_path), PATH=str(tmp_path),
                    PSEUDOLIFE_DAEMON_ONNX_DIR=str(models),
                    PSEUDOLIFE_TEST_DATABASE_URL=f"host=127.0.0.1 port={server.server_address[1]} user=fixture password=synthetic dbname=r2_blackhole sslmode=disable")
-        if fault == "relative-runtime":
-            env["ORT_DYLIB_PATH"] = "./runtime/synthetic-library"
         child = subprocess.Popen([str(candidate), "doctor", "--disposable-proof"], env=env,
                                  cwd=tmp_path, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         try:
@@ -380,7 +360,7 @@ fn main() {
             assert child.returncode == 1
             report = json.loads(stdout)
             expected = {"create-denied": "InsufficientPrivilege", "create-query-canceled": "QueryCanceled",
-                        "relative-runtime": "NativeDaemonStartupError", "create-interrupt": "KeyboardInterrupt", "create-timeout": "TimeoutError",
+                        "create-interrupt": "KeyboardInterrupt", "create-timeout": "TimeoutError",
                         "drop-lost-reply": "FixtureCleanupError",
                         "drop-checkpoint-delay": "NativeDaemonSpawnError",
                         "drop-interrupt": "NativeDaemonSpawnError"}[fault]
@@ -394,8 +374,6 @@ fn main() {
                 assert not drops, "server rejection proves CREATE did not succeed"
             else:
                 assert drops
-            if fault == "relative-runtime":
-                assert json.loads(marker.read_text()) == {"absolute": True, "same_bytes": True}
             if fault == "drop-lost-reply":
                 assert sum(query.startswith("DROP DATABASE") for query in queries) == 2
                 assert report["fixture_removed"] is False
@@ -412,7 +390,8 @@ fn main() {
             thread.join(5)
 
 
-@pytest.mark.parametrize("dsn", ["host='unterminated", "postgresql://fixture@127.0.0.1:1/",
+@pytest.mark.parametrize("dsn", ["host='unterminated", "host=127.0.0.1 dbname=r2_unknown foo=bar",
+                                 "host=127.0.0.1 dbname=r2_unknown sslunknown=bar", "postgresql://fixture@127.0.0.1:1/",
                                  "postgresql://fixture@127.0.0.1:1/pseudolife_memory"])
 def test_invalid_or_production_database_report_matches_python(tmp_path, monkeypatch, capsys, dsn):
     import sys
@@ -522,3 +501,69 @@ def test_native_proof_dsn_domain_refusal_names_the_actual_limit(tmp_path, dsn):
     assert report["error"] == "NativeProofDsnUnsupported"
     assert "TCP host" in report["recovery"] and "application_name" in report["recovery"]
     assert "CREATE/DROP DATABASE permission" not in report["recovery"]
+
+
+@pytest.mark.skipif(sys.platform != "linux" or os.environ.get("PSEUDOLIFE_DOCTOR_LIVE_PROOF") != "1",
+                   reason="Linux installed daemon, CPU models and disposable PostgreSQL required")
+@pytest.mark.parametrize("selection", ["empty", "daemon-relative", "daemon-relative-shadowed",
+                                        "bare", "cwd-relative", "absolute"])
+def test_runtime_library_loads_through_actual_daemon(tmp_path, selection):
+    """A completed native proof requires the real daemon to load its ORT model session."""
+    import psycopg
+    from psycopg.conninfo import conninfo_to_dict, make_conninfo
+
+    dsn = os.environ["PSEUDOLIFE_TEST_DATABASE_URL"]
+    assert conninfo_to_dict(dsn)["dbname"].startswith("r2_")
+    admin = make_conninfo(dsn, dbname="postgres", connect_timeout=5)
+    def banks():
+        with psycopg.connect(admin, autocommit=True) as connection:
+            return {row[0] for row in connection.execute(
+                "SELECT datname FROM pg_database WHERE starts_with(datname, 'r2_')")}
+
+    original = _candidate()
+    original_daemon = original.with_name("pseudolife-daemon")
+    library = Path(os.environ["ORT_DYLIB_PATH"]).resolve()
+    assert original_daemon.is_file() and library.is_file()
+    binary_dir = tmp_path / "bin"
+    binary_dir.mkdir()
+    candidate = binary_dir / "pseudolife-stdio"
+    shutil.copy2(original, candidate)
+    shutil.copy2(original_daemon, binary_dir / "pseudolife-daemon")
+    cwd = tmp_path / "work"
+    cwd.mkdir()
+    temp = tmp_path / "temp"
+    temp.mkdir()
+    env = {key: value for key, value in os.environ.items() if key in (
+        "PATH", "LD_LIBRARY_PATH", "PSEUDOLIFE_DAEMON_ONNX_DIR", "PSEUDOLIFE_DAEMON_MODELS_DIR")}
+    env.update(HOME=str(tmp_path), USERPROFILE=str(tmp_path), TMPDIR=str(temp),
+               TMP=str(temp), TEMP=str(temp), PSEUDOLIFE_TEST_DATABASE_URL=dsn,
+               CUDA_VISIBLE_DEVICES="-1", HF_HUB_OFFLINE="1", TRANSFORMERS_OFFLINE="1")
+    if selection == "empty":
+        destination, override = binary_dir / "libonnxruntime.so", ""
+    elif selection.startswith("daemon-relative"):
+        destination, override = binary_dir / "runtime" / library.name, "runtime/" + library.name
+        if selection.endswith("shadowed"):
+            invalid = cwd / "runtime" / library.name
+            invalid.parent.mkdir()
+            invalid.write_bytes(b"not a dynamic library")
+    elif selection == "bare":
+        destination, override = tmp_path / "loader-search" / library.name, library.name
+        env["LD_LIBRARY_PATH"] = str(destination.parent)
+    elif selection == "cwd-relative":
+        destination, override = cwd / "runtime" / library.name, "./runtime/" + library.name
+    else:
+        destination, override = tmp_path / "absolute" / library.name, str(tmp_path / "absolute" / library.name)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(library, destination)
+    env["ORT_DYLIB_PATH"] = override
+    before = banks()
+    result = subprocess.run([str(candidate), "doctor", "--disposable-proof"], env=env,
+                            cwd=cwd, capture_output=True, text=True, timeout=720)
+    assert banks() == before
+    assert not list(temp.iterdir()), "owned native fixture files must be removed"
+    assert result.returncode == 0, result.stdout
+    assert result.stderr == ""
+    report = json.loads(result.stdout)
+    assert report["ok"] and report["fixture_removed"]
+    assert [stage["path"] for stage in report["stages"]] == ["hint", "ring"]
+    assert all(stage["signal_observed"] and stage["harness_ack"] for stage in report["stages"])

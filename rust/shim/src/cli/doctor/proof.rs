@@ -161,11 +161,86 @@ fn fold(name: &str) -> String {
 
 fn proof_dsn(dsn: &str) -> Result<Dsn, &'static str> {
     Dsn::parse_with_connection_options(dsn).map_err(|error| match error {
-        crate::pg::Error::UnsupportedOption(_) | crate::pg::Error::InvalidOption("host") => {
-            "NativeProofDsnUnsupported"
-        }
+        crate::pg::Error::UnsupportedOption(key) => unsupported_proof_option(&key),
+        crate::pg::Error::InvalidOption("host") => "NativeProofDsnUnsupported",
         _ => "ProgrammingError",
     })
+}
+
+fn unsupported_proof_option(key: &str) -> &'static str {
+    // libpq 18 connection keywords outside the proof's admitted domain.
+    // Unknown keywords remain parser errors, rather than native limitations.
+    match key {
+        "ssl_min_protocol_version"
+        | "ssl_max_protocol_version"
+        | "sslcert"
+        | "sslcertmode"
+        | "sslcompression"
+        | "sslcrl"
+        | "sslcrldir"
+        | "sslkey"
+        | "sslkeylogfile"
+        | "sslmode"
+        | "sslnegotiation"
+        | "sslpassword"
+        | "sslrootcert"
+        | "sslsni" => "NativeProofTlsUnsupported",
+        "channel_binding"
+        | "client_encoding"
+        | "fallback_application_name"
+        | "gssdelegation"
+        | "gssencmode"
+        | "gsslib"
+        | "hostaddr"
+        | "keepalives"
+        | "keepalives_count"
+        | "keepalives_idle"
+        | "keepalives_interval"
+        | "krbsrvname"
+        | "load_balance_hosts"
+        | "max_protocol_version"
+        | "min_protocol_version"
+        | "oauth_client_id"
+        | "oauth_client_secret"
+        | "oauth_issuer"
+        | "oauth_scope"
+        | "options"
+        | "passfile"
+        | "replication"
+        | "require_auth"
+        | "requirepeer"
+        | "scram_client_key"
+        | "scram_server_key"
+        | "service"
+        | "target_session_attrs"
+        | "tcp_user_timeout" => "NativeProofDsnUnsupported",
+        _ => "ProgrammingError",
+    }
+}
+
+fn runtime_library(daemon: &Path, value: std::ffi::OsString) -> Option<std::ffi::OsString> {
+    if value.is_empty() {
+        return None;
+    }
+    let path = Path::new(&value);
+    // ort checks the executable's directory before using the OS loader. Keep
+    // bare names intact so the loader can apply its own search path.
+    let has_separator = value
+        .as_encoded_bytes()
+        .iter()
+        .any(|byte| *byte == b'/' || (cfg!(windows) && *byte == b'\\'));
+    if path.is_absolute()
+        || !has_separator
+        || daemon
+            .parent()
+            .is_some_and(|parent| parent.join(path).exists())
+        || !path.exists()
+    {
+        return Some(value);
+    }
+    // Only an existing caller-relative path needs protection from the cwd
+    // change. If it cannot be resolved, retain ort's original input.
+    Some(std::path::absolute(path).map_or(value, |path| path.into_os_string()))
 }
 
 fn fixture_name(dsn: &str) -> Result<String, &'static str> {
@@ -414,9 +489,9 @@ async fn start(
             command.env(key, value);
         }
     }
-    if let Some(value) = std::env::var_os("ORT_DYLIB_PATH") {
-        // Resolve against the invoking process, before the child changes cwd.
-        let library = std::path::absolute(value).map_err(|_| "OnnxRuntimeUnavailable")?;
+    if let Some(library) =
+        std::env::var_os("ORT_DYLIB_PATH").and_then(|value| runtime_library(daemon, value))
+    {
         command.env("ORT_DYLIB_PATH", library);
     }
     command
@@ -813,6 +888,49 @@ fn cleanup_failure(
 mod tests {
     use super::*;
 
+    #[test]
+    fn runtime_library_preserves_ort_resolution_order() {
+        let cwd = std::env::current_dir().unwrap();
+        let root = cwd.join(format!("r2-runtime-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&root).unwrap();
+        let daemon = root.join("bin/daemon");
+        let relative = root.strip_prefix(&cwd).unwrap().join("library");
+        let library = relative.as_os_str().to_owned();
+        assert_eq!(runtime_library(&daemon, "".into()), None);
+        assert_eq!(
+            runtime_library(&daemon, "library".into()),
+            Some("library".into())
+        );
+        assert_eq!(
+            runtime_library(&daemon, library.clone()),
+            Some(library.clone())
+        );
+        std::fs::write(cwd.join(&relative), b"caller library").unwrap();
+        assert_eq!(
+            runtime_library(&daemon, library.clone()),
+            Some(cwd.join(&relative).into_os_string())
+        );
+        let beside_daemon = daemon.parent().unwrap().join(&relative);
+        std::fs::create_dir_all(beside_daemon.parent().unwrap()).unwrap();
+        std::fs::write(&beside_daemon, b"daemon library").unwrap();
+        assert_eq!(runtime_library(&daemon, library.clone()), Some(library));
+        let absolute = cwd.join(relative).into_os_string();
+        assert_eq!(runtime_library(&daemon, absolute.clone()), Some(absolute));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn unknown_dsn_keywords_are_programming_errors() {
+        for key in ["foo", "sslunknown"] {
+            for dsn in [
+                format!("host=localhost dbname=r2_options {key}=bar"),
+                format!("postgresql://localhost/r2_options?{key}=bar"),
+            ] {
+                assert!(matches!(proof_dsn(&dsn), Err("ProgrammingError")));
+            }
+        }
+    }
+
     #[tokio::test]
     async fn held_drop_replies_expire_and_retry_on_two_owned_connections() {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -942,6 +1060,9 @@ mod tests {
             "sslmode=require",
             "sslmode=verify-full",
             "sslrootcert=relative.pem",
+            "sslcert=relative.pem",
+            "sslkey=relative.pem",
+            "sslcrl=relative.pem",
         ] {
             let dsn = format!("postgresql://fixture@localhost/r2_options?{option}");
             assert_eq!(

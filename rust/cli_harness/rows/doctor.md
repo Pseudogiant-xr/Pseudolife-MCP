@@ -21,9 +21,13 @@ starts the native daemon on loopback, and drives the actual native adapter.
 It requires a sibling or PATH-resolved `pseudolife-daemon` and the host's
 provisioned default models. Missing prerequisites produce a repair instruction
 before any database connection. It carries the resolved model directory and
-`ORT_DYLIB_PATH` (resolved against the invoking working directory) into an otherwise isolated child environment; it never
-provisions models or reads saved client registrations. The daemon verifies
-the model checksums before loading them.
+`ORT_DYLIB_PATH` into an otherwise isolated child environment; it never
+provisions models or reads saved client registrations. Empty runtime overrides
+use ort's default library, daemon-relative paths keep executable-directory
+precedence, and bare names retain the OS loader search. Only an existing
+caller-relative path with no daemon-relative match is made absolute before
+the child changes its working directory. The daemon verifies model checksums
+before loading them.
 
 The fixture DSN's resolved user and password are bound before changing its
 database name or the child environment. URI query escaping is preserved.
@@ -85,7 +89,7 @@ error and does not read that file.
   `service`, `options` or `target_session_attrs` return
   `NativeProofDsnUnsupported` before opening a connection, with the admitted
   domain in the recovery text. Python's libpq accepts those forms. Malformed
-  DSN syntax remains `ProgrammingError`; required TLS and explicit certificate
+  DSN syntax and unknown keywords remain `ProgrammingError`; required TLS and explicit certificate
   settings retain their separate `NativeProofTlsUnsupported` refusal. Encoded
   URI option keys are resolved before constructing the isolated child's DSN.
 - Native `TimeoutError` reports an operation-specific recovery instruction;
@@ -100,8 +104,15 @@ error and does not read that file.
 Server CREATE rejections preserve psycopg's SQLSTATE class names, including
 `InsufficientPrivilege` (42501) and `QueryCanceled` (57014), without returning
 raw server diagnostics. Loopback wire fixtures cover both rejections and assert
-that a rejected CREATE does not cause DROP. A relative-runtime child fixture
-checks the selected library remains readable after the daemon's cwd changes.
+that a rejected CREATE does not cause DROP. Opt-in Linux tests run the actual
+native daemon with a real ONNX library and provisioned CPU models. They require
+a complete hint/ring proof and fixture cleanup for empty, daemon-relative,
+bare, caller-relative and absolute runtime overrides; a conflicting file in
+the caller directory also checks daemon-relative precedence. These load tests
+require `PSEUDOLIFE_DOCTOR_LIVE_PROOF=1`, an explicit `r2_*` fixture DSN,
+`ORT_DYLIB_PATH` naming the source library, and the provisioned model directory.
+Windows contract tests cover the resolver branches; real-library loading on
+Windows is not covered by this Linux matrix.
 
 ## Exact contract items
 

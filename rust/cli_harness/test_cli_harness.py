@@ -65,6 +65,38 @@ print(json.dumps([stat.S_IMODE((root / path).stat().st_mode)
     assert json.loads(result.stdout.splitlines()[-1]) == [0o777 & ~expected, 0o666 & ~expected, 0o666 & ~expected]
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX mode comparison")
+def test_live_077_detects_hard_coded_file_mode_mutant(tmp_path):
+    import json
+    import subprocess
+
+    writer = tmp_path / "writer.py"
+    writer.write_text("from pathlib import Path\nimport sys\np=Path.home()/'mode.txt'\np.write_bytes(b'fixture')\nif '--mutant' in sys.argv: p.chmod(0o644)\n")
+    driver = tmp_path / "driver.py"
+    driver.write_text(r'''import os,sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+from cli_harness import core,rows,runner
+os.umask(0o077)
+rows.ROWS["umask_probe"]="CLI-UMASK-PROBE"
+rows.load=lambda row:[core.Case("inherited-mode",[])]
+core.python_target=lambda *args:core.Target("python",[sys.executable,sys.argv[2]])
+core.rust_target=lambda *args:core.Target("rust",[sys.executable,sys.argv[2],*sys.argv[4:]])
+raise SystemExit(runner.main(["--row","umask_probe","--candidate",sys.executable,"--out",sys.argv[3]]))
+''')
+    for mutant in (False, True):
+        report = tmp_path / ("mutant.json" if mutant else "baseline.json")
+        args = [sys.executable, "-B", str(driver), str(Path(__file__).resolve().parent.parent),
+                str(writer), str(report), *(["--mutant"] if mutant else [])]
+        result = subprocess.run(args, capture_output=True, text=True, timeout=30)
+        assert result.returncode == int(mutant), result.stdout + result.stderr
+        row = json.loads(report.read_text())["rows"]["umask_probe"]
+        assert row["diffs"] == (["inherited-mode"] if mutant else [])
+        if mutant:
+            detail = " ".join(row["results"]["inherited-mode"]["detail"])
+            assert "mode.txt" in detail and "0o600" in detail and "0o644" in detail
+
+
 @pytest.mark.parametrize("fault", [
     {"mismatches": ["fifo:missing"]},
     {"hardlink_same_inode": False},
