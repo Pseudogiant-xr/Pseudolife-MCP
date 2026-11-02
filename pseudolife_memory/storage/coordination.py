@@ -1305,7 +1305,9 @@ CONSOLE_EVENTS_CAP = 101
 # equality and ``ORDER BY seq`` alone the planner walked the primary key
 # backwards, filtering every newer row (6,004 on a 6,000-send fixture,
 # tests/test_coordination_console.py). The detail and expired-count
-# projection is unchanged from before v59. The Rust daemon runs the same
+# projection is the pre-v59 SQL, but expired_count counts expired ids
+# against the bounded visible mail, so an expiry naming older messages can
+# show a lower count than before (2 of 100 rows on the 2026-11-02 bench). The Rust daemon runs the same
 # text (rust/daemon/src/board/console_timeline.sql, ``$1`` the scope and
 # ``$2`` the cap), pinned equal by tests/test_coordination_console.py.
 _CONSOLE_KINDS = "('send','read','ack','attempt','served','woke','lease_expire')"

@@ -41,7 +41,8 @@ prints the SQL to run by hand.
 Names: ``[a-z0-9][a-z0-9._-]{0,63}``; never ``default``, ``daemon`` or
 ``maintainer``, nor a name already in the daemon's ``PSEUDOLIFE_MCP_TOKENS``
 or ``PSEUDOLIFE_MCP_TIER_MAP``. A paired name needs ``--replace`` (its old
-token works until the new code is redeemed); a revoked name may be invited
+token works until the new code is redeemed), except ``--mine`` or
+``--someone-else`` alone, which change only its ownership; a revoked name may be invited
 again. ``--revoke`` takes effect at the daemon's next refresh (within 10 s).
 
 Exit codes: 0 done; 1 the database failed; 2 usage, or not confirmed; 4

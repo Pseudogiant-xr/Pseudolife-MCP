@@ -128,7 +128,7 @@ fn invite_refusals_before_the_database_match_the_oracle() {
             "",
             "invite: not interactive: re-run with --yes to revoke\n",
         ),
-        (&["--version-check"], 0, "pseudolife-mcp invite 1\n", ""),
+        (&["--version-check"], 0, "pseudolife-mcp invite 2\n", ""),
         (
             &["--list", "--revoke", "a", "--json"],
             2,

@@ -329,8 +329,10 @@ def main(argv=None) -> int:
         # The page is the first 100 rows; columns: seq, event, created_at,
         # agent_id, recipient_agent_id, message_id, ...
         old_page, one_page = old_rows[:100], one_rows[:100]
-        only_old = [(r[0], r[1], r[5]) for r in old_page if r not in one_page]
-        only_new = [(r[0], r[1], r[5]) for r in one_page if r not in old_page]
+        # Whole rows, so the artifact shows which column differs (an
+        # expiry's expired_count, under the bounded visible mail).
+        only_old = [list(r) for r in old_page if r not in one_page]
+        only_new = [list(r) for r in one_page if r not in old_page]
         snapshots = {"new-one": time_snapshot(dsn, principal, [principal], sim[0], args.repeats),
                      "new-owner": time_snapshot(dsn, principal, owners, sim[0], args.repeats)}
     result = {
