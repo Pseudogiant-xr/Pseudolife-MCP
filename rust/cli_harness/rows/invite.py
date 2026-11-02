@@ -525,7 +525,8 @@ LIVE_ONLY = frozenset({
     "reinvite-pending-someone-else", "paired-someone-else", "paired-mine-json",
     # Its report is the daemon's auth value nested to the limit and
     # pretty-printed: 2.6 MB of indentation, compared live only.
-    "health-nested-at-limit-json", "defer-tailscale-present", "defer-config-yaml"})
+    "health-nested-at-limit-json", "defer-tailscale-present", "defer-config-yaml",
+    "defer-list-config-yaml", "defer-list-config-env", "defer-invite-config-env"})
 
 
 _TRANSPORT_DOCKER = r'''import json, os, sys
@@ -800,7 +801,9 @@ def _cases() -> list[core.Case]:
     deferred = ("invite-deferral",)
 
     def deferral(case_id, argv, kind="states", **options):
-        native = case_id in {"defer-no-dsn", "defer-list-no-dsn", "defer-tailscale-present", "defer-config-yaml", "defer-help"}
+        native = case_id in {"defer-no-dsn", "defer-list-no-dsn", "defer-tailscale-present", "defer-config-yaml", "defer-help",
+                             # v59: the list and the invite read the config natively.
+                             "defer-list-config-yaml", "defer-list-config-env", "defer-invite-config-env"}
         port = free_port()
         add(write_case(case_id, kind, [*argv, "--port", str(port)], rules=("invite-written",) if native else deferred,
                        daemon=_daemon(port, health()), **options))
