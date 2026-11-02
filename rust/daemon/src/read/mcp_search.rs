@@ -118,7 +118,15 @@ fn mcp_memory_search<'a>(app: &'a crate::http::App, call: ToolCall<'a>) -> ToolF
 /// trace keeps Python JSON's Infinity/NaN spelling. Integer widths survive.
 fn mcp_trace_numbers(value: &mut Value) {
     match value {
-        Value::Number(n) if matches!(n.to_string().as_str(), "Infinity" | "-Infinity" | "NaN") => {
+        Value::Number(n)
+            if {
+                let text = n.to_string();
+                // Large integer top_k values remain arbitrary-precision ints.
+                let float = text.contains(['.', 'e', 'E'])
+                    || matches!(text.as_str(), "Infinity" | "-Infinity" | "NaN");
+                float && text.parse::<f64>().is_ok_and(|n| !n.is_finite())
+            } =>
+        {
             *value = Value::Null;
         }
         Value::Array(items) => items.iter_mut().for_each(mcp_trace_numbers),
@@ -460,10 +468,12 @@ mod tests {
     fn mcp_trace_nulls_nonfinite_floats_without_narrowing_integers() {
         let mut trace = json!({"top_k": serde_json::from_str::<Value>("999999999999999999999999999999").unwrap(),
                                "tiers": [{"half_life_s": null}], "label": "Infinity"});
-        trace["tiers"][0]["half_life_s"] =
-            Value::Number(serde_json::Number::from_string_unchecked("Infinity".into()));
-        mcp_trace_numbers(&mut trace);
-        assert!(trace["tiers"][0]["half_life_s"].is_null());
+        for token in ["Infinity", "-Infinity", "NaN", "1e400", "-1e400"] {
+            trace["tiers"][0]["half_life_s"] =
+                Value::Number(serde_json::Number::from_string_unchecked(token.into()));
+            mcp_trace_numbers(&mut trace);
+            assert!(trace["tiers"][0]["half_life_s"].is_null(), "{token}");
+        }
         assert_eq!(trace["top_k"].to_string(), "999999999999999999999999999999");
         assert_eq!(trace["label"], "Infinity");
     }
