@@ -24,6 +24,12 @@ no enclosing directory. POSIX executables have mode `0755`. The source
 binary is Cargo's `pseudolife-stdio`, built with its default features and
 renamed for installation. These binaries need no Python runtime.
 
+The Linux builds use Ubuntu 22.04 (glibc 2.35) on each architecture;
+macOS builds set a deployment target of 11.0. The Windows build uses MSVC
+on the Windows 2022 runner. The workflow uses native runners for all five
+targets and executes each unpacked archive's `version` command there.
+The runner labels follow [GitHub's hosted runner reference](https://docs.github.com/en/actions/reference/runners/github-hosted-runners).
+
 ## Checksums and compose bundle
 
 `SHA256SUMS` is UTF-8 text with one lowercase SHA-256 digest, two spaces,
@@ -81,3 +87,10 @@ other values disable them. Build-only CI proofs neither attach release
 assets nor push images. Installers and updaters must treat these assets
 as unavailable until an enabled, approved release has actually published
 them; this document defines their contract, not their availability.
+
+To prove the matrix without publication, dispatch `release.yml` on the
+candidate branch. The native build and bundle jobs upload an Actions
+artifact named `native-release-complete`; all publishing jobs are skipped,
+even if the opt-in variables are enabled. A release event builds the same
+archives only after `publish` succeeds and the assets variable is enabled,
+then attaches that complete set without replacing existing release assets.

@@ -29,9 +29,15 @@ name: Release to PyPI
 on:
   release:
     types: [published]
+  # Build-only proof of the same five native targets; no publisher runs.
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   build:
+    if: github.event_name == 'release'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     # Guards + build only read the repo; the write scopes live on the jobs
@@ -84,6 +90,7 @@ jobs:
           if-no-files-found: error
 
   publish:
+    if: github.event_name == 'release'
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -104,6 +111,7 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
 
   images:
+    if: github.event_name == 'release'
     needs: publish
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -182,11 +190,10 @@ jobs:
           docker buildx imagetools inspect "ghcr.io/${OWNER_LC}/pseudolife-daemon:${VERSION}"
           docker buildx imagetools inspect "ghcr.io/${OWNER_LC}/pseudolife-pg:18-${VERSION}"
 
-  # Draft proposal: leave the repository variable unset until the maintainer
-  # approves publishing this additional artifact and its measured runner cost.
+  # Leave the repository variable unset until the maintainer enables this artifact.
   # This does not select Rust in install or update; that is a separate decision.
   rust-image:
-    if: ${{ vars.PSEUDOLIFE_PUBLISH_RUST_DAEMON == 'true' }}
+    if: ${{ github.event_name == 'release' && vars.PSEUDOLIFE_PUBLISH_RUST_DAEMON == 'true' }}
     needs: publish
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -211,10 +218,15 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push the opt-in Rust daemon image
+        # Cold, fresh BuildKit builder (no Cargo/layer cache), Linux dev box,
+        # 2026-11-02 at 5c680dfa: 266s including load. Bound the hosted build
+        # at 35m, leaving 10m of the job timeout for setup/login/inspection.
+        timeout-minutes: 35
         uses: docker/build-push-action@v6
         with:
           context: .
           file: ops/Dockerfile.daemon-rust
+          platforms: linux/amd64
           push: true
           build-args: |
             GIT_SHA=${{ github.sha }}
@@ -223,12 +235,106 @@ jobs:
             BUILD_SOURCE=release
           tags: |
             ghcr.io/${{ env.OWNER_LC }}/pseudolife-daemon-rust:${{ env.VERSION }}
-            ghcr.io/${{ env.OWNER_LC }}/pseudolife-daemon-rust:latest
 
       - name: Verify the pushed Rust image is pullable by digest
         run: docker buildx imagetools inspect "ghcr.io/${OWNER_LC}/pseudolife-daemon-rust:${VERSION}"
 
+  rust-assets:
+    name: Native release / ${{ matrix.target }}
+    needs: publish
+    # The status function admits the build-only dispatch after publish is skipped;
+    # a release requires both human approval and the explicit opt-in.
+    if: ${{ !cancelled() && (github.event_name == 'workflow_dispatch' || (github.event_name == 'release' && needs.publish.result == 'success' && vars.PSEUDOLIFE_PUBLISH_RUST_ASSETS == 'true')) }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        include:
+          - {os: ubuntu-22.04, target: x86_64-unknown-linux-gnu, binary: pseudolife-stdio}
+          - {os: ubuntu-22.04-arm, target: aarch64-unknown-linux-gnu, binary: pseudolife-stdio}
+          - {os: macos-15-intel, target: x86_64-apple-darwin, binary: pseudolife-stdio}
+          - {os: macos-15, target: aarch64-apple-darwin, binary: pseudolife-stdio}
+          - {os: windows-2022, target: x86_64-pc-windows-msvc, binary: pseudolife-stdio.exe}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "11.0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Check disk floor and release identity before building
+        shell: bash
+        run: |
+          python -c "import shutil; assert shutil.disk_usage('.').free >= 8 * 1024**3, 'native build needs 8 GiB free'"
+          python rust/ci/release_assets.py version
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.94.0
+          targets: ${{ matrix.target }}
+      - name: Build the native CLI
+        run: cargo build --manifest-path rust/Cargo.toml --locked --release --bin pseudolife-stdio --target ${{ matrix.target }} -j 3
+      - name: Package the installed executable
+        run: python rust/ci/release_assets.py package --target ${{ matrix.target }} --binary rust/target/${{ matrix.target }}/release/${{ matrix.binary }}
+      - name: Execute the unpacked release binary
+        run: python rust/ci/release_assets.py smoke --target ${{ matrix.target }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-release-${{ matrix.target }}
+          path: release-assets/*
+          if-no-files-found: error
+
+  rust-assets-bundle:
+    needs: rust-assets
+    if: ${{ !cancelled() && needs.rust-assets.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: native-release-*
+          path: release-assets
+          merge-multiple: true
+      - name: Check every archive and assemble compose and checksums
+        run: python rust/ci/release_assets.py assemble
+      - name: Verify all six checksums
+        working-directory: release-assets
+        run: sha256sum --check SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-release-complete
+          path: release-assets/*
+          if-no-files-found: error
+
+  rust-assets-publish:
+    needs: [publish, rust-assets-bundle]
+    if: ${{ !cancelled() && github.event_name == 'release' && needs.publish.result == 'success' && needs.rust-assets-bundle.result == 'success' && vars.PSEUDOLIFE_PUBLISH_RUST_ASSETS == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: native-release-complete
+          path: release-assets
+      - name: Attach native assets to the approved release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # No --clobber: retries never silently replace published bytes.
+        run: gh release upload "$GITHUB_REF_NAME" release-assets/* --repo "$GITHUB_REPOSITORY"
+
   registry:
+    if: github.event_name == 'release'
     needs: publish
     runs-on: ubuntu-latest
     timeout-minutes: 15

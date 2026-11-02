@@ -15,16 +15,29 @@ import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 ROOT = Path(__file__).resolve().parents[2]
-VERIFIED_GRAPH = "f5fdee679d0ffb98e1cb0bb178e8ee2b86739ab7ab035a3a9327761d5c6b1f0b"
 DEFAULT_PATHS = ("ops/Dockerfile.daemon", "ops/docker-compose.yml", "ops/docker-compose.ghcr.yml",
                  "pseudolife_memory/compose/docker-compose.yml", "pseudolife_memory/compose/docker-compose.ghcr.yml",
                  "pseudolife_memory/update_cli.py", ".github/workflows/release.yml",
                  "ops/install.sh", "ops/install.ps1")
 
 
+def native_manifest():
+    source = (ROOT / "rust/daemon/src/model_provision.rs").read_text()
+    return re.findall(r'artifact!\(\s*"([^"]+)"\s*,\s*"([^"]+)"\s*,\s*"([^"]+)"'
+                      r'\s*,\s*"([^"]+)"\s*,\s*"([0-9a-f]{64})"\s*,\s*(\d+)\s*\)', source)
+
+
+def verified_graph():
+    # #1114 admitted the public export with measured parity. The compiled
+    # provisioner's manifest is the identity, not the historical export hash.
+    graphs = [row[4] for row in native_manifest() if row[0] == "embedding/onnx/model.onnx"]
+    assert len(graphs) == 1, "native manifest must pin exactly one embedding graph"
+    return graphs[0]
+
+
 def require_python_defaults(contents, graph):
     # This is one cutover prerequisite, not authorization to switch defaults.
-    if graph == VERIFIED_GRAPH:
+    if graph == verified_graph():
         return
     for path, text in contents.items():
         assert not any(symbol in text for symbol in
@@ -49,21 +62,35 @@ class ContainerTests(unittest.TestCase):
     def test_unverified_graph_cannot_enter_production_selection(self):
         graph = load("provision_container_model").FILES["model.onnx"]
         contents = {path: (ROOT / path).read_text() for path in DEFAULT_PATHS}
+        self.assertEqual(graph, verified_graph())
         require_python_defaults(contents, graph)
+        # Isolate each forbidden input: the real workflow now legitimately
+        # references the verified opt-in image, so it is not a negative fixture.
+        contents = {path: "" for path in DEFAULT_PATHS}
+        contents["ops/Dockerfile.daemon"] = 'CMD ["python", "-m", "pseudolife_memory.cli", "serve"]\n'
+        unverified = "0" * 64
+        require_python_defaults(contents, unverified)
         for path in DEFAULT_PATHS:
             counterfactual = dict(contents)
             counterfactual[path] += "\nimage: w3j-daemon-rust:prep\n"
             with self.subTest(path=path), self.assertRaises(AssertionError):
-                require_python_defaults(counterfactual, graph)
+                require_python_defaults(counterfactual, unverified)
         native_cmd = dict(contents)
         native_cmd["ops/Dockerfile.daemon"] = 'CMD ["pseudolife-daemon"]\n'
         with self.assertRaises(AssertionError):
-            require_python_defaults(native_cmd, graph)
-        require_python_defaults(counterfactual, VERIFIED_GRAPH)
+            require_python_defaults(native_cmd, unverified)
+        require_python_defaults(counterfactual, verified_graph())
+
+    def test_verified_graph_comes_from_the_native_manifest(self):
+        from unittest.mock import patch
+        replacement = [("embedding/onnx/model.onnx", "repo", "revision", "model.onnx", "a" * 64, "1")]
+        with patch.dict(verified_graph.__globals__, native_manifest=lambda: replacement):
+            self.assertEqual(verified_graph(), "a" * 64)
 
     def test_image_gate_matches_inputs_and_skips_unrelated_changes(self):
         gate = load("container_inputs")
         for path in (".dockerignore", "rust/daemon/src/embed.rs", "rust/Cargo.toml", "rust/Cargo.lock",
+                     "evals/prompts/assistant_facts_provenance.txt",
                      "rust/shim/src/main.rs", "rust/shim/Cargo.toml",
                      "rust/shared/pg_runtime.rs",
                      "ops/Dockerfile.daemon-rust", "ops/docker-compose.rust.yml",
@@ -79,6 +106,8 @@ class ContainerTests(unittest.TestCase):
         self.assertIn("--bin pseudolife-stdio", dockerfile)
         self.assertIn("cp rust/target/release/pseudolife-stdio /pseudolife-mcp", dockerfile)
         self.assertIn("COPY --from=builder /pseudolife-mcp /usr/local/bin/pseudolife-mcp", dockerfile)
+        self.assertIn("COPY evals/prompts/assistant_facts_provenance.txt /build/evals/prompts/assistant_facts_provenance.txt", dockerfile)
+        self.assertIn("!evals/prompts/assistant_facts_provenance.txt", (ROOT / ".dockerignore").read_text())
         job = (ROOT / ".github/workflows/rust.yml").read_text().split(
             "\n  daemon-image:", 1)[1].split("\n  parity:", 1)[0]
         self.assertIn("docker run --rm --network none w3j-daemon-rust:prep pseudolife-mcp version", job)
@@ -298,9 +327,7 @@ class ContainerTests(unittest.TestCase):
             self.assertEqual(provision.FILES[name], recorded[name])
 
     def test_export_and_harness_pins_match_the_native_manifest(self):
-        source = (ROOT / "rust/daemon/src/model_provision.rs").read_text()
-        rows = re.findall(r'artifact!\(\s*"([^"]+)"\s*,\s*"([^"]+)"\s*,\s*"([^"]+)"'
-                          r'\s*,\s*"([^"]+)"\s*,\s*"([0-9a-f]{64})"\s*,\s*(\d+)\s*\)', source)
+        rows = native_manifest()
         self.assertEqual(len(rows), 12)
         pins = {path: digest for path, _, _, _, digest, _ in rows}
         self.assertTrue(all(int(size) > 0 for *_, size in rows))

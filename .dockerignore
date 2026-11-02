@@ -27,6 +27,8 @@ docs
 # hold tens of GB of local GGUF checkpoints that would be tarred into every
 # `docker compose build` context, bloating the build cache for nothing.
 evals
+!evals/prompts
+!evals/prompts/assistant_facts_provenance.txt
 tests
 examples
 frontend

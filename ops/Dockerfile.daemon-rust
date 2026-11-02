@@ -3,6 +3,7 @@
 FROM rust:1.94-bookworm AS builder
 WORKDIR /build
 COPY rust /build/rust
+COPY evals/prompts/assistant_facts_provenance.txt /build/evals/prompts/assistant_facts_provenance.txt
 RUN --mount=type=cache,id=w3j-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,id=w3j-cargo-target,target=/build/rust/target,sharing=locked \
     cargo build --manifest-path rust/Cargo.toml --locked --release --bin pseudolife-daemon --bin pseudolife-stdio -j 3 \
