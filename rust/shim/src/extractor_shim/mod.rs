@@ -245,8 +245,23 @@ impl Shim {
     }
     async fn request(
         self: Arc<Self>,
-        req: Request<Incoming>,
+        mut req: Request<Incoming>,
     ) -> Result<Response<Full<Bytes>>, Infallible> {
+        if req.method() != hyper::Method::POST
+            || !matches!(
+                req.uri().path_and_query().map(|path| path.as_str()),
+                Some("/chat/completions" | "/v1/chat/completions")
+            )
+        {
+            // Dropping Incoming before a separately sent body arrives makes
+            // Hyper close the connection early. Discard ignored bodies through
+            // EOF so the existing response can be delivered without a reset.
+            while let Some(frame) = req.body_mut().frame().await {
+                if frame.is_err() {
+                    break;
+                }
+            }
+        }
         if !matches!(req.method().as_str(), "GET" | "POST") {
             let method = req
                 .method()
@@ -562,6 +577,129 @@ where
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn ignored_request_body_is_drained_before_response() {
+        use super::*;
+        use std::{future::Future, task::Poll};
+        use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+
+        let config = config::parse(vec![
+            "claude".into(),
+            "--cli".into(),
+            std::env::current_exe().unwrap().into_os_string(),
+            "--model".into(),
+            "fixture".into(),
+        ])
+        .unwrap()
+        .unwrap();
+        let shim = Arc::new(Shim {
+            config,
+            calls: tokio::sync::Mutex::new(None),
+            health: Mutex::new(None),
+            override_misses: Mutex::new(Default::default()),
+            unlisted_models: Mutex::new(Default::default()),
+        });
+        for (method, path, status) in [
+            ("POST", "/missing", 404),
+            ("PUT", "/models", 501),
+            ("GET", "/models", 200),
+        ] {
+            let (client, server) = tokio::io::duplex(4096);
+            let (witness, ready) = tokio::sync::oneshot::channel();
+            let witness = Arc::new(Mutex::new(Some(witness)));
+            let shim = shim.clone();
+            let service = service_fn(move |req| {
+                let shim = shim.clone();
+                let witness = witness.lock().unwrap().take().unwrap();
+                async move {
+                    tokio::spawn(async move {
+                        let mut response = Box::pin(shim.request(req));
+                        let first = std::future::poll_fn(|cx| {
+                            Poll::Ready(match response.as_mut().poll(cx) {
+                                Poll::Pending => None,
+                                Poll::Ready(answer) => Some(answer),
+                            })
+                        })
+                        .await;
+                        let _ = witness.send(first.is_none());
+                        match first {
+                            Some(answer) => answer,
+                            None => response.await,
+                        }
+                    })
+                    .await
+                    .unwrap()
+                }
+            });
+            let connection = tokio::spawn(async move {
+                http1::Builder::new()
+                    .serve_connection(TokioIo::new(server), service)
+                    .await
+            });
+            let (reader, mut writer) = tokio::io::split(client);
+            let mut reader = BufReader::new(reader);
+            writer
+                .write_all(
+                    format!(
+                        "{method} {path} HTTP/1.1\r\nHost: fixture\r\nContent-Length: 2\r\n\r\n"
+                    )
+                    .as_bytes(),
+                )
+                .await
+                .unwrap();
+            // The service has polled the actual request future with the body
+            // withheld, rather than merely not being scheduled yet.
+            assert!(
+                tokio::time::timeout(std::time::Duration::from_secs(5), ready)
+                    .await
+                    .unwrap()
+                    .unwrap(),
+                "{method} {path} answered before consuming its body"
+            );
+            writer.write_all(b"!?").await.unwrap(); // ignored, not JSON-decoded
+            let response = async {
+                let mut headers = String::new();
+                loop {
+                    let mut line = String::new();
+                    assert_ne!(reader.read_line(&mut line).await.unwrap(), 0);
+                    if line == "\r\n" {
+                        break;
+                    }
+                    headers.push_str(&line);
+                }
+                assert!(headers.starts_with(&format!("HTTP/1.1 {status} ")));
+                let length: usize = headers
+                    .lines()
+                    .find_map(|line| {
+                        let (key, value) = line.split_once(':')?;
+                        key.eq_ignore_ascii_case("content-length")
+                            .then(|| value.trim().parse().unwrap())
+                    })
+                    .unwrap();
+                let mut body = vec![0; length];
+                reader.read_exact(&mut body).await.unwrap();
+                match status {
+                    404 => assert_eq!(body, br#"{"error": "not found"}"#),
+                    501 => assert!(
+                        String::from_utf8(body)
+                            .unwrap()
+                            .contains("Unsupported method ('PUT')")
+                    ),
+                    _ => assert_eq!(
+                        serde_json::from_slice::<Value>(&body).unwrap()["data"][0]["id"],
+                        "fixture"
+                    ),
+                }
+            };
+            tokio::time::timeout(std::time::Duration::from_secs(5), response)
+                .await
+                .unwrap();
+            drop(reader);
+            drop(writer);
+            connection.await.unwrap().unwrap();
+        }
+    }
+
     #[tokio::test(start_paused = true)]
     async fn transient_accept_errors_do_not_stop_the_server() {
         let mut attempts = 0;
