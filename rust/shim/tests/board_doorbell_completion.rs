@@ -1470,7 +1470,7 @@ async fn deferred_privileged_bell_drops_on_empty_expired_or_delivered() {
         tokio::time::advance(Duration::from_secs(61)).await;
         tokio::time::resume();
         if end == "expired" {
-            tokio::time::sleep(Duration::from_millis(250)).await;
+            tokio::time::sleep(Duration::from_secs(1)).await;
         }
         rig.bell.observe(BANK, &next).await;
         assert_eq!(rig.calls(), 0);
