@@ -18,13 +18,14 @@ impl Home {
         ));
         fs::create_dir_all(path.join("pseudolife")).unwrap();
         fs::write(path.join("config.toml"), "# disposable configuration\n").unwrap();
-        Self(path)
+        let user = codex::user_config(&Fake::new(&path).config(), &path).unwrap();
+        Self(user.path.parent().unwrap().to_owned())
     }
     fn token(&self) -> PathBuf {
-        self.0.join("pseudolife/token")
+        self.0.join("pseudolife").join("token")
     }
     fn connection(&self) -> PathBuf {
-        self.0.join("pseudolife/connection.json")
+        self.0.join("pseudolife").join("connection.json")
     }
 }
 impl Drop for Home {
