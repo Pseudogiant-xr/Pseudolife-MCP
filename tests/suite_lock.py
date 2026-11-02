@@ -714,8 +714,8 @@ def _await_board(mirror, mode: str, *, poll: float, notice_every: float,
     ``lease run full-suite`` beside a WSL suite, 2026-11-03). ``wait`` names
     the holder about every ``notice_every`` seconds; ``fail`` raises
     :class:`SuiteLockBusy` once the board has named one, and gives a board
-    that is not answering one request's timeout and one retry
-    (``answer_window``) before the local lock admits the run.
+    that is not answering its retry: the local lock admits the run once two
+    calls have failed, or after ``answer_window`` at most.
     ``check`` runs on every poll, as in the queue, and once more just before
     the run starts, so a tree changed while the board answered is caught
     (review of #1174). A mirror without the gate, or one that fails, admits
@@ -754,8 +754,9 @@ def _await_board(mirror, mode: str, *, poll: float, notice_every: float,
                 raise SuiteLockBusy(
                     f"full-suite lock: {blocker}; {LOCK_ENV}=fail refuses to queue "
                     f"(unset it to wait, or run a targeted subset)")
-            if now - began < window:
-                continue  # a slow daemon gets its retry before the run starts
+            failed = getattr(mirror, "failed_attempts", lambda: 2)()
+            if failed < 2 and now - began < window:
+                continue  # a slow daemon's retry is awaited before the run starts
             print(f"full-suite lock taken; {situation}; {LOCK_ENV}=fail does not wait "
                   f"for it, so the local lock alone admits this run", file=out, flush=True)
             mirror.proceed()

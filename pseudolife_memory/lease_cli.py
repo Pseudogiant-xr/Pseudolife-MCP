@@ -1078,6 +1078,7 @@ class BoardMirror:
         self._admitted = threading.Event()  # with gate: the board let the run start
         self._blocker: str | None = None  # with gate: who it waits for, while it does
         self._trouble: str | None = None  # the board's last failure, until it answers
+        self._failures = 0  # with gate: lease calls that failed before admission
 
     def waiting(self) -> None:
         """While this process waits for the OS lock: queue on the board (the
@@ -1121,9 +1122,15 @@ class BoardMirror:
             return self._trouble
 
     def answer_window(self) -> float:
-        """How long fail mode gives the board to answer before starting on the
-        local lock: one request's timeout and one retry."""
-        return REQUEST_TIMEOUT + TRANSIENT_RETRY
+        """The longest fail mode gives a board that is not answering before
+        starting on the local lock: a timed-out call, the retry pause and a
+        timed-out retry (round 3 of the #1174 review)."""
+        return 2 * REQUEST_TIMEOUT + TRANSIENT_RETRY
+
+    def failed_attempts(self) -> int:
+        """How many of a gated run's lease calls failed before admission."""
+        with self._state_lock:
+            return self._failures
 
     def proceed(self) -> None:
         """Stop waiting for the board: the caller starts on the local lock,
@@ -1201,11 +1208,17 @@ class BoardMirror:
                         # Not admitted yet: ask again after a pause (a board
                         # that keeps failing is dropped after BOARD_GIVE_UP,
                         # and then the local lock alone rules).
-                        if reply is not None:
-                            with self._state_lock:
+                        with self._state_lock:
+                            if reply is None:
+                                self._failures += 1
+                            else:
                                 self._blocker = _queued_notice(self.name, reply)
-                        self._wake.wait(TRANSIENT_RETRY if reply is None else BOARD_POLL)
+                        # hold()'s own wake must not skip the pause; a
+                        # release after this is seen at once all the same.
                         self._wake.clear()
+                        if self._current() != "released":
+                            self._wake.wait(TRANSIENT_RETRY if reply is None else BOARD_POLL)
+                            self._wake.clear()
                         continue
                     holding = True
                     self._admit()
@@ -1258,28 +1271,30 @@ class BoardMirror:
         waiting for it would wait forever (review of #1174). The name must be
         in PSEUDOLIFE_LEASES_HELD (whole names only), and then:
 
-        - with a pid for it in PSEUDOLIFE_LEASES_HELD_PIDS (``lease run``
-          from this package), that pid must be a live ancestor of this
-          process; only when ancestry cannot be read does the lock decide;
-        - without one (the Rust shim's or older ``lease run``), the lease's
-          lock file here must be held, by whichever process;
-        - with neither a pid nor a lock file here, the marker is trusted
-          only when WSLENV names it: ops/wsl-suite.ps1 forwards it into WSL
-          only for leases whose Windows lock it saw held at launch.
+        - a pid for it in PSEUDOLIFE_LEASES_HELD_PIDS (``lease run`` from
+          this package) that is a live ancestor of this process counts;
+        - with no pid, a marker WSLENV names counts: ops/wsl-suite.ps1
+          forwards it into WSL only for leases it checked on the Windows
+          side at launch (the same rule), and a lock file inside WSL is
+          never deleted, so a free one there says nothing about it;
+        - otherwise (no pid, or one that is not an ancestor: a ``lease
+          run`` without the pid record, such as the Rust shim's, started
+          inside the one that left it) the lease's lock file here must be
+          held, by whichever process.
         """
         held = self._environ.get(HELD_ENV, "")
         if f",{self.name}," not in f",{held},":
             return False
         pid = _held_pids(self._environ).get(self.name)
-        if pid is not None:
+        if pid is None:
+            forwarded = (self._environ.get("WSLENV") or "").split(":")
+            if HELD_ENV in (entry.split("/", 1)[0] for entry in forwarded):
+                return True
+        else:
             ancestors = _ancestors()
-            if ancestors is not None:
-                return pid in ancestors
-        lock = self._lease_lock()
-        if lock is not None:
-            return lock
-        forwarded = (self._environ.get("WSLENV") or "").split(":")
-        return pid is None and HELD_ENV in (entry.split("/", 1)[0] for entry in forwarded)
+            if ancestors is not None and pid in ancestors:
+                return True
+        return self._lease_lock() is True
 
     def _connect(self) -> None:
         if self.gate and self._enclosed():

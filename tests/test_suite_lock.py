@@ -1752,37 +1752,58 @@ def test_the_board_not_the_local_clock_decides_a_hold_has_lapsed(tmp_path, paced
 
 @pytest.fixture
 def short_answer_window(paced_board, monkeypatch):
-    # One request's timeout plus one retry: 15 s in production.
-    monkeypatch.setattr(paced_board, "REQUEST_TIMEOUT", 0.4)
+    # Production: REQUEST_TIMEOUT 10 s, TRANSIENT_RETRY 5 s.
+    monkeypatch.setattr(paced_board, "REQUEST_TIMEOUT", 0.3)
     monkeypatch.setattr(paced_board, "TRANSIENT_RETRY", 0.2)
-    return 0.6
+    return paced_board
+
+
+def _times_out(lease_cli):
+    """A board call that takes the whole request timeout, then times out, as
+    a daemon slowed by a suite does."""
+    def reply(request):
+        time.sleep(lease_cli.REQUEST_TIMEOUT)
+        raise httpx.ReadTimeout("timed out")
+    return reply
+
+
+def _answers_late(answer, lease_cli):
+    """A board call that answers just inside the request timeout."""
+    def reply(request):
+        time.sleep(lease_cli.REQUEST_TIMEOUT * 0.8)
+        return answer
+    return reply
 
 
 def test_fail_mode_does_not_wait_for_a_board_that_does_not_answer(tmp_path,
                                                                   short_answer_window):
     # Opus review of #1174: fail mode sat out BOARD_GIVE_UP (120 s) when the
-    # board stopped answering. After one request's timeout and one retry it
-    # says so and the local lock admits the run.
-    daemon = FakeDaemon(lease=[httpx.ConnectError("refused")])
+    # board stopped answering. Once its retry has failed too, it says so and
+    # the local lock admits the run.
+    lease_cli = short_answer_window
+    daemon = FakeDaemon(lease=[_times_out(lease_cli)])
     out = io.StringIO()
     started = time.monotonic()
     held_lock = suite_lock.acquire(tmp_path, "fail", worktree="w", poll=0.02, out=out,
                                    mirror=_mirror(tmp_path, daemon))
     try:
-        assert short_answer_window <= time.monotonic() - started < 30
-        assert daemon.actions().count("lease") >= 2  # it retried once at least
+        # Two timed-out calls with the retry pause between them.
+        floor = 2 * lease_cli.REQUEST_TIMEOUT + lease_cli.TRANSIENT_RETRY
+        assert floor - 0.05 <= time.monotonic() - started < 30
+        assert daemon.actions().count("lease") >= 2
         assert "not answering" in out.getvalue() and "local lock" in out.getvalue()
     finally:
         suite_lock.release(held_lock)
 
 
-def test_fail_mode_gives_a_slow_board_one_retry_before_starting_alone(tmp_path,
+def test_fail_mode_waits_for_the_retrys_answer_before_starting_alone(tmp_path,
                                                                      short_answer_window):
-    # Opus review of #1174, round 2: one failed call started the run, yet a
-    # daemon slowed by the very suite that holds the lease is the likeliest
-    # case. The retry shows that holder, so fail mode refuses.
-    daemon = FakeDaemon(lease=[httpx.ReadTimeout("slow"), httpx.ReadTimeout("slow"),
-                               _queued_behind()])
+    # Opus review of #1174, rounds 2 and 3: a daemon slowed by the very
+    # suite that holds the lease is the likeliest case, and its retry answers
+    # late. That answer shows the holder, so fail mode refuses.
+    lease_cli = short_answer_window
+    daemon = FakeDaemon(lease=[_times_out(lease_cli),
+                               _answers_late(_queued_behind(), lease_cli)])
     with pytest.raises(suite_lock.SuiteLockBusy) as refused:
         suite_lock.acquire(tmp_path, "fail", worktree="w", poll=0.02, out=io.StringIO(),
                            mirror=_mirror(tmp_path, daemon))
@@ -1861,8 +1882,13 @@ ENCLOSING_CASES = {
     # a live ancestor.
     "ancestor": ("gpu,full-suite", "ancestor", "absent", None, True),
     # A recorded pid that is alive but not an ancestor: some other run's
-    # marker leaked into this environment (Opus review of #1174, round 2).
-    "live-non-ancestor": ("gpu,full-suite", "other", "held", None, False),
+    # marker leaked into this environment (Opus review of #1174, round 2),
+    # and no lock here vouches for it.
+    "live-non-ancestor": ("gpu,full-suite", "other", "free", None, False),
+    # A leaked pid, but the lock here is held: a `lease run` without the pid
+    # record (the Rust shim's) started this run inside the leaking one, so
+    # the lock decides, as without a pid (round 3).
+    "stale-pid-lock-held": ("gpu,full-suite", "other", "held", None, True),
     "other-lease": ("gpu", "ancestor", "held", None, False),
     # A run without the pid record (the Rust shim's `lease run`, older code)
     # on this machine: its lock here held.
@@ -1874,6 +1900,11 @@ ENCLOSING_CASES = {
     # it saw held, through WSLENV.
     "forwarded-from-windows": ("full-suite", None, "absent",
                                "PSEUDOLIFE_MCP_TOKEN:PSEUDOLIFE_LEASES_HELD", True),
+    # Lock files are never deleted, so one WSL-side `lease run` or `lease
+    # hold` leaves a free one for good; the forwarded marker still wins
+    # (round 3).
+    "forwarded-over-stale-lock": ("full-suite", None, "free",
+                                  "PSEUDOLIFE_MCP_TOKEN:PSEUDOLIFE_LEASES_HELD", True),
 }
 
 
@@ -1946,23 +1977,45 @@ def _ps_quote(text) -> str:
     return "'" + str(text).replace("'", "''") + "'"
 
 
+# Each case: the lease lock here, the pid recorded for full-suite
+# ("ancestor": this test process, an ancestor of the script; "other": a live
+# process that is not), and whether the marker crosses into WSL.
+WSL_FORWARD_CASES = {
+    "held-no-pid": ("held", None, True),
+    "free-no-pid": ("free", None, False),
+    # Opus review of #1174, round 3: the same live-ancestor check as
+    # BoardMirror._enclosed, before the lock.
+    "ancestor-no-lock": ("absent", "ancestor", True),
+    "non-ancestor-free": ("free", "other", False),
+}
+
+
 @pytest.mark.skipif(os.name != "nt" or not shutil.which("pwsh"),
                     reason="ops/wsl-suite.ps1 runs on Windows under pwsh")
-@pytest.mark.parametrize("lock", ["held", "free"])
+@pytest.mark.parametrize("case", list(WSL_FORWARD_CASES))
 def test_wsl_suite_forwards_a_lease_marker_only_while_its_windows_lock_is_held(
-        tmp_path, lock):
+        tmp_path, case):
     # Opus review of #1174, round 2: `lease run full-suite -- pwsh
     # ops/wsl-suite.ps1` waited forever on its own parent, because the
     # marker never reached WSL. A stand-in for wsl.exe records the
-    # environment the script hands to WSL.
+    # environment the script hands to WSL. The caller's own WSLENV names the
+    # marker too, which must not let it cross unchecked (round 3).
     from pseudolife_memory import os_lock
+    lock, pid, forwarded = WSL_FORWARD_CASES[case]
     leases = tmp_path / "leases"
     leases.mkdir()
     held = os_lock.OsLock(leases / os_lock.lock_file_name("full-suite"))
     if lock == "held":
         assert held.acquire()
-    else:
+    elif lock == "free":
         (leases / os_lock.lock_file_name("full-suite")).touch()
+    other = None
+    pids = {}
+    if pid == "ancestor":
+        pids = {"full-suite": os.getpid()}
+    elif pid == "other":
+        other = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+        pids = {"full-suite": other.pid}
     seen = tmp_path / "seen.txt"
     driver = tmp_path / "driver.ps1"
     driver.write_text(
@@ -1974,23 +2027,32 @@ def test_wsl_suite_forwards_a_lease_marker_only_while_its_windows_lock_is_held(
         "}\n"
         f"& {_ps_quote(ROOT / 'ops' / 'wsl-suite.ps1')}\n",
         encoding="utf-8")
-    env = {key: value for key, value in os.environ.items() if key != "WSLENV"}
+    env = {key: value for key, value in os.environ.items()
+           if key not in ("WSLENV", "PSEUDOLIFE_LEASES_HELD_PIDS")}
     env.update({"PSEUDOLIFE_LEASES_HELD": "gpu,full-suite",
+                "WSLENV": "KEEPME:PSEUDOLIFE_LEASES_HELD/u",
                 "PSEUDOLIFE_LEASE_LOCK_DIR": str(leases),
                 "PSEUDOLIFE_WSL_SUITE_SOURCE": "worktree",
                 "PSEUDOLIFE_TEST_PG_LOGIN_FILE": str(tmp_path / "no-login.env")})
+    if pids:
+        env["PSEUDOLIFE_LEASES_HELD_PIDS"] = json.dumps(pids)
     try:
         done = subprocess.run(["pwsh", "-NoProfile", "-File", str(driver)], env=env,
                               capture_output=True, text=True, timeout=120)
     finally:
         held.release()
+        if other is not None:
+            other.kill()
+            other.wait()
     assert done.returncode == 0, done.stderr
     wslenv, marker = seen.read_text(encoding="utf-8").split("\n")
-    if lock == "held":
-        assert "PSEUDOLIFE_LEASES_HELD" in wslenv.split(":")
+    entries = [entry.split("/", 1)[0] for entry in wslenv.split(":")]
+    assert "KEEPME" in entries  # the caller's other entries still go over
+    if forwarded:
+        assert entries.count("PSEUDOLIFE_LEASES_HELD") == 1
         assert marker == "full-suite"  # gpu's lock is not held here: dropped
     else:
-        assert "PSEUDOLIFE_LEASES_HELD" not in wslenv.split(":")
+        assert "PSEUDOLIFE_LEASES_HELD" not in entries
 
 
 @pytest.mark.parametrize("when", ["while-pending", "as-admitted"])

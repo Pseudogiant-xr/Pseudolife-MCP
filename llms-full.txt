@@ -5409,12 +5409,13 @@ instead. The board decides when a hold has lapsed (it settles them on every
 call). A record under this lock directory's own mirror label while no `lease
 hold` of the lease runs here, or the enclosing `lease run` of the same lease
 that started the run, does not stop it: `lease run` names its leases in
-`PSEUDOLIFE_LEASES_HELD` and its pid in `PSEUDOLIFE_LEASES_HELD_PIDS`, which
-must be a live ancestor of the run (a `lease run` without the pid record
-counts while its lock file here is held), and `ops/wsl-suite.ps1` forwards a
-lease name into WSL only while its Windows lock is held. A board
+`PSEUDOLIFE_LEASES_HELD` and its pid in `PSEUDOLIFE_LEASES_HELD_PIDS`; a
+recorded pid that is a live ancestor of the run counts, and otherwise the
+lease's lock file here must be held. `ops/wsl-suite.ps1` applies the same
+check on the Windows side before it forwards a lease name into WSL, where
+the forwarded marker then counts. A board
 that is unreachable or refuses costs one line and never stops the run (`fail`
-does not wait for one that stops answering), without a bearer the lock alone
+waits for one that stops answering only until its retry has failed too), without a bearer the lock alone
 rules, and `PSEUDOLIFE_SUITE_LOCK=off` (CI) takes neither. The run's bearer and daemon URL
 are read when conftest is imported, before the suite's own client isolation
 strips them, and the mirror is built only for a run that takes the lock.

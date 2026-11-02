@@ -90,8 +90,11 @@ if ($hasLogin) {
 # holds NAME's board lease until this run ends, so the run's suite lock must
 # not wait for it there (it would wait forever). WSL cannot see a Windows
 # lock or process, so a lease name goes over (PSEUDOLIFE_LEASES_HELD, through
-# WSLENV) only while its lock file here is held, and the WSL side trusts
-# exactly that (BoardMirror._enclosed in pseudolife_memory/lease_cli.py).
+# WSLENV) only when, as BoardMirror._enclosed in
+# pseudolife_memory/lease_cli.py checks, the pid PSEUDOLIFE_LEASES_HELD_PIDS
+# records for it is a live ancestor of this script, or its lock file here is
+# held; the WSL side trusts exactly that. A caller's own WSLENV entry for the
+# marker is dropped, so nothing else carries it over.
 function Get-LeaseLockName([string]$name) {
     # pseudolife_memory/os_lock.py lock_file_name
     $safe = $name -replace '[^A-Za-z0-9._-]', '_'
@@ -100,6 +103,25 @@ function Get-LeaseLockName([string]$name) {
         $safe += '-' + (-join ($digest[0..3] | ForEach-Object { $_.ToString('x2') }))
     }
     "lease-$safe.lock"
+}
+function Get-AncestorPids {
+    # This process's ancestors from one process listing, stopping at a parent
+    # newer than its child (a reused pid); empty when the listing fails.
+    $procs = @{}
+    try {
+        Get-CimInstance Win32_Process -Property ProcessId, ParentProcessId, CreationDate |
+            ForEach-Object { $procs[[int]$_.ProcessId] = $_ }
+    } catch { return , @() }
+    $ancestors = [Collections.Generic.List[int]]::new()
+    $current = $procs[[int]$PID]
+    while ($current) {
+        $parent = $procs[[int]$current.ParentProcessId]
+        if (-not $parent -or $parent.CreationDate -gt $current.CreationDate -or
+                $ancestors.Contains([int]$parent.ProcessId)) { break }
+        $ancestors.Add([int]$parent.ProcessId)
+        $current = $parent
+    }
+    , $ancestors
 }
 function Test-LeaseLockHeld([string]$path) {
     # os_lock.probe: the holder locks the first byte (msvcrt.locking).
@@ -116,8 +138,17 @@ if ($env:PSEUDOLIFE_LEASES_HELD) {
     if (-not $leaseDir) {
         $leaseDir = Join-Path ([Environment]::GetFolderPath('UserProfile')) '.pseudolife-mcp/locks'
     }
+    $pids = @{}
+    if ($env:PSEUDOLIFE_LEASES_HELD_PIDS) {
+        try { $pids = $env:PSEUDOLIFE_LEASES_HELD_PIDS | ConvertFrom-Json -AsHashtable } catch { }
+        if ($pids -isnot [hashtable]) { $pids = @{} }
+    }
+    $ancestors = if ($pids.Count) { Get-AncestorPids } else { @() }
     $heldHere = @($env:PSEUDOLIFE_LEASES_HELD -split ',' | Where-Object {
-        $_ -and (Test-LeaseLockHeld (Join-Path $leaseDir (Get-LeaseLockName $_)))
+        $recorded = if ($_) { $pids[$_] } else { $null }
+        $_ -and ((($recorded -is [long] -or $recorded -is [int]) -and
+            ($ancestors -contains [int]$recorded)) -or
+            (Test-LeaseLockHeld (Join-Path $leaseDir (Get-LeaseLockName $_))))
     })
     if ($heldHere.Count) {
         $copy['PSEUDOLIFE_LEASES_HELD'] = $heldHere -join ','
@@ -146,7 +177,13 @@ $entries = @($forward) + @($paths)
 $saved = $env:WSLENV
 $savedCopy = @{}
 foreach ($k in $copy.Keys) { $savedCopy[$k] = [Environment]::GetEnvironmentVariable($k) }
-if ($saved) { $entries = @($saved) + $entries }
+if ($saved) {
+    # The marker crosses only as checked above, never on the caller's say-so.
+    $kept = @($saved -split ':' | Where-Object {
+        $_ -and (($_ -split '/', 2)[0] -ne 'PSEUDOLIFE_LEASES_HELD')
+    })
+    $entries = $kept + $entries
+}
 try {
     # Restored afterwards: run with `&` or dot-sourced, this script shares the
     # caller's environment, and a later wsl call there must not inherit it.
