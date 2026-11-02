@@ -35,7 +35,7 @@ pub(super) fn data_dir() -> Result<(PathBuf, bool)> {
 
 pub(super) fn path(write: bool) -> Result<PathBuf> {
     if let Some(value) = std::env::var_os("PSEUDOLIFE_MCP_CONFIG").filter(|v| !v.is_empty()) {
-        return Ok(value.into());
+        return Ok(native_path(value.into()));
     }
     let (data, known) = data_dir()?;
     if write && !known {
@@ -43,7 +43,15 @@ pub(super) fn path(write: bool) -> Result<PathBuf> {
             "cannot tell where this daemon reads its config: set PSEUDOLIFE_MCP_DATA_DIR (or PSEUDOLIFE_MCP_CONFIG) as the daemon has it, then run `{SETUP}` again"
         )));
     }
-    Ok(data.join("config.yaml"))
+    Ok(native_path(data.join("config.yaml")))
+}
+
+fn native_path(path: PathBuf) -> PathBuf {
+    // pathlib renders Windows paths with native separators even when the
+    // configuration environment variable was written with forward slashes.
+    #[cfg(windows)]
+    let path = path.components().collect();
+    path
 }
 
 pub(super) fn problem(rp: &str, origin: &str) -> Option<String> {
