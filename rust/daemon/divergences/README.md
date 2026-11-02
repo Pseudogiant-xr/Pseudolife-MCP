@@ -36,6 +36,8 @@ closed no-spawn planning difference; the counts below include these two rows.
 | closed | 49 |
 | **Total** | **262** |
 
+TLS wiring now covers six modes and PEM client identities; its remaining libpq conventions keep the row in the caller bucket, so the counts above are unchanged.
+
 ## Behaviour with a caller: B14b routing
 
 Each link names the exact ledger row. Owners are the implementation streams
@@ -80,7 +82,7 @@ whose remaining item is a proof keeps that boundary visible in its entry.
 | [Plugin dir for `hooks_digest`](startup-and-configuration/plugin-dir-for-hooks-digest.md) | `pseudolife_memory/doctor_cli.py::_codex_hooks_line` and `rust/shim/src/cli/doctor/mod.rs` health digest checks on a native launch | B11 runtime/install layout via R4/R5 |
 | [R5-CODEX-BOOTSTRAP-AUTHORITY](startup-and-configuration/r5-codex-bootstrap-authority.md) | Native Codex credential bootstrap through `setup::codex::configure_credential_file` | R5 / B11 installers and client registration |
 | [Storage modes](startup-and-configuration/storage-modes.md) | installed no-DSN startup through Python `pseudolife_memory/service.py::MemoryService` and the lite installer path | B9 embedded Postgres (outside current R1-R7 scope); B11 migration via R4/R5 |
-| [TLS and libpq conventions](startup-and-configuration/tls-and-libpq-conventions.md) | configured external Postgres startup through `pseudolife_memory/service.py::MemoryService._ensure_postgres_storage`, including TLS-required servers | B4 lifecycle/storage; B11 connection setup via R1/R5 |
+| [TLS and libpq conventions](startup-and-configuration/tls-and-libpq-conventions.md) | external Postgres with residual libpq/OpenSSL controls; six TLS modes and PEM identities now implemented | R10 TLS; B4/B11 residual conventions via R1/R5 |
 | [YAML dialect](startup-and-configuration/yaml-dialect.md) | existing Python config.yaml files read by `rust/daemon/src/config.rs::load` on engine cutover | B15 configuration/environment; B11 existing-config cutover via R4/R5 |
 | [`config-write-restart-only`: `POST /api/config` on a live knob](w2-d-completion-boundary-2026-10/config-write-restart-only-post-api.md) | `frontend/src/lib/api/config.ts::configApi.write`, used by `frontend/src/views/Settings.svelte` | B4 runtime configuration; B2d config API |
 | [`POST /api/config` over a config.yaml this daemon cannot rewrite exactly: a YAML timestamp or `!!binary` value, a mapping or list shared through an anchor and alias (a merge of a mapping of scalars is fine), an integer past 64 bits](w2-d-completion-boundary-2026-10/post-api-config-over-a-config-yaml-this.md) | `frontend/src/lib/api/config.ts::configApi.write` against an existing Python-authored config.yaml during engine cutover | B15 configuration/environment; B2d config API |

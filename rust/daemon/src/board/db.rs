@@ -75,10 +75,7 @@ impl Conn {
     }
 
     async fn connect(&self) -> Result<Client> {
-        let config: tokio_postgres::Config = self
-            .dsn
-            .parse()
-            .map_err(|e: tokio_postgres::Error| BoardError::Internal(e.to_string()))?;
+        let config = crate::storage::parse_dsn(&self.dsn).map_err(BoardError::Internal)?;
         // Bound authentication/startup as well as the TCP connection. The
         // shared connector creates a fresh session; no board write is retried.
         let (client, _connection) =
