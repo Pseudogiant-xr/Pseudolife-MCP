@@ -386,6 +386,11 @@ pub enum PrincipalSource {
     Open,
     Environment,
     Store,
+    /// A Console session (schema v59, `console_sessions`): resolved only by
+    /// the `/api` gate's opt-in lookup (`console_sessions::resolve`), never
+    /// by [`resolve_detailed`], so a session is never an agent credential.
+    /// Its issuing credential's source travels beside it (`issued_by`).
+    Session,
 }
 
 #[cfg_attr(not(feature = "principal-harness"), allow(dead_code))]
@@ -393,9 +398,30 @@ pub fn operator_route(path: &str) -> bool {
     matches!(path, "/api/config" | "/api/daemon-notice")
 }
 
+/// `_operator` (`web/api.py`, spec 2026-11-02 section 3): the operator
+/// routes' allowlist. An environment principal, an open daemon, or a Console
+/// session an environment principal issued; a paired (stored) machine, and
+/// any session it issued, is refused, because a pairing code never grants
+/// operator rights. The match is exhaustive on purpose: a new source is
+/// refused until it is placed here.
+pub fn operator(source: Option<PrincipalSource>, issued_by: Option<PrincipalSource>) -> bool {
+    match source {
+        None | Some(PrincipalSource::Open) | Some(PrincipalSource::Environment) => true,
+        Some(PrincipalSource::Session) => issued_by == Some(PrincipalSource::Environment),
+        Some(PrincipalSource::Store) => false,
+    }
+}
+
+/// The operator gate on one request: only a POST to an operator route
+/// consults [`operator`].
 #[cfg_attr(not(feature = "principal-harness"), allow(dead_code))]
-pub fn operator_allowed(source: Option<PrincipalSource>, method: &str, path: &str) -> bool {
-    method != "POST" || source != Some(PrincipalSource::Store) || !operator_route(path)
+pub fn operator_allowed(
+    source: Option<PrincipalSource>,
+    issued_by: Option<PrincipalSource>,
+    method: &str,
+    path: &str,
+) -> bool {
+    method != "POST" || !operator_route(path) || operator(source, issued_by)
 }
 
 #[cfg_attr(not(feature = "principal-harness"), allow(dead_code))]
@@ -571,25 +597,36 @@ mod tests {
 
     #[test]
     fn operator_policy_uses_resolution_source() {
+        use PrincipalSource::{Environment, Open, Store};
         for path in ["/api/config", "/api/daemon-notice"] {
-            assert!(!operator_allowed(
-                Some(PrincipalSource::Store),
-                "POST",
-                path
-            ));
-            assert!(operator_allowed(Some(PrincipalSource::Store), "GET", path));
-            assert!(operator_allowed(
-                Some(PrincipalSource::Environment),
-                "POST",
-                path
-            ));
-            assert!(operator_allowed(Some(PrincipalSource::Open), "POST", path));
+            assert!(!operator_allowed(Some(Store), None, "POST", path));
+            assert!(operator_allowed(Some(Store), None, "GET", path));
+            assert!(operator_allowed(Some(Environment), None, "POST", path));
+            assert!(operator_allowed(Some(Open), None, "POST", path));
+            assert!(operator_allowed(None, None, "POST", path));
         }
-        assert!(operator_allowed(
-            Some(PrincipalSource::Store),
-            "POST",
-            "/api/stats"
-        ));
+        assert!(operator_allowed(Some(Store), None, "POST", "/api/stats"));
+    }
+
+    /// The allowlist (spec 2026-11-02, section 3): a Console session has
+    /// operator rights only when an environment principal issued it. A
+    /// session a paired machine issued, or one whose issuer is unknown, is
+    /// refused, as its machine is; a denylist of `store` alone would let
+    /// both through.
+    #[test]
+    fn operator_gate_is_an_allowlist_a_paired_session_cannot_pass() {
+        use PrincipalSource::{Environment, Open, Session, Store};
+        for path in ["/api/config", "/api/daemon-notice"] {
+            assert!(operator_allowed(Some(Session), Some(Environment), "POST", path));
+            assert!(!operator_allowed(Some(Session), Some(Store), "POST", path));
+            assert!(!operator_allowed(Some(Session), None, "POST", path));
+            assert!(!operator_allowed(Some(Session), Some(Open), "POST", path));
+            assert!(!operator_allowed(Some(Session), Some(Session), "POST", path));
+            // Reading them is not operator-gated.
+            assert!(operator_allowed(Some(Session), Some(Store), "GET", path));
+        }
+        assert!(operator_allowed(Some(Session), Some(Store), "POST", "/api/stats"));
+        assert!(!operator(Some(Store), Some(Environment)));
     }
 
     #[test]

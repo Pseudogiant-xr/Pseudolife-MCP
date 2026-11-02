@@ -266,6 +266,42 @@ pub(crate) fn resolve(app: &App, h: &HeaderMap) -> Resolved {
     resolved
 }
 
+/// What the `/api` gate resolved (`_resolve_detailed`): the principal, the
+/// source of the credential that named it and, for a Console session, the
+/// source of the credential that issued the session.
+pub(crate) struct ApiCaller {
+    pub principal: String,
+    pub source: Option<auth::PrincipalSource>,
+    pub issued_by: Option<auth::PrincipalSource>,
+}
+
+pub(crate) enum ApiResolved {
+    Caller(ApiCaller),
+    None,
+    Unavailable,
+}
+
+/// The `/api` transport gate's one resolution per request
+/// (`_resolve_detailed`), noted once for `invite --list` (v58).
+fn resolve_api(app: &App, h: &HeaderMap) -> ApiResolved {
+    let header = authorization(h);
+    let (resolved, source) = auth::resolve_detailed(header.as_deref(), &app.env_tokens, &app.store);
+    if !app.service.config.read_only
+        && let Some(activity) = &app.activity
+    {
+        activity.note(header.as_deref(), &resolved, source);
+    }
+    match resolved {
+        Resolved::Principal(principal) => ApiResolved::Caller(ApiCaller {
+            principal,
+            source,
+            issued_by: None,
+        }),
+        Resolved::None => ApiResolved::None,
+        Resolved::Unavailable => ApiResolved::Unavailable,
+    }
+}
+
 /// `_authorization`: the Authorization value `resolve` judges, the last one sent.
 pub(crate) fn authorization(h: &HeaderMap) -> Option<String> {
     last_header(h, "authorization")
@@ -523,14 +559,10 @@ async fn api(
         }
         Ok(None) => {}
     }
-    let stored = match resolve(app, h) {
-        Resolved::Unavailable => return principals_unavailable(),
-        Resolved::None => return unauthorized(),
-        // Stored rows never carry an env principal's name or `default`
-        // (they are dropped from the snapshot), so the name tells the source.
-        Resolved::Principal(name) => {
-            name != "default" && !app.env_tokens.map.iter().any(|(_, p)| *p == name)
-        }
+    let caller = match resolve_api(app, h) {
+        ApiResolved::Unavailable => return principals_unavailable(),
+        ApiResolved::None => return unauthorized(),
+        ApiResolved::Caller(caller) => caller,
     };
     if method != "GET" && method != "POST" {
         return method_not_allowed();
@@ -538,7 +570,14 @@ async fn api(
     if app.service.config.read_only && method == "POST" {
         return shadow_refusal();
     }
-    if method == "POST" && OPERATOR_POST_PATHS.contains(&path) && stored {
+    // An invited machine reads and writes the bank and the board, but does
+    // not reconfigure the daemon or speak as it; nor does a Console session
+    // it signed in (an allowlist, spec 2026-11-02 section 3). The body stays
+    // the bare code, as Python's.
+    if method == "POST"
+        && OPERATOR_POST_PATHS.contains(&path)
+        && !auth::operator(caller.source, caller.issued_by)
+    {
         return json_response(403, &json!({"error": "operator_principal_required"}));
     }
     #[cfg(feature = "harness")]
@@ -932,6 +971,64 @@ pub(crate) mod tests {
         let prefix = crate::principal_activity::bearer_hash_prefix("fixture-wrong");
         assert_eq!(batch.rejected.get(&prefix).map(|r| r.0), Some(2));
         assert_eq!(batch.rejected.len(), 1);
+    }
+
+    /// The operator gate reads the resolution's source, not the name: a
+    /// paired machine is refused `POST /api/config` and
+    /// `/api/daemon-notice` with the bare code, and reads them; the
+    /// environment token is not refused.
+    #[tokio::test]
+    async fn the_operator_gate_refuses_a_paired_machine_by_its_source() {
+        use sha2::Digest;
+        let app = Arc::new(fixture_app());
+        let hash = hex::encode(sha2::Sha256::digest(b"fixture-paired-token"));
+        app.store.refresh(
+            vec![auth::StoredPrincipal {
+                principal: "laptop".into(),
+                token_hash: Some(hash),
+                tier: None,
+                board: true,
+                revoked: false,
+                owned: true,
+            }],
+            None,
+            &[],
+            Instant::now(),
+        );
+        let call = |method: &str, path: &str, token: &str| {
+            Request::builder()
+                .method(method)
+                .uri(path)
+                .header("authorization", format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap()
+        };
+        for path in ["/api/config", "/api/daemon-notice"] {
+            let response = handle(
+                State(app.clone()),
+                call("POST", path, "fixture-paired-token"),
+            )
+            .await;
+            assert_eq!(response.status().as_u16(), 403, "{path}");
+            let bytes = axum::body::to_bytes(response.into_body(), 4096)
+                .await
+                .unwrap();
+            assert_eq!(&bytes[..], br#"{"error": "operator_principal_required"}"#);
+            let response = handle(State(app.clone()), call("POST", path, "fixture-token")).await;
+            let bytes = axum::body::to_bytes(response.into_body(), 4096)
+                .await
+                .unwrap();
+            assert!(
+                !String::from_utf8_lossy(&bytes).contains("operator_principal_required"),
+                "{path}"
+            );
+        }
+        let response = handle(
+            State(app.clone()),
+            call("GET", "/api/nope", "fixture-paired-token"),
+        )
+        .await;
+        assert_eq!(response.status().as_u16(), 404);
     }
 
     #[tokio::test]
