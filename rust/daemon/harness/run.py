@@ -31,6 +31,7 @@ import copy
 import http.client
 import importlib.util
 import json
+import math
 import os
 import re
 import tempfile
@@ -60,7 +61,10 @@ GOLDENS = HERE / "goldens"
 HEADERS_COMPARED = ("content-type", "cache-control", "location", "content-security-policy",
                     "x-frame-options", "referrer-policy", "x-content-type-options", "x-pl-board")
 # (table, column) values that are wall-clock or random by construction.
-DB_NONDETERMINISTIC = {("relations", "created_at"): "clock: wall clock per row (storage/postgres.py:765)"}
+DB_NONDETERMINISTIC = {
+    ("relations", "created_at"): "clock: wall clock per row (storage/postgres.py:765)",
+    ("retrieval_events", "created_at"): "clock: retrieval event wall clock per row",
+}
 # State only the Python side writes during init, owned by later slices. Kind
 # "row": a new meta row by key; "warmup": one identified probe and its
 # matching sequence increment. Pre-existing primary keys are never waived.
@@ -391,8 +395,25 @@ def register_response_scrub(path: str, scrub) -> None:
     RESPONSE_SCRUBS[path] = scrub
 
 
+STATS_CLOCKS = (("retrieval_log", "last_event_at"), ("last_true_drop", "at"))
+
+
+def stats_clocks(resp: dict):
+    """Only the two wall clocks already free in the memory_stats comparator."""
+    body = resp.get("json")
+    if resp.get("status") == 200 and isinstance(body, dict):
+        for parent, leaf in STATS_CLOCKS:
+            value = body.get(parent)
+            if isinstance(value, dict) and leaf in value:
+                yield value, leaf
+
+
 def normalize_response(resp: dict, path: str, declared: list[str], *, golden: bool = False) -> dict:
     resp = json.loads(json.dumps(resp))
+    if urllib.parse.unquote(path.split("?")[0]) == "/api/stats":
+        for parent, leaf in stats_clocks(resp):
+            if type(parent[leaf]) is float and math.isfinite(parent[leaf]):
+                parent[leaf] = "<stats clock>"
     if path == "/api/agents?view=coordination" and snapshot_clock_valid(resp):
         resp["json"]["snapshot_at"] = "<request clock>"
     resp.pop("_clock_window", None)
@@ -621,6 +642,10 @@ def stale_declared_cases() -> list[str]:
 def gate_cases(auth: tuple[str, str] | None) -> list[dict]:
     a = [auth] if auth else []
     js = ("Content-Type", "application/json")
+    static = REPO / "pseudolife_memory" / "web" / "static"
+    css, = re.findall(r'href="(/ui/assets/[^"/]+\.css)"',
+                      (static / "index.html").read_text(encoding="utf-8"))
+    assert (static / css.removeprefix("/ui/")).is_file(), "Console stylesheet is missing"
     c = [
         case("health GET", "GET", "/health"),
         case("health POST", "POST", "/health"),
@@ -629,7 +654,7 @@ def gate_cases(auth: tuple[str, str] | None) -> list[dict]:
         case("ui index", "GET", "/ui"),
         case("ui slash", "GET", "/ui/"),
         case("ui asset js", "GET", "/ui/theme.js"),
-        case("ui asset css", "GET", "/ui/assets/index-BFOM-F8H.css"),
+        dict(case("ui asset css", "GET", css), expected_content_type="text/css"),
         case("ui asset font", "GET", "/ui/assets/Geist-Variable-Bj2R_7yk.woff2"),
         case("ui asset png", "GET", "/ui/assets/pseudolife-mark-CiStlepW.png"),
         case("ui asset webp", "GET", "/ui/assets/pseudolife-logo-CWwQVyJT.webp"),
@@ -1894,6 +1919,13 @@ def compare_case(c: dict, py: dict | None, rs: dict, *, golden: bool = False) ->
            "python_status": py and py["status"], "rust_status": rs["status"], "diffs": [], "declared": None}
     if replays:
         row["transport_replays"] = replays
+    if c["method"] == "GET" and urllib.parse.unquote(c["path"].split("?")[0]) == "/api/stats":
+        for side, response in (("python", py), ("rust", rs)):
+            for parent, leaf in stats_clocks(response or {}):
+                value = parent[leaf]
+                recorded = golden and side == "python" and value == "<stats clock>"
+                if value is not None and not recorded and not (type(value) is float and math.isfinite(value)):
+                    row["diffs"].append(f"{side}: stats {leaf} must be a finite float or null")
     if c["path"] == "/api/agents?view=coordination":
         for side, response in (("python", py), ("rust", rs)):
             if response and isinstance(response.get("json"), dict) and "snapshot_at" in response["json"]:
@@ -1936,6 +1968,11 @@ def compare_case(c: dict, py: dict | None, rs: dict, *, golden: bool = False) ->
             if rs["headers"].get(header) != expected:
                 row["diffs"].append(f"future-schema refusal has incorrect {header}")
         return row
+    if "expected_content_type" in c:
+        for side, response in (("python", py), ("rust", rs)):
+            kind = response.get("headers", {}).get("content-type", "").split(";", 1)[0] if response else ""
+            if kind != c["expected_content_type"]:
+                row["diffs"].append(f"{side}: content type {kind!r} differs from contract {c['expected_content_type']!r}")
     if "expected_status" in c and py is not None and py["status"] != c["expected_status"]:
         row["diffs"].append(f"oracle status {py['status']} differs from contract {c['expected_status']}")
     if "expected_error" in c and c["expected_error"] is not None and py is not None:
@@ -2187,6 +2224,18 @@ def run_refusals(binary: Path, root: Path, selected=None) -> list[dict]:
 
 def load_golden(name: str) -> dict:
     data = json.loads((GOLDENS / f"{name}.json").read_text(encoding="utf-8"))
+    # The replay process and its daemon share the host's cgroup/proc view.
+    # Recompute only this host-dependent shape from the Python oracle. Raw
+    # candidate values still pass normalize_memory; source, optional keys,
+    # nullability and scalar kinds must match that oracle on this host.
+    if name in {"tokens", "tokenless"}:
+        from pseudolife_memory.utils.memory_headroom import read_memory_headroom
+        for c, response in zip(SCENARIOS[name]().cases(), data["responses"], strict=True):
+            body = response.get("json", {})
+            if urllib.parse.unquote(c["path"]) == "/health" and isinstance(body, dict) \
+                    and isinstance(body.get("memory"), dict) \
+                    and body["memory"].get("source") in {"cgroup", "process", "unavailable"}:
+                body["memory"] = normalize_memory(read_memory_headroom())
     if name.startswith("static-build-"):
         for c, response in zip(StaticBuild().cases(), data["responses"], strict=True):
             platform_static_type(c, response)
