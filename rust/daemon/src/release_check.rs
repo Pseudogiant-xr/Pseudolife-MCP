@@ -249,7 +249,7 @@ mod tests {
     }
 
     #[test]
-    fn compatibility_python_prerelease_equivalence() {
+    fn compatibility_python_prerelease_spelling_equivalence() {
         let cases: Value =
             serde_json::from_str(include_str!("../harness/goldens/version-spelling.json")).unwrap();
         for case in cases.as_array().unwrap() {
