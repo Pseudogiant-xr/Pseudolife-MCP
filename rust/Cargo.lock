@@ -1804,6 +1804,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "pseudolife-extractor-fixtures"
+version = "0.1.0"
+
+[[package]]
 name = "pseudolife-stdio"
 version = "0.21.0"
 dependencies = [
@@ -1821,6 +1825,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "process-wrap",
+ "pseudolife-extractor-fixtures",
  "regex",
  "regex-lite",
  "reqwest",
