@@ -236,6 +236,13 @@ impl Dsn {
     pub fn config(&self) -> &tokio_postgres::Config {
         &self.config
     }
+    /// Resolve authentication once before passing a connection to an isolated child.
+    pub fn resolved_config(
+        &self,
+        environment: &super::PasswordEnvironment,
+    ) -> Result<tokio_postgres::Config, Error> {
+        super::password::configure(self, environment)
+    }
     pub fn ssl_mode(&self) -> SslMode {
         self.mode
     }

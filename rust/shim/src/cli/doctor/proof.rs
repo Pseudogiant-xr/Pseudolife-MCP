@@ -5,7 +5,7 @@ use crate::board::{
     state,
 };
 use crate::credentials::{CredentialProvider, CredentialSnapshot};
-use crate::pg::{Dsn, Session};
+use crate::pg::{Dsn, PasswordEnvironment, Session, TlsEnvironment};
 use serde_json::{Value, json};
 use std::{
     path::{Path, PathBuf},
@@ -18,6 +18,7 @@ use unicode_casefold::UnicodeCaseFold;
 
 const RECOVERY: &str = "Check the disposable fixture server and CREATE/DROP DATABASE permission; no host delivery has been verified.";
 const TOKEN: &str = "synthetic-proof-bearer";
+const DATABASE_IO_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub(super) fn daemon() -> Option<PathBuf> {
     let name = if cfg!(windows) {
@@ -145,15 +146,19 @@ fn fixture_name(dsn: &str) -> Result<String, &'static str> {
 fn database(dsn: &str, name: &str) -> Result<String, &'static str> {
     if dsn.starts_with("postgres://") || dsn.starts_with("postgresql://") {
         let mut url = reqwest::Url::parse(dsn).map_err(|_| "ProgrammingError")?;
-        let query: Vec<_> = url
-            .query_pairs()
-            .filter(|(key, _)| key != "dbname")
-            .map(|(k, v)| (k.into_owned(), v.into_owned()))
-            .collect();
-        url.set_query(None);
-        if !query.is_empty() {
-            url.query_pairs_mut().extend_pairs(query);
-        }
+        // libpq URI queries percent-decode; '+' is literal, not form whitespace.
+        // Keep every other option's original bytes, including encoded spaces.
+        let query = url.query().map(|query| {
+            query
+                .split('&')
+                .filter(|pair| {
+                    let key = pair.split_once('=').map_or(*pair, |(key, _)| key);
+                    percent_encoding::percent_decode_str(key).decode_utf8_lossy() != "dbname"
+                })
+                .collect::<Vec<_>>()
+                .join("&")
+        });
+        url.set_query(query.as_deref());
         url.set_path(&format!("/{name}"));
         Ok(url.into())
     } else {
@@ -162,9 +167,44 @@ fn database(dsn: &str, name: &str) -> Result<String, &'static str> {
     }
 }
 
+/// Bind the selected fixture's authentication before changing database or HOME.
+/// No credential is placed in argv, output, or a persistent configuration file.
+fn authenticated(dsn: &str, environment: &PasswordEnvironment) -> Result<String, &'static str> {
+    let parsed = Dsn::parse(dsn).map_err(|_| "ProgrammingError")?;
+    let config = parsed
+        .resolved_config(environment)
+        .map_err(|_| "OperationalError")?;
+    let user = config.get_user().ok_or("OperationalError")?;
+    let password = std::str::from_utf8(config.get_password().unwrap_or_default())
+        .map_err(|_| "ProgrammingError")?;
+    if dsn.starts_with("postgres://") || dsn.starts_with("postgresql://") {
+        let encode = |value: &str| {
+            percent_encoding::utf8_percent_encode(value, percent_encoding::NON_ALPHANUMERIC)
+                .to_string()
+        };
+        let separator = if dsn.contains('?') { '&' } else { '?' };
+        Ok(format!(
+            "{dsn}{separator}user={}&password={}",
+            encode(user),
+            encode(password)
+        ))
+    } else {
+        let quote = |value: &str| value.replace('\\', "\\\\").replace('\'', "\\'");
+        Ok(format!(
+            "{dsn} user='{}' password='{}'",
+            quote(user),
+            quote(password)
+        ))
+    }
+}
+
 async fn connect(dsn: &str) -> Result<Session, &'static str> {
     let dsn = Dsn::parse(dsn).map_err(|_| "ProgrammingError")?;
-    tokio::time::timeout(Duration::from_secs(5), Session::open(&dsn))
+    let mut environment = TlsEnvironment::from_environment();
+    // Authentication was resolved against the original fixture database; an
+    // empty result must not read a different pgpass entry for the admin bank.
+    environment.password = PasswordEnvironment::default();
+    tokio::time::timeout(Duration::from_secs(5), Session::open_in(&dsn, &environment))
         .await
         .map_err(|_| "OperationalError")?
         .map_err(|_| "OperationalError")
@@ -173,19 +213,20 @@ async fn connect(dsn: &str) -> Result<Session, &'static str> {
 async fn drop_bank(admin: &str, name: &str) -> bool {
     for _ in 0..2 {
         if let Ok(session) = connect(admin).await {
-            let result = async {
+            let result = tokio::time::timeout(DATABASE_IO_TIMEOUT, async {
                 session
                     .client()
-                    .batch_execute("SET statement_timeout = '300s'")
+                    .batch_execute("SET statement_timeout = '5s'")
                     .await?;
                 session
                     .client()
                     .batch_execute(&format!("DROP DATABASE IF EXISTS \"{name}\" WITH (FORCE)"))
                     .await
-            }
+            })
             .await;
-            let _ = session.close().await;
-            if result.is_ok() {
+            // Closing this owned socket must not wait for a lost server reply.
+            drop(session);
+            if matches!(result, Ok(Ok(()))) {
                 return true;
             }
         }
@@ -220,12 +261,18 @@ struct Fixture {
     root: PathBuf,
     child: Option<Child>,
     adapters: Vec<Arc<Adapter>>,
+    digest_paths: Vec<PathBuf>,
 }
 
 impl Fixture {
     async fn close(&mut self) -> Result<(), &'static str> {
         for adapter in self.adapters.drain(..).rev() {
             adapter.close().await;
+        }
+        // Entry can be cancelled before an Adapter is returned, while its
+        // queued blocking writes still own these paths.
+        for path in self.digest_paths.drain(..) {
+            state::drain(&path).await;
         }
         if let Some(mut child) = self.child.take() {
             // A Child handle owns the unreaped process; no name or shared PID search.
@@ -344,6 +391,9 @@ async fn adapter(
 ) -> Result<(Arc<Adapter>, CredentialSnapshot), &'static str> {
     let provider = CredentialProvider::new(Some(TOKEN.into()), None).map_err(|_| "RuntimeError")?;
     let snapshot = provider.snapshot().map_err(|_| "RuntimeError")?;
+    if let Some(path) = &digest {
+        fixture.digest_paths.push(path.clone());
+    }
     let adapter = Adapter::enter(Config {
         url: url.into(),
         provider,
@@ -482,7 +532,11 @@ pub(super) async fn run(dsn: &str, daemon: &Path, models: &Path, timeout: f64) -
         Ok(name) => name,
         Err(e) => return failed(e),
     };
-    let interrupted = match interrupted() {
+    let dsn = match authenticated(dsn, &PasswordEnvironment::from_environment()) {
+        Ok(dsn) => dsn,
+        Err(e) => return failed(e),
+    };
+    let mut interrupted = match interrupted() {
         Ok(signal) => signal,
         Err(_) => return failed("OSError"),
     };
@@ -493,11 +547,11 @@ pub(super) async fn run(dsn: &str, daemon: &Path, models: &Path, timeout: f64) -
         .take(20)
         .collect();
     let name = format!("{prefix}_proof_{}", uuid::Uuid::new_v4().simple());
-    let admin = match database(dsn, "postgres") {
+    let admin = match database(&dsn, "postgres") {
         Ok(dsn) => dsn,
         Err(e) => return failed(e),
     };
-    let fixture_dsn = match database(dsn, &name) {
+    let fixture_dsn = match database(&dsn, &name) {
         Ok(dsn) => dsn,
         Err(e) => return failed(e),
     };
@@ -505,27 +559,55 @@ pub(super) async fn run(dsn: &str, daemon: &Path, models: &Path, timeout: f64) -
         Ok(s) => s,
         Err(e) => return failed(e),
     };
-    let create = async {
-        session
-            .client()
-            .batch_execute("SET statement_timeout = '5s'")
-            .await?;
-        session
-            .client()
-            .batch_execute(&format!("CREATE DATABASE \"{name}\""))
-            .await
-    }
-    .await;
-    let _ = session.close().await;
-    if let Err(error) = create {
+    let create = {
+        let create = tokio::time::timeout(DATABASE_IO_TIMEOUT, async {
+            session
+                .client()
+                .batch_execute("SET statement_timeout = '5s'")
+                .await?;
+            session
+                .client()
+                .batch_execute(&format!("CREATE DATABASE \"{name}\""))
+                .await
+        });
+        tokio::pin!(create);
+        let (create, cancelled) = tokio::select! {
+            result = &mut create => (result, false),
+            // Let the bounded CREATE settle before DROP, so a pending CREATE
+            // cannot finish after cleanup has already observed an absent bank.
+            _ = &mut interrupted => (create.await, true),
+        };
+        match create {
+            Ok(Ok(())) if cancelled => Err(("KeyboardInterrupt", true)),
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(error)) => Err((
+                if cancelled {
+                    "KeyboardInterrupt"
+                } else {
+                    "OperationalError"
+                },
+                error.as_db_error().is_none(),
+            )),
+            Err(_) => Err((
+                if cancelled {
+                    "KeyboardInterrupt"
+                } else {
+                    "TimeoutError"
+                },
+                true,
+            )),
+        }
+    };
+    drop(session);
+    if let Err((error, uncertain)) = create {
         // A server rejection proves CREATE did not take effect. A lost
         // connection can hide a successful CREATE, so resolve that uncertainty
         // by removing only this invocation's randomly named fixture.
-        if error.as_db_error().is_none() && !drop_bank(&admin, &name).await {
+        if uncertain && !drop_bank(&admin, &name).await {
             return json!({"ok":false,"error":"FixtureCleanupError","fixture_removed":false,
                 "fixture_bank":name,"recovery":format!("On the explicitly selected fixture server, run DROP DATABASE \"{name}\" WITH (FORCE); no host delivery has been verified.")});
         }
-        return failed("OperationalError");
+        return failed(error);
     }
     let tag = format!("coordination-proof-{}", uuid::Uuid::new_v4().simple());
     let mut fixture = Fixture {
@@ -535,6 +617,7 @@ pub(super) async fn run(dsn: &str, daemon: &Path, models: &Path, timeout: f64) -
         )),
         child: None,
         adapters: Vec::new(),
+        digest_paths: Vec::new(),
     };
     let proof = async {
         match start(daemon, models, &fixture_dsn, &mut fixture).await {
@@ -556,14 +639,9 @@ pub(super) async fn run(dsn: &str, daemon: &Path, models: &Path, timeout: f64) -
         _ = interrupted => failed("KeyboardInterrupt"),
     };
     let files_removed = fixture.close().await;
-    if !drop_bank(&admin, &name).await {
-        return json!({"ok":false,"error":"FixtureCleanupError","fixture_removed":false,
-            "fixture_bank":name,"recovery":format!("On the explicitly selected fixture server, run DROP DATABASE \"{name}\" WITH (FORCE); no host delivery has been verified.")});
-    }
-    if let Err(error) = files_removed {
-        return json!({"ok":false,"error":error,"fixture_removed":true,
-            "fixture_directory":fixture.root.to_string_lossy(),
-            "recovery":"The disposable bank was removed, but its local fixture directory could not be removed. Remove that directory after releasing any open handles; no host delivery has been verified."});
+    let bank_removed = drop_bank(&admin, &name).await;
+    if let Some(error) = cleanup_failure(&name, &fixture.root, bank_removed, files_removed) {
+        return error;
     }
     if result["ok"] == true {
         result["fixture_removed"] = json!(true);
@@ -571,9 +649,158 @@ pub(super) async fn run(dsn: &str, daemon: &Path, models: &Path, timeout: f64) -
     result
 }
 
+fn cleanup_failure(
+    name: &str,
+    root: &Path,
+    bank_removed: bool,
+    files_removed: Result<(), &'static str>,
+) -> Option<Value> {
+    if bank_removed && files_removed.is_ok() {
+        return None;
+    }
+    let mut report = json!({"ok":false,"error":if bank_removed {"FixtureDirectoryCleanupError"} else {"FixtureCleanupError"},"fixture_removed":bank_removed});
+    let mut recovery = Vec::new();
+    if !bank_removed {
+        report["fixture_bank"] = json!(name);
+        recovery.push(format!(
+            "On the explicitly selected fixture server, run DROP DATABASE \"{name}\" WITH (FORCE)."
+        ));
+    }
+    if files_removed.is_err() {
+        report["fixture_directory"] = json!(root.to_string_lossy());
+        recovery.push(
+            "Remove the remaining local fixture directory after releasing any open handles.".into(),
+        );
+    }
+    recovery.push("No host delivery has been verified.".into());
+    report["recovery"] = json!(recovery.join(" "));
+    Some(report)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn simultaneous_cleanup_failures_report_both_owned_resources() {
+        let report = cleanup_failure(
+            "r2_owned",
+            Path::new("fixture-directory"),
+            false,
+            Err("FixtureDirectoryCleanupError"),
+        )
+        .unwrap();
+        assert_eq!(report["fixture_removed"], false);
+        assert_eq!(report["fixture_bank"], "r2_owned");
+        assert_eq!(report["fixture_directory"], "fixture-directory");
+        let recovery = report["recovery"].as_str().unwrap();
+        assert!(recovery.contains("DROP DATABASE"));
+        assert!(recovery.contains("remaining local fixture directory"));
+    }
+
+    #[tokio::test]
+    async fn cancelled_entry_file_jobs_finish_before_directory_cleanup() {
+        let root =
+            std::env::temp_dir().join(format!("pseudolife-proof-test-{}", uuid::Uuid::new_v4()));
+        let digest = root.join("entry.digest");
+        let (started, ready) = tokio::sync::oneshot::channel();
+        let (release, wait) = std::sync::mpsc::channel();
+        let write_path = digest.clone();
+        let abandoned = state::offload(&digest, move || {
+            let _ = started.send(());
+            let _ = wait.recv();
+            state::private_dir(write_path.parent().unwrap())?;
+            state::atomic_create(&write_path, b"late entry write")
+        });
+        drop(abandoned);
+        ready.await.unwrap();
+        let mut fixture = Fixture {
+            root: root.clone(),
+            child: None,
+            adapters: Vec::new(),
+            digest_paths: vec![digest.clone()],
+        };
+        let close = tokio::spawn(async move { fixture.close().await });
+        tokio::task::yield_now().await;
+        let closed_early = close.is_finished();
+        release.send(()).unwrap();
+        let result = close.await.unwrap();
+        state::drain(&digest).await;
+        let leftover = root.exists();
+        if leftover {
+            std::fs::remove_dir_all(root).unwrap();
+        }
+        assert!(
+            !closed_early,
+            "cleanup skipped the cancelled entry's queued write"
+        );
+        assert_eq!(result, Ok(()));
+        assert!(!leftover, "entry recreated fixture files after cleanup");
+    }
+
+    #[test]
+    fn isolated_child_dsn_binds_resolved_credentials_without_reinterpreting_them() {
+        let environment = PasswordEnvironment {
+            password: Some(b"synthetic space+'\\password".to_vec()),
+            default_user: Some("fixture_user".into()),
+            ..Default::default()
+        };
+        for original in [
+            "host=localhost dbname=r2_fixture",
+            "postgresql://localhost/r2_fixture",
+        ] {
+            let bound = authenticated(original, &environment).unwrap();
+            let changed = database(&bound, "r2_created").unwrap();
+            // The child daemon uses the driver's parser directly, without the
+            // CLI's environment or password-file resolution.
+            let child: tokio_postgres::Config = changed.parse().unwrap();
+            assert_eq!(child.get_user(), Some("fixture_user"));
+            assert!(child.get_password() == environment.password.as_deref());
+            assert_eq!(child.get_dbname(), Some("r2_created"));
+        }
+    }
+
+    #[test]
+    fn explicit_dsn_password_wins_over_environment_for_the_child() {
+        let environment = PasswordEnvironment {
+            password: Some(b"other synthetic password".to_vec()),
+            ..Default::default()
+        };
+        let bound = authenticated(
+            "host=localhost user=fixture dbname=r2_fixture password='dsn value'",
+            &environment,
+        )
+        .unwrap();
+        let child: tokio_postgres::Config = bound.parse().unwrap();
+        assert!(child.get_password() == Some(b"dsn value".as_slice()));
+    }
+
+    #[test]
+    fn database_replacement_preserves_postgres_query_encoding() {
+        let original = "postgresql://fixture@localhost/source?password=a%20b%2Bc&sslrootcert=cert%20dir/root.crt&db%6eame=old&dbname=last";
+        let changed = database(original, "r2_fixture").unwrap();
+        let before = Dsn::parse(original).unwrap();
+        let after = Dsn::parse(&changed).unwrap();
+        assert_eq!(after.config().get_dbname(), Some("r2_fixture"));
+        assert_eq!(
+            after.config().get_password(),
+            before.config().get_password()
+        );
+        assert!(changed.contains("sslrootcert=cert%20dir/root.crt"));
+        assert!(!changed.contains("dbname="));
+        assert!(!changed.contains("db%6eame="));
+    }
+
+    #[test]
+    fn database_replacement_preserves_literal_plus() {
+        let changed = database(
+            "postgres://fixture@localhost/source?password=a+b",
+            "r2_fixture",
+        )
+        .unwrap();
+        let parsed = Dsn::parse(&changed).unwrap();
+        assert_eq!(parsed.config().get_password(), Some(b"a+b".as_slice()));
+    }
 
     #[tokio::test]
     async fn directory_cleanup_failure_is_not_reported_as_success() {
@@ -585,6 +812,7 @@ mod tests {
             root: path.clone(),
             child: None,
             adapters: Vec::new(),
+            digest_paths: Vec::new(),
         };
         assert_eq!(fixture.close().await, Err("FixtureDirectoryCleanupError"));
         assert_eq!(std::fs::read(&path).unwrap(), b"fixture replacement");

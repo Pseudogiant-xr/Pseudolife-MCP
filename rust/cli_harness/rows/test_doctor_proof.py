@@ -45,7 +45,9 @@ def test_client_only_install_refuses_before_connecting(tmp_path):
 
 @pytest.mark.skipif(os.environ.get("PSEUDOLIFE_DOCTOR_LIVE_PROOF") != "1",
                     reason="explicit disposable server and provisioned native models required")
-def test_actual_adapter_proof_matches_python(tmp_path, monkeypatch, capsys):
+@pytest.mark.parametrize("authentication", ["inline", "environment", pytest.param(
+    "password-file", marks=pytest.mark.skipif(os.name == "nt", reason="Windows password files use the real Shell32 profile; isolated resolver coverage is native"))])
+def test_actual_adapter_proof_matches_python(tmp_path, monkeypatch, capsys, authentication):
     """Compare actual adapter proofs; only bank namespace and transport differ.
 
     The oracle's bank context is substituted to honor the test host's r2_*
@@ -105,6 +107,18 @@ def test_actual_adapter_proof_matches_python(tmp_path, monkeypatch, capsys):
     temp.mkdir()
     env.update(HOME=str(tmp_path), USERPROFILE=str(tmp_path), TMPDIR=str(temp),
                TEMP=str(temp), TMP=str(temp), PSEUDOLIFE_TEST_DATABASE_URL=dsn)
+    if authentication != "inline":
+        fields = conninfo_to_dict(dsn)
+        password = fields.pop("password")
+        env["PSEUDOLIFE_TEST_DATABASE_URL"] = make_conninfo(**fields)
+        if authentication == "environment":
+            env["PGPASSWORD"] = password
+        else:
+            escape = lambda value: value.replace("\\", "\\\\").replace(":", "\\:")
+            entry = [fields["host"], fields.get("port", "5432"), "*", fields["user"], password]
+            passfile = tmp_path / ".pgpass"
+            passfile.write_text(":".join(map(escape, entry)) + "\n", encoding="utf-8")
+            passfile.chmod(0o600)
     result = subprocess.run([str(candidate), "doctor", "--disposable-proof"],
                             env=env, cwd=tmp_path, capture_output=True, text=True, timeout=720)
     assert result.returncode == 0, result.stdout
@@ -156,6 +170,101 @@ def _admission_models(root):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"fixture admission only")
     return root
+
+
+@pytest.mark.parametrize("fault", ["create-timeout", "drop-timeout", pytest.param(
+    "create-interrupt", marks=pytest.mark.skipif(os.name == "nt", reason="POSIX SIGTERM contract"))])
+def test_lost_database_replies_are_bounded_and_cleanup_is_reported(tmp_path, fault):
+    """A loopback PostgreSQL wire fixture loses replies after accepting SQL."""
+    import signal
+    import socketserver
+    import struct
+    import threading
+
+    if "PSEUDOLIFE_PROOF_CANDIDATE" not in os.environ:
+        pytest.skip("set PSEUDOLIFE_PROOF_CANDIDATE to the native CLI")
+    reached = threading.Event()
+    release = threading.Event()
+    queries = []
+
+    class Handler(socketserver.BaseRequestHandler):
+        def exact(self, count):
+            result = b""
+            while len(result) < count:
+                part = self.request.recv(count - len(result))
+                if not part:
+                    raise EOFError
+                result += part
+            return result
+
+        def frame(self, tag, body):
+            self.request.sendall(tag + struct.pack("!I", len(body) + 4) + body)
+
+        def handle(self):
+            try:
+                size = struct.unpack("!I", self.exact(4))[0]
+                self.exact(size - 4)
+                self.frame(b"R", struct.pack("!I", 0))
+                self.frame(b"Z", b"I")
+                while True:
+                    kind = self.exact(1)
+                    size = struct.unpack("!I", self.exact(4))[0]
+                    body = self.exact(size - 4)
+                    if kind != b"Q":
+                        return
+                    query = body[:-1].decode()
+                    queries.append(query)
+                    stalled = (query.startswith("CREATE DATABASE") and fault.startswith("create")) or (
+                        query.startswith("DROP DATABASE") and fault == "drop-timeout")
+                    if stalled:
+                        reached.set()
+                        release.wait(90)
+                        return
+                    self.frame(b"C", b"SET\0")
+                    self.frame(b"Z", b"I")
+            except (EOFError, ConnectionError):
+                return
+
+    class Server(socketserver.ThreadingTCPServer):
+        daemon_threads = True
+
+    candidate = tmp_path / ("pseudolife-stdio.exe" if os.name == "nt" else "pseudolife-stdio")
+    shutil.copy2(os.environ["PSEUDOLIFE_PROOF_CANDIDATE"], candidate)
+    daemon = tmp_path / ("pseudolife-daemon.exe" if os.name == "nt" else "pseudolife-daemon")
+    daemon.write_bytes(b"intentionally not executable")
+    models = _admission_models(tmp_path / "models")
+    with Server(("127.0.0.1", 0), Handler) as server:
+        thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
+        thread.start()
+        env = {key: value for key, value in os.environ.items() if key in ("SYSTEMROOT", "WINDIR", "TEMP", "TMP")}
+        env.update(HOME=str(tmp_path), USERPROFILE=str(tmp_path), PATH=str(tmp_path),
+                   PSEUDOLIFE_DAEMON_ONNX_DIR=str(models),
+                   PSEUDOLIFE_TEST_DATABASE_URL=f"host=127.0.0.1 port={server.server_address[1]} user=fixture password=synthetic dbname=r2_blackhole sslmode=disable")
+        child = subprocess.Popen([str(candidate), "doctor", "--disposable-proof"], env=env,
+                                 cwd=tmp_path, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            assert reached.wait(30), "proof never reached the accepted database statement"
+            if fault == "create-interrupt":
+                child.send_signal(signal.SIGTERM)
+            stdout, stderr = child.communicate(timeout=45)
+            assert child.returncode == 1
+            report = json.loads(stdout)
+            expected = {"create-interrupt": "KeyboardInterrupt", "create-timeout": "TimeoutError",
+                        "drop-timeout": "FixtureCleanupError"}[fault]
+            assert report["error"] == expected
+            assert not stderr
+            assert any(query.startswith('DROP DATABASE IF EXISTS "r2_blackhole_proof_') for query in queries)
+            if fault == "drop-timeout":
+                assert report["fixture_removed"] is False
+                assert report["fixture_bank"].startswith("r2_blackhole_proof_")
+                assert "DROP DATABASE" in report["recovery"]
+        finally:
+            release.set()
+            if child.poll() is None:
+                child.kill()
+                child.communicate(timeout=10)
+            server.shutdown()
+            thread.join(5)
 
 
 @pytest.mark.parametrize("dsn", ["host='unterminated", "postgresql://fixture@127.0.0.1:1/",

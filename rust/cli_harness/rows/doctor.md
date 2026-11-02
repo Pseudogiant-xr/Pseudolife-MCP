@@ -25,6 +25,13 @@ before any database connection. It carries the resolved model directory and
 provisions models or reads saved client registrations. The daemon verifies
 the model checksums before loading them.
 
+The fixture DSN's resolved user and password are bound before changing its
+database name or the child environment. URI query escaping is preserved.
+CREATE and DROP have client deadlines as well as server statement limits,
+so a lost reply reaches owned-bank cleanup or an explicit recovery report.
+Queued adapter file writes are drained before removing the fixture directory;
+if both bank and directory cleanup fail, the report names both resources.
+
 The proof checks enqueue, hint and ring signal, receive, explicit ack and an
 empty mailbox after ack. It stops its owned child and removes its fixture
 directory and database on success, failure, timeout or handled interruption.
@@ -46,6 +53,10 @@ not a replayable golden; ordinary refusal cells remain in the doctor row.
 The POSIX interruption cell starts a sleeping fixture executable after bank
 creation, sends SIGTERM to the owned CLI, and checks its child, files and bank
 are gone. Database-admission cases also compare the oracle's error bytes.
+Loopback PostgreSQL wire cases lose CREATE/DROP replies and check bounded
+exit and recovery; the live proof also covers environment and password-file
+authentication (password-file isolation is POSIX-only). These review-fix
+regressions await execution; earlier evidence is bound to `e8113388`.
 
 Deferred before any effect: other argv shapes (abbreviations, `=` forms,
 repeats, help, bad values). A saved `--agent-state` with the proof is a usage
