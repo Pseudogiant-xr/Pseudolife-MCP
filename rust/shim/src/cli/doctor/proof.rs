@@ -287,8 +287,16 @@ async fn drop_bank(admin: &str, name: &str) -> bool {
 }
 
 async fn drop_bank_with_timeout(admin: &str, name: &str, deadline: Duration) -> bool {
+    drop_bank_attempts(name, deadline, || connect(admin)).await
+}
+
+async fn drop_bank_attempts<F, C>(name: &str, deadline: Duration, mut connect: F) -> bool
+where
+    F: FnMut() -> C,
+    C: std::future::Future<Output = Result<Session, &'static str>>,
+{
     for _ in 0..2 {
-        if let Ok(session) = connect(admin).await {
+        if let Ok(session) = connect().await {
             let result = tokio::time::timeout(deadline, async {
                 session
                     .client()
@@ -787,41 +795,54 @@ mod tests {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
+        let phases = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let server_phases = phases.clone();
         let server = tokio::spawn(async move {
-            let mut attempts = Vec::new();
-            for _ in 0..2 {
+            let mut connections = tokio::task::JoinSet::new();
+            for attempt in 1..=2 {
                 let (mut socket, _) = listener.accept().await.unwrap();
-                let size = socket.read_u32().await.unwrap();
-                let mut startup = vec![0; size as usize - 4];
-                socket.read_exact(&mut startup).await.unwrap();
-                socket
-                    .write_all(b"R\0\0\0\x08\0\0\0\0Z\0\0\0\x05I")
-                    .await
-                    .unwrap();
-                loop {
-                    assert_eq!(socket.read_u8().await.unwrap(), b'Q');
+                server_phases.lock().unwrap().push((attempt, "accepted"));
+                let phases = server_phases.clone();
+                // PostgreSQL accepts a retry independently of an older
+                // connection's close notification.
+                connections.spawn(async move {
                     let size = socket.read_u32().await.unwrap();
-                    let mut query = vec![0; size as usize - 4];
-                    socket.read_exact(&mut query).await.unwrap();
-                    let query = String::from_utf8(query).unwrap();
-                    if query.starts_with("DROP DATABASE") {
-                        attempts.push(query);
-                        // Retain the accepted connection without a reply. Only
-                        // the client's deadline/owned socket close can release it.
-                        let mut end = [0];
-                        let count = socket.read(&mut end).await.unwrap_or(0);
-                        assert!(count == 0 || end[0] == b'X');
-                        break;
-                    }
-                    assert!(
-                        query == "SET statement_timeout = '300s'\0"
-                            || query == "SET lock_timeout = '5s'; SET search_path TO public\0"
-                    );
+                    let mut startup = vec![0; size as usize - 4];
+                    socket.read_exact(&mut startup).await.unwrap();
                     socket
-                        .write_all(b"C\0\0\0\x08SET\0Z\0\0\0\x05I")
+                        .write_all(b"R\0\0\0\x08\0\0\0\0Z\0\0\0\x05I")
                         .await
                         .unwrap();
-                }
+                    loop {
+                        assert_eq!(socket.read_u8().await.unwrap(), b'Q');
+                        let size = socket.read_u32().await.unwrap();
+                        let mut query = vec![0; size as usize - 4];
+                        socket.read_exact(&mut query).await.unwrap();
+                        let query = String::from_utf8(query).unwrap();
+                        if query.starts_with("DROP DATABASE") {
+                            phases.lock().unwrap().push((attempt, "drop held"));
+                            // The client's deadline must still close each owned
+                            // socket; concurrency does not waive this assertion.
+                            let mut end = [0];
+                            let count = socket.read(&mut end).await.unwrap_or(0);
+                            assert!(count == 0 || end[0] == b'X');
+                            phases.lock().unwrap().push((attempt, "closed"));
+                            return query;
+                        }
+                        assert!(
+                            query == "SET statement_timeout = '300s'\0"
+                                || query == "SET lock_timeout = '5s'; SET search_path TO public\0"
+                        );
+                        socket
+                            .write_all(b"C\0\0\0\x08SET\0Z\0\0\0\x05I")
+                            .await
+                            .unwrap();
+                    }
+                });
+            }
+            let mut attempts = Vec::new();
+            while let Some(result) = connections.join_next().await {
+                attempts.push(result.unwrap());
             }
             attempts
         });
@@ -829,13 +850,22 @@ mod tests {
             "host=127.0.0.1 port={} user=fixture password=synthetic dbname=postgres sslmode=disable",
             address.port()
         );
+        let dsn = Dsn::parse(&dsn).unwrap();
+        let environment = TlsEnvironment::default();
         let result = tokio::time::timeout(Duration::from_secs(10), async {
-            let removed =
-                drop_bank_with_timeout(&dsn, "r2_held_reply", Duration::from_secs(1)).await;
+            // The fixture owns all connection settings. Runner PG* controls
+            // and client-certificate files must not turn it into a refusal.
+            let removed = drop_bank_attempts("r2_held_reply", Duration::from_secs(1), || async {
+                Ok(Session::open_in(&dsn, &environment)
+                    .await
+                    .expect("connect to the owned PostgreSQL fixture"))
+            })
+            .await;
+            phases.lock().unwrap().push((0, "attempts returned"));
             (removed, server.await.unwrap())
         })
         .await
-        .unwrap();
+        .unwrap_or_else(|_| panic!("held DROP phases: {:?}", phases.lock().unwrap()));
         assert!(!result.0);
         assert_eq!(
             result.1,
