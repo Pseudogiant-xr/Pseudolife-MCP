@@ -248,10 +248,11 @@
     "transfer-numeric-strings",
     "transfer-order-flip",
     "transfer-part-guard",
-    "transfer-schema-lock-deferred",
     "transfer-refusal-exit",
     "transfer-roster-guard",
     "transfer-schema-guard",
+    "transfer-schema-lock-deferred",
+    "transfer-server-encoding",
     "transfer-stdout-refusal-ignored",
     "transfer-timestamp-range",
     "transfer-utc-precheck"
