@@ -1240,6 +1240,12 @@ pub(crate) enum Node {
     Map(Vec<(Node, Node)>),
     /// A plain, untagged `<<` key; only meaningful in key position.
     MergeKey,
+    /// A Python scalar outside the startup tree's supported types. Ignored
+    /// settings keep it; reading the value reports its source and repair.
+    Unsupported {
+        value: String,
+        reason: String,
+    },
 }
 
 impl Node {
@@ -1253,7 +1259,7 @@ impl Node {
             Node::Str(s) => !s.is_empty(),
             Node::Seq(items) => !items.is_empty(),
             Node::Map(entries) => !entries.is_empty(),
-            Node::MergeKey => true,
+            Node::MergeKey | Node::Unsupported { .. } => true,
         }
     }
 
@@ -1266,6 +1272,7 @@ impl Node {
             Node::Str(_) | Node::MergeKey => "a string",
             Node::Seq(_) => "a list",
             Node::Map(_) => "a mapping",
+            Node::Unsupported { .. } => "an unsupported YAML scalar",
         }
     }
 }
@@ -1279,6 +1286,9 @@ pub(crate) fn node_json(node: &Node) -> Value {
         Node::Float(f) => Value::from(*f),
         Node::Str(s) => Value::from(s.as_str()),
         Node::MergeKey => Value::from("<<"),
+        // Only unused leaves reach this projection; consumed values are
+        // refused by lookup before being turned into runtime settings.
+        Node::Unsupported { value, .. } => Value::from(value.as_str()),
         Node::Seq(items) => Value::Array(items.iter().map(node_json).collect()),
         Node::Map(entries) => Value::Object(
             entries
@@ -1305,11 +1315,22 @@ fn map_insert(entries: &mut Entries, key: Node, value: Node) {
     }
 }
 
-fn lookup<'a>(entries: &'a [(Node, Node)], key: &str) -> Option<&'a Node> {
+fn raw_lookup<'a>(entries: &'a [(Node, Node)], key: &str) -> Option<&'a Node> {
     entries.iter().find_map(|(k, v)| match k {
         Node::Str(s) if s == key => Some(v),
         _ => None,
     })
+}
+
+fn supported(node: &Node) -> Result<&Node, ConfigError> {
+    if let Node::Unsupported { reason, .. } = node {
+        return Err(refuse(reason));
+    }
+    Ok(node)
+}
+
+fn lookup<'a>(entries: &'a [(Node, Node)], key: &str) -> Result<Option<&'a Node>, ConfigError> {
+    raw_lookup(entries, key).map(supported).transpose()
 }
 
 /// yaml-rust2's float reading (`yaml.rs::parse_f64`).
@@ -1344,6 +1365,7 @@ struct Loader {
     anchors: HashMap<usize, Node>,
     error: Option<String>,
     resolve: Option<ScalarResolver>,
+    startup: bool,
     /// Refuse an alias to a mapping or list with this text (a rewrite
     /// cannot keep the shared node).
     collection_alias: Option<&'static str>,
@@ -1491,7 +1513,7 @@ impl Loader {
         }
     }
 
-    fn handle(&mut self, ev: Event) -> Result<(), String> {
+    fn handle(&mut self, ev: Event, mark: Marker) -> Result<(), String> {
         match ev {
             Event::Nothing | Event::StreamStart | Event::StreamEnd | Event::DocumentStart => {}
             Event::DocumentEnd => {
@@ -1520,7 +1542,43 @@ impl Loader {
                 self.complete(node, 0);
             }
             Event::Scalar(value, style, anchor, tag) => {
-                let node = self.resolve.unwrap_or(resolve_scalar)(value, style, tag)?;
+                // SafeConstructor.flatten_mapping turns a YAML value-tag
+                // key into a string before constructing it. A value-tag in
+                // value position still has no constructor.
+                let mapping_key = matches!(self.stack.last(), Some(Frame::Map(_, None, _)));
+                let value_key = self.startup
+                    && mapping_key
+                    && (tag
+                        .as_ref()
+                        .is_some_and(|t| t.handle == CORE_TAG && t.suffix == "value")
+                        || (tag.is_none() && style == TScalarStyle::Plain && value == "="));
+                let mut node = if value_key {
+                    Node::Str(value)
+                } else {
+                    self.resolve.unwrap_or(resolve_scalar)(value, style, tag)?
+                };
+                if let Node::Unsupported { value, reason } = &mut node {
+                    let path = self
+                        .stack
+                        .iter()
+                        .filter_map(|frame| match frame {
+                            Frame::Map(_, Some(Node::Str(key)), _) => Some(key.clone()),
+                            Frame::Seq(items, _) => Some(format!("[{}]", items.len())),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>()
+                        .join(".");
+                    let path = if path.is_empty() {
+                        "config.yaml"
+                    } else {
+                        &path
+                    };
+                    *reason = format!(
+                        "{path} at line {}, column {}: {value:?}: {reason}",
+                        mark.line(),
+                        mark.col() + 1
+                    );
+                }
                 self.complete(node, anchor);
             }
             Event::SequenceStart(anchor, tag) => {
@@ -1555,9 +1613,9 @@ impl Loader {
 }
 
 impl MarkedEventReceiver for Loader {
-    fn on_event(&mut self, ev: Event, _mark: Marker) {
+    fn on_event(&mut self, ev: Event, mark: Marker) {
         if self.error.is_none()
-            && let Err(e) = self.handle(ev)
+            && let Err(e) = self.handle(ev, mark)
         {
             self.error = Some(e);
         }
@@ -1576,7 +1634,7 @@ fn non_printable(c: char) -> bool {
 /// error, more than one document, an unknown tag or a non-printable
 /// character.
 pub(crate) fn safe_load(text: &str) -> Result<Option<Node>, String> {
-    load_with(text, None, None)
+    load_with(text, None, None, false)
 }
 
 /// [`safe_load`] with another scalar resolver, refusing an alias to a
@@ -1586,13 +1644,21 @@ pub(crate) fn safe_load_with(
     resolve: ScalarResolver,
     collection_alias: Option<&'static str>,
 ) -> Result<Option<Node>, String> {
-    load_with(text, Some(resolve), collection_alias)
+    load_with(text, Some(resolve), collection_alias, false)
+}
+
+pub(crate) fn safe_load_startup_with(
+    text: &str,
+    resolve: ScalarResolver,
+) -> Result<Option<Node>, String> {
+    load_with(text, Some(resolve), None, true)
 }
 
 fn load_with(
     text: &str,
     resolve: Option<ScalarResolver>,
     collection_alias: Option<&'static str>,
+    startup: bool,
 ) -> Result<Option<Node>, String> {
     if let Some((offset, c)) = text.char_indices().find(|(_, c)| non_printable(*c)) {
         return Err(format!(
@@ -1604,6 +1670,7 @@ fn load_with(
     let mut loader = Loader {
         resolve,
         collection_alias,
+        startup,
         ..Loader::default()
     };
     let mut parser = Parser::new_from_str(text);
@@ -1647,6 +1714,9 @@ fn yaml_leaves(node: &Node) -> JsonMap<String, Value> {
 // ---------------------------------------------------------------------------
 
 fn wrong_type(path: &str, want: &str, got: &Node) -> ConfigError {
+    if let Node::Unsupported { reason, .. } = got {
+        return refuse(reason);
+    }
     refuse(format!("{path} must be {want}, got {}", got.type_name()))
 }
 
@@ -1656,7 +1726,7 @@ fn want_bool(
     path: &str,
     default: bool,
 ) -> Result<bool, ConfigError> {
-    match lookup(entries, key) {
+    match lookup(entries, key)? {
         None => Ok(default),
         Some(Node::Bool(b)) => Ok(*b),
         Some(other) => Err(wrong_type(&format!("{path}.{key}"), "a boolean", other)),
@@ -1669,7 +1739,7 @@ fn want_int(
     path: &str,
     default: i64,
 ) -> Result<i64, ConfigError> {
-    match lookup(entries, key) {
+    match lookup(entries, key)? {
         None => Ok(default),
         Some(Node::Int(i)) => Ok(*i),
         Some(other) => Err(wrong_type(&format!("{path}.{key}"), "an integer", other)),
@@ -1685,7 +1755,7 @@ fn want_py_limit(
     path: &str,
     default: Option<i64>,
 ) -> Result<Option<i64>, ConfigError> {
-    match lookup(entries, key) {
+    match lookup(entries, key)? {
         None => Ok(default),
         Some(Node::Null) => Ok(None),
         Some(Node::Int(i)) => Ok(Some(*i)),
@@ -1699,15 +1769,19 @@ fn want_py_limit(
 /// takes is the LIMIT (a float truncates, a numeric string parses), and
 /// anything else is `None`, a read that fails and serves nothing. It never
 /// refuses the start.
-fn py_lenient_limit(entries: &[(Node, Node)], key: &str, default: Option<i64>) -> Option<i64> {
-    match lookup(entries, key) {
+fn py_lenient_limit(
+    entries: &[(Node, Node)],
+    key: &str,
+    default: Option<i64>,
+) -> Result<Option<i64>, ConfigError> {
+    Ok(match lookup(entries, key)? {
         None => default,
         Some(Node::Int(i)) => Some(*i),
         Some(Node::Bool(b)) => Some(i64::from(*b)),
         Some(Node::Float(f)) if f.is_finite() && f.abs() < 9.2e18 => Some(f.trunc() as i64),
         Some(Node::Str(s)) => crate::read::search_route::py_int(s),
         Some(_) => None,
-    }
+    })
 }
 
 fn node_f64(node: &Node) -> Option<f64> {
@@ -1724,7 +1798,7 @@ fn want_float(
     path: &str,
     default: f64,
 ) -> Result<f64, ConfigError> {
-    match lookup(entries, key) {
+    match lookup(entries, key)? {
         None => Ok(default),
         Some(node) => {
             node_f64(node).ok_or_else(|| wrong_type(&format!("{path}.{key}"), "a number", node))
@@ -1738,11 +1812,32 @@ fn want_str(
     path: &str,
     default: &str,
 ) -> Result<String, ConfigError> {
-    match lookup(entries, key) {
+    match lookup(entries, key)? {
         None => Ok(default.to_string()),
         Some(Node::Str(s)) => Ok(s.clone()),
+        // PyYAML reads an unquoted off as False. These Python readers use
+        // named-mode comparisons, so False disables the corresponding gate.
+        Some(Node::Bool(false)) if off_mode(path, key) => Ok("off".into()),
+        Some(Node::Bool(_)) => Err(refuse(format!(
+            "{path}.{key} must be a string; quote YAML boolean words, for example 'off'"
+        ))),
         Some(other) => Err(wrong_type(&format!("{path}.{key}"), "a string", other)),
     }
+}
+
+fn off_mode(path: &str, key: &str) -> bool {
+    matches!(
+        (path, key),
+        ("memory.dream", "literal_gate" | "span_gate")
+            | (
+                "memory.deep_dream",
+                "judge_mode"
+                    | "link_judge_mode"
+                    | "junk_judge_mode"
+                    | "curation_judge_mode"
+                    | "candidate_judge_mode"
+            )
+    )
 }
 
 /// A `str | None` knob whose default is `""`: absent is `Some("")`, YAML
@@ -1752,7 +1847,7 @@ fn want_knob_str(
     key: &str,
     path: &str,
 ) -> Result<Option<String>, ConfigError> {
-    match lookup(entries, key) {
+    match lookup(entries, key)? {
         None => Ok(Some(String::new())),
         Some(_) => want_opt_str(entries, key, path),
     }
@@ -1763,7 +1858,7 @@ fn want_opt_str(
     key: &str,
     path: &str,
 ) -> Result<Option<String>, ConfigError> {
-    match lookup(entries, key) {
+    match lookup(entries, key)? {
         None | Some(Node::Null) => Ok(None),
         Some(Node::Str(s)) => Ok(Some(s.clone())),
         Some(other) => Err(wrong_type(
@@ -1781,7 +1876,7 @@ fn section<'a>(
     key: &str,
     path: &str,
 ) -> Result<Option<&'a [(Node, Node)]>, ConfigError> {
-    match lookup(entries, key) {
+    match lookup(entries, key)? {
         None => Ok(None),
         Some(Node::Map(inner)) => Ok(Some(inner)),
         Some(other) => Err(wrong_type(&format!("{path}{key}"), "a mapping", other)),
@@ -1831,6 +1926,9 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
     let doc = crate::config_io::yaml_load::load_startup(text)
         .map_err(|e| refuse(format!("config.yaml: {e}")))?;
     // `yaml.safe_load(f) or {}`.
+    if let Some(node) = &doc {
+        supported(node)?;
+    }
     let raw = match doc {
         Some(node) if node.truthy() => node,
         _ => Node::Map(Vec::new()),
@@ -1871,7 +1969,7 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
 
     let mut config = Config::default();
 
-    if let Some(value) = lookup(entries, "read_only") {
+    if let Some(value) = lookup(entries, "read_only")? {
         config.read_only = match value {
             Node::Bool(value) => *value,
             _ => return Err(refuse("read_only must be true or false")),
@@ -1916,7 +2014,7 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
         )?;
         memory.recency_boost_enabled =
             want_bool(m, "recency_boost_enabled", p, memory.recency_boost_enabled)?;
-        if let Some(node) = lookup(m, "recency_base_half_life_s") {
+        if let Some(node) = lookup(m, "recency_base_half_life_s")? {
             half_life = node.clone();
         }
 
@@ -1935,7 +2033,7 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
             memory.surprise_threshold = want_float(m, "surprise_threshold", p, 0.0)?;
         }
         if user_set("memory.meta_filter.enabled")
-            && let Some(Node::Map(mf)) = lookup(m, "meta_filter")
+            && let Some(Node::Map(mf)) = lookup(m, "meta_filter")?
         {
             memory.meta_filter_enabled = want_bool(mf, "enabled", "memory.meta_filter", true)?;
         }
@@ -1952,7 +2050,7 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
             memory.reference = ReferenceConfig {
                 chunk_size: want_int(r, "chunk_size", p, d.chunk_size)?,
                 chunk_overlap: want_int(r, "chunk_overlap", p, d.chunk_overlap)?,
-                max_results: py_lenient_limit(r, "max_results", d.max_results),
+                max_results: py_lenient_limit(r, "max_results", d.max_results)?,
             };
         }
         // `mem_raw.get("ref_top_k", 3)`, untyped too: it slices the pool
@@ -2020,14 +2118,16 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
             };
         }
         if let Some(sc) = section(m, "scopes", "memory.")? {
-            if let Some(node) = lookup(sc, "exclude") {
+            if let Some(node) = lookup(sc, "exclude")? {
                 memory.scopes_exclude = want_str_list(node, "memory.scopes.exclude")?;
             }
-            match lookup(sc, "rollup") {
+            match lookup(sc, "rollup")? {
                 None | Some(Node::Null) => {}
                 Some(Node::Map(pairs)) => {
                     let mut out = Vec::new();
                     for (k, v) in pairs {
+                        supported(k)?;
+                        supported(v)?;
                         match (k, v) {
                             (Node::Str(k), Node::Str(v)) => out.push((k.clone(), v.clone())),
                             (_, other) => {
@@ -2294,7 +2394,7 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
                         if let Node::Str(name) = k
                             && view.contains_key(name)
                         {
-                            view.insert(name.clone(), node_json(v));
+                            view.insert(name.clone(), node_json(supported(v)?));
                         }
                     }
                     view
@@ -2354,7 +2454,7 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
             ("meta_filter", "memory.meta_filter.enabled"),
             ("traces", "memory.traces.retention_boost"),
         ] {
-            if let Some(node) = lookup(m, key)
+            if let Some(node) = lookup(m, key)?
                 && !matches!(node, Node::Map(_))
                 && !user_set(leaf)
             {
@@ -2376,7 +2476,7 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
     }
     // A non-mapping is kept unvalidated by Python (exact); its readers then
     // fall back to `compact`, as the default here does.
-    if let Some(Node::Map(policy)) = lookup(entries, "memory_policy") {
+    if let Some(Node::Map(policy)) = lookup(entries, "memory_policy")? {
         validate_memory_policy(policy)?;
         config.memory_policy = read_memory_policy(policy);
     }
@@ -2386,7 +2486,7 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
     // `_dict_to_dataclass(TimeConfig, raw["time"])`: no type check, so the
     // value counts by Python truthiness where it is read.
     if let Some(t) = section(entries, "time", "")?
-        && let Some(v) = lookup(t, "relative_age")
+        && let Some(v) = lookup(t, "relative_age")?
     {
         config.time.relative_age = v.truthy();
     }
@@ -2395,7 +2495,7 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
 }
 
 fn read_miras(miras: &[(Node, Node)]) -> Result<(String, Vec<String>), ConfigError> {
-    let preset = match lookup(miras, "preset") {
+    let preset = match lookup(miras, "preset")? {
         None => "flat".to_string(),
         Some(Node::Str(s)) => s.clone(),
         Some(other) => {
@@ -2406,7 +2506,7 @@ fn read_miras(miras: &[(Node, Node)]) -> Result<(String, Vec<String>), ConfigErr
         }
     };
     // `miras_raw.get("bands", []) or []`, then iterated.
-    let bands_raw = lookup(miras, "bands").filter(|n| n.truthy());
+    let bands_raw = lookup(miras, "bands")?.filter(|n| n.truthy());
     let items: Vec<Node> = match bands_raw {
         None => Vec::new(),
         Some(Node::Seq(items)) => items.clone(),
@@ -2475,7 +2575,7 @@ fn read_startup_bands(
             })
             .collect());
     }
-    let Some(Node::Seq(items)) = lookup(miras, "bands") else {
+    let Some(Node::Seq(items)) = lookup(miras, "bands")? else {
         return Err(refuse("memory.miras.bands must be a list"));
     };
     items
@@ -2499,7 +2599,7 @@ fn read_startup_bands(
                 return Err(refuse("unknown band retention_policy"));
             }
             let update_interval =
-                lookup(fields, "update_interval").map_or(Value::from(1), node_json);
+                lookup(fields, "update_interval")?.map_or(Value::from(1), node_json);
             Ok(StartupBandSpec {
                 name: name.clone(),
                 max_entries,
@@ -2513,7 +2613,7 @@ fn read_startup_bands(
 fn read_search(s: &[(Node, Node)]) -> Result<SearchConfig, ConfigError> {
     let p = "memory.search";
     let d = SearchConfig::default();
-    let fusion = match lookup(s, "fusion") {
+    let fusion = match lookup(s, "fusion")? {
         None => d.fusion.clone(),
         Some(Node::Str(f)) if FUSION_MODES.contains(&f.as_str()) => f.clone(),
         Some(_) => {
@@ -2522,7 +2622,7 @@ fn read_search(s: &[(Node, Node)]) -> Result<SearchConfig, ConfigError> {
             ));
         }
     };
-    let min_score = match lookup(s, "min_score") {
+    let min_score = match lookup(s, "min_score")? {
         None => d.min_score,
         Some(node) => match node_f64(node) {
             Some(v) if (0.0..=1.0).contains(&v) => v,
@@ -2560,7 +2660,7 @@ fn read_dream(d: &[(Node, Node)]) -> Result<DreamConfig, ConfigError> {
         fallback_model: want_opt_str(d, "fallback_model", p)?,
         extractor_model_override: want_opt_str(d, "extractor_model_override", p)?,
         // Python `float()`: numbers, bools and numeric strings.
-        sweep_interval_ok: match lookup(d, "sweep_interval_seconds") {
+        sweep_interval_ok: match lookup(d, "sweep_interval_seconds")? {
             None | Some(Node::Int(_) | Node::Float(_) | Node::Bool(_)) => true,
             Some(Node::Str(s)) => crate::storage::py_strip(s)
                 .replace('_', "")
@@ -2568,7 +2668,7 @@ fn read_dream(d: &[(Node, Node)]) -> Result<DreamConfig, ConfigError> {
                 .is_ok(),
             Some(_) => false,
         },
-        sweep_interval_seconds: match lookup(d, "sweep_interval_seconds") {
+        sweep_interval_seconds: match lookup(d, "sweep_interval_seconds")? {
             None => 600.0,
             Some(Node::Bool(value)) => {
                 if *value {
@@ -2587,7 +2687,7 @@ fn read_dream(d: &[(Node, Node)]) -> Result<DreamConfig, ConfigError> {
         extractor_api_key: want_opt_str(d, "extractor_api_key", p)?,
         extractor_reasoning_effort: want_opt_str(d, "extractor_reasoning_effort", p)?,
         extractor_max_tokens: want_int(d, "extractor_max_tokens", p, def.extractor_max_tokens)?,
-        extractor_cache_prompt: match lookup(d, "extractor_cache_prompt") {
+        extractor_cache_prompt: match lookup(d, "extractor_cache_prompt")? {
             None => def.extractor_cache_prompt,
             Some(Node::Null) => None,
             Some(Node::Bool(b)) => Some(*b),
@@ -2607,11 +2707,11 @@ fn read_dream(d: &[(Node, Node)]) -> Result<DreamConfig, ConfigError> {
         )?,
         fallback_api_key: want_opt_str(d, "fallback_api_key", p)?,
         extractor_mode: want_str(d, "extractor_mode", p, &def.extractor_mode)?,
-        eligible_sources: match lookup(d, "eligible_sources") {
+        eligible_sources: match lookup(d, "eligible_sources")? {
             None | Some(Node::Null) => None,
             Some(node) => Some(want_str_list(node, &format!("{p}.eligible_sources"))?),
         },
-        exclude_sources: match lookup(d, "exclude_sources") {
+        exclude_sources: match lookup(d, "exclude_sources")? {
             None => def.exclude_sources.clone(),
             Some(node) => want_str_list(node, &format!("{p}.exclude_sources"))?,
         },
@@ -2624,15 +2724,15 @@ fn read_dream(d: &[(Node, Node)]) -> Result<DreamConfig, ConfigError> {
         digest_target_chars: want_int(d, "digest_target_chars", p, def.digest_target_chars)?,
         stall_notice: want_bool(d, "stall_notice", p, def.stall_notice)?,
         // Validated below with `__post_init__`'s own message.
-        stall_repeat_hours: lookup(d, "stall_repeat_hours")
+        stall_repeat_hours: lookup(d, "stall_repeat_hours")?
             .and_then(node_f64)
             .unwrap_or(def.stall_repeat_hours),
         quarantine_low_trust: want_bool(d, "quarantine_low_trust", p, def.quarantine_low_trust)?,
-        trusted_sources: match lookup(d, "trusted_sources") {
+        trusted_sources: match lookup(d, "trusted_sources")? {
             None | Some(Node::Null) => Vec::new(),
             Some(node) => want_str_list(node, &format!("{p}.trusted_sources"))?,
         },
-        assistant_claims: match lookup(d, "assistant_claims") {
+        assistant_claims: match lookup(d, "assistant_claims")? {
             None | Some(Node::Null) => def.assistant_claims.clone(),
             Some(Node::Str(s)) if s.is_empty() => def.assistant_claims.clone(),
             Some(Node::Str(s)) => s.clone(),
@@ -2675,7 +2775,7 @@ fn read_dream(d: &[(Node, Node)]) -> Result<DreamConfig, ConfigError> {
             p,
             def.alias_candidate_min_cosine,
         )?,
-        known_facts_window: match lookup(d, "known_facts_window") {
+        known_facts_window: match lookup(d, "known_facts_window")? {
             None | Some(Node::Null) => 0,
             Some(_) => want_int(d, "known_facts_window", p, 0)?,
         },
@@ -2685,7 +2785,7 @@ fn read_dream(d: &[(Node, Node)]) -> Result<DreamConfig, ConfigError> {
         chronicle: want_bool(d, "chronicle", p, def.chronicle)?,
     };
     // DreamConfig.__post_init__ (utils/config.py:503-509).
-    if let Some(hours) = lookup(d, "stall_repeat_hours") {
+    if let Some(hours) = lookup(d, "stall_repeat_hours")? {
         match node_f64(hours) {
             Some(h) if h.is_finite() && h > 0.0 => {}
             _ => {
@@ -2716,11 +2816,11 @@ fn want_str_list(node: &Node, path: &str) -> Result<Vec<String>, ConfigError> {
 /// `strip()`; returns the stripped, lower-cased names.
 fn principal_list(c: &[(Node, Node)], key: &str) -> Result<Vec<String>, ConfigError> {
     let bad = || refuse(format!("coordination.{key} must be a list of names"));
-    match lookup(c, key) {
+    match lookup(c, key)? {
         None => Ok(Vec::new()),
         Some(Node::Seq(items)) => items
             .iter()
-            .map(|item| match item {
+            .map(|item| match supported(item)? {
                 Node::Str(s) if !py_strip(s).is_empty() => Ok(py_strip(s).to_lowercase()),
                 _ => Err(bad()),
             })
@@ -2732,29 +2832,29 @@ fn principal_list(c: &[(Node, Node)], key: &str) -> Result<Vec<String>, ConfigEr
 /// `CoordinationConfig.__post_init__` (utils/config.py:1552-1592), with the
 /// wake and maintainer constructors it calls.
 fn read_coordination(c: &[(Node, Node)]) -> Result<CoordinationConfig, ConfigError> {
-    let enabled = match lookup(c, "enabled") {
+    let enabled = match lookup(c, "enabled")? {
         None => true,
         Some(Node::Bool(b)) => *b,
         Some(_) => return Err(refuse("coordination.enabled must be a boolean")),
     };
-    match lookup(c, "maintainer") {
+    match lookup(c, "maintainer")? {
         None => {}
         Some(Node::Map(m)) => validate_maintainer(m)?,
         Some(_) => return Err(refuse("coordination.maintainer must be a mapping")),
     }
-    let wake = match lookup(c, "wake") {
+    let wake = match lookup(c, "wake")? {
         None => WakeConfig::default(),
         Some(Node::Map(w)) => read_wake(w)?,
         Some(_) => return Err(refuse("coordination.wake must be a mapping of wake caps")),
     };
-    if let Some(node) = lookup(c, "awareness_limit")
+    if let Some(node) = lookup(c, "awareness_limit")?
         && !matches!(node, Node::Int(i) if (1..=20).contains(i))
     {
         return Err(refuse(
             "coordination.awareness_limit must be an integer in 1..20",
         ));
     }
-    if let Some(node) = lookup(c, "audit_retention_days")
+    if let Some(node) = lookup(c, "audit_retention_days")?
         && exact_int_at_least(node, 0).is_none()
     {
         return Err(refuse(
@@ -2776,7 +2876,7 @@ fn read_coordination(c: &[(Node, Node)]) -> Result<CoordinationConfig, ConfigErr
         )));
     }
     let defaults = CoordinationConfig::default();
-    let present = |key: &str| lookup(c, key).is_some();
+    let present = |key: &str| raw_lookup(c, key).is_some();
     let dedupe = |names: Vec<String>| {
         let mut out: Vec<String> = Vec::new();
         for n in names {
@@ -2789,7 +2889,7 @@ fn read_coordination(c: &[(Node, Node)]) -> Result<CoordinationConfig, ConfigErr
     Ok(CoordinationConfig {
         enabled,
         wake,
-        awareness_limit: match lookup(c, "awareness_limit") {
+        awareness_limit: match lookup(c, "awareness_limit")? {
             Some(Node::Int(i)) => *i,
             _ => defaults.awareness_limit,
         },
@@ -2800,11 +2900,11 @@ fn read_coordination(c: &[(Node, Node)]) -> Result<CoordinationConfig, ConfigErr
         },
         daemon_notice_principals: dedupe(notice),
         maintainer_principals: dedupe(maintainers),
-        audit_retention_days: lookup(c, "audit_retention_days")
+        audit_retention_days: lookup(c, "audit_retention_days")?
             .and_then(|n| exact_int_at_least(n, 0))
             .unwrap_or(defaults.audit_retention_days),
-        maintainer_per_recipient_per_hour: match lookup(c, "maintainer") {
-            Some(Node::Map(m)) => lookup(m, "maintainer_per_recipient_per_hour")
+        maintainer_per_recipient_per_hour: match lookup(c, "maintainer")? {
+            Some(Node::Map(m)) => lookup(m, "maintainer_per_recipient_per_hour")?
                 .and_then(|n| exact_int_at_least(n, 0))
                 .unwrap_or(defaults.maintainer_per_recipient_per_hour),
             _ => defaults.maintainer_per_recipient_per_hour,
@@ -2817,8 +2917,8 @@ fn read_coordination(c: &[(Node, Node)]) -> Result<CoordinationConfig, ConfigErr
 /// A `coordination.maintainer` string (`validate_maintainer` has refused
 /// any other type), "" when absent.
 fn maintainer_text(c: &[(Node, Node)], key: &str) -> String {
-    match lookup(c, "maintainer") {
-        Some(Node::Map(m)) => match lookup(m, key) {
+    match raw_lookup(c, "maintainer") {
+        Some(Node::Map(m)) => match raw_lookup(m, key) {
             Some(Node::Str(s)) => s.clone(),
             _ => String::new(),
         },
@@ -2831,13 +2931,14 @@ fn maintainer_text(c: &[(Node, Node)], key: &str) -> String {
 fn validate_maintainer(m: &[(Node, Node)]) -> Result<(), ConfigError> {
     const FIELDS: [&str; 3] = ["rp_id", "origin", "maintainer_per_recipient_per_hour"];
     for (key, _) in m {
+        supported(key)?;
         match key {
             Node::Str(k) if FIELDS.contains(&k.as_str()) => {}
             _ => return Err(refuse("coordination.maintainer: unexpected key")),
         }
     }
     for key in ["rp_id", "origin"] {
-        if let Some(node) = lookup(m, key)
+        if let Some(node) = lookup(m, key)?
             && !matches!(node, Node::Str(_))
         {
             return Err(refuse(
@@ -2845,7 +2946,7 @@ fn validate_maintainer(m: &[(Node, Node)]) -> Result<(), ConfigError> {
             ));
         }
     }
-    if let Some(node) = lookup(m, "maintainer_per_recipient_per_hour")
+    if let Some(node) = lookup(m, "maintainer_per_recipient_per_hour")?
         && exact_int_at_least(node, 0).is_none()
     {
         return Err(refuse(
@@ -2859,6 +2960,7 @@ fn validate_maintainer(m: &[(Node, Node)]) -> Result<(), ConfigError> {
 /// non-string key is a TypeError; then its `__post_init__`.
 fn read_wake(w: &[(Node, Node)]) -> Result<WakeConfig, ConfigError> {
     for (key, _) in w {
+        supported(key)?;
         match key {
             Node::Str(k)
                 if WakeConfig::NAMES.contains(&k.as_str())
@@ -2869,7 +2971,7 @@ fn read_wake(w: &[(Node, Node)]) -> Result<WakeConfig, ConfigError> {
     let mut values = WakeConfig::default().values();
     for (slot, name) in values.iter_mut().zip(WakeConfig::NAMES) {
         let floor = if name == "active_seconds" { 1 } else { 0 };
-        if let Some(node) = lookup(w, name) {
+        if let Some(node) = lookup(w, name)? {
             *slot = exact_int_at_least(node, floor).ok_or_else(|| {
                 refuse(format!(
                     "coordination.wake.{name} must be a whole number of at least {floor}"
@@ -2892,17 +2994,20 @@ fn read_wake(w: &[(Node, Node)]) -> Result<WakeConfig, ConfigError> {
 fn validate_memory_policy(p: &[(Node, Node)]) -> Result<(), ConfigError> {
     let is_variant =
         |n: &Node| matches!(n, Node::Str(s) if MEMORY_POLICY_VARIANTS.contains(&s.as_str()));
-    if let Some(variant) = lookup(p, "variant")
+    if let Some(variant) = lookup(p, "variant")?
         && !is_variant(variant)
     {
         return Err(refuse(
             "memory_policy.variant must be one of none, compact, full_separate_hook",
         ));
     }
-    if let Some(arms) = lookup(p, "ab_arms") {
+    if let Some(arms) = lookup(p, "ab_arms")? {
         let Node::Seq(items) = arms else {
             return Err(refuse("memory_policy.ab_arms must be a list of variants"));
         };
+        for item in items {
+            supported(item)?;
+        }
         if !items.iter().all(is_variant) {
             return Err(refuse("memory_policy.ab_arms must be a list of variants"));
         }
@@ -2916,10 +3021,10 @@ fn validate_memory_policy(p: &[(Node, Node)]) -> Result<(), ConfigError> {
 /// The fields of a validated `memory_policy` mapping.
 fn read_memory_policy(p: &[(Node, Node)]) -> MemoryPolicyConfig {
     let mut out = MemoryPolicyConfig::default();
-    if let Some(Node::Str(v)) = lookup(p, "variant") {
+    if let Some(Node::Str(v)) = raw_lookup(p, "variant") {
         out.variant = v.clone();
     }
-    if let Some(Node::Seq(items)) = lookup(p, "ab_arms") {
+    if let Some(Node::Seq(items)) = raw_lookup(p, "ab_arms") {
         out.ab_arms = items
             .iter()
             .filter_map(|n| match n {
@@ -2934,7 +3039,7 @@ fn read_memory_policy(p: &[(Node, Node)]) -> MemoryPolicyConfig {
 /// `UpdatesConfig.__post_init__` (utils/config.py:1628-1633).
 fn read_updates(u: &[(Node, Node)]) -> Result<UpdatesConfig, ConfigError> {
     let d = UpdatesConfig::default();
-    let flag = |key: &str, default: bool| match lookup(u, key) {
+    let flag = |key: &str, default: bool| match lookup(u, key)? {
         None => Ok(default),
         Some(Node::Bool(b)) => Ok(*b),
         Some(_) => Err(refuse(format!("updates.{key} must be a boolean"))),
@@ -2942,7 +3047,7 @@ fn read_updates(u: &[(Node, Node)]) -> Result<UpdatesConfig, ConfigError> {
     let check_releases = flag("check_releases", d.check_releases)?;
     let unattended_clients = flag("unattended_clients", d.unattended_clients)?;
     let unattended_daemon = flag("unattended_daemon", d.unattended_daemon)?;
-    let check_interval_seconds = match lookup(u, "check_interval_seconds") {
+    let check_interval_seconds = match lookup(u, "check_interval_seconds")? {
         None => d.check_interval_seconds,
         Some(node) => exact_int_at_least(node, 60).ok_or_else(|| {
             refuse("updates.check_interval_seconds must be a whole number of seconds, 60 or more")
@@ -3631,20 +3736,99 @@ mod tests {
 
     #[test]
     fn yaml_1_1_unrepresentable_values_name_the_fix() {
-        for (text, fix) in [
-            ("2024-01-01\n", "quote"),
+        for (text, key, value, line, fix) in [
+            ("2024-01-01\n", "config.yaml", "2024-01-01", 1, "quote"),
+            (
+                "embedding:\n  query_prefix: 2024-01-01\n",
+                "embedding.query_prefix",
+                "2024-01-01",
+                2,
+                "quote",
+            ),
             (
                 "embedding:\n  query_prefix: !!binary YQ==\n",
+                "embedding.query_prefix",
+                "YQ==",
+                2,
                 "plain string",
             ),
             (
                 "coordination:\n  wake:\n    nightly_total: 99999999999999999999\n",
+                "coordination.wake.nightly_total",
+                "99999999999999999999",
+                3,
                 "64-bit",
             ),
         ] {
             let error = load_str(text).unwrap_err().to_string();
             assert!(error.contains(fix), "{error}");
+            assert!(error.contains(key), "{error}");
+            assert!(error.contains(value), "{error}");
+            assert!(error.contains(&format!("line {line}, column ")), "{error}");
         }
+    }
+
+    #[test]
+    fn yaml_1_1_unused_values_do_not_refuse_startup() {
+        for text in [
+            "updated: 2024-01-01\n",
+            "notes: {big: 99999999999999999999, blob: !!binary YQ==}\n",
+            "memory: {notes: {updated: 2024-01-01}}\n",
+            "embedding: {notes: !!binary YQ==}\n",
+            "defaults: &date 2024-01-01\nnotes: *date\n",
+            "memory: {top_k: 99999999999999999999, top_k: 7}\n",
+        ] {
+            assert!(load_str(text).is_ok(), "{text}");
+        }
+        let error = load_str("updated: &date 2024-01-01\nembedding: {query_prefix: *date}\n")
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("updated at line 1"), "{error}");
+        assert!(error.contains("quote"), "{error}");
+    }
+
+    #[test]
+    fn yaml_1_1_off_modes_keep_python_effective_behavior() {
+        for word in ["off", "Off", "OFF", "false", "no", "!!bool oFf", "! 'off'"] {
+            let config = cfg(&format!(
+                "memory:\n  dream:\n    literal_gate: {word}\n    span_gate: {word}\n  deep_dream:\n    judge_mode: {word}\n    link_judge_mode: {word}\n    junk_judge_mode: {word}\n    curation_judge_mode: {word}\n    candidate_judge_mode: {word}\n"
+            ));
+            for mode in [
+                &config.dream.literal_gate,
+                &config.dream.span_gate,
+                &config.memory.deep_dream.judge_mode,
+                &config.memory.deep_dream.link_judge_mode,
+                &config.memory.deep_dream.junk_judge_mode,
+                &config.memory.deep_dream.curation_judge_mode,
+                &config.memory.deep_dream.candidate_judge_mode,
+            ] {
+                assert_eq!(mode, "off", "{word}");
+            }
+            assert_eq!(
+                config.memory.deep_dream.as_dict["judge_mode"],
+                Value::Bool(false)
+            );
+        }
+        assert!(refused("embedding: {model_name: off}\n"));
+        assert!(refused("memory: {dream: {literal_gate: on}}\n"));
+        assert_eq!(
+            cfg("embedding: {model_name: 'off'}\n").embedding.model_name,
+            "off"
+        );
+    }
+
+    #[test]
+    fn yaml_1_1_value_tag_is_constructed_only_as_a_mapping_key() {
+        for key in ["=", "!!value '='"] {
+            let config = cfg(&format!(
+                "memory: {{scopes: {{rollup: {{{key}: general}}}}}}\n"
+            ));
+            assert_eq!(
+                config.memory.scopes_rollup,
+                vec![("=".into(), "general".into())]
+            );
+        }
+        assert!(refused("embedding: {query_prefix: =}\n"));
     }
 
     #[test]
@@ -3656,7 +3840,19 @@ mod tests {
             let node = crate::config_io::yaml_load::load_startup(text)
                 .unwrap_or_else(|e| panic!("{text:?}: {e}"))
                 .unwrap_or(Node::Null);
-            assert_eq!(node_json(&node), case["expected"], "{text:?}");
+            if let Some(nonfinite) = case["nonfinite"].as_str() {
+                let Node::Float(value) = node else {
+                    panic!("{text:?}: expected float")
+                };
+                match nonfinite {
+                    "nan" => assert!(value.is_nan()),
+                    "inf" => assert_eq!(value, f64::INFINITY),
+                    "-inf" => assert_eq!(value, f64::NEG_INFINITY),
+                    _ => panic!("unknown nonfinite oracle"),
+                }
+            } else {
+                assert_eq!(node_json(&node), case["expected"], "{text:?}");
+            }
         }
     }
 

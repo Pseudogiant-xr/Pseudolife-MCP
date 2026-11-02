@@ -3,7 +3,7 @@
 //! `017`, `1_000`, `1:30`, `1e5` as a string) and construct as
 //! `SafeConstructor` does (`construct_yaml_bool`, `construct_yaml_int`,
 //! `construct_yaml_float`). Startup uses the same scalar rules, refusing
-//! values its config tree cannot represent rather than rounding them.
+//! consumed values its config tree cannot represent rather than rounding them.
 //!
 //! A timestamp constructs a Python `date` or `datetime`, which this tree
 //! cannot hold: the read for `saved` keeps its text (`str(date)` is the
@@ -15,12 +15,12 @@ use yaml_rust2::scanner::TScalarStyle;
 use super::yaml_dump::{
     TAG_BOOL, TAG_FLOAT, TAG_INT, TAG_MERGE, TAG_NULL, TAG_STR, TAG_TIMESTAMP, resolve,
 };
-use crate::config::{Node, resolve_scalar, safe_load_with};
+use crate::config::{Node, resolve_scalar, safe_load_startup_with, safe_load_with};
 
 /// Startup must preserve values exactly. The editor's read-only projection
 /// may display an oversized integer as a float; startup must not use it.
 pub(crate) fn load_startup(text: &str) -> Result<Option<Node>, String> {
-    safe_load_with(text, construct_startup, None)
+    safe_load_startup_with(text, construct_startup)
 }
 
 fn construct_startup(
@@ -41,20 +41,26 @@ fn construct_startup(
             "null" => return Ok(Node::Null),
             "int" => TAG_INT,
             "timestamp" => TAG_TIMESTAMP,
-            "binary" => return Err(
-                "YAML binary values cannot be used at startup; replace !!binary with a plain string".into()
-            ),
+            "binary" => return Ok(Node::Unsupported {
+                value,
+                reason: "YAML binary values cannot be used at startup; replace !!binary with a plain string".into(),
+            }),
             _ => TAG_STR,
         },
         None if style == TScalarStyle::Plain => resolve(&value),
         _ => TAG_STR,
     };
     match resolved {
-        TAG_TIMESTAMP => Err(
-            "YAML timestamps cannot be used at startup; quote the date or timestamp to use it as a string".into()
-        ),
-        TAG_INT => construct_int_with(&value, startup_integer).map(Node::Int).map_err(|_| {
-            "YAML integer is invalid or outside the signed 64-bit range; use a value from -9223372036854775808 to 9223372036854775807, or quote it for a string setting".into()
+        TAG_TIMESTAMP => Ok(Node::Unsupported {
+            value,
+            reason: "YAML timestamps cannot be used at startup; quote the date or timestamp to use it as a string".into(),
+        }),
+        TAG_INT => Ok(match construct_int_with(&value, startup_integer) {
+            Ok(value) => Node::Int(value),
+            Err(_) => Node::Unsupported {
+                value,
+                reason: "YAML integer is invalid or outside the signed 64-bit range; use a value from -9223372036854775808 to 9223372036854775807, or quote it for a string setting".into(),
+            },
         }),
         _ => construct(value, style, tag, false),
     }

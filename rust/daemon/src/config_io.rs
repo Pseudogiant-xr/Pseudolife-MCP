@@ -645,6 +645,7 @@ fn node_type(node: &Node) -> &'static str {
         Node::Str(_) | Node::MergeKey => "str",
         Node::Seq(_) => "list",
         Node::Map(_) => "dict",
+        Node::Unsupported { .. } => unreachable!("startup-only YAML scalar"),
     }
 }
 
@@ -847,6 +848,7 @@ fn node_truthy(node: &Node) -> bool {
         Node::Seq(items) => !items.is_empty(),
         Node::Map(entries) => !entries.is_empty(),
         Node::MergeKey => true,
+        Node::Unsupported { .. } => unreachable!("startup-only YAML scalar"),
     }
 }
 

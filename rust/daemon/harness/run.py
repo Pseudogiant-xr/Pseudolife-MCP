@@ -1280,6 +1280,11 @@ CONFIG_PROFILES = {
     "YAML 1.1 null": "time:\n  relative_age: NULL\nmemory:\n  miras:\n    bands: Null\n",
     "YAML 1.1 tagged integer spaces": "memory: {top_k: !!int ' 10 '}\n",
     "YAML 1.1 tagged integer block": "memory:\n  top_k: !!int |\n    10\n",
+    "YAML 1.1 unused timestamp": "updated: 2024-01-01\n",
+    "YAML 1.1 unused scalar types": "notes: {big: 99999999999999999999, blob: !!binary YQ==}\n",
+    "YAML 1.1 unused nested scalar": "memory: {notes: {updated: 2024-01-01}}\n",
+    "YAML 1.1 value mapping key": "memory: {scopes: {rollup: {=: general}}}\n",
+    "YAML 1.1 disabled gates": "memory: {dream: {literal_gate: off, span_gate: off}, deep_dream: {judge_mode: off, link_judge_mode: off, junk_judge_mode: off, curation_judge_mode: off, candidate_judge_mode: off}}\n",
 }
 for _boolean in ("yes", "Yes", "YES", "no", "No", "NO", "on", "On", "ON", "off", "Off", "OFF"):
     CONFIG_PROFILES[f"YAML 1.1 boolean {_boolean}"] = (

@@ -97,6 +97,7 @@ fn represent_scalar(node: &Node) -> Option<Scalar> {
         Node::Str(s) => (TAG_STR, s.clone()),
         Node::MergeKey => (TAG_STR, "<<".to_owned()),
         Node::Seq(_) | Node::Map(_) => return None,
+        Node::Unsupported { .. } => unreachable!("startup-only YAML scalar"),
     };
     Some(Scalar::new(tag, value))
 }
@@ -111,6 +112,7 @@ fn node_tag(node: &Node) -> &'static str {
         Node::Str(_) | Node::MergeKey => TAG_STR,
         Node::Seq(_) => TAG_SEQ,
         Node::Map(_) => TAG_MAP,
+        Node::Unsupported { .. } => unreachable!("startup-only YAML scalar"),
     }
 }
 

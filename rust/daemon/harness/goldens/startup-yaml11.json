@@ -284,6 +284,30 @@
     {
       "yaml": "!!int '0b0b10'",
       "expected": 2
+    },
+    {
+      "yaml": ".inf",
+      "nonfinite": "inf"
+    },
+    {
+      "yaml": "-.inf",
+      "nonfinite": "-inf"
+    },
+    {
+      "yaml": ".nan",
+      "nonfinite": "nan"
+    },
+    {
+      "yaml": "{=: general}",
+      "expected": {
+        "=": "general"
+      }
+    },
+    {
+      "yaml": "{!!value '=': general}",
+      "expected": {
+        "=": "general"
+      }
     }
   ]
 }

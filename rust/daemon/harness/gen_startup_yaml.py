@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 
 import yaml
@@ -20,8 +21,17 @@ def cases() -> list[dict]:
         "9223372036854775807", "-9223372036854775808",
         "!!int ' 10 '", "!!int |\n  10\n", "!!int ' 010 '", "!!int '010 '",
         "!!int ' 1 : 30 '", "!!int '0x FF '", "!!int '١٢'", "!!int '0b0b10'",
+        ".inf", "-.inf", ".nan",
+        "{=: general}", "{!!value '=': general}",
     ]
-    return [{"yaml": text, "expected": yaml.safe_load(text)} for text in spellings]
+    rows = []
+    for text in spellings:
+        value = yaml.safe_load(text)
+        if isinstance(value, float) and not math.isfinite(value):
+            rows.append({"yaml": text, "nonfinite": str(value)})
+        else:
+            rows.append({"yaml": text, "expected": value})
+    return rows
 
 
 def main() -> None:
