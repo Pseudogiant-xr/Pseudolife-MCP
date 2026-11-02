@@ -203,6 +203,11 @@ def corpus(kind, prompt):
         yield "wrong-result-type", "POST", "/chat/completions", {}, {"stdout": '{"result":17}'}
         yield "object-error-result", "POST", "/chat/completions", {}, {"stdout": '{"is_error":true,"result":{"error":"bad"}}'}
     else:
+        for value in (17, True, ["text"], {"text": "value"}, None, 0, False, [], {}):
+            for rc in (0, 1):
+                output = dict(canned(kind, value), rc=rc)
+                yield f"reply-type-{value!r}-{rc}", "POST", "/chat/completions", {}, output
+        yield "invalid-earlier-reply", "POST", "/chat/completions", {}, {"stdout": canned(kind, 17)["stdout"] + canned(kind, "last")["stdout"]}
         for rc in (0, 1):
             yield f"turn-failed-{rc}", "POST", "/chat/completions", {}, {"rc": rc, "stdout": '{"type":"turn.failed","error":{"message":"Unauthorized"}}\n'}
         yield "no-reply", "POST", "/chat/completions", {}, {"stdout": "banner\n{}\n"}
@@ -347,6 +352,7 @@ def lifecycle(binary, root):
 
 def main():
     global STUB_EXE
+    subprocess.run([sys.executable, str(Path(__file__).with_name("test_prompt.py"))], check=True)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", required=True, type=Path)
     parser.add_argument("--output", type=Path)

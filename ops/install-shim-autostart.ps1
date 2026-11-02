@@ -80,7 +80,7 @@ if ($NativeExe) {
     $nativeArgs = @("extractor-shim", "install-autostart", "claude", "--repo", $repo, "--native-exe", $NativeExe,
                     "--model", $Model, "--port", "$Port", "--host", "127.0.0.1", "--log", $LogFile)
     if ($NativeTaskName) { $nativeArgs += @("--name", $NativeTaskName) }
-    $nativeArgs += @("--prompt-file", (Join-Path $repo $PromptFile))
+    $nativeArgs += @("--prompt-file", (Join-Path $repo $PromptFile), "--startup-timeout", "$StartupTimeoutSec")
     & $NativeExe @nativeArgs
     if ($LASTEXITCODE -ne 0) { throw "native claude autostart registration failed" }
     return

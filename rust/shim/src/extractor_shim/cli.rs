@@ -122,7 +122,13 @@ fn cli_output(kind: Kind, out: &str, err: &str) -> (String, String) {
     (detail, full)
 }
 
-fn codex_reply(out: &str) -> Result<String, (String, bool)> {
+enum ReplyError {
+    Failed(String),
+    Missing(String),
+    Malformed(String),
+}
+
+fn codex_reply(out: &str) -> Result<String, ReplyError> {
     let mut reply = None;
     for line in out.lines() {
         let Ok(ev) = serde_json::from_str::<Value>(line.trim()) else {
@@ -137,23 +143,27 @@ fn codex_reply(out: &str) -> Result<String, (String, bool)> {
                 } else {
                     json::head(&json::dumps(&ev, true), 200)
                 };
-                return Err((format!("codex exec failed: {msg}"), true));
+                return Err(ReplyError::Failed(format!("codex exec failed: {msg}")));
             }
             Some("item.completed") if ev["item"]["type"] == "agent_message" => {
-                reply = Some(ev["item"]["text"].as_str().unwrap_or("").to_owned())
+                reply = Some(ev["item"]["text"].clone())
             }
             _ => {}
         }
     }
-    reply.map(|s| strip_fence(&s)).ok_or_else(|| {
-        (
-            format!(
-                "codex exec produced no agent_message (stream: {})",
-                json::repr(&json::head(out, 200))
-            ),
-            false,
-        )
-    })
+    let reply = reply.ok_or_else(|| {
+        ReplyError::Missing(format!(
+            "codex exec produced no agent_message (stream: {})",
+            json::repr(&json::head(out, 200))
+        ))
+    })?;
+    if json::truth(&reply) && !reply.is_string() {
+        return Err(ReplyError::Malformed(format!(
+            "'{}' object has no attribute 'strip'",
+            json::typename(&reply)
+        )));
+    }
+    Ok(strip_fence(reply.as_str().unwrap_or("")))
 }
 
 pub(super) struct Instructions(PathBuf);
@@ -364,11 +374,15 @@ pub(super) async fn call(
     let err = String::from_utf8_lossy(&err);
     if !status.success() {
         let (mut detail, mut full) = cli_output(c.kind, &out, &err);
-        if c.kind == Kind::Codex
-            && let Err((message, true)) = codex_reply(&out)
-        {
-            detail = message.clone();
-            full = message;
+        if c.kind == Kind::Codex {
+            match codex_reply(&out) {
+                Err(ReplyError::Failed(message)) => {
+                    detail = message.clone();
+                    full = message;
+                }
+                Err(ReplyError::Malformed(message)) => return Err(message.into()),
+                _ => {}
+            }
         }
         let prefix = if c.kind == Kind::Claude {
             "claude -p"
@@ -390,9 +404,14 @@ pub(super) async fn call(
         });
     }
     if c.kind == Kind::Codex {
-        return codex_reply(&out).map_err(|(message, _)| Failure {
-            sign_in: sign_in(c.kind, &message),
-            message,
+        return codex_reply(&out).map_err(|error| {
+            let message = match error {
+                ReplyError::Failed(s) | ReplyError::Missing(s) | ReplyError::Malformed(s) => s,
+            };
+            Failure {
+                sign_in: sign_in(c.kind, &message),
+                message,
+            }
         });
     }
     let value = serde_json::from_str::<Value>(&out)

@@ -21,6 +21,28 @@ function Get-RegisteredInvocation($task) {
         }
         if ($arguments -match '^"?extractor-shim"?\s+"?(claude|codex)"?\s+"?--env-file"?\s+"([^"]+)"') {
             [PSCustomObject]@{ Exe=$exe; Kind=$Matches[1]; EnvFile=$Matches[2] }
+        } elseif ($arguments -match '^"?(.+?[\\/]ops[\\/]shim_autostart\.py)"?\s+run\s+(claude|codex)(\s|$)') {
+            $repo = Split-Path -Parent (Split-Path -Parent $Matches[1])
+            $provider = $Matches[2]
+            $ports = @(if ($provider -eq 'claude') { 8082 } else { 8086 })
+            $key = 'PSEUDOLIFE_' + $provider.ToUpperInvariant() + '_SHIM_PORT'
+            foreach ($line in @(Get-Content -LiteralPath (Join-Path $repo 'ops/.env') -ErrorAction SilentlyContinue)) {
+                if ($line -match ('^\s*(?:export\s+)?' + $key + '\s*=\s*["'']?(\d+)["'']?\s*(?:#.*)?$')) { $ports = @([int]$Matches[1]) }
+            }
+            # The runner records its last port as well, since config may have
+            # changed since the detached process started.
+            $sha = [Security.Cryptography.SHA256]::Create()
+            try { $digest = -join ($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes([IO.Path]::GetFullPath($repo))) | ForEach-Object { $_.ToString('x2') }) }
+            finally { $sha.Dispose() }
+            $pidFile = Join-Path $env:USERPROFILE ('.pseudolife-mcp/' + $provider + '-shim-' + $digest.Substring(0,8) + '.pid')
+            $previous = Get-Content -Raw -LiteralPath $pidFile -ErrorAction SilentlyContinue
+            if ($previous -match '^\d+\s+(\d+)\s*$') { $ports += [int]$Matches[1] }
+            [PSCustomObject]@{ PythonScript=(Join-Path $repo "evals/${provider}_shim.py"); Ports=$ports }
+        } elseif ($arguments -match '^"?(.+?[\\/]evals[\\/](?:claude|codex)_shim\.py)"?\s+') {
+            $script = $Matches[1]
+            if ($arguments -match '--port\s+"?(\d+)"?(\s|$)') {
+                [PSCustomObject]@{ PythonScript=$script; Ports=@([int]$Matches[1]) }
+            }
         }
     }
 }
@@ -34,9 +56,17 @@ function Remove-OwnedTask([string]$taskName) {
     $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
     if (-not $task) { return }
     $captured = @()
+    $snapshot = @(Get-CimInstance Win32_Process)
     foreach ($invocation in @(Get-RegisteredInvocation $task)) {
+        if ($invocation.PythonScript) {
+            $script = [regex]::Escape($invocation.PythonScript).Replace('\\', '[\\/]')
+            $pattern = '^(?:"[^"]+"|\S+)\s+"?' + $script + '"?(\s|$)'
+            $ports = '--port\s+"?(' + ($invocation.Ports -join '|') + ')"?(\s|$)'
+            $captured += @($snapshot | Where-Object { $_.CommandLine -match $pattern -and $_.CommandLine -match $ports })
+            continue
+        }
         $pattern = '"?extractor-shim"?\s+"?' + [regex]::Escape($invocation.Kind) + '"?\s+"?--env-file"?\s+"?' + [regex]::Escape($invocation.EnvFile) + '"?(\s|$)'
-        foreach ($process in @(Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match $pattern })) {
+        foreach ($process in @($snapshot | Where-Object { $_.CommandLine -match $pattern })) {
             $owned = $process.ExecutablePath -eq $invocation.Exe
             if (-not $owned) {
                 $parent = Get-CimInstance Win32_Process -Filter "ProcessId = $($process.ParentProcessId)" -ErrorAction SilentlyContinue
@@ -46,9 +76,18 @@ function Remove-OwnedTask([string]$taskName) {
             if ($owned) { $captured += $process }
         }
     }
+    do {
+        $added = @($snapshot | Where-Object {
+            $child = $_
+            $child.ProcessId -notin @($captured.ProcessId) -and @($captured | Where-Object {
+                $_.ProcessId -eq $child.ParentProcessId -and $_.CreationDate -le $child.CreationDate
+            }).Count -gt 0
+        })
+        $captured += $added
+    } while ($added.Count)
     # Capture children before stopping the wrapper: its exit can orphan them.
     Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
-    foreach ($process in $captured) { Stop-CapturedProcess $process }
+    foreach ($process in @($captured | Sort-Object CreationDate -Descending)) { Stop-CapturedProcess $process }
     Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
     if (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue) { throw "could not remove $taskName" }
 }

@@ -80,7 +80,10 @@ executables and batch launchers separately. Python and a small Rust trampoline
 are test fixtures only; no provider account is called.
 
 The autostart proof registers unique disposable tasks or services, tests
-launch, bind-conflict refusal, replacement, config reload and listener shutdown, including a stable launcher that waits for a runtime child. It removes its registrations. Run it
+launch, bind-conflict refusal, replacement, config reload and listener shutdown,
+including a stable launcher that waits for a runtime child on both platforms.
+Windows also tests removal of detached Python tasks and startup-timeout forwarding.
+It removes its registrations. Run it
 only on a designated dev machine. Its Windows fixture uses S4U because an SSH
 session has no interactive logon token; it does not prove an interactive logon
 trigger fires. Never use it to replace an existing installation's task.

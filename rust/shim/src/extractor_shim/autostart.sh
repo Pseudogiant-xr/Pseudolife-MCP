@@ -18,12 +18,28 @@ if [ "$action" = remove ]; then
     echo "Removed $name"
     exit 0
 fi
-# A registered unit owns its process group; never kill an unrelated listener.
-old_pid="$(systemctl --user show "$name" --property MainPID --value 2>/dev/null || true)"
+# A waiting launcher and its runtime child belong to the same service cgroup.
+owned_by_unit() {
+    local process_id=$1 hierarchy controllers group
+    [ -n "$unit_group" ] && [ "$unit_group" != / ] || return 1
+    [ -r "/proc/$process_id/cgroup" ] || return 1
+    while IFS=: read -r hierarchy controllers group; do
+        if [[ "$group" = "$unit_group" || "$group" = "$unit_group/"* ]]; then return 0; fi
+    done < "/proc/$process_id/cgroup"
+    return 1
+}
+socket_pids() { grep -oE 'pid=[0-9]+' <<< "$1" | cut -d= -f2 | sort -u || true; }
+unit_group="$(systemctl --user show "$name" --property ControlGroup --value 2>/dev/null || true)"
 listeners="$(ss -H -ltnp "sport = :$port")"
-if [ -n "$listeners" ] && { [ "${old_pid:-0}" = 0 ] || ! grep -F "pid=$old_pid," <<< "$listeners" >/dev/null; }; then
-    echo "port $port belongs to another process; choose --port or stop its owner" >&2
-    exit 1
+if [ -n "$listeners" ]; then
+    pids="$(socket_pids "$listeners")"
+    owned=1
+    [ -n "$pids" ] || owned=0
+    for pid in $pids; do owned_by_unit "$pid" || owned=0; done
+    if [ "$owned" != 1 ]; then
+        echo "port $port belongs to another process; choose --port or stop its owner" >&2
+        exit 1
+    fi
 fi
 "$native" "$@"
 mkdir -p "$unit_dir"
@@ -45,12 +61,14 @@ systemctl --user restart "$name"
 deadline=$((SECONDS + timeout))
 verified=0
 while [ "$SECONDS" -lt "$deadline" ]; do
-    pid="$(systemctl --user show "$name" --property MainPID --value)"
-    if [ "${pid:-0}" != 0 ] && [ "$(readlink "/proc/$pid/exe" 2>/dev/null || true)" = "$owner_exe" ] &&
-        ss -H -ltnp "sport = :$port" | grep -F "pid=$pid," >/dev/null &&
-        curl --silent --fail --max-time 2 "http://$host:$port/models" >/dev/null; then
-        verified=1; break
-    fi
+    unit_group="$(systemctl --user show "$name" --property ControlGroup --value)"
+    for pid in $(socket_pids "$(ss -H -ltnp "sport = :$port")"); do
+        if owned_by_unit "$pid" && [ "$(readlink "/proc/$pid/exe" 2>/dev/null || true)" = "$owner_exe" ] &&
+            curl --silent --fail --max-time 2 "http://$host:$port/models" >/dev/null; then
+            verified=1; break
+        fi
+    done
+    [ "$verified" = 0 ] || break
     sleep 1
 done
 [ "$verified" = 1 ] || { echo "native $kind shim did not bind $host:$port; inspect journalctl --user -u $name" >&2; exit 1; }
