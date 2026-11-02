@@ -1002,13 +1002,23 @@ class BoardMirror:
     before the OS lock does is given it back (the board mirrors the lock; it
     must not name a queued run as the holder); one that shows another holder
     while this process has the OS lock is reported once and left to catch up.
+
+    With ``gate`` (the suite's mirror), a run that holds the OS lock also
+    waits for a live board holder of the same lease before it starts, since
+    that holder's own lock may sit where this one cannot see it (a Windows
+    ``lease run full-suite`` beside a WSL suite: two ran at once on
+    2026-11-03): :meth:`admitted` says when the board has let it start, and
+    :meth:`blocked_by` names the holder meanwhile. A hold past its expiry, or
+    one under this lock directory's own label (which the OS lock already
+    rules), does not stop it; nor does a board that is unusable.
     """
 
     def __init__(self, name: str, *, purpose: str = "", expect: int | None = None,
                  ttl: int = DEFAULT_TTL, worktree: str = "", pid: int | None = None,
                  environ=None, transport=None, no_board: bool = False,
-                 lock_dir: Path | None = None):
+                 lock_dir: Path | None = None, gate: bool = False):
         self.name = name
+        self.gate = gate
         # Stamped with the instance id of the directory the lock lives in.
         self.label = hold_label(os_lock.lock_dir() if lock_dir is None else lock_dir)
         self.purpose = purpose[:MAX_PURPOSE]
@@ -1031,6 +1041,8 @@ class BoardMirror:
         self._granted_early = False  # handed back; no more asking until held
         self._warned_lost = False
         self._held_since: float | None = None
+        self._admitted = threading.Event()  # with gate: the board let the run start
+        self._blocker: str | None = None  # with gate: who it waits for, while it does
 
     def waiting(self) -> None:
         """While this process waits for the OS lock: queue on the board (the
@@ -1053,6 +1065,41 @@ class BoardMirror:
         self._wake.set()
         if thread is not None:
             thread.join(budget + 1)
+        self._admitted.set()
+
+    def admitted(self, timeout: float) -> bool:
+        """After :meth:`hold`: whether the board has let this run start,
+        waiting up to ``timeout`` seconds. True at once without ``gate``."""
+        return not self.gate or self._admitted.wait(timeout)
+
+    def blocked_by(self) -> str | None:
+        """While a gated run waits for the board: the holder it waits for
+        (who, purpose, expected end, queue place); None before the board's
+        first answer and once it is admitted."""
+        with self._state_lock:
+            return self._blocker
+
+    def _admit(self) -> None:
+        with self._state_lock:
+            self._blocker = None
+        self._admitted.set()
+
+    def _waits_behind(self, reply: dict) -> bool:
+        """Whether a gated run must wait for this ``lease`` reply's holder: a
+        live hold (``expires_at`` still ahead, as the board's own settling
+        reads it) by someone other than this lock directory's mirrors, or a
+        free lease the board is passing to a waiter ahead. ``expected_end``
+        only describes the hold: an overrun holder that still renews is
+        still running."""
+        if reply["state"] == "held":
+            return False
+        holder = reply.get("holder")
+        if not isinstance(holder, dict):
+            return True
+        if self.label != HOLD_LABEL and holder.get("label") == self.label:
+            return False
+        expires = _number(holder.get("expires_at"))
+        return expires is None or expires > time.time()
 
     def _set(self, state: str) -> None:
         with self._state_lock:
@@ -1083,8 +1130,20 @@ class BoardMirror:
                     break
                 now = time.monotonic()
                 if state == "holding" and not holding:
-                    holding = True
                     reply = self._lease()
+                    if self.gate and self._board is not None and (
+                            reply is None or self._waits_behind(reply)):
+                        # Not admitted yet: ask again after a pause (a board
+                        # that keeps failing is dropped after BOARD_GIVE_UP,
+                        # and then the local lock alone rules).
+                        if reply is not None:
+                            with self._state_lock:
+                                self._blocker = _queued_notice(self.name, reply)
+                        self._wake.wait(TRANSIENT_RETRY if reply is None else BOARD_POLL)
+                        self._wake.clear()
+                        continue
+                    holding = True
+                    self._admit()
                     if reply is not None and reply["state"] != "held":
                         self._not_held(reply)
                     if self._board is not None and self._current() == "holding":
@@ -1125,6 +1184,7 @@ class BoardMirror:
             if self._board is not None:
                 self._board.close()
                 self._board = None
+            self._admitted.set()  # no board: the local lock alone rules
 
     def _connect(self) -> None:
         try:

@@ -5401,8 +5401,13 @@ the lock (refused, a changed tree, Ctrl-C) gives its board place back. When the
 lock's holder is a run the board does not show (older code, no bearer), the
 board grants the lease to the first waiter; that waiter hands it back and asks
 no more until it holds the lock, so the board never names a queued run as the
-holder. The OS lock stays the truth: a board that is unreachable, refuses, or shows another
-holder costs one line and never delays or stops the run, and
+holder. Once a run holds the lock it also waits, in the board's queue order,
+for a live board holder of the same lease, naming the holder and its purpose,
+because that holder's lock may be one this run cannot see (a Windows `lease
+run full-suite` beside a WSL suite); `PSEUDOLIFE_SUITE_LOCK=fail` exits
+instead, and a hold past its expiry, or one under this lock directory's own
+mirror label, does not stop it. A board that is unreachable or refuses costs
+one line and never stops the run, without a bearer the lock alone rules, and
 `PSEUDOLIFE_SUITE_LOCK=off` (CI) takes neither. The run's bearer and daemon URL
 are read when conftest is imported, before the suite's own client isolation
 strips them, and the mirror is built only for a run that takes the lock.

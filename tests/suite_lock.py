@@ -72,10 +72,18 @@ background, with the run's pid and worktree as its purpose and the expected
 end from the median of the last EXPECT_SAMPLE recorded run times (or
 DEFAULT_EXPECT_SECONDS); the peers whose status says ``suite=running``,
 ``suite=queued`` or ``gpu=``, or who are parked until the lease clears, are
-sent one notice on acquire and one on release. The OS lock stays the truth:
-a board that is unreachable, refuses, or shows another holder costs one
-line on stderr and never delays or stops the run; ``PSEUDOLIFE_SUITE_LOCK=off``
-(CI) takes neither. conftest snapshots the bearer and daemon URL at import
+sent one notice on acquire and one on release. The OS lock stays the truth
+among runs that share it, but not every holder of the lease does: on the
+night of 2026-11-03 a Windows-side ``lease run full-suite`` (a native build)
+and a WSL full suite ran at once twice, because a WSL run cannot see a
+Windows lock. So once a run holds the OS lock it also waits, in arrival
+order, for a live board holder of its lease (``fail`` exits instead), naming
+the holder and its purpose; a hold past its expiry, or one under this lock
+directory's own mirror label, does not stop it. A board that is unreachable
+or refuses costs one line on stderr and never stops the run (one that keeps
+failing is dropped after the mirror's BOARD_GIVE_UP), and without a bearer
+the lock alone rules; ``PSEUDOLIFE_SUITE_LOCK=off`` (CI) takes neither.
+conftest snapshots the bearer and daemon URL at import
 (``board_environment``), before tests/client_environment.py strips them.
 
 Configuration:
@@ -595,7 +603,8 @@ def acquire(directory: Path, mode: str, *, worktree: str,
     runs on every poll, just before each try for the lock; whatever it
     raises abandons the wait. ``mirror`` (see :func:`board_mirror`) is told
     ``waiting()`` on every poll spent queued and ``hold()`` once the lock is
-    taken; :func:`release` tells it ``release()``."""
+    taken, and then holds the lock until the board admits the run (see
+    :func:`_await_board`); :func:`release` tells it ``release()``."""
     count = slots() if callable(slots) else slots
     if count < 1:
         raise ValueError(f"slots={count}: at least one is needed")
@@ -673,7 +682,58 @@ def acquire(directory: Path, mode: str, *, worktree: str,
                     queued_at=queued_at, started_at=record["started"])
     if mirror is not None:
         _mirror_call(mirror, "hold", out)
+        try:
+            _await_board(mirror, mode, poll=poll, notice_every=notice_every, out=out,
+                         check=check)
+        except BaseException:  # refused (fail), a changed tree, or Ctrl-C
+            release(held, record=False)
+            raise
     return held
+
+
+def _await_board(mirror, mode: str, *, poll: float, notice_every: float,
+                 out: IO[str], check: Callable[[], None] | None) -> None:
+    """With the OS lock taken, wait until the board admits the run: a live
+    board holder of the lease may hold a lock this one cannot see (a Windows
+    ``lease run full-suite`` beside a WSL suite, 2026-11-03). ``wait`` names
+    the holder about every ``notice_every`` seconds; ``fail`` raises
+    :class:`SuiteLockBusy` once the board has named one. ``check`` runs on
+    every poll, as in the queue. A mirror without the gate, or one that
+    fails, admits at once: the board never stops a run by breaking."""
+    admitted = getattr(mirror, "admitted", None)
+    if admitted is None:
+        return
+    waited_from = next_notice = None
+    while True:
+        try:
+            if admitted(poll):
+                break
+            blocker = mirror.blocked_by()
+        except Exception as exc:  # noqa: BLE001 — the board never stops a run
+            print(f"full-suite lock: the board mirror failed while the run waited for "
+                  f"it ({type(exc).__name__}); the run continues", file=out, flush=True)
+            return
+        if blocker is None:
+            continue  # no answer from the board yet
+        if mode == "fail":
+            raise SuiteLockBusy(
+                f"full-suite lock: {blocker}; {LOCK_ENV}=fail refuses to queue "
+                f"(unset it to wait, or run a targeted subset)")
+        now = time.monotonic()
+        hint = ""
+        if waited_from is None:
+            waited_from = next_notice = now
+            hint = (f" (this run holds the local lock meanwhile; {LOCK_ENV}=fail "
+                    f"exits instead)")
+        if now >= next_notice:
+            print(f"full-suite lock taken; {blocker}{hint}", file=out, flush=True)
+            next_notice = now + notice_every
+        if check is not None:
+            check()
+    if waited_from is not None:
+        minutes, seconds = divmod(int(time.monotonic() - waited_from), 60)
+        print(f"full-suite lock: the board admitted the run after waiting "
+              f"{minutes}m{seconds:02d}s", file=out, flush=True)
 
 
 def release(held: HeldLock, *, record: bool = True) -> None:
@@ -784,7 +844,7 @@ def board_mirror(directory: Path, worktree, board_environ, *, name: str = SUITE_
     return BoardMirror(
         name, purpose=f"pytest pid {os.getpid()} in {worktree.name}",
         expect=expected_seconds(directory), worktree=str(worktree),
-        environ=board_environ, transport=transport, lock_dir=directory)
+        environ=board_environ, transport=transport, lock_dir=directory, gate=True)
 
 
 def _digest(path: Path) -> str | None:

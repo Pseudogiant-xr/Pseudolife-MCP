@@ -1575,21 +1575,140 @@ def test_an_unreachable_board_never_stops_the_run(tmp_path, quick_board, capsys)
     assert daemon.actions() == ["register"]  # nothing to release, nothing retried
 
 
-def test_a_board_that_shows_another_holder_does_not_stop_the_run(tmp_path, quick_board,
-                                                                  capsys):
-    daemon = FakeDaemon(lease=[QUEUED(position=1, queued=1, name="full-suite",
-                                      holder=holder_record(label="stale-run"))])
-    environ = {"PSEUDOLIFE_SUITE_LOCK_DIR": str(tmp_path)}
-    held_lock = suite_lock.take_for_session(_config(["tests"]), environ, TESTS,
-                                            mirror=_mirror(tmp_path, daemon))
+# 2026-11-03: twice in one night a Windows-side `lease run full-suite` holder
+# (a CPU-heavy native build) and a WSL full suite ran at once on the same
+# machine. The WSL run's OS lock cannot see the Windows lock, so the board
+# lease is the only record of that holder; the run printed "carries on" and
+# started pytest anyway. A full run now waits for a live board holder of its
+# lease once it holds the OS lock, the way it waits for the lock.
+
+def _queued_behind(*, label="lease-run", purpose="cargo build --release", expires_in=100.0):
+    """The board's reply to a run queued behind another live holder."""
+    holder = holder_record(label=label, purpose=purpose)
+    holder["expires_at"] = time.time() + expires_in
+    return QUEUED(position=1, queued=1, name="full-suite", holder=holder)
+
+
+def _held_once(freed):
+    """A lease script: queued behind a live ``lease run`` holder until
+    ``freed`` is set, then held."""
+    def reply(request):
+        return HELD("full-suite") if freed.is_set() else _queued_behind()
+    return reply
+
+
+@pytest.fixture
+def paced_board(quick_board, monkeypatch):
+    # A gated run re-asks every BOARD_POLL; 0 would spin on the fake board.
+    monkeypatch.setattr(quick_board, "BOARD_POLL", 0.02)
+    return quick_board
+
+
+def test_a_full_run_waits_for_another_board_holder_of_its_lease(tmp_path, paced_board,
+                                                                 monkeypatch):
+    freed = threading.Event()
+    daemon = FakeDaemon(lease=[_held_once(freed)])
+    mirror = _mirror(tmp_path, daemon)
+    acquired = _acquired_on_board(monkeypatch, mirror)
+    out = io.StringIO()
+    result: dict = {}
+
+    def run():
+        result["held"] = suite_lock.acquire(tmp_path, "wait", worktree="w", poll=0.02,
+                                            notice_every=60, out=out, mirror=mirror)
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
     try:
-        assert held_lock is not None
-        err = _stderr_until(capsys, "stale-run")
-        assert "stale-run" in err and "OS lock" in err
-        assert err.count("full-suite") >= 1
+        assert _wait_for(lambda: daemon.actions().count("lease") >= 3)
+        assert _wait_for(lambda: "cargo build" in out.getvalue())
+        # The board holder stands: no pytest yet, no "acquired" notice, and
+        # the run keeps the OS lock, so later runs here queue behind it.
+        assert "held" not in result
+        assert not acquired.is_set()
+        assert not suite_lock_is_free(tmp_path)
+        text = out.getvalue()
+        assert "lease-run" in text and "cargo build --release" in text  # holder, purpose
+        assert "PSEUDOLIFE_SUITE_LOCK=fail" in text
+        freed.set()
+        thread.join(START_TIMEOUT)
+        assert "held" in result, "the run never started once the board holder freed"
+        assert acquired.wait(START_TIMEOUT), "the mirror never announced the hold"
+    finally:
+        freed.set()
+        thread.join(START_TIMEOUT)
+        if "held" in result:
+            suite_lock.release(result["held"])
+    assert released_last(daemon)
+
+
+def test_a_full_run_starts_only_once_the_board_has_answered(tmp_path, paced_board):
+    answered = []
+
+    def held_slowly(request):
+        time.sleep(0.3)
+        answered.append(time.monotonic())
+        return HELD("full-suite")
+
+    daemon = FakeDaemon(lease=[held_slowly])
+    held_lock = suite_lock.acquire(tmp_path, "wait", worktree="w", poll=0.02,
+                                   out=io.StringIO(), mirror=_mirror(tmp_path, daemon))
+    try:
+        assert answered, "the run started before the board said its lease was free"
+    finally:
+        suite_lock.release(held_lock)
+    assert released_last(daemon)
+
+
+def test_fail_mode_exits_instead_of_waiting_for_a_board_holder(tmp_path, paced_board):
+    daemon = FakeDaemon(lease=[_queued_behind()])
+    with pytest.raises(suite_lock.SuiteLockBusy) as refused:
+        suite_lock.acquire(tmp_path, "fail", worktree="w", poll=0.02,
+                           out=io.StringIO(), mirror=_mirror(tmp_path, daemon))
+    message = str(refused.value)
+    assert "lease-run" in message and "cargo build --release" in message
+    assert "PSEUDOLIFE_SUITE_LOCK=fail" in message
+    assert suite_lock_is_free(tmp_path)  # the lock went back with the refusal
+    assert suite_lock.read_holder(tmp_path) is None
+    assert _wait_for(lambda: "release" in daemon.actions())  # out of the board queue
+
+
+@pytest.mark.parametrize("holder", ["expired", "this-lock-directory"])
+def test_a_board_hold_that_cannot_be_live_does_not_stop_the_run(tmp_path, paced_board,
+                                                                capsys, holder):
+    # Expired: past its ttl, the board settles it away on its next call.
+    # This lock directory's own mirror label: the OS lock this run holds
+    # admits it, so that record is a sibling slot or a killed run's leftover
+    # (as `lease check` reads it).
+    from pseudolife_memory import lease_cli
+    if holder == "expired":
+        reply = _queued_behind(label="stale-run", expires_in=-5.0)
+    else:
+        reply = _queued_behind(label=lease_cli.hold_label(tmp_path))
+    daemon = FakeDaemon(lease=[reply])
+    held_lock = suite_lock.acquire(tmp_path, "fail", worktree="w", poll=0.02,
+                                   out=io.StringIO(), mirror=_mirror(tmp_path, daemon))
+    try:
+        err = _stderr_until(capsys, "carries on")
+        assert "OS lock" in err and "full-suite" in err
     finally:
         suite_lock.release(held_lock)
     assert released_last(daemon)  # leaves the board queue too
+
+
+@pytest.mark.parametrize("mode", ["wait", "fail"])
+def test_without_a_bearer_the_lock_alone_admits_the_run(tmp_path, paced_board, capsys,
+                                                        mode):
+    daemon = FakeDaemon(lease=[_queued_behind()])
+    held_lock = suite_lock.acquire(tmp_path, mode, worktree="w", poll=0.02,
+                                   out=io.StringIO(),
+                                   mirror=_mirror(tmp_path, daemon, environ={}))
+    try:
+        err = _stderr_until(capsys, "board skipped")
+        assert err.count("board skipped") == 1 and "local lock alone" in err
+    finally:
+        suite_lock.release(held_lock)
+    assert daemon.calls == []
 
 
 def test_without_a_token_the_mirror_is_skipped_in_one_line(tmp_path, quick_board, capsys):
@@ -1622,14 +1741,17 @@ def test_the_mirror_is_optional_and_off_by_default(tmp_path):
 
 
 class _GatedDaemon(FakeDaemon):
-    """Every board call waits until the test opens ``gate``."""
+    """Every board call in ``gated`` (all of them by default) waits until
+    the test opens ``gate``."""
 
-    def __init__(self, **kwargs):
+    def __init__(self, gated=None, **kwargs):
         super().__init__(**kwargs)
         self.gate = threading.Event()
+        self.gated = gated
 
     def handler(self, request):
-        self.gate.wait(2 * START_TIMEOUT)  # outlasts the test's own wait
+        if self.gated is None or request.url.path.rsplit("/", 1)[-1] in self.gated:
+            self.gate.wait(2 * START_TIMEOUT)  # outlasts the test's own wait
         return super().handler(request)
 
 
@@ -1644,8 +1766,12 @@ def _wait_for(predicate, timeout=START_TIMEOUT):
 
 def test_a_slow_board_delays_neither_taking_nor_freeing_the_lock(tmp_path, quick_board):
     peers = [peer(p * 32, f"runner-{p}", "suite=queued") for p in "abcd"]
-    daemon = _GatedDaemon(lease=[HELD("full-suite")], agents=[AGENTS(*peers)])
-    # The lock is taken while every board call is still blocked, so it
+    # The run waits for the board's answer to its lease (a holder elsewhere
+    # must be waited for, 2026-11-03), but not for the peer notices or the
+    # release: those stay blocked while the lock is taken.
+    daemon = _GatedDaemon(gated=("agents", "send", "release"), lease=[HELD("full-suite")],
+                          agents=[AGENTS(*peers)])
+    # The lock is taken while those board calls are still blocked, so it
     # waited on none. A 0.9 s bound against a 1.0 s board call measured the
     # runner instead: a hosted Windows run took 1.2 s with no board call on
     # the way in (run 38716346974, 2026-10-15).
@@ -1682,7 +1808,7 @@ def test_a_slow_board_delays_neither_taking_nor_freeing_the_lock(tmp_path, quick
         taker.join(START_TIMEOUT)
         if "error" in taken:
             raise taken["error"]
-        assert taken_with_board_blocked  # not one board call on the way in
+        assert taken_with_board_blocked  # no notice or release on the way in
         held_lock = taken["lock"]
         held_lock.mirror = _Watch(held_lock.mirror)
     finally:
