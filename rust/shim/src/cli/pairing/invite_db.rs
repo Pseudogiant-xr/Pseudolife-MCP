@@ -285,7 +285,11 @@ pub(super) async fn list(
     names.dedup();
     for name in names {
         if !out.iter().any(|row| &row.principal == name) {
-            out.push(Listed::environment(name.clone(), None, !not_owner.contains(name)));
+            out.push(Listed::environment(
+                name.clone(),
+                None,
+                !not_owner.contains(name),
+            ));
         }
     }
     // Python's sorted(key=principal): code point order, stable.
@@ -411,7 +415,11 @@ pub(super) async fn create_invite(
     for _attempt in 0..5 {
         let code = new_code()?;
         let code_hash = super::sha256_hex(&code);
-        match attempt(client, name, tier, board, owned, ttl, replace, code, &code_hash).await? {
+        match attempt(
+            client, name, tier, board, owned, ttl, replace, code, &code_hash,
+        )
+        .await?
+        {
             Attempt::Done(created) => return Ok(created),
             Attempt::Collision => continue,
         }

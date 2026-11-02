@@ -637,7 +637,8 @@ async fn local(
         }
         if args.list {
             let environment = list_environment()?;
-            let rows = invite_db::list(session.client(), &environment, &not_owner_in_config()).await?;
+            let rows =
+                invite_db::list(session.client(), &environment, &not_owner_in_config()).await?;
             let rejected = invite_db::list_rejected(session.client()).await?;
             return Ok(Ok(Outcome::List(rows, rejected)));
         }

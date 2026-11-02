@@ -303,7 +303,11 @@ fn protected_paths_include_the_owner_list() {
     ] {
         assert!(protected(path), "{path}");
     }
-    for path in ["coordination", "coordination.not_owner", "coordination.allowed_principals"] {
+    for path in [
+        "coordination",
+        "coordination.not_owner",
+        "coordination.allowed_principals",
+    ] {
         assert!(!protected(path), "{path}");
     }
 }

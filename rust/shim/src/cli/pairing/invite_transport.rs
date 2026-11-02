@@ -459,7 +459,9 @@ fn decode_list(
             revoked_at: if stored { revoked } else { None },
             last_seen_at: time(10)?,
             owner: if stored {
-                row.get(12).and_then(serde_json::Value::as_bool).unwrap_or(true)
+                row.get(12)
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(true)
             } else {
                 !not_owner.iter().any(|name| row[0].as_str() == Some(name))
             },
@@ -509,20 +511,31 @@ mod tests {
         };
         let mine = argv(&base(Some(true)));
         let theirs = argv(&base(Some(false)));
-        assert!(mine.contains(&"--mine".to_owned()) && !mine.contains(&"--someone-else".to_owned()));
-        assert!(theirs.contains(&"--someone-else".to_owned()) && !theirs.contains(&"--mine".to_owned()));
+        assert!(
+            mine.contains(&"--mine".to_owned()) && !mine.contains(&"--someone-else".to_owned())
+        );
+        assert!(
+            theirs.contains(&"--someone-else".to_owned()) && !theirs.contains(&"--mine".to_owned())
+        );
         // Python's order: after --expires, before --replace and --url.
         let at = |v: &[String], s: &str| v.iter().position(|a| a == s).unwrap();
         assert!(at(&theirs, "--expires") < at(&theirs, "--someone-else"));
         assert!(at(&theirs, "--someone-else") < at(&theirs, "--url"));
         let neither = argv(&base(None));
-        assert!(!neither.iter().any(|a| a == "--mine" || a == "--someone-else"));
+        assert!(
+            !neither
+                .iter()
+                .any(|a| a == "--mine" || a == "--someone-else")
+        );
     }
 
     #[test]
     fn stopped_daemon_rows_carry_v59_ownership() {
         let (rows, _) = decode_list(r#"{"principals":[["guest",null,true,true,false,null,1,2,null,100,null,true,false],["env",null,null,false,false,null,null,null,null,100,9,false,null],["mine",null,true,true,false,null,1,2,null,100,null,true,true]],"rejected":[]}"#, &["env".to_owned()]).unwrap();
-        let owner: Vec<(&str, bool)> = rows.iter().map(|r| (r.principal.as_str(), r.owner)).collect();
+        let owner: Vec<(&str, bool)> = rows
+            .iter()
+            .map(|r| (r.principal.as_str(), r.owner))
+            .collect();
         assert_eq!(owner, [("env", false), ("guest", false), ("mine", true)]);
     }
 
