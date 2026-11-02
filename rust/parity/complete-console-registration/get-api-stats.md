@@ -1,3 +1,3 @@
 | Method | Path | Phase | Status | Rust | Evidence |
 |---|---|---:|---|---|---|
-| GET | /api/stats | 3 | deferred | 501 | 501 (`w2d-console-projections`, W2-D); declared case in `daemon/harness/run.py`; CLI, shim and eval callers only, no Console caller on master `2092e7b1`: CUTOVER.md proposal A (D9) moves it to the CLI batches |
+| GET | /api/stats | 3 | native; Linux differential verified | native route | CLI route calls the complete `memory_stats` service snapshot; obsolete 501 declaration removed. `cargo test -p pseudolife-daemon routes::` passes 31 cases. `daemon/harness/test_move_stats.py` passes all three authenticated REST/MCP/REST scenarios with complete snapshots, unchanged reads and no bank differences (exit 0, Linux dev box). Windows execution and hosted stress are not claimed. |
