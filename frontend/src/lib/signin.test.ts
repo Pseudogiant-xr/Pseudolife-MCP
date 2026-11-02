@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
+import { ApiError } from "./api/client";
 import {
+  BIND_EXPLAINER,
+  bindFailureLine,
+  bindSuccess,
   browserLabel,
   canMint,
   currentSignin,
@@ -7,11 +11,14 @@ import {
   landingHash,
   mintToken,
   normalizeCode,
+  PASSKEY_CHALLENGE_PATH,
+  passkeyOffered,
   PENDING_AT_KEY,
   PENDING_KEY,
   SETTLE_GRACE_MS,
   LINK_QUESTION,
   redeem,
+  redeemPasskey,
   replaceQuestion,
   SESSION_PATH,
   SESSIONS_PATH,
@@ -26,7 +33,7 @@ import {
   type SigninDeps,
 } from "./signin";
 import { TOKEN_KEY } from "./storage";
-import { b64urlDecode } from "./webauthn";
+import { b64urlDecode, CeremonyError, type AssertionJSON, type WebAuthnEnv } from "./webauthn";
 
 const CODE = "ABCD-EFGH-JKMN";
 const OLD = "the-owners-working-token";
@@ -46,9 +53,10 @@ function json(status: number, body: unknown): Response {
 
 type Route = (init: RequestInit) => Response | Promise<Response>;
 
-/** A fetch that answers the session POST and the sessions GET separately. */
-function fakeFetch(routes: { post?: Route; get?: Route }) {
+/** A fetch that answers the challenge POST, the session POST and the sessions GET separately. */
+function fakeFetch(routes: { challenge?: Route; post?: Route; get?: Route }) {
   return vi.fn(async (url: string, init: RequestInit) => {
+    if (url === PASSKEY_CHALLENGE_PATH && init.method === "POST" && routes.challenge) return routes.challenge(init);
     if (url === SESSION_PATH && init.method === "POST" && routes.post) return routes.post(init);
     if (url === SESSIONS_PATH && init.method === "GET" && routes.get) return routes.get(init);
     throw new Error(`unexpected ${init.method} ${url}`);
@@ -152,6 +160,12 @@ describe("signinTarget", () => {
   });
 });
 
+const SECURE: WebAuthnEnv = {
+  isSecureContext: true,
+  hasPublicKeyCredential: true,
+  credentials: { get: async () => null, create: async () => null },
+};
+
 describe("signinCapability", () => {
   it("is null when /health says nothing (an older daemon)", () => {
     expect(signinCapability({ status: "ok" })).toBeNull();
@@ -161,8 +175,10 @@ describe("signinCapability", () => {
 
   it("offers only the pasted token when the capability is absent or link is off", () => {
     expect(signinChoices(signinCapability({ status: "ok" }))).toEqual({ code: false, passkey: false, pasteOnly: true });
-    expect(signinChoices({ link: false, passkey: true })).toEqual({ code: false, passkey: true, pasteOnly: true });
+    expect(signinChoices({ link: false, passkey: true })).toEqual({ code: false, passkey: false, pasteOnly: true });
     expect(signinChoices({ link: true, passkey: false })).toEqual({ code: true, passkey: false, pasteOnly: false });
+    expect(signinChoices({ link: false, passkey: true }, SECURE)).toEqual({ code: false, passkey: true, pasteOnly: false });
+    expect(signinChoices({ link: true, passkey: true }, SECURE)).toEqual({ code: true, passkey: true, pasteOnly: false });
   });
 
   it("reads link and passkey as strict booleans", () => {
@@ -440,5 +456,271 @@ describe("a link always asks first", () => {
   it("names who should continue: only someone who asked for the link", () => {
     expect(LINK_QUESTION).toMatch(/Continue only if you asked for it yourself/);
     expect(LINK_QUESTION).toMatch(/pseudolife-mcp console/);
+  });
+});
+
+describe("passkeyOffered", () => {
+  const cap = { link: true, passkey: true };
+
+  it("needs the daemon's word, a secure context and WebAuthn", () => {
+    expect(passkeyOffered(cap, SECURE)).toBe(true);
+    expect(passkeyOffered({ link: true, passkey: false }, SECURE)).toBe(false);
+    expect(passkeyOffered(null, SECURE)).toBe(false);
+    expect(passkeyOffered(cap, { ...SECURE, isSecureContext: false })).toBe(false);
+    expect(passkeyOffered(cap, { ...SECURE, credentials: null })).toBe(false);
+    expect(passkeyOffered(cap, { ...SECURE, hasPublicKeyCredential: false })).toBe(false);
+    expect(passkeyOffered(cap, null)).toBe(false);
+  });
+
+  it("the demo's fixture mode needs no browser support, but still the daemon's word", () => {
+    expect(passkeyOffered(cap, null, true)).toBe(true);
+    expect(passkeyOffered({ link: true, passkey: false }, null, true)).toBe(false);
+  });
+});
+
+const CHALLENGE = {
+  payload: '{"purpose":"sign-in","nonce":"n1"}',
+  mac: "mac-1",
+  publicKey: { challenge: "Y2hhbGxlbmdl", allowCredentials: [{ type: "public-key", id: "a2V5" }], rpId: "localhost", userVerification: "preferred", timeout: 120000 },
+};
+
+const ASSERTION: AssertionJSON = {
+  id: "a2V5",
+  rawId: "a2V5",
+  type: "public-key",
+  response: { clientDataJSON: "Y2Q", authenticatorData: "YWQ", signature: "c2ln", userHandle: null },
+  authenticatorAttachment: null,
+  clientExtensionResults: {},
+};
+
+function passkeyDeps(fetch: SigninDeps["fetch"], sign = vi.fn(async (_pk: unknown) => ASSERTION), store = memStore({ [TOKEN_KEY]: OLD })) {
+  return { ...deps(fetch, store), sign };
+}
+
+describe("redeemPasskey", () => {
+  it("posts exactly the contract's bodies, pre-auth, and promotes the token the challenge named", async () => {
+    let challengeBody: Record<string, unknown> = {};
+    let sessionBody: Record<string, unknown> = {};
+    const heads: Record<string, string>[] = [];
+    let signedWith: unknown = null;
+    const sign = vi.fn(async (pk: unknown) => {
+      signedWith = pk;
+      // Nothing is stored while the passkey prompt is up.
+      expect(d.store.read(PENDING_KEY)).toBe("");
+      return ASSERTION;
+    });
+    const d = passkeyDeps(
+      fakeFetch({
+        challenge: (init) => {
+          challengeBody = JSON.parse(String(init.body)) as Record<string, unknown>;
+          heads.push(init.headers as Record<string, string>);
+          expect(d.store.read(PENDING_KEY)).toBe("");
+          return json(200, CHALLENGE);
+        },
+        post: (init) => {
+          sessionBody = JSON.parse(String(init.body)) as Record<string, unknown>;
+          heads.push(init.headers as Record<string, string>);
+          // Pending from before step 3; pl_token still the old one.
+          expect(d.store.read(PENDING_KEY)).toMatch(/^[A-Za-z0-9_-]{43}$/);
+          expect(d.store.read(PENDING_AT_KEY)).not.toBe("");
+          expect(d.store.read(TOKEN_KEY)).toBe(OLD);
+          return json(200, { principal: "owner-pc", session_id: "s1", expires_at: 2_000_000_000 });
+        },
+      }),
+      sign,
+    );
+    const r = await redeemPasskey(d);
+
+    expect(r).toEqual({ kind: "signed_in", principal: "owner-pc" });
+    expect(Object.keys(challengeBody).sort()).toEqual(["label", "token_sha256"]);
+    expect(challengeBody.label).toBe("Firefox on Windows");
+    expect(challengeBody.token_sha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(challengeBody.token_sha256).toBe(await sha256Hex(globalThis.crypto, d.store.read(TOKEN_KEY)));
+    expect(signedWith).toEqual(CHALLENGE.publicKey);
+    expect(sessionBody).toEqual({ payload: CHALLENGE.payload, mac: CHALLENGE.mac, assertion: ASSERTION });
+    for (const h of heads) {
+      expect(h.Authorization).toBeUndefined();
+      expect(h["Content-Type"]).toBe("application/json");
+    }
+    expect(d.store.read(TOKEN_KEY)).not.toBe(OLD);
+    expect(d.store.read(PENDING_KEY)).toBe("");
+    expect(d.store.read(PENDING_AT_KEY)).toBe("");
+  });
+
+  it("a closed passkey prompt is a quiet cancel: nothing sent, nothing stored", async () => {
+    const post = vi.fn(() => json(200, { principal: "owner-pc" }));
+    const sign = vi.fn(async () => {
+      throw new CeremonyError("cancelled", "The passkey prompt was closed or timed out. Nothing was signed or sent.");
+    });
+    const d = passkeyDeps(fakeFetch({ challenge: () => json(200, CHALLENGE), post }), sign);
+    const before = new Map(d.store.map);
+    const r = await redeemPasskey(d);
+    expect(r).toEqual({ kind: "cancelled", message: "Sign-in cancelled." });
+    expect(post).not.toHaveBeenCalled();
+    expect(d.store.map).toEqual(before);
+  });
+
+  it("another ceremony failure says why, and still changes nothing", async () => {
+    const post = vi.fn(() => json(200, { principal: "owner-pc" }));
+    const sign = vi.fn(async () => {
+      throw new CeremonyError("wrong_site", "The browser refused the passkey for this address.");
+    });
+    const d = passkeyDeps(fakeFetch({ challenge: () => json(200, CHALLENGE), post }), sign);
+    const r = await redeemPasskey(d);
+    expect(r).toMatchObject({ kind: "refused", reason: "ceremony", message: "The browser refused the passkey for this address." });
+    expect(post).not.toHaveBeenCalled();
+    expect(d.store.read(TOKEN_KEY)).toBe(OLD);
+    expect(d.store.read(PENDING_KEY)).toBe("");
+  });
+
+  it.each([
+    [409, { error: "passkey_signin_unavailable", hint: "No passkey can sign in yet: run `pseudolife-mcp console` on the daemon's host." }, "passkey_unavailable", /^No passkey can sign in yet: run `pseudolife-mcp console` on the daemon's host\.$/],
+    [409, { error: "passkey_signin_unavailable" }, "passkey_unavailable", /Use this passkey to sign in/],
+    [403, { error: "forbidden_origin" }, "forbidden_origin", /^Passkey sign-in works at your Console's HTTPS address; open the Console there, or sign in with a code\.$/],
+    [429, { error: "rate_limited" }, "rate_limited", /in a minute/],
+    [400, { error: "invalid_request" }, "http", /HTTP 400, invalid_request/],
+    [415, { error: "unsupported_media_type" }, "http", /HTTP 415/],
+    [503, { error: "signin_unavailable" }, "unavailable", /cannot sign browsers in right now/],
+  ])("a refused challenge (%i) never prompts and changes nothing", async (status, body, reason, msg) => {
+    const sign = vi.fn(async () => ASSERTION);
+    const d = passkeyDeps(fakeFetch({ challenge: () => json(status, body) }), sign);
+    const r = await redeemPasskey(d);
+    expect(r).toMatchObject({ kind: "refused", reason });
+    if (r.kind === "refused") expect(r.message).toMatch(msg);
+    expect(sign).not.toHaveBeenCalled();
+    expect(d.store.read(TOKEN_KEY)).toBe(OLD);
+    expect(d.store.read(PENDING_KEY)).toBe("");
+  });
+
+  it("a lost challenge answer is definite: no session can exist yet", async () => {
+    const sign = vi.fn(async () => ASSERTION);
+    const d = passkeyDeps(fakeFetch({ challenge: network }), sign);
+    const r = await redeemPasskey(d);
+    expect(r).toMatchObject({ kind: "refused", reason: "no_answer" });
+    expect(sign).not.toHaveBeenCalled();
+    expect(d.store.read(PENDING_KEY)).toBe("");
+    expect(d.store.read(TOKEN_KEY)).toBe(OLD);
+  });
+
+  it.each([
+    [400, { error: "signin_refused" }, "refused", /^The passkey sign-in was not accepted\. Try again; if it keeps failing, sign in with a code\.$/],
+    [409, { error: "passkey_signin_unavailable", hint: "Sign in on the daemon's host with `pseudolife-mcp console`, then Settings, Your passkeys." }, "passkey_unavailable", /^Sign in on the daemon's host/],
+    [403, { error: "forbidden_origin" }, "forbidden_origin", /HTTPS address/],
+    [429, { error: "rate_limited" }, "rate_limited", /in a minute/],
+  ])("a refused session (%i) keeps pl_token and drops the pending token", async (status, body, reason, msg) => {
+    const get = vi.fn(sessionsFor("someone"));
+    const d = passkeyDeps(fakeFetch({ challenge: () => json(200, CHALLENGE), post: () => json(status, body), get }));
+    const r = await redeemPasskey(d);
+    expect(r).toMatchObject({ kind: "refused", reason });
+    if (r.kind === "refused") expect(r.message).toMatch(msg);
+    expect(d.store.read(TOKEN_KEY)).toBe(OLD);
+    expect(d.store.read(PENDING_KEY)).toBe("");
+    expect(d.store.read(PENDING_AT_KEY)).toBe("");
+    expect(get).not.toHaveBeenCalled();
+  });
+
+  it("503 signin_unavailable on the session is ambiguous: settled like a code's", async () => {
+    const made = passkeyDeps(
+      fakeFetch({ challenge: () => json(200, CHALLENGE), post: () => json(503, { error: "signin_unavailable" }), get: sessionsFor("owner-pc") }),
+    );
+    expect(await redeemPasskey(made)).toEqual({ kind: "signed_in", principal: "owner-pc" });
+    expect(made.store.read(TOKEN_KEY)).not.toBe(OLD);
+
+    const notMade = passkeyDeps(
+      fakeFetch({
+        challenge: () => json(200, CHALLENGE),
+        post: () => json(503, { error: "signin_unavailable" }),
+        get: () => json(401, { error: "unauthorized" }),
+      }),
+    );
+    const r = await redeemPasskey(notMade);
+    expect(r).toMatchObject({ kind: "refused", reason: "unavailable" });
+    expect(notMade.store.read(TOKEN_KEY)).toBe(OLD);
+    expect(notMade.store.read(PENDING_KEY)).toBe("");
+  });
+
+  it("a lost session answer tests the pending token, and words a refusal for the passkey", async () => {
+    let probed = "";
+    const works = passkeyDeps(
+      fakeFetch({
+        challenge: () => json(200, CHALLENGE),
+        post: network,
+        get: (init) => {
+          probed = authOf(init) ?? "";
+          return sessionsFor("owner-pc")();
+        },
+      }),
+    );
+    expect(await redeemPasskey(works)).toEqual({ kind: "signed_in", principal: "owner-pc" });
+    expect(probed).toBe(`Bearer ${works.store.read(TOKEN_KEY)}`);
+
+    const refused = passkeyDeps(fakeFetch({ challenge: () => json(200, CHALLENGE), post: network, get: () => json(401, {}) }));
+    const r = await redeemPasskey(refused);
+    expect(r).toMatchObject({ kind: "refused", reason: "not_completed" });
+    if (r.kind === "refused") expect(r.message).toMatch(/passkey sign-in did not complete/);
+    expect(refused.store.read(TOKEN_KEY)).toBe(OLD);
+  });
+
+  it("when neither answer arrives, the pending token is kept for the next start", async () => {
+    const d = passkeyDeps(fakeFetch({ challenge: () => json(200, CHALLENGE), post: network, get: network }));
+    const r = await redeemPasskey(d);
+    expect(r.kind).toBe("unconfirmed");
+    expect(d.store.read(TOKEN_KEY)).toBe(OLD);
+    expect(d.store.read(PENDING_KEY)).toMatch(/^[A-Za-z0-9_-]{43}$/);
+  });
+
+  it("a challenge answer without payload, mac or options is refused before the prompt", async () => {
+    const sign = vi.fn(async () => ASSERTION);
+    const d = passkeyDeps(fakeFetch({ challenge: () => json(200, { payload: "p" }) }), sign);
+    const r = await redeemPasskey(d);
+    expect(r).toMatchObject({ kind: "refused", reason: "http" });
+    expect(sign).not.toHaveBeenCalled();
+    expect(d.store.read(PENDING_KEY)).toBe("");
+  });
+
+  it("stops before minting without crypto.subtle", async () => {
+    const f = fakeFetch({});
+    const r = await redeemPasskey({ ...passkeyDeps(f), crypto: undefined });
+    expect(r.kind).toBe("unsupported");
+    expect(f).not.toHaveBeenCalled();
+  });
+});
+
+describe("Use this passkey to sign in", () => {
+  it("explains itself and names the principal on success", () => {
+    expect(BIND_EXPLAINER).toBe(
+      "Lets the passkey you choose sign this Console in, as the account this Console is signed in as now. " +
+        "Use it once, after signing in with `pseudolife-mcp console` on the daemon's host.",
+    );
+    expect(bindSuccess({ credential_id: "c1", signs_in_as: "owner-pc" })).toBe(
+      "This passkey now signs the Console in as owner-pc.",
+    );
+  });
+
+  it("principal_not_allowed means this sign-in is not the owner's", () => {
+    const line = bindFailureLine(new ApiError(403, "principal_not_allowed", { error: "principal_not_allowed" }));
+    expect(line).toMatch(/Only the bank owner's sign-in can do this: sign in with `pseudolife-mcp console` on the daemon's host, then try again\.$/);
+  });
+
+  it("a 401 asks to sign in again", () => {
+    expect(bindFailureLine(new ApiError(401, "unauthorized", { error: "unauthorized" }))).toMatch(/Sign in again/);
+  });
+
+  it.each([
+    [409, "maintainer_https_required", /passkeys need HTTPS/],
+    [403, "assertion_invalid", /did not accept the passkey's signature/],
+    [410, "challenge_expired", /two-minute challenge ran out/],
+    [410, "challenge_spent", /already used once/],
+    [503, "coordination_unavailable", /storage is unavailable/],
+  ])("reuses the maintainer routes' wording for %i %s", (status, code, msg) => {
+    const line = bindFailureLine(new ApiError(status, code, { error: code }));
+    expect(line).toMatch(/^The passkey was not set to sign in: /);
+    expect(line).toMatch(msg);
+  });
+
+  it("a closed prompt says nothing was signed", () => {
+    expect(bindFailureLine(new CeremonyError("cancelled", "The passkey prompt was closed or timed out. Nothing was signed or sent."))).toMatch(
+      /closed or timed out/,
+    );
   });
 });

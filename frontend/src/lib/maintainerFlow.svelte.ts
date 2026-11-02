@@ -37,6 +37,7 @@ import {
   normalizeSent,
   readList,
   SEND_WAKE,
+  signAndComplete,
   signReadiness,
   wakeText,
   type Readiness,
@@ -45,6 +46,8 @@ import {
 import { toast } from "./overlay.svelte";
 import { loadBoard, store } from "./state.svelte";
 import { browserEnv, createCredential, getAssertion, webauthnSupport } from "./webauthn";
+import { consoleApi } from "./api/console";
+import { bindFailureLine, bindSuccess, type BindResult } from "./signin";
 import { fmtDateTime } from "./format";
 
 // ---- shared state -------------------------------------------------------------
@@ -457,6 +460,28 @@ export async function enrolBootstrap(code: string, label: string): Promise<Enrol
   } catch (e) {
     toast(failureLine("The passkey was not enrolled", e), "danger", 8000);
     void loadMaintainer();
+    return null;
+  }
+}
+
+/**
+ * "Use this passkey to sign in": the key the browser's prompt picks signs a
+ * bind-sign-in challenge, and from then on signs this Console in as the
+ * principal this Console is signed in as now. The button is the intent, as
+ * for the first enrolment, so there is no confirm dialog.
+ */
+export async function bindKeyForSignin(): Promise<BindResult | null> {
+  try {
+    const answer = await consoleApi.bindChallenge();
+    if (!answer || typeof answer.mac !== "string" || !answer.publicKey) {
+      throw new ApiError(200, (answer as { error?: string } | null)?.error || "invalid_response", null);
+    }
+    const r = await signAndComplete(answer, sign, (s) => consoleApi.bind(s));
+    toast(bindSuccess(r), "ok", 8000);
+    void loadMaintainer();
+    return r;
+  } catch (e) {
+    toast(bindFailureLine(e), "danger", 10000);
     return null;
   }
 }

@@ -1,6 +1,6 @@
 // The browser side of Console sign-in: the #/signin route a sign-in link
-// opens, the sign-in dialog's code form, and the start-up check of a pending
-// token an interrupted sign-in left behind. The decisions live in signin.ts;
+// opens, the sign-in dialog's code form and passkey choice, and the start-up
+// check of a pending token an interrupted sign-in left behind. The decisions live in signin.ts;
 // this module wires them to fetch, localStorage, the address bar and the UI.
 
 import { api } from "./api/client";
@@ -13,6 +13,7 @@ import {
   LINK_QUESTION,
   MESSAGES,
   redeem,
+  redeemPasskey,
   replaceQuestion,
   settlePending,
   signinCapability,
@@ -20,6 +21,7 @@ import {
   type RedeemResult,
   type SigninDeps,
 } from "./signin";
+import { sign } from "./maintainerFlow.svelte";
 import { readKey, TOKEN_KEY, writeKey } from "./storage";
 import { refresh, ui } from "./state.svelte";
 
@@ -80,7 +82,7 @@ function finish(r: RedeemResult): void {
     location.reload();
     return;
   }
-  say(r.message, r.kind === "unconfirmed" ? "warn" : "danger");
+  say(r.message, r.kind === "cancelled" ? "info" : r.kind === "unconfirmed" ? "warn" : "danger");
 }
 
 /** The dialog's "Sign in with a code". The person typed it here, so nothing is asked first. */
@@ -91,6 +93,23 @@ export async function signInWithCode(raw: string): Promise<void> {
   try {
     await settleOnStart();
     finish(await redeem(raw, deps()));
+  } finally {
+    signinFlow.busy = false;
+  }
+}
+
+/**
+ * The dialog's "Sign in with your passkey". The person clicked it here, so
+ * nothing is asked first, even over a working sign-in.
+ */
+export async function signInWithPasskey(): Promise<void> {
+  if (signinFlow.busy) return;
+  signinFlow.busy = true;
+  say("Waiting for your passkey.");
+  try {
+    await settleOnStart();
+    if (!ui.tokenOpen) return;
+    finish(await redeemPasskey({ ...deps(), sign }));
   } finally {
     signinFlow.busy = false;
   }

@@ -6,9 +6,11 @@
 // sign-in. Everything here takes its fetch, storage and crypto as arguments
 // so the state machine is testable without a browser.
 
+import { ApiError } from "./api/client";
+import { failureLine } from "./maintainer";
 import { findNav, resolveRoute } from "./nav";
 import { TOKEN_KEY } from "./storage";
-import { b64urlEncode } from "./webauthn";
+import { b64urlEncode, CeremonyError, webauthnSupport, type AssertionJSON, type WebAuthnEnv } from "./webauthn";
 
 /** Where a minted token waits until the daemon confirms its session. */
 export const PENDING_KEY = "pl_token_pending";
@@ -23,6 +25,8 @@ export const PENDING_AT_KEY = "pl_token_pending_at";
 export const SETTLE_GRACE_MS = 20_000;
 
 export const SESSION_PATH = "/api/console/session";
+export const PASSKEY_CHALLENGE_PATH = "/api/console/passkey-challenge";
+export const PASSKEY_BIND_PATH = "/api/console/passkey-bind";
 export const SESSIONS_PATH = "/api/console/sessions";
 export const REVOKE_PATH = "/api/console/sessions/revoke";
 
@@ -77,12 +81,29 @@ export function signinCapability(health: unknown): SigninCapability | null {
 }
 
 /**
- * What the sign-in dialog offers: the code form only when the daemon says it
- * redeems links, a passkey only when it says so, and otherwise the pasted
- * token alone, opened rather than tucked under Advanced.
+ * Whether the dialog offers "Sign in with your passkey": the daemon says it
+ * signs in with passkeys, and this page can run a passkey ceremony (a secure
+ * context with WebAuthn). The demo's fixture mode needs no browser support.
  */
-export function signinChoices(cap: SigninCapability | null): { code: boolean; passkey: boolean; pasteOnly: boolean } {
-  return { code: cap?.link === true, passkey: cap?.passkey === true, pasteOnly: cap?.link !== true };
+export function passkeyOffered(cap: SigninCapability | null, env: WebAuthnEnv | null, fixtures = false): boolean {
+  if (cap?.passkey !== true) return false;
+  return fixtures || (!!env && webauthnSupport(env).ok);
+}
+
+/**
+ * What the sign-in dialog offers: the code form only when the daemon says it
+ * redeems links, a passkey only when it says so and this page can use one
+ * (`env`; none given, none offered), and otherwise the pasted token alone,
+ * opened rather than tucked under Advanced.
+ */
+export function signinChoices(
+  cap: SigninCapability | null,
+  env: WebAuthnEnv | null = null,
+  fixtures = false,
+): { code: boolean; passkey: boolean; pasteOnly: boolean } {
+  const code = cap?.link === true;
+  const passkey = passkeyOffered(cap, env, fixtures);
+  return { code, passkey, pasteOnly: !code && !passkey };
 }
 
 // ---- the link -----------------------------------------------------------------
@@ -199,6 +220,9 @@ export type RefusalReason =
   | "rate_limited"
   | "unavailable"
   | "not_completed"
+  | "passkey_unavailable"
+  | "no_answer"
+  | "ceremony"
   | "http";
 
 export type RedeemResult =
@@ -209,7 +233,9 @@ export type RedeemResult =
    *  token is kept, and the next start of the Console settles it. */
   | { kind: "unconfirmed"; message: string }
   /** This page cannot mint a token (not a secure context). */
-  | { kind: "unsupported"; message: string };
+  | { kind: "unsupported"; message: string }
+  /** The person closed the passkey prompt: nothing was sent or changed. */
+  | { kind: "cancelled"; message: string };
 
 export const MESSAGES = {
   badCode: "A sign-in code has 12 letters and digits, like ABCD-EFGH-JKMN. Check it and try again.",
@@ -225,6 +251,16 @@ export const MESSAGES = {
     "The daemon did not answer, so this sign-in is not confirmed yet. The Console checks again when you reload it.",
   unsupported:
     "Sign-in needs this Console at https or on this machine (localhost); open it there, or use Advanced.",
+  cancelled: "Sign-in cancelled.",
+  passkeyForbiddenOrigin:
+    "Passkey sign-in works at your Console's HTTPS address; open the Console there, or sign in with a code.",
+  passkeyRefused: "The passkey sign-in was not accepted. Try again; if it keeps failing, sign in with a code.",
+  /** Only when the daemon's 409 carries no hint of its own. */
+  passkeyUnavailable:
+    `No passkey can sign this Console in yet. Sign in on the daemon's host with \`${SIGNIN_COMMAND}\`, then in ` +
+    'Settings, Your passkeys, choose "Use this passkey to sign in".',
+  passkeyNoAnswer: "The daemon did not answer, so nothing changed. Check that it is running, then try again.",
+  passkeyNotCompleted: "The passkey sign-in did not complete. Try again; if it keeps failing, sign in with a code.",
 } as const;
 
 export type Probe =
@@ -289,34 +325,50 @@ function refusal(status: number, code: string): { reason: RefusalReason; message
   };
 }
 
+type Refuse = (status: number, code: string, body: unknown) => { reason: RefusalReason; message: string };
+
+function errorOf(body: unknown): string {
+  const e = (body as { error?: unknown } | null)?.error;
+  return typeof e === "string" ? e : "";
+}
+
+function hintOf(body: unknown): string {
+  const h = (body as { hint?: unknown } | null)?.hint;
+  return typeof h === "string" ? h.trim() : "";
+}
+
+/** Keep a minted token as the pending one, stamped now. */
+function keepPending(store: KeyStore, token: string, deps: Pick<SigninDeps, "now">): void {
+  store.write(PENDING_KEY, token);
+  store.write(PENDING_AT_KEY, String(nowOf(deps)));
+}
+
 /**
- * Redeem a typed or linked code. The outcomes:
- * - 200: the pending token becomes "pl_token";
+ * POST /api/console/session for the pending token (already stored) and read
+ * the answer, for the code and the passkey alike:
+ * - 200 with the session's principal: the pending token becomes "pl_token";
  * - a definite refusal (any 4xx): the pending token is dropped and
- *   "pl_token" is untouched;
+ *   "pl_token" is untouched, and `refuse` words it;
  * - an ambiguous answer (no response, any 5xx, a 200 without a body): the
  *   pending token is tested on a bearer-gated read and promoted only if it
  *   works; if the daemon cannot be asked either, it stays pending. The
  *   daemon's 503 signin_unavailable is ambiguous too: it answers that when
  *   redeeming raised, so the session may exist.
  */
-export async function redeem(rawCode: string, deps: SigninDeps): Promise<RedeemResult> {
-  const code = normalizeCode(rawCode);
-  if (!code) return { kind: "refused", reason: "bad_code", message: MESSAGES.badCode };
-  if (!canMint(deps.crypto)) return { kind: "unsupported", message: MESSAGES.unsupported };
-
-  const token = mintToken(deps.crypto);
-  const tokenSha = await sha256Hex(deps.crypto, token);
-  deps.store.write(PENDING_KEY, token);
-  deps.store.write(PENDING_AT_KEY, String(nowOf(deps)));
-
+async function postSession(
+  token: string,
+  body: Record<string, unknown>,
+  deps: SigninDeps,
+  refuse: Refuse,
+  notCompleted: string,
+): Promise<RedeemResult> {
   let res: Response | null = null;
   try {
     // Pre-auth: no Authorization header, even when this browser holds a token.
     res = await deps.fetch(SESSION_PATH, {
       method: "POST",
       headers: { Accept: "application/json", "Content-Type": "application/json" },
-      body: JSON.stringify({ code, token_sha256: tokenSha, label: browserLabel(deps.userAgent) }),
+      body: JSON.stringify(body),
       cache: "no-store",
       credentials: "same-origin",
     });
@@ -324,11 +376,12 @@ export async function redeem(rawCode: string, deps: SigninDeps): Promise<RedeemR
     res = null;
   }
 
+  const ifRefused = { reason: "not_completed" as RefusalReason, message: notCompleted };
   if (res) {
-    const body = await readJson(res);
-    const errCode = typeof (body as { error?: unknown } | null)?.error === "string" ? (body as { error: string }).error : "";
+    const answer = await readJson(res);
+    const errCode = errorOf(answer);
     if (res.ok) {
-      const principal = (body as { principal?: unknown } | null)?.principal;
+      const principal = (answer as { principal?: unknown } | null)?.principal;
       if (typeof principal === "string" && principal) {
         promote(deps.store, token);
         return { kind: "signed_in", principal };
@@ -336,12 +389,118 @@ export async function redeem(rawCode: string, deps: SigninDeps): Promise<RedeemR
       // A 200 without the session's body is an answer we cannot read: test it.
     } else if (res.status >= 400 && res.status < 500) {
       dropPending(deps.store);
-      return { kind: "refused", ...refusal(res.status, errCode) };
+      return { kind: "refused", ...refuse(res.status, errCode, answer) };
     } else if (errCode === "signin_unavailable") {
       return settleToken(token, deps, { reason: "unavailable", message: MESSAGES.unavailable });
     }
   }
-  return settleToken(token, deps);
+  return settleToken(token, deps, ifRefused);
+}
+
+/** Redeem a typed or linked code (see postSession for the outcomes). */
+export async function redeem(rawCode: string, deps: SigninDeps): Promise<RedeemResult> {
+  const code = normalizeCode(rawCode);
+  if (!code) return { kind: "refused", reason: "bad_code", message: MESSAGES.badCode };
+  if (!canMint(deps.crypto)) return { kind: "unsupported", message: MESSAGES.unsupported };
+
+  const token = mintToken(deps.crypto);
+  const tokenSha = await sha256Hex(deps.crypto, token);
+  keepPending(deps.store, token, deps);
+  return postSession(
+    token,
+    { code, token_sha256: tokenSha, label: browserLabel(deps.userAgent) },
+    deps,
+    (status, errCode) => refusal(status, errCode),
+    MESSAGES.notCompleted,
+  );
+}
+
+// ---- the passkey -------------------------------------------------------------
+
+/** The passkey's step: sign the daemon's request options (webauthn.ts getAssertion). */
+export type SignAssertion = (publicKey: unknown) => Promise<AssertionJSON>;
+
+interface PasskeyChallenge {
+  payload: string;
+  mac: string;
+  publicKey: Record<string, unknown>;
+}
+
+function passkeyRefusal(status: number, code: string, body: unknown, step: "challenge" | "session") {
+  if (code === "passkey_signin_unavailable" || (status === 409 && step === "session")) {
+    return { reason: "passkey_unavailable" as const, message: hintOf(body) || MESSAGES.passkeyUnavailable };
+  }
+  if (status === 403 && code === "forbidden_origin") {
+    return { reason: "forbidden_origin" as const, message: MESSAGES.passkeyForbiddenOrigin };
+  }
+  if (status === 429) return { reason: "rate_limited" as const, message: MESSAGES.rateLimited };
+  if (step === "session" && (status === 400 || code === "signin_refused")) {
+    return { reason: "refused" as const, message: MESSAGES.passkeyRefused };
+  }
+  if (step === "challenge" && code === "signin_unavailable") {
+    return { reason: "unavailable" as const, message: MESSAGES.unavailable };
+  }
+  return {
+    reason: "http" as const,
+    message: `The daemon refused the passkey sign-in (HTTP ${status}${code ? `, ${code}` : ""}). Reload the Console and try again.`,
+  };
+}
+
+/**
+ * Sign in with a passkey (spec section 5). The token is minted first and
+ * only its SHA-256 goes into the challenge, so the signature names exactly
+ * the token the session will accept. Nothing is stored until the passkey has
+ * signed: a refused challenge or a closed prompt leaves this browser as it
+ * was. From just before the signed POST the token is the pending one, and
+ * the answer is read exactly as a code's (postSession).
+ */
+export async function redeemPasskey(deps: SigninDeps & { sign: SignAssertion }): Promise<RedeemResult> {
+  if (!canMint(deps.crypto)) return { kind: "unsupported", message: MESSAGES.unsupported };
+  const token = mintToken(deps.crypto);
+  const tokenSha = await sha256Hex(deps.crypto, token);
+
+  // Step 1: the challenge. No session can exist yet, so every failure here
+  // is definite, a lost answer included.
+  let res: Response;
+  try {
+    res = await deps.fetch(PASSKEY_CHALLENGE_PATH, {
+      method: "POST",
+      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      body: JSON.stringify({ token_sha256: tokenSha, label: browserLabel(deps.userAgent) }),
+      cache: "no-store",
+      credentials: "same-origin",
+    });
+  } catch {
+    return { kind: "refused", reason: "no_answer", message: MESSAGES.passkeyNoAnswer };
+  }
+  const answer = await readJson(res);
+  if (!res.ok) return { kind: "refused", ...passkeyRefusal(res.status, errorOf(answer), answer, "challenge") };
+  const ch = answer as Partial<PasskeyChallenge> | null;
+  if (!ch || typeof ch.payload !== "string" || typeof ch.mac !== "string" || !ch.publicKey || typeof ch.publicKey !== "object") {
+    const code = errorOf(answer);
+    return { kind: "refused", ...passkeyRefusal(res.status, code || "invalid_response", answer, "challenge") };
+  }
+
+  // Step 2: the passkey signs. A closed prompt is the person's choice, said quietly.
+  let assertion: AssertionJSON;
+  try {
+    assertion = await deps.sign(ch.publicKey);
+  } catch (e) {
+    if (e instanceof CeremonyError && e.code === "cancelled") return { kind: "cancelled", message: MESSAGES.cancelled };
+    const message =
+      e instanceof CeremonyError ? e.message : "The passkey prompt failed before anything was sent. Try again.";
+    return { kind: "refused", reason: "ceremony", message };
+  }
+
+  // Step 3: the signed session request, for the token now kept as pending.
+  keepPending(deps.store, token, deps);
+  return postSession(
+    token,
+    { payload: ch.payload, mac: ch.mac, assertion },
+    deps,
+    (status, errCode, body) => passkeyRefusal(status, errCode, body, "session"),
+    MESSAGES.passkeyNotCompleted,
+  );
 }
 
 async function settleToken(
@@ -404,6 +563,43 @@ export const LINK_QUESTION =
 /** The question asked before a link replaces a working sign-in. */
 export function replaceQuestion(principal: string | null): string {
   return `This browser is already signed in as ${principal ?? "another account"}. Replace that sign-in?`;
+}
+
+// ---- "Use this passkey to sign in" (Settings, Your passkeys) ------------------
+
+/** What the bind action is for, under its button. */
+export const BIND_EXPLAINER =
+  "Lets the passkey you choose sign this Console in, as the account this Console is signed in as now. " +
+  `Use it once, after signing in with \`${SIGNIN_COMMAND}\` on the daemon's host.`;
+
+export interface BindResult {
+  credential_id: string;
+  signs_in_as: string;
+}
+
+export function bindSuccess(r: BindResult): string {
+  return `This passkey now signs the Console in as ${r.signs_in_as}.`;
+}
+
+const BIND_FAILURE = "The passkey was not set to sign in";
+
+/**
+ * Why binding failed, as a toast line. The maintainer routes' codes keep
+ * their maintainer.ts wording, except two that mean something specific here.
+ */
+export function bindFailureLine(e: unknown): string {
+  if (e instanceof ApiError) {
+    if (e.code === "principal_not_allowed") {
+      return (
+        `${BIND_FAILURE}. Only the bank owner's sign-in can do this: sign in with \`${SIGNIN_COMMAND}\` ` +
+        "on the daemon's host, then try again."
+      );
+    }
+    if (e.code === "unauthorized" || e.status === 401) {
+      return `${BIND_FAILURE}: this Console's sign-in was not accepted. Sign in again, then try again.`;
+    }
+  }
+  return failureLine(BIND_FAILURE, e);
 }
 
 // ---- Settings' list ---------------------------------------------------------
