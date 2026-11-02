@@ -19,6 +19,10 @@ use std::{
 fn health() -> Value {
     json!({"status":"ok","auth":false,"version":"99.0.0","updates":{"unattended_clients":true}})
 }
+// Installed fixtures verify the full native binary several times. Unoptimized
+// Linux debug binaries include hundreds of megabytes of symbols; their hash
+// cost is unrelated to the ordering assertions around the first frame.
+const NATIVE_UPDATE_BUDGET: Duration = Duration::from_secs(60);
 fn updates(home: &DisposableHome) -> ClientUpdates {
     ClientUpdates::new(
         home.path("state"),
@@ -355,11 +359,13 @@ fn built_binary_launches_updater_only_after_first_flushed_frame() {
             .unwrap()
             .contains("99.0.0")
     );
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + NATIVE_UPDATE_BUDGET;
     while !attempt.exists() {
         assert!(
             Instant::now() < deadline,
-            "first flushed frame did not invoke the updater callback"
+            "first flushed frame did not invoke the updater callback; log: {}",
+            fs::read_to_string(shim.state_dir().join(".pseudolife-mcp/update-clients.log"))
+                .unwrap_or_default()
         );
         std::thread::sleep(Duration::from_millis(5));
     }
@@ -371,7 +377,7 @@ fn built_binary_launches_updater_only_after_first_flushed_frame() {
     let result = shim
         .state_dir()
         .join(".pseudolife-mcp/update-clients.99.0.0.result");
-    let deadline = Instant::now() + Duration::from_secs(22);
+    let deadline = Instant::now() + NATIVE_UPDATE_BUDGET;
     loop {
         if fs::read_to_string(&result).is_ok_and(|text| text.trim() == "2") {
             break;
@@ -492,14 +498,17 @@ fn runtime_update_fixture_at(profile: Option<&str>) -> (DisposableHome, Output, 
     let result = profile
         .map_or_else(|| home.0.clone(), |p| home.path(p))
         .join(".pseudolife-mcp/update-clients.99.0.0.result");
-    let until = Instant::now() + Duration::from_secs(22);
+    let until = Instant::now() + NATIVE_UPDATE_BUDGET;
     loop {
         if fs::read_to_string(&result).is_ok_and(|text| text.trim() == "2") {
             break;
         }
         assert!(
             Instant::now() < until,
-            "native updater did not persist its result"
+            "native updater did not persist its result; child stderr: {}; updater log: {}; result: {:?}",
+            String::from_utf8_lossy(&out.stderr),
+            fs::read_to_string(result.with_file_name("update-clients.log")).unwrap_or_default(),
+            fs::read_to_string(&result)
         );
         std::thread::sleep(Duration::from_millis(10));
     }

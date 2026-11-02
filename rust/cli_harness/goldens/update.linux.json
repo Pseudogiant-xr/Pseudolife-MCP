@@ -1,0 +1,85 @@
+{
+ "row": "CLI-UPDATE",
+ "platform": "linux",
+ "oracle_commit": "2391fa52048ec7622297031291cf309a499bd104",
+ "oracle_commit_source": "declared",
+ "cases": {
+  "update-halves-exclude": {
+   "home": null,
+   "utc_offset": 0,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "LS1jbGllbnRzLW9ubHkgYW5kIC0tZGFlbW9uLW9ubHkgZXhjbHVkZSBlYWNoIG90aGVyCg==",
+   "window": [
+    1793590957.213092,
+    1793590957.4454896
+   ],
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o775"
+   }
+  },
+  "update-check-current": {
+   "home": null,
+   "utc_offset": 0,
+   "exit": 3,
+   "stdout": "PT0+IGN1cnJlbnQ6IDAuMjEuMCBpcyB0aGUgbmV3ZXN0IHJlbGVhc2UK",
+   "stderr": "",
+   "window": [
+    1793590957.687017,
+    1793590957.992344
+   ],
+   "requests": [
+    {
+     "method": "GET",
+     "target": "/health",
+     "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    }
+   ],
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o775"
+   }
+  },
+  "update-check-newer": {
+   "home": null,
+   "utc_offset": 0,
+   "exit": 0,
+   "stdout": "PT0+IHVwZGF0ZSBhdmFpbGFibGU6IDAuMjEuMCAtPiAwLjIxLjEgKHJ1bjogcHNldWRvbGlmZS1tY3AgdXBkYXRlKQo=",
+   "stderr": "",
+   "window": [
+    1793590958.0343742,
+    1793590958.3413103
+   ],
+   "requests": [
+    {
+     "method": "GET",
+     "target": "/health",
+     "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    }
+   ],
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o775"
+   }
+  }
+ }
+}
