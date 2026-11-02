@@ -797,6 +797,38 @@ def test_concurrent_misses_for_one_agent_start_one_lookup(monkeypatch):
     assert sorted(calls) == ["a" * 32, "b" * 32]
 
 
+def test_descheduled_conductor_waiter_rechecks_expiry_at_delivery(monkeypatch):
+    import asyncio
+    import concurrent.futures
+    from types import SimpleNamespace
+    from pseudolife_memory import coordination
+
+    service, calls = _delegate_service(monkeypatch, {
+        "a" * 32: {"projects": ["p"], "remaining": 2.0},
+    })
+    now = [1000.0]
+    # Replace this module's clock, leaving asyncio's monotonic clock alone.
+    monkeypatch.setattr(coordination, "time", SimpleNamespace(monotonic=lambda: now[0]))
+
+    class DelayedDelivery(concurrent.futures.Future):
+        def result(self, *args, **kwargs):
+            answer = super().result(*args, **kwargs)
+            now[0] += 3.0  # the waiter resumes after the published proof expires
+            return answer
+
+    def lookup(service, key):
+        future = DelayedDelivery()
+        future.set_result(coordination._conductor_fetch(service, key, lambda: now[0]))
+        return future
+
+    monkeypatch.setattr(coordination, "_conductor_lookup", lookup)
+    reminder = asyncio.run(coordination.conductor_reminder(
+        service, {"authorization": "Bearer fixture-secret"}, agent="a" * 32,
+        token_map={}, token="fixture-secret"))
+    assert reminder == ""
+    assert calls == [("a" * 32, "default")]
+
+
 def test_a_cached_yes_counts_the_lease_from_before_a_slow_query(monkeypatch):
     """The lease's remaining time is read inside the query, so the cache
     counts it from the query's start: a query that stalls past the lease's

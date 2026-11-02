@@ -480,8 +480,8 @@ def _conductor_cached(service, key, now):
         return list(hit[1]) if hit is not None and hit[0] > now else None
 
 
-def _conductor_fetch(service, key, clock) -> list[str]:
-    """Ask the store, cache the answer and return it; [] on any failure,
+def _conductor_fetch(service, key, clock) -> tuple[float, tuple[str, ...]] | None:
+    """Ask the store, cache the timed answer and return it; None on failure,
     which is not cached. A yes is kept for ``CONDUCTOR_CACHE_SECONDS`` but
     never past the earliest proven lease's expiry."""
     principal, agent = key
@@ -498,12 +498,12 @@ def _conductor_fetch(service, key, clock) -> list[str]:
         remaining = answer.get("remaining")
     except Exception:  # noqa: BLE001 - the brief never surfaces an error to the hook
         logger.debug("conductor lookup failed", exc_info=True)
-        return []
+        return None
     ttl = float(CONDUCTOR_CACHE_SECONDS)
     if projects and remaining is not None:
         ttl = max(0.0, min(ttl, float(remaining)))
         if clock() >= now + ttl:   # the lease ended while the query ran
-            return []
+            return None
     with _CONDUCTOR_CACHE_LOCK:
         cache = getattr(service, "_conductor_cache", None)
         if cache is None:
@@ -513,8 +513,9 @@ def _conductor_fetch(service, key, clock) -> list[str]:
                 del cache[stale]
             while len(cache) >= _CONDUCTOR_CACHE_MAX:
                 del cache[next(iter(cache))]
-        cache[key] = (now + ttl, tuple(projects))
-    return projects
+        answer = (now + ttl, tuple(projects))
+        cache[key] = answer
+    return answer
 
 
 def conductor_projects(service, headers: Mapping[str, str], *, agent,
@@ -538,7 +539,10 @@ def conductor_projects(service, headers: Mapping[str, str], *, agent,
     if key is None:
         return []
     hit = _conductor_cached(service, key, clock())
-    return hit if hit is not None else _conductor_fetch(service, key, clock)
+    if hit is not None:
+        return hit
+    answer = _conductor_fetch(service, key, clock)
+    return list(answer[1]) if answer is not None and answer[0] > clock() else []
 
 
 def _conductor_lookup(service, key) -> concurrent.futures.Future:
@@ -554,19 +558,19 @@ def _conductor_lookup(service, key) -> concurrent.futures.Future:
             return future
         future = concurrent.futures.Future()
         if len(inflight) >= _CONDUCTOR_INFLIGHT_MAX:
-            future.set_result([])
+            future.set_result(None)
             return future
         inflight[key] = future
 
     def run():
         try:
-            projects = _conductor_fetch(service, key, time.monotonic)
+            answer = _conductor_fetch(service, key, time.monotonic)
         except BaseException:  # noqa: BLE001 - _conductor_fetch already fails closed
-            projects = []
+            answer = None
         with _CONDUCTOR_CACHE_LOCK:
             if inflight.get(key) is future:
                 del inflight[key]
-        future.set_result(projects)
+        future.set_result(answer)
 
     try:
         threading.Thread(target=run, name="pl-conductor-lookup", daemon=True).start()
@@ -574,7 +578,7 @@ def _conductor_lookup(service, key) -> concurrent.futures.Future:
         with _CONDUCTOR_CACHE_LOCK:
             if inflight.get(key) is future:
                 del inflight[key]
-        future.set_result([])
+        future.set_result(None)
     return future
 
 
@@ -609,7 +613,10 @@ async def conductor_projects_soon(service, headers: Mapping[str, str], *, agent,
         await asyncio.wait_for(waiter, CONDUCTOR_LOOKUP_BUDGET)
     except asyncio.TimeoutError:
         return []
-    return list(future.result())
+    answer = future.result()
+    # Each waiter can resume after the lease expired, even when the lookup
+    # published in time. Carry the proof's deadline through the shared result.
+    return list(answer[1]) if answer is not None and answer[0] > time.monotonic() else []
 
 
 def render_conductor_brief(projects) -> str:

@@ -6029,6 +6029,8 @@ HOME_OPS = ("snapshot_file", "block_snapshots")
 import w2e_hooks  # noqa: E402
 
 SCENARIOS.update(w2e_hooks.register(sys.modules[__name__]))
+import w2e_conductor  # noqa: E402
+SCENARIOS.update(w2e_conductor.register(sys.modules[__name__]))
 MUTANTS += w2e_hooks.MUTANTS
 HOME_OPS += w2e_hooks.HOME_OPS
 

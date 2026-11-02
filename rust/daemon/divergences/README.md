@@ -29,8 +29,8 @@ closed no-spawn planning difference; the counts below include these two rows.
 |---|---:|
 | presentation | 17 |
 | behaviour with no caller | 68 |
-| behaviour with a caller | 131 |
-| closed | 46 |
+| behaviour with a caller | 130 |
+| closed | 47 |
 | **Total** | **262** |
 
 ## Behaviour with a caller: B14b routing
@@ -100,7 +100,6 @@ whose remaining item is a proof keeps that boundary visible in its entry.
 | [Entry insert fails after eviction](write-path-w2-e/entry-insert-fails-after-eviction.md) | `rust/daemon/src/store.rs::mcp_memory_store` during insert failure after capacity eviction | B4 lifecycle / B14b W2-E failed-store recovery |
 | [The daemon version the session-start notices compare and print](write-path-w2-e/hooks-and-the-cli-s-episode/the-daemon-version-the-session-start.md) | `plugin/hooks/session-start.sh` and `plugin/hooks/lifecycle.ps1` send `plugin_version` to `/api/hook/session-start` | R3 release-version contract / B11 installed handshake |
 | [The hooks notice on session-start when `PSEUDOLIFE_PLUGIN_DIR` is unset](write-path-w2-e/hooks-and-the-cli-s-episode/the-hooks-notice-on-session-start-when.md) | `plugin/hooks/session-start.sh` and `plugin/hooks/lifecycle.ps1` on a checkout daemon without `PSEUDOLIFE_PLUGIN_DIR` | R4 installed hooks/runtime handshake / R3 image environment |
-| [The maintainer's conductor's reminder line on `memory-changes` (`?agent=`), after the cursor and any note](write-path-w2-e/hooks-and-the-cli-s-episode/the-maintainer-s-conductor-s-reminder.md) | `plugin/hooks/session-start.sh` memory-changes request and `plugin/hooks/lifecycle.ps1` send the board agent id | B5 coordination hook-reminder closure |
 | [The cosine `_cosine` (`consolidation.py:81-92`)](write-path-w2-e/memory-consolidation-candidates/the-cosine-cosine-consolidation-py-81-92.md) | `rust/daemon/src/consolidation_tools.rs::mcp_memory_consolidation_candidates` | B14b W2-E consolidation numeric-boundary closure |
 | [The episode anchor's walk order](write-path-w2-e/memory-consolidation-candidates/the-episode-anchor-s-walk-order.md) | `rust/daemon/src/consolidation_tools.rs::mcp_memory_consolidation_candidates` with an episode anchor after multi-band stores | B14b W2-E multi-band promotion and consolidation closure |
 | [`memory.cortex.auto_promote: true`](write-path-w2-e/memory-cortex-auto-promote-true.md) | `rust/daemon/src/store.rs::mcp_memory_store` after enabling the Console auto-promote knob | B14b W2-E cortex auto-promotion closure |
