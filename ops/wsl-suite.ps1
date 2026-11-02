@@ -86,6 +86,44 @@ if ($hasLogin) {
     $copy['PSEUDOLIFE_TEST_PG_LOGIN_FILE'] = (Resolve-Path -LiteralPath $login).Path
     $paths += @('PSEUDOLIFE_TEST_PG_LOGIN_FILE/p')
 }
+# An enclosing `pseudolife-mcp lease run NAME -- pwsh ops/wsl-suite.ps1`
+# holds NAME's board lease until this run ends, so the run's suite lock must
+# not wait for it there (it would wait forever). WSL cannot see a Windows
+# lock or process, so a lease name goes over (PSEUDOLIFE_LEASES_HELD, through
+# WSLENV) only while its lock file here is held, and the WSL side trusts
+# exactly that (BoardMirror._enclosed in pseudolife_memory/lease_cli.py).
+function Get-LeaseLockName([string]$name) {
+    # pseudolife_memory/os_lock.py lock_file_name
+    $safe = $name -replace '[^A-Za-z0-9._-]', '_'
+    if ($safe -cne $name) {
+        $digest = [Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($name))
+        $safe += '-' + (-join ($digest[0..3] | ForEach-Object { $_.ToString('x2') }))
+    }
+    "lease-$safe.lock"
+}
+function Test-LeaseLockHeld([string]$path) {
+    # os_lock.probe: the holder locks the first byte (msvcrt.locking).
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $false }
+    try {
+        $file = [IO.File]::Open($path, 'Open', 'ReadWrite', 'ReadWrite')
+    } catch { return $false }
+    try { $file.Lock(0, 1); $file.Unlock(0, 1); return $false }
+    catch [IO.IOException] { return $true }
+    finally { $file.Dispose() }
+}
+if ($env:PSEUDOLIFE_LEASES_HELD) {
+    $leaseDir = $env:PSEUDOLIFE_LEASE_LOCK_DIR
+    if (-not $leaseDir) {
+        $leaseDir = Join-Path ([Environment]::GetFolderPath('UserProfile')) '.pseudolife-mcp/locks'
+    }
+    $heldHere = @($env:PSEUDOLIFE_LEASES_HELD -split ',' | Where-Object {
+        $_ -and (Test-LeaseLockHeld (Join-Path $leaseDir (Get-LeaseLockName $_)))
+    })
+    if ($heldHere.Count) {
+        $copy['PSEUDOLIFE_LEASES_HELD'] = $heldHere -join ','
+        $forward += @('PSEUDOLIFE_LEASES_HELD')
+    }
+}
 if ($env:PSEUDOLIFE_WSL_SUITE_SOURCE -ne 'worktree') {
     $dirty = git -C $root status --porcelain --untracked-files=no
     if ($LASTEXITCODE -ne 0) { Fail "$root is not a git checkout" }

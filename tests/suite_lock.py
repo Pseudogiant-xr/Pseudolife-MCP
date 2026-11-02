@@ -184,11 +184,13 @@ EXPECT_SAMPLE = 5
 DEFAULT_EXPECT_SECONDS = 25 * 60
 # What the board mirror reads from the environment conftest imports in:
 # the bearer, its file form, the daemon URL and the project for the notices,
-# and an enclosing `lease run`'s marker and lock directory (a run inside
-# `lease run full-suite` must not wait for its own parent's board lease).
+# and an enclosing `lease run`'s marker, pids and lock directory, with
+# WSLENV (a run inside `lease run full-suite` must not wait for its own
+# parent's board lease).
 BOARD_ENVIRONMENT = ("PSEUDOLIFE_MCP_TOKEN", "PSEUDOLIFE_MCP_TOKEN_FILE",
                      "PSEUDOLIFE_MCP_DAEMON_URL", "PSEUDOLIFE_AGENT_PROJECT",
-                     "PSEUDOLIFE_LEASES_HELD", "PSEUDOLIFE_LEASE_LOCK_DIR")
+                     "PSEUDOLIFE_LEASES_HELD", "PSEUDOLIFE_LEASES_HELD_PIDS",
+                     "PSEUDOLIFE_LEASE_LOCK_DIR", "WSLENV")
 SUITE_LEASE = "full-suite"
 # How long a run that leaves the queue without the lock (refused, stale
 # tree, Ctrl-C) waits for the board to drop its place.
@@ -711,8 +713,9 @@ def _await_board(mirror, mode: str, *, poll: float, notice_every: float,
     board holder of the lease may hold a lock this one cannot see (a Windows
     ``lease run full-suite`` beside a WSL suite, 2026-11-03). ``wait`` names
     the holder about every ``notice_every`` seconds; ``fail`` raises
-    :class:`SuiteLockBusy` once the board has named one, and does not wait
-    for a board that is not answering (the local lock admits the run).
+    :class:`SuiteLockBusy` once the board has named one, and gives a board
+    that is not answering one request's timeout and one retry
+    (``answer_window``) before the local lock admits the run.
     ``check`` runs on every poll, as in the queue, and once more just before
     the run starts, so a tree changed while the board answered is caught
     (review of #1174). A mirror without the gate, or one that fails, admits
@@ -721,6 +724,7 @@ def _await_board(mirror, mode: str, *, poll: float, notice_every: float,
     if admitted is None:
         return
     began = time.monotonic()
+    window = getattr(mirror, "answer_window", lambda: 0.0)()
     waited_from = next_notice = None
     while True:
         if check is not None:
@@ -750,6 +754,8 @@ def _await_board(mirror, mode: str, *, poll: float, notice_every: float,
                 raise SuiteLockBusy(
                     f"full-suite lock: {blocker}; {LOCK_ENV}=fail refuses to queue "
                     f"(unset it to wait, or run a targeted subset)")
+            if now - began < window:
+                continue  # a slow daemon gets its retry before the run starts
             print(f"full-suite lock taken; {situation}; {LOCK_ENV}=fail does not wait "
                   f"for it, so the local lock alone admits this run", file=out, flush=True)
             mirror.proceed()

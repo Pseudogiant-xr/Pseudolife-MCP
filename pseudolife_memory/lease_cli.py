@@ -107,6 +107,9 @@ EXIT_NOT_FOUND = 127
 
 DEFAULT_URL = "http://127.0.0.1:8765"
 HELD_ENV = "PSEUDOLIFE_LEASES_HELD"
+# Which process holds each of those leases ({name: pid}, JSON), so a gated
+# suite mirror can tell its own enclosing `lease run` from a leaked marker.
+HELD_PIDS_ENV = "PSEUDOLIFE_LEASES_HELD_PIDS"
 LABEL = "lease-run"
 HOLD_LABEL = "lease-hold"  # a mirror of a lock this process holds (hold, conftest)
 # A mirror's board label is HOLD_LABEL@<instance id>: the id is minted once
@@ -735,6 +738,30 @@ def _spawn(command: list[str], env: dict[str, str]) -> subprocess.Popen:
     return subprocess.Popen(command, env=env)
 
 
+def _held_pids(environ) -> dict[str, int]:
+    """PSEUDOLIFE_LEASES_HELD_PIDS as {lease name: pid}; anything malformed
+    is left out."""
+    try:
+        value = json.loads(environ.get(HELD_PIDS_ENV) or "{}")
+    except ValueError:
+        return {}
+    if not isinstance(value, dict):
+        return {}
+    return {name: pid for name, pid in value.items()
+            if isinstance(name, str) and type(pid) is int and pid > 0}
+
+
+def _ancestors() -> set[int] | None:
+    """The pids of this process's live ancestors; None when they cannot be
+    read."""
+    try:
+        import psutil
+
+        return {parent.pid for parent in psutil.Process().parents()}
+    except Exception:  # noqa: BLE001 — unknown, not "none"
+        return None
+
+
 def _start(command: list[str], name: str | None) -> subprocess.Popen:
     """Start the command; ``name`` joins PSEUDOLIFE_LEASES_HELD, unless None
     (a gated check, which holds nothing)."""
@@ -742,6 +769,9 @@ def _start(command: list[str], name: str | None) -> subprocess.Popen:
     if name is not None:
         held = env.get(HELD_ENV)
         env[HELD_ENV] = f"{held},{name}" if held else name
+        pids = _held_pids(env)
+        pids[name] = os.getpid()
+        env[HELD_PIDS_ENV] = json.dumps(pids, separators=(",", ":"))
     try:
         return _spawn(command, env)
     except FileNotFoundError:
@@ -1090,6 +1120,11 @@ class BoardMirror:
         with self._state_lock:
             return self._trouble
 
+    def answer_window(self) -> float:
+        """How long fail mode gives the board to answer before starting on the
+        local lock: one request's timeout and one retry."""
+        return REQUEST_TIMEOUT + TRANSIENT_RETRY
+
     def proceed(self) -> None:
         """Stop waiting for the board: the caller starts on the local lock,
         and the board lease follows when the board grants it."""
@@ -1218,16 +1253,33 @@ class BoardMirror:
 
     def _enclosed(self) -> bool:
         """Whether this process runs inside ``lease run`` of this same lease
-        (``lease run full-suite -- python -m pytest tests/``): its name is
-        in PSEUDOLIFE_LEASES_HELD (whole names only) and its lock file is
-        not free (held, or absent: a run on the other side of WSL). The
-        board lease is then that run's, renewed until this process exits,
-        so a gated mirror waiting for it would wait forever (review of
-        #1174). A marker beside a free lock outlived its run."""
+        (``lease run full-suite -- python -m pytest tests/``), whose board
+        lease is renewed until this process exits, so a gated mirror
+        waiting for it would wait forever (review of #1174). The name must be
+        in PSEUDOLIFE_LEASES_HELD (whole names only), and then:
+
+        - with a pid for it in PSEUDOLIFE_LEASES_HELD_PIDS (``lease run``
+          from this package), that pid must be a live ancestor of this
+          process; only when ancestry cannot be read does the lock decide;
+        - without one (the Rust shim's or older ``lease run``), the lease's
+          lock file here must be held, by whichever process;
+        - with neither a pid nor a lock file here, the marker is trusted
+          only when WSLENV names it: ops/wsl-suite.ps1 forwards it into WSL
+          only for leases whose Windows lock it saw held at launch.
+        """
         held = self._environ.get(HELD_ENV, "")
         if f",{self.name}," not in f",{held},":
             return False
-        return self._lease_lock() is not False
+        pid = _held_pids(self._environ).get(self.name)
+        if pid is not None:
+            ancestors = _ancestors()
+            if ancestors is not None:
+                return pid in ancestors
+        lock = self._lease_lock()
+        if lock is not None:
+            return lock
+        forwarded = (self._environ.get("WSLENV") or "").split(":")
+        return pid is None and HELD_ENV in (entry.split("/", 1)[0] for entry in forwarded)
 
     def _connect(self) -> None:
         if self.gate and self._enclosed():
