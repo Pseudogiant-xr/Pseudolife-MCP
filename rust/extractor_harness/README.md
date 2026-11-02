@@ -90,6 +90,10 @@ checks cached responses while a refresh is blocked, then observes failure and
 recovery after releasing each probe. Ordinary calls have a separate startup
 budget from the intentional timeout condition; a blocked provider witnesses
 the latter. Every lifecycle failure identifies its provider and oracle arm.
+The HTTP fixture sends each request's unchanged headers and body together;
+Python's early refusals can otherwise close between separate writes on Windows.
+Transport errors are never retried. The native HTTP unit regression separately
+withholds ignored bodies until the early response, then verifies connection reuse.
 
 ```sh
 cargo test --manifest-path rust/Cargo.toml -p pseudolife-stdio --test extractor_shim

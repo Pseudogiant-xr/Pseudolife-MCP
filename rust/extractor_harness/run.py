@@ -84,8 +84,24 @@ def canned(kind, text):
     return {"stdout": json.dumps({"type": "item.completed", "item": {"type": "agent_message", "text": text}}) + "\n"}
 
 
+class RequestConnection(http.client.HTTPConnection):
+    """Send each fixture request together, before reading its one response."""
+
+    def request(self, *args, **kwargs):
+        self.pending = bytearray()
+        super().request(*args, **kwargs)
+        # http.client otherwise writes headers and body separately. Python's
+        # early refusals can close between those writes on Windows (VM loop,
+        # 2026-11-03). Keep identical framing/body bytes without a late write or
+        # a transport retry. Split-body behavior has its own native regression.
+        super().send(bytes(self.pending))
+
+    def send(self, data):
+        self.pending.extend(data)
+
+
 def call(port, method, path, body=None):
-    con = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+    con = RequestConnection("127.0.0.1", port, timeout=10)
     try:
         if isinstance(body, dict):
             body = json.dumps(body).encode()
@@ -490,6 +506,7 @@ def main():
     args = parser.parse_args()
     if args.suite != "lifecycle":
         subprocess.run([sys.executable, str(Path(__file__).with_name("test_prompt.py"))], check=True)
+        subprocess.run([sys.executable, str(Path(__file__).with_name("test_transport.py"))], check=True)
     if args.suite != "contract":
         subprocess.run([sys.executable, str(Path(__file__).with_name("test_lifecycle.py"))], check=True)
     with tempfile.TemporaryDirectory(prefix="r6-extractor-") as scratch:
