@@ -1501,11 +1501,16 @@ async fn deferred_privileged_bell_drops_on_empty_expired_or_delivered() {
                 .note_call(BANK, "memory_message", &json!({"action":"receive"}), true)
                 .await;
         }
-        rig.bell.observe(BANK, &next).await;
+        if end != "expired" {
+            rig.bell.observe(BANK, &next).await;
+        }
         lock.unlock().unwrap();
         assert_eq!(rig.calls(), 0, "{end}");
         assert!(!rig.pending.path.exists(), "{end}");
         let mut peer = view(&[1, 2, 3], 3, 3, 3.0);
+        if end == "delivered" {
+            peer.delivered = 2;
+        }
         peer.wake.as_mut().unwrap()["reason"] = json!("urgent");
         rig.bell.observe(BANK, &peer).await;
         rig.accepted().await;
