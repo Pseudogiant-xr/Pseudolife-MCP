@@ -49,6 +49,9 @@ _PAIR_BODY_LIMIT = 1024
 # A sign-in body is {"code", "token_sha256", "label" (64 chars)}: under
 # 300 bytes (spec 2026-11-02, section 4).
 _SIGNIN_BODY_LIMIT = 1024
+# A passkey sign-in carries a WebAuthn assertion: an RS256 one alone is over
+# 1 KiB, so its body gets 8 KiB (spec 2026-11-02, section 4).
+_PASSKEY_SIGNIN_BODY_LIMIT = 8192
 # Console sessions (schema v59) resolve on /api/* except these: the board's
 # mailbox routes (a session must never become an agent credential), the
 # sign-in link (a session cannot issue a session: it is resolved there only
@@ -325,6 +328,8 @@ def build_console_app(
     # cannot lock the Console's sign-in out, nor the reverse.
     signin_failures = FailureLimiter()
     signin_gate = RedemptionGate()
+    passkey_failures = FailureLimiter()
+    passkey_gate = RedemptionGate()
     env_issuers = console_sessions.environment_issuers(token_map, token)
     env_names = environment_principals(token_map, token)
 
@@ -583,7 +588,7 @@ def build_console_app(
             await _send_json(send, 400, {"error": "signin_refused"})
 
         try:
-            raw = await _read_body(receive, max_bytes=_SIGNIN_BODY_LIMIT)
+            raw = await _read_body(receive, max_bytes=_PASSKEY_SIGNIN_BODY_LIMIT)
         except ValueError:
             await _send_json(send, 413, {"error": "request_too_large"})
             return
@@ -591,6 +596,15 @@ def build_console_app(
             is_sha256_hex, normalize_pairing_code, secret_sha256)
         try:
             body = json.loads(raw.decode("utf-8"))
+        except Exception:  # noqa: BLE001 - never echoed, never logged
+            body = None
+        if isinstance(body, dict) and set(body) == {"payload", "mac", "assertion"}:
+            await _passkey_signin(send, origin, body, attempt)
+            return
+        if len(raw) > _SIGNIN_BODY_LIMIT:
+            await _send_json(send, 413, {"error": "request_too_large"})
+            return
+        try:
             if not (isinstance(body, dict) and set(body) == {"code", "token_sha256", "label"}):
                 raise ValueError
             code = normalize_pairing_code(body["code"])
@@ -650,6 +664,179 @@ def build_console_app(
         except PrincipalsUnavailable:
             return set()
 
+    def _principal_source(name: str) -> str | None:
+        """Where ``name`` resolves on its own now: the environment, the
+        store, or nowhere (``None``)."""
+        if name in env_names:
+            return SOURCE_ENVIRONMENT
+        store = installed_store()
+        if store is not None:
+            if not store.available():
+                raise PrincipalsUnavailable()
+            if store.resolves(name):
+                return SOURCE_STORE
+        return None
+
+    def _passkey_origin() -> str | None:
+        """The passkey origin in its stored form, when passkeys are set up."""
+        m = service.config.coordination.maintainer
+        if not m.configured:
+            return None
+        normal = console_sessions.normalize_origin(m.origin)
+        return console_sessions.origin_key(normal) if normal else None
+
+    async def _passkey_signin(send, origin: str, body: dict, attempt) -> None:
+        """The passkey half of ``POST /api/console/session`` (spec 2026-11-02,
+        section 5): at the passkey origin only; the maintainer store's
+        ``complete()`` verifies the assertion and the session is created in
+        its transaction. Every bad assertion is the same ``signin_refused``."""
+        from pseudolife_memory import console_passkey
+        from pseudolife_memory.storage.maintainer import MaintainerError
+        sessions = console_sessions.installed_sessions()
+        passkey_origin = _passkey_origin()
+        if (not auth_configured or sessions is None or not getattr(service, "_db_url", None)
+                or passkey_origin is None
+                or console_sessions.origin_key(origin) != passkey_origin):
+            await _send_json(send, 400, {"error": "signin_refused"})
+            return
+        if not signin_gate.try_enter():
+            signin_failures.refund(attempt)
+            await _send_json(send, 429, {"error": "rate_limited"})
+            return
+        try:
+            row = await asyncio.get_running_loop().run_in_executor(
+                signin_gate.executor, functools.partial(
+                    console_passkey.complete_signin, service, body,
+                    principal_source=_principal_source))
+        except PrincipalsUnavailable:
+            signin_failures.refund(attempt)
+            await _send_json(send, 503, {"error": "signin_unavailable"})
+            return
+        except MaintainerError as exc:
+            if exc.code == "passkey_signin_unavailable":
+                signin_failures.refund(attempt)
+                await _send_json(send, 409, {"error": exc.code,
+                                             "hint": console_passkey.UNAVAILABLE_HINT})
+            elif exc.code in ("coordination_unavailable", "principals_unavailable"):
+                signin_failures.refund(attempt)
+                await _send_json(send, 503, {"error": "signin_unavailable"})
+            else:
+                await _send_json(send, 400, {"error": "signin_refused"})
+            return
+        except Exception as exc:  # noqa: BLE001 - the outcome is unknown; the type only
+            logger.error("console passkey sign-in failed (%s)", type(exc).__name__)
+            await _send_json(send, 503, {"error": "signin_unavailable"})
+            return
+        finally:
+            signin_gate.leave()
+        signin_failures.refund(attempt)
+        sessions.add(row)
+        await _send_json(send, 200, {"principal": row.principal, "session_id": row.session_id,
+                                     "expires_at": row.expires_at})
+
+    async def _passkey_challenge(scope, receive, send, method: str) -> None:
+        """``POST /api/console/passkey-challenge`` (pre-auth, spec 2026-11-02
+        section 5): a ``sign-in`` challenge for the browser's token hash,
+        at the passkey origin only, read on its own connection; never
+        creates the challenge secret. Its own failure budget and slots."""
+        if method != "POST":
+            await _send_json(send, 405, {"error": "method_not_allowed"})
+            return
+        origin = console_sessions.normalize_origin(_hdr(scope, b"origin"))
+        if origin is None:
+            await _send_json(send, 403, {"error": "forbidden_origin"})
+            return
+        ctype = (_hdr(scope, b"content-type") or "").split(";")[0].strip().lower()
+        if ctype != "application/json":
+            await _send_json(send, 415, {"error": "content_type_must_be_application_json"})
+            return
+        attempt = passkey_failures.reserve()
+        if attempt is None:
+            await _send_json(send, 429, {"error": "rate_limited"})
+            return
+        try:
+            raw = await _read_body(receive, max_bytes=_SIGNIN_BODY_LIMIT)
+        except ValueError:
+            await _send_json(send, 413, {"error": "request_too_large"})
+            return
+        from pseudolife_memory.principals import is_sha256_hex
+        try:
+            body = json.loads(raw.decode("utf-8"))
+            if not (isinstance(body, dict) and set(body) == {"token_sha256", "label"}):
+                raise ValueError
+            token_hash = body["token_sha256"]
+            label = console_sessions.clean_label(body["label"])
+            if not is_sha256_hex(token_hash) or label is None:
+                raise ValueError
+        except Exception:  # noqa: BLE001 - never echoed, never logged
+            await _send_json(send, 400, {"error": "invalid_request"})
+            return
+        from pseudolife_memory import console_passkey
+        passkey_origin = _passkey_origin()
+        dsn = getattr(service, "_db_url", None)
+        if (not auth_configured or passkey_origin is None or not dsn
+                or console_sessions.installed_sessions() is None):
+            passkey_failures.refund(attempt)
+            await _send_json(send, 409, {"error": "passkey_signin_unavailable",
+                                         "hint": console_passkey.NO_KEYS_HINT})
+            return
+        if console_sessions.origin_key(origin) != passkey_origin:
+            await _send_json(send, 403, {"error": "forbidden_origin"})
+            return
+        if not passkey_gate.try_enter():
+            passkey_failures.refund(attempt)
+            await _send_json(send, 429, {"error": "rate_limited"})
+            return
+        try:
+            issued = await asyncio.get_running_loop().run_in_executor(
+                passkey_gate.executor, functools.partial(
+                    console_passkey.issue_signin_challenge, dsn, token_hash=token_hash,
+                    label=label, rp_id=service.config.coordination.maintainer.rp_id))
+        except Exception as exc:  # noqa: BLE001 - the type only
+            logger.error("console passkey challenge failed (%s)", type(exc).__name__)
+            await _send_json(send, 503, {"error": "signin_unavailable"})
+            return
+        finally:
+            passkey_gate.leave()
+        passkey_failures.refund(attempt)
+        if issued is None:
+            await _send_json(send, 409, {"error": "passkey_signin_unavailable",
+                                         "hint": console_passkey.NO_KEYS_HINT})
+            return
+        await _send_json(send, 200, issued)
+
+    async def _passkey_bind(scope, send, body: dict, principal: str) -> None:
+        """``POST /api/console/passkey-bind``: "Use this passkey to sign in"
+        (purpose ``bind-sign-in``), through the maintainer routes' gate and
+        lock, for an owner principal only. On success the key's passkey
+        sessions under any other principal are signed out at once."""
+        from pseudolife_memory import console_passkey
+        from pseudolife_memory.principals import MAINTAINER_PRINCIPAL, owner_principals
+        from pseudolife_memory.writer_context import bind_request_headers, unbind_request_headers
+        cfg = service.config.coordination
+
+        def is_owner(name):
+            return name != MAINTAINER_PRINCIPAL and name in owner_principals(
+                cfg, token_map=token_map, single_token=token)
+
+        def run():
+            headers = {k.decode().lower(): v.decode("latin-1")
+                       for k, v in scope.get("headers", [])}
+            binding = bind_request_headers(headers, principal=principal)
+            try:
+                return console_passkey.bind(service, body, principal, is_owner=is_owner)
+            finally:
+                unbind_request_headers(binding)
+        try:
+            result = await asyncio.get_running_loop().run_in_executor(None, run)
+        except Exception as exc:  # noqa: BLE001 - mapped to a public code, never echoed
+            await _send_json(send, *_maintainer_error(exc))
+            return
+        sessions = console_sessions.installed_sessions()
+        if sessions is not None and "signs_in_as" in result:
+            sessions.drop_issuer(result["credential_id"], keep_principal=result["signs_in_as"])
+        await _send_json(send, 200, result)
+
     async def _console_route(scope, send, method: str, path: str, body: dict,
                              principal: str, source: str | None,
                              issued_by: str | None) -> None:
@@ -664,7 +851,8 @@ def build_console_app(
         sessions = console_sessions.installed_sessions()
         operator = _operator(source, issued_by)
         routes_here = {"/api/console/link": "POST", "/api/console/sessions": "GET",
-                       "/api/console/sessions/revoke": "POST"}
+                       "/api/console/sessions/revoke": "POST",
+                       "/api/console/passkey-bind": "POST"}
         if path not in routes_here:
             await _send_json(send, 404, {"error": "not_found", "path": path})
             return
@@ -709,6 +897,9 @@ def build_console_app(
             return
         if unavailable:
             await _send_json(send, 409, {"error": "signin_unavailable", "hint": unavailable})
+            return
+        if path == "/api/console/passkey-bind":
+            await _passkey_bind(scope, send, body, principal)
             return
         if path == "/api/console/sessions/revoke":
             session_id = body.get("session_id")
@@ -1120,6 +1311,9 @@ def build_console_app(
         # before the bearer gate and checks the Origin against the code's.
         if path == "/api/console/session":
             await _signin(scope, receive, send, method)
+            return
+        if path == "/api/console/passkey-challenge":
+            await _passkey_challenge(scope, receive, send, method)
             return
 
         # 5) console REST API (token-gated like /mcp)

@@ -272,12 +272,17 @@ def _build_health_payload(svc, token_present: bool) -> dict:
     # Which Console sign-ins this daemon offers (spec 2026-11-02): the
     # Console reads this, never a 401 or 404, to decide whether to offer
     # them. A link needs a configured token and the bank's session table
-    # (Postgres); the passkey sign-in is not built yet.
+    # (Postgres); the passkey sign-in also needs passkeys set up.
     from pseudolife_memory.console_sessions import installed_sessions
+    signin = bool(token_present and getattr(svc, "_db_url", None)
+                  and installed_sessions() is not None)
+    coordination_cfg = getattr(getattr(svc, "config", None), "coordination", None)
+    maintainer = getattr(coordination_cfg, "maintainer", None)
     payload["console_signin"] = {
-        "link": bool(token_present and getattr(svc, "_db_url", None)
-                     and installed_sessions() is not None),
-        "passkey": False}
+        "link": signin,
+        # At the passkey origin only; the Console offers it there.
+        "passkey": bool(signin and coordination_cfg is not None and coordination_cfg.enabled
+                        and maintainer is not None and maintainer.configured)}
     build = _build_stamp()
     if build is not None:
         payload["build"] = build

@@ -1,0 +1,3 @@
+| Method | Path | Phase | Status | Rust | Evidence |
+|---|---|---:|---|---|---|
+| POST | /api/console/passkey-challenge | 3/4 | deferred | 401 | Pre-auth, browser-called, beside `/api/pair` (`web/api.py` `_passkey_challenge`): the passkey origin only, JSON, 1 KiB `{token_sha256, label}`, its own failure budget and two slots; a `sign-in` challenge and WebAuthn request options, or 409 `passkey_signin_unavailable` when no key can sign; reads on its own connection and never creates the challenge secret. Rust has no pre-auth dispatch for it, so the bearer gate answers 401 (divergence CONSOLE-SIGNIN). `tests/test_console_passkey.py`, `tests/test_console_passkey_pg.py` |
