@@ -17,6 +17,7 @@ use std::{
     sync::{Arc, Mutex},
     time::Instant,
 };
+use tokio_util::sync::CancellationToken;
 
 struct Health {
     body: Value,
@@ -31,6 +32,10 @@ struct Shim {
     override_misses: Mutex<std::collections::HashSet<String>>,
     unlisted_models: Mutex<std::collections::HashSet<String>>,
 }
+
+// Ignored bodies are not needed by the endpoint. Give a split write time to
+// finish, but cap total drain time even when a sender keeps supplying bytes.
+const IGNORED_BODY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 impl Shim {
     async fn chat(
@@ -246,6 +251,7 @@ impl Shim {
     async fn request(
         self: Arc<Self>,
         req: Request<Incoming>,
+        connection_closed: CancellationToken,
     ) -> Result<Response<Full<Bytes>>, Infallible> {
         let (parts, body) = req.into_parts();
         let req = Request::from_parts(parts, ());
@@ -261,10 +267,20 @@ impl Shim {
             // for ignored bodies rather than waiting for the sender to finish.
             let mut ignored = completion_body.take().expect("request body");
             tokio::spawn(async move {
-                while let Some(frame) = ignored.frame().await {
-                    if frame.is_err() {
-                        break;
+                let drain = async {
+                    while let Some(frame) = ignored.frame().await {
+                        if frame.is_err() {
+                            break;
+                        }
                     }
+                };
+                tokio::select! {
+                    _ = connection_closed.cancelled() => {},
+                    result = tokio::time::timeout(IGNORED_BODY_TIMEOUT, drain) => {
+                        if result.is_err() {
+                            connection_closed.cancel();
+                        }
+                    },
                 }
             });
         }
@@ -548,18 +564,33 @@ async fn serve(config: Config) -> Result<(), Box<dyn std::error::Error>> {
         .await;
         let shim = shim.clone();
         tokio::spawn(async move {
-            let service = service_fn(move |req| {
-                let shim = shim.clone();
-                async move {
-                    // A disconnected HTTP caller does not cancel the queued
-                    // CLI call; Python's request thread has the same lifetime.
-                    tokio::spawn(shim.request(req)).await.expect("request task")
-                }
-            });
-            let _ = http1::Builder::new()
-                .serve_connection(TokioIo::new(stream), service)
-                .await;
+            let _ = serve_connection(shim, stream).await;
         });
+    }
+}
+
+async fn serve_connection(
+    shim: Arc<Shim>,
+    stream: impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+) -> Result<(), hyper::Error> {
+    let closed = CancellationToken::new();
+    // Stop pending drains on every connection exit, including task cancellation.
+    let _guard = closed.clone().drop_guard();
+    let request_closed = closed.clone();
+    let service = service_fn(move |req| {
+        let shim = shim.clone();
+        let closed = request_closed.clone();
+        async move {
+            // A disconnected HTTP caller does not cancel the queued CLI call;
+            // Python's request thread has the same lifetime.
+            tokio::spawn(shim.request(req, closed))
+                .await
+                .expect("request task")
+        }
+    });
+    tokio::select! {
+        _ = closed.cancelled() => Ok(()),
+        result = http1::Builder::new().serve_connection(TokioIo::new(stream), service) => result,
     }
 }
 
@@ -588,42 +619,41 @@ where
 
 #[cfg(test)]
 mod tests {
-    #[tokio::test]
-    async fn ignored_request_body_keeps_early_response_and_connection() {
-        use super::*;
-        use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+    use super::*;
+    use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 
-        async fn response(
-            reader: &mut BufReader<tokio::io::ReadHalf<tokio::io::DuplexStream>>,
-            status: u16,
-        ) -> Vec<u8> {
-            let mut headers = String::new();
-            loop {
-                let mut line = String::new();
-                assert_ne!(
-                    reader.read_line(&mut line).await.unwrap(),
-                    0,
-                    "response closed early"
-                );
-                if line == "\r\n" {
-                    break;
-                }
-                headers.push_str(&line);
+    async fn response(
+        reader: &mut BufReader<tokio::io::ReadHalf<tokio::io::DuplexStream>>,
+        status: u16,
+    ) -> Vec<u8> {
+        let mut headers = String::new();
+        loop {
+            let mut line = String::new();
+            assert_ne!(
+                reader.read_line(&mut line).await.unwrap(),
+                0,
+                "response closed early"
+            );
+            if line == "\r\n" {
+                break;
             }
-            assert!(headers.starts_with(&format!("HTTP/1.1 {status} ")));
-            let length: usize = headers
-                .lines()
-                .find_map(|line| {
-                    let (key, value) = line.split_once(':')?;
-                    key.eq_ignore_ascii_case("content-length")
-                        .then(|| value.trim().parse().unwrap())
-                })
-                .unwrap();
-            let mut body = vec![0; length];
-            reader.read_exact(&mut body).await.unwrap();
-            body
+            headers.push_str(&line);
         }
+        assert!(headers.starts_with(&format!("HTTP/1.1 {status} ")));
+        let length: usize = headers
+            .lines()
+            .find_map(|line| {
+                let (key, value) = line.split_once(':')?;
+                key.eq_ignore_ascii_case("content-length")
+                    .then(|| value.trim().parse().unwrap())
+            })
+            .unwrap();
+        let mut body = vec![0; length];
+        reader.read_exact(&mut body).await.unwrap();
+        body
+    }
 
+    fn fixture_shim() -> Arc<Shim> {
         let config = config::parse(vec![
             "claude".into(),
             "--cli".into(),
@@ -633,13 +663,23 @@ mod tests {
         ])
         .unwrap()
         .unwrap();
-        let shim = Arc::new(Shim {
+        Arc::new(Shim {
             config,
             calls: tokio::sync::Mutex::new(None),
-            health: Mutex::new(None),
+            health: Mutex::new(Some(Health {
+                body: json!({"status": "ok"}),
+                ok: true,
+                at: Instant::now(),
+                refreshing: false,
+            })),
             override_misses: Mutex::new(Default::default()),
             unlisted_models: Mutex::new(Default::default()),
-        });
+        })
+    }
+
+    #[tokio::test]
+    async fn ignored_request_body_keeps_early_response_and_connection() {
+        let shim = fixture_shim();
         for (method, path, status) in [
             ("POST", "/missing", 404),
             ("GET", "/models", 200),
@@ -647,15 +687,7 @@ mod tests {
         ] {
             let (client, server) = tokio::io::duplex(4096);
             let shim = shim.clone();
-            let service = service_fn(move |req| {
-                let shim = shim.clone();
-                async move { tokio::spawn(shim.request(req)).await.unwrap() }
-            });
-            let connection = tokio::spawn(async move {
-                http1::Builder::new()
-                    .serve_connection(TokioIo::new(server), service)
-                    .await
-            });
+            let connection = tokio::spawn(async move { serve_connection(shim, server).await });
             let (reader, mut writer) = tokio::io::split(client);
             let mut reader = BufReader::new(reader);
             writer
@@ -709,6 +741,59 @@ mod tests {
             }
             drop(reader);
             drop(writer);
+            connection.await.unwrap().unwrap();
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn ignored_request_body_deadline_closes_idle_and_trickling_connections() {
+        for (path, status, trickle) in [
+            ("/health", 200, false),
+            ("/models", 200, true),
+            ("/missing", 404, true),
+        ] {
+            let (mut client, server) = tokio::io::duplex(4096);
+            let connection = tokio::spawn(serve_connection(fixture_shim(), server));
+            client
+                .write_all(
+                    format!(
+                        "GET {path} HTTP/1.1\r\nHost: fixture\r\nTransfer-Encoding: chunked\r\n\r\n"
+                    )
+                    .as_bytes(),
+                )
+                .await
+                .unwrap();
+            let (reader, mut writer) = tokio::io::split(client);
+            let mut reader = BufReader::new(reader);
+            // Reading the entire early response proves the request and drain
+            // have started, without releasing the body or invoking a provider.
+            tokio::time::timeout(
+                std::time::Duration::from_secs(1),
+                response(&mut reader, status),
+            )
+            .await
+            .unwrap();
+            for _ in 0..4 {
+                tokio::time::advance(std::time::Duration::from_secs(1)).await;
+                if trickle {
+                    writer.write_all(b"1\r\nx\r\n").await.unwrap();
+                    tokio::task::yield_now().await;
+                }
+                assert!(
+                    !connection.is_finished(),
+                    "closed before the drain deadline"
+                );
+            }
+            tokio::time::advance(std::time::Duration::from_secs(1)).await;
+            let mut remaining = Vec::new();
+            tokio::time::timeout(
+                std::time::Duration::from_secs(1),
+                reader.read_to_end(&mut remaining),
+            )
+            .await
+            .expect("ignored body must close at the deadline")
+            .unwrap();
+            assert!(remaining.is_empty());
             connection.await.unwrap().unwrap();
         }
     }

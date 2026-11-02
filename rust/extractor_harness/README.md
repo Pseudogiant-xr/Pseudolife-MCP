@@ -15,6 +15,10 @@ serialized per shim. Health is warmed before binding and refreshed in the
 background when stale. CLI failures become HTTP 500; an unhealthy health
 probe returns HTTP 503. As in the Python shims, `stream`, `temperature` and
 `response_format` do not change the completion protocol.
+Routes that ignore the request body answer immediately and allow five seconds
+for the body to finish before closing the connection. This is a native resource
+limit; trickling bytes do not extend it. With `Expect: 100-continue`, Hyper may
+emit an interim `100 Continue` before the final response, including a 404.
 
 Concrete provider model IDs pass through; aliases such as `extractor` or `Qwen/Qwen3` keep
 the launch model. Unlisted provider IDs get a one-line note. `--reasoning-effort`
@@ -78,6 +82,23 @@ The existing `install-*shim-autostart.sh` scripts accept `--native PATH`;
 their PowerShell equivalents accept `-NativeExe PATH`. Their existing
 Python installation paths remain available. Custom `--name` registration
 names support isolated installations and tests. When installing through a versioned runtime launcher, pass its stable path with `--native-exe PATH` so future starts follow the selected runtime.
+
+Windows registrations record the installing runtime's exact path alongside the
+stable launcher. Cleanup can therefore recognize that old runtime if it appears
+late during an upgrade, while still requiring the same provider and settings.
+Older wrappers lack this metadata. If cleanup cannot prove a matching process's
+image belongs to the registration, it preserves the task and reports the process
+to inspect before retrying; it does not infer ownership from arguments alone.
+Captured processes are stopped through pinned handles, and task actions are
+checked again before each removal attempt. Rollback preserves a concurrently
+replaced task and reports the incomplete recovery instead of overwriting it.
+
+Legacy Windows migration recognizes each historical installer's own argument
+template: Sonnet's prompt flag, Claude's model and prompt flags, and Codex's
+model and health flags. The BEL-corrupted `evals/anthropic_shim.py` task emitted
+by commit `2f0edc4ce` is deliberately refused: that invalid path could not start
+the shim and was corrected in `ccb6f9a07`. Inspect and remove that broken task
+manually before retrying installation; it grants no process-cleanup ownership.
 
 ## Stub-only verification
 

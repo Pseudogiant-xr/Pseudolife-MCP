@@ -1,5 +1,8 @@
 //! Python is the test oracle only; all provider calls use disposable stubs.
-use std::{fs, path::PathBuf, process::Command};
+use std::{ffi::OsStr, fs, io::Write, path::PathBuf, process::Command};
+
+#[path = "../../extractor_harness/fixtures/build_support.rs"]
+mod fixture_build;
 
 struct Fixtures(PathBuf);
 
@@ -43,7 +46,133 @@ impl Fixtures {
 
 impl Drop for Fixtures {
     fn drop(&mut self) {
-        fs::remove_dir_all(&self.0).expect("remove materialized fixtures");
+        if let Err(error) = fs::remove_dir_all(&self.0) {
+            if std::thread::panicking() {
+                // A second panic would abort the test process and hide its failure.
+                let _ = writeln!(
+                    std::io::stderr().lock(),
+                    "remove materialized fixtures at {}: {error}",
+                    self.0.display()
+                );
+            } else {
+                panic!(
+                    "remove materialized fixtures at {}: {error}",
+                    self.0.display()
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn fixture_cleanup_failure_is_visible() {
+    let path = std::env::temp_dir().join(format!("r6-cleanup-{}", uuid::Uuid::new_v4()));
+    fs::write(&path, b"a file cannot be removed as a directory").unwrap();
+    let result = std::panic::catch_unwind(|| drop(Fixtures(path.clone())));
+    fs::remove_file(&path).unwrap();
+    let panic = result.expect_err("normal cleanup failures must fail the test");
+    assert!(
+        panic
+            .downcast_ref::<String>()
+            .expect("cleanup panic message")
+            .contains("remove materialized fixtures")
+    );
+}
+
+#[test]
+fn fixture_cleanup_failure_during_unwind_preserves_original_panic() {
+    const CHILD: &str = "PSEUDOLIFE_FIXTURE_UNWIND_CHILD";
+    if let Some(path) = std::env::var_os(CHILD) {
+        let result = std::panic::catch_unwind(|| {
+            let _fixtures = Fixtures(path.into());
+            panic!("original fixture failure");
+        });
+        assert_eq!(
+            result.unwrap_err().downcast_ref::<&str>(),
+            Some(&"original fixture failure")
+        );
+        return;
+    }
+    // Keep the regression's former double-panic abort inside a child process.
+    // The parent owns the file so it can clean up even if that child aborts.
+    let path = std::env::temp_dir().join(format!("r6-cleanup-{}", uuid::Uuid::new_v4()));
+    fs::write(&path, b"a file cannot be removed as a directory").unwrap();
+    let output = Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "fixture_cleanup_failure_during_unwind_preserves_original_panic",
+            "--nocapture",
+        ])
+        .env(CHILD, &path)
+        .output()
+        .expect("run cleanup unwind regression");
+    fs::remove_file(&path).unwrap();
+    assert!(
+        output.status.success(),
+        "cleanup unwind child failed: {}\n{}\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(String::from_utf8_lossy(&output.stderr).contains("remove materialized fixtures"));
+}
+
+#[test]
+fn fixture_build_forwards_encoded_rustflags_without_splitting_spaces() {
+    let command = fixture_build::fixture_command(
+        OsStr::new("compiler path/rustc"),
+        "target-triple",
+        std::path::Path::new("source path/stub.rs"),
+        std::path::Path::new("output path/stub.bin"),
+        Some(OsStr::new("linker path/linker")),
+        Some("--cfg\x1ffeature=\"fixture feature\"\x1f-C\x1flink-arg=argument with spaces"),
+    );
+    assert_eq!(command.get_program(), OsStr::new("compiler path/rustc"));
+    let expected = [
+        "--edition=2024",
+        "--target",
+        "target-triple",
+        "source path/stub.rs",
+        "-o",
+        "output path/stub.bin",
+        "-C",
+        "linker=linker path/linker",
+        "--cfg",
+        "feature=\"fixture feature\"",
+        "-C",
+        "link-arg=argument with spaces",
+    ];
+    assert_eq!(
+        command.get_args().collect::<Vec<_>>(),
+        expected.iter().map(OsStr::new).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn fixture_build_accepts_absent_or_empty_rustflags_and_linker() {
+    for encoded in [None, Some("")] {
+        let command = fixture_build::fixture_command(
+            OsStr::new("compiler"),
+            "target-triple",
+            std::path::Path::new("stub.rs"),
+            std::path::Path::new("stub.bin"),
+            None,
+            encoded,
+        );
+        assert_eq!(
+            command.get_args().collect::<Vec<_>>(),
+            [
+                "--edition=2024",
+                "--target",
+                "target-triple",
+                "stub.rs",
+                "-o",
+                "stub.bin"
+            ]
+            .iter()
+            .map(OsStr::new)
+            .collect::<Vec<_>>()
+        );
     }
 }
 

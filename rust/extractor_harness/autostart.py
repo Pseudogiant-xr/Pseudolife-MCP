@@ -186,12 +186,14 @@ def proof(binary, root, fixture, launcher_exe, provider, scenario="all"):
         wrapper_forwarding(root)
         for case in ("PasswordRollback", "LegacyMigration", "LegacyJuly", "LegacyDetached", "DelayedStop", "DelayedRemoval", "DeleteRetry", "DeleteFailure",
                      "StopTimeout", "RemovalTimeout", "ProcessExitRace", "ProcessStopFailure",
-                     "ProcessIdentityChanged", "QueryInitialRetry", "QueryRollbackRetry", "QueryRemovalRetry",
-                     "QueryFailure", "QueryAccessDenied", "QueryNamedAbsent", "DisabledReinstall",
-                     "QueryStopFailure", "QueryRemovalFailure", "ForeignRemoval", "ForeignLegacy", "ForeignSibling",
-                     "ForeignUninstallLegacy", "ForeignNativeArguments", "CustomLauncherRemoval", "ForeignEncodedArguments",
-                     "ForeignNativeBasename", "DetachedClaude", "DetachedCodex", "DetachedCodexCli", "LateLauncherChild",
-                     "ProcessExitWait", "ProcessExitTimeout", "ProcessQueryFailure"):
+                     "ProcessIdentityChanged", "QueryInitialRetry", "QueryRollbackRetry", "QueryRemovalRetry", "QueryFailure",
+                     "QueryAccessDenied", "QueryNamedAbsent", "DisabledReinstall", "QueryStopFailure", "QueryRemovalFailure",
+                     "ForeignRemoval", "ForeignLegacy", "ForeignSibling", "ForeignUninstallLegacy", "ForeignNativeArguments",
+                     "CustomLauncherRemoval", "ForeignEncodedArguments", "ForeignNativeBasename", "DetachedClaude", "DetachedCodex",
+                     "DetachedCodexCli", "LateLauncherChild", "ProcessExitWait", "ProcessExitTimeout", "ProcessQueryFailure",
+                     "ProcessPidReused", "ProcessPinnedExitRace", "ProcessHandleIdentityChanged", "ProcessHandleFailure", "ProcessStartTimeFailure",
+                     "InitialForeignTask", "DeleteReplacedTask", "TaskQueryFailure", "StopQueryFailure", "RemovalQueryFailure",
+                     "RollbackQueryFailure", "TaskAbsent", "HistoricalTailBoundaries", "LateOldRuntimeRecorded", "LateLegacyUnseen", "LateLegacyKnown", "LateLegacyUnseenNoLauncher", "CimSnapshotFailure", "CimParentFailure", "ReplacementDuringStop", "LateCurrentRuntimeRecorded"):
             checked(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(Path(__file__).with_name("scheduler_failures.ps1")),
                      "-Source", str(run.ROOT / "rust/shim/src/extractor_shim/autostart.ps1"), "-Root", str(root), "-Case", case], step=case)
     if not windows and scenario in ("all", "preflight"):
