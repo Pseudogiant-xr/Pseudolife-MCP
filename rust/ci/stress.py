@@ -554,15 +554,19 @@ def run(options) -> int:
             cargo_junit(WORKSPACE).unlink(missing_ok=True)
         print("stress: " + " ".join(argv), flush=True)
         code = subprocess.run(argv, env=env).returncode
-        if kind == "cargo" and cargo_junit(WORKSPACE).is_file():
-            # The row's artifact keeps the report; evidence reads this copy.
-            (scratch / "junit.xml").write_bytes(cargo_junit(WORKSPACE).read_bytes())
-            tests = cargo_times(names, scratch / "junit.xml")
-        if code == 0:
-            note = evidence(kind, names, scratch)
-            if note:
-                code = 1
-                print(f"stress: {note}", flush=True)
+        try:
+            if kind == "cargo" and cargo_junit(WORKSPACE).is_file():
+                # The row's artifact keeps the report; evidence reads this copy.
+                (scratch / "junit.xml").write_bytes(cargo_junit(WORKSPACE).read_bytes())
+                tests = cargo_times(names, scratch / "junit.xml")
+            if code == 0:
+                note = evidence(kind, names, scratch)
+                if note:
+                    code = 1
+                    print(f"stress: {note}", flush=True)
+        except Exception as error:  # a run whose evidence cannot be judged is no evidence, whatever it exited
+            note, code = f"{type(error).__name__}: {error}", code or 1
+            print(f"stress: {note}", flush=True)
     finally:
         row = {"iteration": options.iteration, "attempt": int(os.environ.get("GITHUB_RUN_ATTEMPT") or 1),
                "selection": options.selection.strip(), "runner": runner(), "exit_code": code,

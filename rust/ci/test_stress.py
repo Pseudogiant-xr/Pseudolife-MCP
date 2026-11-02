@@ -1222,6 +1222,37 @@ def test_the_report_counts_an_unreadable_row_as_that_iterations_failure(tmp_path
     assert "stress-row-2.json" in summary.read_text(encoding="utf-8")
 
 
+@pytest.mark.parametrize("selection, summary, error", [
+    # compared() raising on a summary that is valid JSON but not an object.
+    ("row:hook", "[]", ("AttributeError", "TypeError")),
+    ("scenario:tokenless", "3", ("AttributeError", "TypeError")),
+    ("row:hook/some-case", '"text"', ("AttributeError", "TypeError")),
+])
+def test_a_single_item_whose_summary_cannot_be_judged_fails(tmp_path, monkeypatch, selection, summary, error):
+    # The harness exited 0, but a run whose evidence cannot be read is no
+    # evidence: the row must say fail, never pass (review of 3715a45a).
+    def harness(argv, env):
+        Path(argv[argv.index("--out") + 1]).write_text(summary, encoding="utf-8")
+        return SimpleNamespace(returncode=0)
+    monkeypatch.setattr(stress.subprocess, "run", harness)
+    code, row = run_row(tmp_path, selection)
+    assert code == 1 and row["outcome"] == "fail" and row["exit_code"] == 1
+    assert row["note"].split(":")[0] in error and len(row["note"].split(": ", 1)[1]) > 0
+    assert "items" not in row
+
+
+@pytest.mark.parametrize("selection", ["row:hook", "scenario:tokenless", "tests/test_a.py"])
+def test_a_single_item_whose_evidence_check_raises_fails(tmp_path, monkeypatch, selection):
+    monkeypatch.setattr(stress.subprocess, "run", lambda argv, env: SimpleNamespace(returncode=0))
+
+    def broken(kind, names, scratch):
+        raise RuntimeError("summary unreadable")
+    monkeypatch.setattr(stress, "evidence", broken)
+    code, row = run_row(tmp_path, selection)
+    assert code == 1 and row["outcome"] == "fail" and row["exit_code"] == 1
+    assert row["note"] == "RuntimeError: summary unreadable"
+
+
 def test_a_single_item_report_is_unchanged(tmp_path):
     rows = tmp_path / "rows"
     rows.mkdir()
