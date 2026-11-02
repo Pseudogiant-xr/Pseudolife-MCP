@@ -51,7 +51,8 @@ pub async fn call(app: &App, path: &str, h: &HeaderMap, body: &mut RequestBody) 
         Ok(r) => r,
         Err(e) => return json_response(500, &json!({"error": "internal_error", "message": e})),
     };
-    let cfg = &app.service.config.memory;
+    let config = app.service.runtime_config();
+    let cfg = &config.memory;
     let result = match name {
         "memory_store" => store::memory_store(&ready, cfg, &caller, &args).await,
         _ => return json_response(404, &json!({"error": "unknown_tool", "tool": name})),

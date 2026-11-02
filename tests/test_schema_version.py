@@ -70,17 +70,13 @@ def test_schema_meta_version_is_pinned():
         actual=SCHEMA_META_VERSION, pinned=CURRENT_SCHEMA)
 
 
-# The native shim's transfer path carries the schema version as literals:
-# the export writes it, the import refuses any other, and the refusal names
-# it. gen_schema_sql.py generates the daemon's copy, not these. The v56 bump
+# The native export still carries a schema-version literal. Import reuses
+# the daemon's generated SQL, plan and metadata instead. The v56 bump
 # (2026-10-17) left them at 55 and every Parity export/import row refused
 # the bank; this pins them so the next bump fails here first.
 _SHIM = Path(__file__).resolve().parents[1] / "rust" / "shim" / "src" / "cli"
 _SHIM_SCHEMA_LITERALS = (
     (_SHIM / "transfer" / "export.rs", r'const BUILD_SCHEMA: &str = "(\d+)";'),
-    (_SHIM / "transfer" / "import.rs", r'const CURRENT_SCHEMA: &str = "(\d+)";'),
-    (_SHIM / "transfer.rs",
-     r"import into a bank not at this build's schema \((\d+)\) is deferred"),
 )
 
 
@@ -92,3 +88,11 @@ def test_rust_shim_transfer_pins_the_same_schema_version(path, pattern):
     assert {int(v) for v in found} == {SCHEMA_META_VERSION}, (
         f"{path.name} says schema {found}, SCHEMA_META_VERSION is "
         f"{SCHEMA_META_VERSION}: bump the literal with the schema")
+
+
+def test_rust_shim_import_reuses_generated_native_schema():
+    source = (_SHIM / "transfer" / "schema.rs").read_text(encoding="utf-8")
+    for artifact in ("schema_meta.rs", "schema.sql", "schema_plan.json"):
+        assert f'"../../../../daemon/src/storage/{artifact}"' in source
+    assert re.search(r"super::schema::ensure\(client\)\s*\.await",
+                     (_SHIM / "transfer" / "import.rs").read_text(encoding="utf-8"))
