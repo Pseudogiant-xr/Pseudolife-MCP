@@ -42,6 +42,8 @@
 # falls back.
 param(
     [string]$PythonExe = "",
+    [string]$NativeExe = "",
+    [string]$NativeTaskName = "",
     [int]$Port = 8086,
     [string]$Model = "gpt-5.6-terra",
     [int]$HealthTtl = 1800,
@@ -51,6 +53,20 @@ param(
 
 $ErrorActionPreference = "Stop"
 $repo = Split-Path -Parent $PSScriptRoot
+
+# Native registration is shipped in the executable.
+if ($NativeExe) {
+    $NativeExe = (Get-Command $NativeExe -ErrorAction Stop).Source
+    $nativeArgs = @("extractor-shim", "install-autostart", "codex", "--repo", $repo, "--native-exe", $NativeExe,
+                    "--model", $Model, "--port", "$Port", "--host", "127.0.0.1", "--log", $LogFile)
+    if ($NativeTaskName) { $nativeArgs += @("--name", $NativeTaskName) }
+    $nativeArgs += @("--health-ttl", "$HealthTtl")
+    if ($CodexCli) { $nativeArgs += @("--cli", $CodexCli) }
+    & $NativeExe @nativeArgs
+    if ($LASTEXITCODE -ne 0) { throw "native codex autostart registration failed" }
+    return
+}
+
 
 New-Item -ItemType Directory -Force (Split-Path -Parent $LogFile) | Out-Null
 

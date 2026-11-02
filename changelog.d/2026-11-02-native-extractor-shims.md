@@ -1,0 +1,4 @@
+### Added (2026-11-02 — Run extractor CLI shims without Python)
+- Opt-in `extractor-shim claude|codex` serves the existing completion, model and health contracts natively, including serialized CLI calls, prompt overrides, timeout cleanup, model pass-through and Claude tool emulation. The production prompt is shared with the Python oracles and embedded in Rust.
+- Native autostart registration reads a stable settings file or a checkout's `ops/.env`, verifies socket ownership, replaces existing registrations and supports sibling removal without a Python runtime. Existing autostart scripts retain their Python path and accept a native opt-in.
+- Stub-only differential tests compare responses and provider invocation on both platforms, including the corrected Windows Claude batch prompt transport.

@@ -8,6 +8,7 @@ fn main() -> ExitCode {
         return code;
     }
     let arguments: Vec<_> = std::env::args_os().skip(1).collect();
+    pseudolife_stdio::extractor_shim::dispatch_if_requested(&arguments);
     if let Some(mode) = arguments.first().filter(|mode| mode.to_str().is_none()) {
         pseudolife_stdio::stderrln!(
             "unknown mode {}; see: pseudolife-mcp --help",

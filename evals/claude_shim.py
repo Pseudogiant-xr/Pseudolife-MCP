@@ -71,7 +71,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))      # repo root
-from pseudolife_memory.memory.dream import _SYSTEM_PROMPT  # noqa: E402
+_SYSTEM_PROMPT = (Path(__file__).resolve().parent / "prompts"
+                  / "assistant_facts_provenance.txt").read_text(encoding="utf-8")
 
 _LOG = logging.getLogger("claude_shim")
 

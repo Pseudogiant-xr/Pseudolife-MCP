@@ -58,6 +58,8 @@
 # superseded evidence and stays in the tree.
 param(
     [string]$PythonExe = "",
+    [string]$NativeExe = "",
+    [string]$NativeTaskName = "",
     [int]$Port = 8082,
     [string]$Model = "claude-opus-5-5",
     [string]$PromptFile = "evals\prompts\sonnet_extractor_v5.md",
@@ -71,6 +73,19 @@ param(
 
 $ErrorActionPreference = "Stop"
 $repo = Split-Path -Parent $PSScriptRoot
+
+# Native registration is shipped in the executable.
+if ($NativeExe) {
+    $NativeExe = (Get-Command $NativeExe -ErrorAction Stop).Source
+    $nativeArgs = @("extractor-shim", "install-autostart", "claude", "--repo", $repo, "--native-exe", $NativeExe,
+                    "--model", $Model, "--port", "$Port", "--host", "127.0.0.1", "--log", $LogFile)
+    if ($NativeTaskName) { $nativeArgs += @("--name", $NativeTaskName) }
+    $nativeArgs += @("--prompt-file", (Join-Path $repo $PromptFile))
+    & $NativeExe @nativeArgs
+    if ($LASTEXITCODE -ne 0) { throw "native claude autostart registration failed" }
+    return
+}
+
 
 $promptPath = Join-Path $repo $PromptFile
 if (-not (Test-Path $promptPath)) { throw "prompt file not found: $promptPath" }

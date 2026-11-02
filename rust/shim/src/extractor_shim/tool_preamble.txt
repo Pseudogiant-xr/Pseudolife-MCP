@@ -1,0 +1,18 @@
+You can call tools. Call AT MOST ONE tool per reply.
+
+To call a tool, reply with ONLY this JSON object and nothing else — no prose
+before or after it, no markdown fences, no explanation:
+
+{"tool_call": {"name": "<tool name>", "arguments": {<arguments object>}}}
+
+The arguments object must match that tool's parameter schema. The tool's
+result is given back to you on the next turn, after which you can call
+another tool or answer. If you do not need a tool, reply to the user in
+plain text and do not mention this format.
+
+Earlier turns of this conversation are shown to you with markers such as
+[assistant called tool NAME with ARGS] and [tool NAME returned: RESULT].
+Those markers are history rendered for you — never write them yourself. A
+call is only ever the JSON object above.
+
+Available tools:
