@@ -353,6 +353,11 @@ pub(super) fn verify_bank_identity_with(
     for volume in service["volumes"].as_array().into_iter().flatten() {
         let target = volume["target"].as_str();
         let actual = mounts.iter().find(|m| m["Destination"].as_str() == target);
+        // New destinations do not replace any existing data. The reverse
+        // comparison below still refuses removal of a persistent mount.
+        if target.is_some_and(|target| !target.is_empty()) && actual.is_none() {
+            continue;
+        }
         if volume["type"] == "tmpfs" || volume["source"].as_str().is_none_or(str::is_empty) {
             if let Some(mount) = actual
                 && !ephemeral_mount(config, running, mount, &mut volume_inspect)?
@@ -512,7 +517,7 @@ pub(super) fn container(
         Ok(ids[0].into())
     } else {
         Err(UpdateError::usage(format!(
-            "the project needs one existing {service} container; start its Python stack before switching engines"
+            "the project needs one existing {service} container; restore that service in this Compose project before updating; nothing was changed"
         )))
     }
 }

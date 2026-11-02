@@ -13,6 +13,7 @@ NATIVE_HELP = (
     "usage: pseudolife-mcp runtime install --archive <archive> "
     "--sha256sums <SUMS-file> --version <version> [--json]"
 )
+NATIVE_CAPABILITY = "pseudolife-mcp native-update-v1"
 
 
 def fixture(tmp_path, code):
@@ -120,6 +121,11 @@ class Wrapper:
         driver = tmp_path / "native-capability.py"
         driver.write_text(
             "import json, os, pathlib, sys\n"
+            "if sys.argv[1:] == ['update', '--native-capability']:\n"
+            f"    pathlib.Path({str(self.native_probes)!r}).write_text('probed')\n"
+            "    if os.environ.get('FIXTURE_DEFERRED'): raise SystemExit(1)\n"
+            f"    print(os.environ.get('FIXTURE_HELP', {NATIVE_CAPABILITY!r}))\n"
+            "    raise SystemExit(int(os.environ.get('FIXTURE_HELP_EXIT', '0')))\n"
             "if sys.argv[1:] == ['runtime', '--help']:\n"
             f"    pathlib.Path({str(self.native_probes)!r}).write_text('probed')\n"
             f"    print(os.environ.get('FIXTURE_HELP', {NATIVE_HELP!r}))\n"
@@ -246,7 +252,7 @@ def test_no_usable_python_automatically_uses_verified_native(tmp_path, shell, py
 
 
 @pytest.mark.parametrize("shell", ["bash", "pwsh"])
-@pytest.mark.parametrize("invalid", ["missing", "directory", "generic-help", "near-help", "extra-help", "failed-help"])
+@pytest.mark.parametrize("invalid", ["missing", "directory", "generic-help", "near-help", "extra-help", "failed-help", "deferred-update"])
 def test_no_usable_runtime_refuses_without_changing_crlf_env(tmp_path, shell, invalid):
     wrapper = Wrapper(tmp_path, shell)
     path, mtime = wrapper.crlf()
@@ -257,9 +263,11 @@ def test_no_usable_runtime_refuses_without_changing_crlf_env(tmp_path, shell, in
     elif invalid == "generic-help":
         wrapper.env["FIXTURE_HELP"] = "usage: pseudolife-mcp [shim|update]"
     elif invalid == "near-help":
-        wrapper.env["FIXTURE_HELP"] = "prefix " + NATIVE_HELP
+        wrapper.env["FIXTURE_HELP"] = "prefix " + NATIVE_CAPABILITY
     elif invalid == "extra-help":
-        wrapper.env["FIXTURE_HELP"] = NATIVE_HELP + "\nextra output"
+        wrapper.env["FIXTURE_HELP"] = NATIVE_CAPABILITY + "\nextra output"
+    elif invalid == "deferred-update":
+        wrapper.env["FIXTURE_DEFERRED"] = "1"
     else:
         wrapper.env["FIXTURE_HELP_EXIT"] = "7"
     result = wrapper.run()
@@ -345,9 +353,16 @@ def test_bash_selected_update_still_normalizes_crlf_env(tmp_path, native):
     assert backup.read_bytes() == b"FIXTURE_VALUE=unchanged\r\n"
 
 
-def test_capability_probe_matches_shipped_native_runtime_help():
-    source = (ROOT / "rust/shim/src/runtime/cli.rs").read_text(encoding="utf-8")
-    assert f'const HELP: &str = "{NATIVE_HELP}\\n";' in source
+def test_capability_probe_requires_implemented_native_update(tmp_path):
+    binary = os.environ.get("PSEUDOLIFE_UPDATE_TEST_BINARY") or os.environ.get("PSEUDOLIFE_RUST_BINARY")
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY to the built native CLI")
+    result = subprocess.run([str(Path(binary).resolve()), "update", "--native-capability"],
+                            env={k: os.environ[k] for k in ("SYSTEMROOT", "WINDIR") if k in os.environ},
+                            cwd=tmp_path, capture_output=True, text=True, timeout=10)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == NATIVE_CAPABILITY + "\n" and result.stderr == ""
+    assert not list(tmp_path.iterdir())
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows installed .exe fallback contract")

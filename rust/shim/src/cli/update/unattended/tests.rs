@@ -49,6 +49,8 @@ fn health_version_missing_is_unable_to_check_and_lock_io_is_not_busy() {
         json!({}),
         json!({"version":null}),
         json!({"version":"unknown"}),
+        json!({"version":"1.2.3\nforged log line"}),
+        json!({"version":"1.2.3\u{1b}[31m"}),
     ] {
         assert_eq!(health_version(&health).unwrap_err().exit_code, 2);
     }

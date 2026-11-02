@@ -27,6 +27,120 @@ fn native_update_external_paths_keep_drive_unc_and_unicode_without_verbatim_pref
     }
 }
 struct Temp(PathBuf);
+
+#[test]
+#[ignore = "subprocess fixture for isolated proxy environment"]
+fn native_update_proxy_child() {
+    let url = std::env::var("UPDATE_PROXY_TEST_URL").unwrap();
+    let reply = fetch_json(&url, 2);
+    if url.starts_with("http:") {
+        assert_eq!(reply, Some(json!({"info":{"version":"1.2.3"}})));
+    } else {
+        assert!(reply.is_none()); // The fixture refuses CONNECT without contacting a release host.
+    }
+}
+
+#[test]
+fn native_update_release_discovery_honors_http_and_https_proxy() {
+    use std::{
+        net::TcpListener,
+        process::Command,
+        time::{Duration, Instant},
+    };
+    for scheme in ["http", "https"] {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let proxy = format!("http://{}", listener.local_addr().unwrap());
+        let server = std::thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(4);
+            loop {
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        stream
+                            .set_read_timeout(Some(Duration::from_secs(2)))
+                            .unwrap();
+                        let mut request = Vec::new();
+                        let mut byte = [0];
+                        while !request.ends_with(b"\r\n\r\n") && request.len() < 8192 {
+                            if stream.read(&mut byte).unwrap_or(0) == 0 {
+                                break;
+                            }
+                            request.push(byte[0]);
+                        }
+                        let body = br#"{"info":{"version":"1.2.3"}}"#;
+                        let reply = if request.starts_with(b"CONNECT ") {
+                            b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_vec()
+                        } else {
+                            [format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).into_bytes(), body.to_vec()].concat()
+                        };
+                        stream.write_all(&reply).unwrap();
+                        return request;
+                    }
+                    Err(e)
+                        if e.kind() == std::io::ErrorKind::WouldBlock
+                            && Instant::now() < deadline =>
+                    {
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                    _ => return Vec::new(),
+                }
+            }
+        });
+        let mut child = Command::new(std::env::current_exe().unwrap());
+        for name in [
+            "http_proxy",
+            "https_proxy",
+            "all_proxy",
+            "no_proxy",
+            "HTTP_PROXY",
+            "HTTPS_PROXY",
+            "ALL_PROXY",
+            "NO_PROXY",
+        ] {
+            child.env_remove(name);
+        }
+        let result = child
+            .args([
+                "--exact",
+                "cli::update::tests::native_update_proxy_child",
+                "--ignored",
+            ])
+            .env(
+                if scheme == "http" {
+                    "HTTP_PROXY"
+                } else {
+                    "HTTPS_PROXY"
+                },
+                proxy,
+            )
+            .env(
+                "UPDATE_PROXY_TEST_URL",
+                format!("{scheme}://release.invalid/json"),
+            )
+            .output()
+            .unwrap();
+        let request = server.join().unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stdout)
+        );
+        let expected = if scheme == "http" {
+            "GET http://release.invalid/json HTTP/1.1"
+        } else {
+            "CONNECT release.invalid:443 HTTP/1.1"
+        };
+        assert!(
+            request.starts_with(expected.as_bytes()),
+            "proxy did not receive {scheme} discovery"
+        );
+        assert!(
+            !String::from_utf8_lossy(&request)
+                .to_ascii_lowercase()
+                .contains("authorization:")
+        );
+    }
+}
 impl Temp {
     fn new() -> Self {
         let p = std::env::temp_dir().join(format!(

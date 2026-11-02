@@ -212,7 +212,7 @@ impl Update {
         )
     }
     pub fn daemon_health(&self) -> Option<Value> {
-        fetch_json(
+        seams::fetch_health_json(
             &format!("{}/health", self.o.daemon_url.trim_end_matches('/')),
             3,
         )
@@ -686,6 +686,14 @@ fn ask(question: &str) -> bool {
 }
 
 pub(crate) fn run(arguments: Vec<OsString>) -> u8 {
+    // Wrapper capability probe: exact, read-only and absent from deferred CLIs.
+    if arguments == [OsString::from("--native-capability")] {
+        return if output("pseudolife-mcp native-update-v1\n", false).is_ok() {
+            0
+        } else {
+            120
+        };
+    }
     // Image metadata probe: no daemon, configuration, network or bank access.
     // R3 ships this same CLI beside the daemon in its runtime image.
     if arguments == [OsString::from("--schema-version")] {

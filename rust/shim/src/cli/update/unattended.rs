@@ -249,7 +249,7 @@ fn describe(peers: &[Value]) -> String {
 fn health_version(health: &Value) -> Result<String> {
     health["version"]
         .as_str()
-        .filter(|s| super::version_key(s).is_some())
+        .filter(|s| super::plain_release(s))
         .map(str::to_owned)
         .ok_or_else(|| {
             UpdateError::usage("the daemon's /health carries no version; nothing was changed")

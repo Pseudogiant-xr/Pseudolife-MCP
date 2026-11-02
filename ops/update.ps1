@@ -109,13 +109,12 @@ if (-not $python) {
         [Console]::Error.WriteLine('unknown update argument; use the documented update parameters; nothing was changed')
         exit 2
     }
-    # The read-only runtime capability rejects legacy Python selectors and
-    # unrelated executables even when they successfully print generic help.
-    $nativeHelp = 'usage: pseudolife-mcp runtime install --archive <archive> --sha256sums <SUMS-file> --version <version> [--json]'
+    # Runtime installation alone does not prove that update is implemented.
+    $nativeHelp = 'pseudolife-mcp native-update-v1'
     $verifiedNative = $false
     if (Test-Path -LiteralPath $nativeCli -PathType Leaf) {
         try {
-            $helpOutput = & $nativeCli runtime --help 2>$null
+            $helpOutput = & $nativeCli update --native-capability 2>$null
             $verifiedNative = $LASTEXITCODE -eq 0 -and ($helpOutput -join "`n") -ceq $nativeHelp
         } catch { $verifiedNative = $false }
     }

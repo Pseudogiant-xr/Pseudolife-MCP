@@ -125,7 +125,7 @@ pub(crate) fn run_cli(
         }
     })
 }
-pub(crate) fn fetch_json(url: &str, timeout: u64) -> Option<Value> {
+pub(crate) fn fetch_health_json(url: &str, timeout: u64) -> Option<Value> {
     block_on(async {
         let reply =
             super::super::hook_http::get(url, "", None, Duration::from_secs(timeout), true).await?;
@@ -133,6 +133,20 @@ pub(crate) fn fetch_json(url: &str, timeout: u64) -> Option<Value> {
             return None;
         }
         let result: Value = serde_json::from_slice(&reply.body).ok()?;
+        result.is_object().then_some(result)
+    })
+}
+pub(crate) fn fetch_json(url: &str, timeout: u64) -> Option<Value> {
+    block_on(async {
+        // Use the same environment-aware proxy policy as release downloads.
+        // No daemon bearer or board credentials are attached to discovery.
+        let client = reqwest::Client::builder()
+            .user_agent("pseudolife-mcp")
+            .timeout(Duration::from_secs(timeout))
+            .build()
+            .ok()?;
+        let reply = client.get(url).send().await.ok()?.error_for_status().ok()?;
+        let result: Value = reply.json().await.ok()?;
         result.is_object().then_some(result)
     })
 }

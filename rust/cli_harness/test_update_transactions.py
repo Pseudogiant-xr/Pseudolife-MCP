@@ -52,7 +52,7 @@ if a[:1]==["inspect"]:
   f=a[a.index("-f")+1]
   if "State.Running" in f:
    if a[-1]=="missing-daemon":code=1;out="No such container"
-   else:out="true"
+   else:out="false" if s.get("deployed") and s["failure"]=="recreated_stopped" else "true"
   elif "index .Config.Labels" in f: out=s.get("setup_engine","python")
   elif "Labels" in f: out=json.dumps(s["running"]["Config"]["Labels"])
   elif "|" in f: out=s["running"]["Image"]+"|"+s["running"]["Config"]["Image"]
@@ -321,6 +321,47 @@ def stages(state):
         elif args[:1] == ["compose"] and "up" in args:
             result.append("up")
     return result
+
+
+@pytest.mark.parametrize("kind", ["bind", "volume"])
+@pytest.mark.parametrize("mode", ["checkout", "release", "engine"])
+def test_new_mount_is_allowed_without_replacing_existing_data(tmp_path, kind, mode):
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY to the built native CLI")
+    with host(tmp_path, mode=mode) as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        state["config"]["volumes"]["cache"] = {"name": "fixture-cache"}
+        state["config"]["services"][SERVICE]["volumes"].append(
+            {"type": kind, "source": "cache" if kind == "volume" else str(repo / "cache"),
+             "target": "/new-cache"})
+        state_path.write_text(json.dumps(state))
+        args = ["--json", "--no-test-login", "--no-cache-prune", "--health-retries", "1", "--health-delay-ms", "0"]
+        if mode == "release":
+            args += ["--tag", "0.21.1"]
+        else:
+            args += ["--checkout", str(repo)]
+            if mode == "engine":
+                args += ["--engine", "rust"]
+        result = run_arm(repo, env, binary, args)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "up" in stages(json.loads(state_path.read_text()))
+
+
+def test_checkout_health_from_another_daemon_cannot_hide_stopped_recreation(tmp_path):
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY to the built native CLI")
+    with host(tmp_path, "recreated_stopped", "checkout") as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        state["replacement_id"] = "recreated-checkout-daemon"
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary, ["--checkout", str(repo), "--json", "--no-test-login",
+                                           "--no-cache-prune", "--health-retries", "1", "--health-delay-ms", "0"])
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert "not running" in result.stdout and "rollback" in result.stdout.lower()
+        state = json.loads(state_path.read_text())
+        assert ["inspect", "-f", "{{.State.Running}}", "recreated-checkout-daemon"] in state["calls"]
 
 
 @pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])

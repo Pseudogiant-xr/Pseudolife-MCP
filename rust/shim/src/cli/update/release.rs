@@ -591,7 +591,7 @@ impl Update {
     ) -> Result<Value> {
         self.step("waiting for the daemon to report healthy...");
         for attempt in 0..self.o.health_retries {
-            let health = fetch_json(
+            let health = seams::fetch_health_json(
                 &format!("{}/health", self.o.daemon_url.trim_end_matches('/')),
                 3,
             );
@@ -817,6 +817,14 @@ impl Update {
         let health = self
             .wait_plain_health(None)
             .map_err(|e| self.rollback_error(e.message))?;
+        // A forwarded health URL may name another healthy daemon. Verify the
+        // recreated service itself before reporting this project as healthy.
+        let recreated = engine::container(self, &compose, Some(&env), DAEMON_SERVICE)
+            .map_err(|e| self.rollback_error(e.message))?;
+        let (code, state) = self.docker_call(&["inspect", "-f", "{{.State.Running}}", &recreated]);
+        if code != 0 || state.trim() != "true" {
+            return Err(self.rollback_error("the recreated checkout daemon is not running; inspect this project's container logs before retrying"));
+        }
         self.checkout_post_deploy(
             &repo,
             before.as_ref().and_then(|v| v["hooks_digest"].as_str()),

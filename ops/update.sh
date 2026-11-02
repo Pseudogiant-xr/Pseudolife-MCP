@@ -83,10 +83,10 @@ else
         fi
     done
     if [ -z "$python_cmd" ]; then
-        # A Python selector or unrelated executable is not a native runtime.
-        native_help='usage: pseudolife-mcp runtime install --archive <archive> --sha256sums <SUMS-file> --version <version> [--json]'
+        # Runtime installation alone does not prove that update is implemented.
+        native_help='pseudolife-mcp native-update-v1'
         if [ -f "$native_cli" ] && [ -x "$native_cli" ] &&
-            help_output="$("$native_cli" runtime --help 2>/dev/null)" &&
+            help_output="$("$native_cli" update --native-capability 2>/dev/null)" &&
             [ "${help_output%$'\r'}" = "$native_help" ]; then
             native_update=1
             echo "No Python >= 3.10 on PATH; using the verified native update CLI." >&2
