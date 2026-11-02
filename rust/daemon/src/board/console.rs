@@ -36,7 +36,12 @@ pub(crate) fn owner_principals(
         owners.push("default".to_string());
     }
     owners.retain(|p| !config.not_owner_principals.contains(p));
-    owners.extend(store.owned_principals());
+    // Only a fresh view: past its staleness limit the cache may still hold
+    // a principal since revoked or made someone else's, and an environment
+    // bearer never meets the stored view's 503 (principals.py).
+    if store.available() {
+        owners.extend(store.owned_principals());
+    }
     owners.retain(|p| p != super::store::DAEMON_PRINCIPAL);
     owners.push(super::store::MAINTAINER_PRINCIPAL.to_string());
     owners.sort();
@@ -286,6 +291,25 @@ mod owner_tests {
             &snapshot(),
         );
         assert_eq!(owners, names(&["codex", "laptop", "maintainer"]));
+    }
+
+    #[test]
+    fn a_stale_stored_view_never_widens_the_owner_set() {
+        let store = PrincipalStore::new();
+        let started = std::time::Instant::now()
+            .checked_sub(crate::auth::STALE_AFTER + std::time::Duration::from_secs(1))
+            .expect("a monotonic clock older than the staleness limit");
+        store.finish_refresh(
+            store.begin_refresh_at(started),
+            vec![stored("laptop", false, true)],
+            None,
+        );
+        let owners = owner_principals(
+            &CoordinationConfig::default(),
+            &env(&[], true),
+            &store,
+        );
+        assert_eq!(owners, names(&["default", "maintainer"]));
     }
 
     #[test]

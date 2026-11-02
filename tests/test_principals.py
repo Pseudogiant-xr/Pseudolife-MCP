@@ -196,3 +196,15 @@ def test_not_owner_principals_must_be_a_list_of_names():
         with pytest.raises(ValueError, match="not_owner_principals"):
             CoordinationConfig(not_owner_principals=bad)
     assert CoordinationConfig().not_owner_principals == []
+
+
+def test_a_stale_stored_view_never_widens_the_owner_set():
+    from pseudolife_memory.principal_store import PrincipalSnapshot, StoredPrincipal
+    now = [1000.0]
+    snap = PrincipalSnapshot(max_age=60.0, clock=lambda: now[0])
+    snap.refresh(lambda: ([StoredPrincipal("laptop", "a" * 64, None, True, False)], None))
+    fresh = owner_principals(_cfg(), store=snap, token_map={}, single_token="t0")
+    assert "laptop" in fresh
+    now[0] += 61          # the refresher failed past the staleness limit
+    stale = owner_principals(_cfg(), store=snap, token_map={}, single_token="t0")
+    assert stale == {"default", "maintainer"}

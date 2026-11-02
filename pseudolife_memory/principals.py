@@ -233,7 +233,12 @@ def owner_principals(coordination_config, *, store=None, token_map=None,
     not_owner = set(getattr(coordination_config, "not_owner_principals", None) or ())
     owners = environment_principals(token_map, single_token) - not_owner
     store = _STORE if store is None else store
-    if store is not None:
+    # Only a fresh view: past its staleness limit the cache may still hold a
+    # principal since revoked or made someone else's, and an environment
+    # bearer never meets the stored view's 503, so a stale view would keep
+    # widening that Console's scope. The scope narrows to the environment's
+    # instead.
+    if store is not None and store.available():
         owners |= store.owned_principals()
     owners.discard(DAEMON_PRINCIPAL)
     owners.add(MAINTAINER_PRINCIPAL)
