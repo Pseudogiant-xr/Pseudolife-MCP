@@ -245,6 +245,8 @@ struct Fake {
     typed_extra: bool,
     rejected_after_competitor: bool,
     project_no_spawn: Option<String>,
+    foreign_connection_after_write: bool,
+    lost_write_reply: bool,
 }
 
 #[cfg(windows)]
@@ -454,6 +456,8 @@ impl Fake {
             typed_extra: false,
             rejected_after_competitor: false,
             project_no_spawn: None,
+            foreign_connection_after_write: false,
+            lost_write_reply: false,
         }
     }
 }
@@ -486,6 +490,10 @@ impl Rpc for Fake {
                     edit["value"].clone();
             }
             self.config["layers"][0]["version"] = json!(format!("version-{}", self.calls.len()));
+            if self.lost_write_reply {
+                self.lost_write_reply = false;
+                return Err(SetupError("fixture lost write acknowledgement"));
+            }
             if self.rejected_after_competitor {
                 self.rejected_after_competitor = false;
                 let file = self.config["layers"][0]["name"]["file"].as_str().unwrap();
@@ -517,6 +525,17 @@ impl Rpc for Fake {
             if let Some(value) = &self.project_no_spawn {
                 self.config["config"]["mcp_servers"]["pseudolife-memory"]["env"]["PSEUDOLIFE_MCP_NO_SPAWN"] =
                     json!(value);
+            }
+            if self.foreign_connection_after_write {
+                self.foreign_connection_after_write = false;
+                let home = Path::new(self.config["layers"][0]["name"]["file"].as_str().unwrap())
+                    .parent()
+                    .unwrap();
+                pseudolife_stdio::board::state::atomic_create(
+                    &home.join("pseudolife/connection.json"),
+                    b"foreign malformed connection",
+                )
+                .unwrap();
             }
             return Ok(json!({"version":self.config["layers"][0]["version"]}));
         }
@@ -558,6 +577,262 @@ async fn rejected_cas_never_undoes_a_competitor_or_deletes_its_adopted_token() {
             .count(),
         1
     );
+}
+
+#[tokio::test]
+async fn detailed_readback_failure_reports_only_completed_compensation() {
+    let home = Home::new();
+    let mut client = Fake::new(&home.0);
+    client.override_env = true;
+    let plan = plan_replace(&client.config, &home.0, "https://example.com", None, true).unwrap();
+    let failure =
+        pseudolife_stdio::setup::codex::apply_replace_detailed(&mut client, &home.0, plan)
+            .await
+            .err()
+            .unwrap();
+    assert!(!failure.recovery_pending);
+    assert!(failure.recovery.is_none());
+    assert!(Path::new(failure.report["backup"].as_str().unwrap()).is_file());
+    assert_eq!(failure.report["created"], json!([]));
+    assert_eq!(failure.rollback.len(), 2);
+    assert_eq!(failure.rollback[0]["state"], "restored");
+    assert_eq!(failure.rollback[1]["state"], "removed");
+    assert!(!home.0.join("pseudolife/token").exists());
+    assert!(!format!("{failure:?} {}", failure.report).contains("fixture-token"));
+}
+
+#[tokio::test]
+async fn detailed_rejected_write_does_not_claim_a_config_restore() {
+    let home = Home::new();
+    let mut client = Fake::new(&home.0);
+    client.reject = true;
+    let plan = plan_replace(&client.config, &home.0, "https://example.com", None, true).unwrap();
+    let failure =
+        pseudolife_stdio::setup::codex::apply_replace_detailed(&mut client, &home.0, plan)
+            .await
+            .err()
+            .unwrap();
+    assert!(!failure.recovery_pending);
+    assert_eq!(failure.rollback.len(), 1);
+    assert_eq!(failure.rollback[0]["state"], "removed");
+    assert!(Path::new(failure.report["backup"].as_str().unwrap()).is_file());
+}
+
+#[tokio::test]
+async fn detailed_unknown_write_has_no_recovery_capability() {
+    let home = Home::new();
+    let mut client = Fake::new(&home.0);
+    client.rejected_after_competitor = true;
+    let plan = plan_replace(&client.config, &home.0, "https://example.com", None, true).unwrap();
+    let failure =
+        pseudolife_stdio::setup::codex::apply_replace_detailed(&mut client, &home.0, plan)
+            .await
+            .err()
+            .unwrap();
+    assert!(failure.recovery_pending);
+    assert!(failure.recovery.is_none());
+    assert!(
+        failure
+            .rollback
+            .iter()
+            .all(|event| event["state"] == "left")
+    );
+    assert!(home.0.join("pseudolife/token").is_file());
+}
+
+#[tokio::test]
+async fn detailed_lost_reply_without_connection_does_not_authorize_token_cleanup() {
+    let home = Home::new();
+    let mut client = Fake::new(&home.0);
+    client.lost_write_reply = true;
+    let plan = plan_replace(&client.config, &home.0, "https://example.com", None, true).unwrap();
+    let expected = plan.env().clone();
+    let failure =
+        pseudolife_stdio::setup::codex::apply_replace_detailed(&mut client, &home.0, plan)
+            .await
+            .err()
+            .unwrap();
+    assert!(failure.recovery_pending);
+    assert!(failure.recovery.is_none());
+    assert!(home.0.join("pseudolife/token").is_file());
+    assert!(!home.0.join("pseudolife/connection.json").exists());
+    assert_eq!(
+        client.config["layers"][0]["config"]["mcp_servers"]["pseudolife-memory"]["env"],
+        json!(expected)
+    );
+}
+
+#[tokio::test]
+async fn detailed_known_write_keeps_fenced_recovery_after_rollback_conflict() {
+    let home = Home::new();
+    let mut client = Fake::new(&home.0);
+    client.override_env = true;
+    client.concurrent_env = true;
+    let plan = plan_replace(&client.config, &home.0, "https://example.com", None, true).unwrap();
+    let mut failure =
+        pseudolife_stdio::setup::codex::apply_replace_detailed(&mut client, &home.0, plan)
+            .await
+            .err()
+            .unwrap();
+    assert!(failure.recovery_pending);
+    let before = client.config.clone();
+    assert!(
+        failure
+            .recovery
+            .as_mut()
+            .unwrap()
+            .rollback(&mut client, &home.0)
+            .await
+            .is_err()
+    );
+    assert_eq!(client.config, before);
+    assert!(home.0.join("pseudolife/token").is_file());
+    assert!(
+        failure.rollback[0]["detail"]
+            .as_str()
+            .unwrap()
+            .contains("another writer")
+    );
+}
+
+#[tokio::test]
+async fn detailed_connection_failure_preserves_a_foreign_file_and_its_possible_token() {
+    let home = Home::new();
+    let mut client = Fake::new(&home.0);
+    client.foreign_connection_after_write = true;
+    let plan = plan_replace(&client.config, &home.0, "https://example.com", None, true).unwrap();
+    let failure =
+        pseudolife_stdio::setup::codex::apply_replace_detailed(&mut client, &home.0, plan)
+            .await
+            .err()
+            .unwrap();
+    assert!(failure.recovery_pending);
+    assert!(failure.recovery.is_none());
+    assert_eq!(failure.rollback[0]["state"], "restored");
+    assert_eq!(failure.rollback[1]["state"], "left");
+    assert_eq!(failure.rollback[2]["state"], "left");
+    assert_eq!(
+        std::fs::read(home.0.join("pseudolife/connection.json")).unwrap(),
+        b"foreign malformed connection"
+    );
+    assert!(home.0.join("pseudolife/token").is_file());
+    assert_eq!(
+        failure.reason.to_string(),
+        "The managed Codex connection file is unsafe or malformed; repair or remove it before retrying."
+    );
+}
+
+#[tokio::test]
+async fn detailed_later_rollback_reports_completed_events_and_safe_rerun() {
+    let home = Home::new();
+    let mut client = Fake::new(&home.0);
+    let plan = plan_replace(&client.config, &home.0, "https://example.com", None, true).unwrap();
+    let mut applied = apply_replace(&mut client, &home.0, plan).await.unwrap();
+    let events = applied
+        .rollback_detailed(&mut client, &home.0)
+        .await
+        .unwrap();
+    assert_eq!(events.len(), 3);
+    assert_eq!(events[0]["state"], "restored");
+    assert_eq!(events[1]["state"], "removed");
+    assert_eq!(events[2]["state"], "removed");
+    assert!(!home.0.join("pseudolife/token").exists());
+    assert!(!home.0.join("pseudolife/connection.json").exists());
+    assert!(
+        applied
+            .rollback_detailed(&mut client, &home.0)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn detailed_later_rollback_reports_conflict_without_fabricated_file_restores() {
+    let home = Home::new();
+    let mut client = Fake::new(&home.0);
+    let plan = plan_replace(&client.config, &home.0, "https://example.com", None, true).unwrap();
+    let mut applied = apply_replace(&mut client, &home.0, plan).await.unwrap();
+    client.config["layers"][0]["version"] = json!("competing-version");
+    let failure = applied
+        .rollback_detailed(&mut client, &home.0)
+        .await
+        .unwrap_err();
+    assert!(failure.recovery_pending);
+    assert!(failure.recovery.is_none());
+    assert_eq!(failure.rollback.len(), 1);
+    assert_eq!(failure.rollback[0]["state"], "left");
+    assert!(home.0.join("pseudolife/token").is_file());
+    assert!(home.0.join("pseudolife/connection.json").is_file());
+}
+
+#[tokio::test]
+async fn recovery_retry_preserves_token_adopted_after_config_compensation() {
+    recovery_after_token_conflict(true).await;
+}
+
+#[tokio::test]
+async fn recovery_retry_finishes_owned_token_when_compensated_config_is_unchanged() {
+    recovery_after_token_conflict(false).await;
+}
+
+async fn recovery_after_token_conflict(competing_config: bool) {
+    let home = Home::new();
+    let mut client = Fake::new(&home.0);
+    let plan = plan_replace(&client.config, &home.0, "https://example.com", None, true).unwrap();
+    let expected = plan.env().clone();
+    let mut applied = apply_replace(&mut client, &home.0, plan).await.unwrap();
+    let token = home.0.join("pseudolife/token");
+    let retained = home.0.join("pseudolife/retained-token");
+    std::fs::rename(&token, &retained).unwrap();
+    pseudolife_stdio::board::state::atomic_create(&token, b"fixture-token").unwrap();
+    let failure = applied
+        .rollback_detailed(&mut client, &home.0)
+        .await
+        .unwrap_err();
+    assert!(failure.recovery_pending);
+    assert_eq!(
+        failure
+            .rollback
+            .iter()
+            .map(|event| event["state"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["restored", "removed", "left"]
+    );
+    // Restore the exact owned inode: an identity refusal alone cannot make
+    // this test pass. Only the configuration fence protects its new consumer.
+    std::fs::remove_file(&token).unwrap();
+    std::fs::rename(&retained, &token).unwrap();
+    if competing_config {
+        client.config["layers"][0]["version"] = json!("another-connection");
+        for root in ["/config", "/layers/0/config"] {
+            client.config.pointer_mut(root).unwrap()["mcp_servers"]["pseudolife-memory"]["env"] =
+                json!(expected);
+        }
+        let before = client.config.clone();
+        let failure = applied
+            .rollback_detailed(&mut client, &home.0)
+            .await
+            .unwrap_err();
+        assert!(failure.recovery_pending);
+        assert_eq!(failure.rollback.len(), 1);
+        assert_eq!(
+            failure.rollback[0]["file"],
+            json!(home.0.join("config.toml"))
+        );
+        assert_eq!(failure.rollback[0]["state"], "left");
+        assert_eq!(client.config, before);
+        assert!(token.is_file());
+    } else {
+        let events = applied
+            .rollback_detailed(&mut client, &home.0)
+            .await
+            .unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0]["file"], json!(token));
+        assert_eq!(events[0]["state"], "removed");
+        assert!(!token.exists());
+    }
 }
 
 #[tokio::test]

@@ -3,7 +3,7 @@ use super::codex::SetupError;
 use crate::board::state;
 use std::{
     fs,
-    io::Write,
+    io::{Read, Write},
     path::{Path, PathBuf},
 };
 
@@ -46,10 +46,7 @@ impl TransactionLock {
 }
 
 #[cfg(windows)]
-#[allow(unsafe_code)] // One bounded Win32 call publishes an already-private lock exclusively.
 fn create_private_lock(path: &Path) -> Result<state::PrivateFile, &'static str> {
-    use std::os::windows::ffi::OsStrExt;
-    use windows_sys::Win32::Storage::FileSystem::MoveFileW;
     let parent =
         fs::canonicalize(path.parent().ok_or("invalid_state")?).map_err(|_| "state_unavailable")?;
     let temp = parent.join(format!(
@@ -61,18 +58,117 @@ fn create_private_lock(path: &Path) -> Result<state::PrivateFile, &'static str> 
         // state::create finishes ACL hardening before the stable name appears.
         let opened = state::create(&temp)?;
         drop(opened);
-        let source: Vec<u16> = temp.as_os_str().encode_wide().chain(Some(0)).collect();
-        let target: Vec<u16> = target.as_os_str().encode_wide().chain(Some(0)).collect();
-        // MoveFileW fails if the destination exists; unlike a check followed by
-        // fs::rename, it cannot replace a competing installer's lock inode.
-        // Both buffers are NUL-terminated paths and remain alive for the call.
-        if unsafe { MoveFileW(source.as_ptr(), target.as_ptr()) } == 0 {
-            return Err("state_unavailable");
-        }
+        publish_exclusive(&temp, &target, &mut false)?;
         state::open_with_write(path, true)
     })();
     let _ = fs::remove_file(&temp);
     result
+}
+
+#[cfg(windows)]
+#[allow(unsafe_code)] // One bounded Win32 call publishes an already-private file exclusively.
+fn publish_exclusive(
+    source: &Path,
+    target: &Path,
+    published: &mut bool,
+) -> Result<(), &'static str> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::MoveFileW;
+    let source: Vec<u16> = source.as_os_str().encode_wide().chain(Some(0)).collect();
+    let target: Vec<u16> = target.as_os_str().encode_wide().chain(Some(0)).collect();
+    // SAFETY: both buffers are NUL-terminated paths that remain live for the
+    // call. MoveFileW refuses an existing destination, preserving its inode.
+    if unsafe { MoveFileW(source.as_ptr(), target.as_ptr()) } == 0 {
+        return Err("state_unavailable");
+    }
+    *published = true;
+    Ok(())
+}
+
+#[cfg(unix)]
+fn publish_exclusive(
+    source: &Path,
+    target: &Path,
+    published: &mut bool,
+) -> Result<(), &'static str> {
+    // link is exclusive at the destination even if another creator races us.
+    fs::hard_link(source, target).map_err(|_| "reservation_changed")?;
+    *published = true;
+    // The temporary second link must be removed before strict state validation
+    // (which requires nlink == 1). The receipt uses the staged inode identity,
+    // never a target reopen during this two-link interval.
+    fs::remove_file(source).map_err(|_| "state_unavailable")
+}
+
+/// A receipt for the inode we created and filled before publishing its name.
+/// Native transaction locks serialize cooperating writers; the final pathname
+/// check and rename are not an atomic CAS against uncooperative file editors.
+struct StagedPrivate {
+    path: PathBuf,
+    identity: Vec<u128>,
+    published: bool,
+}
+impl StagedPrivate {
+    fn new(target: &Path, bytes: &[u8]) -> Result<Self, SetupError> {
+        let parent = target
+            .parent()
+            .ok_or_else(|| file_error(target, "parent"))?;
+        let path = parent.join(format!(
+            ".pseudolife-publish-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        let staged = (|| {
+            let mut opened = state::create(&path).map_err(|cause| file_error(target, cause))?;
+            opened
+                .file
+                .write_all(bytes)
+                .and_then(|()| opened.file.sync_all())
+                .map_err(|_| file_error(target, "write"))?;
+            // This is the actual staged file's identity, captured before its
+            // handle closes for Windows rename's no-delete-sharing contract.
+            Ok(Self {
+                path: path.clone(),
+                identity: opened.identity,
+                published: false,
+            })
+        })();
+        if staged.is_err() {
+            let _ = fs::remove_file(&path);
+        }
+        staged
+    }
+
+    fn publish(&mut self, target: &Path, expected: Option<&[u128]>) -> Result<(), SetupError> {
+        if let Some(expected) = expected {
+            if state::open(target)
+                .map_err(|cause| file_error(target, cause))?
+                .identity
+                != expected
+            {
+                return Err(file_error(target, "changed"));
+            }
+            fs::rename(&self.path, target).map_err(|_| file_error(target, "write"))?;
+            self.published = true;
+            Ok(())
+        } else {
+            publish_exclusive(&self.path, target, &mut self.published)
+                .map_err(|cause| file_error(target, cause))
+        }
+    }
+}
+impl Drop for StagedPrivate {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
+    }
+}
+
+fn sync_parent(path: &Path) -> Result<(), SetupError> {
+    #[cfg(unix)]
+    fs::File::open(path.parent().ok_or_else(|| file_error(path, "parent"))?)
+        .and_then(|file| file.sync_all())
+        .map_err(|_| file_error(path, "write"))?;
+    let _ = path;
+    Ok(())
 }
 impl Drop for TransactionLock {
     fn drop(&mut self) {
@@ -123,6 +219,7 @@ pub(crate) struct PrivateEdit {
     before: Option<Vec<u8>>,
     after: Vec<u8>,
     identity: Option<Vec<u128>>,
+    published_identity: Option<Vec<u128>>,
     pub backup: Option<PathBuf>,
     committed: bool,
 }
@@ -147,6 +244,7 @@ impl PrivateEdit {
             before,
             after,
             identity,
+            published_identity: None,
             backup: None,
             committed: false,
         })
@@ -157,6 +255,9 @@ impl PrivateEdit {
     }
     pub fn created(&self) -> bool {
         self.committed && self.before.is_none()
+    }
+    pub fn committed(&self) -> bool {
+        self.committed
     }
     pub fn path(&self) -> &Path {
         &self.path
@@ -192,14 +293,17 @@ impl PrivateEdit {
                 return Err(file_error(&self.path, "changed"));
             }
             self.backup = Some(backup(&self.path, before)?);
-            state::atomic_write(&self.path, &self.after, self.identity.as_deref())
-                .map_err(|cause| file_error(&self.path, cause))?;
-        } else {
-            state::atomic_create(&self.path, &self.after)
-                .map_err(|cause| file_error(&self.path, cause))?;
         }
-        self.committed = true;
-        Ok(())
+        let mut staged = StagedPrivate::new(&self.path, &self.after)?;
+        let result = staged.publish(&self.path, self.identity.as_deref());
+        if staged.published {
+            // Retain ownership even when unlinking the staging alias or the
+            // directory durability check fails after successful publication.
+            self.published_identity = Some(staged.identity.clone());
+            self.committed = true;
+        }
+        result?;
+        sync_parent(&self.path)
     }
 
     pub fn rollback(&mut self) -> Result<(), SetupError> {
@@ -207,9 +311,17 @@ impl PrivateEdit {
             return Ok(());
         }
         let opened = state::open(&self.path).map_err(|cause| file_error(&self.path, cause))?;
-        if state::read(&self.path, LIMIT).map_err(|cause| file_error(&self.path, cause))?
-            != self.after
-        {
+        if Some(&opened.identity) != self.published_identity.as_ref() {
+            return Err(SetupError(
+                "Setup rollback refused a file replaced by another writer; restore the saved backup after reviewing it.",
+            ));
+        }
+        let mut bytes = Vec::new();
+        (&opened.file)
+            .take(LIMIT as u64 + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|_| file_error(&self.path, "read"))?;
+        if bytes != self.after {
             return Err(SetupError(
                 "Setup rollback refused a file changed by another writer; restore the saved backup after reviewing it.",
             ));
@@ -217,13 +329,22 @@ impl PrivateEdit {
         let identity = opened.identity;
         drop(opened.file);
         if let Some(bytes) = &self.before {
-            state::atomic_write(&self.path, bytes, Some(&identity))
-                .map_err(|cause| file_error(&self.path, cause))?;
+            let mut staged = StagedPrivate::new(&self.path, bytes)?;
+            let result = staged.publish(&self.path, Some(&identity));
+            if staged.published {
+                // This restoration is another inode we own, not the original
+                // inode from prepare. A legitimate rerun may replace it again.
+                self.identity = Some(staged.identity.clone());
+                self.published_identity = None;
+                self.committed = false;
+            }
+            result?;
         } else {
             fs::remove_file(&self.path).map_err(|_| file_error(&self.path, "remove"))?;
+            self.published_identity = None;
+            self.committed = false;
         }
-        self.committed = false;
-        Ok(())
+        sync_parent(&self.path)
     }
 }
 
