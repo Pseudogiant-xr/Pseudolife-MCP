@@ -953,18 +953,30 @@ fn list_report(
 mod tests {
     #[test]
     fn config_names_are_normalised_as_the_oracle_keeps_them() {
-        let doc = |text: &str| yaml_rust2::YamlLoader::load_from_str(text).unwrap().remove(0);
+        let doc = |text: &str| {
+            yaml_rust2::YamlLoader::load_from_str(text)
+                .unwrap()
+                .remove(0)
+        };
         let config = doc("coordination:\n  not_owner_principals: [' Friend ', friend, CODEX]\n");
         assert_eq!(
             coordination_names(&config, "not_owner_principals"),
             Some(vec!["friend".to_owned(), "codex".to_owned()])
         );
-        assert_eq!(coordination_names(&config, "allowed_principals"), Some(vec![]));
+        assert_eq!(
+            coordination_names(&config, "allowed_principals"),
+            Some(vec![])
+        );
         for bad in ["[' ']", "[1]", "[friend, '']", "friend"] {
             let config = doc(&format!("coordination:\n  not_owner_principals: {bad}\n"));
-            assert_eq!(coordination_names(&config, "not_owner_principals"), None, "{bad}");
+            assert_eq!(
+                coordination_names(&config, "not_owner_principals"),
+                None,
+                "{bad}"
+            );
         }
-        let other_bad = doc("coordination:\n  allowed_principals: ['']\n  not_owner_principals: [friend]\n");
+        let other_bad =
+            doc("coordination:\n  allowed_principals: ['']\n  not_owner_principals: [friend]\n");
         assert!(coordination_lists(&other_bad).is_none());
     }
 

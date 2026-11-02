@@ -200,6 +200,7 @@ def test_not_owner_principals_must_be_a_list_of_names():
 
 def test_a_stale_stored_view_never_widens_the_owner_set():
     from pseudolife_memory.principal_store import PrincipalSnapshot, StoredPrincipal
+    from pseudolife_memory.principals import owner_principals
     now = [1000.0]
     snap = PrincipalSnapshot(max_age=60.0, clock=lambda: now[0])
     snap.refresh(lambda: ([StoredPrincipal("laptop", "a" * 64, None, True, False)], None))

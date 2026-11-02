@@ -304,11 +304,7 @@ mod owner_tests {
             vec![stored("laptop", false, true)],
             None,
         );
-        let owners = owner_principals(
-            &CoordinationConfig::default(),
-            &env(&[], true),
-            &store,
-        );
+        let owners = owner_principals(&CoordinationConfig::default(), &env(&[], true), &store);
         assert_eq!(owners, names(&["default", "maintainer"]));
     }
 
