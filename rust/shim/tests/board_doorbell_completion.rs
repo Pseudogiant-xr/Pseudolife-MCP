@@ -1446,7 +1446,12 @@ async fn deferred_privileged_bell_survives_peer_attention() {
 #[tokio::test]
 async fn deferred_privileged_bell_drops_on_empty_expired_or_delivered() {
     for end in ["empty", "expired", "delivered", "lease_grant"] {
-        let rig = Harness::paused(true, Duration::from_secs(60)).await;
+        let rig = Harness::new(true, Duration::ZERO).await;
+        state::private_dir(rig.pending.path.parent().unwrap()).unwrap();
+        let lock = state::create(&rig.pending.path.with_extension("bell-lock"))
+            .unwrap()
+            .file;
+        lock.lock().unwrap();
         let mut privileged = view(&[1, 2], 2, 2, 1.0);
         privileged.wake.as_mut().unwrap()["reason"] = json!(if end == "lease_grant" {
             "lease_grant"
@@ -1467,14 +1472,14 @@ async fn deferred_privileged_bell_drops_on_empty_expired_or_delivered() {
         if end == "delivered" {
             next.delivered = 2;
         }
-        tokio::time::advance(Duration::from_secs(61)).await;
-        tokio::time::resume();
         if end == "expired" {
             tokio::time::sleep(Duration::from_secs(1)).await;
         }
         rig.bell.observe(BANK, &next).await;
-        assert_eq!(rig.calls(), 0);
-        assert!(!rig.pending.path.exists());
+        lock.unlock().unwrap();
+        rig.bell.observe(BANK, &next).await;
+        assert_eq!(rig.calls(), 0, "{end}");
+        assert!(!rig.pending.path.exists(), "{end}");
         rig.close().await;
     }
 }
