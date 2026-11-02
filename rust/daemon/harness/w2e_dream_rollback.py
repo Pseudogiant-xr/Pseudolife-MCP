@@ -29,7 +29,10 @@ row) and each answer's per-row outcomes:
 * ``dream-rollback-gates-prev``: the quarantine's promotion over a previous
   value, reversed by rewriting it;
 * ``dream-rollback-refused``: seeded run rows, a newer ``failed`` and
-  ``running`` run refusing the rollback, and a stale ``run_id``.
+  ``running`` run refusing the rollback, and a stale ``run_id``;
+* ``dream-rollback-persistence``: a one-shot database failure reports
+  ``partial:error:PersistenceError`` while later reversals and the final
+  save continue, retaining the rolled-back audit row.
 
 Normalizers: ``dream_runs.rolled_back_at`` is the rollback's clock
 (null-or-not), as every other write clock.
