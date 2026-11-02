@@ -91,6 +91,7 @@ class ContainerTests(unittest.TestCase):
         gate = load("container_inputs")
         for path in (".dockerignore", "rust/daemon/src/embed.rs", "rust/Cargo.toml", "rust/Cargo.lock",
                      "evals/prompts/assistant_facts_provenance.txt",
+                     "evals/prompts/sonnet_extractor_v5.md",
                      "rust/shim/src/main.rs", "rust/shim/Cargo.toml",
                      "rust/shared/pg_runtime.rs",
                      "ops/Dockerfile.daemon-rust", "ops/docker-compose.rust.yml",
@@ -108,6 +109,8 @@ class ContainerTests(unittest.TestCase):
         self.assertIn("COPY --from=builder /pseudolife-mcp /usr/local/bin/pseudolife-mcp", dockerfile)
         self.assertIn("COPY evals/prompts/assistant_facts_provenance.txt /build/evals/prompts/assistant_facts_provenance.txt", dockerfile)
         self.assertIn("!evals/prompts/assistant_facts_provenance.txt", (ROOT / ".dockerignore").read_text())
+        self.assertIn("COPY evals/prompts/sonnet_extractor_v5.md /build/evals/prompts/sonnet_extractor_v5.md", dockerfile)
+        self.assertIn("!evals/prompts/sonnet_extractor_v5.md", (ROOT / ".dockerignore").read_text())
         job = (ROOT / ".github/workflows/rust.yml").read_text().split(
             "\n  daemon-image:", 1)[1].split("\n  parity:", 1)[0]
         self.assertIn("docker run --rm --network none w3j-daemon-rust:prep pseudolife-mcp version", job)

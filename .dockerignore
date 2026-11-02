@@ -29,6 +29,7 @@ docs
 evals
 !evals/prompts
 !evals/prompts/assistant_facts_provenance.txt
+!evals/prompts/sonnet_extractor_v5.md
 tests
 examples
 frontend
