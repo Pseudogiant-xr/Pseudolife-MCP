@@ -31,8 +31,8 @@ A selection is one of:
                          the parity shards' candidate binaries in the env
 
 An iteration passes only with evidence: a pytest or cargo run where every
-selected test ran and passed (a skip is not evidence, so a binary holding
-#[ignore] tests is selected test by test; a Rust test that returns early
+selected test ran and passed (a runtime skip is not evidence; nextest's
+default-excluded #[ignore] tests are not selected; a Rust test that returns early
 still counts as run, so a cargo row lists each test's seconds), or a row or scenario that
 compared at least one case. Subcommands: ``plan`` checks the inputs and
 lists the iterations, ``archive`` builds a cargo selection's archive,
@@ -263,7 +263,8 @@ def junit_counts(report: Path) -> tuple[int, int]:
 def selected_cases(names: list[str], report: Path) -> list | None:
     """The (suite, testcase, matching items) a nextest JUnit report holds for
     a cargo selection, or None without a readable report. Tests outside the
-    selection (the rest of a binary when one test is named) are left out."""
+    selection (the rest of a binary when one test is named, or tests excluded
+    by nextest's default run-ignored policy) are left out."""
     try:
         root = ElementTree.parse(report).getroot()
     except (OSError, ElementTree.ParseError):
@@ -272,6 +273,11 @@ def selected_cases(names: list[str], report: Path) -> list | None:
     selected = []
     for suite in root.iter("testsuite"):
         for case in suite.iter("testcase"):
+            # Only nextest's canonical default-exclusion record is not selected.
+            # Unknown skips or records carrying additional failure evidence fail closed.
+            if (len(case) == 1 and case[0].tag == "skipped"
+                    and case[0].get("message") == "Skipped: test does not match the run-ignored option"):
+                continue
             matched = [name for name, (package, binary, test) in zip(names, items)
                        if suite.get("name") == cargo_binary_id(package, binary) and test in (None, case.get("name"))]
             if matched:
