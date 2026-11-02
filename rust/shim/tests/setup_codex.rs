@@ -5,6 +5,195 @@ use serde_json::{Map, Value, json};
 use std::path::Path;
 
 #[tokio::test]
+async fn unchanged_plan_refuses_effective_connection_changed_after_planning() {
+    for no_spawn in [false, true] {
+        for key in ["PSEUDOLIFE_MCP_DAEMON_URL", "PSEUDOLIFE_MCP_TOKEN_FILE"] {
+            let home = Home::new();
+            let mut client = Fake::new(&home.0);
+            let plan =
+                plan_replace(&client.config, &home.0, "https://example.com", None, true).unwrap();
+            apply_replace(&mut client, &home.0, plan).await.unwrap();
+            let plan = plan_replace(
+                &client.config,
+                &home.0,
+                "https://example.com",
+                None,
+                no_spawn,
+            )
+            .unwrap();
+            assert_eq!(plan.env(), plan.previous_env());
+            let connection = home.0.join("pseudolife/connection.json");
+            let before = std::fs::read(&connection).unwrap();
+            client.config["config"]["mcp_servers"]["pseudolife-memory"]["env"][key] =
+                json!("project-changed-value");
+            client.calls.clear();
+            assert!(apply_replace(&mut client, &home.0, plan).await.is_err());
+            assert_eq!(std::fs::read(&connection).unwrap(), before);
+            assert!(
+                client
+                    .calls
+                    .iter()
+                    .all(|(method, _)| method != "config/batchWrite")
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn project_authority_diagnostic_uses_installed_codex_origin_shape() {
+    let home = Home::new();
+    let mut client = Fake::new(&home.0);
+    let folder = home.0.join("project/.codex");
+    client.config["config"]["mcp_servers"]["pseudolife-memory"]["env"]["PSEUDOLIFE_MCP_NO_SPAWN"] =
+        json!("0");
+    client.config["layers"].as_array_mut().unwrap().push(json!({"name":{"type":"project","dotCodexFolder":folder},"version":"project-a","config":{"mcp_servers":{"pseudolife-memory":{"env":{"PSEUDOLIFE_MCP_NO_SPAWN":"0"}}}}}));
+    let plan = plan_replace(&client.config, &home.0, "https://example.com", None, true).unwrap();
+    let error = apply_replace(&mut client, &home.0, plan)
+        .await
+        .err()
+        .unwrap()
+        .to_string();
+    assert!(error.contains(&format!("{:?}", folder.join("config.toml"))));
+    assert!(error.contains("PSEUDOLIFE_MCP_NO_SPAWN"));
+    assert!(!home.0.join("pseudolife").exists());
+}
+
+#[tokio::test]
+async fn write_ack_unknown_pending_write_keeps_token_after_baseline_reads() {
+    struct Deferred {
+        inner: Fake,
+        pending: Option<Value>,
+    }
+    impl Rpc for Deferred {
+        async fn rpc(&mut self, method: &str, params: Value) -> Result<Value, SetupError> {
+            if method == "config/batchWrite" {
+                self.pending = Some(params);
+                return Err(SetupError("fixture write timed out while still pending"));
+            }
+            self.inner.rpc(method, params).await
+        }
+    }
+    let home = Home::new();
+    let mut client = Deferred {
+        inner: Fake::new(&home.0),
+        pending: None,
+    };
+    let plan = plan_replace(
+        &client.inner.config,
+        &home.0,
+        "https://example.com",
+        None,
+        true,
+    )
+    .unwrap();
+    assert!(apply_replace(&mut client, &home.0, plan).await.is_err());
+    // Read snapshots returned the baseline, but the timed-out request remains
+    // pending and may commit after the failed apply has returned to its caller.
+    let pending = client.pending.take().unwrap();
+    client
+        .inner
+        .rpc("config/batchWrite", pending)
+        .await
+        .unwrap();
+    let token = home.0.join("pseudolife/token");
+    assert!(
+        token.is_file(),
+        "the later committed write must retain its token"
+    );
+    assert_eq!(
+        client.inner.config["config"]["mcp_servers"]["pseudolife-memory"]["env"]["PSEUDOLIFE_MCP_TOKEN_FILE"],
+        json!(token)
+    );
+}
+
+#[tokio::test]
+async fn write_ack_restore_retry_survives_one_read_error() {
+    retry_after_restore_ack(false, false).await;
+}
+#[tokio::test]
+async fn write_ack_restore_retry_survives_cancelled_readback() {
+    retry_after_restore_ack(true, false).await;
+}
+#[tokio::test]
+async fn write_ack_restore_retry_still_refuses_a_competing_version() {
+    retry_after_restore_ack(false, true).await;
+}
+
+async fn retry_after_restore_ack(cancel: bool, competing: bool) {
+    struct Fault {
+        inner: Fake,
+        writes: usize,
+        fail_read: bool,
+        cancel: bool,
+    }
+    impl Rpc for Fault {
+        async fn rpc(&mut self, method: &str, params: Value) -> Result<Value, SetupError> {
+            if method == "config/read" && self.fail_read {
+                self.fail_read = false;
+                if self.cancel {
+                    return std::future::pending().await;
+                }
+                return Err(SetupError(
+                    "fixture one-shot read error after restore acknowledgement",
+                ));
+            }
+            let result = self.inner.rpc(method, params).await;
+            if method == "config/batchWrite" {
+                self.writes += 1;
+                if self.writes == 2 {
+                    self.fail_read = true;
+                }
+            }
+            result
+        }
+    }
+    let home = Home::new();
+    let mut client = Fault {
+        inner: Fake::new(&home.0),
+        writes: 0,
+        fail_read: false,
+        cancel,
+    };
+    let plan = plan_replace(
+        &client.inner.config,
+        &home.0,
+        "https://example.com",
+        None,
+        true,
+    )
+    .unwrap();
+    let mut applied = apply_replace(&mut client, &home.0, plan).await.unwrap();
+    if cancel {
+        assert!(
+            tokio::time::timeout(
+                std::time::Duration::from_millis(20),
+                applied.rollback(&mut client, &home.0)
+            )
+            .await
+            .is_err()
+        );
+    } else {
+        assert!(applied.rollback(&mut client, &home.0).await.is_err());
+    }
+    assert_eq!(client.writes, 2);
+    let token = home.0.join("pseudolife/token");
+    let connection = home.0.join("pseudolife/connection.json");
+    assert!(token.is_file() && connection.is_file());
+    if competing {
+        client.inner.config["layers"][0]["version"] = json!("competing-after-restoration");
+        assert!(applied.rollback(&mut client, &home.0).await.is_err());
+        assert!(token.is_file() && connection.is_file());
+    } else {
+        applied.rollback(&mut client, &home.0).await.unwrap();
+        assert!(!token.exists() && !connection.exists());
+    }
+    assert_eq!(
+        client.writes, 2,
+        "retry verifies the acknowledged restore without a second write"
+    );
+}
+
+#[tokio::test]
 async fn lower_system_no_spawn_does_not_override_the_user_connection() {
     let home = Home::new();
     let mut client = Fake::new(&home.0);
@@ -505,7 +694,7 @@ impl Rpc for Fake {
         self.calls.push((method.to_owned(), params.clone()));
         if method == "config/batchWrite" {
             if self.reject {
-                return Err(SetupError("fixture refusal"));
+                return Err(SetupError::rejected("fixture refusal"));
             }
             assert_eq!(
                 params["expectedVersion"],
@@ -1346,7 +1535,7 @@ fn rpc_fixture() {
                 "reject" => {
                     println!(
                         "{}",
-                        json!({"id":id,"error":{"message":"fixture-secret-not-a-diagnostic"}})
+                        json!({"id":id,"error":{"code":-32600,"message":"fixture-secret-not-a-diagnostic"}})
                     );
                     std::io::stdout().flush().unwrap();
                     continue;
@@ -1456,6 +1645,12 @@ async fn rpc_rejection_redacts_child_diagnostics() {
     let mut client = fixture_client(&home.0, "reject").await;
     let error = client.rpc("config/read", json!({})).await.unwrap_err();
     assert!(!error.to_string().contains("fixture-secret"));
+    assert_eq!(
+        error,
+        SetupError::rejected(
+            "Codex rejected the setup request; update Codex or review its configuration before retrying."
+        )
+    );
     client.close().await;
 }
 

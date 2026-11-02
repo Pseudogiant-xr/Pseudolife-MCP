@@ -13,7 +13,7 @@
     "docs/dev/ci-budget.md": "21fed3dc7ba96010612ab32bb8335927d12c67150a5dbd019411f8dbaf931ba3",
     "docs/dev/dev-machines.md": "802349bb1973a19f1e9a93db4195a54fdf5e8c1c3b7a79554c4a6e5e855ba6f9",
     "docs/dev/merge-batches.md": "5ca26a343b58ab26302bd85ae51347486e2f5107a83399a5913eb3354a20cb80",
-    "docs/dev/release-assets.md": "1e0257716b0ccd0fc33e6ae5ae54da1cdf614aae9645a5abe956265adae76d87",
+    "docs/dev/release-assets.md": "3fb0c549c0252024d5278ad158fe93398f349f913844ff3e65bc88bd9eff7235",
     "docs/dev/worktree-retention.md": "23464a303672be4f546ecbf7c8e357c41c4bd2c684202e05cfebec6df78d7355",
     "docs/evidence/rust-stream-c-episode-20261009.json": "6dda143104a5b745eb322041190496caa9af3b61a219620c41633f6477d15079",
     "docs/guide/agent-isolation.md": "e8509e0c6567426a88fad7c301b0f06ac8d69d19f9724ffe9a4643ece7f7d6e4",
@@ -213,7 +213,7 @@
     "examples/hook-instructions.md": "d17b3b4173a0955f0f68c822e500a4a617dff6786fae8bc424d95906b681a0bc",
     "ops/.env.example": "60d44256635f0a131092c54104994cfa65c6e5ab93f94fd8b4f7339442185e0d",
     "ops/Dockerfile.daemon": "91924b87f19bf50e14e6764687ee13b0dc3aa2ba3edd89dba521203260e91166",
-    "ops/Dockerfile.daemon-rust": "4ceb0fa1183c9fb113630accdb1a555034f0abc2d98e0424f36b044d3e5e98c3",
+    "ops/Dockerfile.daemon-rust": "cf407c37169b92e0d11c48422948091ad260790cd54243d62f16366165ef9962",
     "ops/Dockerfile.extractor": "cfd9068d7ba58aad49e00b000ca82ebe83add0e4d8ba7f75043c424243e3451d",
     "ops/Dockerfile.pg": "06308c96aaa3ceedf2fc988c1fccfe8573e4ae1836143546ce1fb7d996707201",
     "ops/assemble_changelog.py": "5462bfcb97a59e280311f0a1628e406fd3a47a45ed3ef39418e1e263b422fb38",
@@ -230,7 +230,7 @@
     "ops/dedup_cortex.py": "483aa26a4edaa5e75dc41b6133f7e663e0d826dbf61ebd83a20a9b3b29ac2727",
     "ops/docker-compose.ghcr.yml": "a64059a8d81e18ccb441bedd3510c366e90172e3d70681ce7a91e8aa58d174de",
     "ops/docker-compose.rust-daemon.yml": "035e8a3b34d6738fb16d1770719419e98d11940629a01895b57b49ffadf1647b",
-    "ops/docker-compose.rust-ghcr.yml": "55eeaee9b85195c40366dd4dd49960ae15973abb09101a63c2360e9951473c14",
+    "ops/docker-compose.rust-ghcr.yml": "909d2f6066466d3650a89bd99e9ec2ca089af94ad831a78268d2ca6b74180b96",
     "ops/docker-compose.rust-shadow.yml": "0863cfdbfd60102526aa910d0db89d03ea82e97b3991ca7055211f575ad78030",
     "ops/docker-compose.rust.yml": "29b3590c58a8cd7a13a581d0e0488e48b2f934ad10844b4bf7b0b2eed4670ce0",
     "ops/docker-compose.yml": "dc564d1296a8179eb14c5c552334c827d5c3fa673539dd409a5ae0cf31bc7d5d",
@@ -6955,7 +6955,7 @@
       "producers": [
         {
           "evidence": "documented",
-          "location": "docs/dev/release-assets.md:75",
+          "location": "docs/dev/release-assets.md:91",
           "shape": {
             "argv_source": "version",
             "channel": "argv",
@@ -23606,7 +23606,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/Dockerfile.daemon-rust:60",
+          "location": "ops/Dockerfile.daemon-rust:62",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -23683,7 +23683,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/Dockerfile.daemon-rust:59",
+          "location": "ops/Dockerfile.daemon-rust:61",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -23721,7 +23721,7 @@
       "producers": [
         {
           "evidence": "static",
-          "location": "ops/Dockerfile.daemon-rust:62",
+          "location": "ops/Dockerfile.daemon-rust:64",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -23798,7 +23798,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/Dockerfile.daemon-rust:61",
+          "location": "ops/Dockerfile.daemon-rust:63",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -28146,7 +28146,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/dev/release-assets.md:58",
+          "location": "docs/dev/release-assets.md:74",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -31727,7 +31727,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/Dockerfile.daemon-rust:44",
+          "location": "ops/Dockerfile.daemon-rust:46",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -31871,7 +31871,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/Dockerfile.daemon-rust:42",
+          "location": "ops/Dockerfile.daemon-rust:44",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -33031,7 +33031,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/Dockerfile.daemon-rust:43",
+          "location": "ops/Dockerfile.daemon-rust:45",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -38934,7 +38934,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/Dockerfile.daemon-rust:48",
+          "location": "ops/Dockerfile.daemon-rust:50",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -58506,7 +58506,7 @@
       "dynamic": "unresolved",
       "evidence": "documented",
       "kind": "environment",
-      "location": "docs/dev/release-assets.md:64",
+      "location": "docs/dev/release-assets.md:80",
       "name": "PSEUDOLIFE_RUST_IMAGE",
       "shape": {
         "channel": "environment",
@@ -58772,7 +58772,7 @@
       "dynamic": "unresolved",
       "evidence": "documented",
       "kind": "environment",
-      "location": "ops/Dockerfile.daemon-rust:37",
+      "location": "ops/Dockerfile.daemon-rust:39",
       "name": "PSEUDOLIFE_DAEMON_ONNX_DIR",
       "shape": {
         "channel": "environment",
@@ -60370,7 +60370,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/Dockerfile.daemon-rust:37",
+      "location": "ops/Dockerfile.daemon-rust:39",
       "name": "PSEUDOLIFE_DAEMON_RERANK_DIR",
       "shape": {
         "channel": "environment",
@@ -65337,7 +65337,7 @@
     {
       "evidence": "documented",
       "kind": "environment",
-      "location": "docs/dev/release-assets.md:78",
+      "location": "docs/dev/release-assets.md:94",
       "name": "PSEUDOLIFE_PUBLISH_RUST_DAEMON",
       "shape": {
         "channel": "environment",
@@ -65353,7 +65353,7 @@
     {
       "evidence": "documented",
       "kind": "environment",
-      "location": "docs/dev/release-assets.md:79",
+      "location": "docs/dev/release-assets.md:95",
       "name": "PSEUDOLIFE_PUBLISH_RUST_ASSETS",
       "shape": {
         "channel": "environment",
@@ -66144,7 +66144,7 @@
     {
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/Dockerfile.daemon-rust:15",
+      "location": "ops/Dockerfile.daemon-rust:17",
       "name": "PSEUDOLIFE_DAEMON_PDFIUM_DIR",
       "shape": {
         "channel": "environment",
@@ -66160,7 +66160,7 @@
     {
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/Dockerfile.daemon-rust:45",
+      "location": "ops/Dockerfile.daemon-rust:47",
       "name": "PSEUDOLIFE_DAEMON_ORT_THREADS",
       "shape": {
         "channel": "environment",
@@ -66176,7 +66176,7 @@
     {
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/Dockerfile.daemon-rust:47",
+      "location": "ops/Dockerfile.daemon-rust:49",
       "name": "PSEUDOLIFE_DAEMON_PDFIUM_DIR",
       "shape": {
         "channel": "environment",
@@ -67334,13 +67334,13 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/dev/release-assets.md:58",
+      "location": "docs/dev/release-assets.md:74",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_IMAGE_TAG"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/dev/release-assets.md:64",
+      "location": "docs/dev/release-assets.md:80",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_RUST_IMAGE"
     },
@@ -80747,18 +80747,18 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/Dockerfile.daemon-rust:27",
+      "location": "ops/Dockerfile.daemon-rust:29",
       "reason": "request target supplied dynamically or external"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/Dockerfile.daemon-rust:37",
+      "location": "ops/Dockerfile.daemon-rust:39",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_DAEMON_ONNX_DIR"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/Dockerfile.daemon-rust:37",
+      "location": "ops/Dockerfile.daemon-rust:39",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_DAEMON_RERANK_DIR"
     },
