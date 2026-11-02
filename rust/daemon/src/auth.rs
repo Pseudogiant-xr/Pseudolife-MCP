@@ -323,6 +323,14 @@ impl PrincipalStore {
         self.row(principal).is_some_and(|r| r.board && !r.revoked)
     }
 
+    /// `resolves`: the principal still authenticates on its own, a row
+    /// with a token hash that is not revoked (a Console session it issued
+    /// needs that).
+    pub fn resolves(&self, principal: &str) -> bool {
+        self.row(principal)
+            .is_some_and(|r| r.token_hash.as_deref().is_some_and(|h| !h.is_empty()) && !r.revoked)
+    }
+
     /// `has`: the view holds a row of that name, revoked or not.
     pub fn has(&self, principal: &str) -> bool {
         self.row(principal).is_some()
@@ -617,15 +625,30 @@ mod tests {
     fn operator_gate_is_an_allowlist_a_paired_session_cannot_pass() {
         use PrincipalSource::{Environment, Open, Session, Store};
         for path in ["/api/config", "/api/daemon-notice"] {
-            assert!(operator_allowed(Some(Session), Some(Environment), "POST", path));
+            assert!(operator_allowed(
+                Some(Session),
+                Some(Environment),
+                "POST",
+                path
+            ));
             assert!(!operator_allowed(Some(Session), Some(Store), "POST", path));
             assert!(!operator_allowed(Some(Session), None, "POST", path));
             assert!(!operator_allowed(Some(Session), Some(Open), "POST", path));
-            assert!(!operator_allowed(Some(Session), Some(Session), "POST", path));
+            assert!(!operator_allowed(
+                Some(Session),
+                Some(Session),
+                "POST",
+                path
+            ));
             // Reading them is not operator-gated.
             assert!(operator_allowed(Some(Session), Some(Store), "GET", path));
         }
-        assert!(operator_allowed(Some(Session), Some(Store), "POST", "/api/stats"));
+        assert!(operator_allowed(
+            Some(Session),
+            Some(Store),
+            "POST",
+            "/api/stats"
+        ));
         assert!(!operator(Some(Store), Some(Environment)));
     }
 

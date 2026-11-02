@@ -1095,7 +1095,8 @@ mod tests {
             .unwrap();
         service.fire_session_dream();
         assert!(service.snapshot().storage.is_none());
-        let health = crate::health::payload(&service, &crate::auth::PrincipalStore::new()).await;
+        let health =
+            crate::health::payload(&service, &crate::auth::PrincipalStore::new(), false).await;
         assert_eq!(health["read_only"], true);
     }
     #[tokio::test]

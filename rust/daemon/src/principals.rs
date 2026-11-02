@@ -17,6 +17,7 @@ use tokio_postgres::Client;
 use tokio_postgres::error::SqlState;
 
 use crate::auth::{self, StoredPrincipal};
+use crate::console_sessions::SessionSnapshot;
 use crate::principal_activity::Recorder;
 use crate::storage::{self, BANK_ID_META_KEY};
 
@@ -105,6 +106,11 @@ pub async fn revoke(client: &mut Client, name: &str) -> Result<bool, tokio_postg
             &[&name],
         )
         .await?;
+    if row.is_some() {
+        // v59: its Console sessions end with it (spec 2026-11-02, section
+        // 3), so re-inviting the name never brings them back.
+        crate::console_sessions::revoke_principal_sessions(&tx, name, None, None).await?;
+    }
     tx.commit().await?;
     Ok(row.is_some())
 }
@@ -239,6 +245,18 @@ pub async fn redeem(
             )
             .await?;
     }
+    if let Some(r) = &row {
+        // v59: a re-pair ends the Console sessions the principal's older
+        // token issued, in this transaction (spec 2026-11-02, section 3).
+        let principal: String = r.get(0);
+        crate::console_sessions::revoke_principal_sessions(
+            &tx,
+            &principal,
+            Some(crate::console_sessions::METHOD_LINK),
+            Some(token_hash),
+        )
+        .await?;
+    }
     tx.execute(
         "UPDATE public.principals SET paired_code_hash = NULL \
          WHERE paired_code_hash IS NOT NULL \
@@ -269,6 +287,11 @@ pub struct Refresher {
     /// v58: the gate's activity record, written after each good refresh.
     activity: Option<Arc<Recorder>>,
     activity_failing: bool,
+    /// v59: the Console sessions' view, reloaded on the same connection
+    /// right after the principals (`None` on an open daemon).
+    sessions: Option<Arc<SessionSnapshot>>,
+    sessions_failing: bool,
+    uses_flushed_at: Option<std::time::Instant>,
 }
 
 impl Refresher {
@@ -282,7 +305,75 @@ impl Refresher {
             failing: false,
             activity: None,
             activity_failing: false,
+            sessions: None,
+            sessions_failing: false,
+            uses_flushed_at: None,
         }
+    }
+
+    pub fn with_sessions(mut self, sessions: Option<Arc<SessionSnapshot>>) -> Self {
+        self.sessions = sessions;
+        self
+    }
+
+    /// `_refresh_sessions`: reload the Console sessions on the refresher's
+    /// connection. A failure leaves that view to age towards stale (its
+    /// bearers then get 503, never 401) and is logged once.
+    async fn refresh_sessions(&mut self) {
+        let Some(sessions) = self.sessions.clone() else {
+            return;
+        };
+        let Some((client, _)) = self.conn.as_ref() else {
+            return;
+        };
+        let read = sessions.begin_refresh();
+        match crate::console_sessions::load_sessions(client).await {
+            Ok((rows, passkeys)) => {
+                sessions.finish_refresh(read, rows, passkeys);
+                if self.sessions_failing {
+                    eprintln!("console sessions: refresh recovered");
+                }
+                self.sessions_failing = false;
+            }
+            Err(_e) => {
+                if !self.sessions_failing {
+                    eprintln!("console sessions: refresh failed (database error)");
+                }
+                self.sessions_failing = true;
+            }
+        }
+    }
+
+    /// `flush_session_uses`: write the Console sessions' last use, at most
+    /// once a minute, on the live connection only; a failed write keeps
+    /// them for the next. A read-only (shadow) refresher never writes.
+    pub async fn flush_session_uses(&mut self) -> bool {
+        if self.read_only {
+            return false;
+        }
+        let Some(sessions) = self.sessions.clone() else {
+            return false;
+        };
+        let Some((client, _)) = self.conn.as_mut().filter(|(c, _)| !c.is_closed()) else {
+            return false;
+        };
+        if self
+            .uses_flushed_at
+            .is_some_and(|t| t.elapsed() < crate::console_sessions::USE_FLUSH)
+        {
+            return false;
+        }
+        let uses = sessions.take_uses();
+        if uses.is_empty() {
+            return false;
+        }
+        if let Err(_e) = crate::console_sessions::flush_uses(client, &uses).await {
+            sessions.give_back_uses(uses);
+            eprintln!("console sessions: last-use write failed (database error)");
+            return false;
+        }
+        self.uses_flushed_at = Some(std::time::Instant::now());
+        true
     }
 
     pub fn with_activity(mut self, activity: Option<Arc<Recorder>>) -> Self {
@@ -374,6 +465,7 @@ impl Refresher {
                     eprintln!("stored principals: refresh recovered");
                 }
                 self.failing = false;
+                self.refresh_sessions().await;
                 true
             }
             Err(_e) => {
@@ -397,6 +489,7 @@ impl Refresher {
         loop {
             if self.refresh_once().await {
                 self.flush_activity().await;
+                self.flush_session_uses().await;
             }
             tokio::time::sleep(auth::REFRESH_EVERY).await;
         }
@@ -412,11 +505,13 @@ pub fn spawn_refresher(
     store: Arc<auth::PrincipalStore>,
     env_principals: Vec<String>,
     activity: Option<Arc<Recorder>>,
+    sessions: Option<Arc<SessionSnapshot>>,
     read_only: bool,
 ) -> JoinHandle<()> {
     tokio::spawn(
         Refresher::new(dsn, store, env_principals)
             .with_activity(activity)
+            .with_sessions(sessions)
             .with_read_only(read_only)
             .run(),
     )

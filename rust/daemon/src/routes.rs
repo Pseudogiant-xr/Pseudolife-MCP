@@ -14,6 +14,7 @@ pub(crate) mod maintainer;
 pub(crate) mod mcp;
 pub(crate) mod pair;
 pub(crate) mod read;
+pub(crate) mod signin;
 pub(crate) mod writes;
 
 use std::collections::HashSet;

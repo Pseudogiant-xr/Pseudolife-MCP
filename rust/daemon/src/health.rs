@@ -346,8 +346,14 @@ pub fn pending(
     out
 }
 
-/// `_build_health_payload`, in Python's key order.
-pub async fn payload(svc: &Service, principals: &crate::auth::PrincipalStore) -> Value {
+/// `_build_health_payload`, in Python's key order. `signin_link` is
+/// `console_signin.link`: whether this daemon offers the Console's link
+/// sign-in (a configured token and the session view).
+pub async fn payload(
+    svc: &Service,
+    principals: &crate::auth::PrincipalStore,
+    signin_link: bool,
+) -> Value {
     let mut p = Map::new();
     p.insert("status".into(), json!("ok"));
     p.insert("version".into(), json!(env!("CARGO_PKG_VERSION")));
@@ -364,6 +370,13 @@ pub async fn payload(svc: &Service, principals: &crate::auth::PrincipalStore) ->
             svc.persist_errors
                 .load(std::sync::atomic::Ordering::Relaxed)
         ),
+    );
+    // Which Console sign-ins this daemon offers (spec 2026-11-02): the
+    // Console reads this, never a 401 or 404, to decide whether to offer
+    // them. The passkey sign-in is not built yet (Python reports false too).
+    p.insert(
+        "console_signin".into(),
+        json!({"link": signin_link, "passkey": false}),
     );
     if let Some(b) = &svc.env.build {
         p.insert("build".into(), build_json(b));
@@ -486,7 +499,7 @@ mod tests {
             String::new(),
             false,
         );
-        let p = payload(&service, &crate::auth::PrincipalStore::new()).await;
+        let p = payload(&service, &crate::auth::PrincipalStore::new(), false).await;
         assert_eq!(p["version"], json!(env!("CARGO_PKG_VERSION")));
         assert_ne!(p["version"], json!("0.0.0"));
     }
@@ -502,7 +515,7 @@ mod tests {
             false,
         );
         let principals = crate::auth::PrincipalStore::new();
-        let p = payload(&service, &principals).await;
+        let p = payload(&service, &principals, true).await;
         assert_eq!(
             p["schema"],
             json!(crate::storage::schema::SCHEMA_META_VERSION)
@@ -518,6 +531,10 @@ mod tests {
         );
         let keys: Vec<&String> = p.as_object().unwrap().keys().collect();
         assert_eq!(keys[keys.len() - 2..], ["ready", "pending"]);
+        // `console_signin` follows `persist_errors`, as Python's does.
+        let at = |k: &str| keys.iter().position(|x| *x == k).unwrap();
+        assert_eq!(at("console_signin"), at("persist_errors") + 1);
+        assert_eq!(p["console_signin"], json!({"link": true, "passkey": false}));
     }
 
     #[test]
@@ -605,7 +622,7 @@ mod tests {
             stall.record(failed.as_object().unwrap(), false, None);
             stall.record(failed.as_object().unwrap(), false, None);
         }
-        let p = payload(&service, &crate::auth::PrincipalStore::new()).await;
+        let p = payload(&service, &crate::auth::PrincipalStore::new(), false).await;
         assert_eq!(p["extractor"], json!("stalled"));
         assert_eq!(p["stall"]["reason"], json!("http_503"));
         let keys: Vec<&String> = p.as_object().unwrap().keys().collect();

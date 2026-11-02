@@ -25,12 +25,13 @@ pub(super) const SERVED: &[(&str, &str)] = &[
 
 pub(super) async fn route(req: &mut Request<'_>) -> Option<Response> {
     match (req.method, req.path) {
-        ("GET", path) if crate::read::maintainer::PATHS.contains(&path) => {
-            Some(crate::read::maintainer::route(req.app, path, req.params, req.headers).await)
-        }
+        ("GET", path) if crate::read::maintainer::PATHS.contains(&path) => Some(
+            crate::read::maintainer::route(req.app, path, req.params, req.headers, req.session)
+                .await,
+        ),
         ("POST", path) if crate::maintainer_ops::PATHS.contains(&path) => {
             let body = std::mem::take(&mut req.body);
-            Some(crate::maintainer_ops::route(req.app, path, req.headers, body).await)
+            Some(crate::maintainer_ops::route(req.app, path, req.headers, req.session, body).await)
         }
         ("GET", "/api/config") => {
             let svc = &req.app.service;
