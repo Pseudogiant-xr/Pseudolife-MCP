@@ -22,6 +22,7 @@ COMPOSE_FILES = (
     "docker-compose.yml", "docker-compose.ghcr.yml", "docker-compose.rust-daemon.yml",
     "docker-compose.rust-shadow.yml", "docker-compose.rust-ghcr.yml",
 )
+BUNDLE_FILES = (*COMPOSE_FILES, "Dockerfile.extractor")
 
 
 def checked_version(version: str) -> str:
@@ -110,7 +111,7 @@ def assemble(root: Path, value: str, out: Path) -> None:
         binary_contents(out / asset_name(value, target), target)
     compose = out / f"pseudolife-compose-{checked_version(value)}.tar.gz"
     with tarfile.open(compose, "w:gz") as stream:
-        for name in COMPOSE_FILES:
+        for name in BUNDLE_FILES:
             tar_member(stream, name, (root / "ops" / name).read_bytes(), 0o644)
     names = sorted(expected | {compose.name})
     lines = [hashlib.sha256((out / name).read_bytes()).hexdigest() + "  " + name + "\n" for name in names]

@@ -29,7 +29,7 @@ def test_assemble_hashes_the_complete_set_and_preserves_compose_bytes(tmp_path):
     out = tmp_path / "out"
     root = tmp_path / "repo"
     (root / "ops").mkdir(parents=True)
-    for name in assets.COMPOSE_FILES:
+    for name in assets.BUNDLE_FILES:
         (root / "ops" / name).write_bytes((name + "\n").encode())
     for target in assets.TARGETS:
         assets.package(binary, "1.2.3", target, out)
@@ -41,10 +41,19 @@ def test_assemble_hashes_the_complete_set_and_preserves_compose_bytes(tmp_path):
         digest, name = line.split("  ")
         assert digest == hashlib.sha256((out / name).read_bytes()).hexdigest()
     with tarfile.open(out / "pseudolife-compose-1.2.3.tar.gz") as stream:
-        assert stream.getnames() == list(assets.COMPOSE_FILES)
+        assert stream.getnames() == list(assets.BUNDLE_FILES)
         for member in stream:
             assert member.isfile()
             assert stream.extractfile(member).read() == (root / "ops" / member.name).read_bytes()
+
+
+def test_extractor_build_needs_no_unbundled_copy_inputs():
+    source = (assets.ROOT / "ops/Dockerfile.extractor").read_text()
+    for line in source.splitlines():
+        if line.startswith(("COPY ", "ADD ")):
+            assert line.startswith("COPY --from="), "add local extractor inputs to BUNDLE_FILES before release"
+    overlay = (assets.ROOT / "ops/docker-compose.rust-ghcr.yml").read_text()
+    assert "pseudolife-extractor:\n    build:\n      context: .\n      dockerfile: Dockerfile.extractor" in overlay
 
 
 def test_assemble_refuses_missing_or_extra_targets_before_checksums(tmp_path):

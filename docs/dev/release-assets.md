@@ -40,7 +40,7 @@ release, verify the archive before extraction, and refuse missing or
 duplicate entries and digest mismatches. A missing native asset means
 that release did not publish the opt-in native set.
 
-The compose archive has these five regular files at its root, copied from
+The compose archive has these six regular files at its root, copied from
 the release's `ops/` directory without rewriting their contents:
 
 - `docker-compose.yml`
@@ -48,6 +48,16 @@ the release's `ops/` directory without rewriting their contents:
 - `docker-compose.rust-daemon.yml`
 - `docker-compose.rust-shadow.yml`
 - `docker-compose.rust-ghcr.yml`
+- `Dockerfile.extractor`
+
+The Rust GHCR overlay resolves the extractor build context to this bundle
+directory and its `Dockerfile.extractor`. That Dockerfile has no local
+`COPY` inputs; it downloads its GGUF in a build stage and copies it into
+the llama.cpp server image. A fresh native install builds this sidecar
+locally, just as the existing installer does; it needs network access for
+the first build but no Python. The sidecar has no published GHCR image
+contract. Daemon-only updates keep it unchanged. Future local extractor
+build inputs must be added to this bundle before release.
 
 The disposable development stack `docker-compose.rust.yml` is excluded.
 Release-mode consumers no longer need a Python wheel to obtain compose
