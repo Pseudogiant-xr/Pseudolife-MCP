@@ -1,22 +1,11 @@
-//! `pseudolife-mcp invite` (invite_cli.py) over an explicit
-//! `PSEUDOLIFE_MCP_DATABASE_URL`:
-//!
-//! - `invite <name> [--tier T] [--board|--no-board] [--expires D] [--replace]
-//!   [--url U] [--port P] [--bank FP] [--json]`
-//! - `invite --list [--bank FP] [--json]` (with last seen and refused tokens, v58)
-//! - `invite --revoke <name> [--yes] [--bank FP] [--json]`
-//!
-//! Each option at most once, a value as the next argument; the name
-//! anywhere among them. Deferred before any effect: argparse's own errors
-//! and help, no DSN (the lite bank, the daemon container, psql in the
-//! Postgres container), a DSN this crate's client does not take or cannot
-//! reach, a revocation's question on a terminal, environment token or tier
-//! maps that would log a warning, a `config.yaml` where `_listed_note` reads
-//! one, and (without `--url`) any `tailscale` CLI `expose status` could run.
+//! Native invite creation and administration over PostgreSQL or the daemon
+//! container, with stopped-daemon list/revoke through psql.
 use super::invite_db::{self, DbError};
 use super::pyjson::{self, J};
 use super::{Defer, net};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
+#[path = "invite_transport.rs"]
+mod transport;
 
 const EXIT_OK: u8 = 0;
 const EXIT_FAILED: u8 = 1;
@@ -302,17 +291,6 @@ fn name_refusal(name: &str) -> Result<Option<String>, Defer> {
     Ok(None)
 }
 
-/// Whether a path is there, conservatively: only "missing" answers false.
-fn maybe_present(path: &Path) -> bool {
-    match std::fs::symlink_metadata(path) {
-        Ok(_) => true,
-        Err(error) => !matches!(
-            error.kind(),
-            std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
-        ),
-    }
-}
-
 fn env_nonempty(name: &str) -> Option<PathBuf> {
     std::env::var_os(name)
         .filter(|value| !value.is_empty())
@@ -334,82 +312,37 @@ fn python_home() -> Result<PathBuf, Defer> {
     }
 }
 
-/// Whether `_listed_note` could read a `config.yaml`: the data dir's
-/// (`PSEUDOLIFE_MCP_DATA_DIR`, else the lite default or `./data`, both
-/// checked). Its reading (the whole AppConfig, any failure a silent "no
-/// note") is not ported; such an invite defers.
-fn config_maybe_present() -> Result<bool, Defer> {
-    let mut candidates = Vec::new();
-    if let Some(dir) = env_nonempty("PSEUDOLIFE_MCP_DATA_DIR") {
-        candidates.push(dir);
-    } else {
-        let lite = if cfg!(windows) {
-            env_nonempty("LOCALAPPDATA").map_or_else(
-                || python_home().map(|home| home.join("AppData").join("Local")),
-                Ok,
-            )?
+/// The optional courtesy note never blocks an invite on malformed configuration.
+fn listed_in_config(name: &str) -> bool {
+    let directory = env_nonempty("PSEUDOLIFE_MCP_DATA_DIR").or_else(|| {
+        let home = python_home().ok()?;
+        let base = if cfg!(windows) {
+            env_nonempty("LOCALAPPDATA").unwrap_or_else(|| home.join("AppData/Local"))
         } else if cfg!(target_os = "macos") {
-            python_home()?.join("Library").join("Application Support")
+            home.join("Library/Application Support")
         } else {
-            env_nonempty("XDG_DATA_HOME").map_or_else(
-                || python_home().map(|home| home.join(".local").join("share")),
-                Ok,
-            )?
+            env_nonempty("XDG_DATA_HOME").unwrap_or_else(|| home.join(".local/share"))
         };
-        candidates.push(lite.join("pseudolife-mcp"));
-        candidates.push(std::env::current_dir().map_err(|_| Defer)?.join("data"));
-    }
-    Ok(candidates
-        .iter()
-        .any(|dir| maybe_present(&dir.join("config.yaml"))))
-}
-
-/// Whether `expose_cli.find_tailscale` could find a CLI (a superset of
-/// `shutil.which("tailscale")` and the installers' default locations). Only
-/// with none does `exposed_url` answer `None` without running anything.
-fn tailscale_maybe_present() -> Result<bool, Defer> {
-    let path = std::env::var_os("PATH").ok_or(Defer)?;
-    let mut directories: Vec<PathBuf> = std::env::split_paths(&path).collect();
-    let mut names = vec!["tailscale".to_owned()];
-    if cfg!(windows) {
-        directories.insert(0, PathBuf::from("."));
-        let pathext = std::env::var("PATHEXT")
-            .ok()
-            .filter(|value| !value.is_empty())
-            .unwrap_or_else(|| ".COM;.EXE;.BAT;.CMD;.VBS;.JS;.WSF;.WSH;.MSC".to_owned());
-        names.extend(
-            pathext
-                .split(';')
-                .filter(|ext| !ext.is_empty())
-                .map(|ext| format!("tailscale{ext}")),
-        );
-        let base = env_nonempty("ProgramW6432")
-            .or_else(|| env_nonempty("ProgramFiles"))
-            .unwrap_or_else(|| PathBuf::from(r"C:\Program Files"));
-        if maybe_present(&base.join("Tailscale").join("tailscale.exe")) {
-            return Ok(true);
-        }
-    } else if cfg!(target_os = "macos")
-        && maybe_present(Path::new(
-            "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
-        ))
-    {
-        return Ok(true);
-    }
-    for directory in directories {
-        let directory = if directory.as_os_str().is_empty() {
-            PathBuf::from(".")
+        let lite = base.join("pseudolife-mcp");
+        if lite.exists() {
+            Some(lite)
         } else {
-            directory
-        };
-        if names
-            .iter()
-            .any(|name| maybe_present(&directory.join(name)))
-        {
-            return Ok(true);
+            std::env::current_dir().ok().map(|p| p.join("data"))
         }
-    }
-    Ok(false)
+    });
+    let Some(directory) = directory else {
+        return false;
+    };
+    let Ok(text) = std::fs::read_to_string(directory.join("config.yaml")) else {
+        return false;
+    };
+    let Ok(documents) = yaml_rust2::YamlLoader::load_from_str(&text) else {
+        return false;
+    };
+    documents
+        .first()
+        .and_then(|doc| doc["coordination"]["allowed_principals"].as_vec())
+        .is_some_and(|names| names.iter().any(|value| value.as_str() == Some(name)))
 }
 
 fn python_bool(value: bool) -> J {
@@ -417,7 +350,7 @@ fn python_bool(value: bool) -> J {
 }
 
 pub(super) async fn run(arguments: &[String]) -> Result<u8, Defer> {
-    let args = parse(arguments)?;
+    let mut args = parse(arguments)?;
     // `int(os.environ.get("PSEUDOLIFE_MCP_PORT") or 8765)` runs while the
     // parser is built; a value int() would refuse is a traceback.
     let default_port = match std::env::var("PSEUDOLIFE_MCP_PORT") {
@@ -465,24 +398,37 @@ pub(super) async fn run(arguments: &[String]) -> Result<u8, Defer> {
     }
     if revoke.is_some() && !args.yes {
         if super::stdin_is_terminal() {
-            return Err(Defer);
+            use std::io::Write;
+            let name = revoke.as_deref().unwrap_or("");
+            let _ = write!(
+                std::io::stderr(),
+                "revoke {name}? Its token stops working within 10 seconds. [y/N] "
+            );
+            let _ = std::io::stderr().flush();
+            let mut answer = String::new();
+            let _ = std::io::stdin().read_line(&mut answer);
+            if !matches!(answer.trim().to_lowercase().as_str(), "y" | "yes") {
+                return Ok(report.fail(EXIT_USAGE, "not confirmed; nothing was changed"));
+            }
+            args.yes = true;
+        } else {
+            return Ok(report.fail(EXIT_USAGE, "not interactive: re-run with --yes to revoke"));
         }
-        return Ok(report.fail(EXIT_USAGE, "not interactive: re-run with --yes to revoke"));
     }
+    let port = args.port.unwrap_or(default_port);
     let dsn = std::env::var("PSEUDOLIFE_MCP_DATABASE_URL")
         .ok()
-        .filter(|value| !value.is_empty())
-        .ok_or(Defer)?;
+        .filter(|value| !value.is_empty());
+    let Some(dsn) = dsn else {
+        if transport::docker_available() {
+            return transport::run(&args, &mut report, port).await;
+        }
+        return Ok(report.fail(EXIT_REFUSED, "no database found: set PSEUDOLIFE_MCP_DATABASE_URL, or run this on the daemon's host (a Docker install runs it in the daemon container)"));
+    };
     let dsn = crate::pg::Dsn::parse(&dsn).map_err(|_| Defer)?;
-    let url = args.url.clone().filter(|url| !url.is_empty());
-    let port = args.port.unwrap_or(default_port);
-    if name.is_some() {
-        if url.is_none() && tailscale_maybe_present()? {
-            return Err(Defer);
-        }
-        if config_maybe_present()? {
-            return Err(Defer);
-        }
+    let mut url = args.url.clone().filter(|url| !url.is_empty());
+    if name.is_some() && url.is_none() {
+        url = transport::exposed_url(port).await;
     }
     // Everything that could still defer happens here, before an invite's
     // only request: the connection (Python opens it after `/health`; a
@@ -780,6 +726,9 @@ fn invite_report(
     );
     if url == URL_PLACEHOLDER {
         report.note("the daemon is not exposed on the tailnet here; put its URL in place of <daemon-url> (`pseudolife-mcp expose tailscale` exposes it), or pass --url");
+    }
+    if listed_in_config(name) {
+        report.note(&format!("note: {name} is already listed in coordination.allowed_principals; the invite gives it a token"));
     }
     report.note("an invited machine can read and write the whole bank and use the agent board, but not change the daemon's configuration");
     report.finish(EXIT_OK)

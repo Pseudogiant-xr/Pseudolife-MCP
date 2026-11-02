@@ -62,8 +62,8 @@ def _terminal() -> bool:
         return False
 
 
-def rust_operator_refusal(docker: str, *, runner: Callable | None = None) -> str | None:
-    """Inspect only the engine label before attempting a Python operator command.
+def operator_cli(docker: str, *, runner: Callable | None = None) -> list[str]:
+    """Select the installed operator CLI using the daemon's engine label.
 
     Invite and guided setup supply their existing bounded subprocess runner.
     Missing labels preserve the ordinary Python image's operator path.
@@ -74,12 +74,10 @@ def rust_operator_refusal(docker: str, *, runner: Callable | None = None) -> str
                 run(command, capture_output=True, text=True, errors="replace",
                     stdin=subprocess.DEVNULL, timeout=INSPECT_TIMEOUT_S, check=False))
     except (OSError, subprocess.TimeoutExpired):
-        return None
+        return ["python", "-m", "pseudolife_memory.cli"]
     if proc.returncode == 0 and (proc.stdout or "").strip() == "rust":
-        return ("the Rust daemon image has no Python operator runtime: run bank commands on a Python host "
-                "with PSEUDOLIFE_MCP_DATABASE_URL set, or switch back with "
-                "`pseudolife-mcp update --engine python --checkout <repo>`; nothing was changed")
-    return None
+        return ["pseudolife-mcp"]
+    return ["python", "-m", "pseudolife_memory.cli"]
 
 
 def run_in_daemon(mode: str, argv: Sequence[str], *, stdin=None,
@@ -94,13 +92,10 @@ def run_in_daemon(mode: str, argv: Sequence[str], *, stdin=None,
     docker = docker_cmd()
     if not _running(docker):
         return None
-    refusal = rust_operator_refusal(docker)
-    if refusal:
-        print(f"pseudolife-mcp {mode}: {refusal}", file=sys.stderr)
-        return subprocess.CompletedProcess([docker], 2)
+    executable = operator_cli(docker)
     tty = stdin is None and stdout is None and _terminal()
     command = [docker, "exec", "-it" if tty else "-i", "-e", f"{NESTED_ENV}=1", CONTAINER,
-               "python", "-m", "pseudolife_memory.cli", mode, *argv]
+               *executable, mode, *argv]
     print(f"pseudolife-mcp {mode}: no bank in this shell; running it inside the {CONTAINER} "
           "container", file=sys.stderr, flush=True)
     sys.stdout.flush()

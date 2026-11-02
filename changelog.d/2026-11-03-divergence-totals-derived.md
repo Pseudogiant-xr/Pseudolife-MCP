@@ -1,0 +1,3 @@
+### Changed (2026-11-03 — divergence totals are derived on demand, not committed)
+- The declared-divergence index (`rust/daemon/divergences/README.md`) no longer carries the D7 bucket count table: two pull requests that each moved an entry merged into wrong totals or conflicted on the shared count lines, and their integration batch had to drop one. `python rust/daemon/split_divergences.py --counts` prints the totals from the entry files.
+- `split_divergences.py --check` stops comparing committed totals and instead rejects any D7 count table in the index; entry buckets, table widths and the caller routing table are checked as before.
