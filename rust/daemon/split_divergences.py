@@ -109,29 +109,19 @@ def first_cell(row: str) -> str:
 
 
 def table_cells(row: str) -> list[str]:
-    """Split a pipe table without counting escaped or inline-code pipes."""
+    """Split a GitHub table: only escaped pipes stay inside a cell, even in code."""
     row = row.strip()
     if not row.startswith("|") or not row.endswith("|"):
         raise LedgerError(f"malformed table row: {row[:80]!r}")
-    cells, start, i, ticks = [], 1, 1, 0
+    cells, start, i = [], 1, 1
     while i < len(row):
-        if row[i] == "\\":
+        if row[i:i + 2] == "\\|":
             i += 2
             continue
-        if row[i] == "`":
-            end = i + 1
-            while end < len(row) and row[end] == "`":
-                end += 1
-            width = end - i
-            ticks = width if not ticks else (0 if ticks == width else ticks)
-            i = end
-            continue
-        if row[i] == "|" and not ticks:
+        if row[i] == "|":
             cells.append(row[start:i].strip())
             start = i + 1
         i += 1
-    if ticks:
-        raise LedgerError(f"unclosed backtick in table row: {row[:80]!r}")
     if start != len(row):
         raise LedgerError(f"table row without a closing cell: {row[:80]!r}")
     return cells
@@ -181,9 +171,6 @@ def parse_section_body(path: tuple[str, ...], body: list[str], ledger: dict) -> 
             if len(block) < 2 or not TABLE_SEPARATOR.fullmatch(block[1].strip()) \
                     or not all(line.startswith("|") for line in block):
                 raise LedgerError(f"{where}: malformed table starting {block[0][:60]!r}")
-            width = len(table_cells(block[0]))
-            if any(len(table_cells(line)) != width for line in block[1:]):
-                raise LedgerError(f"{where}: table column count differs from its header")
             for row in block[2:]:
                 text = f"{block[0]}\n{block[1]}\n{row}\n"
                 add_entry(section, text, where)
@@ -430,8 +417,10 @@ def check_triage(root: Path, ledger: dict) -> None:
         for name, text in section["entries"].items():
             file = section_dir(path, root) / f"{name}.md"
             if text.startswith("|"):
-                header, _, row = text.splitlines()
+                header, separator, row = text.splitlines()
                 columns = table_cells(header)
+                if any(len(table_cells(line)) != len(columns) for line in (separator, row)):
+                    raise LedgerError(f"{file}: table column count differs from its header")
                 if columns.count("D7 bucket") != 1:
                     raise LedgerError(f"{file}: exactly one D7 bucket column is required")
                 bucket = table_cells(row)[columns.index("D7 bucket")]

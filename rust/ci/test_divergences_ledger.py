@@ -355,9 +355,50 @@ def test_table_column_counts_must_match(tmp_path, before, after):
     assert any("column count" in p for p in sd.check(root, pointer))
 
 
-def test_table_column_count_ignores_code_and_escaped_pipes(tmp_path):
+@pytest.mark.parametrize("value", [r"`x\|y` and x\|y", r"`C:\`"])
+def test_table_column_count_accepts_escaped_pipes_and_code_backslashes(tmp_path, value):
     root, pointer = triaged(tmp_path)
     entry = root / "rows/read.md"
-    entry.write_text(entry.read_text().replace("Caller: reader;", r"`x|y` and x\|y; Caller: reader;"),
+    entry.write_text(entry.read_text().replace("Caller: reader;", value + "; Caller: reader;"),
                      encoding="utf-8", newline="\n")
     assert sd.check(root, pointer) == []
+
+
+def test_unescaped_pipe_in_code_is_still_a_github_table_boundary(tmp_path):
+    root, pointer = triaged(tmp_path)
+    entry = root / "rows/read.md"
+    entry.write_text(entry.read_text().replace("Caller: reader;", "`x|y`; Caller: reader;"),
+                     encoding="utf-8", newline="\n")
+    assert any("column count" in p for p in sd.check(root, pointer))
+
+
+# Exact header and row from 3132f591^:rust/daemon/divergences.md.
+# Historical branches carried a three-column header over this four-cell row.
+HISTORICAL_PRE_SPLIT = '''\
+## W2-D completion boundary (2026-10-13)
+
+| Named divergence | Omitted surface | Reason / owner |
+|---|---|---|
+| `/api/overview`'s tag count with a non-string tag on an entry | `list_tags` counts it as a dict key (a list or dict tag raises, and `_safe` serves `{"tags": [], "total": 0}`) | any non-string tag serves the `_safe` default | no tool writes one (`normalize_tags` keeps strings), as the `memory_episode_summary` distributions row above |
+'''
+
+
+def test_real_pre_split_input_stays_convertible_but_fails_current_check(tmp_path, monkeypatch):
+    def historical_git(*args):
+        assert args == ("show", f"3132f591^:{sd.LEDGER_GIT_PATH}")
+        return HISTORICAL_PRE_SPLIT
+
+    monkeypatch.setattr(sd, "git", historical_git)
+    parsed = sd.base_ledger("3132f591^")
+    root = converted(tmp_path, HISTORICAL_PRE_SPLIT)
+    assert sd.load_dir(root) == parsed
+    assert sd.parse_ledger(sd.render(parsed)) == parsed
+    pointer = tmp_path / "divergences.md"
+    pointer.write_text(sd.STUB, encoding="utf-8", newline="\n")
+    assert sd.check(root, pointer, triage=False) == []
+    assert any("column count" in p for p in sd.check(root, pointer))
+
+
+def test_real_pre_split_full_conversion_does_not_invent_a_disposition(tmp_path, monkeypatch):
+    assert run_main(monkeypatch, tmp_path, HISTORICAL_PRE_SPLIT, ["--full"]) == 0
+    assert sd.load_dir(tmp_path / "divergences") == sd.parse_ledger(HISTORICAL_PRE_SPLIT)
