@@ -65,6 +65,7 @@ class ContainerTests(unittest.TestCase):
         gate = load("container_inputs")
         for path in (".dockerignore", "rust/daemon/src/embed.rs", "rust/Cargo.toml", "rust/Cargo.lock",
                      "rust/shim/src/main.rs", "rust/shim/Cargo.toml",
+                     "rust/shared/pg_runtime.rs",
                      "ops/Dockerfile.daemon-rust", "ops/docker-compose.rust.yml",
                      "ops/provision-daemon-models.sh",
                      ".github/workflows/rust.yml", "plugin/hooks/session-start.sh"):
@@ -81,6 +82,13 @@ class ContainerTests(unittest.TestCase):
         job = (ROOT / ".github/workflows/rust.yml").read_text().split(
             "\n  daemon-image:", 1)[1].split("\n  parity:", 1)[0]
         self.assertIn("docker run --rm --network none w3j-daemon-rust:prep pseudolife-mcp version", job)
+
+    def test_release_overlay_requires_a_pull_and_an_explicit_version(self):
+        overlay = (ROOT / "ops/docker-compose.rust-ghcr.yml").read_text()
+        self.assertIn("\n    pull_policy: always\n", overlay)
+        self.assertIn("\n    build: !reset null\n", overlay)
+        self.assertIn("${PSEUDOLIFE_IMAGE_TAG:?", overlay)
+        self.assertIn("\n      org.pseudolife.engine: rust\n", overlay)
 
     def test_runtime_contract_is_explicit_and_default_compose_is_not_used(self):
         dockerfile = (ROOT / "ops/Dockerfile.daemon-rust").read_text()
