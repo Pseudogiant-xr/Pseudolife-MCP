@@ -7,6 +7,19 @@ use tokio::{
 };
 
 const SSL_REQUEST: [u8; 8] = [0, 0, 0, 8, 4, 210, 22, 47];
+struct ClientHome(std::path::PathBuf);
+impl ClientHome {
+    fn new() -> Self {
+        let path = std::env::temp_dir().join(format!("pl-tls-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&path).unwrap();
+        Self(path)
+    }
+}
+impl Drop for ClientHome {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
 async fn startup<S: AsyncRead + Unpin>(stream: &mut S) {
     let length = stream.read_u32().await.unwrap();
     assert!((8..4096).contains(&length));
@@ -40,6 +53,106 @@ fn protocol_config(listener: &TcpListener, mode: &str) -> super::Config {
         super::tls::Environment::default(),
     )
     .unwrap()
+}
+
+#[tokio::test]
+async fn review_compat_plain_server_ignores_unused_tls_files() {
+    for mode in ["prefer", "allow"] {
+        for fixture in ["crl", "encrypted", "unreadable"] {
+            let home = ClientHome::new();
+            let directory = match fixture {
+                "crl" => {
+                    std::fs::write(home.0.join("root.crl"), "fixture").unwrap();
+                    home.0.clone()
+                }
+                "encrypted" => {
+                    std::fs::write(home.0.join("postgresql.crt"), "fixture").unwrap();
+                    std::fs::write(
+                        home.0.join("postgresql.key"),
+                        "-----BEGIN ENCRYPTED PRIVATE KEY-----",
+                    )
+                    .unwrap();
+                    home.0.clone()
+                }
+                _ => {
+                    let path = home.0.join("not-a-directory");
+                    std::fs::write(&path, "fixture").unwrap();
+                    path
+                }
+            };
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let config = super::tls::parse_in(
+                &format!(
+                    "host=127.0.0.1 port={} user=fixture dbname=pl_cf_tls sslmode={mode}",
+                    listener.local_addr().unwrap().port()
+                ),
+                super::tls::Environment {
+                    directory: Some(directory),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            let server = tokio::spawn(async move {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                if mode == "prefer" {
+                    let mut request = [0; 8];
+                    stream.read_exact(&mut request).await.unwrap();
+                    assert_eq!(request, SSL_REQUEST);
+                    stream.write_all(b"N").await.unwrap();
+                }
+                startup(&mut stream).await;
+                ready(&mut stream).await;
+            });
+            let (client, task) = super::connect(&config, Duration::from_secs(3))
+                .await
+                .unwrap();
+            drop(client);
+            task.await.unwrap();
+            tokio::time::timeout(Duration::from_secs(3), server)
+                .await
+                .unwrap()
+                .unwrap();
+        }
+    }
+}
+
+#[tokio::test]
+async fn review_compat_unsupported_tls_files_never_authorize_plaintext_retry() {
+    let home = ClientHome::new();
+    std::fs::write(home.0.join("root.crl"), "fixture").unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let config = super::tls::parse_in(
+        &format!(
+            "host=127.0.0.1 port={} user=fixture dbname=pl_cf_tls sslmode=prefer",
+            listener.local_addr().unwrap().port()
+        ),
+        super::tls::Environment {
+            directory: Some(home.0.clone()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut request = [0; 8];
+        stream.read_exact(&mut request).await.unwrap();
+        assert_eq!(request, SSL_REQUEST);
+        stream.write_all(b"S").await.unwrap();
+        assert_eq!(stream.read(&mut [0]).await.unwrap(), 0);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), listener.accept())
+                .await
+                .is_err()
+        );
+    });
+    let error = super::connect(&config, Duration::from_secs(3))
+        .await
+        .unwrap_err();
+    assert!(error.contains("root.crl"));
+    tokio::time::timeout(Duration::from_secs(3), server)
+        .await
+        .unwrap()
+        .unwrap();
 }
 
 #[tokio::test]

@@ -145,7 +145,7 @@ fn keywords(text: &str) -> Result<BTreeMap<String, String>, String> {
 #[derive(Default)]
 pub(super) struct Environment {
     pub(super) values: BTreeMap<String, String>,
-    directory: Option<PathBuf>,
+    pub(super) directory: Option<PathBuf>,
 }
 impl Environment {
     fn current() -> Self {
@@ -222,14 +222,35 @@ pub(super) fn parse_in(dsn: &str, environment: Environment) -> Result<Config, St
             "PGSSLROOTCERT" => "sslrootcert",
             "PGSSLCERT" => "sslcert",
             "PGSSLKEY" => "sslkey",
+            "PGSSLSNI" => "sslsni",
+            "PGSSLCOMPRESSION" => "sslcompression",
+            "PGSSLCERTMODE" => "sslcertmode",
+            "PGSSLNEGOTIATION" => "sslnegotiation",
             "PGGSSENCMODE" => "gssencmode",
             "PGCHANNELBINDING" => "channel_binding",
             _ => return Err(unsupported(&name)),
         };
         fields.entry(key.into()).or_insert(value);
     }
-    if fields.remove("gssencmode").is_some_and(|v| v != "disable") {
+    if fields
+        .remove("gssencmode")
+        .is_some_and(|v| !matches!(v.as_str(), "disable" | "prefer"))
+    {
         return Err(unsupported("gssencmode"));
+    }
+    // These libpq defaults do not require an unsupported feature. Optional
+    // compression can remain off; GSS prefer permits this non-GSS transport.
+    for (name, supported) in [
+        ("sslsni", &["1"][..]),
+        ("sslcompression", &["0", "1"][..]),
+        ("sslcertmode", &["allow"][..]),
+    ] {
+        if fields
+            .remove(name)
+            .is_some_and(|value| !supported.contains(&value.as_str()))
+        {
+            return Err(unsupported(name));
+        }
     }
     let root = fields.remove("sslrootcert").filter(|v| !v.is_empty());
     let system = root.as_deref() == Some("system");
@@ -356,13 +377,23 @@ fn encrypted_key(bytes: &[u8]) -> bool {
     }
     false
 }
+fn system_roots(
+    certificates: Vec<rustls::pki_types::CertificateDer<'static>>,
+) -> Result<rustls::RootCertStore, String> {
+    let mut roots = rustls::RootCertStore::empty();
+    roots.add_parsable_certificates(certificates);
+    if roots.is_empty() {
+        return Err(file_error("sslrootcert=system"));
+    }
+    Ok(roots)
+}
 impl Config {
     fn path(&self, explicit: &Option<PathBuf>, default: &str) -> Option<PathBuf> {
         explicit
             .clone()
             .or_else(|| self.directory.as_ref().map(|p| p.join(default)))
     }
-    fn supported_files(&self) -> Result<(), String> {
+    pub(super) fn supported_files(&self) -> Result<(), String> {
         if let Some(directory) = &self.directory
             && exists(&directory.join("root.crl"), "root.crl")?
         {
@@ -381,16 +412,7 @@ impl Config {
     pub(super) fn connector(&self) -> Result<tokio_postgres_rustls::MakeRustlsConnect, String> {
         let roots = if self.system {
             let loaded = rustls_native_certs::load_native_certs();
-            let mut roots = rustls::RootCertStore::empty();
-            for cert in loaded.certs {
-                roots
-                    .add(cert)
-                    .map_err(|_| file_error("sslrootcert=system"))?;
-            }
-            if roots.is_empty() {
-                return Err(file_error("sslrootcert=system"));
-            }
-            Some(roots)
+            Some(system_roots(loaded.certs)?)
         } else if let Some(path) = self.path(&self.root, "root.crt") {
             if exists(&path, "sslrootcert")? {
                 Some(crypto::roots(&path).map_err(|_| file_error("sslrootcert"))?)
@@ -528,7 +550,6 @@ pub(super) async fn connect(config: &Config) -> Result<(Client, JoinHandle<()>),
             Err(e) => return Err(e.into()),
         }
     }
-    config.supported_files().map_err(ConnectError::Config)?;
     let tls = transport::Negotiator::new(config.clone(), config.mode);
     let mut driver = config.driver.clone();
     if driver.get_hosts().is_empty() && !driver.get_hostaddrs().is_empty() {
@@ -578,6 +599,62 @@ mod tests {
     }
     fn parse(text: &str) -> Config {
         parse_in(text, Environment::default()).unwrap()
+    }
+    #[test]
+    fn review_compat_environment_defaults_do_not_demand_unsupported_features() {
+        for (name, value) in [
+            ("PGSSLSNI", "1"),
+            ("PGSSLCOMPRESSION", "0"),
+            ("PGSSLCOMPRESSION", "1"),
+            ("PGSSLCERTMODE", "allow"),
+            ("PGSSLNEGOTIATION", "postgres"),
+            ("PGGSSENCMODE", "prefer"),
+            ("PGGSSENCMODE", "disable"),
+        ] {
+            let config = parse_in(
+                "",
+                Environment {
+                    values: BTreeMap::from([(name.into(), value.into())]),
+                    ..Default::default()
+                },
+            );
+            assert!(config.is_ok(), "{name}={value}: {config:?}");
+        }
+    }
+    #[test]
+    fn review_compat_system_roots_keep_valid_certificates() {
+        let bytes = std::fs::read(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../shim/tests/fixtures/pg_tls/ca.pem"),
+        )
+        .unwrap();
+        let cert = rustls_pemfile::certs(&mut bytes.as_slice())
+            .next()
+            .unwrap()
+            .unwrap();
+        let invalid = rustls::pki_types::CertificateDer::from(b"not an X.509 certificate".to_vec());
+        let roots = system_roots(vec![invalid.clone(), cert]).unwrap();
+        assert_eq!(roots.len(), 1);
+        assert!(system_roots(vec![invalid]).is_err());
+        assert!(system_roots(vec![]).is_err());
+    }
+    #[test]
+    fn optional_tls_environment_controls_preserve_dsn_precedence_and_refusals() {
+        for (environment, key, supported, unsupported_value) in [
+            ("PGSSLSNI", "sslsni", "1", "0"),
+            ("PGSSLCOMPRESSION", "sslcompression", "0", "invalid"),
+            ("PGSSLCERTMODE", "sslcertmode", "allow", "require"),
+            ("PGSSLNEGOTIATION", "sslnegotiation", "postgres", "direct"),
+            ("PGGSSENCMODE", "gssencmode", "prefer", "require"),
+        ] {
+            let defaults = |value: &str| Environment {
+                values: BTreeMap::from([(environment.into(), value.into())]),
+                ..Default::default()
+            };
+            let error = parse_in("", defaults(unsupported_value)).unwrap_err();
+            assert!(error.contains(key) && error.contains("Python"));
+            assert!(parse_in(&format!("{key}={supported}"), defaults(unsupported_value)).is_ok());
+            assert!(parse_in(&format!("{key}={unsupported_value}"), defaults(supported)).is_err());
+        }
     }
     #[test]
     fn review_channel_binding_environment_obeys_dsn_precedence() {

@@ -125,6 +125,12 @@ impl TlsConnect<Socket> for Connect {
             socket.write_all(&[0, 0, 0, 8, 4, 210, 22, 47]).await?;
             match socket.read_u8().await? {
                 b'S' => {
+                    // Unused TLS files must not block an N/plain response.
+                    // Unsupported security policies are hard errors after S,
+                    // outside the retryable TLS-failure wrapper below.
+                    self.config
+                        .supported_files()
+                        .map_err(|message| io::Error::other(ConfigurationFailed(message)))?;
                     // libpq loads roots/identity only once TLS is negotiated.
                     // In prefer mode those TLS failures permit a fresh plain
                     // attempt; an N response never reads unused TLS files.

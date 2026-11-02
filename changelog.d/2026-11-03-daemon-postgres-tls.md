@@ -7,3 +7,5 @@ connections use the same policy. Unsupported libpq security controls fail
 with the setting name and an actionable alternative. A disposable PostgreSQL
 comparison covers TLS negotiation, fallback and client authentication against
 the Python engine; remaining libpq conventions stay explicitly tracked.
+Benign TLS environment defaults and unused certificate files no longer block
+plaintext connections, and system trust tolerates malformed individual roots.
