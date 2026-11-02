@@ -22,7 +22,7 @@ def raw_workflow():
 
 @pytest.mark.parametrize("selection, parsed", [
     ("row:hook", ("row", ["hook"])),
-    (" row:hook/briefing-https-hook-json ", ("row", ["hook", "briefing-https-hook-json"])),
+    (" row:hook/briefing-https-hook-json ", ("row", ["hook/briefing-https-hook-json"])),
     ("scenario:security-open", ("scenario", ["security-open"])),
     ("tests/test_wait_mail_cli.py::test_ring_wakes", ("pytest", ["tests/test_wait_mail_cli.py::test_ring_wakes"])),
     ("tests/test_a.py::test_x[1-2] rust/daemon/harness/test_mcp_wire.py",
@@ -865,3 +865,448 @@ def test_stress_loops_get_a_concurrency_group_per_run():
     assert first != concurrency_group("workflow_dispatch", mode="stress", run_id="8")
     assert first not in (concurrency_group("workflow_dispatch", mode="ci"), concurrency_group("push"),
                          concurrency_group("schedule"))
+
+
+# Several rows or several scenarios in one dispatch: each runs as its own
+# harness process, as a one-item selection would, in every iteration.
+
+@pytest.mark.parametrize("selection, parsed", [
+    ("row:mail row:hook/briefing-https-hook-json row:lease",
+     ("row", ["mail", "hook/briefing-https-hook-json", "lease"])),
+    ("  scenario:tokenless   scenario:security-open ", ("scenario", ["tokenless", "security-open"])),
+])
+def test_a_selection_can_name_several_rows_or_several_scenarios(selection, parsed):
+    assert stress.parse(selection) == parsed
+
+
+@pytest.mark.parametrize("selection, item", [
+    # One kind per selection, as with cargo items.
+    ("row:hook scenario:tokenless", "scenario:tokenless"),
+    ("scenario:tokenless row:hook", "row:hook"),
+    ("row:hook tests/test_a.py", "tests/test_a.py"),
+    ("row:hook cargo:pseudolife-stdio/board", "cargo:pseudolife-stdio/board"),
+    ("tests/test_a.py row:hook", "row:hook"),
+])
+def test_a_selection_mixing_row_or_scenario_with_another_kind_names_the_stray_item(selection, item):
+    with pytest.raises(ValueError, match=re.escape(f"item {item!r}") + ".*one kind"):
+        stress.parse(selection)
+
+
+@pytest.mark.parametrize("selection, item", [
+    ("row:hook row:Bad", "row:Bad"),
+    ("row:hook row:mail/", "row:mail/"),
+    ("scenario:tokenless scenario:a/b", "scenario:a/b"),
+    ("scenario:tokenless scenario:", "scenario:"),
+])
+def test_a_malformed_item_in_a_multi_item_selection_is_named(selection, item):
+    with pytest.raises(ValueError, match=re.escape(f"item {item!r}")):
+        stress.parse(selection)
+
+
+@pytest.mark.parametrize("selection, item", [
+    ("row:hook row:hook", "row:hook"),
+    ("scenario:tokenless scenario:security-open scenario:tokenless", "scenario:tokenless"),
+])
+def test_an_item_named_twice_is_refused(selection, item):
+    with pytest.raises(ValueError, match=re.escape(f"{item!r} is named twice")):
+        stress.parse(selection)
+
+
+@pytest.mark.parametrize("scenario", sorted(stress.REMOTE_BIND))
+def test_plan_refuses_a_remote_bind_scenario_beside_others_naming_it(tmp_path, capsys, scenario):
+    # One iteration cannot provide the debug loopback-bind build, so the whole
+    # dispatch is refused rather than run with that item on the wrong binary.
+    output = tmp_path / "out"
+    assert stress.main(["plan", "--selection", f"scenario:tokenless scenario:{scenario} scenario:security-open",
+                        "--iterations", "20", "--github-output", str(output)]) == 2
+    assert not output.exists()
+    err = capsys.readouterr().err
+    assert f"scenario:{scenario} needs the debug loopback-bind build" in err and "nothing was started" in err
+
+
+def test_plan_refuses_rows_mixed_with_scenarios(tmp_path, capsys):
+    output = tmp_path / "out"
+    assert stress.main(["plan", "--selection", "row:hook scenario:tokenless", "--iterations", "20",
+                        "--github-output", str(output)]) == 2
+    assert not output.exists()
+    err = capsys.readouterr().err
+    assert "item 'scenario:tokenless'" in err and "dispatch" in err and "nothing was started" in err
+
+
+@pytest.mark.parametrize("selection, kind", [("row:mail row:lease", "row"),
+                                             ("scenario:tokenless scenario:security-open", "scenario")])
+def test_plan_accepts_several_rows_or_scenarios_as_one_loop(tmp_path, capsys, selection, kind):
+    output = tmp_path / "out"
+    assert stress.main(["plan", "--selection", selection, "--iterations", "20", "--github-output", str(output)]) == 0
+    assert output.read_text(encoding="utf-8") == f"iterations={json.dumps(list(range(1, 21)))}\nkind={kind}\n"
+    assert "2 items" in capsys.readouterr().out
+
+
+def fake_harness(cases, calls, codes=None):
+    """A subprocess.run stand-in: each harness run writes a summary comparing
+    cases[<row or scenario>] cases and exits codes.get(<name>, 0)."""
+    def run(argv, env):
+        calls.append((argv, env))
+        name = argv[argv.index("--row") + 1] if "--row" in argv else argv[argv.index("--only") + 1]
+        out = Path(argv[argv.index("--out") + 1])
+        if "--row" in argv:
+            summary = {"complete": True, "rows": {name: {"cases": cases[name]}}}
+        else:
+            summary = {"scenarios": [{"cases": [{}] * cases[name]}], "refusals": []}
+        out.write_text(json.dumps(summary), encoding="utf-8")
+        return SimpleNamespace(returncode=(codes or {}).get(name, 0))
+    return run
+
+
+def run_row(tmp_path, selection):
+    out = tmp_path / "stress" / "stress-row-1.json"
+    code = stress.main(["run", "--selection", selection, "--iteration", "1",
+                        "--candidates", str(tmp_path / "bin"), "--out", str(out)])
+    return code, json.loads(out.read_text(encoding="utf-8"))
+
+
+def test_each_row_runs_in_its_own_harness_process_with_its_own_setup(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(stress.subprocess, "run", fake_harness({"mail": 2, "lease": 3}, calls))
+    code, row = run_row(tmp_path, "row:mail/some-case row:lease")
+    assert code == 0 and row["outcome"] == "pass" and row["exit_code"] == 0
+    (mail, _), (lease, _) = calls
+    assert mail[mail.index("--row") + 1] == "mail" and mail[mail.index("--case") + 1] == "some-case"
+    assert "--skip-bank" in mail and "--skip-bank" not in lease and "--case" not in lease
+    outs = [Path(argv[argv.index("--out") + 1]) for argv, _ in calls]
+    assert len(set(outs)) == 2 and all(out.parent.parent == tmp_path / "stress" for out in outs)
+    assert [(item["item"], item["outcome"], item["compared"]) for item in row["items"]] == [
+        ("row:mail/some-case", "pass", 2), ("row:lease", "pass", 3)]
+
+
+def test_each_scenario_runs_on_its_own_lanes_binary_and_env(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(stress.subprocess, "run", fake_harness({"security-open": 1, "tokenless": 4}, calls))
+    code, row = run_row(tmp_path, "scenario:security-open scenario:tokenless")
+    assert code == 0 and [item["outcome"] for item in row["items"]] == ["pass", "pass"]
+    (static, static_env), (h5, h5_env) = calls
+    assert Path(static[static.index("--rust-bin") + 1]).stem == "pseudolife-daemon-static"
+    assert "--fixture" not in static and static_env["PL_HARNESS_SLICE"] == "http"
+    assert Path(h5[h5.index("--rust-bin") + 1]).stem == "pseudolife-daemon"
+    assert "--fixture" in h5 and "PL_HARNESS_SLICE" not in h5_env
+    assert static_env["PL_HARNESS_SCRATCH"] != h5_env["PL_HARNESS_SCRATCH"]
+
+
+@pytest.mark.parametrize("cases, codes, failed, note", [
+    # The evidence rule holds per item: a row that compared nothing fails the
+    # iteration even though the other rows compared cases and all exited 0.
+    ({"mail": 2, "hook": 0, "lease": 5}, {}, ["row:hook"], "no case was compared"),
+    ({"mail": 2, "hook": 3, "lease": 5}, {"lease": 1}, ["row:lease"], "exit code 1"),
+    ({"mail": 0, "hook": 3, "lease": 0}, {}, ["row:mail", "row:lease"], "no case was compared"),
+])
+def test_an_iteration_passes_only_if_every_item_compared_a_case(tmp_path, monkeypatch, cases, codes,
+                                                                failed, note):
+    calls = []
+    monkeypatch.setattr(stress.subprocess, "run", fake_harness(cases, calls, codes))
+    code, row = run_row(tmp_path, "row:mail row:hook row:lease")
+    # Every item runs even after one fails, so each has its own result.
+    assert len(calls) == 3
+    assert code != 0 and row["outcome"] == "fail" and row["exit_code"] == code
+    assert [item["item"] for item in row["items"] if item["outcome"] == "fail"] == failed
+    assert all(note in item["note"] for item in row["items"] if item["outcome"] == "fail")
+    assert all("note" not in item for item in row["items"] if item["outcome"] == "pass")
+    assert all(name in row["note"] for name in failed)
+
+
+def test_a_single_row_iteration_records_exactly_what_it_did_before(tmp_path, monkeypatch):
+    # Backward compatibility: one item keeps the summary at scratch/harness.json
+    # and the row's keys, with no per-item list.
+    calls = []
+    monkeypatch.setattr(stress.subprocess, "run", fake_harness({"hook": 2}, calls))
+    code, row = run_row(tmp_path, "row:hook/some-case")
+    assert code == 0 and len(calls) == 1
+    argv, env = calls[0]
+    assert argv == stress.command("row", ["hook", "some-case"], tmp_path / "bin", tmp_path / "stress")
+    assert argv[argv.index("--out") + 1] == str(tmp_path / "stress" / "harness.json")
+    assert set(row) == {"iteration", "attempt", "selection", "runner", "exit_code", "outcome", "seconds"}
+    assert row["selection"] == "row:hook/some-case"
+
+
+def test_a_single_scenario_keeps_its_scratch_paths(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(stress.subprocess, "run", fake_harness({"tokenless": 0}, calls))
+    code, row = run_row(tmp_path, "scenario:tokenless")
+    argv, env = calls[0]
+    assert argv[argv.index("--out") + 1] == str(tmp_path / "stress" / "harness.json")
+    assert env["PL_HARNESS_SCRATCH"] == str(tmp_path / "stress" / "harness-scratch")
+    assert code == 1 and "items" not in row
+    assert row["note"] == "no case was compared (all filtered out on this platform, or no summary)"
+
+
+def write_items_row(directory, iteration, outcomes):
+    path = directory / f"stress-row-{iteration}" / f"stress-row-{iteration}.json"
+    path.parent.mkdir(parents=True)
+    items = [{"item": item, "exit_code": 0, "outcome": outcome, "compared": 3 if outcome == "pass" else 0,
+              "seconds": 4.0, **({} if outcome == "pass" else {"note": "no case was compared"})}
+             for item, outcome in outcomes.items()]
+    failed = [item["item"] for item in items if item["outcome"] == "fail"]
+    path.write_text(json.dumps({"iteration": iteration, "attempt": 1,
+                                "outcome": "fail" if failed else "pass", "exit_code": 1 if failed else 0,
+                                "seconds": 12.5, "runner": {"image": "win25 1", "cpus": 4}, "items": items,
+                                **({"note": "failed: " + ", ".join(failed)} if failed else {})}),
+                    encoding="utf-8")
+
+
+def test_the_report_names_each_items_result_per_iteration_and_in_total(tmp_path):
+    rows = tmp_path / "rows"
+    rows.mkdir()
+    write_items_row(rows, 1, {"row:mail": "pass", "row:hook": "pass"})
+    write_items_row(rows, 2, {"row:mail": "pass", "row:hook": "fail"})
+    out, summary = tmp_path / "stress-report.json", tmp_path / "summary.md"
+    code = stress.main(["report", "--selection", "row:mail row:hook", "--iterations", "3", "--os", "windows-latest",
+                        "--rows", str(rows), "--out", str(out), "--summary", str(summary)])
+    assert code == 1
+    report = json.loads(out.read_text(encoding="utf-8"))
+    assert report["items"] == {"row:mail": {"passed": 2, "failed": 0, "no_result": 1},
+                               "row:hook": {"passed": 1, "failed": 1, "no_result": 1}}
+    text = summary.read_text(encoding="utf-8")
+    assert "row:mail: 2 of 3 iterations passed" in text and "row:hook: 1 of 3 iterations passed" in text
+    second = next(line for line in text.splitlines() if line.startswith("| 2 |"))
+    assert "row:mail pass" in second and "row:hook fail: no case was compared" in second
+
+
+@pytest.mark.parametrize("kind, names", [
+    ("row", ["mail", "hook", "lease", "lease_operator", "doctor", "transfer", "audit"]),
+    ("scenario", ["tokenless", "session-reap", "security-open", "security-closed", "body-limits",
+                  "static-build", "static-paths"]),
+])
+def test_plan_refuses_more_items_than_one_job_can_run(tmp_path, capsys, kind, names):
+    # Items run one after another in one 45-minute job: about 4-5 minutes of
+    # setup plus 2-3 minutes per row (review of 6ffc6a9f).
+    output = tmp_path / "out"
+    selection = " ".join(f"{kind}:{name}" for name in names)
+    assert stress.main(["plan", "--selection", selection, "--iterations", "20",
+                        "--github-output", str(output)]) == 2
+    assert not output.exists()
+    err = capsys.readouterr().err
+    assert f"{len(names)} items" in err and f"at most {stress.MAX_ITEMS}" in err and "split" in err
+    assert stress.MAX_ITEMS == 6
+    assert stress.parse(" ".join(f"{kind}:{name}" for name in names[:6]))[1] == names[:6]
+    # The budget the cap was sized for is the stress job's own.
+    assert raw_workflow()["jobs"]["stress"]["timeout-minutes"] == stress.ITERATION_MINUTES
+
+
+@pytest.mark.parametrize("selection, message", [
+    # A whole row already runs its cases; the same case twice is one item.
+    ("row:hook row:hook/x", "item 'row:hook/x' overlaps 'row:hook'"),
+    ("row:hook/x row:mail row:hook", "item 'row:hook' overlaps 'row:hook/x'"),
+    ("row:hook/x row:mail row:hook/x", "'row:hook/x' is named twice"),
+])
+def test_overlapping_row_items_are_refused(selection, message):
+    with pytest.raises(ValueError, match=re.escape(message)):
+        stress.parse(selection)
+
+
+def test_distinct_cases_of_one_row_are_separate_items():
+    assert stress.parse("row:hook/x row:hook/y") == ("row", ["hook/x", "hook/y"])
+
+
+def test_the_row_file_is_rewritten_after_each_item(tmp_path, monkeypatch):
+    # A job that times out keeps the finished items' results and names the
+    # item that was running (review of 6ffc6a9f).
+    out = tmp_path / "stress" / "stress-row-1.json"
+    seen = []
+    inner = fake_harness({"mail": 2, "hook": 3, "lease": 1}, [])
+
+    def run(argv, env):
+        seen.append(json.loads(out.read_text(encoding="utf-8")))
+        return inner(argv, env)
+    monkeypatch.setattr(stress.subprocess, "run", run)
+    code, row = run_row(tmp_path, "row:mail row:hook row:lease")
+    assert code == 0 and row["outcome"] == "pass" and "note" not in row
+    during_hook = seen[1]
+    assert during_hook["outcome"] == "fail"
+    assert [(item["item"], item["outcome"]) for item in during_hook["items"]] == [
+        ("row:mail", "pass"), ("row:hook", "fail")]
+    assert during_hook["items"][1]["note"] == "not finished"
+    assert "not finished: row:hook" in during_hook["note"] and "not run: row:lease" in during_hook["note"]
+
+
+@pytest.mark.parametrize("broken", ["command", "environment", "subprocess"])
+def test_an_item_that_raises_is_a_failure_and_the_rest_still_run(tmp_path, monkeypatch, broken):
+    calls = []
+    harness = fake_harness({"mail": 2, "hook": 3, "lease": 1}, calls)
+
+    def boom(*args, **kwargs):
+        raise FileNotFoundError("no such candidate: pseudolife-stdio")
+    if broken == "subprocess":
+        def run(argv, env):
+            return boom() if argv[argv.index("--row") + 1] == "hook" else harness(argv, env)
+        monkeypatch.setattr(stress.subprocess, "run", run)
+    else:
+        monkeypatch.setattr(stress.subprocess, "run", harness)
+        real = getattr(stress, broken)
+        monkeypatch.setattr(stress, broken, lambda kind, names, *rest: boom() if names[0] == "hook"
+                            else real(kind, names, *rest))
+    code, row = run_row(tmp_path, "row:mail row:hook row:lease")
+    assert code == 1 and row["outcome"] == "fail" and row["exit_code"] == 1
+    assert [item["outcome"] for item in row["items"]] == ["pass", "fail", "pass"]
+    hook = row["items"][1]
+    assert hook["exit_code"] is None
+    assert hook["note"] == "FileNotFoundError: no such candidate: pseudolife-stdio"
+    assert [argv[argv.index("--row") + 1] for argv, _ in calls] == ["mail", "lease"]
+    assert "row:hook" in row["note"] and "not run" not in row["note"]
+
+
+@pytest.mark.parametrize("summary", ["[]", "3", "\"text\""])
+def test_an_item_whose_summary_is_not_an_object_fails_and_the_rest_still_run(tmp_path, monkeypatch, summary):
+    # Valid JSON that is not an object makes compared() raise AttributeError
+    # or TypeError, after the item's exit code is known (review of 68e97311).
+    calls = []
+    harness = fake_harness({"hook": 3}, calls)
+
+    def run(argv, env):
+        if argv[argv.index("--row") + 1] == "mail":
+            calls.append((argv, env))
+            Path(argv[argv.index("--out") + 1]).write_text(summary, encoding="utf-8")
+            return SimpleNamespace(returncode=1)
+        return harness(argv, env)
+    monkeypatch.setattr(stress.subprocess, "run", run)
+    code, row = run_row(tmp_path, "row:mail row:hook")
+    assert [argv[argv.index("--row") + 1] for argv, _ in calls] == ["mail", "hook"]
+    assert code == 1 and row["outcome"] == "fail" and row["exit_code"] == 1
+    mail, hook = row["items"]
+    assert mail["item"] == "row:mail" and mail["outcome"] == "fail" and mail["exit_code"] == 1
+    assert mail["note"].split(":")[0] in ("AttributeError", "TypeError")
+    assert hook["outcome"] == "pass" and "row:mail" in row["note"]
+
+
+# Ids without spaces: a stress dispatch names pytest nodes space-separated.
+@pytest.mark.parametrize("selection", ["row:hook", "row:mail row:hook"], ids=["single", "multi"])
+def test_the_row_is_replaced_atomically(tmp_path, monkeypatch, selection):
+    # A kill mid-write must not leave a torn row: the row is written to a
+    # temporary file beside it, then moved over it (review of 68e97311).
+    replaced = []
+    real = stress.os.replace
+
+    def replace(source, target):
+        replaced.append((Path(source), Path(target)))
+        return real(source, target)
+    monkeypatch.setattr(stress.os, "replace", replace)
+    monkeypatch.setattr(stress.subprocess, "run", fake_harness({"mail": 2, "hook": 3}, []))
+    code, row = run_row(tmp_path, selection)
+    out = tmp_path / "stress" / "stress-row-1.json"
+    assert code == 0 and replaced and all(target == out and source.parent == out.parent and source != out
+                                          for source, target in replaced)
+    assert out.is_file() and not list(out.parent.rglob("*.tmp"))
+
+
+@pytest.mark.parametrize("content, reason", [
+    ('{"iteration": 2, "attempt": 1, "outc', "unreadable"),  # torn mid-write
+    ('{"iteration": 2, "attempt": 1}', "incomplete"),  # no outcome, runner or seconds
+    ('[2]', "incomplete"),
+    ('{"iteration": 2, "attempt": 1, "outcome": "pass", "exit_code": 0, "seconds": 1, "runner": {},'
+     ' "items": [{"outcome": "pass"}]}', "incomplete"),  # an item without its name
+])
+def test_the_report_counts_an_unreadable_row_as_that_iterations_failure(tmp_path, content, reason):
+    rows = tmp_path / "rows"
+    rows.mkdir()
+    write_row(rows, 1, "pass")
+    write_row(rows, 3, "pass")
+    broken = rows / "stress-row-2" / "stress-row-2.json"
+    broken.parent.mkdir()
+    broken.write_text(content, encoding="utf-8")
+    out, summary = tmp_path / "stress-report.json", tmp_path / "summary.md"
+    code = stress.main(["report", "--selection", "row:mail row:hook", "--iterations", "3", "--os", "windows-latest",
+                        "--rows", str(rows), "--out", str(out), "--summary", str(summary)])
+    assert code == 1
+    report = json.loads(out.read_text(encoding="utf-8"))
+    assert [row["outcome"] for row in report["rows"]] == ["pass", "fail", "pass"]
+    assert report["passed"] == 2 and report["failed"] == 1
+    second = report["rows"][1]
+    assert second["iteration"] == 2 and reason in second["note"] and "stress-row-2.json" in second["note"]
+    assert "stress-row-2.json" in summary.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("selection, summary, error", [
+    # compared() raising on a summary that is valid JSON but not an object.
+    ("row:hook", "[]", ("AttributeError", "TypeError")),
+    ("scenario:tokenless", "3", ("AttributeError", "TypeError")),
+    ("row:hook/some-case", '"text"', ("AttributeError", "TypeError")),
+])
+def test_a_single_item_whose_summary_cannot_be_judged_fails(tmp_path, monkeypatch, selection, summary, error):
+    # The harness exited 0, but a run whose evidence cannot be read is no
+    # evidence: the row must say fail, never pass (review of 3715a45a).
+    def harness(argv, env):
+        Path(argv[argv.index("--out") + 1]).write_text(summary, encoding="utf-8")
+        return SimpleNamespace(returncode=0)
+    monkeypatch.setattr(stress.subprocess, "run", harness)
+    code, row = run_row(tmp_path, selection)
+    assert code == 1 and row["outcome"] == "fail" and row["exit_code"] == 1
+    assert row["note"].split(":")[0] in error and len(row["note"].split(": ", 1)[1]) > 0
+    assert "items" not in row
+
+
+@pytest.mark.parametrize("selection", ["row:hook", "scenario:tokenless", "tests/test_a.py"])
+def test_a_single_item_whose_evidence_check_raises_fails(tmp_path, monkeypatch, selection):
+    monkeypatch.setattr(stress.subprocess, "run", lambda argv, env: SimpleNamespace(returncode=0))
+
+    def broken(kind, names, scratch):
+        raise RuntimeError("summary unreadable")
+    monkeypatch.setattr(stress, "evidence", broken)
+    code, row = run_row(tmp_path, selection)
+    assert code == 1 and row["outcome"] == "fail" and row["exit_code"] == 1
+    assert row["note"] == "RuntimeError: summary unreadable"
+
+
+@pytest.mark.parametrize("selection", ["row:hook", "scenario:tokenless", "tests/test_a.py"])
+def test_an_interrupt_before_evidence_is_judged_leaves_a_failed_row(tmp_path, monkeypatch, selection):
+    # A job timeout or cancel (SIGINT) while evidence() runs: the harness
+    # exited 0, but nothing was judged, so the row the always() upload
+    # delivers must say fail, and the interrupt still ends the step
+    # (review of 3280332b).
+    monkeypatch.setattr(stress.subprocess, "run", lambda argv, env: SimpleNamespace(returncode=0))
+
+    def interrupted(kind, names, scratch):
+        raise KeyboardInterrupt
+    monkeypatch.setattr(stress, "evidence", interrupted)
+    out = tmp_path / "stress" / "stress-row-1.json"
+    with pytest.raises(KeyboardInterrupt):
+        stress.main(["run", "--selection", selection, "--iteration", "1",
+                     "--candidates", str(tmp_path / "bin"), "--out", str(out)])
+    row = json.loads(out.read_text(encoding="utf-8"))
+    assert row["outcome"] == "fail" and row["note"] == "interrupted before evidence was judged"
+
+
+@pytest.mark.parametrize("failing", ["write", "replace"])
+def test_a_failed_row_write_leaves_no_temporary_file_and_keeps_the_previous_row(tmp_path, monkeypatch, failing):
+    out = tmp_path / "stress-row-1.json"
+    stress.write_row(out, {"iteration": 1, "outcome": "fail"})
+    previous = out.read_text(encoding="utf-8")
+
+    def boom(*args, **kwargs):
+        raise PermissionError("denied")
+
+    def torn(self, text, *args, **kwargs):
+        # A disk-full write: part of the temporary file lands, then it fails.
+        with open(self, "w", encoding="utf-8") as handle:
+            handle.write(text[:5])
+        raise PermissionError("no space left")
+    if failing == "replace":
+        monkeypatch.setattr(stress.os, "replace", boom)
+    else:
+        monkeypatch.setattr(stress.Path, "write_text", torn)
+    with pytest.raises(PermissionError):
+        stress.write_row(out, {"iteration": 1, "outcome": "pass"})
+    assert out.read_text(encoding="utf-8") == previous
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["stress-row-1.json"]
+
+
+def test_a_single_item_report_is_unchanged(tmp_path):
+    rows = tmp_path / "rows"
+    rows.mkdir()
+    write_row(rows, 1, "pass")
+    out, summary = tmp_path / "stress-report.json", tmp_path / "summary.md"
+    assert stress.main(["report", "--selection", "row:hook", "--iterations", "1", "--os", "windows-latest",
+                        "--rows", str(rows), "--out", str(out), "--summary", str(summary)]) == 0
+    assert "items" not in json.loads(out.read_text(encoding="utf-8"))
+    assert summary.read_text(encoding="utf-8") == (
+        "### Stress: row:hook on windows-latest\n1 of 1 iterations passed.\n\n"
+        "| Iteration | Attempt | Outcome | Seconds | Image | CPUs | Note |\n"
+        "| --- | --- | --- | --- | --- | --- | --- |\n"
+        "| 1 | 1 | pass | 12.5 | win25 1 | 4 |  |\n")
