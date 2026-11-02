@@ -55,13 +55,21 @@ fn construct_startup(
             value,
             reason: "YAML timestamps cannot be used at startup; quote the date or timestamp to use it as a string".into(),
         }),
-        TAG_INT => Ok(match construct_int_with(&value, startup_integer) {
+        TAG_INT => {
+            // Python constructs every scalar, including unused keys. Only a
+            // valid integer beyond our range may remain an unread placeholder.
+            construct_int_with(&value, |digits, radix| {
+                startup_integer_text(digits, radix).map(|_| 0)
+            })
+            .map_err(|_| format!("cannot read {value:?} as a YAML integer; use integer digits or quote it as a string"))?;
+            Ok(match construct_int_with(&value, startup_integer) {
             Ok(value) => Node::Int(value),
             Err(_) => Node::Unsupported {
                 value,
                 reason: "YAML integer is invalid or outside the signed 64-bit range; use a value from -9223372036854775808 to 9223372036854775807, or quote it for a string setting".into(),
             },
-        }),
+            })
+        }
         _ => construct(value, style, tag, false),
     }
 }
@@ -146,6 +154,10 @@ fn construct_int(text: &str) -> Result<i64, String> {
 /// PyYAML selects the radix before Python's `int()` consumes whitespace.
 /// Thus `!!int ' 010 '` is decimal 10, while `!!int '010 '` is octal 8.
 fn startup_integer(text: &str, radix: u32) -> Option<i128> {
+    i128::from_str_radix(&startup_integer_text(text, radix)?, radix).ok()
+}
+
+fn startup_integer_text(text: &str, radix: u32) -> Option<String> {
     let normalized: String = text
         .trim()
         .chars()
@@ -170,7 +182,10 @@ fn startup_integer(text: &str, radix: u32) -> Option<i128> {
         .strip_prefix(prefix[0])
         .or_else(|| digits.strip_prefix(prefix[1]))
         .unwrap_or(digits);
-    i128::from_str_radix(&format!("{sign}{digits}"), radix).ok()
+    if digits.is_empty() || !digits.chars().all(|c| c.is_digit(radix)) {
+        return None;
+    }
+    Some(format!("{sign}{digits}"))
 }
 
 fn construct_int_with(

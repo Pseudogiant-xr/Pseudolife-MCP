@@ -3333,6 +3333,9 @@ mod tests {
         assert!(refused("memory:\n  top_k: !foo 4\n"));
         assert!(refused("other: !foo 4\n"));
         assert!(refused("other: !!int abc\n"));
+        assert!(refused("other: !!int 08\n"));
+        assert!(refused("other: !!int '1:abc'\n"));
+        assert!(refused("other: !!int ''\n"));
         assert_eq!(cfg("memory:\n  top_k: !!int 4\n").memory.top_k, 4);
     }
 
