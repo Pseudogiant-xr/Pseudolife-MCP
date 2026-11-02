@@ -71,7 +71,24 @@ fn install_files(layout: &Layout, options: &Options) -> Result<Value> {
     let sums = std::str::from_utf8(&sums).map_err(|_| "SHA256SUMS is not UTF-8")?;
     let _lock = UpdateLock::acquire(layout)?;
     let source = format!("pseudolife-mcp=={}", options.version);
-    let runtime = install_archive(layout, &options.version, &source, &archive, sums)?;
+    let digest = install::checksum(sums, &install::archive_name(&options.version)?)?;
+    if format!("{:x}", Sha256::digest(&archive)) != digest {
+        return Err("release archive checksum mismatch; nothing activated".into());
+    }
+    // A verified completion marker binds the installed binary to this exact
+    // archive. Installer reruns reuse that receipt; explicit updater reinstall
+    // still calls the low-level installer and allocates a fresh sequence.
+    let runtime = match current_runtime(layout).filter(|runtime| {
+        runtime.version == options.version
+            && runtime.source == source
+            && runtime.marker.archive_sha256.as_deref() == Some(&digest)
+    }) {
+        Some(runtime) => {
+            install::activate_launcher(layout, &runtime.executable())?.commit();
+            runtime
+        }
+        None => install_archive(layout, &options.version, &source, &archive, sums)?,
+    };
     Ok(
         json!({"state":"installed","runtime":runtime.path,"version":runtime.version,"launcher":layout.launcher}),
     )
@@ -231,6 +248,21 @@ mod tests {
         assert_eq!(report["version"], "1.2.3");
         assert_eq!(fs::read(&archive).unwrap(), data);
         assert_eq!(fs::read_to_string(&sums).unwrap(), correct);
+        assert_eq!(
+            install_files(&layout, &options).unwrap()["runtime"],
+            report["runtime"]
+        );
+        assert_eq!(
+            list_runtimes(&layout).len(),
+            1,
+            "an installer rerun must not grow the runtime tree"
+        );
+        fs::remove_file(&layout.launcher).unwrap();
+        assert_eq!(
+            install_files(&layout, &options).unwrap()["runtime"],
+            report["runtime"]
+        );
+        assert_eq!(fs::read(&layout.launcher).unwrap(), binary);
         let launcher = fs::read(&layout.launcher).unwrap();
         fs::write(&sums, format!("{}  {name}\n", "0".repeat(64))).unwrap();
         assert!(

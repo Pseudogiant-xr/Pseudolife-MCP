@@ -159,7 +159,11 @@ pseudolife-mcp runtime install --archive <archive> --sha256sums <SUMS-file> --ve
 
 `runtime::run` receives arguments after `runtime`; the CLI dispatches this mode
 directly. It takes the same update lock and calls `install_archive`. The
-archive and SUMS files are retained for installer retry/recovery. There is no
+archive and SUMS files are retained for installer retry/recovery. An installer
+rerun reuses the newest verified runtime when its version, release source and
+archive checksum match exactly; it repairs the launcher if needed.
+The low-level installer still allocates a fresh sequence for explicit updater
+reinstallation. There is no
 `--binary` release bypass. A successful JSON report has `state: "installed"`,
 `runtime`, `version` and `launcher`; installation failures return a
 `state: "failed"` report and exit 1. Invalid/missing/repeated options exit 2
