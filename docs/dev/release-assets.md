@@ -56,7 +56,9 @@ retention is the installer's or updater's policy. Resolve each filename
 against the selected version directory.
 For Rust release activation, use the base file, the GHCR file, and the
 Rust GHCR overlay in that order. Set `PSEUDOLIFE_IMAGE_TAG=<version>`;
-the Rust overlay refuses an absent tag. Release updates pull the selected
+the Rust overlay refuses an absent tag and clears the inherited local
+build definition with Compose's `!reset` tag. A failed pull cannot build
+the Python image under a Rust tag. Release updates pull the selected
 image and recreate with `--no-build --no-deps`, after their backup and
 rollback safeguards. The checkout and shadow overlays remain available
 for their respective updater paths; `PSEUDOLIFE_RUST_IMAGE` must be set

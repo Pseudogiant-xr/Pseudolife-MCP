@@ -86,6 +86,7 @@ class ContainerTests(unittest.TestCase):
     def test_release_overlay_requires_a_pull_and_an_explicit_version(self):
         overlay = (ROOT / "ops/docker-compose.rust-ghcr.yml").read_text()
         self.assertIn("\n    pull_policy: always\n", overlay)
+        self.assertIn("\n    build: !reset null\n", overlay)
         self.assertIn("${PSEUDOLIFE_IMAGE_TAG:?", overlay)
         self.assertIn("\n      org.pseudolife.engine: rust\n", overlay)
 

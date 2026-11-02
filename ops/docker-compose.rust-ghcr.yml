@@ -3,6 +3,7 @@
 services:
   pseudolife-daemon:
     pull_policy: always
+    build: !reset null
     image: ghcr.io/pseudogiant-xr/pseudolife-daemon-rust:${PSEUDOLIFE_IMAGE_TAG:?Select an explicit Rust release version}
     labels:
       org.pseudolife.engine: rust
