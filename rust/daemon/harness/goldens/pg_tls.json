@@ -180,6 +180,61 @@
     "tls": true
   },
   {
+    "name": "hostaddr/default",
+    "accepted": true,
+    "tls": true
+  },
+  {
+    "name": "hostaddr/disable",
+    "accepted": true,
+    "tls": false
+  },
+  {
+    "name": "hostaddr/allow",
+    "accepted": true,
+    "tls": false
+  },
+  {
+    "name": "hostaddr/prefer",
+    "accepted": true,
+    "tls": true
+  },
+  {
+    "name": "hostaddr/require",
+    "accepted": true,
+    "tls": true
+  },
+  {
+    "name": "hostaddr/verify-ca",
+    "accepted": true,
+    "tls": true
+  },
+  {
+    "name": "hostaddr/verify-full",
+    "accepted": false,
+    "tls": null
+  },
+  {
+    "name": "channel-binding/env=require/dsn=None",
+    "accepted": false,
+    "tls": null
+  },
+  {
+    "name": "channel-binding/env=disable/dsn=None",
+    "accepted": true,
+    "tls": true
+  },
+  {
+    "name": "channel-binding/env=require/dsn=disable",
+    "accepted": true,
+    "tls": true
+  },
+  {
+    "name": "channel-binding/env=disable/dsn=require",
+    "accepted": false,
+    "tls": null
+  },
+  {
     "name": "plain/default/None/client=False",
     "accepted": true,
     "tls": false
