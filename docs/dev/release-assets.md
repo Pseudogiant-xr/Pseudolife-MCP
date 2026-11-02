@@ -24,6 +24,12 @@ no enclosing directory. POSIX executables have mode `0755`. The source
 binary is Cargo's `pseudolife-stdio`, built with its default features and
 renamed for installation. These binaries need no Python runtime.
 
+The Linux builds use Ubuntu 22.04 (glibc 2.35) on each architecture;
+macOS builds set a deployment target of 11.0. The Windows build uses MSVC
+on the Windows 2022 runner. The workflow uses native runners for all five
+targets and executes each unpacked archive's `version` command there.
+The runner labels follow [GitHub's hosted runner reference](https://docs.github.com/en/actions/reference/runners/github-hosted-runners).
+
 ## Checksums and compose bundle
 
 `SHA256SUMS` is UTF-8 text with one lowercase SHA-256 digest, two spaces,
@@ -34,7 +40,7 @@ release, verify the archive before extraction, and refuse missing or
 duplicate entries and digest mismatches. A missing native asset means
 that release did not publish the opt-in native set.
 
-The compose archive has these five regular files at its root, copied from
+The compose archive has these six regular files at its root, copied from
 the release's `ops/` directory without rewriting their contents:
 
 - `docker-compose.yml`
@@ -42,6 +48,16 @@ the release's `ops/` directory without rewriting their contents:
 - `docker-compose.rust-daemon.yml`
 - `docker-compose.rust-shadow.yml`
 - `docker-compose.rust-ghcr.yml`
+- `Dockerfile.extractor`
+
+The Rust GHCR overlay resolves the extractor build context to this bundle
+directory and its `Dockerfile.extractor`. That Dockerfile has no local
+`COPY` inputs; it downloads its GGUF in a build stage and copies it into
+the llama.cpp server image. A fresh native install builds this sidecar
+locally, just as the existing installer does; it needs network access for
+the first build but no Python. The sidecar has no published GHCR image
+contract. Daemon-only updates keep it unchanged. Future local extractor
+build inputs must be added to this bundle before release.
 
 The disposable development stack `docker-compose.rust.yml` is excluded.
 Release-mode consumers no longer need a Python wheel to obtain compose
@@ -81,3 +97,18 @@ other values disable them. Build-only CI proofs neither attach release
 assets nor push images. Installers and updaters must treat these assets
 as unavailable until an enabled, approved release has actually published
 them; this document defines their contract, not their availability.
+
+To prove the matrix without publication, dispatch `release.yml` on the
+candidate branch. The native build and bundle jobs upload an Actions
+artifact named `native-release-complete`; all publishing jobs are skipped,
+even if the opt-in variables are enabled. A release event builds the same
+archives only after `publish` succeeds and the assets variable is enabled,
+then verifies the downloaded `SHA256SUMS` immediately before attaching the
+complete set. Publication requires exactly the six listed archives plus the
+checksum manifest. On a retry, it downloads and verifies every already
+published asset, including `SHA256SUMS`, before uploading only missing assets;
+any differing published bytes fail the job without replacement. Rerun the
+publication job with the same complete artifact after a partial upload.
+Packaging fixes
+gzip/tar timestamps at the Unix epoch and ZIP timestamps at 1980-01-01;
+identical input bytes produce identical archives with the same packager.
