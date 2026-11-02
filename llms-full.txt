@@ -5405,10 +5405,13 @@ holder. Once a run holds the lock it also waits, in the board's queue order,
 for a live board holder of the same lease, naming the holder and its purpose,
 because that holder's lock may be one this run cannot see (a Windows `lease
 run full-suite` beside a WSL suite); `PSEUDOLIFE_SUITE_LOCK=fail` exits
-instead, and a hold past its expiry, or one under this lock directory's own
-mirror label, does not stop it. A board that is unreachable or refuses costs
-one line and never stops the run, without a bearer the lock alone rules, and
-`PSEUDOLIFE_SUITE_LOCK=off` (CI) takes neither. The run's bearer and daemon URL
+instead. The board decides when a hold has lapsed (it settles them on every
+call). A record under this lock directory's own mirror label while no `lease
+hold` of the lease runs here, or the enclosing `lease run` of the same lease
+that started the run (`PSEUDOLIFE_LEASES_HELD`), does not stop it. A board
+that is unreachable or refuses costs one line and never stops the run (`fail`
+does not wait for one that stops answering), without a bearer the lock alone
+rules, and `PSEUDOLIFE_SUITE_LOCK=off` (CI) takes neither. The run's bearer and daemon URL
 are read when conftest is imported, before the suite's own client isolation
 strips them, and the mirror is built only for a run that takes the lock.
 

@@ -1008,9 +1008,13 @@ class BoardMirror:
     that holder's own lock may sit where this one cannot see it (a Windows
     ``lease run full-suite`` beside a WSL suite: two ran at once on
     2026-11-03): :meth:`admitted` says when the board has let it start, and
-    :meth:`blocked_by` names the holder meanwhile. A hold past its expiry, or
-    one under this lock directory's own label (which the OS lock already
-    rules), does not stop it; nor does a board that is unusable.
+    :meth:`blocked_by` names the holder meanwhile. The board decides when a
+    hold has lapsed (it settles them on every call; a local clock may run
+    fast). A record under this lock directory's own label with no ``lease
+    hold`` of the lease running here (the OS lock already rules it), an
+    enclosing ``lease run`` of the same lease, or an unusable board does not
+    stop the run; :meth:`board_trouble` and :meth:`proceed` let the caller
+    stop waiting for a board that does not answer.
     """
 
     def __init__(self, name: str, *, purpose: str = "", expect: int | None = None,
@@ -1043,6 +1047,7 @@ class BoardMirror:
         self._held_since: float | None = None
         self._admitted = threading.Event()  # with gate: the board let the run start
         self._blocker: str | None = None  # with gate: who it waits for, while it does
+        self._trouble: str | None = None  # the board's last failure, until it answers
 
     def waiting(self) -> None:
         """While this process waits for the OS lock: queue on the board (the
@@ -1079,27 +1084,51 @@ class BoardMirror:
         with self._state_lock:
             return self._blocker
 
+    def board_trouble(self) -> str | None:
+        """Why the board's last call failed, while it has not answered since;
+        None once it answers."""
+        with self._state_lock:
+            return self._trouble
+
+    def proceed(self) -> None:
+        """Stop waiting for the board: the caller starts on the local lock,
+        and the board lease follows when the board grants it."""
+        self._admit()
+        self._wake.set()
+
     def _admit(self) -> None:
         with self._state_lock:
             self._blocker = None
         self._admitted.set()
 
+    def _lease_lock(self) -> bool | None:
+        """Whether this lease's ``lease run`` / ``lease hold`` lock file here
+        is held (True), free (False) or absent (None)."""
+        path = os_lock.lock_dir(self._environ) / os_lock.lock_file_name(self.name)
+        try:
+            return os_lock.probe(path)
+        except OSError:
+            return None
+
     def _waits_behind(self, reply: dict) -> bool:
-        """Whether a gated run must wait for this ``lease`` reply's holder: a
-        live hold (``expires_at`` still ahead, as the board's own settling
-        reads it) by someone other than this lock directory's mirrors, or a
-        free lease the board is passing to a waiter ahead. ``expected_end``
-        only describes the hold: an overrun holder that still renews is
-        still running."""
+        """Whether a gated run must wait for this ``lease`` reply's holder:
+        any hold the board still names (it settles lapsed holds on every
+        call, so a local clock running fast cannot end one early), or a free
+        lease it is passing to a waiter ahead. The exception is a record
+        under this lock directory's own label while no ``lease hold`` of the
+        lease runs here (its lock file is not held): a sibling slot or a
+        killed run's leftover, which the OS lock already rules. A ``lease
+        hold`` here carries the same label, so the label alone proves
+        nothing (review of #1174). ``expected_end`` only describes a hold:
+        an overrun holder that still renews is still running."""
         if reply["state"] == "held":
             return False
         holder = reply.get("holder")
         if not isinstance(holder, dict):
             return True
         if self.label != HOLD_LABEL and holder.get("label") == self.label:
-            return False
-        expires = _number(holder.get("expires_at"))
-        return expires is None or expires > time.time()
+            return self._lease_lock() is True
+        return True
 
     def _set(self, state: str) -> None:
         with self._state_lock:
@@ -1131,8 +1160,9 @@ class BoardMirror:
                 now = time.monotonic()
                 if state == "holding" and not holding:
                     reply = self._lease()
-                    if self.gate and self._board is not None and (
-                            reply is None or self._waits_behind(reply)):
+                    if (self.gate and self._board is not None
+                            and not self._admitted.is_set()
+                            and (reply is None or self._waits_behind(reply))):
                         # Not admitted yet: ask again after a pause (a board
                         # that keeps failing is dropped after BOARD_GIVE_UP,
                         # and then the local lock alone rules).
@@ -1186,7 +1216,25 @@ class BoardMirror:
                 self._board = None
             self._admitted.set()  # no board: the local lock alone rules
 
+    def _enclosed(self) -> bool:
+        """Whether this process runs inside ``lease run`` of this same lease
+        (``lease run full-suite -- python -m pytest tests/``): its name is
+        in PSEUDOLIFE_LEASES_HELD (whole names only) and its lock file is
+        not free (held, or absent: a run on the other side of WSL). The
+        board lease is then that run's, renewed until this process exits,
+        so a gated mirror waiting for it would wait forever (review of
+        #1174). A marker beside a free lock outlived its run."""
+        held = self._environ.get(HELD_ENV, "")
+        if f",{self.name}," not in f",{held},":
+            return False
+        return self._lease_lock() is not False
+
     def _connect(self) -> None:
+        if self.gate and self._enclosed():
+            _say(f"lease: {self.name!r} is held by an enclosing lease run ({HELD_ENV}="
+                 f"{_clean(self._environ.get(HELD_ENV, ''), MAX_PURPOSE)}); the board lease "
+                 f"is that run's, so this run neither waits for it nor mirrors it")
+            return  # no board: admitted at once, the local lock rules the rest
         try:
             self._board, skipped = _connect(self._no_board, self._transport, self._environ)
         except Exception as exc:  # noqa: BLE001
@@ -1221,6 +1269,8 @@ class BoardMirror:
                     status=_printable(f"lease:{self.name} pid {self.pid} {self.worktree}")[:240])
             reply = board.lease(self.name, self.ttl, expect=self.expect, purpose=self.purpose)
         except _Transient as exc:
+            with self._state_lock:
+                self._trouble = _clean(str(exc), MAX_PURPOSE)
             now = time.monotonic()
             if self._failing_since is None:
                 self._failing_since = now
@@ -1234,6 +1284,8 @@ class BoardMirror:
             self._skip(str(exc))
             return None
         self._failing_since = None
+        with self._state_lock:
+            self._trouble = None
         return reply
 
     def _early_grant(self) -> None:

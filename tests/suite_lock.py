@@ -78,11 +78,14 @@ night of 2026-11-03 a Windows-side ``lease run full-suite`` (a native build)
 and a WSL full suite ran at once twice, because a WSL run cannot see a
 Windows lock. So once a run holds the OS lock it also waits, in arrival
 order, for a live board holder of its lease (``fail`` exits instead), naming
-the holder and its purpose; a hold past its expiry, or one under this lock
-directory's own mirror label, does not stop it. A board that is unreachable
-or refuses costs one line on stderr and never stops the run (one that keeps
-failing is dropped after the mirror's BOARD_GIVE_UP), and without a bearer
-the lock alone rules; ``PSEUDOLIFE_SUITE_LOCK=off`` (CI) takes neither.
+the holder and its purpose. The board decides when a hold has lapsed; a
+record under this lock directory's own mirror label while no ``lease hold``
+of the lease runs here, or the enclosing ``lease run`` of the same lease
+(PSEUDOLIFE_LEASES_HELD), does not stop it. A board that is unreachable or
+refuses costs one line on stderr and never stops the run (one that keeps
+failing is dropped after the mirror's BOARD_GIVE_UP, and ``fail`` does not
+wait for one that stops answering), and without a bearer the lock alone
+rules; ``PSEUDOLIFE_SUITE_LOCK=off`` (CI) takes neither.
 conftest snapshots the bearer and daemon URL at import
 (``board_environment``), before tests/client_environment.py strips them.
 
@@ -180,9 +183,12 @@ DURATIONS_KEEP = 50
 EXPECT_SAMPLE = 5
 DEFAULT_EXPECT_SECONDS = 25 * 60
 # What the board mirror reads from the environment conftest imports in:
-# the bearer, its file form, the daemon URL and the project for the notices.
+# the bearer, its file form, the daemon URL and the project for the notices,
+# and an enclosing `lease run`'s marker and lock directory (a run inside
+# `lease run full-suite` must not wait for its own parent's board lease).
 BOARD_ENVIRONMENT = ("PSEUDOLIFE_MCP_TOKEN", "PSEUDOLIFE_MCP_TOKEN_FILE",
-                     "PSEUDOLIFE_MCP_DAEMON_URL", "PSEUDOLIFE_AGENT_PROJECT")
+                     "PSEUDOLIFE_MCP_DAEMON_URL", "PSEUDOLIFE_AGENT_PROJECT",
+                     "PSEUDOLIFE_LEASES_HELD", "PSEUDOLIFE_LEASE_LOCK_DIR")
 SUITE_LEASE = "full-suite"
 # How long a run that leaves the queue without the lock (refused, stale
 # tree, Ctrl-C) waits for the board to drop its place.
@@ -686,9 +692,17 @@ def acquire(directory: Path, mode: str, *, worktree: str,
             _await_board(mirror, mode, poll=poll, notice_every=notice_every, out=out,
                          check=check)
         except BaseException:  # refused (fail), a changed tree, or Ctrl-C
-            release(held, record=False)
+            release(held, record=False, budget=ABORT_BUDGET)
             raise
+        # The run's time starts with its tests, not the board wait: the
+        # median of these sets the next run's expected end.
+        held.taken_at = time.monotonic()
+        held.started_at = datetime.now().astimezone().isoformat(timespec="seconds")
     return held
+
+
+# How long a run waits for the board's first answer before saying so.
+NO_ANSWER_NOTICE = 5.0
 
 
 def _await_board(mirror, mode: str, *, poll: float, notice_every: float,
@@ -697,46 +711,66 @@ def _await_board(mirror, mode: str, *, poll: float, notice_every: float,
     board holder of the lease may hold a lock this one cannot see (a Windows
     ``lease run full-suite`` beside a WSL suite, 2026-11-03). ``wait`` names
     the holder about every ``notice_every`` seconds; ``fail`` raises
-    :class:`SuiteLockBusy` once the board has named one. ``check`` runs on
-    every poll, as in the queue. A mirror without the gate, or one that
-    fails, admits at once: the board never stops a run by breaking."""
+    :class:`SuiteLockBusy` once the board has named one, and does not wait
+    for a board that is not answering (the local lock admits the run).
+    ``check`` runs on every poll, as in the queue, and once more just before
+    the run starts, so a tree changed while the board answered is caught
+    (review of #1174). A mirror without the gate, or one that fails, admits
+    at once: the board never stops a run by breaking."""
     admitted = getattr(mirror, "admitted", None)
     if admitted is None:
         return
+    began = time.monotonic()
     waited_from = next_notice = None
     while True:
+        if check is not None:
+            check()
         try:
             if admitted(poll):
                 break
             blocker = mirror.blocked_by()
+            trouble = mirror.board_trouble()
         except Exception as exc:  # noqa: BLE001 — the board never stops a run
             print(f"full-suite lock: the board mirror failed while the run waited for "
                   f"it ({type(exc).__name__}); the run continues", file=out, flush=True)
-            return
-        if blocker is None:
-            continue  # no answer from the board yet
-        if mode == "fail":
-            raise SuiteLockBusy(
-                f"full-suite lock: {blocker}; {LOCK_ENV}=fail refuses to queue "
-                f"(unset it to wait, or run a targeted subset)")
+            break
         now = time.monotonic()
+        if trouble is not None:
+            situation = f"the board is not answering ({trouble})"
+            if blocker is not None:
+                situation += f"; it last showed: {blocker}"
+        elif blocker is not None:
+            situation = blocker
+        elif now - began >= NO_ANSWER_NOTICE:
+            situation = "the board has not answered yet"
+        else:
+            continue  # the first answer is on its way
+        if mode == "fail":
+            if trouble is None and blocker is not None:
+                raise SuiteLockBusy(
+                    f"full-suite lock: {blocker}; {LOCK_ENV}=fail refuses to queue "
+                    f"(unset it to wait, or run a targeted subset)")
+            print(f"full-suite lock taken; {situation}; {LOCK_ENV}=fail does not wait "
+                  f"for it, so the local lock alone admits this run", file=out, flush=True)
+            mirror.proceed()
+            break
         hint = ""
         if waited_from is None:
             waited_from = next_notice = now
             hint = (f" (this run holds the local lock meanwhile; {LOCK_ENV}=fail "
                     f"exits instead)")
         if now >= next_notice:
-            print(f"full-suite lock taken; {blocker}{hint}", file=out, flush=True)
+            print(f"full-suite lock taken; {situation}{hint}", file=out, flush=True)
             next_notice = now + notice_every
-        if check is not None:
-            check()
+    if check is not None:
+        check()  # the last time, just before the run starts
     if waited_from is not None:
         minutes, seconds = divmod(int(time.monotonic() - waited_from), 60)
         print(f"full-suite lock: the board admitted the run after waiting "
               f"{minutes}m{seconds:02d}s", file=out, flush=True)
 
 
-def release(held: HeldLock, *, record: bool = True) -> None:
+def release(held: HeldLock, *, record: bool = True, budget: float | None = None) -> None:
     """Free the lock, then tell the board. ``record`` times the run for the
     next one's expected end: conftest passes False for a run that did not
     run its tests (interrupted, a collection or usage error), so aborts do
@@ -760,7 +794,8 @@ def release(held: HeldLock, *, record: bool = True) -> None:
     # The board last, as `lease run` does: a slow daemon must never keep the
     # lock from the next run. The mirror waits at most its release budget.
     if held.mirror is not None:
-        _mirror_call(held.mirror, "release", sys.stderr)
+        _mirror_call(held.mirror, "release", sys.stderr,
+                     *(() if budget is None else (budget,)))
 
 
 def record_duration(directory: Path, seconds: float, *, worktree: str,
