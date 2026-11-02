@@ -502,8 +502,8 @@ class Update:
         return self.report.exit_code
 
     def _run(self) -> None:
-        if self.o.shadow and self.o.engine != "rust":
-            raise UpdateError("--shadow requires --engine rust --checkout <repo>; nothing was changed", 2)
+        if self.o.shadow and (not self.o.engine or self.o.checkout is None):
+            raise UpdateError("--shadow requires --engine rust --checkout <repo> to start, or --engine python --checkout <repo> to remove; nothing was changed", 2)
         if self.o.engine == "rust" and self.o.checkout is None:
             raise UpdateError("Rust images are not published; use --engine rust --checkout <repo> (checkout mode); nothing was changed", 2)
         if (self.o.engine or self.o.shadow) and (self.o.clients_only or self.o.all_clients or self.o.unattended or self.o.schedule):
@@ -1460,7 +1460,7 @@ def build_parser() -> argparse.ArgumentParser:
                                      description="update the daemon and the client side (shim, plugin cache, Codex hooks)")
     parser.add_argument("--tag", default=None, help="release version to install (default: the newest on PyPI)")
     parser.add_argument("--engine", choices=("python", "rust"), help="opt-in Docker daemon engine (Rust requires checkout mode)")
-    parser.add_argument("--shadow", action="store_true", help="start read-only Rust on loopback port 8766 beside Python")
+    parser.add_argument("--shadow", action="store_true", help="with --engine rust start read-only Rust on loopback 8766; with --engine python remove only the companion (checkout mode)")
     parser.add_argument("--result-file", default=None,
                         help="write the exit code to this file at the end (the shim's unattended client update reads it)")
     parser.add_argument("--unattended", action="store_true",
