@@ -1,0 +1,82 @@
+[
+  {
+    "python": "0.20.0rc1",
+    "native": "0.20.0-rc1",
+    "equal": true
+  },
+  {
+    "python": "0.20.0rc1",
+    "native": "0.20.0-rc.1",
+    "equal": true
+  },
+  {
+    "python": "0.20.0a1",
+    "native": "0.20.0-alpha.1",
+    "equal": true
+  },
+  {
+    "python": "0.20.0b2",
+    "native": "0.20.0-beta.2",
+    "equal": true
+  },
+  {
+    "python": "0.20.0c3",
+    "native": "0.20.0-rc3",
+    "equal": true
+  },
+  {
+    "python": "0.20.0preview3",
+    "native": "0.20.0-rc.3",
+    "equal": true
+  },
+  {
+    "python": "0.20.0pre3",
+    "native": "0.20.0-rc.3",
+    "equal": true
+  },
+  {
+    "python": "0.20.0RC01",
+    "native": "0.20.0-rc.1",
+    "equal": true
+  },
+  {
+    "python": "0.20.0rc0",
+    "native": "0.20.0-rc.000",
+    "equal": true
+  },
+  {
+    "python": "0.20.0rc1+local",
+    "native": "0.20.0-rc.1+local",
+    "equal": true
+  },
+  {
+    "python": "0.20.0rc1",
+    "native": "0.20.0-rc2",
+    "equal": false
+  },
+  {
+    "python": "0.20.0a1",
+    "native": "0.20.0-beta.1",
+    "equal": false
+  },
+  {
+    "python": "0.20.0rc1",
+    "native": "0.20.0",
+    "equal": false
+  },
+  {
+    "python": "0.20.0rc1",
+    "native": "0.21.0-rc1",
+    "equal": false
+  },
+  {
+    "python": "0.20.0rc1+local",
+    "native": "0.20.0-rc.1+other",
+    "equal": false
+  },
+  {
+    "python": "0.20.0rc1+local",
+    "native": "0.20.0-rc.1",
+    "equal": false
+  }
+]
