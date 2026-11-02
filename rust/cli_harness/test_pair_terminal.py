@@ -1,8 +1,10 @@
 """Real controlling-terminal interruption; set R1_PAIR_CANDIDATE for native proof."""
 import os
+import json
 from pathlib import Path
 import select
 import signal
+import subprocess
 import sys
 import time
 
@@ -53,3 +55,42 @@ def test_interrupt_restores_terminal_echo(tmp_path, arm):
             os.kill(pid, signal.SIGKILL)
             os.waitpid(pid, 0)
         os.close(master)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows console regression")
+@pytest.mark.parametrize("arm", ["python", "rust"])
+@pytest.mark.parametrize("action", ["interrupt", "backspace"])
+def test_windows_prompt_restores_console_modes(tmp_path, arm, action):
+    candidate = os.environ.get("R1_PAIR_CANDIDATE")
+    if arm == "rust" and not candidate:
+        pytest.skip("R1_PAIR_CANDIDATE is required for the native arm")
+    command = ([sys.executable, "-m", "pseudolife_memory.cli"] if arm == "python"
+               else [candidate])
+    token = tmp_path / "token"
+    command += ["pair", "http://localhost:1", "--read-code", "--token-file", str(token)]
+    env = {k: v for k, v in os.environ.items() if not k.startswith("PSEUDOLIFE_")}
+    env.update(HOME=str(tmp_path), USERPROFILE=str(tmp_path),
+               PSEUDOLIFE_MCP_DATA_DIR=str(tmp_path / "data"))
+    result_path = tmp_path / "console-result.json"
+    startup = subprocess.STARTUPINFO()
+    startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    startup.wShowWindow = subprocess.SW_HIDE
+    helper = Path(__file__).with_name("_windows_pair_console.py")
+    # Keep the test runner and every existing console out of the signal target.
+    result = subprocess.run(
+        [sys._base_executable, str(helper), str(result_path), str(token), action, *command],
+        env=env, cwd=Path(__file__).resolve().parents[2], startupinfo=startup,
+        creationflags=subprocess.CREATE_NEW_CONSOLE, timeout=45,
+    )
+    assert result.returncode == 0
+    observation = json.loads(result_path.read_text(encoding="utf-8"))
+    assert "error" not in observation, observation
+    assert observation["isolated_console"]
+    assert not observation["during"] & 4, observation
+    assert observation["after"] == observation["before"], observation
+    assert not observation["token_exists"], observation
+    if action == "interrupt":
+        assert observation["exit_code"] in (130, 0xC000013A), observation
+    else:
+        assert observation["exit_code"] == 2, observation
+        assert observation["empty_code"], observation

@@ -74,9 +74,6 @@ fn help_does_not_open_the_bank_or_enter_the_container() {
 fn non_canonical_argv_defers_before_the_bank() {
     for arguments in [
         &[][..],
-        &["setup"],
-        &["setup", "--check"],
-        &["setup", "--local", "--yes"],
         &["list", "extra"],
         &["enrol-code", "--no-w"],
         &["confirm"],

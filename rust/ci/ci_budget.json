@@ -161,7 +161,7 @@
       "fixtures": "defc5e07c5ac3f94",
       "candidate": "d71c5590ce6f866a",
       "candidate-harness": "43b859ee9d5fd738",
-      "parity-checks": "7ccc52c664b9b41b",
+      "parity-checks": "c004c0452836f94a",
       "daemon-image": "5c93764cb0f0bab7",
       "parity": "aa4ba434de948ea6"
     },
@@ -245,6 +245,11 @@
         "job": "parity-checks",
         "fingerprint": "7ccc52c664b9b41b",
         "reason": "Adds the bounded recovery and setup rows to the existing w1c-connect shard and a two-case POSIX terminal regression to w1c-pairing. No new pull-request jobs, provisioning, or dependency edges. Linux dev validation of the 45 new live cases takes under three minutes, within the existing shard timeout and total runner-minute headroom; retain the full-lane baseline pending batch remeasurement."
+      },
+      {
+        "job": "parity-checks",
+        "fingerprint": "c004c0452836f94a",
+        "reason": "Run the two terminal interruption arms on Windows as well as Linux inside the existing pairing job; no added job or build."
       }
     ]
   },

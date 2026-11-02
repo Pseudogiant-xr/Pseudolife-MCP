@@ -277,7 +277,17 @@ fn write_failures_the_oracle_would_report_defer_before_connecting() {
     if let Some(locked) = Locked::new(home.path().join("locked")) {
         let inside = locked.0.join("x.env");
         let nested = locked.0.join("sub").join("x.env");
-        for file in [&inside, &nested] {
+        // Some Windows accounts can create directories despite the deny ACL
+        // (the Python oracle can too). Only assert refusal for a blocked shape.
+        let blocks_directory = match fs::create_dir(nested.parent().unwrap()) {
+            Ok(()) => {
+                fs::remove_dir(nested.parent().unwrap()).unwrap();
+                false
+            }
+            Err(_) => true,
+        };
+        let files = std::iter::once(&inside).chain(blocks_directory.then_some(&nested));
+        for file in files {
             assert_deferred(
                 &home,
                 &[

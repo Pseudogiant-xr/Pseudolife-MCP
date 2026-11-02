@@ -1283,7 +1283,7 @@ jobs:
           $binaryName = if ($IsWindows) { 'pseudolife-stdio.exe' } else { 'pseudolife-stdio' }
           $candidate = (Resolve-Path (Join-Path 'rust/target/release' $binaryName)).Path
           $rows = @(${{ matrix.w1c_rows }})
-          if ($IsLinux -and $rows -contains 'pair') {
+          if (($IsLinux -or $IsWindows) -and $rows -contains 'pair') {
             $env:R1_PAIR_CANDIDATE = $candidate
             python -m pytest -q rust/cli_harness/test_pair_terminal.py -ra --durations=30 --junitxml (Join-Path $env:RUNNER_TEMP 'junit/cli-pair-terminal.xml')
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

@@ -26,22 +26,6 @@ window, and a fresh credential after its actual private-file bytes match its
 durable hash. A malformed hash, timestamp, credential, or unexercised race
 fails before normalization. These cases are live-only: no invented goldens.
 
-Integration (parent-owned shared files):
-
-```rust
-// rust/shim/src/cli.rs
-pub mod coordination_recovery;
-// Before the generic deferred-mode branch:
-if mode == "coordination-recovery" {
-    return Some(ExitCode::from(coordination_recovery::run(std::env::args_os().skip(2).collect())));
-}
-```
-
-```python
-# rust/cli_harness/rows/__init__.py, ROWS
-"coordination_recovery": "CLI-COORDINATION-RECOVERY",
-```
-
 No dependency changes. `codec.rs` is reused from native board audit; bank
 connections, private state and credential generation reuse native helpers.
 The existing typed configuration boundary refuses unsupported YAML before
@@ -57,5 +41,7 @@ python rust/cli_harness --row coordination_recovery --candidate <native-binary>
 python rust/cli_harness --row coordination_recovery --golden --candidate <native-binary>
 ```
 
-Native build and bank cases have not been run by the implementation worker.
+The Linux native build and all 20 live cases passed, including restored-bank
+rebind and reservation replacement. Native Windows and golden replay qualification
+remain pending.
 Windows stress selection: `row:coordination_recovery` (20 hosted runs).

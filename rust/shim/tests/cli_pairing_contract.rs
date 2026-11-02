@@ -213,7 +213,7 @@ fn operator_help_and_missing_bank_do_not_need_a_runtime() {
     ] {
         let mut help = command(&home.0, mode);
         help.arg("--help");
-        assert_output(&run(help, b""), 0, expected, "");
+        assert_output(&run(help, b""), 0, &expected.replace("\r\n", "\n"), "");
     }
     let mut invite = command(&home.0, "invite");
     invite.arg("--list");

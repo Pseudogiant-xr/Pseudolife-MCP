@@ -77,7 +77,8 @@ pub(super) async fn password() -> io::Result<String> {
 pub(super) async fn password() -> io::Result<String> {
     use std::os::windows::io::AsRawHandle;
     use windows_sys::Win32::System::Console::{
-        ENABLE_ECHO_INPUT, GetConsoleMode, ReadConsoleW, SetConsoleMode,
+        ENABLE_ECHO_INPUT, ENABLE_LINE_INPUT, ENABLE_PROCESSED_INPUT, GetConsoleMode, ReadConsoleW,
+        SetConsoleMode,
     };
     let input = std::fs::OpenOptions::new()
         .read(true)
@@ -97,7 +98,10 @@ pub(super) async fn password() -> io::Result<String> {
             }
         }
     }
-    if unsafe { SetConsoleMode(handle, previous & !ENABLE_ECHO_INPUT) } == 0 {
+    // Match getpass's Windows character input: Ctrl-C must reach this reader
+    // rather than terminate the process before the restore guard can run.
+    let quiet = previous & !(ENABLE_ECHO_INPUT | ENABLE_LINE_INPUT | ENABLE_PROCESSED_INPUT);
+    if unsafe { SetConsoleMode(handle, quiet) } == 0 {
         return Err(io::Error::last_os_error());
     }
     let restore = Restore(handle, previous);
@@ -105,8 +109,8 @@ pub(super) async fn password() -> io::Result<String> {
     stderr.write_all(b"pairing code: ")?;
     stderr.flush()?;
     let mut text = Vec::new();
-    loop {
-        let mut units = [0u16; 128];
+    let result = loop {
+        let mut units = [0u16; 1];
         let mut read = 0;
         let ok = unsafe {
             ReadConsoleW(
@@ -118,15 +122,23 @@ pub(super) async fn password() -> io::Result<String> {
             )
         };
         if ok == 0 {
-            return Err(io::Error::last_os_error());
+            break Err(io::Error::last_os_error());
         }
-        text.extend_from_slice(&units[..read as usize]);
-        if read == 0 || text.contains(&10) || text.contains(&13) {
-            break;
+        if read == 0 {
+            break Ok(());
         }
-    }
+        match units[0] {
+            3 => break Err(io::ErrorKind::Interrupted.into()),
+            10 | 13 => break Ok(()),
+            8 => {
+                text.pop();
+            }
+            unit => text.push(unit),
+        }
+    };
     drop(restore);
     stderr.write_all(b"\n")?;
+    result?;
     String::from_utf16(&text)
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid terminal text"))
 }
