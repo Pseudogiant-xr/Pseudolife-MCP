@@ -2194,6 +2194,8 @@ class CoordinationStore:
             "AND e.payload::jsonb->>'fence'=l.fence::text) "
             "AND NOT EXISTS (SELECT 1 FROM coordination_messages m WHERE "
             "m.sender_principal=%s AND m.request_id='lease-grant:'||l.fence::text) "
+            "AND NOT EXISTS (SELECT 1 FROM coordination_events e WHERE e.event='send' "
+            "AND e.principal='daemon' AND e.payload::jsonb->>'request_id'='lease-grant:'||l.fence::text) "
             "ORDER BY l.name LIMIT 50", (self.clock(), DAEMON_PRINCIPAL))
 
     def send_lease_grant(self, agent_id, credential, *, name, fence, **stamp):
@@ -2208,6 +2210,9 @@ class CoordinationStore:
             request_id = f"lease-grant:{fence}"
             if self._one("SELECT 1 FROM coordination_messages WHERE sender_principal=%s "
                          "AND request_id=%s", (DAEMON_PRINCIPAL, request_id)):
+                return None
+            if self._one("SELECT 1 FROM coordination_events WHERE event='send' AND principal=%s "
+                         "AND payload::jsonb->>'request_id'=%s LIMIT 1", (DAEMON_PRINCIPAL, request_id)):
                 return None
             if self._one(
                     "SELECT 1 FROM coordination_events WHERE event='lease_grant' AND actor='daemon' "
@@ -2933,6 +2938,8 @@ class CoordinationStore:
         # Offer system rows before marking them served. A peer arriving
         # after them cannot postpone or downgrade that first handoff.
         # Thereafter newest-offer selection lets later peer bells through.
+        # Losing peer rows stay unstamped and may ring after the system mail
+        # is acknowledged; they have not yet had a handoff.
         newest = max(rows, key=lambda r: (r["created_at"], r["wake_id"]))
         privileged = [item for item in rows if item["reason"] in _SYSTEM_WAKE_REASONS
                       and (codex or item["queued"] or item["served_at"] is None

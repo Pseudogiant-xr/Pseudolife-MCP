@@ -103,6 +103,9 @@ class LeaseNoticeRecovery(Scenario):
             seed("committed grant without drain", commit_grant),
             notice(act("ordinary receive recovers grant", "receive", agent="B")),
             notice(act("repeat receive does not duplicate", "receive", agent="B")),
+            seed("pruned live notice", lambda store, _ctx:
+                 store.storage.conn.execute("DELETE FROM coordination_messages")),
+            notice(act("audit dedupe survives message pruning", "receive", agent="B"), 0),
             act("release B", "release", agent="B", body={"name": "resource"}),
             notice(act("next grant has one notice", "receive", agent="C")),
         ]
@@ -112,12 +115,16 @@ class LeaseGrantOffer(Scenario):
     name = "lease-grant-offer"
     needs_bank = True
     parked = False
+    codex = True
 
     def steps(self):
         parks = [act("B needs resource", "update", agent="B", body={
             "park_reason": "needs_resource", "park_needs": "resource",
             "park_clear_by": "maintainer"})] if self.parked else []
-        return setup() + parks + [
+        initial = setup()
+        if not self.codex:
+            initial[:4] = [reg(f"register {who}", who, capabilities={"ring": True}) for who in "ABCD"]
+        return initial + parks + [
             act("B listener", "attach", agent="B", body=lambda c: {"attachment_id": "listener",
                 "ring": True, "ring_armed_until": c.now + 60},
                 save=lambda c, r: c.vals.update(generation=r["generation"])),
@@ -135,5 +142,10 @@ class LeaseGrantParkedOffer(LeaseGrantOffer):
     parked = True
 
 
+class LeaseGrantClaudeOffer(LeaseGrantParkedOffer):
+    name = "lease-grant-claude-offer"
+    codex = False
+
+
 SCENARIOS = {s.name: s for s in (LeaseGrantRecovery, LeaseWaiterLiveness, LeaseNoticeRecovery,
-                              LeaseGrantOffer, LeaseGrantParkedOffer)}
+                              LeaseGrantOffer, LeaseGrantParkedOffer, LeaseGrantClaudeOffer)}

@@ -599,6 +599,8 @@ pub async fn serve_wake(c: &impl GenericClient, agent_id: &str, now: f64) -> Res
     }
     // System mail gets its first handoff before a newer peer can delay or
     // downgrade it. Only the selected rows are marked served below.
+    // Losing peer rows remain unstamped and may ring after system mail is
+    // acknowledged: they have not yet had a handoff.
     let latest = rows
         .iter()
         .max_by(|a, b| {

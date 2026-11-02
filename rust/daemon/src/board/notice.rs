@@ -61,6 +61,8 @@ impl Board {
                  AND e.payload::jsonb->>'fence'=l.fence::text) \
                  AND NOT EXISTS (SELECT 1 FROM coordination_messages m WHERE \
                  m.sender_principal=$2 AND m.request_id='lease-grant:'||l.fence::text) \
+                 AND NOT EXISTS (SELECT 1 FROM coordination_events e WHERE e.event='send' \
+                 AND e.principal='daemon' AND e.payload::jsonb->>'request_id'='lease-grant:'||l.fence::text) \
                  ORDER BY l.name LIMIT 50",
                     &[&now(), &DAEMON_PRINCIPAL],
                 )
@@ -285,6 +287,17 @@ impl Store {
         }
         if tx
             .query_opt(
+                "SELECT 1 FROM coordination_events WHERE event='send' AND principal=$1 \
+             AND payload::jsonb->>'request_id'=$2 LIMIT 1",
+                &[&DAEMON_PRINCIPAL, &request_id],
+            )
+            .await?
+            .is_some()
+        {
+            return Ok(None);
+        }
+        if tx
+            .query_opt(
                 "SELECT 1 FROM coordination_events WHERE event='lease_grant' AND actor='daemon' \
                          AND agent_id=$1 AND payload::jsonb->>'name'=$2 \
                          AND payload::jsonb->>'fence'=$3 LIMIT 1",
@@ -340,13 +353,13 @@ mod tests {
 
     #[tokio::test]
     async fn cold_grant_drain_never_waits_for_initialization() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = std::env::temp_dir().join(format!("pl-cold-grant-{}", uuid::Uuid::new_v4()));
         let mut config = crate::config::Config::default();
         config.coordination.enabled = true;
         let service = Arc::new(crate::service::Service::new(
             config,
             crate::config::DaemonEnv::from_env(&|_| None).unwrap(),
-            dir.path().to_path_buf(),
+            dir,
             "unused-cold-dsn".into(),
             true,
         ));

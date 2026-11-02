@@ -175,10 +175,11 @@ def test_notice_failure_after_send_rolls_back_with_its_outbox_entry(store, monke
 
 
 @pytest.mark.parametrize("parked", [False, True])
-def test_unserved_grant_bell_precedes_later_peer_offer(store, parked):
+@pytest.mark.parametrize("codex", [False, True])
+def test_unserved_grant_bell_precedes_later_peer_offer(store, parked, codex):
     a, b = queue(store, 2)
     store.storage.conn.execute("UPDATE coordination_agents SET capabilities=%s WHERE agent_id=%s",
-                               (Jsonb({"ring": True, "codex": False}), b["agent_id"]))
+                               (Jsonb({"ring": True, **({"codex": False} if codex else {})}), b["agent_id"]))
     attached = store.attach(*creds(b), attachment_id="listener", ring=True, ring_armed_until=1060)
     if parked:
         store.update(*creds(b), park_reason="needs_resource", park_needs="resource",
@@ -195,4 +196,18 @@ def test_unserved_grant_bell_precedes_later_peer_offer(store, parked):
                                ring_armed_until=1060)["wake"]
     first = offer()
     assert (first["decision"], first["reason"], first["ring_at"]) == ("rung", "lease_grant", 1001)
-    assert offer()["reason"] == "urgent"
+    assert offer()["reason"] == ("urgent" if codex or parked else "lease_grant")
+
+
+def test_notice_dedupe_survives_live_message_pruning(store):
+    a, b = queue(store, 2)
+    store.release_lease(*creds(a), name="resource")
+    sender = daemon(store)
+    pending = store.pending_lease_grants()[0]
+    store.send_lease_grant(sender["agent_id"], sender["credential"], **pending)
+    # Long-lived renewed hold outlives the mail retention window.
+    store.acquire_lease(*creds(b), name="resource", ttl=86400)
+    store.storage.conn.execute("DELETE FROM coordination_messages")
+    assert store.pending_lease_grants() == []
+    replacement = daemon(store)
+    assert store.send_lease_grant(replacement["agent_id"], replacement["credential"], **pending) is None
