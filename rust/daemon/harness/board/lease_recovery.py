@@ -56,6 +56,7 @@ class LeaseGrantRecovery(Scenario):
                 "ring_armed_until": c.now + 60})),
             notice(act("grant mail is live delivery", "receive", agent="B", body=lambda c: {
                 "attachment_id": "listener", "generation": c.vals["generation"]})),
+            act("B clears consumed resource park", "update", agent="B", body={"park_reason": ""}),
             age(121),
             act("C alive", "update", agent="C", body={"status": "ready"}),
             act("D alive", "update", agent="D", body={"status": "ready"}),
