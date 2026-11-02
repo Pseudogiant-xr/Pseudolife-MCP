@@ -8,6 +8,7 @@ pub(super) enum Action {
     VerifyInput { input: String, expect: Option<Head> },
     VerifyBank { expect: Option<Head> },
     Export(Export),
+    Stats(Stats),
     Redact { message_id: String, reason: String },
     Error(String),
     Help(&'static str),
@@ -20,6 +21,15 @@ pub(super) struct Export {
     pub since: Option<f64>,
     pub until: Option<f64>,
     pub out: Option<String>,
+}
+
+pub(super) struct Stats {
+    pub since: Option<f64>,
+    pub until: Option<f64>,
+    pub input: Option<String>,
+    pub durations: Option<String>,
+    pub out: Option<String>,
+    pub append: Option<String>,
 }
 
 fn usage(action: &str) -> String {
@@ -61,7 +71,7 @@ fn error(action: &str, message: impl std::fmt::Display) -> Option<Action> {
     )))
 }
 
-/// `None` retains the separately deferred stats/transport domains.
+/// `None` retains input domains the native JSON codec cannot represent.
 pub(super) fn parse(arguments: &[OsString]) -> Option<Action> {
     let tokens = arguments
         .iter()
@@ -182,15 +192,10 @@ pub(super) fn parse(arguments: &[OsString]) -> Option<Action> {
             return error(action, format!("argument --expect-head: {message}"));
         }
         if matches!(name, "--since" | "--until") && time(value).is_none() {
-            if epoch(value).is_some() {
-                return error(
-                    action,
-                    format!("argument {name}: expected epoch seconds or an ISO 8601 date/time"),
-                );
-            }
-            // Python admits more ISO spellings than the native converter.
-            // Defer every non-numeric failure, including overwritten options.
-            return None;
+            return error(
+                action,
+                format!("argument {name}: expected epoch seconds or an ISO 8601 date/time"),
+            );
         }
         if let Some(slot) = seen.iter_mut().find(|(key, _)| *key == name) {
             slot.1 = value;
@@ -243,7 +248,14 @@ pub(super) fn parse(arguments: &[OsString]) -> Option<Action> {
             until: get("--until").and_then(time),
             out: get("--out").filter(|v| !v.is_empty()).map(path),
         })),
-        "stats" => None,
+        "stats" => Some(Action::Stats(Stats {
+            since: get("--since").and_then(time),
+            until: get("--until").and_then(time),
+            input: get("--input").filter(|v| !v.is_empty()).map(path),
+            durations: get("--durations").filter(|v| !v.is_empty()).map(path),
+            out: get("--out").filter(|v| !v.is_empty()).map(path),
+            append: get("--append").filter(|v| !v.is_empty()).map(str::to_owned),
+        })),
         _ => Some(Action::Redact {
             message_id: get("--message-id")?.to_owned(),
             reason: get("--reason")?.to_owned(),
@@ -380,7 +392,7 @@ fn python_digit(c: char) -> bool {
         68160..=68163 | 69216..=69224 | 69714..=69722 | 127232..=127242)
 }
 
-fn time(value: &str) -> Option<f64> {
+pub(super) fn time(value: &str) -> Option<f64> {
     match epoch(value) {
         Some(number) => number.is_finite().then_some(number),
         None => iso(value),
@@ -411,75 +423,7 @@ fn epoch(value: &str) -> Option<f64> {
 }
 
 fn iso(value: &str) -> Option<f64> {
-    let offset_start = value.len().checked_sub(6)?;
-    let fraction = value.get(19..offset_start)?;
-    let microseconds = if fraction.is_empty() {
-        0
-    } else {
-        let digits = fraction.strip_prefix('.')?;
-        if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
-            return None;
-        }
-        // datetime.fromisoformat truncates sub-microsecond digits.
-        digits
-            .bytes()
-            .take(6)
-            .chain(std::iter::repeat(b'0'))
-            .take(6)
-            .fold(0, |value, byte| value * 10 + i64::from(byte - b'0'))
-    };
-    let whole = format!("{}{}", value.get(..19)?, value.get(offset_start..)?);
-    let value = whole.as_str();
-    let bytes = value.as_bytes();
-    let shape = b"dddd-dd-ddTdd:dd:dd+dd:dd";
-    for (index, (byte, want)) in bytes.iter().zip(shape).enumerate() {
-        let ok = match want {
-            b'd' => byte.is_ascii_digit(),
-            b'+' => matches!(byte, b'+' | b'-'),
-            other => byte == other,
-        };
-        if !ok || (index == 19 && !matches!(byte, b'+' | b'-')) {
-            return None;
-        }
-    }
-    let number = |range: std::ops::Range<usize>| value[range].parse::<i64>().ok();
-    let (year, month, day) = (number(0..4)?, number(5..7)?, number(8..10)?);
-    let (hour, minute, second) = (number(11..13)?, number(14..16)?, number(17..19)?);
-    let (offset_hours, offset_minutes) = (number(20..22)?, number(23..25)?);
-    let leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
-    let days_in_month = match month {
-        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
-        4 | 6 | 9 | 11 => 30,
-        2 if leap => 29,
-        2 => 28,
-        _ => return None,
-    };
-    if year < 1
-        || day < 1
-        || day > days_in_month
-        || hour > 23
-        || minute > 59
-        || second > 59
-        || offset_hours > 23
-        || offset_minutes > 59
-    {
-        return None;
-    }
-    // Howard Hinnant's days_from_civil.
-    let shifted = if month <= 2 { year - 1 } else { year };
-    let era = shifted.div_euclid(400);
-    let year_of_era = shifted - era * 400;
-    let month_index = (month + 9) % 12;
-    let day_of_year = (153 * month_index + 2) / 5 + day - 1;
-    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
-    let days = era * 146097 + day_of_era - 719468;
-    let sign = if bytes[19] == b'-' { -1 } else { 1 };
-    let offset = sign * (offset_hours * 3600 + offset_minutes * 60);
-    let seconds = days * 86400 + hour * 3600 + minute * 60 + second - offset;
-    // Python divides total integer microseconds. Decimal parsing rounds that
-    // ratio once, including dates whose microseconds exceed exact f64 integers.
-    let total_microseconds = seconds * 1_000_000 + microseconds;
-    format!("{total_microseconds}e-6").parse().ok()
+    super::time::iso(value)
 }
 
 #[cfg(test)]

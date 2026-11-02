@@ -20,6 +20,7 @@ into an empty directory, the one-time conversion.
 
     python rust/daemon/split_divergences.py            # during git merge: apply the branch's changes
     python rust/daemon/split_divergences.py --check    # verify layout, D7 buckets and index
+    python rust/daemon/split_divergences.py --counts   # print the D7 bucket totals
     python rust/daemon/split_divergences.py --render   # print the whole ledger
 """
 from __future__ import annotations
@@ -409,8 +410,16 @@ def convert(ours: dict, base: dict | None, root: Path = ROOT_DIR) -> list[str]:
     return conflicts
 
 
-def check_triage(root: Path, ledger: dict) -> None:
-    """Check the per-entry dispositions and the derived README summary."""
+def bucket_counts(root: Path, ledger: dict) -> dict[str, int]:
+    """Entries per D7 bucket, in D7_BUCKETS order, then "Total". Derived from
+    the entry files and never committed, since pull requests that each edited
+    a shared count line merged into wrong sums (three batches, 2026-11-02)."""
+    return entry_buckets(root, ledger)[0]
+
+
+def entry_buckets(root: Path, ledger: dict) -> tuple[dict[str, int], set[str]]:
+    """Check each entry's one D7 bucket; return the counts (see bucket_counts)
+    and the entry files in the "behaviour with a caller" bucket."""
     counts = dict.fromkeys(D7_BUCKETS, 0)
     callers = set()
     for path, section in ledger.items():
@@ -434,7 +443,12 @@ def check_triage(root: Path, ledger: dict) -> None:
             counts[bucket] += 1
             if bucket == "behaviour with a caller":
                 callers.add(file.relative_to(root).as_posix())
+    return {**counts, "Total": sum(counts.values())}, callers
 
+
+def check_triage(root: Path, ledger: dict) -> None:
+    """Check the per-entry dispositions and the README's caller routing."""
+    _, callers = entry_buckets(root, ledger)
     index = root / "README.md"
     if not index.is_file():
         raise LedgerError(f"{index}: D7 summary index is required")
@@ -452,15 +466,9 @@ def check_triage(root: Path, ledger: dict) -> None:
             raise LedgerError(f"{index}: {label} table column count differs from its header")
         return rows[1:]
 
-    shown = {}
-    for cells in summary_rows(["D7 bucket", "Entries"], "counts"):
-        label, value = (cell.strip("*") for cell in cells)
-        if label in shown or not value.isdecimal():
-            raise LedgerError(f"{index}: duplicate or invalid counts row {cells!r}")
-        shown[label] = int(value)
-    expected = {**counts, "Total": sum(counts.values())}
-    if shown != expected:
-        raise LedgerError(f"{index}: counts differ from entry buckets; expected {expected}")
+    if any("D7 bucket" in table_cells(block[0]) for block in tables):
+        raise LedgerError(f"{index}: remove the D7 count table; the totals are derived, "
+                          "never committed: python rust/daemon/split_divergences.py --counts")
 
     linked = set()
     for cells in summary_rows(["Entry", "Caller", "Closing stream or batch"], "caller"):
@@ -497,6 +505,8 @@ def main(argv: list[str] | None = None) -> int:
     mode = ap.add_mutually_exclusive_group()
     mode.add_argument("--check", action="store_true", help="verify layout, D7 buckets and summary; change nothing")
     mode.add_argument("--render", action="store_true", help="print the whole ledger as one document")
+    mode.add_argument("--counts", action="store_true",
+                      help="print the entries in each D7 bucket and their total; change nothing")
     ap.add_argument("--base", help="the revision the branch's divergences.md was written against "
                                    "(default: the merge base during a merge; none otherwise)")
     ap.add_argument("--full", action="store_true",
@@ -505,6 +515,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.render:
             sys.stdout.write(render(load_dir(ROOT_DIR)))
+            return 0
+        if args.counts:
+            for label, count in bucket_counts(ROOT_DIR, load_dir(ROOT_DIR)).items():
+                print(f"{label:<26}{count:>5}")
             return 0
         if not args.check:
             ours = parse_ledger(LEDGER.read_text(encoding="utf-8")) if LEDGER.is_file() else {}
