@@ -95,7 +95,7 @@ async fn write_ack_unknown_pending_write_keeps_token_after_baseline_reads() {
         .rpc("config/batchWrite", pending)
         .await
         .unwrap();
-    let token = home.0.join("pseudolife/token");
+    let token = home.0.join("pseudolife").join("token");
     assert!(
         token.is_file(),
         "the later committed write must retain its token"
@@ -176,7 +176,7 @@ async fn retry_after_restore_ack(cancel: bool, competing: bool) {
         assert!(applied.rollback(&mut client, &home.0).await.is_err());
     }
     assert_eq!(client.writes, 2);
-    let token = home.0.join("pseudolife/token");
+    let token = home.0.join("pseudolife").join("token");
     let connection = home.0.join("pseudolife/connection.json");
     assert!(token.is_file() && connection.is_file());
     if competing {
