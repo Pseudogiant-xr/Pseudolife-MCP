@@ -1748,6 +1748,9 @@ jobs:
       - name: Build the CPU image without publishing
         if: steps.image-inputs.outputs.needed == 'true'
         run: docker build --progress=plain -f ops/Dockerfile.daemon-rust -t w3j-daemon-rust:prep --build-arg GIT_SHA="$GITHUB_SHA" --build-arg GIT_DIRTY=false --build-arg BUILD_SOURCE=ci .
+      - name: Check the installed native CLI without network access
+        if: steps.image-inputs.outputs.needed == 'true'
+        run: docker run --rm --network none w3j-daemon-rust:prep pseudolife-mcp version
       - name: Restore the pinned model cache
         if: steps.image-inputs.outputs.needed == 'true'
         uses: actions/cache@v4

@@ -1,0 +1,7 @@
+# Opt-in Rust release image; apply after docker-compose.ghcr.yml.
+# The updater supplies an explicit version and uses --no-build --no-deps.
+services:
+  pseudolife-daemon:
+    image: ghcr.io/pseudogiant-xr/pseudolife-daemon-rust:${PSEUDOLIFE_IMAGE_TAG:?Select an explicit Rust release version}
+    labels:
+      org.pseudolife.engine: rust

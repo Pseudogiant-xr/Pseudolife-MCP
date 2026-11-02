@@ -64,13 +64,23 @@ class ContainerTests(unittest.TestCase):
     def test_image_gate_matches_inputs_and_skips_unrelated_changes(self):
         gate = load("container_inputs")
         for path in (".dockerignore", "rust/daemon/src/embed.rs", "rust/Cargo.toml", "rust/Cargo.lock",
+                     "rust/shim/src/main.rs", "rust/shim/Cargo.toml",
                      "ops/Dockerfile.daemon-rust", "ops/docker-compose.rust.yml",
                      "ops/provision-daemon-models.sh",
                      ".github/workflows/rust.yml", "plugin/hooks/session-start.sh"):
             with self.subTest(path=path):
                 self.assertTrue(gate.needs_image([path]))
         self.assertFalse(gate.needs_image(["README.md", "docs/guide/configuration.md",
-                                          "pseudolife_memory/service.py", "rust/shim/src/main.rs"]))
+                                          "pseudolife_memory/service.py"]))
+
+    def test_image_ships_the_native_operator_cli(self):
+        dockerfile = (ROOT / "ops/Dockerfile.daemon-rust").read_text()
+        self.assertIn("--bin pseudolife-stdio", dockerfile)
+        self.assertIn("cp rust/target/release/pseudolife-stdio /pseudolife-mcp", dockerfile)
+        self.assertIn("COPY --from=builder /pseudolife-mcp /usr/local/bin/pseudolife-mcp", dockerfile)
+        job = (ROOT / ".github/workflows/rust.yml").read_text().split(
+            "\n  daemon-image:", 1)[1].split("\n  parity:", 1)[0]
+        self.assertIn("docker run --rm --network none w3j-daemon-rust:prep pseudolife-mcp version", job)
 
     def test_runtime_contract_is_explicit_and_default_compose_is_not_used(self):
         dockerfile = (ROOT / "ops/Dockerfile.daemon-rust").read_text()
