@@ -131,9 +131,13 @@ pub(super) fn stats(stats: &Stats) -> u8 {
         if durations.is_some() { add(&mut args,"--durations",Some("/dev/stdin")); }
         let invocation = resolution::container_exec_for_engine(&docker,false,"board-audit",&args,rust);
         crate::stderrln!("pseudolife-mcp board-audit: no bank in this shell; running it inside the pseudolife-mcp-daemon container");
-        let output = tokio::process::Command::new(&invocation[0]).args(&invocation[1..])
+        let child = tokio::process::Command::new(&invocation[0]).args(&invocation[1..])
             .stdin(durations.map(Stdio::from).unwrap_or_else(Stdio::inherit))
-            .stdout(Stdio::piped()).stderr(Stdio::inherit()).kill_on_drop(true).output().await;
+            .stdout(Stdio::piped()).stderr(Stdio::inherit()).kill_on_drop(true).spawn();
+        let output = match child {
+            Ok(child) => child.wait_with_output().await,
+            Err(error) => Err(error),
+        };
         match output {
             Err(_) => no_bank(),
             Ok(output) if !output.status.success() => resolution::exit_code(output.status) as u8,

@@ -248,7 +248,7 @@
     "transfer-numeric-strings",
     "transfer-order-flip",
     "transfer-part-guard",
-    "transfer-probe-share",
+    "transfer-schema-lock-deferred",
     "transfer-refusal-exit",
     "transfer-roster-guard",
     "transfer-schema-guard",

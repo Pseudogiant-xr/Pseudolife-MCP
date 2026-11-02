@@ -581,6 +581,9 @@ def _seed_null_stamps(conn) -> None:
     finally:
         storage.close()
     conn.execute("UPDATE edges SET asserted_at=150.0 WHERE tx_time IS NULL")
+    # PostgresStorage initializes built-in relations before this arm starts.
+    # Keep that seed deterministic; runtime backfilled edge stamps still compare.
+    conn.execute("UPDATE relations SET created_at=90 WHERE builtin AND created_at>90")
     row = conn.execute("SELECT count(*) FROM edges WHERE tx_time IS NULL").fetchone()
     assert row[0] == 1, "the daemon writer no longer leaves NULL stamps"
 
@@ -873,12 +876,14 @@ MUTANTS = [
            '"DECLARE {cursor} CURSOR FOR SELECT * FROM {} ORDER BY 1 DESC"',
            ("export-seeded",)),
     # Review round 1 (2026-10-09): each guard below is load-bearing.
-    Mutant("transfer-null-stamps", ROW, "shim/src/cli/transfer/import.rs",
-           'if unstamped.as_deref() != Some("f") {', 'if unstamped.as_deref() == Some("x") {',
-           ("import-null-stamps-defers",)),
-    Mutant("transfer-probe-share", ROW, "shim/src/cli/transfer/import.rs",
-           'IN ACCESS EXCLUSIVE MODE"', 'IN ACCESS SHARE MODE"',
-           ("import-force-locked-holder-defers",)),
+    Mutant("transfer-null-stamps", ROW, "shim/src/cli/transfer/schema.rs",
+           'if let Err(error) = execute(client).await {',
+           'if let Err(error) = Ok::<(), Error>(()) {',
+           ("import-null-stamps",)),
+    Mutant("transfer-schema-lock-deferred", ROW, "shim/src/cli/transfer/import.rs",
+           'super::schema::Error::Db => Stop::Fail,',
+           'super::schema::Error::Db => Stop::Defer,',
+           ("import-force-locked-holder",)),
     Mutant("transfer-int-type", ROW, "shim/src/cli/transfer/import.rs",
            '_ => "numeric",', '_ => "int8",', ("import-huge-int-float",)),
     Mutant("transfer-float4-loads", ROW, "shim/src/cli/transfer/import.rs",
