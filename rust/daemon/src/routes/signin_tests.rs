@@ -730,21 +730,17 @@ async fn health_says_which_sign_ins_the_daemon_offers() {
 /// Issue, redeem at another loopback alias, use at once, list (with
 /// `current`), revoke, and the re-pair that signs a paired machine's
 /// session out: on the test bank.
-#[tokio::test]
-async fn db_link_sign_in_list_and_revoke() {
-    let Some(dsn) = std::env::var("PL_W1A_TEST_DSN")
+/// The test bank (`PL_W1A_TEST_DSN`) with its v59 tables, or `None` (and a
+/// note) when there is none.
+async fn test_bank() -> Option<(String, tokio_postgres::Client, tokio::task::JoinHandle<()>)> {
+    let dsn = std::env::var("PL_W1A_TEST_DSN")
         .ok()
-        .filter(|d| !d.is_empty())
-    else {
+        .filter(|d| !d.is_empty());
+    let Some(dsn) = dsn else {
         eprintln!("PL_W1A_TEST_DSN unset: skipping database test");
-        return;
+        return None;
     };
-    let (c, t) = crate::storage::connect(
-        &crate::storage::parse_dsn(&dsn).unwrap(),
-        Duration::from_secs(10),
-    )
-    .await
-    .unwrap();
+    let (c, t) = db_connect(&dsn).await;
     let present: bool = c
         .query_one(
             "SELECT to_regclass('public.console_sessions') IS NOT NULL",
@@ -755,8 +751,25 @@ async fn db_link_sign_in_list_and_revoke() {
         .get(0);
     if !present {
         eprintln!("console_sessions absent (bank below v59): skipping");
-        return;
+        return None;
     }
+    Some((dsn, c, t))
+}
+
+async fn db_connect(dsn: &str) -> (tokio_postgres::Client, tokio::task::JoinHandle<()>) {
+    crate::storage::connect(
+        &crate::storage::parse_dsn(dsn).unwrap(),
+        Duration::from_secs(10),
+    )
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn db_link_sign_in_list_and_revoke() {
+    let Some((dsn, c, t)) = test_bank().await else {
+        return;
+    };
     let browser = "rs59-browser-token";
     c.execute(
         "DELETE FROM console_sessions WHERE token_hash = $1",
@@ -827,6 +840,21 @@ async fn db_link_sign_in_list_and_revoke() {
     assert_eq!(status, 200, "{signed}");
     assert_eq!(signed["principal"], json!("default"));
     let sid = signed["session_id"].as_str().unwrap().to_string();
+    let (stored_hash, stored_issuer): (String, String) = {
+        let r = c
+            .query_one(
+                "SELECT token_hash, issuer FROM console_sessions WHERE session_id = $1",
+                &[&sid],
+            )
+            .await
+            .unwrap();
+        (r.get(0), r.get(1))
+    };
+    assert_eq!(
+        (stored_hash, stored_issuer),
+        (sha(browser), sha(ENV_TOKEN)),
+        "only hashes are stored"
+    );
     assert_eq!(
         app.signin_limiter.attempts(),
         1,
@@ -893,6 +921,314 @@ async fn db_link_sign_in_list_and_revoke() {
             .0,
         401,
         "signed out at once"
+    );
+    c.execute(
+        "DELETE FROM console_sessions WHERE token_hash = $1",
+        &[&sha(browser)],
+    )
+    .await
+    .unwrap();
+    drop(c);
+    let _ = t.await;
+}
+
+fn redeem_body(code: &str, browser: &str) -> Vec<u8> {
+    json!({"code": code, "token_sha256": sha(browser), "label": "Firefox"})
+        .to_string()
+        .into_bytes()
+}
+
+async fn link_from(app: &Arc<App>, origin: &str) -> String {
+    let body = json!({"origin": origin}).to_string();
+    let (status, _, out) = call(
+        app,
+        bearer("POST", "/api/console/link", ENV_TOKEN, Some(&body)),
+    )
+    .await;
+    assert_eq!(status, 200, "{}", json_of(&out));
+    json_of(&out)["code"].as_str().unwrap().to_string()
+}
+
+/// Codes issued at `localhost` and at `[::1]` redeem at the other loopback
+/// aliases (the flow above covers `127.0.0.1` to `[::1]`), another host
+/// leaves the code unspent, and the bank holds only hashes: no code (as
+/// shown, bare or lower-cased), browser token or issuing token in any
+/// column of either table.
+#[tokio::test]
+async fn db_each_loopback_alias_redeems_and_only_hashes_are_stored() {
+    let Some((dsn, c, t)) = test_bank().await else {
+        return;
+    };
+    let browsers = ["rs59-alias-browser-1", "rs59-alias-browser-2"];
+    let hashes: Vec<String> = browsers.iter().map(|b| sha(b)).collect();
+    c.execute(
+        "DELETE FROM console_sessions WHERE token_hash = ANY($1)",
+        &[&hashes],
+    )
+    .await
+    .unwrap();
+    let app = app_with(&dsn, Some(ENV_TOKEN), vec![], true);
+    let first = link_from(&app, "http://localhost:8765").await;
+    let (status, _, out) = call(
+        &app,
+        signin(
+            Some("http://127.0.0.1:8765"),
+            JS,
+            &redeem_body(&first, browsers[0]),
+        ),
+    )
+    .await;
+    assert_eq!(status, 200, "{}", json_of(&out));
+    let second = link_from(&app, "http://[::1]:8765").await;
+    let body = redeem_body(&second, browsers[1]);
+    let (status, _, _) = call(&app, signin(Some("https://bank.example.com"), JS, &body)).await;
+    assert_eq!(status, 400, "another host is refused");
+    let (status, _, out) = call(&app, signin(Some("http://localhost:8765"), JS, &body)).await;
+    assert_eq!(status, 200, "and left the code unspent: {}", json_of(&out));
+    let bare: Vec<String> = [&first, &second]
+        .iter()
+        .map(|code| code.replace('-', ""))
+        .collect();
+    let code_hashes: Vec<String> = bare.iter().map(|code| sha(code)).collect();
+    let mut rows: Vec<String> = Vec::new();
+    for (sql, keys) in [
+        (
+            "SELECT row_to_json(t)::text FROM console_signin_codes t WHERE code_hash = ANY($1)",
+            &code_hashes,
+        ),
+        (
+            "SELECT row_to_json(t)::text FROM console_sessions t WHERE token_hash = ANY($1)",
+            &hashes,
+        ),
+    ] {
+        let found: Vec<String> = c
+            .query(sql, &[keys])
+            .await
+            .unwrap()
+            .iter()
+            .map(|r| r.get(0))
+            .collect();
+        assert_eq!(found.len(), 2, "{sql}");
+        rows.extend(found);
+    }
+    let mut plaintexts: Vec<String> = vec![ENV_TOKEN.into(), first.clone(), second.clone()];
+    plaintexts.extend(browsers.iter().map(|b| b.to_string()));
+    for code in &bare {
+        plaintexts.push(code.clone());
+        plaintexts.push(code.to_lowercase());
+    }
+    for row in &rows {
+        for plain in &plaintexts {
+            assert!(!row.contains(plain.as_str()), "{plain} stored in {row}");
+        }
+    }
+    c.execute(
+        "DELETE FROM console_sessions WHERE token_hash = ANY($1)",
+        &[&hashes],
+    )
+    .await
+    .unwrap();
+    drop(c);
+    let _ = t.await;
+}
+
+/// Lock `sql`'s row on a connection of its own (`BEGIN ... FOR UPDATE`),
+/// returning the connection and its backend id.
+async fn hold_row(
+    dsn: &str,
+    sql: &str,
+    key: &str,
+) -> (tokio_postgres::Client, tokio::task::JoinHandle<()>, i32) {
+    let (lock, lt) = db_connect(dsn).await;
+    lock.batch_execute("BEGIN").await.unwrap();
+    lock.query(sql, &[&key]).await.unwrap();
+    let holder = crate::console_sessions::tests::backend_pid(&lock).await;
+    (lock, lt, holder)
+}
+
+/// Drive `request` until its database work is queued behind `holder`'s
+/// lock (inside its transaction), then drop it, as a client that goes away
+/// mid-call does.
+async fn abandon_once_blocked(
+    app: &Arc<App>,
+    c: &tokio_postgres::Client,
+    holder: i32,
+    request: Request<Body>,
+) {
+    let mut answer = Box::pin(handle(State(app.clone()), request));
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        tokio::select! {
+            biased;
+            _ = &mut answer => panic!("answered while its row was locked"),
+            _ = tokio::time::sleep(Duration::from_millis(20)) => {}
+        }
+        if crate::console_sessions::tests::blocked_by(c, holder).await >= 1 {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the request never reached the bank"
+        );
+    }
+    drop(answer);
+}
+
+/// Poll `check` (at most 20 s) until it holds.
+async fn eventually<F, Fut>(what: &str, mut check: F)
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = bool>,
+{
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while !check().await {
+        assert!(Instant::now() < deadline, "never: {what}");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+/// A browser that goes away mid-redemption (the code row locked, so the
+/// redemption is inside its transaction when the request is dropped) is
+/// still signed in: the session commits and the daemon's view holds it.
+#[tokio::test]
+async fn db_a_redemption_the_client_abandons_still_signs_in() {
+    let Some((dsn, c, t)) = test_bank().await else {
+        return;
+    };
+    let browser = "rs59-abandoned-redeem-browser";
+    c.execute(
+        "DELETE FROM console_sessions WHERE token_hash = $1",
+        &[&sha(browser)],
+    )
+    .await
+    .unwrap();
+    let app = app_with(&dsn, Some(ENV_TOKEN), vec![], true);
+    let code = link_from(&app, "http://127.0.0.1:8765").await;
+    let code_hash = sha(&code.replace('-', ""));
+    let (lock, lt, holder) = hold_row(
+        &dsn,
+        "SELECT 1 FROM console_signin_codes WHERE code_hash = $1 FOR UPDATE",
+        &code_hash,
+    )
+    .await;
+    let request = signin(
+        Some("http://127.0.0.1:8765"),
+        JS,
+        &redeem_body(&code, browser),
+    );
+    abandon_once_blocked(&app, &c, holder, request).await;
+    lock.batch_execute("COMMIT").await.unwrap();
+    drop(lock);
+    let _ = lt.await;
+    let view = app.sessions.clone().unwrap();
+    eventually("the session committed", || {
+        let c = &c;
+        async move {
+            c.query_one(
+                "SELECT count(*) FROM console_sessions WHERE token_hash = $1",
+                &[&sha(browser)],
+            )
+            .await
+            .unwrap()
+            .get::<_, i64>(0)
+                == 1
+        }
+    })
+    .await;
+    eventually("the view holds it and the slot is back", || {
+        let ready = view.lookup(&sha(browser)).is_some() && app.signin_limiter.in_flight() == 0;
+        async move { ready }
+    })
+    .await;
+    assert_eq!(
+        call(&app, bearer("GET", "/api/nope", browser, None))
+            .await
+            .0,
+        404,
+        "the new session signs in"
+    );
+    c.execute(
+        "DELETE FROM console_sessions WHERE token_hash = $1",
+        &[&sha(browser)],
+    )
+    .await
+    .unwrap();
+    drop(c);
+    let _ = t.await;
+}
+
+/// A client that goes away mid-revocation (the session row locked, so the
+/// revocation is inside its transaction when the request is dropped) still
+/// signs the session out: the revocation commits and the view drops it.
+#[tokio::test]
+async fn db_a_revocation_the_client_abandons_still_signs_out() {
+    let Some((dsn, c, t)) = test_bank().await else {
+        return;
+    };
+    let browser = "rs59-abandoned-revoke-browser";
+    c.execute(
+        "DELETE FROM console_sessions WHERE token_hash = $1",
+        &[&sha(browser)],
+    )
+    .await
+    .unwrap();
+    let app = app_with(&dsn, Some(ENV_TOKEN), vec![], true);
+    let code = link_from(&app, "http://127.0.0.1:8765").await;
+    let (status, _, out) = call(
+        &app,
+        signin(
+            Some("http://127.0.0.1:8765"),
+            JS,
+            &redeem_body(&code, browser),
+        ),
+    )
+    .await;
+    let signed = json_of(&out);
+    assert_eq!(status, 200, "{signed}");
+    let sid = signed["session_id"].as_str().unwrap().to_string();
+    let view = app.sessions.clone().unwrap();
+    assert!(view.lookup(&sha(browser)).is_some());
+    let (lock, lt, holder) = hold_row(
+        &dsn,
+        "SELECT 1 FROM console_sessions WHERE session_id = $1 FOR UPDATE",
+        &sid,
+    )
+    .await;
+    let body = json!({"session_id": sid}).to_string();
+    let request = bearer(
+        "POST",
+        "/api/console/sessions/revoke",
+        ENV_TOKEN,
+        Some(&body),
+    );
+    abandon_once_blocked(&app, &c, holder, request).await;
+    lock.batch_execute("COMMIT").await.unwrap();
+    drop(lock);
+    let _ = lt.await;
+    eventually("the revocation committed", || {
+        let (c, sid) = (&c, &sid);
+        async move {
+            c.query_one(
+                "SELECT revoked_at IS NOT NULL FROM console_sessions WHERE session_id = $1",
+                &[sid],
+            )
+            .await
+            .unwrap()
+            .get::<_, bool>(0)
+        }
+    })
+    .await;
+    eventually("the view dropped it", || {
+        let gone = view.lookup(&sha(browser)).is_none();
+        async move { gone }
+    })
+    .await;
+    assert_eq!(
+        call(&app, bearer("GET", "/api/nope", browser, None))
+            .await
+            .0,
+        401,
+        "signed out"
     );
     c.execute(
         "DELETE FROM console_sessions WHERE token_hash = $1",

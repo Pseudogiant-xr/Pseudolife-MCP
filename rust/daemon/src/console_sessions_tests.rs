@@ -1025,6 +1025,30 @@ async fn db_old_codes_and_dead_sessions_are_pruned_after_a_day() {
     )
     .await
     .unwrap();
+    // A code spent and expired two days ago goes too; a session past its
+    // absolute expiry for over a day goes, one expired an hour ago stays.
+    c.execute(
+        "INSERT INTO console_signin_codes (code_hash, principal, source, issuer, origin, expires_at, \
+         created_at, used_at) VALUES ($1, 'rs59e', 'environment', 'i', 'o', $2, $2, $2)",
+        &[&sha("rs59e-spent"), &(now - 2.0 * day)],
+    )
+    .await
+    .unwrap();
+    c.execute(
+        "INSERT INTO console_sessions (session_id, token_hash, principal, source, issuer, method, \
+         label, created_at, last_used_at, expires_at) VALUES \
+         ('rs59e-expired', $1, 'rs59e', 'environment', 'i', 'link', '', $3, NULL, $4), \
+         ('rs59e-lapsed', $2, 'rs59e', 'environment', 'i', 'link', '', $3, NULL, $5)",
+        &[
+            &sha("rs59e-expired"),
+            &sha("rs59e-lapsed"),
+            &(now - 100.0 * day),
+            &(now - 2.0 * day),
+            &(now - 3600.0),
+        ],
+    )
+    .await
+    .unwrap();
     issue_code(&dsn, "rs59e-issuer", SOURCE_ENVIRONMENT, "i", "o")
         .await
         .unwrap();
@@ -1039,7 +1063,7 @@ async fn db_old_codes_and_dead_sessions_are_pruned_after_a_day() {
     assert_eq!(codes, 1, "only the recent code is kept");
     let kept: Vec<String> = c
         .query(
-            "SELECT session_id FROM console_sessions WHERE principal = 'rs59e'",
+            "SELECT session_id FROM console_sessions WHERE principal = 'rs59e' ORDER BY session_id COLLATE \"C\"",
             &[],
         )
         .await
@@ -1047,7 +1071,7 @@ async fn db_old_codes_and_dead_sessions_are_pruned_after_a_day() {
         .iter()
         .map(|r| r.get(0))
         .collect();
-    assert_eq!(kept, ["rs59e-kept"]);
+    assert_eq!(kept, ["rs59e-kept", "rs59e-lapsed"]);
     clean(&c, "rs59e").await;
 }
 
@@ -1099,6 +1123,178 @@ async fn db_the_refresher_loads_sessions_and_writes_their_use() {
     shadow_view.note_use("rs59f-1", now + 50.0);
     assert!(!shadow.flush_session_uses().await);
     clean(&c, "rs59f").await;
+}
+
+/// The backend id of `c`'s connection, for [`blocked_by`].
+pub(crate) async fn backend_pid(c: &Client) -> i32 {
+    c.query_one("SELECT pg_backend_pid()", &[])
+        .await
+        .unwrap()
+        .get(0)
+}
+
+/// How many backends are waiting behind `holder`, directly or through
+/// another waiter (a second updater of a row queues on the first one's
+/// tuple lock, not on the holder).
+pub(crate) async fn blocked_by(c: &Client, holder: i32) -> i64 {
+    c.query_one(
+        "WITH RECURSIVE w(pid) AS (\
+         SELECT pid FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid)) \
+         UNION SELECT a.pid FROM pg_stat_activity a JOIN w ON w.pid = ANY(pg_blocking_pids(a.pid))\
+         ) SELECT count(*) FROM w",
+        &[&holder],
+    )
+    .await
+    .unwrap()
+    .get(0)
+}
+
+/// Wait (at most 20 s) until `n` backends wait on `holder`'s lock.
+pub(crate) async fn until_blocked(c: &Client, holder: i32, n: i64) {
+    let deadline = Instant::now() + std::time::Duration::from_secs(20);
+    while blocked_by(c, holder).await < n {
+        assert!(Instant::now() < deadline, "{n} waiter(s) never queued");
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+}
+
+/// Two browsers redeem one code at once, each with its own token hash: the
+/// code row's lock is held until both redemptions are queued on it, so the
+/// race is real every time, and exactly one session results.
+#[tokio::test]
+async fn db_two_redemptions_of_one_code_make_one_session() {
+    let Some((dsn, c, _t)) = bank().await else {
+        return;
+    };
+    clean(&c, "rs59g").await;
+    let origin = "http://localhost:8765";
+    let (code, _) = issue_code(&dsn, "rs59g", SOURCE_ENVIRONMENT, &sha(ENV_TOKEN), origin)
+        .await
+        .unwrap();
+    let (lock, lt) = connect(&dsn).await.unwrap();
+    lock.batch_execute("BEGIN").await.unwrap();
+    lock.query(
+        "SELECT 1 FROM console_signin_codes WHERE code_hash = $1 FOR UPDATE",
+        &[&sha(&code)],
+    )
+    .await
+    .unwrap();
+    let holder = backend_pid(&lock).await;
+    let release = async {
+        until_blocked(&c, holder, 2).await;
+        lock.batch_execute("COMMIT").await.unwrap();
+    };
+    let (code_hash, first, second) = (sha(&code), sha("rs59g-a"), sha("rs59g-b"));
+    let (a, b, ()) = tokio::join!(
+        redeem_code(&dsn, &code_hash, &first, origin, "A", yes),
+        redeem_code(&dsn, &code_hash, &second, origin, "B", yes),
+        release,
+    );
+    close(lock, lt).await;
+    let won = [&a, &b]
+        .iter()
+        .filter(|r| matches!(r, Ok(Redeemed::Session(_))))
+        .count();
+    let refused = [&a, &b]
+        .iter()
+        .filter(|r| matches!(r, Ok(Redeemed::Refused)))
+        .count();
+    assert_eq!((won, refused), (1, 1), "{a:?} {b:?}");
+    let sessions: i64 = c
+        .query_one(
+            "SELECT count(*) FROM console_sessions WHERE principal = 'rs59g'",
+            &[],
+        )
+        .await
+        .unwrap()
+        .get(0);
+    assert_eq!(sessions, 1, "exactly one session");
+    clean(&c, "rs59g").await;
+}
+
+/// A principal's revocation and the revocation of its sessions commit
+/// together: while a session row is locked, the principal's own revocation
+/// is not visible either, and both land once the lock goes.
+#[tokio::test]
+async fn db_a_principal_revocation_commits_with_its_sessions() {
+    let Some((dsn, c, _t)) = bank().await else {
+        return;
+    };
+    clean(&c, "rs59h").await;
+    c.batch_execute("DELETE FROM principals WHERE principal = 'rs59h'")
+        .await
+        .unwrap();
+    let now = wall_now();
+    c.execute(
+        "INSERT INTO principals (principal, token_hash, tier, board, created_at, paired_at) \
+         VALUES ('rs59h', $1, NULL, TRUE, 0, 0)",
+        &[&sha("rs59h-token")],
+    )
+    .await
+    .unwrap();
+    c.execute(
+        "INSERT INTO console_sessions (session_id, token_hash, principal, source, issuer, method, \
+         label, created_at, last_used_at, expires_at) VALUES ('rs59h-1', $1, 'rs59h', 'store', $2, \
+         'link', '', $3, NULL, $4)",
+        &[
+            &sha("rs59h-1"),
+            &sha("rs59h-token"),
+            &now,
+            &(now + SESSION_MAX_S),
+        ],
+    )
+    .await
+    .unwrap();
+    let (lock, lt) = connect(&dsn).await.unwrap();
+    lock.batch_execute("BEGIN").await.unwrap();
+    lock.query(
+        "SELECT 1 FROM console_sessions WHERE session_id = 'rs59h-1' FOR UPDATE",
+        &[],
+    )
+    .await
+    .unwrap();
+    let holder = backend_pid(&lock).await;
+    let revoking = tokio::spawn({
+        let dsn = dsn.clone();
+        async move {
+            let (mut w, wt) = connect(&dsn).await.unwrap();
+            let out = crate::principals::revoke(&mut w, "rs59h").await.unwrap();
+            close(w, wt).await;
+            out
+        }
+    });
+    until_blocked(&c, holder, 1).await;
+    let visible: bool = c
+        .query_one(
+            "SELECT revoked_at IS NOT NULL FROM principals WHERE principal = 'rs59h'",
+            &[],
+        )
+        .await
+        .unwrap()
+        .get(0);
+    assert!(
+        !visible,
+        "the principal's revocation is not committed before its sessions'"
+    );
+    lock.batch_execute("COMMIT").await.unwrap();
+    close(lock, lt).await;
+    assert!(revoking.await.unwrap());
+    let (principal, session): (bool, bool) = {
+        let row = c
+            .query_one(
+                "SELECT (SELECT revoked_at IS NOT NULL FROM principals WHERE principal = 'rs59h'), \
+                 (SELECT revoked_at IS NOT NULL FROM console_sessions WHERE session_id = 'rs59h-1')",
+                &[],
+            )
+            .await
+            .unwrap();
+        (row.get(0), row.get(1))
+    };
+    assert_eq!((principal, session), (true, true));
+    c.batch_execute("DELETE FROM principals WHERE principal = 'rs59h'")
+        .await
+        .unwrap();
+    clean(&c, "rs59h").await;
 }
 
 use std::sync::Arc;

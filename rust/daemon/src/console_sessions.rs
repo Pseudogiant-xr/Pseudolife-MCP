@@ -1117,4 +1117,4 @@ pub fn with_last_use(rows: Vec<Value>, sessions: &SessionSnapshot) -> Vec<Value>
 
 #[cfg(test)]
 #[path = "console_sessions_tests.rs"]
-mod tests;
+pub(crate) mod tests;

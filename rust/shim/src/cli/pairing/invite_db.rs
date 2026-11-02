@@ -638,4 +638,204 @@ mod tests {
             assert!(!code.contains(['I', 'L', 'O', 'U']));
         }
     }
+
+    // -- the test bank (`PL_W1A_TEST_DSN`, a disposable v59 bank) ---------------
+
+    const DAY: f64 = 86_400.0;
+
+    fn sha(text: &str) -> String {
+        super::super::sha256_hex(text)
+    }
+
+    /// A session on the test bank with v59's `console_sessions`, or `None`
+    /// (and a note) when there is none.
+    async fn bank() -> Option<crate::pg::Session> {
+        let dsn = std::env::var("PL_W1A_TEST_DSN")
+            .ok()
+            .filter(|dsn| !dsn.is_empty());
+        let Some(dsn) = dsn else {
+            eprintln!("PL_W1A_TEST_DSN unset: skipping database test");
+            return None;
+        };
+        let dsn = crate::pg::Dsn::parse(&dsn).unwrap();
+        let session = crate::pg::Session::open_in(&dsn, &crate::pg::TlsEnvironment::default())
+            .await
+            .unwrap();
+        let present: bool = session
+            .client()
+            .query_one(
+                "SELECT to_regclass('public.console_sessions') IS NOT NULL",
+                &[],
+            )
+            .await
+            .unwrap()
+            .get(0);
+        if !present {
+            eprintln!("console_sessions absent (bank below v59): skipping");
+            return None;
+        }
+        Some(session)
+    }
+
+    async fn clean(client: &Client, tag: &str) {
+        let like = format!("{tag}%");
+        client
+            .execute(
+                "DELETE FROM console_sessions WHERE principal LIKE $1",
+                &[&like],
+            )
+            .await
+            .unwrap();
+        client
+            .execute("DELETE FROM principals WHERE principal LIKE $1", &[&like])
+            .await
+            .unwrap();
+    }
+
+    /// A live link session `sid` of `principal` (`revoked_at`, when given,
+    /// ends it).
+    async fn add_session(client: &Client, sid: &str, principal: &str, revoked_at: Option<f64>) {
+        let now: f64 = client
+            .query_one(&format!("SELECT {NOW}"), &[])
+            .await
+            .unwrap()
+            .get(0);
+        client
+            .execute(
+                "INSERT INTO console_sessions (session_id, token_hash, principal, source, issuer, \
+                 method, label, created_at, last_used_at, expires_at, revoked_at) VALUES \
+                 ($1, $2, $3, 'store', $4, 'link', '', $5, NULL, $6, $7)",
+                &[
+                    &sid,
+                    &sha(sid),
+                    &principal,
+                    &sha(&format!("{principal}-token")),
+                    &now,
+                    &(now + 90.0 * DAY),
+                    &revoked_at,
+                ],
+            )
+            .await
+            .unwrap();
+    }
+
+    /// A paired principal row (`revoked_at`, when given, revoked as the
+    /// psql path leaves it: the row alone).
+    async fn add_principal(client: &Client, name: &str, revoked_at: Option<f64>) {
+        client
+            .execute(
+                "INSERT INTO principals (principal, token_hash, tier, board, created_at, \
+                 paired_at, revoked_at) VALUES ($1, $2, NULL, TRUE, 0, 0, $3)",
+                &[&name, &sha(&format!("{name}-token")), &revoked_at],
+            )
+            .await
+            .unwrap();
+    }
+
+    /// Each session id with its `revoked_at`, by id.
+    async fn sessions_of(client: &Client, tag: &str) -> Vec<(String, Option<f64>)> {
+        client
+            .query(
+                "SELECT session_id, revoked_at FROM console_sessions WHERE principal LIKE $1 \
+                 ORDER BY session_id COLLATE \"C\"",
+                &[&format!("{tag}%")],
+            )
+            .await
+            .unwrap()
+            .iter()
+            .map(|row| (row.get(0), row.get(1)))
+            .collect()
+    }
+
+    /// `invite --revoke` ends the name's live Console sessions with it; one
+    /// already ended keeps its time, another principal's are untouched, and
+    /// a name with no row revokes nothing.
+    #[tokio::test]
+    async fn db_revoking_a_principal_ends_its_console_sessions() {
+        let Some(mut session) = bank().await else {
+            return;
+        };
+        let client = session.client_mut();
+        clean(client, "rsshim-r").await;
+        add_principal(client, "rsshim-r", None).await;
+        add_principal(client, "rsshim-r-other", None).await;
+        add_session(client, "rsshim-r-1", "rsshim-r", None).await;
+        add_session(client, "rsshim-r-2", "rsshim-r", None).await;
+        add_session(client, "rsshim-r-ended", "rsshim-r", Some(1.0)).await;
+        add_session(client, "rsshim-r-other-1", "rsshim-r-other", None).await;
+        assert!(!revoke(client, "rsshim-r-missing").await.unwrap());
+        assert!(
+            sessions_of(client, "rsshim-r")
+                .await
+                .iter()
+                .all(|(_, at)| at.is_none() || *at == Some(1.0)),
+            "an unknown name revokes nothing"
+        );
+        assert!(revoke(client, "rsshim-r").await.unwrap());
+        let after = sessions_of(client, "rsshim-r").await;
+        let state: Vec<(&str, bool)> = after
+            .iter()
+            .map(|(sid, at)| (sid.as_str(), at.is_some()))
+            .collect();
+        assert_eq!(
+            state,
+            [
+                ("rsshim-r-1", true),
+                ("rsshim-r-2", true),
+                ("rsshim-r-ended", true),
+                ("rsshim-r-other-1", false),
+            ]
+        );
+        assert_eq!(after[2].1, Some(1.0), "an ended session keeps its time");
+        let revoked: bool = client
+            .query_one(
+                "SELECT revoked_at IS NOT NULL FROM principals WHERE principal = 'rsshim-r'",
+                &[],
+            )
+            .await
+            .unwrap()
+            .get(0);
+        assert!(revoked);
+        clean(client, "rsshim-r").await;
+        session.close().await.unwrap();
+    }
+
+    /// Re-inviting a revoked name starts it with no Console sessions, even
+    /// ones its revocation missed (the psql path revokes the row alone); a
+    /// `--replace` of a paired name keeps its sessions, as the oracle does.
+    #[tokio::test]
+    async fn db_re_inviting_a_revoked_name_ends_its_console_sessions() {
+        let Some(mut session) = bank().await else {
+            return;
+        };
+        let client = session.client_mut();
+        clean(client, "rsshim-i").await;
+        add_principal(client, "rsshim-i", Some(1.0)).await;
+        add_principal(client, "rsshim-i-paired", None).await;
+        add_session(client, "rsshim-i-1", "rsshim-i", None).await;
+        add_session(client, "rsshim-i-paired-1", "rsshim-i-paired", None).await;
+        let created = create_invite(client, "rsshim-i", None, None, None, DAY, false)
+            .await
+            .unwrap();
+        assert_eq!(created.state, "revoked");
+        assert!(created.code.is_some());
+        let replaced = create_invite(client, "rsshim-i-paired", None, None, None, DAY, true)
+            .await
+            .unwrap();
+        assert_eq!(replaced.state, "paired");
+        let state: Vec<(String, bool)> = sessions_of(client, "rsshim-i")
+            .await
+            .into_iter()
+            .map(|(sid, at)| (sid, at.is_some()))
+            .collect();
+        assert_eq!(
+            state,
+            [
+                ("rsshim-i-1".to_string(), true),
+                ("rsshim-i-paired-1".to_string(), false),
+            ]
+        );
+        clean(client, "rsshim-i").await;
+        session.close().await.unwrap();
+    }
 }
