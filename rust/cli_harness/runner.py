@@ -270,29 +270,75 @@ def _binding_blobs(source: Path, binding: dict) -> dict[str, str] | None:
 
 # Set by isolated_relaunch for the relaunched harness process.
 ISOLATION_ENV = "CLI_HARNESS_PYCACHE_PREFIX"
+ISOLATION_DEPTH_ENV = "CLI_HARNESS_RELAUNCH_DEPTH"
 
 
 def _same_path(a: str, b: str) -> bool:
     return os.path.normcase(os.path.abspath(a)) == os.path.normcase(os.path.abspath(b))
 
 
+def _isolated_argv(prefix: str) -> list[str]:
+    """Put isolation flags after interpreter options, before its entrypoint."""
+    args = list(sys.orig_argv[1:])
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        if arg in ("-", "--") or not arg.startswith("-"):
+            break
+        if arg.startswith("--"):
+            index += 2 if arg == "--check-hash-based-pycs" else 1
+            continue
+        for offset, option in enumerate(arg[1:], 1):
+            if option in "cm":
+                # CPython accepts clustered options such as -Ic and -Im.
+                if offset > 1:
+                    args[index:index + 1] = [arg[:offset], "-" + arg[offset:]]
+                    index += 1
+                return [sys.executable, *args[:index], "-B", "-X",
+                        f"pycache_prefix={prefix}", *args[index:]]
+            if option in "WX":
+                separate = offset == len(arg) - 1
+                if option == "X":
+                    value = args[index + 1] if separate else arg[offset + 1:]
+                    if value.partition("=")[0] == "pycache_prefix":
+                        # CPython 3.11 initializes this from the first -X value.
+                        if separate:
+                            args[index + 1] = f"pycache_prefix={prefix}"
+                        else:
+                            args[index] = f"{arg[:offset + 1]}pycache_prefix={prefix}"
+                index += 2 if separate else 1
+                break
+        else:
+            index += 1
+    return [sys.executable, *args[:index], "-B", "-X",
+            f"pycache_prefix={prefix}", *args[index:]]
+
+
 def isolated_relaunch() -> int | None:
     """Run this harness invocation again, once, with an empty
-    ``PYTHONPYCACHEPREFIX`` and ``PYTHONDONTWRITEBYTECODE``: every oracle
+    bytecode cache prefix and bytecode writes disabled: every oracle
     module the harness process imports itself (writers, seeders, observers)
     is then compiled from the source on disk, never from a ``__pycache__``.
     Returns the relaunch's exit code, or ``None`` in the relaunched process."""
+    depth = os.environ.get(ISOLATION_DEPTH_ENV, "0")
+    if depth not in ("0", "1"):
+        raise SystemExit("CLI harness isolation: invalid relaunch depth; start a fresh Python invocation")
     prefix = os.environ.get(ISOLATION_ENV)
     if (prefix and sys.pycache_prefix and _same_path(sys.pycache_prefix, prefix)
             and sys.dont_write_bytecode):
         return None
+    if depth == "1":
+        raise SystemExit("CLI harness isolation failed after one relaunch; check interpreter startup "
+                         "code for changes to sys.pycache_prefix or sys.dont_write_bytecode")
     import shutil  # noqa: PLC0415
     import tempfile  # noqa: PLC0415
     empty = tempfile.mkdtemp(prefix="cli-harness-parent-pycache-")
     try:
         env = dict(os.environ, PYTHONPYCACHEPREFIX=empty, PYTHONDONTWRITEBYTECODE="1")
         env[ISOLATION_ENV] = empty
-        return subprocess.run([sys.executable, *sys.orig_argv[1:]], env=env).returncode
+        env[ISOLATION_DEPTH_ENV] = "1"
+        # -I and -E ignore the PYTHON* environment, but honor explicit options.
+        return subprocess.run(_isolated_argv(empty), env=env).returncode
     finally:
         shutil.rmtree(empty, ignore_errors=True)
 
