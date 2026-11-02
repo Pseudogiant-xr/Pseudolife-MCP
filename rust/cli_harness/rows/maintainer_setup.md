@@ -7,7 +7,7 @@ ownership unchanged. The Python oracle and native candidate both execute
 Bank-free local cases exercise help, tokenless refusal, noninteractive consent,
 real configuration writes, exact original backups, invalid-name replacement,
 and read-only `--check`. All 25 Linux goldens were recorded from the verified oracle at `2c770c4d`
-and replayed; the Windows recording is being refreshed. Eighteen transport cases
+and replayed; all 25 Windows recordings also replay successfully. Eighteen transport cases
 exercise active and pending keys, stopped containers, fresh setup, restart
 failure and retry against Rust, Python and unlabelled images. The fixture checks
 the exact engine-specific helper command before recording any logical effect.
@@ -39,7 +39,7 @@ non-string mapping keys and integers outside the loader domain refuse before
 backup or mutation instead of losing data. This bounded rewrite domain is an
 explicit remaining parity limitation; the ordinary valid-name rerun leaves
 the file untouched. Real terminal regressions passed both arms on Linux and Windows: interruption
-restores the terminal, and enrolment diagnostics retain their merged stream. All 25 Linux live cases passed, including checks,
+restores the terminal, and enrolment diagnostics retain their merged stream. All 25 live cases passed on Linux and Windows, including checks,
 fresh writes, restart failures and retries against all three engine labels.
 
 Validation after integration:

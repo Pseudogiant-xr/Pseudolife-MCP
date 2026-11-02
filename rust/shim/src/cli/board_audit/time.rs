@@ -241,7 +241,7 @@ fn local_micros(naive: NaiveDateTime) -> Option<i64> {
 #[cfg(windows)]
 #[allow(unsafe_code)]
 fn local_seconds(seconds: i64) -> Option<i64> {
-    let seconds: libc::time_t = seconds.try_into().ok()?;
+    let seconds: libc::time_t = seconds;
     let mut tm = std::mem::MaybeUninit::<libc::tm>::uninit();
     // SAFETY: localtime_s initializes tm on success and receives valid
     // pointers to correctly sized storage; no process environment changes.

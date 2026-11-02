@@ -189,8 +189,8 @@ transport failures exposed discarded child stderr; forwarding stderr repaired
 them and all six reran successfully. Native Windows audit contracts passed.
 The transport fixture proves argv and file ownership. A Python-free Rust image
 proof passed at `2c770c4d`, including both host transport arms and a validated
-audit chain. All 41 qualified Linux goldens replayed successfully; Windows
-recording and hosted stress remain separate checks.
+audit chain. All 41 qualified goldens replayed on Linux and Windows. Four Windows live
+stats/time cases also passed; hosted stress remains a separate check.
 
 Validation commands:
 

@@ -149,5 +149,6 @@ Linux native builds and the live differential rows passed, including the engine-
 The activated former deferral cases now compare the actual oracle outcome;
 their old case IDs remain stable. Linux goldens were re-recorded from the verified oracle tree at
 `2c770c4dab8dfaba058fc25d2f935bcdd10ffada` and replayed against the native candidate.
-Windows refresh and hosted stress remain separate qualification steps. This extension makes
+The corresponding Windows goldens also replayed successfully. Hosted stress
+remains a separate qualification step. This extension makes
 no claim about guided setup or lite storage.
