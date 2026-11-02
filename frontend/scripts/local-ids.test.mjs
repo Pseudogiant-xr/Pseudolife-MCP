@@ -18,6 +18,13 @@ describe("check-dist: which local names count as identifiers", () => {
     expect(localIdentifiers({ username: "Root", host: "localhost", ci: false }).check).toEqual([]);
   });
 
+  it("still checks real names that start with or contain a generic word", () => {
+    expect(localIdentifiers({ username: "devon", host: "dev-box", ci: false })).toEqual({
+      check: ["devon", "dev-box"],
+      skipped: [],
+    });
+  });
+
   it("checks nothing on CI, and ignores names shorter than three letters", () => {
     expect(localIdentifiers({ username: "alice", host: "alice-laptop", ci: true }).check).toEqual([]);
     expect(localIdentifiers({ username: "al", host: "", ci: false }).check).toEqual([]);
