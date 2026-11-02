@@ -1,55 +1,56 @@
 # Coordination roles, stuck-lease guards and first-run onboarding
 
-**Status:** design, 2026-11-02. Not reviewed yet. Nothing here is built.
+**Status:** design, 2026-11-02, revised 2026-11-03. Not reviewed yet.
+Nothing here is built. The maintainer decided on 2026-11-03 to hold this
+work for the D10 freeze and have it ready to build on the Rust daemon once
+it is the default (G2).
 
 A team of agent sessions can stall on the board. A session holds a lease or
 the coordinator role, then goes idle, crashes or forgets to release it, and
 every session queued behind it waits, polls and messages the holder. A
 session whose turn comes while it is between turns loses both the lease and
-its place in the queue. This spec makes three changes. The conductor and
+its place in the queue. This spec makes four changes. The conductor and
 coordinator become roles that order the queue, never gates the queue waits
 on. Guards catch a holder that is dead, dormant, hung or has left something
-running. The Console gets a first-run guide that teaches the roles and helps
-the user pick the workflow that fits.
+running. Role holders get a playbook for using resources and landing work
+efficiently. The Console gets a first-run guide that teaches the roles and
+helps the user pick the workflow that fits.
 
-## Decision needed: the D10 freeze
+## The D10 freeze: held for Rust
 
 `rust/CUTOVER.md` D10 is a soft Python freeze. Fixes continue, but there are
 no new Python tools, routes, hooks or CLI modes, and pending schema changes
 share one bump. The exception granted for the Console sign-in work (#1144)
-covers that work only. Each item below is marked as one of:
+covers that work only, and this spec asks for none.
 
-- **fix:** it changes existing behaviour through existing surfaces, so it
-  lands under D10;
+Every item is built Rust-first once the Rust daemon is the default (G2,
+B17), from the landing map in "Building it on Rust" below. Each item is
+still marked by kind, because the fixes stay eligible under D10 if the
+maintainer later wants one in the Python daemon first (with its Rust twin):
+
+- **fix:** it changes existing behaviour through existing surfaces;
 - **surface:** it adds a tool action, route, CLI flag, config key or schema
-  column, so it needs the maintainer's exception or waits for the Rust
-  daemon.
+  column.
 
 | # | Item | Kind | Why |
 |---|------|------|-----|
-| F1 | Tell a waiter when the lease is granted to it | fix, see Q1 | It uses existing board mail. The daemon sends no mail today, though (Q1) |
-| F2 | A missed grant goes back to the queue once instead of being dropped | fix | Internal to `_settle` |
-| F3 | Skip dead waiters at grant time | fix | Internal to `_settle`; the signal is already stored |
-| F4 | The coordinator role lasts only while its session can be reached | fix | Same claim call, different expiry rule |
-| F5 | Escalation notices for a stuck holder | fix | Existing mail, existing stale marker |
+| F1 | Tell a waiter when the lease is granted to it | fix | A notice from the daemon's existing reserved sender, with one new wake decision (Q1) |
+| F2 | A missed grant goes back to the queue once instead of being dropped | fix | Internal to settling |
+| F3 | Skip dead waiters at grant time | fix | Internal to settling; the signal is already stored |
+| F4 | The coordinator role lasts only while its session can be reached | fix | Same claim call, different expiry rule; every input is already stored (§1.1) |
+| F5 | Escalation notices for a stuck holder | fix | Existing daemon notices, existing stale marker |
 | F6 | Board and Console flags for a stuck queue or a dormant coordinator | fix | Existing Board view and snapshot fields |
-| F7 | Served instructions and refusal text for roles and landing | fix | Text only |
+| F7 | Served instructions, role briefs and refusal text, the playbook included | fix | Text only |
 | S1 | A role holder reorders a lease queue or names who goes next | surface | New `memory_agents` action and a waiter column (schema) |
 | S2 | An ordering rule per lease (for example shortest expected job first) | surface | New stored setting and action |
 | S3 | The conductor frees an unreachable holder's session lease | surface | New authority; today only the operator can break a lease |
-| S4 | `lease run` watchdog: `--max`, `--stall-after`, `--wait-children`, owner link | surface | New CLI flags (the maintainer rules whether flags on an existing mode count) |
+| S4 | `lease run` watchdog: `--max`, `--stall-after`, `--wait-children`, owner link | surface | New CLI flags |
 | S5 | Resource probes: check the resource is really free before granting | surface | New config key |
-| S6 | Workflow profile per project and the Console's `#/welcome` guide | surface | New stored setting and route; needs #1144 steps 3 and 5 |
+| S6 | Workflow profile per project and the Console's `#/welcome` guide | surface | New stored setting, route and Console page |
 
-**Phase 1 is F1 to F7 and needs no exception.** It removes most of the
-symptoms on its own: no silent grants, no lost places, no week-long dead
-waiters, no coordinator that holds the role while unreachable.
-
-Rust follows every step, as #1144 does: the oracle leads per
-`rust/PORTING.md`. The lease logic lives in `rust/daemon/src/board/lease.rs`
-(grant window) and `rust/daemon/src/board/mcp.rs` (claim TTLs). Any change to
-`_settle` moves the board harness goldens, so each Python PR either ships its
-Rust twin or records a `daemon/divergences/` entry and parity rows.
+The fixes alone remove most of the symptoms: no silent grants, no lost
+places, no week-long dead waiters, no coordinator that holds the role while
+unreachable.
 
 ## What a user should experience
 
@@ -63,9 +64,10 @@ nothing waits on a session that has stopped:
   minutes. The board names it and tells the role holder. If nobody can
   reach it, the daemon frees what it holds, as long as no process of its is
   still running.
-- If a coordinator or conductor is active, it can put the most urgent or
-  quickest job first. If it goes quiet, the queue carries on in arrival
-  order.
+- If a coordinator or conductor is active, it puts the most urgent or
+  quickest job first, batches landings where that saves time and keeps
+  sessions from colliding. If it goes quiet, the queue carries on in
+  arrival order.
 - The first time you open the Console after installing, it explains the
   roles and asks how your agents land work, then sets the board up for
   that.
@@ -81,17 +83,21 @@ What they are today (`docs/guide/configuration.md`, "lease conductor"):
 | Authority | Its urgent mail reopens a `done` park | None ("grants nothing") |
 | Help staying awake | Brief, per-prompt reminder, `conductor-watch`, reachability warning at grant | None |
 
-The maintainer's intent (2026-11-02): both roles order the team's work and
-decide who gets a scarce resource first, by need and overall speed. The
-coordinator is the lesser role: organised by the agents themselves, without
-the maintainer's delegation. A role holder stays reachable for as long as it
-holds the role.
+The maintainer's intent (2026-11-02, 2026-11-03): both roles order the
+team's work and decide who gets a scarce resource first, by need and overall
+speed, and both look for ways to use resources and land work more
+efficiently. The coordinator is the lesser role: organised by the agents
+themselves, without the maintainer's delegation. A role holder stays
+reachable for as long as it holds the role.
 
 What changes:
 
 - **The coordinator gets the conductor's staying-awake help, not its
-  authority** (F4, F7): the same brief and reminder when it holds the role,
-  `conductor-watch` offered to it, and a reachability check when it claims.
+  authority** (F4, F7): its own brief and reminder while it holds the role
+  (the conductor's text says "the maintainer's conductor" and carries its
+  authority, so it cannot be reused as is), `conductor-watch` offered to
+  it, and a reachability check when it claims.
+- **Both roles get the playbook** (§2.1, F7).
 - **A role is never a gate** (S1, S2). Queues stay first come, first served
   by default. A role holder only reorders. If it goes quiet, arrival order
   continues.
@@ -106,16 +112,18 @@ Today a coordinator claim lasts an hour whether or not its session is
 reachable, and a session that claims again each turn holds it for good.
 
 - **Signal: reachable.** The session has a live attachment (`lease_until`
-  in the future), and either it is mid-turn (a tool call forwarded since its
-  last heartbeat) or its wake listener is armed (`ring_armed_until` in the
-  future). `_listener_path` already computes the listener half, and the
-  mid-turn half is new. This is not the heartbeat's `active` flag: a session waiting on a
-  background build makes no tool calls but is reachable, and must keep the
+  in the future), and either it is mid-turn or its wake listener is armed
+  (`ring_armed_until` in the future). Mid-turn means `last_activity` within
+  the wake policy's `active_seconds` (60 s): the heartbeat moves
+  `last_activity` only when the shim forwarded a tool call since its
+  previous beat. `_listener_path` already computes the listener half, so no
+  new field is needed. A session waiting on a background build makes no
+  tool calls, but its listener is armed, so it is reachable and keeps the
   role.
 - **Rule:** the claim still carries the one-hour TTL. In addition, settling
   expires a coordinator hold whose holder has been unreachable for
-  `COORDINATOR_UNREACHABLE_GRACE` (starting value 10 minutes, not a
-  measurement). It is logged as `lease_expire` with reason `unreachable`.
+  `COORDINATOR_UNREACHABLE_GRACE` (10 minutes). It is logged as
+  `lease_expire` with reason `unreachable`.
 - **Claim check:** a coordinator claim from an unreachable session is
   refused with `coordinator_unreachable`. The message gives the cause, says
   how to arm a listener for the host (Stop hook, Codex doorbell,
@@ -130,7 +138,7 @@ reachable, and a session that claims again each turn holds it for good.
 - **`memory_agents(action="order", lease=..., first=<agent id>,
   reason=...)`** moves one waiter to the head of the queue. It is open only
   to the live holder of `coordinator:<project>` or `conductor:<project>`,
-  for leases in its scope (Q2). Each use is logged as `lease_order` with
+  for that project's waiters (Q2). Each use is logged as `lease_order` with
   actor, waiter, old and new positions and the reason, and every waiter
   whose position changed gets a notice (F1's channel).
 - **An ordering rule** (`action="order", lease=..., rule=...`):
@@ -143,32 +151,87 @@ reachable, and a session that claims again each turn holds it for good.
   which a claim already carries, plus an optional `unblocks` note (S1's
   column). The served instructions make purpose and `expect` routine.
 - **Limits:** no one can reorder the current holder out. A waiter can be
-  moved past at most `ORDER_MAX_SKIPS` times (starting value 3), so a
-  waiter is never starved. Arrival order stays the only rule while no role
-  is held.
-- **Schema:** one waiter column (`priority`, plus `unblocks` text). Under
-  D10 this rides the next bump. If the exception is granted while v59
-  (#1154) is still open, it rides v59 with that session's agreement;
-  otherwise the next bump.
+  moved past at most `ORDER_MAX_SKIPS` times (3), so a waiter is never
+  starved. Arrival order stays the only rule while no role is held.
+- **Schema:** one waiter column (`priority`, plus `unblocks` text), in the
+  Rust daemon's schema plan through the `schema-bump` skill.
+
+### 2.1 The role playbook (F7)
+
+The playbook tells a role holder how to get the most work landed per hour
+with the main branch kept working, and no session waiting on another that
+is not working. The rules, in the order a holder applies them:
+
+1. **Keep the line moving.** A lease held by a session that is not using it
+   is the first thing to fix: ask the holder, then escalate (§3.1). A role
+   holder does not hold a work lease itself for long; the role orders work
+   and `lease run` holds the resource.
+2. **Shorten every hold.** Workers do everything they can before they queue
+   and while they wait (rebase, build, targeted tests), so the landing lease
+   covers only the final rebase, check and push, held by `lease run` so it
+   ends with the command. A long `expect` on a landing lease gets a
+   question.
+3. **Order the queue.** First a job other sessions are blocked on
+   (`unblocks`), then the shortest `expect`, which cuts total waiting most
+   when jobs differ in length, otherwise arrival. Give a reason each time.
+   Set the `shortest_expected` rule (S2) when a queue keeps forming, so the
+   order holds while you are between turns.
+4. **Batch when the check is expensive.** When several changes are ready and
+   the check before landing is long (a full test suite, a CI run), land them
+   together: combine them, check once, land. On a failure, find the culprit
+   by bisection, return it to its session and land the rest. One full check
+   then covers several changes.
+5. **Prevent conflicts before they cost a landing.** Spread concurrent work
+   over separate areas (`claim:<path>`). Land a change others depend on
+   first. When two queued changes touch the same files, land one and have
+   the other rebase and re-check before its turn.
+6. **Use every equivalent resource.** When the same job can run on another
+   free resource (another machine's suite lease), send it there instead of
+   queueing.
+7. **Fail fast.** A landing that fails releases at once and the next waiter
+   goes; the failing session fixes off the lease and queues again. A broken
+   main branch stops landing until it is fixed or the breaking change is
+   reverted, and getting that done is the role holder's first job.
+8. **Stay inside your authority.** The conductor acts within what the
+   maintainer delegated. The coordinator orders the queue and asks. Neither
+   takes a merge click, an approval or a release decision the human keeps.
+9. **Stay reachable and cheap.** Keep the listener armed, hand raw output to
+   a subagent, and answer a quiet wake in one line.
+10. **Measure and adjust.** Check `board-audit stats` (#441) now and then:
+    waits, hold times against `expect`, overruns and frees. Report to the
+    maintainer what slowed the team.
+
+**Delivery.** A short form (rules 1 to 4 and 7 to 9, about eight lines)
+joins each role's brief, served once when the role is held. The per-prompt
+reminder stays one line, because the conductor brief's context cost was
+measured (2026-10-14, six orchestrating sessions) and an instruction
+repeated every turn is paid on every turn. The full playbook is a section
+of the coordination guide that the brief links to.
+
+**What it should move, and where that is measured:** median wait from
+queueing to grant, hold time against `expect`, the count of overruns and of
+unreachable frees, each per lease from `board-audit stats`, compared over
+two weeks before and after the playbook ships. The constant or text that a
+measurement changes carries a comment naming it.
 
 ## 3. Guards: nothing waits on a stopped holder
 
 Every guard decides on one exact signal and is tested against the
 legitimate case that looks like the failure (the near-miss). The thresholds
-are starting values, not measurements. `board-audit stats` (#441) is where
-their effect is measured once they ship.
+are starting values, not measurements (Q3). `board-audit stats` (#441) is
+where their effect is measured once they ship.
 
 | Failure | Today | Guard | Signal | Near-miss that must still work |
 |---|---|---|---|---|
-| Waiter's turn comes while it is between turns | Grant is silent; the waiter is deleted and must claim again within 300 s or lose its place | **F1** a grant notice rings the waiter; **F2** a missed grant puts it back in the queue once, second in line | Grant event; grant window lapsed without a renewal | A waiter that renews within the window keeps the lease as now |
-| Waiter died while queued | Removed only after 7 days idle (`AGENT_RETENTION`); its turn wastes 300 s | **F3** settling skips it and dequeues it with reason `departed` | Session waiter: attachment lapsed (`lease_until` past by 60 s) and no listener. `lease run` waiter: no poll for 60 s (it polls every 5 s) | A live session idle between turns: its shim keeps renewing `lease_until`, so it is kept |
+| Waiter's turn comes while it is between turns | Grant is silent; the waiter is deleted and must claim again within 300 s or lose its place | **F1** a grant notice rings the waiter; **F2** a missed grant puts it back in the queue once, second in line | Grant event; grant window lapsed without a renewal | A waiter that renews within the window keeps the lease as now. Every other daemon notice stays `hinted` and rings nobody |
+| Waiter died while queued | Removed only after 7 days idle (`AGENT_RETENTION`); its turn wastes 300 s | **F3** settling skips it and dequeues it with reason `departed` | Session waiter: attachment lapsed (`lease_until` past by `ATTACHMENT_LEASE`, 60 s, so at least 120 s without a heartbeat when the shim beats every 20 s) and no listener. `lease run` waiter: no poll for 60 s (it polls every 5 s) | A live session idle between turns: its shim keeps renewing `lease_until`, so it is kept. A host stalled for under two minutes is kept |
 | Session holder dormant or dead (claimed lease) | Held to the TTL: 1 h, or 1 d for `claim:` | **F4** for the coordinator; **F5** escalation for others; **S3** conductor frees it | Holder unreachable (§1.1) while someone is queued | A reachable holder waiting on a long build is never freed automatically |
 | Process holder hung (`lease run` alive but stuck) | Renewed every ttl/3 for as long as it runs; `expect` only marks it stale | **F5** escalation from the expected end; **S4** `--stall-after` notices and `--max` stops | Past the expected end; no output for `--stall-after` | A long build that keeps printing, with an honest `--expect` |
 | Process holder crashed | OS lock frees at once; board lease lapses within the ttl (120 s default) | Unchanged | Lock released | |
 | Holder left something running after release | Unguarded: a child that outlives the command runs without the lock (`lease_cli` docstring) | **S4** `--wait-children` (opt-in) holds the lease until the process tree exits; by default the release notice names the processes left running | Job object on Windows, process group on POSIX | `lease hold --while-pid` for a detached server, the supported pattern: never killed, never warned about |
 | Lease free but resource still busy | Next holder collides | **S5** a per-lease busy probe runs before a grant; when busy, the grant waits and the last holder is told | Probe exit code | A probe that fails to run grants as now, with one warning line |
 | Holder keeps renewing past its estimate | Stays stale silently | **F5** renewing a stale lease while others wait logs `lease_overrun` and notifies the role holder | Renewal after the expected end with a non-empty queue | Renewing with a new `expect` is a logged change, not an overrun |
-| Sessions polling and messaging the holder | Only way to learn of a grant | **F1** removes the reason; **F7** the queued answer says "you will be told; don't poll or message the holder" | | |
+| Sessions polling and messaging the holder | Only way to learn of a grant | **F1** removes the reason; **F7** the queued answer says "you will be told; park `needs_resource` with `park_clear_by` set to the lease; don't poll or message the holder" | | |
 
 ### 3.1 Escalation ladder (F5, F6, S3)
 
@@ -185,9 +248,8 @@ For a held lease with someone queued:
    banner.
 4. **Then:**
    - a **session-held lease** whose holder is unreachable is freed by the
-     daemon after `STUCK_FREE_GRACE` (starting value 15 minutes past step 3),
-     logged with reason `unreachable`. The conductor can free it sooner
-     (S3);
+     daemon after `STUCK_FREE_GRACE` (15 minutes past step 3), logged with
+     reason `unreachable`. The conductor can free it sooner (S3);
    - a **process-held lease** whose process is still running is never freed
      automatically, because the OS lock and the running work are real. The
      role holder or the maintainer decides, and `lease break` remains the
@@ -203,26 +265,32 @@ notices go to the owner, and the Board shows the run under that session.
 
 ## 4. Workflow profiles and onboarding (S6)
 
-**Where:** the Console sign-in work (#1144) adds `pseudolife-mcp console`,
-a one-time sign-in link, and makes install and update open the Console
-already signed in (its steps 3 and 5). This guide uses that one browser
-opening and adds none. Agreed with that session on 2026-11-02:
+**Where:** the Console sign-in work (#1144) is open as stacked PRs: #1164
+(`pseudolife-mcp console` with a one-time sign-in link), #1166 (passkey
+sign-in) and #1168 (install, update and maintainer setup open the Console
+signed in). This guide uses that one browser opening and adds none. Agreed
+with that session on 2026-11-02 and 2026-11-03:
 
-- the link lands on the guide with `#/signin?code=…&to=welcome`, set by
-  `pseudolife-mcp console --to welcome`;
-- install and update pass `--to welcome` until the guide is finished;
+- `pseudolife-mcp console --to welcome` appends `&to=welcome` to the
+  sign-in link. The Console honours `to` only for a page id in its
+  navigation list, so S6 adds `welcome` there;
+- install runs `pseudolife-mcp console --unless-signed-in` and passes no
+  `--to` today. Once the guide ships, both installers' "console sign-in"
+  block passes `--to welcome` until the guide is finished, a one-word
+  change;
 - whether the owner has finished is stored per bank in the `meta` row
-  `console_first_run` = `{completed_at, version}`, written through the
-  operator-gated route #1144 defines, so a rerun opens nothing and says so
-  in one line.
+  `console_first_run` = `{completed_at, version}`, so a rerun opens nothing
+  and says so in one line. None of the sign-in PRs adds a route that writes
+  it, so S6 adds one, gated like the other operator routes.
 
 **The guide (`#/welcome`)** has four short screens:
 
 1. **Sessions and the board:** what a session, the board, mail and a lease
    are, in one diagram.
 2. **The roles:** the conductor (given by you, acts for you) and the
-   coordinator (taken by the agents, orders the work), and that neither
-   ever blocks the queue.
+   coordinator (taken by the agents, orders the work), that both look for
+   faster ways to use resources and land work, and that neither ever blocks
+   the queue.
 3. **How do your agents land work?** The answer sets the project's profile:
    - **Solo:** one session at a time. Nothing to set up.
    - **Reviewed pull requests with your merge click:** the guide offers to
@@ -245,39 +313,80 @@ coordinator claim answers with the `lease run` landing recipe. In the PR
 profile, the check-in names the conductor. Every guard in §3 applies in
 every profile, including no profile.
 
+## Building it on Rust
+
+The lease, mail and wake logic already exists in the Rust daemon, so each
+item has a home. Each change moves the board harness goldens it reaches
+(`rust/daemon/harness/board/`), and an item that the Python oracle does not
+also get is recorded in `rust/daemon/divergences.md` with its parity rows,
+per `rust/PORTING.md`.
+
+| Item | Where it lands |
+|------|----------------|
+| Prerequisite | The conductor's per-prompt reminder (`/api/hook/memory-changes?agent=`) is not ported (`rust/daemon/src/routes/hook.rs`, declared in `divergences.md`). The role briefs and playbook reach a holder through that path and the check-in brief, so they are ported first |
+| F1 | `board/lease.rs` (`settle`, `settle_due`) sends the notice through `board/notice.rs`'s reserved daemon sender; the `lease_grant` wake decision goes in `board/wake.rs` |
+| F2, F3 | `board/lease.rs` (`settle`, `LEASE_GRANT_WINDOW`) |
+| F4 | `board/lease.rs` (expiry in `settle`) and `board/mcp.rs` (claim check, `SESSION_LEASE_TTL`) |
+| F5 | `board/lease.rs` (`settle_due`) and `board/notice.rs` |
+| F6 | `board/console.rs` and the Console's Board view |
+| F7 | The served instructions and check-in text, the role briefs (`routes/hook.rs`), refusal texts in `board/error.rs` |
+| S1, S2 | `board/mcp.rs` (the `order` action), `board/lease.rs` (applying the rule), the waiter column in the schema plan (`schema-bump` skill) |
+| S3 | `board/mcp.rs`, with the authority check beside the conductor's in `maintainer_ops/roles.rs` |
+| S4 | `rust/shim/src/cli/lease/run.rs` and `args.rs` |
+| S5 | `board/lease.rs` and the daemon config |
+| S6 | The Console's navigation list and the `welcome` page, the `console_first_run` route, both installers' "console sign-in" block |
+
+Each item ships as its own PR with a watched-RED test and its near-miss
+test from §3.
+
 ## Phasing
 
-1. **This spec** (docs only). Its review carries the D10 decision.
-2. **Phase 1, fixes (F1 to F7):** one PR per guard, each with a watched-RED
-   test and its near-miss test, and Rust twins or divergence entries.
-   Suggested order: F3 and F2 (smallest, no new message origin), F1 (after
-   Q1), F4, F5 and F6, then F7.
-3. **Phase 2, surfaces (S1 to S5):** only after the exception is granted, or
-   Rust-first after the switch (G2).
-4. **Phase 3, onboarding (S6):** after #1144 steps 3 and 5.
+1. **This spec** (docs only).
+2. **Held until G2.** Nothing is built while the Python daemon is the
+   default, unless the maintainer pulls a fix forward (with its Rust twin).
+3. **After G2, fixes first:** the reminder port (prerequisite), F3 and F2
+   (smallest), F1, F4, F5 and F6, then F7 with the playbook.
+4. **Then surfaces:** S1 and S2, S3, S4, S5.
+5. **Onboarding (S6):** once the sign-in PRs (#1164, #1166, #1168) have
+   merged.
 
-## Open questions for review
+## Recommendations on the open questions
 
-- **Q1. Who sends the grant notice?** The daemon sends no board mail today:
-  every message has an agent or the maintainer as its origin. The options
-  are a `daemon` origin on ordinary mail (it carries no authority and is
-  shown as a system notice), or a wake-only ring plus a `granted` field in
-  the heartbeat answer the shim already reads. The first is simpler for
-  every harness. The second adds no new message kind.
-- **Q2. Scope of a project role over machine-wide leases.** A lease such
-  as `full-suite@<box>` is shared by every project on that machine. The
-  options are: (a) a project role reorders only waiters from its own
-  project, among themselves; (b) only the conductor reorders machine-wide
-  leases; (c) machine-wide leases stay in arrival order. (a) is the safest
-  default.
-- **Q3. The thresholds.** The 10-minute unreachable grace, the 15- and
-  30-minute overdue points, the 15-minute free grace and the 3-skip limit
-  are conventions. Should any start elsewhere?
+Each is a recommendation for the maintainer's decision.
+
+- **Q1. Who sends the grant notice?** The first draft said the daemon sends
+  no board mail. That was wrong: it has a reserved sender (`daemon`) for
+  its notices (dream stalls, `POST /api/daemon-notice`), in both daemons
+  (`board/notice.rs` in Rust). Its notices are always decided `hinted`, so
+  they never ring. **Recommended:** the grant notice is a daemon notice to
+  the grantee only, with one new wake decision, `lease_grant`, that rings
+  the grantee's listener whatever its park record says. No new origin, no
+  new column, and the shim needs no change. The near-miss test is every
+  other daemon notice staying `hinted`.
+- **Q2. Scope of a project role over machine-wide leases** such as
+  `full-suite@<box>`. **Recommended: (a)**, a project role reorders only
+  its own project's waiters among themselves. Both roles are scoped to a
+  project (`<role>:<project>`) and nothing holds a machine-wide role, so
+  nobody has the standing to reorder one project's waiters against
+  another's. A machine-wide lease therefore stays in arrival order across
+  projects, even while a conductor is active.
+- **Q3. The thresholds.** **Recommended:** keep the starting values, and
+  tie each one to the constant it depends on so it moves with that
+  constant: the dead-waiter grace is `ATTACHMENT_LEASE` (60 s, three of
+  the shim's 20 s heartbeats, so a waiter is dropped only after at least
+  two minutes without one); the coordinator's unreachable grace is ten times
+  `active_seconds`; overdue is the later of twice `expect` and `expect` plus
+  15 minutes, or 30 minutes with no `expect`; the free grace is 15 minutes
+  after the role holder was told. Each constant carries a comment saying it
+  is a convention, and `board-audit stats` decides any retuning after two
+  weeks of use.
 - **Q4. Do flags on the existing `lease run` mode count as new surfaces
-  under D10?** This spec treats them as surfaces (S4).
+  under D10?** Moot under the hold: S4 lands in the Rust shim after G2 and
+  needs no exception.
 
 ## Not in scope
 
 - Preempting a running process to give its lease to a more urgent waiter.
 - More than one coordinator or conductor per project.
 - Cross-bank coordination.
+- A machine-wide role that orders leases across projects.
