@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner / why |
-|---|---|---|---|
-| Wrong-type `memory.graph_insight` knobs (`resolution: "1"`, `god_nodes_top_n: 2.5`) | taken as given | refused at config load | the existing config-type substitution |
+| Item | Python | Rust | Owner / why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| Wrong-type `memory.graph_insight` knobs (`resolution: "1"`, `god_nodes_top_n: 2.5`) | taken as given | refused at config load | the existing config-type substitution | behaviour with a caller | At `54063c1788f2`: `rust/daemon/src/config.rs` `load_str` checks GraphInsightConfig via `want_float` / `want_int`; `pseudolife_memory/utils/config.py` `load_config` builds GraphInsightConfig with supplied fields. Numeric strings / fractional integer knobs can refuse startup only in Rust. Caller: `rust/daemon/src/config.rs` `load` / Python `load_config` consume operator config.yaml; B14b owner: B15 (CONFIG-LOAD), B14b. |

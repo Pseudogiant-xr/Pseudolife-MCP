@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner |
-|---|---|---|---|
-| The 2026-07-28 stateless era (an `MCP-Protocol-Version` header outside the handshake versions, `_meta` envelopes, `subscriptions/listen`) | served | the transport checks (spec.md M4), then only the no-envelope refusal (400, -32602) | W2-G (follow-up); the shims and doctor use the handshake era, but README documents direct `--transport http` clients |
+| Item | Python | Rust | Owner | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| The 2026-07-28 stateless era (an `MCP-Protocol-Version` header outside the handshake versions, `_meta` envelopes, `subscriptions/listen`) | served | the transport checks (spec.md M4), then only the no-envelope refusal (400, -32602) | W2-G (follow-up); the shims and doctor use the handshake era, but README documents direct `--transport http` clients | behaviour with a caller | `rust/daemon/src/mcp/mod.rs::handle` routes non-handshake versions to `modern_era_refusal` even for valid envelopes; `pseudolife_memory/mcp_server.py::_wire_transport_tiering` supports the SDK modern dispatch. The README direct HTTP client bypasses the handshake-era shims. Caller: direct `claude mcp add --transport http` client documented in `README.md`, using the modern SDK protocol; B14b owner: B6 MCP transport; R2 direct-client compatibility. |

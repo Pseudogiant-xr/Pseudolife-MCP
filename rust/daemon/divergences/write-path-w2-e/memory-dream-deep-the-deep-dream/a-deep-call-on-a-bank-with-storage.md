@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner / why |
-|---|---|---|---|
-| A deep call on a bank with storage unavailable | `_GRAPH_UNAVAILABLE` | not reachable: the Rust daemon always has storage | |
+| Item | Python | Rust | Owner / why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| A deep call on a bank with storage unavailable | `_GRAPH_UNAVAILABLE` | not reachable: the Rust daemon always has storage | | behaviour with no caller | At `54063c1788f2`: `rust/daemon/src/dream/deep.rs` `deep_dream` requires `Ready.storage`; `rust/daemon/src/service.rs` `Service::init` calls `ensure_storage` before publishing Ready. `pseudolife_memory/service_dream.py` `deep_dream` has the Python no-storage branch. Caller search: Rust `dream::service::mcp_memory_dream` and `ticks::deep_dream_tick` both obtain Ready first; neither can invoke the deep body without storage. B14b owner: B14b disposition; B1-P (dream engine). |

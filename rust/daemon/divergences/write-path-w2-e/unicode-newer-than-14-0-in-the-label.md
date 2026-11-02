@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner / why |
-|---|---|---|---|
-| Unicode newer than 14.0 in the label, meta-filter and slot regexes | Python 3.11 tables (Unicode 14.0) | the `regex` crate's tables (Unicode 16.0) | identical for every code point assigned by Unicode 14.0 (full scan) |
+| Item | Python | Rust | Owner / why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| Unicode newer than 14.0 in the label, meta-filter and slot regexes | Python 3.11 tables (Unicode 14.0) | the `regex` crate's tables (Unicode 16.0) | identical for every code point assigned by Unicode 14.0 (full scan) | behaviour with a caller | Verified at `54063c17`: `rust/daemon/src/slots.rs::PyRegex` builds Unicode letter/number/word classes from regex tables and is used by label/meta/slot processing; Python `pseudolife_memory/memory/labels.py`, `pseudolife_memory/memory/meta_filter.py` and `pseudolife_memory/memory/slots.py` use Python Unicode regex tables. Newer assigned characters can change extracted slots, labels or admission, not only rendered text. Caller: MCP `memory_store` and correction admission processing arbitrary caller text through labels, meta filtering and slots; B14b owner: B14b W2-E Unicode classification boundary. |

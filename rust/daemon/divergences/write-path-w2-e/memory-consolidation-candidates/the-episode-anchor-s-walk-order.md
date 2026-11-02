@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner / why |
-|---|---|---|---|
-| The episode anchor's walk order | `band.entries` per band, which a multi-band preset reorders on relocation | bank order per band | the declared multi-band store divergence (EP11); every episode score is 1.0, so the walk order picks the seeds and the one entry kept per text |
+| Item | Python | Rust | Owner / why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| The episode anchor's walk order | `band.entries` per band, which a multi-band preset reorders on relocation | bank order per band | the declared multi-band store divergence (EP11); every episode score is 1.0, so the walk order picks the seeds and the one entry kept per text | behaviour with a caller | Verified at `54063c17`: `rust/daemon/src/consolidation_tools.rs::pool` walks bank indices in band order and deduplicates text; `pseudolife_memory/service.py::MemoryService.consolidation_candidates` walks each band, whose relocation is performed by `pseudolife_memory/memory/cms.py::ContinuumMemorySystem._consolidate`. Pool order changes greedy seeds and retained entries. Caller: `rust/daemon/src/consolidation_tools.rs::mcp_memory_consolidation_candidates` with an episode anchor after multi-band stores; B14b owner: B14b W2-E multi-band promotion and consolidation closure. |

@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner / why |
-|---|---|---|---|
-| The order of seed-search and re-query hits | `CMS.retrieve`'s ranking | `search::rank` | the search rows above: equal scores under `torch.topk` are free, and embeddings agree within the measured tolerance, so near-equal hits can swap and with them `texts` and the mention counts behind the re-query order |
+| Item | Python | Rust | Owner / why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| The order of seed-search and re-query hits | `CMS.retrieve`'s ranking | `search::rank` | the search rows above: equal scores under `torch.topk` are free, and embeddings agree within the measured tolerance, so near-equal hits can swap and with them `texts` and the mention counts behind the re-query order | behaviour with a caller | Verified at `54063c17`: `rust/daemon/src/recall.rs::search` delegates to `search::rank`; Python `pseudolife_memory/memory/recall.py::run_recall` consumes `MemoryService.search`/`ContinuumMemorySystem.retrieve`. `recall::requery_order` uses returned texts and mention counts, so near-tie changes can change subsequent searches, not only display order. Caller: MCP `memory_recall` and `frontend/src/lib/api/recall.ts::recallApi.recall`; B14b owner: B14b retrieval ranking / recall result-set closure. |

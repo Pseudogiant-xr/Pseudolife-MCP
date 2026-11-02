@@ -1,3 +1,3 @@
-| Item | Python | Rust | Why / owner |
-|---|---|---|---|
-| An integer `memory.reranker.fusion_weight` (`fusion_weight: 1`) | logged in `params.reranker` as written (`1`) | logged as a float (`1.0`) | a canonical config writes the default `0.7` |
+| Item | Python | Rust | Why / owner | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| An integer `memory.reranker.fusion_weight` (`fusion_weight: 1`) | logged in `params.reranker` as written (`1`) | logged as a float (`1.0`) | a canonical config writes the default `0.7` | presentation | `rust/daemon/src/search.rs::rank` serializes f64 fusion_weight in params; `pseudolife_memory/service.py` retrieval params preserve the configured numeric spelling. The numeric value and weighting are unchanged; this row is only `1` versus `1.0` in telemetry. B14b owner: B14b presentation disposition. |

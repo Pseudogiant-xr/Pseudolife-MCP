@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner |
-|---|---|---|---|
-| Graph identity Unicode version | runtime Unicode tables (3.11 uses Unicode 14; newer Python images may differ) | pinned Python 3.11 Unicode 14 lowercase and final-sigma context, verified exhaustively | W3-H; revisit when the oracle runtime changes |
+| Item | Python | Rust | Owner | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| Graph identity Unicode version | runtime Unicode tables (3.11 uses Unicode 14; newer Python images may differ) | pinned Python 3.11 Unicode 14 lowercase and final-sigma context, verified exhaustively | W3-H; revisit when the oracle runtime changes | behaviour with a caller | `rust/daemon/src/storage/graph_lower.rs::lower` pins Unicode14 case/sigma properties; `pseudolife_memory/storage/postgres.py::PostgresStorage.ensure_entity` uses the running Python normalization. Exhaustive Unicode14 goldens do not prove identity equality for a changed oracle Unicode runtime. Caller: Unicode entity/alias names supplied to `pseudolife_memory/mcp_server.py` graph tools and `rust/daemon/src/graph_write_tools.rs`; B14b owner: B1 graph identity; B13 oracle-runtime evidence. |

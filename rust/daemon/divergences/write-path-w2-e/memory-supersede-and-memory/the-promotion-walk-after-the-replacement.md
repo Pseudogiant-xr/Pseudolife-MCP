@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner / why |
-|---|---|---|---|
-| The promotion walk after the replacement (`_consolidate_eligible`) | runs, as after any store | not run | the multi-band row above: the flat default never promotes |
+| Item | Python | Rust | Owner / why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| The promotion walk after the replacement (`_consolidate_eligible`) | runs, as after any store | not run | the multi-band row above: the flat default never promotes | behaviour with a caller | Verified at `54063c17`: `rust/daemon/src/correction_tools.rs::apply_correction` increments `interaction_count` without a promotion walk; `pseudolife_memory/service.py::MemoryService._stage_correction_locked` stages a CMS store whose `pseudolife_memory/memory/cms.py::ContinuumMemorySystem._store` calls `_consolidate_eligible`. Multi-band placement and future eviction differ. Caller: MCP `memory_supersede` or `memory_consolidate` with an opt-in multi-band preset; B14b owner: B14b W2-E multi-band correction promotion. |

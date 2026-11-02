@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner / why |
-|---|---|---|---|
-| Transactions inside one verdict | nested `transaction()` savepoints around each storage call | one transaction per verdict, with one savepoint around the relate link | no data differs: a nested block only rolls back on an exception, which ends the tick in both |
+| Item | Python | Rust | Owner / why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| Transactions inside one verdict | nested `transaction()` savepoints around each storage call | one transaction per verdict, with one savepoint around the relate link | no data differs: a nested block only rolls back on an exception, which ends the tick in both | closed | At `54063c1788f2`: `rust/daemon/src/dream/judge.rs` `judge_tick` wraps each verdict in `graph_review_actions::in_txn`; `file_relate_link_isolated` retains the caught-failure savepoint. `pseudolife_memory/service_dream.py` `deep_dream_judge` wraps the same verdict in storage.transaction and `_file_relate_link_isolated`. Other nested storage savepoints add no differing committed outcome: uncaught failure aborts the verdict in both. B14b owner: none (this obligation is closed). |

@@ -1,3 +1,3 @@
-| Named divergence | Omitted surface | Reason / owner |
-|---|---|---|
-| `/api/overview`'s tag count with a non-string tag on an entry | `list_tags` counts it as a dict key (a list or dict tag raises, and `_safe` serves `{"tags": [], "total": 0}`) | any non-string tag serves the `_safe` default | no tool writes one (`normalize_tags` keeps strings), as the `memory_episode_summary` distributions row above |
+| Item | Python | Rust | Reason / owner | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| `/api/overview`'s tag count with a non-string tag on an entry | `list_tags` counts it as a dict key (a list or dict tag raises, and `_safe` serves `{"tags": [], "total": 0}`) | any non-string tag serves the `_safe` default | no tool writes one (`normalize_tags` keeps strings), as the `memory_episode_summary` distributions row above | behaviour with no caller | `rust/daemon/src/read/console.rs::list_tags` returns no count on any non-string tag; Python `pseudolife_memory/service.py` list_tags counts hashable Python keys. Bounded tag-writer search: `pseudolife_memory/memory/episodes.py::normalize_tags` and its CMS/store callers, plus `rust/daemon/src/episodes.rs`, keep only strings; no shipped writer stores a non-string tag. B14b owner: B14b no-caller disposition. |

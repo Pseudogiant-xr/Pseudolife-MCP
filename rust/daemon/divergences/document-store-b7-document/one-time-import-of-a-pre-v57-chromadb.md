@@ -1,3 +1,3 @@
-| Item | Python | Rust | Why / owner |
-|---|---|---|---|
-| One-time import of a pre-v57 chromadb store | at service start (`storage/migrate_chroma.py`) | none | D5 (2026-10-09): Chroma is dropped from the Rust daemon; the Python daemon's v57 start imports the store before a cutover |
+| Item | Python | Rust | Why / owner | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| One-time import of a pre-v57 chromadb store | at service start (`storage/migrate_chroma.py`) | none | D5 (2026-10-09): Chroma is dropped from the Rust daemon; the Python daemon's v57 start imports the store before a cutover | behaviour with a caller | `pseudolife_memory/service.py::MemoryService._hydrate_resident_stores` calls `pseudolife_memory/storage/migrate_chroma.py::import_legacy_store`; `rust/daemon/src/service.rs::Service::init` has no Chroma importer. D5 chooses the Python-before-cutover import; existence of that body does not prove installed migration. Caller: existing pre-v57 document banks reached by installer/update engine cutover; B14b owner: B11 legacy import via R4/R5. |

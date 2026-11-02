@@ -1,3 +1,3 @@
-| Item | Python | Rust | Why |
-|---|---|---|---|
-| Plugin dir for `hooks_digest` | `PSEUDOLIFE_PLUGIN_DIR`, else `plugin/` beside the package | `PSEUDOLIFE_PLUGIN_DIR` only | the image sets the env var; a checkout run sets it too |
+| Item | Python | Rust | Why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| Plugin dir for `hooks_digest` | `PSEUDOLIFE_PLUGIN_DIR`, else `plugin/` beside the package | `PSEUDOLIFE_PLUGIN_DIR` only | the image sets the env var; a checkout run sets it too | behaviour with a caller | `rust/daemon/src/config.rs::DaemonEnv::from_env` has no package-relative plugin fallback; `rust/daemon/src/health.rs::hooks_digest` omits the field without a directory. Python `pseudolife_memory/daemon.py::_build_health_payload` resolves the package plugin; `ops/Dockerfile.daemon-rust` sets the override for the image. Native-launch omission remains a payload difference. Caller: `pseudolife_memory/doctor_cli.py::_codex_hooks_line` and `rust/shim/src/cli/doctor/mod.rs` health digest checks on a native launch; B14b owner: B11 runtime/install layout via R4/R5. |

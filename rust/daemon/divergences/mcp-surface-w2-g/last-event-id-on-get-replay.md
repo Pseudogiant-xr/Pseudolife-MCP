@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner |
-|---|---|---|---|
-| `Last-Event-ID` on GET (replay) | the SDK's replay path with no event store | ignored | non-canonical |
+| Item | Python | Rust | Owner | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| `Last-Event-ID` on GET (replay) | the SDK's replay path with no event store | ignored | non-canonical | behaviour with no caller | `rust/daemon/src/mcp/mod.rs::get` ignores Last-Event-ID while Python SDK replay handling is reachable from `pseudolife_memory/mcp_server.py::build_streamable_http_app`. Bounded producer search: `mcp/mod.rs::sse_event` emits no event id, Python builds the transport with no event store, and `rust/shim/src/raw_http.rs::get_stream_with_max_sse_event_size` adds the header only when a previous id exists; neither shipped daemon supplies one. Arbitrary direct replay headers are outside the shipped reconnect flow. B14b owner: B14b no-caller disposition. |

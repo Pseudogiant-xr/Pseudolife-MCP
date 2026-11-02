@@ -1,3 +1,3 @@
-| Item | Python | Rust | Why / owner |
-|---|---|---|---|
-| Pin-scope word characters, non-ASCII | `isalnum()` plus Unicode category M | `char::is_alphanumeric` minus circled letters, plus the main combining-mark blocks | ASCII is exact; closable with `unicode-normalization` |
+| Item | Python | Rust | Why / owner | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| Pin-scope word characters, non-ASCII | `isalnum()` plus Unicode category M | `char::is_alphanumeric` minus circled letters, plus the main combining-mark blocks | ASCII is exact; closable with `unicode-normalization` | behaviour with a caller | `rust/daemon/src/read/cortex_search.rs::scope_word_char` approximates category M/alphanumerics; `pseudolife_memory/service.py::_scope_word_char` uses Python Unicode categories. Valid Unicode query/entity names can change pin-scope matching and returned facts. Caller: `pseudolife_memory/mcp_server.py::memory_search` cortex block and `frontend/src/lib/api/stream.ts::streamApi.search`; B14b owner: B2a cortex search. |

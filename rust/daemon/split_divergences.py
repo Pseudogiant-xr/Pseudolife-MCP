@@ -19,7 +19,7 @@ overwrite master's entries with the branch's copies), except ``--full``
 into an empty directory, the one-time conversion.
 
     python rust/daemon/split_divergences.py            # during git merge: apply the branch's changes
-    python rust/daemon/split_divergences.py --check    # verify the layout only
+    python rust/daemon/split_divergences.py --check    # verify layout, D7 buckets and index
     python rust/daemon/split_divergences.py --render   # print the whole ledger
 """
 from __future__ import annotations
@@ -44,6 +44,7 @@ SECTION_LIMIT = 32
 ENTRY_LIMIT = 40
 TABLE_SEPARATOR = re.compile(r"\|(\s*:?-+:?\s*\|)+")
 CONFLICT = re.compile(r"^(<{7}|={7}|>{7})( |$)", re.M)
+D7_BUCKETS = ("presentation", "behaviour with no caller", "behaviour with a caller", "closed")
 
 STUB = """\
 # Declared divergences: Rust daemon vs the Python daemon
@@ -105,6 +106,25 @@ def first_cell(row: str) -> str:
             return row[1:i].strip()
         i += 1
     raise LedgerError(f"table row without a closing cell: {row[:80]!r}")
+
+
+def table_cells(row: str) -> list[str]:
+    """Split a GitHub table: only escaped pipes stay inside a cell, even in code."""
+    row = row.strip()
+    if not row.startswith("|") or not row.endswith("|"):
+        raise LedgerError(f"malformed table row: {row[:80]!r}")
+    cells, start, i = [], 1, 1
+    while i < len(row):
+        if row[i:i + 2] == "\\|":
+            i += 2
+            continue
+        if row[i] == "|":
+            cells.append(row[start:i].strip())
+            start = i + 1
+        i += 1
+    if start != len(row):
+        raise LedgerError(f"table row without a closing cell: {row[:80]!r}")
+    return cells
 
 
 def entry_key(text: str) -> str:
@@ -257,6 +277,8 @@ def load_dir(root: Path = ROOT_DIR) -> dict:
                 add_entry(section, text, " / ".join(path))
 
     for top in sorted(root.iterdir()):
+        if top.name == "README.md" and top.is_file():
+            continue  # The summary index is not a declared-divergence entry.
         if not top.is_dir():
             raise LedgerError(f"{top}: only section directories belong in {root.name}/")
         walk(top, ())
@@ -387,14 +409,84 @@ def convert(ours: dict, base: dict | None, root: Path = ROOT_DIR) -> list[str]:
     return conflicts
 
 
-def check(root: Path = ROOT_DIR, ledger: Path = LEDGER) -> list[str]:
+def check_triage(root: Path, ledger: dict) -> None:
+    """Check the per-entry dispositions and the derived README summary."""
+    counts = dict.fromkeys(D7_BUCKETS, 0)
+    callers = set()
+    for path, section in ledger.items():
+        for name, text in section["entries"].items():
+            file = section_dir(path, root) / f"{name}.md"
+            if text.startswith("|"):
+                header, separator, row = text.splitlines()
+                columns = table_cells(header)
+                if any(len(table_cells(line)) != len(columns) for line in (separator, row)):
+                    raise LedgerError(f"{file}: table column count differs from its header")
+                if columns.count("D7 bucket") != 1:
+                    raise LedgerError(f"{file}: exactly one D7 bucket column is required")
+                bucket = table_cells(row)[columns.index("D7 bucket")]
+            else:
+                labels = re.findall(r"D7 bucket: ([^.\n]+)\.", text)
+                if len(labels) != 1 or text.count("D7 bucket:") != 1:
+                    raise LedgerError(f"{file}: exactly one D7 bucket label is required")
+                bucket = labels[0]
+            if bucket not in counts:
+                raise LedgerError(f"{file}: unknown D7 bucket {bucket!r}; expected {D7_BUCKETS}")
+            counts[bucket] += 1
+            if bucket == "behaviour with a caller":
+                callers.add(file.relative_to(root).as_posix())
+
+    index = root / "README.md"
+    if not index.is_file():
+        raise LedgerError(f"{index}: D7 summary index is required")
+    text = index.read_text(encoding="utf-8")
+    if CONFLICT.search(text):
+        raise LedgerError(f"{index}: unresolved conflict markers")
+    tables = [block for block in blocks(text.splitlines()) if block[0].startswith("|")]
+
+    def summary_rows(header: list[str], label: str) -> list[list[str]]:
+        found = [block for block in tables if table_cells(block[0]) == header]
+        if len(found) != 1 or len(found[0]) < 2 or not TABLE_SEPARATOR.fullmatch(found[0][1]):
+            raise LedgerError(f"{index}: exactly one {label} table is required")
+        rows = [table_cells(line) for line in found[0][1:]]
+        if any(len(row) != len(header) for row in rows):
+            raise LedgerError(f"{index}: {label} table column count differs from its header")
+        return rows[1:]
+
+    shown = {}
+    for cells in summary_rows(["D7 bucket", "Entries"], "counts"):
+        label, value = (cell.strip("*") for cell in cells)
+        if label in shown or not value.isdecimal():
+            raise LedgerError(f"{index}: duplicate or invalid counts row {cells!r}")
+        shown[label] = int(value)
+    expected = {**counts, "Total": sum(counts.values())}
+    if shown != expected:
+        raise LedgerError(f"{index}: counts differ from entry buckets; expected {expected}")
+
+    linked = set()
+    for cells in summary_rows(["Entry", "Caller", "Closing stream or batch"], "caller"):
+        match = re.fullmatch(r"\[.+\]\(([^)]+)\)", cells[0])
+        if not match or not cells[1] or not cells[2]:
+            raise LedgerError(f"{index}: caller row needs an entry link, caller and owner")
+        target = match.group(1)
+        if target in linked:
+            raise LedgerError(f"{index}: duplicate caller link {target!r}")
+        linked.add(target)
+    if linked != callers:
+        raise LedgerError(f"{index}: caller links differ from entry buckets; "
+                          f"missing {sorted(callers - linked)}, extra {sorted(linked - callers)}")
+
+
+def check(root: Path = ROOT_DIR, ledger: Path = LEDGER, *, triage: bool = True) -> list[str]:
     problems = []
     text = ledger.read_text(encoding="utf-8") if ledger.is_file() else ""
     if text.replace("\r\n", "\n") != STUB:
         problems.append(f"{ledger.name} is not the pointer: run python rust/daemon/split_divergences.py")
     try:
-        if not load_dir(root):
+        entries = load_dir(root)
+        if not entries:
             problems.append(f"{root.name}/ holds no sections")
+        elif triage:
+            check_triage(root, entries)
     except LedgerError as exc:
         problems.append(str(exc))
     return problems
@@ -403,7 +495,7 @@ def check(root: Path = ROOT_DIR, ledger: Path = LEDGER) -> list[str]:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     mode = ap.add_mutually_exclusive_group()
-    mode.add_argument("--check", action="store_true", help="verify the layout; change nothing")
+    mode.add_argument("--check", action="store_true", help="verify layout, D7 buckets and summary; change nothing")
     mode.add_argument("--render", action="store_true", help="print the whole ledger as one document")
     ap.add_argument("--base", help="the revision the branch's divergences.md was written against "
                                    "(default: the merge base during a merge; none otherwise)")
@@ -441,7 +533,9 @@ def main(argv: list[str] | None = None) -> int:
                         print(f"  {name}")
                     return 1
             LEDGER.write_text(STUB, encoding="utf-8", newline="\n")
-        problems = check(ROOT_DIR, LEDGER)
+        # Historical conversion preserves the source rows without inventing
+        # dispositions; the explicit --check requires a complete D7 index.
+        problems = check(ROOT_DIR, LEDGER, triage=args.check)
         for problem in problems:
             print(problem, file=sys.stderr)
         return 1 if problems else 0

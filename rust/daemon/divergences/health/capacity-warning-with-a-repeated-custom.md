@@ -1,3 +1,3 @@
-| Key | Python | Rust | Owner |
-|---|---|---|---|
-| `capacity_warning` with a repeated custom band name | counts the last band's own entries | counts every entry of that name, as `memory_stats` does (its repeated-name row in this file) | declared (B4) |
+| Key | Python | Rust | Owner | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| `capacity_warning` with a repeated custom band name | counts the last band's own entries | counts every entry of that name, as `memory_stats` does (its repeated-name row in this file) | declared (B4) | behaviour with no caller | `rust/daemon/src/health.rs::capacity_warning` counts entries by the last band name; `pseudolife_memory/memory/cms.py::capacity_warning` reads the last band's entries. Bounded config-producer search: `pseudolife_memory/utils/config.py` presets and `rust/daemon/src/config.rs` preset tables contain unique names; Console `pseudolife_memory/web/config_io.py::KNOBS` cannot edit band definitions; only a hand-authored repeated-name preset reaches this. B14b owner: B14b no-caller disposition. |

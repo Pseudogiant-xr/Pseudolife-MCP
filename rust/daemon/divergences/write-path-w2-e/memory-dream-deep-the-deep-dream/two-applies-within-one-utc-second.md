@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner / why |
-|---|---|---|---|
-| Two applies within one UTC second | the second snapshot overwrites the first (same name) | the same | the harness compares the name by shape and sleeps between applies; within one daemon the behaviour is identical |
+| Item | Python | Rust | Owner / why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| Two applies within one UTC second | the second snapshot overwrites the first (same name) | the same | the harness compares the name by shape and sleeps between applies; within one daemon the behaviour is identical | closed | At `54063c1788f2`: `rust/daemon/src/dream/deep.rs` `write_snapshot_file` uses UTC graph-%Y%m%d-%H%M%S.json and std::fs::write; `pseudolife_memory/service_dream.py` `_write_graph_snapshot_locked` uses the same second-resolution name and write_text. Both overwrite a same-second snapshot; this is shared behaviour, not an outstanding port difference. B14b owner: none (this obligation is closed). |

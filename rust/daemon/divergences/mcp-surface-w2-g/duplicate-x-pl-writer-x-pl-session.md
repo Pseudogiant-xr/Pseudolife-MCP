@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner |
-|---|---|---|---|
-| Duplicate `X-PL-Writer` / `X-PL-Session` headers | the SDK request context's header mapping | the first value | non-canonical |
+| Item | Python | Rust | Owner | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| Duplicate `X-PL-Writer` / `X-PL-Session` headers | the SDK request context's header mapping | the first value | non-canonical | behaviour with no caller | `rust/daemon/src/mcp/identity.rs::header` selects the first header; `pseudolife_memory/mcp_server.py::_wire_transport_tiering` binds the SDK header mapping for `writer_context._http_writer_session_detailed`. Bounded header-producer search: `rust/shim/src/upstream.rs`, `rust/shim/src/raw_http.rs` and `pseudolife_memory/shim.py` build one writer/session value per request; none emits conflicting duplicates. B14b owner: B14b no-caller disposition. |

@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner / why |
-|---|---|---|---|
-| `remove_member` refusal (`member_remove_refused`: an assistant, lower-tier or dream retraction, `cortex.py:1121-1128`) | ported | ported (`remove_member`'s `support` and `dream`; `set_members::set_remove` takes them in `SetRemoveArgs`), replayed by the same sequences | unreachable over MCP until the dream (P1) calls it: `memory_set_remove` passes `origin=None`, `dream=False` |
+| Item | Python | Rust | Owner / why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| `remove_member` refusal (`member_remove_refused`: an assistant, lower-tier or dream retraction, `cortex.py:1121-1128`) | ported | ported (`remove_member`'s `support` and `dream`; `set_members::set_remove` takes them in `SetRemoveArgs`), replayed by the same sequences | MCP still passes neutral origin/dream defaults; the dream now calls the ported member-removal guard through `dream/run.rs`. | closed | Verified at `54063c17`: `rust/daemon/src/dream/run.rs::Pass::claim` passes claim origin and `dream=true` to `set_members::set_remove`; `rust/daemon/src/stores/cortex_members.rs::CortexStore::remove_member` enforces the assistant/lower-tier/direct-write refusal corresponding to `pseudolife_memory/memory/cortex.py::CortexStore.remove_member`. B14b owner: none (closed). |

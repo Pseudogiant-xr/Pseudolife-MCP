@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner / why |
-|---|---|---|---|
-| The extractor timeout | per socket operation | for the whole request | a slow, steady reply can time out only in Rust |
+| Item | Python | Rust | Owner / why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| The extractor timeout | per socket operation | for the whole request | a slow, steady reply can time out only in Rust | behaviour with a caller | At `54063c1788f2`: `rust/daemon/src/dream/extractor.rs` `http_client` sets reqwest's total request timeout; `pseudolife_memory/utils/no_redirect.py` `urlopen` forwards the socket-operation timeout. A slow streaming response can fail only in Rust. Caller: `rust/daemon/src/dream/extractor.rs` `Compat::post` and Python `OpenAIExtractor` chat requests to the configured extractor; B14b owner: B1-P (dream engine), B14b. |

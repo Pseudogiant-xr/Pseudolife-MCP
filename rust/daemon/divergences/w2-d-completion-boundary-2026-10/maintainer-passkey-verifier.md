@@ -1,3 +1,3 @@
-| Named divergence | Omitted surface | Reason / owner |
-|---|---|---|
-| Maintainer passkey verifier: clientDataJSON nested past 512 levels | `json.loads` accepts it up to the stack's recursion limit (about 990 levels, moving with the caller's stack), then raises `RecursionError` rather than `AssertionInvalid` | refused as `client_data_json` from level 513 | a browser's clientDataJSON is one flat object; the cap keeps the parser's stack bounded |
+| Item | Python | Rust | Reason / owner | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| Maintainer passkey verifier: clientDataJSON nested past 512 levels | `json.loads` accepts it up to the stack's recursion limit (about 990 levels, moving with the caller's stack), then raises `RecursionError` rather than `AssertionInvalid` | refused as `client_data_json` from level 513 | a browser's clientDataJSON is one flat object; the cap keeps the parser's stack bounded | behaviour with no caller | `rust/daemon/src/maintainer_webauthn.rs::MAX_CLIENT_DATA_DEPTH` caps the client-data decoder at 512; Python `pseudolife_memory/maintainer_webauthn.py` follows json.loads. Bounded client-data producer search: `frontend/src/lib/webauthn.ts` forwards browser authenticator clientDataJSON (flat type/challenge/origin fields), never constructs a 513-level tree. B14b owner: B14b no-caller disposition. |

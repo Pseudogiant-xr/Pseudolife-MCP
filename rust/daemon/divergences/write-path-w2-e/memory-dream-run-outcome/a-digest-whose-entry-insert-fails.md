@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner / why |
-|---|---|---|---|
-| A digest whose entry insert fails | the resident entry is kept without a row id, so later dreams see the root digested | nothing resident: the root is retried (one held retry, then advance) | failure path only |
+| Item | Python | Rust | Owner / why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| A digest whose entry insert fails | the resident entry is kept without a row id, so later dreams see the root digested | nothing resident: the root is retried (one held retry, then advance) | failure path only | behaviour with a caller | At `54063c1788f2`: `rust/daemon/src/dream/stages.rs` `store_digest` inserts before resident `bank.push`; `generate_digests_stage` records a failed-write retry. `pseudolife_memory/service_dream.py` `_store_digest` calls `band.store` before `insert_entry`, retaining the resident on insert failure. Caller: `rust/daemon/src/dream/stages.rs` `generate_digests_stage` on an ordinary database insert failure with digests enabled; B14b owner: B1-P (dream engine), B14b. |

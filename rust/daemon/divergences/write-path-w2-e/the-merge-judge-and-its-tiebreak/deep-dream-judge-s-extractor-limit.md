@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner / why |
-|---|---|---|---|
-| `deep_dream_judge`'s `extractor`, `limit`, `second_extractor` and `third_extractor` arguments | test hooks | absent: the sweep passes none | no production caller passes them |
+| Item | Python | Rust | Owner / why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| `deep_dream_judge`'s `extractor`, `limit`, `second_extractor` and `third_extractor` arguments | test hooks | absent: the sweep passes none | no production caller passes them | behaviour with no caller | At `54063c1788f2`: `pseudolife_memory/service_dream.py` `deep_dream_judge` accepts explicit extractor/limit/second_extractor/third_extractor overrides; `rust/daemon/src/dream/judge.rs` `deep_dream_judge` takes only service and stop. Caller search: `deep_dream_judge` across production `pseudolife_memory/` resolves to the definition and `pseudolife_memory/memory/dream.py` `run_sweep_once` getattr dispatch calling `judge()` with no arguments; no MCP/Console route exposes the overrides. Rust `ticks::sweep` likewise passes no overrides. B14b owner: B14b disposition; B1-P (dream engine). |

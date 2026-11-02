@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner |
-|---|---|---|---|
-| Storage calls while a reconnect cannot reach the server | refused for 5 s with the cached `reconnect failed: <error>` | each fails with the dead client's own error (`connection closed`) | declared (B4): same retry window and outcome, different error text |
+| Item | Python | Rust | Owner | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| Storage calls while a reconnect cannot reach the server | refused for 5 s with the cached `reconnect failed: <error>` | each fails with the dead client's own error (`connection closed`) | declared (B4): same retry window and outcome, different error text | presentation | `rust/daemon/src/storage/mod.rs::Storage::heal` retains the retry deadline but storage statements use the dead client; `pseudolife_memory/storage/postgres.py::PostgresStorage.conn` raises the cached reconnect text. This row is limited to error wording within the same refusal/retry window. B14b owner: B14b presentation disposition. |

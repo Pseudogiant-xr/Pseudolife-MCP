@@ -1,3 +1,3 @@
-| Item | Remaining behavior | Owner / reason |
-|---|---|---|
-| Exact-duplicate boundary | The fixed-order Rust dot product and Python BLAS reduction are not proven identical at the exact `1.0` duplicate threshold; a numerically near-boundary value may change the rejection reason | W2-E numeric-boundary follow-up; measured vector tolerances do not waive exact admission/reason equality |
+| Item | Remaining behavior | Owner / reason | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|
+| Exact-duplicate boundary | The fixed-order Rust dot product and Python BLAS reduction are not proven identical at the exact `1.0` duplicate threshold; a numerically near-boundary value may change the rejection reason | W2-E numeric-boundary follow-up; measured vector tolerances do not waive exact admission/reason equality | behaviour with a caller | Verified at `54063c17`: `rust/daemon/src/store.rs::dot`/`scan` use a fixed float32 reduction and surprise comparison; `pseudolife_memory/memory/miras/band.py::MIRASBand.compute_surprise` uses the torch matrix reduction. `store::store_body` derives rejection reasons from that surprise. The exact duplicate boundary remains unproven regardless of `w2e-tolerance.json`. Caller: MCP `memory_store` at the duplicate/surprise boundary; B14b owner: B14b W2-E exact admission/rejection-reason acceptance. |

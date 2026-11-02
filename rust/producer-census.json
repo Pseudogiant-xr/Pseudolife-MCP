@@ -205,7 +205,7 @@
     "docs/superpowers/specs/2026-10-02-expose-invite-move-design.md": "ff9661609e29787f664dcf071fa54e86101e446521112d3d1b09e9ed050a7588",
     "docs/superpowers/specs/2026-10-02-maintainer-wake-design.md": "6dfb0154ffc3ef98e925ea95faf9b74ace6ec6f55ce7d4388e953eca7b03b620",
     "docs/superpowers/specs/2026-10-04-board-roles-passkey.md": "5d68cb05bcdd0c5a7ebc5697cb11a07bb824c2aa22ed41e1b640173753099ee7",
-    "evals/claude_shim.py": "a56f3dec2cf89e96ff0faf9ab753d4b5bedbe3f684745daff3d909e6b3d2d780",
+    "evals/claude_shim.py": "6acac1e3de2a37d43b5744b6f871421a36d32e9dfef24e5dea09fe4235611031",
     "evals/codex_shim.py": "7be0b929dddc8c735f75b2d38c390e188d74d86b2173dd6bb93c2e224a846ed5",
     "examples/.mcp.json": "f18025ee2238d455f8ea46b606d6191b8d896314e6851247e93ad10ede06d829",
     "examples/CLAUDE.memory.md": "608f6691e4ce902427f8b4ea071d761d618a7d0803a131161a33889a3f4173b5",
@@ -39383,7 +39383,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "evals/claude_shim.py:77",
+          "location": "evals/claude_shim.py:78",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -39396,7 +39396,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "evals/claude_shim.py:79",
+          "location": "evals/claude_shim.py:80",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -80415,7 +80415,7 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "evals/claude_shim.py:432",
+      "location": "evals/claude_shim.py:433",
       "reason": "forwarded parameters"
     },
     {
@@ -80426,13 +80426,13 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "evals/claude_shim.py:77",
+      "location": "evals/claude_shim.py:78",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_SHIM_CLAUDE_CLI"
     },
     {
       "dynamic": "unresolved",
-      "location": "evals/claude_shim.py:79",
+      "location": "evals/claude_shim.py:80",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_SHIM_CLAUDE_CLI"
     },

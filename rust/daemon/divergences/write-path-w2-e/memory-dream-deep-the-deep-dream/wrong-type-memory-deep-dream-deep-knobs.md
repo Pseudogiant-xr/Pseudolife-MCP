@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner / why |
-|---|---|---|---|
-| Wrong-type `memory.deep_dream` deep knobs (`top_k_candidates: 2.5`, `auto_apply_safe: "yes"`) | taken as given (slicing or truthiness) | refused at config load | the existing config-type substitution |
+| Item | Python | Rust | Owner / why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| Wrong-type `memory.deep_dream` deep knobs (`top_k_candidates: 2.5`, `auto_apply_safe: "yes"`) | taken as given (slicing or truthiness) | refused at config load | the existing config-type substitution | behaviour with a caller | At `54063c1788f2`: `rust/daemon/src/config.rs` `load_str` / `want_int` / `want_bool` type-check deep knobs; `pseudolife_memory/utils/config.py` `load_config` constructs DeepDreamConfig and passes through these shapes. Previously accepted configuration can refuse startup. Caller: `rust/daemon/src/config.rs` `load` and `pseudolife_memory/utils/config.py` `load_config` consume the operator's persisted config.yaml; B14b owner: B15 (CONFIG-LOAD), B14b. |

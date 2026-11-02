@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner / why |
-|---|---|---|---|
-| A corrupt automatic-decision index (`next_seq` not an integer, `cursors`/`active` not mappings) | `int()` / `dict()` raise | read leniently in `list` | corrupt persisted data only; the judges write the index |
+| Item | Python | Rust | Owner / why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| A corrupt automatic-decision index (`next_seq` not an integer, `cursors`/`active` not mappings) | `int()` / `dict()` raise | read leniently in `list` | corrupt persisted data only; the judges write the index | behaviour with no caller | At `54063c1788f2`: `rust/daemon/src/graph_review_tools.rs` `recent_ids` ignores next_seq/cursors/active, while `pseudolife_memory/memory/review_decisions.py` `recent_decisions` calls `_index` and coerces them. Caller search: `pseudolife_memory/memory/review_decisions.py` `_index` / `_write_new` / `refresh_proposal_terminals` and `rust/daemon/src/dream/review_judgments.rs` `DIndex::value` / `write_new` persist integer sequence and mapping fields; no production index writer emits the corrupt shapes. B14b owner: B14b disposition; B1-O (graph review). |

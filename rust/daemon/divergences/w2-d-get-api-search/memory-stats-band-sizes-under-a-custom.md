@@ -1,3 +1,3 @@
-| Item | Python | Rust | Why / owner |
-|---|---|---|---|
-| `memory_stats` band sizes under a custom preset that repeats a band name | positional: a store lands in `bands[0]` even when a later band shares its name | an entry carries its band name, so every entry of that name counts in the last band bearing it (exact at startup, where seating picks that band) | no preset repeats a name; a custom config would have to |
+| Item | Python | Rust | Why / owner | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| `memory_stats` band sizes under a custom preset that repeats a band name | positional: a store lands in `bands[0]` even when a later band shares its name | an entry carries its band name, so every entry of that name counts in the last band bearing it (exact at startup, where seating picks that band) | no preset repeats a name; a custom config would have to | behaviour with no caller | `rust/daemon/src/read/stats.rs::stats` counts by last matching name, unlike positional `pseudolife_memory/memory/cms.py::stats`. Bounded config-producer search: preset definitions in `pseudolife_memory/utils/config.py` and `rust/daemon/src/config.rs` have unique names; `pseudolife_memory/web/config_io.py::KNOBS` does not write custom band arrays, so only hand-written duplicate-name configs reach this. B14b owner: B14b no-caller disposition. |

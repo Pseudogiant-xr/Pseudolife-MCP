@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner / why |
-|---|---|---|---|
-| A tick's `error` text for a database failure | psycopg's message | tokio-postgres' message | the answer is only logged |
+| Item | Python | Rust | Owner / why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| A tick's `error` text for a database failure | psycopg's message | tokio-postgres' message | the answer is only logged | presentation | At `54063c1788f2`: `rust/daemon/src/dream/judge.rs` `err_text` / `deep_dream_judge` report the database error in the tick result; `pseudolife_memory/service_dream.py` `deep_dream_judge` catches and reports str(exc). `rust/daemon/src/dream/ticks.rs` `sweep` logs the result; this row concerns error wording only. B14b owner: B14b presentation disposition. |

@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner / why |
-|---|---|---|---|
-| File-mode corrections (unique exact text without row ids, `id_unavailable`, the file-signature recovery) | served | unreachable: the Rust daemon runs on PostgreSQL only | not ported |
+| Item | Python | Rust | Owner / why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| File-mode corrections (unique exact text without row ids, `id_unavailable`, the file-signature recovery) | served | unreachable: the Rust daemon runs on PostgreSQL only | not ported | behaviour with a caller | Verified at `54063c17`: Python `pseudolife_memory/service.py::MemoryService.supersede`/`reinstate` include file-signature/id-unavailable handling; `pseudolife_memory/daemon.py::run_daemon` still permits the file fallback. `rust/daemon/src/main.rs::main` requires a DSN and `rust/daemon/src/correction_tools.rs` operates on persisted ids. D1 retirement is decided, but these bodies do not establish deprecation completion. Caller: Python CLI `serve` file-mode fallback followed by MCP correction/reinstatement; B14b owner: B9 / D1 file-mode retirement, with R7 / B12 deprecation documentation. |

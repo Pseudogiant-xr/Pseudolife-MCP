@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner |
-|---|---|---|---|
-| A bearer revoked between the gate and dispatch | JSON-RPC -32004 `unauthorized` (or -32003 `principals_unavailable`) | never: the principal is resolved once, at the gate | free (no race window) |
+| Item | Python | Rust | Owner | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| A bearer revoked between the gate and dispatch | JSON-RPC -32004 `unauthorized` (or -32003 `principals_unavailable`) | never: the principal is resolved once, at the gate | free (no race window) | behaviour with a caller | `rust/daemon/src/routes/mcp.rs::route` resolves once and passes that identity to `mcp::respond`; `pseudolife_memory/mcp_server.py::_transport_principal` resolves again at dispatch and can refuse a token revoked meanwhile. Caller: stored-bearer `tools/call`/`tools/list` concurrent with principal revocation in `pseudolife_memory/invite_cli.py`; B14b owner: B6 MCP transport/auth boundary. |

@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner / why |
-|---|---|---|---|
-| Louvain's visiting order | `seed.shuffle` (`random.Random(42)`) at every level | graph order (first appearance), ties to the first community in adjacency order | Option B; on a graph whose structure fixes the partition the two agree, otherwise the partition can differ within Louvain's own seed-to-seed spread (measured above) |
+| Item | Python | Rust | Owner / why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| Louvain's visiting order | `seed.shuffle` (`random.Random(42)`) at every level | graph order (first appearance), ties to the first community in adjacency order | Option B; on a graph whose structure fixes the partition the two agree, otherwise the partition can differ within Louvain's own seed-to-seed spread (measured above) | behaviour with a caller | At `54063c1788f2`: `rust/daemon/src/graph_insight.rs` `one_level` visits 0..n in graph order; `pseudolife_memory/memory/graph_insight.py` `_partition` calls NetworkX louvain_communities(seed=42). Different partitions affect persisted communities; Option B is recorded, not reclassified as presentation. Caller: `rust/daemon/src/dream/run.rs` `run_locked` calls `graph_insight::safe_refresh` on normal dream completion; B14b owner: B1-P2b (graph insight / Option B disposition), B14b. |

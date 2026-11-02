@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner / why |
-|---|---|---|---|
-| File mode | served | not reachable: the daemon is PostgreSQL-only | W3-H |
+| Item | Python | Rust | Owner / why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| File mode | served | not reachable: the daemon is PostgreSQL-only | W3-H | behaviour with a caller | Verified at `54063c17`: `pseudolife_memory/daemon.py::run_daemon` still has a files fallback from `pseudolife_memory/storage/embedded_pg.py::resolve_daemon_storage`, and `MemoryService.delete` can operate on that bank; `rust/daemon/src/main.rs::main` requires a database DSN. D1 decides retirement, but a PostgreSQL-only Rust body is not completed retirement/deprecation evidence. Caller: Python CLI `serve` file-mode fallback followed by `pseudolife_memory/mcp_server.py::memory_forget`; B14b owner: B9 / D1 file-mode retirement, with R7 / B12 deprecation documentation. |

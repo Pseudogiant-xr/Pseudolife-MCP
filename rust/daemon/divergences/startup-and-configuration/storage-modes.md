@@ -1,3 +1,3 @@
-| Item | Python | Rust | Why |
-|---|---|---|---|
-| Storage modes | file mode, or embedded lite Postgres when no DSN | refuses to start (exit 2) without `PSEUDOLIFE_MCP_DATABASE_URL` | the port targets the Postgres tier; lite tier is cutover work (W3-J) |
+| Item | Python | Rust | Why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| Storage modes | file mode, or embedded lite Postgres when no DSN | refuses to start (exit 2) without `PSEUDOLIFE_MCP_DATABASE_URL` | the port targets Postgres; B9 lite is outside the present program brief, and D1 legacy migration/deprecation remains explicit | behaviour with a caller | `rust/daemon/src/main.rs::main` requires a database URL; Python `pseudolife_memory/service.py::MemoryService` resolves file/embedded storage. D1 retires file/in-process modes with a migration/deprecation obligation; lite is explicitly outside this R7 work, not silently closed. Caller: installed no-DSN startup through Python `pseudolife_memory/service.py::MemoryService` and the lite installer path; B14b owner: B9 embedded Postgres (outside current R1-R7 scope); B11 migration via R4/R5. |

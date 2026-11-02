@@ -62,6 +62,25 @@ def test_the_committed_directory_renders_and_parses_back_to_itself():
     assert sd.parse_ledger(sd.render(ledger)) == ledger
 
 
+def test_root_readme_is_an_index_not_a_divergence(tmp_path):
+    root = converted(tmp_path)
+    before = sd.load_dir(root)
+    (root / "README.md").write_text(
+        "# Divergence triage\n\n| Bucket | Count |\n|---|---|\n| closed | 1 |\n",
+        encoding="utf-8", newline="\n")
+    after = sd.load_dir(root)
+    assert after == before
+    assert sd.parse_ledger(sd.render(after)) == before
+
+
+@pytest.mark.parametrize("name", ["readme.md", "README.txt", "extra.md"])
+def test_root_files_other_than_exact_readme_are_rejected(tmp_path, name):
+    root = converted(tmp_path)
+    (root / name).write_text("not an entry\n", encoding="utf-8", newline="\n")
+    with pytest.raises(sd.LedgerError, match="only section directories"):
+        sd.load_dir(root)
+
+
 def test_conversion_keeps_every_entry_and_rerunning_changes_nothing(tmp_path):
     root = converted(tmp_path)
     ledger = sd.parse_ledger(BASE)
@@ -232,3 +251,154 @@ def test_two_entries_one_name_would_hold_are_refused_with_the_fix():
     twice = BASE.replace("| BIND-A | a | b | c |\n", "| BIND-A | a | b | c |\n| bind a | d | e | f |\n")
     with pytest.raises(sd.LedgerError, match="two entries would be bind-a.md"):
         sd.parse_ledger(twice)
+
+
+TRIAGED = """\
+## Rows
+
+| Item | D7 bucket | Evidence |
+|---|---|---|
+| READ | behaviour with a caller | Caller: reader; B14b owner: B4. |
+| CLOSED | closed | Closed by implementation. |
+
+**DISPLAY:** Formatting only. D7 bucket: presentation.
+
+**UNUSED:** No shipped caller. D7 bucket: behaviour with no caller.
+"""
+
+INDEX = """\
+# Divergence triage
+
+| D7 bucket | Entries |
+|---|---:|
+| presentation | 1 |
+| behaviour with no caller | 1 |
+| behaviour with a caller | 1 |
+| closed | 1 |
+| **Total** | **4** |
+
+| Entry | Caller | Closing stream or batch |
+|---|---|---|
+| [READ](rows/read.md) | reader | B4 |
+"""
+
+
+def triaged(tmp_path):
+    root = converted(tmp_path, TRIAGED)
+    (root / "README.md").write_text(INDEX, encoding="utf-8", newline="\n")
+    pointer = tmp_path / "divergences.md"
+    pointer.write_text(sd.STUB, encoding="utf-8", newline="\n")
+    return root, pointer
+
+
+def test_check_accepts_all_four_buckets_in_tables_and_paragraphs(tmp_path):
+    root, pointer = triaged(tmp_path)
+    assert sd.check(root, pointer) == []
+
+
+@pytest.mark.parametrize("filename, before, after", [
+    ("read.md", "D7 bucket", "Disposition"),
+    ("read.md", "behaviour with a caller", "wontfix"),
+    ("read.md", "| Evidence |", "| D7 bucket |"),
+    ("unused.md", "D7 bucket:", "Disposition:"),
+    ("unused.md", "behaviour with no caller", "wontfix"),
+    ("unused.md", "D7 bucket: behaviour with no caller.",
+     "D7 bucket: behaviour with no caller. D7 bucket: closed."),
+])
+def test_check_rejects_missing_unknown_or_duplicate_buckets(tmp_path, filename, before, after):
+    root, pointer = triaged(tmp_path)
+    entry = root / "rows" / filename
+    entry.write_text(entry.read_text().replace(before, after), encoding="utf-8", newline="\n")
+    assert any("D7 bucket" in p for p in sd.check(root, pointer))
+
+
+@pytest.mark.parametrize("before, after", [
+    ("| closed | 1 |", "| closed | 2 |"),
+    ("| closed | 1 |\n", ""),
+    ("| closed | 1 |", "| closed | 1 |\n| closed | 1 |"),
+    ("| **Total** | **4** |", "| **Total** | **5** |"),
+    ("| closed | 1 |", "| wontfix | 1 |"),
+])
+def test_check_rejects_inaccurate_summary_counts(tmp_path, before, after):
+    root, pointer = triaged(tmp_path)
+    (root / "README.md").write_text(INDEX.replace(before, after), encoding="utf-8", newline="\n")
+    assert any("counts" in p for p in sd.check(root, pointer))
+
+
+@pytest.mark.parametrize("replacement", [
+    "",
+    "| [READ](rows/closed.md) | reader | B4 |\n",
+    "| [READ](rows/read.md) | reader | B4 |\n" * 2,
+    "| [READ](rows/read.md) | reader | |\n",
+])
+def test_check_rejects_missing_wrong_duplicate_or_unowned_caller_links(tmp_path, replacement):
+    root, pointer = triaged(tmp_path)
+    text = INDEX.replace("| [READ](rows/read.md) | reader | B4 |\n", replacement)
+    (root / "README.md").write_text(text, encoding="utf-8", newline="\n")
+    assert any("caller" in p for p in sd.check(root, pointer))
+
+
+def test_check_requires_the_summary_index(tmp_path):
+    root, pointer = triaged(tmp_path)
+    (root / "README.md").unlink()
+    assert any("README.md" in p for p in sd.check(root, pointer))
+
+
+@pytest.mark.parametrize("before, after", [
+    ("|---|---|---|", "|---|---|"),
+    ("Caller: reader; B14b owner: B4. |", "Caller: reader; | B14b owner: B4. |"),
+])
+def test_table_column_counts_must_match(tmp_path, before, after):
+    root, pointer = triaged(tmp_path)
+    entry = root / "rows/read.md"
+    entry.write_text(entry.read_text().replace(before, after), encoding="utf-8", newline="\n")
+    assert any("column count" in p for p in sd.check(root, pointer))
+
+
+@pytest.mark.parametrize("value", [r"`x\|y` and x\|y", r"`C:\`"])
+def test_table_column_count_accepts_escaped_pipes_and_code_backslashes(tmp_path, value):
+    root, pointer = triaged(tmp_path)
+    entry = root / "rows/read.md"
+    entry.write_text(entry.read_text().replace("Caller: reader;", value + "; Caller: reader;"),
+                     encoding="utf-8", newline="\n")
+    assert sd.check(root, pointer) == []
+
+
+def test_unescaped_pipe_in_code_is_still_a_github_table_boundary(tmp_path):
+    root, pointer = triaged(tmp_path)
+    entry = root / "rows/read.md"
+    entry.write_text(entry.read_text().replace("Caller: reader;", "`x|y`; Caller: reader;"),
+                     encoding="utf-8", newline="\n")
+    assert any("column count" in p for p in sd.check(root, pointer))
+
+
+# Exact header and row from 3132f591^:rust/daemon/divergences.md.
+# Historical branches carried a three-column header over this four-cell row.
+HISTORICAL_PRE_SPLIT = '''\
+## W2-D completion boundary (2026-10-13)
+
+| Named divergence | Omitted surface | Reason / owner |
+|---|---|---|
+| `/api/overview`'s tag count with a non-string tag on an entry | `list_tags` counts it as a dict key (a list or dict tag raises, and `_safe` serves `{"tags": [], "total": 0}`) | any non-string tag serves the `_safe` default | no tool writes one (`normalize_tags` keeps strings), as the `memory_episode_summary` distributions row above |
+'''
+
+
+def test_real_pre_split_input_stays_convertible_but_fails_current_check(tmp_path, monkeypatch):
+    def historical_git(*args):
+        assert args == ("show", f"3132f591^:{sd.LEDGER_GIT_PATH}")
+        return HISTORICAL_PRE_SPLIT
+
+    monkeypatch.setattr(sd, "git", historical_git)
+    parsed = sd.base_ledger("3132f591^")
+    root = converted(tmp_path, HISTORICAL_PRE_SPLIT)
+    assert sd.load_dir(root) == parsed
+    assert sd.parse_ledger(sd.render(parsed)) == parsed
+    pointer = tmp_path / "divergences.md"
+    pointer.write_text(sd.STUB, encoding="utf-8", newline="\n")
+    assert sd.check(root, pointer, triage=False) == []
+    assert any("column count" in p for p in sd.check(root, pointer))
+
+
+def test_real_pre_split_full_conversion_does_not_invent_a_disposition(tmp_path, monkeypatch):
+    assert run_main(monkeypatch, tmp_path, HISTORICAL_PRE_SPLIT, ["--full"]) == 0
+    assert sd.load_dir(tmp_path / "divergences") == sd.parse_ledger(HISTORICAL_PRE_SPLIT)

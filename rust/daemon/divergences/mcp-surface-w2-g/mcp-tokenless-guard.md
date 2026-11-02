@@ -12,4 +12,4 @@ the W1-A `tokenless` golden compares `GET /mcp` with Python's recorded 406.
 **MCP-BOUND-IDENTITY** is closed: an authenticated `/mcp` request carrying
 `X-PL-Bank` / `X-PL-Principal` is checked against the bearer's W2-F board
 context before the MCP layer (spec.md M18); the live `bound_identity` case
-compares 19 requests with Python and the `mcp-binding-open` mutant is caught.
+compares 19 requests with Python and the `mcp-binding-open` mutant is caught. D7 bucket: closed. Code verification: `rust/daemon/src/mcp/mod.rs::security` applies Host/Origin allowlists and `rust/daemon/src/routes/mcp.rs::route` calls `board::http::mcp_binding`, matching `pseudolife_memory/mcp_server.py::transport_security_for` and Python bound identity; existing differential: `rust/daemon/harness/mcp_ci.py` rebinding/open_lists/bound_identity. B14b owner: none (closed).
