@@ -1,0 +1,11 @@
+usage: pseudolife-mcp test-login [-h] {create} ...
+
+Give the test suite its own Postgres login, which can create and drop its own
+databases and cannot connect to the bank.
+
+positional arguments:
+  {create}
+    create    create the test login, or re-apply it; idempotent
+
+options:
+  -h, --help  show this help message and exit
