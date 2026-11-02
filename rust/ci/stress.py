@@ -13,8 +13,9 @@ A selection is one of:
   scenario:<name>        one live daemon comparison (run.py live --only), on
                          the binary and settings the scenario's lane uses
   cargo:<package>/<test binary>[::<test>] [cargo:...]
-                         Rust integration test binaries, or single tests in
-                         them, under nextest with the Rust job's toolchain,
+                         Rust integration test binaries, lib for library unit
+                         tests, or bin/<name> for binary unit tests, optionally
+                         one exact test, under nextest with the Rust job's toolchain,
                          lockfile, test profile, default features and 4 test
                          threads: the stress-build job compiles them once
                          into a nextest archive (``archive``), and each
@@ -22,7 +23,10 @@ A selection is one of:
                          every kind, the selection runs alone, not beside
                          the rest of its lane, and only the selected
                          packages are built (the Rust job builds the whole
-                         workspace, and also runs --no-default-features)
+                         workspace, and also runs --no-default-features).
+                         lib is reserved: an integration test target named lib
+                         uses test/lib; a binary target named lib is unsupported
+                         (bin/lib is refused).
   <node id> [<node id>]  pytest node ids, run with -ra and a junit report, with
                          the parity shards' candidate binaries in the env
 
@@ -67,10 +71,10 @@ STATIC_PREFIXES = ("body-", "security-", "static-")
 # job builds, and a stress loop runs no rust job.
 REMOTE_BIND = {"trust-bind", "security-remote-open", "security-remote-auth"}
 # A cargo item: package and test binary, optionally one test by its libtest
-# path (module::test). The binary is an integration test, or bin/<name> for a
-# binary target's unit tests (a binary crate has no library for an
-# integration test to import), named as nextest's binary id names it.
-CARGO = re.compile(r"cargo:([a-z0-9][a-z0-9_-]{0,63})/((?:bin/)?[a-z0-9][a-z0-9_-]{0,63})"
+# path (module::test). lib selects library unit tests; test/lib escapes the
+# reserved name for an integration target. bin/<name> selects binary unit
+# tests, except the reserved bin/lib spelling.
+CARGO = re.compile(r"cargo:([a-z0-9][a-z0-9_-]{0,63})/(test/lib|(?:bin/)?[a-z0-9][a-z0-9_-]{0,63})"
                    r"(?:::([A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)*))?")
 CARGO_FORM = "cargo:<package>/[bin/]<test binary>[::<test>]"
 # The Rust workspace; nextest reads rust/.config/nextest.toml from it.
@@ -97,7 +101,11 @@ def parse(selection: str) -> tuple[str, list[str]]:
     if any(node.startswith("cargo:") for node in nodes):
         if not all(CARGO.fullmatch(node) for node in nodes):
             raise ValueError(f"cargo selection {selection!r}: expected {CARGO_FORM} items, "
+                             "or cargo:<package>/lib[::<test>] (test/lib for an integration target named lib), "
                              "separated by spaces and not mixed with other kinds")
+        if any(cargo_item(node[6:])[1] == "bin/lib" for node in nodes):
+            raise ValueError("lib is reserved for library unit tests: use cargo:<package>/lib[::<test>]; "
+                             "a binary target named lib cannot be selected with bin/lib")
         return "cargo", [node[6:] for node in nodes]
     if not nodes or not all(NODE.fullmatch(node) and ".." not in node for node in nodes):
         raise ValueError(f"selection {selection!r}: expected row:<row>[/<case>], scenario:<name>, "
@@ -106,11 +114,15 @@ def parse(selection: str) -> tuple[str, list[str]]:
 
 
 def cargo_item(name: str) -> tuple[str, str, str | None]:
-    """A parsed cargo item's (package, test binary, test or None); a binary
-    target's test binary keeps its bin/ prefix, as in nextest's binary id."""
+    """A parsed cargo item's (package, target selector, exact test or None)."""
     package, _, rest = name.partition("/")
     binary, _, test = rest.partition("::")
     return package, binary, test or None
+
+
+def cargo_binary_id(package: str, binary: str) -> str:
+    """Nextest names library test binaries by package alone."""
+    return package if binary == "lib" else f"{package}::{binary.removeprefix('test/')}"
 
 
 def filterset(names: list[str], binaries_only: bool = False) -> str:
@@ -118,9 +130,9 @@ def filterset(names: list[str], binaries_only: bool = False) -> str:
     binaries_only, the binaries holding them (an archive holds whole binaries)."""
     items = [cargo_item(name) for name in names]
     if binaries_only:
-        ids = dict.fromkeys(f"{package}::{binary}" for package, binary, _ in items)
+        ids = dict.fromkeys(cargo_binary_id(package, binary) for package, binary, _ in items)
         return " | ".join(f"binary_id(={binary_id})" for binary_id in ids)
-    return " | ".join(f"(binary_id(={package}::{binary})" + (f" & test(={test}))" if test else ")")
+    return " | ".join(f"(binary_id(={cargo_binary_id(package, binary)})" + (f" & test(={test}))" if test else ")")
                       for package, binary, test in items)
 
 
@@ -134,8 +146,11 @@ def archive_command(names: list[str], archive: Path) -> list[str]:
     for package in dict.fromkeys(package for package, _, _ in items):
         argv += ["-p", package]
     for binary in dict.fromkeys(binary for _, binary, _ in items):
-        target, _, name = binary.rpartition("/")
-        argv += ["--bin" if target == "bin" else "--test", name]
+        if binary == "lib":
+            argv += ["--lib"]
+        else:
+            target, _, name = binary.rpartition("/")
+            argv += ["--bin" if target == "bin" else "--test", name]
     return argv + ["-E", filterset(names, binaries_only=True), "--archive-file", str(archive)]
 
 
@@ -258,7 +273,7 @@ def selected_cases(names: list[str], report: Path) -> list | None:
     for suite in root.iter("testsuite"):
         for case in suite.iter("testcase"):
             matched = [name for name, (package, binary, test) in zip(names, items)
-                       if suite.get("name") == f"{package}::{binary}" and test in (None, case.get("name"))]
+                       if suite.get("name") == cargo_binary_id(package, binary) and test in (None, case.get("name"))]
             if matched:
                 selected.append((suite.get("name"), case, matched))
     return selected

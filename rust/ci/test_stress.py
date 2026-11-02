@@ -82,9 +82,46 @@ def test_a_selection_can_name_a_binary_targets_unit_tests():
         "pseudolife-daemon", "bin/pseudolife-daemon", SHUTDOWN)
 
 
+@pytest.mark.parametrize("target", ["lib", "lib::runtime::tests::launch", "test/lib::integration_case",
+                                   "bin/library"])
+def test_a_library_selection_and_nearby_target_names_parse(target):
+    name = f"pseudolife-stdio/{target}"
+    assert stress.parse(f"cargo:{name}") == ("cargo", [name])
+
+
+@pytest.mark.parametrize("suffix", ["", "::case"])
+def test_the_reserved_library_name_cannot_be_combined_with_bin(suffix):
+    with pytest.raises(ValueError, match="lib is reserved"):
+        stress.parse(f"cargo:pseudolife-stdio/bin/lib{suffix}")
+
+
+def test_a_library_selection_uses_the_packages_binary_id_and_keeps_exact_tests(tmp_path):
+    names = ["pseudolife-stdio/lib::runtime::tests::launch", "pseudolife-stdio/lib",
+             "pseudolife-stdio/test/lib::integration_case"]
+    assert stress.cargo_item(names[0]) == ("pseudolife-stdio", "lib", "runtime::tests::launch")
+    assert stress.filterset(names) == (
+        "(binary_id(=pseudolife-stdio) & test(=runtime::tests::launch))"
+        " | (binary_id(=pseudolife-stdio))"
+        " | (binary_id(=pseudolife-stdio::lib) & test(=integration_case))")
+    argv = stress.archive_command(names, tmp_path / "a.tar.zst")
+    assert argv.count("--lib") == 1
+    assert [argv[i + 1] for i, a in enumerate(argv) if a == "--test"] == ["lib"]
+    assert "--bin" not in argv
+    assert argv[argv.index("-E") + 1] == "binary_id(=pseudolife-stdio) | binary_id(=pseudolife-stdio::lib)"
+
+
+def test_library_and_bin_targets_can_share_an_archive(tmp_path):
+    argv = stress.archive_command(["pseudolife-stdio/lib::case", f"{DAEMON_BIN}::{SHUTDOWN}"],
+                                 tmp_path / "a.tar.zst")
+    assert argv.count("--lib") == 1
+    assert [argv[i + 1] for i, a in enumerate(argv) if a == "--bin"] == ["pseudolife-daemon"]
+    assert "--test" not in argv
+
+
 @pytest.mark.parametrize("selection", [
     "cargo:pseudolife-daemon/bin/", "cargo:pseudolife-daemon/bin/../x", "cargo:pseudolife-daemon/bin/bin/x",
     "cargo:pseudolife-daemon/lib/x", "cargo:pseudolife-daemon/bin//x", "cargo:pseudolife-daemon/bin/X",
+    "cargo:pseudolife-daemon/lib/bin/x", "cargo:pseudolife-daemon/test/library",
 ])
 def test_a_malformed_bin_selection_is_refused(selection):
     with pytest.raises(ValueError, match=r"cargo:<package>/\[bin/\]<test binary>"):
@@ -129,12 +166,13 @@ def test_the_build_archives_only_the_selected_binaries_from_the_rust_workspace(t
     assert "--release" not in argv and "--no-default-features" not in argv
 
 
-def test_archive_runs_cargo_in_the_rust_workspace(tmp_path, monkeypatch):
+@pytest.mark.parametrize("target", ["board_retry_contract", "lib::runtime::tests::launch", "test/lib"])
+def test_archive_runs_cargo_in_the_rust_workspace(tmp_path, monkeypatch, target):
     calls = []
     monkeypatch.setattr(stress.subprocess, "run",
                         lambda argv, cwd: calls.append((argv, cwd)) or SimpleNamespace(returncode=0))
     archive = tmp_path / "a.tar.zst"
-    assert stress.main(["archive", "--selection", "cargo:pseudolife-stdio/board_retry_contract",
+    assert stress.main(["archive", "--selection", f"cargo:pseudolife-stdio/{target}",
                         "--archive-file", str(archive)]) == 0
     assert calls[0][1] == "rust" and calls[0][0][:3] == ["cargo", "nextest", "archive"]
 
@@ -250,6 +288,33 @@ def test_a_bin_items_evidence_reads_its_binary_id_suite(tmp_path):
     assert stress.evidence("cargo", [f"{DAEMON_BIN}::{SHUTDOWN}"], tmp_path).startswith("no test ran for")
 
 
+@pytest.mark.parametrize("target, suite", [("lib", "pseudolife-stdio"),
+                                          ("test/lib", "pseudolife-stdio::lib")])
+def test_library_and_integration_lib_evidence_use_distinct_suites(tmp_path, target, suite):
+    other = "pseudolife-stdio::lib" if target == "lib" else "pseudolife-stdio"
+    names = [f"pseudolife-stdio/{target}::runtime::tests::launch"]
+    report = tmp_path / "junit.xml"
+    report.write_text(nextest_junit({suite: [("unselected", FILTERED), ("runtime::tests::launch", "")],
+                                    other: [("runtime::tests::launch", IGNORED)]}).replace(
+                                        'name="runtime::tests::launch"',
+                                        'name="runtime::tests::launch" time="1.250"'), encoding="utf-8")
+    assert stress.evidence("cargo", names, tmp_path) == ""
+    assert stress.cargo_times(names, report) == {f"{suite}::runtime::tests::launch": 1.25}
+    report.write_text(nextest_junit({other: [("runtime::tests::launch", "")]}), encoding="utf-8")
+    assert stress.evidence("cargo", names, tmp_path) == "no test ran for " + names[0]
+
+
+@pytest.mark.parametrize("cases, note", [
+    ([("a", ""), ("b", "")], ""),
+    ([("a", ""), ("b", IGNORED)], "1 of 2 selected tests skipped; a skip is not evidence"),
+    ([("a", '<failure message="x"/>')], "1 of 1 selected tests did not pass"),
+    ([], "no test ran for pseudolife-stdio/lib"),
+])
+def test_whole_library_evidence_requires_every_selected_test(tmp_path, cases, note):
+    (tmp_path / "junit.xml").write_text(nextest_junit({"pseudolife-stdio": cases}), encoding="utf-8")
+    assert stress.evidence("cargo", ["pseudolife-stdio/lib"], tmp_path) == note
+
+
 def test_a_cargo_iteration_without_a_junit_report_is_no_evidence(tmp_path):
     assert stress.evidence("cargo", ["pseudolife-stdio/board"], tmp_path) == "no JUnit report from nextest"
 
@@ -261,32 +326,35 @@ def built_here(tmp_path, workspace=None):
     return archive
 
 
-def cargo_run(out, archive):
-    return stress.main(["run", "--selection", f"cargo:pseudolife-stdio/{RETRY}", "--iteration", "1",
+def cargo_run(out, archive, target=RETRY):
+    return stress.main(["run", "--selection", f"cargo:pseudolife-stdio/{target}", "--iteration", "1",
                         "--candidates", "rust/target/release", "--archive-file", str(archive), "--out", str(out)])
 
 
-def test_a_cargo_run_keeps_this_iterations_junit_report(tmp_path, monkeypatch):
+@pytest.mark.parametrize("target, suite", [(RETRY, f"pseudolife-stdio::{RETRY}"),
+                                          ("lib::a", "pseudolife-stdio"),
+                                          ("test/lib::a", "pseudolife-stdio::lib")])
+def test_a_cargo_run_keeps_this_iterations_junit_report(tmp_path, monkeypatch, target, suite):
     # The report lands under the remapped workspace's target dir; a stale one
     # from an earlier run must never count, and the row keeps a copy.
     monkeypatch.chdir(tmp_path)
     junit = stress.cargo_junit(Path("rust"))
     junit.parent.mkdir(parents=True)
-    junit.write_text(nextest_junit({f"pseudolife-stdio::{RETRY}": [("stale", "")]}), encoding="utf-8")
+    junit.write_text(nextest_junit({suite: [("stale", "")]}), encoding="utf-8")
 
     def fresh(argv, env):
         assert not junit.exists(), "a stale report survived into the run"
-        junit.write_text(nextest_junit({f"pseudolife-stdio::{RETRY}": [("a", "")]}).replace(
+        junit.write_text(nextest_junit({suite: [("a", "")]}).replace(
             'name="a"', 'name="a" time="1.250"'), encoding="utf-8")
         return SimpleNamespace(returncode=0)
     monkeypatch.setattr(stress.subprocess, "run", fresh)
     out = tmp_path / "stress" / "stress-row-1.json"
-    assert cargo_run(out, built_here(tmp_path)) == 0
+    assert cargo_run(out, built_here(tmp_path), target) == 0
     assert 'name="a"' in (out.parent / "junit.xml").read_text(encoding="utf-8")
     row = json.loads(out.read_text(encoding="utf-8"))
     # Each selected test's time, so a test that returned at once (an
     # env-gated child helper) shows as 0 s rather than hiding in "pass".
-    assert row["outcome"] == "pass" and row["tests"] == {f"pseudolife-stdio::{RETRY}::a": 1.25}
+    assert row["outcome"] == "pass" and row["tests"] == {f"{suite}::a": 1.25}
 
 
 def test_a_cargo_run_that_left_no_report_fails(tmp_path, monkeypatch):
