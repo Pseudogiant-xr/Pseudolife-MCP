@@ -410,6 +410,16 @@ def evidence(kind: str, names: list[str], scratch: Path) -> str:
     return ""
 
 
+def write_row(out: str | Path, row: dict) -> None:
+    """Write an iteration's row whole or not at all: a temporary file beside
+    it, then a rename over it, so a job killed mid-write leaves the previous
+    row, never a torn one. The report's glob does not match the .tmp name."""
+    out = Path(out)
+    temporary = out.with_name(out.name + ".tmp")
+    temporary.write_text(json.dumps(row, indent=2) + "\n", encoding="utf-8")
+    os.replace(temporary, out)
+
+
 def runner() -> dict:
     return {"os": os.environ.get("RUNNER_OS", ""), "image": " ".join(
         filter(None, (os.environ.get("ImageOS"), os.environ.get("ImageVersion")))) or "unknown",
@@ -489,7 +499,7 @@ def run_items(options, kind: str, items: list[str]) -> int:
                "outcome": "pass" if code == 0 else "fail",
                "seconds": round(time.monotonic() - started, 1),
                **({"note": note} if note else {}), "items": results}
-        Path(options.out).write_text(json.dumps(row, indent=2) + "\n", encoding="utf-8")
+        write_row(options.out, row)
         return code
 
     for index, item in enumerate(items, 1):
@@ -497,7 +507,7 @@ def run_items(options, kind: str, items: list[str]) -> int:
         result = {"item": label, "exit_code": None, "outcome": "fail", "note": "not finished"}
         results.append(result)
         record(running=result)
-        begun = time.monotonic()
+        begun, exit_code = time.monotonic(), None
         try:
             names, here = item_names(kind, item), scratch / f"item-{index}"
             here.mkdir(parents=True, exist_ok=True)
@@ -506,12 +516,15 @@ def run_items(options, kind: str, items: list[str]) -> int:
             print("stress: " + " ".join(argv), flush=True)
             exit_code = subprocess.run(argv, env=env).returncode
             note = f"exit code {exit_code}" if exit_code else evidence(kind, names, here)
-            result.clear()
-            result.update(item=label, exit_code=exit_code, outcome="fail" if note else "pass",
-                          compared=compared(kind, names, here), **({"note": note} if note else {}))
+            # Built whole before it replaces the placeholder, so a raise
+            # anywhere above leaves a complete failed result, never an empty one.
+            done = {"item": label, "exit_code": exit_code, "outcome": "fail" if note else "pass",
+                    "compared": compared(kind, names, here), **({"note": note} if note else {})}
         except Exception as error:  # one item that cannot run is that item's failure, not the loop's
-            result["note"] = f"{type(error).__name__}: {error}"
-        result["seconds"] = round(time.monotonic() - begun, 1)
+            done = {"item": label, "exit_code": exit_code, "outcome": "fail",
+                    "note": f"{type(error).__name__}: {error}"}
+        result.clear()
+        result.update(done, seconds=round(time.monotonic() - begun, 1))
         print(f"stress: {label} {result['outcome']}" + (f": {result['note']}" if "note" in result else ""),
               flush=True)
     return record()
@@ -556,16 +569,47 @@ def run(options) -> int:
                "outcome": "pass" if code == 0 else "fail",
                "seconds": round(time.monotonic() - started, 1),
                **({"note": note} if note else {}), **({"tests": tests} if tests is not None else {})}
-        Path(options.out).write_text(json.dumps(row, indent=2) + "\n", encoding="utf-8")
+        write_row(options.out, row)
     return code
+
+
+def complete_row(row) -> bool:
+    """Whether a row holds every field the report reads."""
+    def whole(item):
+        return isinstance(item, dict) and isinstance(item.get("item"), str) and isinstance(item.get("outcome"), str)
+    return (isinstance(row, dict) and type(row.get("iteration")) is int and row.get("outcome") in ("pass", "fail")
+            and "seconds" in row and isinstance(row.get("runner"), dict)
+            and type(row.get("attempt", 1)) is int
+            and isinstance(row.get("items", []), list) and all(whole(item) for item in row.get("items", [])))
+
+
+def read_row(path: Path) -> tuple[int | None, dict]:
+    """An iteration's number and row. A row that cannot be read whole (a
+    kill mid-write, a partial upload) is that iteration's failure, numbered
+    by its file name, so one bad file never costs the other iterations'
+    report; a file whose name carries no number is not an iteration's row."""
+    numbered = re.fullmatch(r"stress-row-(\d+)\.json", path.name)
+    number = int(numbered[1]) if numbered else None
+    try:
+        row = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        note = f"unreadable row {path.name}: {type(error).__name__}: {error}"
+    else:
+        if complete_row(row):
+            return row["iteration"], row
+        note = f"incomplete row {path.name}: a field the report needs is missing or malformed"
+    print(f"stress: {note}", file=sys.stderr)
+    return number, {"iteration": number, "outcome": "fail", "exit_code": None, "seconds": None,
+                    "runner": {}, "note": note}
 
 
 def report(options) -> int:
     count = iterations(options.iterations)
     rows = {}
     for path in sorted(Path(options.rows).glob("**/stress-row-*.json")):
-        row = json.loads(path.read_text(encoding="utf-8"))
-        rows[int(row["iteration"])] = row
+        iteration, row = read_row(path)
+        if iteration is not None:
+            rows[iteration] = row
     table = [rows.get(i, {"iteration": i, "outcome": "no result", "exit_code": None, "seconds": None,
                           "runner": {}}) for i in range(1, count + 1)]
     passed = sum(row["outcome"] == "pass" for row in table)

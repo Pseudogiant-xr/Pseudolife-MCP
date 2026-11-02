@@ -1153,6 +1153,75 @@ def test_an_item_that_raises_is_a_failure_and_the_rest_still_run(tmp_path, monke
     assert "row:hook" in row["note"] and "not run" not in row["note"]
 
 
+@pytest.mark.parametrize("summary", ["[]", "3", "\"text\""])
+def test_an_item_whose_summary_is_not_an_object_fails_and_the_rest_still_run(tmp_path, monkeypatch, summary):
+    # Valid JSON that is not an object makes compared() raise AttributeError
+    # or TypeError, after the item's exit code is known (review of 68e97311).
+    calls = []
+    harness = fake_harness({"hook": 3}, calls)
+
+    def run(argv, env):
+        if argv[argv.index("--row") + 1] == "mail":
+            calls.append((argv, env))
+            Path(argv[argv.index("--out") + 1]).write_text(summary, encoding="utf-8")
+            return SimpleNamespace(returncode=1)
+        return harness(argv, env)
+    monkeypatch.setattr(stress.subprocess, "run", run)
+    code, row = run_row(tmp_path, "row:mail row:hook")
+    assert [argv[argv.index("--row") + 1] for argv, _ in calls] == ["mail", "hook"]
+    assert code == 1 and row["outcome"] == "fail" and row["exit_code"] == 1
+    mail, hook = row["items"]
+    assert mail["item"] == "row:mail" and mail["outcome"] == "fail" and mail["exit_code"] == 1
+    assert mail["note"].split(":")[0] in ("AttributeError", "TypeError")
+    assert hook["outcome"] == "pass" and "row:mail" in row["note"]
+
+
+@pytest.mark.parametrize("selection", ["row:hook", "row:mail row:hook"])
+def test_the_row_is_replaced_atomically(tmp_path, monkeypatch, selection):
+    # A kill mid-write must not leave a torn row: the row is written to a
+    # temporary file beside it, then moved over it (review of 68e97311).
+    replaced = []
+    real = stress.os.replace
+
+    def replace(source, target):
+        replaced.append((Path(source), Path(target)))
+        return real(source, target)
+    monkeypatch.setattr(stress.os, "replace", replace)
+    monkeypatch.setattr(stress.subprocess, "run", fake_harness({"mail": 2, "hook": 3}, []))
+    code, row = run_row(tmp_path, selection)
+    out = tmp_path / "stress" / "stress-row-1.json"
+    assert code == 0 and replaced and all(target == out and source.parent == out.parent and source != out
+                                          for source, target in replaced)
+    assert out.is_file() and not list(out.parent.rglob("*.tmp"))
+
+
+@pytest.mark.parametrize("content, reason", [
+    ('{"iteration": 2, "attempt": 1, "outc', "unreadable"),  # torn mid-write
+    ('{"iteration": 2, "attempt": 1}', "incomplete"),  # no outcome, runner or seconds
+    ('[2]', "incomplete"),
+    ('{"iteration": 2, "attempt": 1, "outcome": "pass", "exit_code": 0, "seconds": 1, "runner": {},'
+     ' "items": [{"outcome": "pass"}]}', "incomplete"),  # an item without its name
+])
+def test_the_report_counts_an_unreadable_row_as_that_iterations_failure(tmp_path, content, reason):
+    rows = tmp_path / "rows"
+    rows.mkdir()
+    write_row(rows, 1, "pass")
+    write_row(rows, 3, "pass")
+    broken = rows / "stress-row-2" / "stress-row-2.json"
+    broken.parent.mkdir()
+    broken.write_text(content, encoding="utf-8")
+    out, summary = tmp_path / "stress-report.json", tmp_path / "summary.md"
+    code = stress.main(["report", "--selection", "row:mail row:hook", "--iterations", "3", "--os", "windows-latest",
+                        "--rows", str(rows), "--out", str(out), "--summary", str(summary)])
+    assert code == 1
+    report = json.loads(out.read_text(encoding="utf-8"))
+    assert [row["outcome"] for row in report["rows"]] == ["pass", "fail", "pass"]
+    assert report["passed"] == 2 and report["failed"] == 1
+    second = report["rows"][1]
+    assert second["iteration"] == 2 and reason in second["note"] and "stress-row-2.json" in second["note"]
+    assert "stress-row-2.json" in summary.read_text(encoding="utf-8")
+
+
 def test_a_single_item_report_is_unchanged(tmp_path):
     rows = tmp_path / "rows"
     rows.mkdir()
