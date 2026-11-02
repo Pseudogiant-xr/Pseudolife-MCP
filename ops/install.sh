@@ -485,6 +485,8 @@ show_client_only_notes() {
     below, on Linux and Windows) moves the shim to the daemon's
     release; without it, run the update command below with
     --clients-only here, so the shim matches the daemon.
+  - Open the Console signed in, on this machine: pseudolife-mcp console
+    (run as the update command below is).
 PL_CLIENT_ONLY
 }
 # <<< client-only notes <<<
@@ -570,9 +572,49 @@ offer_maintainer_setup() {
     fi
     if [ "$setup_rc" -ne 0 ]; then
         echo "WARNING: pseudolife-mcp maintainer setup exited $setup_rc (see its message above). The install itself is complete: run it again once that is fixed." >&2
+    else
+        # Its passkey step opened the Console signed in at the new address.
+        MAINTAINER_SETUP_DONE=1
     fi
 }
 # <<< maintainer setup offer <<<
+
+# >>> console sign-in >>>
+# A daemon host with a bearer token ends the install with the Console open in
+# the browser, signed in: `pseudolife-mcp console` asks the daemon for a
+# one-time sign-in link with this machine's token and opens it, and the
+# browser asks the person to confirm once. Opening a browser changes nothing
+# persistent, so nothing is asked; without a terminal one line names the
+# command. It runs after the passkey offer, so a link made after that setup
+# names the Console's HTTPS address; a passkey setup that just succeeded has
+# opened it there already. A tokenless daemon needs no sign-in.
+open_console_signin() {
+    case "${TOKEN_STATE:-}" in minted|present) ;; *) return 0 ;; esac
+    if [ -n "${MAINTAINER_SETUP_DONE:-}" ]; then
+        echo "Console: opened signed in by the passkey setup above (again later: pseudolife-mcp console)."
+        return 0
+    fi
+    ensure_shim
+    if ! bank_can_ask; then
+        echo "Open the Console signed in: pseudolife-mcp console"
+        return 0
+    fi
+    if [ -z "$SHIM_OK" ] || [ -z "$SHIM_PATH" ]; then
+        echo "WARNING: the pseudolife-mcp shim is unavailable (see above), so the Console was not opened: run pseudolife-mcp console once it is installed." >&2
+        return 0
+    fi
+    echo "Opening the Console in your browser, signed in (confirm the sign-in there)."
+    console_rc=0
+    if [ -n "${board_file:-}" ]; then
+        PSEUDOLIFE_MCP_TOKEN_FILE="$board_file" "$SHIM_PATH" console || console_rc=$?
+    else
+        "$SHIM_PATH" console || console_rc=$?
+    fi
+    if [ "$console_rc" -ne 0 ]; then
+        echo "WARNING: pseudolife-mcp console exited $console_rc (see its message above). The install itself is complete: run pseudolife-mcp console to open the Console signed in." >&2
+    fi
+}
+# <<< console sign-in <<<
 
 # Expand aliases, validate, dedupe, and emit the canonical provider order.
 normalize_clients() {
@@ -3416,6 +3458,7 @@ if [ "${BANK_LOCATION:-}" = shared ]; then show_shared_bank_notes; echo ""; fi
 if [ "${BANK_LOCATION:-}" = shared ]; then offer_shared_bank_expose; fi
 if [ -n "$SHIM_HELD" ]; then echo "WARNING: $SHIM_HELD" >&2; fi
 if [ -z "$CLIENT_ONLY" ]; then offer_maintainer_setup; fi
+if [ -z "$CLIENT_ONLY" ]; then open_console_signin; fi
 # >>> update line >>>
 # The installers do not put the shim launcher's directory on PATH, so a bare
 # `pseudolife-mcp` finds an older pipx install, or nothing: name the shim this

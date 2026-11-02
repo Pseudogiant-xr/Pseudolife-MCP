@@ -599,3 +599,29 @@ def test_write_refuses_to_guess_where_a_plain_daemon_reads_its_config(tmp_path, 
     assert ms.host_main(["write", "localhost", "http://localhost:8765"]) == ms.EXIT_USAGE
     assert "PSEUDOLIFE_MCP_DATA_DIR" in capsys.readouterr().err
     assert not (tmp_path / "data").exists()
+
+
+
+def test_with_a_bearer_the_console_opens_signed_in_at_the_new_address(host, tailnet, capsys,
+                                                                      monkeypatch):
+    opened = []
+    monkeypatch.setattr(ms, "bearer", lambda: "never-printed-token-value")
+    monkeypatch.setattr(ms, "open_signed_in", lambda: opened.append(True) or True)
+    host.answers = ["y", "y"]
+    assert ms.main([]) == 0
+    out = capsys.readouterr().out
+    assert opened == [True]
+    assert "Confirm the sign-in in the browser" in out and "Your passkeys" in out
+    assert "paste a bearer token" not in out and "never-printed-token-value" not in out
+
+
+def test_open_signed_in_runs_the_console_link_with_this_bearer(monkeypatch):
+    from pseudolife_memory import console_cli
+    calls = []
+    monkeypatch.setattr(ms, "bearer", lambda: "a-token")
+    monkeypatch.setattr(console_cli, "main", lambda argv=None, environ=None: calls.append(argv) or 0)
+    assert ms.open_signed_in() is True and calls == [[]]
+    monkeypatch.setattr(console_cli, "main", lambda argv=None, environ=None: 4)
+    assert ms.open_signed_in() is False
+    monkeypatch.setattr(ms, "bearer", lambda: None)
+    assert ms.open_signed_in() is False

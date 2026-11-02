@@ -507,17 +507,37 @@ def _check_key(tier: str, prefix: str, label: str, *, fresh: bool) -> int:
     return EXIT_REFUSED
 
 
+def open_signed_in() -> bool:
+    """Open the Console at its new HTTPS address, signed in, with this
+    environment's bearer (``pseudolife-mcp console``: with passkeys set up,
+    its sign-in link is for that address). False, with nothing changed,
+    when there is no bearer here or the link could not be made."""
+    if bearer() is None:
+        return False
+    from pseudolife_memory import console_cli
+    try:
+        return console_cli.main([]) == 0
+    except Exception:  # noqa: BLE001 - the manual way is printed instead
+        return False
+
+
 def _enrol(tier: str, origin: str) -> int:
-    # The Console stores its bearer per address, so a first visit to this
-    # origin has none (2026-10-05, the first live run). Name where the token
-    # lives, never the token itself.
-    print(f"\nNext, in your browser: open {origin}/ui/. A browser keeps the Console's token per "
-          "address: if this one asks you to sign in, open \"Advanced: paste a bearer token\" in "
-          "its sign-in dialog and paste the token your Console uses at its usual address: the "
-          "daemon's PSEUDOLIFE_MCP_TOKEN, which a single-token install also keeps in your "
-          "client's token file, ~/.pseudolife-mcp/<principal>.token. Then open Settings, Your "
-          "passkeys, enter the code below with a label for this passkey, and create the "
-          "passkey when the browser asks.", flush=True)
+    # A browser keeps the Console's sign-in per address, so a first visit
+    # to this origin has none (2026-10-05, the first live run): sign it in
+    # with this environment's bearer (spec 2026-11-02), else name the ways
+    # in, never the token itself.
+    passkey_steps = ("Then open Settings, Your passkeys, enter the code below with a label for "
+                     "this passkey, and create the passkey when the browser asks.")
+    print(f"\nNext, the Console at its new address, {origin}/ui/.", flush=True)
+    if open_signed_in():
+        print(f"Confirm the sign-in in the browser (or open the link above). {passkey_steps}",
+              flush=True)
+    else:
+        print(f"Open {origin}/ui/ and sign in: run `pseudolife-mcp console` on a machine that uses "
+              "Pseudolife, or open \"Advanced: paste a bearer token\" in its sign-in dialog and "
+              "paste the token your Console uses at its usual address: the daemon's "
+              "PSEUDOLIFE_MCP_TOKEN, which a single-token install also keeps in your client's "
+              f"token file, ~/.pseudolife-mcp/<principal>.token. {passkey_steps}", flush=True)
     seen: dict = {}
 
     def on_line(line: str) -> None:

@@ -417,6 +417,8 @@ function Show-ClientOnlyNotes {
     below, on Linux and Windows) moves the shim to the daemon's
     release; without it, run the update command below with
     --clients-only here, so the shim matches the daemon.
+  - Open the Console signed in, on this machine: pseudolife-mcp console
+    (run as the update command below is).
 '@
 }
 # <<< client-only notes <<<
@@ -514,9 +516,54 @@ function Invoke-MaintainerSetupOffer {
     }
     if ($setupExit -ne 0) {
         Write-Warning "pseudolife-mcp maintainer setup exited $setupExit (see its message above). The install itself is complete: run it again once that is fixed."
+    } else {
+        # Its passkey step opened the Console signed in at the new address.
+        $script:maintainerSetupDone = $true
     }
 }
 # <<< maintainer setup offer <<<
+
+# >>> console sign-in >>>
+# A daemon host with a bearer token ends the install with the Console open in
+# the browser, signed in: `pseudolife-mcp console` asks the daemon for a
+# one-time sign-in link with this machine's token and opens it, and the
+# browser asks the person to confirm once. Opening a browser changes nothing
+# persistent, so nothing is asked; without a terminal one line names the
+# command. It runs after the passkey offer, so a link made after that setup
+# names the Console's HTTPS address. A tokenless daemon needs no sign-in.
+function Invoke-ConsoleSignin {
+    if ($tokenState -notin "minted", "present") { return }
+    if ($script:maintainerSetupDone) {
+        Write-Host "Console: opened signed in by the passkey setup above (again later: pseudolife-mcp console)."
+        return
+    }
+    $haveShim = (Install-ShimOnce) -and $script:shimInstallPath
+    if (-not $interactive) {
+        Write-Host "Open the Console signed in: pseudolife-mcp console"
+        return
+    }
+    if (-not $haveShim) {
+        Write-Warning "The pseudolife-mcp shim is unavailable (see above), so the Console was not opened: run pseudolife-mcp console once it is installed."
+        return
+    }
+    Write-Host "Opening the Console in your browser, signed in (confirm the sign-in there)."
+    $oldTokenFile = $env:PSEUDOLIFE_MCP_TOKEN_FILE
+    try {
+        if ($boardFile) { $env:PSEUDOLIFE_MCP_TOKEN_FILE = $boardFile }
+        $global:LASTEXITCODE = 0
+        & $script:shimInstallPath console
+        $consoleExit = $LASTEXITCODE
+    } catch {
+        Write-Host "  $($_.Exception.Message)"
+        $consoleExit = 1
+    } finally {
+        $env:PSEUDOLIFE_MCP_TOKEN_FILE = $oldTokenFile
+    }
+    if ($consoleExit -ne 0) {
+        Write-Warning "pseudolife-mcp console exited $consoleExit (see its message above). The install itself is complete: run pseudolife-mcp console to open the Console signed in."
+    }
+}
+# <<< console sign-in <<<
 
 # Expand aliases, validate, dedupe, and emit the canonical provider order.
 function Get-ProviderList([string]$Spec) {
@@ -3241,6 +3288,7 @@ if ($script:bankLocation -eq "shared") { Show-SharedBankNotes; Write-Host "" }
 if ($script:bankLocation -eq "shared") { Invoke-SharedBankExposeOffer }
 if ($script:shimUpgradeHeld) { Write-Warning $script:shimUpgradeHeld }
 if (-not $ClientOnly) { Invoke-MaintainerSetupOffer }
+if (-not $ClientOnly) { Invoke-ConsoleSignin }
 # >>> update line >>>
 # The installers do not put the shim launcher's directory on PATH, so a bare
 # `pseudolife-mcp` finds an older pipx install, or nothing: name the shim this
