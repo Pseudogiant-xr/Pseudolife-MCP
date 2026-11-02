@@ -121,7 +121,8 @@ def post_json(url: str, token: str | None, body: dict, timeout: float = 10.0) ->
     if token:
         request.add_header("Authorization", f"Bearer {token}")
     try:
-        opener = urllib.request.build_opener(_NoRedirectHandler)
+        # Daemon credentials must never reach an environment-selected proxy.
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirectHandler)
         with opener.open(request, timeout=timeout) as response:  # noqa: S310 - the configured daemon URL
             data = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:

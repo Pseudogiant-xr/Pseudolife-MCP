@@ -53,16 +53,19 @@ if a[:1]==["inspect"]:
   if "State.Running" in f:
    if a[-1]=="missing-daemon":code=1;out="No such container"
    else:out="false" if s.get("deployed") and s["failure"]=="recreated_stopped" else "true"
+  elif "State.Status" in f:
+   out={"recreated_stopped":"exited","recreated_restarting":"restarting"}.get(s["failure"],"running") if s.get("deployed") else "running"
   elif "index .Config.Labels" in f: out=s.get("setup_engine","python")
   elif "Labels" in f: out=json.dumps(s["running"]["Config"]["Labels"])
   elif "|" in f: out=s["running"]["Image"]+"|"+s["running"]["Config"]["Image"]
   else: out=s["running"]["Id"]
  else: out=json.dumps([s["running"]])
 elif a[:2]==["image","inspect"]:
- if "Created" in " ".join(a): out="2026-01-01|"+s["running"]["Image"]
+ if "Created" in " ".join(a): out="2026-01-01|"+s["images"].get(a[-1],s["running"]["Image"])
  elif a[-1] in s["images"]: out=s["images"][a[-1]]
  else: code=1
-elif a[:2]==["image","ls"]: out=""
+elif a[:2]==["image","ls"]: out="\n".join(s["images"]) if s.get("list_images") else ""
+elif a[:1]==["port"]:out="127.0.0.1:5433"
 elif a[:2]==["volume","inspect"]:
  if s.get("volume_inspect_failure"):code=1
  else:out=json.dumps(s.get("volume_inspections",{}).get(a[-1],[]))
@@ -81,6 +84,7 @@ elif a[:1]==["compose"]:
   out="fixture-pg" if a[-1]=="pseudolife-pg" else s["running"]["Id"]
   if s["failure"]=="missing_project_daemon" and a[-1]=="pseudolife-daemon":out=""
   if s["failure"]=="ambiguous_project_daemon" and a[-1]=="pseudolife-daemon":out="first\nsecond"
+  if s.get("deployed") and s["failure"]=="recreated_missing" and a[-1]=="pseudolife-daemon":out=""
  elif "build" in a and s["failure"]=="build":code=1
  elif "up" in a:
   code=int(s["failure"]=="up")
@@ -348,20 +352,99 @@ def test_new_mount_is_allowed_without_replacing_existing_data(tmp_path, kind, mo
         assert "up" in stages(json.loads(state_path.read_text()))
 
 
-def test_checkout_health_from_another_daemon_cannot_hide_stopped_recreation(tmp_path):
+@pytest.mark.parametrize("failure", ["recreated_stopped", "recreated_restarting", "recreated_missing"])
+def test_checkout_health_from_another_daemon_cannot_hide_stopped_recreation(tmp_path, failure):
     binary = _native_binary()
     if not binary:
         pytest.skip("set PSEUDOLIFE_RUST_BINARY to the built native CLI")
-    with host(tmp_path, "recreated_stopped", "checkout") as (repo, env, state_path):
+    with host(tmp_path, failure, "checkout") as (repo, env, state_path):
         state = json.loads(state_path.read_text())
         state["replacement_id"] = "recreated-checkout-daemon"
         state_path.write_text(json.dumps(state))
         result = run_arm(repo, env, binary, ["--checkout", str(repo), "--json", "--no-test-login",
                                            "--no-cache-prune", "--health-retries", "1", "--health-delay-ms", "0"])
         assert result.returncode == 1, result.stdout + result.stderr
-        assert "not running" in result.stdout and "rollback" in result.stdout.lower()
+        assert "recreated" in result.stdout and "rollback" in result.stdout.lower()
+        assert "nothing was changed" not in result.stdout
+        assert "before updating" not in result.stdout
         state = json.loads(state_path.read_text())
-        assert ["inspect", "-f", "{{.State.Running}}", "recreated-checkout-daemon"] in state["calls"]
+        if failure != "recreated_missing":
+            assert ["inspect", "-f", "{{.State.Status}}", "recreated-checkout-daemon"] in state["calls"]
+
+
+@pytest.mark.parametrize("target", ["/data/x", "/data/x/../y", "/"])
+@pytest.mark.parametrize("kind", ["bind", "volume", "tmpfs"])
+def test_new_mount_cannot_shadow_existing_data(tmp_path, target, kind):
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY to the built native CLI")
+    with host(tmp_path, mode="checkout") as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        state["config"]["volumes"]["cache"] = {"name": "fixture-cache"}
+        state["config"]["services"][SERVICE]["volumes"].append(
+            {"type": kind, "source": "cache" if kind == "volume" else str(repo / "cache"), "target": target})
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary, ["--checkout", str(repo), "--json", "--no-test-login", "--no-cache-prune"])
+        assert result.returncode == 2, result.stdout + result.stderr
+        assert "overlaps" in result.stdout and "remove" in result.stdout
+        assert stages(json.loads(state_path.read_text())) == []
+
+
+def test_optional_test_login_uses_selected_project_postgres(tmp_path):
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY to the built native CLI")
+    with host(tmp_path, mode="checkout") as (repo, env, state_path):
+        env["PSEUDOLIFE_TEST_PG_HOST_PORT"] = "127.0.0.1:5433"
+        result = run_arm(repo, env, binary, ["--checkout", str(repo), "--json", "--no-cache-prune"])
+        assert result.returncode == 0, result.stdout + result.stderr
+        calls = json.loads(state_path.read_text())["calls"]
+        assert ["port", "fixture-pg", "5432/tcp"] in calls
+        assert not any("pseudolife-mcp-postgres" in call for call in calls)
+        assert any(call[:3] == ["exec", "-i", "fixture-pg"] and any("psql" in arg for arg in call) for call in calls)
+
+
+def test_builtin_backup_has_independent_container_deadlines(tmp_path):
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY to the built native CLI")
+    with host(tmp_path, mode="checkout") as (repo, env, state_path):
+        for name in ("backup.sh", "backup.ps1"):
+            (repo / "ops" / name).unlink(missing_ok=True)
+        result = run_arm(repo, env, binary, ["--checkout", str(repo), "--json", "--no-test-login", "--no-cache-prune"])
+        assert result.returncode == 0, result.stdout + result.stderr
+        calls = json.loads(state_path.read_text())["calls"]
+        for command in ("pg_dump", "tar czf"):
+            call = next(a for a in calls if a[0] == "exec" and any(command in v for v in a))
+            assert call[2:5] == ["timeout", "--kill-after=5s", "3500s"]
+
+
+def test_rollback_retention_leaves_other_projects_and_current_tag(tmp_path):
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY to the built native CLI")
+    with host(tmp_path, mode="checkout") as (repo, env, state_path):
+        args = ["--checkout", str(repo), "--json", "--no-test-login", "--no-cache-prune", "--keep-rollbacks", "0"]
+        first = run_arm(repo, env, binary, args)
+        assert first.returncode == 0, first.stdout + first.stderr
+        state = json.loads(state_path.read_text())
+        tag = next(call[-1] for call in state["calls"] if call[:1] == ["tag"])
+        # New tags carry a project scope before their timestamp; legacy tags
+        # and tags from another scope have no deletion authority here.
+        prefix = tag.rsplit("-", 2)[0]
+        own = prefix + "-20000101-000000"
+        other = "pseudolife-daemon:0.21.0-pre-update-other-project-20000101-000000"
+        legacy = "pseudolife-daemon:0.21.0-pre-update-19990101-000000"
+        state["images"].update({own:"sha256:old-own", other:"sha256:other", legacy:"sha256:legacy"})
+        state.update(calls=[], deployed=False, list_images=True)
+        state["running"]["Image"] = "sha256:validated"
+        state_path.write_text(json.dumps(state))
+        second = run_arm(repo, env, binary, args)
+        assert second.returncode == 0, second.stdout + second.stderr
+        calls = json.loads(state_path.read_text())["calls"]
+        removed = [call[-1] for call in calls if call[:1] == ["rmi"]]
+        assert own in removed
+        assert other not in removed and legacy not in removed and tag not in removed
 
 
 @pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])

@@ -60,6 +60,78 @@ fn health_version_missing_is_unable_to_check_and_lock_io_is_not_busy() {
     )));
 }
 
+#[test]
+fn non_release_version_refusal_does_not_claim_a_missing_version() {
+    for version in ["0.0.0+unknown", "unknown", "1.2.3\nforged"] {
+        let error = health_version(&json!({"version":version})).unwrap_err();
+        assert_eq!(error.exit_code, 2);
+        assert!(error.message.contains("reports a non-release version"));
+        assert!(!error.message.contains(version));
+    }
+    assert!(
+        health_version(&json!({}))
+            .unwrap_err()
+            .message
+            .contains("carries no version")
+    );
+}
+
+#[test]
+#[ignore = "subprocess fixture for isolated daemon proxy environment"]
+fn daemon_proxy_child() {
+    actual_board_transport_registers_then_reads_with_instance_credentials();
+}
+
+#[test]
+fn daemon_credentials_bypass_environment_proxies() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let proxy = format!("http://{}", listener.local_addr().unwrap());
+    let done = Arc::new(AtomicBool::new(false));
+    let stop = done.clone();
+    let server = std::thread::spawn(move || {
+        let deadline = std::time::Instant::now() + Duration::from_secs(20);
+        let mut contacted = false;
+        while !stop.load(Ordering::SeqCst) && std::time::Instant::now() < deadline {
+            if let Ok((mut stream, _)) = listener.accept() {
+                contacted = true;
+                let _ = stream.write_all(
+                    b"HTTP/1.1 503 Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                );
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        contacted
+    });
+    let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+    for key in [
+        "HTTP_PROXY",
+        "http_proxy",
+        "HTTPS_PROXY",
+        "https_proxy",
+        "ALL_PROXY",
+        "all_proxy",
+    ] {
+        command.env(key, &proxy);
+    }
+    command.env("NO_PROXY", "").env("no_proxy", "");
+    let result = command
+        .args([
+            "--exact",
+            "cli::update::unattended::tests::daemon_proxy_child",
+            "--ignored",
+        ])
+        .output()
+        .unwrap();
+    done.store(true, Ordering::SeqCst);
+    assert!(
+        !server.join().unwrap(),
+        "daemon client contacted the environment proxy"
+    );
+    assert!(result.status.success(), "isolated daemon transport failed");
+}
+
 type Requests = Arc<Mutex<Vec<Vec<u8>>>>;
 fn fixture(replies: Vec<(u16, String, Value)>) -> (String, Requests, std::thread::JoinHandle<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();

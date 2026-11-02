@@ -156,6 +156,61 @@ impl Drop for Temp {
         let _ = fs::remove_dir_all(&self.0);
     }
 }
+
+#[test]
+#[ignore = "subprocess fixture for command-tree timeout"]
+fn native_update_timeout_child() {
+    let home = PathBuf::from(std::env::var_os("UPDATE_TIMEOUT_HOME").unwrap());
+    if std::env::var_os("UPDATE_TIMEOUT_DESCENDANT").is_some() {
+        fs::write(home.join("ready"), b"ready").unwrap();
+        std::thread::sleep(std::time::Duration::from_secs(4));
+        fs::write(home.join("survived"), b"survived").unwrap();
+    } else {
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "cli::update::tests::native_update_timeout_child",
+                "--ignored",
+            ])
+            .env("UPDATE_TIMEOUT_DESCENDANT", "1")
+            .spawn()
+            .unwrap();
+        let _ = child.wait();
+    }
+}
+
+#[test]
+fn native_update_timeout_terminates_command_descendants() {
+    let temp = Temp::new();
+    let mut env: Environment = std::env::vars().collect();
+    env.insert(
+        "UPDATE_TIMEOUT_HOME".into(),
+        temp.0.to_string_lossy().into_owned(),
+    );
+    env.remove("UPDATE_TIMEOUT_DESCENDANT");
+    let (code, message) = run_cli(
+        &[
+            std::env::current_exe()
+                .unwrap()
+                .to_string_lossy()
+                .into_owned(),
+            "--exact".into(),
+            "cli::update::tests::native_update_timeout_child".into(),
+            "--ignored".into(),
+        ],
+        Some(&env),
+        2,
+        false,
+    );
+    assert_eq!(code, 1);
+    assert_eq!(message, "command timed out");
+    assert!(temp.0.join("ready").is_file(), "descendant never started");
+    std::thread::sleep(std::time::Duration::from_secs(3));
+    assert!(
+        !temp.0.join("survived").exists(),
+        "descendant survived command timeout"
+    );
+}
 fn gzip(bytes: &[u8]) -> Vec<u8> {
     let mut gz = flate2::write::GzEncoder::new(vec![], flate2::Compression::default());
     gz.write_all(bytes).unwrap();
@@ -361,6 +416,7 @@ fn native_update_mount_identity_normalizes_windows_docker_desktop_sources() {
         "/run/desktop/mnt/host/c/fixture/config.yaml",
         "//./C:/fixture/config.yaml",
         r"\\?\C:\fixture\config.yaml",
+        r"C:\FIXTURE\Config.YAML",
     ] {
         let config = json!({"services":{DAEMON_SERVICE:{"environment":{"PSEUDOLIFE_MCP_DATABASE_URL":"fixture"},"volumes":[
             {"type":"volume","source":"state","target":"/data"},
@@ -373,6 +429,38 @@ fn native_update_mount_identity_normalizes_windows_docker_desktop_sources() {
         assert!(verify_bank_identity(&config, &running).is_ok(), "{actual}");
         running["Mounts"][1]["Source"] = json!("/run/desktop/mnt/host/d/fixture/config.yaml");
         assert!(verify_bank_identity(&config, &running).is_err());
+    }
+}
+
+#[test]
+fn native_update_unc_mounts_compare_without_changing_posix_case() {
+    for (expected, actual, same) in [
+        (
+            r"\\server\share\Config.yaml",
+            r"\\?\UNC\SERVER\SHARE\config.yaml",
+            true,
+        ),
+        (
+            r"\\server\share\Config.yaml",
+            "//server/share/config.yaml",
+            true,
+        ),
+        ("/original/Config.yaml", "/original/config.yaml", false),
+        (
+            r"\\server\share\Config.yaml",
+            r"\\other\share\config.yaml",
+            false,
+        ),
+    ] {
+        let config = json!({"services":{DAEMON_SERVICE:{"environment":{"PSEUDOLIFE_MCP_DATABASE_URL":"fixture"},"volumes":[
+            {"type":"volume","source":"state","target":"/data"},
+            {"type":"bind","source":expected,"target":"/config","read_only":true}
+        ]}},"volumes":{"state":{"name":"fixture-state"}}});
+        let running = json!({"Config":{"Env":["PSEUDOLIFE_MCP_DATABASE_URL=fixture"]},"Mounts":[
+            {"Type":"volume","Name":"fixture-state","Destination":"/data","RW":true},
+            {"Type":"bind","Source":actual,"Destination":"/config","RW":false}
+        ]});
+        assert_eq!(verify_bank_identity(&config, &running).is_ok(), same);
     }
 }
 

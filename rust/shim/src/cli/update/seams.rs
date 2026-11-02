@@ -81,20 +81,25 @@ pub(crate) fn run_cli(
         let Some(program) = argv.first() else {
             return (1, String::new());
         };
-        let mut command = tokio::process::Command::new(program);
-        command
-            .args(&argv[1..])
-            .stdin(Stdio::null())
-            .kill_on_drop(true);
-        if let Some(env) = env {
-            command.env_clear().envs(env);
-        }
-        if stream {
-            command.stdout(Stdio::inherit()).stderr(Stdio::inherit());
-        } else {
-            command.stdout(Stdio::piped()).stderr(Stdio::piped());
-        }
-        let child = match command.spawn() {
+        use process_wrap::tokio::{CommandWrap, KillOnDrop};
+        use tokio::io::AsyncReadExt;
+        let mut command = CommandWrap::with_new(program, |command| {
+            command.args(&argv[1..]).stdin(Stdio::null());
+            if let Some(env) = env {
+                command.env_clear().envs(env);
+            }
+            if stream {
+                command.stdout(Stdio::inherit()).stderr(Stdio::inherit());
+            } else {
+                command.stdout(Stdio::piped()).stderr(Stdio::piped());
+            }
+        });
+        command.wrap(KillOnDrop);
+        #[cfg(windows)]
+        command.wrap(process_wrap::tokio::JobObject);
+        #[cfg(unix)]
+        command.wrap(process_wrap::tokio::ProcessGroup::leader());
+        let mut child = match command.spawn() {
             Ok(child) => child,
             Err(e) => {
                 return (
@@ -108,20 +113,55 @@ pub(crate) fn run_cli(
                 );
             }
         };
-        match tokio::time::timeout(Duration::from_secs(timeout), child.wait_with_output()).await {
-            Ok(Ok(output)) => {
-                let code = output.status.code().unwrap_or(1);
-                let bytes = if code != 0 && output.stdout.is_empty() {
-                    &output.stderr
+        let mut stdout = child.stdout().take();
+        let mut stderr = child.stderr().take();
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        let wait = async {
+            let (status, _, _) = tokio::try_join!(
+                child.wait(),
+                async {
+                    if let Some(pipe) = &mut stdout {
+                        pipe.read_to_end(&mut out).await?;
+                    }
+                    Ok::<_, std::io::Error>(())
+                },
+                async {
+                    if let Some(pipe) = &mut stderr {
+                        pipe.read_to_end(&mut err).await?;
+                    }
+                    Ok::<_, std::io::Error>(())
+                }
+            )?;
+            Ok::<_, std::io::Error>(status)
+        };
+        match tokio::time::timeout(Duration::from_secs(timeout), wait).await {
+            Ok(Ok(status)) => {
+                let code = status.code().unwrap_or(1);
+                let bytes = if code != 0 && out.is_empty() {
+                    &err
                 } else {
-                    &output.stdout
+                    &out
                 };
                 (code, String::from_utf8_lossy(bytes).replace("\r\n", "\n"))
             }
             // stderr may contain resolved credentials; never concatenate it into
             // Compose JSON or a public error. Stream only deliberate long jobs.
-            Ok(Err(_)) => (1, "command failed".into()),
-            Err(_) => (1, "command timed out".into()),
+            result => {
+                // Kill the owned group/job even if its leader exited while a
+                // descendant kept a pipe open. Dropping Tokio Child alone only
+                // kills that leader on Unix.
+                let _ = child.start_kill();
+                let _ = tokio::time::timeout(Duration::from_secs(5), child.wait()).await;
+                (
+                    1,
+                    if result.is_err() {
+                        "command timed out"
+                    } else {
+                        "command failed"
+                    }
+                    .into(),
+                )
+            }
         }
     })
 }

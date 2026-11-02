@@ -385,7 +385,7 @@ class _Board:
         self._httpx = httpx
         self.url = url
         self._client = httpx.Client(
-            base_url=url, transport=transport, follow_redirects=False,
+            base_url=url, transport=transport, follow_redirects=False, trust_env=False,
             timeout=REQUEST_TIMEOUT, headers={"Authorization": f"Bearer {token}"})
         self._lock = threading.Lock()
         self._agent_id: str | None = None

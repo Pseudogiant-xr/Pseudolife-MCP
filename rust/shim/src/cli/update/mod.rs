@@ -81,6 +81,7 @@ pub(crate) struct Update {
     pub schema_before: Option<i64>,
     pub selected_engine: String,
     pub maintainer_context: Option<(Vec<String>, Environment)>,
+    pub rollback_scope: Option<String>,
 }
 
 fn output(text: &str, stderr: bool) -> std::io::Result<()> {
@@ -172,6 +173,7 @@ impl Update {
             schema_before: None,
             selected_engine: "python".into(),
             maintainer_context: None,
+            rollback_scope: None,
         }
     }
     pub fn step(&mut self, text: impl Into<String>) {
@@ -606,8 +608,15 @@ impl Update {
         if path.is_file() {
             return;
         }
-        let (code, running) =
-            self.docker_call(&["inspect", "-f", "{{.State.Running}}", PG_CONTAINER]);
+        let Some((compose, env)) = &self.maintainer_context else {
+            self.warn("test login not created: no selected Compose project; run pseudolife-mcp test-login create --container <project-postgres>");
+            return;
+        };
+        let Ok(pg) = engine::container(self, compose, Some(env), "pseudolife-pg") else {
+            self.warn("test login not created: cannot identify this project's PostgreSQL container; restore that service, then run pseudolife-mcp test-login create --container <project-postgres>");
+            return;
+        };
+        let (code, running) = self.docker_call(&["inspect", "-f", "{{.State.Running}}", &pg]);
         if code != 0 || running.trim() != "true" {
             return;
         }
@@ -628,7 +637,7 @@ impl Update {
             });
         let confirmed = suite.is_some();
         let suite = suite.unwrap_or_else(|| "127.0.0.1:5433".into());
-        let (code, ports) = self.docker_call(&["port", PG_CONTAINER, "5432/tcp"]);
+        let (code, ports) = self.docker_call(&["port", &pg, "5432/tcp"]);
         let Some((host, port)) = suite.rsplit_once(':') else {
             return;
         };
@@ -659,15 +668,15 @@ impl Update {
                     exe.to_string_lossy().into_owned(),
                     "test-login".into(),
                     "create".into(),
+                    "--container".into(),
+                    pg.clone(),
                 ],
                 None,
                 120,
                 !self.o.as_json,
             );
             if code != 0 {
-                self.warn(
-                    "the test suite's login was not created; run pseudolife-mcp test-login create",
-                );
+                self.warn(format!("the test suite's login was not created; run pseudolife-mcp test-login create --container {}", seams::quote(&pg)));
             }
         }
     }

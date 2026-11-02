@@ -16,9 +16,71 @@ import json
 import os
 import shutil
 import sys
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-
 import pytest
+
+
+@pytest.mark.parametrize("operation", ["notice", "board", "read"])
+def test_daemon_credentials_bypass_environment_proxies(monkeypatch, operation):
+    from pseudolife_memory import unattended_update as uu
+    contacted = []
+    authenticated = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *_args):
+            pass
+
+        def do_POST(self):
+            self.rfile.read(int(self.headers.get("Content-Length", "0")))
+            if self.server.is_proxy:
+                contacted.append(True)
+                payload = {"error": "fixture proxy refuses daemon requests"}
+            else:
+                authenticated.append(self.headers.get("Authorization") == "Bearer fixture-bearer")
+                if self.path.endswith("register"):
+                    payload = {"agent_id": "fixture-address", "credential": "fixture-key"}
+                else:
+                    payload = {"agents": [], "idle_omitted": 0, "entries": []}
+            body = json.dumps(payload).encode()
+            self.send_response(403 if self.server.is_proxy else 200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        do_GET = do_POST
+
+    servers = [ThreadingHTTPServer(("127.0.0.1", 0), Handler) for _ in range(2)]
+    threads = []
+    try:
+        for index, server in enumerate(servers):
+            server.is_proxy = bool(index)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            threads.append(thread)
+        proxy = f"http://127.0.0.1:{servers[1].server_port}"
+        for key in ("HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy"):
+            monkeypatch.setenv(key, proxy)
+        monkeypatch.setenv("NO_PROXY", "")
+        monkeypatch.setenv("no_proxy", "")
+        url = f"http://127.0.0.1:{servers[0].server_port}"
+        if operation == "notice":
+            reply = uu.post_json(url + "/api/daemon-notice", "fixture-bearer", {"text": "fixture"})
+            assert reply is not None and "error" not in reply
+        elif operation == "board":
+            assert uu.board_activity(url, "fixture-bearer") == ([], 0, "")
+        else:
+            from pseudolife_memory.update_engine import authenticated_read
+            assert authenticated_read(url, "fixture-bearer")
+        assert not contacted
+        assert authenticated and all(authenticated)
+    finally:
+        for server in servers:
+            server.shutdown()
+            server.server_close()
+        for thread in threads:
+            thread.join(timeout=5)
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
