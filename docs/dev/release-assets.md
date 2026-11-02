@@ -45,7 +45,15 @@ the release's `ops/` directory without rewriting their contents:
 
 The disposable development stack `docker-compose.rust.yml` is excluded.
 Release-mode consumers no longer need a Python wheel to obtain compose
-files. Resolve each filename against the extracted bundle directory.
+files. Install each release in its own directory:
+`~/.local/share/pseudolife-mcp/compose/<version>/` on POSIX and
+`%LOCALAPPDATA%\\pseudolife-mcp\\compose\\<version>\\` on Windows.
+Extract into a temporary sibling directory after checksum verification,
+then rename it into place. A complete version directory is immutable;
+never overwrite it in place or replace the previous version's directory.
+Different versions coexist so rollback can select the prior bundle;
+retention is the installer's or updater's policy. Resolve each filename
+against the selected version directory.
 For Rust release activation, use the base file, the GHCR file, and the
 Rust GHCR overlay in that order. Set `PSEUDOLIFE_IMAGE_TAG=<version>`;
 the Rust overlay refuses an absent tag. Release updates pull the selected
