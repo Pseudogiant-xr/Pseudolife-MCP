@@ -41,6 +41,9 @@ impl Client {
         Self::open_with_timeout(executable, home, cwd, Duration::from_secs(20)).await
     }
 
+    /// Overrides become process arguments (`-c key=value`). They must contain
+    /// configuration switches only; pass credentials through private files or
+    /// the explicit child environment, never through this argument map.
     pub async fn open_with_overrides(
         executable: &Path,
         home: &Path,
@@ -50,6 +53,7 @@ impl Client {
         Self::open_with_environment(executable, home, cwd, overrides, &[]).await
     }
 
+    /// `overrides` has the same non-secret argv contract as `open_with_overrides`.
     pub async fn open_with_environment(
         executable: &Path,
         home: &Path,
@@ -166,6 +170,16 @@ impl Client {
         let (value, size) = tokio::time::timeout(timeout, read_message(&mut self.output))
             .await
             .map_err(|_| TIMEOUT)??;
+        self.retain_event(&value, size)?;
+        Ok(value)
+    }
+
+    fn retain_event(&mut self, value: &Value, size: usize) -> Result<(), SetupError> {
+        // Each reply already has a per-message bound. Only notifications and
+        // server requests belong to the hook event history, not RPC results.
+        if value.get("method").is_none() {
+            return Ok(());
+        }
         if self.event_bytes + size > MAX_MESSAGE as usize {
             return Err(SetupError(
                 "Codex setup event history exceeded its limit; retry with fewer active hooks.",
@@ -173,7 +187,7 @@ impl Client {
         }
         self.event_bytes += size;
         self.events.push(value.clone());
-        Ok(value)
+        Ok(())
     }
 
     pub async fn close(&mut self) {
@@ -184,8 +198,8 @@ impl Client {
                 _=tokio::time::sleep_until(deadline)=>break false,
                 _=self.child.wait()=>break true,
                 message=read_message(&mut self.output)=>match message {
-                    Ok((value,size)) if self.event_bytes+size <= MAX_MESSAGE as usize=>{
-                        self.event_bytes+=size; self.events.push(value);
+                    Ok((value,size))=>{
+                        if self.retain_event(&value,size).is_err() {break false;}
                     },
                     _=>break tokio::time::timeout_at(deadline,self.child.wait()).await.is_ok(),
                 }
@@ -200,11 +214,9 @@ impl Client {
         while let Ok(Ok((value, size))) =
             tokio::time::timeout(Duration::from_millis(20), read_message(&mut self.output)).await
         {
-            if self.event_bytes + size > MAX_MESSAGE as usize {
+            if self.retain_event(&value, size).is_err() {
                 break;
             }
-            self.event_bytes += size;
-            self.events.push(value);
         }
     }
 }

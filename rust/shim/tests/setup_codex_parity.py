@@ -1,6 +1,7 @@
 """Compare native Codex connection planning with the retained Python oracle.
 
 Usage: python rust/shim/tests/setup_codex_parity.py <setup_codex test executable>
+CI: python rust/shim/tests/setup_codex_parity.py --cargo
 Only disposable fixture configuration is passed to either implementation.
 """
 from __future__ import annotations
@@ -19,7 +20,7 @@ sys.path.insert(0, str(ROOT))
 
 def main(binary: Path) -> int:
     with tempfile.TemporaryDirectory(prefix="pseudolife-codex-parity-") as directory:
-        root = Path(directory)
+        root = Path(directory).resolve()
         home = root / "home"
         home.mkdir()
         environment = {key: value for key, value in os.environ.items()
@@ -76,7 +77,17 @@ def main(binary: Path) -> int:
             print(f"native planning fixture failed: exit {completed.returncode}")
             return 1
         actual = json.loads(output.read_text(encoding="utf-8"))
-        failures = [index for index, (left, right) in enumerate(zip(expected, actual)) if left != right]
+        # Windows short temp names and macOS /var aliases may have different
+        # spellings while identifying the same token file.
+        def normalized(result):
+            result = copy.deepcopy(result)
+            for field in ("before", "after"):
+                env = result.get(field, {})
+                if env.get(oracle.TOKEN_FILE_KEY):
+                    env[oracle.TOKEN_FILE_KEY] = str(Path(env[oracle.TOKEN_FILE_KEY]).resolve())
+            return result
+        failures = [index for index, (left, right) in enumerate(zip(expected, actual))
+                    if normalized(left) != normalized(right)]
         if failures or len(actual) != len(expected):
             print(f"planning parity failed at fixture indexes {failures}")
             return 1
@@ -85,4 +96,24 @@ def main(binary: Path) -> int:
 
 
 if __name__ == "__main__":
+    if sys.argv[1:] == ["--cargo"]:
+        # Nextest has already built this target. Cargo's artifact record avoids
+        # guessing hashes or choosing a stale executable from another profile.
+        built = subprocess.run(
+            ["cargo", "test", "--manifest-path", str(ROOT / "rust/Cargo.toml"),
+             "--locked", "-p", "pseudolife-stdio", "--test", "setup_codex",
+             "--no-run", "--message-format=json"],
+            cwd=ROOT, capture_output=True, text=True, timeout=180,
+        )
+        if built.returncode:
+            print("Codex parity fixture build failed", file=sys.stderr)
+            raise SystemExit(built.returncode)
+        artifacts = [json.loads(line) for line in built.stdout.splitlines() if line.startswith("{")]
+        executables = {item["executable"] for item in artifacts
+                       if item.get("reason") == "compiler-artifact"
+                       and item.get("target", {}).get("name") == "setup_codex"
+                       and item.get("profile", {}).get("test") and item.get("executable")}
+        if len(executables) != 1:
+            raise SystemExit("Cargo did not identify exactly one Codex parity test executable")
+        raise SystemExit(main(Path(executables.pop())))
     raise SystemExit(main(Path(sys.argv[1])))

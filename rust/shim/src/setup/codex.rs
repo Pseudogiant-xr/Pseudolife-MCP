@@ -19,15 +19,35 @@ pub const FILE_KEY: &str = "PSEUDOLIFE_MCP_TOKEN_FILE";
 pub const TOKEN_KEY: &str = "PSEUDOLIFE_MCP_TOKEN";
 pub const NO_SPAWN_KEY: &str = "PSEUDOLIFE_MCP_NO_SPAWN";
 
-/// Static diagnostics cannot accidentally include credential-bearing RPC data.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct SetupError(pub &'static str);
+/// Diagnostics contain fixed text and locally selected paths/keys only, never
+/// credential values or untrusted app-server response bodies.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SetupError {
+    message: std::borrow::Cow<'static, str>,
+}
+/// Preserve the static constructor used by callers of the shared setup seam.
+#[allow(non_snake_case)]
+pub const fn SetupError(message: &'static str) -> SetupError {
+    SetupError {
+        message: std::borrow::Cow::Borrowed(message),
+    }
+}
+impl SetupError {
+    pub(crate) fn detail(message: String) -> Self {
+        Self {
+            message: std::borrow::Cow::Owned(message),
+        }
+    }
+}
 const ROLLBACK_UNVERIFIED: SetupError = SetupError(
     "Codex setup failed and rollback could not be verified; the private token copy was retained for the saved configuration. Review the private config backup before retrying.",
 );
+const CONFIG_CHANGED: SetupError = SetupError(
+    "Codex configuration changed while the write outcome was unconfirmed; no rollback was attempted and the private token copy was retained. Review the configuration and retry.",
+);
 impl fmt::Display for SetupError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(self.0)
+        formatter.write_str(&self.message)
     }
 }
 impl std::error::Error for SetupError {}
@@ -64,6 +84,10 @@ fn config_path(path: &Path) -> Result<PathBuf, SetupError> {
     loop {
         match std::fs::canonicalize(&base) {
             Ok(mut real) => {
+                #[cfg(windows)]
+                {
+                    real = ordinary_windows_path(real);
+                }
                 for part in suffix.into_iter().rev() {
                     real.push(part);
                 }
@@ -87,6 +111,28 @@ fn config_path(path: &Path) -> Result<PathBuf, SetupError> {
     }
 }
 
+#[cfg(windows)]
+fn ordinary_windows_path(path: PathBuf) -> PathBuf {
+    use std::os::windows::ffi::OsStrExt;
+    let text = path.to_string_lossy();
+    let candidate = if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+        PathBuf::from(format!(r"\\{rest}"))
+    } else if let Some(rest) = text.strip_prefix(r"\\?\") {
+        PathBuf::from(rest)
+    } else {
+        return path;
+    };
+    // Keep verbatim paths when Win32 length or normalization rules require
+    // them. Resolving the ordinary spelling must identify the exact same path.
+    if candidate.as_os_str().encode_wide().count() < 260
+        && std::fs::canonicalize(&candidate).is_ok_and(|resolved| resolved == path)
+    {
+        candidate
+    } else {
+        path
+    }
+}
+
 pub fn user_config(config: &Value, home: &Path) -> Result<UserConfig, SetupError> {
     let path = config_path(&home.join("config.toml"))?;
     let invalid = SetupError(
@@ -95,7 +141,7 @@ pub fn user_config(config: &Value, home: &Path) -> Result<UserConfig, SetupError
     let mut layers = config
         .get("layers")
         .and_then(Value::as_array)
-        .ok_or(invalid)?
+        .ok_or_else(|| invalid.clone())?
         .iter()
         .filter(|layer| {
             layer["name"]["type"] == "user"
@@ -108,14 +154,14 @@ pub fn user_config(config: &Value, home: &Path) -> Result<UserConfig, SetupError
                     .as_ref()
                     == Some(&path)
         });
-    let layer = layers.next().ok_or(invalid)?;
+    let layer = layers.next().ok_or_else(|| invalid.clone())?;
     if layers.next().is_some() {
         return Err(invalid);
     }
     let version = layer["version"]
         .as_str()
         .filter(|v| !v.is_empty())
-        .ok_or(invalid)?
+        .ok_or_else(|| invalid.clone())?
         .to_owned();
     let values = layer
         .get("config")
@@ -144,6 +190,27 @@ fn environment(server: &Map<String, Value>) -> Result<Map<String, Value>, SetupE
             "The Codex server environment is malformed; repair it before retrying.",
         )),
     }
+}
+
+fn authority_error(config: &Value, key: &str) -> SetupError {
+    let layer = config["layers"].as_array().and_then(|layers| {
+        layers.iter().rev().find(|layer| {
+            layer["name"]["type"] != "user"
+                && server(&layer["config"]).is_some_and(|s| {
+                    s.get("env").is_some_and(|env| env.get(key).is_some())
+                        || s.get("env_vars")
+                            .and_then(Value::as_array)
+                            .is_some_and(|vars| vars.iter().any(|v| v == key))
+                })
+        })
+    });
+    let location = layer
+        .and_then(|layer| layer["name"]["file"].as_str())
+        .map(|file| format!("{:?}", Path::new(file)))
+        .unwrap_or_else(|| "the project or managed configuration layer".into());
+    SetupError::detail(format!(
+        "{key} comes from {location}; remove that key from its env or env_vars and retry. No connection settings were changed."
+    ))
 }
 
 pub fn validated_daemon_url(url: &str) -> Result<String, SetupError> {
@@ -176,7 +243,7 @@ pub fn plan_replace(
     no_spawn: bool,
 ) -> Result<ConnectionPlan, SetupError> {
     let url = validated_daemon_url(url)?;
-    let home = absolute(home)?;
+    let home = config_path(home)?;
     let user = user_config(config, &home)?;
     let user_server = server(&user.config)
         .filter(|s| !s.is_empty())
@@ -198,7 +265,9 @@ pub fn plan_replace(
         ));
     }
     // An effective false/forwarded no-spawn choice must not be silently overridden.
+    let effective_no_spawn = effective_value(effective, NO_SPAWN_KEY).is_some_and(|v| truthy(&v));
     if no_spawn
+        && !effective_no_spawn
         && (effective_env.get(NO_SPAWN_KEY) != before.get(NO_SPAWN_KEY)
             || (forwarded.is_some_and(|f| f.iter().any(|v| v == NO_SPAWN_KEY))
                 && !before.contains_key(NO_SPAWN_KEY)
@@ -214,6 +283,7 @@ pub fn plan_replace(
     let mut after = before.clone();
     after.insert(URL_KEY.to_owned(), json!(url));
     if no_spawn
+        && !effective_no_spawn
         && !before
             .get(NO_SPAWN_KEY)
             .and_then(Value::as_str)
@@ -244,7 +314,8 @@ pub fn plan_replace(
         after.remove(TOKEN_KEY);
     }
     let edit = Edit::new(&["mcp_servers", SERVER, "env"], json!(after));
-    let write = WritePlan::new(config, &home, vec![edit])?;
+    let mut write = WritePlan::new(config, &home, vec![edit])?;
+    write.preserve_truthy_no_spawn = no_spawn && effective_no_spawn;
     Ok(ConnectionPlan {
         home,
         url,
@@ -368,9 +439,11 @@ impl Edit {
 }
 
 pub struct WritePlan {
+    home: PathBuf,
     user: UserConfig,
     edits: Vec<Edit>,
     before: Vec<Value>,
+    preserve_truthy_no_spawn: bool,
 }
 
 fn matches_write(before: &Value, after: &Value, actual: Option<&Value>) -> bool {
@@ -412,9 +485,11 @@ impl WritePlan {
         // Reading and validating the backup source is part of preflight.
         files::read_config(&user.path)?;
         Ok(Self {
+            home: config_path(home)?,
             user,
             edits: changed,
             before,
+            preserve_truthy_no_spawn: false,
         })
     }
 
@@ -463,15 +538,12 @@ impl WritePlan {
                     .rpc("config/read", json!({"includeLayers":true,"cwd":cwd}))
                     .await
                     .map_err(|_| ROLLBACK_UNVERIFIED)?;
-                let user = user_config(
-                    &current,
-                    applied.plan.user.path.parent().ok_or(ROLLBACK_UNVERIFIED)?,
-                )
-                .map_err(|_| ROLLBACK_UNVERIFIED)?;
+                let user =
+                    user_config(&current, &applied.plan.home).map_err(|_| ROLLBACK_UNVERIFIED)?;
                 if user.version != applied.plan.user.version
                     || user.config != applied.plan.user.config
                 {
-                    return Err(ROLLBACK_UNVERIFIED);
+                    return Err(CONFIG_CHANGED);
                 }
                 return Err(error);
             }
@@ -485,9 +557,23 @@ impl WritePlan {
         );
         let result = async {
             let current = client.rpc("config/read", json!({"includeLayers":true,"cwd":cwd})).await?;
-            let user=user_config(&current,applied.plan.user.path.parent().ok_or(ROLLBACK_UNVERIFIED)?)?;
+            let user=user_config(&current,&applied.plan.home)?;
             if Some(&user.version)!=applied.written_version.as_ref() {return Err(ROLLBACK_UNVERIFIED);}
-            if applied.plan.edits.iter().zip(&applied.plan.before).any(|(edit,before)| !matches_write(before,&edit.value,edit.value_at(&current["config"]))) {
+            let mut effective = current["config"].clone();
+            if applied.plan.preserve_truthy_no_spawn {
+                let configured = server(&effective).ok_or(SetupError("Codex's effective server disappeared during setup."))?;
+                if !effective_value(configured, NO_SPAWN_KEY).is_some_and(|v| truthy(&v)) {
+                    return Err(SetupError("Codex's effective no-spawn setting changed during setup; retry after reviewing the overriding layer."));
+                }
+                // Keep the user's existing value, while verifying the project
+                // still supplies the truthy choice we deliberately preserved.
+                let user_value = server(&applied.plan.user.config).and_then(|s| s.get("env")).and_then(|e| e.get(NO_SPAWN_KEY)).cloned();
+                if let Some(env) = effective["mcp_servers"][SERVER]["env"].as_object_mut() {
+                    if let Some(value) = user_value { env.insert(NO_SPAWN_KEY.into(), value); }
+                    else { env.remove(NO_SPAWN_KEY); }
+                }
+            }
+            if applied.plan.edits.iter().zip(&applied.plan.before).any(|(edit,before)| !matches_write(before,&edit.value,edit.value_at(&effective))) {
                 return Err(SetupError("Codex saved settings but its effective configuration differs; check project or managed overrides before reconnecting."));
             }
             Ok(())
@@ -524,12 +610,7 @@ impl AppliedWrite {
         let current = client
             .rpc("config/read", json!({"includeLayers":true,"cwd":cwd}))
             .await?;
-        let home = self
-            .plan
-            .user
-            .path
-            .parent()
-            .ok_or(SetupError("Invalid Codex home."))?;
+        let home = &self.plan.home;
         let user = user_config(&current, home)?;
         if &user.version != written_version {
             return Err(SetupError(
@@ -668,6 +749,7 @@ pub async fn apply_replace(
         Ok(write) => write,
         Err(error) => {
             if error != ROLLBACK_UNVERIFIED
+                && error != CONFIG_CHANGED
                 && connection.still_before()
                 && let Some(token) = &mut token
             {
@@ -727,10 +809,20 @@ pub fn read_connection(path: &Path) -> Result<Option<(String, String)>, SetupErr
         Err(_) => return Err(invalid),
         Ok(_) => (),
     }
-    let bytes = crate::board::state::read(path, 16384).map_err(|_| invalid)?;
-    let value: Value = serde_json::from_slice(&bytes).map_err(|_| invalid)?;
-    let url = decode64(value["daemon_url"].as_str().ok_or(invalid)?).ok_or(invalid)?;
-    let token = decode64(value["token_file"].as_str().ok_or(invalid)?).ok_or(invalid)?;
+    let bytes = crate::board::state::read(path, 16384).map_err(|_| invalid.clone())?;
+    let value: Value = serde_json::from_slice(&bytes).map_err(|_| invalid.clone())?;
+    let url = decode64(
+        value["daemon_url"]
+            .as_str()
+            .ok_or_else(|| invalid.clone())?,
+    )
+    .ok_or_else(|| invalid.clone())?;
+    let token = decode64(
+        value["token_file"]
+            .as_str()
+            .ok_or_else(|| invalid.clone())?,
+    )
+    .ok_or_else(|| invalid.clone())?;
     Ok(Some((url, token)))
 }
 

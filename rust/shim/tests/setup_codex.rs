@@ -1,9 +1,95 @@
 use pseudolife_stdio::setup::codex::{
-    Rpc, SetupError, apply_replace, plan_registration, read_connection,
+    Rpc, SetupError, apply_replace, plan_registration, plan_replace, read_connection, user_config,
 };
-use pseudolife_stdio::setup::codex::{plan_replace, user_config};
 use serde_json::{Map, Value, json};
 use std::path::Path;
+
+#[test]
+fn concurrent_first_lock_publication_is_private_and_never_replaces_the_winner() {
+    struct Gated {
+        inner: Fake,
+        finish: std::sync::Arc<std::sync::Barrier>,
+    }
+    impl Rpc for Gated {
+        async fn rpc(&mut self, method: &str, params: Value) -> Result<Value, SetupError> {
+            if method == "config/batchWrite" {
+                self.finish.wait();
+            }
+            self.inner.rpc(method, params).await
+        }
+    }
+    for _ in 0..8 {
+        let home = Home::new();
+        let start = std::sync::Arc::new(std::sync::Barrier::new(8));
+        let finish = std::sync::Arc::new(std::sync::Barrier::new(8));
+        let results = std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..8)
+                .map(|_| {
+                    let start = start.clone();
+                    let finish = finish.clone();
+                    let home = home.0.clone();
+                    scope.spawn(move || {
+                        let mut client = Gated {
+                            inner: Fake::new(&home),
+                            finish: finish.clone(),
+                        };
+                        let plan = plan_registration(
+                            &client.inner.config,
+                            &home,
+                            &home.join("pseudolife-mcp"),
+                            &[],
+                            &Map::new(),
+                        )
+                        .unwrap();
+                        let runtime = tokio::runtime::Builder::new_current_thread()
+                            .enable_all()
+                            .build()
+                            .unwrap();
+                        start.wait();
+                        let result = runtime.block_on(plan.apply(&mut client, &home));
+                        if let Err(error) = &result {
+                            finish.wait();
+                            assert_eq!(
+                                error.to_string(),
+                                "Another Codex setup is in progress; retry after it finishes."
+                            );
+                        }
+                        result.is_ok()
+                    })
+                })
+                .collect();
+            handles
+                .into_iter()
+                .map(|handle| handle.join().unwrap())
+                .collect::<Vec<_>>()
+        });
+        assert_eq!(results.iter().filter(|won| **won).count(), 1);
+        let lock = home.0.join(".pseudolife-setup.lock");
+        let before = pseudolife_stdio::board::state::open(&lock)
+            .unwrap()
+            .identity;
+        let mut client = Fake::new(&home.0);
+        let plan = plan_registration(
+            &client.config,
+            &home.0,
+            &home.0.join("pseudolife-mcp"),
+            &[],
+            &Map::new(),
+        )
+        .unwrap();
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(plan.apply(&mut client, &home.0)).unwrap();
+        assert_eq!(
+            before,
+            pseudolife_stdio::board::state::open(&lock)
+                .unwrap()
+                .identity
+        );
+    }
+}
 
 struct Home(std::path::PathBuf);
 impl Home {
@@ -28,6 +114,34 @@ struct Fake {
     concurrent_env: bool,
     typed_extra: bool,
     rejected_after_competitor: bool,
+    project_no_spawn: Option<String>,
+}
+
+#[cfg(windows)]
+#[test]
+fn config_path_uses_ordinary_windows_spelling_when_equivalent() {
+    let home = Home::new();
+    let user = user_config(&config(&home.0), &home.0).unwrap();
+    assert!(!user.path.to_string_lossy().starts_with(r"\\?\"));
+    assert_eq!(
+        std::fs::canonicalize(user.path).unwrap(),
+        std::fs::canonicalize(home.0.join("config.toml")).unwrap()
+    );
+}
+
+#[cfg(windows)]
+#[test]
+fn config_path_retains_verbatim_spelling_for_long_paths() {
+    let home = Home::new();
+    let long = home.0.join("a".repeat(120)).join("b".repeat(120));
+    std::fs::create_dir_all(&long).unwrap();
+    std::fs::write(long.join("config.toml"), "# fixture\n").unwrap();
+    let user = user_config(&config(&long), &long).unwrap();
+    assert!(user.path.to_string_lossy().starts_with(r"\\?\"));
+    assert_eq!(
+        std::fs::canonicalize(user.path).unwrap(),
+        std::fs::canonicalize(long.join("config.toml")).unwrap()
+    );
 }
 
 #[tokio::test]
@@ -80,6 +194,12 @@ async fn isolated_fixture(name: &str, mode: &str) {
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
+    if mode.starts_with("no-spawn-") {
+        command.env(
+            "PSEUDOLIFE_MCP_NO_SPAWN",
+            if mode.ends_with("true") { "yes" } else { "0" },
+        );
+    }
     for key in ["SYSTEMROOT", "WINDIR"] {
         if let Some(value) = std::env::var_os(key) {
             command.env(key, value);
@@ -160,6 +280,7 @@ impl Fake {
             concurrent_env: false,
             typed_extra: false,
             rejected_after_competitor: false,
+            project_no_spawn: None,
         }
     }
 }
@@ -220,6 +341,10 @@ impl Rpc for Fake {
             if self.typed_extra {
                 self.config["config"]["mcp_servers"]["pseudolife-memory"]["enabled"] = json!(true);
             }
+            if let Some(value) = &self.project_no_spawn {
+                self.config["config"]["mcp_servers"]["pseudolife-memory"]["env"]["PSEUDOLIFE_MCP_NO_SPAWN"] =
+                    json!(value);
+            }
             return Ok(json!({"version":self.config["layers"][0]["version"]}));
         }
         assert_eq!(method, "config/read");
@@ -260,16 +385,19 @@ async fn bootstrap_refuses_project_forwarded_file_before_migrating_user_literal(
     let mut client = Fake::new(&home.0);
     client.config["config"]["mcp_servers"]["pseudolife-memory"]["env_vars"] =
         json!(["PSEUDOLIFE_MCP_TOKEN_FILE"]);
+    let error = pseudolife_stdio::setup::codex::configure_credential_file(
+        &mut client,
+        &home.0,
+        &home.0,
+        None,
+        None,
+    )
+    .await
+    .unwrap_err();
     assert!(
-        pseudolife_stdio::setup::codex::configure_credential_file(
-            &mut client,
-            &home.0,
-            &home.0,
-            None,
-            None
-        )
-        .await
-        .is_err()
+        error
+            .to_string()
+            .contains("No connection settings were changed")
     );
     assert!(!home.0.join("pseudolife").join("token").exists());
     assert!(
@@ -281,24 +409,170 @@ async fn bootstrap_refuses_project_forwarded_file_before_migrating_user_literal(
 }
 
 #[test]
-fn replace_refuses_project_forwarded_no_spawn() {
+fn isolated_forwarded_no_spawn_fixture() {
+    let Ok(mode) = std::env::var("PSEUDOLIFE_TEST_CREDENTIAL_HOME") else {
+        return;
+    };
+    if !mode.starts_with("no-spawn-") {
+        return;
+    }
     let home = Home::new();
     let mut config = config(&home.0);
     config["config"]["mcp_servers"]["pseudolife-memory"]["env_vars"] =
         json!(["PSEUDOLIFE_MCP_NO_SPAWN"]);
-    assert!(plan_replace(&config, &home.0, "https://example.com", None, true).is_err());
+    if mode.contains("user") {
+        config["layers"][0]["config"]["mcp_servers"]["pseudolife-memory"]["env_vars"] =
+            json!(["PSEUDOLIFE_MCP_NO_SPAWN"]);
+    }
+    let result = plan_replace(&config, &home.0, "https://example.com", None, true);
+    if mode == "no-spawn-project-false" {
+        let error = result.err().unwrap();
+        assert!(error.to_string().contains("No-spawn settings"));
+        assert!(error.to_string().contains("PSEUDOLIFE_MCP_NO_SPAWN"));
+    } else if mode == "no-spawn-project-true" {
+        assert!(
+            !result
+                .unwrap()
+                .env()
+                .contains_key("PSEUDOLIFE_MCP_NO_SPAWN")
+        );
+    } else {
+        assert_eq!(result.unwrap().env()["PSEUDOLIFE_MCP_NO_SPAWN"], "1");
+    }
+}
+
+#[tokio::test]
+async fn replace_refuses_project_forwarded_no_spawn() {
+    isolated_fixture(
+        "isolated_forwarded_no_spawn_fixture",
+        "no-spawn-project-false",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn replace_accepts_user_owned_forwarded_no_spawn() {
+    isolated_fixture("isolated_forwarded_no_spawn_fixture", "no-spawn-user-false").await;
+}
+
+#[tokio::test]
+async fn replace_preserves_truthy_project_forwarded_no_spawn() {
+    isolated_fixture(
+        "isolated_forwarded_no_spawn_fixture",
+        "no-spawn-project-true",
+    )
+    .await;
 }
 
 #[test]
-fn replace_accepts_user_owned_forwarded_no_spawn() {
+fn replace_preserves_truthy_project_no_spawn() {
     let home = Home::new();
-    let mut config = config(&home.0);
-    for root in ["/config", "/layers/0/config"] {
-        config.pointer_mut(root).unwrap()["mcp_servers"]["pseudolife-memory"]["env_vars"] =
-            json!(["PSEUDOLIFE_MCP_NO_SPAWN"]);
+    for value in ["1", "true", "yes", " ON "] {
+        let mut config = config(&home.0);
+        config["config"]["mcp_servers"]["pseudolife-memory"]["env"]["PSEUDOLIFE_MCP_NO_SPAWN"] =
+            json!(value);
+        let plan = plan_replace(&config, &home.0, "https://example.com", None, true).unwrap();
+        assert!(!plan.env().contains_key("PSEUDOLIFE_MCP_NO_SPAWN"));
     }
-    let plan = plan_replace(&config, &home.0, "https://example.com", None, true).unwrap();
-    assert_eq!(plan.env()["PSEUDOLIFE_MCP_NO_SPAWN"], "1");
+}
+
+#[tokio::test]
+async fn replace_verifies_truthy_project_no_spawn_over_unchanged_user_false() {
+    let home = Home::new();
+    let mut client = Fake::new(&home.0);
+    client.config["layers"][0]["config"]["mcp_servers"]["pseudolife-memory"]["env"]["PSEUDOLIFE_MCP_NO_SPAWN"] =
+        json!("0");
+    client.config["config"]["mcp_servers"]["pseudolife-memory"]["env"]["PSEUDOLIFE_MCP_NO_SPAWN"] =
+        json!("yes");
+    client.project_no_spawn = Some("yes".into());
+    let plan = plan_replace(&client.config, &home.0, "https://example.com", None, true).unwrap();
+    assert_eq!(plan.env()["PSEUDOLIFE_MCP_NO_SPAWN"], "0");
+    apply_replace(&mut client, &home.0, plan).await.unwrap();
+    assert_eq!(
+        client.config["config"]["mcp_servers"]["pseudolife-memory"]["env"]["PSEUDOLIFE_MCP_NO_SPAWN"],
+        "yes"
+    );
+}
+
+#[tokio::test]
+async fn bootstrap_authority_error_identifies_project_file_and_key() {
+    let home = Home::new();
+    let mut client = Fake::new(&home.0);
+    let file = home.0.join("project/config.toml");
+    let settings =
+        json!({"mcp_servers":{"pseudolife-memory":{"env_vars":["PSEUDOLIFE_MCP_TOKEN_FILE"]}}});
+    client.config["layers"].as_array_mut().unwrap().push(json!({
+        "name":{"type":"project","file":file},"config":settings
+    }));
+    client.config["config"]["mcp_servers"]["pseudolife-memory"]["env_vars"] =
+        json!(["PSEUDOLIFE_MCP_TOKEN_FILE"]);
+    let error = pseudolife_stdio::setup::codex::configure_credential_file(
+        &mut client,
+        &home.0,
+        &home.0,
+        None,
+        None,
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+    assert!(error.contains(&format!("{:?}", file)));
+    assert!(error.contains("PSEUDOLIFE_MCP_TOKEN_FILE"));
+    assert!(error.contains("remove"));
+    assert!(!error.contains("fixture-token"));
+    assert!(!home.0.join("pseudolife").exists());
+}
+
+#[tokio::test]
+async fn bootstrap_accepts_the_same_forwarded_key_in_user_layer() {
+    let home = Home::new();
+    let mut client = Fake::new(&home.0);
+    for root in ["/config", "/layers/0/config"] {
+        client.config.pointer_mut(root).unwrap()["mcp_servers"]["pseudolife-memory"]["env_vars"] =
+            json!(["PSEUDOLIFE_MCP_TOKEN_FILE"]);
+    }
+    let report = pseudolife_stdio::setup::codex::configure_credential_file(
+        &mut client,
+        &home.0,
+        &home.0,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(report["credential_file_configured"], true);
+}
+
+#[tokio::test]
+async fn linked_codex_home_resolves_before_private_writes() {
+    let home = Home::new();
+    let linked = home.0.join("linked-home");
+    let real = home.0.join("real-home");
+    std::fs::create_dir(&real).unwrap();
+    std::fs::write(real.join("config.toml"), "# fixture\n").unwrap();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&real, &linked).unwrap();
+    #[cfg(windows)]
+    if let Err(error) = std::os::windows::fs::symlink_dir(&real, &linked) {
+        eprintln!("linked home fixture unavailable: {:?}", error.kind());
+        return;
+    }
+    let mut client = Fake::new(&linked);
+    let plan = plan_replace(&client.config, &linked, "https://example.com", None, true).unwrap();
+    let mut applied = apply_replace(&mut client, &linked, plan).await.unwrap();
+    assert!(real.join("pseudolife/token").is_file());
+    applied.rollback(&mut client, &linked).await.unwrap();
+    let report = pseudolife_stdio::setup::codex::configure_credential_file(
+        &mut client,
+        &linked,
+        &linked,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(report["credential_file_configured"], true);
+    assert!(real.join("pseudolife/token").is_file());
 }
 
 #[tokio::test]
@@ -582,6 +856,7 @@ fn rpc_fixture() {
                     json!({})
                 }
                 "exit" => std::process::exit(0),
+                "large" => json!({"padding":"x".repeat(1_500_000)}),
                 "reject" => {
                     println!(
                         "{}",
@@ -631,6 +906,62 @@ async fn rpc_matches_ids_ignores_notifications_and_closes_child() {
         json!({"received":{"includeLayers":true}})
     );
     client.close().await;
+}
+
+#[tokio::test]
+async fn repeated_large_rpc_replies_do_not_consume_notification_history() {
+    let home = Home::new();
+    let mut client = fixture_client(&home.0, "large").await;
+    for _ in 0..5 {
+        let response = client.rpc("config/read", json!({})).await.unwrap();
+        assert_eq!(response["padding"].as_str().unwrap().len(), 1_500_000);
+    }
+    assert_eq!(client.events().len(), 6);
+    assert!(
+        client
+            .events()
+            .iter()
+            .all(|event| event["method"] == "notification")
+    );
+    client.close().await;
+}
+
+#[tokio::test]
+async fn symlinked_config_uses_the_original_home_for_verification_and_rollback() {
+    let home = Home::new();
+    let target = home.0.join("dotfiles/codex-settings.toml");
+    std::fs::create_dir(target.parent().unwrap()).unwrap();
+    std::fs::rename(home.0.join("config.toml"), &target).unwrap();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&target, home.0.join("config.toml")).unwrap();
+    #[cfg(windows)]
+    if let Err(error) = std::os::windows::fs::symlink_file(&target, home.0.join("config.toml")) {
+        eprintln!(
+            "symlinked configuration fixture unavailable: {:?}",
+            error.kind()
+        );
+        return;
+    }
+    let mut client = Fake::new(&home.0);
+    let plan = plan_replace(&client.config, &home.0, "https://example.com", None, true).unwrap();
+    let mut applied = apply_replace(&mut client, &home.0, plan).await.unwrap();
+    assert!(
+        read_connection(&home.0.join("pseudolife/connection.json"))
+            .unwrap()
+            .is_some()
+    );
+    applied.rollback(&mut client, &home.0).await.unwrap();
+    assert_eq!(
+        client.config["config"]["mcp_servers"]["pseudolife-memory"]["env"]["PSEUDOLIFE_MCP_TOKEN"],
+        "fixture-token"
+    );
+    assert!(!home.0.join("pseudolife/token").exists());
+    assert!(
+        std::fs::symlink_metadata(home.0.join("config.toml"))
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
 }
 
 #[tokio::test]
@@ -783,16 +1114,19 @@ async fn credential_bootstrap_refuses_overrides_before_creating_token() {
     let mut client = Fake::new(&home.0);
     client.config["config"]["mcp_servers"]["pseudolife-memory"]["env"]["PSEUDOLIFE_MCP_TOKEN"] =
         json!("project-fixture");
+    let error = pseudolife_stdio::setup::codex::configure_credential_file(
+        &mut client,
+        &home.0,
+        &home.0,
+        None,
+        None,
+    )
+    .await
+    .unwrap_err();
     assert!(
-        pseudolife_stdio::setup::codex::configure_credential_file(
-            &mut client,
-            &home.0,
-            &home.0,
-            None,
-            None
-        )
-        .await
-        .is_err()
+        error
+            .to_string()
+            .contains("No connection settings were changed")
     );
     assert!(!home.0.join("pseudolife").join("token").exists());
     assert!(

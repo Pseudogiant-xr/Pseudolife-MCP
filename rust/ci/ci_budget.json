@@ -157,7 +157,7 @@
     },
     "fingerprints": {
       "scope": "42b22137f81048ce",
-      "rust": "59cc6066e4ac1f82",
+      "rust": "7e5f6fc858dd1367",
       "fixtures": "defc5e07c5ac3f94",
       "candidate": "d71c5590ce6f866a",
       "candidate-harness": "43b859ee9d5fd738",
@@ -235,6 +235,11 @@
         "job": "daemon-image",
         "fingerprint": "b52520e079f13dc1",
         "reason": "Reuses the built daemon, already-pulled PostgreSQL image and provisioned model cache; adds one small psycopg wheel and a short cold-restart smoke with no new job, image build or model download. Keep the existing cold-build allowance and re-measure if the batch timing disagrees."
+      },
+      {
+        "job": "rust",
+        "fingerprint": "7e5f6fc858dd1367",
+        "reason": "Runs 19 pure Codex planner comparisons against the integration executable already built by Nextest; no new target, job, dependency install or network call. Local parity runtime is below one second; retain measured job budget and remeasure if hosted timing disagrees."
       }
     ]
   },

@@ -60,7 +60,7 @@ pub async fn configure_credential_file(
                 .await?
         }
     };
-    let home = absolute(home)?;
+    let home = config_path(home)?;
     let user = user_config(&config, &home)?;
     let empty = Map::new();
     let server = server(&user.config).unwrap_or(&empty);
@@ -79,13 +79,11 @@ pub async fn configure_credential_file(
         && let Some((url, token)) = installer_connection
     {
         let forwarded = effective.get("env_vars").and_then(Value::as_array);
-        if [FILE_KEY, TOKEN_KEY].iter().any(|key| {
-            effective_env.contains_key(*key)
-                || forwarded.is_some_and(|vars| vars.iter().any(|v| v == key))
+        if let Some(key) = [FILE_KEY, TOKEN_KEY].iter().find(|key| {
+            effective_env.contains_key(**key)
+                || forwarded.is_some_and(|vars| vars.iter().any(|v| v == *key))
         }) {
-            return Err(SetupError(
-                "Credential settings come from another Codex configuration layer; the installer did not replace them.",
-            ));
+            return Err(authority_error(&config, key));
         }
         let url = validated_daemon_url(url)?;
         if !effective.is_empty() && (daemon_url(server)? != url || daemon_url(effective)? != url) {
@@ -107,21 +105,19 @@ pub async fn configure_credential_file(
     }
     // Validate authority before staging a token copy. Foreign environment keys
     // remain untouched; only the connection fields must agree with the user.
-    if [FILE_KEY, TOKEN_KEY, URL_KEY].iter().any(|key| {
-        effective_env.get(*key) != before.get(*key)
-            || (!before.contains_key(*key)
+    if let Some(key) = [FILE_KEY, TOKEN_KEY, URL_KEY].iter().find(|key| {
+        effective_env.get(**key) != before.get(**key)
+            || (!before.contains_key(**key)
                 && effective
                     .get("env_vars")
                     .and_then(Value::as_array)
-                    .is_some_and(|v| v.iter().any(|v| v == key))
+                    .is_some_and(|v| v.iter().any(|v| v == *key))
                 && !server
                     .get("env_vars")
                     .and_then(Value::as_array)
-                    .is_some_and(|v| v.iter().any(|v| v == key)))
+                    .is_some_and(|v| v.iter().any(|v| v == *key)))
     }) {
-        return Err(SetupError(
-            "Credential settings come from another Codex configuration layer; no settings were changed.",
-        ));
+        return Err(authority_error(&config, key));
     }
     let migrated = before.contains_key(TOKEN_KEY) || selected_url.is_some();
     if let Some(path) = &source {
