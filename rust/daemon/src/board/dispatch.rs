@@ -463,11 +463,14 @@ impl Board {
                 *self.pruned_at.lock().expect("prune clock") = Some(std::time::Instant::now());
             }
         }
+        self.drain_lease_grants_locked(client).await;
         if action == "register" {
             return self.store.register(client, principal, &params).await;
         }
         if action == "leases" {
-            return lease::leases_action(client, &params).await;
+            let result = lease::leases_action(client, &params).await?;
+            self.drain_lease_grants_locked(client).await;
+            return Ok(result);
         }
         let (agent_id, credential) = instance.expect("instance actions carry credentials");
         let mut for_delivery = false;
@@ -592,6 +595,7 @@ impl Board {
                             expected_writer_epoch: Some(epoch),
                             enforce_writer_epoch: true,
                             notice: false,
+                            lease_grant: false,
                             maintainer_proof: None,
                         },
                     )
@@ -673,6 +677,9 @@ impl Board {
             }
             _ => unreachable!("every action is listed"),
         };
+        if matches!(action, "lease" | "release" | "agents") {
+            self.drain_lease_grants_locked(client).await;
+        }
         drop(conn);
         match action {
             "send" => {

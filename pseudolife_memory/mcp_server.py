@@ -3227,6 +3227,8 @@ def _warmup() -> None:
     t = time.time()
     logger.info("warmup: preloading embedder + reranker + NLI ...")
     service.warmup()
+    from pseudolife_memory.coordination import drain_lease_grants
+    drain_lease_grants(service)
     logger.info("warmup: pipeline ready in %.1fs", time.time() - t)
 
 
