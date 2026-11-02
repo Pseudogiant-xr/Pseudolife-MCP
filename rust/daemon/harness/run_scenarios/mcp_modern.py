@@ -1,7 +1,10 @@
 """Stateless MCP protocol routing and results against the pinned Python SDK."""
 
 import copy
+import http.client
 import json
+
+from mcp_wire import Session
 
 VERSION = "2026-07-28"
 VERSION_KEY = "io.modelcontextprotocol/protocolVersion"
@@ -77,4 +80,56 @@ def register(harness):
                 rows.append(harness.case(label, "POST", "/mcp", base, body))
             return rows
 
-    return [McpModern]
+    class McpModernSubscriptions(McpModern):
+        name = "mcp-modern-subscriptions"
+        golden_replay = True
+
+        def timeline(self, procs, holders):
+            answers = [{}, {}]
+            for side, proc in procs.items():
+                connection = http.client.HTTPConnection("127.0.0.1", proc.port, timeout=30)
+                legacy = None
+                response = None
+                try:
+                    body = {"jsonrpc": "2.0", "id": "subscription-probe", "method": "subscriptions/listen",
+                            "params": {"notifications": {"toolsListChanged": True,
+                                                         "resourcesListChanged": False,
+                                                         "resourceSubscriptions": ["memory://one"]},
+                                       "_meta": {VERSION_KEY: VERSION, CAPABILITIES_KEY: {}}}}
+                    connection.request("POST", "/mcp", json.dumps(body), {
+                        "Authorization": f"Bearer {harness.T_DEFAULT}", "Content-Type": "application/json",
+                        "Accept": "application/json, text/event-stream", "MCP-Protocol-Version": VERSION,
+                        "Mcp-Method": "subscriptions/listen"})
+                    response = connection.getresponse()
+                    assert response.status == 200
+                    assert response.getheader("mcp-session-id") is None
+                    assert response.getheader("content-type").split(";")[0] == "text/event-stream"
+
+                    def event():
+                        data = []
+                        while True:
+                            line = response.readline()
+                            assert line, f"{side}: subscription ended before its event"
+                            if line.startswith(b"data: "):
+                                data.append(line[6:].strip())
+                            if not line.strip() and data:
+                                return json.loads(b"\n".join(data))
+
+                    answers[0][side] = {"status": 200, "headers": {}, "json": event()}
+                    # A change through the handshake era reaches stateless subscribers.
+                    legacy = Session(proc.port, harness.T_DEFAULT)
+                    expanded = legacy.tool("memory_toolset", {"action": "expand"})
+                    assert expanded["status"] == 200
+                    answers[1][side] = {"status": 200, "headers": {}, "json": event()}
+                finally:
+                    if response is not None:
+                        response.close()
+                    connection.close()
+                    if legacy is not None:
+                        legacy.close()
+            for label, values in zip(("honored subscription filter", "legacy change reaches modern subscriber"), answers):
+                row = harness.case(label, "POST", "/mcp")
+                row["_answers"] = (values.get("python"), values["rust"])
+                yield row
+
+    return [McpModern, McpModernSubscriptions]
