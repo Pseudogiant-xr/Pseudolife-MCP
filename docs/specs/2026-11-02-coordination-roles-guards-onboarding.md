@@ -1,9 +1,10 @@
 # Coordination roles, stuck-lease guards and first-run onboarding
 
-**Status:** design, 2026-11-02, revised 2026-11-03. Not reviewed yet.
-Nothing here is built. The maintainer decided on 2026-11-03 to hold this
-work for the D10 freeze and have it ready to build on the Rust daemon once
-it is the default (G2).
+**Status:** design, 2026-11-02, revised 2026-11-03. The maintainer's
+decisions of 2026-11-03: F2 and F3 are fixed now, in both daemons, by the
+board stream that is changing the same lease and wake code; everything else
+is held and built on the Rust daemon only, once it is the default (G2); the
+recommendations on Q1 to Q4 below are accepted.
 
 A team of agent sessions can stall on the board. A session holds a lease or
 the coordinator role, then goes idle, crashes or forgets to release it, and
@@ -23,10 +24,10 @@ no new Python tools, routes, hooks or CLI modes, and pending schema changes
 share one bump. The exception granted for the Console sign-in work (#1144)
 covers that work only, and this spec asks for none.
 
-Every item is built Rust-first once the Rust daemon is the default (G2,
-B17), from the landing map in "Building it on Rust" below. Each item is
-still marked by kind, because the fixes stay eligible under D10 if the
-maintainer later wants one in the Python daemon first (with its Rust twin):
+F2 and F3 are fixes under D10 and land now in both daemons. Every other
+item is built on the Rust daemon only once it is the default (G2, B17),
+from the landing map in "Building it on Rust" below. Each item is marked by
+kind:
 
 - **fix:** it changes existing behaviour through existing surfaces;
 - **surface:** it adds a tool action, route, CLI flag, config key or schema
@@ -224,7 +225,7 @@ where their effect is measured once they ship.
 | Failure | Today | Guard | Signal | Near-miss that must still work |
 |---|---|---|---|---|
 | Waiter's turn comes while it is between turns | Grant is silent; the waiter is deleted and must claim again within 300 s or lose its place | **F1** a grant notice rings the waiter; **F2** a missed grant puts it back in the queue once, second in line | Grant event; grant window lapsed without a renewal | A waiter that renews within the window keeps the lease as now. Every other daemon notice stays `hinted` and rings nobody |
-| Waiter died while queued | Removed only after 7 days idle (`AGENT_RETENTION`); its turn wastes 300 s | **F3** settling skips it and dequeues it with reason `departed` | Session waiter: attachment lapsed (`lease_until` past by `ATTACHMENT_LEASE`, 60 s, so at least 120 s without a heartbeat when the shim beats every 20 s) and no listener. `lease run` waiter: no poll for 60 s (it polls every 5 s) | A live session idle between turns: its shim keeps renewing `lease_until`, so it is kept. A host stalled for under two minutes is kept |
+| Waiter died while queued | Removed only after 7 days idle (`AGENT_RETENTION`); its turn wastes 300 s | **F3** settling passes over it when granting but keeps its row and place, so a daemon restart that briefly makes live waiters look dead costs them one turn, never their place; the existing retention still removes it | Session waiter: attachment lapsed (`lease_until` past by `ATTACHMENT_LEASE`, 60 s, so at least 120 s without a heartbeat when the shim beats every 20 s) and no listener. `lease run` waiter: no poll for 60 s (it polls every 5 s) | A live session idle between turns: its shim keeps renewing `lease_until`, so it is kept. A host stalled for under two minutes is kept. After a daemon restart, a head that looks dead is passed over once and is still first in line |
 | Session holder dormant or dead (claimed lease) | Held to the TTL: 1 h, or 1 d for `claim:` | **F4** for the coordinator; **F5** escalation for others; **S3** conductor frees it | Holder unreachable (§1.1) while someone is queued | A reachable holder waiting on a long build is never freed automatically |
 | Process holder hung (`lease run` alive but stuck) | Renewed every ttl/3 for as long as it runs; `expect` only marks it stale | **F5** escalation from the expected end; **S4** `--stall-after` notices and `--max` stops | Past the expected end; no output for `--stall-after` | A long build that keeps printing, with an honest `--expect` |
 | Process holder crashed | OS lock frees at once; board lease lapses within the ttl (120 s default) | Unchanged | Lock released | |
@@ -339,38 +340,57 @@ per `rust/PORTING.md`.
 Each item ships as its own PR with a watched-RED test and its near-miss
 test from §3.
 
+### 3.3 How F2 and F3 work without a schema change
+
+- **F3** adds one condition to the query that picks the waiter to grant:
+  the waiter's attachment is live (`lease_until` later than
+  `now - ATTACHMENT_LEASE`) or it was active within `ATTACHMENT_LEASE`. A
+  session's shim renews its attachment every 20 seconds; a `lease run` or
+  `lease hold` waiter has no attachment but asks again every 5 seconds,
+  which moves its `last_activity`. A wake listener needs a live
+  attachment, so it needs no separate check.
+- **F2** reads the audit log instead of a new column. When a hold expires,
+  it was an unclaimed grant if a `lease_grant` event exists for that
+  holder, lease and fence, and its expiry is still the grant time plus the
+  grant's `window` (any renewal moves the expiry past it). Once the next
+  waiter is granted, the missed grantee is queued first among the
+  remaining waiters, with a daemon `lease_queue` event (reason
+  `missed_grant`). A grant made from such a requeue carries `retry: true`,
+  and a second miss is not requeued. With nobody else queued, the lease is
+  simply free. Every existing event payload stays byte-identical; the new
+  keys appear only on the new paths.
+
 ## Phasing
 
 1. **This spec** (docs only).
-2. **Held until G2.** Nothing is built while the Python daemon is the
-   default, unless the maintainer pulls a fix forward (with its Rust twin).
-3. **After G2, fixes first:** the reminder port (prerequisite), F3 and F2
-   (smallest), F1, F4, F5 and F6, then F7 with the playbook.
+2. **Now:** F2 and F3 in both daemons, in the board stream's PR.
+3. **Held until G2, then Rust only:** the reminder port (prerequisite),
+   F1, F4, F5 and F6, then F7 with the playbook.
 4. **Then surfaces:** S1 and S2, S3, S4, S5.
 5. **Onboarding (S6):** once the sign-in PRs (#1164, #1166, #1168) have
    merged.
 
-## Recommendations on the open questions
+## Decisions on the open questions
 
-Each is a recommendation for the maintainer's decision.
+The maintainer accepted each recommendation on 2026-11-03.
 
 - **Q1. Who sends the grant notice?** The first draft said the daemon sends
   no board mail. That was wrong: it has a reserved sender (`daemon`) for
   its notices (dream stalls, `POST /api/daemon-notice`), in both daemons
   (`board/notice.rs` in Rust). Its notices are always decided `hinted`, so
-  they never ring. **Recommended:** the grant notice is a daemon notice to
+  they never ring. **Decided:** the grant notice is a daemon notice to
   the grantee only, with one new wake decision, `lease_grant`, that rings
   the grantee's listener whatever its park record says. No new origin, no
   new column, and the shim needs no change. The near-miss test is every
   other daemon notice staying `hinted`.
 - **Q2. Scope of a project role over machine-wide leases** such as
-  `full-suite@<box>`. **Recommended: (a)**, a project role reorders only
+  `full-suite@<box>`. **Decided: (a)**, a project role reorders only
   its own project's waiters among themselves. Both roles are scoped to a
   project (`<role>:<project>`) and nothing holds a machine-wide role, so
   nobody has the standing to reorder one project's waiters against
   another's. A machine-wide lease therefore stays in arrival order across
   projects, even while a conductor is active.
-- **Q3. The thresholds.** **Recommended:** keep the starting values, and
+- **Q3. The thresholds.** **Decided:** keep the starting values, and
   tie each one to the constant it depends on so it moves with that
   constant: the dead-waiter grace is `ATTACHMENT_LEASE` (60 s, three of
   the shim's 20 s heartbeats, so a waiter is dropped only after at least
