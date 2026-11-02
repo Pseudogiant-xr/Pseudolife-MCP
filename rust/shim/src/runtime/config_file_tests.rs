@@ -258,10 +258,9 @@ mod windows {
 
     #[test]
     fn ordinary_client_created_file_keeps_its_default_owner() {
-        let f = Fixture(
-            std::env::temp_dir().join(format!("native-config-test-{}", uuid::Uuid::new_v4())),
-        );
-        fs::create_dir(&f.0).unwrap();
+        // Isolate from host-specific Temp ACLs that may grant other accounts
+        // write access; the client file itself still uses fs::write defaults.
+        let f = Fixture::new();
         let path = f.0.join("client.json");
         // Match client applications: inherit the normal parent ACL and token
         // default owner, including Administrators for an elevated process.

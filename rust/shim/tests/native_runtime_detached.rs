@@ -179,6 +179,9 @@ impl Session {
         while session.connections.len() < expected {
             match listener.accept() {
                 Ok((stream, _)) => {
+                    // Windows inherits the listener's nonblocking mode; the
+                    // framed fixture protocol uses bounded blocking reads.
+                    stream.set_nonblocking(false).unwrap();
                     stream.set_read_timeout(Some(TIMEOUT)).unwrap();
                     stream.set_write_timeout(Some(TIMEOUT)).unwrap();
                     let mut connection = BufReader::new(stream);

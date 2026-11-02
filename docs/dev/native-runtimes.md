@@ -110,8 +110,10 @@ permission bits and validates Windows ownership, accepting normal inherited
 SYSTEM/Administrators access while rejecting other users' write access. A concurrent change detected
 before publication is left in place. Publication
 preserves the actual displaced file in an owner-only recovery directory, using
-atomic file exchange on POSIX and `ReplaceFileW` with a backup on Windows. If
-that displaced file differs from the observed input, the updater reports the
+atomic file exchange on POSIX and `ReplaceFileW` with a backup on Windows.
+Windows stages replacements through a private sibling link so inherited
+permissions are resolved beside the target, then removes the redundant link.
+If the displaced file differs from the observed input, the updater reports the
 conflict and recovery location; it never rolls back over another writer. Cleanup
 retains the three newest verified successful backups for each exact target.
 Conflicted, unreadable, changed and unrecognized recovery evidence is retained;

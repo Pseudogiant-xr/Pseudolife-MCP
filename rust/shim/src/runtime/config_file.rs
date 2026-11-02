@@ -490,7 +490,6 @@ mod windows_config_security {
                 if allowed.Mask & mutable != 0
                     && Security::EqualSid(owner, sid) == 0
                     && Security::EqualSid(current, sid) == 0
-                    && Security::EqualSid(current, sid) == 0
                     && Security::IsWellKnownSid(sid, Security::WinCreatorOwnerRightsSid) == 0
                     && Security::IsWellKnownSid(sid, Security::WinLocalSystemSid) == 0
                     && Security::IsWellKnownSid(sid, Security::WinBuiltinAdministratorsSid) == 0
@@ -536,8 +535,18 @@ fn replace_preserving(target: &Path, pending: &Path, previous: &Path) -> io::Res
         Ok(units.into_iter().chain([0]).collect())
     };
     let target_w = wide(target)?;
-    let pending_w = wide(pending)?;
     let previous_w = wide(previous)?;
+    // ReplaceFileW resolves inherited target ACEs against the replacement's
+    // parent. Replacing directly from the private recovery directory can
+    // produce an empty DACL for an ordinary, non-elevated client. A private
+    // hard link beside the target keeps the correct inheritance context;
+    // the recovery copy remains available until publication is verified.
+    let staged = target
+        .parent()
+        .ok_or_else(|| io::Error::other("configuration target has no parent"))?
+        .join(format!(".client-native-pending-{}", uuid::Uuid::new_v4()));
+    let pending_w = wide(&staged)?;
+    fs::hard_link(pending, &staged)?;
     // ReplaceFileW retains the actual displaced file and its attributes. All
     // buffers live for the call; no ACL-merge errors are ignored.
     let replaced = unsafe {
@@ -551,13 +560,27 @@ fn replace_preserving(target: &Path, pending: &Path, previous: &Path) -> io::Res
         )
     };
     if replaced != 0 {
-        return Ok(());
+        // Publication consumed the sibling link. Drop the redundant recovery
+        // link before validation so a conflict cannot leave the live target
+        // looking like an externally hard-linked configuration on retry.
+        return fs::remove_file(pending);
     }
     let error = io::Error::last_os_error();
     // ERROR_UNABLE_TO_MOVE_REPLACEMENT_2 can leave the original at the backup
     // path. Restore only into an absent target; never overwrite another writer.
     if error.raw_os_error() == Some(1177) {
         let _ = fs::hard_link(previous, target);
+    }
+    if let Err(cleanup) = fs::remove_file(&staged)
+        && cleanup.kind() != io::ErrorKind::NotFound
+    {
+        return Err(io::Error::new(
+            error.kind(),
+            format!(
+                "{error}; replacement staging file retained at {}",
+                staged.display()
+            ),
+        ));
     }
     Err(error)
 }
