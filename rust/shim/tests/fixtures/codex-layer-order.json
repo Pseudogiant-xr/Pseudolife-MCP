@@ -1,0 +1,126 @@
+{
+  "trusted": {
+    "config": {
+      "mcp_servers": {
+        "pseudolife-memory": {
+          "env": {
+            "PSEUDOLIFE_MCP_NO_SPAWN": "0"
+          }
+        }
+      }
+    },
+    "layers": [
+      {
+        "name": {
+          "type": "project",
+          "dotCodexFolder": "${ROOT}/project/.codex"
+        },
+        "version": "captured-project",
+        "config": {
+          "mcp_servers": {
+            "pseudolife-memory": {
+              "env": {
+                "PSEUDOLIFE_MCP_NO_SPAWN": "0"
+              }
+            }
+          }
+        },
+        "disabledReason": null
+      },
+      {
+        "name": {
+          "type": "user",
+          "file": "${ROOT}/home/config.toml"
+        },
+        "version": "captured-user",
+        "config": {
+          "mcp_servers": {
+            "pseudolife-memory": {
+              "env": {
+                "PSEUDOLIFE_MCP_NO_SPAWN": "1"
+              }
+            }
+          }
+        },
+        "disabledReason": null
+      },
+      {
+        "name": {
+          "type": "system",
+          "file": "${SYSTEM}/config.toml"
+        },
+        "version": "captured-system",
+        "config": {
+          "mcp_servers": {
+            "pseudolife-memory": {
+              "env": {}
+            }
+          }
+        },
+        "disabledReason": null
+      }
+    ]
+  },
+  "untrusted": {
+    "config": {
+      "mcp_servers": {
+        "pseudolife-memory": {
+          "env": {
+            "PSEUDOLIFE_MCP_NO_SPAWN": "1"
+          }
+        }
+      }
+    },
+    "layers": [
+      {
+        "name": {
+          "type": "project",
+          "dotCodexFolder": "${ROOT}/project/.codex"
+        },
+        "version": "captured-project",
+        "config": {
+          "mcp_servers": {
+            "pseudolife-memory": {
+              "env": {
+                "PSEUDOLIFE_MCP_NO_SPAWN": "0"
+              }
+            }
+          }
+        },
+        "disabledReason": "project is untrusted"
+      },
+      {
+        "name": {
+          "type": "user",
+          "file": "${ROOT}/home/config.toml"
+        },
+        "version": "captured-user",
+        "config": {
+          "mcp_servers": {
+            "pseudolife-memory": {
+              "env": {
+                "PSEUDOLIFE_MCP_NO_SPAWN": "1"
+              }
+            }
+          }
+        },
+        "disabledReason": null
+      },
+      {
+        "name": {
+          "type": "system",
+          "file": "${SYSTEM}/config.toml"
+        },
+        "version": "captured-system",
+        "config": {
+          "mcp_servers": {
+            "pseudolife-memory": {
+              "env": {}
+            }
+          }
+        },
+        "disabledReason": null
+      }
+    ]
+  }
+}

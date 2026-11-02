@@ -4,6 +4,101 @@ use pseudolife_stdio::setup::codex::{
 use serde_json::{Map, Value, json};
 use std::path::Path;
 
+fn captured_layers(home: &Home, trusted: bool) -> Fake {
+    // Project/user/system order and disabledReason shape captured from an
+    // isolated Codex 0.166.0 config/read on 2026-11-02. Paths, versions and
+    // unrelated configuration are redacted in the fixture.
+    let captured: Value =
+        serde_json::from_str(include_str!("fixtures/codex-layer-order.json")).unwrap();
+    let mut client = Fake::new(&home.0);
+    let user_values = client.config["config"].clone();
+    client.config = captured[if trusted { "trusted" } else { "untrusted" }].clone();
+    for layer in client.config["layers"].as_array_mut().unwrap() {
+        match layer["name"]["type"].as_str().unwrap() {
+            "project" => {
+                layer["name"]["dotCodexFolder"] = json!(home.0.join("project").join(".codex"))
+            }
+            "user" => {
+                layer["name"]["file"] = json!(home.0.join("config.toml"));
+                layer["config"] = user_values.clone();
+                layer["config"]["mcp_servers"]["pseudolife-memory"]["env"]["PSEUDOLIFE_MCP_NO_SPAWN"] =
+                    json!("1");
+            }
+            "system" => {
+                layer["name"]["file"] = json!(home.0.join("system.toml"));
+                layer["config"]["mcp_servers"]["pseudolife-memory"]["env"]["PSEUDOLIFE_MCP_NO_SPAWN"] =
+                    json!("0");
+            }
+            other => panic!("unexpected captured layer {other}"),
+        }
+    }
+    client.config["config"] = client.config["layers"][1]["config"].clone();
+    if trusted {
+        client.project_no_spawn = Some("0".into());
+        client.config["config"]["mcp_servers"]["pseudolife-memory"]["env"]["PSEUDOLIFE_MCP_NO_SPAWN"] =
+            json!("0");
+    }
+    client
+}
+
+#[tokio::test]
+async fn captured_codex_layers_refuse_active_project_before_any_write() {
+    let home = Home::new();
+    let mut client = captured_layers(&home, true);
+    let plan = plan_replace(&client.config, &home.0, "https://example.com", None, true).unwrap();
+    let error = apply_replace(&mut client, &home.0, plan)
+        .await
+        .err()
+        .unwrap()
+        .to_string();
+    assert!(error.contains(&format!(
+        "{:?}",
+        home.0.join("project").join(".codex").join("config.toml")
+    )));
+    assert!(
+        client
+            .calls
+            .iter()
+            .all(|(method, _)| method != "config/batchWrite")
+    );
+    assert!(!home.0.join("pseudolife").exists());
+}
+
+#[tokio::test]
+async fn captured_codex_layers_ignore_disabled_project_and_lower_system() {
+    let home = Home::new();
+    let mut client = captured_layers(&home, false);
+    let plan = plan_replace(&client.config, &home.0, "https://example.com", None, true).unwrap();
+    assert!(apply_replace(&mut client, &home.0, plan).await.is_ok());
+}
+
+#[tokio::test]
+async fn disabled_project_credentials_do_not_claim_the_user_key() {
+    for key in ["PSEUDOLIFE_MCP_TOKEN", "PSEUDOLIFE_MCP_TOKEN_FILE"] {
+        let home = Home::new();
+        let mut client = captured_layers(&home, false);
+        for layer in client.config["layers"].as_array_mut().unwrap() {
+            layer["config"]["mcp_servers"]["pseudolife-memory"]["env"] = json!({key:""});
+        }
+        client.config["config"] = client.config["layers"][1]["config"].clone();
+        let config = client.config.clone();
+        let error = pseudolife_stdio::setup::codex::configure_credential_file(
+            &mut client,
+            &home.0,
+            &home.0,
+            Some(config),
+            Some(("http://localhost:8765", None)),
+        )
+        .await
+        .unwrap_err()
+        .to_string();
+        // An empty file path may fail credential decoding first; either way
+        // the ignored project cannot be named as the owner requiring repair.
+        assert!(!error.contains("comes from"));
+        assert!(!home.0.join("pseudolife").exists());
+    }
+}
+
 #[tokio::test]
 async fn unchanged_plan_refuses_effective_connection_changed_after_planning() {
     for no_spawn in [false, true] {
@@ -43,10 +138,10 @@ async fn unchanged_plan_refuses_effective_connection_changed_after_planning() {
 async fn project_authority_diagnostic_uses_installed_codex_origin_shape() {
     let home = Home::new();
     let mut client = Fake::new(&home.0);
-    let folder = home.0.join("project/.codex");
+    let folder = home.0.join("project").join(".codex");
     client.config["config"]["mcp_servers"]["pseudolife-memory"]["env"]["PSEUDOLIFE_MCP_NO_SPAWN"] =
         json!("0");
-    client.config["layers"].as_array_mut().unwrap().push(json!({"name":{"type":"project","dotCodexFolder":folder},"version":"project-a","config":{"mcp_servers":{"pseudolife-memory":{"env":{"PSEUDOLIFE_MCP_NO_SPAWN":"0"}}}}}));
+    client.config["layers"].as_array_mut().unwrap().insert(0, json!({"name":{"type":"project","dotCodexFolder":folder},"version":"project-a","config":{"mcp_servers":{"pseudolife-memory":{"env":{"PSEUDOLIFE_MCP_NO_SPAWN":"0"}}}}}));
     let plan = plan_replace(&client.config, &home.0, "https://example.com", None, true).unwrap();
     let error = apply_replace(&mut client, &home.0, plan)
         .await
@@ -199,7 +294,7 @@ async fn lower_system_no_spawn_does_not_override_the_user_connection() {
     let mut client = Fake::new(&home.0);
     let plan = plan_replace(&client.config, &home.0, "https://example.com", None, true).unwrap();
     apply_replace(&mut client, &home.0, plan).await.unwrap();
-    client.config["layers"].as_array_mut().unwrap().insert(0, json!({"name":{"type":"system","file":home.0.join("system.toml")},"version":"system-a","config":{"mcp_servers":{"pseudolife-memory":{"env":{"PSEUDOLIFE_MCP_NO_SPAWN":"0","PSEUDOLIFE_MCP_TOKEN":""}}}}}));
+    client.config["layers"].as_array_mut().unwrap().push(json!({"name":{"type":"system","file":home.0.join("system.toml")},"version":"system-a","config":{"mcp_servers":{"pseudolife-memory":{"env":{"PSEUDOLIFE_MCP_NO_SPAWN":"0","PSEUDOLIFE_MCP_TOKEN":""}}}}}));
     let plan = plan_replace(&client.config, &home.0, "https://example.com", None, true).unwrap();
     client.calls.clear();
     assert!(apply_replace(&mut client, &home.0, plan).await.is_ok());
@@ -211,12 +306,12 @@ async fn lower_system_no_spawn_does_not_override_the_user_connection() {
     );
     // Empty credentials have the same precedence rule: a lower system value
     // must not redirect a user-key repair to the system configuration.
-    let env = &mut client.config["layers"][1]["config"]["mcp_servers"]["pseudolife-memory"]["env"];
+    let env = &mut client.config["layers"][0]["config"]["mcp_servers"]["pseudolife-memory"]["env"];
     env.as_object_mut()
         .unwrap()
         .remove("PSEUDOLIFE_MCP_TOKEN_FILE");
     env["PSEUDOLIFE_MCP_TOKEN"] = json!("");
-    client.config["config"] = client.config["layers"][1]["config"].clone();
+    client.config["config"] = client.config["layers"][0]["config"].clone();
     let config = client.config.clone();
     let error = pseudolife_stdio::setup::codex::configure_credential_file(
         &mut client,
@@ -239,14 +334,14 @@ async fn static_project_no_spawn_refusal_precedes_token_and_config_writes() {
     client.project_no_spawn = Some("0".into());
     client.config["config"]["mcp_servers"]["pseudolife-memory"]["env"]["PSEUDOLIFE_MCP_NO_SPAWN"] =
         json!("0");
-    client.config["layers"].as_array_mut().unwrap().push(json!({"name":{"type":"project","file":home.0.join("project.toml")},"version":"project-a","config":{"mcp_servers":{"pseudolife-memory":{"env":{"PSEUDOLIFE_MCP_NO_SPAWN":"0"}}}}}));
+    client.config["layers"].as_array_mut().unwrap().insert(0, json!({"name":{"type":"project","dotCodexFolder":home.0.join("project")},"version":"project-a","config":{"mcp_servers":{"pseudolife-memory":{"env":{"PSEUDOLIFE_MCP_NO_SPAWN":"0"}}}}}));
     let plan = plan_replace(&client.config, &home.0, "https://example.com", None, true).unwrap();
     let error = apply_replace(&mut client, &home.0, plan)
         .await
         .err()
         .unwrap()
         .to_string();
-    assert!(error.contains("project.toml") && error.contains("PSEUDOLIFE_MCP_NO_SPAWN"));
+    assert!(error.contains("project") && error.contains("PSEUDOLIFE_MCP_NO_SPAWN"));
     assert!(error.contains("remove that key"));
     assert!(!error.contains("changed during setup"));
     assert!(
@@ -274,13 +369,16 @@ async fn unchanged_connection_still_checks_effective_no_spawn_before_success() {
     apply_replace(&mut client, &home.0, plan).await.unwrap();
     let connection = home.0.join("pseudolife/connection.json");
     let before = std::fs::read(&connection).unwrap();
-    let project = home.0.join("project.toml");
+    let project = home.0.join("project").join("config.toml");
     for (value, named_layer) in [("0", true), ("0", false), ("true", true)] {
         client.config["config"]["mcp_servers"]["pseudolife-memory"]["env"]["PSEUDOLIFE_MCP_NO_SPAWN"] =
             json!(value);
-        client.config["layers"].as_array_mut().unwrap().truncate(1);
+        client.config["layers"]
+            .as_array_mut()
+            .unwrap()
+            .retain(|layer| layer["name"]["type"] == "user");
         if named_layer {
-            client.config["layers"].as_array_mut().unwrap().push(json!({"name":{"type":"project","file":project},"version":"project-a","config":{"mcp_servers":{"pseudolife-memory":{"env":{"PSEUDOLIFE_MCP_NO_SPAWN":value}}}}}));
+            client.config["layers"].as_array_mut().unwrap().insert(0, json!({"name":{"type":"project","dotCodexFolder":project.parent().unwrap()},"version":"project-a","config":{"mcp_servers":{"pseudolife-memory":{"env":{"PSEUDOLIFE_MCP_NO_SPAWN":value}}}}}));
         }
         let plan =
             plan_replace(&client.config, &home.0, "https://example.com", None, true).unwrap();
@@ -294,7 +392,7 @@ async fn unchanged_connection_still_checks_effective_no_spawn_before_success() {
                 .to_string();
             assert!(
                 error.contains(if named_layer {
-                    "project.toml"
+                    "project"
                 } else {
                     "project or managed"
                 }) && error.contains("PSEUDOLIFE_MCP_NO_SPAWN")
@@ -320,7 +418,7 @@ async fn equal_empty_user_and_project_credentials_name_the_project_owner() {
     client.config["layers"][0]["config"]["mcp_servers"]["pseudolife-memory"]["env"]["PSEUDOLIFE_MCP_TOKEN"] =
         json!("");
     client.config["config"] = client.config["layers"][0]["config"].clone();
-    client.config["layers"].as_array_mut().unwrap().push(json!({"name":{"type":"project","file":home.0.join("project.toml")},"version":"project-a","config":{"mcp_servers":{"pseudolife-memory":{"env":{"PSEUDOLIFE_MCP_TOKEN":""}}}}}));
+    client.config["layers"].as_array_mut().unwrap().insert(0, json!({"name":{"type":"project","dotCodexFolder":home.0.join("project")},"version":"project-a","config":{"mcp_servers":{"pseudolife-memory":{"env":{"PSEUDOLIFE_MCP_TOKEN":""}}}}}));
     let config = client.config.clone();
     let error = pseudolife_stdio::setup::codex::configure_credential_file(
         &mut client,
@@ -332,7 +430,7 @@ async fn equal_empty_user_and_project_credentials_name_the_project_owner() {
     .await
     .unwrap_err()
     .to_string();
-    assert!(error.contains("project.toml") && error.contains("PSEUDOLIFE_MCP_TOKEN"));
+    assert!(error.contains("project") && error.contains("PSEUDOLIFE_MCP_TOKEN"));
     assert!(!error.contains("empty in Codex's user"));
     assert!(client.calls.is_empty());
     assert!(!home.0.join("pseudolife").exists());
@@ -692,18 +790,24 @@ impl Fake {
 impl Rpc for Fake {
     async fn rpc(&mut self, method: &str, params: Value) -> Result<Value, SetupError> {
         self.calls.push((method.to_owned(), params.clone()));
+        let user = self.config["layers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .position(|layer| layer["name"]["type"] == "user")
+            .unwrap();
         if method == "config/batchWrite" {
             if self.reject {
                 return Err(SetupError::rejected("fixture refusal"));
             }
             assert_eq!(
                 params["expectedVersion"],
-                self.config["layers"][0]["version"]
+                self.config["layers"][user]["version"]
             );
             for edit in params["edits"].as_array().unwrap() {
                 if edit["keyPath"] == "\"mcp_servers\".\"pseudolife-memory\"" {
-                    for root in ["/config", "/layers/0/config"] {
-                        self.config.pointer_mut(root).unwrap()["mcp_servers"]["pseudolife-memory"] =
+                    for root in ["/config".to_owned(), format!("/layers/{user}/config")] {
+                        self.config.pointer_mut(&root).unwrap()["mcp_servers"]["pseudolife-memory"] =
                             edit["value"].clone();
                     }
                     continue;
@@ -712,19 +816,21 @@ impl Rpc for Fake {
                     edit["keyPath"],
                     "\"mcp_servers\".\"pseudolife-memory\".\"env\""
                 );
-                self.config["layers"][0]["config"]["mcp_servers"]["pseudolife-memory"]["env"] =
+                self.config["layers"][user]["config"]["mcp_servers"]["pseudolife-memory"]["env"] =
                     edit["value"].clone();
                 self.config["config"]["mcp_servers"]["pseudolife-memory"]["env"] =
                     edit["value"].clone();
             }
-            self.config["layers"][0]["version"] = json!(format!("version-{}", self.calls.len()));
+            self.config["layers"][user]["version"] = json!(format!("version-{}", self.calls.len()));
             if self.lost_write_reply {
                 self.lost_write_reply = false;
                 return Err(SetupError("fixture lost write acknowledgement"));
             }
             if self.rejected_after_competitor {
                 self.rejected_after_competitor = false;
-                let file = self.config["layers"][0]["name"]["file"].as_str().unwrap();
+                let file = self.config["layers"][user]["name"]["file"]
+                    .as_str()
+                    .unwrap();
                 let connection = Path::new(file)
                     .parent()
                     .unwrap()
@@ -744,8 +850,8 @@ impl Rpc for Fake {
                     json!("https://override.example.com");
             }
             if self.concurrent_env {
-                self.config["layers"][0]["config"]["mcp_servers"]["pseudolife-memory"]["env"]["UNRELATED"] =
-                    json!("concurrent change");
+                self.config["layers"][user]["config"]["mcp_servers"]["pseudolife-memory"]["env"]
+                    ["UNRELATED"] = json!("concurrent change");
             }
             if self.typed_extra {
                 self.config["config"]["mcp_servers"]["pseudolife-memory"]["enabled"] = json!(true);
@@ -756,7 +862,7 @@ impl Rpc for Fake {
             }
             if self.foreign_connection_after_write {
                 self.foreign_connection_after_write = false;
-                let home = Path::new(self.config["layers"][0]["name"]["file"].as_str().unwrap())
+                let home = Path::new(self.config["layers"][user]["name"]["file"].as_str().unwrap())
                     .parent()
                     .unwrap();
                 pseudolife_stdio::board::state::atomic_create(
@@ -765,7 +871,7 @@ impl Rpc for Fake {
                 )
                 .unwrap();
             }
-            return Ok(json!({"version":self.config["layers"][0]["version"]}));
+            return Ok(json!({"version":self.config["layers"][user]["version"]}));
         }
         assert_eq!(method, "config/read");
         Ok(self.config.clone())
@@ -1176,9 +1282,12 @@ async fn bootstrap_authority_error_identifies_project_file_and_key() {
     let file = home.0.join("project/config.toml");
     let settings =
         json!({"mcp_servers":{"pseudolife-memory":{"env_vars":["PSEUDOLIFE_MCP_TOKEN_FILE"]}}});
-    client.config["layers"].as_array_mut().unwrap().push(json!({
-        "name":{"type":"project","file":file},"config":settings
-    }));
+    client.config["layers"].as_array_mut().unwrap().insert(
+        0,
+        json!({
+            "name":{"type":"project","dotCodexFolder":file.parent().unwrap()},"config":settings
+        }),
+    );
     client.config["config"]["mcp_servers"]["pseudolife-memory"]["env_vars"] =
         json!(["PSEUDOLIFE_MCP_TOKEN_FILE"]);
     let error = pseudolife_stdio::setup::codex::configure_credential_file(
@@ -1945,8 +2054,8 @@ async fn empty_user_credential_names_user_layer_and_project_near_miss_keeps_its_
         .as_object_mut()
         .unwrap()
         .remove("PSEUDOLIFE_MCP_TOKEN");
-    let project = home.0.join("project.toml");
-    user["layers"].as_array_mut().unwrap().push(json!({"name":{"type":"project","file":project},"version":"project-a","config":{"mcp_servers":{"pseudolife-memory":{"env":{"PSEUDOLIFE_MCP_TOKEN":""}}}}}));
+    let project = home.0.join("project").join("config.toml");
+    user["layers"].as_array_mut().unwrap().insert(0, json!({"name":{"type":"project","dotCodexFolder":project.parent().unwrap()},"version":"project-a","config":{"mcp_servers":{"pseudolife-memory":{"env":{"PSEUDOLIFE_MCP_TOKEN":""}}}}}));
     let error = pseudolife_stdio::setup::codex::configure_credential_file(
         &mut NoWrites,
         &home.0,
@@ -1957,7 +2066,7 @@ async fn empty_user_credential_names_user_layer_and_project_near_miss_keeps_its_
     .await
     .unwrap_err()
     .to_string();
-    assert!(error.contains("project.toml") && error.contains("comes from"));
+    assert!(error.contains("project") && error.contains("comes from"));
     assert!(!error.contains("empty in Codex's user"));
     assert_eq!(std::fs::read(home.0.join("config.toml")).unwrap(), before);
     assert!(!home.0.join("pseudolife").exists());
