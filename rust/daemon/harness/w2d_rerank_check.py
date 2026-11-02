@@ -17,6 +17,13 @@ Per case it compares the raw logits (Rust ``Reranker::logits`` against
 ``CrossEncoderReranker.rerank``) and the ranked candidate order (by text, so
 identical candidates cannot flip it). Exit 1 when any order differs, any
 rerank result differs in length, or the max sigmoid diff exceeds 1e-4.
+
+One order difference is declared (``DECLARED_TIES``): in case 20, different
+passages that truncate to identical tokens tie exactly in Rust while Python's
+scores differ by numeric noise. A swap there is reported as a declared tie,
+not a failure, only when the two orders agree once passages with identical
+truncated tokens are treated as one, and every squashed score is within
+tolerance. Any other order difference fails.
 """
 from __future__ import annotations
 
@@ -31,6 +38,10 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[2]
 SIGMOID_TOL = 1e-4
+# Case number (1-based) -> the ledger entry declaring its tie order.
+DECLARED_TIES = {
+    20: "rust/daemon/divergences/w2-d-get-api-search/rerank-order-of-passages-whose-truncated.md",
+}
 
 LOREM = (
     "Postgres stores the memory bank in a single database, and the daemon owns "
@@ -124,11 +135,15 @@ def python_side(cases: list[dict]) -> list[dict]:
     if not rr._ensure_loaded():
         raise SystemExit("python: cross-encoder failed to load")
     model = rr._model
+    max_length = getattr(model, "max_length", None)
     out = []
     for c in cases:
         pairs = [(c["query"], d) for d in c["candidates"]]
         logits = [float(x) for x in model.predict(pairs)] if pairs else []
-        out.append({"logits": logits, "rerank": rr.rerank(c["query"], c["candidates"])})
+        # The truncated model input of each pair, as predict() tokenizes it.
+        tokens = [list(model.tokenizer(q, d, truncation="longest_first", max_length=max_length)["input_ids"])
+                  for q, d in pairs]
+        out.append({"logits": logits, "rerank": rr.rerank(c["query"], c["candidates"]), "tokens": tokens})
     return out
 
 
@@ -150,6 +165,29 @@ def rust_side(cases_path: Path, out_path: Path, model_dir: str) -> list[dict]:
 def ranked(cands: list[str], scores: list[float]) -> list[str]:
     order = sorted(range(len(scores)), key=lambda i: -scores[i])
     return [cands[i] for i in order]
+
+
+def order_verdict(n: int, case: dict, p: dict, r: dict) -> str:
+    """``agree``, ``declared`` (a declared tie, see ``DECLARED_TIES``) or
+    ``differs`` for case ``n`` (1-based), Python result ``p``, Rust ``r``."""
+    cands = case["candidates"]
+    if ranked(cands, p["logits"]) == ranked(cands, r["logits"]):
+        return "agree"
+    if n not in DECLARED_TIES:
+        return "differs"
+    tokens = p.get("tokens")
+    if not isinstance(tokens, list) or len(tokens) != len(cands):
+        return "differs"
+    # Passages with identical truncated tokens are one key: the orders must
+    # then agree, so the swap is confined to such passages.
+    keys = [tuple(t) for t in tokens]
+    if ranked(keys, p["logits"]) != ranked(keys, r["logits"]):
+        return "differs"
+    if len(p["rerank"]) != len(cands) or len(r["rerank"]) != len(cands):
+        return "differs"
+    if any(abs(a - b) > SIGMOID_TOL for a, b in zip(p["rerank"], r["rerank"])):
+        return "differs"
+    return "declared"
 
 
 def main() -> int:
@@ -174,6 +212,7 @@ def main() -> int:
     max_sig = 0.0
     failures: list[str] = []
     order_ok = 0
+    declared = 0
     for n, (c, p, r) in enumerate(zip(cases, py, rs, strict=True), 1):
         if len(p["logits"]) != len(r["logits"]):
             failures.append(f"case {n}: logit count {len(p['logits'])} vs {len(r['logits'])}")
@@ -185,14 +224,19 @@ def main() -> int:
         ds = max((abs(a - b) for a, b in zip(p["rerank"], r["rerank"])), default=0.0)
         max_logit = max(max_logit, dl)
         max_sig = max(max_sig, ds)
-        if ranked(c["candidates"], p["logits"]) != ranked(c["candidates"], r["logits"]):
+        verdict = order_verdict(n, c, p, r)
+        if verdict == "differs":
             failures.append(f"case {n}: candidate order differs (query {c['query'][:40]!r})")
+        elif verdict == "declared":
+            declared += 1
         else:
             order_ok += 1
         print(f"case {n:2d}: {len(c['candidates']):2d} cands  max|dlogit|={dl:.2e}  "
               f"max|dsigmoid|={ds:.2e}  rerank_len={len(p['rerank'])}")
+        if verdict == "declared":
+            print(f"case {n:2d}: declared tie (see {DECLARED_TIES[n]})")
 
-    print(f"\ncases: {len(cases)}  order agreement: {order_ok}/{len(cases)}")
+    print(f"\ncases: {len(cases)}  order agreement: {order_ok}/{len(cases)}  declared ties: {declared}")
     print(f"max |logit diff|:   {max_logit:.3e}")
     print(f"max |sigmoid diff|: {max_sig:.3e}  (tolerance {SIGMOID_TOL})")
     if max_sig > SIGMOID_TOL:

@@ -157,9 +157,14 @@ truncate to identical token inputs; Python produces slightly different logits
 while Rust ties. The historical local reranker graph and the newly provisioned
 public graph produce identical Rust logits and sigmoid outputs over all 40
 cases. Both agree with 39 of Python's 40 orders and satisfy the harness's
-sigmoid tolerance. This is an explicit baseline limitation, not a passing
-reranker differential or an acceptance of unspecified caller-visible order;
-this change does not relax the harness or alter scoring.
+sigmoid tolerance. #1114 did not relax the harness or alter scoring. The tie
+is now declared in the divergence ledger
+(`divergences/w2-d-get-api-search/rerank-order-of-passages-whose-truncated.md`,
+D7 behaviour with no caller: the order of passages whose truncated inputs are
+identical is unspecified), and the harness reports that swap in case 20 only
+as a declared tie, when the orders agree once identically truncated passages
+are treated as one and every score is within tolerance; any other order
+difference still fails.
 
 Named YAML presentation deferral `sent-quoted-continuation-tab`: a quoted continuation starting with a literal
 tab at indentation column zero (for example `ignored: 'a` followed by a line
