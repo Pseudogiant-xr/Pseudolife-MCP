@@ -75,5 +75,6 @@ and restart, including active, pending, unreadable and missing state and fresh
 setup for all three engine labels. The existing no-flag cases keep the original
 default-container commands and output. Updater acceptance additionally changes
 the container ID during recreation and verifies the subsequent check uses the
-new ID from that same Compose project. Scoped validation and fresh goldens are
-pending for this follow-up.
+new ID from that same Compose project. Linux `0fd31138` passed all 45 live and golden cases. Its new recording is
+Git-bound and used umask `022`; the 29 existing non-help cases match the prior
+recording under the unchanged comparison rules. Windows validation is pending.

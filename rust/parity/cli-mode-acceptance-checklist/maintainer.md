@@ -5,5 +5,5 @@
 The updater integration adds explicit `--container` scoping in both CLI arms.
 Inspection, host helpers, key operations and restart retain that target; a
 missing explicit target refuses instead of selecting a local or default bank.
-Existing no-flag cases remain the default-output regression. The scoped row,
-recreated-checkout isolation tests and both-platform validation are pending.
+Existing no-flag cases remain the default-output regression. Linux `0fd31138` passed the scoped row (45 live and golden cases),
+recreated-checkout isolation tests and native contracts. Windows validation is pending.
