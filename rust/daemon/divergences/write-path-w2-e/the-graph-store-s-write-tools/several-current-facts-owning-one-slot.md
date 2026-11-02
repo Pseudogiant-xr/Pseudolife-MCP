@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner / why |
-|---|---|---|---|
-| Several current facts owning one slot key (the slot-key fold) | `LIMIT 1` with no order | the same statement | declared free: both read one unordered row |
+| Item | Python | Rust | Owner / why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| Several current facts owning one slot key (the slot-key fold) | `LIMIT 1` with no order | the same statement | declared free: both read one unordered row | closed | Verified at `54063c17`: `rust/daemon/src/graph_write_tools.rs::find_fact_slot_entity_body` and `pseudolife_memory/storage/postgres.py::PostgresStorage.find_fact_slot_entity` issue the same `LIMIT 1` query without `ORDER BY`. No divergent selection algorithm remains; neither arm promises which duplicate owner wins. B14b owner: none (closed). |

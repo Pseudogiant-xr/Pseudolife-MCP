@@ -162,7 +162,7 @@
       "candidate": "d71c5590ce6f866a",
       "candidate-harness": "43b859ee9d5fd738",
       "parity-checks": "06054831b8e7b5d2",
-      "daemon-image": "b52520e079f13dc1",
+      "daemon-image": "5c93764cb0f0bab7",
       "parity": "aa4ba434de948ea6"
     },
     "accepted": [
@@ -237,9 +237,14 @@
         "reason": "Reuses the built daemon, already-pulled PostgreSQL image and provisioned model cache; adds one small psycopg wheel and a short cold-restart smoke with no new job, image build or model download. Keep the existing cold-build allowance and re-measure if the batch timing disagrees."
       },
       {
+        "job": "daemon-image",
+        "fingerprint": "5c93764cb0f0bab7",
+        "reason": "Adds one network-disabled CLI version invocation to the existing image job; no new job or dependency setup. The shim shares the daemon dependency build; retain current budget pending batch measurement."
+      },
+      {
         "job": "rust",
         "fingerprint": "7e5f6fc858dd1367",
-        "reason": "Runs 19 pure Codex planner comparisons against the integration executable already built by Nextest; no new target, job, dependency install or network call. Local parity runtime is below one second; retain measured job budget and remeasure if hosted timing disagrees."
+        "reason": "The existing Rust job runs setup planning parity after Nextest; the harness reuses the same workspace all-targets feature-unified artifacts, with no new job, matrix row, dependency installation or limit increase. The additional 22 disposable planning cases complete in seconds. Existing R1 workflow changes and their accepted costs are retained."
       }
     ]
   },
@@ -292,7 +297,7 @@
       "lock-resolve": "83bcc6b654896c6d",
       "test": "ac414107d3d9c71d",
       "test-lite-linux": "44e2a8f2c01baeab",
-      "test-lite-windows": "bcfe230f76563a56",
+      "test-lite-windows": "3bb6d833f0724f2e",
       "test-lite-macos": "d096d17d3377ee89",
       "frontend": "b1b6a1a1278f2e60"
     },
@@ -366,6 +371,11 @@
         "job": "test-lite-windows",
         "fingerprint": "bcfe230f76563a56",
         "reason": "Adds tests/test_update_engine.py (86 tests) to the existing pytest step: the 20 successful windows-latest runs in 41337404983 at c6078ec2 measured 10.235s median (6.41-16.05s), an estimated +0.17 runner-minutes. No new job, shard or setup step; accept this bounded addition within the unchanged budget limits. The recorded full-lane baseline is retained pending full-job remeasurement from the next batch run."
+      },
+      {
+        "job": "test-lite-windows",
+        "fingerprint": "3bb6d833f0724f2e",
+        "reason": "Add four stub-only Claude batch prompt regressions; the native Windows targeted run took 0.12 seconds, with no dependencies, jobs or shards added."
       }
     ]
   }

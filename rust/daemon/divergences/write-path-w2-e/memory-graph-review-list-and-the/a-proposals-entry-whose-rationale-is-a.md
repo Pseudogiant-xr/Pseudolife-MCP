@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner / why |
-|---|---|---|---|
-| A `proposals` entry whose `rationale` is a list | stored as its array text | refused (`internal_error`, after the entities are minted) | the binder's `list[dict]` admits it; no producer sends one. An object errors on both |
+| Item | Python | Rust | Owner / why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| A `proposals` entry whose `rationale` is a list | stored as its array text | refused (`internal_error`, after the entities are minted) | the binder's `list[dict]` admits it; no producer sends one. An object errors on both | behaviour with a caller | At `54063c1788f2`: `rust/daemon/src/graph_review_actions.rs` `text_param` rejects arrays after entity resolution; `pseudolife_memory/service.py` `_graph_propose_links_locked` passes rationale directly to PostgreSQL. The public proposal dict is not field-type-bound, so refusal changes accepted input / state. Caller: `pseudolife_memory/mcp_server.py` `memory_graph_review(action="propose")` accepts list[dict]; Rust `actions::plan` / `propose` forwards those dict fields; B14b owner: B1-O (proposal input parity), B14b. |

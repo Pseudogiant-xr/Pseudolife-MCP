@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner / why |
-|---|---|---|---|
-| `top_k_candidates` negative | the early-exit scan stops after the first survivor's rounded-similarity tie band, then `[:top_k]` drops the last `-top_k` of those | the last `-top_k` of every surviving pair dropped | no shipped config sets one (`curation_top_k` negative slices alike in both) |
+| Item | Python | Rust | Owner / why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| `top_k_candidates` negative | the early-exit scan stops after the first survivor's rounded-similarity tie band, then `[:top_k]` drops the last `-top_k` of those | the last `-top_k` of every surviving pair dropped | no shipped config sets one (`curation_top_k` negative slices alike in both) | behaviour with no caller | At `54063c1788f2`: `rust/daemon/src/graph_consolidation.rs` `candidate_pairs` slices the full scored list via `py_head`; Python `candidate_pairs` stops its scan after the top-k tie band before slicing. Caller search: `top_k_candidates` across `pseudolife_memory/`, `plugin/`, `ops/`, `.github/`, and `pyproject.toml` finds DeepDreamConfig default 50 and consumers, with no shipped generator of a negative value; only a manually negative override exercises the differing scan. B14b owner: B14b disposition; B1-P (dream engine). |

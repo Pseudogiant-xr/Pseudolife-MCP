@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner / why |
-|---|---|---|---|
-| A lesson audit snapshot with a non-string `task`/`aspect`/`lesson`/`about`/`outcome`/`polarity`/`origin` or provenance item | passed to `lesson_write` as is | refused (`internal_error`) before that slot is written | corrupt audit rows only; as for world snapshots |
+| Item | Python | Rust | Owner / why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| A lesson audit snapshot with a non-string `task`/`aspect`/`lesson`/`about`/`outcome`/`polarity`/`origin` or provenance item | passed to `lesson_write` as is | refused (`internal_error`) before that slot is written | corrupt audit rows only; as for world snapshots | behaviour with no caller | At `54063c1788f2`: `rust/daemon/src/graph_review_slots.rs` `lessons_from_snapshots`, `str_key`, `str_field` and `str_list` reject non-string audit fields; Python curation restore passes fields onward. Caller search: `pseudolife_memory/curation_safety.py` `snapshot_record` / `_audit_snapshot`, `rust/daemon/src/graph_review_slots.rs` `lesson_dict` / `snapshot_record`, and lesson storage schema / hydration produce string fields and string provenance. No production audit writer in these paths generates the corrupt field shapes. B14b owner: B14b disposition; B1-O (curation restore). |

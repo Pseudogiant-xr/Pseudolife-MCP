@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner / why |
-|---|---|---|---|
-| An uncertain lesson commit that cannot be reconciled | latches `lesson_reconciliation_required`, blocking lesson reads and the snapshot until a recheck or restart | answers `reconciliation_required` and the error; reads are not blocked | the read slices' barrier work; a commit whose outcome is unknown |
+| Item | Python | Rust | Owner / why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| An uncertain lesson commit that cannot be reconciled | latches `lesson_reconciliation_required`, blocking lesson reads and the snapshot until a recheck or restart | answers `reconciliation_required` and the error; reads are not blocked | the read slices' barrier work; a commit whose outcome is unknown | behaviour with a caller | At `54063c1788f2`: `rust/daemon/src/dream/lessons.rs` `synthesize_lessons` / `recover` return reconciliation_required but install no persistent read latch; `pseudolife_memory/service.py` `_recover_lesson_synthesis` and `_ensure_init` retain the Python barrier. Later reads can observe different resident state. Caller: `rust/daemon/src/dream/run.rs` `run_locked` invokes lesson synthesis; `rust/daemon/src/lesson_tools.rs` lesson reads and later service calls follow an unresolved commit; B14b owner: B1-P (lesson synthesis) and B4 (recovery read barriers), B14b. |

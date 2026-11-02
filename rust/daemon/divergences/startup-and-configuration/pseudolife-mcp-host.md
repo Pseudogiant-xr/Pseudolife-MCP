@@ -1,3 +1,3 @@
-| Item | Python | Rust | Why |
-|---|---|---|---|
-| `PSEUDOLIFE_MCP_HOST=""` | asyncio binds every IPv4 and IPv6 interface | binds `0.0.0.0` only | dual-stack wildcard is packaging work (W3-J) |
+| Item | Python | Rust | Why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| `PSEUDOLIFE_MCP_HOST=""` | asyncio binds every IPv4 and IPv6 interface | binds `0.0.0.0` only | dual-stack wildcard is packaging work (W3-J) | behaviour with no caller | `rust/daemon/src/main.rs::main` turns an empty host into IPv4 wildcard; `pseudolife_memory/daemon.py::run_daemon` passes the empty host to asyncio. Bounded launch-producer search: `ops/Dockerfile.daemon-rust` and `ops/docker-compose.yml` set `0.0.0.0`; daemon/shim defaults in `rust/daemon/src/config.rs::DaemonEnv::from_env` and `pseudolife_memory/daemon.py` are loopback, never empty dual-stack intent. B14b owner: B14b no-caller disposition. |

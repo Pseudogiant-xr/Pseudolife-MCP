@@ -1,3 +1,3 @@
-| Name | Python | Rust | Why |
-|---|---|---|---|
-| MCP-BIND-AS-OF-DIGITS | `float()` reads non-ASCII decimal digits in an `as_of` string | refused unless `fromisoformat` accepts it | `as_of` producers send ASCII epoch seconds or ISO text; closable with a decimal-digit table |
+| Name | Python | Rust | Why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| MCP-BIND-AS-OF-DIGITS | `float()` reads non-ASCII decimal digits in an `as_of` string | refused unless `fromisoformat` accepts it | `as_of` producers send ASCII epoch seconds or ISO text; closable with a decimal-digit table | behaviour with no caller | `rust/daemon/src/mcp/as_of.rs::py_float` accepts ASCII digits; `pseudolife_memory/service.py::MemoryService._parse_as_of` uses Python float. Bounded producer search: history calls in `frontend/src/lib/api/graph.ts`, both shims and MCP history examples use absent/ASCII epoch or ISO as_of, not Unicode decimal strings. B14b owner: B14b no-caller disposition. |

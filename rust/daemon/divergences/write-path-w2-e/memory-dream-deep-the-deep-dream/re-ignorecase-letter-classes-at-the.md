@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner / why |
-|---|---|---|---|
-| `re.IGNORECASE` letter classes at the variant-token boundaries (`(?<![A-Za-z0-9])`) | `ı` and `İ` count as letters | they do not (the Kelvin sign and long s match in both) | variant tokens in names with those letters only |
+| Item | Python | Rust | Owner / why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| `re.IGNORECASE` letter classes at the variant-token boundaries (`(?<![A-Za-z0-9])`) | `ı` and `İ` count as letters | they do not (the Kelvin sign and long s match in both) | variant tokens in names with those letters only | behaviour with a caller | At `54063c1788f2`: `rust/daemon/src/graph_consolidation.rs` `VARIANT_PATTERNS` uses fancy-regex (?i) ASCII boundary classes; `pseudolife_memory/memory/graph_consolidation.py` `_VARIANT_PATTERNS` uses re.IGNORECASE. Dotless/dotted I can change variant conflicts and merge candidates. Caller: `rust/daemon/src/dream/deep.rs` `plan` invokes graph consolidation over entity names created by graph / fact tools; B14b owner: B1-P (dream engine), B14b. |

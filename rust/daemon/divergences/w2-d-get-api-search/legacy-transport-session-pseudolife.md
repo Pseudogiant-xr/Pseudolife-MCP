@@ -1,3 +1,3 @@
-| Item | Python | Rust | Why / owner |
-|---|---|---|---|
-| Legacy transport session (`PSEUDOLIFE_LEGACY_TRANSPORT_SESSION=1`, header `mcp-session-id`) | the event's session falls back to that header | not read | a one-release rollback switch no shipped client sets |
+| Item | Python | Rust | Why / owner | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| Legacy transport session (`PSEUDOLIFE_LEGACY_TRANSPORT_SESSION=1`, header `mcp-session-id`) | the event's session falls back to that header | read by `mcp/identity.rs::legacy_transport_session`, then used by `read/identity.rs::session_id` | closed: the opt-in legacy transport fallback is implemented | closed | `rust/daemon/src/mcp/identity.rs::legacy_transport_session`/`call_identity` read the rollback switch and transport header; `rust/daemon/src/read/identity.rs::session_id` applies the fallback, matching `pseudolife_memory/writer_context.py::_legacy_transport_session_enabled`/`_http_writer_session_detailed`. The old not-read claim is obsolete. B14b owner: none (closed). |

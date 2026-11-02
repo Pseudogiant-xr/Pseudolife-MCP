@@ -1,3 +1,3 @@
-| Item | Python | Rust | Why / owner |
-|---|---|---|---|
-| Tie order among equal scores | `torch.topk` (unspecified) and stable sorts | stable sorts, resident order | free (spec) |
+| Item | Python | Rust | Why / owner | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| Tie order among equal scores | `torch.topk` (unspecified) and stable sorts | stable sorts, resident order | B2a: result-order difference retained for D7 disposition | behaviour with a caller | `rust/daemon/src/search.rs::top_k` uses stable resident-order ties; `pseudolife_memory/memory/miras/band.py` retrieval uses torch.topk's unspecified tie selection. Equal-scoring memories can change order or selected membership at top_k, so the historical free(spec) note is not a presentation bucket. Caller: `memory_search`/GET search in `rust/daemon/src/read/search_route.rs::run`, including repeated/equal embeddings; B14b owner: B2a search ordering. |

@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner / why |
-|---|---|---|---|
-| Reply nesting between about 900 and the interpreter's depth limit | parsed | `RecursionError` | Python's limit depends on the stack; Rust's is a fixed 900 |
+| Item | Python | Rust | Owner / why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| Reply nesting between about 900 and the interpreter's depth limit | parsed | `RecursionError` | Python's limit depends on the stack; Rust's is a fixed 900 | behaviour with a caller | At `54063c1788f2`: `rust/daemon/src/mcp/py_loads.rs` `MAX_DEPTH` and `rust/daemon/src/dream/extractor.rs` `json_error_kind` cap nesting at 900; `pseudolife_memory/memory/dream.py` `OpenAIExtractor` uses interpreter-limited `json.loads`. A reply accepted by Python may fail in Rust. Caller: `rust/daemon/src/dream/extractor.rs` `Compat::post_json` and Python `OpenAIExtractor` consume endpoint replies; B14b owner: B1-P (dream engine), B14b. |

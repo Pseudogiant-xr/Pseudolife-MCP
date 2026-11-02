@@ -1,12 +1,13 @@
-# Opt-in preparation image. Build from the repository root; no release uses it.
+# Opt-in Rust image. Build from the repository root; publication is gated separately.
 # Models are provisioned on first start into the persistent model cache.
 FROM rust:1.94-bookworm AS builder
 WORKDIR /build
 COPY rust /build/rust
 RUN --mount=type=cache,id=w3j-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,id=w3j-cargo-target,target=/build/rust/target,sharing=locked \
-    cargo build --manifest-path rust/Cargo.toml --locked --release --bin pseudolife-daemon -j 3 \
-    && cp rust/target/release/pseudolife-daemon /pseudolife-daemon
+    cargo build --manifest-path rust/Cargo.toml --locked --release --bin pseudolife-daemon --bin pseudolife-stdio -j 3 \
+    && cp rust/target/release/pseudolife-daemon /pseudolife-daemon \
+    && cp rust/target/release/pseudolife-stdio /pseudolife-mcp
 # PDFium for PDF ingest, installed by the daemon's own provisioner: the pin
 # (rust/daemon/pdfium-pin.json) and checks a native install gets. The
 # provisioner publishes owner-only (root here); readable by all, so a
@@ -28,6 +29,7 @@ RUN apt-get update && apt-get -y upgrade \
 USER root
 WORKDIR /app
 COPY --from=builder /pseudolife-daemon /usr/local/bin/pseudolife-daemon
+COPY --from=builder /pseudolife-mcp /usr/local/bin/pseudolife-mcp
 COPY --from=runtime-inputs /opt/ort /opt/ort
 COPY --from=builder /opt/pdfium /opt/pdfium
 COPY plugin/hooks /app/plugin/hooks

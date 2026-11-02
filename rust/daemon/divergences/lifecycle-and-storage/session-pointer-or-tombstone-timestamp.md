@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner |
-|---|---|---|---|
-| Session-pointer or tombstone timestamp parse failures | fail before the embedder and resident-store abandon path; each initialization call retries parsing | fail inside required initialization and arm its retry backoff | W3 PG-HYDRATE; non-canonical metadata, declared divergence |
+| Item | Python | Rust | Owner | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| Session-pointer or tombstone timestamp parse failures | fail before the embedder and resident-store abandon path; each initialization call retries parsing | fail inside required initialization and arm its retry backoff | W3 PG-HYDRATE; non-canonical metadata, declared divergence | behaviour with no caller | `rust/daemon/src/startup.rs::identity_metadata` parses inside the candidate in `rust/daemon/src/service.rs::Service::init`, unlike the pre-embedder coercions in `pseudolife_memory/service.py::MemoryService._ensure_init`. Bounded producer search: active-session/tombstone writes in `pseudolife_memory/service.py`, `rust/daemon/src/session_register.rs` and `rust/daemon/src/session_close.rs` write numeric timestamps; no shipped producer writes an unparsable timestamp. B14b owner: B14b no-caller disposition. |

@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner / why |
-|---|---|---|---|
-| The oversized-community split's subgraph order | NetworkX's subgraph view: the member set's hash order when the community is under half the graph, the parent's order otherwise | the parent's node and adjacency order | the second partition pass only; the same structural comparison covers it (`planted-5x40-split`) |
+| Item | Python | Rust | Owner / why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| The oversized-community split's subgraph order | NetworkX's subgraph view: the member set's hash order when the community is under half the graph, the parent's order otherwise | the parent's node and adjacency order | the second partition pass only; the same structural comparison covers it (`planted-5x40-split`) | behaviour with a caller | At `54063c1788f2`: `rust/daemon/src/graph_insight.rs` `subgraph` preserves parent order before a second `louvain`; `pseudolife_memory/memory/graph_insight.py` `detect_communities` passes NetworkX subgraph views into `_partition`. The split can change community assignments. Caller: `rust/daemon/src/graph_insight.rs` `compute` / Python `_refresh_graph_insight` split communities larger than max_community_fraction; B14b owner: B1-P2b (graph insight / Option B disposition), B14b. |

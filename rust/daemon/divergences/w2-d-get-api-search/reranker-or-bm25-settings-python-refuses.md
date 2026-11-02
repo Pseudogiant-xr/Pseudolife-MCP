@@ -1,3 +1,3 @@
-| Item | Python | Rust | Why / owner |
-|---|---|---|---|
-| Reranker or BM25 settings Python refuses (`reranker.fusion_weight` outside [0, 1], `reranker.top_n < 1`, `bm25.k1 < 0`, `bm25.b` outside [0, 1]) | init fails (500 on every route) or every BM25 search answers 400 | accepted as given | canonical configs use the shipped defaults; W1-A's early-refusal policy can absorb them |
+| Item | Python | Rust | Why / owner | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| Reranker or BM25 settings Python refuses (`reranker.fusion_weight` outside [0, 1], `reranker.top_n < 1`, `bm25.k1 < 0`, `bm25.b` outside [0, 1]) | init fails (500 on every route) or every BM25 search answers 400 | accepted as given | canonical configs use the shipped defaults; W1-A's early-refusal policy can absorb them | behaviour with no caller | `rust/daemon/src/search.rs::rank`/`bm25_score` accept configured numeric knobs; `pseudolife_memory/memory/reranker.py::CrossEncoderReranker.__init__` and `pseudolife_memory/memory/bm25.py::BM25Index.__init__` reject these ranges. Bounded producer search: defaults in `pseudolife_memory/utils/config.py` are in range and Console writes in `pseudolife_memory/web/config_io.py` enforce knob bounds; no shipped writer generates the invalid values. B14b owner: B14b no-caller disposition. |

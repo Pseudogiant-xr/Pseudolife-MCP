@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner / why |
-|---|---|---|---|
-| `stance` and `provenance` on a fact write | written by the dream and consolidation | ported: the stance follows the latest asserting write, provenance is cleaned (`_clean_prov`) and unioned on a confirm; over MCP both stay none (a confirm still clears a stored stance, as Python's does) | same |
+| Item | Python | Rust | Owner / why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| `stance` and `provenance` on a fact write | written by the dream and consolidation | ported: the stance follows the latest asserting write, provenance is cleaned (`_clean_prov`) and unioned on a confirm; over MCP both stay none (a confirm still clears a stored stance, as Python's does) | The dream now supplies stance and quarantine provenance through `dream/run.rs`; the MCP binding still supplies neither. | closed | Verified at `54063c17`: `rust/daemon/src/dream/run.rs::Pass::claim_args` carries stance and its quarantine branches populate provenance; `rust/daemon/src/fact_set.rs::cortex_write` passes both to `rust/daemon/src/stores/cortex_write.rs::FactWrite`. The store cleans/unions provenance and confirms stance as `pseudolife_memory/memory/cortex.py::CortexStore.write_fact` does; MCP keeps neutral values. B14b owner: none (closed). |

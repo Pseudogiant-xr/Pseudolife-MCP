@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner / why |
-|---|---|---|---|
-| The digest prompt-echo patterns | Python `re` (`IGNORECASE`, Unicode 14 `\b`) | the regex crate's Unicode `\b` and simple case folding | rare characters only |
+| Item | Python | Rust | Owner / why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| The digest prompt-echo patterns | Python `re` (`IGNORECASE`, Unicode 14 `\b`) | the regex crate's Unicode `\b` and simple case folding | rare characters only | behaviour with a caller | At `54063c1788f2`: `rust/daemon/src/dream/stage_calls.rs` `digest_echo` / `parse_digest` use regex crate boundaries and folding; `pseudolife_memory/memory/dream.py` `_DIGEST_PROMPT_ECHO` / `_parse_digest` use Python re. This decides whether a digest is accepted or retried. Caller: `rust/daemon/src/dream/stages.rs` `generate_digests_stage` consumes arbitrary session context and generated digest text; B14b owner: B1-P (dream engine), B14b. |

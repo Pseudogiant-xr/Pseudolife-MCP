@@ -1,3 +1,3 @@
-| Item | Python | Rust | Why / owner |
-|---|---|---|---|
-| `memory_stats` `true_drops_total` from a malformed `capacity_true_drops` count | `int()` of any value Python accepts, including non-ASCII digit strings | integers, floats (truncated), booleans and ASCII integer strings; anything else serves both drop keys as null, as Python does for what `int()` rejects | the only writer stores a JSON integer |
+| Item | Python | Rust | Why / owner | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| `memory_stats` `true_drops_total` from a malformed `capacity_true_drops` count | `int()` of any value Python accepts, including non-ASCII digit strings | integers, floats (truncated), booleans and ASCII integer strings; anything else serves both drop keys as null, as Python does for what `int()` rejects | the only writer stores a JSON integer | behaviour with no caller | `rust/daemon/src/read/stats.rs::py_int` uses ASCII string digits versus Python int in `pseudolife_memory/service.py::MemoryService.stats`. Bounded meta-writer search: `pseudolife_memory/memory/cms.py` capacity-eviction accounting and `rust/daemon/src/store.rs` capacity_true_drops write a JSON integer count; neither writes a localized numeric string. B14b owner: B14b no-caller disposition. |

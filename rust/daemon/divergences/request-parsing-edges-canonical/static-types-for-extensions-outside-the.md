@@ -1,3 +1,3 @@
-| Item | Python | Rust |
-|---|---|---|
-| Static types for extensions outside the Console build | platform `mimetypes` tables | `application/octet-stream` for unknown extensions; the shipped vendor Markdown notice uses its platform type |
+| Item | Python | Rust | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|
+| Static types for extensions outside the Console build | platform `mimetypes` tables | `application/octet-stream` for unknown extensions; the shipped vendor Markdown notice uses its platform type | behaviour with no caller | `rust/daemon/src/static_files.rs::guess_type_with` covers shipped extensions and otherwise falls back to octet-stream; `pseudolife_memory/web/api.py` uses platform mimetypes. Bounded asset inventory: `pseudolife_memory/web/static` contains html/css/js/png/webp/woff2/txt and vendor Markdown, all explicitly handled; no shipped asset uses another extension. A changed MIME type could affect rendering, so this is behavioural. B14b owner: B14b no-caller disposition. |

@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner / why |
-|---|---|---|---|
-| `/api/graph/rejudge` (`review_rejudge`, `review_judgments.requeue`) | served | not served: the daemon serves no `/api/graph/*` route | the web API slice; `requeue` also reads the curation and candidate queues (task P3b) |
+| Item | Python | Rust | Owner / why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| `/api/graph/rejudge` (`review_rejudge`, `review_judgments.requeue`) | served | served by `routes/graph.rs::rejudge` | missing-route obligation closed; the adapter includes the curation and candidate queues | closed | At `54063c1788f2`: `rust/daemon/src/routes/console.rs` `route` mounts `graph::route`; `rust/daemon/src/routes/graph.rs` `SERVED`, `route`, `write`, `rejudge` and `bounded_requeue` serve POST /api/graph/rejudge for merge/link/junk/curation/candidate queues. This closes the missing-route obligation; it does not claim unrelated cutover acceptance proofs are complete. B14b owner: none (this obligation is closed). |

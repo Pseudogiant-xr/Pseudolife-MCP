@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner / why |
-|---|---|---|---|
-| A failed lesson batch's `error` text for a database failure | psycopg's message | tokio-postgres' message | failure path only; extractor failures and the acknowledgement mismatch carry Python's text |
+| Item | Python | Rust | Owner / why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| A failed lesson batch's `error` text for a database failure | psycopg's message | tokio-postgres' message | failure path only; extractor failures and the acknowledgement mismatch carry Python's text | presentation | At `54063c1788f2`: `rust/daemon/src/dream/lessons.rs` `synthesize_lessons` reports `error_text` from the failed database batch; `pseudolife_memory/service_dream.py` `synthesize_lessons` reports `str(exc)`. This entry covers the diagnostic wording only; unresolved-commit gating is separately tracked. B14b owner: B14b presentation disposition. |

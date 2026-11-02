@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner / why |
-|---|---|---|---|
-| `custom` band `retention_policy` other than `balanced` | its own eviction score | scored as `balanced` | same |
+| Item | Python | Rust | Owner / why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| `custom` band `retention_policy` other than `balanced` | its own eviction score | scored as `balanced` | same | behaviour with a caller | Verified at `54063c17`: `rust/daemon/src/config.rs::read_startup_bands` accepts `recency_heavy` and `surprise_heavy`, but `rust/daemon/src/store.rs::first_band_victim` uses `retention_score_as` with balanced weights; Python `pseudolife_memory/memory/miras/band.py::MIRASBand._evict_one` uses the selected policy from `pseudolife_memory/memory/miras/retention.py`. Caller: `rust/daemon/src/store.rs::store_body` at capacity with a custom preset loaded by `config::load`; B14b owner: B14b W2-E custom-retention closure. |

@@ -1,3 +1,3 @@
-| Item | Python | Rust | Why |
-|---|---|---|---|
-| Wrong-typed values for keys Python does not validate (`memory.top_k: abc`), and sections that are null or not mappings (`updates:` with every child commented out) | starts, fails later at use, or omits that `/health` key | refuses to start (exit 1) naming the key | fail early instead of serving a half-broken daemon |
+| Item | Python | Rust | Why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| Wrong-typed values for keys Python does not validate (`memory.top_k: abc`), and sections that are null or not mappings (`updates:` with every child commented out) | starts, fails later at use, or omits that `/health` key | refuses to start (exit 1) naming the key | fail early instead of serving a half-broken daemon | behaviour with no caller | `rust/daemon/src/config.rs::want_int`, `want_bool` and mapping validation refuse early; Python `pseudolife_memory/utils/config.py::_dict_to_dataclass` retains unvalidated values. Bounded config-writer search: `pseudolife_memory/web/config_io.py::write_config` validates `KNOBS`, while installer config writers in `ops/install.sh`/`ops/install.ps1` produce mappings/typed leaves; null/wrong-type hand edits are outside those writers. B14b owner: B14b no-caller disposition. |

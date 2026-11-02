@@ -1,3 +1,3 @@
-| Item | Python | Rust | Why / owner |
-|---|---|---|---|
-| `memory_stats` counters persisted in `cms_counters` (`interaction_count`, per-band `hit_count`, `retrieval_queries`; schema v57, D2) | restored at startup from the bank's row, so they count across restarts | the same | closed (B4): the `cms_counters` rows below |
+| Item | Python | Rust | Why / owner | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| `memory_stats` counters persisted in `cms_counters` (`interaction_count`, per-band `hit_count`, `retrieval_queries`; schema v57, D2) | restored at startup from the bank's row, so they count across restarts | the same | closed (B4): the `cms_counters` rows below | closed | `rust/daemon/src/service.rs::Service::load_counters`/`save_counters` and `rust/daemon/src/counters.rs::apply`/`put` restore and persist cms_counters, matching `pseudolife_memory/service.py::MemoryService._load_counters`; existing differential: `rust/daemon/harness/w2e.py` counters-restore. B14b owner: none (closed). |

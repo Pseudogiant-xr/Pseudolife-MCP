@@ -1,3 +1,3 @@
-| Item | Python | Rust | Why / owner |
-|---|---|---|---|
-| `memory_stats` `true_drops` under a multi-band preset | counts evictions out of the last band only (earlier bands relocate) | counts every eviction, as every Rust eviction is a true drop (the multi-band store row below) | the opt-in presets; flat is the default |
+| Item | Python | Rust | Why / owner | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| `memory_stats` `true_drops` under a multi-band preset | counts evictions out of the last band only (earlier bands relocate) | counts every eviction, as every Rust eviction is a true drop (the multi-band store row below) | the opt-in presets; flat is the default | behaviour with a caller | `rust/daemon/src/read/stats.rs::record_true_drop` counts Rust evictions; `rust/daemon/src/store.rs` drops rather than relocating across bands, unlike `pseudolife_memory/memory/cms.py` multi-band relocation. Stats inherits a durable retention/result difference. Caller: opt-in multi-band presets in `pseudolife_memory/utils/config.py` used by `memory_store` and `memory_stats`; B14b owner: B4 multi-band storage. |

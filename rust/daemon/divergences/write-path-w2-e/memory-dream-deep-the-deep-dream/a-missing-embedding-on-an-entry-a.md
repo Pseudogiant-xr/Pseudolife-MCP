@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner / why |
-|---|---|---|---|
-| A missing embedding on an entry a context vector stacks, or `min_entity_mentions` at 0 with no mention | numpy's `ValueError` text | an internal error with Rust's wording | `entries.embedding` is `NOT NULL`; the default is 2 |
+| Item | Python | Rust | Owner / why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| A missing embedding on an entry a context vector stacks, or `min_entity_mentions` at 0 with no mention | numpy's `ValueError` text | an internal error with Rust's wording | `entries.embedding` is `NOT NULL`; the default is 2 | behaviour with no caller | At `54063c1788f2`: `rust/daemon/src/graph_consolidation.rs` `entity_context_vectors` refuses missing / empty rows; `pseudolife_memory/memory/graph_consolidation.py` `entity_context_vectors` calls numpy.stack. Caller search: `pseudolife_memory/storage/schema.py` entries.embedding is NOT NULL; `pseudolife_memory/service_dream.py` `deep_dream` / `_judge_evidence_locked` use stored embeddings and configured min_entity_mentions. A search of `pseudolife_memory/`, `plugin/`, `ops/`, `.github/`, and `pyproject.toml` finds the shipped min_entity_mentions default 2 and no producer setting 0. Corrupt rows or a manual zero override are outside that bounded producer set. B14b owner: B14b disposition; B1-P (dream engine). |

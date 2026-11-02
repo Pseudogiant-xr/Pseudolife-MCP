@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner |
-|---|---|---|---|
-| JSON-RPC message validation: batches, non-object messages, ids that are not integers or strings | pydantic union validation | 400 -32602 with a fixed message (the text after `Validation error: ` is free) | non-canonical |
+| Item | Python | Rust | Owner | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| JSON-RPC message validation: batches, non-object messages, ids that are not integers or strings | pydantic union validation | 400 -32602 with a fixed message (the text after `Validation error: ` is free) | non-canonical | presentation | `rust/daemon/src/mcp/mod.rs::classify`/`post` and `rust/daemon/src/mcp/validation.rs::request` enforce the message boundary pinned to the Python SDK schema by `rust/daemon/harness/mcp_validation_schema.py`; this row's fixed validation prose is free only after the same status/code and admission decision. B14b owner: B14b presentation disposition. |

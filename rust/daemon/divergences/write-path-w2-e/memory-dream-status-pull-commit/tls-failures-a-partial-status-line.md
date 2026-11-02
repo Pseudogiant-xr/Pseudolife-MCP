@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner / why |
-|---|---|---|---|
-| TLS failures, a partial status line, headers hyper rejects | Python's class names (`SSLCertVerificationError`, `BadStatusLine`) or success | `OSError`, `RemoteDisconnected`, `BadStatusLine` | transport edge cases |
+| Item | Python | Rust | Owner / why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| TLS failures, a partial status line, headers hyper rejects | Python's class names (`SSLCertVerificationError`, `BadStatusLine`) or success | `OSError`, `RemoteDisconnected`, `BadStatusLine` | transport edge cases | behaviour with a caller | At `54063c1788f2`: `rust/daemon/src/dream/extractor.rs` `transport_failure` maps reqwest / hyper errors; `pseudolife_memory/memory/dream.py` `classify_extractor_error` follows urllib exceptions. Header acceptance and error classes can change success or the structured stall reason, not just wording. Caller: `rust/daemon/src/dream/extractor.rs` `Compat::post` / `get` and Python extractor / endpoint probes handle real TLS and malformed endpoint responses; B14b owner: B1-P (dream engine), B14b. |
