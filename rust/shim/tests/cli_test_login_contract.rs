@@ -17,6 +17,22 @@ const DEFERRED: &str = "pseudolife-stdio: mode 'test-login' is deferred in this 
 const CLOSED_URL: &str = "postgresql://postgres@127.0.0.1:1/postgres";
 const ABSENT: &str = "pl-cf-w1c-testlogin-absent";
 
+#[test]
+fn help_does_not_require_an_admin_connection_or_write_a_login() {
+    let home = Home::new("help");
+    for arguments in [&["--help"][..], &["create", "--help"]] {
+        let output = run(home.path(), arguments, &[]);
+        assert_eq!(output.status.code(), Some(0));
+        assert!(
+            output
+                .stdout
+                .starts_with(b"usage: pseudolife-mcp test-login")
+        );
+        assert!(output.stderr.is_empty());
+    }
+    assert!(home.listing().is_empty());
+}
+
 struct Home(PathBuf);
 
 impl Home {
@@ -110,9 +126,6 @@ fn non_canonical_argv_defers_before_any_effect() {
     let url = ["--admin-url", CLOSED_URL];
     for arguments in [
         &[][..],
-        &["--help"],
-        &["create", "--help"],
-        &["-h"],
         &["--json", "create"],
         &["create", "extra"],
         &["create", "--rot"],
@@ -264,7 +277,17 @@ fn write_failures_the_oracle_would_report_defer_before_connecting() {
     if let Some(locked) = Locked::new(home.path().join("locked")) {
         let inside = locked.0.join("x.env");
         let nested = locked.0.join("sub").join("x.env");
-        for file in [&inside, &nested] {
+        // Some Windows accounts can create directories despite the deny ACL
+        // (the Python oracle can too). Only assert refusal for a blocked shape.
+        let blocks_directory = match fs::create_dir(nested.parent().unwrap()) {
+            Ok(()) => {
+                fs::remove_dir(nested.parent().unwrap()).unwrap();
+                false
+            }
+            Err(_) => true,
+        };
+        let files = std::iter::once(&inside).chain(blocks_directory.then_some(&nested));
+        for file in files {
             assert_deferred(
                 &home,
                 &[
