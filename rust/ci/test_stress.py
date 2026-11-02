@@ -245,9 +245,9 @@ RETRY = "board_retry_contract"
     (["pseudolife-stdio/board_retry_contract::m::b"],
      {f"pseudolife-stdio::{RETRY}": [("a", FILTERED), ("c", IGNORED), ("m::b", "")]}, ""),
     (["pseudolife-stdio/board_retry_contract"],
-     {f"pseudolife-stdio::{RETRY}": [("a", ""), ("c", IGNORED)]}, "1 of 2 selected tests skipped"),
+     {f"pseudolife-stdio::{RETRY}": [("a", ""), ("c", IGNORED)]}, ""),
     (["pseudolife-stdio/board_retry_contract::c"],
-     {f"pseudolife-stdio::{RETRY}": [("a", FILTERED), ("c", IGNORED)]}, "1 of 1 selected tests skipped"),
+     {f"pseudolife-stdio::{RETRY}": [("a", FILTERED), ("c", IGNORED)]}, "no test ran for pseudolife-stdio/board_retry_contract::c"),
     (["pseudolife-stdio/board_retry_contract"],
      {f"pseudolife-stdio::{RETRY}": [("a", '<failure message="x"/>')]}, "1 of 1 selected tests did not pass"),
     (["pseudolife-stdio/board_retry_contract"],
@@ -306,13 +306,39 @@ def test_library_and_integration_lib_evidence_use_distinct_suites(tmp_path, targ
 
 @pytest.mark.parametrize("cases, note", [
     ([("a", ""), ("b", "")], ""),
-    ([("a", ""), ("b", IGNORED)], "1 of 2 selected tests skipped; a skip is not evidence"),
+    ([("a", ""), ("b", IGNORED)], ""),
+    ([("a", IGNORED)], "no test ran for pseudolife-stdio/lib"),
     ([("a", '<failure message="x"/>')], "1 of 1 selected tests did not pass"),
     ([], "no test ran for pseudolife-stdio/lib"),
 ])
 def test_whole_library_evidence_requires_every_selected_test(tmp_path, cases, note):
     (tmp_path / "junit.xml").write_text(nextest_junit({"pseudolife-stdio": cases}), encoding="utf-8")
     assert stress.evidence("cargo", ["pseudolife-stdio/lib"], tmp_path) == note
+
+
+@pytest.mark.parametrize("child", [
+    '<skipped message="runtime dependency unavailable"/>',
+    '<skipped message="test does not match the run-ignored option"/>',
+    '<skipped/>',
+    FILTERED,
+    IGNORED + '<failure message="failed before exclusion"/>',
+])
+def test_runtime_or_unrecognized_skips_still_fail_a_whole_binary(tmp_path, child):
+    (tmp_path / "junit.xml").write_text(nextest_junit({
+        f"pseudolife-stdio::{RETRY}": [("passed", ""), ("skipped", child)],
+    }), encoding="utf-8")
+    assert stress.evidence("cargo", [f"pseudolife-stdio/{RETRY}"], tmp_path) == (
+        "1 of 2 selected tests skipped; a skip is not evidence")
+
+
+def test_default_ignored_tests_do_not_appear_as_executed_timings(tmp_path):
+    report = tmp_path / "junit.xml"
+    report.write_text(nextest_junit({f"pseudolife-stdio::{RETRY}": [
+        ("passed", ""), ("ignored", IGNORED),
+    ]}), encoding="utf-8")
+    assert stress.cargo_times([f"pseudolife-stdio/{RETRY}"], report) == {
+        f"pseudolife-stdio::{RETRY}::passed": 0.0,
+    }
 
 
 def test_a_cargo_iteration_without_a_junit_report_is_no_evidence(tmp_path):
@@ -425,9 +451,9 @@ NEXTEST_0_9_146 = """<?xml version="1.0" encoding="UTF-8"?>
 
 @pytest.mark.parametrize("names, note", [
     (["app-x/probe_one::inner::nested", "app-x/probe_two"], ""),
-    # Whole probe_one: its ignored test and the two the run filtered out are skips.
-    (["app-x/probe_one"], "3 of 4 selected tests skipped"),
-    (["app-x/probe_one::ignored"], "1 of 1 selected tests skipped"),
+    # Whole probe_one: the two expression-filtered tests were requested but did not run.
+    (["app-x/probe_one"], "2 of 3 selected tests skipped"),
+    (["app-x/probe_one::ignored"], "no test ran for app-x/probe_one::ignored"),
 ])
 def test_cargo_evidence_reads_a_real_nextest_report(tmp_path, names, note):
     (tmp_path / "junit.xml").write_text(NEXTEST_0_9_146, encoding="utf-8")
