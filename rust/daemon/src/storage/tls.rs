@@ -226,7 +226,11 @@ pub(super) fn parse_in(dsn: &str, environment: Environment) -> Result<Config, St
             "PGSSLCOMPRESSION" => "sslcompression",
             "PGSSLCERTMODE" => "sslcertmode",
             "PGSSLNEGOTIATION" => "sslnegotiation",
+            "PGSSLMINPROTOCOLVERSION" => "ssl_min_protocol_version",
             "PGGSSENCMODE" => "gssencmode",
+            "PGKRBSRVNAME" => "krbsrvname",
+            "PGGSSDELEGATION" => "gssdelegation",
+            "PGREQUIRESSL" => "requiressl",
             "PGCHANNELBINDING" => "channel_binding",
             _ => return Err(unsupported(&name)),
         };
@@ -238,12 +242,17 @@ pub(super) fn parse_in(dsn: &str, environment: Environment) -> Result<Config, St
     {
         return Err(unsupported("gssencmode"));
     }
-    // These libpq defaults do not require an unsupported feature. Optional
-    // compression can remain off; GSS prefer permits this non-GSS transport.
+    // These exact defaults do not demand additional TLS features. GSS prefer
+    // uses this non-GSS transport even with a Kerberos cache (declared in
+    // tls-and-libpq-conventions); GSS require is refused above.
     for (name, supported) in [
         ("sslsni", &["1"][..]),
         ("sslcompression", &["0", "1"][..]),
         ("sslcertmode", &["allow"][..]),
+        ("ssl_min_protocol_version", &["TLSv1.2"][..]),
+        ("krbsrvname", &["postgres"][..]),
+        ("gssdelegation", &["0"][..]),
+        ("requiressl", &["0"][..]),
     ] {
         if fields
             .remove(name)
@@ -358,6 +367,22 @@ fn exists(path: &Path, option: &str) -> Result<bool, String> {
 fn file_error(option: &str) -> String {
     format!("cannot load {option}; configure a readable PEM file or use the Python engine")
 }
+fn root_exists(path: &Path) -> bool {
+    // libpq treats any root-certificate stat failure as an absent root. Client
+    // certificate errors use the stricter exists() path instead.
+    std::fs::metadata(path).is_ok()
+}
+
+#[derive(Debug)]
+pub(super) enum ConnectorError {
+    Policy(String),
+    Setup(String),
+}
+impl From<String> for ConnectorError {
+    fn from(message: String) -> Self {
+        Self::Setup(message)
+    }
+}
 fn encrypted_key(bytes: &[u8]) -> bool {
     let mut private_key = false;
     for line in String::from_utf8_lossy(bytes).lines().map(str::trim) {
@@ -394,13 +419,10 @@ impl Config {
             .or_else(|| self.directory.as_ref().map(|p| p.join(default)))
     }
     pub(super) fn supported_files(&self) -> Result<(), String> {
-        if let Some(directory) = &self.directory
-            && exists(&directory.join("root.crl"), "root.crl")?
-        {
-            return Err(unsupported("root.crl"));
-        }
         if let Some(cert) = self.path(&self.cert, "postgresql.crt")
-            && exists(&cert, "sslcert")?
+            // Leave certificate stat errors to identity(): they are TLS setup
+            // failures, not evidence of an unsupported encryption policy.
+            && std::fs::metadata(cert).is_ok()
             && let Some(key) = self.path(&self.key, "postgresql.key")
             && let Ok(bytes) = std::fs::read(key)
             && encrypted_key(&bytes)
@@ -409,12 +431,14 @@ impl Config {
         }
         Ok(())
     }
-    pub(super) fn connector(&self) -> Result<tokio_postgres_rustls::MakeRustlsConnect, String> {
+    pub(super) fn connector(
+        &self,
+    ) -> Result<tokio_postgres_rustls::MakeRustlsConnect, ConnectorError> {
         let roots = if self.system {
             let loaded = rustls_native_certs::load_native_certs();
             Some(system_roots(loaded.certs)?)
         } else if let Some(path) = self.path(&self.root, "root.crt") {
-            if exists(&path, "sslrootcert")? {
+            if root_exists(&path) {
                 Some(crypto::roots(&path).map_err(|_| file_error("sslrootcert"))?)
             } else {
                 None
@@ -422,16 +446,25 @@ impl Config {
         } else {
             None
         };
+        // libpq considers its default CRL only after loading a file root, not
+        // with system roots or an absent root. CRL I/O failures are ignored.
+        if !self.system
+            && roots.is_some()
+            && let Some(directory) = &self.directory
+            && std::fs::read(directory.join("root.crl")).is_ok()
+        {
+            return Err(ConnectorError::Policy(unsupported("root.crl")));
+        }
         let verification = match (self.mode, roots) {
             (SslMode::VerifyFull, Some(roots)) => crypto::Verification::Hostname(roots),
             (SslMode::VerifyCa | SslMode::VerifyFull, None) => {
-                return Err(file_error("sslrootcert"));
+                return Err(file_error("sslrootcert").into());
             }
             (_, Some(roots)) => crypto::Verification::CertificateAuthority(roots),
             (_, None) => crypto::Verification::EncryptionOnly,
         };
         crypto::connector_with_identity(verification, self.identity()?)
-            .map_err(|_| "invalid sslcert/sslkey pair; configure matching PEM certificate and unencrypted private key".into())
+            .map_err(|_| ConnectorError::Setup("invalid sslcert/sslkey pair; configure matching PEM certificate and unencrypted private key".into()))
     }
     fn identity(&self) -> Result<Option<crypto::Identity>, String> {
         let Some(cert) = self.path(&self.cert, "postgresql.crt") else {
@@ -599,6 +632,92 @@ mod tests {
     }
     fn parse(text: &str) -> Config {
         parse_in(text, Environment::default()).unwrap()
+    }
+    #[test]
+    fn review_round2_libpq_defaults_and_dsn_overrides() {
+        for (environment, key, value) in [
+            (
+                "PGSSLMINPROTOCOLVERSION",
+                "ssl_min_protocol_version",
+                "TLSv1.2",
+            ),
+            ("PGKRBSRVNAME", "krbsrvname", "postgres"),
+            ("PGGSSDELEGATION", "gssdelegation", "0"),
+            ("PGREQUIRESSL", "requiressl", "0"),
+        ] {
+            let env = |value: &str| Environment {
+                values: BTreeMap::from([(environment.into(), value.into())]),
+                ..Default::default()
+            };
+            assert!(parse_in("", env(value)).is_ok(), "{environment}");
+            assert!(parse_in(&format!("{key}={value}"), env("unsupported")).is_ok());
+            assert!(parse_in("", env("unsupported")).is_err());
+            assert!(parse_in(&format!("{key}=unsupported"), env(value)).is_err());
+        }
+    }
+    #[test]
+    fn review_round2_stray_crl_is_unused_without_file_roots() {
+        let directory = Directory::new();
+        std::fs::write(directory.path().join("root.crl"), "fixture").unwrap();
+        for dsn in ["sslmode=require", "sslrootcert=system"] {
+            let config = parse_in(
+                dsn,
+                Environment {
+                    directory: Some(directory.path().into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            assert!(config.supported_files().is_ok(), "{dsn}");
+            if dsn == "sslmode=require" {
+                assert!(config.connector().is_ok());
+            }
+        }
+    }
+    #[test]
+    fn review_round2_loaded_file_roots_keep_crl_refusal() {
+        let directory = Directory::new();
+        let fixture =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../shim/tests/fixtures/pg_tls/ca.pem");
+        std::fs::copy(fixture, directory.path().join("root.crt")).unwrap();
+        std::fs::write(directory.path().join("root.crl"), "fixture").unwrap();
+        let config = parse_in(
+            "sslmode=require",
+            Environment {
+                directory: Some(directory.path().into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert!(
+            matches!(config.connector(), Err(ConnectorError::Policy(message)) if message.contains("root.crl"))
+        );
+    }
+    #[cfg(unix)]
+    #[test]
+    fn review_round2_denied_ambient_root_stat_is_absent() {
+        use std::os::unix::fs::PermissionsExt;
+        let directory = Directory::new();
+        let root = directory.path().join("root.crt");
+        std::fs::write(&root, "fixture").unwrap();
+        std::fs::set_permissions(directory.path(), std::fs::Permissions::from_mode(0o0)).unwrap();
+        let denied = std::fs::metadata(&root).map(|_| ()).map_err(|e| e.kind());
+        let result = root_exists(&root);
+        let config = parse_in(
+            "sslmode=require",
+            Environment {
+                directory: Some(directory.path().into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let identity = config.connector();
+        std::fs::set_permissions(directory.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert_eq!(denied, Err(std::io::ErrorKind::PermissionDenied));
+        assert!(!result);
+        assert!(
+            matches!(identity, Err(ConnectorError::Setup(message)) if message.contains("sslcert"))
+        );
     }
     #[test]
     fn review_compat_environment_defaults_do_not_demand_unsupported_features() {
@@ -895,12 +1014,12 @@ mod tests {
 
     #[test]
     fn unsupported_security_controls_are_named_and_redacted() {
-        for name in [
-            "PGSSLCRL",
-            "PGSSLCRLDIR",
-            "PGSSLMINPROTOCOLVERSION",
-            "PGREQUIRESSL",
-            "PGGSSDELEGATION",
+        for (name, option) in [
+            ("PGSSLCRL", "PGSSLCRL"),
+            ("PGSSLCRLDIR", "PGSSLCRLDIR"),
+            ("PGSSLMINPROTOCOLVERSION", "ssl_min_protocol_version"),
+            ("PGREQUIRESSL", "requiressl"),
+            ("PGGSSDELEGATION", "gssdelegation"),
         ] {
             let error = parse_in(
                 "",
@@ -910,7 +1029,7 @@ mod tests {
                 },
             )
             .unwrap_err();
-            assert!(error.contains(name) && error.contains("Python"));
+            assert!(error.contains(option) && error.contains("Python"));
             assert!(!error.contains("private-value"));
         }
         let directory = Directory::new();
@@ -923,7 +1042,14 @@ mod tests {
         )
         .unwrap();
         std::fs::write(directory.path().join("root.crl"), "fixture").unwrap();
-        assert!(config.supported_files().unwrap_err().contains("root.crl"));
+        std::fs::copy(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../shim/tests/fixtures/pg_tls/ca.pem"),
+            directory.path().join("root.crt"),
+        )
+        .unwrap();
+        assert!(
+            matches!(config.connector(), Err(ConnectorError::Policy(message)) if message.contains("root.crl"))
+        );
         std::fs::remove_file(directory.path().join("root.crl")).unwrap();
         std::fs::write(directory.path().join("postgresql.crt"), "fixture").unwrap();
         std::fs::write(

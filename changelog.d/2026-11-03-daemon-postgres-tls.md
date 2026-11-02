@@ -9,3 +9,6 @@ comparison covers TLS negotiation, fallback and client authentication against
 the Python engine; remaining libpq conventions stay explicitly tracked.
 Benign TLS environment defaults and unused certificate files no longer block
 plaintext connections, and system trust tolerates malformed individual roots.
+Root/CRL loading follows libpq file-root rules; four further benign environment
+defaults honor DSN precedence. Multi-host fallback is tested against libpq; the remaining GSS-prefer
+difference is explicitly documented.

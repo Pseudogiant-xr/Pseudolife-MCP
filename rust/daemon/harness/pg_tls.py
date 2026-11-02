@@ -117,6 +117,9 @@ def compare(docker, image, root, evidence, oracle_only):
     environment["HOME"] = str(client_home)
     environment.update(SSL_CERT_FILE=str(root/"ca.pem"), SSL_CERT_DIR=str(root/"empty-roots"))
     (root/"empty-roots").mkdir()
+    stray_home = root/"stray-crl-home"
+    (stray_home/".postgresql").mkdir(parents=True)
+    (stray_home/".postgresql/root.crl").write_text("unused CRL fixture\n")
     records = []
     with patch.dict(os.environ, environment, clear=True):
         for policy in ("both", "plain", "tls-only", "client-cert"):
@@ -133,6 +136,16 @@ def compare(docker, image, root, evidence, oracle_only):
                             cases.append(dict(name=f"{policy}/{mode}/{ca}/client={identity}", guard_dsn=guard, dsn=guard+options))
                 if policy == "both":
                     cases.append(dict(name="system/implicit-verify-full",guard_dsn=guard,dsn=guard+" sslrootcert=system"))
+                    for mode in ("prefer", "require"):
+                        cases.append(dict(name=f"unused-crl/{mode}/no-file-root",guard_dsn=guard,
+                                          dsn=guard+f" sslmode={mode}",client_home=str(stray_home)))
+                    cases.append(dict(name="unused-crl/system-root",guard_dsn=guard,
+                                      dsn=guard+" sslrootcert=system",client_home=str(stray_home)))
+                    for name, value in (("PGSSLMINPROTOCOLVERSION", "TLSv1.2"),
+                                        ("PGKRBSRVNAME", "postgres"), ("PGGSSDELEGATION", "0"),
+                                        ("PGREQUIRESSL", "0")):
+                        cases.append(dict(name=f"environment-default/{name}",guard_dsn=guard,
+                                          dsn=guard+" sslmode=require",environment={name:value}))
                     address_guard = guard.replace("host=localhost", "hostaddr=127.0.0.1")
                     for mode in MODES:
                         options = "" if mode == "default" else f" sslmode={mode}"
@@ -147,12 +160,15 @@ def compare(docker, image, root, evidence, oracle_only):
                                           environment={"PGCHANNELBINDING": ambient}))
                 for case in cases:
                     try:
-                        with patch.dict(os.environ, case.get("environment", {})):
+                        case_environment = dict(case.get("environment", {}))
+                        if "client_home" in case:
+                            case_environment["HOME"] = case["client_home"]
+                        with patch.dict(os.environ, case_environment):
                             with psycopg.connect(case["dsn"], connect_timeout=3) as conn:
                                 case.update(accepted=True,tls=conn.execute("SELECT ssl FROM pg_stat_ssl WHERE pid=pg_backend_pid()").fetchone()[0])
                     except psycopg.Error:
                         case.update(accepted=False,tls=None)
-                records.extend({k:v for k,v in c.items() if k not in ("dsn","guard_dsn","environment")} for c in cases)
+                records.extend({k:v for k,v in c.items() if k not in ("dsn","guard_dsn","environment","client_home")} for c in cases)
                 if not oracle_only:
                     casefile=root/"cases.json"
                     casefile.write_text(json.dumps(cases))

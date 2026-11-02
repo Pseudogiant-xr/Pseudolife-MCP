@@ -57,8 +57,10 @@ fn protocol_config(listener: &TcpListener, mode: &str) -> super::Config {
 
 #[tokio::test]
 async fn review_compat_plain_server_ignores_unused_tls_files() {
+    // allow is coverage-only: its successful plaintext path already bypassed
+    // TLS files before the prefer regression was repaired.
     for mode in ["prefer", "allow"] {
-        for fixture in ["crl", "encrypted", "unreadable"] {
+        for fixture in ["crl", "encrypted", "not-directory"] {
             let home = ClientHome::new();
             let directory = match fixture {
                 "crl" => {
@@ -117,8 +119,118 @@ async fn review_compat_plain_server_ignores_unused_tls_files() {
 }
 
 #[tokio::test]
+async fn review_round2_multiple_hosts_follow_libpq_transport_modes() {
+    for mode in ["prefer", "require"] {
+        for fixture in ["crl", "encrypted"] {
+            let home = ClientHome::new();
+            std::fs::copy(
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../shim/tests/fixtures/pg_tls/ca.pem"),
+                home.0.join("root.crt"),
+            )
+            .unwrap();
+            if fixture == "crl" {
+                std::fs::write(home.0.join("root.crl"), "fixture").unwrap();
+            } else {
+                std::fs::write(home.0.join("postgresql.crt"), "fixture").unwrap();
+                std::fs::write(
+                    home.0.join("postgresql.key"),
+                    "-----BEGIN ENCRYPTED PRIVATE KEY-----",
+                )
+                .unwrap();
+            }
+            let first = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let second = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let config = super::tls::parse_in(&format!("host=127.0.0.1,127.0.0.1 port={},{} user=fixture dbname=pl_cf_tls sslmode={mode}", first.local_addr().unwrap().port(), second.local_addr().unwrap().port()), super::tls::Environment { directory: Some(home.0.clone()), ..Default::default() }).unwrap();
+            let first = tokio::spawn(async move {
+                let (mut stream, _) = first.accept().await.unwrap();
+                let mut request = [0; 8];
+                stream.read_exact(&mut request).await.unwrap();
+                assert_eq!(request, SSL_REQUEST);
+                stream.write_all(b"S").await.unwrap();
+                assert_eq!(stream.read(&mut [0]).await.unwrap(), 0);
+            });
+            let second = tokio::spawn(async move {
+                let (mut stream, _) = second.accept().await.unwrap();
+                let mut request = [0; 8];
+                stream.read_exact(&mut request).await.unwrap();
+                assert_eq!(request, SSL_REQUEST);
+                stream.write_all(b"N").await.unwrap();
+                if mode == "prefer" {
+                    startup(&mut stream).await;
+                    ready(&mut stream).await;
+                } else {
+                    assert_eq!(stream.read(&mut [0]).await.unwrap(), 0);
+                }
+            });
+            let result = super::connect(&config, Duration::from_secs(3)).await;
+            assert_eq!(result.is_ok(), mode == "prefer", "{mode}/{fixture}");
+            if let Ok((client, task)) = result {
+                drop(client);
+                task.await.unwrap();
+            }
+            for peer in [first, second] {
+                tokio::time::timeout(Duration::from_secs(3), peer)
+                    .await
+                    .unwrap()
+                    .unwrap();
+            }
+        }
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn review_round2_plain_peer_never_reads_mode_zero_directory() {
+    use std::os::unix::fs::PermissionsExt;
+    let home = ClientHome::new();
+    std::fs::write(home.0.join("root.crl"), "fixture").unwrap();
+    std::fs::set_permissions(&home.0, std::fs::Permissions::from_mode(0o0)).unwrap();
+    let denied = std::fs::metadata(home.0.join("root.crl"))
+        .map(|_| ())
+        .map_err(|e| e.kind());
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let config = super::tls::parse_in(
+        &format!(
+            "host=127.0.0.1 port={} user=fixture dbname=pl_cf_tls sslmode=prefer",
+            listener.local_addr().unwrap().port()
+        ),
+        super::tls::Environment {
+            directory: Some(home.0.clone()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut request = [0; 8];
+        stream.read_exact(&mut request).await.unwrap();
+        assert_eq!(request, SSL_REQUEST);
+        stream.write_all(b"N").await.unwrap();
+        startup(&mut stream).await;
+        ready(&mut stream).await;
+    });
+    let result = super::connect(&config, Duration::from_secs(3)).await;
+    std::fs::set_permissions(&home.0, std::fs::Permissions::from_mode(0o700)).unwrap();
+    assert_eq!(denied, Err(std::io::ErrorKind::PermissionDenied));
+    let (client, task) = result.unwrap();
+    drop(client);
+    task.await.unwrap();
+    tokio::time::timeout(Duration::from_secs(3), server)
+        .await
+        .unwrap()
+        .unwrap();
+}
+
+#[tokio::test]
 async fn review_compat_unsupported_tls_files_never_authorize_plaintext_retry() {
     let home = ClientHome::new();
+    std::fs::copy(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../shim/tests/fixtures/pg_tls/ca.pem"),
+        home.0.join("root.crt"),
+    )
+    .unwrap();
     std::fs::write(home.0.join("root.crl"), "fixture").unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let config = super::tls::parse_in(
@@ -447,9 +559,19 @@ async fn disposable_postgres_tls_matrix() {
         // Fixture DSNs carry every option under test. Never read the test
         // user's ambient libpq files or environment into this connection.
         let mut environment = super::tls::Environment::default();
+        if let Some(home) = case["client_home"].as_str() {
+            environment.directory = Some(std::path::Path::new(home).join(".postgresql"));
+        }
         if let Some(values) = case["environment"].as_object() {
             for (name, value) in values {
-                assert_eq!(name, "PGCHANNELBINDING");
+                assert!(matches!(
+                    name.as_str(),
+                    "PGCHANNELBINDING"
+                        | "PGSSLMINPROTOCOLVERSION"
+                        | "PGKRBSRVNAME"
+                        | "PGGSSDELEGATION"
+                        | "PGREQUIRESSL"
+                ));
                 environment
                     .values
                     .insert(name.clone(), value.as_str().unwrap().into());

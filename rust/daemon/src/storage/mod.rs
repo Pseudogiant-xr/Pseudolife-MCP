@@ -24,8 +24,8 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use tokio::task::JoinHandle;
-use tokio_postgres::error::SqlState;
 use tokio_postgres::Client;
+use tokio_postgres::error::SqlState;
 
 use schema::{SchemaError, simple_value};
 

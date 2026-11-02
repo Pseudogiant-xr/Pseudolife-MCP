@@ -180,6 +180,41 @@
     "tls": true
   },
   {
+    "name": "unused-crl/prefer/no-file-root",
+    "accepted": true,
+    "tls": true
+  },
+  {
+    "name": "unused-crl/require/no-file-root",
+    "accepted": true,
+    "tls": true
+  },
+  {
+    "name": "unused-crl/system-root",
+    "accepted": true,
+    "tls": true
+  },
+  {
+    "name": "environment-default/PGSSLMINPROTOCOLVERSION",
+    "accepted": true,
+    "tls": true
+  },
+  {
+    "name": "environment-default/PGKRBSRVNAME",
+    "accepted": true,
+    "tls": true
+  },
+  {
+    "name": "environment-default/PGGSSDELEGATION",
+    "accepted": true,
+    "tls": true
+  },
+  {
+    "name": "environment-default/PGREQUIRESSL",
+    "accepted": true,
+    "tls": true
+  },
+  {
     "name": "hostaddr/default",
     "accepted": true,
     "tls": true

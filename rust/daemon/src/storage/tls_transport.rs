@@ -1,5 +1,5 @@
 //! Admit only PostgreSQL's S/N SSLRequest responses before startup/authentication.
-use super::tls::{Config, SslMode};
+use super::tls::{Config, ConnectorError, SslMode};
 use std::{
     convert::Infallible,
     future::Future,
@@ -126,18 +126,22 @@ impl TlsConnect<Socket> for Connect {
             match socket.read_u8().await? {
                 b'S' => {
                     // Unused TLS files must not block an N/plain response.
-                    // Unsupported security policies are hard errors after S,
-                    // outside the retryable TLS-failure wrapper below.
+                    // Unsupported security policies do not authorize a fresh
+                    // plaintext retry here. As in libpq, the driver may still
+                    // advance to another host using the requested SSL mode.
                     self.config
                         .supported_files()
                         .map_err(|message| io::Error::other(ConfigurationFailed(message)))?;
                     // libpq loads roots/identity only once TLS is negotiated.
                     // In prefer mode those TLS failures permit a fresh plain
                     // attempt; an N response never reads unused TLS files.
-                    let mut tls = self.config.connector().map_err(|message| {
-                        io::Error::other(TlsAttemptFailed(io::Error::other(ConfigurationFailed(
-                            message,
-                        ))))
+                    let mut tls = self.config.connector().map_err(|error| match error {
+                        ConnectorError::Policy(message) => {
+                            io::Error::other(ConfigurationFailed(message))
+                        }
+                        ConnectorError::Setup(message) => io::Error::other(TlsAttemptFailed(
+                            io::Error::other(ConfigurationFailed(message)),
+                        )),
                     })?;
                     let tls = <MakeRustlsConnect as MakeTlsConnect<Socket>>::make_tls_connect(
                         &mut tls,
