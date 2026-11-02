@@ -144,9 +144,9 @@ def wrapper_forwarding(root):
             assert args[args.index("--startup-timeout") + 1] == "321", args
 
 
-def proof(binary, root, fixture, launcher_exe, provider):
+def proof(binary, root, fixture, launcher_exe, provider, scenario="all"):
     windows = os.name == "nt"
-    if windows:
+    if windows and scenario in ("all", "preflight"):
         wrapper_forwarding(root)
         for case in ("PasswordRollback", "LegacyMigration", "DelayedStop", "DelayedRemoval", "DeleteRetry", "DeleteFailure",
                      "StopTimeout", "RemovalTimeout", "ProcessExitRace", "ProcessStopFailure",
@@ -190,7 +190,7 @@ def proof(binary, root, fixture, launcher_exe, provider):
         else:
             cli.write_text(f"#!{sys.executable}\n" + stub_source)
             cli.chmod(0o700)
-        if windows:
+        if windows and scenario in ("all", "preflight"):
             legacy_windows(native, root, kind, cli, env)
         port = run.unused_port()
         model = "claude-future" if kind == "claude" else "gpt-future"
@@ -204,38 +204,42 @@ def proof(binary, root, fixture, launcher_exe, provider):
             args += ["--task-logon-type", "S4U"]
         model_flag = "--model"
         try:
-            # A Python shim from another checkout on this port is not ours to
-            # replace, even though its basename and provider match.
-            with run.server(None, kind, root / (kind + "-foreign"), run.canned(kind, "OK")) as (foreign_port, _, _, foreign, _):
-                foreign_args = list(args)
-                foreign_args[foreign_args.index("--port") + 1] = str(foreign_port)
-                refused = invoke(foreign_args, env=env, step=f"{kind} foreign checkout refusal")
-                assert refused.returncode != 0 and b"another process" in refused.stdout + refused.stderr, refused
-                if windows:
-                    detail = refused.stdout + refused.stderr
-                    assert b"image:" in detail and b"command:" in detail and f"{kind}_shim.py".encode() in detail, detail
-                assert foreign.poll() is None and run.call(foreign_port, "GET", "/health")[0] == 200, "foreign shim was stopped"
-            with socket.socket() as blocker:
-                blocker.bind(("127.0.0.1", port))
-                blocker.listen()
-                refused = invoke(args, env=env, step=f"{kind} occupied port refusal")
-                assert refused.returncode != 0 and b"another process" in refused.stdout + refused.stderr
-                assert not (repo / "stable config.env").exists() or kind == "codex"
             config_file = repo / "stable config.env"
-            if kind == "claude":
-                config_file.write_bytes(b"")
-            previous = config_file.read_bytes() if config_file.exists() else None
-            plan.write_text(json.dumps({"rc": 1, "stderr": "fixture provider unavailable"}))
-            unhealthy = invoke(args + ["--startup-timeout", "2"], env=env, step=f"{kind} failed install rollback")
-            assert unhealthy.returncode != 0 and b"health check" in unhealthy.stdout + unhealthy.stderr, unhealthy
-            wait_closed(port)
-            assert (config_file.read_bytes() if config_file.exists() else None) == previous, "failed install did not restore config"
-            if windows:
-                exists = checked(["pwsh", "-NoProfile", "-Command", f"if (Get-ScheduledTask -TaskName '{token}' -ErrorAction SilentlyContinue) {{ exit 1 }}"])
-            else:
-                unit_dir = Path(os.environ.get("XDG_CONFIG_HOME", str(Path.home() / ".config"))) / "systemd/user"
-                assert not (unit_dir / registration).exists(), "failed install left a registration"
-            plan.write_text(json.dumps(run.canned(kind, "OK")))
+            if scenario in ("all", "preflight"):
+                # A Python shim from another checkout on this port is not ours to
+                # replace, even though its basename and provider match.
+                with run.server(None, kind, root / (kind + "-foreign"), run.canned(kind, "OK")) as (foreign_port, _, _, foreign, _):
+                    foreign_args = list(args)
+                    foreign_args[foreign_args.index("--port") + 1] = str(foreign_port)
+                    refused = invoke(foreign_args, env=env, step=f"{kind} foreign checkout refusal")
+                    assert refused.returncode != 0 and b"another process" in refused.stdout + refused.stderr, refused
+                    if windows:
+                        detail = refused.stdout + refused.stderr
+                        assert b"image:" in detail and b"command:" in detail and f"{kind}_shim.py".encode() in detail, detail
+                    assert foreign.poll() is None and run.call(foreign_port, "GET", "/health")[0] == 200, "foreign shim was stopped"
+                with socket.socket() as blocker:
+                    blocker.bind(("127.0.0.1", port))
+                    blocker.listen()
+                    refused = invoke(args, env=env, step=f"{kind} occupied port refusal")
+                    assert refused.returncode != 0 and b"another process" in refused.stdout + refused.stderr
+                    assert not (repo / "stable config.env").exists() or kind == "codex"
+                if kind == "claude":
+                    config_file.write_bytes(b"")
+                previous = config_file.read_bytes() if config_file.exists() else None
+                plan.write_text(json.dumps({"rc": 1, "stderr": "fixture provider unavailable"}))
+                unhealthy = invoke(args + ["--startup-timeout", "2"], env=env, step=f"{kind} failed install rollback")
+                assert unhealthy.returncode != 0 and b"health check" in unhealthy.stdout + unhealthy.stderr, unhealthy
+                wait_closed(port)
+                assert (config_file.read_bytes() if config_file.exists() else None) == previous, "failed install did not restore config"
+                if windows:
+                    exists = checked(["pwsh", "-NoProfile", "-Command", f"if (Get-ScheduledTask -TaskName '{token}' -ErrorAction SilentlyContinue) {{ exit 1 }}"])
+                else:
+                    unit_dir = Path(os.environ.get("XDG_CONFIG_HOME", str(Path.home() / ".config"))) / "systemd/user"
+                    assert not (unit_dir / registration).exists(), "failed install left a registration"
+                plan.write_text(json.dumps(run.canned(kind, "OK")))
+                if scenario == "preflight":
+                    print(f"{kind}: foreign refusal and failed-install rollback passed", flush=True)
+                    return
             print(f"{kind}: registering owned fixture {token}", flush=True)
             checked(args, env=env, step=f"{kind} initial install")
             status, body = run.call(port, "POST", "/chat/completions", {})
@@ -294,7 +298,7 @@ def proof(binary, root, fixture, launcher_exe, provider):
             assert len(run.journal_rows(journal)) > initial_calls, "replacement never warmed the new process"
             status, body = run.call(port, "POST", "/chat/completions", {"messages": [{"role": "user", "content": "proof"}]})
             assert status == 200 and json.loads(body)["model"] == model
-            print(f"{kind}: foreign refusal, health rollback, quiet rerun, replacement and completion passed", flush=True)
+            print(f"{kind}: quiet rerun, config reload, replacement rollback and completion passed", flush=True)
         except Exception:
             if windows:
                 diagnostic = subprocess.run(["pwsh", "-NoProfile", "-Command", f"(Get-ScheduledTaskInfo -TaskName '{token}').LastTaskResult"], capture_output=True)
@@ -314,7 +318,7 @@ def proof(binary, root, fixture, launcher_exe, provider):
                     unit_dir = Path(os.environ.get("XDG_CONFIG_HOME", str(Path.home() / ".config"))) / "systemd/user"
                     (unit_dir / (token + ".service")).unlink(missing_ok=True)
                     checked(["systemctl", "--user", "daemon-reload"])
-        print(f"{kind}: owned registration removed", flush=True)
+            print(f"{kind}: owned registration removed", flush=True)
 
 
 def main():
@@ -323,6 +327,7 @@ def main():
     p.add_argument("--stub-exe", required=True, type=Path)
     p.add_argument("--launcher-exe", required=True, type=Path)
     p.add_argument("--provider", required=True, choices=("claude", "codex"))
+    p.add_argument("--scenario", choices=("all", "preflight", "lifecycle"), default="all")
     args = p.parse_args()
     allowed = os.environ.get("PSEUDOLIFE_TEST_REAL_AUTOSTART") == "1" or (
         os.environ.get("GITHUB_ACTIONS") == "true" and os.environ.get("RUNNER_ENVIRONMENT") == "github-hosted")
@@ -344,7 +349,7 @@ def main():
             assert root.samefile(directory)
             print(f"short-path alias available: {str(root).lower() != str(root.resolve()).lower()}", flush=True)
         proof(args.binary.resolve(), root, args.stub_exe.resolve(strict=True),
-              args.launcher_exe.resolve(strict=True), args.provider)
+              args.launcher_exe.resolve(strict=True), args.provider, args.scenario)
 
 
 if __name__ == "__main__":

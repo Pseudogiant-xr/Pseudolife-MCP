@@ -119,7 +119,14 @@ unique disposable tasks or services, testing
 launch, bind-conflict refusal, replacement, config reload and listener shutdown,
 including a stable launcher that waits for a runtime child on both platforms.
 Windows also tests removal of detached Python tasks and startup-timeout forwarding.
-It removes its registrations. Run it
+Preflight (wrapper checks, mocked scheduler failures, legacy cleanup, bind
+refusals and failed-install rollback) and the installed lifecycle (quiet rerun,
+config reload, replacement rollback and replacement) run as separate tests for
+each provider, with independent registrations and cleanup. Their cumulative
+scheduler overhead must not share one 120-second nextest deadline. The direct
+Python entry point retains the combined proof by default; `--scenario preflight`
+and `--scenario lifecycle` select the same independent scenarios used by Cargo.
+Each proof removes its registrations. Run it
 only on a designated dev machine. Its Windows fixture uses S4U because an SSH
 session has no interactive logon token; it does not prove an interactive logon
 trigger fires. Never use it to replace an existing installation's task.

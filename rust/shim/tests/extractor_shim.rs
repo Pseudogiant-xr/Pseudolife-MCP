@@ -99,7 +99,7 @@ fn extractor_shim_lifecycle() {
     );
 }
 
-fn autostart(provider: &str) {
+fn autostart(provider: &str, scenario: &str) {
     let explicit = std::env::var("PSEUDOLIFE_TEST_REAL_AUTOSTART").ok();
     // Hosted Linux runners do not supply a user systemd manager.
     let allowed = explicit.as_deref() == Some("1")
@@ -127,6 +127,8 @@ fn autostart(provider: &str) {
             )
             .arg("--provider")
             .arg(provider)
+            .arg("--scenario")
+            .arg(scenario)
             .status()
             .expect("Python test fixture must be installed")
             .success()
@@ -135,10 +137,23 @@ fn autostart(provider: &str) {
 
 #[test]
 fn extractor_shim_autostart_claude() {
-    autostart("claude");
+    autostart("claude", "lifecycle");
 }
 
 #[test]
 fn extractor_shim_autostart_codex() {
-    autostart("codex");
+    autostart("codex", "lifecycle");
+}
+
+// The Windows batch on 2026-11-03 spent 108-110 seconds in completed scheduler
+// steps before its final replacement hit the 120-second test deadline. Give
+// preflight and the installed lifecycle separate budgets, fixtures and cleanup.
+#[test]
+fn extractor_shim_autostart_claude_preflight() {
+    autostart("claude", "preflight");
+}
+
+#[test]
+fn extractor_shim_autostart_codex_preflight() {
+    autostart("codex", "preflight");
 }
