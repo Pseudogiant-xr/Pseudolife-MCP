@@ -105,6 +105,13 @@ def _shim_models(rel: str = "evals/claude_shim.py") -> set[str]:
     return set(re.findall(rf'"({MODEL})"', block))
 
 
+def _native_models(kind: str) -> set[str]:
+    block = re.search(rf'Self::{kind} => &\[(.*?)\]',
+                      _read("rust/shim/src/extractor_shim/config.rs"), re.S)
+    assert block, f"native extractor has no {kind} model list"
+    return set(re.findall(rf'"({MODEL})"', block.group(1)))
+
+
 def test_the_claude_model_list_is_one_list():
     installer = _sh_list("CLAUDE_MODELS")
     assert "claude-opus-5" in installer
@@ -118,6 +125,7 @@ def test_the_claude_model_list_is_one_list():
         "dreamer.ts DREAMER_MODELS": _family(_console_models(), "claude-"),
         "config_io extractor_model_override": _family(_panel_suggestions(), "claude-"),
         "evals/claude_shim.py /models": _shim_models(),
+        "native Claude /models": _native_models("Claude"),
     }
     for where, models in sources.items():
         assert models == installer, f"{where} differs from install.sh CLAUDE_MODELS"
@@ -138,6 +146,7 @@ def test_the_openai_model_list_is_one_list():
         "dreamer.ts DREAMER_MODELS": _family(_console_models(), "gpt-"),
         "config_io extractor_model_override": _family(_panel_suggestions(), "gpt-"),
         "evals/codex_shim.py /models": _shim_models("evals/codex_shim.py"),
+        "native Codex /models": _native_models("Codex"),
     }
     for where, models in sources.items():
         assert models == installer, f"{where} differs from install.sh OPENAI_MODELS"

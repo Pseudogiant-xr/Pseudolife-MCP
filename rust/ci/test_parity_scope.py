@@ -51,6 +51,8 @@ def test_an_unreadable_or_empty_pull_request_diff_runs_every_suite(files):
     (["tests/test_shim.py", "tests/conftest.py"], set()),
     # One command's shim code reaches its rows and the judges.
     (["rust/shim/src/cli/doctor/mod.rs"], {"w1c-doctor", "judges"}),
+    (["rust/shim/src/cli/update/engine.rs"], {"judges"}),
+    (["rust/shim/src/cli/backup/mod.rs"], {"h5-backup", "judges"}),
     (["rust/shim/src/cli/transfer/mod.rs"], {"w1c-pairing", "judges"}),
     # Helpers other commands import reach the whole binary (Codex review:
     # tunnel uses hook_json, board_audit uses lease).

@@ -14,7 +14,7 @@ W1A = ('tokens', 'tokenless', 'pair-budget', 'config', 'extractor', 'db-down',
        'lease-held', 'reaper', 'dim-mismatch', 'stamped', 'seeded',
        'json-float-shortest-ties', 'trust-bind', 'null-embedding',
        'unconstrained-dims', 'db-lost', 'encodings', 'map-order', 'map-order-reversed',
-       'mcp-search-explain')
+       'mcp-dream-rollback', 'mcp-search-explain')
 
 # These are observed differences, not comparator relaxations. Each omitted
 # selection remains named so the inventory cannot silently erase the gap.
@@ -85,6 +85,7 @@ EXCEPTIONS = {
 }
 
 DAEMON_CONTROLS = {
+    'mcp-dream-rollback-audit-kept': ['mcp-dream-rollback'],
     'trace-no-trace': ['mcp-search-explain'],
     'auth-candidate-order': ['encodings'],
     'skip-relation-seed': ['extractor'],

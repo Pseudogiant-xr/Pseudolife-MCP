@@ -38,7 +38,7 @@ pub fn bank_fingerprint(bank_id: Option<&serde_json::Value>) -> Option<String> {
 /// The refresher's connection options (principal_store.py `_KEEPALIVES`):
 /// keepalive probes after 10 s idle, every 5 s, three tries, and a 30 s cap
 /// on unacknowledged writes.
-fn refresher_config(dsn: &str) -> Result<tokio_postgres::Config, String> {
+fn refresher_config(dsn: &str) -> Result<storage::Config, String> {
     let mut config = storage::parse_dsn(dsn)?;
     config
         .keepalives(true)
