@@ -184,7 +184,9 @@ def test_the_reserved_name_check_is_load_bearing_for_the_database(bank, pg_url, 
 # -- the Docker path -----------------------------------------------------------
 
 class _Docker:
-    def __init__(self, version="pseudolife-mcp invite 2\n", code=0, stdout="invited\n"):
+    # What a v59 image's `invite --version-check` prints.
+    def __init__(self, version="pseudolife-mcp invite 1\npseudolife-mcp invite 2\n", code=0,
+                 stdout="invited\n"):
         self.calls = []
         self.inputs = []
         self.version, self.code, self.stdout = version, code, stdout
@@ -249,7 +251,17 @@ def test_no_database_and_no_docker_is_refused(env, capsys):
 
 def test_the_version_check_answers(capsys):
     assert invite_cli.main(["--version-check"]) == 0
-    assert capsys.readouterr().out.startswith(invite_cli.VERSION_LINE)
+    assert capsys.readouterr().out.splitlines() == list(invite_cli.VERSION_LINES)
+
+
+def test_an_older_host_cli_still_accepts_the_version_check(capsys):
+    """A daemon-only update leaves the host CLI older than the image. Every
+    release before v59, Python CLI and shim alike, accepted the image only
+    when the output ``startswith("pseudolife-mcp invite 1")``: it must still
+    start that way, or a plain invite is refused as an image that predates
+    ``invite``."""
+    assert invite_cli.main(["--version-check"]) == 0
+    assert capsys.readouterr().out.startswith("pseudolife-mcp invite 1")
 
 
 # -- review fixes (2026-10-02): revoke and list need no healthy daemon ----------------
@@ -284,20 +296,36 @@ def test_a_stopped_daemon_container_revokes_through_postgres(docker, capsys):
     assert not any("pseudolife-mcp-daemon" in call and "exec" in call for call in docker.calls)
 
 
-def test_a_stopped_daemon_container_lists_through_postgres(docker, capsys):
+def test_a_stopped_daemon_container_lists_through_postgres(docker, env, capsys, tmp_path):
     docker.running = False
-    docker.psql["stdout"] = ["t\n", json.dumps({
-        "principals": [["laptop", "core", True, True, False, None, 1.0, 2.0, None, 3.0, 2.5, True],
-                       ["codex", None, None, False, False, None, None, None, None, 3.0, 2.0, False]],
-        "rejected": [["ab12cd34", 3, 1.0, 2.0]]}) + "\n"]
+    listed = json.dumps({
+        "principals": [["laptop", "core", True, True, False, None, 1.0, 2.0, None, 3.0, 2.5, True,
+                        False],
+                       ["codex", None, None, False, False, None, None, None, None, 3.0, 2.0, False,
+                        None]],
+        "rejected": [["ab12cd34", 3, 1.0, 2.0]]}) + "\n"
+    # This host's config is not the stopped daemon's (that one is in its
+    # volume): naming codex here must not decide codex's owner.
+    config = tmp_path / "host.yaml"
+    config.write_text("coordination:\n  not_owner_principals: [codex]\n", encoding="utf-8")
+    env.setenv("PSEUDOLIFE_MCP_CONFIG", str(config))
+    docker.psql["stdout"] = ["t\n", listed]
     code, out, _err = _run(capsys, "--list", "--json")
     report = json.loads(out)
     assert docker.inputs[-2:] == [invite_cli.ACTIVITY_SQL + "\n", invite_cli.LIST_SQL + "\n"]
-    assert code == 0 and [(r["principal"], r["state"], r["last_seen_at"])
-                          for r in report["principals"]] == [("codex", "environment", 2.0),
-                                                              ("laptop", "paired", 2.5)]
+    assert code == 0 and [(r["principal"], r["state"], r["last_seen_at"], r["owner"])
+                          for r in report["principals"]] == [("codex", "environment", 2.0, None),
+                                                              ("laptop", "paired", 2.5, False)]
     assert report["rejected"] == [{"hash_prefix": "ab12cd34", "rejections": 3,
                                    "first_seen_at": 1.0, "last_seen_at": 2.0}]
+    docker.psql["stdout"] = ["t\n", listed]
+    code, out, _err = _run(capsys, "--list")
+    owner = {line.split()[0]: re.search(r" (?:on|off|-) +(yes|no|-) ", line).group(1)
+             for line in out.splitlines()[1:3]}
+    assert code == 0 and owner == {"codex": "-", "laptop": "no"}
+    # The footer says what that `-` means.
+    assert "   owner -: unknown, an environment token listed with the daemon stopped)" in \
+        out.splitlines()
 
 
 def test_a_stopped_daemon_container_cannot_invite(docker, capsys):
@@ -434,10 +462,10 @@ def _owned(pg_url):
 def test_an_invite_is_the_owners_and_names_the_flag_for_someone_elses(bank, pg_url, capsys):
     code, out, _err = _run(capsys, "laptop")
     assert code == 0 and _owned(pg_url) == {"laptop": True}
-    assert "for a machine that is not yours, add --someone-else" in out
+    assert NOTE in out.splitlines()
     report = json.loads(_run(capsys, "phone", "--json")[1])
     assert report["owned"] is True
-    assert "for a machine that is not yours, add --someone-else" in report["notes"]
+    assert NOTE in report["notes"]
 
 
 def test_someone_else_invites_a_machine_that_is_not_the_owners(bank, pg_url, capsys):
@@ -574,7 +602,26 @@ def test_an_older_image_refuses_the_ownership_flags_plainly(docker, capsys):
 
 def test_the_version_check_names_the_ownership_flags(capsys):
     assert invite_cli.main(["--version-check"]) == 0
-    assert capsys.readouterr().out == "pseudolife-mcp invite 2\n"
+    assert capsys.readouterr().out == "pseudolife-mcp invite 1\npseudolife-mcp invite 2\n"
+
+
+@pytest.mark.parametrize("answer, admitted", [
+    ("pseudolife-mcp invite 1\npseudolife-mcp invite 2\n", True),
+    ("pseudolife-mcp invite 1\r\npseudolife-mcp invite 2\r\n", True),
+    ("pseudolife-mcp invite 2\npseudolife-mcp invite 1\n", True),
+    ("a banner\npseudolife-mcp invite 3\n", True),
+    ("pseudolife-mcp invite 1\npseudolife-mcp invite 2x\n", False),
+    ("pseudolife-mcp invite 1\n pseudolife-mcp invite 2\n", False),
+], ids=["new-image", "crlf", "any-order", "banner-and-later", "trailing-text", "indented"])
+def test_the_ownership_flags_take_the_highest_version_line(docker, capsys, answer, admitted):
+    """The image's highest exact ``pseudolife-mcp invite <N>`` line decides."""
+    docker.version = answer
+    code, _out, err = _run(capsys, "guest", "--someone-else")
+    if admitted:
+        assert code == 0, err
+        assert docker.calls[-1][-6:-2] == ["guest", "--expires", "900s", "--someone-else"]
+    else:
+        assert code == 4 and "update the daemon to schema 59" in err, err
 
 
 def test_a_paired_machine_changes_owner_without_a_new_code(bank, pg_url, capsys):
@@ -596,3 +643,143 @@ def test_a_paired_machine_changes_owner_without_a_new_code(bank, pg_url, capsys)
     code, _out, err = _run(capsys, "laptop", "--mine", "--tier", "core")
     assert code == 4 and "--mine or --someone-else alone changes whose machine it is" in err
     assert "need not pair again" in err
+
+
+# -- the --someone-else note through an older host CLI (2026-11-03) -------------
+
+NOTE = ("for a machine that is not yours, add --someone-else (an older pseudolife-mcp refuses it: "
+        "update it first)")
+
+
+def _v021_forward(name, url):
+    """What the released v0.21.0 host CLI runs in the daemon's container for
+    a plain invite (``git show v0.21.0:pseudolife_memory/invite_cli.py``,
+    ``_in_container`` and ``_forward``): ``docker exec -i <container> python
+    -m pseudolife_memory.cli invite`` with no ``-e``, so no
+    PSEUDOLIFE_DAEMON_EXEC, then the name, ``--expires <N>s`` and ``--url``.
+    Its own parser has no --someone-else."""
+    return [name, "--expires", "900s", "--url", url]
+
+
+def test_the_note_holds_for_an_invite_forwarded_by_v0_21_0(bank, env, capsys):
+    """Through a v0.21.0 host CLI the image cannot tell it was forwarded,
+    and that CLI refuses --someone-else: the one note says to update it."""
+    env.delenv("PSEUDOLIFE_DAEMON_EXEC", raising=False)
+    code, out, err = _run(capsys, *_v021_forward("laptop", "http://100.64.0.2:8765"))
+    assert code == 0, err
+    notes = [line for line in out.splitlines() if "--someone-else" in line]
+    assert notes == [NOTE]
+    assert "update it first" in notes[0]
+    report = json.loads(_run(capsys, *_v021_forward("phone", "u"), "--json")[1])
+    assert [note for note in report["notes"] if "--someone-else" in note] == [NOTE]
+
+
+@pytest.mark.parametrize("forwarded", [None, "", "1"], ids=["direct", "empty-env", "forwarded"])
+def test_the_note_is_one_text_however_invite_ran(bank, env, capsys, forwarded):
+    if forwarded is None:
+        env.delenv("PSEUDOLIFE_DAEMON_EXEC", raising=False)
+    else:
+        env.setenv("PSEUDOLIFE_DAEMON_EXEC", forwarded)
+    code, out, _err = _run(capsys, "laptop", "--url", "u")
+    assert code == 0 and NOTE in out.splitlines()
+    assert NOTE in json.loads(_run(capsys, "phone", "--url", "u", "--json")[1])["notes"]
+
+
+def _base_parser():
+    """The invite parser of an image built from #1154 alone
+    (``git show origin/feat/console-owner-scope:pseudolife_memory/invite_cli.py``,
+    ``_parser``), vendored with its help texts dropped: that image already
+    answers ``pseudolife-mcp invite 2``, so a current host CLI forwards to it,
+    and its argparse refuses any option it lacks. Its ``TIERS`` and
+    ``_expires`` are copied too, so a later change to this module's never
+    widens what the vendored image accepts."""
+    import argparse
+    import re
+
+    def expires(value: str) -> int:
+        match = re.fullmatch(r"(\d+)\s*([smhd]?)", value.strip().lower())
+        if not match:
+            raise argparse.ArgumentTypeError(f"not a duration: {value!r}")
+        unit = {"": 60, "s": 1, "m": 60, "h": 3600, "d": 86400}[match.group(2)]
+        seconds = int(match.group(1)) * unit
+        if not 60 <= seconds <= 24 * 3600:
+            raise argparse.ArgumentTypeError("--expires must be between 1 minute and 24 hours")
+        return seconds
+
+    parser = argparse.ArgumentParser(prog="pseudolife-mcp invite")
+    parser.add_argument("name", nargs="?")
+    parser.add_argument("--tier", choices=("minimal", "core", "full"))
+    board = parser.add_mutually_exclusive_group()
+    board.add_argument("--board", dest="board", action="store_const", const=True, default=None)
+    board.add_argument("--no-board", dest="board", action="store_const", const=False)
+    parser.add_argument("--expires", type=expires, default=15 * 60)
+    owner = parser.add_mutually_exclusive_group()
+    owner.add_argument("--someone-else", dest="owned", action="store_const", const=False,
+                       default=None)
+    owner.add_argument("--mine", dest="owned", action="store_const", const=True)
+    parser.add_argument("--replace", action="store_true")
+    parser.add_argument("--url")
+    parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument("--bank", metavar="FINGERPRINT")
+    parser.add_argument("--list", action="store_true")
+    parser.add_argument("--revoke", metavar="NAME")
+    parser.add_argument("--yes", action="store_true")
+    parser.add_argument("--json", action="store_true")
+    parser.add_argument("--version-check", action="store_true")
+    return parser
+
+
+@pytest.mark.parametrize("argv", [
+    ["laptop"],
+    ["laptop", "--json"],
+    ["laptop", "--tier", "core", "--no-board", "--replace", "--bank", "abc", "--json"],
+    ["guest", "--someone-else"],
+    ["laptop", "--mine", "--expires", "2h"],
+    ["--list", "--json"],
+    ["--revoke", "laptop"],
+], ids=["plain", "plain-json", "options", "someone-else", "mine", "list", "revoke"])
+def test_an_image_from_1154_parses_what_the_host_forwards(docker, env, capsys, argv):
+    """A current host CLI at image version 2 forwards only what #1154's
+    parser takes: an extra option fails every invite with "unrecognized
+    arguments". A #1154 image answers the version check with its one line."""
+    env.setattr(invite_cli, "interactive", lambda: True)
+    env.setattr(invite_cli, "_ask", lambda question: True)
+    docker.version = "pseudolife-mcp invite 2\n"
+    code, _out, err = _run(capsys, *argv)
+    assert code == 0, err
+    forwarded = docker.calls[-1]
+    forwarded = forwarded[forwarded.index("invite") + 1:]
+    try:
+        _base_parser().parse_args(forwarded)
+    except SystemExit:
+        pytest.fail(f"an image from #1154 refuses {forwarded}: "
+                    f"{capsys.readouterr().err.strip()}")
+
+
+# Each case is also in rust/shim/src/cli/pairing/invite_transport.rs
+# (the_image_version_reads_as_the_oracle_does): both read the probe alike.
+@pytest.mark.parametrize("stdout, version", [
+    ("pseudolife-mcp invite 1\rpseudolife-mcp invite 2", 2),
+    ("pseudolife-mcp invite 1\rpseudolife-mcp invite 2\n", 2),
+    ("pseudolife-mcp invite 1\n\rpseudolife-mcp invite 2\n", 2),
+    ("pseudolife-mcp invite 2\r", 2),
+    ("pseudolife-mcp invite 2\r\r\n", 2),
+    ("pseudolife-mcp invite 1\r\rpseudolife-mcp invite 3\r\n", 3),
+    ("pseudolife-mcp invite 2 \r\n", None),
+    ("pseudolife-mcp invite 2", 2),
+    ("pseudolife-mcp invite 1\npseudolife-mcp invite " + "1" * 25 + "\n", 1),
+    ("pseudolife-mcp invite 18446744073709551615\n", 2**64 - 1),
+    ("pseudolife-mcp invite 18446744073709551616\n", None),
+    ("pseudolife-mcp invite " + "0" * 5000 + "2\n", 2),
+    ("pseudolife-mcp invite 0\n", 0),
+    ("", None),
+    ("\n", None),
+    ("pseudolife-mcp invite \u0662\n", None),
+    ("pseudolife-mcp invite 1\npseudolife-mcp invite \uff12\n", 1),
+    ("pseudolife-mcp invite 1\u2028pseudolife-mcp invite 2\n", None),
+], ids=["lone-cr", "lone-cr-then-lf", "cr-starts-a-line", "trailing-lone-cr", "cr-cr-lf",
+        "cr-cr-then-crlf", "space-before-crlf", "no-newline",
+        "past-u64", "u64-max", "u64-max-plus-one", "leading-zeros", "zero", "empty",
+        "blank-line", "arabic-indic-digit", "fullwidth-digit", "unicode-line-separator"])
+def test_the_image_version_reads_as_the_shim_does(stdout, version):
+    assert invite_cli._image_version(stdout) == version

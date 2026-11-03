@@ -7,10 +7,10 @@ Oracle: `pseudolife_memory/invite_cli.py`, `principal_store.py`, `principals.py`
 
 ## Canonical shapes (implemented)
 
-- `invite <name> [--tier T] [--board|--no-board] [--expires D] [--someone-else|--mine] [--replace] [--url U] [--port P] [--bank FP] [--json]` (v59: `--someone-else` / `--mine` set `owned`, refused before any write on a bank before v59 (`prev59` seed); a re-invite without either keeps it; on a paired row either alone changes ownership with no code; the report's `owned` member and the `for a machine that is not yours, add --someone-else` note when neither is given, the row is the owner's and the bank has the column)
-- `invite --list [--bank FP] [--json]` (v59: the owner column and footer line, JSON `owner`; deferred where a `config.yaml` could hold `coordination.not_owner_principals`, `PSEUDOLIFE_MCP_CONFIG` included)
+- `invite <name> [--tier T] [--board|--no-board] [--expires D] [--someone-else|--mine] [--replace] [--url U] [--port P] [--bank FP] [--json]` (v59: `--someone-else` / `--mine` set `owned`, refused before any write on a bank before v59 (`prev59` seed); a re-invite without either keeps it; on a paired row either alone changes ownership with no code; the report's `owned` member and the `for a machine that is not yours, add --someone-else (an older pseudolife-mcp refuses it: update it first)` note when neither is given, the row is the owner's and the bank has the column; one text however invite was run, since a host CLI one release behind forwards a plain invite into the daemon container exactly as a direct run looks (cases `invite-v021-forward*`: v0.21.0's argv, no `PSEUDOLIFE_DAEMON_EXEC`; `invite-forwarded`: with `PSEUDOLIFE_DAEMON_EXEC` set, as a current host CLI forwards))
+- `invite --list [--bank FP] [--json]` (v59: the owner column and its two footer lines, `-` unknown, JSON `owner`; deferred where a `config.yaml` could hold `coordination.not_owner_principals`, `PSEUDOLIFE_MCP_CONFIG` included)
 - `invite --revoke <name> [--yes] [--bank FP] [--json]`
-- `invite --version-check` (the Docker path's image probe)
+- `invite --version-check` (the Docker path's image probe: `pseudolife-mcp invite 1` then `pseudolife-mcp invite 2`, line 1 first for host CLIs before v59 that read only the start; the probe takes the highest line that is exactly `pseudolife-mcp invite <N>` (universal newlines: `\r\n`, then a lone `\r`, read as `\n`, then split on `\n` only; `N` ASCII digits that fit a u64), and `--someone-else` / `--mine` need 2; a forwarded invite carries only options an image from #1154 parses; with the daemon container stopped, `--list` shows an environment row's owner as unknown, `-` and JSON `null`, since the stopped daemon's `coordination.not_owner_principals` is not this host's)
 
 Producers: `docs/guide/remote-bank.md` "Adding a machine", `docs/guide/agent-isolation.md`
 step 4, the installers' help text. Each option at most once, its value the
@@ -109,13 +109,13 @@ it, and core's program preflight proves both before every arm. Rule
 loads; each arm records it, and only `port <p>`, `127.0.0.1:<p>` and
 `localhost:<p>` with that exact value become `<port>` in the streams.
 
-The 31 cases in `LIVE_ONLY` (`invite.py`) show the seeded principals in
+The 40 cases in `LIVE_ONLY` (`invite.py`) show the seeded principals in
 their output or bank dump. The oracle's writers stamp those rows with the
 wall clock and draw their codes and tokens at random in every harness
 process, so the cases run live only (`Case.golden` False).
 `health-nested-at-limit-json` is live-only too: its report pretty-prints
 the daemon's auth value nested to the limit, 2.6 MB of indentation. The
-goldens hold the other 61.
+goldens hold the other 84.
 
 ## Operator transport extension (2026-11-02 candidate)
 

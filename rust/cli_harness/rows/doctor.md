@@ -24,10 +24,12 @@ before any database connection. It carries the resolved model directory and
 `ORT_DYLIB_PATH` into an otherwise isolated child environment; it never
 provisions models or reads saved client registrations. Empty runtime overrides
 use ort's default library, daemon-relative paths keep executable-directory
-precedence, and bare names retain the OS loader search. Only an existing
-caller-relative path with no daemon-relative match is made absolute before
-the child changes its working directory. The daemon verifies model checksums
-before loading them.
+precedence, and bare names retain the OS loader search. On Linux, that directory
+belongs to the resolved executable, including when PATH discovery finds a
+symlink. An existing caller-relative path with no daemon-relative match is made
+absolute before the child changes its working directory. Windows drive-relative
+paths are also resolved before the child loses the caller's drive context.
+The daemon verifies model checksums before loading them.
 
 The fixture DSN's resolved user and password are bound before changing its
 database name or the child environment. URI query escaping is preserved.
@@ -38,6 +40,9 @@ client deadline and a second connection attempt. `connect_timeout` and
 `application_name` are preserved. TLS modes requiring encryption and explicit
 certificate options are refused before CREATE because the sibling daemon's
 database transport cannot honor them end to end.
+The proof recognizes libpq's `requiressl` alias and URI-only `ssl=true` in input
+order, so required encryption receives the same TLS refusal as `sslmode=require`.
+`requiressl=0` preserves `prefer`; unknown keyword `ssl` remains a parser error.
 Queued adapter file writes are drained before removing the fixture directory;
 if both bank and directory cleanup fail, the report names both resources.
 Signal receivers remain installed through cleanup. A Windows job owns the
@@ -108,11 +113,23 @@ that a rejected CREATE does not cause DROP. Opt-in Linux tests run the actual
 native daemon with a real ONNX library and provisioned CPU models. They require
 a complete hint/ring proof and fixture cleanup for empty, daemon-relative,
 bare, caller-relative and absolute runtime overrides; a conflicting file in
-the caller directory also checks daemon-relative precedence. These load tests
+the caller directory also checks daemon-relative precedence. Symlink cases load
+a caller-relative library beside a PATH link in the caller's working directory,
+and verify that the resolved daemon's library wins over an invalid caller-relative
+file. A library beside a link elsewhere is not a Linux loader search location.
+These load tests
 require `PSEUDOLIFE_DOCTOR_LIVE_PROOF=1`, an explicit `r2_*` fixture DSN,
 `ORT_DYLIB_PATH` naming the source library, and the provisioned model directory.
-Windows contract tests cover the resolver branches; real-library loading on
-Windows is not covered by this Linux matrix.
+The ordinary `cli_doctor_proof_contract` target also starts a native fixture
+child through the real proof launcher and records its received override and
+readable file bytes after environment clearing and the directory change. It
+covers unset, empty, bare, caller-relative and absolute inputs on both platforms,
+plus Windows drive-relative inputs, without a database, models or a compiler
+on the runner. This child wiring contract does not claim actual ORT loading;
+real-library loading on Windows is not covered by the Linux matrix.
+A Linux unit regression also checks both symlink lookup branches in ordinary
+CI, without changing the test process's working directory. macOS retains its
+prior executable-directory lookup; this follow-up does not claim macOS testing.
 
 ## Exact contract items
 
