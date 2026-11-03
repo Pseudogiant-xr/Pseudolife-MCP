@@ -732,6 +732,47 @@ mod tests {
     }
 
     #[test]
+    fn lesson_width_omission_differs_from_an_explicit_null() {
+        let bound = bind("memory_lesson_search", json!({"query": "deploy"})).unwrap();
+        assert_eq!(bound["top_k"], Value::Null);
+        let refused = bind(
+            "memory_lesson_search",
+            json!({"query": "deploy", "top_k": null}),
+        )
+        .unwrap_err();
+        assert_eq!(refused["param"], "top_k");
+        assert_eq!(refused["error"], "invalid_argument");
+        assert_eq!(
+            bind(
+                "memory_lesson_search",
+                json!({"query": "deploy", "top_k": 3})
+            )
+            .unwrap()["top_k"],
+            3
+        );
+    }
+
+    #[test]
+    fn recall_limits_distinguish_omission_from_explicit_null() {
+        let bound = bind("memory_recall", json!({"query": "walk"})).unwrap();
+        for key in ["hops", "top_k"] {
+            assert_eq!(bound[key], Value::Null);
+            let mut args = json!({"query": "walk"});
+            args[key] = Value::Null;
+            let refused = bind("memory_recall", args).unwrap_err();
+            assert_eq!(refused["param"], key);
+            assert_eq!(refused["error"], "invalid_argument");
+        }
+        let bound = bind(
+            "memory_recall",
+            json!({"query": "walk", "hops": 1, "top_k": 2}),
+        )
+        .unwrap();
+        assert_eq!(bound["hops"], 1);
+        assert_eq!(bound["top_k"], 2);
+    }
+
+    #[test]
     fn lax_coercions_and_defaults() {
         let out = bind("memory_search", json!({"query": "q", "top_k": "3"})).unwrap();
         assert_eq!(out["top_k"], json!(3));

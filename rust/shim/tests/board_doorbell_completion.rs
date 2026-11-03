@@ -1410,3 +1410,180 @@ fn resolver_pathext_preserves_supported_extensions_and_path_directory_order() {
         std::fs::remove_file(selected).unwrap();
     }
 }
+
+#[tokio::test]
+async fn deferred_privileged_bell_survives_peer_attention() {
+    for reason in ["maintainer_message", "conductor"] {
+        let rig = Harness::new(true, Duration::ZERO).await;
+        state::private_dir(rig.pending.path.parent().unwrap()).unwrap();
+        let lock = state::create(&rig.pending.path.with_extension("bell-lock"))
+            .unwrap()
+            .file;
+        lock.lock().unwrap();
+        let mut privileged = view(&[1, 2], 2, 2, 1.0);
+        privileged.wake.as_mut().unwrap()["reason"] = json!(reason);
+        privileged.wake.as_mut().unwrap()["message_expires_at"] = json!(now() + 3600.0);
+        publish_initial_offer(&rig, &privileged).await;
+        wait_for(|| rig.ledger().iter().any(|row| row[1] == "bell_deferred")).await;
+        assert_eq!(rig.calls(), 0);
+        lock.unlock().unwrap();
+        let mut peer = view(&[1, 2, 3], 3, 3, 2.0);
+        peer.wake = Some(
+            json!({"decision":"attention", "reason":"urgent", "ring_at":2.0,
+            "queue_allowed":true, "recipient_state":"unknown", "message_expires_at":now()+7200.0}),
+        );
+        rig.bell.observe(BANK, &peer).await;
+        rig.accepted().await;
+        assert_eq!(rig.calls(), 1);
+        rig.close().await;
+        assert!(
+            rig.ledger()
+                .iter()
+                .any(|row| row[5].starts_with(&format!("rung {reason} ")))
+        );
+    }
+}
+
+async fn publish_initial_offer(rig: &Harness, offered: &View) {
+    // Drive the subscribed watch first: its initial attach view must run
+    // before these tests start injecting subsequent observations directly.
+    let mut preview = offered.preview.clone();
+    for entry in &mut preview {
+        entry["sender_agent_id"] = json!("fixture-peer");
+        entry["sender_label"] = json!("fixture");
+    }
+    rig.adapter
+        .update_mailbox(&json!({"pending_count":offered.count,
+        "pending_preview":preview, "wake":offered.wake}))
+        .await;
+    assert_eq!(rig.adapter.view().await.watermark, 2);
+}
+
+#[tokio::test]
+async fn deferred_privileged_bell_drops_on_empty_expired_or_delivered() {
+    for end in [
+        "empty",
+        "expired",
+        "delivered",
+        "receive",
+        "lease_grant",
+        "park_expired",
+        "park_refined",
+    ] {
+        let rig = Harness::new(true, Duration::ZERO).await;
+        state::private_dir(rig.pending.path.parent().unwrap()).unwrap();
+        let lock = state::create(&rig.pending.path.with_extension("bell-lock"))
+            .unwrap()
+            .file;
+        lock.lock().unwrap();
+        let mut privileged = view(&[1, 2], 2, 2, 1.0);
+        privileged.wake.as_mut().unwrap()["reason"] = json!(if end == "lease_grant" {
+            "lease_grant"
+        } else {
+            "conductor"
+        });
+        let expiry = if end == "expired" {
+            now() + 2.0
+        } else {
+            now() + 3600.0
+        };
+        privileged.wake.as_mut().unwrap()["message_expires_at"] = json!(expiry);
+        publish_initial_offer(&rig, &privileged).await;
+        wait_for(|| rig.ledger().iter().any(|row| row[1] == "bell_deferred")).await;
+        assert!(now() < expiry, "initial reservation must precede expiry");
+        assert!(rig.ledger().iter().any(|row| row[1] == "bell_deferred"));
+        let mut next = view(&[1, 2], 2, 2, 2.0);
+        next.wake = Some(
+            json!({"decision":"attention", "reason":"urgent", "ring_at":2.0,
+            "queue_allowed":true, "recipient_state":"unknown", "message_expires_at":now()+3600.0}),
+        );
+        if end == "empty" {
+            next.count = Some(0);
+            next.preview.clear();
+        }
+        if end == "delivered" {
+            next.delivered = 2;
+        }
+        if end == "expired" {
+            tokio::time::sleep(Duration::from_secs_f64((expiry - now()).max(1.0) + 0.01)).await;
+        }
+        if end == "park_expired" {
+            next.wake = None;
+        }
+        if end == "park_refined" {
+            next.wake = Some(json!({"decision":"attention", "reason":"no_steer_path",
+                "ring_at":2.0, "recipient_state":"unknown"}));
+        }
+        if end == "receive" {
+            rig.bell
+                .note_call(BANK, "memory_message", &json!({"action":"receive"}), true)
+                .await;
+        }
+        if end != "expired" {
+            rig.bell.observe(BANK, &next).await;
+        }
+        lock.unlock().unwrap();
+        assert_eq!(rig.calls(), 0, "{end}");
+        assert!(!rig.pending.path.exists(), "{end}");
+        let mut peer = view(&[1, 2, 3], 3, 3, 3.0);
+        if end == "delivered" {
+            peer.delivered = 2;
+        }
+        peer.wake.as_mut().unwrap()["reason"] = json!("urgent");
+        rig.bell.observe(BANK, &peer).await;
+        rig.accepted().await;
+        rig.close().await;
+        assert!(
+            rig.ledger()
+                .iter()
+                .any(|row| row[5].starts_with("rung urgent ")),
+            "{end}"
+        );
+        assert!(
+            !rig.ledger()
+                .iter()
+                .any(|row| row[5].starts_with("rung conductor ")),
+            "{end}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn already_rung_privileged_offer_is_not_retained_again() {
+    let rig = Harness::new(true, Duration::ZERO).await;
+    let mut privileged = view(&[1], 1, 2, 0.0);
+    privileged.wake.as_mut().unwrap()["reason"] = json!("maintainer_message");
+    publish_initial_offer(&rig, &privileged).await;
+    wait_for(|| rig.ledger().iter().filter(|row| row[1] == "bell").count() == 1).await;
+    let first = rig.accepted().await;
+    assert!(
+        rig.pending
+            .note_prompt(&json!({"session_id":BANK,"prompt":first["text"]}), now())
+    );
+    let mut peer = view(&[1, 2], 2, 3, 1.0);
+    peer.delivered = 2;
+    peer.wake.as_mut().unwrap()["reason"] = json!("urgent");
+    rig.bell.observe(BANK, &peer).await;
+    wait_for(|| rig.ledger().iter().filter(|row| row[1] == "bell").count() == 2).await;
+    let second = rig.accepted().await;
+    assert!(
+        rig.pending
+            .note_prompt(&json!({"session_id":BANK,"prompt":second["text"]}), now())
+    );
+    privileged.watermark = 4;
+    privileged.wake_watermark = Some(4);
+    privileged.delivered = 3;
+    rig.bell.observe(BANK, &privileged).await; // peer acknowledged, old mail remains
+    let mut fresh = view(&[1, 3], 2, 5, 3.0);
+    fresh.delivered = 3;
+    fresh.wake = Some(
+        json!({"decision":"attention", "reason":"urgent", "ring_at":3.0,
+        "queue_allowed":true, "recipient_state":"unknown", "message_expires_at":now()+3600.0}),
+    );
+    rig.bell.observe(BANK, &fresh).await;
+    wait_for(|| rig.ledger().iter().filter(|row| row[1] == "bell").count() == 3).await;
+    rig.accepted().await;
+    rig.close().await;
+    assert_eq!(rig.calls(), 3);
+    assert!(rig.ledger().last().unwrap()[5].starts_with("attention urgent "));
+}

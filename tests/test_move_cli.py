@@ -25,6 +25,7 @@ import json
 import os
 import signal
 import stat
+import sys
 import tarfile
 from pathlib import Path
 
@@ -1156,6 +1157,18 @@ def test_a_connect_reply_that_is_not_an_object_still_reports(tmp_path, capsys):
     code = run_move(world, tmp_path, as_json=True)
     report = json.loads(capsys.readouterr().out)
     assert code == 5 and report["report"]["rollback"]
+
+
+def test_the_repoint_runs_the_installed_package_not_the_working_directorys(tmp_path, monkeypatch):
+    """Run from a directory that is not the package's own (an older
+    checkout, say), the re-point's ``connect`` child leaves that directory
+    off its import path."""
+    monkeypatch.chdir(tmp_path)
+    world = World()
+    assert run_move(world, tmp_path) == 0
+    connects = [c.argv for c in world.calls if "connect" in c.argv and "pseudolife_memory.cli" in c.argv]
+    assert len(connects) == 1
+    assert ("-P" in connects[0]) == (sys.version_info >= (3, 11))
 
 
 def test_no_registration_to_repoint_is_not_a_failure(tmp_path):
