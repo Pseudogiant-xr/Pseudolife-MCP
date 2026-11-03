@@ -582,6 +582,7 @@ jobs:
           --junitxml=ci-results/test-lite-windows.xml
           tests/test_embedded_pg.py
           tests/test_backup_cli.py
+          tests/test_migrate_flat.py
           tests/test_schema_version.py
           tests/test_doctor_cli.py
           tests/test_unattended_update.py

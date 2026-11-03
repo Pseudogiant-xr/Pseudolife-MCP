@@ -260,6 +260,11 @@
         "job": "parity-checks",
         "fingerprint": "398ff9a598c5f63e",
         "reason": "Merge forward after #1208 while retaining the existing R4 CLI selections and their approved cost allowance. Preserves master R1 recovery/setup/transport/config/stats registration and adds the update golden/live row and transaction/wrapper acceptance within existing CLI steps. No new PR job, shard, dependency installation or build. Windows stress run 41425900902 at afe57bbf measured the selected transactions at 122.69s median and wrappers at 46.72s across 20 successful runs; earlier complete Windows dev VM files took 204.55s and 49.64s before later regressions. The conductor approved a bounded addition of eight minutes per CLI shard: retained baseline 384.2 plus sixteen = 400.2 within the unchanged 410 limit, pending batch/master remeasurement. CLI step timeout is 15 minutes; job limit remains 35. Existing master acceptance records remain valid for other steps. update-0 adds two nightly/manual-only source jobs outside the PR budget."
+      },
+      {
+        "job": "parity-checks",
+        "fingerprint": "398ff9a598c5f63e",
+        "reason": "Adds migrate_flat live, record and golden checks to the existing h5-backup shard and PostgreSQL setup. The 32-case Linux run at 66b7b064 took 68.7 seconds across those three stages; no gated job or shard is added. Retain the measured baseline within unchanged limits pending batch remeasurement. Its single source mutant gets one additional nightly/manual shard per OS and remains excluded from PR and batch events."
       }
     ]
   },
@@ -312,7 +317,7 @@
       "lock-resolve": "83bcc6b654896c6d",
       "test": "ac414107d3d9c71d",
       "test-lite-linux": "44e2a8f2c01baeab",
-      "test-lite-windows": "0cf37dff07f5dab1",
+      "test-lite-windows": "0e3d38b7bd3bfdc3",
       "test-lite-macos": "c4a0ad0c70bb205a",
       "frontend": "b1b6a1a1278f2e60"
     },
@@ -411,6 +416,11 @@
         "job": "test-lite-macos",
         "fingerprint": "c4a0ad0c70bb205a",
         "reason": "adds one test_suite_lock node (the ops/wsl-suite.ps1 marker-forwarding check, one short pwsh spawn), seconds against the lane's measured minutes"
+      },
+      {
+        "job": "test-lite-windows",
+        "fingerprint": "0e3d38b7bd3bfdc3",
+        "reason": "Adds the 33 migration tests to the existing PostgreSQL-backed step (9.15 seconds in the native Windows targeted run on 2026-11-03). No new job, setup step or shard; retain the measured lane baseline within unchanged limits pending the next batch measurement."
       }
     ]
   }
