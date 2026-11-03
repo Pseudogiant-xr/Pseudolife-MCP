@@ -430,7 +430,7 @@
     "rust/shim/src/cli/maintainer/top_help.txt": "206d1f9cb021ff363cafb643157eeedbf9a5dfe2d744dd9578e7594acfa0dc12",
     "rust/shim/src/cli/move_cli.rs": "e11c7d488e244b1a496c29d1fc4a79f6e0337c474b2f6c7aeaec50274feac4b5",
     "rust/shim/src/cli/pairing/invite.rs": "9569382a53fd55c325483b42d6a80fbe676d6ec04a57754b59db1f72545bd0e8",
-    "rust/shim/src/cli/pairing/invite_db.rs": "6fa112d2c700c5808c7a3834311af3103424ef1afc36b327a630e69df073d99f",
+    "rust/shim/src/cli/pairing/invite_db.rs": "589c07235d9e68047cef04f42d252366b29a021f4a76920dec4fe7aa430417b9",
     "rust/shim/src/cli/pairing/invite_help.txt": "b5bdd61622278b0de84f4720b91b6864142ebe6ebc4601c23dc2f2da057fd6da",
     "rust/shim/src/cli/pairing/invite_transport.rs": "20e332e6f08838bf5f78753e3bdc8ee45931f81bbdd0db3a68868cd06304b168",
     "rust/shim/src/cli/pairing/mod.rs": "c708d0b91306ed353d262f47c60569da20462d6d8b561b7aa5b727db751b6901",
