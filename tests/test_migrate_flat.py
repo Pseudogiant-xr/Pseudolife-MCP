@@ -7,6 +7,31 @@ from pseudolife_memory import migrate_flat_cli as migration
 from tests.pg_fixtures import pg_conn, pg_url  # noqa: F401
 
 
+@pytest.mark.parametrize("failure", ["lock", "permission", "connection"])
+def test_finalization_lock_error_names_only_actual_contention(tmp_path, failure):
+    from contextlib import nullcontext
+    import psycopg
+    errors = {"lock": psycopg.errors.LockNotAvailable,
+              "permission": psycopg.errors.InsufficientPrivilege,
+              "connection": psycopg.OperationalError}
+
+    class Connection:
+        def transaction(self):
+            return nullcontext()
+
+        def execute(self, sql):
+            if sql.startswith("LOCK TABLE"):
+                raise errors[failure]("fixture")
+
+    with pytest.raises(migration.MigrationError) as caught:
+        migration._finish(Connection(), tmp_path / "config.yaml", {})
+    if failure == "lock":
+        assert "entry lock unavailable; stop all bank writers" in str(caught.value)
+    else:
+        assert "entry table lock failed; check database connectivity and permissions" in str(caught.value)
+        assert "stop all bank writers" not in str(caught.value)
+
+
 def test_config_override_refuses_before_connect(tmp_path, monkeypatch, capsys):
     import psycopg
     (tmp_path / "config.yaml").write_text("memory: {miras: {preset: continuum}}\n")

@@ -141,9 +141,21 @@ def finalization_lock_held(arm):
     arm.state["writer"] = writer
 
 
+def entry_lock_held(arm):
+    setup("memory: {miras: {preset: continuum}}\n")(arm)
+    writer = _bank.connect(DB)
+    writer.execute("LOCK TABLE entries IN ROW EXCLUSIVE MODE")
+    arm.state["writer"] = writer
+
+
 def lock_refused(arm, obs):
     refused(arm, obs)
     assert b"entry lock unavailable; stop all bank writers" in base64.b64decode(obs["stderr"])
+
+
+def initial_lock_refused(arm, obs):
+    lock_refused(arm, obs)
+    assert not (arm.home / "bank" / "backups").exists()
 
 
 def edited_pending(arm):
@@ -230,6 +242,7 @@ def cases():
              setup=setup("memory: {miras: {preset: continuum}}\n"), after=after,
              rules=("flat-migration-files",), timeout=120, real_programs=("pg_dump",)),
         Case("writer-held", argv, env=env, setup=held_writer, after=refused),
+        Case("entry-lock-held", argv, env=env, setup=entry_lock_held, after=initial_lock_refused),
         *[Case("refuse-" + name, argv, env=env, setup=setup(config), after=refused)
           for name, config in (
               ("utf8", b"invalid: \xff\n"),

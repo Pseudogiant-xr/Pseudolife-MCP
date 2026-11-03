@@ -168,14 +168,26 @@ async fn fingerprint(client: &Client) -> Result<Vec<(i64, String)>, String> {
     Ok(rows.iter().map(|row| (row.get(0), row.get(1))).collect())
 }
 
+fn entry_lock_error(code: Option<&tokio_postgres::error::SqlState>) -> &'static str {
+    if code == Some(&tokio_postgres::error::SqlState::LOCK_NOT_AVAILABLE) {
+        "entry lock unavailable; stop all bank writers and retry migrate-flat --apply"
+    } else {
+        "entry table lock failed; check database connectivity and permissions, then retry migrate-flat --apply"
+    }
+}
+
+async fn begin_entry_lock(client: &Client) -> Result<(), String> {
+    client.batch_execute("BEGIN; SET LOCAL lock_timeout='5s'; LOCK TABLE public.entries IN SHARE ROW EXCLUSIVE MODE")
+        .await.map_err(|error| entry_lock_error(error.code()).to_owned())
+}
+
 async fn finish(
     client: &Client,
     daemon: &Path,
     path: &Path,
     marker: &mut Value,
 ) -> Result<(), String> {
-    client.batch_execute("BEGIN; SET LOCAL lock_timeout='5s'; LOCK TABLE public.entries IN SHARE ROW EXCLUSIVE MODE")
-        .await.map_err(|_| "entry lock unavailable; stop all bank writers and retry migrate-flat --apply")?;
+    begin_entry_lock(client).await?;
     match finish_locked(client, daemon, path, marker).await {
         Ok(()) => client
             .batch_execute("COMMIT")
@@ -298,7 +310,7 @@ async fn locked(
         }
         return Ok(marker);
     }
-    client.batch_execute("BEGIN; SET LOCAL lock_timeout='5s'; LOCK TABLE public.entries IN SHARE ROW EXCLUSIVE MODE").await.map_err(|_| "entry lock unavailable; stop all bank writers and retry migrate-flat --apply")?;
+    begin_entry_lock(client).await?;
     let rows = fingerprint(client).await?;
     let planned = plan(daemon, raw, rows.len() as i64)?;
     let nonflat: i64 = client
@@ -558,6 +570,8 @@ mod tests {
 
     #[test]
     fn planner_stderr_precedes_broken_input_pipe() {
+        // Coverage of stderr precedence, not RED evidence for the diagnostic
+        // changes: this also passes on the earlier planner implementation.
         let message = run_planner(
             exiting_planner("migrate-flat refused: fixture planner rejected the config"),
             Path::new("fixture-daemon"),
@@ -565,6 +579,28 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(message, "fixture planner rejected the config");
+    }
+
+    #[test]
+    fn entry_lock_failure_classifies_only_contention() {
+        use tokio_postgres::error::SqlState;
+        assert!(
+            entry_lock_error(Some(&SqlState::LOCK_NOT_AVAILABLE))
+                .contains("entry lock unavailable; stop all bank writers")
+        );
+        for code in [
+            None,
+            Some(&SqlState::INSUFFICIENT_PRIVILEGE),
+            Some(&SqlState::CONNECTION_FAILURE),
+        ] {
+            let message = entry_lock_error(code);
+            assert!(
+                message.contains(
+                    "entry table lock failed; check database connectivity and permissions"
+                )
+            );
+            assert!(!message.contains("stop all bank writers"));
+        }
     }
 
     #[test]

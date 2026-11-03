@@ -11,6 +11,9 @@ these tests postdate the pinned Python oracle inventories.
 The capture validates that absolute recovery paths name files in this arm's
 `bank/backups` directory, then records that exact relative suffix under
 `{HOME}/bank/backups`; no host path is saved in the golden metadata.
+Record Linux goldens from a neutral test account: backup archives retain
+owner and group metadata inside compressed payloads. Run the tracked-tree
+identifier guard after recording; it inspects nested archives as well as text.
 
 Physical restore is separately exercised by
 `daemon/harness/test_flat_migration_restore.py` against an owned disposable

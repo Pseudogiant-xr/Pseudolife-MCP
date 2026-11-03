@@ -20,3 +20,5 @@
   names the matching binary needed instead of reporting a missing database URL.
 - Invalid UTF-8 configuration names the config repair required, and a locked
   entry table during finalization names the writers that must be stopped.
+- Initial migration and finalization distinguish lock contention from database
+  connection and permission failures before suggesting an operator action.

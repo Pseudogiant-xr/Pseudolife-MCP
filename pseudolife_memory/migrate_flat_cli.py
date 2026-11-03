@@ -242,13 +242,20 @@ def _require_flat_entries(conn):
         raise MigrationError("the migrated bank contains entries outside the flat band; stop all writers and reconcile those entries into flat before retrying migrate-flat --apply")
 
 
+def _lock_entries(conn):
+    from psycopg.errors import LockNotAvailable
+    try:
+        conn.execute("SET LOCAL lock_timeout='5s'")
+        conn.execute("LOCK TABLE public.entries IN SHARE ROW EXCLUSIVE MODE")
+    except LockNotAvailable:
+        raise MigrationError("entry lock unavailable; stop all bank writers and retry migrate-flat --apply") from None
+    except Exception:
+        raise MigrationError("entry table lock failed; check database connectivity and permissions, then retry migrate-flat --apply") from None
+
+
 def _finish(conn, path, marker):
     with conn.transaction():
-        try:
-            conn.execute("SET LOCAL lock_timeout='5s'")
-            conn.execute("LOCK TABLE public.entries IN SHARE ROW EXCLUSIVE MODE")
-        except Exception:
-            raise MigrationError("entry lock unavailable; stop all bank writers and retry migrate-flat --apply") from None
+        _lock_entries(conn)
         _finish_locked(conn, path, marker)
 
 
@@ -300,8 +307,7 @@ def migrate(conn, data_dir: Path, *, backup=None):
             return {"status": "resumed", **marker, "complete": True}
         with conn.transaction():
             # Allows pg_dump's ACCESS SHARE while preventing direct entry writers.
-            conn.execute("SET LOCAL lock_timeout='5s'")
-            conn.execute("LOCK TABLE public.entries IN SHARE ROW EXCLUSIVE MODE")
+            _lock_entries(conn)
             rows = conn.execute(_FINGERPRINT).fetchall()
             target, capacity = flat_config(config, len(rows))
             nonflat = conn.execute("SELECT count(*) FROM public.entries WHERE band <> 'flat'").fetchone()[0]
