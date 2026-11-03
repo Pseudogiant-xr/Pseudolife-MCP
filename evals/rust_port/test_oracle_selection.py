@@ -92,7 +92,8 @@ def test_dispatch_uses_frozen_head_without_new_input(graph):
     assert not any(arguments[0] == "merge-base" for arguments in graph)
 
 
-@pytest.mark.parametrize("ref", [None, "", "refs/heads/topic", "refs/tags/master"])
+@pytest.mark.parametrize("ref", [None, "", "refs/heads/topic", "refs/tags/master",
+                                 "refs/heads/Master", "refs/heads/MASTER"])
 def test_dispatch_requires_the_master_branch_ref(graph, ref):
     with pytest.raises(ValueError, match="dispatch requires refs/heads/master"):
         oracle.select("root", "workflow_dispatch", {"inputs": {"frozen_head": HEAD}}, HEAD,
@@ -161,7 +162,8 @@ def test_stress_does_not_change_the_existing_master_frozen_capture(graph):
     assert not any(args[0] == "merge-base" for args in graph)
 
 
-def test_stress_cli_uses_the_run_wide_base_after_master_moves(graph, monkeypatch, tmp_path):
+@pytest.mark.parametrize("ref", ["refs/heads/topic", "refs/heads/Master", "refs/heads/MASTER"])
+def test_stress_cli_uses_the_run_wide_base_after_master_moves(graph, monkeypatch, tmp_path, ref):
     original_git = oracle.git
     monkeypatch.setattr(oracle, "git", lambda root, *args:
                         HEAD if args in (("rev-parse", "HEAD"),
@@ -172,7 +174,7 @@ def test_stress_cli_uses_the_run_wide_base_after_master_moves(graph, monkeypatch
     monkeypatch.setenv("PSEUDOLIFE_PORT_DISPATCH_BASE", BASE)
     monkeypatch.setattr(sys, "argv", ["selection", "--root", str(tmp_path),
         "--event-name", "workflow_dispatch", "--event-path", str(payload),
-        "--checkout-head", HEAD, "--github-ref", "refs/heads/topic", "--out", str(receipt)])
+        "--checkout-head", HEAD, "--github-ref", ref, "--out", str(receipt)])
     oracle.main()
     selected = json.loads(receipt.read_text(encoding="utf-8"))
     assert selected["base_head"] == BASE

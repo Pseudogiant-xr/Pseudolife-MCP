@@ -153,6 +153,7 @@ def merge_base(root, base, head):
 def select(root, event_name, event, checkout_head, *, github_ref=None, dispatch_base=None):
     checkout_head = commit(checkout_head)
     release = None
+    # Keep this exact, case-sensitive ref check aligned with rust.yml's stress plan.
     branch_stress = (event_name == "workflow_dispatch"
                      and event.get("inputs", {}).get("mode") == "stress"
                      and github_ref != "refs/heads/master")

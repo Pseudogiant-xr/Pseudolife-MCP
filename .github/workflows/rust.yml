@@ -1897,10 +1897,16 @@ jobs:
           fetch-depth: 0
       - name: Freeze the branch-stress oracle base
         id: oracle
-        if: github.ref != 'refs/heads/master'
+        # Actions string comparisons ignore case; Git branch refs do not.
+        shell: python
         run: |
-          base=$(git rev-parse --verify "refs/remotes/origin/master^{commit}")
-          echo "oracle_base=$base" >> "$GITHUB_OUTPUT"
+          import os
+          import subprocess
+          if os.environ["GITHUB_REF"] != "refs/heads/master":
+              base = subprocess.check_output(
+                  ["git", "rev-parse", "--verify", "refs/remotes/origin/master^{commit}"], text=True).strip()
+              with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+                  output.write(f"oracle_base={base}\n")
       - name: Check the selection and list the iterations
         id: plan
         env:

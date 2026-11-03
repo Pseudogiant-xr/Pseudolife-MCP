@@ -1,7 +1,9 @@
 """rust.yml's stress mode: one selection on N fresh hosted runners, one row each."""
 
 import json
+import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -776,10 +778,35 @@ def test_stress_plan_freezes_the_remote_master_once_for_all_iterations():
     checkout = next(step for step in plan["steps"] if step.get("uses") == "actions/checkout@v4")
     assert checkout["with"]["fetch-depth"] == 0
     freeze = next(step for step in plan["steps"] if step.get("id") == "oracle")
-    assert freeze["if"] == "github.ref != 'refs/heads/master'"
-    assert freeze["run"] == (
-        'base=$(git rev-parse --verify "refs/remotes/origin/master^{commit}")\n'
-        'echo "oracle_base=$base" >> "$GITHUB_OUTPUT"\n')
+    assert "if" not in freeze  # Actions string comparisons ignore case.
+    assert freeze["shell"] == "python"
+
+
+@pytest.mark.parametrize("ref", ["refs/heads/master", "refs/heads/Master",
+                                 "refs/heads/MASTER", "refs/heads/topic"])
+def test_stress_plan_master_check_is_case_sensitive(tmp_path, ref):
+    plan = raw_workflow()["jobs"]["stress-plan"]
+    freeze = next(step for step in plan["steps"] if step.get("id") == "oracle")
+    assert "if" not in freeze, "Actions must not skip case-distinct branch refs"
+    assert freeze["shell"] == "python"
+    if ref != "refs/heads/master":
+        subprocess.run(["git", "init", "--quiet", str(tmp_path)], check=True, capture_output=True)
+        subprocess.run(["git", "-c", "user.name=Fixture", "-c", "user.email=fixture@example.com",
+                        "commit", "--quiet", "--allow-empty", "-m", "fixture"],
+                       cwd=tmp_path, check=True, capture_output=True)
+        base = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=tmp_path, text=True).strip()
+        subprocess.run(["git", "update-ref", "refs/remotes/origin/master", base],
+                       cwd=tmp_path, check=True, capture_output=True)
+    output = tmp_path / "github-output"
+    output.touch()
+    result = subprocess.run([sys.executable, "-c", freeze["run"]], cwd=tmp_path,
+                            env={**os.environ, "GITHUB_REF": ref, "GITHUB_OUTPUT": str(output)},
+                            capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stderr
+    if ref == "refs/heads/master":
+        assert output.read_text(encoding="utf-8") == ""
+    else:
+        assert output.read_text(encoding="utf-8") == f"oracle_base={base}\n"
 
 
 def test_a_cargo_loop_builds_its_test_binaries_once_as_the_rust_job_does():
