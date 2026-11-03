@@ -119,6 +119,14 @@ unique disposable tasks or services, testing
 launch, bind-conflict refusal, replacement, config reload and listener shutdown,
 including a stable launcher that waits for a runtime child on both platforms.
 Windows also tests removal of detached Python tasks and startup-timeout forwarding.
+Task-name validation runs without a scheduler: a missing explicit launcher
+keeps the old-code failure control from touching registrations. Windows task
+names cannot contain wildcard characters or the wildcard escape character.
+Mocked scheduler cases also cover foreign task actions, disabled healthy tasks,
+and persistent query failures; cleanup requires confirmed named absence.
+The Linux rollback control uses a mocked service manager to cover enabled and
+disabled units in active and inactive states. The native lifecycle additionally
+checks that failed replacement preserves a disabled unit's enablement.
 Preflight (wrapper checks, mocked scheduler failures, legacy cleanup, bind
 refusals and failed-install rollback) and the installed lifecycle (quiet rerun,
 config reload, replacement rollback and replacement) run as separate tests for

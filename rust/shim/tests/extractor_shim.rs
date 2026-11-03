@@ -72,6 +72,60 @@ fn real_autostart_gate_excludes_local_and_self_hosted() {
     assert!(real_autostart_allowed(Some("1"), None, None));
 }
 
+#[cfg(windows)]
+#[test]
+fn extractor_shim_autostart_names_are_literal() {
+    let fixtures = Fixtures::new();
+    let missing_launcher = fixtures.0.join("missing-launcher.exe");
+    assert!(!missing_launcher.exists());
+    for provider in ["claude", "codex"] {
+        for mode in ["install-autostart", "uninstall-autostart"] {
+            for name in [
+                "Pseudolife*",
+                "Shim?",
+                "Shim[beta",
+                "Shim]beta",
+                "Shim`beta",
+            ] {
+                // A missing explicit launcher also stops the old implementation
+                // before it can invoke PowerShell or touch any real task.
+                let output = Command::new(env!("CARGO_BIN_EXE_pseudolife-stdio"))
+                    .args(["extractor-shim", mode, provider, "--name", name])
+                    .arg("--native-exe")
+                    .arg(&missing_launcher)
+                    .arg("--env-file")
+                    .arg(fixtures.0.join("settings.env"))
+                    .arg("--cli")
+                    .arg(fixtures.0.join("stub.exe"))
+                    .args(["--port", "12345", "--host", "127.0.0.1"])
+                    .output()
+                    .unwrap();
+                assert!(!output.status.success());
+                let error = String::from_utf8_lossy(&output.stderr);
+                assert!(
+                    error.contains("invalid registration name"),
+                    "{mode} {provider} {name}: {error}"
+                );
+                assert!(!fixtures.0.join("settings.env").exists());
+            }
+            // Spaces and punctuation without wildcard meaning remain valid.
+            let output = Command::new(env!("CARGO_BIN_EXE_pseudolife-stdio"))
+                .args(["extractor-shim", mode, provider, "--name", "Shim (beta)-2"])
+                .arg("--native-exe")
+                .arg(&missing_launcher)
+                .arg("--env-file")
+                .arg(fixtures.0.join("settings.env"))
+                .arg("--cli")
+                .arg(fixtures.0.join("stub.exe"))
+                .args(["--port", "12345", "--host", "127.0.0.1"])
+                .output()
+                .unwrap();
+            assert!(!output.status.success());
+            assert!(String::from_utf8_lossy(&output.stderr).contains("native launcher not found"));
+        }
+    }
+}
+
 #[test]
 fn extractor_shim_stub_differential() {
     let fixtures = Fixtures::new();

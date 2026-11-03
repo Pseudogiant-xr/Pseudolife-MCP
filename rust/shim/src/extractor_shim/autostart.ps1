@@ -77,6 +77,11 @@ function Stop-CapturedProcess($old) {
         }
     }
 }
+function Assert-ShimRegistration($task) {
+    if ($task -and (@($task.Actions).Count -ne 1 -or @(Get-RegisteredInvocation $task).Count -ne 1)) {
+        throw "task $($task.TaskName) is not a recognized shim registration; choose another --name or inspect its action"
+    }
+}
 function Get-OwnedTaskProcesses($task) {
     if (-not $task) { return }
     $captured = @()
@@ -115,8 +120,9 @@ function Get-OwnedTaskProcesses($task) {
 function Get-TaskRegistration([string]$taskName, [datetime]$deadline = (Get-Date).AddSeconds(15)) {
     # The 2026-11-03 VM trace saw four intermittent provider file-not-found
     # errors in 80 autostart proofs. They are not the named-task absence result.
-    # Retry that exact error within the scheduler's existing settlement budget;
-    # persistent failures and all other errors must remain visible to callers.
+    # One-shot reads get a 15-second retry budget. Stop/delete polling passes
+    # its existing deadline so a read cannot restart that settlement budget.
+    # Persistent failures and all other errors remain visible to callers.
     while ($true) {
         try { return Get-ScheduledTask -TaskName $taskName -ErrorAction Stop }
         catch {
@@ -131,7 +137,8 @@ function Wait-TaskStopped([string]$taskName) {
     # reuse the existing 15-second port-release budget for scheduler settlement.
     $deadline = (Get-Date).AddSeconds(15)
     while ($true) {
-        $task = Get-TaskRegistration $taskName $deadline
+        $task = try { Get-TaskRegistration $taskName $deadline }
+                catch { throw "could not confirm task $taskName stopped: $($_.Exception.Message); inspect its scheduler state" }
         if (-not $task -or $task.State -notin @('Running', 'Queued')) { return }
         if ((Get-Date) -ge $deadline) { throw "task $taskName did not stop; inspect its scheduler state" }
         Start-Sleep -Milliseconds 200
@@ -140,6 +147,7 @@ function Wait-TaskStopped([string]$taskName) {
 function Remove-OwnedTask([string]$taskName) {
     $task = Get-TaskRegistration $taskName
     if (-not $task) { return }
+    Assert-ShimRegistration $task
     $script:removedRegistration = $true
     $captured = @(Get-OwnedTaskProcesses $task)
     # Capture children before stopping the wrapper: its exit can orphan them.
@@ -149,7 +157,10 @@ function Remove-OwnedTask([string]$taskName) {
     $deadline = (Get-Date).AddSeconds(15)
     $accepted = $false
     $lastDeleteError = 'registration is still present'
-    while (Get-TaskRegistration $taskName $deadline) {
+    while ($true) {
+        $task = try { Get-TaskRegistration $taskName $deadline }
+                catch { throw "could not confirm removal of task ${taskName}: $($_.Exception.Message); inspect its scheduler state" }
+        if (-not $task) { break }
         if ((Get-Date) -ge $deadline) { throw "could not remove ${taskName}: $lastDeleteError" }
         if (-not $accepted) {
             try {
@@ -175,6 +186,15 @@ if ($c.Remove) {
 }
 $registered = Get-TaskRegistration $name
 $legacy = if ($name -eq 'Pseudolife Claude Shim') { Get-TaskRegistration 'Pseudolife Sonnet Shim' } else { $null }
+Assert-ShimRegistration $registered
+Assert-ShimRegistration $legacy
+$siblings = @()
+if ($c.ReplaceSibling) {
+    $siblings = if ($kind -eq 'claude') { @('Pseudolife Codex Shim') } else { @('Pseudolife Claude Shim', 'Pseudolife Sonnet Shim') }
+    foreach ($sibling in $siblings) {
+        if ($sibling -ne $name) { Assert-ShimRegistration (Get-TaskRegistration $sibling) }
+    }
+}
 $legacyProcesses = @(Get-OwnedTaskProcesses $legacy)
 $legacyWasActive = $legacy -and ($legacy.State -eq 'Running' -or $legacyProcesses.Count -gt 0)
 # Only the selected registration can establish ownership. A matching basename
@@ -246,6 +266,9 @@ try {
         $registered.Actions[0].Execute -eq $action.Execute -and $registered.Actions[0].Arguments -eq $action.Arguments -and
         [string]$registered.Principal.LogonType -eq [string]$c.LogonType
     $unchanged = $sameTask -and (Test-HealthyListener)
+    if ($unchanged -and -not $registered.Settings.Enabled) {
+        Enable-ScheduledTask -TaskName $name -ErrorAction Stop | Out-Null
+    }
     if (-not $unchanged) {
         $mutated = $true
         Stop-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
@@ -299,7 +322,6 @@ if ($name -eq 'Pseudolife Claude Shim') {
     Remove-OwnedTask 'Pseudolife Sonnet Shim'
 }
 if ($c.ReplaceSibling) {
-    $siblings = if ($kind -eq 'claude') { @('Pseudolife Codex Shim') } else { @('Pseudolife Claude Shim', 'Pseudolife Sonnet Shim') }
     foreach ($sibling in $siblings) {
         if ($sibling -ne $name) {
             Remove-OwnedTask $sibling

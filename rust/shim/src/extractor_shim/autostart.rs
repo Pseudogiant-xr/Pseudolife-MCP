@@ -123,8 +123,12 @@ pub(super) fn install(args: &[OsString], remove: bool) -> Result<(), String> {
             "pseudolife-codex-shim.service".into()
         }
     });
-    if name.is_empty() || name.chars().any(|c| c.is_control() || "/\\".contains(c)) {
-        return Err("invalid registration name".into());
+    if name.is_empty()
+        || name.chars().any(|c| c.is_control() || "/\\".contains(c))
+        // ScheduledTasks uses wildcard matching, including backtick escaping.
+        || (cfg!(windows) && name.contains(['*', '?', '[', ']', '`']))
+    {
+        return Err("invalid registration name; use a literal name without control characters, slashes or wildcard characters".into());
     }
     if !cfg!(windows)
         && (!name.ends_with(".service")

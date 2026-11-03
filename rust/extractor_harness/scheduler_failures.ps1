@@ -1,4 +1,4 @@
-param([string]$Source, [string]$Root, [ValidateSet('PasswordRollback','LegacyMigration','DelayedStop','DelayedRemoval','DeleteRetry','DeleteFailure','StopTimeout','RemovalTimeout','ProcessExitRace','ProcessStopFailure','ProcessIdentityChanged','QueryInitialRetry','QueryRollbackRetry','QueryRemovalRetry','QueryFailure','QueryAccessDenied','QueryNamedAbsent')][string]$Case)
+param([string]$Source, [string]$Root, [ValidateSet('PasswordRollback','LegacyMigration','DelayedStop','DelayedRemoval','DeleteRetry','DeleteFailure','StopTimeout','RemovalTimeout','ProcessExitRace','ProcessStopFailure','ProcessIdentityChanged','QueryInitialRetry','QueryRollbackRetry','QueryRemovalRetry','QueryFailure','QueryAccessDenied','QueryNamedAbsent','DisabledReinstall','QueryStopFailure','QueryRemovalFailure','ForeignRemoval','ForeignLegacy','ForeignSibling')][string]$Case)
 $ErrorActionPreference = 'Stop'
 # Every scheduler/process operation is mocked; these cases need no credentials,
 # real registrations, listeners or process termination.
@@ -11,6 +11,7 @@ $writer = Join-Path $directory 'writer.ps1'
 [IO.File]::WriteAllText($writer, "[IO.File]::WriteAllText('$($settings.Replace("'", "''"))', 'after'); `$global:LASTEXITCODE=0")
 $global:r6fixtureTask = $null
 $global:r6legacyTask = $null
+$global:r6siblingTask = $null
 $global:r6listening = $false
 $global:r6stoppedLegacy = $false
 $global:r6restartedLegacy = $false
@@ -27,6 +28,7 @@ $global:r6oldProcess = $null
 $global:r6newProcess = $null
 $global:r6queryFaults = 0
 $global:r6startupFailed = $false
+$global:r6enabled = $false
 if ($Case -in @('ProcessExitRace','ProcessStopFailure','ProcessIdentityChanged')) {
     $ast = [Management.Automation.Language.Parser]::ParseFile($Source, [ref]$null, [ref]$null)
     $stopper = $ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Stop-CapturedProcess' }, $true)
@@ -63,8 +65,18 @@ if ($Case -in @('ProcessExitRace','ProcessStopFailure','ProcessIdentityChanged')
     return
 }
 $taskName = 'fixture-native'
-if ($Case -eq 'PasswordRollback') {
-    $global:r6fixtureTask = [PSCustomObject]@{ TaskName=$taskName; State='Ready'; Principal=[PSCustomObject]@{LogonType='Password'}; Actions=@([PSCustomObject]@{Execute='previous.exe';Arguments='--previous'}) }
+if ($Case -eq 'ForeignRemoval') {
+    $global:r6fixtureTask = [PSCustomObject]@{ TaskName=$taskName; State='Ready'; Actions=@([PSCustomObject]@{Execute='foreign.exe';Arguments='--unrelated'}) }
+    $expectedFailure = 'not a recognized shim registration'
+} elseif ($Case -eq 'ForeignSibling') {
+    $global:r6siblingTask = [PSCustomObject]@{ TaskName='Pseudolife Codex Shim'; State='Ready'; Actions=@([PSCustomObject]@{Execute='foreign.exe';Arguments='--unrelated'}) }
+    $expectedFailure = 'not a recognized shim registration'
+} elseif ($Case -eq 'ForeignLegacy') {
+    $taskName = 'Pseudolife Claude Shim'
+    $global:r6legacyTask = [PSCustomObject]@{ TaskName='Pseudolife Sonnet Shim'; State='Ready'; Actions=@([PSCustomObject]@{Execute='foreign.exe';Arguments='--unrelated'}) }
+    $expectedFailure = 'not a recognized shim registration'
+} elseif ($Case -eq 'PasswordRollback') {
+    $global:r6fixtureTask = [PSCustomObject]@{ TaskName=$taskName; State='Ready'; Principal=[PSCustomObject]@{LogonType='Password'}; Actions=@([PSCustomObject]@{Execute='previous.exe';Arguments=('extractor-shim claude --env-file "' + $settings + '"')}) }
     $expectedFailure = 'original fixture startup failure'
 } elseif ($Case -eq 'LegacyMigration') {
     $taskName = 'Pseudolife Claude Shim'
@@ -73,12 +85,14 @@ if ($Case -eq 'PasswordRollback') {
     $global:r6legacyProcess = [PSCustomObject]@{ ProcessId=4242; ParentProcessId=1; CreationDate=[datetime]'2026-01-01'; ExecutablePath='legacy.exe'; CommandLine=('legacy.exe ' + $arguments) }
     $global:r6listening = $true
     $expectedFailure = 'original fixture registration failure'
-} elseif ($Case -in @('DelayedStop','StopTimeout','QueryInitialRetry','QueryFailure','QueryAccessDenied')) {
+} elseif ($Case -in @('DelayedStop','StopTimeout','QueryInitialRetry','QueryFailure','QueryAccessDenied','DisabledReinstall','QueryStopFailure')) {
     $arguments = 'extractor-shim claude --env-file "' + $settings + '"'
     $global:r6fixtureTask = [PSCustomObject]@{ TaskName=$taskName; State='Running'; Principal=[PSCustomObject]@{LogonType='S4U'}; Actions=@([PSCustomObject]@{Execute=$writer;Arguments=$arguments}) }
     $global:r6oldProcess = [PSCustomObject]@{ ProcessId=4242; ParentProcessId=1; CreationDate=[datetime]'2026-01-01'; ExecutablePath=$writer; CommandLine=($writer + ' ' + $arguments) }
     $global:r6listening = $true
     $expectedFailure = "task $taskName did not stop; inspect its scheduler state"
+    if ($Case -eq 'DisabledReinstall') { $global:r6fixtureTask | Add-Member Settings ([PSCustomObject]@{Enabled=$false}) }
+    if ($Case -eq 'QueryStopFailure') { $expectedFailure = 'could not confirm task fixture-native stopped: fixture task query failed; inspect its scheduler state' }
     if ($Case -in @('QueryFailure','QueryAccessDenied')) { $expectedFailure = 'fixture task query failed' }
 } else {
     $expectedFailure = 'original fixture startup failure'
@@ -86,7 +100,7 @@ if ($Case -eq 'PasswordRollback') {
 function Get-ScheduledTask {
     [CmdletBinding()]
     param($TaskName)
-    $fault = $Case -in @('QueryFailure','QueryAccessDenied','QueryNamedAbsent') -or (
+    $fault = ($Case -eq 'QueryStopFailure' -and $global:r6stopPending -gt 0) -or ($Case -eq 'QueryRemovalFailure' -and $global:r6deleteAttempts -gt 0) -or $Case -in @('QueryFailure','QueryAccessDenied','QueryNamedAbsent') -or (
         $global:r6queryFaults -lt 2 -and (
             $Case -eq 'QueryInitialRetry' -or
             ($Case -eq 'QueryRollbackRetry' -and $global:r6startupFailed) -or
@@ -100,6 +114,7 @@ function Get-ScheduledTask {
         $PSCmdlet.WriteError($record)
         return
     }
+    if ($TaskName -eq 'Pseudolife Codex Shim') { return $global:r6siblingTask }
     if ($TaskName -eq 'Pseudolife Sonnet Shim') { return $global:r6legacyTask }
     if ($global:r6stopPending -gt 0) {
         $global:r6stopWaits++
@@ -130,7 +145,13 @@ function Get-NetTCPConnection {
 function Stop-Process { param($Id) $global:r6stoppedPids += $Id; $global:r6listening=$false }
 function Get-Date { $global:r6clock }
 function Start-Sleep { param($Milliseconds) $global:r6clock=$global:r6clock.AddMilliseconds($Milliseconds) }
-function New-ScheduledTaskAction { param($Execute,$Argument) [PSCustomObject]@{Execute=$Execute;Arguments=$Argument} }
+function New-ScheduledTaskAction {
+    param($Execute,$Argument)
+    $action = [PSCustomObject]@{Execute=$Execute;Arguments=$Argument}
+    if ($Case -eq 'DisabledReinstall') { $global:r6fixtureTask.Actions=@($action) }
+    $action
+}
+function Enable-ScheduledTask { param($TaskName) $global:r6enabled=$true; $global:r6fixtureTask.Settings.Enabled=$true }
 function New-ScheduledTaskPrincipal { param($UserId,$LogonType) [PSCustomObject]@{LogonType=$LogonType} }
 function New-ScheduledTaskTrigger { }
 function New-ScheduledTaskSettingsSet { }
@@ -149,7 +170,7 @@ function Unregister-ScheduledTask {
         return
     }
     if ($global:r6fixtureTask -and $global:r6fixtureTask.State -eq 'Running') { throw 'task unregistered before scheduler stopped' }
-    if ($Case -in @('DelayedRemoval','RemovalTimeout','QueryRemovalRetry')) { $global:r6removePending=3 }
+    if ($Case -in @('DelayedRemoval','RemovalTimeout','QueryRemovalRetry','QueryRemovalFailure')) { $global:r6removePending=3 }
     else { $global:r6fixtureTask=$null }
 }
 function Register-ScheduledTask {
@@ -173,15 +194,23 @@ function Start-ScheduledTask {
     throw $expectedFailure
 }
 function Invoke-WebRequest {
-    if ($Case -notin @('DelayedStop','QueryInitialRetry')) { throw 'unexpected HTTP call in scheduler failure fixture' }
+    if ($Case -notin @('DelayedStop','QueryInitialRetry','DisabledReinstall')) { throw 'unexpected HTTP call in scheduler failure fixture' }
 }
 function Write-Warning { param($Message) $global:r6warningText += $Message }
 $config = Join-Path $directory 'registration.json'
-@{ Native=$writer;OwnerExe=$writer;Kind='claude';Port=12345;Host='127.0.0.1';Name=$taskName;EnvFile=$settings;LogonType='S4U';Timeout=1;Remove=($Case -eq 'QueryNamedAbsent');ConfigArgs=@();ServeArgs=@('extractor-shim','claude','--env-file',$settings) } |
+@{ Native=$writer;OwnerExe=$writer;Kind='claude';Port=12345;Host='127.0.0.1';Name=$taskName;EnvFile=$settings;LogonType='S4U';Timeout=1;Remove=($Case -in @('QueryNamedAbsent','ForeignRemoval'));ReplaceSibling=($Case -eq 'ForeignSibling');ConfigArgs=@();ServeArgs=@('extractor-shim','claude','--env-file',$settings) } |
     ConvertTo-Json | Set-Content -LiteralPath $config -Encoding UTF8
 $caught = ''
 try { & $Source -ConfigPath $config } catch { $caught = $_.Exception.Message }
-if ($Case -in @('QueryFailure','QueryAccessDenied','QueryNamedAbsent')) {
+if ($Case -in @('ForeignRemoval','ForeignLegacy','ForeignSibling')) {
+    if ($caught -notlike '*not a recognized shim registration*' -or $global:r6registered -or $global:r6deleteAttempts -or $global:r6stoppedLegacy -or $global:r6stoppedPids.Count -or [IO.File]::ReadAllText($settings) -ne 'before') { throw "foreign registration was changed or not refused: $caught" }
+    Write-Output "$Case passed without real scheduler operations"
+    return
+} elseif ($Case -eq 'DisabledReinstall') {
+    if ($caught -or -not $global:r6enabled -or -not $global:r6fixtureTask.Settings.Enabled -or $global:r6registered -or $global:r6deleteAttempts -or $global:r6stoppedPids.Count) { throw "healthy disabled task was not enabled without restart: $caught" }
+    Write-Output "$Case passed without real scheduler operations"
+    return
+} elseif ($Case -in @('QueryFailure','QueryAccessDenied','QueryNamedAbsent')) {
     if ($Case -eq 'QueryNamedAbsent') {
         if ($caught) { throw "confirmed missing task was not a quiet no-op: $caught" }
     } elseif ($caught -ne $expectedFailure) { throw "task query failure was lost: $caught" }
@@ -198,9 +227,15 @@ if ($Case -in @('QueryFailure','QueryAccessDenied','QueryNamedAbsent')) {
 } else {
     if ($caught -ne $expectedFailure) { throw "original failure was lost: $caught" }
     if ([IO.File]::ReadAllText($settings) -ne 'before') { throw 'settings were not restored' }
-    if ($Case -notin @('StopTimeout','RemovalTimeout','DeleteFailure') -and $global:r6fixtureTask) { throw 'replacement task survived failed installation' }
+    if ($Case -notin @('StopTimeout','RemovalTimeout','DeleteFailure','QueryStopFailure','QueryRemovalFailure') -and $global:r6fixtureTask) { throw 'replacement task survived failed installation' }
 }
-if ($Case -eq 'DeleteRetry') {
+if ($Case -eq 'QueryStopFailure') {
+    if ($global:r6registered -or $global:r6deleteAttempts -or -not $global:r6fixtureTask) { throw 'unreadable stop state caused registration mutation' }
+    if (($global:r6clock - [datetime]'2026-01-01').TotalSeconds -ne 45) { throw 'stop, rollback and diagnostic queries exceeded their three deadlines' }
+} elseif ($Case -eq 'QueryRemovalFailure') {
+    if ($global:r6deleteAttempts -ne 1 -or -not $global:r6fixtureTask -or $global:r6warningText -notlike '*could not confirm removal of task fixture-native*') { throw 'unreadable deletion state lost operation context or retried deletion' }
+    if (($global:r6clock - [datetime]'2026-01-01').TotalSeconds -ne 30) { throw 'deletion query and diagnostic query exceeded their two deadlines' }
+} elseif ($Case -eq 'DeleteRetry') {
     if ($global:r6deleteAttempts -ne 3 -or $global:r6warningText) { throw 'rejected deletion was not retried until accepted' }
 } elseif ($Case -eq 'DeleteFailure') {
     if (-not $global:r6fixtureTask -or $global:r6warningText -notlike '*fixture delete rejected*' -or $global:r6warningText -notlike '*present*') { throw 'delete failure diagnostic or remaining state was lost' }
@@ -219,7 +254,7 @@ if ($Case -eq 'DeleteRetry') {
     throw 'legacy registration was not recognized and restored'
 }
 if ($Case -in @('QueryInitialRetry','QueryRollbackRetry','QueryRemovalRetry') -and $global:r6queryFaults -ne 2) { throw 'transient query errors were not retried' }
-if (($global:r6clock - [datetime]'2026-01-01').TotalSeconds -gt 31) { throw 'scheduler waits exceeded their bounded deadlines' }
+if (($global:r6clock - [datetime]'2026-01-01').TotalSeconds -gt $(if ($Case -eq 'QueryStopFailure') { 45 } else { 31 })) { throw 'scheduler waits exceeded their bounded deadlines' }
 Write-Output "$Case passed without real scheduler operations"
 $ast = [Management.Automation.Language.Parser]::ParseFile($Source, [ref]$null, [ref]$null)
 $formatter = $ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Format-ForeignCommand' }, $true)

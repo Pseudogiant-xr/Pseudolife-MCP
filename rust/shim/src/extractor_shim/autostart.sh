@@ -68,10 +68,11 @@ healthy_listener() {
 }
 umask 077
 config_backup="$(mktemp)" unit_backup="$(mktemp)" desired="$(mktemp)"
-had_config=0 had_unit=0 was_active=0 mutated=0 committed=0
+had_config=0 had_unit=0 was_active=0 was_enabled=0 mutated=0 committed=0
 if [ -e "$env_file" ]; then cp -- "$env_file" "$config_backup"; had_config=1; fi
 if [ -e "$unit" ]; then cp -- "$unit" "$unit_backup"; had_unit=1; fi
 systemctl --user is-active --quiet "$name" && was_active=1
+systemctl --user is-enabled --quiet "$name" && was_enabled=1
 finish() {
     result=$?
     trap - EXIT
@@ -79,7 +80,10 @@ finish() {
         if [ "$mutated" = 1 ]; then systemctl --user stop "$name" >/dev/null 2>&1 || true; fi
         if [ "$had_config" = 1 ]; then cp -- "$config_backup" "$env_file"; else rm -f -- "$env_file"; fi
         if [ "$mutated" = 1 ]; then
-            if [ "$had_unit" = 1 ]; then cp -- "$unit_backup" "$unit";
+            if [ "$had_unit" = 1 ]; then
+                cp -- "$unit_backup" "$unit"
+                if [ "$was_enabled" = 1 ]; then systemctl --user enable "$name" >/dev/null 2>&1 || true;
+                else systemctl --user disable "$name" >/dev/null 2>&1 || true; fi
             else systemctl --user disable "$name" >/dev/null 2>&1 || true; rm -f -- "$unit"; fi
             systemctl --user daemon-reload || true
             if [ "$was_active" = 1 ]; then systemctl --user restart "$name" || true; fi

@@ -20,6 +20,29 @@ import uuid
 import run
 
 
+WINDOWS_TASK_ABSENCE = r'''
+function Get-FixtureTask([string]$Task) {
+    # Match the observed scheduler provider retry in the native shim, within
+    # its existing 15-second settlement budget; only named absence is proof.
+    $deadline = (Get-Date).AddSeconds(15)
+    while ($true) {
+        try { $registration = @(Get-ScheduledTask -TaskName $Task -ErrorAction Stop) }
+        catch {
+            if ($_.FullyQualifiedErrorId -eq 'CmdletizationQuery_NotFound_TaskName,Get-ScheduledTask') { return }
+            if ($_.FullyQualifiedErrorId -ne 'HRESULT 0x80070002,Get-ScheduledTask' -or (Get-Date) -ge $deadline) { throw }
+            Start-Sleep -Milliseconds 200
+            continue
+        }
+        if ($registration.Count) { return $registration }
+        throw "scheduler did not confirm named absence for fixture task $Task"
+    }
+}
+function Assert-TaskAbsent([string]$Task) {
+    if (Get-FixtureTask $Task) { throw "fixture task $Task survived removal" }
+}
+'''
+
+
 def invoke(argv, *, step, **kwargs):
     started = time.monotonic()
     print(f"START {step}", flush=True)
@@ -37,6 +60,7 @@ def checked(argv, *, step="fixture helper", **kwargs):
 def windows_cleanup(task, native, repo):
     script = r'''
 param($Task,$Native,$Repo)
+''' + WINDOWS_TASK_ABSENCE + r'''
 Unregister-ScheduledTask -TaskName $Task -Confirm:$false -ErrorAction SilentlyContinue
 $pattern = [regex]::Escape($Repo)
 $owned = @(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -eq $Native -and $_.CommandLine -match $pattern })
@@ -44,11 +68,17 @@ foreach ($old in $owned) {
     $current = Get-CimInstance Win32_Process -Filter "ProcessId = $($old.ProcessId)"
     if ($current -and $current.CreationDate -eq $old.CreationDate) { Stop-Process -Id $old.ProcessId -Force }
 }
-if (Get-ScheduledTask -TaskName $Task -ErrorAction SilentlyContinue) { throw 'fixture task survived cleanup' }
+Assert-TaskAbsent $Task
 '''
     path = repo / "cleanup.ps1"
     path.write_text(script)
     checked(["pwsh", "-NoProfile", "-File", str(path), task, str(native.resolve()), str(repo.resolve())])
+
+
+def windows_assert_task_absent(task):
+    quoted = task.replace("'", "''")
+    checked(["pwsh", "-NoProfile", "-Command", WINDOWS_TASK_ABSENCE + f"\nAssert-TaskAbsent '{quoted}'"],
+            step="failed-install registration absence")
 
 
 
@@ -147,13 +177,18 @@ def wrapper_forwarding(root):
 def proof(binary, root, fixture, launcher_exe, provider, scenario="all"):
     windows = os.name == "nt"
     if windows and scenario in ("all", "preflight"):
+        from autostart_absence_controls import controls
+        controls(sys.modules[__name__])
         wrapper_forwarding(root)
         for case in ("PasswordRollback", "LegacyMigration", "DelayedStop", "DelayedRemoval", "DeleteRetry", "DeleteFailure",
                      "StopTimeout", "RemovalTimeout", "ProcessExitRace", "ProcessStopFailure",
                      "ProcessIdentityChanged", "QueryInitialRetry", "QueryRollbackRetry", "QueryRemovalRetry",
-                     "QueryFailure", "QueryAccessDenied", "QueryNamedAbsent"):
+                     "QueryFailure", "QueryAccessDenied", "QueryNamedAbsent", "DisabledReinstall",
+                     "QueryStopFailure", "QueryRemovalFailure", "ForeignRemoval", "ForeignLegacy", "ForeignSibling"):
             checked(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(Path(__file__).with_name("scheduler_failures.ps1")),
                      "-Source", str(run.ROOT / "rust/shim/src/extractor_shim/autostart.ps1"), "-Root", str(root), "-Case", case], step=case)
+    if not windows and scenario in ("all", "preflight"):
+        checked(["bash", str(Path(__file__).with_name("autostart_rollback.sh"))], step="mocked enablement rollback")
     repo = root / "settings with spaces"
     repo.mkdir()
     bin_dir = root / "bin"
@@ -233,7 +268,7 @@ def proof(binary, root, fixture, launcher_exe, provider, scenario="all"):
                 wait_closed(port)
                 assert (config_file.read_bytes() if config_file.exists() else None) == previous, "failed install did not restore config"
                 if windows:
-                    exists = checked(["pwsh", "-NoProfile", "-Command", f"if (Get-ScheduledTask -TaskName '{token}' -ErrorAction SilentlyContinue) {{ exit 1 }}"])
+                    windows_assert_task_absent(token)
                 else:
                     unit_dir = Path(os.environ.get("XDG_CONFIG_HOME", str(Path.home() / ".config"))) / "systemd/user"
                     assert not (unit_dir / registration).exists(), "failed install left a registration"
@@ -241,6 +276,8 @@ def proof(binary, root, fixture, launcher_exe, provider, scenario="all"):
                 if scenario == "preflight":
                     print(f"{kind}: foreign refusal and failed-install rollback passed", flush=True)
                     return
+            if scenario == "lifecycle" and kind == "claude":
+                config_file.write_bytes(b"")
             print(f"{kind}: registering owned fixture {token}", flush=True)
             checked(args, env=env, step=f"{kind} initial install")
             status, body = run.call(port, "POST", "/chat/completions", {})
@@ -250,6 +287,14 @@ def proof(binary, root, fixture, launcher_exe, provider, scenario="all"):
             repeated = checked(args, env=env, step=f"{kind} unchanged reinstall")
             assert not repeated.stdout.strip(), repeated.stdout
             assert len(run.journal_rows(journal)) == initial_calls, "unchanged install restarted its provider"
+            if windows:
+                checked(["pwsh", "-NoProfile", "-Command",
+                         f"Disable-ScheduledTask -TaskName '{token}' -ErrorAction Stop | Out-Null"], step=f"{kind} disable healthy task")
+                assert not checked(args, env=env, step=f"{kind} re-enable healthy task").stdout.strip()
+                checked(["pwsh", "-NoProfile", "-Command", WINDOWS_TASK_ABSENCE +
+                         f"\nif (-not (Get-FixtureTask '{token}').Settings.Enabled) {{ throw 'task remains disabled' }}"],
+                        step=f"{kind} enabled registration")
+                assert len(run.journal_rows(journal)) == initial_calls, "re-enabling restarted its provider"
             with config_file.open("a") as settings:
                 settings.write("\nUNRELATED_PASSWORD=synthetic-only\n")
             assert not checked(args, env=env, step=f"{kind} unrelated setting").stdout.strip(), "unrelated setting forced reinstall"
@@ -279,9 +324,14 @@ def proof(binary, root, fixture, launcher_exe, provider, scenario="all"):
                 broken_cli.write_text(f"#!{sys.executable}\nraise SystemExit(1)\n")
                 broken_cli.chmod(0o700)
             previous = config_file.read_bytes()
+            if not windows:
+                checked(["systemctl", "--user", "disable", registration], step=f"{kind} disable before failed replacement")
             unhealthy = invoke(args + ["--cli", str(broken_cli), "--startup-timeout", "2"], env=env, step=f"{kind} failed replacement rollback")
             assert unhealthy.returncode != 0 and b"health check" in unhealthy.stdout + unhealthy.stderr, unhealthy
             assert config_file.read_bytes() == previous, "failed replacement did not restore config"
+            if not windows:
+                enabled = invoke(["systemctl", "--user", "is-enabled", registration], step=f"{kind} rolled-back enablement")
+                assert enabled.returncode != 0 and enabled.stdout.strip() == b"disabled", "failed replacement enabled a disabled unit"
             deadline = time.monotonic() + 25
             while True:
                 try:
