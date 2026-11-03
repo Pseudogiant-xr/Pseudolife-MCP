@@ -75,6 +75,7 @@ def test_daemon_credentials_bypass_environment_proxies(monkeypatch, tmp_path, op
         cert_file.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
         key_file.write_bytes(key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()))
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
         context.load_cert_chain(cert_file, key_file)
         servers[0].socket = context.wrap_socket(servers[0].socket, server_side=True)
         monkeypatch.setenv("SSL_CERT_FILE", str(cert_file))
