@@ -406,3 +406,25 @@ fn write_config_matches_python() {
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
+
+/// v59: `coordination.not_owner_principals` is refused as protected, like
+/// `coordination.maintainer*` (tests/test_maintainer_web.py pins Python's).
+#[test]
+fn protected_paths_include_the_owner_list() {
+    for path in [
+        "coordination.maintainer",
+        "coordination.maintainer.rp_id",
+        "coordination.not_owner_principals",
+        "Coordination.Not_Owner_Principals",
+        " coordination.not_owner_principals.0",
+    ] {
+        assert!(protected(path), "{path}");
+    }
+    for path in [
+        "coordination",
+        "coordination.not_owner",
+        "coordination.allowed_principals",
+    ] {
+        assert!(!protected(path), "{path}");
+    }
+}

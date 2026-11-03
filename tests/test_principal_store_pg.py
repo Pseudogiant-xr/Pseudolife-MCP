@@ -47,11 +47,11 @@ def _db_now(conn) -> float:
     return conn.execute("SELECT EXTRACT(EPOCH FROM clock_timestamp())::double precision").fetchone()[0]
 
 
-def test_the_table_has_the_v53_columns(db):
+def test_the_table_has_the_v53_columns_and_v59_ownership(db):
     cols = {r[0] for r in db.execute(
         "SELECT column_name FROM information_schema.columns WHERE table_name = 'principals'")}
     assert cols == {"principal", "token_hash", "tier", "board", "code_hash", "code_expires_at",
-                    "paired_code_hash", "created_at", "paired_at", "revoked_at"}
+                    "paired_code_hash", "created_at", "paired_at", "revoked_at", "owned"}
 
 
 def test_an_invite_stores_only_the_codes_hash(db):
@@ -419,3 +419,80 @@ def test_the_refused_list_is_newest_first(db):
     assert store.list_rejected(db) == [
         {"hash_prefix": "00ff00ff", "rejections": 1, "first_seen_at": 60.0, "last_seen_at": 60.0},
         {"hash_prefix": "ab12cd34", "rejections": 4, "first_seen_at": 10.0, "last_seen_at": 50.0}]
+
+
+# -- v59: whose principal it is (spec 2026-11-02, section 1) --------------------
+
+def _owned(conn, name="laptop"):
+    return conn.execute("SELECT owned FROM principals WHERE principal = %s", (name,)).fetchone()[0]
+
+
+def test_a_new_invite_is_the_owners_unless_it_is_someone_elses(db):
+    assert _invite(db, "laptop")["owned"] is True and _owned(db, "laptop") is True
+    assert _invite(db, "guest", owned=False)["owned"] is False and _owned(db, "guest") is False
+
+
+def test_a_re_invite_keeps_ownership_unless_given(db, pg_url):
+    _invite(db, "guest", owned=False)
+    assert _invite(db, "guest")["owned"] is False                       # pending re-invite
+    store.redeem(pg_url, secret_sha256(_invite(db, "guest")["code"]), secret_sha256(TOKEN_A))
+    assert _invite(db, "guest", replace=True)["owned"] is False         # paired, replaced
+    store.revoke(db, "guest")
+    assert _invite(db, "guest")["owned"] is False                       # after its revocation
+    assert _invite(db, "guest", owned=True)["owned"] is True and _owned(db, "guest") is True
+
+
+def test_redemption_and_the_loader_carry_ownership(db, pg_url):
+    invite = _invite(db, "guest", owned=False)
+    won = store.redeem(pg_url, secret_sha256(invite["code"]), secret_sha256(TOKEN_A))
+    assert won.owned is False
+    _invite(db, "laptop")
+    with psycopg.connect(pg_url, autocommit=True) as conn:
+        rows, _bank = store.load_rows(conn)
+    assert {r.principal: r.owned for r in rows} == {"guest": False, "laptop": True}
+
+
+def test_a_pre_v59_table_loads_and_lists_every_row_as_the_owners(db, pg_url):
+    """The refresher can run before the daemon's storage applied v59 (and
+    ``invite --list`` can meet an older bank): a table without the column is
+    every row the owner's, as the migration makes it."""
+    _invite(db, "laptop")
+    db.execute("ALTER TABLE principals DROP COLUMN owned")
+    db.commit()
+    with psycopg.connect(pg_url, autocommit=True) as conn:
+        rows, _bank = store.load_rows(conn)
+        listed = store.list_principals(conn)
+    assert [(r.principal, r.owned) for r in rows] == [("laptop", True)]
+    assert [(r["principal"], r["owner"]) for r in listed] == [("laptop", True)]
+
+
+def test_the_list_says_whose_each_principal_is(db, pg_url):
+    _invite(db, "laptop")
+    _invite(db, "guest", owned=False)
+    rows = {r["principal"]: r["owner"] for r in store.list_principals(
+        db, environment=["codex", "friend"], not_owner=["friend"])}
+    assert rows == {"codex": True, "friend": False, "guest": False, "laptop": True}
+
+
+def test_a_pre_v59_bank_takes_an_invite_that_leaves_ownership_alone(db):
+    _invite(db, "laptop")
+    db.execute("ALTER TABLE principals DROP COLUMN owned")
+    db.commit()
+    assert not store.has_owned_column(db)
+    assert _invite(db, "laptop")["owned"] is True
+    assert _invite(db, "phone")["state"] == "new"
+    for owned in (False, True):
+        with pytest.raises(store.InviteRefused, match="need schema v59"):
+            _invite(db, "laptop", owned=owned)
+
+
+def test_a_paired_rows_ownership_changes_without_a_code(db, pg_url):
+    invite = _invite(db, "laptop")
+    store.redeem(pg_url, secret_sha256(invite["code"]), secret_sha256(TOKEN_A))
+    changed = store.create_invite(db, "laptop", owned=False, ttl_seconds=900, replace=False)
+    assert (changed["code"], changed["expires_at"], changed["state"], changed["owned"]) == (
+        None, None, "paired", False)
+    assert db.execute("SELECT token_hash, code_hash, owned FROM principals").fetchone() == (
+        secret_sha256(TOKEN_A), None, False)
+    with pytest.raises(store.InviteRefused, match="--mine or --someone-else alone"):
+        store.create_invite(db, "laptop", owned=True, tier="core", ttl_seconds=900, replace=False)

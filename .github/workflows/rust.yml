@@ -1280,7 +1280,7 @@ jobs:
       # - Cases marked live-only (Case.golden False) are left out of goldens
       #   and run in the live pass: transfer keeps help, the no-database
       #   refusals and the float-tie cases (the whole row is 14 MB of bank
-      #   dumps); invite leaves out the 24 cases that show principals its
+      #   dumps); invite leaves out the 31 cases that show principals its
       #   seed stamps with the wall clock and random codes, and one 2.6 MB
       #   report.
       - name: Build the test_login container image

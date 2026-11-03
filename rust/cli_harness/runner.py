@@ -479,10 +479,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--fixture", action="store_true", help="use the offline CPU embedder for real daemon fixtures")
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args(argv)
-    if os.name != "nt" and (args.record or args.golden):
+    if args.record or args.golden:
         # Record and replay share a baseline; live arms inherit the caller's
         # umask so permission differences remain observable there.
-        os.umask(0o022)
+        core.pin_umask()
     if args.golden_dir:
         GOLDENS = args.golden_dir.resolve()
         GOLDENS.mkdir(parents=True, exist_ok=True)

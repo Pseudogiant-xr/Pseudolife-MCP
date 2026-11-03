@@ -690,6 +690,9 @@ class Disabled(Scenario):
 
 class Console(Scenario):
     name = "console"
+    # v59 owner scope: default, alice and every other environment principal
+    # are the owner's except bob, listed as someone else's.
+    config_yaml = BASE_CONFIG + "  not_owner_principals: [bob]\n"
 
     def steps(self):
         view = "/api/agents?view=coordination"
@@ -723,6 +726,17 @@ class Console(Scenario):
             act("receive B sees notice", "receive", token="alice", agent="B"),
             act("agents shows daemon", "agents", token="alice", agent="B", write=False),
             hook("console after notice", "GET", view, write=False),
+            # Owner scope (spec 2026-11-02): two owner principals (default,
+            # alice) see each other's counts and mail; bob, someone else's,
+            # sees only his own, and the owners do not see his own mail.
+            reg("register C (bob)", "C", token="bob", label="guest"),
+            reg("register D (bob)", "D", token="bob", label="guest-helper"),
+            msg("C to D (bob's own)", "C", "D", "between bob's", token="bob"),
+            msg("C to B", "C", "B", "from bob", token="bob"),
+            msg("B to A again", "B", "A", "unread for A", token="alice"),
+            hook("console owner default", "GET", view, write=False),
+            hook("console owner alice", "GET", view, token="alice", write=False),
+            hook("console not owner bob", "GET", view, token="bob", write=False),
         ]
 
 

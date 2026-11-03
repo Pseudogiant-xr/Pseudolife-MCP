@@ -336,6 +336,7 @@ class PythonArm:
             return {"available": self.snapshot.available(), "len": len(self.snapshot),
                     "bank": self.snapshot.bank, "shadowed": self.snapshot.shadowed_rows,
                     "invalid": self.snapshot.invalid_rows, "excluded": sorted(self.snapshot.excluded_names),
+                    "owned": sorted(self.snapshot.owned_principals()),
                     "names": [{"principal": n, "has": self.snapshot.has(n),
                                "admitted": self.snapshot.admitted(n), "tier": self.snapshot.tier_of(n),
                                "board_allowed": identities.principal_admitted(
@@ -488,16 +489,18 @@ class Paired:
             self.differences.append({"case": label, "diffs": diffs})
         self.records.append({"case": label, "output": outputs[0], "state": states[0]})
 
-    def invite(self, name, tier=None, board=True, replace=False, ttl=900, adversarial=False):
+    def invite(self, name, tier=None, board=True, replace=False, ttl=900, adversarial=False,
+               owned=oracle.KEEP):
         code = self.code()
         self.codes[name] = identities.secret_sha256(code)
         def mutate(conn, _i):
             old = oracle.new_pairing_code
             oracle.new_pairing_code = lambda: code
             try:
-                result = oracle.create_invite(conn, name, tier=tier, board=board,
+                result = oracle.create_invite(conn, name, tier=tier, board=board, owned=owned,
                                               ttl_seconds=ttl, replace=replace)
-                return {"state": result["state"], "tier": result["tier"], "board": result["board"]}
+                return {"state": result["state"], "tier": result["tier"], "board": result["board"],
+                        "owned": result["owned"]}
             finally:
                 oracle.new_pairing_code = old
         offsets = {(name, "created_at"): 0, (name, "code_expires_at"): ttl}
@@ -535,9 +538,9 @@ def scenarios(p):
     nbsp_token = unicode_token + "\u00a0"
     p.raw_secrets.extend((unicode_token, nbsp_token))
     h = identities.secret_sha256
-    def row(name, token=None, tier=None, board=True, revoked=False):
+    def row(name, token=None, tier=None, board=True, revoked=False, owned=True):
         return {"principal": name, "token_hash": h(token) if token else None,
-                "tier": tier, "board": board, "revoked": revoked}
+                "tier": tier, "board": board, "revoked": revoked, "owned": owned}
     def inspect(label, names=(), tokens=(), headers=(), allowed=()):
         p.step(label, {"op": "inspect", "names": list(names),
                        "headers": ["Bearer " + token for token in tokens] + list(headers),
@@ -556,7 +559,8 @@ def scenarios(p):
             row("gone", bad, "minimal", revoked=True), row("pending", tier="admin"),
             row("DESK", bad), row("default", bad), row("Daemon", bad), row("Maintainer", bad),
             row("../invalid", bad), row(".hidden", bad), row("env-conflict", env_token),
-            row("encoded", unicode_token), row("nbsp", nbsp_token)]
+            row("encoded", unicode_token), row("nbsp", nbsp_token),
+            row("guest", p.secret("guest"), owned=False)]
     p.step("refresh-normalization", {"op": "refresh", "rows": rows, "bank": "0123456789abcdef"})
     inspect("normalization-exclusion-board-tier", names=("laptop", "quiet", "gone", "pending", "desk", "daemon"),
             tokens=(a, b, bad, env_token, single))
@@ -599,6 +603,9 @@ def scenarios(p):
                               ("expired", None, True), ("desk", None, True),
                               ("pending", "minimal", True), ("gone", None, True)):
         p.invite(name, tier, board)
+    # v59: someone else's machine, kept so by a re-invite without the flag.
+    p.invite("guest", owned=False)
+    p.invite("guest")
     for name in ("default", "daemon", "maintainer"):
         p.invite(name, adversarial=True)
     p.adversarial("expiry", "UPDATE principals SET code_expires_at=1000 WHERE principal='expired'",

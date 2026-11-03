@@ -114,6 +114,35 @@
             ],
             "rows": []
           },
+          "public.console_sessions": {
+            "columns": [
+              "session_id",
+              "token_hash",
+              "principal",
+              "source",
+              "issuer",
+              "method",
+              "label",
+              "created_at",
+              "last_used_at",
+              "expires_at",
+              "revoked_at"
+            ],
+            "rows": []
+          },
+          "public.console_signin_codes": {
+            "columns": [
+              "code_hash",
+              "principal",
+              "source",
+              "issuer",
+              "origin",
+              "expires_at",
+              "used_at",
+              "created_at"
+            ],
+            "rows": []
+          },
           "public.coordination_agents": {
             "columns": [
               "agent_id",
@@ -833,7 +862,8 @@
               "last_used_at",
               "revoked_at",
               "revoked_by",
-              "flagged_at"
+              "flagged_at",
+              "signs_in_as"
             ],
             "rows": []
           },
@@ -887,7 +917,7 @@
               ],
               [
                 "schema_version",
-                58
+                59
               ],
               [
                 "writer_lease_epoch",
@@ -929,7 +959,8 @@
               "paired_code_hash",
               "created_at",
               "paired_at",
-              "revoked_at"
+              "revoked_at",
+              "owned"
             ],
             "rows": []
           },
@@ -1319,6 +1350,35 @@
             ],
             "rows": []
           },
+          "public.console_sessions": {
+            "columns": [
+              "session_id",
+              "token_hash",
+              "principal",
+              "source",
+              "issuer",
+              "method",
+              "label",
+              "created_at",
+              "last_used_at",
+              "expires_at",
+              "revoked_at"
+            ],
+            "rows": []
+          },
+          "public.console_signin_codes": {
+            "columns": [
+              "code_hash",
+              "principal",
+              "source",
+              "issuer",
+              "origin",
+              "expires_at",
+              "used_at",
+              "created_at"
+            ],
+            "rows": []
+          },
           "public.coordination_agents": {
             "columns": [
               "agent_id",
@@ -2038,7 +2098,8 @@
               "last_used_at",
               "revoked_at",
               "revoked_by",
-              "flagged_at"
+              "flagged_at",
+              "signs_in_as"
             ],
             "rows": []
           },
@@ -2092,7 +2153,7 @@
               ],
               [
                 "schema_version",
-                58
+                59
               ],
               [
                 "writer_lease_epoch",
@@ -2134,7 +2195,8 @@
               "paired_code_hash",
               "created_at",
               "paired_at",
-              "revoked_at"
+              "revoked_at",
+              "owned"
             ],
             "rows": []
           },
@@ -2472,6 +2534,35 @@
             ],
             "rows": []
           },
+          "public.console_sessions": {
+            "columns": [
+              "session_id",
+              "token_hash",
+              "principal",
+              "source",
+              "issuer",
+              "method",
+              "label",
+              "created_at",
+              "last_used_at",
+              "expires_at",
+              "revoked_at"
+            ],
+            "rows": []
+          },
+          "public.console_signin_codes": {
+            "columns": [
+              "code_hash",
+              "principal",
+              "source",
+              "issuer",
+              "origin",
+              "expires_at",
+              "used_at",
+              "created_at"
+            ],
+            "rows": []
+          },
           "public.coordination_agents": {
             "columns": [
               "agent_id",
@@ -3191,7 +3282,8 @@
               "last_used_at",
               "revoked_at",
               "revoked_by",
-              "flagged_at"
+              "flagged_at",
+              "signs_in_as"
             ],
             "rows": []
           },
@@ -3245,7 +3337,7 @@
               ],
               [
                 "schema_version",
-                58
+                59
               ],
               [
                 "writer_lease_epoch",
@@ -3287,7 +3379,8 @@
               "paired_code_hash",
               "created_at",
               "paired_at",
-              "revoked_at"
+              "revoked_at",
+              "owned"
             ],
             "rows": []
           },
@@ -3626,6 +3719,35 @@
             ],
             "rows": []
           },
+          "public.console_sessions": {
+            "columns": [
+              "session_id",
+              "token_hash",
+              "principal",
+              "source",
+              "issuer",
+              "method",
+              "label",
+              "created_at",
+              "last_used_at",
+              "expires_at",
+              "revoked_at"
+            ],
+            "rows": []
+          },
+          "public.console_signin_codes": {
+            "columns": [
+              "code_hash",
+              "principal",
+              "source",
+              "issuer",
+              "origin",
+              "expires_at",
+              "used_at",
+              "created_at"
+            ],
+            "rows": []
+          },
           "public.coordination_agents": {
             "columns": [
               "agent_id",
@@ -4345,7 +4467,8 @@
               "last_used_at",
               "revoked_at",
               "revoked_by",
-              "flagged_at"
+              "flagged_at",
+              "signs_in_as"
             ],
             "rows": []
           },
@@ -4399,7 +4522,7 @@
               ],
               [
                 "schema_version",
-                58
+                59
               ],
               [
                 "writer_lease_epoch",
@@ -4441,7 +4564,8 @@
               "paired_code_hash",
               "created_at",
               "paired_at",
-              "revoked_at"
+              "revoked_at",
+              "owned"
             ],
             "rows": []
           },
@@ -4833,6 +4957,35 @@
             ],
             "rows": []
           },
+          "public.console_sessions": {
+            "columns": [
+              "session_id",
+              "token_hash",
+              "principal",
+              "source",
+              "issuer",
+              "method",
+              "label",
+              "created_at",
+              "last_used_at",
+              "expires_at",
+              "revoked_at"
+            ],
+            "rows": []
+          },
+          "public.console_signin_codes": {
+            "columns": [
+              "code_hash",
+              "principal",
+              "source",
+              "issuer",
+              "origin",
+              "expires_at",
+              "used_at",
+              "created_at"
+            ],
+            "rows": []
+          },
           "public.coordination_agents": {
             "columns": [
               "agent_id",
@@ -5552,7 +5705,8 @@
               "last_used_at",
               "revoked_at",
               "revoked_by",
-              "flagged_at"
+              "flagged_at",
+              "signs_in_as"
             ],
             "rows": []
           },
@@ -5606,7 +5760,7 @@
               ],
               [
                 "schema_version",
-                58
+                59
               ],
               [
                 "writer_lease_epoch",
@@ -5648,7 +5802,8 @@
               "paired_code_hash",
               "created_at",
               "paired_at",
-              "revoked_at"
+              "revoked_at",
+              "owned"
             ],
             "rows": []
           },
@@ -5984,6 +6139,35 @@
             ],
             "rows": []
           },
+          "public.console_sessions": {
+            "columns": [
+              "session_id",
+              "token_hash",
+              "principal",
+              "source",
+              "issuer",
+              "method",
+              "label",
+              "created_at",
+              "last_used_at",
+              "expires_at",
+              "revoked_at"
+            ],
+            "rows": []
+          },
+          "public.console_signin_codes": {
+            "columns": [
+              "code_hash",
+              "principal",
+              "source",
+              "issuer",
+              "origin",
+              "expires_at",
+              "used_at",
+              "created_at"
+            ],
+            "rows": []
+          },
           "public.coordination_agents": {
             "columns": [
               "agent_id",
@@ -6703,7 +6887,8 @@
               "last_used_at",
               "revoked_at",
               "revoked_by",
-              "flagged_at"
+              "flagged_at",
+              "signs_in_as"
             ],
             "rows": []
           },
@@ -6757,7 +6942,7 @@
               ],
               [
                 "schema_version",
-                58
+                59
               ],
               [
                 "writer_lease_epoch",
@@ -6799,7 +6984,8 @@
               "paired_code_hash",
               "created_at",
               "paired_at",
-              "revoked_at"
+              "revoked_at",
+              "owned"
             ],
             "rows": []
           },
@@ -7137,6 +7323,35 @@
             ],
             "rows": []
           },
+          "public.console_sessions": {
+            "columns": [
+              "session_id",
+              "token_hash",
+              "principal",
+              "source",
+              "issuer",
+              "method",
+              "label",
+              "created_at",
+              "last_used_at",
+              "expires_at",
+              "revoked_at"
+            ],
+            "rows": []
+          },
+          "public.console_signin_codes": {
+            "columns": [
+              "code_hash",
+              "principal",
+              "source",
+              "issuer",
+              "origin",
+              "expires_at",
+              "used_at",
+              "created_at"
+            ],
+            "rows": []
+          },
           "public.coordination_agents": {
             "columns": [
               "agent_id",
@@ -7856,7 +8071,8 @@
               "last_used_at",
               "revoked_at",
               "revoked_by",
-              "flagged_at"
+              "flagged_at",
+              "signs_in_as"
             ],
             "rows": []
           },
@@ -7910,7 +8126,7 @@
               ],
               [
                 "schema_version",
-                58
+                59
               ],
               [
                 "writer_lease_epoch",
@@ -7952,7 +8168,8 @@
               "paired_code_hash",
               "created_at",
               "paired_at",
-              "revoked_at"
+              "revoked_at",
+              "owned"
             ],
             "rows": []
           },
@@ -8291,6 +8508,35 @@
             ],
             "rows": []
           },
+          "public.console_sessions": {
+            "columns": [
+              "session_id",
+              "token_hash",
+              "principal",
+              "source",
+              "issuer",
+              "method",
+              "label",
+              "created_at",
+              "last_used_at",
+              "expires_at",
+              "revoked_at"
+            ],
+            "rows": []
+          },
+          "public.console_signin_codes": {
+            "columns": [
+              "code_hash",
+              "principal",
+              "source",
+              "issuer",
+              "origin",
+              "expires_at",
+              "used_at",
+              "created_at"
+            ],
+            "rows": []
+          },
           "public.coordination_agents": {
             "columns": [
               "agent_id",
@@ -9010,7 +9256,8 @@
               "last_used_at",
               "revoked_at",
               "revoked_by",
-              "flagged_at"
+              "flagged_at",
+              "signs_in_as"
             ],
             "rows": []
           },
@@ -9064,7 +9311,7 @@
               ],
               [
                 "schema_version",
-                58
+                59
               ],
               [
                 "writer_lease_epoch",
@@ -9106,7 +9353,8 @@
               "paired_code_hash",
               "created_at",
               "paired_at",
-              "revoked_at"
+              "revoked_at",
+              "owned"
             ],
             "rows": []
           },
@@ -9444,6 +9692,35 @@
             ],
             "rows": []
           },
+          "public.console_sessions": {
+            "columns": [
+              "session_id",
+              "token_hash",
+              "principal",
+              "source",
+              "issuer",
+              "method",
+              "label",
+              "created_at",
+              "last_used_at",
+              "expires_at",
+              "revoked_at"
+            ],
+            "rows": []
+          },
+          "public.console_signin_codes": {
+            "columns": [
+              "code_hash",
+              "principal",
+              "source",
+              "issuer",
+              "origin",
+              "expires_at",
+              "used_at",
+              "created_at"
+            ],
+            "rows": []
+          },
           "public.coordination_agents": {
             "columns": [
               "agent_id",
@@ -10163,7 +10440,8 @@
               "last_used_at",
               "revoked_at",
               "revoked_by",
-              "flagged_at"
+              "flagged_at",
+              "signs_in_as"
             ],
             "rows": []
           },
@@ -10217,7 +10495,7 @@
               ],
               [
                 "schema_version",
-                58
+                59
               ],
               [
                 "writer_lease_epoch",
@@ -10259,7 +10537,8 @@
               "paired_code_hash",
               "created_at",
               "paired_at",
-              "revoked_at"
+              "revoked_at",
+              "owned"
             ],
             "rows": []
           },

@@ -4,16 +4,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 520,
-      "sha256": "ef9953fff052e57fbc89baa9"
+      "rows": 541,
+      "sha256": "5466b0d4d226295898f2e558"
      },
      "columns": {
-      "rows": 520,
-      "sha256": "b8115ba89a92ec0cd5dfa329"
+      "rows": 541,
+      "sha256": "672d325c753f7a389cc837ff"
      },
      "constraints": {
-      "rows": 384,
-      "sha256": "3fcb9795b8792dc379f78350"
+      "rows": 404,
+      "sha256": "78bbad5a658bd6be9542ff4b"
      },
      "extensions": {
       "rows": 2,
@@ -24,12 +24,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 104,
-      "sha256": "484e2fccacb2f852dc18c783"
+      "rows": 107,
+      "sha256": "23d2a0af007401704066aaf5"
      },
      "owners_and_comments": {
-      "rows": 170,
-      "sha256": "33a115196978de52679bade1"
+      "rows": 175,
+      "sha256": "dc54134521168c387634b8bb"
      },
      "schemas": {
       "rows": 1,
@@ -107,6 +107,35 @@
        "size",
        "cohesion",
        "computed_at"
+      ],
+      "rows": []
+     },
+     "public.console_sessions": {
+      "columns": [
+       "session_id",
+       "token_hash",
+       "principal",
+       "source",
+       "issuer",
+       "method",
+       "label",
+       "created_at",
+       "last_used_at",
+       "expires_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.console_signin_codes": {
+      "columns": [
+       "code_hash",
+       "principal",
+       "source",
+       "issuer",
+       "origin",
+       "expires_at",
+       "used_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -608,7 +637,8 @@
        "last_used_at",
        "revoked_at",
        "revoked_by",
-       "flagged_at"
+       "flagged_at",
+       "signs_in_as"
       ],
       "rows": []
      },
@@ -654,7 +684,7 @@
       "rows": [
        [
         "schema_version",
-        58
+        59
        ],
        [
         "writer_lease_epoch",
@@ -696,7 +726,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      },
@@ -933,16 +964,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 520,
-      "sha256": "ef9953fff052e57fbc89baa9"
+      "rows": 541,
+      "sha256": "5466b0d4d226295898f2e558"
      },
      "columns": {
-      "rows": 520,
-      "sha256": "b8115ba89a92ec0cd5dfa329"
+      "rows": 541,
+      "sha256": "672d325c753f7a389cc837ff"
      },
      "constraints": {
-      "rows": 384,
-      "sha256": "3fcb9795b8792dc379f78350"
+      "rows": 404,
+      "sha256": "78bbad5a658bd6be9542ff4b"
      },
      "extensions": {
       "rows": 2,
@@ -953,12 +984,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 104,
-      "sha256": "484e2fccacb2f852dc18c783"
+      "rows": 107,
+      "sha256": "23d2a0af007401704066aaf5"
      },
      "owners_and_comments": {
-      "rows": 170,
-      "sha256": "33a115196978de52679bade1"
+      "rows": 175,
+      "sha256": "dc54134521168c387634b8bb"
      },
      "schemas": {
       "rows": 1,
@@ -1036,6 +1067,35 @@
        "size",
        "cohesion",
        "computed_at"
+      ],
+      "rows": []
+     },
+     "public.console_sessions": {
+      "columns": [
+       "session_id",
+       "token_hash",
+       "principal",
+       "source",
+       "issuer",
+       "method",
+       "label",
+       "created_at",
+       "last_used_at",
+       "expires_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.console_signin_codes": {
+      "columns": [
+       "code_hash",
+       "principal",
+       "source",
+       "issuer",
+       "origin",
+       "expires_at",
+       "used_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -1537,7 +1597,8 @@
        "last_used_at",
        "revoked_at",
        "revoked_by",
-       "flagged_at"
+       "flagged_at",
+       "signs_in_as"
       ],
       "rows": []
      },
@@ -1583,7 +1644,7 @@
       "rows": [
        [
         "schema_version",
-        58
+        59
        ],
        [
         "writer_lease_epoch",
@@ -1625,7 +1686,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      },
@@ -5236,16 +5298,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 520,
-      "sha256": "ef9953fff052e57fbc89baa9"
+      "rows": 541,
+      "sha256": "5466b0d4d226295898f2e558"
      },
      "columns": {
-      "rows": 520,
-      "sha256": "b8115ba89a92ec0cd5dfa329"
+      "rows": 541,
+      "sha256": "672d325c753f7a389cc837ff"
      },
      "constraints": {
-      "rows": 384,
-      "sha256": "3fcb9795b8792dc379f78350"
+      "rows": 404,
+      "sha256": "78bbad5a658bd6be9542ff4b"
      },
      "extensions": {
       "rows": 2,
@@ -5256,12 +5318,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 104,
-      "sha256": "484e2fccacb2f852dc18c783"
+      "rows": 107,
+      "sha256": "23d2a0af007401704066aaf5"
      },
      "owners_and_comments": {
-      "rows": 170,
-      "sha256": "33a115196978de52679bade1"
+      "rows": 175,
+      "sha256": "dc54134521168c387634b8bb"
      },
      "schemas": {
       "rows": 1,
@@ -5339,6 +5401,35 @@
        "size",
        "cohesion",
        "computed_at"
+      ],
+      "rows": []
+     },
+     "public.console_sessions": {
+      "columns": [
+       "session_id",
+       "token_hash",
+       "principal",
+       "source",
+       "issuer",
+       "method",
+       "label",
+       "created_at",
+       "last_used_at",
+       "expires_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.console_signin_codes": {
+      "columns": [
+       "code_hash",
+       "principal",
+       "source",
+       "issuer",
+       "origin",
+       "expires_at",
+       "used_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -5840,7 +5931,8 @@
        "last_used_at",
        "revoked_at",
        "revoked_by",
-       "flagged_at"
+       "flagged_at",
+       "signs_in_as"
       ],
       "rows": []
      },
@@ -5886,7 +5978,7 @@
       "rows": [
        [
         "schema_version",
-        58
+        59
        ],
        [
         "writer_lease_epoch",
@@ -5928,7 +6020,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      },
@@ -6165,16 +6258,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 520,
-      "sha256": "ef9953fff052e57fbc89baa9"
+      "rows": 541,
+      "sha256": "5466b0d4d226295898f2e558"
      },
      "columns": {
-      "rows": 520,
-      "sha256": "b8115ba89a92ec0cd5dfa329"
+      "rows": 541,
+      "sha256": "672d325c753f7a389cc837ff"
      },
      "constraints": {
-      "rows": 384,
-      "sha256": "3fcb9795b8792dc379f78350"
+      "rows": 404,
+      "sha256": "78bbad5a658bd6be9542ff4b"
      },
      "extensions": {
       "rows": 2,
@@ -6185,12 +6278,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 104,
-      "sha256": "484e2fccacb2f852dc18c783"
+      "rows": 107,
+      "sha256": "23d2a0af007401704066aaf5"
      },
      "owners_and_comments": {
-      "rows": 170,
-      "sha256": "33a115196978de52679bade1"
+      "rows": 175,
+      "sha256": "dc54134521168c387634b8bb"
      },
      "schemas": {
       "rows": 1,
@@ -6268,6 +6361,35 @@
        "size",
        "cohesion",
        "computed_at"
+      ],
+      "rows": []
+     },
+     "public.console_sessions": {
+      "columns": [
+       "session_id",
+       "token_hash",
+       "principal",
+       "source",
+       "issuer",
+       "method",
+       "label",
+       "created_at",
+       "last_used_at",
+       "expires_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.console_signin_codes": {
+      "columns": [
+       "code_hash",
+       "principal",
+       "source",
+       "issuer",
+       "origin",
+       "expires_at",
+       "used_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -6769,7 +6891,8 @@
        "last_used_at",
        "revoked_at",
        "revoked_by",
-       "flagged_at"
+       "flagged_at",
+       "signs_in_as"
       ],
       "rows": []
      },
@@ -6815,7 +6938,7 @@
       "rows": [
        [
         "schema_version",
-        58
+        59
        ],
        [
         "writer_lease_epoch",
@@ -6857,7 +6980,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      },
@@ -7424,20 +7548,20 @@
     }
    }
   ],
-  "468470071edfe9bfd7e526678864ac8fab92403b": [
+  "3d9311bf8203c79b46b5373b3c440d0b1a54fcbf": [
    {
     "catalog": {
      "column_types": {
-      "rows": 520,
-      "sha256": "58f2f50b7eac82b851765a7e"
+      "rows": 541,
+      "sha256": "5466b0d4d226295898f2e558"
      },
      "columns": {
-      "rows": 520,
-      "sha256": "34825af254da666e2a7ff713"
+      "rows": 541,
+      "sha256": "672d325c753f7a389cc837ff"
      },
      "constraints": {
-      "rows": 384,
-      "sha256": "3fcb9795b8792dc379f78350"
+      "rows": 404,
+      "sha256": "78bbad5a658bd6be9542ff4b"
      },
      "extensions": {
       "rows": 2,
@@ -7448,12 +7572,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 104,
-      "sha256": "484e2fccacb2f852dc18c783"
+      "rows": 107,
+      "sha256": "23d2a0af007401704066aaf5"
      },
      "owners_and_comments": {
-      "rows": 170,
-      "sha256": "33a115196978de52679bade1"
+      "rows": 175,
+      "sha256": "dc54134521168c387634b8bb"
      },
      "schemas": {
       "rows": 1,
@@ -7531,6 +7655,35 @@
        "size",
        "cohesion",
        "computed_at"
+      ],
+      "rows": []
+     },
+     "public.console_sessions": {
+      "columns": [
+       "session_id",
+       "token_hash",
+       "principal",
+       "source",
+       "issuer",
+       "method",
+       "label",
+       "created_at",
+       "last_used_at",
+       "expires_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.console_signin_codes": {
+      "columns": [
+       "code_hash",
+       "principal",
+       "source",
+       "issuer",
+       "origin",
+       "expires_at",
+       "used_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -7879,11 +8032,11 @@
        "episode_title",
        "tags",
        "slots",
-       "reinforcements",
        "authority",
        "distortion_tolerance",
-       "explicit_reinforcements",
-       "dream_state"
+       "dream_state",
+       "reinforcements",
+       "explicit_reinforcements"
       ],
       "rows": []
      },
@@ -7944,15 +8097,15 @@
        "kind",
        "value_norm",
        "stance",
+       "authority",
+       "distortion_tolerance",
        "tx_time",
        "valid_time",
        "hlc_phys",
        "hlc_logical",
        "writer_id",
        "session_id",
-       "version",
-       "authority",
-       "distortion_tolerance"
+       "version"
       ],
       "rows": []
      },
@@ -8032,7 +8185,8 @@
        "last_used_at",
        "revoked_at",
        "revoked_by",
-       "flagged_at"
+       "flagged_at",
+       "signs_in_as"
       ],
       "rows": []
      },
@@ -8078,7 +8232,7 @@
       "rows": [
        [
         "schema_version",
-        58
+        59
        ],
        [
         "writer_lease_epoch",
@@ -8120,7 +8274,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      },
@@ -8357,16 +8512,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 520,
-      "sha256": "58f2f50b7eac82b851765a7e"
+      "rows": 541,
+      "sha256": "5466b0d4d226295898f2e558"
      },
      "columns": {
-      "rows": 520,
-      "sha256": "34825af254da666e2a7ff713"
+      "rows": 541,
+      "sha256": "672d325c753f7a389cc837ff"
      },
      "constraints": {
-      "rows": 384,
-      "sha256": "3fcb9795b8792dc379f78350"
+      "rows": 404,
+      "sha256": "78bbad5a658bd6be9542ff4b"
      },
      "extensions": {
       "rows": 2,
@@ -8377,12 +8532,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 104,
-      "sha256": "484e2fccacb2f852dc18c783"
+      "rows": 107,
+      "sha256": "23d2a0af007401704066aaf5"
      },
      "owners_and_comments": {
-      "rows": 170,
-      "sha256": "33a115196978de52679bade1"
+      "rows": 175,
+      "sha256": "dc54134521168c387634b8bb"
      },
      "schemas": {
       "rows": 1,
@@ -8460,6 +8615,997 @@
        "size",
        "cohesion",
        "computed_at"
+      ],
+      "rows": []
+     },
+     "public.console_sessions": {
+      "columns": [
+       "session_id",
+       "token_hash",
+       "principal",
+       "source",
+       "issuer",
+       "method",
+       "label",
+       "created_at",
+       "last_used_at",
+       "expires_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.console_signin_codes": {
+      "columns": [
+       "code_hash",
+       "principal",
+       "source",
+       "issuer",
+       "origin",
+       "expires_at",
+       "used_at",
+       "created_at"
+      ],
+      "rows": []
+     },
+     "public.coordination_agents": {
+      "columns": [
+       "agent_id",
+       "principal",
+       "credential_hash",
+       "label",
+       "project",
+       "task",
+       "status",
+       "episode",
+       "capabilities",
+       "wake_enabled",
+       "created_at",
+       "last_activity",
+       "lifecycle",
+       "next_sequence",
+       "attachment_id",
+       "generation",
+       "lease_until",
+       "status_expires_at",
+       "children",
+       "park_reason",
+       "park_needs",
+       "park_clear_by",
+       "park_resume",
+       "park_expires",
+       "park_set_at",
+       "parent_agent_id",
+       "parent_thread",
+       "name",
+       "name_source",
+       "name_set_at",
+       "harness_name"
+      ],
+      "rows": []
+     },
+     "public.coordination_events": {
+      "columns": [
+       "seq",
+       "event",
+       "actor",
+       "principal",
+       "agent_id",
+       "recipient_agent_id",
+       "project",
+       "task",
+       "message_id",
+       "payload",
+       "created_at",
+       "hlc",
+       "prev_hash",
+       "hash",
+       "body",
+       "body_salt"
+      ],
+      "rows": []
+     },
+     "public.coordination_lease_waiters": {
+      "columns": [
+       "name",
+       "agent_id",
+       "ticket",
+       "principal",
+       "purpose",
+       "ttl",
+       "expect",
+       "enqueued_at"
+      ],
+      "rows": []
+     },
+     "public.coordination_leases": {
+      "columns": [
+       "name",
+       "holder_agent_id",
+       "holder_principal",
+       "purpose",
+       "fence",
+       "acquired_at",
+       "expires_at",
+       "expect",
+       "expected_end",
+       "freed_at"
+      ],
+      "rows": []
+     },
+     "public.coordination_messages": {
+      "columns": [
+       "message_id",
+       "sender_agent_id",
+       "recipient_agent_id",
+       "sender_principal",
+       "project",
+       "task",
+       "text",
+       "reply_to",
+       "request_id",
+       "fingerprint",
+       "recipient_sequence",
+       "hlc",
+       "created_at",
+       "expires_at",
+       "attempt_at",
+       "attempt_generation",
+       "attempts",
+       "acknowledged_at",
+       "first_read_at",
+       "wake",
+       "origin",
+       "maintainer_proof",
+       "repudiated_at"
+      ],
+      "rows": []
+     },
+     "public.coordination_wakes": {
+      "columns": [
+       "wake_id",
+       "recipient_agent_id",
+       "sender_agent_id",
+       "message_id",
+       "decision",
+       "reason",
+       "urgent",
+       "ring_at",
+       "created_at",
+       "served_at"
+      ],
+      "rows": []
+     },
+     "public.curation_judgments": {
+      "columns": [
+       "store",
+       "a_key",
+       "b_key",
+       "verdict",
+       "keep",
+       "fold",
+       "confidence",
+       "note",
+       "model",
+       "judged_at"
+      ],
+      "rows": []
+     },
+     "public.dismissed_pairs": {
+      "columns": [
+       "a_norm",
+       "b_norm",
+       "dismissed_at"
+      ],
+      "rows": []
+     },
+     "public.dream_run_slots": {
+      "columns": [
+       "id",
+       "run_id",
+       "seq",
+       "entity",
+       "attribute",
+       "entity_norm",
+       "attribute_norm",
+       "kind",
+       "op",
+       "prev_kind",
+       "prev_value",
+       "prev_status",
+       "prev_confidence",
+       "prev_support",
+       "new_value",
+       "action",
+       "src_entry_id",
+       "at",
+       "chronicle_event_id"
+      ],
+      "rows": []
+     },
+     "public.dream_runs": {
+      "columns": [
+       "id",
+       "started_at",
+       "finished_at",
+       "cursor_before",
+       "cursor_after",
+       "pulled",
+       "claims",
+       "tallies",
+       "status",
+       "extractor",
+       "writer_id",
+       "rolled_back_at"
+      ],
+      "rows": []
+     },
+     "public.edge_evidence": {
+      "columns": [
+       "edge_id",
+       "entry_id"
+      ],
+      "rows": []
+     },
+     "public.edge_proposals": {
+      "columns": [
+       "id",
+       "src_id",
+       "relation",
+       "dst_id",
+       "confidence",
+       "similarity",
+       "rationale",
+       "source",
+       "created_at",
+       "status",
+       "judge_verdict",
+       "judge_confidence",
+       "judge_note",
+       "judge_model",
+       "judged_at",
+       "judge_relation",
+       "decided_by",
+       "decided_at",
+       "judge_served_model",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
+      ],
+      "rows": []
+     },
+     "public.edges": {
+      "columns": [
+       "id",
+       "src_id",
+       "relation",
+       "dst_id",
+       "confidence",
+       "origin",
+       "asserted_at",
+       "superseded_at",
+       "tx_time",
+       "valid_time",
+       "hlc_phys",
+       "hlc_logical",
+       "writer_id",
+       "session_id",
+       "version"
+      ],
+      "rows": []
+     },
+     "public.entities": {
+      "columns": [
+       "id",
+       "canonical",
+       "display",
+       "etype",
+       "created_at"
+      ],
+      "rows": []
+     },
+     "public.entity_aliases": {
+      "columns": [
+       "alias",
+       "entity_id"
+      ],
+      "rows": []
+     },
+     "public.entity_communities": {
+      "columns": [
+       "entity_id",
+       "community_id",
+       "computed_at"
+      ],
+      "rows": []
+     },
+     "public.entity_kinds": {
+      "columns": [
+       "entity_norm",
+       "kind",
+       "origin",
+       "confidence",
+       "decided_at"
+      ],
+      "rows": []
+     },
+     "public.entity_proposals": {
+      "columns": [
+       "id",
+       "kind",
+       "entity_id",
+       "into_id",
+       "score",
+       "reason",
+       "status",
+       "created_at",
+       "decided_by",
+       "decided_at",
+       "judge_verdict",
+       "judge_confidence",
+       "judge_note",
+       "judge_model",
+       "judged_at",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge_served_model",
+       "judge2_served_model",
+       "judge2_policy",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
+      ],
+      "rows": []
+     },
+     "public.entity_sources": {
+      "columns": [
+       "entity_id",
+       "source",
+       "count",
+       "origin",
+       "updated_at"
+      ],
+      "rows": []
+     },
+     "public.entries": {
+      "columns": [
+       "id",
+       "band",
+       "text",
+       "embedding",
+       "surprise",
+       "ts",
+       "access_count",
+       "source",
+       "superseded_at",
+       "superseded_by_text",
+       "last_logical_turn",
+       "episode_id",
+       "episode_title",
+       "tags",
+       "slots",
+       "authority",
+       "distortion_tolerance",
+       "dream_state",
+       "reinforcements",
+       "explicit_reinforcements"
+      ],
+      "rows": []
+     },
+     "public.entry_reinstatement_decisions": {
+      "columns": [
+       "operation_id",
+       "entry_id",
+       "request_sha256",
+       "entry_text_sha256",
+       "entry_source_sha256",
+       "prior_superseded_at",
+       "prior_superseded_by_text",
+       "prior_superseded_by_text_sha256",
+       "evidence_packet_sha256",
+       "reviewer_ids",
+       "reason",
+       "decided_by",
+       "decided_at"
+      ],
+      "rows": []
+     },
+     "public.episodes": {
+      "columns": [
+       "id",
+       "title",
+       "hint",
+       "started_at",
+       "ended_at",
+       "closed_by_new_start",
+       "session_key",
+       "parent_id"
+      ],
+      "rows": []
+     },
+     "public.facts": {
+      "columns": [
+       "id",
+       "entity",
+       "attribute",
+       "entity_norm",
+       "attribute_norm",
+       "value",
+       "polarity",
+       "status",
+       "confidence",
+       "origin",
+       "support",
+       "provenance",
+       "asserted_at",
+       "last_confirmed",
+       "supersedes_value",
+       "superseded_by_value",
+       "superseded_at",
+       "embedding",
+       "entity_id",
+       "object_entity_id",
+       "freshness_class",
+       "kind",
+       "value_norm",
+       "stance",
+       "authority",
+       "distortion_tolerance",
+       "tx_time",
+       "valid_time",
+       "hlc_phys",
+       "hlc_logical",
+       "writer_id",
+       "session_id",
+       "version"
+      ],
+      "rows": []
+     },
+     "public.lesson_search_events": {
+      "columns": [
+       "id",
+       "query_text",
+       "session_id",
+       "episode_id",
+       "served",
+       "created_at"
+      ],
+      "rows": []
+     },
+     "public.lessons": {
+      "columns": [
+       "id",
+       "entity",
+       "attribute",
+       "entity_norm",
+       "attribute_norm",
+       "value",
+       "about",
+       "polarity",
+       "outcome",
+       "status",
+       "confidence",
+       "origin",
+       "support",
+       "provenance",
+       "asserted_at",
+       "last_confirmed",
+       "supersedes_value",
+       "superseded_by_value",
+       "superseded_at",
+       "embedding",
+       "entity_id",
+       "object_entity_id",
+       "tx_time",
+       "valid_time",
+       "hlc_phys",
+       "hlc_logical",
+       "writer_id",
+       "session_id",
+       "version"
+      ],
+      "rows": []
+     },
+     "public.maintainer_bootstrap": {
+      "columns": [
+       "code_hash",
+       "expires_at",
+       "used_at",
+       "credential_id",
+       "failed_attempts"
+      ],
+      "rows": []
+     },
+     "public.maintainer_nonces": {
+      "columns": [
+       "nonce",
+       "expires_at"
+      ],
+      "rows": []
+     },
+     "public.maintainer_passkeys": {
+      "columns": [
+       "credential_id",
+       "public_key",
+       "alg",
+       "sign_count",
+       "label",
+       "enrolled_by",
+       "state",
+       "active_from",
+       "created_at",
+       "last_used_at",
+       "revoked_at",
+       "revoked_by",
+       "flagged_at",
+       "signs_in_as"
+      ],
+      "rows": []
+     },
+     "public.memory_trace_invalidations": {
+      "columns": [
+       "entity_norm",
+       "attribute_norm",
+       "source_entry_id",
+       "invalidated_at",
+       "cause"
+      ],
+      "rows": []
+     },
+     "public.memory_traces": {
+      "columns": [
+       "entity_norm",
+       "attribute_norm",
+       "entry_id",
+       "created_at"
+      ],
+      "rows": []
+     },
+     "public.merge_decisions": {
+      "columns": [
+       "id",
+       "proposal_id",
+       "entity_display",
+       "into_display",
+       "status",
+       "score",
+       "reason",
+       "decided_by",
+       "decided_at",
+       "votes"
+      ],
+      "rows": []
+     },
+     "public.meta": {
+      "columns": [
+       "key",
+       "value"
+      ],
+      "rows": [
+       [
+        "schema_version",
+        59
+       ],
+       [
+        "writer_lease_epoch",
+        2
+       ]
+      ]
+     },
+     "public.outcome_signals": {
+      "columns": [
+       "id",
+       "task",
+       "outcome",
+       "about",
+       "detail",
+       "polarity",
+       "origin",
+       "episode_id",
+       "created_at",
+       "consumed_at",
+       "used_ids"
+      ],
+      "rows": []
+     },
+     "public.principal_activity": {
+      "columns": [
+       "principal",
+       "last_seen_at"
+      ],
+      "rows": []
+     },
+     "public.principals": {
+      "columns": [
+       "principal",
+       "token_hash",
+       "tier",
+       "board",
+       "code_hash",
+       "code_expires_at",
+       "paired_code_hash",
+       "created_at",
+       "paired_at",
+       "revoked_at",
+       "owned"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
+      ],
+      "rows": []
+     },
+     "public.rejected_bearers": {
+      "columns": [
+       "hash_prefix",
+       "rejections",
+       "first_seen_at",
+       "last_seen_at"
+      ],
+      "rows": []
+     },
+     "public.relations": {
+      "columns": [
+       "name",
+       "description",
+       "src_type",
+       "dst_type",
+       "transitive",
+       "inverse_of",
+       "builtin",
+       "created_at"
+      ],
+      "rows": [
+       [
+        "avoids",
+        "src (a task-type) should avoid dead-end dst (negative lesson)",
+        null,
+        null,
+        false,
+        null,
+        true,
+        "<created_at>"
+       ],
+       [
+        "configures",
+        "src sets configuration for dst",
+        null,
+        null,
+        false,
+        null,
+        true,
+        "<created_at>"
+       ],
+       [
+        "depends-on",
+        "src requires dst to function",
+        null,
+        null,
+        true,
+        null,
+        true,
+        "<created_at>"
+       ],
+       [
+        "hosts",
+        "src is the host/platform for dst",
+        null,
+        null,
+        false,
+        null,
+        true,
+        "<created_at>"
+       ],
+       [
+        "implements",
+        "src (a source file) realizes concept/role dst",
+        null,
+        null,
+        false,
+        null,
+        true,
+        "<created_at>"
+       ],
+       [
+        "part-of",
+        "src is a component of dst",
+        null,
+        null,
+        true,
+        null,
+        true,
+        "<created_at>"
+       ],
+       [
+        "prefers",
+        "src (a task-type) prefers approach/tool dst (positive lesson)",
+        null,
+        null,
+        false,
+        null,
+        true,
+        "<created_at>"
+       ],
+       [
+        "related-to",
+        "untyped catch-all association",
+        null,
+        null,
+        false,
+        null,
+        true,
+        "<created_at>"
+       ],
+       [
+        "runs-on",
+        "src executes on host/platform dst",
+        null,
+        null,
+        false,
+        "hosts",
+        true,
+        "<created_at>"
+       ],
+       [
+        "stores-data-in",
+        "src persists its data in dst",
+        null,
+        null,
+        false,
+        null,
+        true,
+        "<created_at>"
+       ],
+       [
+        "uses",
+        "src makes use of dst",
+        null,
+        null,
+        false,
+        null,
+        true,
+        "<created_at>"
+       ]
+      ]
+     },
+     "public.retrieval_events": {
+      "columns": [
+       "id",
+       "query_text",
+       "origin",
+       "session_id",
+       "episode_id",
+       "served",
+       "created_at",
+       "params",
+       "served_facts"
+      ],
+      "rows": []
+     },
+     "public.retrieval_uses": {
+      "columns": [
+       "event_id",
+       "entry_id",
+       "used_via",
+       "created_at"
+      ],
+      "rows": []
+     },
+     "public.slot_reads": {
+      "columns": [
+       "entity_norm",
+       "attribute_norm",
+       "read_count",
+       "last_read_at"
+      ],
+      "rows": []
+     },
+     "public.store_decisions": {
+      "columns": [
+       "id",
+       "store",
+       "entity_norm",
+       "attribute_norm",
+       "action",
+       "decided_by",
+       "reason",
+       "record",
+       "decided_at"
+      ],
+      "rows": []
+     },
+     "public.world_facts": {
+      "columns": [
+       "id",
+       "entity",
+       "attribute",
+       "entity_norm",
+       "attribute_norm",
+       "value",
+       "polarity",
+       "status",
+       "confidence",
+       "origin",
+       "support",
+       "provenance",
+       "asserted_at",
+       "last_confirmed",
+       "supersedes_value",
+       "superseded_by_value",
+       "superseded_at",
+       "embedding",
+       "source_url",
+       "source_quote",
+       "retrieved_at",
+       "freshness_class",
+       "content_hash",
+       "source_doc_id",
+       "tx_time",
+       "valid_time",
+       "hlc_phys",
+       "hlc_logical",
+       "writer_id",
+       "session_id",
+       "version"
+      ],
+      "rows": []
+     }
+    }
+   }
+  ],
+  "468470071edfe9bfd7e526678864ac8fab92403b": [
+   {
+    "catalog": {
+     "column_types": {
+      "rows": 541,
+      "sha256": "13201a52142b0c7c0d45125b"
+     },
+     "columns": {
+      "rows": 541,
+      "sha256": "bcaaa818949675614005e0c4"
+     },
+     "constraints": {
+      "rows": 404,
+      "sha256": "78bbad5a658bd6be9542ff4b"
+     },
+     "extensions": {
+      "rows": 2,
+      "sha256": "571b948c38bd5754f1861b6c"
+     },
+     "functions": {
+      "rows": 0,
+      "sha256": "4f53cda18c2baa0c0354bb5f"
+     },
+     "indexes": {
+      "rows": 107,
+      "sha256": "23d2a0af007401704066aaf5"
+     },
+     "owners_and_comments": {
+      "rows": 175,
+      "sha256": "dc54134521168c387634b8bb"
+     },
+     "schemas": {
+      "rows": 1,
+      "sha256": "7bc06edb30fe47a6a1afd841"
+     },
+     "sequence_bounds": {
+      "rows": 19,
+      "sha256": "39772a7c4953e87dab66f88a"
+     },
+     "sequences": {
+      "rows": 19,
+      "sha256": "62e2c919c4ada0e8138a969a"
+     },
+     "triggers": {
+      "rows": 0,
+      "sha256": "4f53cda18c2baa0c0354bb5f"
+     },
+     "views": {
+      "rows": 0,
+      "sha256": "4f53cda18c2baa0c0354bb5f"
+     }
+    },
+    "rows": {
+     "public.chronicle_events": {
+      "columns": [
+       "id",
+       "occurred_at",
+       "occurred_phrase",
+       "recorded_at",
+       "actor",
+       "actor_norm",
+       "description",
+       "description_norm",
+       "episode",
+       "src_entry_id",
+       "hlc_phys",
+       "hlc_logical",
+       "writer_id",
+       "invalidated_at"
+      ],
+      "rows": []
+     },
+     "public.client_sessions": {
+      "columns": [
+       "session_key",
+       "registered_via",
+       "principal",
+       "started_at",
+       "ended_at",
+       "end_reason",
+       "policy_variant",
+       "episode_ids",
+       "start_times"
+      ],
+      "rows": []
+     },
+     "public.cms_counters": {
+      "columns": [
+       "id",
+       "preset_name",
+       "interaction_count",
+       "logical_turn_count",
+       "tier_queries",
+       "tier_hits",
+       "surprise_history",
+       "consolidation_events",
+       "updated_at"
+      ],
+      "rows": []
+     },
+     "public.communities": {
+      "columns": [
+       "id",
+       "label",
+       "size",
+       "cohesion",
+       "computed_at"
+      ],
+      "rows": []
+     },
+     "public.console_sessions": {
+      "columns": [
+       "session_id",
+       "token_hash",
+       "principal",
+       "source",
+       "issuer",
+       "method",
+       "label",
+       "created_at",
+       "last_used_at",
+       "expires_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.console_signin_codes": {
+      "columns": [
+       "code_hash",
+       "principal",
+       "source",
+       "issuer",
+       "origin",
+       "expires_at",
+       "used_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -8961,7 +10107,8 @@
        "last_used_at",
        "revoked_at",
        "revoked_by",
-       "flagged_at"
+       "flagged_at",
+       "signs_in_as"
       ],
       "rows": []
      },
@@ -9007,7 +10154,967 @@
       "rows": [
        [
         "schema_version",
-        58
+        59
+       ],
+       [
+        "writer_lease_epoch",
+        1
+       ]
+      ]
+     },
+     "public.outcome_signals": {
+      "columns": [
+       "id",
+       "task",
+       "outcome",
+       "about",
+       "detail",
+       "polarity",
+       "origin",
+       "episode_id",
+       "created_at",
+       "consumed_at",
+       "used_ids"
+      ],
+      "rows": []
+     },
+     "public.principal_activity": {
+      "columns": [
+       "principal",
+       "last_seen_at"
+      ],
+      "rows": []
+     },
+     "public.principals": {
+      "columns": [
+       "principal",
+       "token_hash",
+       "tier",
+       "board",
+       "code_hash",
+       "code_expires_at",
+       "paired_code_hash",
+       "created_at",
+       "paired_at",
+       "revoked_at",
+       "owned"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
+      ],
+      "rows": []
+     },
+     "public.rejected_bearers": {
+      "columns": [
+       "hash_prefix",
+       "rejections",
+       "first_seen_at",
+       "last_seen_at"
+      ],
+      "rows": []
+     },
+     "public.relations": {
+      "columns": [
+       "name",
+       "description",
+       "src_type",
+       "dst_type",
+       "transitive",
+       "inverse_of",
+       "builtin",
+       "created_at"
+      ],
+      "rows": [
+       [
+        "avoids",
+        "src (a task-type) should avoid dead-end dst (negative lesson)",
+        null,
+        null,
+        false,
+        null,
+        true,
+        "<created_at>"
+       ],
+       [
+        "configures",
+        "src sets configuration for dst",
+        null,
+        null,
+        false,
+        null,
+        true,
+        "<created_at>"
+       ],
+       [
+        "depends-on",
+        "src requires dst to function",
+        null,
+        null,
+        true,
+        null,
+        true,
+        "<created_at>"
+       ],
+       [
+        "hosts",
+        "src is the host/platform for dst",
+        null,
+        null,
+        false,
+        null,
+        true,
+        "<created_at>"
+       ],
+       [
+        "implements",
+        "src (a source file) realizes concept/role dst",
+        null,
+        null,
+        false,
+        null,
+        true,
+        "<created_at>"
+       ],
+       [
+        "part-of",
+        "src is a component of dst",
+        null,
+        null,
+        true,
+        null,
+        true,
+        "<created_at>"
+       ],
+       [
+        "prefers",
+        "src (a task-type) prefers approach/tool dst (positive lesson)",
+        null,
+        null,
+        false,
+        null,
+        true,
+        "<created_at>"
+       ],
+       [
+        "related-to",
+        "untyped catch-all association",
+        null,
+        null,
+        false,
+        null,
+        true,
+        "<created_at>"
+       ],
+       [
+        "runs-on",
+        "src executes on host/platform dst",
+        null,
+        null,
+        false,
+        "hosts",
+        true,
+        "<created_at>"
+       ],
+       [
+        "stores-data-in",
+        "src persists its data in dst",
+        null,
+        null,
+        false,
+        null,
+        true,
+        "<created_at>"
+       ],
+       [
+        "uses",
+        "src makes use of dst",
+        null,
+        null,
+        false,
+        null,
+        true,
+        "<created_at>"
+       ]
+      ]
+     },
+     "public.retrieval_events": {
+      "columns": [
+       "id",
+       "query_text",
+       "origin",
+       "session_id",
+       "episode_id",
+       "served",
+       "created_at",
+       "params",
+       "served_facts"
+      ],
+      "rows": []
+     },
+     "public.retrieval_uses": {
+      "columns": [
+       "event_id",
+       "entry_id",
+       "used_via",
+       "created_at"
+      ],
+      "rows": []
+     },
+     "public.slot_reads": {
+      "columns": [
+       "entity_norm",
+       "attribute_norm",
+       "read_count",
+       "last_read_at"
+      ],
+      "rows": []
+     },
+     "public.store_decisions": {
+      "columns": [
+       "id",
+       "store",
+       "entity_norm",
+       "attribute_norm",
+       "action",
+       "decided_by",
+       "reason",
+       "record",
+       "decided_at"
+      ],
+      "rows": []
+     },
+     "public.world_facts": {
+      "columns": [
+       "id",
+       "entity",
+       "attribute",
+       "entity_norm",
+       "attribute_norm",
+       "value",
+       "polarity",
+       "status",
+       "confidence",
+       "origin",
+       "support",
+       "provenance",
+       "asserted_at",
+       "last_confirmed",
+       "supersedes_value",
+       "superseded_by_value",
+       "superseded_at",
+       "embedding",
+       "source_url",
+       "source_quote",
+       "retrieved_at",
+       "freshness_class",
+       "content_hash",
+       "source_doc_id",
+       "tx_time",
+       "valid_time",
+       "hlc_phys",
+       "hlc_logical",
+       "writer_id",
+       "session_id",
+       "version"
+      ],
+      "rows": []
+     }
+    }
+   },
+   {
+    "catalog": {
+     "column_types": {
+      "rows": 541,
+      "sha256": "13201a52142b0c7c0d45125b"
+     },
+     "columns": {
+      "rows": 541,
+      "sha256": "bcaaa818949675614005e0c4"
+     },
+     "constraints": {
+      "rows": 404,
+      "sha256": "78bbad5a658bd6be9542ff4b"
+     },
+     "extensions": {
+      "rows": 2,
+      "sha256": "571b948c38bd5754f1861b6c"
+     },
+     "functions": {
+      "rows": 0,
+      "sha256": "4f53cda18c2baa0c0354bb5f"
+     },
+     "indexes": {
+      "rows": 107,
+      "sha256": "23d2a0af007401704066aaf5"
+     },
+     "owners_and_comments": {
+      "rows": 175,
+      "sha256": "dc54134521168c387634b8bb"
+     },
+     "schemas": {
+      "rows": 1,
+      "sha256": "7bc06edb30fe47a6a1afd841"
+     },
+     "sequence_bounds": {
+      "rows": 19,
+      "sha256": "39772a7c4953e87dab66f88a"
+     },
+     "sequences": {
+      "rows": 19,
+      "sha256": "62e2c919c4ada0e8138a969a"
+     },
+     "triggers": {
+      "rows": 0,
+      "sha256": "4f53cda18c2baa0c0354bb5f"
+     },
+     "views": {
+      "rows": 0,
+      "sha256": "4f53cda18c2baa0c0354bb5f"
+     }
+    },
+    "rows": {
+     "public.chronicle_events": {
+      "columns": [
+       "id",
+       "occurred_at",
+       "occurred_phrase",
+       "recorded_at",
+       "actor",
+       "actor_norm",
+       "description",
+       "description_norm",
+       "episode",
+       "src_entry_id",
+       "hlc_phys",
+       "hlc_logical",
+       "writer_id",
+       "invalidated_at"
+      ],
+      "rows": []
+     },
+     "public.client_sessions": {
+      "columns": [
+       "session_key",
+       "registered_via",
+       "principal",
+       "started_at",
+       "ended_at",
+       "end_reason",
+       "policy_variant",
+       "episode_ids",
+       "start_times"
+      ],
+      "rows": []
+     },
+     "public.cms_counters": {
+      "columns": [
+       "id",
+       "preset_name",
+       "interaction_count",
+       "logical_turn_count",
+       "tier_queries",
+       "tier_hits",
+       "surprise_history",
+       "consolidation_events",
+       "updated_at"
+      ],
+      "rows": []
+     },
+     "public.communities": {
+      "columns": [
+       "id",
+       "label",
+       "size",
+       "cohesion",
+       "computed_at"
+      ],
+      "rows": []
+     },
+     "public.console_sessions": {
+      "columns": [
+       "session_id",
+       "token_hash",
+       "principal",
+       "source",
+       "issuer",
+       "method",
+       "label",
+       "created_at",
+       "last_used_at",
+       "expires_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.console_signin_codes": {
+      "columns": [
+       "code_hash",
+       "principal",
+       "source",
+       "issuer",
+       "origin",
+       "expires_at",
+       "used_at",
+       "created_at"
+      ],
+      "rows": []
+     },
+     "public.coordination_agents": {
+      "columns": [
+       "agent_id",
+       "principal",
+       "credential_hash",
+       "label",
+       "project",
+       "task",
+       "status",
+       "episode",
+       "capabilities",
+       "wake_enabled",
+       "created_at",
+       "last_activity",
+       "lifecycle",
+       "next_sequence",
+       "attachment_id",
+       "generation",
+       "lease_until",
+       "status_expires_at",
+       "children",
+       "park_reason",
+       "park_needs",
+       "park_clear_by",
+       "park_resume",
+       "park_expires",
+       "park_set_at",
+       "parent_agent_id",
+       "parent_thread",
+       "name",
+       "name_source",
+       "name_set_at",
+       "harness_name"
+      ],
+      "rows": []
+     },
+     "public.coordination_events": {
+      "columns": [
+       "seq",
+       "event",
+       "actor",
+       "principal",
+       "agent_id",
+       "recipient_agent_id",
+       "project",
+       "task",
+       "message_id",
+       "payload",
+       "created_at",
+       "hlc",
+       "prev_hash",
+       "hash",
+       "body",
+       "body_salt"
+      ],
+      "rows": []
+     },
+     "public.coordination_lease_waiters": {
+      "columns": [
+       "name",
+       "agent_id",
+       "ticket",
+       "principal",
+       "purpose",
+       "ttl",
+       "expect",
+       "enqueued_at"
+      ],
+      "rows": []
+     },
+     "public.coordination_leases": {
+      "columns": [
+       "name",
+       "holder_agent_id",
+       "holder_principal",
+       "purpose",
+       "fence",
+       "acquired_at",
+       "expires_at",
+       "expect",
+       "expected_end",
+       "freed_at"
+      ],
+      "rows": []
+     },
+     "public.coordination_messages": {
+      "columns": [
+       "message_id",
+       "sender_agent_id",
+       "recipient_agent_id",
+       "sender_principal",
+       "project",
+       "task",
+       "text",
+       "reply_to",
+       "request_id",
+       "fingerprint",
+       "recipient_sequence",
+       "hlc",
+       "created_at",
+       "expires_at",
+       "attempt_at",
+       "attempt_generation",
+       "attempts",
+       "acknowledged_at",
+       "first_read_at",
+       "wake",
+       "origin",
+       "maintainer_proof",
+       "repudiated_at"
+      ],
+      "rows": []
+     },
+     "public.coordination_wakes": {
+      "columns": [
+       "wake_id",
+       "recipient_agent_id",
+       "sender_agent_id",
+       "message_id",
+       "decision",
+       "reason",
+       "urgent",
+       "ring_at",
+       "created_at",
+       "served_at"
+      ],
+      "rows": []
+     },
+     "public.curation_judgments": {
+      "columns": [
+       "store",
+       "a_key",
+       "b_key",
+       "verdict",
+       "keep",
+       "fold",
+       "confidence",
+       "note",
+       "model",
+       "judged_at"
+      ],
+      "rows": []
+     },
+     "public.dismissed_pairs": {
+      "columns": [
+       "a_norm",
+       "b_norm",
+       "dismissed_at"
+      ],
+      "rows": []
+     },
+     "public.dream_run_slots": {
+      "columns": [
+       "id",
+       "run_id",
+       "seq",
+       "entity",
+       "attribute",
+       "entity_norm",
+       "attribute_norm",
+       "kind",
+       "op",
+       "prev_kind",
+       "prev_value",
+       "prev_status",
+       "prev_confidence",
+       "prev_support",
+       "new_value",
+       "action",
+       "src_entry_id",
+       "at",
+       "chronicle_event_id"
+      ],
+      "rows": []
+     },
+     "public.dream_runs": {
+      "columns": [
+       "id",
+       "started_at",
+       "finished_at",
+       "cursor_before",
+       "cursor_after",
+       "pulled",
+       "claims",
+       "tallies",
+       "status",
+       "extractor",
+       "writer_id",
+       "rolled_back_at"
+      ],
+      "rows": []
+     },
+     "public.edge_evidence": {
+      "columns": [
+       "edge_id",
+       "entry_id"
+      ],
+      "rows": []
+     },
+     "public.edge_proposals": {
+      "columns": [
+       "id",
+       "src_id",
+       "relation",
+       "dst_id",
+       "confidence",
+       "similarity",
+       "rationale",
+       "source",
+       "created_at",
+       "status",
+       "judge_verdict",
+       "judge_confidence",
+       "judge_note",
+       "judge_model",
+       "judged_at",
+       "judge_relation",
+       "decided_by",
+       "decided_at",
+       "judge_served_model",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
+      ],
+      "rows": []
+     },
+     "public.edges": {
+      "columns": [
+       "id",
+       "src_id",
+       "relation",
+       "dst_id",
+       "confidence",
+       "origin",
+       "asserted_at",
+       "superseded_at",
+       "tx_time",
+       "valid_time",
+       "hlc_phys",
+       "hlc_logical",
+       "writer_id",
+       "session_id",
+       "version"
+      ],
+      "rows": []
+     },
+     "public.entities": {
+      "columns": [
+       "id",
+       "canonical",
+       "display",
+       "etype",
+       "created_at"
+      ],
+      "rows": []
+     },
+     "public.entity_aliases": {
+      "columns": [
+       "alias",
+       "entity_id"
+      ],
+      "rows": []
+     },
+     "public.entity_communities": {
+      "columns": [
+       "entity_id",
+       "community_id",
+       "computed_at"
+      ],
+      "rows": []
+     },
+     "public.entity_kinds": {
+      "columns": [
+       "entity_norm",
+       "kind",
+       "origin",
+       "confidence",
+       "decided_at"
+      ],
+      "rows": []
+     },
+     "public.entity_proposals": {
+      "columns": [
+       "id",
+       "kind",
+       "entity_id",
+       "into_id",
+       "score",
+       "reason",
+       "status",
+       "created_at",
+       "decided_by",
+       "decided_at",
+       "judge_verdict",
+       "judge_confidence",
+       "judge_note",
+       "judge_model",
+       "judged_at",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge_served_model",
+       "judge2_served_model",
+       "judge2_policy",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
+      ],
+      "rows": []
+     },
+     "public.entity_sources": {
+      "columns": [
+       "entity_id",
+       "source",
+       "count",
+       "origin",
+       "updated_at"
+      ],
+      "rows": []
+     },
+     "public.entries": {
+      "columns": [
+       "id",
+       "band",
+       "text",
+       "embedding",
+       "surprise",
+       "ts",
+       "access_count",
+       "source",
+       "superseded_at",
+       "superseded_by_text",
+       "last_logical_turn",
+       "episode_id",
+       "episode_title",
+       "tags",
+       "slots",
+       "reinforcements",
+       "authority",
+       "distortion_tolerance",
+       "explicit_reinforcements",
+       "dream_state"
+      ],
+      "rows": []
+     },
+     "public.entry_reinstatement_decisions": {
+      "columns": [
+       "operation_id",
+       "entry_id",
+       "request_sha256",
+       "entry_text_sha256",
+       "entry_source_sha256",
+       "prior_superseded_at",
+       "prior_superseded_by_text",
+       "prior_superseded_by_text_sha256",
+       "evidence_packet_sha256",
+       "reviewer_ids",
+       "reason",
+       "decided_by",
+       "decided_at"
+      ],
+      "rows": []
+     },
+     "public.episodes": {
+      "columns": [
+       "id",
+       "title",
+       "hint",
+       "started_at",
+       "ended_at",
+       "closed_by_new_start",
+       "session_key",
+       "parent_id"
+      ],
+      "rows": []
+     },
+     "public.facts": {
+      "columns": [
+       "id",
+       "entity",
+       "attribute",
+       "entity_norm",
+       "attribute_norm",
+       "value",
+       "polarity",
+       "status",
+       "confidence",
+       "origin",
+       "support",
+       "provenance",
+       "asserted_at",
+       "last_confirmed",
+       "supersedes_value",
+       "superseded_by_value",
+       "superseded_at",
+       "embedding",
+       "entity_id",
+       "object_entity_id",
+       "freshness_class",
+       "kind",
+       "value_norm",
+       "stance",
+       "tx_time",
+       "valid_time",
+       "hlc_phys",
+       "hlc_logical",
+       "writer_id",
+       "session_id",
+       "version",
+       "authority",
+       "distortion_tolerance"
+      ],
+      "rows": []
+     },
+     "public.lesson_search_events": {
+      "columns": [
+       "id",
+       "query_text",
+       "session_id",
+       "episode_id",
+       "served",
+       "created_at"
+      ],
+      "rows": []
+     },
+     "public.lessons": {
+      "columns": [
+       "id",
+       "entity",
+       "attribute",
+       "entity_norm",
+       "attribute_norm",
+       "value",
+       "about",
+       "polarity",
+       "outcome",
+       "status",
+       "confidence",
+       "origin",
+       "support",
+       "provenance",
+       "asserted_at",
+       "last_confirmed",
+       "supersedes_value",
+       "superseded_by_value",
+       "superseded_at",
+       "embedding",
+       "entity_id",
+       "object_entity_id",
+       "tx_time",
+       "valid_time",
+       "hlc_phys",
+       "hlc_logical",
+       "writer_id",
+       "session_id",
+       "version"
+      ],
+      "rows": []
+     },
+     "public.maintainer_bootstrap": {
+      "columns": [
+       "code_hash",
+       "expires_at",
+       "used_at",
+       "credential_id",
+       "failed_attempts"
+      ],
+      "rows": []
+     },
+     "public.maintainer_nonces": {
+      "columns": [
+       "nonce",
+       "expires_at"
+      ],
+      "rows": []
+     },
+     "public.maintainer_passkeys": {
+      "columns": [
+       "credential_id",
+       "public_key",
+       "alg",
+       "sign_count",
+       "label",
+       "enrolled_by",
+       "state",
+       "active_from",
+       "created_at",
+       "last_used_at",
+       "revoked_at",
+       "revoked_by",
+       "flagged_at",
+       "signs_in_as"
+      ],
+      "rows": []
+     },
+     "public.memory_trace_invalidations": {
+      "columns": [
+       "entity_norm",
+       "attribute_norm",
+       "source_entry_id",
+       "invalidated_at",
+       "cause"
+      ],
+      "rows": []
+     },
+     "public.memory_traces": {
+      "columns": [
+       "entity_norm",
+       "attribute_norm",
+       "entry_id",
+       "created_at"
+      ],
+      "rows": []
+     },
+     "public.merge_decisions": {
+      "columns": [
+       "id",
+       "proposal_id",
+       "entity_display",
+       "into_display",
+       "status",
+       "score",
+       "reason",
+       "decided_by",
+       "decided_at",
+       "votes"
+      ],
+      "rows": []
+     },
+     "public.meta": {
+      "columns": [
+       "key",
+       "value"
+      ],
+      "rows": [
+       [
+        "schema_version",
+        59
        ],
        [
         "writer_lease_epoch",
@@ -9049,7 +11156,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      },
@@ -9954,16 +12062,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 520,
-      "sha256": "ef9953fff052e57fbc89baa9"
+      "rows": 541,
+      "sha256": "5466b0d4d226295898f2e558"
      },
      "columns": {
-      "rows": 520,
-      "sha256": "b8115ba89a92ec0cd5dfa329"
+      "rows": 541,
+      "sha256": "672d325c753f7a389cc837ff"
      },
      "constraints": {
-      "rows": 384,
-      "sha256": "3fcb9795b8792dc379f78350"
+      "rows": 404,
+      "sha256": "78bbad5a658bd6be9542ff4b"
      },
      "extensions": {
       "rows": 2,
@@ -9974,12 +12082,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 104,
-      "sha256": "484e2fccacb2f852dc18c783"
+      "rows": 107,
+      "sha256": "23d2a0af007401704066aaf5"
      },
      "owners_and_comments": {
-      "rows": 170,
-      "sha256": "33a115196978de52679bade1"
+      "rows": 175,
+      "sha256": "dc54134521168c387634b8bb"
      },
      "schemas": {
       "rows": 1,
@@ -10057,6 +12165,35 @@
        "size",
        "cohesion",
        "computed_at"
+      ],
+      "rows": []
+     },
+     "public.console_sessions": {
+      "columns": [
+       "session_id",
+       "token_hash",
+       "principal",
+       "source",
+       "issuer",
+       "method",
+       "label",
+       "created_at",
+       "last_used_at",
+       "expires_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.console_signin_codes": {
+      "columns": [
+       "code_hash",
+       "principal",
+       "source",
+       "issuer",
+       "origin",
+       "expires_at",
+       "used_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -10558,7 +12695,8 @@
        "last_used_at",
        "revoked_at",
        "revoked_by",
-       "flagged_at"
+       "flagged_at",
+       "signs_in_as"
       ],
       "rows": []
      },
@@ -10604,7 +12742,7 @@
       "rows": [
        [
         "schema_version",
-        58
+        59
        ],
        [
         "writer_lease_epoch",
@@ -10646,7 +12784,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      },
@@ -10883,16 +13022,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 520,
-      "sha256": "ef9953fff052e57fbc89baa9"
+      "rows": 541,
+      "sha256": "5466b0d4d226295898f2e558"
      },
      "columns": {
-      "rows": 520,
-      "sha256": "b8115ba89a92ec0cd5dfa329"
+      "rows": 541,
+      "sha256": "672d325c753f7a389cc837ff"
      },
      "constraints": {
-      "rows": 384,
-      "sha256": "3fcb9795b8792dc379f78350"
+      "rows": 404,
+      "sha256": "78bbad5a658bd6be9542ff4b"
      },
      "extensions": {
       "rows": 2,
@@ -10903,12 +13042,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 104,
-      "sha256": "484e2fccacb2f852dc18c783"
+      "rows": 107,
+      "sha256": "23d2a0af007401704066aaf5"
      },
      "owners_and_comments": {
-      "rows": 170,
-      "sha256": "33a115196978de52679bade1"
+      "rows": 175,
+      "sha256": "dc54134521168c387634b8bb"
      },
      "schemas": {
       "rows": 1,
@@ -10986,6 +13125,35 @@
        "size",
        "cohesion",
        "computed_at"
+      ],
+      "rows": []
+     },
+     "public.console_sessions": {
+      "columns": [
+       "session_id",
+       "token_hash",
+       "principal",
+       "source",
+       "issuer",
+       "method",
+       "label",
+       "created_at",
+       "last_used_at",
+       "expires_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.console_signin_codes": {
+      "columns": [
+       "code_hash",
+       "principal",
+       "source",
+       "issuer",
+       "origin",
+       "expires_at",
+       "used_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -11487,7 +13655,8 @@
        "last_used_at",
        "revoked_at",
        "revoked_by",
-       "flagged_at"
+       "flagged_at",
+       "signs_in_as"
       ],
       "rows": []
      },
@@ -11533,7 +13702,7 @@
       "rows": [
        [
         "schema_version",
-        58
+        59
        ],
        [
         "writer_lease_epoch",
@@ -11575,7 +13744,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      },
@@ -11814,16 +13984,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 520,
-      "sha256": "ef9953fff052e57fbc89baa9"
+      "rows": 541,
+      "sha256": "5466b0d4d226295898f2e558"
      },
      "columns": {
-      "rows": 520,
-      "sha256": "b8115ba89a92ec0cd5dfa329"
+      "rows": 541,
+      "sha256": "672d325c753f7a389cc837ff"
      },
      "constraints": {
-      "rows": 384,
-      "sha256": "3fcb9795b8792dc379f78350"
+      "rows": 404,
+      "sha256": "78bbad5a658bd6be9542ff4b"
      },
      "extensions": {
       "rows": 2,
@@ -11834,12 +14004,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 104,
-      "sha256": "484e2fccacb2f852dc18c783"
+      "rows": 107,
+      "sha256": "23d2a0af007401704066aaf5"
      },
      "owners_and_comments": {
-      "rows": 170,
-      "sha256": "33a115196978de52679bade1"
+      "rows": 175,
+      "sha256": "dc54134521168c387634b8bb"
      },
      "schemas": {
       "rows": 1,
@@ -11917,6 +14087,35 @@
        "size",
        "cohesion",
        "computed_at"
+      ],
+      "rows": []
+     },
+     "public.console_sessions": {
+      "columns": [
+       "session_id",
+       "token_hash",
+       "principal",
+       "source",
+       "issuer",
+       "method",
+       "label",
+       "created_at",
+       "last_used_at",
+       "expires_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.console_signin_codes": {
+      "columns": [
+       "code_hash",
+       "principal",
+       "source",
+       "issuer",
+       "origin",
+       "expires_at",
+       "used_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -12418,7 +14617,8 @@
        "last_used_at",
        "revoked_at",
        "revoked_by",
-       "flagged_at"
+       "flagged_at",
+       "signs_in_as"
       ],
       "rows": []
      },
@@ -12464,7 +14664,7 @@
       "rows": [
        [
         "schema_version",
-        58
+        59
        ],
        [
         "writer_lease_epoch",
@@ -12506,7 +14706,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      },
@@ -12743,16 +14944,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 520,
-      "sha256": "ef9953fff052e57fbc89baa9"
+      "rows": 541,
+      "sha256": "5466b0d4d226295898f2e558"
      },
      "columns": {
-      "rows": 520,
-      "sha256": "b8115ba89a92ec0cd5dfa329"
+      "rows": 541,
+      "sha256": "672d325c753f7a389cc837ff"
      },
      "constraints": {
-      "rows": 384,
-      "sha256": "3fcb9795b8792dc379f78350"
+      "rows": 404,
+      "sha256": "78bbad5a658bd6be9542ff4b"
      },
      "extensions": {
       "rows": 2,
@@ -12763,12 +14964,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 104,
-      "sha256": "484e2fccacb2f852dc18c783"
+      "rows": 107,
+      "sha256": "23d2a0af007401704066aaf5"
      },
      "owners_and_comments": {
-      "rows": 170,
-      "sha256": "33a115196978de52679bade1"
+      "rows": 175,
+      "sha256": "dc54134521168c387634b8bb"
      },
      "schemas": {
       "rows": 1,
@@ -12846,6 +15047,35 @@
        "size",
        "cohesion",
        "computed_at"
+      ],
+      "rows": []
+     },
+     "public.console_sessions": {
+      "columns": [
+       "session_id",
+       "token_hash",
+       "principal",
+       "source",
+       "issuer",
+       "method",
+       "label",
+       "created_at",
+       "last_used_at",
+       "expires_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.console_signin_codes": {
+      "columns": [
+       "code_hash",
+       "principal",
+       "source",
+       "issuer",
+       "origin",
+       "expires_at",
+       "used_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -13347,7 +15577,8 @@
        "last_used_at",
        "revoked_at",
        "revoked_by",
-       "flagged_at"
+       "flagged_at",
+       "signs_in_as"
       ],
       "rows": []
      },
@@ -13393,7 +15624,7 @@
       "rows": [
        [
         "schema_version",
-        58
+        59
        ],
        [
         "writer_lease_epoch",
@@ -13435,7 +15666,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      },
@@ -14148,16 +16380,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 520,
-      "sha256": "58f2f50b7eac82b851765a7e"
+      "rows": 541,
+      "sha256": "13201a52142b0c7c0d45125b"
      },
      "columns": {
-      "rows": 520,
-      "sha256": "34825af254da666e2a7ff713"
+      "rows": 541,
+      "sha256": "bcaaa818949675614005e0c4"
      },
      "constraints": {
-      "rows": 384,
-      "sha256": "3fcb9795b8792dc379f78350"
+      "rows": 404,
+      "sha256": "78bbad5a658bd6be9542ff4b"
      },
      "extensions": {
       "rows": 2,
@@ -14168,12 +16400,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 104,
-      "sha256": "484e2fccacb2f852dc18c783"
+      "rows": 107,
+      "sha256": "23d2a0af007401704066aaf5"
      },
      "owners_and_comments": {
-      "rows": 170,
-      "sha256": "33a115196978de52679bade1"
+      "rows": 175,
+      "sha256": "dc54134521168c387634b8bb"
      },
      "schemas": {
       "rows": 1,
@@ -14251,6 +16483,35 @@
        "size",
        "cohesion",
        "computed_at"
+      ],
+      "rows": []
+     },
+     "public.console_sessions": {
+      "columns": [
+       "session_id",
+       "token_hash",
+       "principal",
+       "source",
+       "issuer",
+       "method",
+       "label",
+       "created_at",
+       "last_used_at",
+       "expires_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.console_signin_codes": {
+      "columns": [
+       "code_hash",
+       "principal",
+       "source",
+       "issuer",
+       "origin",
+       "expires_at",
+       "used_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -14752,7 +17013,8 @@
        "last_used_at",
        "revoked_at",
        "revoked_by",
-       "flagged_at"
+       "flagged_at",
+       "signs_in_as"
       ],
       "rows": []
      },
@@ -14798,7 +17060,7 @@
       "rows": [
        [
         "schema_version",
-        58
+        59
        ],
        [
         "writer_lease_epoch",
@@ -14840,7 +17102,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      },
@@ -15077,16 +17340,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 520,
-      "sha256": "58f2f50b7eac82b851765a7e"
+      "rows": 541,
+      "sha256": "13201a52142b0c7c0d45125b"
      },
      "columns": {
-      "rows": 520,
-      "sha256": "34825af254da666e2a7ff713"
+      "rows": 541,
+      "sha256": "bcaaa818949675614005e0c4"
      },
      "constraints": {
-      "rows": 384,
-      "sha256": "3fcb9795b8792dc379f78350"
+      "rows": 404,
+      "sha256": "78bbad5a658bd6be9542ff4b"
      },
      "extensions": {
       "rows": 2,
@@ -15097,12 +17360,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 104,
-      "sha256": "484e2fccacb2f852dc18c783"
+      "rows": 107,
+      "sha256": "23d2a0af007401704066aaf5"
      },
      "owners_and_comments": {
-      "rows": 170,
-      "sha256": "33a115196978de52679bade1"
+      "rows": 175,
+      "sha256": "dc54134521168c387634b8bb"
      },
      "schemas": {
       "rows": 1,
@@ -15180,6 +17443,35 @@
        "size",
        "cohesion",
        "computed_at"
+      ],
+      "rows": []
+     },
+     "public.console_sessions": {
+      "columns": [
+       "session_id",
+       "token_hash",
+       "principal",
+       "source",
+       "issuer",
+       "method",
+       "label",
+       "created_at",
+       "last_used_at",
+       "expires_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.console_signin_codes": {
+      "columns": [
+       "code_hash",
+       "principal",
+       "source",
+       "issuer",
+       "origin",
+       "expires_at",
+       "used_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -15681,7 +17973,8 @@
        "last_used_at",
        "revoked_at",
        "revoked_by",
-       "flagged_at"
+       "flagged_at",
+       "signs_in_as"
       ],
       "rows": []
      },
@@ -15727,7 +18020,7 @@
       "rows": [
        [
         "schema_version",
-        58
+        59
        ],
        [
         "writer_lease_epoch",
@@ -15769,7 +18062,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      },
@@ -16008,16 +18302,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 520,
-      "sha256": "66b452723c32cc3adc3afa79"
+      "rows": 541,
+      "sha256": "6763b981d0d1fc66bf0c3055"
      },
      "columns": {
-      "rows": 520,
-      "sha256": "0865e07473b1880cf4c4688d"
+      "rows": 541,
+      "sha256": "b2dcabc24c9e3e2fe1ded544"
      },
      "constraints": {
-      "rows": 384,
-      "sha256": "3fcb9795b8792dc379f78350"
+      "rows": 404,
+      "sha256": "78bbad5a658bd6be9542ff4b"
      },
      "extensions": {
       "rows": 2,
@@ -16028,12 +18322,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 104,
-      "sha256": "484e2fccacb2f852dc18c783"
+      "rows": 107,
+      "sha256": "23d2a0af007401704066aaf5"
      },
      "owners_and_comments": {
-      "rows": 170,
-      "sha256": "33a115196978de52679bade1"
+      "rows": 175,
+      "sha256": "dc54134521168c387634b8bb"
      },
      "schemas": {
       "rows": 1,
@@ -16111,6 +18405,35 @@
        "size",
        "cohesion",
        "computed_at"
+      ],
+      "rows": []
+     },
+     "public.console_sessions": {
+      "columns": [
+       "session_id",
+       "token_hash",
+       "principal",
+       "source",
+       "issuer",
+       "method",
+       "label",
+       "created_at",
+       "last_used_at",
+       "expires_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.console_signin_codes": {
+      "columns": [
+       "code_hash",
+       "principal",
+       "source",
+       "issuer",
+       "origin",
+       "expires_at",
+       "used_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -16612,7 +18935,8 @@
        "last_used_at",
        "revoked_at",
        "revoked_by",
-       "flagged_at"
+       "flagged_at",
+       "signs_in_as"
       ],
       "rows": []
      },
@@ -16658,7 +18982,7 @@
       "rows": [
        [
         "schema_version",
-        58
+        59
        ],
        [
         "writer_lease_epoch",
@@ -16700,7 +19024,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      },
@@ -16937,16 +19262,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 520,
-      "sha256": "66b452723c32cc3adc3afa79"
+      "rows": 541,
+      "sha256": "6763b981d0d1fc66bf0c3055"
      },
      "columns": {
-      "rows": 520,
-      "sha256": "0865e07473b1880cf4c4688d"
+      "rows": 541,
+      "sha256": "b2dcabc24c9e3e2fe1ded544"
      },
      "constraints": {
-      "rows": 384,
-      "sha256": "3fcb9795b8792dc379f78350"
+      "rows": 404,
+      "sha256": "78bbad5a658bd6be9542ff4b"
      },
      "extensions": {
       "rows": 2,
@@ -16957,12 +19282,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 104,
-      "sha256": "484e2fccacb2f852dc18c783"
+      "rows": 107,
+      "sha256": "23d2a0af007401704066aaf5"
      },
      "owners_and_comments": {
-      "rows": 170,
-      "sha256": "33a115196978de52679bade1"
+      "rows": 175,
+      "sha256": "dc54134521168c387634b8bb"
      },
      "schemas": {
       "rows": 1,
@@ -17040,6 +19365,35 @@
        "size",
        "cohesion",
        "computed_at"
+      ],
+      "rows": []
+     },
+     "public.console_sessions": {
+      "columns": [
+       "session_id",
+       "token_hash",
+       "principal",
+       "source",
+       "issuer",
+       "method",
+       "label",
+       "created_at",
+       "last_used_at",
+       "expires_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.console_signin_codes": {
+      "columns": [
+       "code_hash",
+       "principal",
+       "source",
+       "issuer",
+       "origin",
+       "expires_at",
+       "used_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -17541,7 +19895,8 @@
        "last_used_at",
        "revoked_at",
        "revoked_by",
-       "flagged_at"
+       "flagged_at",
+       "signs_in_as"
       ],
       "rows": []
      },
@@ -17587,7 +19942,7 @@
       "rows": [
        [
         "schema_version",
-        58
+        59
        ],
        [
         "writer_lease_epoch",
@@ -17629,7 +19984,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      },
@@ -17868,16 +20224,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 520,
-      "sha256": "ef9953fff052e57fbc89baa9"
+      "rows": 541,
+      "sha256": "5466b0d4d226295898f2e558"
      },
      "columns": {
-      "rows": 520,
-      "sha256": "b8115ba89a92ec0cd5dfa329"
+      "rows": 541,
+      "sha256": "672d325c753f7a389cc837ff"
      },
      "constraints": {
-      "rows": 384,
-      "sha256": "3fcb9795b8792dc379f78350"
+      "rows": 404,
+      "sha256": "78bbad5a658bd6be9542ff4b"
      },
      "extensions": {
       "rows": 2,
@@ -17888,12 +20244,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 104,
-      "sha256": "484e2fccacb2f852dc18c783"
+      "rows": 107,
+      "sha256": "23d2a0af007401704066aaf5"
      },
      "owners_and_comments": {
-      "rows": 170,
-      "sha256": "33a115196978de52679bade1"
+      "rows": 175,
+      "sha256": "dc54134521168c387634b8bb"
      },
      "schemas": {
       "rows": 1,
@@ -17971,6 +20327,35 @@
        "size",
        "cohesion",
        "computed_at"
+      ],
+      "rows": []
+     },
+     "public.console_sessions": {
+      "columns": [
+       "session_id",
+       "token_hash",
+       "principal",
+       "source",
+       "issuer",
+       "method",
+       "label",
+       "created_at",
+       "last_used_at",
+       "expires_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.console_signin_codes": {
+      "columns": [
+       "code_hash",
+       "principal",
+       "source",
+       "issuer",
+       "origin",
+       "expires_at",
+       "used_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -18472,7 +20857,8 @@
        "last_used_at",
        "revoked_at",
        "revoked_by",
-       "flagged_at"
+       "flagged_at",
+       "signs_in_as"
       ],
       "rows": []
      },
@@ -18518,7 +20904,7 @@
       "rows": [
        [
         "schema_version",
-        58
+        59
        ],
        [
         "writer_lease_epoch",
@@ -18560,7 +20946,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      },
@@ -18797,16 +21184,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 520,
-      "sha256": "ef9953fff052e57fbc89baa9"
+      "rows": 541,
+      "sha256": "5466b0d4d226295898f2e558"
      },
      "columns": {
-      "rows": 520,
-      "sha256": "b8115ba89a92ec0cd5dfa329"
+      "rows": 541,
+      "sha256": "672d325c753f7a389cc837ff"
      },
      "constraints": {
-      "rows": 384,
-      "sha256": "3fcb9795b8792dc379f78350"
+      "rows": 404,
+      "sha256": "78bbad5a658bd6be9542ff4b"
      },
      "extensions": {
       "rows": 2,
@@ -18817,12 +21204,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 104,
-      "sha256": "484e2fccacb2f852dc18c783"
+      "rows": 107,
+      "sha256": "23d2a0af007401704066aaf5"
      },
      "owners_and_comments": {
-      "rows": 170,
-      "sha256": "33a115196978de52679bade1"
+      "rows": 175,
+      "sha256": "dc54134521168c387634b8bb"
      },
      "schemas": {
       "rows": 1,
@@ -18900,6 +21287,35 @@
        "size",
        "cohesion",
        "computed_at"
+      ],
+      "rows": []
+     },
+     "public.console_sessions": {
+      "columns": [
+       "session_id",
+       "token_hash",
+       "principal",
+       "source",
+       "issuer",
+       "method",
+       "label",
+       "created_at",
+       "last_used_at",
+       "expires_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.console_signin_codes": {
+      "columns": [
+       "code_hash",
+       "principal",
+       "source",
+       "issuer",
+       "origin",
+       "expires_at",
+       "used_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -19401,7 +21817,8 @@
        "last_used_at",
        "revoked_at",
        "revoked_by",
-       "flagged_at"
+       "flagged_at",
+       "signs_in_as"
       ],
       "rows": []
      },
@@ -19447,7 +21864,7 @@
       "rows": [
        [
         "schema_version",
-        58
+        59
        ],
        [
         "writer_lease_epoch",
@@ -19489,7 +21906,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      },
@@ -19728,16 +22146,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 520,
-      "sha256": "ef9953fff052e57fbc89baa9"
+      "rows": 541,
+      "sha256": "5466b0d4d226295898f2e558"
      },
      "columns": {
-      "rows": 520,
-      "sha256": "b8115ba89a92ec0cd5dfa329"
+      "rows": 541,
+      "sha256": "672d325c753f7a389cc837ff"
      },
      "constraints": {
-      "rows": 384,
-      "sha256": "3fcb9795b8792dc379f78350"
+      "rows": 404,
+      "sha256": "78bbad5a658bd6be9542ff4b"
      },
      "extensions": {
       "rows": 2,
@@ -19748,12 +22166,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 104,
-      "sha256": "484e2fccacb2f852dc18c783"
+      "rows": 107,
+      "sha256": "23d2a0af007401704066aaf5"
      },
      "owners_and_comments": {
-      "rows": 170,
-      "sha256": "33a115196978de52679bade1"
+      "rows": 175,
+      "sha256": "dc54134521168c387634b8bb"
      },
      "schemas": {
       "rows": 1,
@@ -19831,6 +22249,35 @@
        "size",
        "cohesion",
        "computed_at"
+      ],
+      "rows": []
+     },
+     "public.console_sessions": {
+      "columns": [
+       "session_id",
+       "token_hash",
+       "principal",
+       "source",
+       "issuer",
+       "method",
+       "label",
+       "created_at",
+       "last_used_at",
+       "expires_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.console_signin_codes": {
+      "columns": [
+       "code_hash",
+       "principal",
+       "source",
+       "issuer",
+       "origin",
+       "expires_at",
+       "used_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -20332,7 +22779,8 @@
        "last_used_at",
        "revoked_at",
        "revoked_by",
-       "flagged_at"
+       "flagged_at",
+       "signs_in_as"
       ],
       "rows": []
      },
@@ -20378,7 +22826,7 @@
       "rows": [
        [
         "schema_version",
-        58
+        59
        ],
        [
         "writer_lease_epoch",
@@ -20420,7 +22868,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      },
@@ -20657,16 +23106,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 520,
-      "sha256": "ef9953fff052e57fbc89baa9"
+      "rows": 541,
+      "sha256": "5466b0d4d226295898f2e558"
      },
      "columns": {
-      "rows": 520,
-      "sha256": "b8115ba89a92ec0cd5dfa329"
+      "rows": 541,
+      "sha256": "672d325c753f7a389cc837ff"
      },
      "constraints": {
-      "rows": 384,
-      "sha256": "3fcb9795b8792dc379f78350"
+      "rows": 404,
+      "sha256": "78bbad5a658bd6be9542ff4b"
      },
      "extensions": {
       "rows": 2,
@@ -20677,12 +23126,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 104,
-      "sha256": "484e2fccacb2f852dc18c783"
+      "rows": 107,
+      "sha256": "23d2a0af007401704066aaf5"
      },
      "owners_and_comments": {
-      "rows": 170,
-      "sha256": "33a115196978de52679bade1"
+      "rows": 175,
+      "sha256": "dc54134521168c387634b8bb"
      },
      "schemas": {
       "rows": 1,
@@ -20760,6 +23209,35 @@
        "size",
        "cohesion",
        "computed_at"
+      ],
+      "rows": []
+     },
+     "public.console_sessions": {
+      "columns": [
+       "session_id",
+       "token_hash",
+       "principal",
+       "source",
+       "issuer",
+       "method",
+       "label",
+       "created_at",
+       "last_used_at",
+       "expires_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.console_signin_codes": {
+      "columns": [
+       "code_hash",
+       "principal",
+       "source",
+       "issuer",
+       "origin",
+       "expires_at",
+       "used_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -21261,7 +23739,8 @@
        "last_used_at",
        "revoked_at",
        "revoked_by",
-       "flagged_at"
+       "flagged_at",
+       "signs_in_as"
       ],
       "rows": []
      },
@@ -21307,7 +23786,7 @@
       "rows": [
        [
         "schema_version",
-        58
+        59
        ],
        [
         "writer_lease_epoch",
@@ -21349,7 +23828,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      },
@@ -22912,16 +25392,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 520,
-      "sha256": "ef9953fff052e57fbc89baa9"
+      "rows": 541,
+      "sha256": "5466b0d4d226295898f2e558"
      },
      "columns": {
-      "rows": 520,
-      "sha256": "b8115ba89a92ec0cd5dfa329"
+      "rows": 541,
+      "sha256": "672d325c753f7a389cc837ff"
      },
      "constraints": {
-      "rows": 384,
-      "sha256": "3fcb9795b8792dc379f78350"
+      "rows": 404,
+      "sha256": "78bbad5a658bd6be9542ff4b"
      },
      "extensions": {
       "rows": 2,
@@ -22932,12 +25412,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 104,
-      "sha256": "484e2fccacb2f852dc18c783"
+      "rows": 107,
+      "sha256": "23d2a0af007401704066aaf5"
      },
      "owners_and_comments": {
-      "rows": 170,
-      "sha256": "33a115196978de52679bade1"
+      "rows": 175,
+      "sha256": "dc54134521168c387634b8bb"
      },
      "schemas": {
       "rows": 1,
@@ -23015,6 +25495,35 @@
        "size",
        "cohesion",
        "computed_at"
+      ],
+      "rows": []
+     },
+     "public.console_sessions": {
+      "columns": [
+       "session_id",
+       "token_hash",
+       "principal",
+       "source",
+       "issuer",
+       "method",
+       "label",
+       "created_at",
+       "last_used_at",
+       "expires_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.console_signin_codes": {
+      "columns": [
+       "code_hash",
+       "principal",
+       "source",
+       "issuer",
+       "origin",
+       "expires_at",
+       "used_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -23516,7 +26025,8 @@
        "last_used_at",
        "revoked_at",
        "revoked_by",
-       "flagged_at"
+       "flagged_at",
+       "signs_in_as"
       ],
       "rows": []
      },
@@ -23562,7 +26072,7 @@
       "rows": [
        [
         "schema_version",
-        58
+        59
        ],
        [
         "writer_lease_epoch",
@@ -23604,7 +26114,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      },
@@ -23841,16 +26352,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 520,
-      "sha256": "ef9953fff052e57fbc89baa9"
+      "rows": 541,
+      "sha256": "5466b0d4d226295898f2e558"
      },
      "columns": {
-      "rows": 520,
-      "sha256": "b8115ba89a92ec0cd5dfa329"
+      "rows": 541,
+      "sha256": "672d325c753f7a389cc837ff"
      },
      "constraints": {
-      "rows": 384,
-      "sha256": "3fcb9795b8792dc379f78350"
+      "rows": 404,
+      "sha256": "78bbad5a658bd6be9542ff4b"
      },
      "extensions": {
       "rows": 2,
@@ -23861,12 +26372,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 104,
-      "sha256": "484e2fccacb2f852dc18c783"
+      "rows": 107,
+      "sha256": "23d2a0af007401704066aaf5"
      },
      "owners_and_comments": {
-      "rows": 170,
-      "sha256": "33a115196978de52679bade1"
+      "rows": 175,
+      "sha256": "dc54134521168c387634b8bb"
      },
      "schemas": {
       "rows": 1,
@@ -23944,6 +26455,35 @@
        "size",
        "cohesion",
        "computed_at"
+      ],
+      "rows": []
+     },
+     "public.console_sessions": {
+      "columns": [
+       "session_id",
+       "token_hash",
+       "principal",
+       "source",
+       "issuer",
+       "method",
+       "label",
+       "created_at",
+       "last_used_at",
+       "expires_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.console_signin_codes": {
+      "columns": [
+       "code_hash",
+       "principal",
+       "source",
+       "issuer",
+       "origin",
+       "expires_at",
+       "used_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -24445,7 +26985,8 @@
        "last_used_at",
        "revoked_at",
        "revoked_by",
-       "flagged_at"
+       "flagged_at",
+       "signs_in_as"
       ],
       "rows": []
      },
@@ -24491,7 +27032,7 @@
       "rows": [
        [
         "schema_version",
-        58
+        59
        ],
        [
         "writer_lease_epoch",
@@ -24533,7 +27074,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      },
@@ -24772,16 +27314,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 520,
-      "sha256": "ef9953fff052e57fbc89baa9"
+      "rows": 541,
+      "sha256": "5466b0d4d226295898f2e558"
      },
      "columns": {
-      "rows": 520,
-      "sha256": "b8115ba89a92ec0cd5dfa329"
+      "rows": 541,
+      "sha256": "672d325c753f7a389cc837ff"
      },
      "constraints": {
-      "rows": 384,
-      "sha256": "3fcb9795b8792dc379f78350"
+      "rows": 404,
+      "sha256": "78bbad5a658bd6be9542ff4b"
      },
      "extensions": {
       "rows": 2,
@@ -24792,12 +27334,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 104,
-      "sha256": "484e2fccacb2f852dc18c783"
+      "rows": 107,
+      "sha256": "23d2a0af007401704066aaf5"
      },
      "owners_and_comments": {
-      "rows": 170,
-      "sha256": "33a115196978de52679bade1"
+      "rows": 175,
+      "sha256": "dc54134521168c387634b8bb"
      },
      "schemas": {
       "rows": 1,
@@ -24875,6 +27417,35 @@
        "size",
        "cohesion",
        "computed_at"
+      ],
+      "rows": []
+     },
+     "public.console_sessions": {
+      "columns": [
+       "session_id",
+       "token_hash",
+       "principal",
+       "source",
+       "issuer",
+       "method",
+       "label",
+       "created_at",
+       "last_used_at",
+       "expires_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.console_signin_codes": {
+      "columns": [
+       "code_hash",
+       "principal",
+       "source",
+       "issuer",
+       "origin",
+       "expires_at",
+       "used_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -25376,7 +27947,8 @@
        "last_used_at",
        "revoked_at",
        "revoked_by",
-       "flagged_at"
+       "flagged_at",
+       "signs_in_as"
       ],
       "rows": []
      },
@@ -25422,7 +27994,7 @@
       "rows": [
        [
         "schema_version",
-        58
+        59
        ],
        [
         "writer_lease_epoch",
@@ -25464,7 +28036,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      },
@@ -25701,16 +28274,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 520,
-      "sha256": "ef9953fff052e57fbc89baa9"
+      "rows": 541,
+      "sha256": "5466b0d4d226295898f2e558"
      },
      "columns": {
-      "rows": 520,
-      "sha256": "b8115ba89a92ec0cd5dfa329"
+      "rows": 541,
+      "sha256": "672d325c753f7a389cc837ff"
      },
      "constraints": {
-      "rows": 384,
-      "sha256": "3fcb9795b8792dc379f78350"
+      "rows": 404,
+      "sha256": "78bbad5a658bd6be9542ff4b"
      },
      "extensions": {
       "rows": 2,
@@ -25721,12 +28294,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 104,
-      "sha256": "484e2fccacb2f852dc18c783"
+      "rows": 107,
+      "sha256": "23d2a0af007401704066aaf5"
      },
      "owners_and_comments": {
-      "rows": 170,
-      "sha256": "33a115196978de52679bade1"
+      "rows": 175,
+      "sha256": "dc54134521168c387634b8bb"
      },
      "schemas": {
       "rows": 1,
@@ -25804,6 +28377,35 @@
        "size",
        "cohesion",
        "computed_at"
+      ],
+      "rows": []
+     },
+     "public.console_sessions": {
+      "columns": [
+       "session_id",
+       "token_hash",
+       "principal",
+       "source",
+       "issuer",
+       "method",
+       "label",
+       "created_at",
+       "last_used_at",
+       "expires_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.console_signin_codes": {
+      "columns": [
+       "code_hash",
+       "principal",
+       "source",
+       "issuer",
+       "origin",
+       "expires_at",
+       "used_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -26305,7 +28907,8 @@
        "last_used_at",
        "revoked_at",
        "revoked_by",
-       "flagged_at"
+       "flagged_at",
+       "signs_in_as"
       ],
       "rows": []
      },
@@ -26351,7 +28954,7 @@
       "rows": [
        [
         "schema_version",
-        58
+        59
        ],
        [
         "writer_lease_epoch",
@@ -26393,7 +28996,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      },
@@ -27298,16 +29902,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 520,
-      "sha256": "ef9953fff052e57fbc89baa9"
+      "rows": 541,
+      "sha256": "5466b0d4d226295898f2e558"
      },
      "columns": {
-      "rows": 520,
-      "sha256": "b8115ba89a92ec0cd5dfa329"
+      "rows": 541,
+      "sha256": "672d325c753f7a389cc837ff"
      },
      "constraints": {
-      "rows": 384,
-      "sha256": "3fcb9795b8792dc379f78350"
+      "rows": 404,
+      "sha256": "78bbad5a658bd6be9542ff4b"
      },
      "extensions": {
       "rows": 2,
@@ -27318,12 +29922,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 104,
-      "sha256": "484e2fccacb2f852dc18c783"
+      "rows": 107,
+      "sha256": "23d2a0af007401704066aaf5"
      },
      "owners_and_comments": {
-      "rows": 170,
-      "sha256": "33a115196978de52679bade1"
+      "rows": 175,
+      "sha256": "dc54134521168c387634b8bb"
      },
      "schemas": {
       "rows": 1,
@@ -27401,6 +30005,35 @@
        "size",
        "cohesion",
        "computed_at"
+      ],
+      "rows": []
+     },
+     "public.console_sessions": {
+      "columns": [
+       "session_id",
+       "token_hash",
+       "principal",
+       "source",
+       "issuer",
+       "method",
+       "label",
+       "created_at",
+       "last_used_at",
+       "expires_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.console_signin_codes": {
+      "columns": [
+       "code_hash",
+       "principal",
+       "source",
+       "issuer",
+       "origin",
+       "expires_at",
+       "used_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -27902,7 +30535,8 @@
        "last_used_at",
        "revoked_at",
        "revoked_by",
-       "flagged_at"
+       "flagged_at",
+       "signs_in_as"
       ],
       "rows": []
      },
@@ -27948,7 +30582,7 @@
       "rows": [
        [
         "schema_version",
-        58
+        59
        ],
        [
         "writer_lease_epoch",
@@ -27990,7 +30624,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      },
@@ -28227,16 +30862,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 520,
-      "sha256": "ef9953fff052e57fbc89baa9"
+      "rows": 541,
+      "sha256": "5466b0d4d226295898f2e558"
      },
      "columns": {
-      "rows": 520,
-      "sha256": "b8115ba89a92ec0cd5dfa329"
+      "rows": 541,
+      "sha256": "672d325c753f7a389cc837ff"
      },
      "constraints": {
-      "rows": 384,
-      "sha256": "3fcb9795b8792dc379f78350"
+      "rows": 404,
+      "sha256": "78bbad5a658bd6be9542ff4b"
      },
      "extensions": {
       "rows": 2,
@@ -28247,12 +30882,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 104,
-      "sha256": "484e2fccacb2f852dc18c783"
+      "rows": 107,
+      "sha256": "23d2a0af007401704066aaf5"
      },
      "owners_and_comments": {
-      "rows": 170,
-      "sha256": "33a115196978de52679bade1"
+      "rows": 175,
+      "sha256": "dc54134521168c387634b8bb"
      },
      "schemas": {
       "rows": 1,
@@ -28330,6 +30965,35 @@
        "size",
        "cohesion",
        "computed_at"
+      ],
+      "rows": []
+     },
+     "public.console_sessions": {
+      "columns": [
+       "session_id",
+       "token_hash",
+       "principal",
+       "source",
+       "issuer",
+       "method",
+       "label",
+       "created_at",
+       "last_used_at",
+       "expires_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.console_signin_codes": {
+      "columns": [
+       "code_hash",
+       "principal",
+       "source",
+       "issuer",
+       "origin",
+       "expires_at",
+       "used_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -28831,7 +31495,8 @@
        "last_used_at",
        "revoked_at",
        "revoked_by",
-       "flagged_at"
+       "flagged_at",
+       "signs_in_as"
       ],
       "rows": []
      },
@@ -28877,7 +31542,7 @@
       "rows": [
        [
         "schema_version",
-        58
+        59
        ],
        [
         "writer_lease_epoch",
@@ -28919,7 +31584,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      },
@@ -29158,16 +31824,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 520,
-      "sha256": "c53b12c49b9b1c4de45361c6"
+      "rows": 541,
+      "sha256": "ab7052d31a991e7add45e223"
      },
      "columns": {
-      "rows": 520,
-      "sha256": "f0bc6032caba0af7d8c9e317"
+      "rows": 541,
+      "sha256": "ea1565795f57d1e560c82e9d"
      },
      "constraints": {
-      "rows": 384,
-      "sha256": "3fcb9795b8792dc379f78350"
+      "rows": 404,
+      "sha256": "78bbad5a658bd6be9542ff4b"
      },
      "extensions": {
       "rows": 2,
@@ -29178,12 +31844,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 104,
-      "sha256": "484e2fccacb2f852dc18c783"
+      "rows": 107,
+      "sha256": "23d2a0af007401704066aaf5"
      },
      "owners_and_comments": {
-      "rows": 170,
-      "sha256": "33a115196978de52679bade1"
+      "rows": 175,
+      "sha256": "dc54134521168c387634b8bb"
      },
      "schemas": {
       "rows": 1,
@@ -29261,6 +31927,35 @@
        "size",
        "cohesion",
        "computed_at"
+      ],
+      "rows": []
+     },
+     "public.console_sessions": {
+      "columns": [
+       "session_id",
+       "token_hash",
+       "principal",
+       "source",
+       "issuer",
+       "method",
+       "label",
+       "created_at",
+       "last_used_at",
+       "expires_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.console_signin_codes": {
+      "columns": [
+       "code_hash",
+       "principal",
+       "source",
+       "issuer",
+       "origin",
+       "expires_at",
+       "used_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -29762,7 +32457,8 @@
        "last_used_at",
        "revoked_at",
        "revoked_by",
-       "flagged_at"
+       "flagged_at",
+       "signs_in_as"
       ],
       "rows": []
      },
@@ -29808,7 +32504,7 @@
       "rows": [
        [
         "schema_version",
-        58
+        59
        ],
        [
         "writer_lease_epoch",
@@ -29850,7 +32546,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      },
@@ -30087,16 +32784,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 520,
-      "sha256": "c53b12c49b9b1c4de45361c6"
+      "rows": 541,
+      "sha256": "ab7052d31a991e7add45e223"
      },
      "columns": {
-      "rows": 520,
-      "sha256": "f0bc6032caba0af7d8c9e317"
+      "rows": 541,
+      "sha256": "ea1565795f57d1e560c82e9d"
      },
      "constraints": {
-      "rows": 384,
-      "sha256": "3fcb9795b8792dc379f78350"
+      "rows": 404,
+      "sha256": "78bbad5a658bd6be9542ff4b"
      },
      "extensions": {
       "rows": 2,
@@ -30107,12 +32804,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 104,
-      "sha256": "484e2fccacb2f852dc18c783"
+      "rows": 107,
+      "sha256": "23d2a0af007401704066aaf5"
      },
      "owners_and_comments": {
-      "rows": 170,
-      "sha256": "33a115196978de52679bade1"
+      "rows": 175,
+      "sha256": "dc54134521168c387634b8bb"
      },
      "schemas": {
       "rows": 1,
@@ -30190,6 +32887,35 @@
        "size",
        "cohesion",
        "computed_at"
+      ],
+      "rows": []
+     },
+     "public.console_sessions": {
+      "columns": [
+       "session_id",
+       "token_hash",
+       "principal",
+       "source",
+       "issuer",
+       "method",
+       "label",
+       "created_at",
+       "last_used_at",
+       "expires_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.console_signin_codes": {
+      "columns": [
+       "code_hash",
+       "principal",
+       "source",
+       "issuer",
+       "origin",
+       "expires_at",
+       "used_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -30691,7 +33417,8 @@
        "last_used_at",
        "revoked_at",
        "revoked_by",
-       "flagged_at"
+       "flagged_at",
+       "signs_in_as"
       ],
       "rows": []
      },
@@ -30737,7 +33464,7 @@
       "rows": [
        [
         "schema_version",
-        58
+        59
        ],
        [
         "writer_lease_epoch",
@@ -30779,7 +33506,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      },
@@ -31700,16 +34428,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 520,
-      "sha256": "9cc56b09c0fde6afe71cf541"
+      "rows": 541,
+      "sha256": "fea437c258340f18db03a367"
      },
      "columns": {
-      "rows": 520,
-      "sha256": "9c4ebe15bfd9eb9d579f38ae"
+      "rows": 541,
+      "sha256": "4afe2e1360c843265abcfd63"
      },
      "constraints": {
-      "rows": 384,
-      "sha256": "3fcb9795b8792dc379f78350"
+      "rows": 404,
+      "sha256": "78bbad5a658bd6be9542ff4b"
      },
      "extensions": {
       "rows": 2,
@@ -31720,12 +34448,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 104,
-      "sha256": "484e2fccacb2f852dc18c783"
+      "rows": 107,
+      "sha256": "23d2a0af007401704066aaf5"
      },
      "owners_and_comments": {
-      "rows": 170,
-      "sha256": "33a115196978de52679bade1"
+      "rows": 175,
+      "sha256": "dc54134521168c387634b8bb"
      },
      "schemas": {
       "rows": 1,
@@ -31803,6 +34531,35 @@
        "size",
        "cohesion",
        "computed_at"
+      ],
+      "rows": []
+     },
+     "public.console_sessions": {
+      "columns": [
+       "session_id",
+       "token_hash",
+       "principal",
+       "source",
+       "issuer",
+       "method",
+       "label",
+       "created_at",
+       "last_used_at",
+       "expires_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.console_signin_codes": {
+      "columns": [
+       "code_hash",
+       "principal",
+       "source",
+       "issuer",
+       "origin",
+       "expires_at",
+       "used_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -32304,7 +35061,8 @@
        "last_used_at",
        "revoked_at",
        "revoked_by",
-       "flagged_at"
+       "flagged_at",
+       "signs_in_as"
       ],
       "rows": []
      },
@@ -32350,7 +35108,7 @@
       "rows": [
        [
         "schema_version",
-        58
+        59
        ],
        [
         "writer_lease_epoch",
@@ -32392,7 +35150,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      },
@@ -32629,16 +35388,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 520,
-      "sha256": "9cc56b09c0fde6afe71cf541"
+      "rows": 541,
+      "sha256": "fea437c258340f18db03a367"
      },
      "columns": {
-      "rows": 520,
-      "sha256": "9c4ebe15bfd9eb9d579f38ae"
+      "rows": 541,
+      "sha256": "4afe2e1360c843265abcfd63"
      },
      "constraints": {
-      "rows": 384,
-      "sha256": "3fcb9795b8792dc379f78350"
+      "rows": 404,
+      "sha256": "78bbad5a658bd6be9542ff4b"
      },
      "extensions": {
       "rows": 2,
@@ -32649,12 +35408,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 104,
-      "sha256": "484e2fccacb2f852dc18c783"
+      "rows": 107,
+      "sha256": "23d2a0af007401704066aaf5"
      },
      "owners_and_comments": {
-      "rows": 170,
-      "sha256": "33a115196978de52679bade1"
+      "rows": 175,
+      "sha256": "dc54134521168c387634b8bb"
      },
      "schemas": {
       "rows": 1,
@@ -32732,6 +35491,35 @@
        "size",
        "cohesion",
        "computed_at"
+      ],
+      "rows": []
+     },
+     "public.console_sessions": {
+      "columns": [
+       "session_id",
+       "token_hash",
+       "principal",
+       "source",
+       "issuer",
+       "method",
+       "label",
+       "created_at",
+       "last_used_at",
+       "expires_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.console_signin_codes": {
+      "columns": [
+       "code_hash",
+       "principal",
+       "source",
+       "issuer",
+       "origin",
+       "expires_at",
+       "used_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -33233,7 +36021,8 @@
        "last_used_at",
        "revoked_at",
        "revoked_by",
-       "flagged_at"
+       "flagged_at",
+       "signs_in_as"
       ],
       "rows": []
      },
@@ -33279,7 +36068,7 @@
       "rows": [
        [
         "schema_version",
-        58
+        59
        ],
        [
         "writer_lease_epoch",
@@ -33321,7 +36110,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      },
@@ -33560,16 +36350,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 520,
-      "sha256": "02cc426d3871c5a0884c96a5"
+      "rows": 541,
+      "sha256": "9982bec45eb94ac8965e5e3e"
      },
      "columns": {
-      "rows": 520,
-      "sha256": "7f84067ec9fe8bf3d113888f"
+      "rows": 541,
+      "sha256": "1cd1cb10321121b04e24d8b2"
      },
      "constraints": {
-      "rows": 384,
-      "sha256": "3fcb9795b8792dc379f78350"
+      "rows": 404,
+      "sha256": "78bbad5a658bd6be9542ff4b"
      },
      "extensions": {
       "rows": 2,
@@ -33580,12 +36370,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 104,
-      "sha256": "484e2fccacb2f852dc18c783"
+      "rows": 107,
+      "sha256": "23d2a0af007401704066aaf5"
      },
      "owners_and_comments": {
-      "rows": 170,
-      "sha256": "33a115196978de52679bade1"
+      "rows": 175,
+      "sha256": "dc54134521168c387634b8bb"
      },
      "schemas": {
       "rows": 1,
@@ -33663,6 +36453,35 @@
        "size",
        "cohesion",
        "computed_at"
+      ],
+      "rows": []
+     },
+     "public.console_sessions": {
+      "columns": [
+       "session_id",
+       "token_hash",
+       "principal",
+       "source",
+       "issuer",
+       "method",
+       "label",
+       "created_at",
+       "last_used_at",
+       "expires_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.console_signin_codes": {
+      "columns": [
+       "code_hash",
+       "principal",
+       "source",
+       "issuer",
+       "origin",
+       "expires_at",
+       "used_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -34164,7 +36983,8 @@
        "last_used_at",
        "revoked_at",
        "revoked_by",
-       "flagged_at"
+       "flagged_at",
+       "signs_in_as"
       ],
       "rows": []
      },
@@ -34210,7 +37030,7 @@
       "rows": [
        [
         "schema_version",
-        58
+        59
        ],
        [
         "writer_lease_epoch",
@@ -34252,7 +37072,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      },
@@ -34489,16 +37310,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 520,
-      "sha256": "02cc426d3871c5a0884c96a5"
+      "rows": 541,
+      "sha256": "9982bec45eb94ac8965e5e3e"
      },
      "columns": {
-      "rows": 520,
-      "sha256": "7f84067ec9fe8bf3d113888f"
+      "rows": 541,
+      "sha256": "1cd1cb10321121b04e24d8b2"
      },
      "constraints": {
-      "rows": 384,
-      "sha256": "3fcb9795b8792dc379f78350"
+      "rows": 404,
+      "sha256": "78bbad5a658bd6be9542ff4b"
      },
      "extensions": {
       "rows": 2,
@@ -34509,12 +37330,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 104,
-      "sha256": "484e2fccacb2f852dc18c783"
+      "rows": 107,
+      "sha256": "23d2a0af007401704066aaf5"
      },
      "owners_and_comments": {
-      "rows": 170,
-      "sha256": "33a115196978de52679bade1"
+      "rows": 175,
+      "sha256": "dc54134521168c387634b8bb"
      },
      "schemas": {
       "rows": 1,
@@ -34592,6 +37413,35 @@
        "size",
        "cohesion",
        "computed_at"
+      ],
+      "rows": []
+     },
+     "public.console_sessions": {
+      "columns": [
+       "session_id",
+       "token_hash",
+       "principal",
+       "source",
+       "issuer",
+       "method",
+       "label",
+       "created_at",
+       "last_used_at",
+       "expires_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.console_signin_codes": {
+      "columns": [
+       "code_hash",
+       "principal",
+       "source",
+       "issuer",
+       "origin",
+       "expires_at",
+       "used_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -35093,7 +37943,8 @@
        "last_used_at",
        "revoked_at",
        "revoked_by",
-       "flagged_at"
+       "flagged_at",
+       "signs_in_as"
       ],
       "rows": []
      },
@@ -35139,7 +37990,7 @@
       "rows": [
        [
         "schema_version",
-        58
+        59
        ],
        [
         "writer_lease_epoch",
@@ -35181,7 +38032,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      },
@@ -35420,16 +38272,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 520,
-      "sha256": "ef9953fff052e57fbc89baa9"
+      "rows": 541,
+      "sha256": "5466b0d4d226295898f2e558"
      },
      "columns": {
-      "rows": 520,
-      "sha256": "b8115ba89a92ec0cd5dfa329"
+      "rows": 541,
+      "sha256": "672d325c753f7a389cc837ff"
      },
      "constraints": {
-      "rows": 384,
-      "sha256": "3fcb9795b8792dc379f78350"
+      "rows": 404,
+      "sha256": "78bbad5a658bd6be9542ff4b"
      },
      "extensions": {
       "rows": 2,
@@ -35440,12 +38292,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 104,
-      "sha256": "484e2fccacb2f852dc18c783"
+      "rows": 107,
+      "sha256": "23d2a0af007401704066aaf5"
      },
      "owners_and_comments": {
-      "rows": 170,
-      "sha256": "33a115196978de52679bade1"
+      "rows": 175,
+      "sha256": "dc54134521168c387634b8bb"
      },
      "schemas": {
       "rows": 1,
@@ -35523,6 +38375,35 @@
        "size",
        "cohesion",
        "computed_at"
+      ],
+      "rows": []
+     },
+     "public.console_sessions": {
+      "columns": [
+       "session_id",
+       "token_hash",
+       "principal",
+       "source",
+       "issuer",
+       "method",
+       "label",
+       "created_at",
+       "last_used_at",
+       "expires_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.console_signin_codes": {
+      "columns": [
+       "code_hash",
+       "principal",
+       "source",
+       "issuer",
+       "origin",
+       "expires_at",
+       "used_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -36024,7 +38905,8 @@
        "last_used_at",
        "revoked_at",
        "revoked_by",
-       "flagged_at"
+       "flagged_at",
+       "signs_in_as"
       ],
       "rows": []
      },
@@ -36070,7 +38952,7 @@
       "rows": [
        [
         "schema_version",
-        58
+        59
        ],
        [
         "writer_lease_epoch",
@@ -36112,7 +38994,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      },
@@ -36349,16 +39232,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 520,
-      "sha256": "ef9953fff052e57fbc89baa9"
+      "rows": 541,
+      "sha256": "5466b0d4d226295898f2e558"
      },
      "columns": {
-      "rows": 520,
-      "sha256": "b8115ba89a92ec0cd5dfa329"
+      "rows": 541,
+      "sha256": "672d325c753f7a389cc837ff"
      },
      "constraints": {
-      "rows": 384,
-      "sha256": "3fcb9795b8792dc379f78350"
+      "rows": 404,
+      "sha256": "78bbad5a658bd6be9542ff4b"
      },
      "extensions": {
       "rows": 2,
@@ -36369,12 +39252,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 104,
-      "sha256": "484e2fccacb2f852dc18c783"
+      "rows": 107,
+      "sha256": "23d2a0af007401704066aaf5"
      },
      "owners_and_comments": {
-      "rows": 170,
-      "sha256": "33a115196978de52679bade1"
+      "rows": 175,
+      "sha256": "dc54134521168c387634b8bb"
      },
      "schemas": {
       "rows": 1,
@@ -36452,6 +39335,35 @@
        "size",
        "cohesion",
        "computed_at"
+      ],
+      "rows": []
+     },
+     "public.console_sessions": {
+      "columns": [
+       "session_id",
+       "token_hash",
+       "principal",
+       "source",
+       "issuer",
+       "method",
+       "label",
+       "created_at",
+       "last_used_at",
+       "expires_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.console_signin_codes": {
+      "columns": [
+       "code_hash",
+       "principal",
+       "source",
+       "issuer",
+       "origin",
+       "expires_at",
+       "used_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -36953,7 +39865,8 @@
        "last_used_at",
        "revoked_at",
        "revoked_by",
-       "flagged_at"
+       "flagged_at",
+       "signs_in_as"
       ],
       "rows": []
      },
@@ -36999,7 +39912,7 @@
       "rows": [
        [
         "schema_version",
-        58
+        59
        ],
        [
         "writer_lease_epoch",
@@ -37041,7 +39954,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      },
@@ -37280,16 +40194,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 520,
-      "sha256": "ef9953fff052e57fbc89baa9"
+      "rows": 541,
+      "sha256": "5466b0d4d226295898f2e558"
      },
      "columns": {
-      "rows": 520,
-      "sha256": "b8115ba89a92ec0cd5dfa329"
+      "rows": 541,
+      "sha256": "672d325c753f7a389cc837ff"
      },
      "constraints": {
-      "rows": 384,
-      "sha256": "3fcb9795b8792dc379f78350"
+      "rows": 404,
+      "sha256": "78bbad5a658bd6be9542ff4b"
      },
      "extensions": {
       "rows": 2,
@@ -37300,12 +40214,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 104,
-      "sha256": "484e2fccacb2f852dc18c783"
+      "rows": 107,
+      "sha256": "23d2a0af007401704066aaf5"
      },
      "owners_and_comments": {
-      "rows": 170,
-      "sha256": "33a115196978de52679bade1"
+      "rows": 175,
+      "sha256": "dc54134521168c387634b8bb"
      },
      "schemas": {
       "rows": 1,
@@ -37383,6 +40297,35 @@
        "size",
        "cohesion",
        "computed_at"
+      ],
+      "rows": []
+     },
+     "public.console_sessions": {
+      "columns": [
+       "session_id",
+       "token_hash",
+       "principal",
+       "source",
+       "issuer",
+       "method",
+       "label",
+       "created_at",
+       "last_used_at",
+       "expires_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.console_signin_codes": {
+      "columns": [
+       "code_hash",
+       "principal",
+       "source",
+       "issuer",
+       "origin",
+       "expires_at",
+       "used_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -37884,7 +40827,8 @@
        "last_used_at",
        "revoked_at",
        "revoked_by",
-       "flagged_at"
+       "flagged_at",
+       "signs_in_as"
       ],
       "rows": []
      },
@@ -37930,7 +40874,7 @@
       "rows": [
        [
         "schema_version",
-        58
+        59
        ],
        [
         "writer_lease_epoch",
@@ -37972,7 +40916,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      },
@@ -38209,16 +41154,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 520,
-      "sha256": "ef9953fff052e57fbc89baa9"
+      "rows": 541,
+      "sha256": "5466b0d4d226295898f2e558"
      },
      "columns": {
-      "rows": 520,
-      "sha256": "b8115ba89a92ec0cd5dfa329"
+      "rows": 541,
+      "sha256": "672d325c753f7a389cc837ff"
      },
      "constraints": {
-      "rows": 384,
-      "sha256": "3fcb9795b8792dc379f78350"
+      "rows": 404,
+      "sha256": "78bbad5a658bd6be9542ff4b"
      },
      "extensions": {
       "rows": 2,
@@ -38229,12 +41174,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 104,
-      "sha256": "484e2fccacb2f852dc18c783"
+      "rows": 107,
+      "sha256": "23d2a0af007401704066aaf5"
      },
      "owners_and_comments": {
-      "rows": 170,
-      "sha256": "33a115196978de52679bade1"
+      "rows": 175,
+      "sha256": "dc54134521168c387634b8bb"
      },
      "schemas": {
       "rows": 1,
@@ -38312,6 +41257,35 @@
        "size",
        "cohesion",
        "computed_at"
+      ],
+      "rows": []
+     },
+     "public.console_sessions": {
+      "columns": [
+       "session_id",
+       "token_hash",
+       "principal",
+       "source",
+       "issuer",
+       "method",
+       "label",
+       "created_at",
+       "last_used_at",
+       "expires_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.console_signin_codes": {
+      "columns": [
+       "code_hash",
+       "principal",
+       "source",
+       "issuer",
+       "origin",
+       "expires_at",
+       "used_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -38813,7 +41787,8 @@
        "last_used_at",
        "revoked_at",
        "revoked_by",
-       "flagged_at"
+       "flagged_at",
+       "signs_in_as"
       ],
       "rows": []
      },
@@ -38859,7 +41834,7 @@
       "rows": [
        [
         "schema_version",
-        58
+        59
        ],
        [
         "writer_lease_epoch",
@@ -38901,7 +41876,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      },
@@ -39140,16 +42116,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 520,
-      "sha256": "58f2f50b7eac82b851765a7e"
+      "rows": 541,
+      "sha256": "13201a52142b0c7c0d45125b"
      },
      "columns": {
-      "rows": 520,
-      "sha256": "34825af254da666e2a7ff713"
+      "rows": 541,
+      "sha256": "bcaaa818949675614005e0c4"
      },
      "constraints": {
-      "rows": 384,
-      "sha256": "3fcb9795b8792dc379f78350"
+      "rows": 404,
+      "sha256": "78bbad5a658bd6be9542ff4b"
      },
      "extensions": {
       "rows": 2,
@@ -39160,12 +42136,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 104,
-      "sha256": "484e2fccacb2f852dc18c783"
+      "rows": 107,
+      "sha256": "23d2a0af007401704066aaf5"
      },
      "owners_and_comments": {
-      "rows": 170,
-      "sha256": "33a115196978de52679bade1"
+      "rows": 175,
+      "sha256": "dc54134521168c387634b8bb"
      },
      "schemas": {
       "rows": 1,
@@ -39243,6 +42219,35 @@
        "size",
        "cohesion",
        "computed_at"
+      ],
+      "rows": []
+     },
+     "public.console_sessions": {
+      "columns": [
+       "session_id",
+       "token_hash",
+       "principal",
+       "source",
+       "issuer",
+       "method",
+       "label",
+       "created_at",
+       "last_used_at",
+       "expires_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.console_signin_codes": {
+      "columns": [
+       "code_hash",
+       "principal",
+       "source",
+       "issuer",
+       "origin",
+       "expires_at",
+       "used_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -39744,7 +42749,8 @@
        "last_used_at",
        "revoked_at",
        "revoked_by",
-       "flagged_at"
+       "flagged_at",
+       "signs_in_as"
       ],
       "rows": []
      },
@@ -39790,7 +42796,7 @@
       "rows": [
        [
         "schema_version",
-        58
+        59
        ],
        [
         "writer_lease_epoch",
@@ -39832,7 +42838,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      },
@@ -40069,16 +43076,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 520,
-      "sha256": "58f2f50b7eac82b851765a7e"
+      "rows": 541,
+      "sha256": "13201a52142b0c7c0d45125b"
      },
      "columns": {
-      "rows": 520,
-      "sha256": "34825af254da666e2a7ff713"
+      "rows": 541,
+      "sha256": "bcaaa818949675614005e0c4"
      },
      "constraints": {
-      "rows": 384,
-      "sha256": "3fcb9795b8792dc379f78350"
+      "rows": 404,
+      "sha256": "78bbad5a658bd6be9542ff4b"
      },
      "extensions": {
       "rows": 2,
@@ -40089,12 +43096,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 104,
-      "sha256": "484e2fccacb2f852dc18c783"
+      "rows": 107,
+      "sha256": "23d2a0af007401704066aaf5"
      },
      "owners_and_comments": {
-      "rows": 170,
-      "sha256": "33a115196978de52679bade1"
+      "rows": 175,
+      "sha256": "dc54134521168c387634b8bb"
      },
      "schemas": {
       "rows": 1,
@@ -40172,6 +43179,35 @@
        "size",
        "cohesion",
        "computed_at"
+      ],
+      "rows": []
+     },
+     "public.console_sessions": {
+      "columns": [
+       "session_id",
+       "token_hash",
+       "principal",
+       "source",
+       "issuer",
+       "method",
+       "label",
+       "created_at",
+       "last_used_at",
+       "expires_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.console_signin_codes": {
+      "columns": [
+       "code_hash",
+       "principal",
+       "source",
+       "issuer",
+       "origin",
+       "expires_at",
+       "used_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -40673,7 +43709,8 @@
        "last_used_at",
        "revoked_at",
        "revoked_by",
-       "flagged_at"
+       "flagged_at",
+       "signs_in_as"
       ],
       "rows": []
      },
@@ -40719,7 +43756,7 @@
       "rows": [
        [
         "schema_version",
-        58
+        59
        ],
        [
         "writer_lease_epoch",
@@ -40761,7 +43798,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      },
@@ -41978,16 +45016,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 520,
-      "sha256": "9cc56b09c0fde6afe71cf541"
+      "rows": 541,
+      "sha256": "fea437c258340f18db03a367"
      },
      "columns": {
-      "rows": 520,
-      "sha256": "9c4ebe15bfd9eb9d579f38ae"
+      "rows": 541,
+      "sha256": "4afe2e1360c843265abcfd63"
      },
      "constraints": {
-      "rows": 384,
-      "sha256": "3fcb9795b8792dc379f78350"
+      "rows": 404,
+      "sha256": "78bbad5a658bd6be9542ff4b"
      },
      "extensions": {
       "rows": 2,
@@ -41998,12 +45036,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 104,
-      "sha256": "484e2fccacb2f852dc18c783"
+      "rows": 107,
+      "sha256": "23d2a0af007401704066aaf5"
      },
      "owners_and_comments": {
-      "rows": 170,
-      "sha256": "33a115196978de52679bade1"
+      "rows": 175,
+      "sha256": "dc54134521168c387634b8bb"
      },
      "schemas": {
       "rows": 1,
@@ -42081,6 +45119,35 @@
        "size",
        "cohesion",
        "computed_at"
+      ],
+      "rows": []
+     },
+     "public.console_sessions": {
+      "columns": [
+       "session_id",
+       "token_hash",
+       "principal",
+       "source",
+       "issuer",
+       "method",
+       "label",
+       "created_at",
+       "last_used_at",
+       "expires_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.console_signin_codes": {
+      "columns": [
+       "code_hash",
+       "principal",
+       "source",
+       "issuer",
+       "origin",
+       "expires_at",
+       "used_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -42582,7 +45649,8 @@
        "last_used_at",
        "revoked_at",
        "revoked_by",
-       "flagged_at"
+       "flagged_at",
+       "signs_in_as"
       ],
       "rows": []
      },
@@ -42628,7 +45696,7 @@
       "rows": [
        [
         "schema_version",
-        58
+        59
        ],
        [
         "writer_lease_epoch",
@@ -42670,7 +45738,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      },
@@ -42907,16 +45976,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 520,
-      "sha256": "9cc56b09c0fde6afe71cf541"
+      "rows": 541,
+      "sha256": "fea437c258340f18db03a367"
      },
      "columns": {
-      "rows": 520,
-      "sha256": "9c4ebe15bfd9eb9d579f38ae"
+      "rows": 541,
+      "sha256": "4afe2e1360c843265abcfd63"
      },
      "constraints": {
-      "rows": 384,
-      "sha256": "3fcb9795b8792dc379f78350"
+      "rows": 404,
+      "sha256": "78bbad5a658bd6be9542ff4b"
      },
      "extensions": {
       "rows": 2,
@@ -42927,12 +45996,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 104,
-      "sha256": "484e2fccacb2f852dc18c783"
+      "rows": 107,
+      "sha256": "23d2a0af007401704066aaf5"
      },
      "owners_and_comments": {
-      "rows": 170,
-      "sha256": "33a115196978de52679bade1"
+      "rows": 175,
+      "sha256": "dc54134521168c387634b8bb"
      },
      "schemas": {
       "rows": 1,
@@ -43010,6 +46079,35 @@
        "size",
        "cohesion",
        "computed_at"
+      ],
+      "rows": []
+     },
+     "public.console_sessions": {
+      "columns": [
+       "session_id",
+       "token_hash",
+       "principal",
+       "source",
+       "issuer",
+       "method",
+       "label",
+       "created_at",
+       "last_used_at",
+       "expires_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.console_signin_codes": {
+      "columns": [
+       "code_hash",
+       "principal",
+       "source",
+       "issuer",
+       "origin",
+       "expires_at",
+       "used_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -43511,7 +46609,8 @@
        "last_used_at",
        "revoked_at",
        "revoked_by",
-       "flagged_at"
+       "flagged_at",
+       "signs_in_as"
       ],
       "rows": []
      },
@@ -43557,7 +46656,7 @@
       "rows": [
        [
         "schema_version",
-        58
+        59
        ],
        [
         "writer_lease_epoch",
@@ -43599,7 +46698,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      },
@@ -43838,16 +46938,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 520,
-      "sha256": "ef9953fff052e57fbc89baa9"
+      "rows": 541,
+      "sha256": "5466b0d4d226295898f2e558"
      },
      "columns": {
-      "rows": 520,
-      "sha256": "b8115ba89a92ec0cd5dfa329"
+      "rows": 541,
+      "sha256": "672d325c753f7a389cc837ff"
      },
      "constraints": {
-      "rows": 384,
-      "sha256": "3fcb9795b8792dc379f78350"
+      "rows": 404,
+      "sha256": "78bbad5a658bd6be9542ff4b"
      },
      "extensions": {
       "rows": 2,
@@ -43858,12 +46958,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 104,
-      "sha256": "484e2fccacb2f852dc18c783"
+      "rows": 107,
+      "sha256": "23d2a0af007401704066aaf5"
      },
      "owners_and_comments": {
-      "rows": 170,
-      "sha256": "33a115196978de52679bade1"
+      "rows": 175,
+      "sha256": "dc54134521168c387634b8bb"
      },
      "schemas": {
       "rows": 1,
@@ -43941,6 +47041,35 @@
        "size",
        "cohesion",
        "computed_at"
+      ],
+      "rows": []
+     },
+     "public.console_sessions": {
+      "columns": [
+       "session_id",
+       "token_hash",
+       "principal",
+       "source",
+       "issuer",
+       "method",
+       "label",
+       "created_at",
+       "last_used_at",
+       "expires_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.console_signin_codes": {
+      "columns": [
+       "code_hash",
+       "principal",
+       "source",
+       "issuer",
+       "origin",
+       "expires_at",
+       "used_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -44442,7 +47571,8 @@
        "last_used_at",
        "revoked_at",
        "revoked_by",
-       "flagged_at"
+       "flagged_at",
+       "signs_in_as"
       ],
       "rows": []
      },
@@ -44488,7 +47618,7 @@
       "rows": [
        [
         "schema_version",
-        58
+        59
        ],
        [
         "writer_lease_epoch",
@@ -44530,7 +47660,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      },
@@ -44767,16 +47898,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 520,
-      "sha256": "ef9953fff052e57fbc89baa9"
+      "rows": 541,
+      "sha256": "5466b0d4d226295898f2e558"
      },
      "columns": {
-      "rows": 520,
-      "sha256": "b8115ba89a92ec0cd5dfa329"
+      "rows": 541,
+      "sha256": "672d325c753f7a389cc837ff"
      },
      "constraints": {
-      "rows": 384,
-      "sha256": "3fcb9795b8792dc379f78350"
+      "rows": 404,
+      "sha256": "78bbad5a658bd6be9542ff4b"
      },
      "extensions": {
       "rows": 2,
@@ -44787,12 +47918,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 104,
-      "sha256": "484e2fccacb2f852dc18c783"
+      "rows": 107,
+      "sha256": "23d2a0af007401704066aaf5"
      },
      "owners_and_comments": {
-      "rows": 170,
-      "sha256": "33a115196978de52679bade1"
+      "rows": 175,
+      "sha256": "dc54134521168c387634b8bb"
      },
      "schemas": {
       "rows": 1,
@@ -44870,6 +48001,35 @@
        "size",
        "cohesion",
        "computed_at"
+      ],
+      "rows": []
+     },
+     "public.console_sessions": {
+      "columns": [
+       "session_id",
+       "token_hash",
+       "principal",
+       "source",
+       "issuer",
+       "method",
+       "label",
+       "created_at",
+       "last_used_at",
+       "expires_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.console_signin_codes": {
+      "columns": [
+       "code_hash",
+       "principal",
+       "source",
+       "issuer",
+       "origin",
+       "expires_at",
+       "used_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -45371,7 +48531,8 @@
        "last_used_at",
        "revoked_at",
        "revoked_by",
-       "flagged_at"
+       "flagged_at",
+       "signs_in_as"
       ],
       "rows": []
      },
@@ -45417,7 +48578,7 @@
       "rows": [
        [
         "schema_version",
-        58
+        59
        ],
        [
         "writer_lease_epoch",
@@ -45459,7 +48620,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      },
@@ -46288,16 +49450,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 520,
-      "sha256": "ef9953fff052e57fbc89baa9"
+      "rows": 541,
+      "sha256": "5466b0d4d226295898f2e558"
      },
      "columns": {
-      "rows": 520,
-      "sha256": "b8115ba89a92ec0cd5dfa329"
+      "rows": 541,
+      "sha256": "672d325c753f7a389cc837ff"
      },
      "constraints": {
-      "rows": 384,
-      "sha256": "3fcb9795b8792dc379f78350"
+      "rows": 404,
+      "sha256": "78bbad5a658bd6be9542ff4b"
      },
      "extensions": {
       "rows": 2,
@@ -46308,12 +49470,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 104,
-      "sha256": "484e2fccacb2f852dc18c783"
+      "rows": 107,
+      "sha256": "23d2a0af007401704066aaf5"
      },
      "owners_and_comments": {
-      "rows": 170,
-      "sha256": "33a115196978de52679bade1"
+      "rows": 175,
+      "sha256": "dc54134521168c387634b8bb"
      },
      "schemas": {
       "rows": 1,
@@ -46391,6 +49553,35 @@
        "size",
        "cohesion",
        "computed_at"
+      ],
+      "rows": []
+     },
+     "public.console_sessions": {
+      "columns": [
+       "session_id",
+       "token_hash",
+       "principal",
+       "source",
+       "issuer",
+       "method",
+       "label",
+       "created_at",
+       "last_used_at",
+       "expires_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.console_signin_codes": {
+      "columns": [
+       "code_hash",
+       "principal",
+       "source",
+       "issuer",
+       "origin",
+       "expires_at",
+       "used_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -46892,7 +50083,8 @@
        "last_used_at",
        "revoked_at",
        "revoked_by",
-       "flagged_at"
+       "flagged_at",
+       "signs_in_as"
       ],
       "rows": []
      },
@@ -46938,7 +50130,7 @@
       "rows": [
        [
         "schema_version",
-        58
+        59
        ],
        [
         "writer_lease_epoch",
@@ -46980,7 +50172,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      },
@@ -47217,16 +50410,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 520,
-      "sha256": "ef9953fff052e57fbc89baa9"
+      "rows": 541,
+      "sha256": "5466b0d4d226295898f2e558"
      },
      "columns": {
-      "rows": 520,
-      "sha256": "b8115ba89a92ec0cd5dfa329"
+      "rows": 541,
+      "sha256": "672d325c753f7a389cc837ff"
      },
      "constraints": {
-      "rows": 384,
-      "sha256": "3fcb9795b8792dc379f78350"
+      "rows": 404,
+      "sha256": "78bbad5a658bd6be9542ff4b"
      },
      "extensions": {
       "rows": 2,
@@ -47237,12 +50430,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 104,
-      "sha256": "484e2fccacb2f852dc18c783"
+      "rows": 107,
+      "sha256": "23d2a0af007401704066aaf5"
      },
      "owners_and_comments": {
-      "rows": 170,
-      "sha256": "33a115196978de52679bade1"
+      "rows": 175,
+      "sha256": "dc54134521168c387634b8bb"
      },
      "schemas": {
       "rows": 1,
@@ -47320,6 +50513,35 @@
        "size",
        "cohesion",
        "computed_at"
+      ],
+      "rows": []
+     },
+     "public.console_sessions": {
+      "columns": [
+       "session_id",
+       "token_hash",
+       "principal",
+       "source",
+       "issuer",
+       "method",
+       "label",
+       "created_at",
+       "last_used_at",
+       "expires_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.console_signin_codes": {
+      "columns": [
+       "code_hash",
+       "principal",
+       "source",
+       "issuer",
+       "origin",
+       "expires_at",
+       "used_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -47821,7 +51043,8 @@
        "last_used_at",
        "revoked_at",
        "revoked_by",
-       "flagged_at"
+       "flagged_at",
+       "signs_in_as"
       ],
       "rows": []
      },
@@ -47867,7 +51090,7 @@
       "rows": [
        [
         "schema_version",
-        58
+        59
        ],
        [
         "writer_lease_epoch",
@@ -47909,7 +51132,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      },
@@ -48148,16 +51372,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 520,
-      "sha256": "9cc56b09c0fde6afe71cf541"
+      "rows": 541,
+      "sha256": "fea437c258340f18db03a367"
      },
      "columns": {
-      "rows": 520,
-      "sha256": "9c4ebe15bfd9eb9d579f38ae"
+      "rows": 541,
+      "sha256": "4afe2e1360c843265abcfd63"
      },
      "constraints": {
-      "rows": 384,
-      "sha256": "3fcb9795b8792dc379f78350"
+      "rows": 404,
+      "sha256": "78bbad5a658bd6be9542ff4b"
      },
      "extensions": {
       "rows": 2,
@@ -48168,12 +51392,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 104,
-      "sha256": "484e2fccacb2f852dc18c783"
+      "rows": 107,
+      "sha256": "23d2a0af007401704066aaf5"
      },
      "owners_and_comments": {
-      "rows": 170,
-      "sha256": "33a115196978de52679bade1"
+      "rows": 175,
+      "sha256": "dc54134521168c387634b8bb"
      },
      "schemas": {
       "rows": 1,
@@ -48251,6 +51475,35 @@
        "size",
        "cohesion",
        "computed_at"
+      ],
+      "rows": []
+     },
+     "public.console_sessions": {
+      "columns": [
+       "session_id",
+       "token_hash",
+       "principal",
+       "source",
+       "issuer",
+       "method",
+       "label",
+       "created_at",
+       "last_used_at",
+       "expires_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.console_signin_codes": {
+      "columns": [
+       "code_hash",
+       "principal",
+       "source",
+       "issuer",
+       "origin",
+       "expires_at",
+       "used_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -48752,7 +52005,8 @@
        "last_used_at",
        "revoked_at",
        "revoked_by",
-       "flagged_at"
+       "flagged_at",
+       "signs_in_as"
       ],
       "rows": []
      },
@@ -48798,7 +52052,7 @@
       "rows": [
        [
         "schema_version",
-        58
+        59
        ],
        [
         "writer_lease_epoch",
@@ -48840,7 +52094,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      },
@@ -49077,16 +52332,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 520,
-      "sha256": "9cc56b09c0fde6afe71cf541"
+      "rows": 541,
+      "sha256": "fea437c258340f18db03a367"
      },
      "columns": {
-      "rows": 520,
-      "sha256": "9c4ebe15bfd9eb9d579f38ae"
+      "rows": 541,
+      "sha256": "4afe2e1360c843265abcfd63"
      },
      "constraints": {
-      "rows": 384,
-      "sha256": "3fcb9795b8792dc379f78350"
+      "rows": 404,
+      "sha256": "78bbad5a658bd6be9542ff4b"
      },
      "extensions": {
       "rows": 2,
@@ -49097,12 +52352,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 104,
-      "sha256": "484e2fccacb2f852dc18c783"
+      "rows": 107,
+      "sha256": "23d2a0af007401704066aaf5"
      },
      "owners_and_comments": {
-      "rows": 170,
-      "sha256": "33a115196978de52679bade1"
+      "rows": 175,
+      "sha256": "dc54134521168c387634b8bb"
      },
      "schemas": {
       "rows": 1,
@@ -49180,6 +52435,35 @@
        "size",
        "cohesion",
        "computed_at"
+      ],
+      "rows": []
+     },
+     "public.console_sessions": {
+      "columns": [
+       "session_id",
+       "token_hash",
+       "principal",
+       "source",
+       "issuer",
+       "method",
+       "label",
+       "created_at",
+       "last_used_at",
+       "expires_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.console_signin_codes": {
+      "columns": [
+       "code_hash",
+       "principal",
+       "source",
+       "issuer",
+       "origin",
+       "expires_at",
+       "used_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -49681,7 +52965,8 @@
        "last_used_at",
        "revoked_at",
        "revoked_by",
-       "flagged_at"
+       "flagged_at",
+       "signs_in_as"
       ],
       "rows": []
      },
@@ -49727,7 +53012,7 @@
       "rows": [
        [
         "schema_version",
-        58
+        59
        ],
        [
         "writer_lease_epoch",
@@ -49769,7 +53054,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      },
@@ -50008,16 +53294,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 520,
-      "sha256": "ef9953fff052e57fbc89baa9"
+      "rows": 541,
+      "sha256": "5466b0d4d226295898f2e558"
      },
      "columns": {
-      "rows": 520,
-      "sha256": "b8115ba89a92ec0cd5dfa329"
+      "rows": 541,
+      "sha256": "672d325c753f7a389cc837ff"
      },
      "constraints": {
-      "rows": 384,
-      "sha256": "3fcb9795b8792dc379f78350"
+      "rows": 404,
+      "sha256": "78bbad5a658bd6be9542ff4b"
      },
      "extensions": {
       "rows": 2,
@@ -50028,12 +53314,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 104,
-      "sha256": "484e2fccacb2f852dc18c783"
+      "rows": 107,
+      "sha256": "23d2a0af007401704066aaf5"
      },
      "owners_and_comments": {
-      "rows": 170,
-      "sha256": "33a115196978de52679bade1"
+      "rows": 175,
+      "sha256": "dc54134521168c387634b8bb"
      },
      "schemas": {
       "rows": 1,
@@ -50111,6 +53397,35 @@
        "size",
        "cohesion",
        "computed_at"
+      ],
+      "rows": []
+     },
+     "public.console_sessions": {
+      "columns": [
+       "session_id",
+       "token_hash",
+       "principal",
+       "source",
+       "issuer",
+       "method",
+       "label",
+       "created_at",
+       "last_used_at",
+       "expires_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.console_signin_codes": {
+      "columns": [
+       "code_hash",
+       "principal",
+       "source",
+       "issuer",
+       "origin",
+       "expires_at",
+       "used_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -50612,7 +53927,8 @@
        "last_used_at",
        "revoked_at",
        "revoked_by",
-       "flagged_at"
+       "flagged_at",
+       "signs_in_as"
       ],
       "rows": []
      },
@@ -50658,7 +53974,7 @@
       "rows": [
        [
         "schema_version",
-        58
+        59
        ],
        [
         "writer_lease_epoch",
@@ -50700,7 +54016,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      },
@@ -50937,16 +54254,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 520,
-      "sha256": "ef9953fff052e57fbc89baa9"
+      "rows": 541,
+      "sha256": "5466b0d4d226295898f2e558"
      },
      "columns": {
-      "rows": 520,
-      "sha256": "b8115ba89a92ec0cd5dfa329"
+      "rows": 541,
+      "sha256": "672d325c753f7a389cc837ff"
      },
      "constraints": {
-      "rows": 384,
-      "sha256": "3fcb9795b8792dc379f78350"
+      "rows": 404,
+      "sha256": "78bbad5a658bd6be9542ff4b"
      },
      "extensions": {
       "rows": 2,
@@ -50957,12 +54274,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 104,
-      "sha256": "484e2fccacb2f852dc18c783"
+      "rows": 107,
+      "sha256": "23d2a0af007401704066aaf5"
      },
      "owners_and_comments": {
-      "rows": 170,
-      "sha256": "33a115196978de52679bade1"
+      "rows": 175,
+      "sha256": "dc54134521168c387634b8bb"
      },
      "schemas": {
       "rows": 1,
@@ -51040,6 +54357,35 @@
        "size",
        "cohesion",
        "computed_at"
+      ],
+      "rows": []
+     },
+     "public.console_sessions": {
+      "columns": [
+       "session_id",
+       "token_hash",
+       "principal",
+       "source",
+       "issuer",
+       "method",
+       "label",
+       "created_at",
+       "last_used_at",
+       "expires_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.console_signin_codes": {
+      "columns": [
+       "code_hash",
+       "principal",
+       "source",
+       "issuer",
+       "origin",
+       "expires_at",
+       "used_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -51541,7 +54887,8 @@
        "last_used_at",
        "revoked_at",
        "revoked_by",
-       "flagged_at"
+       "flagged_at",
+       "signs_in_as"
       ],
       "rows": []
      },
@@ -51587,7 +54934,7 @@
       "rows": [
        [
         "schema_version",
-        58
+        59
        ],
        [
         "writer_lease_epoch",
@@ -51629,7 +54976,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      },
@@ -51868,16 +55216,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 520,
-      "sha256": "ef9953fff052e57fbc89baa9"
+      "rows": 541,
+      "sha256": "5466b0d4d226295898f2e558"
      },
      "columns": {
-      "rows": 520,
-      "sha256": "b8115ba89a92ec0cd5dfa329"
+      "rows": 541,
+      "sha256": "672d325c753f7a389cc837ff"
      },
      "constraints": {
-      "rows": 384,
-      "sha256": "3fcb9795b8792dc379f78350"
+      "rows": 404,
+      "sha256": "78bbad5a658bd6be9542ff4b"
      },
      "extensions": {
       "rows": 2,
@@ -51888,12 +55236,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 104,
-      "sha256": "484e2fccacb2f852dc18c783"
+      "rows": 107,
+      "sha256": "23d2a0af007401704066aaf5"
      },
      "owners_and_comments": {
-      "rows": 170,
-      "sha256": "33a115196978de52679bade1"
+      "rows": 175,
+      "sha256": "dc54134521168c387634b8bb"
      },
      "schemas": {
       "rows": 1,
@@ -51971,6 +55319,35 @@
        "size",
        "cohesion",
        "computed_at"
+      ],
+      "rows": []
+     },
+     "public.console_sessions": {
+      "columns": [
+       "session_id",
+       "token_hash",
+       "principal",
+       "source",
+       "issuer",
+       "method",
+       "label",
+       "created_at",
+       "last_used_at",
+       "expires_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.console_signin_codes": {
+      "columns": [
+       "code_hash",
+       "principal",
+       "source",
+       "issuer",
+       "origin",
+       "expires_at",
+       "used_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -52472,7 +55849,8 @@
        "last_used_at",
        "revoked_at",
        "revoked_by",
-       "flagged_at"
+       "flagged_at",
+       "signs_in_as"
       ],
       "rows": []
      },
@@ -52518,7 +55896,7 @@
       "rows": [
        [
         "schema_version",
-        58
+        59
        ],
        [
         "writer_lease_epoch",
@@ -52560,7 +55938,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      },
@@ -52797,16 +56176,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 520,
-      "sha256": "ef9953fff052e57fbc89baa9"
+      "rows": 541,
+      "sha256": "5466b0d4d226295898f2e558"
      },
      "columns": {
-      "rows": 520,
-      "sha256": "b8115ba89a92ec0cd5dfa329"
+      "rows": 541,
+      "sha256": "672d325c753f7a389cc837ff"
      },
      "constraints": {
-      "rows": 384,
-      "sha256": "3fcb9795b8792dc379f78350"
+      "rows": 404,
+      "sha256": "78bbad5a658bd6be9542ff4b"
      },
      "extensions": {
       "rows": 2,
@@ -52817,12 +56196,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 104,
-      "sha256": "484e2fccacb2f852dc18c783"
+      "rows": 107,
+      "sha256": "23d2a0af007401704066aaf5"
      },
      "owners_and_comments": {
-      "rows": 170,
-      "sha256": "33a115196978de52679bade1"
+      "rows": 175,
+      "sha256": "dc54134521168c387634b8bb"
      },
      "schemas": {
       "rows": 1,
@@ -52900,6 +56279,35 @@
        "size",
        "cohesion",
        "computed_at"
+      ],
+      "rows": []
+     },
+     "public.console_sessions": {
+      "columns": [
+       "session_id",
+       "token_hash",
+       "principal",
+       "source",
+       "issuer",
+       "method",
+       "label",
+       "created_at",
+       "last_used_at",
+       "expires_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.console_signin_codes": {
+      "columns": [
+       "code_hash",
+       "principal",
+       "source",
+       "issuer",
+       "origin",
+       "expires_at",
+       "used_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -53401,7 +56809,8 @@
        "last_used_at",
        "revoked_at",
        "revoked_by",
-       "flagged_at"
+       "flagged_at",
+       "signs_in_as"
       ],
       "rows": []
      },
@@ -53447,7 +56856,7 @@
       "rows": [
        [
         "schema_version",
-        58
+        59
        ],
        [
         "writer_lease_epoch",
@@ -53489,7 +56898,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      },
@@ -53728,16 +57138,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 520,
-      "sha256": "58f2f50b7eac82b851765a7e"
+      "rows": 541,
+      "sha256": "13201a52142b0c7c0d45125b"
      },
      "columns": {
-      "rows": 520,
-      "sha256": "34825af254da666e2a7ff713"
+      "rows": 541,
+      "sha256": "bcaaa818949675614005e0c4"
      },
      "constraints": {
-      "rows": 384,
-      "sha256": "3fcb9795b8792dc379f78350"
+      "rows": 404,
+      "sha256": "78bbad5a658bd6be9542ff4b"
      },
      "extensions": {
       "rows": 2,
@@ -53748,12 +57158,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 104,
-      "sha256": "484e2fccacb2f852dc18c783"
+      "rows": 107,
+      "sha256": "23d2a0af007401704066aaf5"
      },
      "owners_and_comments": {
-      "rows": 170,
-      "sha256": "33a115196978de52679bade1"
+      "rows": 175,
+      "sha256": "dc54134521168c387634b8bb"
      },
      "schemas": {
       "rows": 1,
@@ -53831,6 +57241,35 @@
        "size",
        "cohesion",
        "computed_at"
+      ],
+      "rows": []
+     },
+     "public.console_sessions": {
+      "columns": [
+       "session_id",
+       "token_hash",
+       "principal",
+       "source",
+       "issuer",
+       "method",
+       "label",
+       "created_at",
+       "last_used_at",
+       "expires_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.console_signin_codes": {
+      "columns": [
+       "code_hash",
+       "principal",
+       "source",
+       "issuer",
+       "origin",
+       "expires_at",
+       "used_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -54332,7 +57771,8 @@
        "last_used_at",
        "revoked_at",
        "revoked_by",
-       "flagged_at"
+       "flagged_at",
+       "signs_in_as"
       ],
       "rows": []
      },
@@ -54378,7 +57818,7 @@
       "rows": [
        [
         "schema_version",
-        58
+        59
        ],
        [
         "writer_lease_epoch",
@@ -54420,7 +57860,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      },
@@ -54657,16 +58098,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 520,
-      "sha256": "58f2f50b7eac82b851765a7e"
+      "rows": 541,
+      "sha256": "13201a52142b0c7c0d45125b"
      },
      "columns": {
-      "rows": 520,
-      "sha256": "34825af254da666e2a7ff713"
+      "rows": 541,
+      "sha256": "bcaaa818949675614005e0c4"
      },
      "constraints": {
-      "rows": 384,
-      "sha256": "3fcb9795b8792dc379f78350"
+      "rows": 404,
+      "sha256": "78bbad5a658bd6be9542ff4b"
      },
      "extensions": {
       "rows": 2,
@@ -54677,12 +58118,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 104,
-      "sha256": "484e2fccacb2f852dc18c783"
+      "rows": 107,
+      "sha256": "23d2a0af007401704066aaf5"
      },
      "owners_and_comments": {
-      "rows": 170,
-      "sha256": "33a115196978de52679bade1"
+      "rows": 175,
+      "sha256": "dc54134521168c387634b8bb"
      },
      "schemas": {
       "rows": 1,
@@ -54760,6 +58201,35 @@
        "size",
        "cohesion",
        "computed_at"
+      ],
+      "rows": []
+     },
+     "public.console_sessions": {
+      "columns": [
+       "session_id",
+       "token_hash",
+       "principal",
+       "source",
+       "issuer",
+       "method",
+       "label",
+       "created_at",
+       "last_used_at",
+       "expires_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.console_signin_codes": {
+      "columns": [
+       "code_hash",
+       "principal",
+       "source",
+       "issuer",
+       "origin",
+       "expires_at",
+       "used_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -55261,7 +58731,8 @@
        "last_used_at",
        "revoked_at",
        "revoked_by",
-       "flagged_at"
+       "flagged_at",
+       "signs_in_as"
       ],
       "rows": []
      },
@@ -55307,7 +58778,7 @@
       "rows": [
        [
         "schema_version",
-        58
+        59
        ],
        [
         "writer_lease_epoch",
@@ -55349,7 +58820,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      },
@@ -55588,16 +59060,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 520,
-      "sha256": "ef9953fff052e57fbc89baa9"
+      "rows": 541,
+      "sha256": "5466b0d4d226295898f2e558"
      },
      "columns": {
-      "rows": 520,
-      "sha256": "b8115ba89a92ec0cd5dfa329"
+      "rows": 541,
+      "sha256": "672d325c753f7a389cc837ff"
      },
      "constraints": {
-      "rows": 384,
-      "sha256": "3fcb9795b8792dc379f78350"
+      "rows": 404,
+      "sha256": "78bbad5a658bd6be9542ff4b"
      },
      "extensions": {
       "rows": 2,
@@ -55608,12 +59080,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 104,
-      "sha256": "484e2fccacb2f852dc18c783"
+      "rows": 107,
+      "sha256": "23d2a0af007401704066aaf5"
      },
      "owners_and_comments": {
-      "rows": 170,
-      "sha256": "33a115196978de52679bade1"
+      "rows": 175,
+      "sha256": "dc54134521168c387634b8bb"
      },
      "schemas": {
       "rows": 1,
@@ -55691,6 +59163,35 @@
        "size",
        "cohesion",
        "computed_at"
+      ],
+      "rows": []
+     },
+     "public.console_sessions": {
+      "columns": [
+       "session_id",
+       "token_hash",
+       "principal",
+       "source",
+       "issuer",
+       "method",
+       "label",
+       "created_at",
+       "last_used_at",
+       "expires_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.console_signin_codes": {
+      "columns": [
+       "code_hash",
+       "principal",
+       "source",
+       "issuer",
+       "origin",
+       "expires_at",
+       "used_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -56192,7 +59693,8 @@
        "last_used_at",
        "revoked_at",
        "revoked_by",
-       "flagged_at"
+       "flagged_at",
+       "signs_in_as"
       ],
       "rows": []
      },
@@ -56238,7 +59740,7 @@
       "rows": [
        [
         "schema_version",
-        58
+        59
        ],
        [
         "writer_lease_epoch",
@@ -56280,7 +59782,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      },
@@ -56517,16 +60020,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 520,
-      "sha256": "ef9953fff052e57fbc89baa9"
+      "rows": 541,
+      "sha256": "5466b0d4d226295898f2e558"
      },
      "columns": {
-      "rows": 520,
-      "sha256": "b8115ba89a92ec0cd5dfa329"
+      "rows": 541,
+      "sha256": "672d325c753f7a389cc837ff"
      },
      "constraints": {
-      "rows": 384,
-      "sha256": "3fcb9795b8792dc379f78350"
+      "rows": 404,
+      "sha256": "78bbad5a658bd6be9542ff4b"
      },
      "extensions": {
       "rows": 2,
@@ -56537,12 +60040,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 104,
-      "sha256": "484e2fccacb2f852dc18c783"
+      "rows": 107,
+      "sha256": "23d2a0af007401704066aaf5"
      },
      "owners_and_comments": {
-      "rows": 170,
-      "sha256": "33a115196978de52679bade1"
+      "rows": 175,
+      "sha256": "dc54134521168c387634b8bb"
      },
      "schemas": {
       "rows": 1,
@@ -56620,6 +60123,35 @@
        "size",
        "cohesion",
        "computed_at"
+      ],
+      "rows": []
+     },
+     "public.console_sessions": {
+      "columns": [
+       "session_id",
+       "token_hash",
+       "principal",
+       "source",
+       "issuer",
+       "method",
+       "label",
+       "created_at",
+       "last_used_at",
+       "expires_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.console_signin_codes": {
+      "columns": [
+       "code_hash",
+       "principal",
+       "source",
+       "issuer",
+       "origin",
+       "expires_at",
+       "used_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -57121,7 +60653,8 @@
        "last_used_at",
        "revoked_at",
        "revoked_by",
-       "flagged_at"
+       "flagged_at",
+       "signs_in_as"
       ],
       "rows": []
      },
@@ -57167,7 +60700,7 @@
       "rows": [
        [
         "schema_version",
-        58
+        59
        ],
        [
         "writer_lease_epoch",
@@ -57209,7 +60742,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      },
@@ -57978,16 +61512,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 520,
-      "sha256": "ef9953fff052e57fbc89baa9"
+      "rows": 541,
+      "sha256": "5466b0d4d226295898f2e558"
      },
      "columns": {
-      "rows": 520,
-      "sha256": "b8115ba89a92ec0cd5dfa329"
+      "rows": 541,
+      "sha256": "672d325c753f7a389cc837ff"
      },
      "constraints": {
-      "rows": 384,
-      "sha256": "3fcb9795b8792dc379f78350"
+      "rows": 404,
+      "sha256": "78bbad5a658bd6be9542ff4b"
      },
      "extensions": {
       "rows": 2,
@@ -57998,12 +61532,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 104,
-      "sha256": "484e2fccacb2f852dc18c783"
+      "rows": 107,
+      "sha256": "23d2a0af007401704066aaf5"
      },
      "owners_and_comments": {
-      "rows": 170,
-      "sha256": "33a115196978de52679bade1"
+      "rows": 175,
+      "sha256": "dc54134521168c387634b8bb"
      },
      "schemas": {
       "rows": 1,
@@ -58081,6 +61615,35 @@
        "size",
        "cohesion",
        "computed_at"
+      ],
+      "rows": []
+     },
+     "public.console_sessions": {
+      "columns": [
+       "session_id",
+       "token_hash",
+       "principal",
+       "source",
+       "issuer",
+       "method",
+       "label",
+       "created_at",
+       "last_used_at",
+       "expires_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.console_signin_codes": {
+      "columns": [
+       "code_hash",
+       "principal",
+       "source",
+       "issuer",
+       "origin",
+       "expires_at",
+       "used_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -58582,7 +62145,8 @@
        "last_used_at",
        "revoked_at",
        "revoked_by",
-       "flagged_at"
+       "flagged_at",
+       "signs_in_as"
       ],
       "rows": []
      },
@@ -58628,7 +62192,7 @@
       "rows": [
        [
         "schema_version",
-        58
+        59
        ],
        [
         "writer_lease_epoch",
@@ -58670,7 +62234,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      },
@@ -58907,16 +62472,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 520,
-      "sha256": "ef9953fff052e57fbc89baa9"
+      "rows": 541,
+      "sha256": "5466b0d4d226295898f2e558"
      },
      "columns": {
-      "rows": 520,
-      "sha256": "b8115ba89a92ec0cd5dfa329"
+      "rows": 541,
+      "sha256": "672d325c753f7a389cc837ff"
      },
      "constraints": {
-      "rows": 384,
-      "sha256": "3fcb9795b8792dc379f78350"
+      "rows": 404,
+      "sha256": "78bbad5a658bd6be9542ff4b"
      },
      "extensions": {
       "rows": 2,
@@ -58927,12 +62492,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 104,
-      "sha256": "484e2fccacb2f852dc18c783"
+      "rows": 107,
+      "sha256": "23d2a0af007401704066aaf5"
      },
      "owners_and_comments": {
-      "rows": 170,
-      "sha256": "33a115196978de52679bade1"
+      "rows": 175,
+      "sha256": "dc54134521168c387634b8bb"
      },
      "schemas": {
       "rows": 1,
@@ -59010,6 +62575,35 @@
        "size",
        "cohesion",
        "computed_at"
+      ],
+      "rows": []
+     },
+     "public.console_sessions": {
+      "columns": [
+       "session_id",
+       "token_hash",
+       "principal",
+       "source",
+       "issuer",
+       "method",
+       "label",
+       "created_at",
+       "last_used_at",
+       "expires_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.console_signin_codes": {
+      "columns": [
+       "code_hash",
+       "principal",
+       "source",
+       "issuer",
+       "origin",
+       "expires_at",
+       "used_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -59511,7 +63105,8 @@
        "last_used_at",
        "revoked_at",
        "revoked_by",
-       "flagged_at"
+       "flagged_at",
+       "signs_in_as"
       ],
       "rows": []
      },
@@ -59557,7 +63152,7 @@
       "rows": [
        [
         "schema_version",
-        58
+        59
        ],
        [
         "writer_lease_epoch",
@@ -59599,7 +63194,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      },
@@ -59838,16 +63434,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 520,
-      "sha256": "66b452723c32cc3adc3afa79"
+      "rows": 541,
+      "sha256": "6763b981d0d1fc66bf0c3055"
      },
      "columns": {
-      "rows": 520,
-      "sha256": "0865e07473b1880cf4c4688d"
+      "rows": 541,
+      "sha256": "b2dcabc24c9e3e2fe1ded544"
      },
      "constraints": {
-      "rows": 384,
-      "sha256": "3fcb9795b8792dc379f78350"
+      "rows": 404,
+      "sha256": "78bbad5a658bd6be9542ff4b"
      },
      "extensions": {
       "rows": 2,
@@ -59858,12 +63454,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 104,
-      "sha256": "484e2fccacb2f852dc18c783"
+      "rows": 107,
+      "sha256": "23d2a0af007401704066aaf5"
      },
      "owners_and_comments": {
-      "rows": 170,
-      "sha256": "33a115196978de52679bade1"
+      "rows": 175,
+      "sha256": "dc54134521168c387634b8bb"
      },
      "schemas": {
       "rows": 1,
@@ -59941,6 +63537,35 @@
        "size",
        "cohesion",
        "computed_at"
+      ],
+      "rows": []
+     },
+     "public.console_sessions": {
+      "columns": [
+       "session_id",
+       "token_hash",
+       "principal",
+       "source",
+       "issuer",
+       "method",
+       "label",
+       "created_at",
+       "last_used_at",
+       "expires_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.console_signin_codes": {
+      "columns": [
+       "code_hash",
+       "principal",
+       "source",
+       "issuer",
+       "origin",
+       "expires_at",
+       "used_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -60442,7 +64067,8 @@
        "last_used_at",
        "revoked_at",
        "revoked_by",
-       "flagged_at"
+       "flagged_at",
+       "signs_in_as"
       ],
       "rows": []
      },
@@ -60488,7 +64114,7 @@
       "rows": [
        [
         "schema_version",
-        58
+        59
        ],
        [
         "writer_lease_epoch",
@@ -60530,7 +64156,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      },
@@ -60767,16 +64394,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 520,
-      "sha256": "66b452723c32cc3adc3afa79"
+      "rows": 541,
+      "sha256": "6763b981d0d1fc66bf0c3055"
      },
      "columns": {
-      "rows": 520,
-      "sha256": "0865e07473b1880cf4c4688d"
+      "rows": 541,
+      "sha256": "b2dcabc24c9e3e2fe1ded544"
      },
      "constraints": {
-      "rows": 384,
-      "sha256": "3fcb9795b8792dc379f78350"
+      "rows": 404,
+      "sha256": "78bbad5a658bd6be9542ff4b"
      },
      "extensions": {
       "rows": 2,
@@ -60787,12 +64414,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 104,
-      "sha256": "484e2fccacb2f852dc18c783"
+      "rows": 107,
+      "sha256": "23d2a0af007401704066aaf5"
      },
      "owners_and_comments": {
-      "rows": 170,
-      "sha256": "33a115196978de52679bade1"
+      "rows": 175,
+      "sha256": "dc54134521168c387634b8bb"
      },
      "schemas": {
       "rows": 1,
@@ -60870,6 +64497,35 @@
        "size",
        "cohesion",
        "computed_at"
+      ],
+      "rows": []
+     },
+     "public.console_sessions": {
+      "columns": [
+       "session_id",
+       "token_hash",
+       "principal",
+       "source",
+       "issuer",
+       "method",
+       "label",
+       "created_at",
+       "last_used_at",
+       "expires_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.console_signin_codes": {
+      "columns": [
+       "code_hash",
+       "principal",
+       "source",
+       "issuer",
+       "origin",
+       "expires_at",
+       "used_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -61371,7 +65027,8 @@
        "last_used_at",
        "revoked_at",
        "revoked_by",
-       "flagged_at"
+       "flagged_at",
+       "signs_in_as"
       ],
       "rows": []
      },
@@ -61417,7 +65074,7 @@
       "rows": [
        [
         "schema_version",
-        58
+        59
        ],
        [
         "writer_lease_epoch",
@@ -61459,7 +65116,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      },
@@ -61698,16 +65356,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 520,
-      "sha256": "ef9953fff052e57fbc89baa9"
+      "rows": 541,
+      "sha256": "5466b0d4d226295898f2e558"
      },
      "columns": {
-      "rows": 520,
-      "sha256": "b8115ba89a92ec0cd5dfa329"
+      "rows": 541,
+      "sha256": "672d325c753f7a389cc837ff"
      },
      "constraints": {
-      "rows": 384,
-      "sha256": "3fcb9795b8792dc379f78350"
+      "rows": 404,
+      "sha256": "78bbad5a658bd6be9542ff4b"
      },
      "extensions": {
       "rows": 2,
@@ -61718,12 +65376,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 104,
-      "sha256": "484e2fccacb2f852dc18c783"
+      "rows": 107,
+      "sha256": "23d2a0af007401704066aaf5"
      },
      "owners_and_comments": {
-      "rows": 170,
-      "sha256": "33a115196978de52679bade1"
+      "rows": 175,
+      "sha256": "dc54134521168c387634b8bb"
      },
      "schemas": {
       "rows": 1,
@@ -61801,6 +65459,35 @@
        "size",
        "cohesion",
        "computed_at"
+      ],
+      "rows": []
+     },
+     "public.console_sessions": {
+      "columns": [
+       "session_id",
+       "token_hash",
+       "principal",
+       "source",
+       "issuer",
+       "method",
+       "label",
+       "created_at",
+       "last_used_at",
+       "expires_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.console_signin_codes": {
+      "columns": [
+       "code_hash",
+       "principal",
+       "source",
+       "issuer",
+       "origin",
+       "expires_at",
+       "used_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -62302,7 +65989,8 @@
        "last_used_at",
        "revoked_at",
        "revoked_by",
-       "flagged_at"
+       "flagged_at",
+       "signs_in_as"
       ],
       "rows": []
      },
@@ -62348,7 +66036,7 @@
       "rows": [
        [
         "schema_version",
-        58
+        59
        ],
        [
         "writer_lease_epoch",
@@ -62390,7 +66078,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      },
@@ -62627,16 +66316,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 520,
-      "sha256": "ef9953fff052e57fbc89baa9"
+      "rows": 541,
+      "sha256": "5466b0d4d226295898f2e558"
      },
      "columns": {
-      "rows": 520,
-      "sha256": "b8115ba89a92ec0cd5dfa329"
+      "rows": 541,
+      "sha256": "672d325c753f7a389cc837ff"
      },
      "constraints": {
-      "rows": 384,
-      "sha256": "3fcb9795b8792dc379f78350"
+      "rows": 404,
+      "sha256": "78bbad5a658bd6be9542ff4b"
      },
      "extensions": {
       "rows": 2,
@@ -62647,12 +66336,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 104,
-      "sha256": "484e2fccacb2f852dc18c783"
+      "rows": 107,
+      "sha256": "23d2a0af007401704066aaf5"
      },
      "owners_and_comments": {
-      "rows": 170,
-      "sha256": "33a115196978de52679bade1"
+      "rows": 175,
+      "sha256": "dc54134521168c387634b8bb"
      },
      "schemas": {
       "rows": 1,
@@ -62730,6 +66419,35 @@
        "size",
        "cohesion",
        "computed_at"
+      ],
+      "rows": []
+     },
+     "public.console_sessions": {
+      "columns": [
+       "session_id",
+       "token_hash",
+       "principal",
+       "source",
+       "issuer",
+       "method",
+       "label",
+       "created_at",
+       "last_used_at",
+       "expires_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.console_signin_codes": {
+      "columns": [
+       "code_hash",
+       "principal",
+       "source",
+       "issuer",
+       "origin",
+       "expires_at",
+       "used_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -63231,7 +66949,8 @@
        "last_used_at",
        "revoked_at",
        "revoked_by",
-       "flagged_at"
+       "flagged_at",
+       "signs_in_as"
       ],
       "rows": []
      },
@@ -63277,7 +66996,7 @@
       "rows": [
        [
         "schema_version",
-        58
+        59
        ],
        [
         "writer_lease_epoch",
@@ -63319,7 +67038,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      },
@@ -63558,16 +67278,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 520,
-      "sha256": "c53b12c49b9b1c4de45361c6"
+      "rows": 541,
+      "sha256": "ab7052d31a991e7add45e223"
      },
      "columns": {
-      "rows": 520,
-      "sha256": "f0bc6032caba0af7d8c9e317"
+      "rows": 541,
+      "sha256": "ea1565795f57d1e560c82e9d"
      },
      "constraints": {
-      "rows": 384,
-      "sha256": "3fcb9795b8792dc379f78350"
+      "rows": 404,
+      "sha256": "78bbad5a658bd6be9542ff4b"
      },
      "extensions": {
       "rows": 2,
@@ -63578,12 +67298,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 104,
-      "sha256": "484e2fccacb2f852dc18c783"
+      "rows": 107,
+      "sha256": "23d2a0af007401704066aaf5"
      },
      "owners_and_comments": {
-      "rows": 170,
-      "sha256": "33a115196978de52679bade1"
+      "rows": 175,
+      "sha256": "dc54134521168c387634b8bb"
      },
      "schemas": {
       "rows": 1,
@@ -63661,6 +67381,35 @@
        "size",
        "cohesion",
        "computed_at"
+      ],
+      "rows": []
+     },
+     "public.console_sessions": {
+      "columns": [
+       "session_id",
+       "token_hash",
+       "principal",
+       "source",
+       "issuer",
+       "method",
+       "label",
+       "created_at",
+       "last_used_at",
+       "expires_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.console_signin_codes": {
+      "columns": [
+       "code_hash",
+       "principal",
+       "source",
+       "issuer",
+       "origin",
+       "expires_at",
+       "used_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -64162,7 +67911,8 @@
        "last_used_at",
        "revoked_at",
        "revoked_by",
-       "flagged_at"
+       "flagged_at",
+       "signs_in_as"
       ],
       "rows": []
      },
@@ -64208,7 +67958,7 @@
       "rows": [
        [
         "schema_version",
-        58
+        59
        ],
        [
         "writer_lease_epoch",
@@ -64250,7 +68000,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      },
@@ -64487,16 +68238,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 520,
-      "sha256": "c53b12c49b9b1c4de45361c6"
+      "rows": 541,
+      "sha256": "ab7052d31a991e7add45e223"
      },
      "columns": {
-      "rows": 520,
-      "sha256": "f0bc6032caba0af7d8c9e317"
+      "rows": 541,
+      "sha256": "ea1565795f57d1e560c82e9d"
      },
      "constraints": {
-      "rows": 384,
-      "sha256": "3fcb9795b8792dc379f78350"
+      "rows": 404,
+      "sha256": "78bbad5a658bd6be9542ff4b"
      },
      "extensions": {
       "rows": 2,
@@ -64507,12 +68258,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 104,
-      "sha256": "484e2fccacb2f852dc18c783"
+      "rows": 107,
+      "sha256": "23d2a0af007401704066aaf5"
      },
      "owners_and_comments": {
-      "rows": 170,
-      "sha256": "33a115196978de52679bade1"
+      "rows": 175,
+      "sha256": "dc54134521168c387634b8bb"
      },
      "schemas": {
       "rows": 1,
@@ -64590,6 +68341,35 @@
        "size",
        "cohesion",
        "computed_at"
+      ],
+      "rows": []
+     },
+     "public.console_sessions": {
+      "columns": [
+       "session_id",
+       "token_hash",
+       "principal",
+       "source",
+       "issuer",
+       "method",
+       "label",
+       "created_at",
+       "last_used_at",
+       "expires_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.console_signin_codes": {
+      "columns": [
+       "code_hash",
+       "principal",
+       "source",
+       "issuer",
+       "origin",
+       "expires_at",
+       "used_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -65091,7 +68871,8 @@
        "last_used_at",
        "revoked_at",
        "revoked_by",
-       "flagged_at"
+       "flagged_at",
+       "signs_in_as"
       ],
       "rows": []
      },
@@ -65137,7 +68918,7 @@
       "rows": [
        [
         "schema_version",
-        58
+        59
        ],
        [
         "writer_lease_epoch",
@@ -65179,7 +68960,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      },
@@ -66004,16 +69786,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 520,
-      "sha256": "ef9953fff052e57fbc89baa9"
+      "rows": 541,
+      "sha256": "5466b0d4d226295898f2e558"
      },
      "columns": {
-      "rows": 520,
-      "sha256": "b8115ba89a92ec0cd5dfa329"
+      "rows": 541,
+      "sha256": "672d325c753f7a389cc837ff"
      },
      "constraints": {
-      "rows": 384,
-      "sha256": "3fcb9795b8792dc379f78350"
+      "rows": 404,
+      "sha256": "78bbad5a658bd6be9542ff4b"
      },
      "extensions": {
       "rows": 2,
@@ -66024,12 +69806,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 104,
-      "sha256": "484e2fccacb2f852dc18c783"
+      "rows": 107,
+      "sha256": "23d2a0af007401704066aaf5"
      },
      "owners_and_comments": {
-      "rows": 170,
-      "sha256": "33a115196978de52679bade1"
+      "rows": 175,
+      "sha256": "dc54134521168c387634b8bb"
      },
      "schemas": {
       "rows": 1,
@@ -66107,6 +69889,35 @@
        "size",
        "cohesion",
        "computed_at"
+      ],
+      "rows": []
+     },
+     "public.console_sessions": {
+      "columns": [
+       "session_id",
+       "token_hash",
+       "principal",
+       "source",
+       "issuer",
+       "method",
+       "label",
+       "created_at",
+       "last_used_at",
+       "expires_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.console_signin_codes": {
+      "columns": [
+       "code_hash",
+       "principal",
+       "source",
+       "issuer",
+       "origin",
+       "expires_at",
+       "used_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -66608,7 +70419,8 @@
        "last_used_at",
        "revoked_at",
        "revoked_by",
-       "flagged_at"
+       "flagged_at",
+       "signs_in_as"
       ],
       "rows": []
      },
@@ -66654,7 +70466,7 @@
       "rows": [
        [
         "schema_version",
-        58
+        59
        ],
        [
         "writer_lease_epoch",
@@ -66696,7 +70508,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      },
@@ -66933,16 +70746,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 520,
-      "sha256": "ef9953fff052e57fbc89baa9"
+      "rows": 541,
+      "sha256": "5466b0d4d226295898f2e558"
      },
      "columns": {
-      "rows": 520,
-      "sha256": "b8115ba89a92ec0cd5dfa329"
+      "rows": 541,
+      "sha256": "672d325c753f7a389cc837ff"
      },
      "constraints": {
-      "rows": 384,
-      "sha256": "3fcb9795b8792dc379f78350"
+      "rows": 404,
+      "sha256": "78bbad5a658bd6be9542ff4b"
      },
      "extensions": {
       "rows": 2,
@@ -66953,12 +70766,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 104,
-      "sha256": "484e2fccacb2f852dc18c783"
+      "rows": 107,
+      "sha256": "23d2a0af007401704066aaf5"
      },
      "owners_and_comments": {
-      "rows": 170,
-      "sha256": "33a115196978de52679bade1"
+      "rows": 175,
+      "sha256": "dc54134521168c387634b8bb"
      },
      "schemas": {
       "rows": 1,
@@ -67036,6 +70849,35 @@
        "size",
        "cohesion",
        "computed_at"
+      ],
+      "rows": []
+     },
+     "public.console_sessions": {
+      "columns": [
+       "session_id",
+       "token_hash",
+       "principal",
+       "source",
+       "issuer",
+       "method",
+       "label",
+       "created_at",
+       "last_used_at",
+       "expires_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.console_signin_codes": {
+      "columns": [
+       "code_hash",
+       "principal",
+       "source",
+       "issuer",
+       "origin",
+       "expires_at",
+       "used_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -67537,7 +71379,8 @@
        "last_used_at",
        "revoked_at",
        "revoked_by",
-       "flagged_at"
+       "flagged_at",
+       "signs_in_as"
       ],
       "rows": []
      },
@@ -67583,7 +71426,7 @@
       "rows": [
        [
         "schema_version",
-        58
+        59
        ],
        [
         "writer_lease_epoch",
@@ -67625,7 +71468,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      },
@@ -67864,16 +71708,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 520,
-      "sha256": "c53b12c49b9b1c4de45361c6"
+      "rows": 541,
+      "sha256": "ab7052d31a991e7add45e223"
      },
      "columns": {
-      "rows": 520,
-      "sha256": "f0bc6032caba0af7d8c9e317"
+      "rows": 541,
+      "sha256": "ea1565795f57d1e560c82e9d"
      },
      "constraints": {
-      "rows": 384,
-      "sha256": "3fcb9795b8792dc379f78350"
+      "rows": 404,
+      "sha256": "78bbad5a658bd6be9542ff4b"
      },
      "extensions": {
       "rows": 2,
@@ -67884,12 +71728,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 104,
-      "sha256": "484e2fccacb2f852dc18c783"
+      "rows": 107,
+      "sha256": "23d2a0af007401704066aaf5"
      },
      "owners_and_comments": {
-      "rows": 170,
-      "sha256": "33a115196978de52679bade1"
+      "rows": 175,
+      "sha256": "dc54134521168c387634b8bb"
      },
      "schemas": {
       "rows": 1,
@@ -67967,6 +71811,35 @@
        "size",
        "cohesion",
        "computed_at"
+      ],
+      "rows": []
+     },
+     "public.console_sessions": {
+      "columns": [
+       "session_id",
+       "token_hash",
+       "principal",
+       "source",
+       "issuer",
+       "method",
+       "label",
+       "created_at",
+       "last_used_at",
+       "expires_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.console_signin_codes": {
+      "columns": [
+       "code_hash",
+       "principal",
+       "source",
+       "issuer",
+       "origin",
+       "expires_at",
+       "used_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -68468,7 +72341,8 @@
        "last_used_at",
        "revoked_at",
        "revoked_by",
-       "flagged_at"
+       "flagged_at",
+       "signs_in_as"
       ],
       "rows": []
      },
@@ -68514,7 +72388,7 @@
       "rows": [
        [
         "schema_version",
-        58
+        59
        ],
        [
         "writer_lease_epoch",
@@ -68556,7 +72430,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      },
@@ -68793,16 +72668,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 520,
-      "sha256": "c53b12c49b9b1c4de45361c6"
+      "rows": 541,
+      "sha256": "ab7052d31a991e7add45e223"
      },
      "columns": {
-      "rows": 520,
-      "sha256": "f0bc6032caba0af7d8c9e317"
+      "rows": 541,
+      "sha256": "ea1565795f57d1e560c82e9d"
      },
      "constraints": {
-      "rows": 384,
-      "sha256": "3fcb9795b8792dc379f78350"
+      "rows": 404,
+      "sha256": "78bbad5a658bd6be9542ff4b"
      },
      "extensions": {
       "rows": 2,
@@ -68813,12 +72688,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 104,
-      "sha256": "484e2fccacb2f852dc18c783"
+      "rows": 107,
+      "sha256": "23d2a0af007401704066aaf5"
      },
      "owners_and_comments": {
-      "rows": 170,
-      "sha256": "33a115196978de52679bade1"
+      "rows": 175,
+      "sha256": "dc54134521168c387634b8bb"
      },
      "schemas": {
       "rows": 1,
@@ -68896,6 +72771,35 @@
        "size",
        "cohesion",
        "computed_at"
+      ],
+      "rows": []
+     },
+     "public.console_sessions": {
+      "columns": [
+       "session_id",
+       "token_hash",
+       "principal",
+       "source",
+       "issuer",
+       "method",
+       "label",
+       "created_at",
+       "last_used_at",
+       "expires_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.console_signin_codes": {
+      "columns": [
+       "code_hash",
+       "principal",
+       "source",
+       "issuer",
+       "origin",
+       "expires_at",
+       "used_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -69397,7 +73301,8 @@
        "last_used_at",
        "revoked_at",
        "revoked_by",
-       "flagged_at"
+       "flagged_at",
+       "signs_in_as"
       ],
       "rows": []
      },
@@ -69443,7 +73348,7 @@
       "rows": [
        [
         "schema_version",
-        58
+        59
        ],
        [
         "writer_lease_epoch",
@@ -69485,7 +73390,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      },
@@ -69724,16 +73630,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 520,
-      "sha256": "ef9953fff052e57fbc89baa9"
+      "rows": 541,
+      "sha256": "5466b0d4d226295898f2e558"
      },
      "columns": {
-      "rows": 520,
-      "sha256": "b8115ba89a92ec0cd5dfa329"
+      "rows": 541,
+      "sha256": "672d325c753f7a389cc837ff"
      },
      "constraints": {
-      "rows": 384,
-      "sha256": "3fcb9795b8792dc379f78350"
+      "rows": 404,
+      "sha256": "78bbad5a658bd6be9542ff4b"
      },
      "extensions": {
       "rows": 2,
@@ -69744,12 +73650,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 104,
-      "sha256": "484e2fccacb2f852dc18c783"
+      "rows": 107,
+      "sha256": "23d2a0af007401704066aaf5"
      },
      "owners_and_comments": {
-      "rows": 170,
-      "sha256": "33a115196978de52679bade1"
+      "rows": 175,
+      "sha256": "dc54134521168c387634b8bb"
      },
      "schemas": {
       "rows": 1,
@@ -69827,6 +73733,35 @@
        "size",
        "cohesion",
        "computed_at"
+      ],
+      "rows": []
+     },
+     "public.console_sessions": {
+      "columns": [
+       "session_id",
+       "token_hash",
+       "principal",
+       "source",
+       "issuer",
+       "method",
+       "label",
+       "created_at",
+       "last_used_at",
+       "expires_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.console_signin_codes": {
+      "columns": [
+       "code_hash",
+       "principal",
+       "source",
+       "issuer",
+       "origin",
+       "expires_at",
+       "used_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -70328,7 +74263,8 @@
        "last_used_at",
        "revoked_at",
        "revoked_by",
-       "flagged_at"
+       "flagged_at",
+       "signs_in_as"
       ],
       "rows": []
      },
@@ -70374,7 +74310,7 @@
       "rows": [
        [
         "schema_version",
-        58
+        59
        ],
        [
         "writer_lease_epoch",
@@ -70416,7 +74352,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      },
@@ -70653,16 +74590,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 520,
-      "sha256": "ef9953fff052e57fbc89baa9"
+      "rows": 541,
+      "sha256": "5466b0d4d226295898f2e558"
      },
      "columns": {
-      "rows": 520,
-      "sha256": "b8115ba89a92ec0cd5dfa329"
+      "rows": 541,
+      "sha256": "672d325c753f7a389cc837ff"
      },
      "constraints": {
-      "rows": 384,
-      "sha256": "3fcb9795b8792dc379f78350"
+      "rows": 404,
+      "sha256": "78bbad5a658bd6be9542ff4b"
      },
      "extensions": {
       "rows": 2,
@@ -70673,12 +74610,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 104,
-      "sha256": "484e2fccacb2f852dc18c783"
+      "rows": 107,
+      "sha256": "23d2a0af007401704066aaf5"
      },
      "owners_and_comments": {
-      "rows": 170,
-      "sha256": "33a115196978de52679bade1"
+      "rows": 175,
+      "sha256": "dc54134521168c387634b8bb"
      },
      "schemas": {
       "rows": 1,
@@ -70756,6 +74693,35 @@
        "size",
        "cohesion",
        "computed_at"
+      ],
+      "rows": []
+     },
+     "public.console_sessions": {
+      "columns": [
+       "session_id",
+       "token_hash",
+       "principal",
+       "source",
+       "issuer",
+       "method",
+       "label",
+       "created_at",
+       "last_used_at",
+       "expires_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.console_signin_codes": {
+      "columns": [
+       "code_hash",
+       "principal",
+       "source",
+       "issuer",
+       "origin",
+       "expires_at",
+       "used_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -71257,7 +75223,8 @@
        "last_used_at",
        "revoked_at",
        "revoked_by",
-       "flagged_at"
+       "flagged_at",
+       "signs_in_as"
       ],
       "rows": []
      },
@@ -71303,7 +75270,7 @@
       "rows": [
        [
         "schema_version",
-        58
+        59
        ],
        [
         "writer_lease_epoch",
@@ -71345,7 +75312,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      },
@@ -71584,16 +75552,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 520,
-      "sha256": "ef9953fff052e57fbc89baa9"
+      "rows": 541,
+      "sha256": "5466b0d4d226295898f2e558"
      },
      "columns": {
-      "rows": 520,
-      "sha256": "b8115ba89a92ec0cd5dfa329"
+      "rows": 541,
+      "sha256": "672d325c753f7a389cc837ff"
      },
      "constraints": {
-      "rows": 384,
-      "sha256": "3fcb9795b8792dc379f78350"
+      "rows": 404,
+      "sha256": "78bbad5a658bd6be9542ff4b"
      },
      "extensions": {
       "rows": 2,
@@ -71604,12 +75572,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 104,
-      "sha256": "484e2fccacb2f852dc18c783"
+      "rows": 107,
+      "sha256": "23d2a0af007401704066aaf5"
      },
      "owners_and_comments": {
-      "rows": 170,
-      "sha256": "33a115196978de52679bade1"
+      "rows": 175,
+      "sha256": "dc54134521168c387634b8bb"
      },
      "schemas": {
       "rows": 1,
@@ -71687,6 +75655,35 @@
        "size",
        "cohesion",
        "computed_at"
+      ],
+      "rows": []
+     },
+     "public.console_sessions": {
+      "columns": [
+       "session_id",
+       "token_hash",
+       "principal",
+       "source",
+       "issuer",
+       "method",
+       "label",
+       "created_at",
+       "last_used_at",
+       "expires_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.console_signin_codes": {
+      "columns": [
+       "code_hash",
+       "principal",
+       "source",
+       "issuer",
+       "origin",
+       "expires_at",
+       "used_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -72188,7 +76185,8 @@
        "last_used_at",
        "revoked_at",
        "revoked_by",
-       "flagged_at"
+       "flagged_at",
+       "signs_in_as"
       ],
       "rows": []
      },
@@ -72234,7 +76232,7 @@
       "rows": [
        [
         "schema_version",
-        58
+        59
        ],
        [
         "writer_lease_epoch",
@@ -72276,7 +76274,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      },
@@ -72513,16 +76512,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 520,
-      "sha256": "ef9953fff052e57fbc89baa9"
+      "rows": 541,
+      "sha256": "5466b0d4d226295898f2e558"
      },
      "columns": {
-      "rows": 520,
-      "sha256": "b8115ba89a92ec0cd5dfa329"
+      "rows": 541,
+      "sha256": "672d325c753f7a389cc837ff"
      },
      "constraints": {
-      "rows": 384,
-      "sha256": "3fcb9795b8792dc379f78350"
+      "rows": 404,
+      "sha256": "78bbad5a658bd6be9542ff4b"
      },
      "extensions": {
       "rows": 2,
@@ -72533,12 +76532,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 104,
-      "sha256": "484e2fccacb2f852dc18c783"
+      "rows": 107,
+      "sha256": "23d2a0af007401704066aaf5"
      },
      "owners_and_comments": {
-      "rows": 170,
-      "sha256": "33a115196978de52679bade1"
+      "rows": 175,
+      "sha256": "dc54134521168c387634b8bb"
      },
      "schemas": {
       "rows": 1,
@@ -72616,6 +76615,35 @@
        "size",
        "cohesion",
        "computed_at"
+      ],
+      "rows": []
+     },
+     "public.console_sessions": {
+      "columns": [
+       "session_id",
+       "token_hash",
+       "principal",
+       "source",
+       "issuer",
+       "method",
+       "label",
+       "created_at",
+       "last_used_at",
+       "expires_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.console_signin_codes": {
+      "columns": [
+       "code_hash",
+       "principal",
+       "source",
+       "issuer",
+       "origin",
+       "expires_at",
+       "used_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -73117,7 +77145,8 @@
        "last_used_at",
        "revoked_at",
        "revoked_by",
-       "flagged_at"
+       "flagged_at",
+       "signs_in_as"
       ],
       "rows": []
      },
@@ -73163,7 +77192,7 @@
       "rows": [
        [
         "schema_version",
-        58
+        59
        ],
        [
         "writer_lease_epoch",
@@ -73205,7 +77234,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      },
@@ -73446,5 +77476,5 @@
   "catalog.extensions.extversion": "server-provided version; exact in live Python/Rust diff",
   "relations.created_at": "newly seeded rows only, against the common template"
  },
- "oracle_head": "bbfc85745b9625103db1cc4b8675e55bd8cad3eb"
+ "oracle_head": "9de1e0fa3c65b078a042318724d0a5b34d5d94b8"
 }

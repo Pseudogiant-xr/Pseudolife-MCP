@@ -246,6 +246,22 @@ def check_programs(case: Case, env: dict[str, str], cwd: Path, home: Path,
     return seen
 
 
+# In record and replay both arms' files are created under this umask
+# whatever the recording host's is (live runs keep the caller's, so mode
+# differences stay observable there): a golden recorded on a box with umask 002 named its home
+# directories 0o775, which CI (umask 022) replays as `modes differ`
+# (2026-11-02).
+HARNESS_UMASK = 0o022
+
+
+def pin_umask() -> int | None:
+    """Set the process umask, which both arms inherit, to HARNESS_UMASK;
+    the previous one, or ``None`` on Windows (no POSIX modes recorded)."""
+    if WINDOWS:
+        return None
+    return os.umask(HARNESS_UMASK)
+
+
 def modes(root: Path) -> dict[str, str]:
     """POSIX permission bits of every entry under ``root`` (empty on Windows,
     where private files are judged by ACLs the CLIs check themselves)."""

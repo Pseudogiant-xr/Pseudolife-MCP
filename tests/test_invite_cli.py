@@ -6,6 +6,7 @@ the Docker path against a fake ``docker`` that records every command.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 
 import pytest
@@ -183,7 +184,7 @@ def test_the_reserved_name_check_is_load_bearing_for_the_database(bank, pg_url, 
 # -- the Docker path -----------------------------------------------------------
 
 class _Docker:
-    def __init__(self, version="pseudolife-mcp invite 1\n", code=0, stdout="invited\n"):
+    def __init__(self, version="pseudolife-mcp invite 2\n", code=0, stdout="invited\n"):
         self.calls = []
         self.inputs = []
         self.version, self.code, self.stdout = version, code, stdout
@@ -320,8 +321,8 @@ def test_the_postgres_route_sql_runs_as_written(bank, pg_url, capsys):
         conn.execute("INSERT INTO principal_activity VALUES ('codex', 5.0), ('laptop', 6.0)")
         conn.execute("INSERT INTO rejected_bearers VALUES ('ab12cd34', 2, 1.0, 4.0)")
         listed = conn.execute(invite_cli.LIST_SQL).fetchone()[0]
-        assert [(row[0], row[10], row[11]) for row in listed["principals"]] == [
-            ("codex", 5.0, False), ("laptop", 6.0, True)]
+        assert [(row[0], row[10], row[11], row[12]) for row in listed["principals"]] == [
+            ("codex", 5.0, False, None), ("laptop", 6.0, True, True)]
         assert listed["rejected"] == [["ab12cd34", 2, 1.0, 4.0]]
         assert conn.execute(invite_cli.revoke_sql("laptop")).fetchone() == ("laptop",)
         assert conn.execute(invite_cli.BANK_SQL).fetchone() == (BANK_ID,)
@@ -420,3 +421,178 @@ def test_a_stopped_container_lists_through_postgres_on_any_bank(bank, pg_url, en
         ("laptop", "pending", 6.0 if v58 else None)]
     assert report["rejected"] == ([{"hash_prefix": "ab12cd34", "rejections": 2,
                                     "first_seen_at": 1.0, "last_seen_at": 4.0}] if v58 else [])
+
+
+# -- v59: whose machine it is ---------------------------------------------------
+
+def _owned(pg_url):
+    import psycopg
+    with psycopg.connect(pg_url) as conn:
+        return dict(conn.execute("SELECT principal, owned FROM principals").fetchall())
+
+
+def test_an_invite_is_the_owners_and_names_the_flag_for_someone_elses(bank, pg_url, capsys):
+    code, out, _err = _run(capsys, "laptop")
+    assert code == 0 and _owned(pg_url) == {"laptop": True}
+    assert "for a machine that is not yours, add --someone-else" in out
+    report = json.loads(_run(capsys, "phone", "--json")[1])
+    assert report["owned"] is True
+    assert "for a machine that is not yours, add --someone-else" in report["notes"]
+
+
+def test_someone_else_invites_a_machine_that_is_not_the_owners(bank, pg_url, capsys):
+    code, out, _err = _run(capsys, "guest", "--someone-else")
+    assert code == 0 and _owned(pg_url) == {"guest": False}
+    assert "someone else's" in out.splitlines()[0]
+    assert "--someone-else" not in out
+    # A re-invite without the flag keeps it someone else's.
+    code, out, _err = _run(capsys, "guest")
+    assert code == 0 and _owned(pg_url) == {"guest": False}
+    assert "someone else's" in out.splitlines()[0] and "--someone-else" not in out
+    assert json.loads(_run(capsys, "guest", "--json")[1])["owned"] is False
+
+
+def test_someone_else_turns_a_re_invited_owners_name(bank, pg_url, capsys):
+    _run(capsys, "laptop")
+    assert _run(capsys, "laptop", "--someone-else")[0] == 0
+    assert _owned(pg_url) == {"laptop": False}
+
+
+def test_the_list_has_an_owner_column(bank, env, pg_url, capsys, tmp_path):
+    env.setenv("PSEUDOLIFE_MCP_TOKENS", "fixture-env-token:codex,fixture-env-token-2:friend")
+    (tmp_path / "config.yaml").write_text(
+        "coordination:\n  not_owner_principals: [friend]\n", encoding="utf-8")
+    _run(capsys, "laptop")
+    _run(capsys, "guest", "--someone-else")
+    code, out, _err = _run(capsys, "--list")
+    assert code == 0
+    lines = out.splitlines()
+    assert lines[0].split()[4:7] == ["tier", "board", "owner"]
+    owner = {line.split()[0]: re.search(r" (?:on|off|-) +(yes|no) ", line).group(1)
+             for line in lines[1:5]}
+    assert owner == {"codex": "yes", "friend": "no", "guest": "no", "laptop": "yes"}
+    report = json.loads(_run(capsys, "--list", "--json")[1])
+    assert {r["principal"]: r["owner"] for r in report["principals"]} == {
+        "codex": True, "friend": False, "guest": False, "laptop": True}
+
+
+def test_someone_else_is_forwarded_to_the_daemon_container(docker, capsys):
+    code, _out, _err = _run(capsys, "guest", "--someone-else")
+    assert code == 0
+    assert docker.calls[-1][-6:] == ["guest", "--expires", "900s", "--someone-else", "--url",
+                                     "http://100.64.0.2:8765"]
+
+
+def test_a_stopped_container_lists_ownership_through_postgres(bank, pg_url, env, capsys):
+    import psycopg
+    _run(capsys, "laptop")
+    _run(capsys, "guest", "--someone-else")
+    env.delenv("PSEUDOLIFE_MCP_DATABASE_URL")
+    env.setattr(invite_cli, "docker_available", lambda: True)
+    env.setattr(invite_cli, "_daemon_running", lambda: False)
+    env.setattr(invite_cli, "_psql", _psql_on(pg_url))
+    report = json.loads(_run(capsys, "--list", "--json")[1])
+    assert {r["principal"]: r["owner"] for r in report["principals"]} == {
+        "guest": False, "laptop": True}
+    # A bank before v59 has no column: every row is the owner's, as v59 makes it.
+    with psycopg.connect(pg_url, autocommit=True) as conn:
+        conn.execute("ALTER TABLE principals DROP COLUMN owned")
+    report = json.loads(_run(capsys, "--list", "--json")[1])
+    assert {r["principal"]: r["owner"] for r in report["principals"]} == {
+        "guest": True, "laptop": True}
+
+
+def test_mine_undoes_a_mistaken_someone_else(bank, pg_url, capsys):
+    _run(capsys, "laptop", "--someone-else")
+    code, out, _err = _run(capsys, "laptop", "--mine")
+    assert code == 0 and _owned(pg_url) == {"laptop": True}
+    assert "someone else's" not in out and "--someone-else" not in out
+    report = json.loads(_run(capsys, "phone", "--mine", "--json")[1])
+    assert report["owned"] is True and report["notes"] == [
+        "an invited machine can read and write the whole bank and use the agent board, but not "
+        "change the daemon's configuration"]
+    assert _run(capsys, "laptop", "--mine", "--someone-else")[0] == 2
+
+
+def test_mine_is_forwarded_to_the_daemon_container(docker, capsys):
+    assert _run(capsys, "laptop", "--mine")[0] == 0
+    assert "--mine" in docker.calls[-1] and "--someone-else" not in docker.calls[-1]
+
+
+@pytest.mark.parametrize("flag", [None, "--someone-else", "--mine"])
+def test_a_pre_v59_bank_invites_but_refuses_to_record_ownership(bank, pg_url, capsys, flag):
+    """A newer CLI against a v53-v58 bank: an invite that leaves ownership
+    as it is works there (create and re-invite); one that sets it is
+    refused before anything is written, naming the update."""
+    import psycopg
+    _run(capsys, "laptop")
+    with psycopg.connect(pg_url, autocommit=True) as conn:
+        conn.execute("ALTER TABLE principals DROP COLUMN owned")
+        before = conn.execute("SELECT code_hash FROM principals").fetchall()
+    argv = ["laptop"] + ([flag] if flag else [])
+    code, out, err = _run(capsys, *argv)
+    if flag is None:
+        assert code == 0 and "re-invited" in out
+        # The flag cannot work on this bank, so the invite does not offer it.
+        assert "--someone-else" not in out
+        assert _run(capsys, "phone")[0] == 0
+        assert [r[0] for r in _rows(pg_url)] == ["laptop", "phone"]
+        return
+    assert code == 4
+    assert err == ("invite: --someone-else and --mine need schema v59, and this bank is older: "
+                   "update the daemon to schema 59 (`pseudolife-mcp update`) and let it start, "
+                   "then re-run. Nothing was changed\n")
+    with psycopg.connect(pg_url, autocommit=True) as conn:
+        assert conn.execute("SELECT code_hash FROM principals").fetchall() == before
+
+
+def test_the_list_reads_the_config_the_daemon_reads(bank, env, pg_url, capsys, tmp_path):
+    """PSEUDOLIFE_MCP_CONFIG comes first, as the daemon reads it
+    (mcp_server.py, maintainer_setup._config_path)."""
+    env.setenv("PSEUDOLIFE_MCP_TOKENS", "fixture-env-token:codex,fixture-env-token-2:friend")
+    (tmp_path / "config.yaml").write_text("coordination:\n  not_owner_principals: [codex]\n",
+                                          encoding="utf-8")
+    elsewhere = tmp_path / "elsewhere.yaml"
+    elsewhere.write_text("coordination:\n  not_owner_principals: [friend]\n", encoding="utf-8")
+    env.setenv("PSEUDOLIFE_MCP_CONFIG", str(elsewhere))
+    report = json.loads(_run(capsys, "--list", "--json")[1])
+    assert {r["principal"]: r["owner"] for r in report["principals"]} == {
+        "codex": True, "friend": False}
+
+
+def test_an_older_image_refuses_the_ownership_flags_plainly(docker, capsys):
+    """A v59 host CLI and a daemon image from before --someone-else: the
+    image's argparse would refuse the flag as unrecognized."""
+    docker.version = "pseudolife-mcp invite 1\n"
+    for flag in ("--someone-else", "--mine"):
+        code, _out, err = _run(capsys, "laptop", flag)
+        assert code == 4 and "update the daemon to schema 59" in err, err
+        assert not any(call[:4] == ["docker", "exec", "-i", "pseudolife-mcp-daemon"]
+                       for call in docker.calls)
+    assert _run(capsys, "laptop")[0] == 0           # a plain invite still goes through
+
+
+def test_the_version_check_names_the_ownership_flags(capsys):
+    assert invite_cli.main(["--version-check"]) == 0
+    assert capsys.readouterr().out == "pseudolife-mcp invite 2\n"
+
+
+def test_a_paired_machine_changes_owner_without_a_new_code(bank, pg_url, capsys):
+    """Ownership touches no credential: a paired machine's --mine or
+    --someone-else needs no --replace and leaves its token and pairing."""
+    import psycopg
+    _run(capsys, "laptop")
+    token = secret_sha256("fixture-token")
+    with psycopg.connect(pg_url, autocommit=True) as conn:
+        conn.execute("UPDATE principals SET token_hash = %s, code_hash = NULL, "
+                     "code_expires_at = NULL, paired_at = 1", (token,))
+    code, out, _err = _run(capsys, "laptop", "--someone-else")
+    assert code == 0 and "no new code" in out and "someone else's machine" in out
+    with psycopg.connect(pg_url) as conn:
+        assert conn.execute("SELECT token_hash, code_hash, owned FROM principals").fetchone() == (
+            token, None, False)
+    report = json.loads(_run(capsys, "laptop", "--mine", "--json")[1])
+    assert report["owned"] is True and report["state"] == "paired" and "code" not in report
+    code, _out, err = _run(capsys, "laptop", "--mine", "--tier", "core")
+    assert code == 4 and "--mine or --someone-else alone changes whose machine it is" in err
+    assert "need not pair again" in err
