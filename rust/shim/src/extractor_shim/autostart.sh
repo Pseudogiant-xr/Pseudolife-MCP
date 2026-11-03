@@ -8,6 +8,7 @@ serve=("${@:1:count}")
 shift "$count"
 unit_dir="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 unit="$unit_dir/$name"
+wants="$unit_dir/default.target.wants/$name"
 if [ "$action" = remove ]; then
     [ -e "$unit" ] || [ -L "$unit" ] || exit 0
     if ! command -v systemctl >/dev/null; then
@@ -67,12 +68,14 @@ healthy_listener() {
     return 1
 }
 umask 077
-config_backup="$(mktemp)" unit_backup="$(mktemp)" desired="$(mktemp)"
-had_config=0 had_unit=0 was_active=0 was_enabled=0 mutated=0 committed=0
+config_backup="$(mktemp)" unit_backup="$(mktemp)" wants_backup="$(mktemp)" desired="$(mktemp)"
+had_config=0 had_unit=0 had_wants=0 was_active=0 mutated=0 link_mutated=0 committed=0
 if [ -e "$env_file" ]; then cp -- "$env_file" "$config_backup"; had_config=1; fi
 if [ -e "$unit" ]; then cp -- "$unit" "$unit_backup"; had_unit=1; fi
+# The generated unit enables only this local link; preserve its exact target,
+# including a dangling link, without interpreting static/indirect as enabled.
+if [ -e "$wants" ] || [ -L "$wants" ]; then cp -P -- "$wants" "$wants_backup"; had_wants=1; fi
 systemctl --user is-active --quiet "$name" && was_active=1
-systemctl --user is-enabled --quiet "$name" && was_enabled=1
 finish() {
     result=$?
     trap - EXIT
@@ -82,14 +85,18 @@ finish() {
         if [ "$mutated" = 1 ]; then
             if [ "$had_unit" = 1 ]; then
                 cp -- "$unit_backup" "$unit"
-                if [ "$was_enabled" = 1 ]; then systemctl --user enable "$name" >/dev/null 2>&1 || true;
-                else systemctl --user disable "$name" >/dev/null 2>&1 || true; fi
-            else systemctl --user disable "$name" >/dev/null 2>&1 || true; rm -f -- "$unit"; fi
+            else rm -f -- "$unit"; fi
+        fi
+        if [ "$link_mutated" = 1 ]; then
+            rm -f -- "$wants"
+            if [ "$had_wants" = 1 ]; then cp -P -- "$wants_backup" "$wants"; fi
+        fi
+        if [ "$mutated" = 1 ] || [ "$link_mutated" = 1 ]; then
             systemctl --user daemon-reload || true
-            if [ "$was_active" = 1 ]; then systemctl --user restart "$name" || true; fi
+            if [ "$mutated" = 1 ] && [ "$was_active" = 1 ]; then systemctl --user restart "$name" || true; fi
         fi
     fi
-    rm -f -- "$config_backup" "$unit_backup" "$desired"
+    rm -f -- "$config_backup" "$unit_backup" "$wants_backup" "$desired"
     exit "$result"
 }
 trap finish EXIT
@@ -110,6 +117,7 @@ unchanged=0
 if [ "$had_unit" = 1 ] && cmp -s "$desired" "$unit" && healthy_listener; then
     unchanged=1
     if ! systemctl --user is-enabled --quiet "$name"; then
+        link_mutated=1
         systemctl --user enable "$name" >/dev/null
     fi
 else
@@ -117,6 +125,7 @@ else
     mutated=1
     cp -- "$desired" "$unit"
     systemctl --user daemon-reload
+    link_mutated=1
     systemctl --user enable "$name"
     systemctl --user restart "$name"
     deadline=$((SECONDS + timeout))

@@ -1,4 +1,4 @@
-param([string]$Source, [string]$Root, [ValidateSet('PasswordRollback','LegacyMigration','DelayedStop','DelayedRemoval','DeleteRetry','DeleteFailure','StopTimeout','RemovalTimeout','ProcessExitRace','ProcessStopFailure','ProcessIdentityChanged','QueryInitialRetry','QueryRollbackRetry','QueryRemovalRetry','QueryFailure','QueryAccessDenied','QueryNamedAbsent','DisabledReinstall','QueryStopFailure','QueryRemovalFailure','ForeignRemoval','ForeignLegacy','ForeignSibling')][string]$Case)
+param([string]$Source, [string]$Root, [ValidateSet('PasswordRollback','LegacyMigration','LegacyJuly','LegacyDetached','DelayedStop','DelayedRemoval','DeleteRetry','DeleteFailure','StopTimeout','RemovalTimeout','ProcessExitRace','ProcessStopFailure','ProcessIdentityChanged','QueryInitialRetry','QueryRollbackRetry','QueryRemovalRetry','QueryFailure','QueryAccessDenied','QueryNamedAbsent','DisabledReinstall','QueryStopFailure','QueryRemovalFailure','ForeignRemoval','ForeignLegacy','ForeignSibling','ForeignUninstallLegacy','ForeignNativeArguments')][string]$Case)
 $ErrorActionPreference = 'Stop'
 # Every scheduler/process operation is mocked; these cases need no credentials,
 # real registrations, listeners or process termination.
@@ -65,7 +65,15 @@ if ($Case -in @('ProcessExitRace','ProcessStopFailure','ProcessIdentityChanged')
     return
 }
 $taskName = 'fixture-native'
-if ($Case -eq 'ForeignRemoval') {
+if ($Case -eq 'ForeignUninstallLegacy') {
+    $taskName = 'Pseudolife Claude Shim'
+    $global:r6fixtureTask = [PSCustomObject]@{ TaskName=$taskName; State='Ready'; Actions=@([PSCustomObject]@{Execute=$writer;Arguments=('extractor-shim claude --env-file "' + $settings + '"')}) }
+    $global:r6legacyTask = [PSCustomObject]@{ TaskName='Pseudolife Sonnet Shim'; State='Ready'; Actions=@([PSCustomObject]@{Execute='foreign.exe';Arguments='--unrelated'}) }
+    $expectedFailure = 'not a recognized shim registration'
+} elseif ($Case -eq 'ForeignNativeArguments') {
+    $global:r6fixtureTask = [PSCustomObject]@{ TaskName=$taskName; State='Ready'; Actions=@([PSCustomObject]@{Execute='foreign.exe';Arguments=('extractor-shim claude --env-file "' + $settings + '"')}) }
+    $expectedFailure = 'not a recognized shim registration'
+} elseif ($Case -eq 'ForeignRemoval') {
     $global:r6fixtureTask = [PSCustomObject]@{ TaskName=$taskName; State='Ready'; Actions=@([PSCustomObject]@{Execute='foreign.exe';Arguments='--unrelated'}) }
     $expectedFailure = 'not a recognized shim registration'
 } elseif ($Case -eq 'ForeignSibling') {
@@ -76,13 +84,43 @@ if ($Case -eq 'ForeignRemoval') {
     $global:r6legacyTask = [PSCustomObject]@{ TaskName='Pseudolife Sonnet Shim'; State='Ready'; Actions=@([PSCustomObject]@{Execute='foreign.exe';Arguments='--unrelated'}) }
     $expectedFailure = 'not a recognized shim registration'
 } elseif ($Case -eq 'PasswordRollback') {
-    $global:r6fixtureTask = [PSCustomObject]@{ TaskName=$taskName; State='Ready'; Principal=[PSCustomObject]@{LogonType='Password'}; Actions=@([PSCustomObject]@{Execute='previous.exe';Arguments=('extractor-shim claude --env-file "' + $settings + '"')}) }
+    $global:r6fixtureTask = [PSCustomObject]@{ TaskName=$taskName; State='Ready'; Principal=[PSCustomObject]@{LogonType='Password'}; Actions=@([PSCustomObject]@{Execute='pseudolife-mcp.exe';Arguments=('extractor-shim claude --env-file "' + $settings + '"')}) }
     $expectedFailure = 'original fixture startup failure'
-} elseif ($Case -eq 'LegacyMigration') {
+} elseif ($Case -in @('LegacyMigration','LegacyJuly','LegacyDetached')) {
     $taskName = 'Pseudolife Claude Shim'
     $arguments = 'extractor-shim claude --env-file "' + $settings + '"'
-    $global:r6legacyTask = [PSCustomObject]@{ TaskName='Pseudolife Sonnet Shim'; State='Running'; Actions=@([PSCustomObject]@{Execute='legacy.exe';Arguments=$arguments}) }
-    $global:r6legacyProcess = [PSCustomObject]@{ ProcessId=4242; ParentProcessId=1; CreationDate=[datetime]'2026-01-01'; ExecutablePath='legacy.exe'; CommandLine=('legacy.exe ' + $arguments) }
+    $global:r6legacyTask = [PSCustomObject]@{ TaskName='Pseudolife Sonnet Shim'; State='Running'; Actions=@([PSCustomObject]@{Execute='pseudolife-stdio.exe';Arguments=$arguments}) }
+    $global:r6legacyProcess = [PSCustomObject]@{ ProcessId=4242; ParentProcessId=1; CreationDate=[datetime]'2026-01-01'; ExecutablePath='pseudolife-stdio.exe'; CommandLine=('pseudolife-stdio.exe ' + $arguments) }
+    if ($Case -ne 'LegacyMigration') {
+        $repo = Join-Path $directory 'old checkout'
+        $PythonExe = Join-Path $repo '.venv\Scripts\python.exe'
+        $promptPath = Join-Path $repo 'evals\prompts\sonnet_extractor_v1.md'
+        $LogFile = Join-Path $directory 'sonnet-shim.log'
+        $Port = 12345
+        # Historical installer action templates: 1cb8b3697 (July) and
+        # 2f0edc4ce^ (detached cmd.exe wrapper). No template is executed.
+        if ($Case -eq 'LegacyJuly') {
+            $inner = "& '$PythonExe' '$repo\evals\sonnet_shim.py' --port $Port " +
+                     "--system-prompt-file '$promptPath' *>> '$LogFile'"
+        } else {
+            $innerCmd = "`"$PythonExe`" `"$repo\evals\sonnet_shim.py`" --port $Port " +
+                        "--system-prompt-file `"$promptPath`""
+            $cmdArgs = "/c `"$innerCmd >> `"`"$LogFile`"`" 2>&1`""
+            $inner = @"
+`$psi = New-Object System.Diagnostics.ProcessStartInfo
+`$psi.FileName = 'cmd.exe'
+`$psi.Arguments = '$($cmdArgs -replace "'", "''")'
+`$psi.UseShellExecute = `$false
+`$psi.CreateNoWindow = `$true
+`$psi.WorkingDirectory = '$repo'
+[System.Diagnostics.Process]::Start(`$psi) | Out-Null
+"@
+        }
+        $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($inner))
+        $global:r6legacyTask.Actions = @([PSCustomObject]@{Execute='powershell.exe';Arguments="-NoProfile -WindowStyle Hidden -EncodedCommand $encoded"})
+        $global:r6legacyProcess.ExecutablePath = $PythonExe
+        $global:r6legacyProcess.CommandLine = "`"$PythonExe`" `"$repo\evals\sonnet_shim.py`" --port $Port --system-prompt-file `"$promptPath`""
+    }
     $global:r6listening = $true
     $expectedFailure = 'original fixture registration failure'
 } elseif ($Case -in @('DelayedStop','StopTimeout','QueryInitialRetry','QueryFailure','QueryAccessDenied','DisabledReinstall','QueryStopFailure')) {
@@ -130,7 +168,7 @@ function Get-ScheduledTask {
 }
 function Get-CimInstance {
     param($ClassName, $Filter)
-    if ($Case -eq 'LegacyMigration') { return $global:r6legacyProcess }
+    if ($Case -in @('LegacyMigration','LegacyJuly','LegacyDetached')) { return $global:r6legacyProcess }
     if ($Filter -and $Filter -match 'ProcessId = (\d+)') {
         if ($global:r6oldProcess -and [int]$Matches[1] -eq $global:r6oldProcess.ProcessId) { return $global:r6oldProcess }
         if ($global:r6newProcess -and [int]$Matches[1] -eq $global:r6newProcess.ProcessId) { return $global:r6newProcess }
@@ -176,7 +214,7 @@ function Unregister-ScheduledTask {
 function Register-ScheduledTask {
     param($TaskName,$Action,$Principal,$Trigger,$Settings,$Description,$Xml,[switch]$Force)
     if ($Xml) { throw 'password credentials required' }
-    if ($Case -eq 'LegacyMigration') { throw $expectedFailure }
+    if ($Case -in @('LegacyMigration','LegacyJuly','LegacyDetached')) { throw $expectedFailure }
     if ($global:r6fixtureTask -and $global:r6fixtureTask.State -eq 'Running') { throw 'replacement registered before scheduler stopped' }
     $global:r6registered=$true
     $global:r6fixtureTask = [PSCustomObject]@{TaskName=$TaskName;State='Ready';Actions=@($Action);Principal=$Principal}
@@ -198,11 +236,11 @@ function Invoke-WebRequest {
 }
 function Write-Warning { param($Message) $global:r6warningText += $Message }
 $config = Join-Path $directory 'registration.json'
-@{ Native=$writer;OwnerExe=$writer;Kind='claude';Port=12345;Host='127.0.0.1';Name=$taskName;EnvFile=$settings;LogonType='S4U';Timeout=1;Remove=($Case -in @('QueryNamedAbsent','ForeignRemoval'));ReplaceSibling=($Case -eq 'ForeignSibling');ConfigArgs=@();ServeArgs=@('extractor-shim','claude','--env-file',$settings) } |
+@{ Native=$writer;OwnerExe=$writer;Kind='claude';Port=12345;Host='127.0.0.1';Name=$taskName;EnvFile=$settings;LogonType='S4U';Timeout=1;Remove=($Case -in @('QueryNamedAbsent','ForeignRemoval','ForeignUninstallLegacy','ForeignNativeArguments'));ReplaceSibling=($Case -eq 'ForeignSibling');ConfigArgs=@();ServeArgs=@('extractor-shim','claude','--env-file',$settings) } |
     ConvertTo-Json | Set-Content -LiteralPath $config -Encoding UTF8
 $caught = ''
 try { & $Source -ConfigPath $config } catch { $caught = $_.Exception.Message }
-if ($Case -in @('ForeignRemoval','ForeignLegacy','ForeignSibling')) {
+if ($Case -in @('ForeignRemoval','ForeignLegacy','ForeignSibling','ForeignUninstallLegacy','ForeignNativeArguments')) {
     if ($caught -notlike '*not a recognized shim registration*' -or $global:r6registered -or $global:r6deleteAttempts -or $global:r6stoppedLegacy -or $global:r6stoppedPids.Count -or [IO.File]::ReadAllText($settings) -ne 'before') { throw "foreign registration was changed or not refused: $caught" }
     Write-Output "$Case passed without real scheduler operations"
     return
@@ -217,7 +255,8 @@ if ($Case -in @('ForeignRemoval','ForeignLegacy','ForeignSibling')) {
     if ($global:r6registered -or $global:r6deleteAttempts -or $global:r6stoppedPids.Count -or [IO.File]::ReadAllText($settings) -ne 'before') { throw 'unconfirmed registration caused a mutation' }
     $elapsed=($global:r6clock - [datetime]'2026-01-01').TotalSeconds
     if ($Case -eq 'QueryFailure' -and ($elapsed -ne 15 -or $global:r6queryFaults -lt 2)) { throw 'persistent query failure was not bounded by its deadline' }
-    if ($Case -ne 'QueryFailure' -and ($elapsed -ne 0 -or $global:r6queryFaults -ne 1)) { throw 'nonretryable query result was retried' }
+    $expectedQueries = if ($Case -eq 'QueryNamedAbsent') { 2 } else { 1 }
+    if ($Case -ne 'QueryFailure' -and ($elapsed -ne 0 -or $global:r6queryFaults -ne $expectedQueries)) { throw 'nonretryable query result was retried' }
     Write-Output "$Case passed without real scheduler operations"
     return
 } elseif ($Case -in @('DelayedStop','QueryInitialRetry')) {
@@ -250,7 +289,7 @@ if ($Case -eq 'QueryStopFailure') {
     if (($global:r6clock - [datetime]'2026-01-01').TotalSeconds -lt 15) { throw 'removal timeout did not await its deadline' }
 } elseif ($Case -eq 'PasswordRollback') {
     if ($global:r6warningText -notlike '*password credentials required*' -or $global:r6warningText -notlike '*absent*') { throw "missing remaining-state diagnostic: $global:r6warningText" }
-} elseif ($Case -eq 'LegacyMigration' -and (-not $global:r6stoppedLegacy -or -not $global:r6restartedLegacy)) {
+} elseif ($Case -in @('LegacyMigration','LegacyJuly','LegacyDetached') -and (-not $global:r6stoppedLegacy -or -not $global:r6restartedLegacy -or ($global:r6stoppedPids -join ',') -ne '4242')) {
     throw 'legacy registration was not recognized and restored'
 }
 if ($Case -in @('QueryInitialRetry','QueryRollbackRetry','QueryRemovalRetry') -and $global:r6queryFaults -ne 2) { throw 'transient query errors were not retried' }

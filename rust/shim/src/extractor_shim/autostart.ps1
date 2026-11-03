@@ -32,16 +32,45 @@ function Get-RegisteredInvocation($task) {
         $exe = $item.Execute
         $arguments = $item.Arguments
         if ($arguments -match '-EncodedCommand ([A-Za-z0-9+/=]+)') {
+            if ([IO.Path]::GetFileName($exe) -notin @('powershell.exe', 'pwsh.exe')) { continue }
             try {
                 $code = [Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($Matches[1]))
+                # The original Sonnet installer invoked Python directly from
+                # an encoded PowerShell command. Parse its literal template;
+                # never evaluate a registered task's code to identify it.
+                if ($code -match '^& ''([^'']+)'' ''([^'']+[\\/]evals[\\/]sonnet_shim\.py)'' --port (\d+) --system-prompt-file ''[^'']+'' \*>> ''[^'']+''\s*$') {
+                    $script = $Matches[2]
+                    $scriptPort = [int]$Matches[3]
+                    if ([IO.Path]::GetFileName($Matches[1]) -match '^python(?:w|\d+(?:\.\d+)*)?\.exe$') {
+                        [PSCustomObject]@{ PythonScript=$script; Ports=@($scriptPort) }
+                    }
+                    continue
+                }
                 if ($code -notmatch '(?m)^\$psi\.FileName = ''((?:[^'']|'''')*)''\r?$') { continue }
                 $exe = $Matches[1].Replace("''", "'")
                 if ($code -notmatch '(?m)^\$psi\.Arguments = ''((?:[^'']|'''')*)''\r?$') { continue }
                 $arguments = $Matches[1].Replace("''", "'")
             } catch { continue }
         }
+        if ([IO.Path]::GetFileName($exe) -eq 'cmd.exe') {
+            # The later Sonnet installer detached cmd.exe with this quoted
+            # redirection template. Only its Python script and port own a child.
+            if ($arguments -match '^/c ""([^"]+)" "([^"]+[\\/]evals[\\/]sonnet_shim\.py)" --port (\d+) --system-prompt-file "[^"]+" >> ""[^"]+"" 2>&1"$') {
+                $script = $Matches[2]
+                $scriptPort = [int]$Matches[3]
+                if ([IO.Path]::GetFileName($Matches[1]) -match '^python(?:w|\d+(?:\.\d+)*)?\.exe$') {
+                    [PSCustomObject]@{ PythonScript=$script; Ports=@($scriptPort) }
+                }
+            }
+            continue
+        }
         if ($arguments -match '^"?extractor-shim"?\s+"?(claude|codex)"?\s+"?--env-file"?\s+"([^"]+)"') {
-            [PSCustomObject]@{ Exe=$exe; Kind=$Matches[1]; EnvFile=$Matches[2] }
+            $provider = $Matches[1]
+            $settingsFile = $Matches[2]
+            if ([IO.Path]::GetFileName($exe) -in @('pseudolife-mcp.exe', 'pseudolife-stdio.exe') -or
+                (Test-SamePath $exe $native) -or (Test-SamePath $exe $ownerExe)) {
+                [PSCustomObject]@{ Exe=$exe; Kind=$provider; EnvFile=$settingsFile }
+            }
         } elseif ($arguments -match '^"?(.+?[\\/]ops[\\/]shim_autostart\.py)"?\s+run\s+(claude|codex)(\s|$)') {
             $repo = Split-Path -Parent (Split-Path -Parent $Matches[1])
             $provider = $Matches[2]
@@ -59,7 +88,7 @@ function Get-RegisteredInvocation($task) {
             $previous = Get-Content -Raw -LiteralPath $pidFile -ErrorAction SilentlyContinue
             if ($previous -match '^\d+\s+(\d+)\s*$') { $ports += [int]$Matches[1] }
             [PSCustomObject]@{ PythonScript=(Join-Path $repo "evals/${provider}_shim.py"); Ports=$ports }
-        } elseif ($arguments -match '^"?(.+?[\\/]evals[\\/](?:claude|codex)_shim\.py)"?\s+') {
+        } elseif ($arguments -match '^"?(.+?[\\/]evals[\\/](?:claude|codex|sonnet)_shim\.py)"?\s+') {
             $script = $Matches[1]
             if ($arguments -match '--port\s+"?(\d+)"?(\s|$)') {
                 [PSCustomObject]@{ PythonScript=$script; Ports=@([int]$Matches[1]) }
@@ -178,6 +207,7 @@ if ($c.Remove) {
     $script:removedRegistration = $false
     $names = @($name)
     if ($name -eq 'Pseudolife Claude Shim') { $names += 'Pseudolife Sonnet Shim' }
+    foreach ($task in $names) { Assert-ShimRegistration (Get-TaskRegistration $task) }
     foreach ($task in $names) {
         Remove-OwnedTask $task
     }

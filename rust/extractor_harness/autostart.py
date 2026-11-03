@@ -180,11 +180,12 @@ def proof(binary, root, fixture, launcher_exe, provider, scenario="all"):
         from autostart_absence_controls import controls
         controls(sys.modules[__name__])
         wrapper_forwarding(root)
-        for case in ("PasswordRollback", "LegacyMigration", "DelayedStop", "DelayedRemoval", "DeleteRetry", "DeleteFailure",
+        for case in ("PasswordRollback", "LegacyMigration", "LegacyJuly", "LegacyDetached", "DelayedStop", "DelayedRemoval", "DeleteRetry", "DeleteFailure",
                      "StopTimeout", "RemovalTimeout", "ProcessExitRace", "ProcessStopFailure",
                      "ProcessIdentityChanged", "QueryInitialRetry", "QueryRollbackRetry", "QueryRemovalRetry",
                      "QueryFailure", "QueryAccessDenied", "QueryNamedAbsent", "DisabledReinstall",
-                     "QueryStopFailure", "QueryRemovalFailure", "ForeignRemoval", "ForeignLegacy", "ForeignSibling"):
+                     "QueryStopFailure", "QueryRemovalFailure", "ForeignRemoval", "ForeignLegacy", "ForeignSibling",
+                     "ForeignUninstallLegacy", "ForeignNativeArguments"):
             checked(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(Path(__file__).with_name("scheduler_failures.ps1")),
                      "-Source", str(run.ROOT / "rust/shim/src/extractor_shim/autostart.ps1"), "-Root", str(root), "-Case", case], step=case)
     if not windows and scenario in ("all", "preflight"):
