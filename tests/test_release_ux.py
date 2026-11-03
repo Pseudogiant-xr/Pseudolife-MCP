@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import gzip
+import hashlib
 import io
 import json
 import re
@@ -516,6 +517,10 @@ _USERNAME_PAT = re.compile(rb"c:\\+users\\+(?!<|o'brien)[a-z0-9]")
 # Every match of _USERNAME_PAT starts with this literal, so it is an exact
 # superset prescreen (same for the two below).
 _USERNAME_PRESCREEN = (b"c:\\",)
+# The audit golden contains one launcher captured under the neutral dev
+# account. Permit only that exact lowercased payload, not its directory or
+# username prefix; every other identifier class is still checked below.
+_NEUTRAL_AUDIT_LAUNCHER_SHA256 = "ce5f14a6aff063f0bfbe3d2eb6778d96083cb1b27be0ab72ff6444ba95fbae17"
 _DEV_BOX_PAT = re.compile(rb"\b(?:dev-" + rb"playground(?:-[0-9]+)?|play" + rb"ground-[0-9]+)\b")
 _RFC1918_PAT = re.compile(
     rb"\b(?:10\.\d{1,3}\.\d{1,3}\.\d{1,3}"
@@ -596,7 +601,8 @@ def _scan_identifiers(rel: str, low: bytes, hits: list) -> None:
         hits.append((rel, "environment-specific account SID"))
         return
     if (any(p in low for p in _USERNAME_PRESCREEN)
-            and _USERNAME_PAT.search(low)):
+            and _USERNAME_PAT.search(low)
+            and hashlib.sha256(low).hexdigest() != _NEUTRAL_AUDIT_LAUNCHER_SHA256):
         hits.append((rel, "windows username path"))
         return
     if any(p in low for p in _CREDENTIAL_PRESCREEN):
@@ -649,11 +655,10 @@ def _git_binary_paths(repo: Path, paths: list[str]) -> set[str]:
 
 def _scan_golden_archive_identifiers(rel: str, data: bytes, hits: list) -> None:
     """Inspect encoded content and archive metadata without extracting files."""
-    def scan(payload: bytes, label: str, depth: int = 0, in_archive: bool = False) -> None:
-        # The existing raw-text policy remains unchanged. Follow encoded
-        # golden snapshots to their archives, then inspect all member data.
-        if in_archive:
-            _scan_identifiers(label, payload.lower(), hits)
+    def scan(payload: bytes, label: str, depth: int = 0) -> None:
+        # Plain stdout/stderr and file snapshots need the same checks as
+        # archive contents, including after each layer of decoding.
+        _scan_identifiers(label, payload.lower(), hits)
         if depth > 8:
             hits.append((rel, "nested golden payload exceeds inspection depth"))
             return
@@ -663,7 +668,7 @@ def _scan_golden_archive_identifiers(rel: str, data: bytes, hits: list) -> None:
                     expanded = stream.read(64 * 1024 * 1024 + 1)
                 if len(expanded) > 64 * 1024 * 1024:
                     raise ValueError("expanded payload too large")
-                scan(expanded, label + ":gzip", depth + 1, True)
+                scan(expanded, label + ":gzip", depth + 1)
             except (OSError, EOFError, ValueError):
                 hits.append((rel, "gzip payload could not be inspected"))
             return
@@ -687,7 +692,7 @@ def _scan_golden_archive_identifiers(rel: str, data: bytes, hits: list) -> None:
                             if member.size > 64 * 1024 * 1024:
                                 raise ValueError("archive member too large")
                             with archive.extractfile(member) as stream:
-                                scan(stream.read(), location + ":content", depth + 1, True)
+                                scan(stream.read(), location + ":content", depth + 1)
             except (tarfile.TarError, OSError, ValueError):
                 hits.append((rel, "tar payload could not be inspected"))
             return
@@ -705,7 +710,7 @@ def _scan_golden_archive_identifiers(rel: str, data: bytes, hits: list) -> None:
                     for item in value:
                         walk(item)
                 elif isinstance(value, str):
-                    scan(value.encode(errors="surrogatepass"), label + ":json", depth + 1, in_archive)
+                    scan(value.encode(errors="surrogatepass"), label + ":json", depth + 1)
             walk(document)
         else:
             # CLI file snapshots prefix their base64 bytes with ``file:``.
@@ -716,9 +721,38 @@ def _scan_golden_archive_identifiers(rel: str, data: bytes, hits: list) -> None:
                 decoded = base64.b64decode(encoded, validate=True)
             except ValueError:
                 return
-            scan(decoded, label + ":base64", depth + 1, in_archive)
+            scan(decoded, label + ":base64", depth + 1)
 
     scan(data, rel)
+
+
+@pytest.mark.parametrize("change", ["exact", "changed-byte", "changed-owner"])
+def test_identifier_guard_neutral_launcher_exception_is_exact(change):
+    golden = Path(__file__).resolve().parents[1] / "rust/cli_harness/goldens/audit.windows.json"
+    snapshot = json.loads(golden.read_text(encoding="utf-8"))["cases"][
+        "transport-python-verify-23"]["before"]["docker_fixture.cmd"]
+    payload = base64.b64decode(snapshot.removeprefix("file:"))
+    if change == "changed-byte":
+        payload += b"x"
+    elif change == "changed-owner":
+        payload = payload.replace(b"Users\\dev\\", b"Users\\" + _IDENT_NEEDLES[0] + b"\\")
+    hits = []
+    _scan_identifiers("fixture.cmd", payload.lower(), hits)
+    assert bool(hits) is (change != "exact")
+
+
+@pytest.mark.parametrize("field", ["stdout", "stderr", "file"])
+@pytest.mark.parametrize("payload,rejected", [
+    (b"/home/" + _IDENT_NEEDLES[0] + b"/bank", True),
+    (b"192.168." + b"7.9", True),
+    (b"/home/<user>/bank", False),
+], ids=["username", "private-address", "placeholder"])
+def test_golden_identifier_guard_inspects_plain_base64(field, payload, rejected):
+    encoded = base64.b64encode(payload).decode()
+    value = "file:" + encoded if field == "file" else encoded
+    hits = []
+    _scan_golden_archive_identifiers("fixture.json", json.dumps({field: value}).encode(), hits)
+    assert bool(hits) is rejected
 
 
 @pytest.mark.parametrize("field", ["uname", "gname", "pax", "content"])
