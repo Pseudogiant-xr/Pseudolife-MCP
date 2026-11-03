@@ -55,6 +55,12 @@ EXCEPTIONS = {
                    'is a Linux dev-box live run (D6/D11). Pairing refusals stay in CI through '
                    'pair-budget, body-pair-budget and the security corpus, and the routes/pair.rs '
                    'tests cover the two-slot gate, refunds and disconnect ownership on both OSes.',
+        'console-signin': 'Live only (B5, CONSOLE-SIGNIN): its sessions and sign-in codes carry the '
+                          'template clock, and the codes, session ids and expiries the routes mint are '
+                          'the run\'s own; the evidence is a Linux dev-box live run (D6/D11). The '
+                          'routes/signin.rs and console_sessions.rs unit tests cover the gate\'s '
+                          'session call sites, the operator allowlist, staleness and every refusal on '
+                          'both OSes.',
     },
     'cli_mutants': {
         'linux': {

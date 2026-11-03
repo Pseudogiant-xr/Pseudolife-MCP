@@ -267,13 +267,18 @@ async fn answer(req: &mut Request<'_>) -> Result<Value> {
     }
     let svc = req.app.service.clone();
     let ready = svc.ensure_init().await.map_err(|s| Failure(500, s))?;
-    let principal = match crate::auth::resolve(
-        crate::http::authorization(req.headers).as_deref(),
-        &req.app.env_tokens,
-        &req.app.store,
-    ) {
-        crate::auth::Resolved::Principal(p) => p,
-        _ => "default".into(),
+    // A Console session's principal is the gate's own answer (Python binds
+    // the gate's principal for every route); the agent resolver refuses it.
+    let principal = match req.session {
+        Some(session) => session.to_string(),
+        None => match crate::auth::resolve(
+            crate::http::authorization(req.headers).as_deref(),
+            &req.app.env_tokens,
+            &req.app.store,
+        ) {
+            crate::auth::Resolved::Principal(p) => p,
+            _ => "default".into(),
+        },
     };
     let identity = crate::mcp::identity::call_identity(&principal, req.headers);
     let caller = crate::episodes::Caller {

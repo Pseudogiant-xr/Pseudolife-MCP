@@ -29,6 +29,14 @@ const REFUSAL_DRAIN_DEADLINE: Duration = Duration::from_millis(250);
 const REFUSAL_DISCARD_BUDGET: usize = 8 * 1024 * 1024;
 const TEXT_BODY_PATHS: [&str; 3] = ["/api/facts/set", "/api/consolidate", "/api/supersede"];
 const OPERATOR_POST_PATHS: [&str; 2] = ["/api/config", "/api/daemon-notice"];
+/// Console sessions (schema v59) resolve on `/api/*` except these and
+/// `/api/coordination/*`: the board's mailbox routes (a session must never
+/// become an agent credential) and the daemon notice. `/api/console/link`
+/// resolves one only to refuse it by name. Hooks and `/mcp` never reach the
+/// session lookup at all (spec 2026-11-02, section 3).
+const SESSIONLESS_API_PATHS: [&str; 2] = ["/api/console/link", "/api/daemon-notice"];
+const SESSION_CANNOT_ISSUE_HINT: &str = "a sign-in link needs a client's own token: run \
+     `pseudolife-mcp console` on a machine that uses Pseudolife";
 pub struct App {
     pub service: Arc<Service>,
     pub env_tokens: auth::EnvTokens,
@@ -40,6 +48,15 @@ pub struct App {
     /// v58: where the gate notes each request's outcome (`None`: open
     /// daemon, or a test app).
     pub activity: Option<Arc<crate::principal_activity::Recorder>>,
+    /// v59: the Console sessions' view (`None`: open daemon, or a test app
+    /// that installs none), and what a session's issuer and principal are
+    /// checked against.
+    pub sessions: Option<Arc<crate::console_sessions::SessionSnapshot>>,
+    pub(crate) env_issuers: HashMap<String, String>,
+    pub(crate) env_principals: std::collections::HashSet<String>,
+    /// Sign-in's own failure budget and two slots, apart from pairing's, so
+    /// a burst of bad pairing codes cannot lock sign-in out, nor the reverse.
+    pub(crate) signin_limiter: crate::routes::pair::PairLimiter,
 }
 
 impl App {
@@ -51,6 +68,8 @@ impl App {
         board: Arc<crate::board::Board>,
     ) -> App {
         let mcp = crate::mcp::McpState::from_env(env_tokens.configured());
+        let env_issuers = crate::console_sessions::environment_issuers(&env_tokens);
+        let env_principals = crate::console_sessions::environment_principals(&env_tokens);
         App {
             service,
             env_tokens,
@@ -60,7 +79,19 @@ impl App {
             pair_limiter: Default::default(),
             mcp,
             activity: None,
+            sessions: None,
+            env_issuers,
+            env_principals,
+            signin_limiter: Default::default(),
         }
+    }
+
+    pub fn with_sessions(
+        mut self,
+        sessions: Option<Arc<crate::console_sessions::SessionSnapshot>>,
+    ) -> App {
+        self.sessions = sessions;
+        self
     }
 
     pub fn with_activity(
@@ -137,7 +168,7 @@ fn latin1(v: &HeaderValue) -> String {
 }
 
 /// `_hdr`: the first value.
-fn first_header(h: &HeaderMap, name: &str) -> Option<String> {
+pub(crate) fn first_header(h: &HeaderMap, name: &str) -> Option<String> {
     if crate::mutants::active("security-browser-last") {
         h.get_all(name).iter().next_back().map(latin1)
     } else {
@@ -264,6 +295,86 @@ pub(crate) fn resolve(app: &App, h: &HeaderMap) -> Resolved {
         activity.note(header.as_deref(), &resolved, source);
     }
     resolved
+}
+
+/// What the `/api` gate resolved (`_resolve_detailed`): the principal, the
+/// source of the credential that named it and, for a Console session, the
+/// source of the credential that issued the session.
+pub(crate) struct ApiCaller {
+    pub principal: String,
+    pub source: Option<auth::PrincipalSource>,
+    pub issued_by: Option<auth::PrincipalSource>,
+    /// The Console session that signed this request in, if one did.
+    pub session_id: Option<String>,
+}
+
+pub(crate) enum ApiResolved {
+    Caller(ApiCaller),
+    None,
+    Unavailable,
+}
+
+/// The `/api` transport gate's one resolution per request
+/// (`_resolve_detailed`): the agent credential resolver first, unchanged,
+/// then, only where `sessions` opts in, the Console session lookup. A
+/// session hit has source `Session` and carries its issuer's source. A
+/// stale view behind either answer is `Unavailable` (503), never `None`
+/// (401). The outcome is noted once for `invite --list` (v58), a session's
+/// under its principal with the issuing source.
+fn resolve_api(app: &App, h: &HeaderMap, sessions: bool) -> ApiResolved {
+    let header = authorization(h);
+    let (resolved, source) = auth::resolve_detailed(header.as_deref(), &app.env_tokens, &app.store);
+    let unavailable = matches!(resolved, Resolved::Unavailable);
+    let mut caller = match resolved {
+        Resolved::Principal(principal) => Some(ApiCaller {
+            principal,
+            source,
+            issued_by: None,
+            session_id: None,
+        }),
+        Resolved::None | Resolved::Unavailable => None,
+    };
+    if caller.is_none() && sessions {
+        match crate::console_sessions::resolve(
+            header.as_deref(),
+            app.sessions.as_deref(),
+            &app.env_issuers,
+            &app.env_principals,
+            &app.store,
+            crate::console_sessions::wall_now(),
+        ) {
+            Err(crate::console_sessions::Unavailable) => return ApiResolved::Unavailable,
+            Ok(Some(hit)) => {
+                caller = Some(ApiCaller {
+                    principal: hit.principal,
+                    source: Some(auth::PrincipalSource::Session),
+                    issued_by: Some(hit.issued_by),
+                    session_id: Some(hit.session.session_id),
+                });
+            }
+            Ok(None) => {}
+        }
+    }
+    if caller.is_none() && unavailable {
+        return ApiResolved::Unavailable;
+    }
+    if !app.service.config.read_only
+        && let Some(activity) = &app.activity
+    {
+        let noted = caller.as_ref().and_then(|c| match c.source {
+            Some(auth::PrincipalSource::Session) => c.issued_by,
+            other => other,
+        });
+        activity.note_outcome(
+            header.as_deref(),
+            caller.as_ref().map(|c| c.principal.as_str()),
+            noted,
+        );
+    }
+    match caller {
+        Some(caller) => ApiResolved::Caller(caller),
+        None => ApiResolved::None,
+    }
 }
 
 /// `_authorization`: the Authorization value `resolve` judges, the last one sent.
@@ -523,14 +634,23 @@ async fn api(
         }
         Ok(None) => {}
     }
-    let stored = match resolve(app, h) {
-        Resolved::Unavailable => return principals_unavailable(),
-        Resolved::None => return unauthorized(),
-        // Stored rows never carry an env principal's name or `default`
-        // (they are dropped from the snapshot), so the name tells the source.
-        Resolved::Principal(name) => {
-            name != "default" && !app.env_tokens.map.iter().any(|(_, p)| *p == name)
+    // `/api/console/link` resolves a session only to refuse it by name (a
+    // session cannot issue a session), rather than a bare 401.
+    let session_site = path == "/api/console/link"
+        || !(path.starts_with("/api/coordination/") || SESSIONLESS_API_PATHS.contains(&path));
+    let caller = match resolve_api(app, h, session_site) {
+        ApiResolved::Unavailable => return principals_unavailable(),
+        ApiResolved::Caller(caller)
+            if path == "/api/console/link"
+                && caller.source == Some(auth::PrincipalSource::Session) =>
+        {
+            return json_response(
+                403,
+                &json!({"error": "session_cannot_issue", "hint": SESSION_CANNOT_ISSUE_HINT}),
+            );
         }
+        ApiResolved::None => return unauthorized(),
+        ApiResolved::Caller(caller) => caller,
     };
     if method != "GET" && method != "POST" {
         return method_not_allowed();
@@ -538,7 +658,14 @@ async fn api(
     if app.service.config.read_only && method == "POST" {
         return shadow_refusal();
     }
-    if method == "POST" && OPERATOR_POST_PATHS.contains(&path) && stored {
+    // An invited machine reads and writes the bank and the board, but does
+    // not reconfigure the daemon or speak as it; nor does a Console session
+    // it signed in (an allowlist, spec 2026-11-02 section 3). The body stays
+    // the bare code, as Python's.
+    if method == "POST"
+        && OPERATOR_POST_PATHS.contains(&path)
+        && !auth::operator(caller.source, caller.issued_by)
+    {
         return json_response(403, &json!({"error": "operator_principal_required"}));
     }
     #[cfg(feature = "harness")]
@@ -599,6 +726,9 @@ async fn api(
             }
         }
     }
+    if path.starts_with("/api/console/") {
+        return crate::routes::signin::route(app, method, path, h, parsed_body, &caller).await;
+    }
     if coordination_path {
         return crate::board::http::coordination(app, path, h, parsed_body).await;
     }
@@ -618,6 +748,8 @@ async fn api(
             raw_query,
             params: &params,
             body: parsed_body,
+            session: (caller.source == Some(auth::PrincipalSource::Session))
+                .then_some(caller.principal.as_str()),
         },
         maintainer_path,
     )
@@ -705,7 +837,7 @@ async fn dispatch(
         return shadow_refusal();
     }
     if path == "/health" {
-        let payload = health::payload(&app.service, &app.store).await;
+        let payload = health::payload(&app.service, &app.store, signin_link(app)).await;
         let status = if payload["status"] == "ok" { 200 } else { 503 };
         return json_response(status, &payload);
     }
@@ -766,10 +898,23 @@ async fn dispatch(
     if path == "/api/pair" {
         return crate::routes::pair::route(app, method, h, body).await;
     }
+    // Console sign-in-code redemption (spec 2026-11-02, section 4): the
+    // second pre-auth route, browser-called, so it is routed before the
+    // bearer gate and checks the Origin against the code's.
+    if path == "/api/console/session" {
+        return crate::routes::signin::redeem(app, method, h, body).await;
+    }
     if path.starts_with("/api/") || path == "/api" {
         return api(app, path, method, h, raw_query, body).await;
     }
     crate::routes::mcp::route(app, path, method, h, raw_query, body).await
+}
+
+/// `/health` `console_signin.link`: a configured token and the bank's
+/// session table (the Rust daemon always has its Postgres bank). A
+/// read-only shadow refuses the sign-in POST, so it never offers sign-in.
+fn signin_link(app: &App) -> bool {
+    app.auth_configured() && app.sessions.is_some() && !app.service.config.read_only
 }
 
 fn shadow_refusal() -> Response {
@@ -932,6 +1077,64 @@ pub(crate) mod tests {
         let prefix = crate::principal_activity::bearer_hash_prefix("fixture-wrong");
         assert_eq!(batch.rejected.get(&prefix).map(|r| r.0), Some(2));
         assert_eq!(batch.rejected.len(), 1);
+    }
+
+    /// The operator gate reads the resolution's source, not the name: a
+    /// paired machine is refused `POST /api/config` and
+    /// `/api/daemon-notice` with the bare code, and reads them; the
+    /// environment token is not refused.
+    #[tokio::test]
+    async fn the_operator_gate_refuses_a_paired_machine_by_its_source() {
+        use sha2::Digest;
+        let app = Arc::new(fixture_app());
+        let hash = hex::encode(sha2::Sha256::digest(b"fixture-paired-token"));
+        app.store.refresh(
+            vec![auth::StoredPrincipal {
+                principal: "laptop".into(),
+                token_hash: Some(hash),
+                tier: None,
+                board: true,
+                revoked: false,
+                owned: true,
+            }],
+            None,
+            &[],
+            Instant::now(),
+        );
+        let call = |method: &str, path: &str, token: &str| {
+            Request::builder()
+                .method(method)
+                .uri(path)
+                .header("authorization", format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap()
+        };
+        for path in ["/api/config", "/api/daemon-notice"] {
+            let response = handle(
+                State(app.clone()),
+                call("POST", path, "fixture-paired-token"),
+            )
+            .await;
+            assert_eq!(response.status().as_u16(), 403, "{path}");
+            let bytes = axum::body::to_bytes(response.into_body(), 4096)
+                .await
+                .unwrap();
+            assert_eq!(&bytes[..], br#"{"error": "operator_principal_required"}"#);
+            let response = handle(State(app.clone()), call("POST", path, "fixture-token")).await;
+            let bytes = axum::body::to_bytes(response.into_body(), 4096)
+                .await
+                .unwrap();
+            assert!(
+                !String::from_utf8_lossy(&bytes).contains("operator_principal_required"),
+                "{path}"
+            );
+        }
+        let response = handle(
+            State(app.clone()),
+            call("GET", "/api/nope", "fixture-paired-token"),
+        )
+        .await;
+        assert_eq!(response.status().as_u16(), 404);
     }
 
     #[tokio::test]
