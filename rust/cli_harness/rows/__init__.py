@@ -9,6 +9,7 @@ ROWS = {
     "mail": "CLI-MAIL",
     "audit": "CLI-AUDIT",
     "backup": "CLI-BACKUP-DSN",
+    "migrate_flat": "CLI-MIGRATE-FLAT",
     "hook": "CLI-HOOK",
     "episode": "CLI-EPISODE",
     "lease": "CLI-LEASE-core",

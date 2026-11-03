@@ -1,0 +1,660 @@
+//! Offline lossless migration; the daemon supplies the shared YAML plan.
+
+use crate::pg::{Client, Dsn, Session};
+use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
+use std::{
+    ffi::OsString,
+    fs,
+    io::Write,
+    path::{Path, PathBuf},
+    process::{Command, Stdio},
+};
+
+const MARKER: &str = "flat_band_migration_v1";
+const FINGERPRINT: &str =
+    "SELECT id, md5((to_jsonb(e)-'band')::text) FROM public.entries e ORDER BY id";
+const RETRY: &str = "bank migration committed but config finalization failed; keep the daemon stopped and retry migrate-flat --apply";
+
+fn emit(stdout: bool, text: &str) {
+    let text = if cfg!(windows) {
+        text.replace("\n", "\r\n")
+    } else {
+        text.into()
+    };
+    if stdout {
+        let _ = std::io::stdout().lock().write_all(text.as_bytes());
+    } else {
+        let _ = std::io::stderr().lock().write_all(text.as_bytes());
+    }
+}
+
+fn hash(bytes: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(bytes))
+}
+fn quoted(value: &str) -> String {
+    if !value.is_empty()
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"_@%+=:,./-".contains(&b))
+    {
+        value.into()
+    } else {
+        format!("'{}'", value.replace('\'', "'\"'\"'"))
+    }
+}
+fn restore(pair: &Value) -> String {
+    format!(
+        "use your rehearsed external recovery tooling for this same bank AND config; bank dump {}; state archive {}; no automatic restore is available",
+        quoted(pair["dump"].as_str().unwrap_or("<dump>")),
+        quoted(pair["state"].as_str().unwrap_or("<archive>"))
+    )
+}
+
+fn daemon() -> Result<PathBuf, String> {
+    let name = if cfg!(windows) {
+        "pseudolife-daemon.exe"
+    } else {
+        "pseudolife-daemon"
+    };
+    let sibling = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|p| p.join(name)));
+    if let Some(path) = sibling.filter(|p| p.is_file()) {
+        return Ok(path);
+    }
+    for dir in std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()) {
+        let path = dir.join(name);
+        if path.is_file() {
+            return Ok(path);
+        }
+    }
+    Err("pseudolife-daemon is unavailable; run migrate-flat --apply on the bank host with both native binaries installed; nothing changed".into())
+}
+
+fn planner_command(daemon: &Path) -> Command {
+    let mut command = Command::new(daemon);
+    command.env_remove("PSEUDOLIFE_MCP_DATABASE_URL");
+    command
+}
+
+fn plan(daemon: &Path, raw: &[u8], entries: i64) -> Result<Value, String> {
+    let mut command = planner_command(daemon);
+    command.args(["migrate-flat-config", &entries.to_string()]);
+    run_planner(command, daemon, raw)
+}
+
+fn run_planner(mut command: Command, daemon: &Path, raw: &[u8]) -> Result<Value, String> {
+    let mut child = command
+        .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()
+        .map_err(|_| "the native config planner could not start; install the matching daemon binary on the bank host; nothing changed")?;
+    let mut input = child.stdin.take().expect("piped stdin");
+    let bytes = raw.to_vec();
+    let writer = std::thread::spawn(move || input.write_all(&bytes));
+    let output = child
+        .wait_with_output()
+        .map_err(|_| "the native config planner did not finish; retry migrate-flat --apply")?;
+    let written = writer.join();
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(match stderr.trim().strip_prefix("migrate-flat refused:") {
+            Some(reason) if !reason.trim().is_empty() => reason.trim().to_owned(),
+            _ => format!(
+                "the planner at {} does not support migrate-flat-config; install the matching daemon binary on the bank host; nothing changed",
+                daemon.display()
+            ),
+        });
+    }
+    written
+        .map_err(|_| "config planner input failed")?
+        .map_err(|_| "config planner input failed")?;
+    let result: Value = serde_json::from_slice(&output.stdout).map_err(
+        |_| "the native config planner returned invalid JSON; install matching native binaries",
+    )?;
+    if result["capacity"].as_i64().is_none()
+        || result["yaml"].as_str().is_none()
+        || result["flat"].as_bool().is_none()
+    {
+        return Err("the native config planner returned an incomplete plan; install matching native binaries".into());
+    }
+    Ok(result)
+}
+
+fn read_config(path: &Path) -> Result<Vec<u8>, String> {
+    let metadata = fs::symlink_metadata(path).map_err(
+        |_| "config.yaml must be an existing regular file in --data-dir; nothing changed",
+    )?;
+    if !metadata.is_file() || metadata.file_type().is_symlink() {
+        return Err(
+            "config.yaml must be an existing regular file in --data-dir; nothing changed".into(),
+        );
+    }
+    fs::read(path).map_err(|_| {
+        "config.yaml could not be read; check --data-dir and retry migrate-flat --apply".into()
+    })
+}
+
+fn replace_config(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    let temporary = path.with_file_name(format!(
+        ".migrate-flat.config.{}.part",
+        uuid::Uuid::new_v4().simple()
+    ));
+    let result = (|| {
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = options.open(&temporary)?;
+        file.write_all(bytes)?;
+        file.sync_all()?;
+        drop(file);
+        fs::rename(&temporary, path)?;
+        #[cfg(unix)]
+        fs::File::open(path.parent().unwrap())?.sync_all()?;
+        Ok::<(), std::io::Error>(())
+    })();
+    let _ = fs::remove_file(&temporary);
+    result.map_err(|_| "config replacement failed".into())
+}
+
+async fn fingerprint(client: &Client) -> Result<Vec<(i64, String)>, String> {
+    let rows = client
+        .query(FINGERPRINT, &[])
+        .await
+        .map_err(|_| "entry verification query failed; nothing committed")?;
+    Ok(rows.iter().map(|row| (row.get(0), row.get(1))).collect())
+}
+
+fn entry_lock_error(code: Option<&tokio_postgres::error::SqlState>) -> &'static str {
+    if code == Some(&tokio_postgres::error::SqlState::LOCK_NOT_AVAILABLE) {
+        "entry lock unavailable; stop all bank writers and retry migrate-flat --apply"
+    } else {
+        "entry table lock failed; check database connectivity and permissions, then retry migrate-flat --apply"
+    }
+}
+
+async fn begin_entry_lock(client: &Client) -> Result<(), String> {
+    client.batch_execute("BEGIN; SET LOCAL lock_timeout='5s'; LOCK TABLE public.entries IN SHARE ROW EXCLUSIVE MODE")
+        .await.map_err(|error| entry_lock_error(error.code()).to_owned())
+}
+
+async fn finish(
+    client: &Client,
+    daemon: &Path,
+    path: &Path,
+    marker: &mut Value,
+) -> Result<(), String> {
+    begin_entry_lock(client).await?;
+    match finish_locked(client, daemon, path, marker).await {
+        Ok(()) => client
+            .batch_execute("COMMIT")
+            .await
+            .map_err(|_| "migration marker finalization failed".into()),
+        Err(error) => {
+            let _ = client.batch_execute("ROLLBACK").await;
+            Err(error)
+        }
+    }
+}
+
+async fn finish_locked(
+    client: &Client,
+    daemon: &Path,
+    path: &Path,
+    marker: &mut Value,
+) -> Result<(), String> {
+    require_flat_entries(client).await?;
+    let raw = read_config(path)?;
+    if hash(&raw) == marker["original_sha256"].as_str().unwrap_or("") {
+        let planned = plan(
+            daemon,
+            &raw,
+            marker["capacity"]
+                .as_i64()
+                .ok_or("migration marker capacity is invalid")?,
+        )?;
+        let rendered = planned["yaml"].as_str().unwrap().as_bytes();
+        if hash(rendered) != marker["target_sha256"].as_str().unwrap_or("")
+            || planned["capacity"] != marker["capacity"]
+        {
+            return Err(format!(
+                "migration config no longer matches its committed plan; restore bank and config together: {}",
+                restore(&marker["backup"])
+            ));
+        }
+        replace_config(path, rendered)?;
+    } else if hash(&raw) != marker["target_sha256"].as_str().unwrap_or("")
+        && plan(
+            daemon,
+            &raw,
+            marker["capacity"]
+                .as_i64()
+                .ok_or("migration marker capacity is invalid")?,
+        )?["flat"]
+            != true
+    {
+        return Err(layout_error(marker));
+    }
+    marker["complete"] = Value::Bool(true);
+    client
+        .execute(
+            "UPDATE public.meta SET value=$1::text::jsonb WHERE key=$2",
+            &[&marker.to_string(), &MARKER],
+        )
+        .await
+        .map_err(|_| "migration marker finalization failed")?;
+    Ok(())
+}
+
+fn layout_error(marker: &Value) -> String {
+    format!(
+        "config.yaml does not provide the migrated flat layout; configure memory.miras with preset: custom and a single balanced band named flat with max_entries >= {}, then retry migrate-flat --apply",
+        marker["capacity"]
+    )
+}
+
+async fn require_flat_entries(client: &Client) -> Result<(), String> {
+    let nonflat: i64 = client
+        .query_one(
+            "SELECT count(*) FROM public.entries WHERE band <> 'flat'",
+            &[],
+        )
+        .await
+        .map_err(|_| "entry band verification failed")?
+        .get(0);
+    if nonflat != 0 {
+        return Err("the migrated bank contains entries outside the flat band; stop all writers and reconcile those entries into flat before retrying migrate-flat --apply".into());
+    }
+    Ok(())
+}
+
+async fn locked(
+    client: &Client,
+    dsn: &str,
+    daemon: &Path,
+    data_dir: &Path,
+    raw: &[u8],
+) -> Result<Value, String> {
+    let path = data_dir.join("config.yaml");
+    if let Some(row) = client
+        .query_opt(
+            "SELECT value::text FROM public.meta WHERE key=$1",
+            &[&MARKER],
+        )
+        .await
+        .map_err(|_| "migration marker could not be read")?
+    {
+        let mut marker: Value = serde_json::from_str(&row.get::<_, String>(0))
+            .map_err(|_| "migration marker is invalid; restore the backup pair before retrying")?;
+        if marker["complete"] == true {
+            require_flat_entries(client).await?;
+            let planned = plan(
+                daemon,
+                raw,
+                marker["capacity"]
+                    .as_i64()
+                    .ok_or("migration marker capacity is invalid")?,
+            )?;
+            if planned["flat"] != true {
+                return Err(layout_error(&marker));
+            }
+            marker["status"] = "unchanged".into();
+        } else {
+            if let Err(reason) = finish(client, daemon, &path, &mut marker).await {
+                return Err(committed_error(&marker, &reason));
+            }
+            marker["status"] = "resumed".into();
+        }
+        return Ok(marker);
+    }
+    begin_entry_lock(client).await?;
+    let rows = fingerprint(client).await?;
+    let planned = plan(daemon, raw, rows.len() as i64)?;
+    let nonflat: i64 = client
+        .query_one(
+            "SELECT count(*) FROM public.entries WHERE band <> 'flat'",
+            &[],
+        )
+        .await
+        .map_err(|_| "entry count query failed")?
+        .get(0);
+    if nonflat == 0 && planned["flat"] == true {
+        client
+            .batch_execute("ROLLBACK")
+            .await
+            .map_err(|_| "database connection failed")?;
+        return Ok(
+            json!({"status": "unchanged", "entries": rows.len(), "capacity": planned["capacity"]}),
+        );
+    }
+    let backup_dir = data_dir.to_owned();
+    let backup_dsn = dsn.to_owned();
+    let backup = tokio::task::spawn_blocking(move || {
+        super::backup::migration_backup(&backup_dir, &backup_dsn)
+    })
+    .await
+    .map_err(|_| "backup worker did not finish; nothing changed")??;
+    if read_config(&path)? != raw {
+        return Err(
+            "config.yaml changed during backup; nothing changed; retry migrate-flat --apply".into(),
+        );
+    }
+    let mut marker = json!({"version": 1, "complete": false, "entries": rows.len(),
+        "capacity": planned["capacity"], "original_sha256": hash(raw),
+        "target_sha256": hash(planned["yaml"].as_str().unwrap().as_bytes()), "backup": backup});
+    client
+        .execute(
+            "UPDATE public.entries SET band='flat' WHERE band <> 'flat'",
+            &[],
+        )
+        .await
+        .map_err(|_| "band update failed; migration rolled back")?;
+    if fingerprint(client).await? != rows {
+        return Err(format!(
+            "entry verification failed; migration rolled back; restore backup if needed: {}",
+            restore(&marker["backup"])
+        ));
+    }
+    client
+        .execute(
+            "INSERT INTO public.meta (key,value) VALUES ($1,$2::text::jsonb)",
+            &[&MARKER, &marker.to_string()],
+        )
+        .await
+        .map_err(|_| "migration marker could not be saved; migration rolled back")?;
+    client.batch_execute("INSERT INTO public.meta (key,value) VALUES ('writer_lease_epoch','1'::jsonb) ON CONFLICT (key) DO UPDATE SET value=to_jsonb(COALESCE(CASE WHEN jsonb_typeof(meta.value)='number' THEN (meta.value #>> '{}')::numeric::bigint END,0)+1)").await.map_err(|_| "writer epoch could not be advanced; migration rolled back")?;
+    client.batch_execute("COMMIT").await.map_err(|_| format!("migration COMMIT answer was lost; keep the daemon stopped and retry migrate-flat --apply to reconcile; restore bank and config together if needed: {}", restore(&marker["backup"])))?;
+    if let Err(reason) = finish(client, daemon, &path, &mut marker).await {
+        return Err(committed_error(&marker, &reason));
+    }
+    marker["status"] = "migrated".into();
+    Ok(marker)
+}
+
+fn committed_error(marker: &Value, reason: &str) -> String {
+    let reason = reason.replace("; nothing changed", "");
+    format!(
+        "{RETRY}: {reason}; restore bank and config together only as a last resort: {}",
+        restore(&marker["backup"])
+    )
+}
+
+async fn migrate(
+    dsn_text: &str,
+    daemon: &Path,
+    data_dir: &Path,
+    raw: &[u8],
+) -> Result<Value, String> {
+    let dsn = Dsn::parse(dsn_text).map_err(|e| e.to_string())?;
+    let session = Session::open(&dsn).await.map_err(|e| e.to_string())?;
+    let client = session.client();
+    let held: bool = client
+        .query_one(
+            "SELECT pg_try_advisory_lock(hashtextextended('pseudolife-bank-writer',0))",
+            &[],
+        )
+        .await
+        .map_err(|_| "bank writer lock query failed")?
+        .get(0);
+    if !held {
+        return Err("the bank writer is running; stop the daemon and retry migrate-flat --apply; nothing changed".into());
+    }
+    let result = locked(client, dsn_text, daemon, data_dir, raw).await;
+    let _ = client.batch_execute("ROLLBACK").await;
+    let _ = session.close().await;
+    result
+}
+
+pub(super) fn run(arguments: Vec<OsString>) -> u8 {
+    let mut apply = false;
+    let mut external_recovery = false;
+    let mut data_dir = None;
+    let mut args = arguments.iter();
+    while let Some(arg) = args.next() {
+        match arg.to_str() {
+            Some("--apply") => apply = true,
+            Some("--external-recovery-verified") => external_recovery = true,
+            Some("--data-dir") => data_dir = args.next().map(PathBuf::from),
+            Some("--help" | "-h") => {
+                emit(
+                    true,
+                    "usage: pseudolife-mcp migrate-flat --apply --data-dir PATH --external-recovery-verified\n\nBack up and flatten a stopped bank. Set PSEUDOLIFE_MCP_DATABASE_URL.\nNative execution also requires pseudolife-daemon on the bank host.\n--external-recovery-verified attests that you have rehearsed restoring\nthis exact bank AND config with your own tooling; no automatic restore exists.\n",
+                );
+                return 0;
+            }
+            _ => {
+                emit(false, "migrate-flat refused: use --apply --data-dir PATH\n");
+                return 2;
+            }
+        }
+    }
+    let result: Result<Value, String> = (|| {
+        if !apply {
+            return Err("no changes made; stop the daemon and pass --apply".into());
+        }
+        let data_dir = data_dir.ok_or("--data-dir is required")?;
+        if !external_recovery {
+            return Err("a paired restore for an explicit DSN is not available yet; nothing changed; rehearse restoring this exact bank AND config with your own tooling, then pass --external-recovery-verified".into());
+        }
+        let dsn = std::env::var("PSEUDOLIFE_MCP_DATABASE_URL")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .ok_or("set PSEUDOLIFE_MCP_DATABASE_URL to the stopped bank and retry")?;
+        emit(
+            false,
+            "WARNING: external recovery acknowledged for this bank AND config; use your rehearsed tooling to restore the backup pair; no automatic restore is available.\n",
+        );
+        let data_dir =
+            fs::canonicalize(data_dir).map_err(|_| "--data-dir is unavailable; nothing changed")?;
+        #[cfg(windows)]
+        let data_dir = {
+            let text = data_dir.to_string_lossy();
+            PathBuf::from(text.strip_prefix(r"\\?\").unwrap_or(&text))
+        };
+        if let Some(override_path) =
+            std::env::var_os("PSEUDOLIFE_MCP_CONFIG").filter(|p| !p.is_empty())
+        {
+            let matches = fs::canonicalize(override_path)
+                .ok()
+                .zip(fs::canonicalize(data_dir.join("config.yaml")).ok())
+                .is_some_and(|(actual, expected)| actual == expected);
+            if !matches {
+                return Err("PSEUDOLIFE_MCP_CONFIG does not resolve to --data-dir/config.yaml; nothing changed; use a matching configuration path before retrying".into());
+            }
+        }
+        let raw = read_config(&data_dir.join("config.yaml"))?;
+        let daemon = daemon()?;
+        plan(&daemon, &raw, 0)?;
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|_| "migration runtime could not start")?;
+        runtime.block_on(migrate(&dsn, &daemon, &data_dir, &raw))
+    })();
+    match result {
+        Ok(result) => {
+            emit(
+                true,
+                &format!(
+                    "flat migration: {}; entries={}; capacity={}\n",
+                    result["status"].as_str().unwrap(),
+                    result["entries"],
+                    result["capacity"]
+                ),
+            );
+            if result.get("backup").is_some() {
+                emit(
+                    true,
+                    &format!(
+                        "bank dump: {}\n",
+                        result["backup"]["dump"].as_str().unwrap()
+                    ),
+                );
+                emit(
+                    true,
+                    &format!(
+                        "state archive: {}\n",
+                        result["backup"]["state"].as_str().unwrap()
+                    ),
+                );
+                emit(
+                    true,
+                    &format!(
+                        "restore bank and config together: {}\n",
+                        restore(&result["backup"])
+                    ),
+                );
+            }
+            0
+        }
+        Err(reason) => {
+            emit(false, &format!("migrate-flat refused: {reason}\n"));
+            1
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn postcommit_read_failure_reports_committed_bank() {
+        let reason = read_config(&std::env::temp_dir()).unwrap_err();
+        assert!(reason.contains("nothing changed"));
+        let marker = json!({"backup": {"dump": "bank.sql.gz", "state": "state.tgz"}});
+        let message = committed_error(&marker, &reason);
+        assert!(message.starts_with(RETRY));
+        assert!(message.contains("config.yaml must be an existing regular file"));
+        assert!(!message.contains("nothing changed"));
+    }
+
+    #[test]
+    fn planner_does_not_inherit_database_url() {
+        let output = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "cli::migrate_flat::tests::planner_environment_child",
+                "--ignored",
+                "--nocapture",
+            ])
+            .env(
+                "PSEUDOLIFE_MCP_DATABASE_URL",
+                "fixture-must-not-reach-planner",
+            )
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+        assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed"));
+    }
+
+    fn exiting_planner(reason: &str) -> Command {
+        let mut command = Command::new(std::env::current_exe().unwrap());
+        command
+            .args([
+                "--exact",
+                "cli::migrate_flat::tests::planner_exit_child",
+                "--ignored",
+                "--nocapture",
+            ])
+            .env("PSEUDOLIFE_TEST_PLANNER_STDERR", reason);
+        command
+    }
+
+    #[test]
+    fn planner_stderr_precedes_broken_input_pipe() {
+        // Coverage of stderr precedence, not RED evidence for the diagnostic
+        // changes: this also passes on the earlier planner implementation.
+        let message = run_planner(
+            exiting_planner("migrate-flat refused: fixture planner rejected the config"),
+            Path::new("fixture-daemon"),
+            &vec![b'x'; 1024 * 1024],
+        )
+        .unwrap_err();
+        assert_eq!(message, "fixture planner rejected the config");
+    }
+
+    #[test]
+    fn entry_lock_failure_classifies_only_contention() {
+        use tokio_postgres::error::SqlState;
+        assert!(
+            entry_lock_error(Some(&SqlState::LOCK_NOT_AVAILABLE))
+                .contains("entry lock unavailable; stop all bank writers")
+        );
+        for code in [
+            None,
+            Some(&SqlState::INSUFFICIENT_PRIVILEGE),
+            Some(&SqlState::CONNECTION_FAILURE),
+        ] {
+            let message = entry_lock_error(code);
+            assert!(
+                message.contains(
+                    "entry table lock failed; check database connectivity and permissions"
+                )
+            );
+            assert!(!message.contains("stop all bank writers"));
+        }
+    }
+
+    #[test]
+    fn old_planner_names_matching_binary_fix() {
+        for reason in [
+            "",
+            "storage resolution refused: the Rust daemon requires PSEUDOLIFE_MCP_DATABASE_URL",
+        ] {
+            let message = run_planner(
+                exiting_planner(reason),
+                Path::new("fixture-daemon"),
+                &vec![b'x'; 1024 * 1024],
+            )
+            .unwrap_err();
+            assert_eq!(
+                message,
+                "the planner at fixture-daemon does not support migrate-flat-config; install the matching daemon binary on the bank host; nothing changed"
+            );
+        }
+    }
+
+    #[test]
+    #[ignore = "early-exit subprocess probe"]
+    fn planner_exit_child() {
+        eprint!(
+            "{}",
+            std::env::var("PSEUDOLIFE_TEST_PLANNER_STDERR").unwrap()
+        );
+        std::process::exit(1);
+    }
+
+    #[test]
+    #[ignore = "subprocess probe launched with an explicit database URL"]
+    fn planner_environment_child() {
+        assert_eq!(
+            std::env::var("PSEUDOLIFE_MCP_DATABASE_URL").unwrap(),
+            "fixture-must-not-reach-planner"
+        );
+        #[cfg(windows)]
+        let mut command = {
+            let mut command = planner_command(Path::new("cmd.exe"));
+            command.args([
+                "/D",
+                "/C",
+                "if defined PSEUDOLIFE_MCP_DATABASE_URL (exit 1) else (exit 0)",
+            ]);
+            command
+        };
+        #[cfg(unix)]
+        let mut command = {
+            let mut command = planner_command(Path::new("/bin/sh"));
+            command.args(["-c", "test -z \"${PSEUDOLIFE_MCP_DATABASE_URL+x}\""]);
+            command
+        };
+        assert!(command.status().unwrap().success());
+    }
+}

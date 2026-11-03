@@ -1422,6 +1422,7 @@ struct Loader {
     error: Option<String>,
     resolve: Option<ScalarResolver>,
     startup: bool,
+    value_keys: bool,
     /// Refuse an alias to a mapping or list with this text (a rewrite
     /// cannot keep the shared node).
     collection_alias: Option<&'static str>,
@@ -1625,7 +1626,7 @@ impl Loader {
                 // key into a string before constructing it. A value-tag in
                 // value position still has no constructor.
                 let mapping_key = matches!(self.stack.last(), Some(Frame::Map(_, None, _)));
-                let value_key = self.startup
+                let value_key = self.value_keys
                     && mapping_key
                     && (tag
                         .as_ref()
@@ -1702,7 +1703,7 @@ fn non_printable(c: char) -> bool {
 /// error, more than one document, an unknown tag or a non-printable
 /// character.
 pub(crate) fn safe_load(text: &str) -> Result<Option<Node>, String> {
-    load_with(text, None, None, false)
+    load_with(text, None, None, false, false)
 }
 
 /// [`safe_load`] with another scalar resolver, refusing an alias to a
@@ -1712,14 +1713,24 @@ pub(crate) fn safe_load_with(
     resolve: ScalarResolver,
     collection_alias: Option<&'static str>,
 ) -> Result<Option<Node>, String> {
-    load_with(text, Some(resolve), collection_alias, false)
+    load_with(text, Some(resolve), collection_alias, false, false)
+}
+
+/// Migration keeps PyYAML's value-tag mapping keys without changing the
+/// editor's existing constructor or startup's diagnostic formatting.
+pub(crate) fn safe_load_migrating_with(
+    text: &str,
+    resolve: ScalarResolver,
+    collection_alias: Option<&'static str>,
+) -> Result<Option<Node>, String> {
+    load_with(text, Some(resolve), collection_alias, false, true)
 }
 
 pub(crate) fn safe_load_startup_with(
     text: &str,
     resolve: ScalarResolver,
 ) -> Result<Option<Node>, String> {
-    load_with(text, Some(resolve), None, true)
+    load_with(text, Some(resolve), None, true, true)
 }
 
 fn load_with(
@@ -1727,6 +1738,7 @@ fn load_with(
     resolve: Option<ScalarResolver>,
     collection_alias: Option<&'static str>,
     startup: bool,
+    value_keys: bool,
 ) -> Result<Option<Node>, String> {
     if let Some((offset, c)) = text.char_indices().find(|(_, c)| non_printable(*c)) {
         return Err(format!(
@@ -1739,6 +1751,7 @@ fn load_with(
         resolve,
         collection_alias,
         startup,
+        value_keys,
         ..Loader::default()
     };
     let mut parser = Parser::new_from_str(text);

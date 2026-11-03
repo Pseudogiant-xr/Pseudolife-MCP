@@ -632,6 +632,7 @@ def test_export_skips_transient_meta_and_telemetry(pg_url, tmp_path):
             "('coordination_hlc_highwater', '[10000, 1]'::jsonb), "
             "('coordination_bank_id', '\"11111111-1111-4111-8111-111111111111\"'::jsonb), "
             "('writer_lease_epoch', '7'::jsonb), "
+            "('flat_band_migration_v1', '{\"complete\": true, \"backup\": {\"dump\": \"local-only\"}}'::jsonb), "
             "('reference_chroma_import', '{\"status\": \"done\"}'::jsonb) "
             "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
         )
@@ -661,6 +662,7 @@ def test_export_skips_transient_meta_and_telemetry(pg_url, tmp_path):
         # v57: whether THIS host's chromadb store was imported; the target
         # imports its own.
         assert "reference_chroma_import" not in meta_keys
+        assert "flat_band_migration_v1" not in meta_keys
         assert "cortex_dream_cursor" in meta_keys
         signals = [json.loads(line) for line in
                    zf.read("outcome_signals.jsonl").decode().split("\n")
@@ -678,6 +680,7 @@ def test_export_skips_transient_meta_and_telemetry(pg_url, tmp_path):
 @pytest.mark.parametrize("key,value", [
     ("sampleext_schema_version", "v34-sampleext"),
     ("coordination_bank_id", "11111111-1111-4111-8111-111111111111"),
+    ("flat_band_migration_v1", {"complete": True}),
 ])
 def test_import_skips_bank_local_meta_injected_into_the_archive(pg_url, tmp_path, key, value):
     """The import-side guard is load-bearing on its own: an archive carrying
