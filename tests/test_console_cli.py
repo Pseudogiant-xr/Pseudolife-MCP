@@ -148,3 +148,42 @@ def test_the_daemons_bank_problem_is_named(daemon, capsys):
     daemon["answer"] = (503, {"error": "signin_unavailable", "hint": "could not reach its bank"})
     assert console_cli.main([], environ=ENV) == 4
     assert "could not reach its bank" in capsys.readouterr().err
+
+
+def test_unless_signed_in_does_nothing_when_a_browser_is_signed_in(daemon, capsys):
+    daemon["answer"] = (200, {"operator": True, "sessions": [{"session_id": "s1"}]})
+    assert console_cli.main(["--unless-signed-in"], environ=ENV) == 0
+    assert [c[1] for c in daemon["calls"]] == ["/api/console/sessions"]
+    assert daemon["opened"] == [] and "already signed in" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("listed", [(200, {"sessions": []}), (404, {"error": "not_found"})])
+def test_unless_signed_in_signs_in_when_none_is_or_it_cannot_tell(daemon, monkeypatch, listed):
+    answers = iter([listed, (200, LINK)])
+    monkeypatch.setattr(console_cli, "request",
+                        lambda url, path, token, *, body=None: daemon["calls"].append(path)
+                        or next(answers))
+    assert console_cli.main(["--unless-signed-in"], environ=ENV) == 0
+    assert daemon["calls"] == ["/api/console/sessions", "/api/console/link"]
+    assert daemon["opened"] == [LINK["url"]]
+
+
+def test_a_terminal_browser_is_never_used(monkeypatch):
+    import webbrowser
+    opened = []
+
+    class Lynx(webbrowser.GenericBrowser):
+        def open(self, url, new=0, autoraise=True):
+            opened.append(url)
+            return True
+
+    monkeypatch.setattr(webbrowser, "get", lambda using=None: Lynx("lynx"))
+    assert console_cli.open_browser("http://127.0.0.1:8765/ui/") is False and opened == []
+
+    class Firefox(webbrowser.BackgroundBrowser):
+        def open(self, url, new=0, autoraise=True):
+            opened.append(url)
+            return True
+
+    monkeypatch.setattr(webbrowser, "get", lambda using=None: Firefox("firefox"))
+    assert console_cli.open_browser("http://127.0.0.1:8765/ui/") is True and opened

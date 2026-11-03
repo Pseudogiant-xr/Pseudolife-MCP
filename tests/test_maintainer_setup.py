@@ -608,6 +608,34 @@ def test_write_refuses_to_guess_where_a_plain_daemon_reads_its_config(tmp_path, 
     assert not (tmp_path / "data").exists()
 
 
+def test_with_a_bearer_the_console_opens_signed_in_at_the_new_address(host, tailnet, capsys,
+                                                                      monkeypatch):
+    opened = []
+    monkeypatch.setattr(ms, "bearer", lambda: "never-printed-token-value")
+    monkeypatch.setattr(ms, "open_signed_in", lambda port=8765: opened.append(port) or True)
+    host.answers = ["y", "y"]
+    assert ms.main([]) == 0
+    out = capsys.readouterr().out
+    assert opened == [8765]
+    assert "Confirm the sign-in in the browser" in out and "Your passkeys" in out
+    assert "paste a bearer token" not in out and "never-printed-token-value" not in out
+
+
+def test_open_signed_in_asks_the_daemon_this_setup_talks_to(monkeypatch):
+    from pseudolife_memory import console_cli
+    calls = []
+    monkeypatch.setattr(console_cli, "credentials",
+                        lambda environ=None: ("http://127.0.0.1:9000", "a-token", "registration"))
+    monkeypatch.setattr(console_cli, "main", lambda argv=None, environ=None: calls.append(
+        (argv, environ["PSEUDOLIFE_MCP_DAEMON_URL"])) or 0)
+    assert ms.open_signed_in(9000) is True and calls == [([], "http://127.0.0.1:9000")]
+    monkeypatch.setattr(console_cli, "main", lambda argv=None, environ=None: 4)
+    assert ms.open_signed_in(9000) is False
+    monkeypatch.setattr(console_cli, "credentials",
+                        lambda environ=None: ("http://127.0.0.1:9000", None, "none"))
+    assert ms.open_signed_in(9000) is False
+
+
 def test_container_scope_does_not_leak_into_the_next_invocation(host, capsys):
     host.rp_id, host.origin = DNS, ORIGIN
     host.keys = [{"prefix": PREFIX, "label": "laptop", "state": "active"}]

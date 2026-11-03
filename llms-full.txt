@@ -296,7 +296,9 @@ The installer also turns the agent board on: it mints a bearer token in
 `ops/.env` (owner-only, never printed) and gives each shim client it wires an
 owner-only token file. Re-running it on an existing install adds that file to
 the Claude Code registration in place. The ladder's last line, and
-`pseudolife-mcp doctor`, say whether the board is on or why it is off.
+`pseudolife-mcp doctor`, say whether the board is on or why it is off. At the
+end it opens the Console in your browser, signed in (`pseudolife-mcp
+console`, which an unattended install names instead of running).
 Use `doctor --host codex` or `--host claude-code` for a compact coordination
 snapshot: reachability, bearer admission, registration evidence, tool inventory
 and configured wake are separate. Default doctor is read-only; health and a
@@ -1397,9 +1399,13 @@ pseudolife-mcp-daemon`).
 - **Port already in use**: the stack binds `127.0.0.1:8765` (daemon) and
   `127.0.0.1:5433` (Postgres). Change the host side in
   `ops/docker-compose.yml` if either collides.
-- **Console shows "offline" / Unauthorized**: "offline" means the daemon
-  isn't reachable (see above); a 401 prompt means it runs with
-  `PSEUDOLIFE_MCP_TOKEN` — paste that token into the Console's Token dialog.
+- **Console shows "offline" / asks you to sign in**: "offline" means the daemon
+  isn't reachable (see above); a sign-in prompt means it runs with a token.
+  Run `pseudolife-mcp console` on the daemon's machine, or on any machine that
+  uses Pseudolife once `pseudolife-mcp maintainer setup` gave the Console an
+  HTTPS address: it opens the Console signed in (or prints a link and a short
+  code where there is no browser). Pasting the daemon's token under
+  "Advanced" still works.
 - **The coding agent doesn't see the tools**: `claude mcp list` or
   `codex mcp list` should show
   `pseudolife-memory` ✓ connected. If not, re-check the URL
@@ -5804,6 +5810,17 @@ passkey signs the Console in with the same rights. A passkey can now get a
 bank bearer: see the [security posture](security-posture.md). Revoking a
 key signs out every browser it signed in.
 
+**Install and update do it for you.** A daemon-host install with a token
+ends by running `pseudolife-mcp console --unless-signed-in` (after the
+passkey offer, so the link is for the HTTPS address when you set one up):
+when a browser is signed in already, from the passkey setup or an earlier
+install, it says so in one line and opens nothing. An unattended install
+names the command instead, and a client-only install names it in its
+summary. `console` never hands the link to a terminal browser (lynx, w3m):
+it prints it instead. `pseudolife-mcp update` names it when the daemon offers sign-in and
+no browser is signed in yet, and the update that moves the bank to schema
+v59 says, once, which principals are now treated as yours.
+
 `pseudolife-mcp console --list` shows the signed-in browsers (an operator
 sees all of them, a paired machine its own) and `--revoke <id>` signs one
 out; the Console's Settings view does the same. A token pasted under
@@ -5880,14 +5897,14 @@ before changing anything (`--yes` answers for it), then:
    config file, with a backup beside it, and restarts the daemon container
    (`docker restart`: the same container and volumes). A lite daemon is not
    restarted for you: stop `pseudolife-mcp serve` and run the command again.
-3. Prints a one-time enrolment code, valid for 10 minutes. Open the
-   Console at the new address (`<origin>/ui/`). A browser keeps the
-   Console's token per address, so at a new address it has none: click
-   "Set a bearer token" and paste the token your Console uses at its usual
-   address (the daemon's `PSEUDOLIFE_MCP_TOKEN`; a single-token install
-   also keeps it in `~/.pseudolife-mcp/<principal>.token`). Then open
-   Settings, Your passkeys, enter the code and a label, and create the
-   passkey. The command prints the new key's id prefix and label and asks
+3. Opens the Console at the new address (`<origin>/ui/`) signed in, the
+   way `pseudolife-mcp console` does, with the bearer of the environment it
+   runs in; a browser keeps its sign-in per address, so a new address needs
+   one. With no bearer there it says how to sign in instead (`pseudolife-mcp
+   console` from any machine that uses Pseudolife, or the token pasted under
+   "Advanced"). Then it prints a one-time enrolment code, valid for 10
+   minutes: in the Console open Settings, Your passkeys, enter the code and a
+   label, and create the passkey. The command prints the new key's id prefix and label and asks
    whether the Console shows the same: `y` activates the key, anything else
    revokes it (someone else may have redeemed the code); run the command
    again to retry.
