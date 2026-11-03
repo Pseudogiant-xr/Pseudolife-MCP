@@ -8,11 +8,13 @@
 
 pub(crate) mod as_of;
 pub mod binding;
+mod cancellation;
 mod catalogue;
 mod difflib;
 pub mod dispatch;
 mod envelope;
 pub mod identity;
+mod modern;
 pub(crate) mod py_loads;
 pub mod tiers;
 mod toolset;
@@ -50,6 +52,8 @@ pub struct McpState {
     /// Tokenless installs keep the SDK's DNS-rebinding allowlist on.
     auth_configured: bool,
     sessions: Mutex<Sessions>,
+    requests: Arc<cancellation::Registry>,
+    modern: Arc<modern::Subscriptions>,
 }
 
 /// One registered transport. `ready` is the SDK runner's initialization
@@ -122,6 +126,8 @@ impl McpState {
             overrides: Overrides::new(tiers::OVERRIDE_TTL),
             auth_configured,
             sessions: Mutex::new(Sessions::default()),
+            requests: Arc::new(cancellation::Registry::default()),
+            modern: Arc::new(modern::Subscriptions::default()),
         }
     }
 
@@ -191,10 +197,15 @@ impl McpState {
     fn forget(&self, sid: &str) {
         let mut s = self.sessions.lock().expect("sessions lock");
         s.live.remove(sid);
+        self.requests.forget(sid);
     }
 
     /// Server-initiated message to the session's standalone stream, if open.
     async fn notify(&self, sid: &str, message: &Value) {
+        if message["method"] == "notifications/tools/list_changed" {
+            self.modern.tools_changed();
+            tokio::task::yield_now().await;
+        }
         let stream = {
             let s = self.sessions.lock().expect("sessions lock");
             s.live
@@ -387,7 +398,7 @@ pub async fn handle(
 
     // Era routing (`StreamableHTTPSessionManager._handle_request`): a
     // protocol-version header outside the handshake versions belongs to the
-    // 2026-07-28 stateless era, which this port does not serve yet. Its
+    // 2026-07-28 stateless era. Its
     // handler (`handle_modern_request`) runs the transport check first.
     if let Some(pv) = latin1(&headers, "mcp-protocol-version")
         && !HANDSHAKE_VERSIONS.contains(&pv.as_str())
@@ -397,7 +408,7 @@ pub async fn handle(
         {
             return r;
         }
-        return modern_era_refusal(&body);
+        return modern::handle(app, principal, method, headers, body).await;
     }
 
     let supplied = latin1(&headers, "mcp-session-id");
@@ -461,20 +472,6 @@ pub async fn handle(
         opening.settle(response.status());
     }
     response
-}
-
-/// The modern era's answer to a legacy-shaped request with no `_meta`
-/// envelope (recorded from the oracle); every other modern request is a
-/// declared divergence.
-fn modern_era_refusal(body: &[u8]) -> Response {
-    let id = std::str::from_utf8(body)
-        .ok()
-        .and_then(|text| crate::http::parse_body_json(text).ok())
-        .and_then(|v| v.get("id").cloned())
-        .unwrap_or(Value::Null);
-    let out = json!({"jsonrpc": "2.0", "id": id, "error": {"code": INVALID_PARAMS,
-        "message": "params._meta must be an object carrying the required 'io.modelcontextprotocol/protocolVersion' and 'io.modelcontextprotocol/clientCapabilities' envelope keys"}});
-    json_bytes(400, out.to_string().into_bytes(), None)
 }
 
 fn get(state: &McpState, sid: &str, known: bool, headers: &HeaderMap) -> Response {
@@ -584,10 +581,10 @@ fn request_id(v: &Value) -> Option<Value> {
     match v {
         Value::String(_) => Some(v.clone()),
         Value::Number(n)
-            if !n
-                .to_string()
+            if n.to_string()
+                .trim_start_matches('-')
                 .bytes()
-                .any(|b| matches!(b, b'.' | b'e' | b'E')) =>
+                .all(|b| b.is_ascii_digit()) =>
         {
             Some(v.clone())
         }
@@ -712,6 +709,12 @@ async fn post(
     let (id, method, params) = match message {
         Message::Request { id, method, params } => (id, method, params),
         Message::Notification { method, params } => {
+            if method == "notifications/cancelled"
+                && !crate::mutants::active("mcp-cancel-ignored")
+                && let Some(id) = params.get("requestId")
+            {
+                app.mcp.requests.cancel(sid, id);
+            }
             if validation::notification(&method, &Value::Object(params))
                 && method == "notifications/initialized"
             {
@@ -724,14 +727,21 @@ async fn post(
     // The call runs as its own task, so a client that drops the connection
     // does not cancel a tool body mid-write (Python runs bodies on worker
     // threads that a disconnect does not stop).
-    let work = tokio::spawn(respond(
-        app.clone(),
-        principal.to_string(),
-        sid.to_string(),
-        headers,
-        id,
-        method,
-        params,
+    let pending = app.mcp.requests.start(sid, &id);
+    let interruptible = method != "tools/call"
+        || params.get("name").and_then(Value::as_str) == Some("memory_toolset");
+    let work = tokio::spawn(pending.run(
+        id.clone(),
+        interruptible,
+        respond(
+            app.clone(),
+            principal.to_string(),
+            sid.to_string(),
+            headers,
+            id,
+            method,
+            params,
+        ),
     ));
     let stream = async_stream(move |tx| async move {
         tokio::pin!(work);
@@ -823,12 +833,26 @@ async fn respond(
         // The runner's initialization gate.
         return invalid_params(&id);
     }
-    match method.as_str() {
-        "ping" => rpc_result(&id, "{}"),
+    method_response(&app, &principal, &sid, &headers, &id, &method, &params).await
+}
+
+/// Handler dispatch after the era-specific envelope and parameter checks.
+async fn method_response(
+    app: &Arc<crate::http::App>,
+    principal: &str,
+    sid: &str,
+    headers: &HeaderMap,
+    id: &Value,
+    method: &str,
+    params: &Map<String, Value>,
+) -> String {
+    let state = &app.mcp;
+    match method {
+        "ping" => rpc_result(id, "{}"),
         "tools/list" => {
-            let key = identity::tier_key(&principal, &headers);
-            let tier = state.resolve_tier(&app.store, &principal, key.as_deref());
-            rpc_result(&id, &catalogue::list_result(tier))
+            let key = identity::tier_key(principal, headers);
+            let tier = state.resolve_tier(&app.store, principal, key.as_deref());
+            rpc_result(id, &catalogue::list_result(tier))
         }
         "tools/call" => {
             let name = params
@@ -840,12 +864,12 @@ async fn respond(
                 .and_then(Value::as_object)
                 .cloned()
                 .unwrap_or_default();
-            let result = call_tool(&app, &principal, &sid, &headers, name, &args).await;
-            rpc_result(&id, &result.to_string())
+            let result = call_tool(app, principal, sid, headers, name, &args).await;
+            rpc_result(id, &result.to_string())
         }
-        "prompts/list" => rpc_result(&id, "{\"prompts\":[]}"),
-        "resources/list" => rpc_result(&id, "{\"resources\":[]}"),
-        "resources/templates/list" => rpc_result(&id, "{\"resourceTemplates\":[]}"),
+        "prompts/list" => rpc_result(id, "{\"prompts\":[]}"),
+        "resources/list" => rpc_result(id, "{\"resources\":[]}"),
+        "resources/templates/list" => rpc_result(id, "{\"resourceTemplates\":[]}"),
         "prompts/get" => {
             let name = params
                 .get("name")
@@ -860,13 +884,13 @@ async fn respond(
                 .and_then(Value::as_str)
                 .unwrap_or_default();
             rpc_error(
-                &id,
+                id,
                 INVALID_PARAMS,
                 &format!("Unknown resource: {uri}"),
                 json!({"uri": uri}),
             )
         }
-        _ => rpc_error(&id, METHOD_NOT_FOUND, "Method not found", json!(method)),
+        _ => rpc_error(id, METHOD_NOT_FOUND, "Method not found", json!(method)),
     }
 }
 
@@ -1146,15 +1170,31 @@ mod sessions {
     }
 
     #[tokio::test]
-    async fn modern_refusal_preserves_reserved_keys_and_ids() {
+    async fn modern_refusal_validates_ids_before_the_envelope() {
         for (body, expected_id) in [
-            (r#"{"$serde_json::private::Number":"1","id":7}"#, "7"),
             (
-                r#"{"id":{"$serde_json::private::Number":"1"}}"#,
-                r#"{"$serde_json::private::Number":"1"}"#,
+                r#"{"jsonrpc":"2.0","method":"tools/list","$serde_json::private::Number":"1","id":7}"#,
+                "7",
             ),
+            (r#"{"id":{"$serde_json::private::Number":"1"}}"#, "null"),
         ] {
-            let response = modern_era_refusal(body.as_bytes());
+            let mut headers = HeaderMap::new();
+            headers.insert(
+                header::ACCEPT,
+                HeaderValue::from_static("application/json, text/event-stream"),
+            );
+            headers.insert(
+                "mcp-protocol-version",
+                HeaderValue::from_static("2026-07-28"),
+            );
+            let response = modern::handle(
+                &app(),
+                "caller",
+                Method::POST,
+                headers,
+                Bytes::copy_from_slice(body.as_bytes()),
+            )
+            .await;
             assert_eq!(response.status(), StatusCode::BAD_REQUEST);
             let bytes = axum::body::to_bytes(response.into_body(), 4096)
                 .await

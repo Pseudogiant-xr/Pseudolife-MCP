@@ -165,7 +165,7 @@ pub(super) fn boolean(value: &Value) -> bool {
         })
 }
 
-fn valid(schema: &Value, value: &Value, defs: &Value) -> bool {
+pub(super) fn valid(schema: &Value, value: &Value, defs: &Value) -> bool {
     if let Some(allowed) = schema.as_bool() {
         return allowed;
     }
