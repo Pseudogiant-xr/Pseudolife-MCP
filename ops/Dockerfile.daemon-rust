@@ -35,6 +35,7 @@ COPY --from=builder /pseudolife-mcp /usr/local/bin/pseudolife-mcp
 COPY --from=runtime-inputs /opt/ort /opt/ort
 COPY --from=builder /opt/pdfium /opt/pdfium
 COPY plugin/hooks /app/plugin/hooks
+COPY pseudolife_memory/web/static /app/static
 COPY --chmod=755 ops/provision-daemon-models.sh /usr/local/bin/provision-daemon-models
 # PSEUDOLIFE_DAEMON_ONNX_DIR=<model-root> and PSEUDOLIFE_DAEMON_RERANK_DIR
 # remain optional overrides; ordinary startup resolves the pinned cache.
@@ -47,7 +48,8 @@ ENV CUDA_VISIBLE_DEVICES=-1 \
     PSEUDOLIFE_DAEMON_ORT_THREADS=3 \
     ORT_DYLIB_PATH=/opt/ort/libonnxruntime.so.1.27.0 \
     PSEUDOLIFE_DAEMON_PDFIUM_DIR=/opt/pdfium \
-    PSEUDOLIFE_PLUGIN_DIR=/app/plugin
+    PSEUDOLIFE_PLUGIN_DIR=/app/plugin \
+    PSEUDOLIFE_DAEMON_STATIC_DIR=/app/static
 RUN mkdir /data
 VOLUME ["/data"]
 ARG GIT_SHA=unknown
