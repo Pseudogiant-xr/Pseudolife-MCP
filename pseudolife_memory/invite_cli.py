@@ -118,10 +118,21 @@ DEFAULT_PORT = expose_cli.DEFAULT_PORT
 MIN_SCHEMA = 53
 TIERS = ("minimal", "core", "full")
 URL_PLACEHOLDER = "<daemon-url>"
-# The first line `invite --version-check` prints: an image that answers it
-# carries this command. 2 (schema v59): it takes --someone-else and --mine.
-VERSION_LINE = "pseudolife-mcp invite 2"
-_VERSION = re.compile(r"pseudolife-mcp invite (\d+)")
+# What `invite --version-check` prints: an image that answers it carries
+# this command, at the highest version listed. 2 (schema v59): it takes
+# --someone-else and --mine. Line 1 stays first because every host CLI before
+# v59, Python and shim alike, accepts the image only when its output starts
+# with `pseudolife-mcp invite 1`: without it, a host CLI one release behind
+# refuses a plain invite as an image that predates `invite`.
+VERSION_LINES = ("pseudolife-mcp invite 1", "pseudolife-mcp invite 2")
+# ASCII digits only, as the shim's `image_version` reads them.
+_VERSION = re.compile(r"pseudolife-mcp invite ([0-9]+)")
+_U64_MAX = 2**64 - 1
+# The --someone-else note, one text however invite was run: a host CLI
+# before v59 forwards an invite into this image with nothing that tells it
+# apart from a direct run, and its own parser refuses --someone-else.
+OWNERSHIP_NOTE = ("for a machine that is not yours, add --someone-else (an older pseudolife-mcp "
+                  "refuses it: update it first)")
 # The refusal of --someone-else / --mine through an image that predates them.
 OWNERSHIP_NEEDS_NEWER_IMAGE = (
     "the daemon's image predates --someone-else and --mine: update the daemon to schema 59 "
@@ -435,7 +446,7 @@ def _invite(args, report: _Report, store, conn) -> int:
     if note:
         report.note(note)
     if ownership and created["owned"] and args.owned is None:
-        report.note("for a machine that is not yours, add --someone-else")
+        report.note(OWNERSHIP_NOTE)
     report.note("an invited machine can read and write the whole bank and use the agent board, "
                 "but not change the daemon's configuration")
     return report.finish(EXIT_OK)
@@ -460,7 +471,8 @@ def _list(report: _Report, rows: list[dict], rejected: list[dict]) -> int:
     for row in rows:
         state = row["state"] + (f" until {_when(row['code_expires_at'])}" if row["state"] == "pending" else "")
         board = "-" if row["board"] is None else "on" if row["board"] else "off"
-        owner = "yes" if row.get("owner", True) else "no"
+        owned = row.get("owner", True)
+        owner = "-" if owned is None else "yes" if owned else "no"
         report.say(f"  {row['principal']:<24} {state:<11} {_when(row['last_seen_at'], 'never'):<21} "
                    f"{row['tier'] or 'default':<8} {board:<6} {owner:<6} {_when(row['created_at']):<21} "
                    f"{_when(row['paired_at']):<21} {_when(row['revoked_at'])}")
@@ -468,7 +480,8 @@ def _list(report: _Report, rows: list[dict], rejected: list[dict]) -> int:
         report.say("  (environment: a token in the daemon's PSEUDOLIFE_MCP_TOKENS or "
                    "PSEUDOLIFE_MCP_TOKEN; last seen: its last accepted request, written once a minute;")
         report.say("   owner: the bank owner's machine, whose board mail the owner's Console shows; "
-                   "`invite --someone-else` and coordination.not_owner_principals say otherwise)")
+                   "`invite --someone-else` and coordination.not_owner_principals say otherwise;")
+        report.say("   owner -: unknown, an environment token listed with the daemon stopped)")
     report.say()
     if not rejected:
         report.say("no refused tokens recorded")
@@ -486,7 +499,8 @@ def _list(report: _Report, rows: list[dict], rejected: list[dict]) -> int:
 
 def _forward(args) -> list[str]:
     """The same request for the container, with the URL and the
-    confirmation resolved here."""
+    confirmation resolved here. Only options an image at invite version 2
+    (#1154) parses: anything new here breaks every invite through it."""
     out = []
     if args.list:
         out.append("--list")
@@ -556,8 +570,10 @@ def _through_postgres(args, report: _Report) -> int:
             rows, rejected = listed["principals"], listed["rejected"]
         except (ValueError, IndexError, KeyError, TypeError):
             return by_hand("psql answered something that is not the list")
-        # No environment here: the stopped daemon's is not this shell's.
-        return _list(report, describe_rows(rows, not_owner=_not_owner_names()),
+        # No environment here: the stopped daemon's is not this shell's. Nor
+        # its config: coordination.not_owner_principals is in the daemon's
+        # volume, so an environment row's owner is unknown (None).
+        return _list(report, describe_rows(rows, not_owner=None),
                      describe_rejected(rejected))
     if args.revoke not in output.splitlines():
         return report.fail(EXIT_REFUSED, f"no stored principal is named {args.revoke}")
@@ -565,6 +581,28 @@ def _through_postgres(args, report: _Report) -> int:
     report.say(f"{args.revoke}: revoked; the daemon stops accepting its token within 10 seconds of "
                "starting again")
     return report.finish(EXIT_OK)
+
+
+def _image_version(stdout: str | None) -> int | None:
+    """The highest ``N`` over the lines of ``invite --version-check`` that
+    are exactly ``pseudolife-mcp invite <N>``; None when no line is. Read as
+    the shim's ``image_version`` reads it: universal newlines, as ``run``'s
+    ``text=True`` already gives (``\\r\\n``, then a lone ``\\r``, become
+    ``\\n``), done here too so a direct call reads alike; then lines split
+    on ``\\n`` only, ``N`` ASCII digits (leading zeros allowed), a line whose
+    ``N`` exceeds 2**64 - 1 ignored."""
+    found = []
+    text = (stdout or "").replace("\r\n", "\n").replace("\r", "\n")
+    for line in text.split("\n"):
+        match = _VERSION.fullmatch(line)
+        if match is None:
+            continue
+        # Leading zeros first, so a long run of them never reaches int()'s
+        # digit limit; past 20 digits the number cannot fit in a u64.
+        digits = match.group(1).lstrip("0") or "0"
+        if len(digits) <= 20 and int(digits) <= _U64_MAX:
+            found.append(int(digits))
+    return max(found, default=None)
 
 
 def _in_container(args, report: _Report) -> int:
@@ -580,7 +618,7 @@ def _in_container(args, report: _Report) -> int:
     executable = daemon_exec.operator_cli(docker, runner=run)
     base = [docker, "exec", "-e", f"{daemon_exec.NESTED_ENV}=1", CONTAINER, *executable, "invite"]
     check = run([*base, "--version-check"])
-    version = _VERSION.match(check.stdout or "") if check.returncode == 0 else None
+    version = _image_version(check.stdout) if check.returncode == 0 else None
     if version is None:
         if check.returncode == 127 or "No such container" in (check.stderr or ""):
             return report.fail(EXIT_REFUSED, (
@@ -588,7 +626,7 @@ def _in_container(args, report: _Report) -> int:
                 f"no {CONTAINER} container: run this on the daemon's host"))
         return report.fail(EXIT_REFUSED, ("the daemon's image predates `invite`: update the daemon "
                                           "first (pseudolife-mcp update), then re-run"))
-    if args.owned is not None and int(version.group(1)) < 2:
+    if args.owned is not None and version < 2:
         return report.fail(EXIT_REFUSED, OWNERSHIP_NEEDS_NEWER_IMAGE)
     proc = run([docker, "exec", "-i", "-e", f"{daemon_exec.NESTED_ENV}=1", CONTAINER, *executable, "invite",
                 *_forward(args)])
@@ -645,7 +683,8 @@ def main(argv: list[str] | None = None) -> int:
     except SystemExit as exc:
         return exc.code if isinstance(exc.code, int) else EXIT_USAGE
     if args.version_check:
-        print(VERSION_LINE)
+        for line in VERSION_LINES:
+            print(line)
         return EXIT_OK
     report = _Report(args.json)
     modes = [bool(args.name), args.list, bool(args.revoke)]

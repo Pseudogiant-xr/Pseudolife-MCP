@@ -160,12 +160,13 @@ pub(super) struct Listed {
     pub revoked_at: Option<f64>,
     pub last_seen_at: Option<f64>,
     /// v59: the bank owner's (`owner`); an environment row is unless
-    /// `coordination.not_owner_principals` names it.
-    pub owner: bool,
+    /// `coordination.not_owner_principals` names it. `None` when that is
+    /// unknown (an environment row listed with the daemon stopped).
+    pub owner: Option<bool>,
 }
 
 impl Listed {
-    fn environment(principal: String, last_seen_at: Option<f64>, owner: bool) -> Self {
+    fn environment(principal: String, last_seen_at: Option<f64>, owner: Option<bool>) -> Self {
         Listed {
             principal,
             state: "environment",
@@ -243,7 +244,7 @@ pub(super) async fn list(
         let stored: bool = row.try_get(11).map_err(|_| DbError::Defer)?;
         if !stored {
             let owner = !not_owner.contains(&principal);
-            out.push(Listed::environment(principal, last_seen, owner));
+            out.push(Listed::environment(principal, last_seen, Some(owner)));
             continue;
         }
         let paired: bool = row.try_get(3).map_err(|_| DbError::Defer)?;
@@ -274,10 +275,11 @@ pub(super) async fn list(
             paired_at: get(7)?,
             revoked_at: revoked,
             last_seen_at: last_seen,
-            owner: row
-                .try_get::<_, Option<bool>>(12)
-                .map_err(|_| DbError::Defer)?
-                .unwrap_or(true),
+            owner: Some(
+                row.try_get::<_, Option<bool>>(12)
+                    .map_err(|_| DbError::Defer)?
+                    .unwrap_or(true),
+            ),
         });
     }
     let mut names: Vec<&String> = environment.iter().collect();
@@ -288,7 +290,7 @@ pub(super) async fn list(
             out.push(Listed::environment(
                 name.clone(),
                 None,
-                !not_owner.contains(name),
+                Some(!not_owner.contains(name)),
             ));
         }
     }

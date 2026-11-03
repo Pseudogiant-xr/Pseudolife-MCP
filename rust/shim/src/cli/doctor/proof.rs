@@ -160,7 +160,7 @@ fn fold(name: &str) -> String {
 }
 
 fn proof_dsn(dsn: &str) -> Result<Dsn, &'static str> {
-    Dsn::parse_with_connection_options(dsn).map_err(|error| match error {
+    Dsn::parse_with_proof_options(dsn).map_err(|error| match error {
         crate::pg::Error::UnsupportedOption(key) => unsupported_proof_option(&key),
         crate::pg::Error::InvalidOption("host") => "NativeProofDsnUnsupported",
         _ => "ProgrammingError",
@@ -223,6 +223,22 @@ fn runtime_library(daemon: &Path, value: std::ffi::OsString) -> Option<std::ffi:
         return None;
     }
     let path = Path::new(&value);
+    #[cfg(windows)]
+    if matches!(
+        path.components().next(),
+        Some(std::path::Component::Prefix(prefix))
+            if matches!(prefix.kind(), std::path::Prefix::Disk(_)) && !path.has_root()
+    ) {
+        // C:library and C:dir/library depend on the caller's drive context,
+        // which the isolated child no longer has after env_clear and chdir.
+        return Some(std::path::absolute(path).map_or(value, |path| path.into_os_string()));
+    }
+    // On Linux, current_exe (and hence ort) resolves the executable symlink.
+    // Other platforms retain their existing executable-directory semantics.
+    #[cfg(target_os = "linux")]
+    let resolved_daemon = std::fs::canonicalize(daemon).ok();
+    #[cfg(target_os = "linux")]
+    let daemon = resolved_daemon.as_deref().unwrap_or(daemon);
     // ort checks the executable's directory before using the OS loader. Keep
     // bare names intact so the loader can apply its own search path.
     let has_separator = value
@@ -885,6 +901,10 @@ fn cleanup_failure(
 }
 
 #[cfg(test)]
+#[path = "proof_loader_tests.rs"]
+mod loader_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -1063,6 +1083,8 @@ mod tests {
             "sslcert=relative.pem",
             "sslkey=relative.pem",
             "sslcrl=relative.pem",
+            "requiressl=1",
+            "ssl=true",
         ] {
             let dsn = format!("postgresql://fixture@localhost/r2_options?{option}");
             assert_eq!(
@@ -1074,6 +1096,20 @@ mod tests {
             daemon_connection_admission("host=localhost dbname=r2_options sslmode=disable"),
             Ok(())
         );
+        for dsn in [
+            "host=localhost user=fixture dbname=r2_options requiressl=0",
+            "postgresql://fixture@localhost/r2_options?requiressl=0",
+            "postgresql://fixture@localhost/r2_options?ssl=true&sslmode=disable",
+        ] {
+            assert_eq!(daemon_connection_admission(dsn), Ok(()));
+            let bound = authenticated(dsn, &PasswordEnvironment::default()).unwrap();
+            assert!(!bound.contains("requiressl") && !bound.contains("ssl=true"));
+            assert!(Dsn::parse_with_connection_options(&bound).is_ok());
+        }
+        assert!(matches!(
+            proof_dsn("host=localhost dbname=r2_options ssl=true"),
+            Err("ProgrammingError")
+        ));
     }
 
     #[test]

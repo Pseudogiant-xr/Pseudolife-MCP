@@ -1,7 +1,9 @@
 """rust.yml's stress mode: one selection on N fresh hosted runners, one row each."""
 
 import json
+import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -718,7 +720,8 @@ def test_stress_jobs_run_only_in_stress_mode_and_reuse_the_candidate():
     plan, loop, report = jobs["stress-plan"], jobs["stress"], jobs["stress-report"]
     assert plan["if"] == "github.event_name == 'workflow_dispatch' && inputs.mode == 'stress'"
     assert plan["outputs"] == {"iterations": "${{ steps.plan.outputs.iterations }}",
-                               "kind": "${{ steps.plan.outputs.kind }}"}
+                               "kind": "${{ steps.plan.outputs.kind }}",
+                               "oracle_base": "${{ steps.oracle.outputs.oracle_base }}"}
     assert loop["needs"] == ["stress-plan", "candidate", "candidate-harness", "stress-build"]
     assert loop["if"] == ("${{ !cancelled() && needs.stress-plan.result == 'success' "
                           "&& needs.candidate.result == 'success' "
@@ -737,10 +740,9 @@ def test_stress_jobs_run_only_in_stress_mode_and_reuse_the_candidate():
     for step in loop["steps"]:
         assert not re.search(r"\bcargo (build|test|nextest (archive|run))\b|\bcargo \+", step.get("run", "")), \
             step.get("name")
-    # The event oracle binding accepts only master dispatches with frozen_head,
-    # so a loop on a branch must not stop there (Codex review of e56fe0f6);
-    # but oracle-dependent pytest selections need it when it can bind (Codex
-    # review of 028c3ebb), so it runs best-effort before the selection.
+    # Binding remains best-effort for selections that do not consume an
+    # event oracle. Branch stress can bind its merge-base oracle, and
+    # oracle-dependent selections still require a valid receipt.
     # test_login's container cases need the image the W1-C connection shard
     # builds on Linux (batch #868 review); hosted Windows runs Windows
     # containers only, so the row skips them there.
@@ -754,7 +756,8 @@ def test_stress_jobs_run_only_in_stress_mode_and_reuse_the_candidate():
     assert names.index(image["name"]) < names.index("Run the selection once")
     binds = [step for step in loop["steps"] if "evals.rust_port.oracle_selection" in step.get("run", "")]
     assert len(binds) == 1 and binds[0]["continue-on-error"] is True
-    assert binds[0]["env"] == {"GITHUB_REF": "${{ github.ref }}"}
+    assert binds[0]["env"] == {"GITHUB_REF": "${{ github.ref }}",
+                                "PSEUDOLIFE_PORT_DISPATCH_BASE": "${{ needs.stress-plan.outputs.oracle_base }}"}
     names = [step.get("name") for step in loop["steps"]]
     assert names.index(binds[0]["name"]) < names.index("Run the selection once")
     assert report["needs"] == ["stress-plan", "stress"]
@@ -768,6 +771,42 @@ def test_stress_jobs_run_only_in_stress_mode_and_reuse_the_candidate():
 
 def step_named(job, name):
     return next(step for step in job["steps"] if step.get("name") == name)
+
+
+def test_stress_plan_freezes_the_remote_master_once_for_all_iterations():
+    plan = raw_workflow()["jobs"]["stress-plan"]
+    checkout = next(step for step in plan["steps"] if step.get("uses") == "actions/checkout@v4")
+    assert checkout["with"]["fetch-depth"] == 0
+    freeze = next(step for step in plan["steps"] if step.get("id") == "oracle")
+    assert "if" not in freeze  # Actions string comparisons ignore case.
+    assert freeze["shell"] == "python"
+
+
+@pytest.mark.parametrize("ref", ["refs/heads/master", "refs/heads/Master",
+                                 "refs/heads/MASTER", "refs/heads/topic"])
+def test_stress_plan_master_check_is_case_sensitive(tmp_path, ref):
+    plan = raw_workflow()["jobs"]["stress-plan"]
+    freeze = next(step for step in plan["steps"] if step.get("id") == "oracle")
+    assert "if" not in freeze, "Actions must not skip case-distinct branch refs"
+    assert freeze["shell"] == "python"
+    if ref != "refs/heads/master":
+        subprocess.run(["git", "init", "--quiet", str(tmp_path)], check=True, capture_output=True)
+        subprocess.run(["git", "-c", "user.name=Fixture", "-c", "user.email=fixture@example.com",
+                        "commit", "--quiet", "--allow-empty", "-m", "fixture"],
+                       cwd=tmp_path, check=True, capture_output=True)
+        base = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=tmp_path, text=True).strip()
+        subprocess.run(["git", "update-ref", "refs/remotes/origin/master", base],
+                       cwd=tmp_path, check=True, capture_output=True)
+    output = tmp_path / "github-output"
+    output.touch()
+    result = subprocess.run([sys.executable, "-c", freeze["run"]], cwd=tmp_path,
+                            env={**os.environ, "GITHUB_REF": ref, "GITHUB_OUTPUT": str(output)},
+                            capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stderr
+    if ref == "refs/heads/master":
+        assert output.read_text(encoding="utf-8") == ""
+    else:
+        assert output.read_text(encoding="utf-8") == f"oracle_base={base}\n"
 
 
 def test_a_cargo_loop_builds_its_test_binaries_once_as_the_rust_job_does():
