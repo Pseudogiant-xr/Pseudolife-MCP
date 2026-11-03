@@ -156,20 +156,20 @@ def test_each_new_authority_and_later_peer_offer_changes_identity(store, codex, 
     assert (third["reason"], third["ring_at"]) == ("anyone", 1002.0)
 
 
-@pytest.mark.parametrize("authority", ["conductor", "maintainer"])
-def test_authority_wakes_do_not_consume_peer_budgets(store, authority):
-    from pseudolife_memory.storage.coordination import MAINTAINER_WAKE_REASON
-
+@pytest.mark.parametrize("authority", ["conductor", "maintainer_message", "lease_grant"])
+@pytest.mark.parametrize("cap", ["recipient_hour", "nightly"])
+def test_authority_wakes_do_not_consume_peer_budgets(store, authority, cap):
     sender, recipient = _delegate(store), _done(store)
     _wake(store, sender, recipient)
-    if authority == "maintainer":
-        store.storage.conn.execute("UPDATE coordination_wakes SET reason=%s", (MAINTAINER_WAKE_REASON,))
-    store.wake = WakePolicy(nightly_total=1, per_recipient_per_hour=1)
+    store.storage.conn.execute("UPDATE coordination_wakes SET reason=%s", (authority,))
+    store.wake = WakePolicy(nightly_total=1 if cap == "nightly" else 100,
+                            per_recipient_per_hour=1 if cap == "recipient_hour" else 100)
     store.update(*creds(recipient), park_reason="needs_info", park_needs="result",
                  park_clear_by="anyone")
     peer = store.register("alice")
     assert _wake(store, peer, recipient)["decision"] == "rung"
-    assert _wake(store, peer, recipient)["decision"] == "capped"
+    capped = _wake(store, peer, recipient)
+    assert (capped["decision"], capped["reason"]) == ("capped", cap)
 
 
 @pytest.mark.parametrize("parked", [False, True])
