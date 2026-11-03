@@ -1896,8 +1896,9 @@ jobs:
 
   # A stress loop (mode=stress): run one selection on N fresh hosted runners
   # and report every iteration (rust/ci/stress.py). It compares against this
-  # checkout's Python on any branch; the event oracle binds best-effort (only
-  # a master dispatch with frozen_head has one). Inputs reach the scripts only through env,
+  # checkout's Python on any branch; branch dispatches also bind an event oracle
+  # from the merge base with master, frozen once by the plan for every iteration.
+  # Inputs reach the scripts only through env,
   # never inlined into a script.
   stress-plan:
     name: Stress / plan
@@ -1907,8 +1908,23 @@ jobs:
     outputs:
       iterations: ${{ steps.plan.outputs.iterations }}
       kind: ${{ steps.plan.outputs.kind }}
+      oracle_base: ${{ steps.oracle.outputs.oracle_base }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Freeze the branch-stress oracle base
+        id: oracle
+        # Actions string comparisons ignore case; Git branch refs do not.
+        shell: python
+        run: |
+          import os
+          import subprocess
+          if os.environ["GITHUB_REF"] != "refs/heads/master":
+              base = subprocess.check_output(
+                  ["git", "rev-parse", "--verify", "refs/remotes/origin/master^{commit}"], text=True).strip()
+              with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+                  output.write(f"oracle_base={base}\n")
       - name: Check the selection and list the iterations
         id: plan
         env:
@@ -2075,21 +2091,22 @@ jobs:
         with:
           name: stress-tests-${{ runner.os }}
           path: ${{ runner.temp }}/stress-tests
-      # Best effort: the event oracle binds only for a master dispatch with
-      # frozen_head. The CLI and daemon harnesses never read it; pytest
-      # selections under evals/rust_port that call selected_oracle() need it,
-      # and on a branch they fail with its "select the event oracle" error.
+      # Best effort for selections that do not consume the event oracle.
+      # Branch stress freezes the merge base with master; master captures
+      # retain frozen_head. Oracle-dependent selections still fail if binding
+      # fails, including an unaccepted production source pin.
       - name: Bind the event-selected Python oracle when the dispatch has one
         continue-on-error: true
         shell: pwsh
         env:
           GITHUB_REF: ${{ github.ref }}
+          PSEUDOLIFE_PORT_DISPATCH_BASE: ${{ needs.stress-plan.outputs.oracle_base }}
         run: |
           python -m evals.rust_port.oracle_selection --out (Join-Path $env:RUNNER_TEMP 'oracle-selection.json') --github-env $env:GITHUB_ENV
           exit $LASTEXITCODE
       # The Rust job's Nextest step has the selected package metadata, which
-      # cli_version_contract reads; it needs the oracle above, so on a branch
-      # it is skipped and that test fails rather than passing.
+      # cli_version_contract reads; it needs the oracle above, and fails
+      # rather than passing if the selected metadata could not be prepared.
       - name: Prepare selected package metadata for the Rust identity contract
         if: env.STRESS_KIND == 'cargo'
         continue-on-error: true
