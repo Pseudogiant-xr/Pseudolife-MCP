@@ -374,8 +374,8 @@ pub async fn payload(
     // Which Console sign-ins this daemon offers (spec 2026-11-02): the
     // Console reads this, never a 401 or 404, to decide whether to offer
     // them. The passkey sign-in is not ported yet (divergence CONSOLE-SIGNIN),
-    // so Rust reports false where Python reports true at a configured
-    // passkey origin.
+    // so Rust reports false where Python reports true: link sign-in on,
+    // coordination on and a maintainer passkey origin configured.
     p.insert(
         "console_signin".into(),
         json!({"link": signin_link, "passkey": false}),

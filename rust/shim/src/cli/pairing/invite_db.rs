@@ -335,7 +335,6 @@ pub(super) async fn list_rejected(client: &Client) -> Result<Vec<Rejected>, DbEr
         .collect()
 }
 
-/// `revoke`: whether a row was there.
 /// `console_sessions.revoke_principal_sessions` (v59): end `name`'s live
 /// Console sessions inside the caller's transaction, as revoking it, or
 /// re-inviting a revoked name, does in Python. A bank before v59 has none.
@@ -367,6 +366,7 @@ async fn revoke_sessions(
     Ok(())
 }
 
+/// `revoke`: whether a row was there.
 pub(super) async fn revoke(client: &mut Client, name: &str) -> Result<bool, DbError> {
     let transaction = client
         .transaction()
