@@ -15,7 +15,7 @@
 //! runtime snapshot after persistence. Other knobs answer `restart_required`
 //! and show their `saved` value until the next start.
 
-mod yaml_dump;
+pub(crate) mod yaml_dump;
 pub(crate) mod yaml_load;
 
 use std::collections::HashSet;

@@ -142,7 +142,7 @@ ROW_SUITES = {
     "test_login": "w1c-connection", "connect": "w1c-connect", "maintainer": "w1c-connect",
     "coordination_recovery": "w1c-connect", "maintainer_setup": "w1c-connect",
     "move": "w1c-connection", "tunnel": "w1c-connection",
-    "audit": "h5-audit", "backup": "h5-backup",
+    "audit": "h5-audit", "backup": "h5-backup", "migrate_flat": "h5-backup",
 }
 # The pseudolife-stdio binary: every CLI row, plus the differential judges,
 # which cover its whole argv, help and version surface.
@@ -159,8 +159,9 @@ DAEMON = ("cli", "cli-store", "cli-daemon", "cli-daemon-2", "cli-live", "eval", 
 SHIM_COMMANDS = {
     # The conservative import scan also sees update's private backup module.
     # Include that row rather than exempting the match from the coverage guard.
-    "backup": ("backup", "update"), "backup_help.txt": ("backup", "update"),
+    "backup": ("backup", "migrate_flat", "update"), "backup_help.txt": ("backup", "migrate_flat", "update"),
     "board_audit": ("audit", "coordination_recovery"),
+    "migrate_flat.rs": ("migrate_flat",),
     "update": ("update",),
     "connect": ("connect",), "doctor": ("doctor",), "maintainer": ("maintainer", "maintainer_setup", "update"),
     "coordination_recovery": ("coordination_recovery",),

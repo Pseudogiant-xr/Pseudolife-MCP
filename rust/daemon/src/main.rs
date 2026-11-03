@@ -53,6 +53,7 @@ mod maintenance;
 mod mcp;
 mod memory_changes;
 mod meta_filter;
+mod migrate_flat_config;
 mod mutants;
 mod native;
 mod onnx_artifacts;
@@ -144,6 +145,9 @@ fn main() {
     // `provision <runtime>` installs a pinned native runtime and exits,
     // before anything that needs a bank or configuration.
     let args: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();
+    if args.first().is_some_and(|a| a == "migrate-flat-config") {
+        std::process::exit(migrate_flat_config::command(&args[1..]));
+    }
     if args.first().is_some_and(|a| a == "provision") {
         std::process::exit(native::command(&args[1..]));
     }

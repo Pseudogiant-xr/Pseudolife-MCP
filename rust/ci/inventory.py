@@ -176,7 +176,7 @@ def check(workflow):
     setup = next(s for s in parity["steps"] if s.get("name") == "Prepare disposable PostgreSQL for H5")
     assert setup["if"] == step["if"] and parity["steps"].index(setup) < parity["steps"].index(step)
 
-    covered = {"audit", "backup"}
+    covered = {"audit", "backup", "migrate_flat"}
     for current in parity["steps"]:
         for words in commands(current.get("run", "")):
             if words[:2] == ["python", "rust/cli_harness"] and "--mutants" not in words:
@@ -186,9 +186,10 @@ def check(workflow):
     assert set(rows) <= covered, "accepted live row dropped"
     # Existing live/golden routing remains checked by test_workflow.py;
     # the executable H5 plan names its additional row modes explicitly.
-    for row in ("audit", "backup"):
-        assert {action["mode"] for action in SUITES[f"h5-{row}"]} == {"live", "record", "golden"}
-        assert all(action["row"] == row for action in SUITES[f"h5-{row}"])
+    for suite, expected_rows in (("h5-audit", {"audit"}), ("h5-backup", {"backup", "migrate_flat"})):
+        assert {action["row"] for action in SUITES[suite]} == expected_rows
+        for row in expected_rows:
+            assert {action["mode"] for action in SUITES[suite] if action["row"] == row} == {"live", "record", "golden"}
 
     source = jobs["source-mutants"]
     assert source["strategy"]["matrix"]["os"] == SYSTEMS

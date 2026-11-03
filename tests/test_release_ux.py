@@ -20,9 +20,14 @@ Pins the fixes from the pre-release UI/UX pass:
 from __future__ import annotations
 
 import asyncio
+import base64
+import gzip
+import hashlib
+import io
 import json
 import re
 import subprocess
+import tarfile
 from pathlib import Path
 
 import pytest
@@ -491,6 +496,9 @@ _IDENT_NEEDLES = (("HAM" "O9").lower().encode(),
                   ("192.168." + "0.").encode(),
                   ("brendan" "-hermes").encode(),
                   ("pseudo" "-pc").encode())
+# A bare given name can be legitimate corpus text, but an archive owner
+# identifies the machine account used to record the fixture.
+_ARCHIVE_OWNER_NEEDLES = (*_IDENT_NEEDLES, ("bren" + "dan").encode())
 # The two hostnames were added 2026-09-04: a graph artifact published the
 # first one as an entity name because the redactor's tracked-tree check
 # vouched for it — the tree already carried it, in a judge-eval fixture built
@@ -509,6 +517,10 @@ _USERNAME_PAT = re.compile(rb"c:\\+users\\+(?!<|o'brien)[a-z0-9]")
 # Every match of _USERNAME_PAT starts with this literal, so it is an exact
 # superset prescreen (same for the two below).
 _USERNAME_PRESCREEN = (b"c:\\",)
+# The audit golden contains one launcher captured under the neutral dev
+# account. Permit only that exact lowercased payload, not its directory or
+# username prefix; every other identifier class is still checked below.
+_NEUTRAL_AUDIT_LAUNCHER_SHA256 = "ce5f14a6aff063f0bfbe3d2eb6778d96083cb1b27be0ab72ff6444ba95fbae17"
 _DEV_BOX_PAT = re.compile(rb"\b(?:dev-" + rb"playground(?:-[0-9]+)?|play" + rb"ground-[0-9]+)\b")
 _RFC1918_PAT = re.compile(
     rb"\b(?:10\.\d{1,3}\.\d{1,3}\.\d{1,3}"
@@ -589,7 +601,8 @@ def _scan_identifiers(rel: str, low: bytes, hits: list) -> None:
         hits.append((rel, "environment-specific account SID"))
         return
     if (any(p in low for p in _USERNAME_PRESCREEN)
-            and _USERNAME_PAT.search(low)):
+            and _USERNAME_PAT.search(low)
+            and hashlib.sha256(low).hexdigest() != _NEUTRAL_AUDIT_LAUNCHER_SHA256):
         hits.append((rel, "windows username path"))
         return
     if any(p in low for p in _CREDENTIAL_PRESCREEN):
@@ -640,6 +653,133 @@ def _git_binary_paths(repo: Path, paths: list[str]) -> set[str]:
     return {path for path, attrs in unset.items() if attrs >= {"text", "diff"}}
 
 
+def _scan_golden_archive_identifiers(rel: str, data: bytes, hits: list) -> None:
+    """Inspect encoded content and archive metadata without extracting files."""
+    def scan(payload: bytes, label: str, depth: int = 0) -> None:
+        # Plain stdout/stderr and file snapshots need the same checks as
+        # archive contents, including after each layer of decoding.
+        _scan_identifiers(label, payload.lower(), hits)
+        if depth > 8:
+            hits.append((rel, "nested golden payload exceeds inspection depth"))
+            return
+        if payload.startswith(b"\x1f\x8b"):
+            try:
+                with gzip.GzipFile(fileobj=io.BytesIO(payload)) as stream:
+                    expanded = stream.read(64 * 1024 * 1024 + 1)
+                if len(expanded) > 64 * 1024 * 1024:
+                    raise ValueError("expanded payload too large")
+                scan(expanded, label + ":gzip", depth + 1)
+            except (OSError, EOFError, ValueError):
+                hits.append((rel, "gzip payload could not be inspected"))
+            return
+        if payload[257:262] == b"ustar":
+            _scan_identifiers(label, payload.lower(), hits)
+            try:
+                with tarfile.open(fileobj=io.BytesIO(payload), mode="r:") as archive:
+                    for index, member in enumerate(archive):
+                        location = f"{label}:tar[{index}]"
+                        owners = (member.uname, member.gname,
+                                  member.pax_headers.get("uname", ""),
+                                  member.pax_headers.get("gname", ""))
+                        if any(needle in owner.lower().encode(errors="surrogatepass")
+                               for owner in owners for needle in _ARCHIVE_OWNER_NEEDLES):
+                            hits.append((location, "maintainer archive owner"))
+                        metadata = [member.name, member.linkname, member.uname, member.gname,
+                                    *member.pax_headers.keys(), *member.pax_headers.values()]
+                        _scan_identifiers(location + ":metadata",
+                                          "\n".join(metadata).encode(errors="surrogatepass").lower(), hits)
+                        if member.isfile():
+                            if member.size > 64 * 1024 * 1024:
+                                raise ValueError("archive member too large")
+                            with archive.extractfile(member) as stream:
+                                scan(stream.read(), location + ":content", depth + 1)
+            except (tarfile.TarError, OSError, ValueError):
+                hits.append((rel, "tar payload could not be inspected"))
+            return
+        try:
+            document = json.loads(payload)
+        except (ValueError, UnicodeError):
+            document = None
+        if isinstance(document, (dict, list)):
+            def walk(value):
+                if isinstance(value, dict):
+                    for key, item in value.items():
+                        walk(key)
+                        walk(item)
+                elif isinstance(value, list):
+                    for item in value:
+                        walk(item)
+                elif isinstance(value, str):
+                    scan(value.encode(errors="surrogatepass"), label + ":json", depth + 1)
+            walk(document)
+        else:
+            # CLI file snapshots prefix their base64 bytes with ``file:``.
+            encoded = payload[5:] if payload.startswith(b"file:") else payload
+            if len(encoded) < 8 or len(encoded) % 4:
+                return
+            try:
+                decoded = base64.b64decode(encoded, validate=True)
+            except ValueError:
+                return
+            scan(decoded, label + ":base64", depth + 1)
+
+    scan(data, rel)
+
+
+@pytest.mark.parametrize("change", ["exact", "changed-byte", "changed-owner"])
+def test_identifier_guard_neutral_launcher_exception_is_exact(change):
+    golden = Path(__file__).resolve().parents[1] / "rust/cli_harness/goldens/audit.windows.json"
+    snapshot = json.loads(golden.read_text(encoding="utf-8"))["cases"][
+        "transport-python-verify-23"]["before"]["docker_fixture.cmd"]
+    payload = base64.b64decode(snapshot.removeprefix("file:"))
+    if change == "changed-byte":
+        payload += b"x"
+    elif change == "changed-owner":
+        payload = payload.replace(b"Users\\dev\\", b"Users\\" + _IDENT_NEEDLES[0] + b"\\")
+    hits = []
+    _scan_identifiers("fixture.cmd", payload.lower(), hits)
+    assert bool(hits) is (change != "exact")
+
+
+@pytest.mark.parametrize("field", ["stdout", "stderr", "file"])
+@pytest.mark.parametrize("payload,rejected", [
+    (b"/home/" + _IDENT_NEEDLES[0] + b"/bank", True),
+    (b"192.168." + b"7.9", True),
+    (b"/home/<user>/bank", False),
+], ids=["username", "private-address", "placeholder"])
+def test_golden_identifier_guard_inspects_plain_base64(field, payload, rejected):
+    encoded = base64.b64encode(payload).decode()
+    value = "file:" + encoded if field == "file" else encoded
+    hits = []
+    _scan_golden_archive_identifiers("fixture.json", json.dumps({field: value}).encode(), hits)
+    assert bool(hits) is rejected
+
+
+@pytest.mark.parametrize("field", ["uname", "gname", "pax", "content"])
+@pytest.mark.parametrize("private", [False, True])
+def test_golden_identifier_guard_inspects_nested_archive_fields(field, private):
+    needle = _IDENT_NEEDLES[0] if field == "content" else _ARCHIVE_OWNER_NEEDLES[-1]
+    owner = needle.decode() if private else "dev"
+    inner = io.BytesIO()
+    with tarfile.open(fileobj=inner, mode="w", format=tarfile.PAX_FORMAT) as archive:
+        member = tarfile.TarInfo("config.yaml")
+        member.uname = member.gname = "dev"
+        if field in ("uname", "gname"):
+            setattr(member, field, owner)
+        elif field == "pax":
+            member.pax_headers = {"uname": owner}
+        content = (owner if field == "content" else "fixture").encode()
+        member.size = len(content)
+        archive.addfile(member, io.BytesIO(content))
+    encoded = "file:" + base64.b64encode(gzip.compress(inner.getvalue())).decode()
+    nested = gzip.compress(json.dumps({"archive": encoded}).encode())
+    hits = []
+    _scan_golden_archive_identifiers("fixture.json",
+                             json.dumps({"file": "file:" + base64.b64encode(nested).decode(),
+                                         "invalid_unicode": "\ud800"}).encode(), hits)
+    assert bool(hits) is private
+
+
 def _scan_control_bytes(rel: str, data: bytes, hits: list) -> None:
     if b"\x00" in data:  # binary file
         return
@@ -672,6 +812,8 @@ def tracked_tree_scan():
         except OSError:
             continue
         _scan_identifiers(rel, data.lower(), ident_hits)
+        if "goldens" in Path(rel).parts and rel.endswith(".json"):
+            _scan_golden_archive_identifiers(rel, data, ident_hits)
         if rel not in binary:
             _scan_control_bytes(rel, data, control_hits)
     return ident_hits, control_hits

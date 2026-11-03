@@ -1,4 +1,7 @@
 {
+  "migrate_flat": [
+    "migrate-flat-apply-fence"
+  ],
   "audit": [
     "audit-body-reason-swap",
     "audit-broken-exit-3",
