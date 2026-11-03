@@ -6,12 +6,16 @@
   // quarantined newer key and revoking a key with itself. Every key change is
   // listed, and one this browser did not make is a notice for a week: anyone
   // with a shell on the daemon host or the database password can change keys.
+  // When the daemon signs the Console in with passkeys, "Use this passkey to
+  // sign in" binds the key the browser's prompt picks to this sign-in.
   import { untrack } from "svelte";
   import type { Passkey } from "../../lib/api/maintainer";
   import { ENROL_COMMAND, inQuarantine, KEY_NOTICE_DAYS, keyChangeText, usableKey } from "../../lib/maintainer";
+  import { BIND_EXPLAINER, signinCapability } from "../../lib/signin";
   import {
     acknowledgeChange,
     addKey,
+    bindKeyForSignin,
     cancelKey,
     enrolBootstrap,
     enrolReadiness,
@@ -23,7 +27,7 @@
     revokeOwnKey,
   } from "../../lib/maintainerFlow.svelte";
   import { fmtDateTime, fmtRelative, keyPrefix } from "../../lib/format";
-  import { ui } from "../../lib/state.svelte";
+  import { store, ui } from "../../lib/state.svelte";
 
   const uid = $props.id();
 
@@ -70,6 +74,20 @@
   /** An older usable key exists, so this quarantined one can be cancelled. */
   function cancellable(k: Passkey): boolean {
     return inQuarantine(k, now) && keys.some((o) => o.created_at < k.created_at && usableKey(o, now));
+  }
+
+  // ---- sign-in ------------------------------------------------------------------
+  const signinByPasskey = $derived(signinCapability(store.health.data)?.passkey === true);
+  let binding = $state(false);
+
+  async function bind() {
+    if (binding) return;
+    binding = true;
+    try {
+      await bindKeyForSignin();
+    } finally {
+      binding = false;
+    }
   }
 
   // ---- bootstrap ----------------------------------------------------------------
@@ -203,6 +221,21 @@
         host can: <code class="mono">pseudolife-mcp maintainer revoke &lt;prefix&gt;</code>, or
         <code class="mono">pseudolife-mcp maintainer reset</code> to revoke them all and reopen enrolment.
       </p>
+    {/if}
+
+    {#if signinByPasskey && keys.some((k) => usableKey(k, now))}
+      <div class="signin">
+        <h3 class="sub-title">Sign in with a passkey</h3>
+        <p class="caption">{BIND_EXPLAINER}</p>
+        {#if !canSign.ok}
+          <p class="blocked" role="status"><span class="blocked-title">{canSign.title}.</span> {canSign.body}</p>
+        {/if}
+        <div class="form-actions">
+          <button type="button" class="btn btn-secondary btn-sm" disabled={!canSign.ok || binding} onclick={bind}>
+            {binding ? "Waiting for your authenticator" : "Use this passkey to sign in"}
+          </button>
+        </div>
+      </div>
     {/if}
 
     {#if history.length}
@@ -438,7 +471,8 @@
     flex-wrap: wrap;
     gap: 8px;
   }
-  .enrol {
+  .enrol,
+  .signin {
     display: flex;
     flex-direction: column;
     gap: 10px;
