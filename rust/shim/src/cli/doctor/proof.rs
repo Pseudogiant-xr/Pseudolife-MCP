@@ -233,10 +233,11 @@ fn runtime_library(daemon: &Path, value: std::ffi::OsString) -> Option<std::ffi:
         // which the isolated child no longer has after env_clear and chdir.
         return Some(std::path::absolute(path).map_or(value, |path| path.into_os_string()));
     }
-    // On POSIX, ort uses current_exe's resolved target, not the PATH symlink.
-    #[cfg(not(windows))]
+    // On Linux, current_exe (and hence ort) resolves the executable symlink.
+    // Other platforms retain their existing executable-directory semantics.
+    #[cfg(target_os = "linux")]
     let resolved_daemon = std::fs::canonicalize(daemon).ok();
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
     let daemon = resolved_daemon.as_deref().unwrap_or(daemon);
     // ort checks the executable's directory before using the OS loader. Keep
     // bare names intact so the loader can apply its own search path.

@@ -74,6 +74,10 @@ async fn runtime_library_reaches_the_isolated_child() {
     let work = root.join("work");
     fs::create_dir_all(&bin).unwrap();
     fs::create_dir_all(work.join("runtime")).unwrap();
+    // getcwd resolves /var to /private/var on macOS. Windows canonicalize
+    // instead adds a verbatim prefix, so keep its ordinary drive spelling.
+    #[cfg(unix)]
+    let work = fs::canonicalize(work).unwrap();
     let daemon = bin.join("daemon.exe");
     // A compiled native trampoline passes one libtest filter to this executable;
     // no Python, compiler or model installation is needed on a stress runner.
@@ -93,7 +97,7 @@ async fn runtime_library_reaches_the_isolated_child() {
         node("child_environment_capture"),
     )
     .unwrap();
-    let library = work.join("runtime/library");
+    let library = work.join("runtime").join("library");
     fs::write(&library, b"caller library").unwrap();
     fs::write(work.join("library"), b"caller library").unwrap();
     let mut cases: Vec<(&str, Option<OsString>, Option<OsString>, bool)> = vec![
@@ -160,10 +164,13 @@ async fn runtime_library_reaches_the_isolated_child() {
         let mut child = command.spawn().unwrap();
         let status = tokio::time::timeout(Duration::from_secs(25), child.wait()).await;
         if status.is_err() {
-            child.kill().await.unwrap();
+            let _ = child.kill().await;
         }
         let output = child.wait_with_output().await.unwrap();
-        assert!(status.unwrap().unwrap().success(), "{label}: {output:?}");
+        assert!(
+            matches!(&status, Ok(Ok(status)) if status.success()),
+            "{label}: wait={status:?}; {output:?}"
+        );
         let received: Value =
             serde_json::from_slice(&fs::read(root.join("result.json")).unwrap()).unwrap();
         assert_eq!(received["value"], json!(expected), "{label}");
@@ -179,4 +186,39 @@ async fn runtime_library_reaches_the_isolated_child() {
         assert!(!root.join("private").exists());
         fs::remove_file(root.join("result.json")).unwrap();
     }
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn runtime_library_uses_resolved_daemon_directory() {
+    let cwd = std::env::current_dir().unwrap();
+    let home = Home(cwd.join(format!("r2-proof-link-{}", uuid::Uuid::new_v4())));
+    let root = &home.0;
+    let real = root.join("real");
+    fs::create_dir_all(&real).unwrap();
+    fs::write(real.join("daemon"), b"fixture executable").unwrap();
+    let link = root.join("daemon");
+    std::os::unix::fs::symlink(real.join("daemon"), &link).unwrap();
+    // Use a unique caller-relative name without mutating this process's cwd.
+    let relative = root.strip_prefix(&cwd).unwrap().join("runtime/library");
+    let caller_library = cwd.join(&relative);
+    let link_library = root.join(&relative);
+    for path in [&caller_library, &link_library] {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, b"caller library").unwrap();
+    }
+    assert_eq!(
+        runtime_library(&link, relative.clone().into_os_string()),
+        Some(caller_library.into_os_string()),
+        "a link-directory match must not hide the caller-relative fallback"
+    );
+    fs::remove_file(link_library).unwrap();
+    let target_library = real.join(&relative);
+    fs::create_dir_all(target_library.parent().unwrap()).unwrap();
+    fs::write(target_library, b"target library").unwrap();
+    assert_eq!(
+        runtime_library(&link, relative.clone().into_os_string()),
+        Some(relative.into_os_string()),
+        "the real daemon directory must take precedence over the caller"
+    );
 }

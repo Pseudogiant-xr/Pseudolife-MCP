@@ -24,7 +24,7 @@ before any database connection. It carries the resolved model directory and
 `ORT_DYLIB_PATH` into an otherwise isolated child environment; it never
 provisions models or reads saved client registrations. Empty runtime overrides
 use ort's default library, daemon-relative paths keep executable-directory
-precedence, and bare names retain the OS loader search. On POSIX, that directory
+precedence, and bare names retain the OS loader search. On Linux, that directory
 belongs to the resolved executable, including when PATH discovery finds a
 symlink. An existing caller-relative path with no daemon-relative match is made
 absolute before the child changes its working directory. Windows drive-relative
@@ -114,8 +114,10 @@ native daemon with a real ONNX library and provisioned CPU models. They require
 a complete hint/ring proof and fixture cleanup for empty, daemon-relative,
 bare, caller-relative and absolute runtime overrides; a conflicting file in
 the caller directory also checks daemon-relative precedence. Symlink cases load
-a library present only beside the PATH link and verify that the resolved daemon's
-library wins over an invalid caller-relative file. These load tests
+a caller-relative library beside a PATH link in the caller's working directory,
+and verify that the resolved daemon's library wins over an invalid caller-relative
+file. A library beside a link elsewhere is not a Linux loader search location.
+These load tests
 require `PSEUDOLIFE_DOCTOR_LIVE_PROOF=1`, an explicit `r2_*` fixture DSN,
 `ORT_DYLIB_PATH` naming the source library, and the provisioned model directory.
 The ordinary `cli_doctor_proof_contract` target also starts a native fixture
@@ -125,6 +127,9 @@ covers unset, empty, bare, caller-relative and absolute inputs on both platforms
 plus Windows drive-relative inputs, without a database, models or a compiler
 on the runner. This child wiring contract does not claim actual ORT loading;
 real-library loading on Windows is not covered by the Linux matrix.
+A Linux unit regression also checks both symlink lookup branches in ordinary
+CI, without changing the test process's working directory. macOS retains its
+prior executable-directory lookup; this follow-up does not claim macOS testing.
 
 ## Exact contract items
 
