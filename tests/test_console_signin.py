@@ -170,6 +170,14 @@ def test_a_revoked_session_stops_resolving_at_once(sessions):
     assert _resolve(sessions) is None
 
 
+def test_a_revocation_that_lands_before_its_sign_in_is_published_stays_revoked(sessions):
+    # redeem_code commits, an operator lists and revokes the new session,
+    # and only then does the redemption publish it to the view.
+    sessions.drop(["s1"])
+    sessions.add(_session())
+    assert _resolve(sessions) is None
+
+
 def test_a_dropped_session_stays_dropped_through_an_older_refresh(sessions):
     row = _session()
 
