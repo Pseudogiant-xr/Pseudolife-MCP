@@ -2068,8 +2068,11 @@ def memory_lesson_search(
     query: Annotated[str, Field(
         description="The task at hand, described the way it would have "
                     "been logged.")],
+    # Omission follows the live config. The int annotation intentionally
+    # keeps an explicitly supplied null invalid at the MCP boundary.
     top_k: Annotated[int, Field(
-        ge=1, description="Max entries returned; positive integer.")] = 5,
+        ge=1, description="Max entries returned; positive integer. "
+                          "Omit to use memory.lessons.top_k (default 5).")] = None,
     verbose: Annotated[bool, Field(
         description="Full provenance metadata; default entries are "
                     "compact.")] = False,
@@ -2875,14 +2878,15 @@ def memory_recall(
         description="Natural-language relational question; its top hits "
                     "seed the graph walk.")],
     hops: Annotated[int, Field(
-        description="Max graph hops. Clamped to 1..5.")] = 3,
+        description="Max graph hops. Clamped to 1..5. When omitted, uses "
+                    "memory.recall.default_hops.")] = None,
     top_k: Annotated[int, Field(
         ge=1,
         description="Positive integer. Bounds only the SEED search (the "
                     "initial hits that "
                     "name the walk's start entities), not the result, which "
                     "is capped separately; up to 3 ``texts`` slots go to "
-                    "seed hits.")] = 5,
+                    "seed hits. When omitted, uses memory.recall.default_top_k.")] = None,
     verbose: Annotated[bool, Field(
         description="Full fact/edge provenance and untruncated texts. "
                     "Default facts are ``{attribute, value}``, edges "
@@ -2908,6 +2912,10 @@ def memory_recall(
     entities may be missing — narrow the question or lower ``hops``.
     Details: docs/guide/retrieval.md.
     """
+    # Omitted arguments follow live configuration; explicit null remains an
+    # integer binding error. Resolve the width once for both walk and caps.
+    if top_k is None:
+        top_k = max(1, int(service.config.memory.recall.default_top_k))
     out = service.recall(query, hops=hops, top_k=top_k)
     entity_hop = out.get("entity_hop") or {}
     seed_text_count = out.get("seed_text_count")
@@ -3227,6 +3235,8 @@ def _warmup() -> None:
     t = time.time()
     logger.info("warmup: preloading embedder + reranker + NLI ...")
     service.warmup()
+    from pseudolife_memory.coordination import drain_lease_grants
+    drain_lease_grants(service)
     logger.info("warmup: pipeline ready in %.1fs", time.time() - t)
 
 

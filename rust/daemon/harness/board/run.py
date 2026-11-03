@@ -43,9 +43,13 @@ from board import scenarios as S  # noqa: E402
 from board.norm import Normalizer, Windows  # noqa: E402
 from board.maintainer import SCENARIOS as MAINTAINER_SCENARIOS  # noqa: E402
 from board.maintainer_refusals import SCENARIOS as MAINTAINER_REFUSALS  # noqa: E402
+from board.lease_recovery import SCENARIOS as LEASE_RECOVERY_SCENARIOS  # noqa: E402
+from board.conductor_wake import SCENARIOS as CONDUCTOR_WAKE  # noqa: E402
 
 S.SCENARIOS.update(MAINTAINER_SCENARIOS)
 S.SCENARIOS.update(MAINTAINER_REFUSALS)
+S.SCENARIOS.update(LEASE_RECOVERY_SCENARIOS)
+S.SCENARIOS.update(CONDUCTOR_WAKE)
 
 # This harness admits only its own slice's disposable database names.
 pg = pgdisposable.Slice("w2f")

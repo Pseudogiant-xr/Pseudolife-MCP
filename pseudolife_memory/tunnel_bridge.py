@@ -13,6 +13,7 @@ import threading
 import time
 import uuid
 
+from pseudolife_memory import child_python
 from pseudolife_memory.tunnel_profiles import Profile, ProfileStore, TunnelError, private_read, private_write
 
 TOOLS = ('memory_search', 'memory_agents')
@@ -338,7 +339,7 @@ def run_bridge(store: ProfileStore, profile: Profile, *, command=None, stdin=Non
     source = stdin or sys.stdin.buffer
     destination = stdout or sys.stdout.buffer
     observer = Observer(store, profile.name, profile)
-    with subprocess.Popen(command or [sys.executable, '-m', 'pseudolife_memory.cli'], env=env,
+    with subprocess.Popen(command or child_python.cli_argv(), env=env,
                           stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL) as child:
         write_lock = threading.Lock()
         emit_lock = threading.Lock()

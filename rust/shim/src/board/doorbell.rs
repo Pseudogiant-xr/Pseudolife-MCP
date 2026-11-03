@@ -101,6 +101,7 @@ pub struct BellState {
     covered: u64,
     outstanding: bool,
     last_ring: Option<(String, String, f64)>,
+    deferred_privileged: Option<(Value, u64)>,
     pending: PendingNotice,
     watch_cancel: CancellationToken,
     adapter: Arc<Adapter>,
@@ -227,6 +228,7 @@ impl Doorbell {
                 covered,
                 outstanding,
                 last_ring: None,
+                deferred_privileged: None,
                 pending,
                 watch_cancel: watch_cancel.clone(),
                 adapter: adapter.clone(),
@@ -251,7 +253,11 @@ impl Doorbell {
                 && name == "memory_message"
                 && arguments.get("action").and_then(Value::as_str) == Some("receive")
             {
+                // Receive covers current mail even with after/limit. Only
+                // clear the local reservation; the adapter's offer and
+                // Stop-hook marker remain available for a later arrival.
                 bell.covered = bell.covered.max(bell.arrival);
+                bell.deferred_privileged = None;
             }
         }
     }
@@ -290,6 +296,30 @@ impl Doorbell {
             return;
         }
         let Some(count) = view.count else { return };
+        // A failed reservation can survive newer peer permission, but never
+        // explicit daemon withdrawal (including an invalidated park).
+        let permitted = view.wake.as_ref().is_some_and(|wake| {
+            wake["reason"].is_string()
+                && wake["ring_at"].as_f64().is_some_and(|at| at.is_finite())
+                && (wake["decision"] == "rung"
+                    || (wake["decision"] == "attention"
+                        && wake["queue_allowed"] == true
+                        && wake["recipient_state"] == "unknown"))
+        });
+        if bell
+            .deferred_privileged
+            .as_ref()
+            .is_some_and(|(wake, watermark)| {
+                !permitted
+                    || count == 0
+                    || view.delivered >= *watermark
+                    || wake["message_expires_at"]
+                        .as_f64()
+                        .is_none_or(|at| at <= now())
+            })
+        {
+            bell.deferred_privileged = None;
+        }
         let unknown = view
             .preview
             .iter()
@@ -335,11 +365,15 @@ impl Doorbell {
             bell.covered = bell.arrival;
             return;
         }
-        let Some(wake) = &view.wake else { return };
-        if view
-            .wake_watermark
-            .is_none_or(|watermark| view.delivered >= watermark)
-        {
+        let selected = bell
+            .deferred_privileged
+            .as_ref()
+            .map(|(wake, watermark)| (wake, Some(*watermark)))
+            .or_else(|| view.wake.as_ref().map(|wake| (wake, view.wake_watermark)));
+        let Some((wake, watermark)) = selected else {
+            return;
+        };
+        if watermark.is_none_or(|watermark| view.delivered >= watermark) {
             return;
         }
         let decision = wake.get("decision").and_then(Value::as_str);
@@ -371,6 +405,10 @@ impl Doorbell {
             .filter(|value| !value.is_null())
             .map(|value| value.as_f64().unwrap_or(f64::NAN));
         let unknown = decision == "attention";
+        let deferred = (decision == "rung"
+            && matches!(reason, "maintainer_message" | "conductor")
+            && expiry.is_some_and(|at| at.is_finite() && at > now()))
+        .then(|| (wake.clone(), watermark.unwrap()));
         let (previous_expiry, notice, current_expiry) = offload(&bell.pending, move |pending| {
             let expired = pending.path.with_extension("bell-unresolved-expired");
             let previous = state::read(&expired, 8192).ok();
@@ -385,6 +423,7 @@ impl Doorbell {
             self.note_expiry(&bell.adapter, thread, &basis).await;
         }
         let Some(notice) = notice else {
+            bell.deferred_privileged = deferred;
             bell.outstanding = state::exists(&bell.pending.path);
             self.note_delivery(
                 &bell.adapter,
@@ -404,6 +443,7 @@ impl Doorbell {
             .await;
             return;
         };
+        bell.deferred_privileged = None;
         bell.last_ring = Some(ring.clone());
         bell.covered = bell.arrival;
         bell.outstanding = true;

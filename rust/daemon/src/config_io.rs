@@ -16,7 +16,7 @@
 //! and show their `saved` value until the next start.
 
 mod yaml_dump;
-mod yaml_load;
+pub(crate) mod yaml_load;
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -159,9 +159,7 @@ fn setting(cfg: &Config, path: &str) -> Option<Value> {
         "memory.dream.fallback_model" => opt(&d.fallback_model),
         "memory.dream.runs_keep" => json!(d.runs_keep),
         "memory.lessons.enabled" => json!(m.lessons_enabled),
-        // No reader in this daemon (the binder never reads it over MCP):
-        // `LessonsConfig.top_k`'s default.
-        "memory.lessons.top_k" => json!(5),
+        "memory.lessons.top_k" => json!(m.lessons_top_k),
         "memory.lessons.signal_retention_days" => json!(m.lessons_signal_retention_days),
         "memory.lessons.synthesize_in_dream" => json!(m.lessons_synthesize_in_dream),
         "memory.lessons.infer_outcomes" => json!(m.lessons_infer_outcomes),
@@ -644,6 +642,7 @@ fn node_type(node: &Node) -> &'static str {
         Node::Str(_) | Node::MergeKey => "str",
         Node::Seq(_) => "list",
         Node::Map(_) => "dict",
+        Node::Unsupported { .. } => unreachable!("startup-only YAML scalar"),
     }
 }
 
@@ -902,6 +901,7 @@ fn node_truthy(node: &Node) -> bool {
         Node::Seq(items) => !items.is_empty(),
         Node::Map(entries) => !entries.is_empty(),
         Node::MergeKey => true,
+        Node::Unsupported { .. } => unreachable!("startup-only YAML scalar"),
     }
 }
 

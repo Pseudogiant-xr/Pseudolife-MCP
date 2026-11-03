@@ -103,32 +103,41 @@ root = Path(os.environ['HOME'])
 args = sys.argv[1:]
 mode = os.environ['R1_SETUP_FIXTURE']
 engine = os.environ.get('R1_SETUP_ENGINE', 'rust')
+container = os.environ.get('R4_SETUP_CONTAINER', 'pseudolife-mcp-daemon')
 if args[:3] == ['inspect', '-f', '{{.State.Running}}']:
+    assert args[-1] == container, args
+    if mode == 'missing':
+        print('No such container', file=sys.stderr)
+        raise SystemExit(1)
     print('false' if mode == 'stopped' else 'true')
     raise SystemExit(0)
 if args[:2] == ['inspect', '-f']:
     assert args[2] == '{{index .Config.Labels "org.pseudolife.engine"}}'
+    assert args[-1] == container, args
     print(engine if engine != 'unlabelled' else '<no value>')
     raise SystemExit(0)
-if args == ['restart', 'pseudolife-mcp-daemon']:
+if args == ['restart', container]:
     with (root / 'effects.jsonl').open('a') as out: out.write(json.dumps(['restart']) + '\n')
     if mode == 'restart-fails':
         print('fixture restart failure', file=sys.stderr)
         raise SystemExit(1)
-    print('pseudolife-mcp-daemon')
+    print(container)
     raise SystemExit(0)
 assert args[0] == 'exec'
 args = args[1:]
 if args[:2] == ['-e', 'PSEUDOLIFE_DAEMON_EXEC=1']: args = args[2:]
 if engine == 'rust':
-    assert args[:4] == ['pseudolife-mcp-daemon', 'pseudolife-mcp', 'maintainer', 'setup'], args
+    assert args[:4] == [container, 'pseudolife-mcp', 'maintainer', 'setup'], args
     args = args[4:]
 else:
-    assert args[:4] == ['pseudolife-mcp-daemon', 'python', '-m', 'pseudolife_memory.maintainer_setup'], args
+    assert args[:4] == [container, 'python', '-m', 'pseudolife_memory.maintainer_setup'], args
     args = ['--host-' + args[4], *args[5:]]
 with (root / 'effects.jsonl').open('a') as out: out.write(json.dumps(args) + '\n')
 configured = mode in ('active', 'pending', 'restart-retry') or (root / 'written').exists()
 if args == ['--host-state']:
+    if mode == 'unreadable':
+        print('unreadable')
+        raise SystemExit(0)
     keys = [{'prefix': 'fixture-key1', 'label': 'fixture', 'state': 'active'}] if mode in ('active', 'restart-retry') else []
     if mode == 'pending': keys = [{'prefix': 'fixture-key1', 'label': 'fixture', 'state': 'pending'}]
     print(json.dumps({'config_path': str(root / 'config.yaml'),
@@ -212,4 +221,19 @@ def cases():
                 docker_env["PSEUDOLIFE_MCP_TOKEN"] = "fixture-console-token"
             result.append(core.Case("setup-" + engine + "-image-" + mode, base + extra, env=docker_env, daemon=_daemon(),
                                     setup=_docker_setup, after=_docker_after(expected), programs=("docker", "tailscale")))
+    for engine in ("rust", "python", "unlabelled"):
+        for mode, extra, expected in [
+            ("active", ["--check"], ["--host-state"]),
+            ("pending", ["--check"], ["--host-state"]),
+            ("unreadable", ["--check"], ["--host-state"]),
+            ("missing", ["--check"], []),
+            ("fresh", ["--yes"], ["--host-state", "--host-write", "restart"]),
+        ]:
+            docker_env = dict(env, PSEUDOLIFE_DOCKER="{HOME}/fixture_docker." + ("cmd" if core.WINDOWS else "sh"),
+                              R1_SETUP_FIXTURE=mode, R1_SETUP_ENGINE=engine,
+                              R4_SETUP_CONTAINER="second-project-daemon")
+            result.append(core.Case("setup-scoped-" + engine + "-" + mode,
+                                    base + ["--container", "second-project-daemon"] + extra,
+                                    env=docker_env, daemon=_daemon(), setup=_docker_setup,
+                                    after=_docker_after(expected), programs=("docker", "tailscale")))
     return result

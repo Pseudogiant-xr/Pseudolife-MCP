@@ -233,7 +233,7 @@ mod inherited_pin {
 
 #[cfg(windows)]
 #[allow(unsafe_code)]
-mod windows_job {
+pub(crate) mod windows_job {
     use std::{
         io,
         os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle},
@@ -257,7 +257,7 @@ mod windows_job {
         },
     };
 
-    pub(super) fn create() -> io::Result<OwnedHandle> {
+    pub(crate) fn create() -> io::Result<OwnedHandle> {
         // SAFETY: null attributes/name create an unnamed, non-inheritable job.
         let raw = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
         if raw.is_null() {
@@ -285,7 +285,7 @@ mod windows_job {
         Ok(job)
     }
 
-    pub(super) fn assign_and_resume(
+    pub(crate) fn assign_and_resume(
         job: &OwnedHandle,
         child: &tokio::process::Child,
     ) -> io::Result<()> {

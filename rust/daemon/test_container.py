@@ -59,6 +59,20 @@ def load(name):
 
 
 class ContainerTests(unittest.TestCase):
+    def test_native_compile_inputs_exist_in_the_image_builder(self):
+        self.assertEqual(load("container_inputs").missing_compile_inputs(ROOT), [])
+
+    def test_missing_compile_input_guard_rejects_host_only_python_source(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "ops").mkdir()
+            (root / "ops/Dockerfile.daemon-rust").write_text(
+                "FROM rust AS builder\nCOPY rust /build/rust\nFROM debian\n", encoding="utf-8")
+            source = root / "rust/shim/src"
+            source.mkdir(parents=True)
+            (source / "probe.rs").write_text('include_str!("../../../pseudolife_memory/schema.py");', encoding="utf-8")
+            self.assertEqual(len(load("container_inputs").missing_compile_inputs(root)), 1)
+
     def test_guard_import_needs_only_the_standard_library(self):
         subprocess.run([sys.executable, "-S", "-c",
                         "import runpy, sys; runpy.run_path(sys.argv[1], run_name='container_guard_import')",
@@ -123,7 +137,8 @@ class ContainerTests(unittest.TestCase):
                      "rust/shared/pg_runtime.rs",
                      "ops/Dockerfile.daemon-rust", "ops/docker-compose.rust.yml",
                      "ops/provision-daemon-models.sh",
-                     ".github/workflows/rust.yml", "plugin/hooks/session-start.sh"):
+                     ".github/workflows/rust.yml", "plugin/hooks/session-start.sh",
+                     "pseudolife_memory/web/static/index.html"):
             with self.subTest(path=path):
                 self.assertTrue(gate.needs_image([path]))
         self.assertFalse(gate.needs_image(["README.md", "docs/guide/configuration.md",
@@ -141,6 +156,12 @@ class ContainerTests(unittest.TestCase):
         job = (ROOT / ".github/workflows/rust.yml").read_text(encoding="utf-8").split(
             "\n  daemon-image:", 1)[1].split("\n  parity:", 1)[0]
         self.assertIn("docker run --rm --network none w3j-daemon-rust:prep pseudolife-mcp version", job)
+
+    def test_image_ships_the_console_and_selects_its_asset_directory(self):
+        dockerfile = (ROOT / "ops/Dockerfile.daemon-rust").read_text(encoding="utf-8")
+        self.assertIn("COPY pseudolife_memory/web/static /app/static", dockerfile)
+        self.assertIn("PSEUDOLIFE_DAEMON_STATIC_DIR=/app/static", dockerfile)
+        self.assertTrue((ROOT / "pseudolife_memory/web/static/index.html").is_file())
 
     def test_release_overlay_requires_a_pull_and_an_explicit_version(self):
         overlay = (ROOT / "ops/docker-compose.rust-ghcr.yml").read_text(encoding="utf-8")

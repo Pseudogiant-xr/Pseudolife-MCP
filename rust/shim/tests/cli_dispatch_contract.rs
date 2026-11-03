@@ -79,14 +79,12 @@ fn recognized_deferred_modes_are_not_reported_as_python_unknown_modes() {
 }
 
 #[test]
-fn deferred_update_names_the_available_native_install_command() {
+fn update_dispatches_to_the_native_updater_help() {
     let output = Command::new(env!("CARGO_BIN_EXE_pseudolife-stdio"))
-        .arg("update")
+        .args(["update", "--help"])
         .output()
         .unwrap();
-    assert_eq!(output.status.code(), Some(1));
-    assert!(output.stdout.is_empty());
-    assert!(String::from_utf8_lossy(&output.stderr).contains(
-        "pseudolife-mcp runtime install --archive <archive> --sha256sums <SHA256SUMS> --version <version>"
-    ));
+    assert_eq!(output.status.code(), Some(0));
+    assert!(output.stderr.is_empty());
+    assert!(String::from_utf8_lossy(&output.stdout).contains("--engine python|rust"));
 }

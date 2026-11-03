@@ -247,6 +247,18 @@ jobs:
       run:
         working-directory: rust
     steps:
+      # Hosted Linux only: the default and --no-default-features builds and
+      # their test binaries outgrew the runner's disk on 2026-11-03 (batch
+      # 18, job 125843927347: "No space left on device" compiling the second
+      # nextest pass). Remove preinstalled SDKs this job never uses.
+      - name: Free the hosted Linux runner's disk
+        if: runner.os == 'Linux' && runner.environment == 'github-hosted'
+        working-directory: .
+        shell: bash
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+          df -h /
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -896,16 +908,18 @@ jobs:
           exit $LASTEXITCODE
       - name: CLI differential harness
         if: matrix.suite == 'cli'
-        timeout-minutes: 10
+        # Updater transaction/wrapper acceptance adds about five minutes on
+        # the Windows dev VM; keep that allowance beyond the existing step.
+        timeout-minutes: 15
         shell: pwsh
         run: |
           $binaryName = if ($IsWindows) { 'pseudolife-stdio.exe' } else { 'pseudolife-stdio' }
           $candidate = (Resolve-Path (Join-Path 'rust/target/release' $binaryName)).Path
           $env:PSEUDOLIFE_RUST_BINARY = $candidate
           $env:PSEUDOLIFE_BACKUP_NATIVE_REQUIRED = '1'
-          python -m pytest -q -p no:cacheprovider rust/cli_harness/test_cli_harness.py rust/cli_harness/test_lease.py rust/cli_harness/test_bank.py rust/cli_harness/test_backup.py -ra --durations=30 --junitxml (Join-Path $env:RUNNER_TEMP 'junit/cli-differential-harness.xml')
+          python -m pytest -q -p no:cacheprovider rust/cli_harness/test_cli_harness.py rust/cli_harness/test_lease.py rust/cli_harness/test_bank.py rust/cli_harness/test_backup.py rust/cli_harness/test_update_transactions.py rust/cli_harness/test_update_wrappers_native.py -ra --durations=30 --junitxml (Join-Path $env:RUNNER_TEMP 'junit/cli-differential-harness.xml')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python rust/cli_harness --row mail --row hook --row episode --golden --candidate $candidate -v --out (Join-Path $env:RUNNER_TEMP 'cli-harness-golden.json')
+          python rust/cli_harness --row mail --row hook --row episode --row update --golden --candidate $candidate -v --out (Join-Path $env:RUNNER_TEMP 'cli-harness-golden.json')
           exit $LASTEXITCODE
       # The same rows against this checkout's Python live: the hook row's
       # 250 ms health probe is part of what is compared, so a cold Windows
@@ -917,7 +931,7 @@ jobs:
         run: |
           $binaryName = if ($IsWindows) { 'pseudolife-stdio.exe' } else { 'pseudolife-stdio' }
           $candidate = (Resolve-Path (Join-Path 'rust/target/release' $binaryName)).Path
-          python rust/cli_harness --row mail --row hook --row episode --skip-bank --candidate $candidate -v --out (Join-Path $env:RUNNER_TEMP 'cli-harness.json')
+          python rust/cli_harness --row mail --row hook --row episode --row update --skip-bank --candidate $candidate -v --out (Join-Path $env:RUNNER_TEMP 'cli-harness.json')
           exit $LASTEXITCODE
       - name: Prepare disposable PostgreSQL for CLI lease row
         # Every cli shard's daemon harnesses take their banks from it.
@@ -1639,7 +1653,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-        shard: [audit-0, audit-1, audit-2, backup-0, backup-1, backup-2, connect-0, connect-1, connect-2, coordination_recovery-0, doctor-0, doctor-1, doctor-2, doctor-3, doctor-4, episode-0, hook-0, hook-1, invite-0, lease-0, lease_operator-0, mail-0, mail-1, maintainer-0, maintainer-1, maintainer_setup-0, move-0, move-1, pair-0, pair-1, test_login-0, test_login-1, test_login-2, transfer-0, transfer-1, transfer-2, tunnel-0, tunnel-1, tunnel-2]
+        shard: [audit-0, audit-1, audit-2, backup-0, backup-1, backup-2, connect-0, connect-1, connect-2, coordination_recovery-0, doctor-0, doctor-1, doctor-2, doctor-3, doctor-4, episode-0, hook-0, hook-1, invite-0, lease-0, lease_operator-0, mail-0, mail-1, maintainer-0, maintainer-1, maintainer_setup-0, move-0, move-1, pair-0, pair-1, test_login-0, test_login-1, test_login-2, transfer-0, transfer-1, transfer-2, tunnel-0, tunnel-1, tunnel-2, update-0]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     steps:

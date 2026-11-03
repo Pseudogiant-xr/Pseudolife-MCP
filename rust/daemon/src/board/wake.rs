@@ -24,6 +24,7 @@ const REOPEN_ROW_REASONS: [&str; 5] = [
     "coordinator",
 ];
 pub const MAINTAINER_WAKE_REASON: &str = "maintainer_message";
+const PRIVILEGED_WAKE_REASONS: [&str; 3] = [MAINTAINER_WAKE_REASON, "conductor", "lease_grant"];
 const ROLE_ACTORS: [&str; 2] = ["operator", "maintainer"];
 const WAKE_SERVE_REPEAT: f64 = 25.0;
 const LEASE_CLEAR_GRACE: f64 = 60.0;
@@ -138,6 +139,16 @@ async fn authority(
     if maintainer_principals.contains(&sender.principal) {
         return Ok(Some("maintainer"));
     }
+    conductor_authority(c, sender, recipient, now).await
+}
+
+/// Verify the live project hold and its operator/maintainer grant fence.
+async fn conductor_authority(
+    c: &impl GenericClient,
+    sender: &AgentRow,
+    recipient: &AgentRow,
+    now: f64,
+) -> Result<Option<&'static str>> {
     if recipient.project.is_empty() {
         return Ok(None);
     }
@@ -195,6 +206,10 @@ fn no_path(recipient: &AgentRow, missing: &str) -> Map<String, Value> {
     m
 }
 
+fn recently_active(last_activity: f64, now: f64, active_seconds: i64) -> bool {
+    last_activity > now - active_seconds as f64
+}
+
 /// `_wake_decision`. The returned object may carry `_ring`, which `send`
 /// pops into the audit payload before storing the decision.
 #[allow(clippy::too_many_arguments)]
@@ -211,7 +226,13 @@ pub async fn wake_decision(
     maintainer: bool,
 ) -> Result<Map<String, Value>> {
     if maintainer {
-        return maintainer_wake(c, policy, sender, recipient, now, message_id).await;
+        return maintainer_wake(c, policy, sender, recipient, now, message_id, false).await;
+    }
+    if conductor_authority(c, sender, recipient, now)
+        .await?
+        .is_some()
+    {
+        return maintainer_wake(c, policy, sender, recipient, now, message_id, true).await;
     }
     let park = live_park(recipient, now);
     let done = park.as_ref().is_some_and(|p| p.park_reason == "done");
@@ -227,7 +248,9 @@ pub async fn wake_decision(
         m
     };
     let attention = park.is_none() && urgent && recipient.has_capability("codex");
-    if !attention && park.is_none() && recipient.last_activity > now - policy.active_seconds as f64
+    if !attention
+        && park.is_none()
+        && recently_active(recipient.last_activity, now, policy.active_seconds)
     {
         return Ok(obj_map(json!({"decision": "hinted", "reason": "active"})));
     }
@@ -330,13 +353,14 @@ pub async fn wake_decision(
             "SELECT count(*) FILTER (WHERE recipient_agent_id=$1 AND created_at>$2) AS recipient,\
              count(*) FILTER (WHERE created_at>$3) AS night,\
              max(ring_at) FILTER (WHERE sender_agent_id=$4 AND ring_at>$5) AS burst \
-             FROM coordination_wakes",
+             FROM coordination_wakes WHERE NOT (reason=ANY($6))",
             &[
                 &recipient.agent_id,
                 &hour,
                 &day,
                 &sender.agent_id,
                 &stagger_floor,
+                &PRIVILEGED_WAKE_REASONS.to_vec(),
             ],
         )
         .await?;
@@ -401,7 +425,31 @@ pub async fn wake_decision(
     Ok(m)
 }
 
-/// `_maintainer_wake`.
+/// A committed grant uses one ordinary daemon message, without peer caps.
+pub async fn lease_grant_wake(
+    c: &impl GenericClient,
+    sender: &AgentRow,
+    recipient: &AgentRow,
+    now: f64,
+    message_id: &str,
+) -> Result<Map<String, Value>> {
+    c.execute(
+        "INSERT INTO coordination_wakes (recipient_agent_id,sender_agent_id,message_id,\
+         decision,reason,urgent,ring_at,created_at) \
+         VALUES ($1,$2,$3,'rung','lease_grant',false,$4,$4)",
+        &[&recipient.agent_id, &sender.agent_id, &message_id, &now],
+    )
+    .await?;
+    let mut decision = if let Some(missing) = listener_path(recipient, now) {
+        no_path(recipient, missing)
+    } else {
+        obj_map(json!({"decision": "rung", "reason": "lease_grant", "ring_at": float_value(now)}))
+    };
+    decision.insert("_ring".into(), json!("lease_grant"));
+    Ok(decision)
+}
+
+/// `_maintainer_wake`: verified conductors share delivery but have a sender budget.
 async fn maintainer_wake(
     c: &impl GenericClient,
     policy: &WakePolicy,
@@ -409,22 +457,50 @@ async fn maintainer_wake(
     recipient: &AgentRow,
     now: f64,
     message_id: &str,
+    conductor: bool,
 ) -> Result<Map<String, Value>> {
+    let reason = if conductor {
+        "conductor"
+    } else {
+        MAINTAINER_WAKE_REASON
+    };
+    let column = if conductor {
+        "sender_agent_id"
+    } else {
+        "recipient_agent_id"
+    };
+    let identity = if conductor {
+        &sender.agent_id
+    } else {
+        &recipient.agent_id
+    };
+    let reasons: Vec<String> = if conductor {
+        AUTHORITY_ROW_REASONS
+            .iter()
+            .map(|s| s.to_string())
+            .collect()
+    } else {
+        vec![MAINTAINER_WAKE_REASON.to_string()]
+    };
     let sent = count(
         &c.query_one(
-            "SELECT count(*) AS n FROM coordination_wakes WHERE \
-             recipient_agent_id=$1 AND reason=$2 AND created_at>$3",
-            &[
-                &recipient.agent_id,
-                &MAINTAINER_WAKE_REASON,
-                &(now - 3600.0),
-            ],
+            &format!(
+                "SELECT count(*) AS n FROM coordination_wakes WHERE \
+                      {column}=$1 AND reason=ANY($2) AND created_at>$3"
+            ),
+            &[identity, &reasons, &(now - 3600.0)],
         )
         .await?,
     );
-    if sent >= policy.maintainer_per_recipient_per_hour {
+    let cap = if conductor {
+        policy.authority_per_sender_per_hour
+    } else {
+        policy.maintainer_per_recipient_per_hour
+    };
+    if sent >= cap {
         return Ok(obj_map(
-            json!({"decision": "capped", "reason": "maintainer_hour"}),
+            json!({"decision": "capped", "reason": if conductor {
+                "authority_sender_hour" } else { "maintainer_hour" }}),
         ));
     }
     c.execute(
@@ -434,20 +510,23 @@ async fn maintainer_wake(
             &recipient.agent_id,
             &sender.agent_id,
             &message_id,
-            &MAINTAINER_WAKE_REASON,
+            &reason,
             &now,
             &now,
         ],
     )
     .await?;
-    if let Some(missing) = listener_path(recipient, now) {
-        let mut m = no_path(recipient, missing);
-        m.insert("_ring".into(), json!(MAINTAINER_WAKE_REASON));
-        return Ok(m);
+    let mut m = if let Some(missing) = listener_path(recipient, now) {
+        no_path(recipient, missing)
+    } else {
+        let mut m = obj_map(json!({"decision": "rung", "reason": reason}));
+        m.insert("ring_at".into(), float_value(now));
+        m
+    };
+    m.insert("_ring".into(), json!(reason));
+    if conductor && live_park(recipient, now).is_some_and(|p| p.park_reason == "done") {
+        m.insert("reopened".into(), json!(true));
     }
-    let mut m = obj_map(json!({"decision": "rung", "reason": MAINTAINER_WAKE_REASON}));
-    m.insert("ring_at".into(), float_value(now));
-    m.insert("_ring".into(), json!(MAINTAINER_WAKE_REASON));
     Ok(m)
 }
 
@@ -509,53 +588,6 @@ pub async fn serve_wake(c: &impl GenericClient, agent_id: &str, now: f64) -> Res
         return Ok(Value::Null);
     }
     let seq_floor = park_seq.unwrap_or(0);
-    let reopen: Vec<String> = REOPEN_ROW_REASONS
-        .iter()
-        .map(|s| s.to_string())
-        .chain(std::iter::once(MAINTAINER_WAKE_REASON.to_string()))
-        .collect();
-    let base = "UPDATE coordination_wakes SET served_at=$1 WHERE recipient_agent_id=$2 \
-                AND decision IN ('rung','attention') \
-                AND served_at IS NULL AND EXISTS (SELECT 1 FROM coordination_messages m \
-                WHERE m.message_id=coordination_wakes.message_id AND m.recipient_agent_id=$2 \
-                AND m.acknowledged_at IS NULL AND m.expires_at>$1)";
-    if codex {
-        let guard = " AND (decision='attention' OR ($3 AND reason=$4) OR ($5 AND EXISTS \
-                     (SELECT 1 FROM coordination_events s WHERE s.event='send' \
-                     AND s.message_id=coordination_wakes.message_id AND s.seq>$6)))";
-        if reopen_only {
-            let sql = format!("{base}{guard} AND decision='rung' AND reason=ANY($7)");
-            c.execute(
-                &sql,
-                &[
-                    &now,
-                    &agent_id,
-                    &listening,
-                    &MAINTAINER_WAKE_REASON,
-                    &ring_allowed,
-                    &seq_floor,
-                    &reopen,
-                ],
-            )
-            .await?;
-        } else {
-            let sql = format!("{base}{guard}");
-            c.execute(
-                &sql,
-                &[
-                    &now,
-                    &agent_id,
-                    &listening,
-                    &MAINTAINER_WAKE_REASON,
-                    &ring_allowed,
-                    &seq_floor,
-                ],
-            )
-            .await?;
-        }
-    } else {
-        c.execute(base, &[&now, &agent_id]).await?;
-    }
     let mut rows: Vec<Offerable> = c
         .query(
             "SELECT w.decision,w.reason,w.ring_at,w.created_at,w.wake_id,w.served_at,m.expires_at,\
@@ -566,8 +598,11 @@ pub async fn serve_wake(c: &impl GenericClient, agent_id: &str, now: f64) -> Res
              JOIN coordination_messages m ON m.message_id=w.message_id \
              AND m.recipient_agent_id=w.recipient_agent_id WHERE w.recipient_agent_id=$2 \
              AND w.decision IN ('rung','attention') \
-             AND (w.served_at IS NOT NULL OR $3) AND m.acknowledged_at IS NULL AND m.expires_at>$4",
-            &[&seq_floor, &agent_id, &codex, &now],
+             AND m.acknowledged_at IS NULL AND m.expires_at>$3 \
+             AND (w.reason<>'lease_grant' OR EXISTS (SELECT 1 FROM coordination_leases l \
+             WHERE l.holder_agent_id=m.recipient_agent_id AND l.expires_at>$3 \
+             AND m.request_id='lease-grant:'||l.fence::text))",
+            &[&seq_floor, &agent_id, &now],
         )
         .await?
         .iter()
@@ -586,7 +621,7 @@ pub async fn serve_wake(c: &impl GenericClient, agent_id: &str, now: f64) -> Res
         .collect();
     if reopen_only {
         rows.retain(|item| {
-            item.reason == MAINTAINER_WAKE_REASON
+            PRIVILEGED_WAKE_REASONS.contains(&item.reason.as_str())
                 || (park_seq.is_some()
                     && item.decision == "rung"
                     && REOPEN_ROW_REASONS.contains(&item.reason.as_str())
@@ -602,7 +637,7 @@ pub async fn serve_wake(c: &impl GenericClient, agent_id: &str, now: f64) -> Res
             .iter()
             .filter(|item| {
                 item.decision == "attention"
-                    || (listening && item.reason == MAINTAINER_WAKE_REASON)
+                    || (listening && PRIVILEGED_WAKE_REASONS.contains(&item.reason.as_str()))
                     || (ring_allowed && item.park_authorized)
             })
             .cloned()
@@ -619,6 +654,42 @@ pub async fn serve_wake(c: &impl GenericClient, agent_id: &str, now: f64) -> Res
             return Ok(Value::Null);
         }
     }
+    // System mail gets its first handoff before a newer peer can delay or
+    // downgrade it. Only the selected rows are marked served below.
+    // Losing peer rows remain unstamped and may ring after system mail is
+    // acknowledged: they have not yet had a handoff.
+    let latest = rows
+        .iter()
+        .max_by(|a, b| {
+            a.created_at
+                .total_cmp(&b.created_at)
+                .then(a.wake_id.cmp(&b.wake_id))
+        })
+        .expect("eligible rows");
+    let latest_privileged = PRIVILEGED_WAKE_REASONS.contains(&latest.reason.as_str());
+    let privileged: Vec<Offerable> = rows
+        .iter()
+        .filter(|item| {
+            PRIVILEGED_WAKE_REASONS.contains(&item.reason.as_str())
+                && (codex
+                    || item.queued
+                    || item.served_at.is_none()
+                    || item
+                        .served_at
+                        .is_some_and(|at| at > now - WAKE_SERVE_REPEAT))
+        })
+        .cloned()
+        .collect();
+    let unserved: Vec<Offerable> = privileged
+        .iter()
+        .filter(|item| item.served_at.is_none())
+        .cloned()
+        .collect();
+    if !unserved.is_empty() {
+        rows = unserved;
+    } else if !privileged.is_empty() && latest_privileged {
+        rows = privileged;
+    }
     let mut newest = &rows[0];
     for r in &rows[1..] {
         if (r.created_at, r.wake_id) > (newest.created_at, newest.wake_id) {
@@ -627,12 +698,21 @@ pub async fn serve_wake(c: &impl GenericClient, agent_id: &str, now: f64) -> Res
     }
     if !codex
         && !rows.iter().any(|r| r.queued)
-        && newest.served_at.unwrap_or(f64::NEG_INFINITY) <= now - WAKE_SERVE_REPEAT
+        && newest
+            .served_at
+            .is_some_and(|at| at <= now - WAKE_SERVE_REPEAT)
     {
         return Ok(Value::Null);
     }
+    let offered: Vec<i64> = rows.iter().map(|item| item.wake_id).collect();
+    c.execute(
+        "UPDATE coordination_wakes SET served_at=$1 WHERE wake_id=ANY($2) AND served_at IS NULL",
+        &[&now, &offered],
+    )
+    .await?;
+    let ring_at = max_ring(&rows);
     let mut offer = json!({"decision": newest.decision, "reason": newest.reason,
-                           "ring_at": float_value(max_ring(&rows))});
+                           "ring_at": float_value(ring_at)});
     if codex {
         offer["message_expires_at"] = float_value(newest.expires_at);
         if newest.decision == "attention" {
@@ -641,4 +721,26 @@ pub async fn serve_wake(c: &impl GenericClient, agent_id: &str, now: f64) -> Res
         }
     }
     Ok(offer)
+}
+
+#[cfg(test)]
+mod activity_tests {
+    #[test]
+    fn strict_activity_boundary_matches_python() {
+        let cases: serde_json::Value = serde_json::from_str(include_str!(
+            "../../harness/board/goldens/mail-activity.json"
+        ))
+        .unwrap();
+        for case in cases.as_array().unwrap() {
+            assert_eq!(
+                super::recently_active(
+                    case["last_activity"].as_f64().unwrap(),
+                    case["now"].as_f64().unwrap(),
+                    case["active_seconds"].as_i64().unwrap()
+                ),
+                case["wake"]["decision"] == "hinted",
+                "{case}"
+            );
+        }
+    }
 }
