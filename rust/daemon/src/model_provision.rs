@@ -14,6 +14,7 @@ use std::{
 };
 
 pub const EMBEDDING_MODEL: &str = "Qwen/Qwen3-Embedding-0.6B";
+pub const RERANKER_MODEL: &str = "cross-encoder/ms-marco-MiniLM-L-6-v2";
 pub const CACHE_ENV: &str = "PSEUDOLIFE_DAEMON_MODELS_DIR";
 const COMMAND: &str = "pseudolife-daemon provision models";
 

@@ -253,6 +253,9 @@ impl Doorbell {
                 && name == "memory_message"
                 && arguments.get("action").and_then(Value::as_str) == Some("receive")
             {
+                // Receive covers current mail even with after/limit. Only
+                // clear the local reservation; the adapter's offer and
+                // Stop-hook marker remain available for a later arrival.
                 bell.covered = bell.covered.max(bell.arrival);
                 bell.deferred_privileged = None;
             }

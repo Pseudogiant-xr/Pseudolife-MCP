@@ -18,6 +18,8 @@ use std::{
 pub use cli::run;
 pub use install::{install_archive, install_binary, install_source, target_triple};
 pub use launch::maybe_launch;
+#[cfg(windows)]
+pub(crate) use launch::windows_job;
 pub use prune::{Evidence, Process, collect_evidence, remove_unused};
 
 pub const MARKER: &str = "runtime.json";

@@ -21,6 +21,7 @@ mod pyjson;
 mod test_login;
 mod transfer;
 mod tunnel;
+mod update;
 mod version;
 pub mod wait_mail;
 
@@ -41,7 +42,6 @@ const DEFERRED_MODES: &[&str] = &[
     "expose",
     "tunnel",
     "move",
-    "update",
     "backup",
     "export",
     "import",
@@ -109,6 +109,11 @@ fn mode_repr(mode: &str) -> String {
 /// Handle leaves before daemon attachment; default/shim/channel keep the proxy path.
 pub fn dispatch(mode: Option<&str>) -> Option<ExitCode> {
     let mode = mode.unwrap_or("shim");
+    if mode == "update" {
+        return Some(ExitCode::from(update::run(
+            std::env::args_os().skip(2).collect(),
+        )));
+    }
     if mode == "runtime" {
         return Some(ExitCode::from(crate::runtime::run(
             std::env::args_os().skip(2).collect(),
@@ -190,12 +195,7 @@ pub fn dispatch(mode: Option<&str>) -> Option<ExitCode> {
     {
         return Some(code);
     }
-    let (message, code) = if mode == "update" {
-        (
-            "pseudolife-stdio: mode 'update' is deferred in this candidate; install a verified native archive with: pseudolife-mcp runtime install --archive <archive> --sha256sums <SHA256SUMS> --version <version>\n".to_owned(),
-            1,
-        )
-    } else if DEFERRED_MODES.contains(&mode) {
+    let (message, code) = if DEFERRED_MODES.contains(&mode) {
         (
             format!(
                 "pseudolife-stdio: mode {} is deferred in this candidate\n",

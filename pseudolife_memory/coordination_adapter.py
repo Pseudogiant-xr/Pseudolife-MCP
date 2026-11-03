@@ -424,7 +424,13 @@ class CoordinationAdapter:
     def clear_deferred_ring(self) -> None:
         """A successful receive covers a reservation that never queued."""
         if self._ring_deferred:
-            self._withdraw_ring()
+            # Receive covers current mail even with after/limit. Clear only
+            # the local reservation: Stop-hook delivery remains authorized,
+            # and an identical daemon offer may serve a later arrival.
+            self._ring_offer = None
+            self._taken_ring = None
+            self._ring_deferred = False
+            self._last_ring = None
 
     def _withdraw_ring(self) -> None:
         """Withdraw local authorization, never an outstanding native notice."""

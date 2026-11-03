@@ -24,7 +24,7 @@ const REOPEN_ROW_REASONS: [&str; 5] = [
     "coordinator",
 ];
 pub const MAINTAINER_WAKE_REASON: &str = "maintainer_message";
-const PRIVILEGED_WAKE_REASONS: [&str; 2] = [MAINTAINER_WAKE_REASON, "conductor"];
+const PRIVILEGED_WAKE_REASONS: [&str; 3] = [MAINTAINER_WAKE_REASON, "conductor", "lease_grant"];
 const ROLE_ACTORS: [&str; 2] = ["operator", "maintainer"];
 const WAKE_SERVE_REPEAT: f64 = 25.0;
 const LEASE_CLEAR_GRACE: f64 = 60.0;
@@ -206,6 +206,10 @@ fn no_path(recipient: &AgentRow, missing: &str) -> Map<String, Value> {
     m
 }
 
+fn recently_active(last_activity: f64, now: f64, active_seconds: i64) -> bool {
+    last_activity > now - active_seconds as f64
+}
+
 /// `_wake_decision`. The returned object may carry `_ring`, which `send`
 /// pops into the audit payload before storing the decision.
 #[allow(clippy::too_many_arguments)]
@@ -244,7 +248,9 @@ pub async fn wake_decision(
         m
     };
     let attention = park.is_none() && urgent && recipient.has_capability("codex");
-    if !attention && park.is_none() && recipient.last_activity > now - policy.active_seconds as f64
+    if !attention
+        && park.is_none()
+        && recently_active(recipient.last_activity, now, policy.active_seconds)
     {
         return Ok(obj_map(json!({"decision": "hinted", "reason": "active"})));
     }
@@ -419,6 +425,30 @@ pub async fn wake_decision(
     Ok(m)
 }
 
+/// A committed grant uses one ordinary daemon message, without peer caps.
+pub async fn lease_grant_wake(
+    c: &impl GenericClient,
+    sender: &AgentRow,
+    recipient: &AgentRow,
+    now: f64,
+    message_id: &str,
+) -> Result<Map<String, Value>> {
+    c.execute(
+        "INSERT INTO coordination_wakes (recipient_agent_id,sender_agent_id,message_id,\
+         decision,reason,urgent,ring_at,created_at) \
+         VALUES ($1,$2,$3,'rung','lease_grant',false,$4,$4)",
+        &[&recipient.agent_id, &sender.agent_id, &message_id, &now],
+    )
+    .await?;
+    let mut decision = if let Some(missing) = listener_path(recipient, now) {
+        no_path(recipient, missing)
+    } else {
+        obj_map(json!({"decision": "rung", "reason": "lease_grant", "ring_at": float_value(now)}))
+    };
+    decision.insert("_ring".into(), json!("lease_grant"));
+    Ok(decision)
+}
+
 /// `_maintainer_wake`: verified conductors share delivery but have a sender budget.
 async fn maintainer_wake(
     c: &impl GenericClient,
@@ -568,7 +598,10 @@ pub async fn serve_wake(c: &impl GenericClient, agent_id: &str, now: f64) -> Res
              JOIN coordination_messages m ON m.message_id=w.message_id \
              AND m.recipient_agent_id=w.recipient_agent_id WHERE w.recipient_agent_id=$2 \
              AND w.decision IN ('rung','attention') \
-             AND m.acknowledged_at IS NULL AND m.expires_at>$3",
+             AND m.acknowledged_at IS NULL AND m.expires_at>$3 \
+             AND (w.reason<>'lease_grant' OR EXISTS (SELECT 1 FROM coordination_leases l \
+             WHERE l.holder_agent_id=m.recipient_agent_id AND l.expires_at>$3 \
+             AND m.request_id='lease-grant:'||l.fence::text))",
             &[&seq_floor, &agent_id, &now],
         )
         .await?
@@ -621,8 +654,10 @@ pub async fn serve_wake(c: &impl GenericClient, agent_id: &str, now: f64) -> Res
             return Ok(Value::Null);
         }
     }
-    // Authority gets its first handoff before a newer peer can delay or
+    // System mail gets its first handoff before a newer peer can delay or
     // downgrade it. Only the selected rows are marked served below.
+    // Losing peer rows remain unstamped and may ring after system mail is
+    // acknowledged: they have not yet had a handoff.
     let latest = rows
         .iter()
         .max_by(|a, b| {
@@ -686,4 +721,26 @@ pub async fn serve_wake(c: &impl GenericClient, agent_id: &str, now: f64) -> Res
         }
     }
     Ok(offer)
+}
+
+#[cfg(test)]
+mod activity_tests {
+    #[test]
+    fn strict_activity_boundary_matches_python() {
+        let cases: serde_json::Value = serde_json::from_str(include_str!(
+            "../../harness/board/goldens/mail-activity.json"
+        ))
+        .unwrap();
+        for case in cases.as_array().unwrap() {
+            assert_eq!(
+                super::recently_active(
+                    case["last_activity"].as_f64().unwrap(),
+                    case["now"].as_f64().unwrap(),
+                    case["active_seconds"].as_i64().unwrap()
+                ),
+                case["wake"]["decision"] == "hinted",
+                "{case}"
+            );
+        }
+    }
 }
