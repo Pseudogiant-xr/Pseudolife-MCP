@@ -32,6 +32,8 @@ Native registration recovery adds the open rollback-ownership row below.
 The entry totals per D7 bucket are derived from the entry files, never
 committed here: `python rust/daemon/split_divergences.py --counts` prints them.
 
+TLS wiring now covers six modes and PEM client identities; its remaining libpq conventions keep the row in the caller bucket, so the counts above are unchanged.
+
 ## Behaviour with a caller: B14b routing
 
 Each link names the exact ledger row. Owners are the implementation streams
@@ -47,7 +49,6 @@ whose remaining item is a proof keeps that boundary visible in its entry.
 |---|---|---|
 | [R4-NATIVE-UPDATE](startup-and-configuration/r4-native-update.md) | release/checkout CLI and unattended updates in `rust/shim/src/cli/update` | R4 / B11 and OPS-CUTOVER |
 | [W2F-CLOCK-RETRY](coordination-board-completion-w2/w2f-clock-retry.md) | board sends and daemon notices through `rust/daemon/src/board/dispatch.rs` / `board/notice.rs` during a reconnect | B5 board; B4 writer-session refresh |
-| [W2F-MAIL-PACING](coordination-board-completion-w2/w2f-mail-pacing.md) | production board send/reply wake decisions in `rust/daemon/src/board/mail.rs::Store::send` at the active_seconds boundary | B5 board; B13 differential evidence |
 | [DOC-INGEST-LOCK](document-store-b7-document/doc-ingest-lock.md) | MCP `document_ingest` concurrent with `document_search`/`memory_search`, registered in `rust/daemon/src/mcp/dispatch.rs::registry` | B7 documents |
 | [DOC-PDF-ENGINE](document-store-b7-document/doc-pdf-engine.md) | `pseudolife_memory/mcp_server.py::document_ingest` / Rust `documents.rs::mcp_document_ingest` on a PDF after library loss or bad installation | B7 documents; B11 provisioning via R4/R5 |
 | [DOC-PDF-RECURSION](document-store-b7-document/doc-pdf-recursion.md) | MCP `document_ingest` in `pseudolife_memory/mcp_server.py` / `rust/daemon/src/documents.rs::mcp_document_ingest`, which accepts valid PDFs without excluding this glyph shape | B7 documents |
@@ -77,7 +78,7 @@ whose remaining item is a proof keeps that boundary visible in its entry.
 | [R5-CODEX-BOOTSTRAP-AUTHORITY](startup-and-configuration/r5-codex-bootstrap-authority.md) | Native Codex credential bootstrap through `setup::codex::configure_credential_file` | R5 / B11 installers and client registration |
 | [R5-REGISTRATION-ROLLBACK-OWNERSHIP](startup-and-configuration/r5-registration-rollback-ownership.md) | Native Codex connection/setup rollback through `setup::codex::AppliedConnection::rollback_detailed` | R5 / B11 durable registration recovery |
 | [Storage modes](startup-and-configuration/storage-modes.md) | installed no-DSN startup through Python `pseudolife_memory/service.py::MemoryService` and the lite installer path | B9 embedded Postgres (outside current R1-R7 scope); B11 migration via R4/R5 |
-| [TLS and libpq conventions](startup-and-configuration/tls-and-libpq-conventions.md) | configured external Postgres startup through `pseudolife_memory/service.py::MemoryService._ensure_postgres_storage`, including TLS-required servers | B4 lifecycle/storage; B11 connection setup via R1/R5 |
+| [TLS and libpq conventions](startup-and-configuration/tls-and-libpq-conventions.md) | external Postgres with residual libpq/OpenSSL controls; six TLS modes and PEM identities now implemented | R10 TLS; B4/B11 residual conventions via R1/R5 |
 | [`config-write-restart-only`: `POST /api/config` on a live knob](w2-d-completion-boundary-2026-10/config-write-restart-only-post-api.md) | `frontend/src/lib/api/config.ts::configApi.write`, used by `frontend/src/views/Settings.svelte` | B4 runtime configuration; B2d config API |
 | [`POST /api/config` over a config.yaml this daemon cannot rewrite exactly: a YAML timestamp or `!!binary` value, a mapping or list shared through an anchor and alias (a merge of a mapping of scalars is fine), an integer past 64 bits](w2-d-completion-boundary-2026-10/post-api-config-over-a-config-yaml-this.md) | `frontend/src/lib/api/config.ts::configApi.write` against an existing Python-authored config.yaml during engine cutover | B15 configuration/environment; B2d config API |
 | [`w2d-model-provisioning`](w2-d-completion-boundary-2026-10/w2d-model-provisioning.md) | `rust/daemon/src/read/search_route.rs::params_for` forwards `cfg.reranker.model_name`; `LazyReranker::model` loads the fixed bundle. `ops/provision-daemon-models.sh` invokes default provisioning on Rust image startup. | R10 / B8 configured-model disposition; B11 installed provisioning via R4/R5 |

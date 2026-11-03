@@ -436,6 +436,13 @@ prove are yours.
   maintainer's session that takes it up). A reviewer of
   any kind reviews the diff it was given, starts no other review, subagent
   or Codex run, and does not call its pass single-reviewer.
+- **Under a conductor, the PR's opener reviews once and the conductor
+  reviews each fix round:** the opener runs its review pass and Codex second
+  review before first handing the PR to the conductor, then sends fixes for
+  the conductor's findings back without another pair for the conductor's own
+  delta review (a scope-widening or self-initiated change still gets the
+  opener's fresh pair), because two pairs on one fix round only duplicate
+  each other.
 - **Perf, cache and index changes get an independent review before
   commit** (`/code-review` medium or a reviewer subagent).
 - **Codex approves hooks by their `plugin/hooks/hooks.json` definition**
