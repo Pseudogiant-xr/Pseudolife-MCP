@@ -247,6 +247,18 @@ jobs:
       run:
         working-directory: rust
     steps:
+      # Hosted Linux only: the default and --no-default-features builds and
+      # their test binaries outgrew the runner's disk on 2026-11-03 (batch
+      # 18, job 125843927347: "No space left on device" compiling the second
+      # nextest pass). Remove preinstalled SDKs this job never uses.
+      - name: Free the hosted Linux runner's disk
+        if: runner.os == 'Linux' && runner.environment == 'github-hosted'
+        working-directory: .
+        shell: bash
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+          df -h /
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0

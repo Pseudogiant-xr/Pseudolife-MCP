@@ -63,6 +63,7 @@ pub struct Board {
     pub(crate) maintainer_identity: Mutex<Option<(String, String)>>,
     /// The daemon's own board address, registered by its first notice.
     pub(crate) daemon_identity: Mutex<Option<(String, String)>>,
+    pub(crate) lease_grant_refusals: Mutex<std::collections::HashSet<i64>>,
     pub(crate) conductor: Arc<conductor::Cache>,
     /// Test seam: a send's first attempt waits on this after it took its
     /// ready service and before it stamps (`clock_retry_tests`).
@@ -110,6 +111,7 @@ impl Board {
             service,
             principals,
             daemon_identity: Mutex::new(None),
+            lease_grant_refusals: Mutex::new(Default::default()),
             maintainer_identity: Mutex::new(None),
             conductor: Arc::default(),
             #[cfg(test)]

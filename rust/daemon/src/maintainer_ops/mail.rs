@@ -77,6 +77,7 @@ async fn board_send(
                 expected_writer_epoch: Some(stamp.1),
                 enforce_writer_epoch: true,
                 notice: false,
+                lease_grant: false,
                 maintainer_proof: Some(proof.clone()),
             },
         )
