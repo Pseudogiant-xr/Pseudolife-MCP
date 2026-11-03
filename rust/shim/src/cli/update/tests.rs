@@ -222,23 +222,33 @@ fn native_update_timeout_terminates_command_descendants() {
         temp.0.to_string_lossy().into_owned(),
     );
     env.remove("UPDATE_TIMEOUT_DESCENDANT");
-    let (code, message) = run_cli(
-        &[
-            std::env::current_exe()
-                .unwrap()
-                .to_string_lossy()
-                .into_owned(),
-            "--exact".into(),
-            "cli::update::tests::native_update_timeout_child".into(),
-            "--ignored".into(),
-        ],
-        Some(&env),
-        // The old two-second deadline raced two executable startups on
-        // Windows (#1195). Match the client fixture's 30-second readiness
-        // allowance; no descendant work races an observation sleep afterward.
-        30,
-        false,
-    );
+    let argv = [
+        std::env::current_exe()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned(),
+        "--exact".into(),
+        "cli::update::tests::native_update_timeout_child".into(),
+        "--ignored".into(),
+    ];
+    let (code, message) = std::thread::scope(|scope| {
+        let (send, receive) = std::sync::mpsc::sync_channel(1);
+        scope.spawn(move || {
+            // The old two-second deadline raced two executable startups on
+            // Windows (#1195). Match the client fixture's readiness allowance.
+            let _ = send.send(run_cli(&argv, Some(&env), 30, false));
+        });
+        match receive.recv_timeout(Duration::from_secs(60)) {
+            Ok(result) => result,
+            Err(_) => {
+                // Windows can retain inherited pipe handles even with null
+                // stdio. A deliberate containment defect must fail and tear
+                // down its fixture, not deadlock while joining the IO worker.
+                fs::write(temp.0.join("stop"), b"stop").unwrap();
+                panic!("command timeout did not finish within its teardown budget");
+            }
+        }
+    });
     assert_eq!(code, 1);
     assert_eq!(message, "command timed out");
     assert!(temp.0.join("ready").is_file(), "descendant never started");
