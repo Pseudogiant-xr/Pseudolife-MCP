@@ -58,6 +58,7 @@ toml.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
+pseudolife-extractor-fixtures = { path = "../extractor_harness/fixtures" }
 
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true
