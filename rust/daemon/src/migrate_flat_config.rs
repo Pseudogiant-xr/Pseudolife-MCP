@@ -217,7 +217,7 @@ pub(crate) fn command(args: &[std::ffi::OsString]) -> i32 {
     };
     let mut text = String::new();
     if std::io::stdin().read_to_string(&mut text).is_err() {
-        eprintln!("config.yaml is not readable UTF-8; nothing changed");
+        eprintln!("migrate-flat refused: config.yaml is not valid UTF-8 YAML; restore a valid config and retry migrate-flat --apply");
         return 1;
     }
     match plan(text.trim_start_matches('\u{feff}'), entries) {

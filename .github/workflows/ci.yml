@@ -568,6 +568,8 @@ jobs:
         #   client-only install, Windows-only installer code.
         # - test_schema_version, test_doctor_cli, test_tool_annotations (one
         #   test): schema pins and doctor, cheap and platform-sensitive.
+        # - test_migrate_flat: interrupted config replacement, file handling,
+        #   and recovery refusals on native Windows.
         # - test_runner_cleanup: the parity runners' disk cleanup treats a
         #   directory junction as a link, which only Windows can make.
         # - test_selfhosted_windows_scripts: the Windows parity runner's hook

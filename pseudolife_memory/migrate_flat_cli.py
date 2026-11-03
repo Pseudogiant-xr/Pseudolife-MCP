@@ -248,7 +248,7 @@ def _finish(conn, path, marker):
             conn.execute("SET LOCAL lock_timeout='5s'")
             conn.execute("LOCK TABLE public.entries IN SHARE ROW EXCLUSIVE MODE")
         except Exception:
-            raise MigrationError("entry band verification failed") from None
+            raise MigrationError("entry lock unavailable; stop all bank writers and retry migrate-flat --apply") from None
         _finish_locked(conn, path, marker)
 
 

@@ -18,3 +18,5 @@
   marker, names the required capacity when repairing a flat layout, and
   preserves YAML value-tag mapping keys. An incompatible native planner now
   names the matching binary needed instead of reporting a missing database URL.
+- Invalid UTF-8 configuration names the config repair required, and a locked
+  entry table during finalization names the writers that must be stopped.

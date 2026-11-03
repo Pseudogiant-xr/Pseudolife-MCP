@@ -50,7 +50,7 @@ def setup(config, rows=True):
         bank = arm.home / "bank"
         bank.mkdir()
         original = bank / "config.yaml"
-        original.write_bytes(config.encode())
+        original.write_bytes(config if isinstance(config, bytes) else config.encode())
         os.utime(original, (backup.FIXED, backup.FIXED))
         arm.state["before"] = _bank.dump(DB)
     return prepare
@@ -132,6 +132,18 @@ def pending(replaced, prefix=""):
 def override_config(arm):
     setup("memory: {miras: {preset: continuum}}\n")(arm)
     (arm.home / "bank" / "other.yaml").write_text("memory: {miras: {preset: continuum}}\n")
+
+
+def finalization_lock_held(arm):
+    pending(True)(arm)
+    writer = _bank.connect(DB)
+    writer.execute("LOCK TABLE entries IN ROW EXCLUSIVE MODE")
+    arm.state["writer"] = writer
+
+
+def lock_refused(arm, obs):
+    refused(arm, obs)
+    assert b"entry lock unavailable; stop all bank writers" in base64.b64decode(obs["stderr"])
 
 
 def edited_pending(arm):
@@ -220,6 +232,7 @@ def cases():
         Case("writer-held", argv, env=env, setup=held_writer, after=refused),
         *[Case("refuse-" + name, argv, env=env, setup=setup(config), after=refused)
           for name, config in (
+              ("utf8", b"invalid: \xff\n"),
               ("timestamp", "date: 2026-11-02\n"),
               ("binary", "blob: !!binary YQ==\n"),
               ("integer", "large: 9223372036854775808\n"),
@@ -233,6 +246,7 @@ def cases():
              setup=pending(False, "model: 1e5\nother: 0o17\n"), after=after),
         Case("resume-edited-flat-config", argv, env=env, setup=edited_pending, after=after),
         Case("resume-finalization-refused", argv, env=env, setup=rejected_finalization, after=refused),
+        Case("resume-entry-lock-held", argv, env=env, setup=finalization_lock_held, after=lock_refused),
         *[Case(f"{state}-{problem}", argv, env=env,
                setup=invalid_migrated_bank(complete, nonflat=nonflat), after=refused)
           for state, complete in (("pending", False), ("complete", True))

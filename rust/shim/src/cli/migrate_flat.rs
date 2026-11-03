@@ -175,7 +175,7 @@ async fn finish(
     marker: &mut Value,
 ) -> Result<(), String> {
     client.batch_execute("BEGIN; SET LOCAL lock_timeout='5s'; LOCK TABLE public.entries IN SHARE ROW EXCLUSIVE MODE")
-        .await.map_err(|_| "entry band verification failed")?;
+        .await.map_err(|_| "entry lock unavailable; stop all bank writers and retry migrate-flat --apply")?;
     match finish_locked(client, daemon, path, marker).await {
         Ok(()) => client
             .batch_execute("COMMIT")
