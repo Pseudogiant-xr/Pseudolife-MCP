@@ -27,10 +27,23 @@ function Format-ForeignCommand([string]$command) {
     if ($match.Success) { return $command.Substring(0, $match.Index) + ' [redacted sensitive arguments]' }
     return $command
 }
+function Get-NativeTaskCode([string]$executable, [string]$arguments) {
+    @"
+`$psi = New-Object System.Diagnostics.ProcessStartInfo
+`$psi.FileName = '$($executable.Replace("'", "''"))'
+`$psi.Arguments = '$($arguments.Replace("'", "''"))'
+`$psi.UseShellExecute = `$false
+`$psi.CreateNoWindow = `$true
+`$process = [System.Diagnostics.Process]::Start(`$psi)
+`$process.WaitForExit()
+exit `$process.ExitCode
+"@
+}
 function Get-RegisteredInvocation($task) {
     foreach ($item in $task.Actions) {
         $exe = $item.Execute
         $arguments = $item.Arguments
+        $nativeWrapper = $false
         if ($arguments -match '-EncodedCommand ([A-Za-z0-9+/=]+)') {
             if ([IO.Path]::GetFileName($exe) -notin @('powershell.exe', 'pwsh.exe')) { continue }
             try {
@@ -50,6 +63,11 @@ function Get-RegisteredInvocation($task) {
                 $exe = $Matches[1].Replace("''", "'")
                 if ($code -notmatch '(?m)^\$psi\.Arguments = ''((?:[^'']|'''')*)''\r?$') { continue }
                 $arguments = $Matches[1].Replace("''", "'")
+                # --native-exe can name a custom waiting launcher. Its exact
+                # generated wrapper identifies that registration after restart;
+                # arbitrary encoded code with similar arguments does not.
+                $expected = Get-NativeTaskCode $exe $arguments
+                $nativeWrapper = $code.Replace("`r`n", "`n").TrimEnd() -ceq $expected.Replace("`r`n", "`n").TrimEnd()
             } catch { continue }
         }
         if ([IO.Path]::GetFileName($exe) -eq 'cmd.exe') {
@@ -67,7 +85,7 @@ function Get-RegisteredInvocation($task) {
         if ($arguments -match '^"?extractor-shim"?\s+"?(claude|codex)"?\s+"?--env-file"?\s+"([^"]+)"') {
             $provider = $Matches[1]
             $settingsFile = $Matches[2]
-            if ([IO.Path]::GetFileName($exe) -in @('pseudolife-mcp.exe', 'pseudolife-stdio.exe') -or
+            if ($nativeWrapper -or [IO.Path]::GetFileName($exe) -in @('pseudolife-mcp.exe', 'pseudolife-stdio.exe') -or
                 (Test-SamePath $exe $native) -or (Test-SamePath $exe $ownerExe)) {
                 [PSCustomObject]@{ Exe=$exe; Kind=$provider; EnvFile=$settingsFile }
             }
@@ -247,16 +265,7 @@ function Quote-Argument([string]$value) {
 $argument = (@($c.ServeArgs | ForEach-Object { Quote-Argument ([string]$_) }) -join ' ')
 # Keep the scheduler attached to the hidden child for its entire lifetime:
 # console Rust executables otherwise open a visible window at interactive logon.
-$inner = @"
-`$psi = New-Object System.Diagnostics.ProcessStartInfo
-`$psi.FileName = '$($native.Replace("'", "''"))'
-`$psi.Arguments = '$($argument.Replace("'", "''"))'
-`$psi.UseShellExecute = `$false
-`$psi.CreateNoWindow = `$true
-`$process = [System.Diagnostics.Process]::Start(`$psi)
-`$process.WaitForExit()
-exit `$process.ExitCode
-"@
+$inner = Get-NativeTaskCode $native $argument
 $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($inner))
 $powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
 $action = New-ScheduledTaskAction -Execute $powershell -Argument "-NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand $encoded"

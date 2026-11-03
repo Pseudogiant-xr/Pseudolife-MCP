@@ -1,4 +1,4 @@
-param([string]$Source, [string]$Root, [ValidateSet('PasswordRollback','LegacyMigration','LegacyJuly','LegacyDetached','DelayedStop','DelayedRemoval','DeleteRetry','DeleteFailure','StopTimeout','RemovalTimeout','ProcessExitRace','ProcessStopFailure','ProcessIdentityChanged','QueryInitialRetry','QueryRollbackRetry','QueryRemovalRetry','QueryFailure','QueryAccessDenied','QueryNamedAbsent','DisabledReinstall','QueryStopFailure','QueryRemovalFailure','ForeignRemoval','ForeignLegacy','ForeignSibling','ForeignUninstallLegacy','ForeignNativeArguments')][string]$Case)
+param([string]$Source, [string]$Root, [ValidateSet('PasswordRollback','LegacyMigration','LegacyJuly','LegacyDetached','DelayedStop','DelayedRemoval','DeleteRetry','DeleteFailure','StopTimeout','RemovalTimeout','ProcessExitRace','ProcessStopFailure','ProcessIdentityChanged','QueryInitialRetry','QueryRollbackRetry','QueryRemovalRetry','QueryFailure','QueryAccessDenied','QueryNamedAbsent','DisabledReinstall','QueryStopFailure','QueryRemovalFailure','ForeignRemoval','ForeignLegacy','ForeignSibling','ForeignUninstallLegacy','ForeignNativeArguments','CustomLauncherRemoval','ForeignEncodedArguments')][string]$Case)
 $ErrorActionPreference = 'Stop'
 # Every scheduler/process operation is mocked; these cases need no credentials,
 # real registrations, listeners or process termination.
@@ -65,7 +65,25 @@ if ($Case -in @('ProcessExitRace','ProcessStopFailure','ProcessIdentityChanged')
     return
 }
 $taskName = 'fixture-native'
-if ($Case -eq 'ForeignUninstallLegacy') {
+if ($Case -in @('CustomLauncherRemoval','ForeignEncodedArguments')) {
+    $custom = Join-Path $directory 'custom-launcher.exe'
+    $arguments = 'extractor-shim claude --env-file "' + $settings + '"'
+    $inner = @"
+`$psi = New-Object System.Diagnostics.ProcessStartInfo
+`$psi.FileName = '$($custom.Replace("'", "''"))'
+`$psi.Arguments = '$($arguments.Replace("'", "''"))'
+`$psi.UseShellExecute = `$false
+`$psi.CreateNoWindow = `$true
+`$process = [System.Diagnostics.Process]::Start(`$psi)
+`$process.WaitForExit()
+exit `$process.ExitCode
+"@
+    if ($Case -eq 'ForeignEncodedArguments') { $inner += "`nWrite-Output 'unrelated action'" }
+    $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($inner))
+    $global:r6fixtureTask = [PSCustomObject]@{TaskName=$taskName;State='Ready';Actions=@([PSCustomObject]@{Execute='powershell.exe';Arguments="-NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand $encoded"})}
+    $global:r6oldProcess = [PSCustomObject]@{ProcessId=4242;ParentProcessId=1;CreationDate=[datetime]'2026-01-01';ExecutablePath=$custom;CommandLine=('"' + $custom + '" ' + $arguments)}
+    $expectedFailure = 'not a recognized shim registration'
+} elseif ($Case -eq 'ForeignUninstallLegacy') {
     $taskName = 'Pseudolife Claude Shim'
     $global:r6fixtureTask = [PSCustomObject]@{ TaskName=$taskName; State='Ready'; Actions=@([PSCustomObject]@{Execute=$writer;Arguments=('extractor-shim claude --env-file "' + $settings + '"')}) }
     $global:r6legacyTask = [PSCustomObject]@{ TaskName='Pseudolife Sonnet Shim'; State='Ready'; Actions=@([PSCustomObject]@{Execute='foreign.exe';Arguments='--unrelated'}) }
@@ -236,11 +254,15 @@ function Invoke-WebRequest {
 }
 function Write-Warning { param($Message) $global:r6warningText += $Message }
 $config = Join-Path $directory 'registration.json'
-@{ Native=$writer;OwnerExe=$writer;Kind='claude';Port=12345;Host='127.0.0.1';Name=$taskName;EnvFile=$settings;LogonType='S4U';Timeout=1;Remove=($Case -in @('QueryNamedAbsent','ForeignRemoval','ForeignUninstallLegacy','ForeignNativeArguments'));ReplaceSibling=($Case -eq 'ForeignSibling');ConfigArgs=@();ServeArgs=@('extractor-shim','claude','--env-file',$settings) } |
+@{ Native=$writer;OwnerExe=$writer;Kind='claude';Port=12345;Host='127.0.0.1';Name=$taskName;EnvFile=$settings;LogonType='S4U';Timeout=1;Remove=($Case -in @('QueryNamedAbsent','ForeignRemoval','ForeignUninstallLegacy','ForeignNativeArguments','CustomLauncherRemoval','ForeignEncodedArguments'));ReplaceSibling=($Case -eq 'ForeignSibling');ConfigArgs=@();ServeArgs=@('extractor-shim','claude','--env-file',$settings) } |
     ConvertTo-Json | Set-Content -LiteralPath $config -Encoding UTF8
 $caught = ''
 try { & $Source -ConfigPath $config } catch { $caught = $_.Exception.Message }
-if ($Case -in @('ForeignRemoval','ForeignLegacy','ForeignSibling','ForeignUninstallLegacy','ForeignNativeArguments')) {
+if ($Case -eq 'CustomLauncherRemoval') {
+    if ($caught -or $global:r6fixtureTask -or $global:r6deleteAttempts -ne 1 -or ($global:r6stoppedPids -join ',') -ne '4242') { throw "custom native launcher was not removed: $caught" }
+    Write-Output "$Case passed without real scheduler operations"
+    return
+} elseif ($Case -in @('ForeignRemoval','ForeignLegacy','ForeignSibling','ForeignUninstallLegacy','ForeignNativeArguments','ForeignEncodedArguments')) {
     if ($caught -notlike '*not a recognized shim registration*' -or $global:r6registered -or $global:r6deleteAttempts -or $global:r6stoppedLegacy -or $global:r6stoppedPids.Count -or [IO.File]::ReadAllText($settings) -ne 'before') { throw "foreign registration was changed or not refused: $caught" }
     Write-Output "$Case passed without real scheduler operations"
     return
