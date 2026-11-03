@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
+import re
 import time
 from pathlib import Path
 import urllib.error
@@ -11,6 +13,21 @@ import urllib.parse
 import urllib.request
 
 QUERY = "disposable container readiness query"
+
+
+def verify_console(base: str) -> dict:
+    static = Path(__file__).resolve().parents[2] / "pseudolife_memory/web/static"
+    index = (static / "index.html").read_bytes()
+    assets = re.findall(r'(?:src|href)="(/ui/[^"?#]+)"', index.decode("utf-8"))
+    if not assets:
+        raise RuntimeError("Console index contains no static assets")
+    for path in ["/ui", *assets]:
+        expected = index if path == "/ui" else (static / path.removeprefix("/ui/")).read_bytes()
+        with urllib.request.urlopen(base + path, timeout=30) as response:
+            if response.status != 200 or response.read() != expected:
+                raise RuntimeError(f"container Console content differs at {path}")
+    return {"console": True, "assets": len(assets),
+            "index_sha256": hashlib.sha256(index).hexdigest()}
 
 
 def verify_policy(log: str) -> dict:
@@ -66,9 +83,14 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--url", default="http://127.0.0.1:8766")
     parser.add_argument("--timeout", type=float, default=180)
+    parser.add_argument("--console-only", action="store_true",
+                        help="compare the image's Console index and referenced assets with this checkout")
     parser.add_argument("--startup-log", type=Path,
                         help="verify the loaded model policy from a daemon startup log only")
     args = parser.parse_args()
+    if args.console_only:
+        print(json.dumps(verify_console(args.url), sort_keys=True))
+        return
     if args.startup_log:
         print(json.dumps(verify_policy(args.startup_log.read_text()), sort_keys=True))
         return
