@@ -155,13 +155,15 @@ and persistent query failures; cleanup requires confirmed named absence.
 The Linux rollback control uses a mocked service manager to cover enabled and
 disabled units in active and inactive states. The native lifecycle additionally
 checks that failed replacement preserves a disabled unit's enablement.
-Preflight (wrapper checks, mocked scheduler failures, legacy cleanup, bind
-refusals and failed-install rollback) and the installed lifecycle (quiet rerun,
+Windows wrapper checks and mocked scheduler failures run once in
+`extractor_shim_scheduler_controls`, without real registrations. Preflight
+(legacy cleanup, bind refusals and failed-install rollback) and the installed lifecycle (quiet rerun,
 config reload, replacement rollback and replacement) run as separate tests for
 each provider, with independent registrations and cleanup. Their cumulative
 scheduler overhead must not share one 120-second nextest deadline. The direct
-Python entry point retains the combined proof by default; `--scenario preflight`
-and `--scenario lifecycle` select the same independent scenarios used by Cargo.
+Python entry point retains the combined proof by default; `--scenario controls`,
+`--scenario preflight` and `--scenario lifecycle` select the same independent
+scenarios used by Cargo. The mocked controls do not require the real-autostart opt-in.
 Each proof removes its registrations. Run it
 only on a designated dev machine. Its Windows fixture uses S4U because an SSH
 session has no interactive logon token; it does not prove an interactive logon

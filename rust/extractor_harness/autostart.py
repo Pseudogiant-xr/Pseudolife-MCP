@@ -180,7 +180,7 @@ def wrapper_forwarding(root):
 
 def proof(binary, root, fixture, launcher_exe, provider, scenario="all"):
     windows = os.name == "nt"
-    if windows and scenario in ("all", "preflight"):
+    if windows and scenario in ("all", "controls"):
         from autostart_absence_controls import controls
         controls(sys.modules[__name__])
         wrapper_forwarding(root)
@@ -196,6 +196,8 @@ def proof(binary, root, fixture, launcher_exe, provider, scenario="all"):
                      "RollbackQueryFailure", "TaskAbsent", "HistoricalTailBoundaries", "LateOldRuntimeRecorded", "LateLegacyUnseen", "LateLegacyKnown", "LateLegacyUnseenNoLauncher", "CimSnapshotFailure", "CimParentFailure", "ReplacementDuringStop", "LateCurrentRuntimeRecorded", "ReplacementBeforeRegister", "TaskAppearedBeforeRegister", "InstallUnverifiedPreflight", "InstallUnverifiedLate", "TaskRemovedBeforeRegister", "RemoveUnverifiedPreflight", "SiblingUnverifiedPreflight", "TaskRemovedDuringHealth"):
             checked(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(Path(__file__).with_name("scheduler_failures.ps1")),
                      "-Source", str(run.ROOT / "rust/shim/src/extractor_shim/autostart.ps1"), "-Root", str(root), "-Case", case], step=case)
+    if scenario == "controls":
+        return
     if not windows and scenario in ("all", "preflight"):
         checked(["bash", str(Path(__file__).with_name("autostart_rollback.sh"))], step="mocked enablement rollback")
     repo = root / "settings with spaces"
@@ -387,11 +389,11 @@ def main():
     p.add_argument("--stub-exe", required=True, type=Path)
     p.add_argument("--launcher-exe", required=True, type=Path)
     p.add_argument("--provider", required=True, choices=("claude", "codex"))
-    p.add_argument("--scenario", choices=("all", "preflight", "lifecycle"), default="all")
+    p.add_argument("--scenario", choices=("all", "controls", "preflight", "lifecycle"), default="all")
     args = p.parse_args()
     allowed = os.environ.get("PSEUDOLIFE_TEST_REAL_AUTOSTART") == "1" or (
         os.environ.get("GITHUB_ACTIONS") == "true" and os.environ.get("RUNNER_ENVIRONMENT") == "github-hosted")
-    if not allowed:
+    if not allowed and args.scenario != "controls":
         p.error("real autostart proof requires PSEUDOLIFE_TEST_REAL_AUTOSTART=1 on a designated dev machine")
     with tempfile.TemporaryDirectory(prefix="r6-autostart-") as directory:
         root = Path(directory)

@@ -292,7 +292,7 @@ fn autostart(provider: &str, scenario: &str) {
                 std::env::var("GITHUB_ACTIONS").ok().as_deref(),
                 std::env::var("RUNNER_ENVIRONMENT").ok().as_deref(),
             ));
-    if !allowed {
+    if !allowed && scenario != "controls" {
         eprintln!(
             "real autostart proof skipped; set PSEUDOLIFE_TEST_REAL_AUTOSTART=1 on a disposable dev machine"
         );
@@ -339,4 +339,13 @@ fn extractor_shim_autostart_claude_preflight() {
 #[test]
 fn extractor_shim_autostart_codex_preflight() {
     autostart("codex", "preflight");
+}
+
+// Hosted stress on 2026-11-04 spent 83.5-83.6 seconds in the 66 mocked cases
+// before each provider's real preflight hit its 120-second deadline. These
+// provider-independent controls run once, without creating real registrations.
+#[cfg(windows)]
+#[test]
+fn extractor_shim_scheduler_controls() {
+    autostart("claude", "controls");
 }
