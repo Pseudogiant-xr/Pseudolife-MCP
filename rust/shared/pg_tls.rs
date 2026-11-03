@@ -92,21 +92,35 @@ pub fn roots(path: &std::path::Path) -> Result<rustls::RootCertStore, RootCertif
 }
 /// Verification policy is selected by the caller's libpq option handling.
 pub enum Verification {
+    /// Encrypt and verify handshake signatures without authenticating the server.
     EncryptionOnly,
+    /// Authenticate the certificate chain, validity and server-auth usage only.
     CertificateAuthority(rustls::RootCertStore),
+    /// Authenticate the certificate chain and the DNS/IP subject alternative name.
     Hostname(rustls::RootCertStore),
 }
 
 pub fn connector(
     verification: Verification,
 ) -> Result<tokio_postgres_rustls::MakeRustlsConnect, rustls::Error> {
+    connector_with_identity(verification, None)
+}
+
+pub type Identity = (
+    Vec<CertificateDer<'static>>,
+    rustls::pki_types::PrivateKeyDer<'static>,
+);
+
+/// Client identity is optional; the shim's existing connector uses none.
+pub fn connector_with_identity(
+    verification: Verification,
+    identity: Option<Identity>,
+) -> Result<tokio_postgres_rustls::MakeRustlsConnect, rustls::Error> {
     let provider = Arc::new(rustls::crypto::aws_lc_rs::default_provider());
     let builder = rustls::ClientConfig::builder_with_provider(provider.clone())
         .with_safe_default_protocol_versions()?;
-    let config = match verification {
-        Verification::Hostname(roots) => {
-            builder.with_root_certificates(roots).with_no_client_auth()
-        }
+    let builder = match verification {
+        Verification::Hostname(roots) => builder.with_root_certificates(roots),
         other => {
             let roots = match other {
                 Verification::CertificateAuthority(roots) => Some(roots),
@@ -116,8 +130,11 @@ pub fn connector(
             builder
                 .dangerous()
                 .with_custom_certificate_verifier(Arc::new(Verifier { roots, provider }))
-                .with_no_client_auth()
         }
+    };
+    let config = match identity {
+        Some((certificates, key)) => builder.with_client_auth_cert(certificates, key)?,
+        None => builder.with_no_client_auth(),
     };
     Ok(tokio_postgres_rustls::MakeRustlsConnect::new(config))
 }
