@@ -46,7 +46,6 @@ whose remaining item is a proof keeps that boundary visible in its entry.
 | Entry | Caller | Closing stream or batch |
 |---|---|---|
 | [W2F-CLOCK-RETRY](coordination-board-completion-w2/w2f-clock-retry.md) | board sends and daemon notices through `rust/daemon/src/board/dispatch.rs` / `board/notice.rs` during a reconnect | B5 board; B4 writer-session refresh |
-| [W2F-MAIL-PACING](coordination-board-completion-w2/w2f-mail-pacing.md) | production board send/reply wake decisions in `rust/daemon/src/board/mail.rs::Store::send` at the active_seconds boundary | B5 board; B13 differential evidence |
 | [DOC-INGEST-LOCK](document-store-b7-document/doc-ingest-lock.md) | MCP `document_ingest` concurrent with `document_search`/`memory_search`, registered in `rust/daemon/src/mcp/dispatch.rs::registry` | B7 documents |
 | [DOC-PDF-ENGINE](document-store-b7-document/doc-pdf-engine.md) | `pseudolife_memory/mcp_server.py::document_ingest` / Rust `documents.rs::mcp_document_ingest` on a PDF after library loss or bad installation | B7 documents; B11 provisioning via R4/R5 |
 | [DOC-PDF-RECURSION](document-store-b7-document/doc-pdf-recursion.md) | MCP `document_ingest` in `pseudolife_memory/mcp_server.py` / `rust/daemon/src/documents.rs::mcp_document_ingest`, which accepts valid PDFs without excluding this glyph shape | B7 documents |
