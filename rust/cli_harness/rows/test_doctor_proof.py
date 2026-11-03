@@ -202,7 +202,8 @@ def _admission_models(root):
 
 
 @pytest.mark.parametrize("option", ["sslmode=require", "sslmode=verify-full", "sslrootcert=relative.pem",
-                                 "sslcert=relative.pem", "sslkey=relative.pem", "sslcrl=relative.pem"])
+                                 "sslcert=relative.pem", "sslkey=relative.pem", "sslcrl=relative.pem",
+                                 "requiressl=1"])
 def test_unsupported_daemon_tls_refuses_before_create(tmp_path, option):
     (tmp_path / ("pseudolife-daemon.exe" if os.name == "nt" else "pseudolife-daemon")).write_bytes(b"must not execute")
     result = _run(tmp_path, dsn=f"host=127.0.0.1 port=1 user=fixture dbname=r2_admission {option}",
@@ -211,6 +212,18 @@ def test_unsupported_daemon_tls_refuses_before_create(tmp_path, option):
     report = json.loads(result.stdout)
     assert report["error"] == "NativeProofTlsUnsupported"
     assert "sslmode=disable" in report["recovery"]
+    assert "nothing was changed" in report["recovery"]
+
+
+@pytest.mark.parametrize("query", ["requiressl=1", "ssl=true", "sslmode=disable&requiressl=1",
+                                  "sslmode=disable&ssl=true", "requiressl=%31", "s%73l=tr%75e"])
+def test_uri_tls_aliases_name_the_native_limit(tmp_path, query):
+    (tmp_path / ("pseudolife-daemon.exe" if os.name == "nt" else "pseudolife-daemon")).write_bytes(b"must not execute")
+    result = _run(tmp_path, dsn=f"postgresql://fixture@127.0.0.1:1/r2_admission?{query}",
+                  models=_admission_models(tmp_path / "models"))
+    assert result.returncode == 1 and not result.stderr
+    report = json.loads(result.stdout)
+    assert report["error"] == "NativeProofTlsUnsupported"
     assert "nothing was changed" in report["recovery"]
 
 
@@ -490,6 +503,8 @@ def test_signal_during_daemon_start_removes_owned_process_files_and_bank(tmp_pat
     "host=localhost dbname=r2_unsupported options='-c statement_timeout=5000'",
     "host=localhost dbname=r2_unsupported target_session_attrs=read-write",
     "service=fixture dbname=r2_unsupported",
+    "postgresql://u@localhost/r2_unsupported?host=/run/postgresql",
+    "postgresql://u@localhost/r2_unsupported?host=localhost,/run/postgresql",
 ])
 def test_native_proof_dsn_domain_refusal_names_the_actual_limit(tmp_path, dsn):
     daemon = tmp_path / ("pseudolife-daemon.exe" if os.name == "nt" else "pseudolife-daemon")
@@ -506,7 +521,8 @@ def test_native_proof_dsn_domain_refusal_names_the_actual_limit(tmp_path, dsn):
 @pytest.mark.skipif(sys.platform != "linux" or os.environ.get("PSEUDOLIFE_DOCTOR_LIVE_PROOF") != "1",
                    reason="Linux installed daemon, CPU models and disposable PostgreSQL required")
 @pytest.mark.parametrize("selection", ["empty", "daemon-relative", "daemon-relative-shadowed",
-                                        "bare", "cwd-relative", "absolute"])
+                                        "bare", "cwd-relative", "absolute", "symlink-only",
+                                        "symlink-target-shadowed"])
 def test_runtime_library_loads_through_actual_daemon(tmp_path, selection):
     """A completed native proof requires the real daemon to load its ORT model session."""
     import psycopg
@@ -538,7 +554,20 @@ def test_runtime_library_loads_through_actual_daemon(tmp_path, selection):
     env.update(HOME=str(tmp_path), USERPROFILE=str(tmp_path), TMPDIR=str(temp),
                TMP=str(temp), TEMP=str(temp), PSEUDOLIFE_TEST_DATABASE_URL=dsn,
                CUDA_VISIBLE_DEVICES="-1", HF_HUB_OFFLINE="1", TRANSFORMERS_OFFLINE="1")
-    if selection == "empty":
+    if selection.startswith("symlink-"):
+        real_bin = tmp_path / "real-bin"
+        real_bin.mkdir()
+        shutil.move(binary_dir / "pseudolife-daemon", real_bin / "pseudolife-daemon")
+        # Discover through PATH, with no sibling daemon beside the CLI.
+        (cwd / "pseudolife-daemon").symlink_to(real_bin / "pseudolife-daemon")
+        env["PATH"] = str(cwd)
+        override = "runtime/" + library.name
+        destination = (cwd if selection == "symlink-only" else real_bin) / override
+        if selection == "symlink-target-shadowed":
+            invalid = cwd / override
+            invalid.parent.mkdir()
+            invalid.write_bytes(b"not a dynamic library")
+    elif selection == "empty":
         destination, override = binary_dir / "libonnxruntime.so", ""
     elif selection.startswith("daemon-relative"):
         destination, override = binary_dir / "runtime" / library.name, "runtime/" + library.name

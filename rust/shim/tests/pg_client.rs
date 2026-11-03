@@ -95,6 +95,180 @@ fn default_dsn_admission_does_not_expand_with_proof_connection_options() {
 }
 
 #[test]
+fn proof_tls_aliases_follow_libpq_values_without_expanding_other_callers() {
+    for (value, mode) in [
+        ("1", SslMode::Require),
+        ("0", SslMode::Prefer),
+        ("10", SslMode::Require),
+        ("1x", SslMode::Require),
+        ("01", SslMode::Prefer),
+        ("true", SslMode::Prefer),
+        ("", SslMode::Prefer),
+    ] {
+        for dsn in [
+            format!("host=localhost requiressl='{value}'"),
+            format!("postgresql://localhost/db?requiressl={value}"),
+        ] {
+            assert_eq!(
+                Dsn::parse_with_proof_options(&dsn).unwrap().ssl_mode(),
+                mode
+            );
+            for parse in [Dsn::parse, Dsn::parse_with_connection_options] {
+                assert_eq!(
+                    parse(&dsn).unwrap_err(),
+                    Error::UnsupportedOption("requiressl".into())
+                );
+            }
+        }
+    }
+    let uri = "postgresql://localhost/db?ssl=true";
+    assert_eq!(
+        Dsn::parse_with_proof_options(uri).unwrap().ssl_mode(),
+        SslMode::Require
+    );
+    for parse in [Dsn::parse, Dsn::parse_with_connection_options] {
+        assert_eq!(
+            parse(uri).unwrap_err(),
+            Error::UnsupportedOption("ssl".into())
+        );
+    }
+    let dsn =
+        Dsn::parse_with_proof_options("host=localhost application_name=fixture connect_timeout=0")
+            .unwrap();
+    assert_eq!(dsn.ssl_mode(), SslMode::Prefer);
+    assert_eq!(dsn.config().get_application_name(), Some("fixture"));
+    assert_eq!(dsn.config().get_connect_timeout(), None);
+}
+
+#[test]
+fn proof_tls_aliases_and_sslmode_keep_input_order_and_duplicates() {
+    for (options, mode) in [
+        ("sslmode=disable requiressl=1", SslMode::Require),
+        ("requiressl=1 sslmode=disable", SslMode::Disable),
+        ("requiressl=1 requiressl=0", SslMode::Prefer),
+        ("requiressl=0 requiressl=1", SslMode::Require),
+        ("sslmode=unknown requiressl=1", SslMode::Require),
+        ("sslmode=require sslmode=disable", SslMode::Disable),
+    ] {
+        for dsn in [
+            format!("host=localhost {options}"),
+            format!("postgresql://localhost/db?{}", options.replace(' ', "&")),
+        ] {
+            assert_eq!(
+                Dsn::parse_with_proof_options(&dsn).unwrap().ssl_mode(),
+                mode
+            );
+        }
+    }
+    for (query, mode) in [
+        ("ssl=true&sslmode=disable", SslMode::Disable),
+        ("sslmode=disable&ssl=true", SslMode::Require),
+        ("requiressl=0&ssl=true&requiressl=0", SslMode::Prefer),
+        ("ssl=true&ssl=true", SslMode::Require),
+    ] {
+        assert_eq!(
+            Dsn::parse_with_proof_options(&format!("postgresql://localhost/db?{query}"))
+                .unwrap()
+                .ssl_mode(),
+            mode
+        );
+    }
+}
+
+#[test]
+fn proof_tls_aliases_preserve_keyword_and_percent_decoding() {
+    for (options, mode) in [
+        ("requiressl='1'", SslMode::Require),
+        (r"requiressl=\1", SslMode::Require),
+        ("requiressl=' 1'", SslMode::Prefer),
+        ("requiressl='1 '", SslMode::Require),
+    ] {
+        let dsn = Dsn::parse_with_proof_options(&format!(
+            "host=localhost password='requiressl=0 ssl=true' {options}"
+        ))
+        .unwrap();
+        assert_eq!(dsn.ssl_mode(), mode);
+        assert_eq!(
+            dsn.config().get_password(),
+            Some(b"requiressl=0 ssl=true".as_slice())
+        );
+    }
+    for (query, mode) in [
+        ("%72equiressl=%31", SslMode::Require),
+        ("requiressl=%201", SslMode::Prefer),
+        ("requiressl=1%20", SslMode::Require),
+        ("requiressl=1+", SslMode::Require),
+        ("%73sl=%74rue", SslMode::Require),
+        ("%73slmode=disable&%72equiressl=%31", SslMode::Require),
+    ] {
+        let dsn = Dsn::parse_with_proof_options(&format!(
+            "postgresql://localhost/db?password=query%2Bpassword&{query}"
+        ))
+        .unwrap();
+        assert_eq!(dsn.ssl_mode(), mode);
+        assert_eq!(
+            dsn.config().get_password(),
+            Some(b"query+password".as_slice())
+        );
+    }
+}
+
+#[test]
+fn proof_tls_aliases_refuse_invalid_uri_ssl_and_keyword_ssl() {
+    for dsn in [
+        "host=localhost ssl=true",
+        "host=localhost ssl='true' sslmode=require",
+        "postgresql://localhost/db?ssl=false",
+        "postgresql://localhost/db?ssl=TRUE",
+        "postgresql://localhost/db?ssl=1",
+        "postgresql://localhost/db?ssl=",
+        "postgresql://localhost/db?ssl=true&ssl=false&sslmode=require",
+    ] {
+        assert_eq!(
+            Dsn::parse_with_proof_options(dsn).unwrap_err(),
+            Error::UnsupportedOption("ssl".into())
+        );
+    }
+    for dsn in [
+        "host=localhost requiressl='unterminated",
+        "postgresql://localhost/db?requiressl=%GG",
+        "postgresql://localhost/db?requiressl=%00",
+        "postgresql://localhost/db?requiressl=%31%00",
+        "postgresql://localhost/db?ssl=%GG",
+        "postgresql://localhost/db?requiressl=1#ignored",
+    ] {
+        assert_eq!(
+            Dsn::parse_with_proof_options(dsn).unwrap_err(),
+            Error::InvalidDsn
+        );
+    }
+}
+
+#[test]
+fn proof_tls_aliases_preserve_query_host_precedence_and_transport_refusals() {
+    let dsn = Dsn::parse_with_proof_options(
+        "postgresql://localhost/db?host=db.example&host=override.example&requiressl=1",
+    )
+    .unwrap();
+    assert_eq!(
+        dsn.config().get_hosts(),
+        &[tokio_postgres::config::Host::Tcp("override.example".into())]
+    );
+    for dsn in [
+        "postgresql://localhost/db?host=/run/postgresql&requiressl=1",
+        "postgresql://localhost/db?host=%2Frun%2Fpostgresql&ssl=true",
+        "postgresql://localhost/db?host=localhost,%2Frun%2Fpostgresql&ssl=true",
+        "host=localhost,/run/postgresql requiressl=1",
+        "host=/run/postgresql requiressl=0",
+    ] {
+        assert_eq!(
+            Dsn::parse_with_proof_options(dsn).unwrap_err(),
+            Error::InvalidOption("host")
+        );
+    }
+}
+
+#[test]
 fn unsupported_dsn_controls_are_named_and_never_ignored() {
     for option in [
         "sslcert",
