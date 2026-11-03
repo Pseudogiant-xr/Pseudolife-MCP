@@ -7,6 +7,18 @@ use std::path::{Path, PathBuf};
 #[path = "model_provision.rs"]
 pub mod provision;
 
+/// The native reranker loads one pinned bundle, including when a request
+/// enables reranking independently of the config default.
+pub fn validate_reranker_model(model: &str) -> Result<()> {
+    if model != provision::RERANKER_MODEL {
+        bail!(
+            "unsupported memory.reranker.model_name {model:?}: the native daemon supports only {}; set memory.reranker.model_name to that model, or keep the Python engine for a different reranker",
+            provision::RERANKER_MODEL
+        );
+    }
+    Ok(())
+}
+
 pub fn relative_parts(value: &str) -> Result<Vec<&str>> {
     if value.is_empty() {
         return Ok(vec![]);
@@ -187,13 +199,31 @@ pub fn resolve(model: &str, file_name: &str, cache: &Path) -> Result<(PathBuf, b
         }
     }
     bail!(
-        "configured ONNX artifact {normalized:?} for {model:?} is not available in the local model or Hub cache; run `pseudolife-daemon provision models` for the default models, or restore the configured local model"
+        "embedding.model_name {model:?}: configured ONNX artifact {normalized:?} is not available in the local model or Hub cache; restore that artifact, or set embedding.model_name to {} and run `pseudolife-daemon provision models` for the pinned default",
+        provision::EMBEDDING_MODEL
     )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compatibility_reranker_model_is_never_silently_substituted() {
+        assert!(
+            validate_reranker_model(&crate::config::RerankerConfig::default().model_name).is_ok()
+        );
+        for model in [
+            "unsupported/fixture",
+            "cross-encoder/ms-marco-MiniLM-L-12-v2",
+            "cross-encoder/ms-marco-MiniLM-L-6-v2 ",
+            "",
+        ] {
+            let error = validate_reranker_model(model).unwrap_err().to_string();
+            assert!(error.contains("memory.reranker.model_name"), "{error}");
+            assert!(error.contains(provision::RERANKER_MODEL), "{error}");
+        }
+    }
 
     #[test]
     fn missing_model_names_the_provisioning_fix() {
@@ -203,10 +233,37 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(error.contains("missing/model"), "{error}");
+        assert!(error.contains("embedding.model_name"), "{error}");
+        assert!(error.contains(provision::EMBEDDING_MODEL), "{error}");
         assert!(
             error.contains("pseudolife-daemon provision models"),
             "{error}"
         );
+    }
+
+    #[test]
+    fn configured_local_and_cached_graphs_remain_admitted() {
+        let base =
+            std::env::temp_dir().join(format!("pl_models_existing_{}", uuid::Uuid::new_v4()));
+        let local = base.join("local");
+        std::fs::create_dir_all(local.join("onnx")).unwrap();
+        std::fs::write(local.join("onnx/model.onnx"), b"fixture").unwrap();
+        let cache = base.join("cache");
+        assert_eq!(
+            resolve(local.to_str().unwrap(), "onnx/model.onnx", &cache).unwrap(),
+            (local, false)
+        );
+        let repo = cache.join("models--fixture--configured");
+        let root = repo.join("snapshots/abcdef");
+        std::fs::create_dir_all(root.join("onnx")).unwrap();
+        std::fs::create_dir_all(repo.join("refs")).unwrap();
+        std::fs::write(repo.join("refs/main"), b"abcdef").unwrap();
+        std::fs::write(root.join("onnx/model.onnx"), b"fixture").unwrap();
+        assert_eq!(
+            resolve("fixture/configured", "onnx/model.onnx", &cache).unwrap(),
+            (root, true)
+        );
+        std::fs::remove_dir_all(base).unwrap();
     }
 
     #[test]

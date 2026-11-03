@@ -301,6 +301,7 @@ def test_parse_name_list_tolerates_noise():
 
 from tests.helpers import pg_reachable as _pg_reachable
 from tests.pg_defaults import default_admin_url
+from tests.pg_fixtures import pg_conn, pg_url  # noqa: F401 (fixtures)
 
 _ADMIN = os.environ.get("PSEUDOLIFE_BENCH_ADMIN_URL") or default_admin_url()
 
@@ -525,6 +526,82 @@ def test_memory_recall_tool_delegates(bench_pg, monkeypatch, tmp_path):
     monkeypatch.setattr(srv, "service", svc, raising=False)
     out = srv.memory_recall("what does web-portal run on?")
     assert "edge-cluster" in {n["entity"] for n in out["entities"]}
+
+
+@pytest.fixture()
+def config_service(pg_conn, pg_url, tmp_path):
+    from pseudolife_memory.service import MemoryService
+
+    svc = MemoryService(data_dir=tmp_path, database_url=pg_url)
+    try:
+        yield svc
+    finally:
+        if svc._storage is not None:
+            svc._storage.close()
+
+
+@pytest.mark.parametrize("surface", ["mcp", "rest"])
+def test_recall_live_default_hops_reaches_the_graph(config_service, monkeypatch, surface):
+    from pseudolife_memory import mcp_server
+    from pseudolife_memory.web.config_io import write_config
+    from pseudolife_memory.web.routes import ConsoleRoutes
+    from tests.helpers import invoke_tool
+
+    svc = config_service
+    monkeypatch.setattr(mcp_server, "service", svc)
+    monkeypatch.delenv("PSEUDOLIFE_MCP_CONFIG", raising=False)
+    monkeypatch.setattr(svc.config.memory.recall, "default_hops", 3)
+    for src, dst in (("walk-start", "walk-middle"), ("walk-middle", "walk-end")):
+        assert not svc.graph_relate(src, "uses", dst).get("error")
+
+    def recall(**args):
+        if surface == "mcp":
+            return invoke_tool("memory_recall", {"query": "what uses walk-start?", **args})
+        return ConsoleRoutes(svc).dispatch("GET", "/api/recall", {"q": "what uses walk-start?", **args}, {})
+
+    for hops in (1, 2):
+        assert write_config(svc, {"memory.recall.default_hops": hops})["applied"] == ["memory.recall.default_hops"]
+        out = recall()
+        assert out["hops"] == hops
+        assert ("walk-end" in {n["entity"] for n in out["entities"]}) == (hops == 2)
+    explicit = recall(hops=1)
+    assert explicit["hops"] == 1
+    assert "walk-end" not in {n["entity"] for n in explicit["entities"]}
+    if surface == "rest":
+        for value in (None, "", "invalid"):
+            assert recall(hops=value)["hops"] == 3
+        assert recall(hops=0)["hops"] == 1
+
+
+@pytest.mark.parametrize("surface", ["mcp", "rest"])
+def test_recall_live_default_width_changes_seed_count(config_service, monkeypatch, surface):
+    from pseudolife_memory import mcp_server
+    from pseudolife_memory.web.config_io import write_config
+    from pseudolife_memory.web.routes import ConsoleRoutes
+    from tests.helpers import invoke_tool
+
+    svc = config_service
+    monkeypatch.setattr(mcp_server, "service", svc)
+    monkeypatch.delenv("PSEUDOLIFE_MCP_CONFIG", raising=False)
+    monkeypatch.setattr(svc.config.memory.recall, "default_top_k", 5)
+    monkeypatch.setattr(svc.config.memory.search, "min_score", 0.0)
+    for text in ("Cedar grows beside the river.", "The kitchen oven needs cleaning.",
+                 "A satellite measures ocean temperature."):
+        assert svc.store(text, source="test")["stored"]
+
+    def recall(**args):
+        if surface == "mcp":
+            return invoke_tool("memory_recall", {"query": "unrelated observations", **args})
+        return ConsoleRoutes(svc).dispatch("GET", "/api/recall", {"q": "unrelated observations", **args}, {})
+
+    for width in (2, 1):
+        assert write_config(svc, {"memory.recall.default_top_k": width})["applied"] == ["memory.recall.default_top_k"]
+        assert len(recall()["texts"]) == width
+    assert len(recall(top_k=3)["texts"]) == 3
+    if surface == "rest":
+        for value in (None, "", "invalid"):
+            assert len(recall(top_k=value)["texts"]) == 3
+        assert len(recall(top_k=0)["texts"]) == 1
 
 
 # ---------------------------------------------------------------------------

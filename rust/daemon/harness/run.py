@@ -110,7 +110,7 @@ MUTANTS = ["del-unescaped", "auth-candidate-order", "serde-json-writer", "skip-r
            "health-omits-db", "route-405-as-404", "body-limit-off", "tokenless-maintainer-open",
            "no-backoff", "static-redirect", "static-no-csp", "static-traversal-open", "static-wrong-type",
            "static-json-whitespace", "static-string-prefix", "body-limit-inclusive", "text-limit-control", "agents-view-default",
-           "golden-float-token"]
+           "golden-float-token", "mcp-dream-rollback-audit-kept", "trace-no-trace"]
 
 import security_cases
 
@@ -1275,7 +1275,24 @@ CONFIG_PROFILES = {
     "duplicate keys": "memory:\n  top_k: 3\n  top_k: 5\n",
     "anchors and merge": "base: &b {top_k: 4}\nmemory:\n  <<: *b\n  hide_superseded: true\n",
     "memory policy": "memory_policy:\n  variant: full_separate_hook\n  ab_arms: [none, compact, compact]\n",
+    "YAML 1.1 numbers": "memory:\n  top_k: 010\n  recency_base_half_life_s: 1:30.5\ncoordination:\n  wake:\n    nightly_total: 1_000\nupdates:\n  check_interval_seconds: 1:30\n",
+    "YAML 1.1 strings": "embedding:\n  query_prefix: 1e5\n  model_name: 0o10\n",
+    "YAML 1.1 null": "time:\n  relative_age: NULL\nmemory:\n  miras:\n    bands: Null\n",
+    "YAML 1.1 tagged integer spaces": "memory: {top_k: !!int ' 10 '}\n",
+    "YAML 1.1 tagged integer block": "memory:\n  top_k: !!int |\n    10\n",
+    "YAML 1.1 unused timestamp": "updated: 2024-01-01\n",
+    "YAML 1.1 unused scalar types": "notes: {big: 99999999999999999999, blob: !!binary YQ==}\n",
+    "YAML 1.1 unused nested scalar": "memory: {notes: {updated: 2024-01-01}}\n",
+    "YAML 1.1 value mapping key": "memory: {scopes: {rollup: {=: general}}}\n",
+    "YAML 1.1 disabled gates": "memory: {dream: {literal_gate: off, span_gate: off}, deep_dream: {judge_mode: off, link_judge_mode: off, junk_judge_mode: off, curation_judge_mode: off, candidate_judge_mode: off}}\n",
+    "YAML 1.1 lenient timestamp readers": "memory: {reference: {max_results: 2024-01-01}}\ntime: {relative_age: 2024-01-01}\n",
+    "YAML 1.1 true gates": "memory: {dream: {literal_gate: true, span_gate: true}}\n",
+    "YAML 1.1 on gates": "memory: {dream: {literal_gate: on, span_gate: on}}\n",
 }
+for _boolean in ("yes", "Yes", "YES", "no", "No", "NO", "on", "On", "ON", "off", "Off", "OFF"):
+    CONFIG_PROFILES[f"YAML 1.1 boolean {_boolean}"] = (
+        f"memory:\n  hide_superseded: {_boolean}\ncoordination:\n  enabled: {_boolean}\n"
+        f"updates:\n  check_releases: {_boolean}\n")
 
 
 def python_config_dump(home: Path, config_yaml: str | None) -> dict:
@@ -1288,6 +1305,10 @@ from pseudolife_memory.service import MemoryService
 c = MemoryService(data_dir=sys.argv[1]).config
 m, s, b, e, co, u, d = c.memory, c.memory.search, c.memory.bm25, c.embedding, c.coordination, c.updates, c.memory.dream
 from dataclasses import asdict
+try:
+    reference_limit = int(c.memory.reference.max_results)
+except (TypeError, ValueError, OverflowError):
+    reference_limit = None
 print(json.dumps({
  "memory.top_k": m.top_k, "memory.hide_superseded": m.hide_superseded,
  "memory.search_confidence_floor": m.search_confidence_floor, "memory.recency_boost_enabled": m.recency_boost_enabled,
@@ -1313,7 +1334,13 @@ print(json.dumps({
  "coordination.enabled": co.enabled, "coordination.wake": asdict(co.wake), "coordination.allowed_principals": co.allowed_principals,
  "updates.check_releases": u.check_releases, "updates.unattended_clients": u.unattended_clients,
  "updates.unattended_daemon": u.unattended_daemon, "updates.check_interval_seconds": u.check_interval_seconds,
- "memory.dream.enabled": d.enabled, "memory.dream.extractor_source": d.extractor_source,
+ "memory.dream.enabled": d.enabled,
+ "memory.dream.literal_gate_effective": "log" if isinstance(d.literal_gate, bool) else d.literal_gate,
+ "memory.dream.span_gate_effective": "log" if isinstance(d.span_gate, bool) else d.span_gate,
+ "memory.deep_dream.judge_mode": c.memory.deep_dream.judge_mode,
+ "time.relative_age_effective": bool(c.time.relative_age),
+ "memory.reference.max_results_effective": reference_limit,
+ "memory.dream.extractor_source": d.extractor_source,
  "memory.dream.extractor_base_url": d.extractor_base_url, "memory.dream.extractor_model": d.extractor_model,
  "memory.dream.fallback_base_url": d.fallback_base_url, "memory.dream.fallback_model": d.fallback_model,
  "memory.dream.extractor_model_override": d.extractor_model_override,

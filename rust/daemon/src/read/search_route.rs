@@ -179,6 +179,7 @@ fn now() -> f64 {
 
 /// What a search call asks for beyond the query (the route's coercions, or
 /// the warmup probe's fixed arguments).
+#[derive(Clone)]
 pub struct Request {
     pub query: String,
     pub top_k: i64,

@@ -66,7 +66,7 @@ from urllib.parse import urlsplit
 
 from contextvars import ContextVar
 
-from pseudolife_memory import expose_cli
+from pseudolife_memory import child_python, expose_cli
 from pseudolife_memory.daemon_exec import CONTAINER as DAEMON_CONTAINER, docker_cmd, operator_cli
 
 EXIT_OK = 0
@@ -340,11 +340,12 @@ def _maintainer(tier: str, *args: str) -> list[str]:
         docker = docker_cmd()
         cli = _operator_cli(docker)
         return [docker, "exec", _container(), *cli, "maintainer", *args]
-    return [*_python(tier), "-m", "pseudolife_memory.cli", "maintainer", *args]
+    return child_python.cli_argv("maintainer", *args)
 
 
 def _host(tier: str, *args: str) -> dict:
-    command = [*_python(tier), "-m", MODULE, *args]
+    command = ([*_python(tier), "-m", MODULE, *args] if tier == "docker"
+               else child_python.module_argv(MODULE, *args))
     if tier == "docker":
         docker = docker_cmd()
         cli = _operator_cli(docker)
