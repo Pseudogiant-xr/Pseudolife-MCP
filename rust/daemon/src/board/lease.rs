@@ -7,7 +7,7 @@
 use super::canon::float_value;
 use super::db::{LeaseRow, obj, opt_f64};
 use super::error::{BoardError, Result};
-use super::store::{Event, Store, append, check_limit, now, refuse_secret};
+use super::store::{ATTACHMENT_LEASE, Event, Store, append, check_limit, now, refuse_secret};
 use super::text;
 use serde_json::{Value, json};
 use tokio_postgres::GenericClient;
@@ -166,6 +166,39 @@ async fn drop_reserved_waiters(
 }
 
 /// `_settle`: the locked row after expiry and grant, or None.
+pub(crate) async fn unaccepted_grant(
+    c: &impl GenericClient,
+    row: &LeaseRow,
+    name: &str,
+) -> Result<Option<Value>> {
+    let start = row.acquired_at.unwrap_or(0.0);
+    let end = start + LEASE_GRANT_WINDOW as f64;
+    let event = c
+        .query_opt(
+            "SELECT payload FROM coordination_events e WHERE e.event='lease_grant' \
+         AND e.actor='daemon' AND e.agent_id=$1 AND e.created_at>=$2 AND e.created_at<=$3 \
+         AND e.payload::jsonb->>'name'=$4 AND e.payload::jsonb->>'fence'=$5 \
+         AND NOT EXISTS (SELECT 1 FROM coordination_events a WHERE a.event='lease_update' \
+         AND a.created_at>=$2 AND a.created_at<=$3 AND a.agent_id=e.agent_id \
+         AND a.payload::jsonb->>'name'=$4 AND a.payload::jsonb->>'fence'=$5 \
+         AND a.payload::jsonb->>'accepted'='true') ORDER BY e.seq DESC LIMIT 1",
+            &[
+                &row.holder_agent_id,
+                &start,
+                &end,
+                &name,
+                &row.fence.to_string(),
+            ],
+        )
+        .await?;
+    event
+        .map(|event| {
+            serde_json::from_str(event.get::<_, &str>(0))
+                .map_err(|e| BoardError::Internal(e.to_string()))
+        })
+        .transpose()
+}
+
 pub async fn settle(
     c: &impl GenericClient,
     name: &str,
@@ -182,10 +215,22 @@ pub async fn settle(
         return Ok(None);
     };
     let mut row = LeaseRow::from_row(&row);
+    let mut missed = None;
     if let Some(holder) = &row.holder_agent_id
         && row.expires_at.is_some_and(|e| e <= now)
         && !crate::mutants::active("board-lease-never-expires")
     {
+        // Match the exact queue-grant generation. Direct holds, renewed
+        // windows and a retry that was already missed expire normally.
+        if let Some(payload) = unaccepted_grant(c, &row, name).await? {
+            if let Some(window) = payload["window"].as_i64()
+                && payload["retry"] != true
+                && row.expires_at.unwrap_or(f64::INFINITY)
+                    <= row.acquired_at.unwrap_or(0.0) + window as f64 + 0.001
+            {
+                missed = Some((row.clone(), window as i32));
+            }
+        }
         events.push(
             Event::new("lease_expire", &json!({"name": name, "fence": row.fence}))
                 .actor("daemon")
@@ -224,8 +269,10 @@ pub async fn settle(
             .query_opt(
                 "SELECT w.* FROM coordination_lease_waiters w JOIN coordination_agents a \
                  ON a.agent_id=w.agent_id AND a.credential_hash IS NOT NULL \
-                 WHERE w.name=$1 ORDER BY w.ticket LIMIT 1 FOR UPDATE OF w",
-                &[&name],
+                 WHERE w.name=$1 AND (a.lease_until>$2::double precision \
+                 OR a.last_activity>$2::double precision) \
+                 ORDER BY w.ticket LIMIT 1 FOR UPDATE OF w",
+                &[&name, &(now - ATTACHMENT_LEASE)],
             )
             .await?;
         if let Some(w) = waiter {
@@ -234,6 +281,19 @@ pub async fn settle(
             let ttl: i32 = w.get("ttl");
             let expect: Option<i32> = w.get("expect");
             let purpose: String = w.get("purpose");
+            // Skipped dead-looking waiters retain their tickets; a restart
+            // must not discard a live session's queue position.
+            let enqueued_at: f64 = w.get("enqueued_at");
+            let retry = c
+                .query_opt(
+                    "SELECT 1 FROM coordination_events WHERE event='lease_queue' \
+                 AND actor='daemon' AND agent_id=$1 AND created_at=$2 \
+                 AND payload::jsonb->>'name'=$3 \
+                 AND payload::jsonb->>'reason'='missed_grant' LIMIT 1",
+                    &[&agent, &enqueued_at, &name],
+                )
+                .await?
+                .is_some();
             c.execute(
                 "DELETE FROM coordination_lease_waiters WHERE name=$1 AND agent_id=$2",
                 &[&name, &agent],
@@ -251,15 +311,49 @@ pub async fn settle(
                 &purpose,
             )
             .await?;
+            let mut payload = json!({"name": name, "fence": row.fence, "window": hold,
+                                     "expect": expect, "purpose": purpose});
+            if retry {
+                payload["retry"] = json!(true);
+            }
             events.push(
-                Event::new(
-                    "lease_grant",
-                    &json!({"name": name, "fence": row.fence, "window": hold,
-                            "expect": expect, "purpose": purpose}),
-                )
-                .actor("daemon")
-                .agent(&agent),
+                Event::new("lease_grant", &payload)
+                    .actor("daemon")
+                    .agent(&agent),
             );
+            if let Some((old, window)) = missed {
+                // One retry, behind the successor just granted and ahead
+                // of remaining waiters, serialized by the lease row lock.
+                c.execute(
+                    "INSERT INTO coordination_lease_waiters \
+                     (name,agent_id,principal,purpose,ttl,expect,enqueued_at,ticket) \
+                     SELECT $1,$2,$3,$4,$5,$6,$7,COALESCE(min(ticket)-1, \
+                     nextval('coordination_lease_waiters_ticket_seq')) \
+                     FROM coordination_lease_waiters WHERE name=$1 \
+                     ON CONFLICT (name,agent_id) DO NOTHING",
+                    &[
+                        &name,
+                        &old.holder_agent_id,
+                        &old.holder_principal,
+                        &old.purpose,
+                        &window,
+                        &old.expect,
+                        &now,
+                    ],
+                )
+                .await?;
+                events.push(
+                    Event::new(
+                        "lease_queue",
+                        &json!({
+                            "name": name, "ttl": window, "expect": old.expect,
+                            "purpose": old.purpose, "reason": "missed_grant",
+                        }),
+                    )
+                    .actor("daemon")
+                    .agent(old.holder_agent_id.as_deref().expect("expired holder")),
+                );
+            }
         }
     }
     Ok(Some(row))
@@ -460,6 +554,18 @@ impl Store {
         )
         .await?;
         let mut events = Vec::new();
+        // A returning caller is alive before selection, under the lease
+        // lock so agent-before-lease lock inversion remains impossible.
+        tx.query_one(
+            "SELECT name FROM coordination_leases WHERE name=$1 FOR UPDATE",
+            &[&name],
+        )
+        .await?;
+        tx.execute(
+            "UPDATE coordination_agents SET last_activity=$1 WHERE agent_id=$2",
+            &[&now, &agent_id],
+        )
+        .await?;
         let row = settle(&tx, &name, now, &mut events)
             .await?
             .expect("lease row inserted above");
@@ -472,6 +578,13 @@ impl Store {
         let purpose_or_empty = purpose.clone().unwrap_or_default();
         if row.holder_agent_id.as_deref() == Some(agent_id) {
             let mut changed = serde_json::Map::new();
+            if events
+                .iter()
+                .any(|e| e.event == "lease_grant" && e.agent_id == agent_id)
+                || unaccepted_grant(&tx, &row, &name).await?.is_some()
+            {
+                changed.insert("accepted".into(), json!(true));
+            }
             let new_expect = expect32.filter(|e| Some(*e) != row.expect);
             let new_purpose = purpose.clone().filter(|p| *p != row.purpose);
             tx.execute(
@@ -503,6 +616,11 @@ impl Store {
                 events.push(scoped(Event::new("lease_update", &payload)));
             }
         } else if row.holder_agent_id.is_none() {
+            tx.execute(
+                "DELETE FROM coordination_lease_waiters WHERE name=$1 AND agent_id=$2",
+                &[&name, &agent_id],
+            )
+            .await?;
             let granted = grant(
                 &tx,
                 &name,
