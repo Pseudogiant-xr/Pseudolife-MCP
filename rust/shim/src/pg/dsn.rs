@@ -55,18 +55,45 @@ fn decode(text: &str) -> Result<String, Error> {
         .map(|s| s.into_owned())
         .map_err(|_| Error::InvalidDsn)
 }
-fn option(key: &str, connection_options: bool) -> Result<(), Error> {
+fn option(key: &str, connection_options: bool, proof_options: bool) -> Result<(), Error> {
     if key.is_empty() || !key.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_') {
         return Err(Error::InvalidDsn);
     }
     match key {
         "host" | "port" | "user" | "password" | "dbname" | "sslmode" | "sslrootcert" => Ok(()),
         "connect_timeout" | "application_name" if connection_options => Ok(()),
+        "requiressl" if proof_options => Ok(()),
         _ => Err(Error::UnsupportedOption(key.into())),
     }
 }
+fn insert_option(
+    fields: &mut BTreeMap<String, String>,
+    key: String,
+    value: String,
+    proof_options: bool,
+) -> Result<(), Error> {
+    if proof_options && key == "requiressl" {
+        if value.contains('\0') {
+            return Err(Error::InvalidDsn);
+        }
+        // libpq's deprecated alias checks the first character, not a boolean.
+        let mode = if value.starts_with('1') {
+            "require"
+        } else {
+            "prefer"
+        };
+        fields.insert("sslmode".into(), mode.into());
+    } else {
+        fields.insert(key, value);
+    }
+    Ok(())
+}
 // libpq keyword quoting/backslash rules; URI authority parsing remains in the driver.
-fn keywords(text: &str, connection_options: bool) -> Result<BTreeMap<String, String>, Error> {
+fn keywords(
+    text: &str,
+    connection_options: bool,
+    proof_options: bool,
+) -> Result<BTreeMap<String, String>, Error> {
     let mut input = text.chars().peekable();
     let mut fields = BTreeMap::new();
     loop {
@@ -83,7 +110,7 @@ fn keywords(text: &str, connection_options: bool) -> Result<BTreeMap<String, Str
         {
             key.push(input.next().unwrap());
         }
-        option(&key, connection_options)?;
+        option(&key, connection_options, proof_options)?;
         while input.peek().is_some_and(|c| c.is_ascii_whitespace()) {
             input.next();
         }
@@ -114,18 +141,26 @@ fn keywords(text: &str, connection_options: bool) -> Result<BTreeMap<String, Str
         if !closed || (quoted && input.peek().is_some_and(|c| !c.is_ascii_whitespace())) {
             return Err(Error::InvalidDsn);
         }
-        fields.insert(key, value);
+        insert_option(&mut fields, key, value, proof_options)?;
     }
 }
 impl Dsn {
     pub fn parse(text: &str) -> Result<Self, Error> {
-        Self::parse_options(text, false)
+        Self::parse_options(text, false, false)
     }
     /// Admit optional connection settings only for callers that preserve them.
     pub fn parse_with_connection_options(text: &str) -> Result<Self, Error> {
-        Self::parse_options(text, true)
+        Self::parse_options(text, true, false)
     }
-    fn parse_options(text: &str, connection_options: bool) -> Result<Self, Error> {
+    /// Preserve libpq TLS aliases only for the disposable doctor proof.
+    pub fn parse_with_proof_options(text: &str) -> Result<Self, Error> {
+        Self::parse_options(text, true, true)
+    }
+    fn parse_options(
+        text: &str,
+        connection_options: bool,
+        proof_options: bool,
+    ) -> Result<Self, Error> {
         if text.contains('\0') {
             return Err(Error::InvalidDsn);
         }
@@ -139,12 +174,20 @@ impl Dsn {
                 for item in query.split('&').filter(|item| !item.is_empty()) {
                     let (key, value) = item.split_once('=').ok_or(Error::InvalidDsn)?;
                     let key = decode(key)?;
-                    option(&key, connection_options)?;
-                    fields.insert(key, decode(value)?);
+                    if proof_options && key == "ssl" {
+                        // libpq accepts this alias only in URI queries.
+                        if decode(value)? != "true" {
+                            return Err(Error::UnsupportedOption(key));
+                        }
+                        fields.insert("sslmode".into(), "require".into());
+                    } else {
+                        option(&key, connection_options, proof_options)?;
+                        insert_option(&mut fields, key, decode(value)?, proof_options)?;
+                    }
                 }
                 (Some(base), fields)
             } else {
-                (None, keywords(text, connection_options)?)
+                (None, keywords(text, connection_options, proof_options)?)
             };
         let mode = fields
             .remove("sslmode")
