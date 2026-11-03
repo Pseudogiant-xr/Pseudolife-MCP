@@ -26,6 +26,8 @@ PYTHON_ACCEPTED = "data/update-engine/docker-compose.python-accepted.json"
 ENGINE_LABEL = "org.pseudolife.engine"
 CHECKOUT_LABEL = "org.pseudolife.checkout"
 ACTIVATION_LABEL = "org.pseudolife.activation"
+RELEASE_LABEL = "org.pseudolife.release"
+RELEASE_ACCEPTED = "update-engine/docker-compose.release-accepted.json"
 SHADOW_SERVICE = "pseudolife-rust-shadow"
 
 
@@ -52,9 +54,13 @@ def _selection(repo: Path, filename: str = SELECTION) -> dict | None:
 def _validated_engine_selection(labels: dict) -> dict:
     engine = labels.get(ENGINE_LABEL, "python")
     origin = labels.get(CHECKOUT_LABEL)
-    selected = _selection(Path(origin), SELECTION if engine == "rust" else PYTHON_ACCEPTED) if origin else None
+    release = labels.get(RELEASE_LABEL)
+    selected = (_selection(up.data_dir(), RELEASE_ACCEPTED) if release else
+                _selection(Path(origin), SELECTION if engine == "rust" else PYTHON_ACCEPTED) if origin else None)
     if (not selected or selected["labels"][ENGINE_LABEL] != engine
-            or selected["labels"].get(ACTIVATION_LABEL) != labels.get(ACTIVATION_LABEL)):
+            or not labels.get(ACTIVATION_LABEL)
+            or selected["labels"].get(ACTIVATION_LABEL) != labels.get(ACTIVATION_LABEL)
+            or release and selected["labels"].get(RELEASE_LABEL) != release):
         raise up.UpdateError(f"the running {engine} container has no valid accepted activation; use the previous update's "
                              "rollback commands (the Python rollback for a first activation) before retrying; nothing was changed", 2)
     return selected
@@ -119,7 +125,7 @@ def authenticated_read(url: str, token: str) -> bool:
     request = urllib.request.Request(url.rstrip("/") + "/api/facts?limit=1",
                                      headers={"Authorization": "Bearer " + token})
     try:
-        with urllib.request.build_opener(_NoRedirect()).open(request, timeout=10) as response:
+        with urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect()).open(request, timeout=10) as response:
             result = json.loads(response.read())
             return isinstance(result, dict) and isinstance(result.get("entries"), list) and not result.get("error")
     except (OSError, ValueError, urllib.error.URLError):

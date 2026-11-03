@@ -7,8 +7,8 @@
 //! `_assert_public_search_path`.
 //!
 //! Declared differences from psycopg/libpq, none of which changes a database
-//! write: no TLS (`NoTls`; a DSN that requires TLS fails to connect); DSN
-//! options tokio-postgres does not know are a connect failure; the
+//! write: non-TLS DSN options tokio-postgres does not know are a connect
+//! failure; unsupported libpq TLS controls name the Python alternative; the
 //! `application_name` fallback names this binary instead of Python's argv.
 
 // Wired by main in W1-A.
@@ -16,13 +16,16 @@
 
 pub mod graph;
 pub mod schema;
+mod tls;
+mod tls_transport;
+pub use tls::Config;
 
 use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use tokio::task::JoinHandle;
+use tokio_postgres::Client;
 use tokio_postgres::error::SqlState;
-use tokio_postgres::{Client, Config, NoTls};
 
 use schema::{SchemaError, simple_value};
 
@@ -235,8 +238,7 @@ struct BankIdCache {
 
 /// Parse a DSN in URL or `key=value` form.
 pub fn parse_dsn(dsn: &str) -> Result<Config, String> {
-    dsn.parse::<Config>()
-        .map_err(|e| format!("invalid connection string: {e}"))
+    tls::parse(dsn)
 }
 
 /// `_application_name()` (postgres.py:369-380): how this process appears in
@@ -301,21 +303,16 @@ pub async fn connect(
     config.connect_timeout(timeout);
     let mut attempt = 1;
     loop {
-        let result = tokio::time::timeout(timeout, config.connect(NoTls)).await;
+        let result = tokio::time::timeout(timeout, tls::connect(&config)).await;
         match result {
             Err(_) => return Err("connection timeout expired".into()),
-            Ok(Ok((client, connection))) => {
-                let task = tokio::spawn(async move {
-                    let _ = connection.await;
-                });
-                return Ok((client, task));
-            }
-            Ok(Err(e)) if attempt < ATTEMPTS && local_port_error(&e) => {
+            Ok(Ok(result)) => return Ok(result),
+            Ok(Err(e)) if attempt < ATTEMPTS && e.local_port_error() => {
                 let backoff = 0.05 * f64::from(1u32 << (attempt - 1)) * jitter();
                 tokio::time::sleep(Duration::from_secs_f64(backoff)).await;
                 attempt += 1;
             }
-            Ok(Err(e)) => return Err(error_text(&e)),
+            Ok(Err(e)) => return Err(e.text()),
         }
     }
 }
@@ -1086,3 +1083,6 @@ impl Storage {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod tls_tests;

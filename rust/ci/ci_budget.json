@@ -157,11 +157,11 @@
     },
     "fingerprints": {
       "scope": "42b22137f81048ce",
-      "rust": "7e5f6fc858dd1367",
+      "rust": "1eaa006de0ab0f43",
       "fixtures": "defc5e07c5ac3f94",
       "candidate": "d71c5590ce6f866a",
       "candidate-harness": "43b859ee9d5fd738",
-      "parity-checks": "fc8882ae92b7f9bb",
+      "parity-checks": "398ff9a598c5f63e",
       "daemon-image": "5c93764cb0f0bab7",
       "parity": "aa4ba434de948ea6"
     },
@@ -250,6 +250,16 @@
         "job": "parity-checks",
         "fingerprint": "fc8882ae92b7f9bb",
         "reason": "Integrate the bounded R1 recovery, setup, transport, config and stats checks into the existing W1-C shards after the installer workflow merge; no new jobs, shards, dependency installation or setup steps, and budget limits remain unchanged. Re-measure the combined steps from the next integration batch."
+      },
+      {
+        "job": "rust",
+        "fingerprint": "1eaa006de0ab0f43",
+        "reason": "adds one hosted-Linux step removing unused preinstalled SDKs (a few seconds to under a minute of rm -rf) so the default and no-default-features builds fit the runner disk; Windows and self-hosted skip it"
+      },
+      {
+        "job": "parity-checks",
+        "fingerprint": "398ff9a598c5f63e",
+        "reason": "Merge forward after #1208 while retaining the existing R4 CLI selections and their approved cost allowance. Preserves master R1 recovery/setup/transport/config/stats registration and adds the update golden/live row and transaction/wrapper acceptance within existing CLI steps. No new PR job, shard, dependency installation or build. Windows stress run 41425900902 at afe57bbf measured the selected transactions at 122.69s median and wrappers at 46.72s across 20 successful runs; earlier complete Windows dev VM files took 204.55s and 49.64s before later regressions. The conductor approved a bounded addition of eight minutes per CLI shard: retained baseline 384.2 plus sixteen = 400.2 within the unchanged 410 limit, pending batch/master remeasurement. CLI step timeout is 15 minutes; job limit remains 35. Existing master acceptance records remain valid for other steps. update-0 adds two nightly/manual-only source jobs outside the PR budget."
       }
     ]
   },
@@ -302,7 +312,7 @@
       "lock-resolve": "83bcc6b654896c6d",
       "test": "ac414107d3d9c71d",
       "test-lite-linux": "44e2a8f2c01baeab",
-      "test-lite-windows": "174f440964ff7254",
+      "test-lite-windows": "0cf37dff07f5dab1",
       "test-lite-macos": "c4a0ad0c70bb205a",
       "frontend": "b1b6a1a1278f2e60"
     },
@@ -391,6 +401,16 @@
         "job": "test-lite-macos",
         "fingerprint": "c4a0ad0c70bb205a",
         "reason": "adds tests/test_child_python.py, a few seconds of interpreter spawns"
+      },
+      {
+        "job": "test-lite-windows",
+        "fingerprint": "0cf37dff07f5dab1",
+        "reason": "adds one test_suite_lock node (the ops/wsl-suite.ps1 marker-forwarding check, one short pwsh spawn), seconds against the lane's measured minutes"
+      },
+      {
+        "job": "test-lite-macos",
+        "fingerprint": "c4a0ad0c70bb205a",
+        "reason": "adds one test_suite_lock node (the ops/wsl-suite.ps1 marker-forwarding check, one short pwsh spawn), seconds against the lane's measured minutes"
       }
     ]
   }

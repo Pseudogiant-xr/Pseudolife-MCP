@@ -2020,3 +2020,61 @@ def test_already_rung_privileged_offer_is_not_retained_again(tmp_path):
                 await coordination._heartbeat()  # a new arrival must use its own permission
                 assert coordination.ring_due() == ("attention", "urgent")
     asyncio.run(drive())
+
+
+@pytest.mark.parametrize("reason", ["maintainer_message", "conductor"])
+def test_receive_clear_allows_identical_wake_for_next_arrival(tmp_path, reason):
+    from pseudolife_memory.codex_doorbell import CodexDoorbell
+    ring = {"decision": "rung", "reason": reason, "ring_at": 0.0,
+            "message_expires_at": time.time() + 3600}
+    daemon = _mailbox_daemon([(0, [], None), (1, _preview("m1"), ring),
+                              (1, _preview("m1"), ring),
+                              (2, _preview("m1", "m2"), ring)])
+    async def drive():
+        client, coordination = adapter(daemon, delivery_transport="codex",
+                                       digest_path=tmp_path / "digest.txt")
+        async with client, coordination:
+            await coordination._heartbeat()
+            coordination.restore_ring(coordination.ring_due())
+            thread = "aaaaaaaa-1111-4111-8111-111111111111"
+            bell = CodexDoorbell([])
+            bell.watch(thread, coordination)
+            bell.note_call(thread, "memory_message",
+                           {"action": "receive", "after": "fixture-cursor", "limit": 1},
+                           succeeded=True)
+            coordination.mailbox_observer = None
+            assert coordination.ring_due() is None
+            await coordination._heartbeat()  # the daemon re-serves the identical wake
+            await coordination._heartbeat()  # a new arrival makes that offer useful again
+            assert coordination.ring_due() == ("rung", reason)
+            assert coordination.ring_due() is None
+    asyncio.run(drive())
+
+
+@pytest.mark.parametrize("marker", ["written", "pending"])
+def test_receive_clear_preserves_stop_marker_delivery(tmp_path, marker):
+    ring = {"decision": "rung", "reason": "conductor", "ring_at": 0.0,
+            "message_expires_at": time.time() + 3600}
+    daemon = _mailbox_daemon([(0, [], None), (1, _preview("m1"), ring)])
+    async def drive():
+        client, coordination = adapter(daemon, delivery_transport="codex",
+                                       digest_path=tmp_path / "digest.txt")
+        async with client, coordination:
+            await coordination._heartbeat()
+            coordination.restore_ring(coordination.ring_due())
+            timer = coordination._ring_timer
+            assert timer is not None and not timer.cancelled()
+            path = tmp_path / "digest.ring"
+            if marker == "written":
+                coordination._write_ring(coordination._last_ring)
+                before = path.read_bytes()
+            coordination.clear_deferred_ring()
+            if marker == "written":
+                assert path.read_bytes() == before
+            else:
+                assert not timer.cancelled()
+                async with asyncio.timeout(2):
+                    while not path.exists():
+                        await asyncio.sleep(0.01)
+                assert "rung conductor" in path.read_text()
+    asyncio.run(drive())
