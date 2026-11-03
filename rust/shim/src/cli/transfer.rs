@@ -51,7 +51,7 @@ pub(super) const EXPORTED_TABLES: [&str; 27] = [
     "store_decisions",
     "reference_chunks",
 ];
-pub(super) const EXCLUDED_TABLES: [&str; 20] = [
+pub(super) const EXCLUDED_TABLES: [&str; 22] = [
     "dream_runs",
     "dream_run_slots",
     "retrieval_events",
@@ -72,6 +72,8 @@ pub(super) const EXCLUDED_TABLES: [&str; 20] = [
     "cms_counters",
     "principal_activity",
     "rejected_bearers",
+    "console_sessions",
+    "console_signin_codes",
 ];
 const META_SKIP_KEYS: [&str; 8] = [
     "schema_version",

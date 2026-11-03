@@ -71,6 +71,8 @@ pub struct StoredPrincipal {
     pub tier: Option<String>,
     pub board: bool,
     pub revoked: bool,
+    /// v59: the bank owner's, unless invited with `--someone-else`.
+    pub owned: bool,
 }
 
 /// The tiers a stored principal may carry (principal_store.py `_TIERS`).
@@ -224,6 +226,7 @@ impl PrincipalStore {
                 tier: None,
                 board: true,
                 revoked,
+                owned: true,
             })
             .collect();
         let env_principals: Vec<String> = env.principals().map(String::from).collect();
@@ -323,6 +326,18 @@ impl PrincipalStore {
     /// `has`: the view holds a row of that name, revoked or not.
     pub fn has(&self, principal: &str) -> bool {
         self.row(principal).is_some()
+    }
+
+    /// `owned_principals` (v59): the stored principals that are the bank
+    /// owner's and not revoked; shadowed and reserved rows are not in the
+    /// view at all.
+    pub fn owned_principals(&self) -> Vec<String> {
+        let snap = self.snap.read().unwrap();
+        snap.rows
+            .iter()
+            .filter(|r| r.owned && !r.revoked)
+            .map(|r| r.principal.clone())
+            .collect()
     }
 
     /// The bank fingerprint the last successful read saw (`bank`).
@@ -699,6 +714,7 @@ mod tests {
             tier: tier.map(String::from),
             board,
             revoked,
+            owned: true,
         }
     }
 

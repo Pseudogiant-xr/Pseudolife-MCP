@@ -210,6 +210,48 @@ def principal_admitted(coordination_config, principal, *, store=None) -> bool:
     return store is not None and store.admitted(principal)
 
 
+def environment_principals(token_map: dict[str, str], single_token: str | None) -> set[str]:
+    """The daemon's environment principals: every ``PSEUDOLIFE_MCP_TOKENS``
+    name, and ``default`` when ``PSEUDOLIFE_MCP_TOKEN`` is set."""
+    names = set(token_map.values())
+    if single_token:
+        names.add(DEFAULT_PRINCIPAL)
+    return names
+
+
+def owner_principals(coordination_config, *, store=None, token_map=None,
+                     single_token=None) -> frozenset[str]:
+    """The principals that are the bank owner's (schema v59, spec
+    2026-11-02): the environment principals not listed in
+    ``coordination.not_owner_principals``, the stored principals whose row
+    is owned and not revoked, and ``maintainer`` (passkey-signed mail). The
+    daemon's own sender never is. ``token_map=None`` reads the daemon's
+    environment (:func:`env_auth`); ``store`` defaults to the installed
+    snapshot. Reads memory only, never storage."""
+    if token_map is None:
+        token_map, single_token = env_auth()
+    not_owner = set(getattr(coordination_config, "not_owner_principals", None) or ())
+    owners = environment_principals(token_map, single_token) - not_owner
+    store = _STORE if store is None else store
+    # Only a fresh view: past its staleness limit the cache may still hold a
+    # principal since revoked or made someone else's, and an environment
+    # bearer never meets the stored view's 503, so a stale view would keep
+    # widening that Console's scope. The scope narrows to the environment's
+    # instead.
+    if store is not None and store.available():
+        owners |= store.owned_principals()
+    owners.discard(DAEMON_PRINCIPAL)
+    owners.add(MAINTAINER_PRINCIPAL)
+    return frozenset(owners)
+
+
+def is_owner_principal(coordination_config, principal, store=None, *, token_map=None,
+                       single_token=None) -> bool:
+    """Whether ``principal`` is the bank owner's (:func:`owner_principals`)."""
+    return isinstance(principal, str) and principal in owner_principals(
+        coordination_config, store=store, token_map=token_map, single_token=single_token)
+
+
 def is_stored_principal(principal) -> bool:
     """Whether ``principal`` names a principal stored in the bank (paired,
     pending or revoked), as opposed to an environment one. Rows the

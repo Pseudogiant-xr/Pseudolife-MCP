@@ -79,6 +79,8 @@ def seed_states(conn, name: str) -> None:
     store.create_invite(conn, "delta", board=False, ttl_seconds=-60, replace=False)
     store.create_invite(conn, "a-rather-long-principal-name.x", tier="full", ttl_seconds=3600,
                         replace=False)
+    # v59: a machine invited as someone else's.
+    store.create_invite(conn, "echo", owned=False, ttl_seconds=900, replace=False)
 
 
 def seed_activity(conn, name: str) -> None:
@@ -94,8 +96,26 @@ def seed_activity(conn, name: str) -> None:
                  "('ffffffff', 12345678, 1791000000.0, 1793000000.0)")
 
 
+def seed_prev59(conn, name: str) -> None:
+    """A bank before v59 (as tests/test_invite_cli.py drops the column):
+    rows at fixed times, so the cases replay as goldens, then no ``owned``."""
+    _meta(conn)
+    _guarded(conn)
+    conn.execute(
+        "INSERT INTO principals (principal, token_hash, tier, board, created_at, paired_at) "
+        "VALUES ('alpha', %s, NULL, TRUE, 1793000000.0, 1793000060.0)",
+        (hashlib.sha256(b"prev59-seed-token-alpha").hexdigest(),))
+    conn.execute(
+        "INSERT INTO principals (principal, tier, board, code_hash, code_expires_at, created_at) "
+        "VALUES ('bravo', 'core', FALSE, %s, 1793000400.0, 1793000100.0)",
+        (hashlib.sha256(b"prev59-seed-code-bravo").hexdigest(),))
+    _guarded(conn)
+    conn.execute("ALTER TABLE principals DROP COLUMN owned")
+
+
 SEEDERS = {
     "states": seed_states,
+    "prev59": seed_prev59,
     "activity": seed_activity,
     "empty": lambda conn, name: _meta(conn),
     "nometa": lambda conn, name: None,
@@ -164,6 +184,8 @@ def fresh_copy(kind: str) -> None:
     from psycopg.types.json import Jsonb  # noqa: PLC0415
     with _bank.connect(ARM_DB, autocommit=True) as target:
         _guarded(target)
+        if kind == "prev59":
+            target.execute("ALTER TABLE principals DROP COLUMN owned")
         for key, value in meta:
             target.execute("INSERT INTO meta (key, value) VALUES (%s, %s)", (key, Jsonb(value)))
         marks = ", ".join(["%s"] * len(columns))
@@ -497,9 +519,15 @@ LIVE_ONLY = frozenset({
     "reinvite-expired-board", "paired-replace", "revoked-reinvite-json",
     "invite-bank-match", "invite-health-int-at-limit", "invite-env-port", "revoke",
     "revoke-json", "revoke-again",
+    # v59 ownership writes, which show the seeded principals too.
+    "invite-someone-else", "invite-someone-else-json", "reinvite-keeps-someone-else",
+    "reinvite-keeps-someone-else-json", "reinvite-mine", "invite-mine-json",
+    "reinvite-pending-someone-else", "paired-someone-else", "paired-mine-json",
     # Its report is the daemon's auth value nested to the limit and
     # pretty-printed: 2.6 MB of indentation, compared live only.
-    "health-nested-at-limit-json", "defer-tailscale-present", "defer-config-yaml"})
+    "health-nested-at-limit-json", "defer-tailscale-present", "defer-config-yaml",
+    "defer-list-config-yaml", "defer-list-config-env", "defer-invite-config-env",
+    "list-config-names-normalised"})
 
 
 _TRANSPORT_DOCKER = r'''import json, os, sys
@@ -729,6 +757,30 @@ def _cases() -> list[core.Case]:
     inviting("paired-needs-replace-json", "states", ["bravo", "--url", "u", "--json"])
     inviting("paired-replace", "states", ["bravo", "--replace", "--url", "u"])
     inviting("revoked-reinvite-json", "states", ["charlie", "--url", "u", "--json"])
+    # v59 ownership: a new machine that is someone else's, a re-invite that
+    # keeps it, --mine undoing it, and --mine on a new name (no flag note).
+    inviting("invite-someone-else", "states", ["laptop", "--someone-else", "--url", "u"])
+    inviting("invite-someone-else-json", "states", ["--someone-else", "laptop", "--url", "u",
+                                                    "--json"])
+    inviting("reinvite-keeps-someone-else", "states", ["echo", "--url", "u"])
+    inviting("reinvite-keeps-someone-else-json", "states", ["echo", "--url", "u", "--json"])
+    inviting("reinvite-mine", "states", ["echo", "--mine", "--url", "u"])
+    inviting("invite-mine-json", "states", ["laptop", "--mine", "--url", "u", "--json"])
+    inviting("reinvite-pending-someone-else", "states", ["alpha", "--someone-else", "--url", "u"])
+    # A paired machine's ownership alone: no --replace, no new code.
+    inviting("paired-someone-else", "states", ["bravo", "--someone-else", "--url", "u"])
+    inviting("paired-mine-json", "states", ["bravo", "--mine", "--url", "u", "--json"])
+    inviting("paired-mine-tier-refused", "states", ["bravo", "--mine", "--tier", "core",
+                                                    "--url", "u"])
+    # A bank before v59: invites and lists work; the ownership flags are
+    # refused before any write, naming the update.
+    add(read_case("prev59-list", "prev59", ["--list"]))
+    add(read_case("prev59-list-json", "prev59", ["--list", "--json"]))
+    inviting("prev59-invite", "prev59", ["zulu.1", "--url", "u"])
+    inviting("prev59-invite-json", "prev59", ["zulu.1", "--url", "u", "--json"])
+    inviting("prev59-reinvite", "prev59", ["bravo", "--url", "u"])
+    inviting("prev59-someone-else-refused", "prev59", ["zulu.1", "--someone-else", "--url", "u"])
+    inviting("prev59-mine-refused-json", "prev59", ["alpha", "--mine", "--url", "u", "--json"])
     inviting("invite-bank-match", "states", ["laptop", "--bank", FINGERPRINT, "--url", "u"])
     inviting("invite-bank-other", "states", ["laptop", "--bank", OTHER_FINGERPRINT, "--url", "u"])
     inviting("invite-empty-bank", "empty", ["zulu.1", "--url", "u", "--json"])
@@ -750,7 +802,10 @@ def _cases() -> list[core.Case]:
     deferred = ("invite-deferral",)
 
     def deferral(case_id, argv, kind="states", **options):
-        native = case_id in {"defer-no-dsn", "defer-list-no-dsn", "defer-tailscale-present", "defer-config-yaml", "defer-help"}
+        native = case_id in {"defer-no-dsn", "defer-list-no-dsn", "defer-tailscale-present", "defer-config-yaml", "defer-help",
+                             # v59: the list and the invite read the config natively.
+                             "defer-list-config-yaml", "defer-list-config-env", "defer-invite-config-env",
+                             "list-config-names-normalised"}
         port = free_port()
         add(write_case(case_id, kind, [*argv, "--port", str(port)], rules=("invite-written",) if native else deferred,
                        daemon=_daemon(port, health()), **options))
@@ -769,6 +824,21 @@ def _cases() -> list[core.Case]:
     deferral("defer-config-yaml", ["laptop", "--url", "u"],
              extra_env={"PSEUDOLIFE_MCP_DATA_DIR": "{HOME}" + SEP + "data"},
              files={"data/config.yaml": b"coordination:\n  allowed_principals: [laptop]\n"})
+    # v59: --list reads coordination.not_owner_principals from the config.
+    deferral("defer-list-config-yaml", ["--list"],
+             extra_env={"PSEUDOLIFE_MCP_DATA_DIR": "{HOME}" + SEP + "data"},
+             files={"data/config.yaml": b"coordination:\n  not_owner_principals: [codex]\n"})
+    # The config's names as load_config keeps them: stripped, lower-cased.
+    deferral("list-config-names-normalised", ["--list"],
+             extra_env={"PSEUDOLIFE_MCP_DATA_DIR": "{HOME}" + SEP + "data"},
+             files={"data/config.yaml": b"coordination:\n  not_owner_principals: [' Codex ']\n"})
+    deferral("defer-mine-and-someone-else", ["laptop", "--mine", "--someone-else", "--url", "u"])
+    # PSEUDOLIFE_MCP_CONFIG comes first for the daemon, so the oracle reads it.
+    deferral("defer-list-config-env", ["--list"],
+             extra_env={"PSEUDOLIFE_MCP_CONFIG": "{HOME}" + SEP + "elsewhere.yaml"},
+             files={"elsewhere.yaml": b"coordination:\n  not_owner_principals: [codex]\n"})
+    deferral("defer-invite-config-env", ["laptop", "--url", "u"],
+             extra_env={"PSEUDOLIFE_MCP_CONFIG": "{HOME}" + SEP + "absent.yaml"})
     deferral("defer-malformed-token-map", ["laptop", "--url", "u"],
              extra_env={"PSEUDOLIFE_MCP_TOKENS": "no-separator"})
     deferral("defer-help", ["--help"])
@@ -804,9 +874,14 @@ MUTANTS = [
            "single use, expires in {} min",
            "single-use, expires in {} min", cases=("invite-new",)),
     Mutant("invite-keep-tier-lost", "invite", "shim/src/cli/pairing/invite_db.rs",
-           "(Some(_), None) => \", tier = $4\",",
-           "(Some(_), None) => \", tier = $4, board = TRUE\",",
+           "given.push_str(&format!(\", tier = ${}\", params.len()));",
+           "given.push_str(&format!(\", tier = ${}, board = TRUE\", params.len()));",
            cases=("reinvite-expired-tier-json",)),
+    # v59: a re-invite without a flag must keep someone else's machine so.
+    Mutant("invite-keep-owned-lost", "invite", "shim/src/cli/pairing/invite_db.rs",
+           "\"UPDATE public.principals p SET code_hash = $1, ",
+           "\"UPDATE public.principals p SET owned = TRUE, code_hash = $1, ",
+           cases=("reinvite-keeps-someone-else",)),
     Mutant("invite-expired-is-pending", "invite", "shim/src/cli/pairing/invite_db.rs",
            "expires.is_some_and(|expires| expires > now)",
            "expires.is_some()", cases=("list",)),

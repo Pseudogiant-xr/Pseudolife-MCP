@@ -2198,3 +2198,30 @@ def test_a_failed_initdb_says_why(tmp_path, monkeypatch):
     with pytest.raises(subprocess.CalledProcessError) as quiet:
         _cluster._run(failing)
     assert quiet.value.stderr is None and "Its error output" not in str(quiet.value)
+
+
+@pytest.mark.skipif(core.WINDOWS, reason="POSIX modes")
+def test_the_harness_pins_the_umask_both_arms_inherit(tmp_path):
+    """A host umask of 002 made a re-recorded golden say "cwd": "0o775",
+    which CI (umask 022) replays as `modes differ` (2026-11-02)."""
+    previous = os.umask(0o002)
+    try:
+        core.pin_umask()
+        (tmp_path / "home" / "cwd").mkdir(parents=True)
+        assert core.modes(tmp_path / "home") == {"cwd": "0o755"}
+    finally:
+        os.umask(previous)
+
+
+def test_the_runner_pins_the_umask_before_recording_or_replaying(monkeypatch):
+    from cli_harness import runner
+
+    class Pinned(Exception):
+        pass
+
+    def pin():
+        raise Pinned
+    monkeypatch.setattr(core, "pin_umask", pin)
+    for mode in (["--record"], ["--golden"]):
+        with pytest.raises(Pinned):
+            runner.main(["--row", "invite", *mode])
