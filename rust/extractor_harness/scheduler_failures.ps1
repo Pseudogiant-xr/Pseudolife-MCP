@@ -1,4 +1,4 @@
-param([string]$Source, [string]$Root, [ValidateSet('PasswordRollback','LegacyMigration','LegacyJuly','LegacyDetached','DelayedStop','DelayedRemoval','DeleteRetry','DeleteFailure','StopTimeout','RemovalTimeout','ProcessExitRace','ProcessStopFailure','ProcessIdentityChanged','QueryInitialRetry','QueryRollbackRetry','QueryRemovalRetry','QueryFailure','QueryAccessDenied','QueryNamedAbsent','DisabledReinstall','QueryStopFailure','QueryRemovalFailure','ForeignRemoval','ForeignLegacy','ForeignSibling','ForeignUninstallLegacy','ForeignNativeArguments','CustomLauncherRemoval','ForeignEncodedArguments','ForeignNativeBasename','DetachedClaude','DetachedCodex','DetachedCodexCli')][string]$Case)
+param([string]$Source, [string]$Root, [ValidateSet('PasswordRollback','LegacyMigration','LegacyJuly','LegacyDetached','DelayedStop','DelayedRemoval','DeleteRetry','DeleteFailure','StopTimeout','RemovalTimeout','ProcessExitRace','ProcessStopFailure','ProcessIdentityChanged','QueryInitialRetry','QueryRollbackRetry','QueryRemovalRetry','QueryFailure','QueryAccessDenied','QueryNamedAbsent','DisabledReinstall','QueryStopFailure','QueryRemovalFailure','ForeignRemoval','ForeignLegacy','ForeignSibling','ForeignUninstallLegacy','ForeignNativeArguments','CustomLauncherRemoval','ForeignEncodedArguments','ForeignNativeBasename','DetachedClaude','DetachedCodex','DetachedCodexCli','LateLauncherChild','ProcessExitWait','ProcessExitTimeout','ProcessQueryFailure')][string]$Case)
 $ErrorActionPreference = 'Stop'
 # Every scheduler/process operation is mocked; these cases need no credentials,
 # real registrations, listeners or process termination.
@@ -29,6 +29,86 @@ $global:r6newProcess = $null
 $global:r6queryFaults = 0
 $global:r6startupFailed = $false
 $global:r6enabled = $false
+if ($Case -in @('ProcessExitWait','ProcessExitTimeout','ProcessQueryFailure')) {
+    $ast = [Management.Automation.Language.Parser]::ParseFile($Source, [ref]$null, [ref]$null)
+    $stopper = $ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Stop-CapturedProcess' }, $true)
+    Invoke-Expression $stopper.Extent.Text
+    $old = [PSCustomObject]@{ProcessId=4242;CreationDate=[datetime]'2026-01-01';CommandLine='fixture-native --owned'}
+    $global:r6exitWaited=$false
+    function Get-CimInstance {
+        [CmdletBinding()]
+        param($ClassName,$Filter)
+        if ($Case -eq 'ProcessQueryFailure') { Write-Error 'fixture process query failed'; return }
+        $old
+    }
+    function Stop-Process {
+        param($Id,[switch]$PassThru)
+        if ($Id -ne 4242) { throw 'wrong process stopped' }
+        $process=[PSCustomObject]@{}
+        $process | Add-Member ScriptMethod WaitForExit {
+            param($timeout)
+            if ($timeout -ne 15000) { throw 'process exit wait changed its deadline' }
+            $global:r6exitWaited=$true
+            return $Case -ne 'ProcessExitTimeout'
+        }
+        if ($PassThru) { $process }
+    }
+    $caught=''
+    try { Stop-CapturedProcess $old } catch { $caught=$_.Exception.Message }
+    if ($Case -eq 'ProcessQueryFailure') {
+        if ($caught -ne 'fixture process query failed' -or $global:r6exitWaited) { throw 'process query failure was silently treated as an exit' }
+    } else {
+        if (-not $global:r6exitWaited) { throw 'process termination returned before waiting for exit' }
+        if ($Case -eq 'ProcessExitWait' -and $caught) { throw "process exit wait failed: $caught" }
+        if ($Case -eq 'ProcessExitTimeout' -and $caught -ne 'process 4242 did not exit after termination') { throw "process exit timeout was lost: $caught" }
+    }
+    Write-Output "$Case passed without real scheduler operations"
+    return
+}
+if ($Case -eq 'LateLauncherChild') {
+    # The waiting launcher can create its runtime after the first process
+    # snapshot, immediately before the scheduler stops its outer wrapper.
+    $native = Join-Path $directory 'launcher.exe'
+    $ownerExe = Join-Path $directory 'runtime.exe'
+    $kind = 'codex'
+    $arguments = '"extractor-shim" "codex" "--env-file" "' + $settings + '"'
+    $ast = [Management.Automation.Language.Parser]::ParseFile($Source, [ref]$null, [ref]$null)
+    foreach ($functionName in @('Test-SamePath','Test-NativeInvocation','Get-NativeTaskCode','Get-RegisteredInvocation','Assert-ShimRegistration','Get-OwnedTaskProcesses','Stop-CapturedProcess','Get-TaskRegistration','Wait-TaskStopped','Remove-OwnedTask')) {
+        $definition = $ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $functionName }, $true)
+        Invoke-Expression $definition.Extent.Text
+    }
+    $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes((Get-NativeTaskCode $native $arguments)))
+    $global:r6fixtureTask = [PSCustomObject]@{TaskName='fixture-late';State='Running';Actions=@([PSCustomObject]@{Execute='powershell.exe';Arguments="-EncodedCommand $encoded"})}
+    $global:r6lateLauncher = [PSCustomObject]@{ProcessId=4242;ParentProcessId=1;CreationDate=[datetime]'2026-01-01';ExecutablePath=$native;CommandLine=('"' + $native + '" ' + $arguments)}
+    $global:r6lateRuntime = $null
+    $global:r6foreignRuntime = [PSCustomObject]@{ProcessId=4444;ParentProcessId=1;CreationDate=[datetime]'2026-01-01';ExecutablePath=$ownerExe;CommandLine=('"' + $ownerExe + '" ' + $arguments.Replace($settings, $settings + '.other'))}
+    $global:r6foreignImage = [PSCustomObject]@{ProcessId=4445;ParentProcessId=1;CreationDate=[datetime]'2026-01-01';ExecutablePath=($ownerExe + '.other');CommandLine=('"' + $ownerExe + '.other" ' + $arguments)}
+    function Get-CimInstance {
+        param($ClassName,$Filter)
+        $all=@($global:r6lateLauncher,$global:r6lateRuntime,$global:r6foreignRuntime,$global:r6foreignImage) | Where-Object { $_ }
+        if ($Filter -match 'ProcessId = (\d+)') { $all | Where-Object ProcessId -eq ([int]$Matches[1]) }
+        else { $all }
+    }
+    function Get-ScheduledTask { $global:r6fixtureTask }
+    function Stop-ScheduledTask {
+        $global:r6lateRuntime=[PSCustomObject]@{ProcessId=4343;ParentProcessId=4242;CreationDate=[datetime]'2026-01-01T00:00:01';ExecutablePath=$ownerExe;CommandLine=('"' + $ownerExe + '" ' + $arguments)}
+        $global:r6fixtureTask.State='Ready'
+    }
+    function Stop-Process {
+        param($Id)
+        $global:r6stoppedPids += $Id
+        if ($Id -eq 4242) { $global:r6lateLauncher=$null }
+        elseif ($Id -eq 4343) { $global:r6lateRuntime=$null }
+        else { throw 'foreign process was stopped' }
+    }
+    function Unregister-ScheduledTask { param($TaskName,[switch]$Confirm) $global:r6fixtureTask=$null }
+    function Start-Sleep { }
+    Remove-OwnedTask 'fixture-late'
+    if ($global:r6lateRuntime -or $global:r6lateLauncher -or $global:r6fixtureTask) { throw 'late launcher child survived successful task removal' }
+    if (($global:r6stoppedPids | Sort-Object) -join ',' -ne '4242,4343') { throw 'removal did not stop precisely the launcher and its late runtime' }
+    Write-Output "$Case passed without real scheduler operations"
+    return
+}
 if ($Case -in @('DetachedClaude','DetachedCodex','DetachedCodexCli')) {
     # Actual detached actions immediately before 5de8b597f introduced the
     # ops/.env runner. Keep both providers' flags and quoting from that source.
@@ -256,7 +336,14 @@ function Get-CimInstance {
 function Get-NetTCPConnection {
     if ($global:r6listening) { [PSCustomObject]@{OwningProcess=$(if ($global:r6newProcess) { 4343 } else { 4242 })} }
 }
-function Stop-Process { param($Id) $global:r6stoppedPids += $Id; $global:r6listening=$false }
+function Stop-Process {
+    param($Id)
+    $global:r6stoppedPids += $Id
+    $global:r6listening=$false
+    if ($global:r6oldProcess -and $global:r6oldProcess.ProcessId -eq $Id) { $global:r6oldProcess=$null }
+    if ($global:r6newProcess -and $global:r6newProcess.ProcessId -eq $Id) { $global:r6newProcess=$null }
+    if ($global:r6legacyProcess -and $global:r6legacyProcess.ProcessId -eq $Id) { $global:r6legacyProcess=$null }
+}
 function Get-Date { $global:r6clock }
 function Start-Sleep { param($Milliseconds) $global:r6clock=$global:r6clock.AddMilliseconds($Milliseconds) }
 function New-ScheduledTaskAction {

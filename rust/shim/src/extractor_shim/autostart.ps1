@@ -118,9 +118,12 @@ function Get-RegisteredInvocation($task) {
     }
 }
 function Stop-CapturedProcess($old) {
-    $current = Get-CimInstance Win32_Process -Filter "ProcessId = $($old.ProcessId)" -ErrorAction SilentlyContinue
+    $current = Get-CimInstance Win32_Process -Filter "ProcessId = $($old.ProcessId)" -ErrorAction Stop
     if ($current -and $current.CreationDate -eq $old.CreationDate -and $current.CommandLine -eq $old.CommandLine) {
-        try { Stop-Process -Id $old.ProcessId -Force -ErrorAction Stop }
+        try {
+            $stopped = Stop-Process -Id $old.ProcessId -Force -PassThru -ErrorAction Stop
+            if ($stopped -and -not $stopped.WaitForExit(15000)) { throw "process $($old.ProcessId) did not exit after termination" }
+        }
         catch {
             # Scheduler stop can finish between the identity check and this call.
             if ($_.FullyQualifiedErrorId -ne 'NoProcessFoundForGivenId,Microsoft.PowerShell.Commands.StopProcessCommand') { throw }
@@ -147,7 +150,11 @@ function Get-OwnedTaskProcesses($task) {
             continue
         }
         foreach ($process in @($snapshot | Where-Object { Test-NativeInvocation $_.CommandLine $invocation.Kind $invocation.EnvFile })) {
-            $owned = Test-SamePath $process.ExecutablePath $invocation.Exe
+            # A waiting launcher may already have exited. The exact runtime
+            # image and this registration's provider/settings still identify
+            # its native child; a basename or matching port never does.
+            $owned = (Test-SamePath $process.ExecutablePath $invocation.Exe) -or
+                (Test-SamePath $process.ExecutablePath $ownerExe)
             if (-not $owned) {
                 $parent = Get-CimInstance Win32_Process -Filter "ProcessId = $($process.ParentProcessId)" -ErrorAction SilentlyContinue
                 $owned = $parent -and (Test-SamePath $parent.ExecutablePath $invocation.Exe) -and
@@ -204,6 +211,10 @@ function Remove-OwnedTask([string]$taskName) {
     Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
     foreach ($process in @($captured | Sort-Object CreationDate -Descending)) { Stop-CapturedProcess $process }
     Wait-TaskStopped $taskName
+    # A launcher can spawn between the first snapshot and scheduler stop.
+    # Once the wrapper has stopped, collect that last child before removing
+    # the registration or restoring a previous listener on the same port.
+    foreach ($process in @(Get-OwnedTaskProcesses $task)) { Stop-CapturedProcess $process }
     $deadline = (Get-Date).AddSeconds(15)
     $accepted = $false
     $lastDeleteError = 'registration is still present'
@@ -318,6 +329,7 @@ try {
         foreach ($old in $stale) { Stop-CapturedProcess $old }
         Wait-TaskStopped $name
         if ($legacy) { Wait-TaskStopped $legacy.TaskName }
+        foreach ($old in @((Get-OwnedTaskProcesses $registered)) + @((Get-OwnedTaskProcesses $legacy))) { Stop-CapturedProcess $old }
         $deadline = (Get-Date).AddSeconds(15)
         while ((Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 200 }
         if (Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue) { throw "port $port did not become free; restoring the previous registration" }

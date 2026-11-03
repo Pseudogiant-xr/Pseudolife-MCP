@@ -48,6 +48,10 @@ def invoke(argv, *, step, **kwargs):
     print(f"START {step}", flush=True)
     p = subprocess.run(argv, capture_output=True, **kwargs)
     print(f"END {step}: exit {p.returncode}, {time.monotonic() - started:.1f}s", flush=True)
+    if p.returncode:
+        # Expected failed replacements can contain a rollback warning that is
+        # essential if the later restored-listener assertion fails.
+        print(p.stdout.decode(errors="replace"), p.stderr.decode(errors="replace"), flush=True)
     return p
 
 
@@ -186,7 +190,8 @@ def proof(binary, root, fixture, launcher_exe, provider, scenario="all"):
                      "QueryFailure", "QueryAccessDenied", "QueryNamedAbsent", "DisabledReinstall",
                      "QueryStopFailure", "QueryRemovalFailure", "ForeignRemoval", "ForeignLegacy", "ForeignSibling",
                      "ForeignUninstallLegacy", "ForeignNativeArguments", "CustomLauncherRemoval", "ForeignEncodedArguments",
-                     "ForeignNativeBasename", "DetachedClaude", "DetachedCodex", "DetachedCodexCli"):
+                     "ForeignNativeBasename", "DetachedClaude", "DetachedCodex", "DetachedCodexCli", "LateLauncherChild",
+                     "ProcessExitWait", "ProcessExitTimeout", "ProcessQueryFailure"):
             checked(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(Path(__file__).with_name("scheduler_failures.ps1")),
                      "-Source", str(run.ROOT / "rust/shim/src/extractor_shim/autostart.ps1"), "-Root", str(root), "-Case", case], step=case)
     if not windows and scenario in ("all", "preflight"):
