@@ -4,12 +4,10 @@
 decisions of 2026-11-03: F2 and F3 are fixed now, in both daemons, by the
 board stream that is changing the same lease and wake code; everything else
 is held and built on the Rust daemon only, once it is the default (G2); the
-recommendations on Q1 to Q4 below are accepted. Later on 2026-11-03 the
-board stream reported, in board mail 14c2cfe3 relaying a conductor
-decision, that Q1's delivery details were settled and that F1 is built into
-the same open fix (#1182). F1 moving out of the hold is pending the
-maintainer's confirmation; until then the maintainer's hold above stands
-for F1.
+recommendations on Q1 to Q4 below are accepted. Later the same day
+(maintainer decision, 2026-11-03) F1 moved out of the hold to ship now in
+the same open fix (#1182), so F1, F2 and F3 land together in both
+daemons.
 
 A team of agent sessions can stall on the board. A session holds a lease or
 the coordinator role, then goes idle, crashes or forgets to release it, and
@@ -30,8 +28,8 @@ share one bump. The exception granted for the Console sign-in work (#1144)
 covers that work only, and this spec asks for none.
 
 F2 and F3 are fixes under D10 and land now in both daemons, with #1182.
-F1 is built in the same PR, pending the maintainer's confirmation (see the
-status line). Every other item is built on the Rust daemon only once it is the default (G2, B17),
+F1 ships in the same PR (maintainer decision, 2026-11-03). Every other
+item is built on the Rust daemon only once it is the default (G2, B17),
 from the landing map in "Building it on Rust" below. Each item is marked by
 kind:
 
@@ -41,7 +39,7 @@ kind:
 
 | # | Item | Kind | Why |
 |---|------|------|-----|
-| F1 | Tell a waiter when the lease is granted to it | fix | One mail per grant from the daemon's existing reserved sender, decided `rung` with a new reason `lease_grant` (Q1); built in #1182, pending the maintainer's confirmation |
+| F1 | Tell a waiter when the lease is granted to it | fix | One mail per grant from the daemon's existing reserved sender, decided `rung` with a new reason `lease_grant` (Q1); lands with #1182 (maintainer decision, 2026-11-03) |
 | F2 | A missed grant goes back to the queue once instead of being dropped | fix | Internal to settling |
 | F3 | Skip dead waiters at grant time | fix | Internal to settling; the signal is already stored |
 | F4 | The coordinator role lasts only while its session can be reached | fix | Same claim call, different expiry rule; every input is already stored (§1.1) |
@@ -328,8 +326,8 @@ notices go to the owner, and the Board shows the run under that session.
   only on the new paths.
 - **F2 needs F1:** without F1 a retry grant is as silent as the first
   one, so an idle session can miss it too and F2 alone buys a sleeping
-  waiter one more turn, not a guarantee. This is why F1 is built into
-  the same fix (#1182).
+  waiter one more turn, not a guarantee. This is why F1 ships in the
+  same fix (#1182).
 
 ## 4. Workflow profiles and onboarding (S6)
 
@@ -392,7 +390,7 @@ per `rust/PORTING.md`.
 | Item | Where it lands |
 |------|----------------|
 | Prerequisite | The conductor's per-prompt reminder (`/api/hook/memory-changes?agent=`) is not ported (`rust/daemon/src/routes/hook.rs`, declared in `divergences.md`). The role briefs and playbook reach a holder through that path and the check-in brief, so they are ported first |
-| F1, F2, F3 | Landing with #1182 in both daemons (F1 pending the maintainer's confirmation), not held for G2 |
+| F1, F2, F3 | Landing with #1182 in both daemons, not held for G2 |
 | F4 | `board/lease.rs` (expiry in `settle`) and `board/mcp.rs` (claim check, `SESSION_LEASE_TTL`) |
 | F5 | `board/lease.rs` (`settle_due`) and `board/notice.rs` |
 | F6 | `board/console.rs` and the Console's Board view |
@@ -409,12 +407,10 @@ test from §3.
 ## Phasing
 
 1. **This spec** (docs only).
-2. **Now:** F2 and F3 in both daemons, landing with the board stream's
-   PR (#1182), which also builds F1, pending the maintainer's
-   confirmation.
+2. **Now:** F1, F2 and F3 in both daemons, landing with the board
+   stream's PR (#1182).
 3. **Held until G2, then Rust only:** the reminder port (prerequisite),
-   F1 if the maintainer keeps it held, F4, F5 and F6, then F7 with the
-   playbook.
+   F4, F5 and F6, then F7 with the playbook.
 4. **Then surfaces:** S1 and S2, S3, S4, S5.
 5. **Onboarding (S6):** once the sign-in PRs (#1164, #1166, #1168) have
    merged.
@@ -434,8 +430,8 @@ The maintainer accepted each recommendation on 2026-11-03.
   `doorbell.rs`, and their Python counterparts), so a new decision value
   would never ring. No new origin, no new column, and no shim change. The near-miss test is every
   other daemon notice staying `hinted`.
-  **Delivery, a conductor decision relayed by the board stream in board
-  mail 14c2cfe3 on 2026-11-03:** the notice is agent-origin mail from the
+  **Delivery, as built in #1182 (maintainer decision, 2026-11-03, to
+  ship F1 now):** the notice is agent-origin mail from the
   reserved daemon sender, so it conveys no user approval. It is sent once
   per grant fence; that deduplication bounds the notices, so a grant ring
   gets no wake cap of its own. The ordinary queue and send limits still
