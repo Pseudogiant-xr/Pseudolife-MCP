@@ -31,7 +31,7 @@ from pseudolife_memory.utils.config import (
 PATHEXT = ".COM;.EXE;.BAT;.CMD"
 CAPS = {"per_recipient_per_hour": 20, "urgent_per_sender_per_hour": 6,
         "nightly_total": 200, "fan_out_stagger_seconds": 30,
-        "authority_per_sender_per_hour": 12}
+        "authority_per_sender_per_hour": 60}
 PLUGIN = "pseudolife-memory@pseudolife-mcp"
 
 

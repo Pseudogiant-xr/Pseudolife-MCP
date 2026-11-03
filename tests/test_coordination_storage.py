@@ -1073,11 +1073,11 @@ def test_the_project_conductors_urgent_mail_reopens_a_done_park(store):
     assert answer["wake"]["decision"] == "rung"
 
 
-def test_plain_mail_from_the_conductor_still_never_rings_a_done_park(store):
-    """Plain mail never wakes (2026-10-02); reopening takes ``urgent``."""
+def test_plain_mail_from_the_conductor_rings_a_done_park(store):
+    """A current maintainer-granted conductor needs no urgency to reopen."""
     delegate = _delegate(store)
     b = _done(store)
-    assert _wake(store, delegate, b)["reason"] == "parked_done"
+    assert _wake(store, delegate, b)["reason"] == "conductor"
 
 
 @pytest.mark.parametrize("case", ["other_project", "no_project", "resigned", "revoked",
@@ -1160,7 +1160,7 @@ def test_the_audit_log_names_the_authority_a_ring_used(store, listener):
              for row in audit_events(store.storage.conn) if row["event"] == "send"}
     assert sends["authority"]["wake_reason"] == "conductor"
     assert sends["authority"]["wake"] == wake["decision"]
-    assert "wake_reason" not in sends["plain"]
+    assert sends["plain"]["wake_reason"] == "conductor"
     assert "_ring" not in wake
 
 
@@ -1196,11 +1196,8 @@ def test_anyone_on_a_done_park_does_not_open_it_to_every_peer(store):
     assert _wake(store, a, b, urgent=True)["reason"] == "parked_done"
 
 
-def test_authority_rings_have_their_own_small_budget_and_the_shared_caps(store):
-    """A delegate relaying an incident to several sessions is not capped
-    by the plain urgent allowance (2026-10-03: relays came back ``capped``),
-    but its own hourly budget, the per-recipient cap, the nightly total and
-    the stagger still bound it: rings stay rate-capped."""
+def test_conductor_rings_have_their_own_budget_without_peer_caps(store):
+    """The conductor bypasses peer caps and stagger but keeps its sender cap."""
     from pseudolife_memory.storage.coordination import WakePolicy
     store.wake = WakePolicy(urgent_per_sender_per_hour=1, authority_per_sender_per_hour=2,
                             per_recipient_per_hour=1)
@@ -1209,7 +1206,7 @@ def test_authority_rings_have_their_own_small_budget_and_the_shared_caps(store):
     first = _wake(store, delegate, peers[0], urgent=True)
     second = _wake(store, delegate, peers[1], urgent=True)
     assert (first["reason"], second["reason"]) == ("conductor", "conductor")
-    assert (first["ring_at"], second["ring_at"]) == (1000.0, 1030.0)
+    assert (first["ring_at"], second["ring_at"]) == (1000.0, 1000.0)
     assert _wake(store, delegate, peers[2], urgent=True) == {
         "decision": "capped", "reason": "authority_sender_hour"}
     store.test_time[0] += 3601
@@ -1219,8 +1216,9 @@ def test_authority_rings_have_their_own_small_budget_and_the_shared_caps(store):
         _idle(store, peer, 120)
     store.grant_conductor("proj", delegate["agent_id"], hold=3600)
     assert _wake(store, delegate, peers[2], urgent=True)["reason"] == "conductor"
+    assert _wake(store, delegate, peers[2], urgent=True)["reason"] == "conductor"
     assert _wake(store, delegate, peers[2], urgent=True) == {
-        "decision": "capped", "reason": "recipient_hour"}
+        "decision": "capped", "reason": "authority_sender_hour"}
 
 
 def test_authority_on_a_parked_or_unparked_session_spends_the_authority_budget(store):

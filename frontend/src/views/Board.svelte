@@ -28,6 +28,7 @@
     scopeLine,
     stateChip,
     summarize,
+    timelineEmpty,
     waitersOmitted,
   } from "../lib/board";
   import { explainBoardUnavailable, explainError } from "../lib/errors";
@@ -230,8 +231,8 @@
     </button>
   </div>
   <p class="readonly caption">
-    Board metadata: agent message bodies are never served to the Console. Unread counts are shown only for your own
-    principal's peers. Refreshing never reads mail or changes the board; roles and your messages change only with your
+    Board metadata: agent message bodies are never served to the Console. Unread counts and mail are shown only for
+    sessions that use this Console's token. Refreshing never reads mail or changes the board; roles and your messages change only with your
     passkey.
   </p>
 
@@ -449,20 +450,22 @@
           <div class="timeline-head">
             <div class="timeline-title">
               <h3 class="panel-title">Mail and wake timeline</h3>
-              <p class="caption">Retained events visible to your principal, newest first</p>
+              <p class="caption">Mail of sessions that use this Console's token, newest first</p>
             </div>
             <div class="segmented small" role="group" aria-label="Timeline scope">
               <button type="button" aria-pressed={scope === "peer"} onclick={() => (scope = "peer")} disabled={!selected}>
                 This peer
               </button>
-              <button type="button" aria-pressed={scope === "all"} onclick={() => (scope = "all")}>Everything visible</button>
+              <button type="button" aria-pressed={scope === "all"} onclick={() => (scope = "all")}>All visible</button>
             </div>
           </div>
           {#if timeline.length === 0}
+            {@const why = timelineEmpty(scope, selected, agents)}
             <p class="empty">
-              {scope === "peer" && selected
-                ? `No retained mail or wake event involves ${agentName(selected)}.`
-                : "No retained mail or wake events are visible to this token. This bounded view follows the configured audit retention."}
+              {why.text}
+              {#if why.tokenFix}<button type="button" class="linkish" onclick={() => (ui.tokenOpen = true)}
+                  >Set a bearer token</button
+                >{/if}
             </p>
           {:else}
             <ol class="events">
@@ -621,6 +624,16 @@
     padding: 14px;
     color: var(--ink-4);
     font-size: 12.5px;
+  }
+
+  .linkish {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--link);
+    font-size: inherit;
+    text-decoration: underline;
+    cursor: pointer;
   }
 
   /* roster: its own fixed-height pane, so finding a session never scrolls
