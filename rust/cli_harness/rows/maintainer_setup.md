@@ -68,3 +68,13 @@ python rust/cli_harness --row maintainer_setup --golden --candidate <native-bina
 Windows stress selections: `row:maintainer_setup` and
 `cargo:pseudolife-stdio/lib::cli::maintainer::setup::system::tests::timeout_preserves_the_enable_link_and_reaps_its_child`
 (20 hosted runs each).
+
+The explicit `--container <name>` option is shared by both engines. Fifteen
+additional scoped cases assert the selected container on every inspect, helper
+and restart, including active, pending, unreadable and missing state and fresh
+setup for all three engine labels. The existing no-flag cases keep the original
+default-container commands and output. Updater acceptance additionally changes
+the container ID during recreation and verifies the subsequent check uses the
+new ID from that same Compose project. Linux `0fd31138` passed all 45 live and golden cases. Its new recording is
+Git-bound and used umask `022`; the 29 existing non-help cases match the prior
+recording under the unchanged comparison rules. Windows recorded the same Git-bound oracle and passed all 45 live and golden cases; its 29 prior non-help cases also match under the existing rules.

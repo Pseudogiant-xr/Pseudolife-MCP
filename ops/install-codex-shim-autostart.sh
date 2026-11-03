@@ -34,11 +34,15 @@ PORT=8086
 MODEL="gpt-5.6-terra"
 HEALTH_TTL=1800
 PYTHON_EXE=""
+NATIVE_EXE=""
+NATIVE_UNIT=""
 CODEX_CLI=""
 LOG_FILE="$HOME/.pseudolife-mcp/codex-shim.log"
 
 while [ $# -gt 0 ]; do
     case "$1" in
+        --native)      NATIVE_EXE="$2"; shift 2 ;;
+        --native-unit) NATIVE_UNIT="$2"; shift 2 ;;
         --port)       PORT="$2"; shift 2 ;;
         --model)      MODEL="$2"; shift 2 ;;
         --health-ttl) HEALTH_TTL="$2"; shift 2 ;;
@@ -69,6 +73,18 @@ fi
     echo "  https://developers.openai.com/codex/cli/" >&2
     exit 1
 }
+
+
+# Native registration is shipped in the executable; no Python is discovered.
+if [ -n "$NATIVE_EXE" ]; then
+    NATIVE_EXE="$(command -v "$NATIVE_EXE")"
+    bridge_ip="$(ip -4 addr show docker0 2>/dev/null | sed -n 's/.*inet \([0-9.]*\).*/\1/p' | head -1)"
+    native_args=(extractor-shim install-autostart codex --repo "$repo" --native-exe "$NATIVE_EXE"
+        --model "$MODEL" --port "$PORT" --host "${bridge_ip:-172.17.0.1}" --log "$LOG_FILE")
+    [ -z "$NATIVE_UNIT" ] || native_args+=(--name "$NATIVE_UNIT")
+    native_args+=(--health-ttl "$HEALTH_TTL" --cli "$CODEX_CLI")
+    exec "$NATIVE_EXE" "${native_args[@]}"
+fi
 
 # >>> shim python >>>
 # The unit's interpreter must import pseudolife_memory with its

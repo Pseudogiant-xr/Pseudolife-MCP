@@ -6,6 +6,7 @@ pub mod cli;
 pub mod credentials;
 pub mod daemon_url;
 mod errors;
+pub mod extractor_shim;
 #[path = "../../shared/float_repr.rs"]
 mod float_repr;
 pub mod lifecycle;

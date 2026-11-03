@@ -3,7 +3,7 @@ pub(super) mod args;
 mod board;
 mod hold;
 mod json;
-mod lock;
+pub(crate) mod lock;
 pub mod operator;
 mod run;
 mod view;

@@ -556,7 +556,8 @@ jobs:
         #   Windows process handling, which no other lane reaches; the three
         #   cancellation tests that reap real children run nightly.
         # - test_suite_lock (picks): the only CI coverage of the msvcrt lock
-        #   backend, crash release and the native-Windows full-run refusal.
+        #   backend, crash release and the native-Windows full-run refusal,
+        #   and of ops/wsl-suite.ps1 forwarding a held lease's marker.
         # - test_conductor_watch (picks): the watcher's detach flags, its
         #   GetProcessTimes start-time check and its lifetime lock.
         # - test_client_install_ux, test_installer_plugin, test_codex_hooks
@@ -619,6 +620,7 @@ jobs:
           tests/test_suite_lock.py::test_the_lock_is_released_when_its_holder_crashes
           tests/test_suite_lock.py::test_only_a_full_run_on_native_windows_is_refused_and_only_when_configured
           tests/test_suite_lock.py::test_the_windows_policy_comes_from_the_env_then_the_file_then_allow
+          tests/test_suite_lock.py::test_wsl_suite_forwards_a_lease_marker_only_while_its_windows_lock_is_held
           tests/test_conductor_watch.py::test_detach_starts_the_watcher_and_prints_its_address
           tests/test_conductor_watch.py::test_detach_reports_one_already_running
           tests/test_conductor_watch.py::test_detach_reports_a_child_that_never_came_up
@@ -805,6 +807,7 @@ jobs:
           --deselect tests/test_suite_lock.py::test_the_lock_is_released_when_its_holder_crashes
           --deselect tests/test_suite_lock.py::test_only_a_full_run_on_native_windows_is_refused_and_only_when_configured
           --deselect tests/test_suite_lock.py::test_the_windows_policy_comes_from_the_env_then_the_file_then_allow
+          --deselect tests/test_suite_lock.py::test_wsl_suite_forwards_a_lease_marker_only_while_its_windows_lock_is_held
           tests/test_conductor_watch.py
           --deselect tests/test_conductor_watch.py::test_detach_starts_the_watcher_and_prints_its_address
           --deselect tests/test_conductor_watch.py::test_detach_reports_one_already_running

@@ -1,6 +1,6 @@
 usage: pseudolife-mcp maintainer setup [-h] [--local] [--port PORT]
                                        [--https-port HTTPS_PORT] [--yes]
-                                       [--check]
+                                       [--check] [--container CONTAINER]
 
 Set up maintainer passkeys on this daemon host: the Console's HTTPS name, the
 daemon's config, and your first passkey.
@@ -17,3 +17,6 @@ options:
   --check               change nothing: exit 0 when passkeys are set up (a
                         valid name and an active key), 1 when not, 2 when that
                         cannot be read
+  --container CONTAINER
+                        scope Docker operations to this daemon container
+                        (default pseudolife-mcp-daemon)
