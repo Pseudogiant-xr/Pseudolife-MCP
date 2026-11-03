@@ -157,7 +157,7 @@
     },
     "fingerprints": {
       "scope": "42b22137f81048ce",
-      "rust": "1eaa006de0ab0f43",
+      "rust": "8c868dd3971a8c76",
       "fixtures": "defc5e07c5ac3f94",
       "candidate": "d71c5590ce6f866a",
       "candidate-harness": "43b859ee9d5fd738",
@@ -265,6 +265,11 @@
         "job": "parity-checks",
         "fingerprint": "3d8e223dcbc15bc0",
         "reason": "Issue #1211: Windows judges step deadline 15 -> 20 minutes plus eight Stopwatch/Write-Host phase timings; no jobs, setup, commands or cases added. Paired Windows VM totals at a461bac9 and batch 8b63e007 were 584.6s and 541.3s; hosted step 554s at master, 901s timeout then 519s pass at unchanged batch head (runs 41627644757 and 41630214341). Existing measured job costs and budget limits retained; slow-runner headroom only."
+      },
+      {
+        "job": "rust",
+        "fingerprint": "8c868dd3971a8c76",
+        "reason": "Slow-runner headroom only: Rust job timeout-minutes 45 -> 60. No steps, commands, jobs or shards change. Warm hosted Windows at the same code: batch run 41691166042 passed (Nextest 9.6, no-default 7.4, override builds 11.9 min); master run 41699732205 took 11.8, 8.7 and 15.9 min and was cancelled at 45 min inside the override builds. Measured costs retained."
       }
     ]
   },
