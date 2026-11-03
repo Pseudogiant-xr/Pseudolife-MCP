@@ -179,8 +179,15 @@ def start_stored_principals(svc, token_map, *, auth_configured: bool):
     install_store(snapshot)
     recorder = ActivityRecorder() if auth_configured else None
     install_recorder(recorder)
+    # v59: Console sign-in sessions, reloaded by the same refresher. An
+    # open daemon has no principals to sign in as, so none.
+    sessions = None
+    if auth_configured:
+        from pseudolife_memory.console_sessions import SessionSnapshot, install_sessions
+        sessions = SessionSnapshot()
+        install_sessions(sessions)
     PrincipalRefresher(dsn, snapshot, auth_configured=auth_configured,
-                       recorder=recorder).start()
+                       recorder=recorder, sessions=sessions).start()
     return snapshot
 
 
@@ -262,6 +269,15 @@ def _build_health_payload(svc, token_present: bool) -> dict:
         # >0 means writes succeeded in memory but a snapshot did not persist.
         "persist_errors": getattr(svc, "_persist_errors", 0),
     }
+    # Which Console sign-ins this daemon offers (spec 2026-11-02): the
+    # Console reads this, never a 401 or 404, to decide whether to offer
+    # them. A link needs a configured token and the bank's session table
+    # (Postgres); the passkey sign-in is not built yet.
+    from pseudolife_memory.console_sessions import installed_sessions
+    payload["console_signin"] = {
+        "link": bool(token_present and getattr(svc, "_db_url", None)
+                     and installed_sessions() is not None),
+        "passkey": False}
     build = _build_stamp()
     if build is not None:
         payload["build"] = build

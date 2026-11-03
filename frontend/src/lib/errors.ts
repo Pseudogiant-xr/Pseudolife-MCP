@@ -1,5 +1,5 @@
 // Plain-language explanations for refused or failed API calls. Each names
-// the fix; `token` marks the ones the token modal can resolve.
+// the fix; `token` marks the ones the sign-in dialog can resolve.
 
 import type { ApiError } from "./api/client";
 import type { BoardSnapshot } from "./api/types";
@@ -7,7 +7,7 @@ import type { BoardSnapshot } from "./api/types";
 export interface Explained {
   title: string;
   body: string;
-  /** Offer "Set a bearer token" next to the message. */
+  /** Offer "Sign in" (the sign-in dialog) next to the message. */
   token: boolean;
 }
 
@@ -27,26 +27,26 @@ export function explainError(e: ApiError, what = "This view"): Explained {
       };
     case "unauthorized":
       return {
-        title: "The daemon did not accept this console's token",
-        body: "Store the bearer token the daemon was started with (PSEUDOLIFE_MCP_TOKEN, or one from PSEUDOLIFE_MCP_TOKENS). A browser keeps it for each address separately, so a new address, such as the HTTPS one for passkeys, needs the same token pasted once.",
+        title: "This Console is not signed in",
+        body: "Sign in again: run `pseudolife-mcp console` on a machine that already uses Pseudolife, and it opens a signed-in Console or shows a code to type here. A browser keeps its sign-in for each address separately, so a new address, such as the HTTPS one for passkeys, needs its own sign-in once.",
         token: true,
       };
     case "authentication_required":
       return {
         title: "The board needs a bearer token on the daemon",
-        body: "Coordination requires a configured token even on a loopback install. Start the daemon with PSEUDOLIFE_MCP_TOKEN (or PSEUDOLIFE_MCP_TOKENS), then store the same token here.",
+        body: "Coordination requires a configured token even on a loopback install. Start the daemon with PSEUDOLIFE_MCP_TOKEN (or PSEUDOLIFE_MCP_TOKENS), then sign in here.",
         token: true,
       };
     case "principal_not_allowed":
       return {
-        title: "This token's principal may not read the board",
-        body: "Add the principal to coordination.allowed_principals in the daemon config, or use a token for an allowed principal.",
+        title: "This Console's principal may not read the board",
+        body: "Add the principal to coordination.allowed_principals in the daemon config, or sign in as an allowed principal.",
         token: true,
       };
     case "operator_principal_required":
       return {
-        title: "Only the operator's token can change this",
-        body: "This token belongs to an invited machine. Invited machines read and write memory and the board, but changing the daemon's settings needs the operator's token (PSEUDOLIFE_MCP_TOKEN, or one from PSEUDOLIFE_MCP_TOKENS).",
+        title: "Only a sign-in from the daemon's host can change this",
+        body: "This Console was signed in from an invited machine. It can read and change memory and the board, but not the daemon's settings. To change them, run `pseudolife-mcp console` on the daemon's host and sign in with the link it opens.",
         token: true,
       };
     case "principals_unavailable":

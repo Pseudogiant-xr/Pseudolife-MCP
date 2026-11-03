@@ -1,7 +1,7 @@
 <script lang="ts">
-  // Your passkeys (the maintainer's signing keys), then the daemon's live
-  // configuration: the Dreamer card, then every knob of
-  // GET /api/config in the server's group order. Nothing about a knob is
+  // Your passkeys (the maintainer's signing keys), the signed-in browsers,
+  // then the daemon's live configuration: the Dreamer card, then every knob
+  // of GET /api/config in the server's group order. Nothing about a knob is
   // hard-coded here. Edits stay local until "Review and save" shows the
   // exact patch, which POST /api/config writes to config.yaml on the daemon
   // host (atomic, with a timestamped backup).
@@ -9,6 +9,7 @@
   import DreamerCard from "../components/settings/DreamerCard.svelte";
   import KnobRow from "../components/settings/KnobRow.svelte";
   import PasskeysPanel from "../components/settings/PasskeysPanel.svelte";
+  import SignedInBrowsers from "../components/settings/SignedInBrowsers.svelte";
   import ErrorState from "../components/ErrorState.svelte";
   import Modal from "../components/Modal.svelte";
   import { ApiError, softError } from "../lib/api/client";
@@ -30,7 +31,8 @@
   import { actionError, explainError } from "../lib/errors";
   import { fmtNum, plural } from "../lib/format";
   import { toast } from "../lib/overlay.svelte";
-  import { refresh, setSubtitle, ui } from "../lib/state.svelte";
+  import { signinCapability } from "../lib/signin";
+  import { refresh, setSubtitle, store, ui } from "../lib/state.svelte";
 
   // ---- loading ------------------------------------------------------------------
   let config = $state<ConfigResponse | null>(null);
@@ -66,6 +68,11 @@
   $effect(() => {
     void ui.tick;
     untrack(() => void load());
+  });
+
+  const signinOffered = $derived.by(() => {
+    const cap = signinCapability(store.health.data);
+    return !!cap && (cap.link || cap.passkey);
   });
 
   const knobCount = $derived(config ? config.groups.reduce((n, g) => n + g.knobs.length, 0) : 0);
@@ -143,6 +150,12 @@
 
 <div class="view settings">
   <PasskeysPanel />
+
+  <!-- An older daemon's /health says nothing about sign-in, and a daemon
+       that offers none (no token, or no Postgres bank) has no sessions. -->
+  {#if signinOffered}
+    <SignedInBrowsers />
+  {/if}
 
   {#if error && !config}
     <section class="panel pad">

@@ -47,6 +47,7 @@ whose remaining item is a proof keeps that boundary visible in its entry.
 
 | Entry | Caller | Closing stream or batch |
 |---|---|---|
+| [CONSOLE-SIGNIN](routes-whose-handlers-belong-to/console-sign-in-sessions-and-routes.md) | the Console's sign-in dialog and Settings, Signed-in browsers (`frontend/src/lib/signin.ts`), and `pseudolife-mcp console`, against `/api/console/*` and any `/api/*` call with a session bearer | B5 board; G2 |
 | [R4-NATIVE-UPDATE](startup-and-configuration/r4-native-update.md) | release/checkout CLI and unattended updates in `rust/shim/src/cli/update` | R4 / B11 and OPS-CUTOVER |
 | [W2F-CLOCK-RETRY](coordination-board-completion-w2/w2f-clock-retry.md) | board sends and daemon notices through `rust/daemon/src/board/dispatch.rs` / `board/notice.rs` during a reconnect | B5 board; B4 writer-session refresh |
 | [DOC-INGEST-LOCK](document-store-b7-document/doc-ingest-lock.md) | MCP `document_ingest` concurrent with `document_search`/`memory_search`, registered in `rust/daemon/src/mcp/dispatch.rs::registry` | B7 documents |

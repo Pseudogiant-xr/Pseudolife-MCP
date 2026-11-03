@@ -619,7 +619,7 @@
         {#if boardProblem}
           <p class="unavailable">
             {boardProblem.title}.
-            {#if boardProblem.token}<button type="button" class="linkish" onclick={() => (ui.tokenOpen = true)}>Set a bearer token</button>{/if}
+            {#if boardProblem.token}<button type="button" class="linkish" onclick={() => (ui.tokenOpen = true)}>Sign in</button>{/if}
           </p>
         {:else if !board}
           <p class="unavailable">Reading the board.</p>

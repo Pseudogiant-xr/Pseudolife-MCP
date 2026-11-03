@@ -122,7 +122,7 @@
    "p": "",
    "d": [
     "Talks only to /ui/* and /api/*",
-    "Bearer token kept in localStorage (pl_token); a 401 shows the refusal with a token prompt"
+    "Bearer token kept in localStorage (pl_token): a Console session minted at sign-in (a pseudolife-mcp console link or a typed code, schema v59) or a pasted token; a 401 opens the sign-in dialog"
    ]
   },
   {

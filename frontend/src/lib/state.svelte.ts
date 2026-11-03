@@ -1,4 +1,4 @@
-// App-wide reactive state: route, theme, token modal, refresh tick and the
+// App-wide reactive state: route, theme, sign-in dialog, refresh tick and the
 // shared daemon resources (health, overview, board) that several views read.
 
 import { untrack } from "svelte";
@@ -113,15 +113,16 @@ export function refresh(): void {
   ui.tick += 1;
 }
 
-// A 401 "unauthorized" means the stored token is missing or wrong: open the
-// token dialog, once per burst (a view load fires several requests at once).
+// A 401 "unauthorized" means this browser is not signed in (no token, or one
+// the daemon no longer accepts): open the sign-in dialog, once per burst (a
+// view load fires several requests at once).
 let unauthorizedAt = 0;
 setUnauthorizedHandler(() => {
   const now = Date.now();
   if (now - unauthorizedAt < 15_000 || ui.tokenOpen) return;
   unauthorizedAt = now;
   ui.tokenOpen = true;
-  toast("The daemon did not accept this console's token. Store the one it was started with.", "warn", 6000);
+  toast("This Console is not signed in, or its sign-in has ended. Sign in again.", "warn", 6000);
 });
 
 // ---- shared resources ------------------------------------------------------
