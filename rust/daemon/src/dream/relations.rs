@@ -196,7 +196,7 @@ fn degrees(g: &Value) -> std::collections::BTreeMap<i64, usize> {
 /// `_propose_write_dedup` (`service.py:7601-7657`): advisory merge
 /// proposals for a dream-minted entity that near-duplicates an existing
 /// name. A failure is logged and swallowed.
-async fn propose_write_dedup(svc: &Service, client: &Client, id: i64, name: &str) {
+pub(crate) async fn propose_write_dedup(svc: &Service, client: &Client, id: i64, name: &str) {
     if let Err(e) = write_dedup(svc, client, id, name).await {
         eprintln!("write-dedup scan skipped ({e:?}): {name:?}");
     }

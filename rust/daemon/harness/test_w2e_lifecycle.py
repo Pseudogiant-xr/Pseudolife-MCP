@@ -54,6 +54,36 @@ class FixtureFailure(RuntimeError):
     pass
 
 
+@pytest.mark.parametrize("name", ["cortex-auto-promote", "cortex-auto-promote-set",
+                                  "cortex-auto-promote-confidence", "cortex-auto-promote-disabled",
+                                  "cortex-auto-promote-eligibility"])
+def test_auto_promotion_recordings_declare_their_live_replay_requirements(harness, monkeypatch,
+                                                                        tmp_path, name):
+    # Full body evidence selects these registered scenarios. Their oracle
+    # recordings are retained, but seeded/restarting cases require both daemons.
+    golden = json.loads((harness.GOLDENS / f"{name}.json").read_text(encoding="utf-8"))
+    assert golden["scenario"] == name
+    monkeypatch.setattr(harness.pg, "create", lambda *a, **kw: pytest.fail("unsafe replay"))
+    result = harness.run_golden(name, tmp_path / "daemon", tmp_path, {}, [])
+    assert result["skipped"]
+    assert result["steps"] == []
+
+
+def test_auto_promotion_recordings_exercise_rejected_slot_bearing_stores(harness):
+    rejected = {}
+    for path in harness.GOLDENS.glob("cortex-auto-promote*.json"):
+        for step in json.loads(path.read_text(encoding="utf-8"))["steps"]:
+            op = step["op"]
+            if op.get("name") == "memory_store":
+                answer = step.get("python", {}).get("value", {})
+                if answer.get("stored") is False:
+                    rejected.setdefault(answer.get("reason"), []).append((op, answer))
+    assert any(answer["cortex_promoted"] > 0
+               for _, answer in rejected.get("below_surprise_threshold", []))
+    assert any("my editor is" in op["args"]["text"] and answer["cortex_promoted"] == 0
+               for op, answer in rejected.get("filtered_meta", []))
+
+
 @pytest.mark.parametrize("python_embedding,rust_embedding", [
     ([1.0, 0.0], [1.0]), ([1.0], [1.0, 0.0]),
     ([], [1.0]), ([1.0], []), (None, [1.0]), ([1.0], None),
