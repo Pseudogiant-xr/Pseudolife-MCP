@@ -181,7 +181,9 @@ class ConsoleRoutes:
             sources=_list(q, "source"), bands=_list(q, "band"),
             rerank=_tribool(q, "rerank"), bm25=_tribool(q, "bm25")))
         g("/api/recall", lambda q, b: svc.recall(
-            _s(q, "q", ""), hops=_i(q, "hops", 3), top_k=_i(q, "top_k", 5)))
+            _s(q, "q", ""),
+            hops=_i(q, "hops", 3) if "hops" in q else None,
+            top_k=_i(q, "top_k", 5) if "top_k" in q else None))
         g("/api/chain", lambda q, b: svc.chain(
             _s(q, "entity", ""), limit=_i(q, "limit", 20)))
 

@@ -1,8 +1,11 @@
 //! Codex configuration is written through its versioned app-server API.
 //! Never flatten project/managed settings into the user configuration.
 mod credentials;
+mod outcome;
 mod rpc;
 pub use credentials::{configure_credential_file, daemon_url, effective_value};
+pub use outcome::{SetupFailure, apply_replace_detailed};
+use outcome::{WriteDisposition, WriteFailure};
 pub use rpc::{Client, Rpc, resolve_codex};
 
 use super::files::{self, PrivateEdit};
@@ -80,6 +83,7 @@ pub fn dotted(parts: &[&str]) -> String {
 }
 
 /// The sole writable layer, with the opaque version needed for compare-and-swap.
+#[derive(Clone)]
 pub struct UserConfig {
     pub path: PathBuf,
     pub version: String,
@@ -674,75 +678,100 @@ impl WritePlan {
         client: &mut impl Rpc,
         cwd: &Path,
     ) -> Result<AppliedWrite, SetupError> {
-        let mut applied = AppliedWrite {
-            plan: self,
-            backup: None,
-            written_version: None,
-        };
-        if !applied.plan.changed() {
-            applied.plan.verify_unchanged(client, cwd).await?;
-            return Ok(applied);
-        }
-        if let Some(bytes) = files::read_config(&applied.plan.user.path)? {
-            applied.backup = Some(files::backup(&applied.plan.user.path, &bytes)?);
-        }
-        let response = client
-            .rpc(
-                "config/batchWrite",
-                json!({"edits":applied.plan.edits.iter().map(Edit::request).collect::<Vec<_>>(),
+        self.apply_locked_detailed(client, cwd)
+            .await
+            .map_err(|failure| failure.reason)
+    }
+
+    async fn apply_locked_detailed(
+        self,
+        client: &mut impl Rpc,
+        cwd: &Path,
+    ) -> Result<AppliedWrite, Box<WriteFailure>> {
+        let mut applied = AppliedWrite::unwritten(self);
+        let mut disposition = WriteDisposition::Untouched;
+        let mut rollback_error = None;
+        let result = async {
+            if !applied.plan.changed() {
+                applied.plan.verify_unchanged(client, cwd).await?;
+                return Ok(());
+            }
+            if let Some(bytes) = files::read_config(&applied.plan.user.path)? {
+                applied.backup = Some(files::backup(&applied.plan.user.path, &bytes)?);
+            }
+            disposition = WriteDisposition::Pending;
+            applied.settled = None;
+            let response = client
+                .rpc(
+                    "config/batchWrite",
+                    json!({"edits":applied.plan.edits.iter().map(Edit::request).collect::<Vec<_>>(),
             "filePath":applied.plan.user.path,"expectedVersion":applied.plan.user.version}),
-            )
-            .await;
-        let response = match response {
-            Ok(response) => response,
-            Err(error) => {
-                // Matching desired values are not evidence of ownership: another
-                // writer may have won this CAS, or our response may have been lost.
+                )
+                .await;
+            let response = match response {
+                Ok(response) => response,
+                Err(error) => {
+                    // Matching desired values are not evidence of ownership: another
+                    // writer may have won this CAS, or our response may have been lost.
+                    let current = client
+                        .rpc("config/read", json!({"includeLayers":true,"cwd":cwd}))
+                        .await
+                        .map_err(|_| ROLLBACK_UNVERIFIED)?;
+                    let user = user_config(&current, &applied.plan.home)
+                        .map_err(|_| ROLLBACK_UNVERIFIED)?;
+                    if user.version != applied.plan.user.version
+                        || !same_setting(&[], &user.config, &applied.plan.user.config)
+                    {
+                        return Err(CONFIG_CHANGED);
+                    }
+                    // An unchanged read is not a completion barrier: a timed-out
+                    // request may still commit after the snapshot was returned.
+                    if !error.definite_rejection {
+                        return Err(ROLLBACK_UNVERIFIED);
+                    }
+                    disposition = WriteDisposition::Untouched;
+                    applied.settled = Some(user);
+                    return Err(error);
+                }
+            };
+            applied.written_version = Some(
+                response["version"]
+                    .as_str()
+                    .filter(|v| !v.is_empty())
+                    .ok_or(ROLLBACK_UNVERIFIED)?
+                    .to_owned(),
+            );
+            let result = async {
                 let current = client
                     .rpc("config/read", json!({"includeLayers":true,"cwd":cwd}))
-                    .await
-                    .map_err(|_| ROLLBACK_UNVERIFIED)?;
-                let user =
-                    user_config(&current, &applied.plan.home).map_err(|_| ROLLBACK_UNVERIFIED)?;
-                if user.version != applied.plan.user.version
-                    || !same_setting(&[], &user.config, &applied.plan.user.config)
-                {
-                    return Err(CONFIG_CHANGED);
-                }
-                // An unchanged read is not a completion barrier: a timed-out
-                // request may still commit after the snapshot was returned.
-                if !error.definite_rejection {
+                    .await?;
+                let user = user_config(&current, &applied.plan.home)?;
+                if Some(&user.version) != applied.written_version.as_ref() {
                     return Err(ROLLBACK_UNVERIFIED);
                 }
+                applied.plan.verify_effective(&current, &user)
+            }
+            .await;
+            if let Err(error) = result {
+                if let Err(error) = applied.rollback_locked(client, cwd).await {
+                    rollback_error = Some(error);
+                    return Err(ROLLBACK_UNVERIFIED);
+                }
+                disposition = WriteDisposition::Restored;
                 return Err(error);
             }
-        };
-        applied.written_version = Some(
-            response["version"]
-                .as_str()
-                .filter(|v| !v.is_empty())
-                .ok_or(ROLLBACK_UNVERIFIED)?
-                .to_owned(),
-        );
-        let result = async {
-            let current = client
-                .rpc("config/read", json!({"includeLayers":true,"cwd":cwd}))
-                .await?;
-            let user = user_config(&current, &applied.plan.home)?;
-            if Some(&user.version) != applied.written_version.as_ref() {
-                return Err(ROLLBACK_UNVERIFIED);
-            }
-            applied.plan.verify_effective(&current, &user)
+            Ok(())
         }
         .await;
-        if let Err(error) = result {
-            applied
-                .rollback_locked(client, cwd)
-                .await
-                .map_err(|_| ROLLBACK_UNVERIFIED)?;
-            return Err(error);
+        match result {
+            Ok(()) => Ok(applied),
+            Err(reason) => Err(Box::new(WriteFailure {
+                reason,
+                write: applied,
+                disposition,
+                rollback_error,
+            })),
         }
-        Ok(applied)
     }
 }
 
@@ -750,8 +779,19 @@ pub struct AppliedWrite {
     plan: WritePlan,
     pub backup: Option<PathBuf>,
     written_version: Option<String>,
+    // An unchanged or acknowledged restored configuration permits private-file
+    // cleanup only while this exact snapshot still holds on a later retry.
+    settled: Option<UserConfig>,
 }
 impl AppliedWrite {
+    fn unwritten(plan: WritePlan) -> Self {
+        Self {
+            settled: Some(plan.user.clone()),
+            plan,
+            backup: None,
+            written_version: None,
+        }
+    }
     pub async fn rollback(&mut self, client: &mut impl Rpc, cwd: &Path) -> Result<(), SetupError> {
         let _lock = files::TransactionLock::acquire(&self.plan.user.path)?;
         self.rollback_locked(client, cwd).await
@@ -761,14 +801,21 @@ impl AppliedWrite {
         client: &mut impl Rpc,
         cwd: &Path,
     ) -> Result<(), SetupError> {
-        let Some(written_version) = self.written_version.as_ref() else {
-            return Ok(());
-        };
         let current = client
             .rpc("config/read", json!({"includeLayers":true,"cwd":cwd}))
             .await?;
         let home = &self.plan.home;
         let user = user_config(&current, home)?;
+        let Some(written_version) = self.written_version.as_ref() else {
+            if self.settled.as_ref().is_some_and(|settled| {
+                settled.version == user.version && same_setting(&[], &settled.config, &user.config)
+            }) {
+                return Ok(());
+            }
+            return Err(SetupError(
+                "Codex rollback refused configuration changed since compensation; review the remaining private files before retrying.",
+            ));
+        };
         if &user.version != written_version {
             return Err(SetupError(
                 "Codex rollback refused a newer configuration version; review the private config backup.",
@@ -788,6 +835,7 @@ impl AppliedWrite {
             });
         if old {
             self.written_version = None;
+            self.settled = Some(user);
             return Ok(());
         }
         if self.plan.edits.iter().any(|edit| {
@@ -849,6 +897,7 @@ impl AppliedWrite {
             ));
         }
         self.written_version = None;
+        self.settled = Some(user);
         Ok(())
     }
 }
@@ -864,13 +913,10 @@ impl AppliedConnection {
         &self.report
     }
     pub async fn rollback(&mut self, client: &mut impl Rpc, cwd: &Path) -> Result<(), SetupError> {
-        let _lock = files::TransactionLock::acquire(&self.write.plan.user.path)?;
-        self.write.rollback_locked(client, cwd).await?;
-        self.connection.rollback()?;
-        if let Some(token) = &mut self.token {
-            token.rollback()?;
-        }
-        Ok(())
+        self.rollback_detailed(client, cwd)
+            .await
+            .map(|_| ())
+            .map_err(|failure| failure.reason)
     }
 }
 
@@ -879,93 +925,9 @@ pub async fn apply_replace(
     cwd: &Path,
     plan: ConnectionPlan,
 ) -> Result<AppliedConnection, SetupError> {
-    let target = plan
-        .after
-        .get(FILE_KEY)
-        .and_then(Value::as_str)
-        .filter(|p| !p.is_empty());
-    let mut token = if let (Some(literal), Some(path)) = (&plan.literal, target) {
-        if std::fs::symlink_metadata(path).is_ok() {
-            CredentialProvider::new(None, Some(PathBuf::from(path)))
-                .and_then(|p| p.snapshot())
-                .map_err(|_| {
-                    SetupError(
-                        "The Codex token copy is unsafe or malformed; repair it before retrying.",
-                    )
-                })?;
-        }
-        Some(PrivateEdit::prepare(
-            Path::new(path),
-            literal.as_bytes().to_vec(),
-        )?)
-    } else {
-        None
-    };
-    if token.is_none()
-        && let Some(path) = target
-    {
-        CredentialProvider::new(None, Some(PathBuf::from(path))).and_then(|p|p.snapshot()).map_err(|_| SetupError("The configured credential file is missing, unsafe, or malformed; repair it before retrying."))?;
-    }
-    let path = connection_path(&plan.home);
-    read_connection(&path)?;
-    let data = connection_bytes(&plan.url, target.unwrap_or(""));
-    let mut connection = PrivateEdit::prepare(&path, data)?;
-    let _lock = files::TransactionLock::acquire(&plan.write.user.path)?;
-    let current = client
-        .rpc("config/read", json!({"includeLayers":true,"cwd":cwd}))
-        .await?;
-    plan.write.check_no_spawn_override(&current)?;
-    if user_config(&current, &plan.home)?.version != plan.write.user.version {
-        return Err(SetupError(
-            "Codex configuration changed during setup; no connection settings were written. Retry setup.",
-        ));
-    }
-    if let Some(token) = &mut token {
-        token.commit()?;
-    }
-    let mut write = match plan.write.apply_locked(client, cwd).await {
-        Ok(write) => write,
-        Err(error) => {
-            if error != ROLLBACK_UNVERIFIED
-                && error != CONFIG_CHANGED
-                && connection.still_before()
-                && let Some(token) = &mut token
-            {
-                token.rollback()?;
-            }
-            return Err(error);
-        }
-    };
-    if let Err(error) = connection.commit() {
-        write.rollback_locked(client, cwd).await?;
-        if let Some(token) = &mut token {
-            token.rollback()?;
-        }
-        return Err(error);
-    }
-    let mut changed = plan
-        .before
-        .keys()
-        .chain(plan.after.keys())
-        .filter(|key| !same_env_value(key, plan.before.get(*key), plan.after.get(*key)))
-        .cloned()
-        .collect::<Vec<_>>();
-    changed.sort();
-    changed.dedup();
-    let created = token
-        .iter()
-        .chain(std::iter::once(&connection))
-        .filter(|e| e.created())
-        .map(|e| e.path().to_owned())
-        .collect::<Vec<_>>();
-    let report = json!({"daemon_url":plan.url,"credential_file_path":target.unwrap_or(""),"changed":changed,
-        "backup":write.backup,"connection_backup":connection.backup,"token_backup":token.as_ref().and_then(|t|t.backup.as_ref()),"created":created});
-    Ok(AppliedConnection {
-        write,
-        token,
-        connection,
-        report,
-    })
+    apply_replace_detailed(client, cwd, plan)
+        .await
+        .map_err(|failure| failure.reason)
 }
 
 fn connection_bytes(url: &str, token_file: &str) -> Vec<u8> {

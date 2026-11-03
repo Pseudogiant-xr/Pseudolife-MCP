@@ -131,6 +131,8 @@ pub struct Service {
     pub session_dream: Arc<dyn crate::background_sessions::SessionDream>,
     pub release_check: Arc<crate::release_check::ReleaseCheck>,
     pub config: Config,
+    /// Live settings, published together only after their file replacement succeeds.
+    runtime_config: RwLock<Arc<Config>>,
     pub env: DaemonEnv,
     pub data_dir: PathBuf,
     pub auth_configured: bool,
@@ -202,6 +204,7 @@ impl Service {
             persist_errors: std::sync::atomic::AtomicU64::new(0),
             session_dream: Arc::new(crate::background_sessions::DeferredSessionDream),
             release_check: Arc::new(crate::release_check::ReleaseCheck::default()),
+            runtime_config: RwLock::new(Arc::new(config.clone())),
             config,
             env,
             data_dir,
@@ -223,6 +226,17 @@ impl Service {
             #[cfg(test)]
             verify_gate: std::sync::Mutex::new(None),
         }
+    }
+
+    /// A stable configuration for one operation. Restart-only fields retain
+    /// their boot values even when the Console has saved another value.
+    pub(crate) fn runtime_config(&self) -> Arc<Config> {
+        self.runtime_config.read().expect("runtime config").clone()
+    }
+
+    pub(crate) fn update_runtime_config<R>(&self, update: impl FnOnce(&mut Config) -> R) -> R {
+        let mut current = self.runtime_config.write().expect("runtime config");
+        update(Arc::make_mut(&mut current))
     }
 
     /// Install the handles the background dream work needs (once, at
@@ -631,6 +645,24 @@ impl Service {
         storage.acknowledge_rehydration();
     }
 
+    async fn prepare_compaction<T>(
+        &self,
+        config: &Config,
+        initialize: impl std::future::Future<Output = Result<T, String>>,
+    ) -> Result<Option<(T, i64, f64)>, String> {
+        if !config.memory.compaction_enabled {
+            return Ok(None);
+        }
+        // Keep the enable flag and retention limits from one snapshot even if
+        // a Console patch arrives while initialization yields.
+        let ready = initialize.await?;
+        Ok(Some((
+            ready,
+            config.memory.compaction_keep_per_slot,
+            config.memory.compaction_min_age_days,
+        )))
+    }
+
     /// `compact_superseded` (service.py:5832-5866), on the sweep tick: purge
     /// old superseded and retired versions from the three canonical stores
     /// (per slot the newest `memory.compaction.keep_per_slot` non-live
@@ -639,12 +671,10 @@ impl Service {
     /// purged rows. Under the write lock, as every canonical write is, so no
     /// write sees the records shift under it. A failed save is logged and
     /// counted (`persist_errors`); the slots stay dirty for the next save.
-    async fn compact_superseded(&self, ready: &Ready) {
+    async fn compact_superseded(&self, ready: &Ready, keep: i64, min_age: f64) {
         if crate::mutants::active("compaction-off") {
             return;
         }
-        let m = &self.config.memory;
-        let (keep, min_age) = (m.compaction_keep_per_slot, m.compaction_min_age_days);
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs_f64())
@@ -900,9 +930,12 @@ impl crate::background::Duties for Service {
             if self.config.read_only {
                 return Ok(());
             }
-            if self.config.memory.compaction_enabled {
-                let ready = self.ensure_init_inner().await?;
-                self.compact_superseded(&ready).await;
+            let config = self.runtime_config();
+            if let Some((ready, keep, min_age)) = self
+                .prepare_compaction(&config, self.ensure_init_inner())
+                .await?
+            {
+                self.compact_superseded(&ready, keep, min_age).await;
             }
             let inner = self.inner.lock().await;
             let Some(storage) = &inner.storage else {
@@ -913,11 +946,11 @@ impl crate::background::Duties for Service {
                 .map_err(|e| e.to_string())?
                 .as_secs_f64();
             let runs =
-                crate::maintenance::prune_runs(storage.client(), self.config.dream.runs_keep, now)
+                crate::maintenance::prune_runs(storage.client(), config.dream.runs_keep, now)
                     .await?;
             let retrieval = crate::maintenance::prune_retrieval(
                 storage.client(),
-                now - self.config.memory.retrieval_retention_days * 86400.0,
+                now - config.memory.retrieval_retention_days * 86400.0,
             )
             .await?;
             drop(inner);
@@ -1066,6 +1099,53 @@ impl crate::background::Duties for Service {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn compaction_keeps_one_policy_when_a_patch_arrives_during_initialization() {
+        let dir = std::env::temp_dir().join(format!("pl-sweep-config-{}", std::process::id()));
+        let service = Service::new(
+            Config::default(),
+            DaemonEnv::from_env(&|_| None).unwrap(),
+            dir.clone(),
+            String::new(),
+            false,
+        );
+        let config = service.runtime_config();
+        let (release, waiting) = tokio::sync::oneshot::channel();
+        let mut prepared = Box::pin(service.prepare_compaction(&config, async {
+            waiting.await.unwrap();
+            Ok(())
+        }));
+        std::future::poll_fn(|cx| {
+            use std::future::Future;
+            assert!(prepared.as_mut().poll(cx).is_pending());
+            std::task::Poll::Ready(())
+        })
+        .await;
+        crate::config_io::write_config(
+            &service,
+            &|_| None,
+            &json!({
+                "memory.compaction.enabled": false,
+                "memory.compaction.keep_per_slot": 0,
+                "memory.compaction.min_age_days": 0,
+            }),
+        )
+        .unwrap();
+        release.send(()).unwrap();
+        let (_, keep, min_age) = prepared.await.unwrap().unwrap();
+        // Neither the old enabled policy nor the new disabled policy may
+        // purge this version. Mixing the old enable bit with new limits does.
+        let records = [crate::maintenance::CompactRecord {
+            entity_norm: "fixture",
+            attribute_norm: "version",
+            status: "superseded",
+            superseded_at: Some(1.0),
+            asserted_at: 1.0,
+        }];
+        assert!(crate::maintenance::compaction_victims(&records, keep, min_age, 1000.0).is_empty());
+        let _ = std::fs::remove_dir_all(dir);
+    }
 
     #[tokio::test]
     async fn shadow_duties_and_health_do_not_initialize_or_write() {

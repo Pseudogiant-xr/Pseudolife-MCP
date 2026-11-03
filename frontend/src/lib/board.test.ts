@@ -19,6 +19,7 @@ import {
   pendingText,
   stateChip,
   summarize,
+  timelineEmpty,
   waitersOmitted,
 } from "./board";
 
@@ -183,7 +184,7 @@ describe("peer facts", () => {
   it("pending mail is a count for your principal, and not visible otherwise", () => {
     expect(pendingText(agent({ pending_count: 2 }))).toBe("2 unread");
     expect(pendingText(agent({ pending_count: 0 }))).toBe("None unread");
-    expect(pendingText(agent({ pending_count: null }))).toBe("Not visible to this token");
+    expect(pendingText(agent({ pending_count: null }))).toBe("Hidden: uses another token");
   });
 
   it("names the adapter state when the daemon serves it", () => {
@@ -195,6 +196,41 @@ describe("peer facts", () => {
   it("says who reported each subagent", () => {
     expect(childSource({ label: "Helper", since: 1 })).toBe("parent reported");
     expect(childSource({ label: "general-purpose#abcd1234", since: 1, agent_id: "abcd1234ef" })).toBe("hook reported");
+  });
+});
+
+describe("an empty timeline says why it is empty", () => {
+  const mine = agent({ agent_id: "m", name: "Mine", pending_count: 0 });
+  const theirs = agent({ agent_id: "t", name: "Theirs", pending_count: null });
+
+  it("blames the token when no listed session uses the Console's own token", () => {
+    const out = timelineEmpty("all", null, [theirs, agent({ agent_id: "u", pending_count: undefined })]);
+    expect(out.tokenFix).toBe(true);
+    expect(out.text).toContain("none of the sessions listed here use this Console's token");
+    expect(out.text).not.toContain("retention");
+  });
+
+  it("keeps the retention reason when a listed session does use the token", () => {
+    const out = timelineEmpty("all", null, [theirs, mine]);
+    expect(out.tokenFix).toBe(false);
+    expect(out.text).toContain("audit retention");
+  });
+
+  it("does not guess when the roster is empty", () => {
+    expect(timelineEmpty("all", null, []).tokenFix).toBe(false);
+  });
+
+  it("names a selected peer that uses another token", () => {
+    const out = timelineEmpty("peer", theirs, [theirs, mine]);
+    expect(out.tokenFix).toBe(true);
+    expect(out.text).toContain("Theirs uses a different token from this Console");
+  });
+
+  it("keeps the plain message for a selected peer on the Console's own token", () => {
+    expect(timelineEmpty("peer", mine, [theirs, mine])).toEqual({
+      text: "No retained mail or wake event involves Mine.",
+      tokenFix: false,
+    });
   });
 });
 
