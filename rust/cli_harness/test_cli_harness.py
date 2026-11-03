@@ -2213,7 +2213,7 @@ def test_the_harness_pins_the_umask_both_arms_inherit(tmp_path):
         os.umask(previous)
 
 
-def test_the_runner_pins_the_umask_before_anything_else(monkeypatch):
+def test_the_runner_pins_the_umask_before_recording_or_replaying(monkeypatch):
     from cli_harness import runner
 
     class Pinned(Exception):
@@ -2222,5 +2222,6 @@ def test_the_runner_pins_the_umask_before_anything_else(monkeypatch):
     def pin():
         raise Pinned
     monkeypatch.setattr(core, "pin_umask", pin)
-    with pytest.raises(Pinned):
-        runner.main(["--row", "invite"])
+    for mode in (["--record"], ["--golden"]):
+        with pytest.raises(Pinned):
+            runner.main(["--row", "invite", *mode])
