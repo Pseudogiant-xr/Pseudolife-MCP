@@ -229,7 +229,14 @@ class SessionSnapshot:
             self._loaded_at = started_at
 
     def add(self, row: ConsoleSession) -> None:
+        """A sign-in that just committed: usable at once, unless a
+        revocation of it already committed and was dropped here. A
+        redemption publishes after its COMMIT, so an operator can list and
+        revoke the session in between; the late publish must not bring it
+        back."""
         with self._lock:
+            if row.session_id in self._dropped:
+                return
             self._seq += 1
             self._added[row.session_id] = (self._seq, row)
             self._by_hash[row.token_hash] = row

@@ -44,8 +44,16 @@ def _fallback_fixture(tmp_path, source):
     env = {k: v for k, v in os.environ.items() if not k.startswith("PSEUDOLIFE_")}
     env.update(PYTHONPATH=str(tmp_path), HOME=str(tmp_path), USERPROFILE=str(tmp_path),
                PSEUDOLIFE_MCP_DATA_DIR=str(tmp_path / "data"))
-    return subprocess.Popen([binary, "update", "--python-runtime", sys.executable],
-                            cwd=tmp_path, env=env, stdout=subprocess.DEVNULL,
+    argv = [binary, "update", "--python-runtime", sys.executable]
+    if os.name == "posix":
+        # Background shells may ignore INT/HUP. Establish the fixture's own
+        # dispositions in a fresh process without a threaded preexec_fn hook.
+        bootstrap = ("import os, signal, sys; "
+                     "[signal.signal(s, signal.SIG_DFL) for s in "
+                     "(signal.SIGINT, signal.SIGTERM, signal.SIGHUP, signal.SIGQUIT, signal.SIGTSTP)]; "
+                     "os.execv(sys.argv[1], sys.argv[1:])")
+        argv = [sys.executable, "-c", bootstrap, *argv]
+    return subprocess.Popen(argv, cwd=tmp_path, env=env, stdout=subprocess.DEVNULL,
                             stderr=subprocess.DEVNULL)
 
 
@@ -58,7 +66,7 @@ def _await_file(path, process):
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="POSIX process-group cancellation")
-@pytest.mark.parametrize("signal_name", ["SIGINT", "SIGTERM", "SIGHUP"])
+@pytest.mark.parametrize("signal_name", ["SIGINT", "SIGTERM", "SIGHUP", "SIGQUIT"])
 @pytest.mark.parametrize("resistant", [False, True])
 def test_native_update_forwards_cancellation_to_owned_descendants(tmp_path, signal_name, resistant):
     import signal
@@ -73,7 +81,7 @@ def stop(signum, frame):
     if (root / "resist").exists():
         return
     raise SystemExit(0)
-for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP, signal.SIGQUIT):
     signal.signal(signum, stop)
 (root / "ready").write_text(str(os.getpid()))
 deadline = time.monotonic() + 60
@@ -86,7 +94,7 @@ child = subprocess.Popen([sys.executable, str(root / "child.py")])
 def stop(signum, frame):
     child.wait(timeout=10)
     raise SystemExit(128 + signum)
-for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP, signal.SIGQUIT):
     signal.signal(signum, stop)
 deadline = time.monotonic() + 60
 while not (root / "stop").exists() and time.monotonic() < deadline:
@@ -106,6 +114,85 @@ child.wait(timeout=10)
         (tmp_path / "stop").touch()
         if proc.poll() is None:
             proc.kill()
+        proc.wait(timeout=15)
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="POSIX process-group cancellation")
+def test_native_update_forwards_second_interrupt_during_cleanup(tmp_path):
+    import signal
+
+    child = tmp_path / "child.py"
+    child.write_text("""import pathlib, signal, time
+root = pathlib.Path(__file__).parent
+count = 0
+def stop(signum, frame):
+    global count
+    count += 1
+    (root / f"signal-{count}").touch()
+    if count == 2:
+        raise SystemExit(0)
+signal.signal(signal.SIGINT, stop)
+(root / "ready").touch()
+while not (root / "stop").exists():
+    time.sleep(.02)
+""", encoding="utf-8")
+    proc = _fallback_fixture(tmp_path, """import pathlib, signal, subprocess, sys
+signal.signal(signal.SIGINT, lambda *_: None)
+child = subprocess.Popen([sys.executable, str(pathlib.Path.cwd() / "child.py")])
+child.wait()
+""")
+    try:
+        _await_file(tmp_path / "ready", proc)
+        proc.send_signal(signal.SIGINT)
+        _await_file(tmp_path / "signal-1", proc)
+        proc.send_signal(signal.SIGINT)
+        proc.wait(timeout=15)
+        assert (tmp_path / "signal-2").exists(), "second interrupt never reached the owned group"
+        assert proc.returncode in (-signal.SIGINT, 128 + signal.SIGINT)
+    finally:
+        (tmp_path / "stop").touch()
+        if proc.poll() is None:
+            proc.kill()
+        proc.wait(timeout=15)
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="POSIX job control")
+def test_native_update_suspends_and_resumes_owned_command(tmp_path):
+    import signal
+
+    proc = _fallback_fixture(tmp_path, """import os, pathlib, signal, time
+root = pathlib.Path.cwd()
+def suspend(signum, frame):
+    (root / "suspended").touch()
+    os.kill(os.getpid(), signal.SIGSTOP)
+    (root / "resumed").touch()
+signal.signal(signal.SIGTSTP, suspend)
+(root / "ready").touch()
+while not (root / "stop").exists():
+    time.sleep(.02)
+""")
+    try:
+        _await_file(tmp_path / "ready", proc)
+        proc.send_signal(signal.SIGTSTP)
+        _await_file(tmp_path / "suspended", proc)
+        deadline = time.monotonic() + 30
+        state = Path(f"/proc/{proc.pid}/stat")
+        while time.monotonic() < deadline:
+            assert proc.poll() is None
+            if state.read_text().split(")", 1)[1].split()[0] == "T":
+                break
+            time.sleep(.02)
+        else:
+            pytest.fail("updater did not suspend with its owned command")
+        proc.send_signal(signal.SIGCONT)
+        _await_file(tmp_path / "resumed", proc)
+        (tmp_path / "stop").touch()
+        assert proc.wait(timeout=15) == 0
+    finally:
+        (tmp_path / "stop").touch()
+        proc.send_signal(signal.SIGCONT) if proc.poll() is None else None
+        if proc.poll() is None:
+            proc.terminate()
         proc.wait(timeout=15)
 
 

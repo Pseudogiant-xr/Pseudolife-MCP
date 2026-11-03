@@ -233,7 +233,7 @@ def test_a_release_update_pulls_backs_up_tags_recreates_and_moves_the_clients(wo
     assert calls[compose].startswith("compose -p pseudolife-mcp ")
     assert f"-f {project / 'docker-compose.yml'} -f {project / 'docker-compose.ghcr.yml'}" in calls[compose]
     assert f"--env-file {project / '.env'}" in calls[compose]
-    assert any(c.startswith(f"image ls {up.GHCR_IMAGE}") for c in calls)       # retention in the GHCR repository
+    assert not any(c.startswith(("image ls ", "rmi ")) for c in calls)        # unproven rollback ownership
     assert not any(c.startswith("builder") for c in calls)                     # nothing was built
     env = world.envs[[i for i, c in enumerate(world.calls) if c[1:2] == ["compose"]][0]]
     assert env["PSEUDOLIFE_IMAGE_TAG"] == "0.15.1"
@@ -243,7 +243,9 @@ def test_a_release_update_pulls_backs_up_tags_recreates_and_moves_the_clients(wo
     assert not any(n.endswith(".part") for n in backups)
     assert clients == [{"steps": ("shim", "plugin", "codex"), "repo": None, "source": "pseudolife-mcp==0.15.1",
                         "daemon_digest": "e" * 64, "reinstall": False}]
-    out = capsys.readouterr().out
+    captured = capsys.readouterr()
+    assert "rollback-tag retention skipped" in captured.err
+    out = captured.out
     assert "healthy. version=0.15.1" in out
     # the overlay selects the image through PSEUDOLIFE_IMAGE_TAG: that is the rollback
     assert "PSEUDOLIFE_IMAGE_TAG=0.15.0-pre-update-" in out and "$env:PSEUDOLIFE_IMAGE_TAG='0.15.0-pre-update-" in out
@@ -897,14 +899,58 @@ def _script_calls(world: World, script: Path) -> list[list[str]]:
     return [c for c in world.calls if str(script) in c]
 
 
-def test_the_checkouts_scripts_run_with_their_mapped_flags(world, clients, tmp_path):
+@pytest.mark.parametrize("repository", ["pseudolife-daemon", up.GHCR_IMAGE,
+                                        "pseudolife-daemon-python", "pseudolife-daemon-rust"])
+@pytest.mark.parametrize("keep", [0, 2])
+@pytest.mark.parametrize("entry", ["builtin", "checkout", ".ps1", ".sh"])
+def test_legacy_retention_preserves_unproven_tags(world, monkeypatch, tmp_path, repository, keep, entry):
+    """Neither tag shape nor image age proves which project owns a tag."""
+    native = f"{repository}:0.21.0-pre-update-pl-{'a' * 64}-20261101-120000"
+    refs = [f"{repository}:0.21.0-pre-update-20261101-120000",  # legacy automatic
+            f"{repository}:0.21.0-pre-keep",                  # manual
+            native,
+            f"{repository}:0.21.0-pre-update-20261001-120000",  # current rollback
+            f"{repository}:0.21.0-pre-update-20260901-120000",  # in use
+            "foreign-project:0.21.0-pre-update-20260801-120000"]
+    world.image_list = [(f"2026-11-0{i + 1}T00:00:00Z", ref, f"sha256:image{i}")
+                        for i, ref in enumerate(refs)]
+    world.images.update({ref: image for _, ref, image in world.image_list})
+    world.container = {"id": "sha256:image4", "ref": refs[4]}
+    update = up.Update(up.Options(keep_rollbacks=keep))
+    update.report.rollback = {"tag": refs[3], "state": "tagged"}
+    if entry in (".ps1", ".sh"):
+        script = tmp_path / f"prune-rollbacks{entry}"
+        script.write_text("# unsafe legacy script\n", encoding="utf-8")
+        monkeypatch.setattr(update, "_checkout_script", lambda *args: script)
+    if entry == "builtin":
+        update.builtin_prune_rollbacks(repository)
+    else:
+        update.prune_rollbacks(tmp_path, repository)
+    assert not any(c[1:2] == ["rmi"] for c in world.calls), world.calls
+    assert not any("prune-rollbacks" in " ".join(c) for c in world.calls), world.calls
+    assert any("retention skipped" in step for step in update.report.steps)
+
+
+@pytest.mark.parametrize("failure", ["ps", "inspect", "image"])
+def test_legacy_retention_keeps_tags_when_docker_evidence_is_unreadable(world, monkeypatch, failure):
+    ref = "pseudolife-daemon:0.21.0-pre-update-20261101-120000"
+    world.image_list = [("2026-11-01T00:00:00Z", ref, "sha256:old")]
+    world.images[ref] = "sha256:old"
+    world.container = {"id": "sha256:running", "ref": "pseudolife-daemon:0.21.0"}
+    original = world.docker
+    monkeypatch.setattr(world, "docker", lambda args: (1, "unreadable") if args[0] == failure else original(args))
+    update = up.Update(up.Options(keep_rollbacks=0))
+    update.builtin_prune_rollbacks("pseudolife-daemon")
+    assert not any(c[1:2] == ["rmi"] for c in world.calls), world.calls
+    assert any("retention skipped" in step for step in update.report.steps)
+
+
+def test_the_checkouts_backup_and_cache_scripts_run_with_their_mapped_flags(world, clients, tmp_path):
     root, _ = _checkout(world, tmp_path)
     scripts = _scripts(root)
     assert _run(["--checkout", str(root), "--keep-rollbacks", "5", "--keep-cache-hours", "24"]) == 0
     assert len(_script_calls(world, scripts["backup"])) == 1
-    [prune] = _script_calls(world, scripts["prune-rollbacks"])
-    flag, repo_flag = ("-Keep", "-Repository") if os.name == "nt" else ("--keep", "--repository")
-    assert prune[-4:] == [flag, "5", repo_flag, "pseudolife-daemon"]
+    assert _script_calls(world, scripts["prune-rollbacks"]) == []
     [cache] = _script_calls(world, scripts["prune-build-cache"])
     assert cache[-2:] == ["-MaxAgeHours" if os.name == "nt" else "--max-age-hours", "24"]
     assert not any("pg_dump" in c for c in world.docker_calls())
@@ -1238,7 +1284,7 @@ sys.exit(up.main(["--checkout", str(checkout), "--rollback-tag", "unittest", "--
     # the checkout's own scripts stream: every step line, and the rollback
     # text, lands before the child that follows it
     ("scripts", ("==> backing up the bank", "<<child>> backup", "==> tagged rollback image",
-                 "<<child>> prune-rollbacks", "==> rebuilding the daemon only", "==> build stamp",
+                 "WARNING: rollback-tag retention skipped", "==> rebuilding the daemon only", "==> build stamp",
                  "<<child>> compose", "==> waiting for the daemon", "==> healthy.",
                  "Rolled-back deploy if ever needed", "<<child>> prune-build-cache")),
     # no scripts: the builtin backup, and a failed builtin cache prune warns

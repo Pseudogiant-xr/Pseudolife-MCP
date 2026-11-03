@@ -24,6 +24,8 @@ rust/shim/src/board/doorbell_linux_cleanup_deadline_tests.rs | metadata_success_
 
 rust/shim/src/board/doorbell_linux_cleanup_wait_deadline_tests.rs | wait_cutoff_control | tokio::time::sleep(Duration::from_millis(10)).await; | poll: proves the timer advances; the test awaits it with no bound
 
+rust/shim/src/cli/update/tests.rs | assert_suspend_preserves_budget | let observe = Instant::now() + Duration::from_millis(300); | negative: after resume, asserts the command has not exited while its finish gate stays closed; no completion is required within this interval
+
 rust/shim/tests/auth_lifecycle_runtime.rs | sleep | tokio::time::sleep(Duration::from_millis(5)).await; | poll: the fake DaemonControl::sleep inside ensure_daemon's own retry loops
 
 rust/shim/tests/auth_lifecycle_updates.rs | test_two_sessions_starting_together_spawn_one_run | std::thread::sleep(Duration::from_millis(25)); | negative: widens the overlap inside the stubbed spawn; asserts only one run

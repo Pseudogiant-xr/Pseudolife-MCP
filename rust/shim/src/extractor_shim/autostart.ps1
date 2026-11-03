@@ -27,8 +27,9 @@ function Format-ForeignCommand([string]$command) {
     if ($match.Success) { return $command.Substring(0, $match.Index) + ' [redacted sensitive arguments]' }
     return $command
 }
-function Get-NativeTaskCode([string]$executable, [string]$arguments) {
-    @"
+function Get-NativeTaskCode([string]$executable, [string]$arguments, [string]$runtimeExe) {
+    $metadata = if ($runtimeExe) { "`$runtimeExe = '$($runtimeExe.Replace("'", "''"))'`n" } else { '' }
+    $metadata + @"
 `$psi = New-Object System.Diagnostics.ProcessStartInfo
 `$psi.FileName = '$($executable.Replace("'", "''"))'
 `$psi.Arguments = '$($arguments.Replace("'", "''"))'
@@ -45,6 +46,7 @@ function Get-RegisteredInvocation($task) {
         $arguments = $item.Arguments
         $nativeWrapper = $false
         $encodedWrapper = $false
+        $runtimeExe = ''
         if ($arguments -match '-EncodedCommand ([A-Za-z0-9+/=]+)') {
             $encodedWrapper = $true
             if ([IO.Path]::GetFileName($exe) -notin @('powershell.exe', 'pwsh.exe')) { continue }
@@ -68,7 +70,8 @@ function Get-RegisteredInvocation($task) {
                 # --native-exe can name a custom waiting launcher. Its exact
                 # generated wrapper identifies that registration after restart;
                 # arbitrary encoded code with similar arguments does not.
-                $expected = Get-NativeTaskCode $exe $arguments
+                if ($code -match '^\$runtimeExe = ''((?:[^'']|'''')*)''\r?\n') { $runtimeExe = $Matches[1].Replace("''", "'") }
+                $expected = Get-NativeTaskCode $exe $arguments $runtimeExe
                 $nativeWrapper = $code.Replace("`r`n", "`n").TrimEnd() -ceq $expected.Replace("`r`n", "`n").TrimEnd()
             } catch { continue }
         }
@@ -76,10 +79,20 @@ function Get-RegisteredInvocation($task) {
             # The later Sonnet, Claude and Codex installers detached cmd.exe
             # with these quoted flags/redirection templates. Only the recorded
             # Python script and port own a child; model/CLI flags are not run.
-            if ($arguments -match '^/c ""([^"]+)" "([^"]+[\\/]evals[\\/](?:sonnet|claude|codex)_shim\.py)" --port (\d+) (?:(?:--model [^"\s&|<>]+ )?--system-prompt-file "[^"]+"|--model [^"\s&|<>]+ --health-ttl \d+(?: --cli "[^"]+")?) >> ""[^"]+"" 2>&1"$') {
+            # 2f0edc4ce's BEL-corrupted evals/anthropic_shim.py path never ran
+            # and ccb6f9a07 fixed it; that invalid action grants no ownership.
+            if ($arguments -match '^/c ""([^"]+)" "([^"]+[\\/]evals[\\/](sonnet|claude|codex)_shim\.py)" --port (\d+) (.+) >> ""[^"]+"" 2>&1"$') {
                 $script = $Matches[2]
-                $scriptPort = [int]$Matches[3]
-                if ([IO.Path]::GetFileName($Matches[1]) -match '^python(?:w|\d+(?:\.\d+)*)?\.exe$') {
+                $provider = $Matches[3]
+                $scriptPort = [int]$Matches[4]
+                $tail = $Matches[5]
+                $python = [IO.Path]::GetFileName($Matches[1]) -match '^python(?:w|\d+(?:\.\d+)*)?\.exe$'
+                $tailPattern = switch ($provider) {
+                    'sonnet' { '^--system-prompt-file "[^"]+"$' }
+                    'claude' { '^--model [^"\s&|<>]+ --system-prompt-file "[^"]+"$' }
+                    'codex' { '^--model [^"\s&|<>]+ --health-ttl \d+(?: --cli "[^"]+")?$' }
+                }
+                if ($python -and $tail -match $tailPattern) {
                     [PSCustomObject]@{ PythonScript=$script; Ports=@($scriptPort) }
                 }
             }
@@ -90,7 +103,7 @@ function Get-RegisteredInvocation($task) {
             $settingsFile = $Matches[2]
             if ($nativeWrapper -or (-not $encodedWrapper -and
                 ((Test-SamePath $exe $native) -or (Test-SamePath $exe $ownerExe)))) {
-                [PSCustomObject]@{ Exe=$exe; Kind=$provider; EnvFile=$settingsFile }
+                [PSCustomObject]@{ Exe=$exe; Kind=$provider; EnvFile=$settingsFile; RuntimeExe=$runtimeExe }
             }
         } elseif ($arguments -match '^"?(.+?[\\/]ops[\\/]shim_autostart\.py)"?\s+run\s+(claude|codex)(\s|$)') {
             $repo = Split-Path -Parent (Split-Path -Parent $Matches[1])
@@ -118,16 +131,37 @@ function Get-RegisteredInvocation($task) {
     }
 }
 function Stop-CapturedProcess($old) {
-    $current = Get-CimInstance Win32_Process -Filter "ProcessId = $($old.ProcessId)" -ErrorAction Stop
-    if ($current -and $current.CreationDate -eq $old.CreationDate -and $current.CommandLine -eq $old.CommandLine) {
-        try {
-            $stopped = Stop-Process -Id $old.ProcessId -Force -PassThru -ErrorAction Stop
-            if ($stopped -and -not $stopped.WaitForExit(15000)) { throw "process $($old.ProcessId) did not exit after termination" }
-        }
+    $filter = "ProcessId = $($old.ProcessId)"
+    $current = try { Get-CimInstance Win32_Process -Filter $filter -ErrorAction Stop }
+        catch { throw "could not verify process $($old.ProcessId): $($_.Exception.Message); restore access to Get-CimInstance Win32_Process -Filter '$filter', then retry the autostart command" }
+    if (-not $current -or $current.CreationDate -ne $old.CreationDate -or $current.CommandLine -ne $old.CommandLine) { return }
+    $process = $null
+    try {
+        try { $process = Get-Process -Id $old.ProcessId -ErrorAction Stop }
         catch {
-            # Scheduler stop can finish between the identity check and this call.
-            if ($_.FullyQualifiedErrorId -ne 'NoProcessFoundForGivenId,Microsoft.PowerShell.Commands.StopProcessCommand') { throw }
+            if ($_.FullyQualifiedErrorId -eq 'NoProcessFoundForGivenId,Microsoft.PowerShell.Commands.GetProcessCommand') { return }
+            throw
         }
+        # Handle opens the long-lived .NET process handle. StartTime and Kill
+        # then use that same handle even if the original PID is reused.
+        # Invoke getters explicitly: PowerShell property syntax can suppress
+        # getter exceptions and silently produce null instead.
+        $null = $process.get_Handle()
+        $started = $process.get_StartTime().ToUniversalTime().Ticks
+        $captured = ([datetime]$old.CreationDate).ToUniversalTime().Ticks
+        # CIM's datetime has microsecond precision; .NET retains 100ns ticks.
+        if (($started - $started % 10) -ne ($captured - $captured % 10)) { return }
+        $process.Kill()
+        if (-not $process.WaitForExit(15000)) { throw "process $($old.ProcessId) did not exit after termination; inspect Stop-Process -Id $($old.ProcessId) -Force after confirming its identity, then retry the autostart command" }
+    } catch {
+        $failure = $_
+        $exited = $false
+        # Only a confirmed exit on the pinned process makes a race benign;
+        # an unreadable handle or a permission failure still propagates.
+        if ($process) { try { $exited = $process.get_HasExited() } catch { } }
+        if (-not $exited) { throw "could not stop process $($old.ProcessId): $($failure.Exception.Message); inspect Get-Process -Id $($old.ProcessId), restore permission to inspect and terminate that process, then retry the autostart command" }
+    } finally {
+        if ($process) { $process.Dispose() }
     }
 }
 function Assert-ShimRegistration($task) {
@@ -135,10 +169,11 @@ function Assert-ShimRegistration($task) {
         throw "task $($task.TaskName) is not a recognized shim registration; choose another --name or inspect its action"
     }
 }
-function Get-OwnedTaskProcesses($task) {
+function Get-OwnedTaskProcesses($task, $previous = @(), [switch]$RequireSettled) {
     if (-not $task) { return }
     $captured = @()
-    $snapshot = @(Get-CimInstance Win32_Process)
+    $snapshot = try { @(Get-CimInstance Win32_Process -ErrorAction Stop) }
+        catch { throw "could not inspect shim processes: $($_.Exception.Message); restore access to Get-CimInstance Win32_Process, then retry the autostart command" }
     foreach ($invocation in @(Get-RegisteredInvocation $task)) {
         if ($invocation.PythonScript) {
             $ports = '--port\s+"?(' + ($invocation.Ports -join '|') + ')"?(\s|$)'
@@ -153,12 +188,29 @@ function Get-OwnedTaskProcesses($task) {
             # A waiting launcher may already have exited. The exact runtime
             # image and this registration's provider/settings still identify
             # its native child; a basename or matching port never does.
+            # New registrations retain the exact runtime image across upgrades.
+            # Metadata-free launchers can only reuse runtime paths whose
+            # ownership was already proved in the first snapshot.
+            $runtime = if ($invocation.RuntimeExe) { $invocation.RuntimeExe } else { $ownerExe }
             $owned = (Test-SamePath $process.ExecutablePath $invocation.Exe) -or
-                (Test-SamePath $process.ExecutablePath $ownerExe)
+                (Test-SamePath $process.ExecutablePath $runtime) -or
+                (Test-SamePath $process.ExecutablePath $ownerExe) -or
+                @($previous | Where-Object {
+                    (Test-SamePath $_.ExecutablePath $process.ExecutablePath) -and
+                    (Test-NativeInvocation $_.CommandLine $invocation.Kind $invocation.EnvFile)
+                }).Count -gt 0
             if (-not $owned) {
-                $parent = Get-CimInstance Win32_Process -Filter "ProcessId = $($process.ParentProcessId)" -ErrorAction SilentlyContinue
+                $filter = "ProcessId = $($process.ParentProcessId)"
+                $parent = try { Get-CimInstance Win32_Process -Filter $filter -ErrorAction Stop }
+                    catch { throw "could not verify launcher for process $($process.ProcessId): $($_.Exception.Message); restore access to Get-CimInstance Win32_Process -Filter '$filter', then retry the autostart command" }
                 $owned = $parent -and (Test-SamePath $parent.ExecutablePath $invocation.Exe) -and
                     $parent.CreationDate -le $process.CreationDate -and (Test-NativeInvocation $parent.CommandLine $invocation.Kind $invocation.EnvFile)
+            }
+            if (-not $owned -and $RequireSettled -and -not $invocation.RuntimeExe) {
+                # An absent launcher or reused parent PID cannot prove this
+                # image belongs to a metadata-free task. Preserve its registration
+                # while any unverified exact provider/settings candidate remains.
+                throw "task $($task.TaskName) has an unverified runtime (pid $($process.ProcessId), image: $($process.ExecutablePath)); inspect Get-CimInstance Win32_Process -Filter 'ProcessId = $($process.ProcessId)' and stop its confirmed owner, then retry the autostart command; reinstall the task to record its runtime image"
             }
             if ($owned) { $captured += $process }
         }
@@ -189,32 +241,43 @@ function Get-TaskRegistration([string]$taskName, [datetime]$deadline = (Get-Date
         Start-Sleep -Milliseconds 200
     }
 }
-function Wait-TaskStopped([string]$taskName) {
+function Get-TaskOwnership($task) {
+    # State changes while the scheduler settles; execution identity must not.
+    [ordered]@{ Actions=@($task.Actions | Select-Object Execute, Arguments, WorkingDirectory);
+       Principal=($task.Principal | Select-Object UserId, GroupId, LogonType, RunLevel) } | ConvertTo-Json -Depth 4 -Compress
+}
+function Wait-TaskStopped([string]$taskName, [string]$ownership) {
     # Windows autostart stress (2026-11-02) left a terminated task visible;
     # reuse the existing 15-second port-release budget for scheduler settlement.
     $deadline = (Get-Date).AddSeconds(15)
     while ($true) {
         $task = try { Get-TaskRegistration $taskName $deadline }
                 catch { throw "could not confirm task $taskName stopped: $($_.Exception.Message); inspect its scheduler state" }
+        if ($task -and $ownership -and (Get-TaskOwnership $task) -ne $ownership) { throw "task $taskName registration changed; refusing to change it" }
         if (-not $task -or $task.State -notin @('Running', 'Queued')) { return }
         if ((Get-Date) -ge $deadline) { throw "task $taskName did not stop; inspect its scheduler state" }
         Start-Sleep -Milliseconds 200
     }
 }
-function Remove-OwnedTask([string]$taskName) {
+function Remove-OwnedTask([string]$taskName, [string]$expectedOwnership, [switch]$RequireExpectedOwnership) {
     $task = Get-TaskRegistration $taskName
-    if (-not $task) { return }
+    # False means another operation already removed the registration; callers
+    # must not restore previous XML in response to that concurrent deletion.
+    if (-not $task) { return $false }
+    if ($RequireExpectedOwnership -and (-not $expectedOwnership -or (Get-TaskOwnership $task) -ne $expectedOwnership)) {
+        throw "task $taskName registration changed; inspect its action before retrying; refusing to remove it"
+    }
     Assert-ShimRegistration $task
-    $script:removedRegistration = $true
-    $captured = @(Get-OwnedTaskProcesses $task)
+    $ownership = Get-TaskOwnership $task
+    $captured = @(Get-OwnedTaskProcesses $task -RequireSettled)
     # Capture children before stopping the wrapper: its exit can orphan them.
     Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
     foreach ($process in @($captured | Sort-Object CreationDate -Descending)) { Stop-CapturedProcess $process }
-    Wait-TaskStopped $taskName
+    Wait-TaskStopped $taskName $ownership
     # A launcher can spawn between the first snapshot and scheduler stop.
     # Once the wrapper has stopped, collect that last child before removing
     # the registration or restoring a previous listener on the same port.
-    foreach ($process in @(Get-OwnedTaskProcesses $task)) { Stop-CapturedProcess $process }
+    foreach ($process in @(Get-OwnedTaskProcesses $task $captured -RequireSettled)) { Stop-CapturedProcess $process }
     $deadline = (Get-Date).AddSeconds(15)
     $accepted = $false
     $lastDeleteError = 'registration is still present'
@@ -222,6 +285,7 @@ function Remove-OwnedTask([string]$taskName) {
         $task = try { Get-TaskRegistration $taskName $deadline }
                 catch { throw "could not confirm removal of task ${taskName}: $($_.Exception.Message); inspect its scheduler state" }
         if (-not $task) { break }
+        if ((Get-TaskOwnership $task) -ne $ownership) { throw "task $taskName registration changed; refusing to remove it" }
         if ((Get-Date) -ge $deadline) { throw "could not remove ${taskName}: $lastDeleteError" }
         if (-not $accepted) {
             try {
@@ -234,6 +298,23 @@ function Remove-OwnedTask([string]$taskName) {
         # needs its registration to disappear. Both share the same deadline.
         Start-Sleep -Milliseconds 200
     }
+    if ($accepted) { $script:removedRegistration = $true }
+    return $accepted
+}
+function Restart-UnchangedTask([string]$taskName, $ownership, [bool]$wasActive) {
+    $current = Get-TaskRegistration $taskName
+    if (-not $current) { return }
+    if (-not $ownership -or (Get-TaskOwnership $current) -ne $ownership) {
+        throw "task $taskName registration changed; inspect its action before retrying; refusing to restart it"
+    }
+    if (-not $wasActive) { return }
+    Wait-TaskStopped $taskName $ownership
+    $current = Get-TaskRegistration $taskName
+    if (-not $current) { return }
+    if ((Get-TaskOwnership $current) -ne $ownership) {
+        throw "task $taskName registration changed; inspect its action before retrying; refusing to restart it"
+    }
+    Start-ScheduledTask -TaskName $taskName -ErrorAction Stop
 }
 if ($c.Remove) {
     $script:removedRegistration = $false
@@ -241,7 +322,7 @@ if ($c.Remove) {
     if ($name -eq 'Pseudolife Claude Shim') { $names += 'Pseudolife Sonnet Shim' }
     foreach ($task in $names) { Assert-ShimRegistration (Get-TaskRegistration $task) }
     foreach ($task in $names) {
-        Remove-OwnedTask $task
+        $null = Remove-OwnedTask $task
     }
     if ($script:removedRegistration) { Write-Host "Removed $name" }
     return
@@ -257,11 +338,13 @@ if ($c.ReplaceSibling) {
         if ($sibling -ne $name) { Assert-ShimRegistration (Get-TaskRegistration $sibling) }
     }
 }
-$legacyProcesses = @(Get-OwnedTaskProcesses $legacy)
+# Refuse ambiguous metadata-free runtimes before changing settings or stopping
+# either original task; the settled snapshot repeats this check for late children.
+$legacyProcesses = @(Get-OwnedTaskProcesses $legacy -RequireSettled)
 $legacyWasActive = $legacy -and ($legacy.State -eq 'Running' -or $legacyProcesses.Count -gt 0)
 # Only the selected registration can establish ownership. A matching basename
 # and port from another checkout is a foreign listener, never a replacement.
-$registeredProcesses = @(Get-OwnedTaskProcesses $registered)
+$registeredProcesses = @(Get-OwnedTaskProcesses $registered -RequireSettled)
 $stale = $registeredProcesses + $legacyProcesses
 $listeners = @(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue)
 foreach ($listener in $listeners) {
@@ -279,7 +362,7 @@ function Quote-Argument([string]$value) {
 $argument = (@($c.ServeArgs | ForEach-Object { Quote-Argument ([string]$_) }) -join ' ')
 # Keep the scheduler attached to the hidden child for its entire lifetime:
 # console Rust executables otherwise open a visible window at interactive logon.
-$inner = Get-NativeTaskCode $native $argument
+$inner = Get-NativeTaskCode $native $argument $ownerExe
 $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($inner))
 $powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
 $action = New-ScheduledTaskAction -Execute $powershell -Argument "-NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand $encoded"
@@ -309,6 +392,9 @@ $configBefore = [byte[]]@()
 if ($configExisted) { $configBefore = [IO.File]::ReadAllBytes($c.EnvFile) }
 $previousXml = if ($registered) { Export-ScheduledTask -TaskName $name } else { $null }
 $wasActive = $registered -and ($registered.State -eq 'Running' -or $registeredProcesses.Count -gt 0)
+$rollbackOwnership = if ($registered) { Get-TaskOwnership $registered } else { $null }
+$originalOwnership = $rollbackOwnership
+$replacementRegistered = $false
 $mutated = $false
 $unchanged = $false
 try {
@@ -327,13 +413,22 @@ try {
         Stop-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
         if ($legacy) { Stop-ScheduledTask -TaskName $legacy.TaskName -ErrorAction SilentlyContinue }
         foreach ($old in $stale) { Stop-CapturedProcess $old }
-        Wait-TaskStopped $name
-        if ($legacy) { Wait-TaskStopped $legacy.TaskName }
-        foreach ($old in @((Get-OwnedTaskProcesses $registered)) + @((Get-OwnedTaskProcesses $legacy))) { Stop-CapturedProcess $old }
+        Wait-TaskStopped $name $rollbackOwnership
+        if ($legacy) { Wait-TaskStopped $legacy.TaskName (Get-TaskOwnership $legacy) }
+        foreach ($old in @((Get-OwnedTaskProcesses $registered $registeredProcesses -RequireSettled)) + @((Get-OwnedTaskProcesses $legacy $legacyProcesses -RequireSettled))) { Stop-CapturedProcess $old }
         $deadline = (Get-Date).AddSeconds(15)
         while ((Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 200 }
         if (Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue) { throw "port $port did not become free; restoring the previous registration" }
-        Register-ScheduledTask -TaskName $name -Action $action -Principal $principal -Trigger $trigger -Settings $settings -Description "Native $kind extractor CLI shim" -Force | Out-Null
+        # Process and port settlement can outlive the earlier ownership check.
+        # A new registration also requires the name to have remained absent.
+        $beforeRegister = Get-TaskRegistration $name
+        if (($beforeRegister -and (-not $rollbackOwnership -or (Get-TaskOwnership $beforeRegister) -ne $rollbackOwnership)) -or
+            (-not $beforeRegister -and $rollbackOwnership)) {
+            throw "task $name registration changed; inspect its action before retrying; refusing to overwrite it"
+        }
+        $installed = Register-ScheduledTask -TaskName $name -Action $action -Principal $principal -Trigger $trigger -Settings $settings -Description "Native $kind extractor CLI shim" -Force
+        $replacementRegistered = $true
+        $rollbackOwnership = Get-TaskOwnership $installed
         if (-not (Get-TaskRegistration $name)) { throw "task was not registered: $name" }
         Start-ScheduledTask -TaskName $name
         $deadline = (Get-Date).AddSeconds([int]$c.Timeout)
@@ -345,40 +440,51 @@ try {
 } catch {
     $failure = $_
     $rollbackErrors = @()
-    if ($mutated) {
-        try { Remove-OwnedTask $name }
+    $rollbackRemoved = $false
+    if ($replacementRegistered) {
+        try { $rollbackRemoved = Remove-OwnedTask $name $rollbackOwnership -RequireExpectedOwnership }
         catch { $rollbackErrors += "removing replacement task: $($_.Exception.Message)" }
     }
     try {
         if ($configExisted) { [IO.File]::WriteAllBytes($c.EnvFile, [byte[]]$configBefore) }
         elseif (Test-Path -LiteralPath $c.EnvFile) { Remove-Item -LiteralPath $c.EnvFile }
     } catch { $rollbackErrors += "restoring settings: $($_.Exception.Message)" }
-    if ($mutated -and $previousXml) {
+    if ($replacementRegistered -and $previousXml -and $rollbackRemoved) {
         try {
+            $remainingTask = Get-TaskRegistration $name
+            if ($remainingTask -and (-not $rollbackOwnership -or (Get-TaskOwnership $remainingTask) -ne $rollbackOwnership)) {
+                throw "task $name registration changed; inspect its action before retrying; refusing to overwrite it with the previous registration"
+            }
             Register-ScheduledTask -TaskName $name -Xml $previousXml -Force | Out-Null
             if ($wasActive) { Start-ScheduledTask -TaskName $name }
         } catch { $rollbackErrors += "restoring previous task: $($_.Exception.Message)" }
     }
+    if ($mutated -and -not $replacementRegistered) {
+        # Stopping the original is not replacing its registration. Restart only
+        # that unchanged task; a concurrent deletion must remain a deletion.
+        try { Restart-UnchangedTask $name $originalOwnership $wasActive }
+        catch { $rollbackErrors += "recovering task state: $($_.Exception.Message)" }
+    }
     if ($mutated -and $legacyWasActive) {
-        try { Start-ScheduledTask -TaskName $legacy.TaskName }
+        try { Restart-UnchangedTask $legacy.TaskName (Get-TaskOwnership $legacy) $true }
         catch { $rollbackErrors += "restarting legacy task: $($_.Exception.Message)" }
     }
     if ($rollbackErrors.Count) {
         $remaining = try {
             $task = Get-TaskRegistration $name
             if ($task) { "present (state $($task.State))" } else { 'absent' }
-        } catch { 'absent or unreadable' }
+        } catch { "unreadable ($($_.Exception.Message))" }
         Write-Warning "Rollback incomplete: $($rollbackErrors -join '; '). Task '$name' is $remaining. Restore its previous registration manually if needed; password-logon tasks require credentials that task XML does not contain. Original failure: $($failure.Exception.Message)" -WarningAction Continue
     }
     throw $failure
 }
 if ($name -eq 'Pseudolife Claude Shim') {
-    Remove-OwnedTask 'Pseudolife Sonnet Shim'
+    $null = Remove-OwnedTask 'Pseudolife Sonnet Shim'
 }
 if ($c.ReplaceSibling) {
     foreach ($sibling in $siblings) {
         if ($sibling -ne $name) {
-            Remove-OwnedTask $sibling
+            $null = Remove-OwnedTask $sibling
         }
     }
 }

@@ -15,6 +15,10 @@ serialized per shim. Health is warmed before binding and refreshed in the
 background when stale. CLI failures become HTTP 500; an unhealthy health
 probe returns HTTP 503. As in the Python shims, `stream`, `temperature` and
 `response_format` do not change the completion protocol.
+Routes that ignore the request body answer immediately and allow five seconds
+for the body to finish before closing the connection. This is a native resource
+limit; trickling bytes do not extend it. With `Expect: 100-continue`, Hyper may
+emit an interim `100 Continue` before the final response, including a 404.
 
 Concrete provider model IDs pass through; aliases such as `extractor` or `Qwen/Qwen3` keep
 the launch model. Unlisted provider IDs get a one-line note. `--reasoning-effort`
@@ -79,6 +83,30 @@ their PowerShell equivalents accept `-NativeExe PATH`. Their existing
 Python installation paths remain available. Custom `--name` registration
 names support isolated installations and tests. When installing through a versioned runtime launcher, pass its stable path with `--native-exe PATH` so future starts follow the selected runtime.
 
+Windows registrations record the installing runtime's exact path alongside the
+stable launcher. Cleanup can therefore recognize that old runtime if it appears
+late during an upgrade, while still requiring the same provider and settings.
+Older wrappers lack this metadata. If cleanup cannot prove a matching process's
+image belongs to the registration, it preserves the task and reports the process
+to inspect before retrying; it does not infer ownership from arguments alone.
+Captured processes are stopped through pinned handles, and task actions are
+checked again before each removal attempt. Rollback preserves a concurrently
+replaced task and reports the incomplete recovery instead of overwriting it.
+Installation checks ambiguous runtimes before stopping the original task. If a
+late runtime forces refusal after that stop, rollback restarts the unchanged
+original; a concurrently removed registration stays absent, including removal
+during the replacement health wait. Uninstall and post-install sibling cleanup
+check ambiguous runtimes before stopping a task.
+
+Legacy Windows migration recognizes each historical installer's own argument
+template: Sonnet's prompt flag, Claude's model and prompt flags, and Codex's
+model and health flags. The BEL-corrupted `evals/anthropic_shim.py` task emitted
+by commit `2f0edc4ce` is deliberately refused: that invalid path could not start
+the shim and was corrected in `ccb6f9a07`. Inspect and remove that broken task
+manually before retrying installation; it grants no process-cleanup ownership.
+This BEL-path case documents an existing refusal and is a negative control, not
+a regression that failed before this hardening change.
+
 ## Stub-only verification
 
 Native timeout checks observe descendant termination and pipe reaping through a
@@ -127,13 +155,15 @@ and persistent query failures; cleanup requires confirmed named absence.
 The Linux rollback control uses a mocked service manager to cover enabled and
 disabled units in active and inactive states. The native lifecycle additionally
 checks that failed replacement preserves a disabled unit's enablement.
-Preflight (wrapper checks, mocked scheduler failures, legacy cleanup, bind
-refusals and failed-install rollback) and the installed lifecycle (quiet rerun,
+Windows wrapper checks and mocked scheduler failures run once in
+`extractor_shim_scheduler_controls`, without real registrations. Preflight
+(legacy cleanup, bind refusals and failed-install rollback) and the installed lifecycle (quiet rerun,
 config reload, replacement rollback and replacement) run as separate tests for
 each provider, with independent registrations and cleanup. Their cumulative
 scheduler overhead must not share one 120-second nextest deadline. The direct
-Python entry point retains the combined proof by default; `--scenario preflight`
-and `--scenario lifecycle` select the same independent scenarios used by Cargo.
+Python entry point retains the combined proof by default; `--scenario controls`,
+`--scenario preflight` and `--scenario lifecycle` select the same independent
+scenarios used by Cargo. The mocked controls do not require the real-autostart opt-in.
 Each proof removes its registrations. Run it
 only on a designated dev machine. Its Windows fixture uses S4U because an SSH
 session has no interactive logon token; it does not prove an interactive logon
