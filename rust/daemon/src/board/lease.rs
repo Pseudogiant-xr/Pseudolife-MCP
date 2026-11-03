@@ -222,14 +222,13 @@ pub async fn settle(
     {
         // Match the exact queue-grant generation. Direct holds, renewed
         // windows and a retry that was already missed expire normally.
-        if let Some(payload) = unaccepted_grant(c, &row, name).await? {
-            if let Some(window) = payload["window"].as_i64()
-                && payload["retry"] != true
-                && row.expires_at.unwrap_or(f64::INFINITY)
-                    <= row.acquired_at.unwrap_or(0.0) + window as f64 + 0.001
-            {
-                missed = Some((row.clone(), window as i32));
-            }
+        if let Some(payload) = unaccepted_grant(c, &row, name).await?
+            && let Some(window) = payload["window"].as_i64()
+            && payload["retry"] != true
+            && row.expires_at.unwrap_or(f64::INFINITY)
+                <= row.acquired_at.unwrap_or(0.0) + window as f64 + 0.001
+        {
+            missed = Some((row.clone(), window as i32));
         }
         events.push(
             Event::new("lease_expire", &json!({"name": name, "fence": row.fence}))
