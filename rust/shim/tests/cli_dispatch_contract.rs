@@ -22,9 +22,9 @@ fn help_aliases_ignore_trailing_arguments_before_daemon_attachment() {
         assert_eq!(output.status.code(), Some(0));
         // SHA-256 of pinned cli.py::_USAGE UTF-8 bytes, with Windows CRLF.
         let expected = if cfg!(windows) {
-            "60c74f604456ea9a649f062b2b51bb630d8ae3d2461b0bd0b1329cfcd1f21d46"
+            "431b9104ca3b188add7100442038cb20b275361421f85de263a8f163eb4db8e7"
         } else {
-            "4d649216259501decd94d4b9404bca93c295b195ee183b57405be304e34a3175"
+            "32b2da5e90606740a82ca321675b8d60b2b314ca27ffa40effe4a9b0362c381d"
         };
         assert_eq!(format!("{:x}", Sha256::digest(&output.stdout)), expected);
         assert!(output.stderr.is_empty());
@@ -61,6 +61,7 @@ fn unknown_mode_uses_python_quotes_and_exit_two() {
 fn recognized_deferred_modes_are_not_reported_as_python_unknown_modes() {
     for mode in [
         "maintainer",
+        "console",
         "test-login",
         "conductor-watch",
         "delegate-watch",

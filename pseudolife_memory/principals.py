@@ -273,6 +273,10 @@ def stored_tier(principal) -> str | None:
 SOURCE_OPEN = "open"
 SOURCE_ENVIRONMENT = "environment"
 SOURCE_STORE = "store"
+#: A Console session (schema v59, ``console_sessions``): resolved only by the
+#: call sites that opt in (``console_sessions.resolve``), never by this
+#: module's resolver, so a session is never an agent credential.
+SOURCE_SESSION = "session"
 
 
 def resolve_principal(auth_header: str | None,

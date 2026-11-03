@@ -528,8 +528,8 @@ def _enrol(tier: str, origin: str) -> int:
     # origin has none (2026-10-05, the first live run). Name where the token
     # lives, never the token itself.
     print(f"\nNext, in your browser: open {origin}/ui/. A browser keeps the Console's token per "
-          "address: if this one says it did not accept the console's token, click \"Set a "
-          "bearer token\" and paste the token your Console uses at its usual address: the "
+          "address: if this one asks you to sign in, open \"Advanced: paste a bearer token\" in "
+          "its sign-in dialog and paste the token your Console uses at its usual address: the "
           "daemon's PSEUDOLIFE_MCP_TOKEN, which a single-token install also keeps in your "
           "client's token file, ~/.pseudolife-mcp/<principal>.token. Then open Settings, Your "
           "passkeys, enter the code below with a label for this passkey, and create the "

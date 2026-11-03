@@ -3,16 +3,18 @@ import { ApiError } from "./api/client";
 import { actionError, explainError } from "./errors";
 
 describe("explainError", () => {
-  it("tells an invited machine that only the operator token changes daemon settings", () => {
+  it("tells an invited machine's sign-in that only the daemon's host changes daemon settings", () => {
     // POST /api/config from a stored (invited) principal: the daemon has a
     // token, so the tokenless-loopback explanation would be wrong.
     const e = new ApiError(403, "operator_principal_required", { error: "operator_principal_required" });
     const x = explainError(e, "Saving the config");
-    expect(x.title).toBe("Only the operator's token can change this");
+    expect(x.title).toBe("Only a sign-in from the daemon's host can change this");
     expect(x.body).toContain("invited machine");
+    expect(x.body).toContain("pseudolife-mcp console");
+    expect(x.body).not.toMatch(/bearer|PSEUDOLIFE_MCP_TOKEN/i);
     expect(x.body).not.toMatch(/tokenless|loopback/i);
     expect(x.token).toBe(true);
-    expect(actionError(e, "Save")).toBe("Save failed: only the operator's token can change this");
+    expect(actionError(e, "Save")).toBe("Save failed: only a sign-in from the daemon's host can change this");
   });
 
   it("explains principals_unavailable as a temporary daemon-side check failure", () => {
@@ -33,12 +35,14 @@ describe("explainError", () => {
     expect(bare.body).toContain("tokenless daemon");
   });
 
-  it("says a new address needs the token pasted once", () => {
-    // The Console keeps its token per address, so the passkey HTTPS address
+  it("says to sign in again, and that a new address needs its own sign-in", () => {
+    // The Console keeps its sign-in per address, so the passkey HTTPS address
     // opens with none even where the usual address works.
     const x = explainError(new ApiError(401, "unauthorized", { error: "unauthorized" }));
-    expect(x.title).toBe("The daemon did not accept this console's token");
+    expect(x.title).toBe("This Console is not signed in");
     expect(x.body).toMatch(/each address/i);
+    expect(x.body).toContain("pseudolife-mcp console");
+    expect(x.body).not.toMatch(/bearer/i);
     expect(x.token).toBe(true);
   });
 });
