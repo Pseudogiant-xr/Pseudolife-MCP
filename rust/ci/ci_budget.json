@@ -265,6 +265,11 @@
         "job": "parity-checks",
         "fingerprint": "398ff9a598c5f63e",
         "reason": "Adds migrate_flat live, record and golden checks to the existing h5-backup shard and PostgreSQL setup. The 32-case Linux run at 66b7b064 took 68.7 seconds across those three stages; no gated job or shard is added. Retain the measured baseline within unchanged limits pending batch remeasurement. Its single source mutant gets one additional nightly/manual shard per OS and remains excluded from PR and batch events."
+      },
+      {
+        "job": "parity-checks",
+        "fingerprint": "398ff9a598c5f63e",
+        "reason": "The migrate_flat row stays in existing h5-backup selection; this unchanged job fingerprint makes the acceptance a cost annotation, not a new selection gate. The 34-case Windows run at 1f9e646e measured 77.93s live, 40.93s record and 30.51s golden (149.37s total); Linux previously measured 68.7s for 32 cases, and the new 34-case Linux capture took 27.97s. No gated job, setup or shard is added. This fits the existing bounded per-shard allowance and unchanged workflow limits; retain the baseline pending batch measurement. Its source mutant remains nightly/manual only."
       }
     ]
   },
