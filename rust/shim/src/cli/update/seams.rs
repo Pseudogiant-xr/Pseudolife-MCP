@@ -174,7 +174,7 @@ pub(crate) fn run_cli(
                 super::signals::terminate(&mut *child, signal).await;
                 return (128 + signal, "command interrupted".into());
             }
-            result = tokio::time::timeout(Duration::from_secs(timeout), wait) => result,
+            result = super::signals::timeout(Duration::from_secs(timeout), wait) => result,
         };
         #[cfg(not(unix))]
         let result = tokio::time::timeout(Duration::from_secs(timeout), wait).await;

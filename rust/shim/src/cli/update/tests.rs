@@ -272,6 +272,141 @@ fn native_update_timeout_terminates_command_descendants() {
         }
     }
 }
+#[cfg(unix)]
+#[test]
+fn native_update_suspend_preserves_command_budget() {
+    assert_suspend_preserves_budget("cli::update::tests::native_update_suspend_driver");
+}
+
+#[cfg(unix)]
+#[allow(unsafe_code)]
+pub(super) fn assert_suspend_preserves_budget(driver: &str) {
+    use std::process::{Child, Command, Stdio};
+    use std::time::{Duration, Instant};
+
+    struct Owned<'a>(Child, &'a Path);
+    impl Drop for Owned<'_> {
+        fn drop(&mut self) {
+            let _ = fs::write(self.1.join("finish"), b"finish");
+            if self.0.try_wait().ok().flatten().is_some() {
+                return;
+            }
+            if let Ok(pid) = fs::read_to_string(self.1.join("ready"))
+                && let Ok(pid) = pid.parse::<i32>()
+            {
+                // SAFETY: the fixture wrote its owned process-group id to this
+                // unique directory; resume it so teardown can release it.
+                unsafe { libc::kill(-pid, libc::SIGCONT) };
+            }
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    let root = Temp::new();
+    let child = Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", driver, "--ignored", "--quiet"])
+        .env("UPDATE_SUSPEND_ROOT", &root.0)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut owned = Owned(child, &root.0);
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while !root.0.join("ready").exists() {
+        assert!(
+            owned.0.try_wait().unwrap().is_none(),
+            "runner exited before readiness"
+        );
+        assert!(Instant::now() < deadline, "command did not become ready");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    // SAFETY: signal and wait only for this still-live owned driver process.
+    assert_eq!(unsafe { libc::kill(owned.0.id() as i32, libc::SIGTSTP) }, 0);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let mut status = 0;
+        let got = unsafe {
+            libc::waitpid(
+                owned.0.id() as i32,
+                &mut status,
+                libc::WNOHANG | libc::WUNTRACED,
+            )
+        };
+        assert!(got >= 0);
+        if got != 0 {
+            assert!(
+                libc::WIFSTOPPED(status),
+                "runner exited instead of stopping"
+            );
+            break;
+        }
+        assert!(Instant::now() < deadline, "runner did not stop");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    // The command's five-second budget must not include these six seconds in
+    // a verified stopped state. Keep it blocked briefly after resume so an
+    // expired timer cannot be hidden by a simultaneously completed command.
+    std::thread::sleep(Duration::from_secs(6));
+    assert_eq!(unsafe { libc::kill(owned.0.id() as i32, libc::SIGCONT) }, 0);
+    let observe = Instant::now() + Duration::from_millis(300);
+    while Instant::now() < observe {
+        assert!(
+            owned.0.try_wait().unwrap().is_none(),
+            "suspension consumed the command timeout"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    fs::write(root.0.join("finish"), b"finish").unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        if let Some(status) = owned.0.try_wait().unwrap() {
+            assert!(
+                status.success(),
+                "resumed command did not finish successfully"
+            );
+            break;
+        }
+        assert!(Instant::now() < deadline, "resumed command did not finish");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+#[cfg(unix)]
+#[test]
+#[ignore = "subprocess fixture"]
+fn native_update_suspend_driver() {
+    let env: Environment = std::env::vars().collect();
+    let result = run_cli(
+        &[
+            std::env::current_exe()
+                .unwrap()
+                .to_string_lossy()
+                .into_owned(),
+            "--exact".into(),
+            "cli::update::tests::native_update_suspend_command".into(),
+            "--ignored".into(),
+        ],
+        Some(&env),
+        5,
+        false,
+    );
+    assert_eq!(result.0, 0, "resumed command: {}", result.1);
+}
+
+#[cfg(unix)]
+#[test]
+#[ignore = "subprocess fixture"]
+fn native_update_suspend_command() {
+    use std::time::{Duration, Instant};
+    let root = PathBuf::from(std::env::var_os("UPDATE_SUSPEND_ROOT").unwrap());
+    fs::write(root.join("ready"), std::process::id().to_string()).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(60);
+    while root.exists() && !root.join("finish").exists() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
 fn gzip(bytes: &[u8]) -> Vec<u8> {
     let mut gz = flate2::write::GzEncoder::new(vec![], flate2::Compression::default());
     gz.write_all(bytes).unwrap();

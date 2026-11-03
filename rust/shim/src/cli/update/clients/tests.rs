@@ -724,3 +724,30 @@ fn client_helper_child() {
         std::thread::sleep(Duration::from_millis(20));
     }
 }
+#[cfg(unix)]
+#[test]
+fn native_client_suspend_preserves_command_budget() {
+    super::super::tests::assert_suspend_preserves_budget(
+        "cli::update::clients::tests::native_client_suspend_driver",
+    );
+}
+
+#[cfg(unix)]
+#[test]
+#[ignore = "subprocess fixture"]
+fn native_client_suspend_driver() {
+    use super::command::{NativeRunner, Runner};
+    let root = std::env::var("UPDATE_SUSPEND_ROOT").unwrap();
+    let result = NativeRunner.run(
+        &std::env::current_exe().unwrap(),
+        &[
+            "--exact",
+            "cli::update::tests::native_update_suspend_command",
+            "--ignored",
+        ],
+        None,
+        std::time::Duration::from_secs(5),
+        &[("UPDATE_SUSPEND_ROOT", &root)],
+    );
+    assert_eq!(result.code, 0, "resumed client command timed out");
+}

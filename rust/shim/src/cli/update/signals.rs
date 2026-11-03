@@ -5,7 +5,7 @@ use std::{
     cell::Cell,
     sync::{
         Mutex, MutexGuard,
-        atomic::{AtomicBool, AtomicI32, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicI32, AtomicU64, AtomicUsize, Ordering},
     },
     time::Duration,
 };
@@ -15,6 +15,7 @@ static RECEIVED: AtomicI32 = AtomicI32::new(0);
 static LATEST: AtomicI32 = AtomicI32::new(0);
 static COUNT: AtomicUsize = AtomicUsize::new(0);
 static SUSPEND: AtomicBool = AtomicBool::new(false);
+static STOPPED_NANOS: AtomicU64 = AtomicU64::new(0);
 thread_local! { static DEPTH: Cell<usize> = const { Cell::new(0) }; }
 
 extern "C" fn receive(signal: libc::c_int) {
@@ -46,6 +47,7 @@ impl Guard {
         LATEST.store(0, Ordering::Relaxed);
         COUNT.store(0, Ordering::Relaxed);
         SUSPEND.store(false, Ordering::Relaxed);
+        STOPPED_NANOS.store(0, Ordering::Relaxed);
         DEPTH.set(1);
         let mut guard = Self {
             previous: Vec::new(),
@@ -109,6 +111,7 @@ impl Drop for CleanupSignal {
 
 fn suspend(group: Option<u32>) {
     if SUSPEND.swap(false, Ordering::Relaxed) {
+        let stopped = std::time::Instant::now();
         // SAFETY: group is the owned child's process group, captured at spawn.
         // SIGSTOP stops this process even in an orphaned background group. After
         // the shell continues us, continue the isolated child group as well.
@@ -121,6 +124,32 @@ fn suspend(group: Option<u32>) {
                 libc::kill(-(group as i32), libc::SIGCONT);
             }
         }
+        STOPPED_NANOS.fetch_add(
+            stopped.elapsed().as_nanos().min(u64::MAX as u128) as u64,
+            Ordering::Relaxed,
+        );
+    }
+}
+
+/// Preserve the remaining command budget across terminal suspension. The
+/// signal future records stopped time before this future is polled on resume.
+pub(super) async fn timeout<F: std::future::Future>(
+    duration: Duration,
+    future: F,
+) -> Result<F::Output, tokio::time::error::Elapsed> {
+    let mut stopped = STOPPED_NANOS.load(Ordering::Relaxed);
+    let mut deadline = tokio::time::Instant::now() + duration;
+    tokio::pin!(future);
+    loop {
+        // Borrow the same pinned future: extending an expired wall-clock timer
+        // must not cancel or restart the command and its output readers.
+        let result = tokio::time::timeout_at(deadline, &mut future).await;
+        let total = STOPPED_NANOS.load(Ordering::Relaxed);
+        if result.is_ok() || total == stopped {
+            return result;
+        }
+        deadline += Duration::from_nanos(total.saturating_sub(stopped));
+        stopped = total;
     }
 }
 

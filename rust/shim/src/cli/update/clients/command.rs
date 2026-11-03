@@ -188,7 +188,7 @@ impl Runner for NativeRunner {
                         super::super::signals::terminate(&mut *child, signal).await;
                         return Output { code: 128 + signal, bytes: vec![] };
                     }
-                    result = tokio::time::timeout(timeout, wait) => result,
+                    result = super::super::signals::timeout(timeout, wait) => result,
                 };
                 #[cfg(not(unix))]
                 let result = tokio::time::timeout(timeout, wait).await;
