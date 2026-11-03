@@ -62,13 +62,13 @@ def test_native_opt_in_maps_flags_and_preserves_exact_exit(tmp_path, code, shell
         native.chmod(0o755)
         env["PSEUDOLIFE_NATIVE_CLI"] = str(native).replace("\\", "/")
     if shell == "pwsh":
-        argv = [program, "-NoProfile", "-File", str(repo / "ops/update.ps1"),
+        argv = [program, "-NoProfile", "-NonInteractive", "-File", str(repo / "ops/update.ps1"),
                 "-Engine", "rust", "-Shadow", "-Tag", "pre-fixture", "-NoTestLogin"]
     elif shell == "bash":
         argv = [program, str(repo / "ops/update.sh").replace("\\", "/"), "--engine", "rust", "--shadow", "--tag", "pre-fixture", "--no-test-login"]
     else:
         argv = [program, str(repo / "ops/update.py"), "--engine", "rust", "--shadow", "--rollback-tag", "pre-fixture", "--no-test-login"]
-    result = subprocess.run(argv, env=env, capture_output=True, timeout=30)
+    result = subprocess.run(argv, env=env, stdin=subprocess.DEVNULL, capture_output=True, timeout=30)
     assert result.returncode == code, result.stderr.decode(errors="replace")
     args = json.loads(output.read_text())
     assert args[:3] == ["update", "--checkout", str(repo)] or (
@@ -84,8 +84,8 @@ def test_native_missing_binary_never_falls_back_to_python(tmp_path):
         pytest.skip("pwsh unavailable")
     repo, env, output = fixture(tmp_path, 0)
     env["PSEUDOLIFE_NATIVE_CLI"] = str(tmp_path / "absent-native")
-    result = subprocess.run([program, "-NoProfile", "-File", str(repo / "ops/update.ps1")],
-                            env=env, capture_output=True, timeout=30)
+    result = subprocess.run([program, "-NoProfile", "-NonInteractive", "-File", str(repo / "ops/update.ps1")],
+                            env=env, stdin=subprocess.DEVNULL, capture_output=True, timeout=30)
     assert result.returncode == 2
     assert not output.exists()
     assert b"native" in (result.stdout + result.stderr).lower()
@@ -97,6 +97,48 @@ def _shell_program(shell):
                  Path(os.environ.get("LOCALAPPDATA", "")) / "Programs/Git/bin/bash.exe")
         return next((str(path) for path in paths if path.is_file()), None)
     return shutil.which(shell)
+
+
+@pytest.mark.parametrize("probe", ["stdin", "prompt"])
+def test_powershell_fixture_cannot_consume_parent_input(tmp_path, probe):
+    if not _shell_program("pwsh"):
+        pytest.skip("pwsh unavailable")
+    scripts = {
+        "stdin": "if ($null -ne [Console]::In.ReadLine()) { throw 'inherited caller input' }\n"
+                 "Write-Output 'stdin EOF'\n",
+        "prompt": "try { $null = Read-Host 'Unexpected fixture prompt' }\n"
+                  "catch { Write-Output 'prompt refused'; exit 0 }\n"
+                  "throw 'accepted an interactive prompt'\n",
+    }
+    worker = tmp_path / "invoke.py"
+    worker.write_text(
+        "import pathlib, runpy, sys\n"
+        f"module = runpy.run_path({str(Path(__file__).resolve())!r})\n"
+        "wrapper = module['Wrapper'](pathlib.Path(sys.argv[1]), 'pwsh')\n"
+        f"(wrapper.repo / 'ops/update.ps1').write_text({scripts[probe]!r}, encoding='utf-8')\n"
+        "result = wrapper.run()\n"
+        "print(result.stdout, end='')\n"
+        "print(result.stderr, end='', file=sys.stderr)\n"
+        "raise SystemExit(result.returncode)\n", encoding="utf-8")
+    _, env, _ = fixture(tmp_path / "parent", 0)
+    output = tmp_path / "worker.log"
+    with output.open("w", encoding="utf-8") as log:
+        child = subprocess.Popen([sys.executable, str(worker), str(tmp_path / "child")],
+                                 env=env, stdin=subprocess.PIPE, stdout=log, stderr=log)
+        try:
+            # Keep the parent's pipe open: neither EOF nor pytest's stdin capture
+            # should make an accidentally interactive child appear isolated.
+            child.stdin.write(b"input belonging to the parent\n")
+            child.stdin.flush()
+            child.wait(timeout=60)
+        finally:
+            if child.poll() is None:
+                child.kill()
+                child.wait()
+            child.stdin.close()
+    text = output.read_text(encoding="utf-8")
+    assert child.returncode == 0, text
+    assert text.strip() == {"stdin": "stdin EOF", "prompt": "prompt refused"}[probe]
 
 
 def test_powershell_python_discovery_does_not_autoload_modules(tmp_path):
@@ -210,10 +252,13 @@ class Wrapper:
             self._driver(self.bin / name, driver)
 
     def run(self, *args):
-        argv = ([self.program, "-NoProfile", "-File", str(self.repo / "ops/update.ps1")]
+        argv = ([self.program, "-NoProfile", "-NonInteractive", "-File", str(self.repo / "ops/update.ps1")]
                 if self.shell == "pwsh" else
                 [self.program, "--noprofile", "--norc", str(self.repo / "ops/update.sh").replace("\\", "/")])
-        return subprocess.run([*argv, *args], env=self.env, capture_output=True, text=True, timeout=30)
+        # These fixtures never ask for input; a runner's open stdin must not
+        # turn an accidental read or PowerShell prompt into a stalled test.
+        return subprocess.run([*argv, *args], env=self.env, stdin=subprocess.DEVNULL,
+                              capture_output=True, text=True, timeout=30)
 
     def crlf(self):
         path = self.repo / "ops/.env"
