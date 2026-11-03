@@ -21,6 +21,12 @@ pub(crate) struct Request<'a> {
     /// A POST's JSON object, empty for an empty body or a GET. A handler
     /// that consumes it takes it (`std::mem::take`).
     pub body: Map<String, Value>,
+    /// The principal of the Console session that signed this request in,
+    /// when one did (schema v59). The gate already resolved it, so the
+    /// handlers that name the caller use it, as Python binds the gate's
+    /// principal for the route; `authenticated_principal` and the agent
+    /// resolver would refuse a session bearer.
+    pub session: Option<&'a str>,
 }
 
 pub(crate) async fn route(mut req: Request<'_>, maintainer_path: bool) -> Response {

@@ -111,13 +111,14 @@ pub(crate) async fn route(
     app: &App,
     path: &str,
     h: &HeaderMap,
+    session: Option<&str>,
     body: Map<String, Value>,
 ) -> Response {
-    if let Err(refused) = gate(app, h) {
+    if let Err(refused) = gate(app, h, session) {
         return *refused;
     }
     if path != "/api/maintainer/challenge" {
-        return action_route(app, path, h, body).await;
+        return action_route(app, path, h, session, body).await;
     }
     let cfg = &app.board.config;
     let rp_id = cfg.maintainer_rp_id.clone();
@@ -670,8 +671,14 @@ async fn challenge(
 #[path = "maintainer_ops_tests.rs"]
 mod tests;
 
-async fn action_route(app: &App, path: &str, h: &HeaderMap, body: Map<String, Value>) -> Response {
-    let principal = match gate(app, h) {
+async fn action_route(
+    app: &App,
+    path: &str,
+    h: &HeaderMap,
+    session: Option<&str>,
+    body: Map<String, Value>,
+) -> Response {
+    let principal = match gate(app, h, session) {
         Ok(p) => p,
         Err(r) => return *r,
     };

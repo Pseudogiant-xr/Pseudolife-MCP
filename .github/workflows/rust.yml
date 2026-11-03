@@ -242,7 +242,11 @@ jobs:
     # the runner image's own Rust, so each image rollout started cold
     # (windows-latest 1.98.1 -> 1.99.0, 2026-10-15). The cache now saves on
     # failure and hashes only the pinned toolchain (see its steps).
-    timeout-minutes: 45
+    # Warm hosted Windows on 2026-11-04: batch run 41691166042 finished with
+    # Nextest 9.6, no-default 7.4 and override builds 11.9 min, while master
+    # run 41699732205 at the same code took 11.8, 8.7 and 15.9 min and was
+    # cancelled at the 45-minute limit inside the override builds.
+    timeout-minutes: 60
     defaults:
       run:
         working-directory: rust

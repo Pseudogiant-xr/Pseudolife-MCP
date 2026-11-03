@@ -62,7 +62,7 @@ impl Drop for Slot {
 
 impl PairLimiter {
     /// `FailureLimiter.reserve`: count one attempt, or None when spent.
-    fn reserve(&self) -> Option<Attempt> {
+    pub(crate) fn reserve(&self) -> Option<Attempt> {
         let mut f = self.failures.lock().expect("pair limiter");
         let now = Instant::now();
         while f
@@ -86,7 +86,7 @@ impl PairLimiter {
 
     /// `FailureLimiter.refund`: give back an attempt that succeeded or never
     /// reached the store (one already aged out is gone).
-    fn refund(&self, attempt: Attempt) {
+    pub(crate) fn refund(&self, attempt: Attempt) {
         let mut f = self.failures.lock().expect("pair limiter");
         if let Some(i) = f.attempts.iter().position(|a| a.id == attempt.id) {
             f.attempts.remove(i);
@@ -95,7 +95,7 @@ impl PairLimiter {
 
     /// `RedemptionGate.try_enter`: a slot, or None when both are taken. A
     /// full gate is a refusal, never a queue.
-    fn enter(&self) -> Option<Slot> {
+    pub(crate) fn enter(&self) -> Option<Slot> {
         self.in_flight
             .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
                 (n < REDEMPTION_SLOTS).then_some(n + 1)
@@ -105,12 +105,12 @@ impl PairLimiter {
     }
 
     #[cfg(test)]
-    fn attempts(&self) -> usize {
+    pub(crate) fn attempts(&self) -> usize {
         self.failures.lock().expect("pair limiter").attempts.len()
     }
 
     #[cfg(test)]
-    fn in_flight(&self) -> usize {
+    pub(crate) fn in_flight(&self) -> usize {
         self.in_flight.load(Ordering::SeqCst)
     }
 }
@@ -162,7 +162,7 @@ async fn redeem_in_bank(
 }
 
 /// `normalize_pairing_code`.
-fn normalize_pairing_code(v: &Value) -> Option<String> {
+pub(crate) fn normalize_pairing_code(v: &Value) -> Option<String> {
     let text = v.as_str()?;
     let code: String = py_strip(text)
         .to_uppercase()
@@ -178,7 +178,7 @@ fn normalize_pairing_code(v: &Value) -> Option<String> {
         .then_some(code)
 }
 
-fn is_sha256_hex(v: &Value) -> bool {
+pub(crate) fn is_sha256_hex(v: &Value) -> bool {
     v.as_str().is_some_and(|s| {
         s.len() == 64
             && s.bytes()

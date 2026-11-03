@@ -228,15 +228,25 @@ fn list_limit(q: &HashMap<String, String>) -> i64 {
     crate::read::console::i_param(q, "limit", LIST_DEFAULT).clamp(1, LIST_MAX)
 }
 
-/// `_gate`: the caller's principal, or the refusal to answer.
-pub(crate) fn gate(app: &App, h: &HeaderMap) -> Result<String, Box<Response>> {
+/// `_gate`: the caller's principal, or the refusal to answer. A Console
+/// session's principal (`session`, resolved by the gate) is the request's
+/// principal as it is (Python's `request_principal`); every other caller is
+/// resolved by `authenticated_principal`.
+pub(crate) fn gate(
+    app: &App,
+    h: &HeaderMap,
+    session: Option<&str>,
+) -> Result<String, Box<Response>> {
     let headers = crate::board::http::header_dict(h);
-    let principal = match crate::board::http::authenticated_principal(app, &headers) {
-        Ok(p) => p,
-        Err(crate::board::error::BoardError::Refused(r)) => {
-            return Err(Box::new(refusal(&r.code, None)));
-        }
-        Err(_) => return Err(Box::new(refusal("coordination_unavailable", None))),
+    let principal = match session {
+        Some(principal) => principal.to_string(),
+        None => match crate::board::http::authenticated_principal(app, &headers) {
+            Ok(p) => p,
+            Err(crate::board::error::BoardError::Refused(r)) => {
+                return Err(Box::new(refusal(&r.code, None)));
+            }
+            Err(_) => return Err(Box::new(refusal("coordination_unavailable", None))),
+        },
     };
     let cfg = &app.board.config;
     if principal == MAINTAINER_PRINCIPAL
@@ -266,8 +276,9 @@ pub(crate) async fn route(
     path: &str,
     q: &HashMap<String, String>,
     h: &HeaderMap,
+    session: Option<&str>,
 ) -> Response {
-    if let Err(refused) = gate(app, h) {
+    if let Err(refused) = gate(app, h, session) {
         return *refused;
     }
     let cfg = &app.board.config;
