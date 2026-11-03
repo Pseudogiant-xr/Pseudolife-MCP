@@ -127,6 +127,9 @@ tests/test_shim_board_retry.py | test_retry_waits_out_the_attachment_its_cancell
 tests/test_shim_runtimes.py | test_a_real_process_in_a_real_virtualenv_holds_its_runtime | time.sleep(0.5) | minimum: the child sleeps 120 s, so a later scan still finds it; the wait only lets the venv launcher settle
 
 tests/test_suite_lock.py | test_a_waiter_whose_board_address_expired_registers_again_at_hold | err = _stderr_until(capsys, "never-printed", timeout=0.5) | negative: waits for text that never prints, then asserts the board was not skipped
+tests/test_suite_lock.py | test_a_full_run_starts_only_once_the_board_has_answered.held_slowly | time.sleep(0.3) | minimum: a slow board answer, so a run that skipped it would start first; slowness only delays the answer the run waits for
+tests/test_suite_lock.py | test_the_recorded_run_time_starts_once_the_board_admits_the_run.held_slowly | time.sleep(0.5) | minimum: a slow board answer, so a run time taken before admission would precede it; slowness only delays the answer
+tests/test_suite_lock.py | test_the_tree_is_checked_while_the_board_answers_and_before_the_run_starts.held_slowly | time.sleep(0.3) | minimum: holds the board answer pending while the tree changes; the check must still see it however long the answer takes
 
 tests/test_wait_mail_cli.py | test_a_refused_ring_retried_after_a_restart_stays_dropped.drive | await asyncio.sleep(0.05) | minimum: yields so the call_later(0) ring timer, scheduled first, refuses its write
 tests/test_wait_mail_cli.py | test_a_refused_ring_retried_after_a_restart_stays_dropped.drive | await asyncio.sleep(0.05) | negative: then asserts the dropped ring wrote no marker

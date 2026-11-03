@@ -137,7 +137,8 @@ class ContainerTests(unittest.TestCase):
                      "rust/shared/pg_runtime.rs",
                      "ops/Dockerfile.daemon-rust", "ops/docker-compose.rust.yml",
                      "ops/provision-daemon-models.sh",
-                     ".github/workflows/rust.yml", "plugin/hooks/session-start.sh"):
+                     ".github/workflows/rust.yml", "plugin/hooks/session-start.sh",
+                     "pseudolife_memory/web/static/index.html"):
             with self.subTest(path=path):
                 self.assertTrue(gate.needs_image([path]))
         self.assertFalse(gate.needs_image(["README.md", "docs/guide/configuration.md",
@@ -155,6 +156,12 @@ class ContainerTests(unittest.TestCase):
         job = (ROOT / ".github/workflows/rust.yml").read_text(encoding="utf-8").split(
             "\n  daemon-image:", 1)[1].split("\n  parity:", 1)[0]
         self.assertIn("docker run --rm --network none w3j-daemon-rust:prep pseudolife-mcp version", job)
+
+    def test_image_ships_the_console_and_selects_its_asset_directory(self):
+        dockerfile = (ROOT / "ops/Dockerfile.daemon-rust").read_text(encoding="utf-8")
+        self.assertIn("COPY pseudolife_memory/web/static /app/static", dockerfile)
+        self.assertIn("PSEUDOLIFE_DAEMON_STATIC_DIR=/app/static", dockerfile)
+        self.assertTrue((ROOT / "pseudolife_memory/web/static/index.html").is_file())
 
     def test_release_overlay_requires_a_pull_and_an_explicit_version(self):
         overlay = (ROOT / "ops/docker-compose.rust-ghcr.yml").read_text(encoding="utf-8")

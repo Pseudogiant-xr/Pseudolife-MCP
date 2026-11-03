@@ -262,3 +262,24 @@ def test_list_shaped_about_gets_no_graph_node(svc):
                      "use the leak checker", about="evals/leak_check.py",
                      outcome="success", polarity="+")
     assert svc._storage.find_entity(norm_name("evals/leak_check.py")) is not None
+
+
+def test_mcp_lesson_limit_follows_live_config_and_preserves_explicit_width(svc, monkeypatch):
+    from pseudolife_memory import mcp_server
+    from pseudolife_memory.web.config_io import write_config
+    from tests.helpers import invoke_tool
+
+    monkeypatch.setattr(mcp_server, "service", svc)
+    monkeypatch.delenv("PSEUDOLIFE_MCP_CONFIG", raising=False)
+    for i in range(7):
+        svc.lesson_write("deploy engine to host", f"deployment step {i}",
+                         f"deployment checklist step {i}")
+    assert svc.lessons_dump()["count"] == 7
+    assert invoke_tool("memory_lesson_search", {"query": "deploy engine to host"})["count"] == 5
+    for width in (3, 1):
+        result = write_config(svc, {"memory.lessons.top_k": width})
+        assert result["applied"] == ["memory.lessons.top_k"]
+        assert result["restart_required"] == []
+        assert invoke_tool("memory_lesson_search", {"query": "deploy engine to host"})["count"] == width
+        assert invoke_tool("memory_lesson_search", {"query": "deploy engine to host", "top_k": 5})["count"] == 5
+    assert invoke_tool("memory_lesson_search", {"query": "deploy engine to host", "top_k": 7})["count"] == 7

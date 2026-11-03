@@ -16,6 +16,7 @@ pub mod py_json_error;
 pub mod queue_judges;
 pub mod relations;
 pub mod review_judgments;
+pub mod rollback;
 pub mod run;
 pub mod service;
 pub mod stage_calls;

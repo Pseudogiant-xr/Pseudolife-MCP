@@ -17,7 +17,8 @@ EXACT_INPUTS = {
 
 
 def needs_image(paths: list[str]) -> bool:
-    return any(path in EXACT_INPUTS or path.startswith(("rust/daemon/", "rust/shim/", "rust/shared/", "plugin/hooks/"))
+    return any(path in EXACT_INPUTS or path.startswith(("rust/daemon/", "rust/shim/", "rust/shared/", "plugin/hooks/",
+                                                      "pseudolife_memory/web/static/"))
                for path in paths)
 
 
