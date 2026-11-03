@@ -690,15 +690,29 @@ def _base_parser():
     (``git show origin/feat/console-owner-scope:pseudolife_memory/invite_cli.py``,
     ``_parser``), vendored with its help texts dropped: that image already
     answers ``pseudolife-mcp invite 2``, so a current host CLI forwards to it,
-    and its argparse refuses any option it lacks."""
+    and its argparse refuses any option it lacks. Its ``TIERS`` and
+    ``_expires`` are copied too, so a later change to this module's never
+    widens what the vendored image accepts."""
     import argparse
+    import re
+
+    def expires(value: str) -> int:
+        match = re.fullmatch(r"(\d+)\s*([smhd]?)", value.strip().lower())
+        if not match:
+            raise argparse.ArgumentTypeError(f"not a duration: {value!r}")
+        unit = {"": 60, "s": 1, "m": 60, "h": 3600, "d": 86400}[match.group(2)]
+        seconds = int(match.group(1)) * unit
+        if not 60 <= seconds <= 24 * 3600:
+            raise argparse.ArgumentTypeError("--expires must be between 1 minute and 24 hours")
+        return seconds
+
     parser = argparse.ArgumentParser(prog="pseudolife-mcp invite")
     parser.add_argument("name", nargs="?")
-    parser.add_argument("--tier", choices=invite_cli.TIERS)
+    parser.add_argument("--tier", choices=("minimal", "core", "full"))
     board = parser.add_mutually_exclusive_group()
     board.add_argument("--board", dest="board", action="store_const", const=True, default=None)
     board.add_argument("--no-board", dest="board", action="store_const", const=False)
-    parser.add_argument("--expires", type=invite_cli._expires, default=15 * 60)
+    parser.add_argument("--expires", type=expires, default=15 * 60)
     owner = parser.add_mutually_exclusive_group()
     owner.add_argument("--someone-else", dest="owned", action="store_const", const=False,
                        default=None)
@@ -727,10 +741,10 @@ def _base_parser():
 def test_an_image_from_1154_parses_what_the_host_forwards(docker, env, capsys, argv):
     """A current host CLI at image version 2 forwards only what #1154's
     parser takes: an extra option fails every invite with "unrecognized
-    arguments"."""
+    arguments". A #1154 image answers the version check with its one line."""
     env.setattr(invite_cli, "interactive", lambda: True)
     env.setattr(invite_cli, "_ask", lambda question: True)
-    docker.version = "pseudolife-mcp invite 1\npseudolife-mcp invite 2\n"
+    docker.version = "pseudolife-mcp invite 2\n"
     code, _out, err = _run(capsys, *argv)
     assert code == 0, err
     forwarded = docker.calls[-1]
