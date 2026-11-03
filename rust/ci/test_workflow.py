@@ -264,17 +264,19 @@ def check_executable_coverage(jobs):
                      "rust/daemon/harness/test_w2d_recent.py",
                      "rust/daemon/harness/test_config_knobs_golden.py"), PYTEST_FILTERS)
     assert search["timeout-minutes"] == 1
-    # The mail, hook and episode rows replay their goldens in the required
+    # The mail, hook, episode and update rows replay their goldens in the required
     # cli shard; their live arms run beside the other live comparisons.
-    row_commands(commands(parity["CLI differential harness"]["run"]), ("mail", "hook", "episode"), True)
+    row_commands(commands(parity["CLI differential harness"]["run"]), ("mail", "hook", "episode", "update"), True)
     row_commands(commands(parity["CLI differential harness live arms"]["run"]),
-                 ("mail", "hook", "episode"), False)
+                 ("mail", "hook", "episode", "update"), False)
     for golden in (False, True):
         row_commands(commands(parity["CLI lease differential harness"]["run"]), ("lease",), golden)
     require_command(commands(parity["CLI differential harness"]["run"]),
                     ("python", "-m", "pytest"),
                     ("rust/cli_harness/test_cli_harness.py", "rust/cli_harness/test_lease.py",
-                     "rust/cli_harness/test_bank.py", "rust/cli_harness/test_backup.py"), PYTEST_FILTERS)
+                     "rust/cli_harness/test_bank.py", "rust/cli_harness/test_backup.py",
+                     "rust/cli_harness/test_update_transactions.py",
+                     "rust/cli_harness/test_update_wrappers_native.py"), PYTEST_FILTERS)
     backup_proofs = parity["CLI differential harness"]["run"]
     assert '$env:PSEUDOLIFE_RUST_BINARY = $candidate' in backup_proofs
     assert "$env:PSEUDOLIFE_BACKUP_NATIVE_REQUIRED = '1'" in backup_proofs
@@ -1183,6 +1185,10 @@ def test_coverage_contract_allows_additions(monkeypatch, name, old, new):
     ("Daemon schema startup parity", "python rust/daemon/harness/schema_ci.py", "# python rust/daemon/harness/schema_ci.py"),
     ("CLI differential harness", "--row hook", ""),
     ("CLI differential harness", "rust/cli_harness/test_backup.py", ""),
+    ("CLI differential harness", "rust/cli_harness/test_update_transactions.py", ""),
+    ("CLI differential harness", "rust/cli_harness/test_update_wrappers_native.py", ""),
+    ("CLI differential harness", "--row update", ""),
+    ("CLI differential harness live arms", "--row update", ""),
     ("CLI differential harness", "$env:PSEUDOLIFE_RUST_BINARY = $candidate", "$env:PSEUDOLIFE_RUST_BINARY = 'debug-only'"),
     ("CLI differential harness", "$env:PSEUDOLIFE_BACKUP_NATIVE_REQUIRED = '1'", "$env:PSEUDOLIFE_BACKUP_NATIVE_REQUIRED = '0'"),
     ("Graph store differential and recorded oracle", "python rust/daemon/harness/graph_store.py live", "# python rust/daemon/harness/graph_store.py live"),

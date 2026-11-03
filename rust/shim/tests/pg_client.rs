@@ -56,6 +56,45 @@ fn configured_producer_dsns_and_quoting_are_preserved() {
     assert!(!format!("{dsn:?}").contains("one"));
 }
 #[test]
+fn default_dsn_admission_does_not_expand_with_proof_connection_options() {
+    for (key, value) in [
+        ("application_name", "fixture"),
+        ("application_name", ""),
+        ("connect_timeout", "0"),
+        ("connect_timeout", "10"),
+    ] {
+        for dsn in [
+            format!("host=localhost user=fixture {key}='{value}'"),
+            format!("postgresql://fixture@localhost/db?{key}={value}"),
+            format!(
+                "postgresql://fixture@localhost/db?{}={value}",
+                key.replace('_', "%5f")
+            ),
+        ] {
+            assert_eq!(
+                Dsn::parse(&dsn).unwrap_err(),
+                Error::UnsupportedOption(key.into())
+            );
+            let admitted = Dsn::parse_with_connection_options(&dsn).unwrap();
+            if key == "application_name" {
+                assert_eq!(admitted.config().get_application_name(), Some(value));
+            } else {
+                let expected = (value != "0").then(|| Duration::from_secs(value.parse().unwrap()));
+                assert_eq!(admitted.config().get_connect_timeout(), expected.as_ref());
+            }
+        }
+    }
+    // Option names inside ordinary values do not widen or restrict admission.
+    let dsn = Dsn::parse(
+        "host=localhost user=fixture password='application_name=x connect_timeout=5' dbname=fixture",
+    )
+    .unwrap();
+    assert!(
+        dsn.config().get_password() == Some(b"application_name=x connect_timeout=5".as_slice())
+    );
+}
+
+#[test]
 fn unsupported_dsn_controls_are_named_and_never_ignored() {
     for option in [
         "sslcert",
@@ -65,9 +104,7 @@ fn unsupported_dsn_controls_are_named_and_never_ignored() {
         "sslpassword",
         "sslnegotiation",
         "sslsni",
-        "connect_timeout",
         "options",
-        "application_name",
         "hostaddr",
         "service",
         "passfile",
@@ -94,6 +131,15 @@ fn unsupported_dsn_controls_are_named_and_never_ignored() {
         assert_eq!(
             Dsn::parse(&format!("host=localhost sslmode='{mode}'")).unwrap_err(),
             Error::UnsupportedOption("sslmode".into())
+        );
+    }
+    for value in ["fixture-value", "1.5", "18446744073709551616"] {
+        assert_eq!(
+            Dsn::parse_with_connection_options(&format!(
+                "host=localhost connect_timeout='{value}'"
+            ))
+            .unwrap_err(),
+            Error::InvalidOption("connect_timeout")
         );
     }
     for dsn in [

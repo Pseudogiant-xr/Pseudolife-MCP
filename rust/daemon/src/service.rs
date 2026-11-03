@@ -985,6 +985,9 @@ impl crate::background::Duties for Service {
     fn warmup(&self, stop: tokio::sync::watch::Receiver<bool>) -> crate::background::Duty<'_> {
         Box::pin(async {
             Service::warmup(self, stop).await;
+            if let Some(board) = self.board() {
+                board.drain_lease_grants().await;
+            }
             Ok(())
         })
     }

@@ -9240,6 +9240,40 @@
     "git/git.exe": "file:"
    },
    "modes": {}
+  },
+  "proof-missing-dsn": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "eyJvayI6IGZhbHNlLCAiZXJyb3IiOiAiRXhwbGljaXREaXNwb3NhYmxlRGF0YWJhc2VSZXF1aXJlZCIsICJyZWNvdmVyeSI6ICJTZXQgUFNFVURPTElGRV9URVNUX0RBVEFCQVNFX1VSTCB0byBhbiBleHBsaWNpdGx5IGRpc3Bvc2FibGUgZml4dHVyZSBzZXJ2ZXI7IG5vIGNvbmZpZ3VyZWQgYmFuayBvciBiZW5jaCBkZWZhdWx0IGlzIHVzZWQuIn0NCg==",
+   "stderr": "",
+   "window": [
+    1793589266.0502722,
+    1793589266.8734438
+   ],
+   "arm": "python",
+   "identity": "no report",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "proof-saved-state-refused": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "dXNhZ2U6IGNsaS5weSBbLWhdIFstLXRpbWVvdXQgVElNRU9VVF0NCiAgICAgICAgICAgICAgWy0taG9zdCB7Y29kZXgsY2xhdWRlLWNvZGUsY2xhdWRlLWRlc2t0b3AsZ2VuZXJpY31dDQogICAgICAgICAgICAgIFstLWFnZW50LXN0YXRlIEFHRU5UX1NUQVRFXSBbLS1kaXNwb3NhYmxlLXByb29mXQ0KY2xpLnB5OiBlcnJvcjogLS1kaXNwb3NhYmxlLXByb29mIGNhbm5vdCB1c2UgYSBzYXZlZCAtLWFnZW50LXN0YXRlDQo=",
+   "window": [
+    1793589266.877828,
+    1793589267.3906415
+   ],
+   "arm": "python",
+   "identity": "no report",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
   }
  }
 }

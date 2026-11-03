@@ -1639,8 +1639,8 @@ class Mover:
     def repoint(self) -> int:
         url = self.target_url
         self.step(f"re-pointing this machine's clients: pseudolife-mcp connect {url} --yes")
-        result = self.local([sys.executable, "-m", "pseudolife_memory.cli", "connect", url, "--yes", "--json"],
-                            timeout=900)
+        from pseudolife_memory import child_python
+        result = self.local(child_python.cli_argv("connect", url, "--yes", "--json"), timeout=900)
         try:
             reply = json.loads(result.text)
         except ValueError:

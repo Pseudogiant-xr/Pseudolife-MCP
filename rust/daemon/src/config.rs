@@ -89,9 +89,9 @@ pub struct MemoryConfig {
     /// `memory.lessons.enabled` (default on): gates the correction signal a
     /// user-origin supersession records (`service.py:4961`).
     pub lessons_enabled: bool,
+    /// `memory.lessons.top_k` (5): width when a lesson search omits it.
+    pub lessons_top_k: i64,
     /// `memory.lessons.min_confidence` (0.0): `lesson_search`'s score floor.
-    /// (`memory.lessons.top_k` is never read over MCP: the binder always
-    /// passes a width.)
     pub lessons_min_confidence: f64,
     /// `memory.lessons.infer_outcomes` (on) and `infer_outcomes_max_signals`
     /// (3): whether `dream_status` counts sessions awaiting outcome inference.
@@ -461,7 +461,7 @@ pub struct RerankerConfig {
 impl Default for RerankerConfig {
     fn default() -> Self {
         RerankerConfig {
-            model_name: "cross-encoder/ms-marco-MiniLM-L-6-v2".to_string(),
+            model_name: crate::onnx_artifacts::provision::RERANKER_MODEL.to_string(),
             top_n: 20,
             fusion_weight: 0.7,
             skip_margin: 0.0,
@@ -908,6 +908,7 @@ impl Default for MemoryConfig {
             retrieval_log_use_window_seconds: 3600.0,
             retrieval_retention_days: 365.0,
             lessons_enabled: true,
+            lessons_top_k: 5,
             lessons_min_confidence: 0.0,
             lessons_infer_outcomes: true,
             lessons_infer_outcomes_max_signals: 3,
@@ -958,7 +959,7 @@ impl Default for WakeConfig {
             nightly_total: 200,
             fan_out_stagger_seconds: 30,
             active_seconds: 60,
-            authority_per_sender_per_hour: 12,
+            authority_per_sender_per_hour: 60,
         }
     }
 }
@@ -2169,6 +2170,7 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
         }
         if let Some(l) = section(m, "lessons", "memory.")? {
             memory.lessons_enabled = want_bool(l, "enabled", "memory.lessons", true)?;
+            memory.lessons_top_k = want_int(l, "top_k", "memory.lessons", 5)?;
             memory.lessons_min_confidence = want_float(l, "min_confidence", "memory.lessons", 0.0)?;
             memory.lessons_infer_outcomes = want_bool(l, "infer_outcomes", "memory.lessons", true)?;
             memory.lessons_infer_outcomes_max_signals =
@@ -3651,7 +3653,7 @@ mod tests {
         let json = serde_json::to_string(&WakeConfig::default().to_json()).unwrap();
         assert_eq!(
             json,
-            r#"{"per_recipient_per_hour":20,"urgent_per_sender_per_hour":6,"nightly_total":200,"fan_out_stagger_seconds":30,"active_seconds":60,"authority_per_sender_per_hour":12}"#
+            r#"{"per_recipient_per_hour":20,"urgent_per_sender_per_hour":6,"nightly_total":200,"fan_out_stagger_seconds":30,"active_seconds":60,"authority_per_sender_per_hour":60}"#
         );
     }
 

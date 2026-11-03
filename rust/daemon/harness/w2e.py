@@ -1476,7 +1476,7 @@ def supersede(new_text, headers=(), **kw) -> dict:
 # Scenarios whose operations may include ``external`` writes.
 EXTERNAL_WRITES = {"supersede-branches", "reinstate", "consolidation-candidates",
                    "review-list", "review-actions", "review-slots",
-                   "consolidate-branches"}
+                   "consolidate-branches", "dream-rollback-persistence"}
 
 
 def external(statement: str) -> dict:
@@ -2433,6 +2433,20 @@ RECALL_SEED = [
 ]
 
 SCENARIOS.update({
+    "recall-config-defaults": {
+        "config": ("memory:\n  dream:\n    enabled: false\n  recall:\n"
+                   "    default_hops: 1\n    default_top_k: 1\n"),
+        "seed": RECALL_SEED,
+        "ops": [
+            recall("What does the web app run on?", verbose=True),
+            {"op": "http", "method": "GET", "path": "/api/recall?q=web+app"},
+            recall("What does the web app run on?", hops=2, top_k=3, verbose=True),
+            {"op": "http", "method": "GET", "path": "/api/recall?q=web+app&hops=2&top_k=3"},
+            recall("web app", hops=None),
+            recall("web app", top_k=None),
+            {"op": "http", "method": "GET", "path": "/api/recall?q=web+app&hops=&top_k=invalid"},
+        ],
+    },
     "recall": {
         "config": None,
         "seed": RECALL_SEED,
@@ -5804,7 +5818,12 @@ def drain_side(stubs: dict[str, StubExtractor], scn: dict, side: str) -> list[di
 
 # The tables the merge judge writes: settled when none of them changes.
 # The review-queue judges (P3b): their scenarios live in their own module.
+import w2e_dream_rollback  # noqa: E402
 import w2e_queue_judges  # noqa: E402
+
+SCENARIOS.update(w2e_dream_rollback.scenarios(sys.modules[__name__]))
+CLOCK |= w2e_dream_rollback.CLOCK
+MUTANTS += w2e_dream_rollback.MUTANTS
 
 _QUEUE_JUDGES = w2e_queue_judges.scenarios(sys.modules[__name__])
 SCENARIOS.update(_QUEUE_JUDGES)
@@ -6031,6 +6050,8 @@ HOME_OPS = ("snapshot_file", "block_snapshots")
 import w2e_hooks  # noqa: E402
 
 SCENARIOS.update(w2e_hooks.register(sys.modules[__name__]))
+import w2e_conductor  # noqa: E402
+SCENARIOS.update(w2e_conductor.register(sys.modules[__name__]))
 MUTANTS += w2e_hooks.MUTANTS
 HOME_OPS += w2e_hooks.HOME_OPS
 

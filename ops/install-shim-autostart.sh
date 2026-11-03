@@ -46,10 +46,14 @@ PORT=8082
 MODEL="claude-opus-5-5"
 PROMPT_FILE="evals/prompts/sonnet_extractor_v5.md"
 PYTHON_EXE=""
+NATIVE_EXE=""
+NATIVE_UNIT=""
 LOG_FILE="$HOME/.pseudolife-mcp/claude-shim.log"
 
 while [ $# -gt 0 ]; do
     case "$1" in
+        --native)      NATIVE_EXE="$2"; shift 2 ;;
+        --native-unit) NATIVE_UNIT="$2"; shift 2 ;;
         --port)        PORT="$2"; shift 2 ;;
         --model)       MODEL="$2"; shift 2 ;;
         --prompt-file) PROMPT_FILE="$2"; shift 2 ;;
@@ -76,6 +80,18 @@ prompt_path="$repo/$PROMPT_FILE"
 # like ~/.local/bin are not visible to the unit).
 claude_cli="$(command -v claude || true)"
 [ -n "$claude_cli" ] || { echo "claude CLI not found on PATH — install + log in first." >&2; exit 1; }
+
+
+# Native registration is shipped in the executable; no Python is discovered.
+if [ -n "$NATIVE_EXE" ]; then
+    NATIVE_EXE="$(command -v "$NATIVE_EXE")"
+    bridge_ip="$(ip -4 addr show docker0 2>/dev/null | sed -n 's/.*inet \([0-9.]*\).*/\1/p' | head -1)"
+    native_args=(extractor-shim install-autostart claude --repo "$repo" --native-exe "$NATIVE_EXE"
+        --model "$MODEL" --port "$PORT" --host "${bridge_ip:-172.17.0.1}" --log "$LOG_FILE")
+    [ -z "$NATIVE_UNIT" ] || native_args+=(--name "$NATIVE_UNIT")
+    native_args+=(--prompt-file "$prompt_path" --cli "$claude_cli")
+    exec "$NATIVE_EXE" "${native_args[@]}"
+fi
 
 # >>> shim python >>>
 # The unit's interpreter must import pseudolife_memory with its

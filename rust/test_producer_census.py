@@ -330,9 +330,21 @@ def test_snapshot_is_independent_of_source_commit_history(monkeypatch):
     assert census.snapshot() == before
 
 
-def test_module_form_cli_real_tree_unattended_update_is_present():
+def test_module_form_cli_real_tree_unattended_update_is_native():
     text = (census.ROOT / "rust/shim/src/lifecycle.rs").read_text(encoding="utf-8-sig")
     calls = census.module_cli_calls(text.split("#[cfg(test)]")[0], "rust/shim/src/lifecycle.rs")
+    assert not any(call["name"] == "update" for call in calls)
+
+
+def test_module_form_cli_rust_array_preserves_update_arguments():
+    # Keep parser coverage for the legacy module form after lifecycle's
+    # client updater switched to the native launcher.
+    text = '''spawn(&[
+        "-m".into(), "pseudolife_memory.cli".into(), "update".into(),
+        "--clients-only".into(), "--tag".into(), version.into(),
+        "--result-file".into(), result.to_string_lossy().into_owned(),
+    ], &log)'''
+    calls = census.module_cli_calls(text, "rust/shim/src/lifecycle.rs")
     update = next(call for call in calls if call["name"] == "update")
     assert update["shape"]["parameters"]["--clients-only"] == {"literal": True}
     assert "--result-file" in update["shape"]["parameters"]

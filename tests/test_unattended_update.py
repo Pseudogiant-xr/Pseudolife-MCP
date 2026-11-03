@@ -16,9 +16,99 @@ import json
 import os
 import shutil
 import sys
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-
 import pytest
+
+
+@pytest.mark.parametrize("operation", ["notice", "board", "read"])
+@pytest.mark.parametrize("tls", [False, True], ids=["http", "https-private-ca"])
+def test_daemon_credentials_bypass_environment_proxies(monkeypatch, tmp_path, operation, tls):
+    from pseudolife_memory import unattended_update as uu
+    contacted = []
+    authenticated = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *_args):
+            pass
+
+        def do_POST(self):
+            self.rfile.read(int(self.headers.get("Content-Length", "0")))
+            if self.server.is_proxy:
+                contacted.append(True)
+                payload = {"error": "fixture proxy refuses daemon requests"}
+            else:
+                authenticated.append(self.headers.get("Authorization") == "Bearer fixture-bearer")
+                if self.path.endswith("register"):
+                    payload = {"agent_id": "fixture-address", "credential": "fixture-key"}
+                else:
+                    payload = {"agents": [], "idle_omitted": 0, "entries": []}
+            body = json.dumps(payload).encode()
+            self.send_response(403 if self.server.is_proxy else 200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        do_GET = do_POST
+
+    servers = [ThreadingHTTPServer(("127.0.0.1", 0), Handler) for _ in range(2)]
+    if tls:
+        import datetime
+        import ipaddress
+        import ssl
+        from cryptography import x509
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import ec
+        from cryptography.x509.oid import NameOID
+        key = ec.generate_private_key(ec.SECP256R1())
+        subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "fixture daemon")])
+        now = datetime.datetime.now(datetime.timezone.utc)
+        cert = (x509.CertificateBuilder().subject_name(subject).issuer_name(subject)
+                .public_key(key.public_key()).serial_number(x509.random_serial_number())
+                .not_valid_before(now - datetime.timedelta(days=1))
+                .not_valid_after(now + datetime.timedelta(days=1))
+                .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
+                .add_extension(x509.SubjectAlternativeName([x509.IPAddress(ipaddress.ip_address("127.0.0.1"))]), critical=False)
+                .sign(key, hashes.SHA256()))
+        cert_file, key_file = tmp_path / "ca.pem", tmp_path / "key.pem"
+        cert_file.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
+        key_file.write_bytes(key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()))
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
+        context.load_cert_chain(cert_file, key_file)
+        servers[0].socket = context.wrap_socket(servers[0].socket, server_side=True)
+        monkeypatch.setenv("SSL_CERT_FILE", str(cert_file))
+        monkeypatch.delenv("SSL_CERT_DIR", raising=False)
+    threads = []
+    try:
+        for index, server in enumerate(servers):
+            server.is_proxy = bool(index)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            threads.append(thread)
+        proxy = f"http://127.0.0.1:{servers[1].server_port}"
+        for key in ("HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy"):
+            monkeypatch.setenv(key, proxy)
+        monkeypatch.setenv("NO_PROXY", "")
+        monkeypatch.setenv("no_proxy", "")
+        url = f"{'https' if tls else 'http'}://127.0.0.1:{servers[0].server_port}"
+        if operation == "notice":
+            reply = uu.post_json(url + "/api/daemon-notice", "fixture-bearer", {"text": "fixture"})
+            assert reply is not None and "error" not in reply
+        elif operation == "board":
+            assert uu.board_activity(url, "fixture-bearer") == ([], 0, "")
+        else:
+            from pseudolife_memory.update_engine import authenticated_read
+            assert authenticated_read(url, "fixture-bearer")
+        assert not contacted
+        assert authenticated and all(authenticated)
+    finally:
+        for server in servers:
+            server.shutdown()
+            server.server_close()
+        for thread in threads:
+            thread.join(timeout=5)
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -578,7 +668,12 @@ def test_a_daemon_url_rides_into_the_scheduled_command(scheduler, tmp_path, monk
     monkeypatch.setattr(uu.sys, "executable", str(tmp_path / "py"))
     monkeypatch.setenv("PSEUDOLIFE_SHIM_LAUNCHER", str(tmp_path / "no-launcher"))
     monkeypatch.setenv("PSEUDOLIFE_SHIM_RUNTIMES", str(tmp_path / "rt"))
-    assert uu._command("http://127.0.0.1:8765") == [str(tmp_path / "py"), "-m", "pseudolife_memory.cli", "update", "--unattended"]
+    # Written from a directory that is not the package's own, the saved
+    # command leaves the working directory off the child's import path.
+    monkeypatch.chdir(tmp_path)
+    safe = ["-P"] if sys.version_info >= (3, 11) else []
+    assert uu._command("http://127.0.0.1:8765") == [str(tmp_path / "py"), *safe, "-m", "pseudolife_memory.cli",
+                                                    "update", "--unattended"]
     assert uu._command("http://10.0.0.7:8765")[-2:] == ["--daemon-url", "http://10.0.0.7:8765"]
 
 

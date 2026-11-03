@@ -333,9 +333,13 @@ class Identity(Scenario):
 
 class Mail(Scenario):
     name = "mail"
+    # Live recording interleaves two arms; replay runs one. Keep ordinary
+    # mail within a generous window and cross it with paired explicit ages,
+    # so elapsed harness overhead cannot choose the wake decision (W2F-MAIL-PACING).
+    config_yaml = BASE_CONFIG.replace("active_seconds: 1", "active_seconds: 600")
 
     def steps(self):
-        return [
+        steps = [
             reg("register A", "A", label="codex", project="p1"),
             reg("register B", "B", token="alice", label="claude-code", project="p1"),
             reg("register C", "C", token="bob", label="claude-code", project="p2"),
@@ -425,7 +429,29 @@ class Mail(Scenario):
             act("receive ack not bool", "receive", agent="A", body={"ack": "yes"}, write=False),
             act("receive A with ack", "receive", agent="A", body={"ack": True}),
             act("receive A after ack", "receive", agent="A", body={"ack": True}, write=False),
+            age(601),
+            msg("A to inactive B", "A", "B", "after the explicit activity window"),
+            act("B becomes active", "update", token="alice", agent="B", body={"status": "reviewing"}),
+            msg("A to active B again", "A", "B", "after activity resumes"),
+            age(601),
+            msg("B replies to inactive A", "B", "A", "after the reply activity window",
+                token="alice", reply_to=lambda c: c.vals["m1"]),
+            act("A becomes active", "update", agent="A", body={"status": "reviewing"}),
+            msg("B replies to active A again", "B", "A", "after reply activity resumes",
+                token="alice", reply_to=lambda c: c.vals["m1"]),
         ]
+        expected = {
+            "A to inactive B": {"decision": "not_needed", "reason": "no_park"},
+            "A to active B again": {"decision": "hinted", "reason": "active"},
+            "B replies to inactive A": {"decision": "not_needed", "reason": "no_park"},
+            "B replies to active A again": {"decision": "hinted", "reason": "active"},
+        }
+        for step in steps:
+            if step.name in expected:
+                def check(_ctx, response, want=expected[step.name]):
+                    assert response.get("wake") == want, response
+                step.save = check
+        return steps
 
 
 class Wake(Scenario):

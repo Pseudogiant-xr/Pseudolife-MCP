@@ -207,6 +207,8 @@ fn main() {
         println!("{}", pyjson::dumps(&config.dump()));
         std::process::exit(0);
     }
+    onnx_artifacts::validate_reranker_model(&config.memory.reranker.model_name)
+        .unwrap_or_else(|e| fail(1, &e.to_string()));
     let env = config::DaemonEnv::from_env(&env_lookup).unwrap_or_else(|e| fail(1, &e.to_string()));
     let read_only = config.read_only || env.read_only;
     if !read_only && let Err(e) = std::fs::create_dir_all(&data_dir) {
@@ -325,6 +327,13 @@ fn main() {
             auth_configured,
         ));
         read::search_route::LazyReranker::prepare();
+        let board = Arc::new(board::Board::new(
+            service.config.coordination.clone(),
+            service_dsn,
+            service.clone(),
+            store.clone(),
+        ));
+        service.install(&board);
         let background = background::Background::default();
         background.start_background_durability(service.clone(), autosave_every);
         if !read_only {
@@ -338,13 +347,6 @@ fn main() {
         );
         background.start_release_check(service.release_check.clone(), &service.config.updates);
         background.start_heap_trim(trim_every);
-        let board = Arc::new(board::Board::new(
-            service.config.coordination.clone(),
-            service_dsn,
-            service.clone(),
-            store.clone(),
-        ));
-        service.install(&board);
         let app = Arc::new(
             http::App::new(service.clone(), tokens, store, static_dir, board)
                 .with_activity(activity),

@@ -405,12 +405,19 @@ def test_a_daemon_still_running_the_old_name_is_restarted(host, tailnet, monkeyp
     assert not [c for c in host.calls if "write" in c]
 
 
-def test_the_lite_tier_writes_locally_and_names_the_restart(host, tailnet, capsys):
+def test_the_lite_tier_writes_locally_and_names_the_restart(host, tailnet, capsys, monkeypatch, tmp_path):
     host.container = None
     host.answers = ["y"]
+    # Run from a directory that is not the package's own (an older checkout,
+    # say): every local child leaves that directory off its import path.
+    monkeypatch.chdir(tmp_path)
     assert ms.main(["--local"]) == 0
     calls = [c for c in host.calls if ms.MODULE in c]
     assert calls and all(c[0] == sys.executable for c in calls)
+    safe = ["-P"] if sys.version_info >= (3, 11) else []
+    assert all(c[:len(safe) + 3] == [sys.executable, *safe, "-m", ms.MODULE] for c in calls)
+    assert ms._maintainer("local", "show") == [sys.executable, *safe, "-m", "pseudolife_memory.cli",
+                                               "maintainer", "show"]
     assert not host.named("restart") and not host.named("enrol-code")
     out = capsys.readouterr().out
     assert "restart" in out.lower() and "pseudolife-mcp maintainer setup" in out
@@ -599,3 +606,23 @@ def test_write_refuses_to_guess_where_a_plain_daemon_reads_its_config(tmp_path, 
     assert ms.host_main(["write", "localhost", "http://localhost:8765"]) == ms.EXIT_USAGE
     assert "PSEUDOLIFE_MCP_DATA_DIR" in capsys.readouterr().err
     assert not (tmp_path / "data").exists()
+
+
+def test_container_scope_does_not_leak_into_the_next_invocation(host, capsys):
+    host.rp_id, host.origin = DNS, ORIGIN
+    host.keys = [{"prefix": PREFIX, "label": "laptop", "state": "active"}]
+    assert ms.main(["--container", "second-project-daemon", "--check"]) == 0
+    assert capsys.readouterr().out == "maintainer passkeys: in place\n"
+    assert all("second-project-daemon" in call for call in host.calls)
+    host.calls.clear()
+    assert ms.main(["--check"]) == 0
+    assert capsys.readouterr().out == "maintainer passkeys: in place\n"
+    assert all(ms.DAEMON_CONTAINER in call for call in host.calls)
+
+
+def test_scoped_retry_instruction_retains_the_container(host, tailnet, capsys):
+    host.rp_id, host.origin = DNS, ORIGIN
+    host.tty = False
+    assert ms.main(["--container", "second-project-daemon", "--yes"]) == 0
+    assert "pseudolife-mcp maintainer setup --container second-project-daemon" in capsys.readouterr().out
+    assert ms._CONTAINER_SCOPE.get() is None

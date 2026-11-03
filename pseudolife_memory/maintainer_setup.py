@@ -64,7 +64,9 @@ import tempfile
 import time
 from urllib.parse import urlsplit
 
-from pseudolife_memory import expose_cli
+from contextvars import ContextVar
+
+from pseudolife_memory import child_python, expose_cli
 from pseudolife_memory.daemon_exec import CONTAINER as DAEMON_CONTAINER, docker_cmd, operator_cli
 
 EXIT_OK = 0
@@ -162,7 +164,7 @@ def _config_path(*, for_write: bool = False) -> Path:
             and data_dir != embedded_pg.default_lite_data_dir()):
         raise ValueError("cannot tell where this daemon reads its config: set "
                          "PSEUDOLIFE_MCP_DATA_DIR (or PSEUDOLIFE_MCP_CONFIG) as the daemon has "
-                         f"it, then run `{SETUP}` again")
+                         f"it, then run `{_setup_command()}` again")
     return data_dir / "config.yaml"
 
 
@@ -279,53 +281,83 @@ class _Refused(Exception):
         self.code = code
 
 
+_CONTAINER_SCOPE: ContextVar[str | None] = ContextVar("maintainer_setup_container", default=None)
+
+
+def _container() -> str:
+    return _CONTAINER_SCOPE.get() or DAEMON_CONTAINER
+
+
+def _setup_command() -> str:
+    container = _container()
+    return SETUP if container == DAEMON_CONTAINER else f"{SETUP} --container {container}"
+
+
+def _scoped_refusal() -> _Refused:
+    return _Refused(f"cannot read running container {_container()}; use docker ps to find the daemon, "
+                    "then run pseudolife-mcp maintainer setup --container <name>")
+
+
+def _operator_cli(docker: str) -> list[str]:
+    # operator_cli constructs exactly one engine-label inspect with its default
+    # container last. Preserve its engine policy while scoping that inspect too.
+    return operator_cli(docker, runner=lambda command: run([*command[:-1], _container()], timeout=60))
+
+
 def _tier() -> str:
     """``docker`` when the daemon container runs, ``local`` when there is
     none (or no Docker)."""
     docker = docker_cmd()
     if docker == "docker" and not which("docker"):
+        if _CONTAINER_SCOPE.get() is not None:
+            raise _scoped_refusal()
         return "local"
-    proc = run([docker, "inspect", "-f", "{{.State.Running}}", DAEMON_CONTAINER], timeout=60)
+    proc = run([docker, "inspect", "-f", "{{.State.Running}}", _container()], timeout=60)
     if proc.returncode == 0:
         if proc.stdout.strip() != "true":
-            raise _Refused(f"the {DAEMON_CONTAINER} container is not running: start it first")
+            if _CONTAINER_SCOPE.get() is not None:
+                raise _scoped_refusal()
+            raise _Refused(f"the {_container()} container is not running: start it first")
         return "docker"
+    if _CONTAINER_SCOPE.get() is not None:
+        raise _scoped_refusal()
     if "no such" in (proc.stderr + proc.stdout).lower():
         return "local"
     raise _Refused("docker did not answer ("
                    f"{expose_cli._first_line(proc.stderr) or f'exit {proc.returncode}'}), so "
-                   f"whether the daemon is the {DAEMON_CONTAINER} container cannot be told: start "
+                   f"whether the daemon is the {_container()} container cannot be told: start "
                    "Docker (or run this as a user who can use it) and run this again")
 
 
 def _python(tier: str) -> list[str]:
     if tier == "docker":
-        return [docker_cmd(), "exec", DAEMON_CONTAINER, "python"]
+        return [docker_cmd(), "exec", _container(), "python"]
     return [sys.executable]
 
 
 def _maintainer(tier: str, *args: str) -> list[str]:
     if tier == "docker":
         docker = docker_cmd()
-        cli = operator_cli(docker, runner=lambda command: run(command, timeout=60))
-        return [docker, "exec", DAEMON_CONTAINER, *cli, "maintainer", *args]
-    return [*_python(tier), "-m", "pseudolife_memory.cli", "maintainer", *args]
+        cli = _operator_cli(docker)
+        return [docker, "exec", _container(), *cli, "maintainer", *args]
+    return child_python.cli_argv("maintainer", *args)
 
 
 def _host(tier: str, *args: str) -> dict:
-    command = [*_python(tier), "-m", MODULE, *args]
+    command = ([*_python(tier), "-m", MODULE, *args] if tier == "docker"
+               else child_python.module_argv(MODULE, *args))
     if tier == "docker":
         docker = docker_cmd()
-        cli = operator_cli(docker, runner=lambda command: run(command, timeout=60))
+        cli = _operator_cli(docker)
         if cli == ["pseudolife-mcp"]:
-            command = [docker, "exec", DAEMON_CONTAINER, *cli, "maintainer", "setup",
+            command = [docker, "exec", _container(), *cli, "maintainer", "setup",
                        "--host-" + args[0], *args[1:]]
     proc = run(command, timeout=120)
     if proc.returncode != 0:
         detail = (proc.stderr or proc.stdout).strip()
         if MODULE in detail and "No module named" in detail:
             raise _Refused("the daemon predates this command: run `pseudolife-mcp update` "
-                           f"first, then `{SETUP}`")
+                           f"first, then `{_setup_command()}`")
         last = detail.splitlines()[-1] if detail else f"exit {proc.returncode}"
         if args[0] == "state":
             raise _Refused(f"reading the daemon's config failed: {last}")
@@ -459,7 +491,7 @@ def _serve(binary: str, https_port: int, dns: str, port: int) -> None:
     link = re.search(r"https://login\.tailscale\.com/\S+", proc.stdout or "")
     if link:
         reason += (f"; Serve may be off for this tailnet: turn it on at {link.group(0)}, then "
-                   f"run `{SETUP}` again")
+                   f"run `{_setup_command()}` again")
     raise _Refused(f"the HTTPS serve did not take ({reason}); {undone}", EXIT_UNDONE)
 
 
@@ -468,12 +500,12 @@ def _serve_off(binary: str, https_port: int) -> bool:
 
 
 def _restart(tier: str, port: int) -> None:
-    proc = run([docker_cmd(), "restart", DAEMON_CONTAINER], timeout=300)
+    proc = run([docker_cmd(), "restart", _container()], timeout=300)
     if proc.returncode != 0:
         raise _Refused("the daemon restart failed "
                        f"({expose_cli._first_line(proc.stderr) or f'exit {proc.returncode}'}); "
-                       f"the config is written: run `docker restart {DAEMON_CONTAINER}`, then "
-                       f"`{SETUP}` again", EXIT_UNDONE)
+                       f"the config is written: run `docker restart {_container()}`, then "
+                       f"`{_setup_command()}` again", EXIT_UNDONE)
     print("restarted the daemon; waiting for it to answer...", flush=True)
     deadline = time.monotonic() + RESTART_TIMEOUT_S
     while True:
@@ -482,8 +514,8 @@ def _restart(tier: str, port: int) -> None:
             return
         if time.monotonic() >= deadline:
             raise _Refused(f"the daemon did not report healthy within {RESTART_TIMEOUT_S} s "
-                           f"of its restart: check `docker logs {DAEMON_CONTAINER}`, then run "
-                           f"`{SETUP}` again", EXIT_UNDONE)
+                           f"of its restart: check `docker logs {_container()}`, then run "
+                           f"`{_setup_command()}` again", EXIT_UNDONE)
         sleep(HEALTH_POLL_S)
 
 
@@ -516,7 +548,7 @@ def _check_key(tier: str, prefix: str, label: str, *, fresh: bool) -> int:
         state = ("revoked" if proc.returncode == 0 else
                  f"NOT revoked (run `pseudolife-mcp maintainer revoke {prefix}`)")
         print(f"passkey {prefix} {state}. If someone else redeemed the code, check "
-              f"`pseudolife-mcp maintainer list`; to try again, run `{SETUP}`")
+              f"`pseudolife-mcp maintainer list`; to try again, run `{_setup_command()}`")
     else:
         print(f"left pending. Revoke it if it is not yours: pseudolife-mcp maintainer revoke {prefix}")
     return EXIT_REFUSED
@@ -545,7 +577,7 @@ def _enrol(tier: str, origin: str) -> int:
 
     stream(_maintainer(tier, "enrol-code"), on_line)
     if not seen:
-        print(f"maintainer setup: no passkey was enrolled; run `{SETUP}` again for a new code",
+        print(f"maintainer setup: no passkey was enrolled; run `{_setup_command()}` again for a new code",
               file=sys.stderr)
         return EXIT_REFUSED
     return _check_key(tier, seen["prefix"], seen["label"], fresh=True)
@@ -607,7 +639,7 @@ def _setup(args) -> int:
     if configured and _running_name(args.port) not in (None, (rp_id, origin)):
         restart = True
     if restart and tier == "docker":
-        plan.append(f"restart  the daemon container ({DAEMON_CONTAINER}) so it reads them")
+        plan.append(f"restart  the daemon container ({_container()}) so it reads them")
 
     if origin.startswith("http://localhost"):
         print(f"Console name: {origin} (passkeys work in a browser on this machine only)")
@@ -633,14 +665,14 @@ def _setup(args) -> int:
         # Nothing here owns a lite daemon's process. Enrolling before it
         # reads the name would hand out a code the Console cannot redeem.
         print(f"Restart the daemon so it reads the name (stop the `pseudolife-mcp serve` process; "
-              f"your next session starts it again), then run `{SETUP}` again to enrol your "
+              f"your next session starts it again), then run `{_setup_command()}` again to enrol your "
               "passkey.")
         return EXIT_OK if write else EXIT_REFUSED
 
     keys = state.get("keys")
     if keys is None:
         raise _Refused(f"could not read the passkeys ({state.get('keys_error')}); the name is in "
-                       f"place: run `{SETUP}` again once the bank answers")
+                       f"place: run `{_setup_command()}` again once the bank answers")
     active = [k for k in keys if k.get("state") == "active"]
     pending = [k for k in keys if k.get("state") == "pending"]
     if active:
@@ -649,7 +681,7 @@ def _setup(args) -> int:
         return EXIT_OK
     if not interactive():
         print(f"The name is in place ({origin}). Enrolling a passkey needs you at the Console: "
-              f"run `{SETUP}` in a terminal.")
+              f"run `{_setup_command()}` in a terminal.")
         return EXIT_OK
     if pending:
         key = pending[0]
@@ -660,6 +692,13 @@ def _setup(args) -> int:
 
 def _port(value: str) -> int:
     return expose_cli._port(value)
+
+
+def _container_name(value: str) -> str:
+    if (not value or not value[0].isascii() or not value[0].isalnum()
+            or any(not c.isascii() or not (c.isalnum() or c in "_.-") for c in value)):
+        raise argparse.ArgumentTypeError("use docker ps to find the daemon, then pass --container <name>")
+    return value
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -680,6 +719,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--check", action="store_true",
                         help="change nothing: exit 0 when passkeys are set up (a valid name and "
                              "an active key), 1 when not, 2 when that cannot be read")
+    parser.add_argument("--container", type=_container_name,
+                        help="scope Docker operations to this daemon container (default pseudolife-mcp-daemon)")
     return parser
 
 
@@ -688,8 +729,20 @@ def main(argv: list[str] | None = None) -> int:
         args = _parser().parse_args(argv)
     except SystemExit as exc:
         return exc.code if isinstance(exc.code, int) else EXIT_USAGE
+    token = _CONTAINER_SCOPE.set(args.container)
+    try:
+        return _main_scoped(args)
+    finally:
+        _CONTAINER_SCOPE.reset(token)
+
+
+def _main_scoped(args) -> int:
     if args.check:
-        state = passkeys_set_up()
+        try:
+            state = passkeys_set_up()
+        except _Refused as exc:
+            print(f"maintainer setup: {exc}", file=sys.stderr)
+            return EXIT_USAGE
         print({True: "maintainer passkeys: in place", False: "maintainer passkeys: not set up",
                None: "maintainer passkeys: could not read the daemon's state"}[state])
         return {True: 0, False: 1, None: 2}[state]
@@ -699,7 +752,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"maintainer setup: {exc}", file=sys.stderr)
         return exc.code
     except KeyboardInterrupt:
-        print(f"\nmaintainer setup: interrupted. What was done stays done; run `{SETUP}` again "
+        print(f"\nmaintainer setup: interrupted. What was done stays done; run `{_setup_command()}` again "
               "to pick up from there", file=sys.stderr)
         return 130
 
@@ -709,7 +762,13 @@ def passkeys_set_up() -> bool | None:
     ``None`` when that cannot be read (``pseudolife-mcp update`` then says
     nothing)."""
     try:
-        state = _host(_tier(), "state")
+        tier = _tier()
+    except _Refused:
+        if _CONTAINER_SCOPE.get() is not None:
+            raise
+        return None
+    try:
+        state = _host(tier, "state")
     except _Refused:
         return None
     if state.get("problem") is not None:
