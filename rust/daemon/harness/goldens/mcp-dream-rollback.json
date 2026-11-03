@@ -1,0 +1,166 @@
+{
+ "db_state": null,
+ "normalizers": {
+  "db_declared": [
+   [
+    "row",
+    "meta",
+    "dream_ack_secret_v1",
+    "dream tracking init writes a random secret (W3-H)"
+   ],
+   [
+    "row",
+    "meta",
+    "curation_listing_spelling_v2",
+    "the listing-spelling carry-over stamps the clock (W2-E)"
+   ],
+   [
+    "warmup",
+    "retrieval_events",
+    null,
+    "one warmup probe and its sequence increment (W2-D telemetry)"
+   ]
+  ],
+  "db_nondeterministic": [
+   [
+    "relations",
+    "created_at",
+    "clock: wall clock per row (storage/postgres.py:765)"
+   ],
+   [
+    "retrieval_events",
+    "created_at",
+    "clock: retrieval event wall clock per row"
+   ]
+  ],
+  "golden": "golden_scrub in run.py",
+  "health": "normalize_health in run.py"
+ },
+ "responses": [
+  {
+   "headers": {},
+   "json": {
+    "content": [
+     {
+      "text": "{\n  \"error\": \"newer_unjournaled_runs\",\n  \"runs\": [\n    {\n      \"id\": 2,\n      \"status\": \"failed\"\n    }\n  ]\n}",
+      "type": "text"
+     }
+    ],
+    "isError": false,
+    "structuredContent": {
+     "error": "newer_unjournaled_runs",
+     "runs": [
+      {
+       "id": 2,
+       "status": "failed"
+      }
+     ]
+    }
+   },
+   "status": 200
+  },
+  {
+   "headers": {},
+   "json": {
+    "content": [
+     {
+      "text": "{\n  \"error\": \"stale_run_id\",\n  \"latest\": 1\n}",
+      "type": "text"
+     }
+    ],
+    "isError": false,
+    "structuredContent": {
+     "error": "stale_run_id",
+     "latest": 1
+    }
+   },
+   "status": 200
+  },
+  {
+   "headers": {},
+   "json": {
+    "content": [
+     {
+      "text": "{\n  \"error\": \"stale_run_id\",\n  \"latest\": 1\n}",
+      "type": "text"
+     }
+    ],
+    "isError": false,
+    "structuredContent": {
+     "error": "stale_run_id",
+     "latest": 1
+    }
+   },
+   "status": 200
+  },
+  {
+   "headers": {},
+   "json": {
+    "content": [
+     {
+      "text": "{\n  \"run_id\": 1,\n  \"reverted\": 0,\n  \"skipped\": 1,\n  \"partial\": 0,\n  \"details\": [\n    {\n      \"seq\": 1,\n      \"entity\": \"Probe\",\n      \"attribute\": \"value\",\n      \"action\": \"skipped\",\n      \"outcome\": \"skipped:no_reversal\"\n    }\n  ]\n}",
+      "type": "text"
+     }
+    ],
+    "isError": false,
+    "structuredContent": {
+     "details": [
+      {
+       "action": "skipped",
+       "attribute": "value",
+       "entity": "Probe",
+       "outcome": "skipped:no_reversal",
+       "seq": 1
+      }
+     ],
+     "partial": 0,
+     "reverted": 0,
+     "run_id": 1,
+     "skipped": 1
+    }
+   },
+   "status": 200
+  },
+  {
+   "headers": {},
+   "json": {
+    "content": [
+     {
+      "text": "{\n  \"error\": \"no_committed_run\"\n}",
+      "type": "text"
+     }
+    ],
+    "isError": false,
+    "structuredContent": {
+     "error": "no_committed_run"
+    }
+   },
+   "status": 200
+  },
+  {
+   "headers": {},
+   "json": {
+    "audit": [
+     [
+      1,
+      "rolled_back",
+      true
+     ],
+     [
+      2,
+      "rolled_back",
+      false
+     ]
+    ],
+    "cursor": 42,
+    "journal": [
+     [
+      1,
+      "skipped"
+     ]
+    ]
+   },
+   "status": 200
+  }
+ ]
+}

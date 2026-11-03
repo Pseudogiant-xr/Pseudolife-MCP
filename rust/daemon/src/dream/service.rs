@@ -910,13 +910,6 @@ pub fn mcp_tools() -> Vec<(&'static str, crate::mcp::dispatch::ToolFn)> {
     vec![(TOOL, mcp_memory_dream)]
 }
 
-/// The refusal an unregistered tool answers, for the actions not served yet.
-fn unserved() -> ToolError {
-    let stub = crate::mcp::dispatch::not_implemented(TOOL);
-    let message = stub["message"].as_str().unwrap_or_default();
-    ToolError::refused("not_implemented", message.strip_prefix("not_implemented: "))
-}
-
 fn positive(args: &Map<String, Value>, key: &str, default: i64) -> i64 {
     // `limit or default`: the binding refuses anything under 1.
     args.get(key)
@@ -976,14 +969,33 @@ fn mcp_memory_dream<'a>(app: &'a crate::http::App, call: ToolCall<'a>) -> ToolFu
                 .map_err(internal)?
         });
     }
-    if !matches!(action.as_str(), "status" | "pull" | "commit" | "runs") {
+    if action == "rollback" {
+        let run_id = call
+            .args
+            .get("run_id")
+            .filter(|v| !v.is_null())
+            .map(Value::as_i64);
+        let caller = crate::episodes::Caller {
+            header_session: call.ident.header_session.clone(),
+            transport_session: call.ident.transport_session.clone(),
+        };
+        let writer = call.ident.writer.clone();
+        let service = app.service.clone();
+        // Detached: a disconnect must not cancel a half-unwound journal.
         return Box::pin(async move {
-            if action == "rollback" {
-                Err(unserved())
-            } else {
-                Ok(json!({"error": "unknown_action", "actions": ACTIONS}))
-            }
+            let ready = service.ensure_init().await.map_err(internal)?;
+            let r2 = ready.clone();
+            ready
+                .writes
+                .spawn(async move {
+                    super::rollback::rollback(&service, &r2, &caller, &writer, run_id).await
+                })
+                .await
+                .map_err(internal)?
         });
+    }
+    if !matches!(action.as_str(), "status" | "pull" | "commit" | "runs") {
+        return Box::pin(async move { Ok(json!({"error": "unknown_action", "actions": ACTIONS})) });
     }
     if action == "commit" && call.args.get("commit_token").is_none_or(Value::is_null) {
         let legacy = call.args.get("cursor").is_some_and(|c| !c.is_null());

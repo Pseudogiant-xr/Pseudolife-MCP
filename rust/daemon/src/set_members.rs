@@ -222,7 +222,7 @@ pub(crate) async fn set_add(
     // Every outcome, invalid and capped included, may mint the subject.
     ensure_subject_entity(db, &a.entity)
         .await
-        .map_err(internal)?;
+        .map_err(crate::fact_set::internal_cause)?;
     save_cortex(svc, ready).await?;
     let count = ready
         .cortex
