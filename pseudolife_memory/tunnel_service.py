@@ -72,7 +72,7 @@ def render_service(profile: Profile, store: ProfileStore, command: list[str], *,
         raise TunnelError('service profile directory contains invalid characters')
     if 'shim' in command:
         from pseudolife_memory.tunnel_runtime import stable_command
-        command = stable_command() + ['tunnel', 'run', '--profile', profile.name, '--profile-dir', str(store.root)]
+        command = stable_command(saved=True) + ['tunnel', 'run', '--profile', profile.name, '--profile-dir', str(store.root)]
     _stable(command)
     system = platform or host_platform.system().lower()
     if system_service and system != 'linux':
@@ -272,7 +272,7 @@ def install_service(profile: Profile, store: ProfileStore, command: list[str], *
         raise TunnelError('linger opt-in applies only to Linux user services')
     if 'shim' in command:
         from pseudolife_memory.tunnel_runtime import stable_command
-        command = stable_command() + ['tunnel', 'run', '--profile', profile.name, '--profile-dir', str(store.root)]
+        command = stable_command(saved=True) + ['tunnel', 'run', '--profile', profile.name, '--profile-dir', str(store.root)]
     if system == 'linux-system':
         # Root runs every path in this chain at each boot.
         from pseudolife_memory import tunnel_runtime

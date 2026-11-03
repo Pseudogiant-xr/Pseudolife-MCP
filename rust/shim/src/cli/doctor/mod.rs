@@ -1,11 +1,12 @@
-//! `pseudolife-mcp doctor`: read-only runtime diagnostics, and the
-//! canonical `--disposable-proof` refusal. Every input outside the
+//! `pseudolife-mcp doctor`: read-only runtime diagnostics and an explicit
+//! disposable proof through the native daemon. Every input outside the
 //! reproduced domain defers before the first request to the daemon, or,
 //! for an answer only the daemon can give, before the handshake starts.
 mod agent;
 mod clients;
 mod handshake;
 mod probes;
+mod proof;
 mod pyenv;
 mod pyjson;
 
@@ -95,14 +96,54 @@ fn emit(text: &str, code: u8) -> ExitCode {
 pub(super) fn run(values: Vec<OsString>) -> Option<ExitCode> {
     let args = parse(&values)?;
     if args.proof {
-        // A nonempty fixture database runs the Python daemon's ASGI app in
-        // process; saved-state proofs are refused there too. Both defer.
-        if args.agent_state.is_some()
-            || std::env::var_os("PSEUDOLIFE_TEST_DATABASE_URL").is_some_and(|dsn| !dsn.is_empty())
-        {
+        if args.agent_state.is_some() {
+            let message = "usage: cli.py [-h] [--timeout TIMEOUT]\n              [--host {codex,claude-code,claude-desktop,generic}]\n              [--agent-state AGENT_STATE] [--disposable-proof]\ncli.py: error: --disposable-proof cannot use a saved --agent-state\n";
+            let _ = io::stderr().lock().write_all(&super::text_bytes(message));
+            return Some(ExitCode::from(2));
+        }
+        if matches!(
+            std::env::var("PSEUDOLIFE_TEST_DATABASE_URL"),
+            Err(std::env::VarError::NotUnicode(_))
+        ) {
             return None;
         }
-        return Some(emit(REFUSAL, 2));
+        let Some(dsn) = std::env::var("PSEUDOLIFE_TEST_DATABASE_URL")
+            .ok()
+            .filter(|v| !v.is_empty())
+        else {
+            return Some(emit(REFUSAL, 2));
+        };
+        let Some(daemon) = proof::daemon() else {
+            return Some(emit(&(pyjson::dumps(&proof::missing_daemon()) + "\n"), 2));
+        };
+        let Some(models) = proof::models() else {
+            return Some(emit(&(pyjson::dumps(&proof::missing_models()) + "\n"), 2));
+        };
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .ok()?;
+        let report = runtime.block_on(proof::run(&dsn, &daemon, &models, args.timeout));
+        let code = if report["ok"] == true { 0 } else { 1 };
+        let text = if code == 0 {
+            pyjson::dumps(&report)
+        } else {
+            // Python prints proof exceptions without indent. Error reports
+            // contain only scalar values, preserving insertion order and ASCII.
+            format!(
+                "{{{}}}",
+                report
+                    .as_object()
+                    .unwrap()
+                    .iter()
+                    .map(|(key, value)| {
+                        format!("{}: {}", pyjson::dumps(&json!(key)), pyjson::dumps(value))
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        };
+        return Some(emit(&(text + "\n"), code));
     }
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()

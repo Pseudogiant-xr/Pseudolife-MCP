@@ -194,6 +194,7 @@ class _Bell:
     # prompt hook. Mailbox receive, ack, and expiry do not consume the notice.
     outstanding: bool = False
     pending_notice: object = None
+    adapter: object = None
 
 
 class CodexDoorbell:
@@ -245,6 +246,7 @@ class CodexDoorbell:
         from .coordination_identity import default_digest_dir
         digest = getattr(adapter, "digest_path", None)
         bell.pending_notice = PendingNotice(digest.parent if digest else default_digest_dir(), thread_id)
+        bell.adapter = adapter
         bell.outstanding = os.path.lexists(bell.pending_notice.path)
         if not shown and count:
             bell.arrival = adapter.digest_watermark
@@ -267,6 +269,9 @@ class CodexDoorbell:
         if (succeeded and name == "memory_message" and isinstance(arguments, dict)
                 and arguments.get("action") == "receive"):
             bell.covered = max(bell.covered, bell.arrival)
+            clear = getattr(bell.adapter, "clear_deferred_ring", None)
+            if clear is not None:
+                clear()
 
     @staticmethod
     def _note_expiry(adapter, basis):
