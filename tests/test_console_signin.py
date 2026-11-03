@@ -12,6 +12,7 @@ tests/test_console_sessions_pg.py covers the real ones.
 """
 from __future__ import annotations
 
+import dataclasses
 import json
 import time
 
@@ -150,9 +151,14 @@ def test_a_used_session_lives_past_thirty_days_but_never_past_ninety(sessions):
     now = time.time()
     sessions.add(_session(created=now - 60 * 86400, last_used=now - 86400))
     assert _resolve(sessions, now=now) is not None
-    sessions.drop(["s1"])
-    sessions.add(_session(created=now - 91 * 86400, last_used=now - 60))
-    assert _resolve(sessions, now=now) is None
+    # Its own id (a session revoked here stays revoked, so re-adding s1
+    # would prove nothing), and its stored expiry pushed out, so only the
+    # absolute limit can refuse it.
+    sessions.add(dataclasses.replace(
+        _session("past-ninety", created=now - 91 * 86400, last_used=now - 60, sid="s2"),
+        expires_at=now + 86400))
+    assert sessions.lookup(secret_sha256("past-ninety")) is not None
+    assert _resolve(sessions, "past-ninety", now=now) is None
 
 
 def test_a_use_is_noted_and_extends_the_session(sessions):
@@ -168,6 +174,28 @@ def test_a_revoked_session_stops_resolving_at_once(sessions):
     sessions.add(_session())
     sessions.drop(["s1"])
     assert _resolve(sessions) is None
+
+
+def test_a_revocation_that_lands_before_its_sign_in_is_published_stays_revoked(sessions):
+    # redeem_code commits, an operator lists and revokes the new session,
+    # and only then does the redemption publish it to the view.
+    sessions.drop(["s1"])
+    sessions.add(_session())
+    assert _resolve(sessions) is None
+
+
+def test_a_revocation_of_another_session_does_not_refuse_a_sign_in(sessions):
+    sessions.drop(["s2"])
+    sessions.add(_session())
+    assert _resolve(sessions) is not None
+
+
+def test_a_revoked_passkey_sign_in_published_late_leaves_the_key_state_alone(sessions):
+    sessions.drop(["s1"])
+    sessions.add(_session(method="passkey", issuer="credential-1"))
+    assert _resolve(sessions) is None
+    assert "credential-1" not in sessions.active_passkeys
+    assert sessions._keys_added == {}
 
 
 def test_a_dropped_session_stays_dropped_through_an_older_refresh(sessions):

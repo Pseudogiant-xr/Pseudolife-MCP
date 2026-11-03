@@ -103,7 +103,9 @@ def complete_signin(service, body: dict, *, principal_source, publish=None):
     snapshot ``add``) runs before the coordination lock is released, so a
     rebind of the same key, which drops its sessions under that lock,
     cannot run between the commit and the publication and be undone by
-    it."""
+    it. An operator's revoke through ``/api/console/sessions/revoke`` takes
+    no such lock; the snapshot's tombstone keeps that one from being undone
+    by a late publication."""
     import psycopg
 
     from pseudolife_memory import coordination
