@@ -1,4 +1,4 @@
-param([string]$Source, [string]$Root, [ValidateSet('PasswordRollback','LegacyMigration','LegacyJuly','LegacyDetached','DelayedStop','DelayedRemoval','DeleteRetry','DeleteFailure','StopTimeout','RemovalTimeout','ProcessExitRace','ProcessStopFailure','ProcessIdentityChanged','QueryInitialRetry','QueryRollbackRetry','QueryRemovalRetry','QueryFailure','QueryAccessDenied','QueryNamedAbsent','DisabledReinstall','QueryStopFailure','QueryRemovalFailure','ForeignRemoval','ForeignLegacy','ForeignSibling','ForeignUninstallLegacy','ForeignNativeArguments','CustomLauncherRemoval','ForeignEncodedArguments','ForeignNativeBasename','DetachedClaude','DetachedCodex','DetachedCodexCli','LateLauncherChild','ProcessExitWait','ProcessExitTimeout','ProcessQueryFailure','ProcessPidReused','ProcessPinnedExitRace','ProcessHandleIdentityChanged','ProcessHandleFailure','ProcessStartTimeFailure','InitialForeignTask','DeleteReplacedTask','TaskQueryFailure','StopQueryFailure','RemovalQueryFailure','RollbackQueryFailure','TaskAbsent','HistoricalTailBoundaries','LateOldRuntimeRecorded','LateLegacyUnseen','LateLegacyKnown','LateLegacyUnseenNoLauncher','CimSnapshotFailure','CimParentFailure','ReplacementDuringStop','LateCurrentRuntimeRecorded','ReplacementBeforeRegister','TaskAppearedBeforeRegister')][string]$Case)
+param([string]$Source, [string]$Root, [ValidateSet('PasswordRollback','LegacyMigration','LegacyJuly','LegacyDetached','DelayedStop','DelayedRemoval','DeleteRetry','DeleteFailure','StopTimeout','RemovalTimeout','ProcessExitRace','ProcessStopFailure','ProcessIdentityChanged','QueryInitialRetry','QueryRollbackRetry','QueryRemovalRetry','QueryFailure','QueryAccessDenied','QueryNamedAbsent','DisabledReinstall','QueryStopFailure','QueryRemovalFailure','ForeignRemoval','ForeignLegacy','ForeignSibling','ForeignUninstallLegacy','ForeignNativeArguments','CustomLauncherRemoval','ForeignEncodedArguments','ForeignNativeBasename','DetachedClaude','DetachedCodex','DetachedCodexCli','LateLauncherChild','ProcessExitWait','ProcessExitTimeout','ProcessQueryFailure','ProcessPidReused','ProcessPinnedExitRace','ProcessHandleIdentityChanged','ProcessHandleFailure','ProcessStartTimeFailure','InitialForeignTask','DeleteReplacedTask','TaskQueryFailure','StopQueryFailure','RemovalQueryFailure','RollbackQueryFailure','TaskAbsent','HistoricalTailBoundaries','LateOldRuntimeRecorded','LateLegacyUnseen','LateLegacyKnown','LateLegacyUnseenNoLauncher','CimSnapshotFailure','CimParentFailure','ReplacementDuringStop','LateCurrentRuntimeRecorded','ReplacementBeforeRegister','TaskAppearedBeforeRegister','InstallUnverifiedPreflight','InstallUnverifiedLate','TaskRemovedBeforeRegister')][string]$Case)
 $ErrorActionPreference = 'Stop'
 # Every scheduler/process operation is mocked; these cases need no credentials,
 # real registrations, listeners or process termination.
@@ -34,6 +34,8 @@ $global:r6disposed = 0
 $global:r6handlePinned = $false
 $global:r6stopInvoked = $false
 $global:r6foreignInjected = $false
+$global:r6originalRestarted = $false
+$global:r6unverifiedProcess = $null
 function New-FixtureProcess($identity) {
     $process = [PSCustomObject]@{ StartTime=$identity.CreationDate; HasExited=$false; FixtureId=$identity.ProcessId }
     $process | Add-Member ScriptMethod get_Handle {
@@ -309,6 +311,7 @@ if ($Case -like 'Process*') {
         if (($global:r6stoppedPids -join ',') -ne '4242') { throw 'stop did not target precisely the captured process' }
         if ($global:r6disposed -ne 1) { throw 'captured process handle was not disposed' }
     }
+    if ($Case -in @('ProcessHandleFailure','ProcessStartTimeFailure','ProcessStopFailure') -and ($caught -notlike '*process 4242*' -or $caught -notlike '*Get-Process -Id 4242*' -or $caught -notlike '*retry the autostart command*')) { throw "process failure lost its PID and fixing action: $caught" }
     Write-Output "$Case passed without real process operations"
     return
 }
@@ -445,7 +448,7 @@ exit `$process.ExitCode
     }
     $global:r6listening = $true
     $expectedFailure = 'original fixture registration failure'
-} elseif ($Case -in @('DelayedStop','StopTimeout','QueryInitialRetry','QueryFailure','QueryAccessDenied','DisabledReinstall','QueryStopFailure','ReplacementDuringStop','ReplacementBeforeRegister')) {
+} elseif ($Case -in @('DelayedStop','StopTimeout','QueryInitialRetry','QueryFailure','QueryAccessDenied','DisabledReinstall','QueryStopFailure','ReplacementDuringStop','ReplacementBeforeRegister','InstallUnverifiedPreflight','InstallUnverifiedLate','TaskRemovedBeforeRegister')) {
     $arguments = 'extractor-shim claude --env-file "' + $settings + '"'
     $global:r6fixtureTask = [PSCustomObject]@{ TaskName=$taskName; State='Running'; Principal=[PSCustomObject]@{LogonType='S4U'}; Actions=@([PSCustomObject]@{Execute=$writer;Arguments=$arguments}) }
     $global:r6oldProcess = [PSCustomObject]@{ ProcessId=4242; ParentProcessId=1; CreationDate=[datetime]'2026-01-01'; ExecutablePath=$writer; CommandLine=($writer + ' ' + $arguments) }
@@ -457,6 +460,11 @@ exit `$process.ExitCode
     if ($Case -in @('QueryFailure','QueryAccessDenied')) { $expectedFailure = 'fixture task query failed' }
 } else {
     $expectedFailure = 'original fixture startup failure'
+}
+if ($Case -in @('InstallUnverifiedPreflight','InstallUnverifiedLate')) {
+    # The unknown candidate uses the same provider/settings, but does not own
+    # the listener. Only the original task's known process owns that port.
+    $global:r6unverifiedProcess = [PSCustomObject]@{ProcessId=4545;ParentProcessId=1;CreationDate=[datetime]'2026-01-01';ExecutablePath='unknown-runtime.exe';CommandLine=('unknown-runtime.exe ' + $arguments)}
 }
 function Get-ScheduledTask {
     [CmdletBinding()]
@@ -500,8 +508,10 @@ function Get-CimInstance {
     }
     if ($global:r6oldProcess) { $global:r6oldProcess }
     if ($global:r6newProcess) { $global:r6newProcess }
+    if ($global:r6unverifiedProcess -and ($Case -eq 'InstallUnverifiedPreflight' -or $global:r6stopInvoked)) { $global:r6unverifiedProcess }
 }
 function Get-NetTCPConnection {
+    if ($Case -eq 'TaskRemovedBeforeRegister' -and $global:r6stopInvoked) { $global:r6fixtureTask=$null; $global:r6foreignInjected=$true }
     if ($Case -in @('ReplacementBeforeRegister','TaskAppearedBeforeRegister') -and $global:r6stopInvoked -and -not $global:r6foreignInjected) {
         $global:r6foreignInjected=$true
         $global:r6fixtureTask=[PSCustomObject]@{TaskName='fixture-native';State='Ready';Actions=@([PSCustomObject]@{Execute='foreign.exe';Arguments='--unrelated'});Principal=[PSCustomObject]@{LogonType='S4U'}}
@@ -553,7 +563,7 @@ function Unregister-ScheduledTask {
 function Register-ScheduledTask {
     param($TaskName,$Action,$Principal,$Trigger,$Settings,$Description,$Xml,[switch]$Force)
     if ($Xml) {
-        if ($Case -in @('ReplacementDuringStop','ReplacementBeforeRegister','TaskAppearedBeforeRegister')) { $global:r6xmlRestored=$true; $global:r6fixtureTask=$null; return }
+        if ($Case -in @('ReplacementDuringStop','ReplacementBeforeRegister','TaskAppearedBeforeRegister','TaskRemovedBeforeRegister')) { $global:r6xmlRestored=$true; $global:r6fixtureTask=$null; return }
         throw 'password credentials required'
     }
     if ($Case -in @('LegacyMigration','LegacyJuly','LegacyDetached')) { throw $expectedFailure }
@@ -565,6 +575,10 @@ function Register-ScheduledTask {
 function Start-ScheduledTask {
     param($TaskName)
     if ($Case -eq 'RollbackQueryFailure') { $global:r6rollbackStarted=$true }
+    if ($Case -in @('InstallUnverifiedLate','InstallUnverifiedPreflight','TaskRemovedBeforeRegister') -and -not $global:r6registered) {
+        if (-not $global:r6fixtureTask) { throw 'attempted to restart an absent original' }
+        $global:r6originalRestarted=$true; $global:r6fixtureTask.State='Running'; $global:r6listening=$true; return
+    }
     if ($TaskName -eq 'Pseudolife Sonnet Shim') { $global:r6restartedLegacy=$true; return }
     if ($Case -in @('DelayedStop','QueryInitialRetry')) {
         $global:r6newProcess = [PSCustomObject]@{ ProcessId=4343; ParentProcessId=1; CreationDate=[datetime]'2026-01-02'; ExecutablePath=$writer; CommandLine=($writer + ' extractor-shim claude --env-file "' + $global:r6settings + '"') }
@@ -585,6 +599,18 @@ $config = Join-Path $directory 'registration.json'
 if ($Case -in @('ReplacementBeforeRegister','TaskAppearedBeforeRegister')) { $expectedFailure='task fixture-native registration changed; inspect its action before retrying; refusing to overwrite it' }
 $caught = ''
 try { & $Source -ConfigPath $config } catch { $caught = $_.Exception.Message }
+if ($Case -in @('InstallUnverifiedPreflight','InstallUnverifiedLate','TaskRemovedBeforeRegister')) {
+    if ($global:r6registered -or $global:r6xmlRestored -or $global:r6deleteAttempts -or [IO.File]::ReadAllText($settings) -ne 'before') { throw "failed install mutated the original registration or settings: $caught" }
+    if ($Case -eq 'TaskRemovedBeforeRegister') {
+        if (-not $global:r6foreignInjected -or $global:r6fixtureTask -or $global:r6originalRestarted -or $caught -notlike '*registration changed*') { throw "concurrently removed task was resurrected: $caught" }
+    } else {
+        if ($caught -notlike '*unverified runtime (pid 4545*' -or $caught -notlike '*retry the autostart command*' -or -not $global:r6fixtureTask -or $global:r6fixtureTask.State -ne 'Running' -or -not $global:r6listening -or 4545 -in $global:r6stoppedPids) { throw "unverified runtime refusal stopped the original or lost its cause: $caught" }
+        if ($Case -eq 'InstallUnverifiedPreflight' -and ($global:r6stopInvoked -or $global:r6stoppedPids.Count -or $global:r6originalRestarted)) { throw 'preflight refusal mutated the working original' }
+        if ($Case -eq 'InstallUnverifiedLate' -and (-not $global:r6originalRestarted -or ($global:r6stoppedPids -join ',') -ne '4242')) { throw 'late refusal did not restart the unchanged original' }
+    }
+    Write-Output "$Case passed without real scheduler operations"
+    return
+}
 if ($Case -eq 'CustomLauncherRemoval') {
     if ($caught -or $global:r6fixtureTask -or $global:r6deleteAttempts -ne 1 -or ($global:r6stoppedPids -join ',') -ne '4242') { throw "custom native launcher was not removed: $caught" }
     Write-Output "$Case passed without real scheduler operations"

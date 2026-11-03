@@ -159,7 +159,7 @@ function Stop-CapturedProcess($old) {
         # Only a confirmed exit on the pinned process makes a race benign;
         # an unreadable handle or a permission failure still propagates.
         if ($process) { try { $exited = $process.get_HasExited() } catch { } }
-        if (-not $exited) { throw $failure }
+        if (-not $exited) { throw "could not stop process $($old.ProcessId): $($failure.Exception.Message); inspect Get-Process -Id $($old.ProcessId), restore permission to inspect and terminate that process, then retry the autostart command" }
     } finally {
         if ($process) { $process.Dispose() }
     }
@@ -298,6 +298,21 @@ function Remove-OwnedTask([string]$taskName, [string]$expectedOwnership, [switch
         Start-Sleep -Milliseconds 200
     }
 }
+function Restart-UnchangedTask([string]$taskName, $ownership, [bool]$wasActive) {
+    $current = Get-TaskRegistration $taskName
+    if (-not $current) { return }
+    if (-not $ownership -or (Get-TaskOwnership $current) -ne $ownership) {
+        throw "task $taskName registration changed; inspect its action before retrying; refusing to restart it"
+    }
+    if (-not $wasActive) { return }
+    Wait-TaskStopped $taskName $ownership
+    $current = Get-TaskRegistration $taskName
+    if (-not $current) { return }
+    if ((Get-TaskOwnership $current) -ne $ownership) {
+        throw "task $taskName registration changed; inspect its action before retrying; refusing to restart it"
+    }
+    Start-ScheduledTask -TaskName $taskName -ErrorAction Stop
+}
 if ($c.Remove) {
     $script:removedRegistration = $false
     $names = @($name)
@@ -320,11 +335,13 @@ if ($c.ReplaceSibling) {
         if ($sibling -ne $name) { Assert-ShimRegistration (Get-TaskRegistration $sibling) }
     }
 }
-$legacyProcesses = @(Get-OwnedTaskProcesses $legacy)
+# Refuse ambiguous metadata-free runtimes before changing settings or stopping
+# either original task; the settled snapshot repeats this check for late children.
+$legacyProcesses = @(Get-OwnedTaskProcesses $legacy -RequireSettled)
 $legacyWasActive = $legacy -and ($legacy.State -eq 'Running' -or $legacyProcesses.Count -gt 0)
 # Only the selected registration can establish ownership. A matching basename
 # and port from another checkout is a foreign listener, never a replacement.
-$registeredProcesses = @(Get-OwnedTaskProcesses $registered)
+$registeredProcesses = @(Get-OwnedTaskProcesses $registered -RequireSettled)
 $stale = $registeredProcesses + $legacyProcesses
 $listeners = @(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue)
 foreach ($listener in $listeners) {
@@ -373,6 +390,8 @@ if ($configExisted) { $configBefore = [IO.File]::ReadAllBytes($c.EnvFile) }
 $previousXml = if ($registered) { Export-ScheduledTask -TaskName $name } else { $null }
 $wasActive = $registered -and ($registered.State -eq 'Running' -or $registeredProcesses.Count -gt 0)
 $rollbackOwnership = if ($registered) { Get-TaskOwnership $registered } else { $null }
+$originalOwnership = $rollbackOwnership
+$replacementRegistered = $false
 $mutated = $false
 $unchanged = $false
 try {
@@ -405,6 +424,7 @@ try {
             throw "task $name registration changed; inspect its action before retrying; refusing to overwrite it"
         }
         $installed = Register-ScheduledTask -TaskName $name -Action $action -Principal $principal -Trigger $trigger -Settings $settings -Description "Native $kind extractor CLI shim" -Force
+        $replacementRegistered = $true
         $rollbackOwnership = Get-TaskOwnership $installed
         if (-not (Get-TaskRegistration $name)) { throw "task was not registered: $name" }
         Start-ScheduledTask -TaskName $name
@@ -418,7 +438,7 @@ try {
     $failure = $_
     $rollbackErrors = @()
     $rollbackRemoved = $false
-    if ($mutated) {
+    if ($replacementRegistered) {
         try { Remove-OwnedTask $name $rollbackOwnership -RequireExpectedOwnership; $rollbackRemoved = $true }
         catch { $rollbackErrors += "removing replacement task: $($_.Exception.Message)" }
     }
@@ -426,7 +446,7 @@ try {
         if ($configExisted) { [IO.File]::WriteAllBytes($c.EnvFile, [byte[]]$configBefore) }
         elseif (Test-Path -LiteralPath $c.EnvFile) { Remove-Item -LiteralPath $c.EnvFile }
     } catch { $rollbackErrors += "restoring settings: $($_.Exception.Message)" }
-    if ($mutated -and $previousXml -and $rollbackRemoved) {
+    if ($replacementRegistered -and $previousXml -and $rollbackRemoved) {
         try {
             $remainingTask = Get-TaskRegistration $name
             if ($remainingTask -and (-not $rollbackOwnership -or (Get-TaskOwnership $remainingTask) -ne $rollbackOwnership)) {
@@ -436,8 +456,14 @@ try {
             if ($wasActive) { Start-ScheduledTask -TaskName $name }
         } catch { $rollbackErrors += "restoring previous task: $($_.Exception.Message)" }
     }
+    if ($mutated -and -not $replacementRegistered) {
+        # Stopping the original is not replacing its registration. Restart only
+        # that unchanged task; a concurrent deletion must remain a deletion.
+        try { Restart-UnchangedTask $name $originalOwnership $wasActive }
+        catch { $rollbackErrors += "restarting previous task: $($_.Exception.Message)" }
+    }
     if ($mutated -and $legacyWasActive) {
-        try { Start-ScheduledTask -TaskName $legacy.TaskName }
+        try { Restart-UnchangedTask $legacy.TaskName (Get-TaskOwnership $legacy) $true }
         catch { $rollbackErrors += "restarting legacy task: $($_.Exception.Message)" }
     }
     if ($rollbackErrors.Count) {

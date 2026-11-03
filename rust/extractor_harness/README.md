@@ -92,6 +92,9 @@ to inspect before retrying; it does not infer ownership from arguments alone.
 Captured processes are stopped through pinned handles, and task actions are
 checked again before each removal attempt. Rollback preserves a concurrently
 replaced task and reports the incomplete recovery instead of overwriting it.
+Installation checks ambiguous runtimes before stopping the original task. If a
+late runtime forces refusal after that stop, rollback restarts the unchanged
+original; a concurrently removed registration stays absent.
 
 Legacy Windows migration recognizes each historical installer's own argument
 template: Sonnet's prompt flag, Claude's model and prompt flags, and Codex's
@@ -99,6 +102,8 @@ model and health flags. The BEL-corrupted `evals/anthropic_shim.py` task emitted
 by commit `2f0edc4ce` is deliberately refused: that invalid path could not start
 the shim and was corrected in `ccb6f9a07`. Inspect and remove that broken task
 manually before retrying installation; it grants no process-cleanup ownership.
+This BEL-path case documents an existing refusal and is a negative control, not
+a regression that failed before this hardening change.
 
 ## Stub-only verification
 
