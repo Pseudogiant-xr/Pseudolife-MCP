@@ -2433,6 +2433,20 @@ RECALL_SEED = [
 ]
 
 SCENARIOS.update({
+    "recall-config-defaults": {
+        "config": ("memory:\n  dream:\n    enabled: false\n  recall:\n"
+                   "    default_hops: 1\n    default_top_k: 1\n"),
+        "seed": RECALL_SEED,
+        "ops": [
+            recall("What does the web app run on?", verbose=True),
+            {"op": "http", "method": "GET", "path": "/api/recall?q=web+app"},
+            recall("What does the web app run on?", hops=2, top_k=3, verbose=True),
+            {"op": "http", "method": "GET", "path": "/api/recall?q=web+app&hops=2&top_k=3"},
+            recall("web app", hops=None),
+            recall("web app", top_k=None),
+            {"op": "http", "method": "GET", "path": "/api/recall?q=web+app&hops=&top_k=invalid"},
+        ],
+    },
     "recall": {
         "config": None,
         "seed": RECALL_SEED,
@@ -6031,6 +6045,8 @@ HOME_OPS = ("snapshot_file", "block_snapshots")
 import w2e_hooks  # noqa: E402
 
 SCENARIOS.update(w2e_hooks.register(sys.modules[__name__]))
+import w2e_conductor  # noqa: E402
+SCENARIOS.update(w2e_conductor.register(sys.modules[__name__]))
 MUTANTS += w2e_hooks.MUTANTS
 HOME_OPS += w2e_hooks.HOME_OPS
 

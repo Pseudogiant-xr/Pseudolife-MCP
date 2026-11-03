@@ -193,6 +193,30 @@ def test_w2e_receives_the_provisioned_reranker_after_environment_scrubbing(tmp_p
     assert env["PSEUDOLIFE_DAEMON_RERANK_DIR"] == root
 
 
+def test_full_w2e_selection_includes_conductor_reminders_and_goldens(tmp_path, monkeypatch):
+    import importlib
+    import sys
+
+    monkeypatch.syspath_prepend(str(evidence.HARNESS))
+    harness = importlib.import_module("w2e")
+    expected = {"hook-conductor-reminder", "hook-conductor-disabled", "hook-conductor-denied"}
+    selected = []
+
+    def scenario(name, *args, **kwargs):
+        selected.append(name)
+        return {"scenario": name, "steps": [{"diffs": []}], "stats": {}}
+
+    monkeypatch.setattr(harness, "run_scenario", scenario)
+    monkeypatch.setattr(harness, "run_root", lambda: tmp_path)
+    # Full body evidence passes no --only filter; exercise that actual default.
+    monkeypatch.setattr(sys, "argv", ["w2e", "live", "--rust-bin", str(tmp_path / "daemon")])
+    assert harness.main() == 0
+    assert expected <= set(selected)
+    for name in expected:
+        golden = json.loads((evidence.HARNESS / "goldens/w2e" / f"{name}.json").read_text())
+        assert golden["scenario"] == name
+
+
 def test_partial_report_names_the_scenarios_that_did_not_run():
     report = {"complete": False, "planned_scenarios": ["first", "second"],
               "scenarios": [{"scenario": "first", "steps": [{"diffs": []}]}]}
