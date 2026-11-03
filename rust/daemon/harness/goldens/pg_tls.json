@@ -1,0 +1,552 @@
+[
+  {
+    "name": "both/default/None/client=False",
+    "accepted": true,
+    "tls": true
+  },
+  {
+    "name": "both/default/ca.pem/client=False",
+    "accepted": true,
+    "tls": true
+  },
+  {
+    "name": "both/default/other-ca.pem/client=False",
+    "accepted": true,
+    "tls": false
+  },
+  {
+    "name": "both/default/missing.pem/client=False",
+    "accepted": true,
+    "tls": true
+  },
+  {
+    "name": "both/default/invalid.pem/client=False",
+    "accepted": true,
+    "tls": false
+  },
+  {
+    "name": "both/disable/None/client=False",
+    "accepted": true,
+    "tls": false
+  },
+  {
+    "name": "both/disable/ca.pem/client=False",
+    "accepted": true,
+    "tls": false
+  },
+  {
+    "name": "both/disable/other-ca.pem/client=False",
+    "accepted": true,
+    "tls": false
+  },
+  {
+    "name": "both/disable/missing.pem/client=False",
+    "accepted": true,
+    "tls": false
+  },
+  {
+    "name": "both/disable/invalid.pem/client=False",
+    "accepted": true,
+    "tls": false
+  },
+  {
+    "name": "both/allow/None/client=False",
+    "accepted": true,
+    "tls": false
+  },
+  {
+    "name": "both/allow/ca.pem/client=False",
+    "accepted": true,
+    "tls": false
+  },
+  {
+    "name": "both/allow/other-ca.pem/client=False",
+    "accepted": true,
+    "tls": false
+  },
+  {
+    "name": "both/allow/missing.pem/client=False",
+    "accepted": true,
+    "tls": false
+  },
+  {
+    "name": "both/allow/invalid.pem/client=False",
+    "accepted": true,
+    "tls": false
+  },
+  {
+    "name": "both/prefer/None/client=False",
+    "accepted": true,
+    "tls": true
+  },
+  {
+    "name": "both/prefer/ca.pem/client=False",
+    "accepted": true,
+    "tls": true
+  },
+  {
+    "name": "both/prefer/other-ca.pem/client=False",
+    "accepted": true,
+    "tls": false
+  },
+  {
+    "name": "both/prefer/missing.pem/client=False",
+    "accepted": true,
+    "tls": true
+  },
+  {
+    "name": "both/prefer/invalid.pem/client=False",
+    "accepted": true,
+    "tls": false
+  },
+  {
+    "name": "both/require/None/client=False",
+    "accepted": true,
+    "tls": true
+  },
+  {
+    "name": "both/require/ca.pem/client=False",
+    "accepted": true,
+    "tls": true
+  },
+  {
+    "name": "both/require/other-ca.pem/client=False",
+    "accepted": false,
+    "tls": null
+  },
+  {
+    "name": "both/require/missing.pem/client=False",
+    "accepted": true,
+    "tls": true
+  },
+  {
+    "name": "both/require/invalid.pem/client=False",
+    "accepted": false,
+    "tls": null
+  },
+  {
+    "name": "both/verify-ca/None/client=False",
+    "accepted": false,
+    "tls": null
+  },
+  {
+    "name": "both/verify-ca/ca.pem/client=False",
+    "accepted": true,
+    "tls": true
+  },
+  {
+    "name": "both/verify-ca/other-ca.pem/client=False",
+    "accepted": false,
+    "tls": null
+  },
+  {
+    "name": "both/verify-ca/missing.pem/client=False",
+    "accepted": false,
+    "tls": null
+  },
+  {
+    "name": "both/verify-ca/invalid.pem/client=False",
+    "accepted": false,
+    "tls": null
+  },
+  {
+    "name": "both/verify-full/None/client=False",
+    "accepted": false,
+    "tls": null
+  },
+  {
+    "name": "both/verify-full/ca.pem/client=False",
+    "accepted": true,
+    "tls": true
+  },
+  {
+    "name": "both/verify-full/other-ca.pem/client=False",
+    "accepted": false,
+    "tls": null
+  },
+  {
+    "name": "both/verify-full/missing.pem/client=False",
+    "accepted": false,
+    "tls": null
+  },
+  {
+    "name": "both/verify-full/invalid.pem/client=False",
+    "accepted": false,
+    "tls": null
+  },
+  {
+    "name": "system/implicit-verify-full",
+    "accepted": true,
+    "tls": true
+  },
+  {
+    "name": "unused-crl/prefer/no-file-root",
+    "accepted": true,
+    "tls": true
+  },
+  {
+    "name": "unused-crl/require/no-file-root",
+    "accepted": true,
+    "tls": true
+  },
+  {
+    "name": "unused-crl/system-root",
+    "accepted": true,
+    "tls": true
+  },
+  {
+    "name": "environment-default/PGSSLMINPROTOCOLVERSION",
+    "accepted": true,
+    "tls": true
+  },
+  {
+    "name": "environment-default/PGKRBSRVNAME",
+    "accepted": true,
+    "tls": true
+  },
+  {
+    "name": "environment-default/PGGSSDELEGATION",
+    "accepted": true,
+    "tls": true
+  },
+  {
+    "name": "environment-default/PGREQUIRESSL",
+    "accepted": true,
+    "tls": true
+  },
+  {
+    "name": "hostaddr/default",
+    "accepted": true,
+    "tls": true
+  },
+  {
+    "name": "hostaddr/disable",
+    "accepted": true,
+    "tls": false
+  },
+  {
+    "name": "hostaddr/allow",
+    "accepted": true,
+    "tls": false
+  },
+  {
+    "name": "hostaddr/prefer",
+    "accepted": true,
+    "tls": true
+  },
+  {
+    "name": "hostaddr/require",
+    "accepted": true,
+    "tls": true
+  },
+  {
+    "name": "hostaddr/verify-ca",
+    "accepted": true,
+    "tls": true
+  },
+  {
+    "name": "hostaddr/verify-full",
+    "accepted": false,
+    "tls": null
+  },
+  {
+    "name": "channel-binding/env=require/dsn=None",
+    "accepted": false,
+    "tls": null
+  },
+  {
+    "name": "channel-binding/env=disable/dsn=None",
+    "accepted": true,
+    "tls": true
+  },
+  {
+    "name": "channel-binding/env=require/dsn=disable",
+    "accepted": true,
+    "tls": true
+  },
+  {
+    "name": "channel-binding/env=disable/dsn=require",
+    "accepted": false,
+    "tls": null
+  },
+  {
+    "name": "plain/default/None/client=False",
+    "accepted": true,
+    "tls": false
+  },
+  {
+    "name": "plain/default/ca.pem/client=False",
+    "accepted": true,
+    "tls": false
+  },
+  {
+    "name": "plain/default/other-ca.pem/client=False",
+    "accepted": true,
+    "tls": false
+  },
+  {
+    "name": "plain/default/missing.pem/client=False",
+    "accepted": true,
+    "tls": false
+  },
+  {
+    "name": "plain/default/invalid.pem/client=False",
+    "accepted": true,
+    "tls": false
+  },
+  {
+    "name": "plain/disable/None/client=False",
+    "accepted": true,
+    "tls": false
+  },
+  {
+    "name": "plain/disable/ca.pem/client=False",
+    "accepted": true,
+    "tls": false
+  },
+  {
+    "name": "plain/disable/other-ca.pem/client=False",
+    "accepted": true,
+    "tls": false
+  },
+  {
+    "name": "plain/disable/missing.pem/client=False",
+    "accepted": true,
+    "tls": false
+  },
+  {
+    "name": "plain/disable/invalid.pem/client=False",
+    "accepted": true,
+    "tls": false
+  },
+  {
+    "name": "plain/allow/None/client=False",
+    "accepted": true,
+    "tls": false
+  },
+  {
+    "name": "plain/allow/ca.pem/client=False",
+    "accepted": true,
+    "tls": false
+  },
+  {
+    "name": "plain/allow/other-ca.pem/client=False",
+    "accepted": true,
+    "tls": false
+  },
+  {
+    "name": "plain/allow/missing.pem/client=False",
+    "accepted": true,
+    "tls": false
+  },
+  {
+    "name": "plain/allow/invalid.pem/client=False",
+    "accepted": true,
+    "tls": false
+  },
+  {
+    "name": "plain/prefer/None/client=False",
+    "accepted": true,
+    "tls": false
+  },
+  {
+    "name": "plain/prefer/ca.pem/client=False",
+    "accepted": true,
+    "tls": false
+  },
+  {
+    "name": "plain/prefer/other-ca.pem/client=False",
+    "accepted": true,
+    "tls": false
+  },
+  {
+    "name": "plain/prefer/missing.pem/client=False",
+    "accepted": true,
+    "tls": false
+  },
+  {
+    "name": "plain/prefer/invalid.pem/client=False",
+    "accepted": true,
+    "tls": false
+  },
+  {
+    "name": "plain/require/None/client=False",
+    "accepted": false,
+    "tls": null
+  },
+  {
+    "name": "plain/require/ca.pem/client=False",
+    "accepted": false,
+    "tls": null
+  },
+  {
+    "name": "plain/require/other-ca.pem/client=False",
+    "accepted": false,
+    "tls": null
+  },
+  {
+    "name": "plain/require/missing.pem/client=False",
+    "accepted": false,
+    "tls": null
+  },
+  {
+    "name": "plain/require/invalid.pem/client=False",
+    "accepted": false,
+    "tls": null
+  },
+  {
+    "name": "plain/verify-ca/None/client=False",
+    "accepted": false,
+    "tls": null
+  },
+  {
+    "name": "plain/verify-ca/ca.pem/client=False",
+    "accepted": false,
+    "tls": null
+  },
+  {
+    "name": "plain/verify-ca/other-ca.pem/client=False",
+    "accepted": false,
+    "tls": null
+  },
+  {
+    "name": "plain/verify-ca/missing.pem/client=False",
+    "accepted": false,
+    "tls": null
+  },
+  {
+    "name": "plain/verify-ca/invalid.pem/client=False",
+    "accepted": false,
+    "tls": null
+  },
+  {
+    "name": "plain/verify-full/None/client=False",
+    "accepted": false,
+    "tls": null
+  },
+  {
+    "name": "plain/verify-full/ca.pem/client=False",
+    "accepted": false,
+    "tls": null
+  },
+  {
+    "name": "plain/verify-full/other-ca.pem/client=False",
+    "accepted": false,
+    "tls": null
+  },
+  {
+    "name": "plain/verify-full/missing.pem/client=False",
+    "accepted": false,
+    "tls": null
+  },
+  {
+    "name": "plain/verify-full/invalid.pem/client=False",
+    "accepted": false,
+    "tls": null
+  },
+  {
+    "name": "tls-only/default/ca.pem/client=False",
+    "accepted": true,
+    "tls": true
+  },
+  {
+    "name": "tls-only/disable/ca.pem/client=False",
+    "accepted": false,
+    "tls": null
+  },
+  {
+    "name": "tls-only/allow/ca.pem/client=False",
+    "accepted": true,
+    "tls": true
+  },
+  {
+    "name": "tls-only/prefer/ca.pem/client=False",
+    "accepted": true,
+    "tls": true
+  },
+  {
+    "name": "tls-only/require/ca.pem/client=False",
+    "accepted": true,
+    "tls": true
+  },
+  {
+    "name": "tls-only/verify-ca/ca.pem/client=False",
+    "accepted": true,
+    "tls": true
+  },
+  {
+    "name": "tls-only/verify-full/ca.pem/client=False",
+    "accepted": true,
+    "tls": true
+  },
+  {
+    "name": "client-cert/default/ca.pem/client=False",
+    "accepted": false,
+    "tls": null
+  },
+  {
+    "name": "client-cert/default/ca.pem/client=True",
+    "accepted": true,
+    "tls": true
+  },
+  {
+    "name": "client-cert/disable/ca.pem/client=False",
+    "accepted": false,
+    "tls": null
+  },
+  {
+    "name": "client-cert/disable/ca.pem/client=True",
+    "accepted": false,
+    "tls": null
+  },
+  {
+    "name": "client-cert/allow/ca.pem/client=False",
+    "accepted": false,
+    "tls": null
+  },
+  {
+    "name": "client-cert/allow/ca.pem/client=True",
+    "accepted": true,
+    "tls": true
+  },
+  {
+    "name": "client-cert/prefer/ca.pem/client=False",
+    "accepted": false,
+    "tls": null
+  },
+  {
+    "name": "client-cert/prefer/ca.pem/client=True",
+    "accepted": true,
+    "tls": true
+  },
+  {
+    "name": "client-cert/require/ca.pem/client=False",
+    "accepted": false,
+    "tls": null
+  },
+  {
+    "name": "client-cert/require/ca.pem/client=True",
+    "accepted": true,
+    "tls": true
+  },
+  {
+    "name": "client-cert/verify-ca/ca.pem/client=False",
+    "accepted": false,
+    "tls": null
+  },
+  {
+    "name": "client-cert/verify-ca/ca.pem/client=True",
+    "accepted": true,
+    "tls": true
+  },
+  {
+    "name": "client-cert/verify-full/ca.pem/client=False",
+    "accepted": false,
+    "tls": null
+  },
+  {
+    "name": "client-cert/verify-full/ca.pem/client=True",
+    "accepted": true,
+    "tls": true
+  }
+]
