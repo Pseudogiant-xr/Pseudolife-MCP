@@ -513,14 +513,37 @@ impl ClientProcess {
     fn heartbeat(&self) -> Vec<u8> {
         fs::read(self.fixture.path.join("heartbeat")).unwrap()
     }
+    fn wait_helper_stopped(&self) -> std::io::Result<()> {
+        let lock = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(self.fixture.path.join("helper.lock"))?;
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        loop {
+            match lock.try_lock() {
+                Ok(()) => return Ok(()),
+                Err(fs::TryLockError::WouldBlock) => {
+                    if std::time::Instant::now() >= deadline {
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::TimedOut,
+                            "client helper still holds its lifetime lock",
+                        ));
+                    }
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                Err(error) => return Err(std::io::Error::other(error)),
+            }
+        }
+    }
 }
 impl Drop for ClientProcess {
     fn drop(&mut self) {
         let _ = fs::write(self.fixture.path.join("stop"), b"stop");
         let _ = self.child.kill();
         let _ = self.child.wait();
-        // Helpers are bounded even if a failing assertion bypassed runner cleanup.
-        std::thread::sleep(Duration::from_millis(100));
+        // The OS releases this lock even when the helper was killed. A helper
+        // that survived a failed assertion also exits on the stop marker.
+        let _ = self.wait_helper_stopped();
     }
 }
 
@@ -545,13 +568,9 @@ fn native_client_runner_timeout_stops_descendants() {
     let mut process = ClientProcess::start("timeout");
     process.wait_file("heartbeat");
     assert_eq!(process.wait().code(), Some(124));
-    let first = process.heartbeat();
-    std::thread::sleep(Duration::from_secs(1));
-    assert_eq!(
-        process.heartbeat(),
-        first,
-        "timed-out client helper survived"
-    );
+    process
+        .wait_helper_stopped()
+        .expect("timed-out client helper survived");
 }
 
 #[cfg(unix)]
@@ -573,13 +592,9 @@ fn native_client_runner_forwards_cancellation_to_descendants() {
                 Some(signal.to_string()),
                 "client helper missed {signal} ({mode})"
             );
-            let first = process.heartbeat();
-            std::thread::sleep(Duration::from_millis(200));
-            assert_eq!(
-                process.heartbeat(),
-                first,
-                "cancelled client helper survived"
-            );
+            process
+                .wait_helper_stopped()
+                .expect("cancelled client helper survived");
         }
     }
 }
@@ -659,6 +674,15 @@ fn client_helper_child() {
     let root = PathBuf::from(std::env::var_os("PSEUDOLIFE_CLIENT_FIXTURE").unwrap());
     #[cfg(unix)]
     let _signals = super::super::signals::Guard::new().unwrap();
+    // Keep this handle alive until after the heartbeat closes. The parent
+    // waits on lock release rather than guessing when a killed helper exited.
+    let active = fs::OpenOptions::new()
+        .create_new(true)
+        .read(true)
+        .write(true)
+        .open(root.join("helper.lock"))
+        .unwrap();
+    active.try_lock().unwrap();
     let deadline = std::time::Instant::now() + Duration::from_secs(60);
     use std::io::Write;
     let mut heartbeat = fs::OpenOptions::new()
