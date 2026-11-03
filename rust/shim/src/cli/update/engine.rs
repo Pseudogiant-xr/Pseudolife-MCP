@@ -224,15 +224,38 @@ fn bind_source(source: &str) -> String {
         && host.as_bytes().first().is_some_and(u8::is_ascii_alphabetic)
         && host.as_bytes().get(1) == Some(&b'/')
     {
-        return format!("{}:{}", host[..1].to_ascii_lowercase(), &host[1..]);
+        return format!("{}:{}", &host[..1], &host[1..]).to_ascii_lowercase();
     }
     if path.as_bytes().first().is_some_and(u8::is_ascii_alphabetic)
         && path.as_bytes().get(1..3) == Some(b":/")
     {
-        return format!("{}{}", path[..1].to_ascii_lowercase(), &path[1..]);
+        return path.to_ascii_lowercase();
+    }
+    if let Some(unc) = path
+        .strip_prefix("UNC/")
+        .or_else(|| path.strip_prefix("unc/"))
+    {
+        return format!("//{unc}").to_ascii_lowercase();
+    }
+    if slashes.starts_with("//") {
+        return slashes.to_ascii_lowercase();
     }
     // Preserve POSIX case and backslashes: they can name distinct files.
     source.to_owned()
+}
+fn same_bind_source(actual: &str, expected: &str) -> bool {
+    let windows = |s: &str| {
+        s.starts_with(r"\\")
+            || s.starts_with("/run/desktop/mnt/host/")
+            || (s.as_bytes().first().is_some_and(u8::is_ascii_alphabetic)
+                && s.as_bytes().get(1) == Some(&b':'))
+            || (cfg!(windows) && s.starts_with("//"))
+    };
+    if windows(actual) || windows(expected) {
+        bind_source(actual) == bind_source(expected)
+    } else {
+        actual == expected
+    }
 }
 fn ephemeral_mount(
     config: &Value,
@@ -350,12 +373,43 @@ pub(super) fn verify_bank_identity_with(
     let mounts = running["Mounts"].as_array().ok_or_else(|| UpdateError::usage(
         "cannot read the daemon's mounts; restore its Compose project and retry; nothing was changed"
     ))?;
-    for volume in service["volumes"].as_array().into_iter().flatten() {
+    let mut volumes = service["volumes"].as_array().cloned().unwrap_or_default();
+    // Compose retains service-level tmpfs separately from long-form volumes.
+    // Include both forms in the same persistent-mount checks.
+    if !service["tmpfs"].is_null() {
+        let unreadable = || {
+            UpdateError::usage(
+                "cannot read the daemon's Compose tmpfs destinations; restore its tmpfs configuration before updating; nothing was changed",
+            )
+        };
+        for entry in service["tmpfs"].as_array().ok_or_else(unreadable)? {
+            let target = entry
+                .as_str()
+                .and_then(|value| value.split(':').next())
+                .filter(|target| target.starts_with('/'))
+                .ok_or_else(unreadable)?;
+            volumes.push(json!({"type": "tmpfs", "target": target}));
+        }
+    }
+    for volume in &volumes {
         let target = volume["target"].as_str();
         let actual = mounts.iter().find(|m| m["Destination"].as_str() == target);
-        // New destinations do not replace any existing data. The reverse
-        // comparison below still refuses removal of a persistent mount.
+        // A new destination must not hide data below an existing mount, or
+        // obscure that mount by introducing a new ancestor. Compare path
+        // components so /data-other remains a legitimate new destination.
         if target.is_some_and(|target| !target.is_empty()) && actual.is_none() {
+            let new = mount_components(target.unwrap());
+            for mount in mounts.iter().filter(|m| m["Type"] != "tmpfs") {
+                let old = mount["Destination"].as_str().ok_or_else(|| UpdateError::usage(
+                    "cannot read an existing mount destination; restore its Compose mount metadata before updating; nothing was changed"
+                ))?;
+                let old = mount_components(old);
+                if new.starts_with(&old) || old.starts_with(&new) {
+                    return Err(UpdateError::usage(
+                        "a new Compose mount overlaps an existing persistent destination; remove the new overlapping mount before updating; nothing was changed",
+                    ));
+                }
+            }
             continue;
         }
         if volume["type"] == "tmpfs" || volume["source"].as_str().is_none_or(str::is_empty) {
@@ -384,7 +438,7 @@ pub(super) fn verify_bank_identity_with(
             };
             let same_source = match (source, expected_source) {
                 (Some(actual), Some(expected)) if volume["type"] == "bind" => {
-                    bind_source(actual) == bind_source(expected)
+                    same_bind_source(actual, expected)
                 }
                 (Some(actual), Some(expected)) => actual == expected,
                 _ => false,
@@ -406,16 +460,26 @@ pub(super) fn verify_bank_identity_with(
         {
             continue;
         }
-        if !service["volumes"]
-            .as_array()
-            .is_some_and(|volumes| volumes.iter().any(|v| v["target"] == mount["Destination"]))
-        {
+        if !volumes.iter().any(|v| v["target"] == mount["Destination"]) {
             return Err(UpdateError::usage(
                 "the Compose configuration drops a daemon mount; restore its original mounts before updating; nothing was changed",
             ));
         }
     }
     Ok(())
+}
+fn mount_components(path: &str) -> Vec<&str> {
+    let mut parts = Vec::new();
+    for part in path.split('/') {
+        match part {
+            "" | "." => (),
+            ".." => {
+                parts.pop();
+            }
+            _ => parts.push(part),
+        }
+    }
+    parts
 }
 fn verify_endpoint(config: &Value, url: &str) -> Result<()> {
     let service = &config["services"][DAEMON_SERVICE];
@@ -687,6 +751,7 @@ pub(super) fn deploy(u: &mut Update, repo: &Path) -> Result<()> {
         ));
     }
     verify_identity(u, &config, &running, &u.o.daemon_url)?;
+    u.set_rollback_scope(&config, &running)?;
     u.maintainer_context = Some((base.clone(), env.clone()));
     let token = daemon_token(&config)?;
     let pg_env = &config["services"]["pseudolife-pg"]["environment"];
@@ -721,11 +786,7 @@ pub(super) fn deploy(u: &mut Update, repo: &Path) -> Result<()> {
     }
     let backups = u.project_backup(&repo, &pg, &daemon, user, db)?;
     let old = labels[ENGINE_LABEL].as_str().unwrap_or("python");
-    let suffix = if u.o.rollback_suffix.is_empty() {
-        format!("pre-update-{}", stamp())
-    } else {
-        u.o.rollback_suffix.clone()
-    };
+    let suffix = u.rollback_suffix();
     let rollback = format!("pseudolife-daemon-{old}:{running_version}-{suffix}");
     let id = running["Image"]
         .as_str()
@@ -755,8 +816,8 @@ pub(super) fn deploy(u: &mut Update, repo: &Path) -> Result<()> {
     u.rollback_lines.extend(u.schema_rollback_note());
     u.report.rollback =
         json!({"tag":rollback,"state":"tagged","overlay":rollback_file,"backup":backups});
-    u.prune_rollbacks(Some(&repo), "pseudolife-daemon-python");
-    u.prune_rollbacks(Some(&repo), "pseudolife-daemon-rust");
+    u.prune_rollbacks("pseudolife-daemon-python");
+    u.prune_rollbacks("pseudolife-daemon-rust");
     let activation = uuid::Uuid::new_v4().simple().to_string();
     let service = json!({"image":format!("pseudolife-daemon-{choice}:checkout"),"build":{"dockerfile":format!("ops/Dockerfile.daemon{}",if choice=="rust"{"-rust"}else{""})},"labels":{ENGINE_LABEL:choice,CHECKOUT_LABEL:repo,ACTIVATION_LABEL:activation}});
     let candidate = repo.join("data/update-engine/docker-compose.engine-candidate.json");

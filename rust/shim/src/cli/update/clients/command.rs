@@ -43,6 +43,16 @@ impl Runner for NativeRunner {
         timeout: Duration,
         env: &[(&str, &str)],
     ) -> Output {
+        #[cfg(unix)]
+        let _signals = match super::super::signals::Guard::new() {
+            Ok(guard) => guard,
+            Err(_) => {
+                return Output {
+                    code: 1,
+                    bytes: vec![],
+                };
+            }
+        };
         let executable = executable.to_owned();
         let args: Vec<_> = args.iter().map(|s| s.to_string()).collect();
         let cwd = cwd.map(Path::to_owned);
@@ -65,7 +75,19 @@ impl Runner for NativeRunner {
             runtime.block_on(async move {
                 use process_wrap::tokio::{CommandWrap, KillOnDrop};
                 use tokio::io::AsyncReadExt;
+                #[cfg(windows)]
+                let job = match super::super::windows_job::Job::new() {
+                    Ok(job) => job,
+                    Err(_) => {
+                        return Output {
+                            code: 1,
+                            bytes: vec![],
+                        };
+                    }
+                };
                 let mut command = CommandWrap::with_new(executable, |c| {
+                    #[cfg(windows)]
+                    c.creation_flags(windows_sys::Win32::System::Threading::CREATE_SUSPENDED);
                     c.args(args)
                         .stdin(Stdio::null())
                         .stdout(Stdio::piped())
@@ -89,8 +111,6 @@ impl Runner for NativeRunner {
                     }
                 });
                 command.wrap(KillOnDrop);
-                #[cfg(windows)]
-                command.wrap(process_wrap::tokio::JobObject);
                 #[cfg(unix)]
                 command.wrap(process_wrap::tokio::ProcessGroup::leader());
                 let Ok(mut child) = command.spawn() else {
@@ -99,6 +119,20 @@ impl Runner for NativeRunner {
                         bytes: vec![],
                     };
                 };
+                #[cfg(windows)]
+                if child
+                    .try_inner_child()
+                    .ok_or_else(|| std::io::Error::other("no native child"))
+                    .and_then(|child| job.assign(child))
+                    .is_err()
+                {
+                    let _ = child.start_kill();
+                    let _ = tokio::time::timeout(Duration::from_secs(5), child.wait()).await;
+                    return Output {
+                        code: 1,
+                        bytes: vec![],
+                    };
+                }
                 let stdout = child.stdout().take();
                 let stderr = child.stderr().take();
                 let read = |pipe: Option<tokio::process::ChildStdout>| async move {
@@ -138,17 +172,40 @@ impl Runner for NativeRunner {
                         bytes,
                     })
                 };
-                match tokio::time::timeout(timeout, wait).await {
-                    Ok(Some(output)) => output,
-                    Ok(None) => Output {
-                        code: 1,
-                        bytes: vec![],
-                    },
-                    Err(_) => {
+                #[cfg(unix)]
+                let result = tokio::select! {
+                    biased;
+                    signal = super::super::signals::wait() => {
+                        let _ = child.signal(signal);
+                        let _ = tokio::time::timeout(Duration::from_secs(5), child.wait()).await;
+                        let _ = child.start_kill();
+                        let _ = tokio::time::timeout(Duration::from_secs(5), child.wait()).await;
+                        return Output { code: 128 + signal, bytes: vec![] };
+                    }
+                    result = tokio::time::timeout(timeout, wait) => result,
+                };
+                #[cfg(not(unix))]
+                let result = tokio::time::timeout(timeout, wait).await;
+                match result {
+                    Ok(Some(output)) => {
+                        #[cfg(windows)]
+                        if job.complete().is_err() {
+                            return Output {
+                                code: 1,
+                                bytes: vec![],
+                            };
+                        }
+                        output
+                    }
+                    result => {
+                        // Retain ownership until both the primary and captured
+                        // pipes finish; a failed read must clean up helpers too.
+                        #[cfg(windows)]
+                        drop(job);
                         let _ = child.start_kill();
                         let _ = tokio::time::timeout(Duration::from_secs(5), child.wait()).await;
                         Output {
-                            code: 124,
+                            code: if result.is_err() { 124 } else { 1 },
                             bytes: vec![],
                         }
                     }

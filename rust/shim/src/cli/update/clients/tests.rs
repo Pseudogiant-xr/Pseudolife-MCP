@@ -465,3 +465,247 @@ fn script_digest_matches_name_nul_bytes_nul_protocol() {
     );
     let _ = BTreeMap::<String, String>::new();
 }
+
+// Run NativeRunner in a separate process: signal tests must never signal the
+// test harness, and the runner must own the complete primary/helper tree.
+struct ClientProcess {
+    fixture: Fixture,
+    child: std::process::Child,
+}
+impl ClientProcess {
+    fn start(mode: &str) -> Self {
+        let fixture = Fixture::new();
+        let child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "cli::update::clients::tests::client_runner_child",
+                "--ignored",
+            ])
+            .env("PSEUDOLIFE_CLIENT_FIXTURE", &fixture.path)
+            .env("PSEUDOLIFE_CLIENT_MODE", mode)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        Self { fixture, child }
+    }
+    fn wait_file(&self, name: &str) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+        while !self.fixture.path.join(name).exists() {
+            assert!(std::time::Instant::now() < deadline, "missing {name}");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+    fn wait(&mut self) -> std::process::ExitStatus {
+        let deadline = std::time::Instant::now() + Duration::from_secs(15);
+        loop {
+            if let Some(status) = self.child.try_wait().unwrap() {
+                return status;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "client runner did not finish"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+    fn heartbeat(&self) -> Vec<u8> {
+        fs::read(self.fixture.path.join("heartbeat")).unwrap()
+    }
+    fn wait_helper_stopped(&self) -> std::io::Result<()> {
+        let lock = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(self.fixture.path.join("helper.lock"))?;
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        loop {
+            match lock.try_lock() {
+                Ok(()) => return Ok(()),
+                Err(fs::TryLockError::WouldBlock) => {
+                    if std::time::Instant::now() >= deadline {
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::TimedOut,
+                            "client helper still holds its lifetime lock",
+                        ));
+                    }
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                Err(error) => return Err(std::io::Error::other(error)),
+            }
+        }
+    }
+}
+impl Drop for ClientProcess {
+    fn drop(&mut self) {
+        let _ = fs::write(self.fixture.path.join("stop"), b"stop");
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+        // The OS releases this lock even when the helper was killed. A helper
+        // that survived a failed assertion also exits on the stop marker.
+        let _ = self.wait_helper_stopped();
+    }
+}
+
+#[test]
+fn native_client_runner_preserves_completed_background_helpers() {
+    let mut process = ClientProcess::start("complete");
+    process.wait_file("heartbeat");
+    assert_eq!(process.wait().code(), Some(23));
+    let first = process.heartbeat();
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while process.heartbeat() == first {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "completed client helper was killed"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+#[test]
+fn native_client_runner_timeout_stops_descendants() {
+    let mut process = ClientProcess::start("timeout");
+    process.wait_file("heartbeat");
+    assert_eq!(process.wait().code(), Some(124));
+    process
+        .wait_helper_stopped()
+        .expect("timed-out client helper survived");
+}
+
+#[cfg(unix)]
+#[test]
+#[allow(unsafe_code)]
+fn native_client_runner_forwards_cancellation_to_descendants() {
+    use std::os::unix::process::ExitStatusExt;
+    for signal in [libc::SIGINT, libc::SIGTERM, libc::SIGHUP] {
+        for mode in ["cooperative", "resistant"] {
+            let mut process = ClientProcess::start(mode);
+            process.wait_file("heartbeat");
+            // SAFETY: this is the still-running child created above, never the
+            // shared test harness or its process group.
+            assert_eq!(unsafe { libc::kill(process.child.id() as i32, signal) }, 0);
+            let status = process.wait();
+            assert!(status.signal() == Some(signal) || status.code() == Some(128 + signal));
+            assert_eq!(
+                fs::read_to_string(process.fixture.path.join("signal")).ok(),
+                Some(signal.to_string()),
+                "client helper missed {signal} ({mode})"
+            );
+            process
+                .wait_helper_stopped()
+                .expect("cancelled client helper survived");
+        }
+    }
+}
+
+#[test]
+#[ignore = "subprocess fixture"]
+fn client_runner_child() {
+    let root = std::env::var("PSEUDOLIFE_CLIENT_FIXTURE").unwrap();
+    let mode = std::env::var("PSEUDOLIFE_CLIENT_MODE").unwrap();
+    let result = command::NativeRunner.run(
+        &std::env::current_exe().unwrap(),
+        &[
+            "--exact",
+            "cli::update::clients::tests::client_primary_child",
+            "--ignored",
+        ],
+        Some(Path::new(&root)),
+        Duration::from_secs(if mode == "timeout" { 10 } else { 60 }),
+        &[],
+    );
+    std::process::exit(result.code);
+}
+
+#[test]
+#[ignore = "subprocess fixture"]
+#[allow(unsafe_code)]
+fn client_primary_child() {
+    // A cooperative primary waits for its helper to finish signal cleanup.
+    // Without this, the default disposition exits the primary immediately and
+    // the runner correctly kills the helper before its polling loop can record
+    // receipt; that cannot distinguish forwarding from forced cleanup.
+    #[cfg(unix)]
+    let _signals = super::super::signals::Guard::new().unwrap();
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::{
+            Foundation::{HANDLE_FLAG_INHERIT, SetHandleInformation},
+            System::Console::{GetStdHandle, STD_ERROR_HANDLE, STD_OUTPUT_HANDLE},
+        };
+        // Rust's Windows spawn can inherit other inheritable handles even
+        // with null stdio. This fixture models a detached helper that closes
+        // the primary's captured pipes, not one that keeps them open.
+        for stream in [STD_OUTPUT_HANDLE, STD_ERROR_HANDLE] {
+            // SAFETY: change only this isolated fixture's standard handles.
+            assert_ne!(
+                unsafe { SetHandleInformation(GetStdHandle(stream), HANDLE_FLAG_INHERIT, 0) },
+                0
+            );
+        }
+    }
+    let root = PathBuf::from(std::env::var_os("PSEUDOLIFE_CLIENT_FIXTURE").unwrap());
+    let mut helper = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "cli::update::clients::tests::client_helper_child",
+            "--ignored",
+        ])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+    while !root.join("heartbeat").exists() {
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    if std::env::var("PSEUDOLIFE_CLIENT_MODE").unwrap() == "complete" {
+        std::process::exit(23);
+    }
+    let _ = helper.wait();
+}
+
+#[test]
+#[ignore = "subprocess fixture"]
+fn client_helper_child() {
+    let root = PathBuf::from(std::env::var_os("PSEUDOLIFE_CLIENT_FIXTURE").unwrap());
+    #[cfg(unix)]
+    let _signals = super::super::signals::Guard::new().unwrap();
+    // Keep this handle alive until after the heartbeat closes. The parent
+    // waits on lock release rather than guessing when a killed helper exited.
+    let active = fs::OpenOptions::new()
+        .create_new(true)
+        .read(true)
+        .write(true)
+        .open(root.join("helper.lock"))
+        .unwrap();
+    active.try_lock().unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(60);
+    use std::io::Write;
+    let mut heartbeat = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(root.join("heartbeat"))
+        .unwrap();
+    #[cfg(unix)]
+    let mut recorded_signal = false;
+    while std::time::Instant::now() < deadline && root.exists() && !root.join("stop").exists() {
+        #[cfg(unix)]
+        if !recorded_signal && super::super::signals::received() != 0 {
+            fs::write(
+                root.join("signal"),
+                super::super::signals::received().to_string(),
+            )
+            .unwrap();
+            recorded_signal = true;
+            if std::env::var("PSEUDOLIFE_CLIENT_MODE").unwrap() == "cooperative" {
+                std::process::exit(0);
+            }
+        }
+        heartbeat.write_all(b"x").unwrap();
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}

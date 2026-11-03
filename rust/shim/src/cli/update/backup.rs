@@ -147,6 +147,37 @@ pub(super) fn rotate(directory: &Path, keep: &BTreeSet<String>) -> Vec<PathBuf> 
     removed
 }
 impl Update {
+    pub fn set_rollback_scope(&mut self, config: &Value, running: &Value) -> Result<()> {
+        use sha2::{Digest, Sha256};
+        let project = config["name"].as_str().filter(|s| !s.is_empty());
+        let volume = running["Mounts"]
+            .as_array()
+            .and_then(|mounts| mounts.iter().find(|m| m["Destination"] == "/data"))
+            .and_then(|m| m["Name"].as_str())
+            .filter(|s| !s.is_empty());
+        let (Some(project), Some(volume)) = (project, volume) else {
+            return Err(UpdateError::usage(
+                "cannot identify this Compose project and its state volume for rollback retention; restore the project's named /data volume and retry; nothing was deployed",
+            ));
+        };
+        self.rollback_scope = Some(format!(
+            "{:x}",
+            Sha256::digest(json!([project, volume]).to_string())
+        ));
+        Ok(())
+    }
+    pub fn rollback_suffix(&self) -> String {
+        if !self.o.rollback_suffix.is_empty() {
+            return self.o.rollback_suffix.clone();
+        }
+        format!(
+            "pre-update-pl-{}-{}",
+            self.rollback_scope
+                .as_deref()
+                .expect("validated rollback scope"),
+            stamp()
+        )
+    }
     fn requires_state_backup(&self) -> bool {
         self.o.engine.is_some() || self.selected_engine == "rust"
     }
@@ -234,10 +265,25 @@ impl Update {
             seams::quote(&remote)
         );
         let (code, _) = self.command(
-            &["exec", pg, "sh", "-c", &sql, "sh", user, db]
-                .iter()
-                .map(|s| s.to_string())
-                .collect::<Vec<_>>(),
+            // Docker exec children run in the container, outside the host's
+            // process group/job. Their own deadline expires before the host
+            // CLI's 3600-second timeout, with a bounded forced-kill grace.
+            &[
+                "exec",
+                pg,
+                "timeout",
+                "--kill-after=5s",
+                "3500s",
+                "sh",
+                "-c",
+                &sql,
+                "sh",
+                user,
+                db,
+            ]
+            .iter()
+            .map(|s| s.to_string())
+            .collect::<Vec<_>>(),
             None,
             3600,
             false,
@@ -245,7 +291,7 @@ impl Update {
         if code != 0 {
             self.docker_call(&["exec", pg, "rm", "-f", &remote]);
             return Err(UpdateError::new(
-                "pg_dump failed inside the PostgreSQL container; fix the backup error or use --no-backup for a plain update; nothing was deployed",
+                "pg_dump failed or timed out inside the PostgreSQL container; ensure GNU timeout is installed and fix the backup error, or use --no-backup for a plain update; nothing was deployed",
             ));
         }
         let (code, _) = self.command(
@@ -270,6 +316,9 @@ impl Update {
             &[
                 "exec".into(),
                 daemon.into(),
+                "timeout".into(),
+                "--kill-after=5s".into(),
+                "3500s".into(),
                 "sh".into(),
                 "-c".into(),
                 format!("tar czf {remote} -C /data ."),
@@ -297,7 +346,7 @@ impl Update {
         if !state_ok {
             if self.requires_state_backup() {
                 return Err(UpdateError::new(
-                    "the state volume backup is missing or incomplete; the bank dump is retained; fix the backup error and retry; engine changes cannot use --no-backup; nothing was deployed",
+                    "the state volume backup is missing or incomplete; the bank dump is retained; ensure GNU timeout is installed in the daemon image, fix the backup error and retry; engine changes cannot use --no-backup; nothing was deployed",
                 ));
             }
             self.warn("state archive could not be made; continuing with the complete SQL dump (the daemon may be stopped)");
@@ -391,27 +440,12 @@ impl Update {
             vec!["bash".into(), script.to_string_lossy().into_owned()]
         }
     }
-    pub fn prune_rollbacks(&mut self, repo: Option<&Path>, repository: &str) {
-        if let Some(repo) = repo
-            && let Some(script) = self.checkout_script(repo, "prune-rollbacks")
-        {
-            let flags = if script.extension().is_some_and(|s| s == "ps1") {
-                ["-Keep", "-Repository"]
-            } else {
-                ["--keep", "--repository"]
-            };
-            let mut args = Self::script_argv(&script);
-            args.extend([
-                flags[0].into(),
-                self.o.keep_rollbacks.to_string(),
-                flags[1].into(),
-                repository.into(),
-            ]);
-            if run_cli(&args, None, 600, !self.o.as_json).0 != 0 {
-                self.warn("rollback-tag retention failed (deploy continues)");
-            }
+    pub fn prune_rollbacks(&mut self, repository: &str) {
+        let Some(scope) = &self.rollback_scope else {
+            self.warn("rollback-tag retention skipped: no verified project scope");
             return;
-        }
+        };
+        let marker = format!("-pre-update-pl-{scope}-");
         let (code, out) = self.docker_call(&["ps", "-q"]);
         if code != 0 {
             self.warn("rollback-tag retention skipped: cannot inspect running containers");
@@ -442,9 +476,20 @@ impl Update {
         }
         let mut candidates = vec![];
         for reference in out.lines().map(str::trim).filter(|s| {
-            s.starts_with(&format!("{repository}:"))
-                && s.split_once(':')
-                    .is_some_and(|(_, tag)| tag.contains("-pre-"))
+            s.strip_prefix(&format!("{repository}:"))
+                .and_then(|tag| tag.split_once(&marker))
+                .is_some_and(|(_, stamp)| {
+                    // Only our complete automatic timestamp grants retention
+                    // authority; operator suffixes such as -keep stay intact.
+                    stamp.len() == 15
+                        && stamp.bytes().enumerate().all(|(i, byte)| {
+                            if i == 8 {
+                                byte == b'-'
+                            } else {
+                                byte.is_ascii_digit()
+                            }
+                        })
+                })
         }) {
             let (code, out) = self.docker_call(&[
                 "image",
@@ -461,6 +506,9 @@ impl Update {
         }
         candidates.sort_by(|a, b| b.cmp(a));
         for (_, reference, id) in candidates.into_iter().skip(self.o.keep_rollbacks) {
+            if self.report.rollback["tag"] == reference {
+                continue;
+            }
             if in_use.contains(&id) {
                 self.step(format!(
                     "rollback retention: keeping {reference} (image in use by a running container)"

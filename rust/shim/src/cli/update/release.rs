@@ -370,6 +370,7 @@ impl Update {
         let (code, out) = self.command(&config_args, Some(&env), 60, false);
         let config:Value=serde_json::from_str(&out).ok().filter(|_:&Value|code==0).ok_or_else(||UpdateError::usage("cannot resolve the Compose project; check its files and env file, then retry; nothing was changed"))?;
         engine::verify_bank_identity(self, &config, &context.running)?;
+        self.set_rollback_scope(&config, &context.running)?;
         self.maintainer_context = Some((context.args.clone(), env.clone()));
         let token = if activating {
             engine::verify_identity(self, &config, &context.running, &self.o.daemon_url)?;
@@ -488,11 +489,7 @@ impl Update {
         let old_engine = context.running["Config"]["Labels"][engine::ENGINE_LABEL]
             .as_str()
             .unwrap_or("python");
-        let suffix = if self.o.rollback_suffix.is_empty() {
-            format!("pre-update-{}", stamp())
-        } else {
-            self.o.rollback_suffix.clone()
-        };
+        let suffix = self.rollback_suffix();
         let rollback = format!(
             "{}:{}-{suffix}",
             if old_engine == "rust" {
@@ -521,8 +518,8 @@ impl Update {
         self.rollback_lines.extend(self.schema_rollback_note());
         self.report.rollback =
             json!({"tag":rollback,"state":"tagged","overlay":rollback_file,"backup":backups});
-        self.prune_rollbacks(None, PYTHON_IMAGE);
-        self.prune_rollbacks(None, RUST_IMAGE);
+        self.prune_rollbacks(PYTHON_IMAGE);
+        self.prune_rollbacks(RUST_IMAGE);
         let activation = uuid::Uuid::new_v4().simple().to_string();
         let mut service = json!({"image":image});
         if activating {
@@ -688,6 +685,7 @@ impl Update {
         let daemon = engine::container(self, &compose, Some(&env), DAEMON_SERVICE)?;
         let running = engine::inspect(self, &daemon)?;
         engine::verify_checkout_identity(self, &config, &running, &daemon)?;
+        self.set_rollback_scope(&config, &running)?;
         self.maintainer_context = Some((compose.clone(), env.clone()));
         if self.o.no_backup {
             self.backup(None)?;
@@ -725,11 +723,7 @@ impl Update {
         let foreign = reference
             .as_deref()
             .is_some_and(|r| r.split(':').next() != image.split(':').next());
-        let suffix = if self.o.rollback_suffix.is_empty() {
-            format!("pre-update-{}", stamp())
-        } else {
-            self.o.rollback_suffix.clone()
-        };
+        let suffix = self.rollback_suffix();
         let rollback = format!("{image}-{suffix}");
         if let Some(source) = if foreign {
             running.as_ref()
@@ -788,10 +782,7 @@ impl Update {
         if !self.rollback_lines.is_empty() {
             self.rollback_lines.extend(self.schema_rollback_note());
         }
-        self.prune_rollbacks(
-            Some(&repo),
-            image.split(':').next().unwrap_or("pseudolife-daemon"),
-        );
+        self.prune_rollbacks(image.split(':').next().unwrap_or("pseudolife-daemon"));
         if tree_state(&repo) != tree {
             return Err(UpdateError::new(
                 "the checkout changed during this deploy; nothing was built. Re-run the deploy",
@@ -820,9 +811,9 @@ impl Update {
         // A forwarded health URL may name another healthy daemon. Verify the
         // recreated service itself before reporting this project as healthy.
         let recreated = engine::container(self, &compose, Some(&env), DAEMON_SERVICE)
-            .map_err(|e| self.rollback_error(e.message))?;
-        let (code, state) = self.docker_call(&["inspect", "-f", "{{.State.Running}}", &recreated]);
-        if code != 0 || state.trim() != "true" {
+            .map_err(|_| self.rollback_error("cannot identify exactly one recreated checkout daemon; inspect this project's Compose services and use the rollback commands below before retrying"))?;
+        let (code, state) = self.docker_call(&["inspect", "-f", "{{.State.Status}}", &recreated]);
+        if code != 0 || state.trim() != "running" {
             return Err(self.rollback_error("the recreated checkout daemon is not running; inspect this project's container logs before retrying"));
         }
         self.checkout_post_deploy(

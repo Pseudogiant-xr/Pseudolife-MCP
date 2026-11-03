@@ -125,7 +125,7 @@ def authenticated_read(url: str, token: str) -> bool:
     request = urllib.request.Request(url.rstrip("/") + "/api/facts?limit=1",
                                      headers={"Authorization": "Bearer " + token})
     try:
-        with urllib.request.build_opener(_NoRedirect()).open(request, timeout=10) as response:
+        with urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect()).open(request, timeout=10) as response:
             result = json.loads(response.read())
             return isinstance(result, dict) and isinstance(result.get("entries"), list) and not result.get("error")
     except (OSError, ValueError, urllib.error.URLError):

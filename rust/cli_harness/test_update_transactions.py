@@ -17,6 +17,7 @@ import subprocess
 import sys
 import tarfile
 import threading
+import time
 
 import pytest
 
@@ -29,6 +30,147 @@ FILES = ("docker-compose.yml", "docker-compose.ghcr.yml", "docker-compose.rust-d
 def _native_binary():
     candidate = os.environ.get("PSEUDOLIFE_UPDATE_TEST_BINARY") or os.environ.get("PSEUDOLIFE_RUST_BINARY")
     return str(Path(candidate).resolve()) if candidate else None
+
+
+def _fallback_fixture(tmp_path, source):
+    """Use explicit legacy delegation to exercise the shipped process boundary."""
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("native candidate required")
+    package = tmp_path / "pseudolife_memory"
+    package.mkdir()
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "cli.py").write_text(source, encoding="utf-8")
+    env = {k: v for k, v in os.environ.items() if not k.startswith("PSEUDOLIFE_")}
+    env.update(PYTHONPATH=str(tmp_path), HOME=str(tmp_path), USERPROFILE=str(tmp_path),
+               PSEUDOLIFE_MCP_DATA_DIR=str(tmp_path / "data"))
+    return subprocess.Popen([binary, "update", "--python-runtime", sys.executable],
+                            cwd=tmp_path, env=env, stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL)
+
+
+def _await_file(path, process):
+    deadline = time.monotonic() + 30
+    while not path.exists() and time.monotonic() < deadline:
+        assert process.poll() is None, "fixture exited before readiness"
+        time.sleep(0.02)
+    assert path.exists(), "fixture did not become ready"
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="POSIX process-group cancellation")
+@pytest.mark.parametrize("signal_name", ["SIGINT", "SIGTERM", "SIGHUP"])
+@pytest.mark.parametrize("resistant", [False, True])
+def test_native_update_forwards_cancellation_to_owned_descendants(tmp_path, signal_name, resistant):
+    import signal
+
+    child = tmp_path / "child.py"
+    if resistant:
+        (tmp_path / "resist").touch()
+    child.write_text('''import os, pathlib, signal, time
+root = pathlib.Path(__file__).parent
+def stop(signum, frame):
+    (root / "child-signal").write_text(str(signum))
+    if (root / "resist").exists():
+        return
+    raise SystemExit(0)
+for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+    signal.signal(signum, stop)
+(root / "ready").write_text(str(os.getpid()))
+deadline = time.monotonic() + 60
+while not (root / "stop").exists() and time.monotonic() < deadline:
+    time.sleep(.02)
+''', encoding="utf-8")
+    proc = _fallback_fixture(tmp_path, '''import pathlib, signal, subprocess, sys, time
+root = pathlib.Path.cwd()
+child = subprocess.Popen([sys.executable, str(root / "child.py")])
+def stop(signum, frame):
+    child.wait(timeout=10)
+    raise SystemExit(128 + signum)
+for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+    signal.signal(signum, stop)
+deadline = time.monotonic() + 60
+while not (root / "stop").exists() and time.monotonic() < deadline:
+    time.sleep(.02)
+child.wait(timeout=10)
+''')
+    try:
+        _await_file(tmp_path / "ready", proc)
+        proc.send_signal(getattr(signal, signal_name))
+        proc.wait(timeout=15)
+        assert (tmp_path / "child-signal").exists(), "updater abandoned its child group"
+        assert int((tmp_path / "child-signal").read_text()) == getattr(signal, signal_name)
+        assert proc.returncode in (-getattr(signal, signal_name), 128 + getattr(signal, signal_name))
+        status = Path("/proc") / (tmp_path / "ready").read_text() / "stat"
+        assert not status.exists() or status.read_text().split(")", 1)[1].split()[0] == "Z"
+    finally:
+        (tmp_path / "stop").touch()
+        if proc.poll() is None:
+            proc.kill()
+        proc.wait(timeout=15)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows Job Object completion")
+def test_native_update_does_not_wait_for_successful_background_helpers(tmp_path):
+    proc = _fallback_fixture(tmp_path, '''import pathlib, subprocess, sys, time
+source = """import pathlib, time
+root = pathlib.Path.cwd()
+(root / 'helper-ready').touch()
+deadline = time.monotonic() + 60
+while not (root / 'stop').exists() and time.monotonic() < deadline:
+    (root / 'heartbeat').write_text(str(time.monotonic()))
+    time.sleep(.05)
+"""
+subprocess.Popen([sys.executable, '-c', source], stdin=subprocess.DEVNULL,
+                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+deadline = time.monotonic() + 30
+while not pathlib.Path('helper-ready').exists() and time.monotonic() < deadline:
+    time.sleep(.02)
+pathlib.Path('ready').touch()
+raise SystemExit(7)
+''')
+    try:
+        _await_file(tmp_path / "ready", proc)
+        assert proc.wait(timeout=10) == 7
+        before = (tmp_path / "heartbeat").read_text()
+        deadline = time.monotonic() + 5
+        while (tmp_path / "heartbeat").read_text() == before and time.monotonic() < deadline:
+            time.sleep(.02)
+        assert (tmp_path / "heartbeat").read_text() != before, "completed command killed its helper"
+    finally:
+        (tmp_path / "stop").touch()
+        if proc.poll() is None:
+            proc.kill()
+        proc.wait(timeout=15)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows Git fsmonitor background service")
+def test_native_update_preserves_git_fsmonitor(tmp_path):
+    git = shutil.which("git")
+    if not git:
+        pytest.skip("Git required")
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    env.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull)
+    subprocess.run([git, "init", "-q", str(tmp_path)], env=env, check=True, timeout=15)
+    subprocess.run([git, "-C", str(tmp_path), "config", "core.fsmonitor", "true"],
+                   env=env, check=True, timeout=15)
+    proc = _fallback_fixture(tmp_path, f'''import os, pathlib, subprocess
+env = {{k:v for k,v in os.environ.items() if not k.startswith('GIT_')}}
+env.update(GIT_CONFIG_NOSYSTEM='1', GIT_CONFIG_GLOBAL=os.devnull)
+subprocess.run([{git!r}, 'status', '--porcelain'], env=env, check=True, timeout=15)
+pathlib.Path('ready').touch()
+''')
+    try:
+        _await_file(tmp_path / "ready", proc)
+        assert proc.wait(timeout=10) == 0
+        status = subprocess.run([git, "-C", str(tmp_path), "fsmonitor--daemon", "status"],
+                                env=env, capture_output=True, timeout=15)
+        assert status.returncode == 0, "completed git status lost its fsmonitor daemon"
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+        proc.wait(timeout=15)
+        subprocess.run([git, "-C", str(tmp_path), "fsmonitor--daemon", "stop"],
+                       env=env, capture_output=True, timeout=15)
 
 
 def test_native_transactions_use_the_standard_lane_candidate(monkeypatch):
@@ -53,16 +195,19 @@ if a[:1]==["inspect"]:
   if "State.Running" in f:
    if a[-1]=="missing-daemon":code=1;out="No such container"
    else:out="false" if s.get("deployed") and s["failure"]=="recreated_stopped" else "true"
+  elif "State.Status" in f:
+   out={"recreated_stopped":"exited","recreated_restarting":"restarting"}.get(s["failure"],"running") if s.get("deployed") else "running"
   elif "index .Config.Labels" in f: out=s.get("setup_engine","python")
   elif "Labels" in f: out=json.dumps(s["running"]["Config"]["Labels"])
   elif "|" in f: out=s["running"]["Image"]+"|"+s["running"]["Config"]["Image"]
   else: out=s["running"]["Id"]
  else: out=json.dumps([s["running"]])
 elif a[:2]==["image","inspect"]:
- if "Created" in " ".join(a): out="2026-01-01|"+s["running"]["Image"]
+ if "Created" in " ".join(a): out="2026-01-01|"+s["images"].get(a[-1],s["running"]["Image"])
  elif a[-1] in s["images"]: out=s["images"][a[-1]]
  else: code=1
-elif a[:2]==["image","ls"]: out=""
+elif a[:2]==["image","ls"]: out="\n".join(s["images"]) if s.get("list_images") else ""
+elif a[:1]==["port"]:out="127.0.0.1:5433"
 elif a[:2]==["volume","inspect"]:
  if s.get("volume_inspect_failure"):code=1
  else:out=json.dumps(s.get("volume_inspections",{}).get(a[-1],[]))
@@ -81,6 +226,7 @@ elif a[:1]==["compose"]:
   out="fixture-pg" if a[-1]=="pseudolife-pg" else s["running"]["Id"]
   if s["failure"]=="missing_project_daemon" and a[-1]=="pseudolife-daemon":out=""
   if s["failure"]=="ambiguous_project_daemon" and a[-1]=="pseudolife-daemon":out="first\nsecond"
+  if s.get("deployed") and s["failure"]=="recreated_missing" and a[-1]=="pseudolife-daemon":out=""
  elif "build" in a and s["failure"]=="build":code=1
  elif "up" in a:
   code=int(s["failure"]=="up")
@@ -182,6 +328,12 @@ def host(tmp_path, failure="", mode="release"):
     programs = home / "programs"
     programs.mkdir()
     docker = _program(programs / "docker", DOCKER)
+    if os.name != "nt":
+        # PowerShell can live outside Bash's directory on POSIX runners.
+        # Expose only the needed interpreter, keeping Docker isolated.
+        bash = shutil.which("bash")
+        assert bash, "checkout backup fixture requires Bash"
+        (programs / "bash").symlink_to(Path(bash).resolve())
     _program(programs / "git", 'import sys\nprint("a"*40 if "rev-parse" in sys.argv else "")\n')
     backup = programs / "backup.py"
     backup.write_text(BACKUP)
@@ -307,6 +459,30 @@ def run_arm(repo, env, native, args):
     return subprocess.run(command, env=env, cwd=repo, capture_output=True, text=True, timeout=60)
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX checkout backup interpreter")
+def test_fixture_backup_finds_bash_when_powershell_is_in_a_separate_directory(tmp_path, monkeypatch):
+    powershell = tmp_path / "powershell-only" / "pwsh"
+    powershell.parent.mkdir()
+    real_which = shutil.which
+
+    def which(command, *args, **kwargs):
+        if command == "pwsh":
+            return str(powershell)
+        return real_which(command, *args, **kwargs)
+
+    monkeypatch.setattr(shutil, "which", which)
+    with host(tmp_path, mode="checkout") as (repo, env, state_path):
+        assert real_which("docker", path=env["PATH"]) == env["PSEUDOLIFE_DOCKER"]
+        assert real_which("bash", path=env["PATH"]), "fixture PATH hides its backup interpreter"
+        result = subprocess.run(["bash", str(repo / "ops/backup.sh")], cwd=repo, env=env,
+                                capture_output=True, text=True, timeout=30)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert json.loads(state_path.read_text())["calls"] == [["fixture-backup"]]
+        directory = Path(env["UPDATE_FIXTURE_BACKUPS"])
+        assert (directory / "pseudolife_memory-20260101-000001.sql.gz").is_file()
+        assert (directory / "pseudolife_state-20260101-000001.tgz").is_file()
+
+
 def stages(state):
     result = []
     for args in state["calls"]:
@@ -348,20 +524,126 @@ def test_new_mount_is_allowed_without_replacing_existing_data(tmp_path, kind, mo
         assert "up" in stages(json.loads(state_path.read_text()))
 
 
-def test_checkout_health_from_another_daemon_cannot_hide_stopped_recreation(tmp_path):
+@pytest.mark.parametrize("failure", ["recreated_stopped", "recreated_restarting", "recreated_missing"])
+def test_checkout_health_from_another_daemon_cannot_hide_stopped_recreation(tmp_path, failure):
     binary = _native_binary()
     if not binary:
         pytest.skip("set PSEUDOLIFE_RUST_BINARY to the built native CLI")
-    with host(tmp_path, "recreated_stopped", "checkout") as (repo, env, state_path):
+    with host(tmp_path, failure, "checkout") as (repo, env, state_path):
         state = json.loads(state_path.read_text())
         state["replacement_id"] = "recreated-checkout-daemon"
         state_path.write_text(json.dumps(state))
         result = run_arm(repo, env, binary, ["--checkout", str(repo), "--json", "--no-test-login",
                                            "--no-cache-prune", "--health-retries", "1", "--health-delay-ms", "0"])
         assert result.returncode == 1, result.stdout + result.stderr
-        assert "not running" in result.stdout and "rollback" in result.stdout.lower()
+        assert "recreated" in result.stdout and "rollback" in result.stdout.lower()
+        assert "nothing was changed" not in result.stdout
+        assert "before updating" not in result.stdout
         state = json.loads(state_path.read_text())
-        assert ["inspect", "-f", "{{.State.Running}}", "recreated-checkout-daemon"] in state["calls"]
+        if failure != "recreated_missing":
+            assert ["inspect", "-f", "{{.State.Status}}", "recreated-checkout-daemon"] in state["calls"]
+
+
+@pytest.mark.parametrize("target", ["/data/x", "/data/x/../y", "/"])
+@pytest.mark.parametrize("kind", ["bind", "volume", "tmpfs"])
+def test_new_mount_cannot_shadow_existing_data(tmp_path, target, kind):
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY to the built native CLI")
+    with host(tmp_path, mode="checkout") as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        state["config"]["volumes"]["cache"] = {"name": "fixture-cache"}
+        state["config"]["services"][SERVICE]["volumes"].append(
+            {"type": kind, "source": "cache" if kind == "volume" else str(repo / "cache"), "target": target})
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary, ["--checkout", str(repo), "--json", "--no-test-login", "--no-cache-prune"])
+        assert result.returncode == 2, result.stdout + result.stderr
+        assert "overlaps" in result.stdout and "remove" in result.stdout
+        assert stages(json.loads(state_path.read_text())) == []
+
+
+@pytest.mark.parametrize("target,allowed", [("/data/cache:mode=1777", False), ("/data", False), ("/", False), ("/new-cache", True)])
+def test_service_tmpfs_mounts_cannot_shadow_persistent_data(tmp_path, target, allowed):
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY to the built native CLI")
+    with host(tmp_path, mode="checkout") as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        # Captured from `docker compose config --format json`: service-level
+        # tmpfs remains a separate list, including mount options after ':'.
+        state["config"]["services"][SERVICE]["tmpfs"] = [target]
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary, ["--checkout", str(repo), "--json", "--no-test-login", "--no-cache-prune"])
+        assert result.returncode == (0 if allowed else 2), result.stdout + result.stderr
+        if not allowed:
+            assert "overlaps" in result.stdout or "persistent mount" in result.stdout
+            assert "remove" in result.stdout or "restore" in result.stdout
+            assert stages(json.loads(state_path.read_text())) == []
+
+
+def test_optional_test_login_uses_selected_project_postgres(tmp_path):
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY to the built native CLI")
+    with host(tmp_path, mode="checkout") as (repo, env, state_path):
+        if os.name == "nt":
+            # test-login uses bare `docker`, unlike update's explicit override.
+            # Rust searches its executable directory and System32 before the
+            # inherited PATH; hosted Windows has Docker in System32. Keep this
+            # copied candidate beside our stub so no host Docker can resolve.
+            binary = shutil.copyfile(binary, Path(env["PSEUDOLIFE_DOCKER"]).with_name(Path(binary).name))
+        env["PSEUDOLIFE_TEST_PG_HOST_PORT"] = "127.0.0.1:5433"
+        result = run_arm(repo, env, binary, ["--checkout", str(repo), "--json", "--no-cache-prune"])
+        assert result.returncode == 0, result.stdout + result.stderr
+        calls = json.loads(state_path.read_text())["calls"]
+        assert ["port", "fixture-pg", "5432/tcp"] in calls
+        assert not any("pseudolife-mcp-postgres" in call for call in calls)
+        assert any(call[:3] == ["exec", "-i", "fixture-pg"] and any("psql" in arg for arg in call) for call in calls)
+
+
+def test_builtin_backup_has_independent_container_deadlines(tmp_path):
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY to the built native CLI")
+    with host(tmp_path, mode="checkout") as (repo, env, state_path):
+        for name in ("backup.sh", "backup.ps1"):
+            (repo / "ops" / name).unlink(missing_ok=True)
+        result = run_arm(repo, env, binary, ["--checkout", str(repo), "--json", "--no-test-login", "--no-cache-prune"])
+        assert result.returncode == 0, result.stdout + result.stderr
+        calls = json.loads(state_path.read_text())["calls"]
+        for command in ("pg_dump", "tar czf"):
+            call = next(a for a in calls if a[0] == "exec" and any(command in v for v in a))
+            assert call[2:5] == ["timeout", "--kill-after=5s", "3500s"]
+
+
+def test_rollback_retention_leaves_other_projects_and_current_tag(tmp_path):
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY to the built native CLI")
+    with host(tmp_path, mode="checkout") as (repo, env, state_path):
+        args = ["--checkout", str(repo), "--json", "--no-test-login", "--no-cache-prune", "--keep-rollbacks", "0"]
+        first = run_arm(repo, env, binary, args)
+        assert first.returncode == 0, first.stdout + first.stderr
+        state = json.loads(state_path.read_text())
+        tag = next(call[-1] for call in state["calls"] if call[:1] == ["tag"])
+        # New tags carry a project scope before their timestamp; legacy tags
+        # and tags from another scope have no deletion authority here.
+        prefix = tag.rsplit("-", 2)[0]
+        own = prefix + "-20000101-000000"
+        other = "pseudolife-daemon:0.21.0-pre-update-other-project-20000101-000000"
+        legacy = "pseudolife-daemon:0.21.0-pre-update-19990101-000000"
+        manual = own + "-keep"
+        state["images"].update({own:"sha256:old-own", other:"sha256:other", legacy:"sha256:legacy", manual:"sha256:manual"})
+        state.update(calls=[], deployed=False, list_images=True)
+        state["running"]["Image"] = "sha256:validated"
+        state_path.write_text(json.dumps(state))
+        second = run_arm(repo, env, binary, args)
+        assert second.returncode == 0, second.stdout + second.stderr
+        calls = json.loads(state_path.read_text())["calls"]
+        removed = [call[-1] for call in calls if call[:1] == ["rmi"]]
+        assert own in removed
+        assert other not in removed and legacy not in removed and tag not in removed
+        assert manual not in removed
 
 
 @pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])

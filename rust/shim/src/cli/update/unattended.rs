@@ -74,6 +74,7 @@ fn post_json(
 ) -> std::result::Result<Value, String> {
     seams::block_on(async {
         let client = reqwest::Client::builder()
+            .no_proxy()
             .redirect(reqwest::redirect::Policy::none())
             .timeout(Duration::from_secs(10))
             .build()
@@ -247,13 +248,18 @@ fn describe(peers: &[Value]) -> String {
 }
 
 fn health_version(health: &Value) -> Result<String> {
-    health["version"]
+    let version = health["version"]
         .as_str()
-        .filter(|s| super::plain_release(s))
-        .map(str::to_owned)
+        .filter(|s| !s.is_empty())
         .ok_or_else(|| {
             UpdateError::usage("the daemon's /health carries no version; nothing was changed")
-        })
+        })?;
+    if !super::plain_release(version) {
+        return Err(UpdateError::usage(
+            "the daemon's /health reports a non-release version; install a published release before using unattended updates; nothing was changed",
+        ));
+    }
+    Ok(version.to_owned())
 }
 
 /// The caller owns the final result file; this layer owns only its append log.
