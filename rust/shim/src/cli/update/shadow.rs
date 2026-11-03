@@ -504,7 +504,7 @@ pub(super) fn start(
         "--force".into(),
         SERVICE.into(),
     ]);
-    let mut cleanup = Cleanup::new(args, env.clone())?;
+    let cleanup = Cleanup::new(args, env.clone())?;
     if compose_call(
         u,
         &compose,
@@ -528,7 +528,19 @@ pub(super) fn start(
         )));
     }
     let retries = u.o.health_retries;
-    match gate(u, &url, token, version, schema, retries) {
+    let health = gate(u, &url, token, version, schema, retries);
+    finish_start(u, &compose, &env, &url, cleanup, health)
+}
+
+fn finish_start(
+    u: &mut Update,
+    compose: &[String],
+    env: &Environment,
+    url: &str,
+    mut cleanup: Cleanup,
+    health: Result<Value>,
+) -> Result<()> {
+    match health {
         Ok(_) => {
             #[cfg(unix)]
             if signals::checkpoint() != 0 {
@@ -547,14 +559,14 @@ pub(super) fn start(
                 // after cancellation, while its explicit recovery scope may run.
                 return Err(e);
             }
-            let failed = compose_call(
-                u,
-                &compose,
-                &env,
-                &["rm", "--stop", "--force", SERVICE],
-                120,
-            )
-            .0 != 0;
+            let failed =
+                compose_call(u, compose, env, &["rm", "--stop", "--force", SERVICE], 120).0 != 0;
+            #[cfg(unix)]
+            if signals::checkpoint() != 0 {
+                // Cancellation can arrive during the removal itself. Its guard
+                // defers exit to this scope, so leave recovery armed for Drop.
+                return Err(e);
+            }
             cleanup.armed = false;
             Err(UpdateError::new(format!(
                 "{}; Python is unchanged; {}retry {RETRY} (the saved password is retained)",
@@ -602,58 +614,77 @@ mod cancellation_tests {
     #[allow(unsafe_code)]
     fn cancellation_removes_armed_shadow_before_exit() {
         for mode in ["command", "health", "delay"] {
-            let root = FixtureDir::new();
-            let mut child = Command::new(std::env::current_exe().unwrap())
-                .args([
-                    "--exact",
-                    "cli::update::shadow::cancellation_tests::shadow_scope_child",
-                    "--ignored",
-                    "--quiet",
-                ])
-                .env("UPDATE_SHADOW_CLEANUP_ROOT", root.path())
-                .env("UPDATE_SHADOW_CLEANUP_MODE", mode)
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn()
-                .unwrap();
-            let deadline = Instant::now() + Duration::from_secs(30);
-            while !root.path().join("ready").exists() {
-                if child.try_wait().unwrap().is_some() || Instant::now() >= deadline {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    panic!("shadow fixture did not become ready ({mode})");
-                }
-                std::thread::sleep(Duration::from_millis(20));
-            }
-            // SAFETY: signal only the still-live owned fixture child.
-            assert_eq!(unsafe { libc::kill(child.id() as i32, libc::SIGTERM) }, 0);
-            let deadline = Instant::now() + Duration::from_secs(30);
-            let status = loop {
-                if let Some(status) = child.try_wait().unwrap() {
-                    break status;
-                }
-                if Instant::now() >= deadline {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    panic!("cancelled shadow fixture did not exit ({mode})");
-                }
-                std::thread::sleep(Duration::from_millis(20));
-            };
-            use std::os::unix::process::ExitStatusExt;
-            assert!(
-                status.signal() == Some(libc::SIGTERM)
-                    || status.code() == Some(128 + libc::SIGTERM)
-            );
-            assert!(
-                root.path().join("removed").exists(),
-                "cancelled shadow was not removed ({mode})"
-            );
-            assert!(
-                !root.path().join("unexpected").exists(),
-                "ordinary command ran after cancellation"
-            );
+            cancellation_case(mode);
         }
+    }
+
+    #[test]
+    fn cancellation_interrupts_streaming_health() {
+        cancellation_case("stream-health");
+    }
+
+    #[test]
+    fn cancellation_interrupts_streaming_authenticated_read() {
+        cancellation_case("stream-read");
+    }
+
+    #[test]
+    fn cancellation_retries_interrupted_failure_removal() {
+        cancellation_case("failure-removal");
+    }
+
+    #[allow(unsafe_code)]
+    fn cancellation_case(mode: &str) {
+        let root = FixtureDir::new();
+        let mut child = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "cli::update::shadow::cancellation_tests::shadow_scope_child",
+                "--ignored",
+                "--quiet",
+            ])
+            .env("UPDATE_SHADOW_CLEANUP_ROOT", root.path())
+            .env("UPDATE_SHADOW_CLEANUP_MODE", mode)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while !root.path().join("ready").exists() {
+            if child.try_wait().unwrap().is_some() || Instant::now() >= deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!("shadow fixture did not become ready ({mode})");
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        // SAFETY: signal only the still-live owned fixture child.
+        assert_eq!(unsafe { libc::kill(child.id() as i32, libc::SIGTERM) }, 0);
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let status = loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                break status;
+            }
+            if Instant::now() >= deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!("cancelled shadow fixture did not exit ({mode})");
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        };
+        use std::os::unix::process::ExitStatusExt;
+        assert!(
+            status.signal() == Some(libc::SIGTERM) || status.code() == Some(128 + libc::SIGTERM)
+        );
+        assert!(
+            root.path().join("removed").exists(),
+            "cancelled shadow was not removed ({mode})"
+        );
+        assert!(
+            !root.path().join("unexpected").exists(),
+            "ordinary command ran after cancellation"
+        );
     }
 
     #[test]
@@ -665,6 +696,35 @@ mod cancellation_tests {
             .unwrap()
             .to_string_lossy()
             .into_owned();
+        if env["UPDATE_SHADOW_CLEANUP_MODE"] == "failure-removal" {
+            use std::os::unix::fs::PermissionsExt;
+            let docker = root.join("docker-fixture");
+            fs::write(&docker, b"#!/bin/sh\ncd \"$UPDATE_SHADOW_CLEANUP_ROOT\" || exit 1\nif [ ! -e attempted ]; then\n  touch attempted ready\n  exec sleep 60\nfi\ntouch removed\n").unwrap();
+            fs::set_permissions(&docker, fs::Permissions::from_mode(0o700)).unwrap();
+            let mut update = Update::new(Options::parse(vec![]).unwrap());
+            update.docker = docker.to_string_lossy().into_owned();
+            let cleanup = Cleanup::new(
+                vec![
+                    update.docker.clone(),
+                    "compose".into(),
+                    "rm".into(),
+                    "--stop".into(),
+                    "--force".into(),
+                    SERVICE.into(),
+                ],
+                env.clone(),
+            )
+            .unwrap();
+            let _ = finish_start(
+                &mut update,
+                &[],
+                &env,
+                "fixture",
+                cleanup,
+                Err(UpdateError::new("fixture health failed")),
+            );
+            panic!("cancelled removal returned instead of exiting");
+        }
         let _cleanup = Cleanup::new(
             vec![
                 exe.clone(),
@@ -691,14 +751,55 @@ mod cancellation_tests {
             fs::write(root.join("ready"), b"ready").unwrap();
             signals::sleep(Duration::from_secs(60));
         } else {
-            // Hold an isolated listener without serving; health requests have
-            // their real three-second deadline and cannot reach a real daemon.
+            // A stream that keeps making progress must still be cancellable;
+            // the transport's inactivity timeout cannot bound its duration.
             let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
             let mut update = Update::new(Options::parse(vec![]).unwrap());
             update.o.daemon_url = format!("http://{}", listener.local_addr().unwrap());
             update.o.health_retries = 30;
             update.o.health_delay_ms = 20;
-            fs::write(root.join("ready"), b"ready").unwrap();
+            let mode = env["UPDATE_SHADOW_CLEANUP_MODE"].clone();
+            if mode.starts_with("stream-") {
+                let root = root.clone();
+                std::thread::spawn(move || {
+                    for stream in listener.incoming() {
+                        let mut stream = stream.unwrap();
+                        stream
+                            .set_read_timeout(Some(Duration::from_secs(10)))
+                            .unwrap();
+                        stream
+                            .set_write_timeout(Some(Duration::from_secs(10)))
+                            .unwrap();
+                        let mut request = Vec::new();
+                        let mut byte = [0];
+                        while !request.ends_with(b"\r\n\r\n") {
+                            if stream.read_exact(&mut byte).is_err() {
+                                return;
+                            }
+                            request.push(byte[0]);
+                        }
+                        if mode == "stream-read" && request.starts_with(b"GET /health ") {
+                            let body = br#"{"status":"ok","version":"1.0.0","schema":1,"read_only":true,"ready":true,"db":"ok"}"#;
+                            write!(stream, "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).unwrap();
+                            stream.write_all(body).unwrap();
+                            continue;
+                        }
+                        stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1000000\r\nConnection: close\r\n\r\n ").unwrap();
+                        fs::write(root.join("ready"), b"ready").unwrap();
+                        while stream.write_all(b" ").is_ok() {
+                            std::thread::park_timeout(Duration::from_millis(20));
+                        }
+                        return;
+                    }
+                });
+            } else {
+                fs::write(root.join("ready"), b"ready").unwrap();
+                // Keep this listener alive through wait_health without serving.
+                std::thread::spawn(move || {
+                    let _listener = listener;
+                    std::thread::park_timeout(Duration::from_secs(60));
+                });
+            }
             let _ = update.wait_health(Some("1.0.0"), Some(1), "fixture-only", true);
         }
         let mut ordinary = env.clone();

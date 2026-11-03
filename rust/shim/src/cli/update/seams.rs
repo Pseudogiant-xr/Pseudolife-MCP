@@ -215,16 +215,45 @@ pub(crate) fn run_cli(
         }
     })
 }
-pub(crate) fn fetch_health_json(url: &str, timeout: u64) -> Option<Value> {
+fn daemon_get(
+    url: &str,
+    target: &str,
+    authorization: Option<&[u8]>,
+    timeout: u64,
+    follow: bool,
+) -> Option<super::super::hook_http::Reply> {
+    // Capture ownership on the caller thread, before block_on moves the future.
+    // Only its enclosing cleanup scope may defer default signal termination.
+    #[cfg(unix)]
+    let owns_scope = super::signals::owns_scope();
     block_on(async {
-        let reply =
-            super::super::hook_http::get(url, "", None, Duration::from_secs(timeout), true).await?;
-        if !(200..300).contains(&reply.status) {
-            return None;
+        let request = super::super::hook_http::get(
+            url,
+            target,
+            authorization,
+            Duration::from_secs(timeout),
+            follow,
+        );
+        #[cfg(unix)]
+        if owns_scope {
+            // The HTTP timeout bounds inactivity, so a streaming response may
+            // never finish. Drop it promptly when the owned scope is cancelled.
+            return tokio::select! {
+                biased;
+                _ = super::signals::wait(None) => None,
+                reply = request => reply,
+            };
         }
-        let result: Value = serde_json::from_slice(&reply.body).ok()?;
-        result.is_object().then_some(result)
+        request.await
     })
+}
+pub(crate) fn fetch_health_json(url: &str, timeout: u64) -> Option<Value> {
+    let reply = daemon_get(url, "", None, timeout, true)?;
+    if !(200..300).contains(&reply.status) {
+        return None;
+    }
+    let result: Value = serde_json::from_slice(&reply.body).ok()?;
+    result.is_object().then_some(result)
 }
 pub(crate) fn fetch_json(url: &str, timeout: u64) -> Option<Value> {
     block_on(async {
@@ -241,24 +270,20 @@ pub(crate) fn fetch_json(url: &str, timeout: u64) -> Option<Value> {
     })
 }
 pub(crate) fn authenticated_read(url: &str, token: &str) -> bool {
-    block_on(async {
-        let authorization = format!("Bearer {token}");
-        let Some(reply) = super::super::hook_http::get(
-            url.trim_end_matches('/'),
-            "/api/facts?limit=1",
-            Some(authorization.as_bytes()),
-            Duration::from_secs(10),
-            false,
-        )
-        .await
-        else {
-            return false;
-        };
-        (200..300).contains(&reply.status)
-            && serde_json::from_slice::<Value>(&reply.body)
-                .ok()
-                .is_some_and(|v| v["entries"].is_array() && !super::truthy(&v["error"]))
-    })
+    let authorization = format!("Bearer {token}");
+    let Some(reply) = daemon_get(
+        url.trim_end_matches('/'),
+        "/api/facts?limit=1",
+        Some(authorization.as_bytes()),
+        10,
+        false,
+    ) else {
+        return false;
+    };
+    (200..300).contains(&reply.status)
+        && serde_json::from_slice::<Value>(&reply.body)
+            .ok()
+            .is_some_and(|v| v["entries"].is_array() && !super::truthy(&v["error"]))
 }
 pub(crate) fn download(url: &str) -> Result<Option<Vec<u8>>> {
     block_on(async {

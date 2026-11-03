@@ -189,6 +189,12 @@ fn native_update_timeout_child() {
                 "--ignored",
             ])
             .env("UPDATE_TIMEOUT_DESCENDANT", "1")
+            // The lifetime lock is the oracle. Do not let inherited Windows
+            // pipes keep Tokio's blocking reads alive when deliberately testing
+            // broken job cleanup; that would hide the lock assertion in a hang.
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
             .spawn()
             .unwrap();
         let _ = child.wait();

@@ -86,6 +86,10 @@ pub(super) fn received() -> i32 {
     RECEIVED.load(Ordering::Relaxed)
 }
 
+pub(super) fn owns_scope() -> bool {
+    DEPTH.get() != 0
+}
+
 /// Allow only an explicitly owned recovery action to run after cancellation.
 /// A further signal still cancels that action; the first signal remains pending
 /// for the outer guard when recovery finishes.
