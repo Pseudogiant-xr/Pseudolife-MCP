@@ -1861,8 +1861,8 @@
           "type": "string"
          },
          "top_k": {
-          "default": 5,
-          "description": "Max entries returned; positive integer.",
+          "default": null,
+          "description": "Max entries returned; positive integer. Omit to use memory.lessons.top_k (default 5).",
           "minimum": 1,
           "title": "Top K",
           "type": "integer"
@@ -2883,8 +2883,8 @@
         "additionalProperties": false,
         "properties": {
          "hops": {
-          "default": 3,
-          "description": "Max graph hops. Clamped to 1..5.",
+          "default": null,
+          "description": "Max graph hops. Clamped to 1..5. When omitted, uses memory.recall.default_hops.",
           "title": "Hops",
           "type": "integer"
          },
@@ -2894,8 +2894,8 @@
           "type": "string"
          },
          "top_k": {
-          "default": 5,
-          "description": "Positive integer. Bounds only the SEED search (the initial hits that name the walk's start entities), not the result, which is capped separately; up to 3 ``texts`` slots go to seed hits.",
+          "default": null,
+          "description": "Positive integer. Bounds only the SEED search (the initial hits that name the walk's start entities), not the result, which is capped separately; up to 3 ``texts`` slots go to seed hits. When omitted, uses memory.recall.default_top_k.",
           "minimum": 1,
           "title": "Top K",
           "type": "integer"
@@ -3546,18 +3546,6 @@
       "inputSchema",
       "properties",
       "top_k",
-      "default"
-     ],
-     "token": "5"
-    },
-    {
-     "path": [
-      "result",
-      "tools",
-      20,
-      "inputSchema",
-      "properties",
-      "top_k",
       "minimum"
      ],
      "token": "1"
@@ -3707,30 +3695,6 @@
       "default"
      ],
      "token": "1"
-    },
-    {
-     "path": [
-      "result",
-      "tools",
-      34,
-      "inputSchema",
-      "properties",
-      "hops",
-      "default"
-     ],
-     "token": "3"
-    },
-    {
-     "path": [
-      "result",
-      "tools",
-      34,
-      "inputSchema",
-      "properties",
-      "top_k",
-      "default"
-     ],
-     "token": "5"
     },
     {
      "path": [
