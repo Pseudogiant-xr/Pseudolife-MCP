@@ -10,8 +10,10 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import re
 import time
+from pathlib import Path
 from typing import Any, Callable
 
 Rule = Callable[[dict], None]
@@ -329,7 +331,13 @@ def home_tokens(obs: dict, home: str) -> None:
     recorded under one home compare against a run under another."""
     from urllib.parse import quote  # noqa: PLC0415
     # Raw, JSON-escaped and URL-quoted (a launcher query carries the path).
-    forms = {home.encode(), json.dumps(home)[1:-1].encode(), quote(home, safe="").encode()}
+    homes = {home}
+    if os.name == "nt":
+        # TEMP may use an 8.3 ancestor while the CLI prints its long spelling.
+        # Resolve before encoding so the whole per-process home is replaced.
+        homes.add(str(Path(home).resolve()))
+    forms = {form.encode() for path in homes
+             for form in (path, json.dumps(path)[1:-1], quote(path, safe=""))}
 
     def swap(data: bytes) -> bytes:
         for form in sorted(forms, key=len, reverse=True):

@@ -81,6 +81,8 @@ modes:
                  `--tag X` pins one; pip installs upgrade the package)
   backup         back up the bank: pg_dump + state archive with rotation
                  (pip tiers; the Docker tier keeps ops/backup.ps1)
+  migrate-flat   back up and flatten a stopped bank without dropping entries
+                 (--apply --data-dir PATH; opt-in)
   export         write a portable logical export of the bank (ZIP of JSONL
                  tables + manifest; tier- and PG-version-independent)
   import         load a logical export into a fresh, empty bank
@@ -165,6 +167,9 @@ def main() -> None:
     elif mode == "board-audit":
         from pseudolife_memory.board_audit_cli import main as audit_main
         sys.exit(audit_main(sys.argv[2:]))
+    elif mode == "migrate-flat":
+        from pseudolife_memory.migrate_flat_cli import main as migrate_flat_main
+        sys.exit(migrate_flat_main(sys.argv[2:]))
     elif mode == "briefing":
         from pseudolife_memory.briefing_cli import run_briefing
         run_briefing()

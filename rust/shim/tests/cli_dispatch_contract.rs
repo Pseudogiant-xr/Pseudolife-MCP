@@ -22,9 +22,9 @@ fn help_aliases_ignore_trailing_arguments_before_daemon_attachment() {
         assert_eq!(output.status.code(), Some(0));
         // SHA-256 of pinned cli.py::_USAGE UTF-8 bytes, with Windows CRLF.
         let expected = if cfg!(windows) {
-            "431b9104ca3b188add7100442038cb20b275361421f85de263a8f163eb4db8e7"
+            "d130168242140ad45ea6f3f6c5457e07711ef50492fd4d7428823cb408752ebc"
         } else {
-            "32b2da5e90606740a82ca321675b8d60b2b314ca27ffa40effe4a9b0362c381d"
+            "f11497a658f9a2e0ea0c840420a842ea36c1334621393e2cd6e617de5d75f701"
         };
         assert_eq!(format!("{:x}", Sha256::digest(&output.stdout)), expected);
         assert!(output.stderr.is_empty());

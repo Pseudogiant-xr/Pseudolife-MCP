@@ -75,9 +75,10 @@ pub(super) const EXCLUDED_TABLES: [&str; 22] = [
     "console_sessions",
     "console_signin_codes",
 ];
-const META_SKIP_KEYS: [&str; 8] = [
+const META_SKIP_KEYS: [&str; 9] = [
     "schema_version",
     "active_session_pointer",
+    "flat_band_migration_v1",
     "dream_ack_secret_v1",
     "coordination_hlc_highwater",
     "coordination_bank_id",
