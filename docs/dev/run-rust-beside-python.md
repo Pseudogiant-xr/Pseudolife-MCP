@@ -15,6 +15,18 @@ option and does not redirect checkout mode's host file.
 Never copy the host env file into a different checkout. Have at least 8 GB free
 and enough additional space for a Rust build and its provisioned models.
 
+Use an updater from the matching checkout, not an older installed package.
+For an existing **Python CLI**, select the checkout in a separate terminal
+before the commands below (`$env:PYTHONPATH = (Get-Location).Path` in PowerShell):
+
+```sh
+export PYTHONPATH="$PWD"
+```
+
+A current native CLI needs no `PYTHONPATH`; its installation is described in
+[native runtimes](native-runtimes.md). This rehearsal used the Python CLI with
+that checkout selection, and did not install or move any client runtime.
+
 Check Python first:
 
 ```sh
