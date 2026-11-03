@@ -59,6 +59,20 @@ def load(name):
 
 
 class ContainerTests(unittest.TestCase):
+    def test_native_compile_inputs_exist_in_the_image_builder(self):
+        self.assertEqual(load("container_inputs").missing_compile_inputs(ROOT), [])
+
+    def test_missing_compile_input_guard_rejects_host_only_python_source(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "ops").mkdir()
+            (root / "ops/Dockerfile.daemon-rust").write_text(
+                "FROM rust AS builder\nCOPY rust /build/rust\nFROM debian\n", encoding="utf-8")
+            source = root / "rust/shim/src"
+            source.mkdir(parents=True)
+            (source / "probe.rs").write_text('include_str!("../../../pseudolife_memory/schema.py");', encoding="utf-8")
+            self.assertEqual(len(load("container_inputs").missing_compile_inputs(root)), 1)
+
     def test_guard_import_needs_only_the_standard_library(self):
         subprocess.run([sys.executable, "-S", "-c",
                         "import runpy, sys; runpy.run_path(sys.argv[1], run_name='container_guard_import')",

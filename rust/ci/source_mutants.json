@@ -279,5 +279,8 @@
     "tunnel-tunnel-id-class",
     "tunnel-update-exit-3",
     "tunnel-verify-message"
+  ],
+  "update": [
+    "update-current-exit"
   ]
 }
