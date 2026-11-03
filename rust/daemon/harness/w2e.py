@@ -6055,6 +6055,9 @@ SCENARIOS.update(w2e_conductor.register(sys.modules[__name__]))
 MUTANTS += w2e_hooks.MUTANTS
 HOME_OPS += w2e_hooks.HOME_OPS
 
+import w2e_auto_promote  # noqa: E402
+SCENARIOS.update(w2e_auto_promote.register(sys.modules[__name__]))
+
 import w2e_live_config  # noqa: E402
 SCENARIOS.update(w2e_live_config.register(sys.modules[__name__]))
 

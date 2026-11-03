@@ -10714,3 +10714,17 @@ def test_codex_doorbell_probe_record_backs_its_outcome():
     assert record["harness"] == "evals/codex_doorbell_probe.py"
     assert record["timeline"]["outcome"] == "rung, turn taken, acknowledged"
     assert '"rung, turn taken,\nacknowledged"' in _read_doc(CODEX_SPEC)
+
+
+# -- the Console board snapshot on a live-size board (2026-11-02) ----------
+# evals/console_snapshot_bench.py: the v59 owner-scope timeline as it ships
+# (SET LOCAL jit = off) against the same query with the server's JIT.
+CONSOLE_SNAPSHOT_BENCH = RESULTS + "console-snapshot-bench-20261102.json"
+for _cid, _value, _stated in (
+        ("console-snapshot-owner-jit-on",
+         lambda d: d["jit_diagnostic"]["new-owner-jit-on"]["repeats"]["median_ms"], 627),
+        ("console-snapshot-owner-shipped",
+         lambda d: d["timeline_query"]["new-owner"]["repeats"]["median_ms"], 130)):
+    CLAIMS.append(Claim(
+        id=_cid, doc=CHANGELOG, needle="the owner-scope query's median fell from 627 to 130 ms",
+        artifacts=(CONSOLE_SNAPSHOT_BENCH,), value=_value, stated=_stated, places=0))

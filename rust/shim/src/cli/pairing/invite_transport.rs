@@ -204,6 +204,8 @@ async fn psql(sql: &str) -> Output {
     capture(&command, Some(&format!("{sql}\n"))).await
 }
 
+/// `_forward`: only options an image at invite version 2 (#1154) parses;
+/// anything new here breaks every invite through it.
 fn forward(args: &Args, url: Option<String>) -> Vec<OsString> {
     let mut out: Vec<String> = Vec::new();
     if args.list {
@@ -222,6 +224,12 @@ fn forward(args: &Args, url: Option<String>) -> Vec<OsString> {
             "--expires".into(),
             format!("{}s", args.expires.unwrap_or(900)),
         ]);
+        // v59: whose machine, in `_forward`'s place, so the container's
+        // invite records it (never dropped: an omission would make someone
+        // else's machine the owner's).
+        if let Some(owned) = args.owned {
+            out.push(if owned { "--mine" } else { "--someone-else" }.into());
+        }
         if args.replace {
             out.push("--replace".into());
         }
@@ -268,13 +276,21 @@ pub(super) async fn run(args: &Args, report: &mut Report, port: u32) -> Result<u
     );
     check.remove(2); // A version probe has no stdin or TTY.
     let checked = capture(&check, None).await;
-    if checked.code != 0 || !checked.stdout.starts_with(VERSION_LINE) {
+    // `_image_version`: the highest N over lines that are exactly
+    // `pseudolife-mcp invite <N>`; 2 (v59) takes --someone-else and --mine.
+    let version = (checked.code == 0)
+        .then(|| image_version(&checked.stdout))
+        .flatten();
+    let Some(version) = version else {
         let message = if checked.code == 127 || checked.stderr.contains("No such container") {
             "no database here (PSEUDOLIFE_MCP_DATABASE_URL is unset and no lite bank was found) and no pseudolife-mcp-daemon container: run this on the daemon's host"
         } else {
             "the daemon's image predates `invite`: update the daemon first (pseudolife-mcp update), then re-run"
         };
         return Ok(report.fail(EXIT_REFUSED, message));
+    };
+    if args.owned.is_some() && version < 2 {
+        return Ok(report.fail(EXIT_REFUSED, "the daemon's image predates --someone-else and --mine: update the daemon to schema 59 (pseudolife-mcp update), then re-run. Nothing was changed"));
     }
     let url = match args.url.clone().filter(|u| !u.is_empty()) {
         Some(url) => Some(url),
@@ -382,11 +398,34 @@ async fn through_postgres(args: &Args, report: &mut Report) -> Result<u8, Defer>
     Ok(report.finish(EXIT_OK))
 }
 
+/// `_image_version`: the highest `N` over the lines of `invite
+/// --version-check` that are exactly `pseudolife-mcp invite <N>`. Universal
+/// newlines first, as the oracle's `text=True` run reads them (`\r\n`, then
+/// a lone `\r`, become `\n`), then lines split on `\n` only; `N` ASCII
+/// digits that fit a `u64` (leading zeros allowed).
+fn image_version(stdout: &str) -> Option<u64> {
+    stdout
+        .replace("\r\n", "\n")
+        .replace('\r', "\n")
+        .split('\n')
+        .filter_map(|line| line.strip_prefix("pseudolife-mcp invite "))
+        .filter(|rest| !rest.is_empty() && rest.chars().all(|c| c.is_ascii_digit()))
+        .filter_map(|digits| digits.parse::<u64>().ok())
+        .max()
+}
+
+/// `describe_rows(..., not_owner=None)` over psql's JSON: a row is 12
+/// columns, or 13 with v59's `owned` (null for an environment row). The
+/// stopped daemon's `coordination.not_owner_principals` is in its volume,
+/// not this host's config, so an environment row's owner is unknown.
 fn decode_list(text: &str) -> Result<(Vec<invite_db::Listed>, Vec<invite_db::Rejected>), Defer> {
     let value: serde_json::Value = serde_json::from_str(text).map_err(|_| Defer)?;
     let mut rows = Vec::new();
     for row in value["principals"].as_array().ok_or(Defer)? {
-        let row = row.as_array().filter(|r| r.len() == 12).ok_or(Defer)?;
+        let row = row
+            .as_array()
+            .filter(|r| r.len() == 12 || r.len() == 13)
+            .ok_or(Defer)?;
         let time = |i: usize| -> Result<Option<f64>, Defer> {
             if row[i].is_null() {
                 Ok(None)
@@ -432,6 +471,11 @@ fn decode_list(text: &str) -> Result<(Vec<invite_db::Listed>, Vec<invite_db::Rej
             paired_at: if stored { time(7)? } else { None },
             revoked_at: if stored { revoked } else { None },
             last_seen_at: time(10)?,
+            owner: stored.then(|| {
+                row.get(12)
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(true)
+            }),
         });
     }
     rows.sort_by(|a, b| a.principal.cmp(&b.principal));
@@ -460,6 +504,237 @@ mod tests {
         assert_eq!(rows[1].board, None);
         assert_eq!(rejected[0].rejections, 3);
         assert!(decode_list(r#"{"principals":[[]],"rejected":[]}"#).is_err());
+        // A stored row from before v59 is the owner's; an environment
+        // row's owner is the stopped daemon's config, unknown here.
+        assert_eq!(rows[0].owner, Some(true));
+        assert_eq!(rows[1].owner, None);
+    }
+
+    #[test]
+    fn the_image_version_is_the_highest_exact_version_line() {
+        for (stdout, version) in [
+            (
+                "pseudolife-mcp invite 1\npseudolife-mcp invite 2\n",
+                Some(2),
+            ),
+            (
+                "pseudolife-mcp invite 1\r\npseudolife-mcp invite 2\r\n",
+                Some(2),
+            ),
+            (
+                "pseudolife-mcp invite 2\npseudolife-mcp invite 1\n",
+                Some(2),
+            ),
+            ("a banner\npseudolife-mcp invite 3\n", Some(3)),
+            ("pseudolife-mcp invite 1\n", Some(1)),
+            (
+                "pseudolife-mcp invite 1\npseudolife-mcp invite 2x\n",
+                Some(1),
+            ),
+            (
+                "pseudolife-mcp invite 1\n pseudolife-mcp invite 2\n",
+                Some(1),
+            ),
+            ("pseudolife-mcp invite \n", None),
+            ("pseudolife-mcp invite 2 extra\n", None),
+            ("", None),
+        ] {
+            assert_eq!(image_version(stdout), version, "{stdout:?}");
+        }
+    }
+
+    /// The parity cases `tests/test_invite_cli.py` runs through the
+    /// oracle's `_image_version`: both read the probe alike.
+    #[test]
+    fn the_image_version_reads_as_the_oracle_does() {
+        let zeros = format!("pseudolife-mcp invite {}2\n", "0".repeat(5000));
+        let huge = format!(
+            "pseudolife-mcp invite 1\npseudolife-mcp invite {}\n",
+            "1".repeat(25)
+        );
+        for (stdout, version) in [
+            // Universal newlines: a lone \r ends a line, as \r\n and \n do.
+            ("pseudolife-mcp invite 1\rpseudolife-mcp invite 2", Some(2)),
+            (
+                "pseudolife-mcp invite 1\rpseudolife-mcp invite 2\n",
+                Some(2),
+            ),
+            (
+                "pseudolife-mcp invite 1\n\rpseudolife-mcp invite 2\n",
+                Some(2),
+            ),
+            ("pseudolife-mcp invite 2\r", Some(2)),
+            ("pseudolife-mcp invite 2\r\r\n", Some(2)),
+            (
+                "pseudolife-mcp invite 1\r\rpseudolife-mcp invite 3\r\n",
+                Some(3),
+            ),
+            ("pseudolife-mcp invite 2 \r\n", None),
+            ("pseudolife-mcp invite 2", Some(2)),
+            // A number past u64 is ignored; leading zeros are not.
+            (huge.as_str(), Some(1)),
+            (
+                "pseudolife-mcp invite 18446744073709551615\n",
+                Some(u64::MAX),
+            ),
+            ("pseudolife-mcp invite 18446744073709551616\n", None),
+            (zeros.as_str(), Some(2)),
+            ("pseudolife-mcp invite 0\n", Some(0)),
+            ("", None),
+            ("\n", None),
+            // Decimal digits other than ASCII are not a version.
+            ("pseudolife-mcp invite \u{0662}\n", None),
+            (
+                "pseudolife-mcp invite 1\npseudolife-mcp invite \u{ff12}\n",
+                Some(1),
+            ),
+            // Other Unicode line breaks split nothing.
+            (
+                "pseudolife-mcp invite 1\u{2028}pseudolife-mcp invite 2\n",
+                None,
+            ),
+        ] {
+            assert_eq!(image_version(stdout), version, "{stdout:?}");
+        }
+    }
+
+    #[test]
+    fn the_container_invite_carries_whose_machine_it_is() {
+        let base = |owned| Args {
+            name: Some("laptop".into()),
+            owned,
+            ..Args::default()
+        };
+        let argv = |args: &Args| -> Vec<String> {
+            forward(args, Some("https://example.com".into()))
+                .into_iter()
+                .map(|a| a.to_string_lossy().into_owned())
+                .collect()
+        };
+        let mine = argv(&base(Some(true)));
+        let theirs = argv(&base(Some(false)));
+        assert!(
+            mine.contains(&"--mine".to_owned()) && !mine.contains(&"--someone-else".to_owned())
+        );
+        assert!(
+            theirs.contains(&"--someone-else".to_owned()) && !theirs.contains(&"--mine".to_owned())
+        );
+        // Python's order: after --expires, before --replace and --url.
+        let at = |v: &[String], s: &str| v.iter().position(|a| a == s).unwrap();
+        assert!(at(&theirs, "--expires") < at(&theirs, "--someone-else"));
+        assert!(at(&theirs, "--someone-else") < at(&theirs, "--url"));
+        let neither = argv(&base(None));
+        assert!(
+            !neither
+                .iter()
+                .any(|a| a == "--mine" || a == "--someone-else")
+        );
+    }
+
+    /// The options an image built from #1154 alone parses: its
+    /// `invite_cli._parser` (`git show
+    /// origin/feat/console-owner-scope:pseudolife_memory/invite_cli.py`),
+    /// a fixed allowlist taken from that branch, each with whether it takes
+    /// a value. That image already answers `pseudolife-mcp invite 2`, and
+    /// its argparse refuses anything else as unrecognized.
+    const BASE_OPTIONS: [(&str, bool); 15] = [
+        ("--tier", true),
+        ("--board", false),
+        ("--no-board", false),
+        ("--expires", true),
+        ("--someone-else", false),
+        ("--mine", false),
+        ("--replace", false),
+        ("--url", true),
+        ("--port", true),
+        ("--bank", true),
+        ("--list", false),
+        ("--revoke", true),
+        ("--yes", false),
+        ("--json", false),
+        ("--version-check", false),
+    ];
+
+    #[test]
+    fn an_image_from_1154_parses_what_the_host_forwards() {
+        let invites = [
+            Args {
+                name: Some("laptop".into()),
+                ..Args::default()
+            },
+            Args {
+                name: Some("laptop".into()),
+                json: true,
+                ..Args::default()
+            },
+            Args {
+                name: Some("laptop".into()),
+                tier: Some("core".into()),
+                board: Some(false),
+                owned: Some(false),
+                replace: true,
+                bank: Some("abc".into()),
+                json: true,
+                ..Args::default()
+            },
+            Args {
+                name: Some("laptop".into()),
+                board: Some(true),
+                owned: Some(true),
+                expires: Some(7200),
+                ..Args::default()
+            },
+            Args {
+                list: true,
+                json: true,
+                ..Args::default()
+            },
+            Args {
+                revoke: Some("laptop".into()),
+                ..Args::default()
+            },
+        ];
+        let strings = |args: &Args| -> Vec<String> {
+            forward(args, Some("u".into()))
+                .into_iter()
+                .map(|a| a.to_string_lossy().into_owned())
+                .collect()
+        };
+        for args in &invites {
+            let argv = strings(args);
+            let mut items = argv.iter();
+            while let Some(item) = items.next() {
+                if !item.starts_with('-') {
+                    continue;
+                }
+                let known = BASE_OPTIONS.iter().find(|(option, _)| option == item);
+                assert!(
+                    known.is_some(),
+                    "an image from #1154 refuses {item} in {argv:?}"
+                );
+                if known.is_some_and(|(_, value)| *value) {
+                    items.next();
+                }
+            }
+        }
+        // A plain invite forwards exactly what v0.21.0's host CLI did.
+        assert_eq!(
+            strings(&invites[0]),
+            ["laptop", "--expires", "900s", "--url", "u"]
+        );
+    }
+
+    #[test]
+    fn stopped_daemon_rows_carry_v59_ownership() {
+        let (rows, _) = decode_list(r#"{"principals":[["guest",null,true,true,false,null,1,2,null,100,null,true,false],["env",null,null,false,false,null,null,null,null,100,9,false,null],["mine",null,true,true,false,null,1,2,null,100,null,true,true]],"rejected":[]}"#).unwrap();
+        let owner: Vec<(&str, Option<bool>)> = rows
+            .iter()
+            .map(|r| (r.principal.as_str(), r.owner))
+            .collect();
+        assert_eq!(
+            owner,
+            [("env", None), ("guest", Some(false)), ("mine", Some(true))]
+        );
     }
 
     #[test]

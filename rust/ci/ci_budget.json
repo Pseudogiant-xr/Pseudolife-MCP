@@ -161,7 +161,7 @@
       "fixtures": "defc5e07c5ac3f94",
       "candidate": "d71c5590ce6f866a",
       "candidate-harness": "43b859ee9d5fd738",
-      "parity-checks": "398ff9a598c5f63e",
+      "parity-checks": "3d8e223dcbc15bc0",
       "daemon-image": "5c93764cb0f0bab7",
       "parity": "aa4ba434de948ea6"
     },
@@ -270,6 +270,11 @@
         "job": "parity-checks",
         "fingerprint": "398ff9a598c5f63e",
         "reason": "The migrate_flat row stays in existing h5-backup selection; this unchanged job fingerprint makes the acceptance a cost annotation, not a new selection gate. The 34-case Windows run at 1f9e646e measured 77.93s live, 40.93s record and 30.51s golden (149.37s total); Linux previously measured 68.7s for 32 cases, and the new 34-case Linux capture took 27.97s. No gated job, setup or shard is added. This fits the existing bounded per-shard allowance and unchanged workflow limits; retain the baseline pending batch measurement. Its source mutant remains nightly/manual only."
+      },
+      {
+        "job": "parity-checks",
+        "fingerprint": "3d8e223dcbc15bc0",
+        "reason": "Issue #1211: Windows judges step deadline 15 -> 20 minutes plus eight Stopwatch/Write-Host phase timings; no jobs, setup, commands or cases added. Paired Windows VM totals at a461bac9 and batch 8b63e007 were 584.6s and 541.3s; hosted step 554s at master, 901s timeout then 519s pass at unchanged batch head (runs 41627644757 and 41630214341). Existing measured job costs and budget limits retained; slow-runner headroom only."
       }
     ]
   },

@@ -1,5 +1,7 @@
 //! Native invite creation and administration over PostgreSQL or the daemon
 //! container, with stopped-daemon list/revoke through psql.
+//! v59: `--someone-else` / `--mine` on an invite, and an owner column in
+//! `--list` (`coordination.not_owner_principals` read natively).
 use super::invite_db::{self, DbError};
 use super::pyjson::{self, J};
 use super::{Defer, net};
@@ -15,13 +17,27 @@ const DEFAULT_PORT: u32 = 8765;
 const MIN_SCHEMA: i64 = 53;
 const TIERS: [&str; 3] = ["minimal", "core", "full"];
 const URL_PLACEHOLDER: &str = "<daemon-url>";
-const VERSION_LINE: &str = "pseudolife-mcp invite 1";
+/// `VERSION_LINES`: what `invite --version-check` prints, the highest
+/// version listed being this image's; 2 (v59) takes `--someone-else` and
+/// `--mine`. Line 1 stays first because every host CLI before v59, Python
+/// and shim alike, accepts the image only when its output starts with
+/// `pseudolife-mcp invite 1`: without it, a host CLI one release behind
+/// refuses a plain invite as an image that predates `invite`.
+const VERSION_LINES: [&str; 2] = ["pseudolife-mcp invite 1", "pseudolife-mcp invite 2"];
+/// `OWNERSHIP_NOTE`: the `--someone-else` note, one text however invite
+/// was run, since a host CLI before v59 forwards an invite into the image
+/// with nothing that tells it apart from a direct run, and its own parser
+/// refuses `--someone-else`.
+const OWNERSHIP_NOTE: &str = "for a machine that is not yours, add --someone-else (an older pseudolife-mcp refuses it: update it first)";
 
 #[derive(Default)]
 struct Args {
     name: Option<String>,
     tier: Option<String>,
     board: Option<bool>,
+    /// v59: `--someone-else` (false) or `--mine` (true); both is
+    /// argparse's mutually-exclusive error, deferred.
+    owned: Option<bool>,
     expires: Option<u32>,
     replace: bool,
     url: Option<String>,
@@ -112,6 +128,8 @@ fn parse(arguments: &[String]) -> Result<Args, Defer> {
             }
             "--board" => once(&mut args.board, true)?,
             "--no-board" => once(&mut args.board, false)?,
+            "--someone-else" => once(&mut args.owned, false)?,
+            "--mine" => once(&mut args.owned, true)?,
             "--expires" => once(&mut args.expires, expires(&value()?)?)?,
             "--replace" => flag(&mut args.replace)?,
             "--url" => once(&mut args.url, value()?)?,
@@ -312,37 +330,88 @@ fn python_home() -> Result<PathBuf, Defer> {
     }
 }
 
+/// The daemon's `config.yaml` as `invite_cli._coordination_config` finds it:
+/// `PSEUDOLIFE_MCP_CONFIG`, else the data dir's (`PSEUDOLIFE_MCP_DATA_DIR`,
+/// the lite default when it exists, else `./data`). `None` when there is
+/// none or it does not parse: a courtesy read, never a failure.
+fn config_yaml() -> Option<yaml_rust2::Yaml> {
+    let path = match env_nonempty("PSEUDOLIFE_MCP_CONFIG") {
+        Some(path) => path,
+        None => {
+            let directory = env_nonempty("PSEUDOLIFE_MCP_DATA_DIR").or_else(|| {
+                let home = python_home().ok()?;
+                let base = if cfg!(windows) {
+                    env_nonempty("LOCALAPPDATA").unwrap_or_else(|| home.join("AppData/Local"))
+                } else if cfg!(target_os = "macos") {
+                    home.join("Library/Application Support")
+                } else {
+                    env_nonempty("XDG_DATA_HOME").unwrap_or_else(|| home.join(".local/share"))
+                };
+                let lite = base.join("pseudolife-mcp");
+                if lite.exists() {
+                    Some(lite)
+                } else {
+                    std::env::current_dir().ok().map(|p| p.join("data"))
+                }
+            })?;
+            directory.join("config.yaml")
+        }
+    };
+    let text = std::fs::read_to_string(path).ok()?;
+    yaml_rust2::YamlLoader::load_from_str(&text)
+        .ok()?
+        .into_iter()
+        .next()
+}
+
+/// A `coordination` list of names as `CoordinationConfig.__post_init__`
+/// keeps it: each stripped and lower-cased, duplicates dropped in order.
+/// `None` when any entry is not a string or is blank (the oracle's
+/// validation then refuses the whole file).
+fn coordination_names(config: &yaml_rust2::Yaml, key: &str) -> Option<Vec<String>> {
+    let items = match &config["coordination"][key] {
+        yaml_rust2::Yaml::BadValue | yaml_rust2::Yaml::Null => return Some(Vec::new()),
+        yaml_rust2::Yaml::Array(items) => items,
+        _ => return None,
+    };
+    let mut names: Vec<String> = Vec::new();
+    for value in items {
+        let name = value.as_str()?.trim().to_lowercase();
+        if name.is_empty() {
+            return None;
+        }
+        if !names.contains(&name) {
+            names.push(name);
+        }
+    }
+    Some(names)
+}
+
+/// The config is the oracle's only when both lists it reads are valid: a
+/// malformed one makes `load_config` refuse the whole file, and then
+/// neither the listed note nor the not-owner names apply.
+fn coordination_lists(config: &yaml_rust2::Yaml) -> Option<(Vec<String>, Vec<String>)> {
+    Some((
+        coordination_names(config, "allowed_principals")?,
+        coordination_names(config, "not_owner_principals")?,
+    ))
+}
+
 /// The optional courtesy note never blocks an invite on malformed configuration.
 fn listed_in_config(name: &str) -> bool {
-    let directory = env_nonempty("PSEUDOLIFE_MCP_DATA_DIR").or_else(|| {
-        let home = python_home().ok()?;
-        let base = if cfg!(windows) {
-            env_nonempty("LOCALAPPDATA").unwrap_or_else(|| home.join("AppData/Local"))
-        } else if cfg!(target_os = "macos") {
-            home.join("Library/Application Support")
-        } else {
-            env_nonempty("XDG_DATA_HOME").unwrap_or_else(|| home.join(".local/share"))
-        };
-        let lite = base.join("pseudolife-mcp");
-        if lite.exists() {
-            Some(lite)
-        } else {
-            std::env::current_dir().ok().map(|p| p.join("data"))
-        }
-    });
-    let Some(directory) = directory else {
-        return false;
-    };
-    let Ok(text) = std::fs::read_to_string(directory.join("config.yaml")) else {
-        return false;
-    };
-    let Ok(documents) = yaml_rust2::YamlLoader::load_from_str(&text) else {
-        return false;
-    };
-    documents
-        .first()
-        .and_then(|doc| doc["coordination"]["allowed_principals"].as_vec())
-        .is_some_and(|names| names.iter().any(|value| value.as_str() == Some(name)))
+    config_yaml()
+        .and_then(|config| coordination_lists(&config))
+        .is_some_and(|(allowed, _)| allowed.iter().any(|value| value == name))
+}
+
+/// `_not_owner_names` (v59): `coordination.not_owner_principals`, the
+/// environment principals that are someone else's; empty when the config
+/// cannot be read.
+fn not_owner_in_config() -> Vec<String> {
+    config_yaml()
+        .and_then(|config| coordination_lists(&config))
+        .map(|(_, not_owner)| not_owner)
+        .unwrap_or_default()
 }
 
 fn python_bool(value: bool) -> J {
@@ -359,7 +428,9 @@ pub(super) async fn run(arguments: &[String]) -> Result<u8, Defer> {
         Err(_) => return Err(Defer),
     };
     if args.version_check {
-        super::print(VERSION_LINE);
+        for line in VERSION_LINES {
+            super::print(line);
+        }
         return Ok(EXIT_OK);
     }
     let mut report = Report::new(args.json);
@@ -600,7 +671,8 @@ async fn local(
         }
         if args.list {
             let environment = list_environment()?;
-            let rows = invite_db::list(session.client(), &environment).await?;
+            let rows =
+                invite_db::list(session.client(), &environment, &not_owner_in_config()).await?;
             let rejected = invite_db::list_rejected(session.client()).await?;
             return Ok(Ok(Outcome::List(rows, rejected)));
         }
@@ -609,16 +681,18 @@ async fn local(
             return Ok(Ok(Outcome::Revoked(found)));
         }
         let name = name.clone().ok_or(DbError::Defer)?;
+        let ownership = invite_db::has_owned_column(session.client()).await?;
         let created = invite_db::create_invite(
             session.client_mut(),
             &name,
             args.tier.as_deref(),
             args.board,
+            args.owned,
             f64::from(args.expires.unwrap_or(900)),
             args.replace,
         )
         .await?;
-        Ok(Ok(Outcome::Created(created)))
+        Ok(Ok(Outcome::Created(created, ownership)))
     }
     .await;
     match result {
@@ -639,12 +713,15 @@ async fn local(
             ));
             Ok(report.finish(EXIT_OK))
         }
-        Ok(Ok(Outcome::Created(created))) => Ok(invite_report(
+        Ok(Ok(Outcome::Created(created, ownership))) => Ok(invite_report(
             report,
             &name.unwrap_or_default(),
             &created,
             url,
             args.expires.unwrap_or(900),
+            // The note is offered only where the flag can work: a bank with
+            // the column, and neither flag given.
+            ownership && args.owned.is_none(),
         )),
         Ok(Err(refusal)) => Ok(report.fail_units(EXIT_REFUSED, refusal)),
         Err(DbError::UndefinedTable) => Ok(report.fail(EXIT_REFUSED, NO_TABLE)),
@@ -662,7 +739,8 @@ async fn local(
 enum Outcome {
     List(Vec<invite_db::Listed>, Vec<invite_db::Rejected>),
     Revoked(bool),
-    Created(invite_db::Created),
+    /// The row, and whether the bank records ownership (v59).
+    Created(invite_db::Created, bool),
 }
 
 /// `round(seconds / 60)`: half to even.
@@ -675,28 +753,43 @@ fn minutes(seconds: u32) -> u32 {
     }
 }
 
-/// `_invite`'s report, after the row was written.
+/// `_invite`'s report, after the row was written. `ownership_note`:
+/// whether to print `OWNERSHIP_NOTE` when the row is the owner's.
 fn invite_report(
     report: &mut Report,
     name: &str,
     created: &invite_db::Created,
     url: Option<String>,
     seconds: u32,
+    ownership_note: bool,
 ) -> u8 {
-    let code = format!(
-        "{}-{}-{}",
-        &created.code[..4],
-        &created.code[4..8],
-        &created.code[8..]
-    );
+    let (Some(raw), Some(expires_at)) = (created.code.as_deref(), created.expires_at) else {
+        // A paired machine's ownership alone: no code, nothing to re-pair.
+        report.set("principal", J::Str(name.to_owned()));
+        report.set("state", J::Str(created.state.into()));
+        report.set("tier", created.tier.clone().map_or(J::Null, J::Str));
+        report.set("board", python_bool(created.board));
+        report.set("owned", python_bool(created.owned));
+        let whose = if created.owned {
+            "the owner's"
+        } else {
+            "someone else's"
+        };
+        report.say(&format!(
+            "{name}: paired; now {whose} machine. Its token and pairing are unchanged: no new code, nothing to re-pair"
+        ));
+        return report.finish(EXIT_OK);
+    };
+    let code = format!("{}-{}-{}", &raw[..4], &raw[4..8], &raw[8..]);
     let url = url.unwrap_or_else(|| URL_PLACEHOLDER.to_owned());
     let command = format!("pseudolife-mcp pair {url} {code}");
     report.set("principal", J::Str(name.to_owned()));
     report.set("state", J::Str(created.state.into()));
     report.set("code", J::Str(code.clone()));
-    report.set("expires_at", J::Float(created.expires_at));
+    report.set("expires_at", J::Float(expires_at));
     report.set("tier", created.tier.clone().map_or(J::Null, J::Str));
     report.set("board", python_bool(created.board));
+    report.set("owned", python_bool(created.owned));
     report.set("url", J::Str(url.clone()));
     report.set("pair_command", J::Str(command.clone()));
     let what = match created.state {
@@ -711,11 +804,16 @@ fn invite_report(
         .filter(|tier| !tier.is_empty())
         .unwrap_or_else(|| "the daemon default".to_owned());
     report.say(&format!(
-        "{name}: {what}; tier {tier}, agent board {}",
-        if created.board { "on" } else { "off" }
+        "{name}: {what}; tier {tier}, agent board {}{}",
+        if created.board { "on" } else { "off" },
+        if created.owned {
+            ""
+        } else {
+            "; someone else's machine"
+        }
     ));
     // The expiry is the database clock plus at most a day: always finite.
-    let expiry = when(Some(created.expires_at)).unwrap_or_default();
+    let expiry = when(Some(expires_at)).unwrap_or_default();
     report.say(&format!(
         "  code     {code}   single use, expires in {} min ({expiry})",
         minutes(seconds)
@@ -729,6 +827,9 @@ fn invite_report(
     }
     if listed_in_config(name) {
         report.note(&format!("note: {name} is already listed in coordination.allowed_principals; the invite gives it a token"));
+    }
+    if ownership_note && created.owned {
+        report.note(OWNERSHIP_NOTE);
     }
     report.note("an invited machine can read and write the whole bank and use the agent board, but not change the daemon's configuration");
     report.finish(EXIT_OK)
@@ -777,12 +878,17 @@ fn list_report(
             Some(false) => "off",
         };
         lines.push(format!(
-            "  {:<24} {:<11} {:<21} {:<8} {:<6} {:<21} {:<21} {}",
+            "  {:<24} {:<11} {:<21} {:<8} {:<6} {:<6} {:<21} {:<21} {}",
             row.principal,
             state,
             when_or(row.last_seen_at, "never")?,
             tier,
             board,
+            match row.owner {
+                None => "-",
+                Some(true) => "yes",
+                Some(false) => "no",
+            },
             when(row.created_at)?,
             when(row.paired_at)?,
             when(row.revoked_at)?
@@ -805,6 +911,7 @@ fn list_report(
             ("paired_at".into(), float(row.paired_at)),
             ("revoked_at".into(), float(row.revoked_at)),
             ("last_seen_at".into(), float(row.last_seen_at)),
+            ("owner".into(), row.owner.map_or(J::Null, J::Bool)),
         ]));
     }
     let mut refused_lines = Vec::new();
@@ -833,15 +940,17 @@ fn list_report(
         report.say("no stored principals");
     } else {
         report.say(&format!(
-            "  {:<24} {:<11} {:<21} {:<8} {:<6} {:<21} {:<21} revoked",
-            "name", "state", "last seen", "tier", "board", "created", "paired"
+            "  {:<24} {:<11} {:<21} {:<8} {:<6} {:<6} {:<21} {:<21} revoked",
+            "name", "state", "last seen", "tier", "board", "owner", "created", "paired"
         ));
     }
     for line in lines {
         report.say(&line);
     }
     if !rows.is_empty() {
-        report.say("  (environment: a token in the daemon's PSEUDOLIFE_MCP_TOKENS or PSEUDOLIFE_MCP_TOKEN; last seen: its last accepted request, written once a minute)");
+        report.say("  (environment: a token in the daemon's PSEUDOLIFE_MCP_TOKENS or PSEUDOLIFE_MCP_TOKEN; last seen: its last accepted request, written once a minute;");
+        report.say("   owner: the bank owner's machine, whose board mail the owner's Console shows; `invite --someone-else` and coordination.not_owner_principals say otherwise;");
+        report.say("   owner -: unknown, an environment token listed with the daemon stopped)");
     }
     report.say("");
     if rejected.is_empty() {
@@ -861,6 +970,35 @@ fn list_report(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn config_names_are_normalised_as_the_oracle_keeps_them() {
+        let doc = |text: &str| {
+            yaml_rust2::YamlLoader::load_from_str(text)
+                .unwrap()
+                .remove(0)
+        };
+        let config = doc("coordination:\n  not_owner_principals: [' Friend ', friend, CODEX]\n");
+        assert_eq!(
+            coordination_names(&config, "not_owner_principals"),
+            Some(vec!["friend".to_owned(), "codex".to_owned()])
+        );
+        assert_eq!(
+            coordination_names(&config, "allowed_principals"),
+            Some(vec![])
+        );
+        for bad in ["[' ']", "[1]", "[friend, '']", "friend"] {
+            let config = doc(&format!("coordination:\n  not_owner_principals: {bad}\n"));
+            assert_eq!(
+                coordination_names(&config, "not_owner_principals"),
+                None,
+                "{bad}"
+            );
+        }
+        let other_bad =
+            doc("coordination:\n  allowed_principals: ['']\n  not_owner_principals: [friend]\n");
+        assert!(coordination_lists(&other_bad).is_none());
+    }
+
     use super::*;
 
     fn strings(values: &[&str]) -> Vec<String> {
@@ -883,6 +1021,8 @@ mod tests {
             ],
             &["--list", "--bank", "abc", "--json"],
             &["--revoke", "laptop", "--yes"],
+            &["laptop", "--someone-else"],
+            &["--mine", "laptop"],
             &["--version-check"],
             &[""],
         ] {
@@ -892,6 +1032,8 @@ mod tests {
             &["a", "b"][..],
             &["--board", "--no-board", "x"],
             &["--json", "--json"],
+            &["x", "--mine", "--someone-else"],
+            &["x", "--someone-else", "--someone-else"],
             &["--tier", "writer", "x"],
             &["--tier"],
             &["--expires", "30s", "x"],

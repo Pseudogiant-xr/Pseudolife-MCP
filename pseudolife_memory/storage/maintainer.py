@@ -121,7 +121,7 @@ class MaintainerError(ValueError):
         "recipient_unknown": 404, "recipient_reserved": 400, "rate_capped": 429,
         "config_protected": 400, "invalid_request": 400, "message_not_found": 404,
         "credential_not_found": 404, "authentication_required": 401, "unauthorized": 401,
-        "role_changed": 409,
+        "role_changed": 409, "passkey_signin_unavailable": 409,
         "principal_not_allowed": 403, "principals_unavailable": 503,
         "coordination_unavailable": 503, "not_found": 404,
     }
@@ -187,7 +187,8 @@ def check_label(label) -> str:
 class MaintainerStore:
     """Runs on the board's mailbox connection, under the coordination lock."""
 
-    def __init__(self, storage, *, rp_id: str, origin: str, clock=time.time, principal=""):
+    def __init__(self, storage, *, rp_id: str, origin: str, clock=time.time, principal="",
+                 signs_in_as=None):
         self.storage = storage
         self.rp_id = rp_id
         self.origin = origin
@@ -195,6 +196,10 @@ class MaintainerStore:
         # The bearer principal of a Console request, for the audit record;
         # empty on the host.
         self.principal = principal
+        # v59: the Console sign-in a key enrolled through this request will
+        # give: the request's principal when it is the bank owner's, else
+        # none (the caller decides; spec 2026-11-02, section 5).
+        self.signs_in_as = signs_in_as
 
     # -- plumbing ----------------------------------------------------------
 
@@ -435,13 +440,17 @@ class MaintainerStore:
 
     def _insert_key(self, registration, *, label, enrolled_by, state, active_from):
         credential_id = b64url_encode(registration.credential_id)
+        # v59: the Console sign-in this key will give, the bearer principal
+        # of the request that enrolled it (spec 2026-11-02, section 5); a
+        # host-side insert has none.
         inserted = self.storage.conn.execute(
             "INSERT INTO maintainer_passkeys (credential_id,public_key,alg,sign_count,label,"
-            "enrolled_by,state,active_from,created_at) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) "
+            "enrolled_by,state,active_from,created_at,signs_in_as) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) "
             "ON CONFLICT (credential_id) DO NOTHING",
             (credential_id, registration.public_key, registration.alg,
              registration.sign_count, label, enrolled_by, state, active_from,
-             self.clock())).rowcount
+             self.clock(), self.signs_in_as or None)).rowcount
         if inserted != 1:
             raise MaintainerError("assertion_invalid", check="credential_exists")
         return {"credential_id": credential_id, "label": label, "state": state,
@@ -538,6 +547,13 @@ class MaintainerStore:
                              by=approver["credential_id"])
             return out
 
+    def _end_sessions(self, credential_id=None) -> None:
+        """v59: end the Console sessions a key signed in (every passkey's
+        with ``None``), inside the change's transaction, so a revoked key's
+        sign-ins never outlive it (spec 2026-11-02, section 3)."""
+        from pseudolife_memory.console_sessions import revoke_issuer_sessions
+        revoke_issuer_sessions(self.storage.conn, credential_id)
+
     def cancel(self, payload, mac, assertion) -> dict:
         """An older active key cancels a newer key still in quarantine."""
         def action(fields, key):
@@ -554,6 +570,7 @@ class MaintainerStore:
             self.storage.conn.execute(
                 "UPDATE maintainer_passkeys SET state='revoked',revoked_at=%s,revoked_by=%s "
                 "WHERE credential_id=%s", (now, key["credential_id"], target["credential_id"]))
+            self._end_sessions(target["credential_id"])
             self._key_change("cancel", credential_id=target["credential_id"],
                              label=target["label"], by=key["credential_id"])
             return {"credential_id": target["credential_id"], "state": "revoked"}
@@ -568,10 +585,31 @@ class MaintainerStore:
                 "UPDATE maintainer_passkeys SET state='revoked',revoked_at=%s,revoked_by=%s "
                 "WHERE credential_id=%s", (self.clock(), key["credential_id"],
                                            key["credential_id"]))
+            self._end_sessions(key["credential_id"])
             self._key_change("revoke", credential_id=key["credential_id"], label=key["label"],
                              by=key["credential_id"])
             return {"credential_id": key["credential_id"], "state": "revoked"}
         return self.complete(payload, mac, "revoke-self", assertion, action)
+
+    def bind_sign_in(self, payload, mac, assertion, *, principal) -> dict:
+        """v59: the signing key will sign the Console in as ``principal``
+        (the purpose ``bind-sign-in``, spec 2026-11-02 section 5). The
+        payload names the principal it was issued for, and only that
+        principal may complete it; the key's sessions under any other
+        principal end in the same transaction."""
+        def action(fields, key):
+            if fields.get("principal") != principal:
+                raise MaintainerError("assertion_invalid", check="bind_principal")
+            self.storage.conn.execute(
+                "UPDATE maintainer_passkeys SET signs_in_as=%s WHERE credential_id=%s",
+                (principal, key["credential_id"]))
+            from pseudolife_memory.console_sessions import revoke_issuer_sessions
+            revoke_issuer_sessions(self.storage.conn, key["credential_id"],
+                                   keep_principal=principal)
+            self._key_change("bind-sign-in", credential_id=key["credential_id"],
+                             label=key["label"], by=key["credential_id"])
+            return {"credential_id": key["credential_id"], "signs_in_as": principal}
+        return self.complete(payload, mac, "bind-sign-in", assertion, action)
 
     # -- board reads ---------------------------------------------------------
 
@@ -799,6 +837,7 @@ class MaintainerStore:
                     "UPDATE maintainer_passkeys SET state='revoked',revoked_at=%s,"
                     "revoked_by='host' WHERE credential_id=%s AND state<>'revoked'",
                     (self.clock(), row["credential_id"])).rowcount:
+                self._end_sessions(row["credential_id"])
                 self._key_change("revoke", credential_id=row["credential_id"],
                                  label=row["label"], by="host")
         return {"credential_id": row["credential_id"], "label": row["label"], "state": "revoked"}
@@ -809,6 +848,7 @@ class MaintainerStore:
             revoked = self.storage.conn.execute(
                 "UPDATE maintainer_passkeys SET state='revoked',revoked_at=%s,revoked_by='host' "
                 "WHERE state<>'revoked'", (self.clock(),)).rowcount
+            self._end_sessions()
             self.storage.conn.execute("DELETE FROM maintainer_bootstrap")
             self.storage.conn.execute("DELETE FROM meta WHERE key=%s", (SECRET_META_KEY,))
             self._secret()

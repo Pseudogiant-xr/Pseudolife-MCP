@@ -79,6 +79,8 @@ def seed_states(conn, name: str) -> None:
     store.create_invite(conn, "delta", board=False, ttl_seconds=-60, replace=False)
     store.create_invite(conn, "a-rather-long-principal-name.x", tier="full", ttl_seconds=3600,
                         replace=False)
+    # v59: a machine invited as someone else's.
+    store.create_invite(conn, "echo", owned=False, ttl_seconds=900, replace=False)
 
 
 def seed_activity(conn, name: str) -> None:
@@ -94,8 +96,26 @@ def seed_activity(conn, name: str) -> None:
                  "('ffffffff', 12345678, 1791000000.0, 1793000000.0)")
 
 
+def seed_prev59(conn, name: str) -> None:
+    """A bank before v59 (as tests/test_invite_cli.py drops the column):
+    rows at fixed times, so the cases replay as goldens, then no ``owned``."""
+    _meta(conn)
+    _guarded(conn)
+    conn.execute(
+        "INSERT INTO principals (principal, token_hash, tier, board, created_at, paired_at) "
+        "VALUES ('alpha', %s, NULL, TRUE, 1793000000.0, 1793000060.0)",
+        (hashlib.sha256(b"prev59-seed-token-alpha").hexdigest(),))
+    conn.execute(
+        "INSERT INTO principals (principal, tier, board, code_hash, code_expires_at, created_at) "
+        "VALUES ('bravo', 'core', FALSE, %s, 1793000400.0, 1793000100.0)",
+        (hashlib.sha256(b"prev59-seed-code-bravo").hexdigest(),))
+    _guarded(conn)
+    conn.execute("ALTER TABLE principals DROP COLUMN owned")
+
+
 SEEDERS = {
     "states": seed_states,
+    "prev59": seed_prev59,
     "activity": seed_activity,
     "empty": lambda conn, name: _meta(conn),
     "nometa": lambda conn, name: None,
@@ -164,6 +184,8 @@ def fresh_copy(kind: str) -> None:
     from psycopg.types.json import Jsonb  # noqa: PLC0415
     with _bank.connect(ARM_DB, autocommit=True) as target:
         _guarded(target)
+        if kind == "prev59":
+            target.execute("ALTER TABLE principals DROP COLUMN owned")
         for key, value in meta:
             target.execute("INSERT INTO meta (key, value) VALUES (%s, %s)", (key, Jsonb(value)))
         marks = ", ".join(["%s"] * len(columns))
@@ -497,9 +519,15 @@ LIVE_ONLY = frozenset({
     "reinvite-expired-board", "paired-replace", "revoked-reinvite-json",
     "invite-bank-match", "invite-health-int-at-limit", "invite-env-port", "revoke",
     "revoke-json", "revoke-again",
+    # v59 ownership writes, which show the seeded principals too.
+    "invite-someone-else", "invite-someone-else-json", "reinvite-keeps-someone-else",
+    "reinvite-keeps-someone-else-json", "reinvite-mine", "invite-mine-json",
+    "reinvite-pending-someone-else", "paired-someone-else", "paired-mine-json",
     # Its report is the daemon's auth value nested to the limit and
     # pretty-printed: 2.6 MB of indentation, compared live only.
-    "health-nested-at-limit-json", "defer-tailscale-present", "defer-config-yaml"})
+    "health-nested-at-limit-json", "defer-tailscale-present", "defer-config-yaml",
+    "defer-list-config-yaml", "defer-list-config-env", "defer-invite-config-env",
+    "list-config-names-normalised"})
 
 
 _TRANSPORT_DOCKER = r'''import json, os, sys
@@ -512,7 +540,9 @@ if argv[0] == 'inspect':
     print(os.environ['FIXTURE_DOCKER_ENGINE'] if 'Labels' in argv[2]
           else os.environ['FIXTURE_DOCKER_RUNNING'])
 elif '--version-check' in argv:
-    print('pseudolife-mcp invite 1')
+    # An image before v59 prints one line; a v59 image adds a second.
+    for version in range(1, int(os.environ.get('FIXTURE_VERSION', '1')) + 1):
+        print(f'pseudolife-mcp invite {version}')
 elif 'pseudolife-mcp-postgres' in argv:
     if 'to_regclass' in body:
         print(os.environ.get('FIXTURE_ACTIVITY', 't'))
@@ -521,9 +551,17 @@ elif 'pseudolife-mcp-postgres' in argv:
     elif 'UPDATE' in body:
         print('laptop')
     else:
-        print(json.dumps({'principals': [['laptop', 'core', True, True, False, None,
-                                        1700000000.0, 1700000001.0, None, 1700000010.0,
-                                        None, True]], 'rejected': []}))
+        v58 = os.environ.get('FIXTURE_ACTIVITY', 't') == 't'
+        # owned: a v53 bank has no such column, so LIST_SQL_V53's COALESCE
+        # makes every stored row the owner's.
+        rows = [['laptop', 'core', True, True, False, None, 1700000000.0, 1700000001.0, None,
+                 1700000010.0, None, True, not v58]]
+        if v58:
+            # Seen with no stored row: an environment principal, whose owner
+            # the stopped daemon's own config decides.
+            rows.append(['codex', None, None, False, False, None, None, None, None,
+                         1700000010.0, 1700000005.0, False, None])
+        print(json.dumps({'principals': rows, 'rejected': []}))
 else:
     print('container-invite')
     sys.exit(int(os.environ.get('FIXTURE_DOCKER_EXIT', '0')))
@@ -537,6 +575,10 @@ def _transport_cases():
 
     def setup(arm):
         script = lease_transport._input(arm, 'docker.py', _TRANSPORT_DOCKER)
+        # This host's config, which is not the stopped daemon's: naming codex
+        # here must not decide codex's owner in a stopped-daemon list.
+        lease_transport._input(arm, 'host.yaml',
+                               'coordination:\n  not_owner_principals: [codex]\n')
         wrapper = (f'@echo off\r\n"{sys.executable}" "{script}" %*\r\nexit /b %errorlevel%\r\n'
                    if core.WINDOWS else
                    f'#!/bin/sh\nexec {shlex.quote(sys.executable)} {shlex.quote(str(script))} "$@"\n')
@@ -544,13 +586,24 @@ def _transport_cases():
         if not core.WINDOWS:
             path.chmod(0o700)
 
-    def after(engine, running, nested, argv, exit_code, activity):
+    def after(engine, running, nested, argv, exit_code, activity, forwarded=True):
         def check(arm, obs):
             log = arm.home / 'docker.jsonl'
             calls = [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
             if nested:
                 assert not calls
                 assert obs['exit'] == 4
+            elif running and argv[1:2] == ['--someone-else']:
+                cli = ['pseudolife-mcp'] if engine == 'rust' else ['python', '-m', 'pseudolife_memory.cli']
+                base = ['-e', 'PSEUDOLIFE_DAEMON_EXEC=1', 'pseudolife-mcp-daemon', *cli, 'invite']
+                assert calls[2]['argv'] == ['exec', *base, '--version-check']
+                if forwarded:
+                    # Only options an image from #1154 parses.
+                    assert calls[3]['argv'] == ['exec', '-i', *base, 'laptop', '--expires', '900s',
+                                                '--someone-else', '--url', 'https://example.com']
+                    assert obs['exit'] == 0
+                else:
+                    assert len(calls) == 3 and obs['exit'] == 4
             elif running:
                 cli = ['pseudolife-mcp'] if engine == 'rust' else ['python', '-m', 'pseudolife_memory.cli']
                 base = ['-e', 'PSEUDOLIFE_DAEMON_EXEC=1', 'pseudolife-mcp-daemon', *cli, 'invite']
@@ -583,15 +636,28 @@ def _transport_cases():
                'FIXTURE_DOCKER_EXIT': str(exit_code)}
         out.append(core.Case('container-' + engine, ['invite', *argv], env=env, setup=setup,
                              after=after(engine, True, False, argv, exit_code, 't')))
+    # The image's version: the highest `pseudolife-mcp invite <N>` line; the
+    # ownership flags need 2 (v59), and a v59 image still prints 1 first.
+    for version, forwarded in [(2, True), (1, False)]:
+        argv = ['laptop', '--someone-else', '--url', 'https://example.com']
+        env = {'PSEUDOLIFE_MCP_DATABASE_URL': None, 'PSEUDOLIFE_DAEMON_EXEC': None,
+               'PSEUDOLIFE_DOCKER': '{HOME}/docker.' + ('cmd' if core.WINDOWS else 'sh'),
+               'FIXTURE_DOCKER_ENGINE': 'rust', 'FIXTURE_DOCKER_RUNNING': 'true',
+               'FIXTURE_VERSION': str(version)}
+        out.append(core.Case(f'container-v{version}-someone-else', ['invite', *argv], env=env,
+                             setup=setup,
+                             after=after('rust', True, False, argv, 0, 't', forwarded)))
     for name, argv, activity, nested in [
             ('stopped-list-v58', ['--list', '--json'], 't', False),
+            ('stopped-list-v58-text', ['--list'], 't', False),
             ('stopped-list-v53', ['--list'], 'f', False),
             ('stopped-revoke', ['--revoke', 'laptop', '--yes'], 't', False),
             ('nested-no-bank', ['--list', '--json'], 't', True)]:
         env = {'PSEUDOLIFE_MCP_DATABASE_URL': None, 'PSEUDOLIFE_DAEMON_EXEC': '1' if nested else None,
                'PSEUDOLIFE_DOCKER': '{HOME}/docker.' + ('cmd' if core.WINDOWS else 'sh'),
                'FIXTURE_DOCKER_ENGINE': 'rust', 'FIXTURE_DOCKER_RUNNING': 'false',
-               'FIXTURE_ACTIVITY': activity}
+               'FIXTURE_ACTIVITY': activity,
+               'PSEUDOLIFE_MCP_CONFIG': '{HOME}/host.yaml'}
         out.append(core.Case(name, ['invite', *argv], env=env, setup=setup,
                              after=after('rust', False, nested, argv, 0, activity)))
     return out
@@ -729,9 +795,48 @@ def _cases() -> list[core.Case]:
     inviting("paired-needs-replace-json", "states", ["bravo", "--url", "u", "--json"])
     inviting("paired-replace", "states", ["bravo", "--replace", "--url", "u"])
     inviting("revoked-reinvite-json", "states", ["charlie", "--url", "u", "--json"])
+    # v59 ownership: a new machine that is someone else's, a re-invite that
+    # keeps it, --mine undoing it, and --mine on a new name (no flag note).
+    inviting("invite-someone-else", "states", ["laptop", "--someone-else", "--url", "u"])
+    inviting("invite-someone-else-json", "states", ["--someone-else", "laptop", "--url", "u",
+                                                    "--json"])
+    inviting("reinvite-keeps-someone-else", "states", ["echo", "--url", "u"])
+    inviting("reinvite-keeps-someone-else-json", "states", ["echo", "--url", "u", "--json"])
+    inviting("reinvite-mine", "states", ["echo", "--mine", "--url", "u"])
+    inviting("invite-mine-json", "states", ["laptop", "--mine", "--url", "u", "--json"])
+    inviting("reinvite-pending-someone-else", "states", ["alpha", "--someone-else", "--url", "u"])
+    # A paired machine's ownership alone: no --replace, no new code.
+    inviting("paired-someone-else", "states", ["bravo", "--someone-else", "--url", "u"])
+    inviting("paired-mine-json", "states", ["bravo", "--mine", "--url", "u", "--json"])
+    inviting("paired-mine-tier-refused", "states", ["bravo", "--mine", "--tier", "core",
+                                                    "--url", "u"])
+    # A bank before v59: invites and lists work; the ownership flags are
+    # refused before any write, naming the update.
+    add(read_case("prev59-list", "prev59", ["--list"]))
+    add(read_case("prev59-list-json", "prev59", ["--list", "--json"]))
+    inviting("prev59-invite", "prev59", ["zulu.1", "--url", "u"])
+    inviting("prev59-invite-json", "prev59", ["zulu.1", "--url", "u", "--json"])
+    inviting("prev59-reinvite", "prev59", ["bravo", "--url", "u"])
+    inviting("prev59-someone-else-refused", "prev59", ["zulu.1", "--someone-else", "--url", "u"])
+    inviting("prev59-mine-refused-json", "prev59", ["alpha", "--mine", "--url", "u", "--json"])
     inviting("invite-bank-match", "states", ["laptop", "--bank", FINGERPRINT, "--url", "u"])
     inviting("invite-bank-other", "states", ["laptop", "--bank", OTHER_FINGERPRINT, "--url", "u"])
     inviting("invite-empty-bank", "empty", ["zulu.1", "--url", "u", "--json"])
+    # The --someone-else note on a plain invite, one text however invite ran.
+    # First exactly as the released v0.21.0 host CLI runs it in the daemon's
+    # container: `docker exec -i` with no PSEUDOLIFE_DAEMON_EXEC, the name,
+    # --expires <N>s and --url (no --port: the port is the container's
+    # PSEUDOLIFE_MCP_PORT). That CLI refuses --someone-else, so the note
+    # says to update it first.
+    for case_id, json_flag in [("invite-v021-forward", []), ("invite-v021-forward-json", ["--json"])]:
+        port = free_port()
+        add(write_case(case_id, "empty", ["zulu.1", "--expires", "900s", "--url", "u", *json_flag],
+                       extra_env={"PSEUDOLIFE_MCP_PORT": str(port), "PSEUDOLIFE_DAEMON_EXEC": None},
+                       daemon=_daemon(port, health())))
+    # Run with PSEUDOLIFE_DAEMON_EXEC set, as a current host CLI forwards it
+    # (here with --port too, which no host forwards): the same note.
+    inviting("invite-forwarded", "empty", ["zulu.1", "--expires", "900s", "--url", "u"],
+             extra_env={"PSEUDOLIFE_DAEMON_EXEC": "1"})
     inviting("invite-health-int-at-limit", "states", ["laptop", "--url", "u", "--json"],
              payload=json.dumps(health())[:-1].encode() + b', "x": -' + b"9" * 4300 + b"}")
     port = free_port()
@@ -750,7 +855,10 @@ def _cases() -> list[core.Case]:
     deferred = ("invite-deferral",)
 
     def deferral(case_id, argv, kind="states", **options):
-        native = case_id in {"defer-no-dsn", "defer-list-no-dsn", "defer-tailscale-present", "defer-config-yaml", "defer-help"}
+        native = case_id in {"defer-no-dsn", "defer-list-no-dsn", "defer-tailscale-present", "defer-config-yaml", "defer-help",
+                             # v59: the list and the invite read the config natively.
+                             "defer-list-config-yaml", "defer-list-config-env", "defer-invite-config-env",
+                             "list-config-names-normalised"}
         port = free_port()
         add(write_case(case_id, kind, [*argv, "--port", str(port)], rules=("invite-written",) if native else deferred,
                        daemon=_daemon(port, health()), **options))
@@ -769,6 +877,24 @@ def _cases() -> list[core.Case]:
     deferral("defer-config-yaml", ["laptop", "--url", "u"],
              extra_env={"PSEUDOLIFE_MCP_DATA_DIR": "{HOME}" + SEP + "data"},
              files={"data/config.yaml": b"coordination:\n  allowed_principals: [laptop]\n"})
+    # v59: --list reads coordination.not_owner_principals from the config.
+    deferral("defer-list-config-yaml", ["--list"],
+             extra_env={"PSEUDOLIFE_MCP_DATA_DIR": "{HOME}" + SEP + "data"},
+             files={"data/config.yaml": b"coordination:\n  not_owner_principals: [codex]\n"})
+    # The config's names as load_config keeps them: stripped, lower-cased.
+    # codex is an environment row here, so reverting the normalisation shows
+    # it as the owner's in one arm only.
+    deferral("list-config-names-normalised", ["--list"],
+             extra_env={"PSEUDOLIFE_MCP_DATA_DIR": "{HOME}" + SEP + "data",
+                        "PSEUDOLIFE_MCP_TOKENS": "seed-env-token:codex"},
+             files={"data/config.yaml": b"coordination:\n  not_owner_principals: [' Codex ']\n"})
+    deferral("defer-mine-and-someone-else", ["laptop", "--mine", "--someone-else", "--url", "u"])
+    # PSEUDOLIFE_MCP_CONFIG comes first for the daemon, so the oracle reads it.
+    deferral("defer-list-config-env", ["--list"],
+             extra_env={"PSEUDOLIFE_MCP_CONFIG": "{HOME}" + SEP + "elsewhere.yaml"},
+             files={"elsewhere.yaml": b"coordination:\n  not_owner_principals: [codex]\n"})
+    deferral("defer-invite-config-env", ["laptop", "--url", "u"],
+             extra_env={"PSEUDOLIFE_MCP_CONFIG": "{HOME}" + SEP + "absent.yaml"})
     deferral("defer-malformed-token-map", ["laptop", "--url", "u"],
              extra_env={"PSEUDOLIFE_MCP_TOKENS": "no-separator"})
     deferral("defer-help", ["--help"])
@@ -804,9 +930,14 @@ MUTANTS = [
            "single use, expires in {} min",
            "single-use, expires in {} min", cases=("invite-new",)),
     Mutant("invite-keep-tier-lost", "invite", "shim/src/cli/pairing/invite_db.rs",
-           "(Some(_), None) => \", tier = $4\",",
-           "(Some(_), None) => \", tier = $4, board = TRUE\",",
+           "given.push_str(&format!(\", tier = ${}\", params.len()));",
+           "given.push_str(&format!(\", tier = ${}, board = TRUE\", params.len()));",
            cases=("reinvite-expired-tier-json",)),
+    # v59: a re-invite without a flag must keep someone else's machine so.
+    Mutant("invite-keep-owned-lost", "invite", "shim/src/cli/pairing/invite_db.rs",
+           "\"UPDATE public.principals p SET code_hash = $1, ",
+           "\"UPDATE public.principals p SET owned = TRUE, code_hash = $1, ",
+           cases=("reinvite-keeps-someone-else",)),
     Mutant("invite-expired-is-pending", "invite", "shim/src/cli/pairing/invite_db.rs",
            "expires.is_some_and(|expires| expires > now)",
            "expires.is_some()", cases=("list",)),

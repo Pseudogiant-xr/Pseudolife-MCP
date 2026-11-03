@@ -18,7 +18,7 @@ from typing import Iterable
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_META_VERSION = 58
+SCHEMA_META_VERSION = 59
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -804,6 +804,14 @@ SCHEMA_SQL += COORDINATION_SCHEMA_SQL
 # redeemed code's hash for ten minutes, so the client that minted the token
 # can retry a lost response. Credentials: never in a logical export
 # (transfer_cli.EXCLUDED_TABLES); a physical backup carries them.
+#
+# v59: ``owned`` says whether the principal is the bank owner's (spec
+# 2026-11-02, Console sign-in and owner-scoped board visibility). Every row
+# is unless ``invite --someone-else`` made it; the migration marks every
+# existing row the owner's, so an existing install becomes owner-scoped
+# with no step. The owner's Console reads board metadata for all the
+# owner's principals (coordination.console_snapshot). Guarded like the v49
+# and v50 columns: one probe, then the ALTER only when missing.
 PRINCIPALS_SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS principals (
     principal        TEXT PRIMARY KEY,
@@ -815,8 +823,18 @@ CREATE TABLE IF NOT EXISTS principals (
     paired_code_hash TEXT,
     created_at       DOUBLE PRECISION NOT NULL,
     paired_at        DOUBLE PRECISION,
-    revoked_at       DOUBLE PRECISION
+    revoked_at       DOUBLE PRECISION,
+    owned            BOOLEAN NOT NULL DEFAULT TRUE
 );
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_attribute
+                   WHERE attrelid = 'principals'::regclass
+                     AND attname = 'owned' AND attnum > 0 AND NOT attisdropped) THEN
+        ALTER TABLE principals
+            ADD COLUMN IF NOT EXISTS owned BOOLEAN NOT NULL DEFAULT TRUE;
+    END IF;
+END $$;
 """
 SCHEMA_SQL += PRINCIPALS_SCHEMA_SQL
 
@@ -830,6 +848,17 @@ SCHEMA_SQL += PRINCIPALS_SCHEMA_SQL
 # key whose sign count went backwards, for review in the Console.
 # Credentials of this deployment (bound to its RP ID): never in a logical
 # export (transfer_cli.EXCLUDED_TABLES); a physical backup carries them.
+#
+# v59: ``signs_in_as`` is the principal a passkey's Console sign-in acts as
+# (spec 2026-11-02, section 5); NULL means none yet, and nothing reads it
+# before the passkey sign-in lands. The migration fills it only from the
+# key's own enrolment event in the board's audit log (``maintainer_key``,
+# change ``enrol`` or ``add``, the first for that credential id), whose
+# principal is the bearer that completed the enrolment. A later
+# ``confirm``, ``revoke`` or ``reset`` is logged by the host with an empty
+# principal and never counts; where retention pruned the enrolment event,
+# or it carries no principal, the column stays NULL. Run once, with the
+# column, so a later pass never rewrites a value.
 MAINTAINER_SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS maintainer_passkeys (
     credential_id TEXT PRIMARY KEY,
@@ -844,7 +873,8 @@ CREATE TABLE IF NOT EXISTS maintainer_passkeys (
     last_used_at  DOUBLE PRECISION,
     revoked_at    DOUBLE PRECISION,
     revoked_by    TEXT,
-    flagged_at    DOUBLE PRECISION
+    flagged_at    DOUBLE PRECISION,
+    signs_in_as   TEXT
 );
 CREATE TABLE IF NOT EXISTS maintainer_bootstrap (
     code_hash       TEXT PRIMARY KEY,
@@ -867,6 +897,28 @@ BEGIN
                      AND attname = 'failed_attempts' AND attnum > 0 AND NOT attisdropped) THEN
         ALTER TABLE maintainer_bootstrap
             ADD COLUMN IF NOT EXISTS failed_attempts INTEGER NOT NULL DEFAULT 0;
+    END IF;
+END $$;
+-- v59: the principal each passkey signs in as, backfilled once from the
+-- key's own enrolment event. OFFSET 0 keeps the payload cast to
+-- maintainer_key rows.
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_attribute
+                   WHERE attrelid = 'maintainer_passkeys'::regclass
+                     AND attname = 'signs_in_as' AND attnum > 0 AND NOT attisdropped) THEN
+        ALTER TABLE maintainer_passkeys ADD COLUMN IF NOT EXISTS signs_in_as TEXT;
+        UPDATE maintainer_passkeys k SET signs_in_as = src.principal
+          FROM (SELECT DISTINCT ON (e.payload ->> 'credential_id')
+                       e.payload ->> 'credential_id' AS credential_id,
+                       NULLIF(e.principal, '') AS principal
+                  FROM (SELECT seq, principal, payload::jsonb AS payload
+                          FROM coordination_events
+                         WHERE event = 'maintainer_key' OFFSET 0) e
+                 WHERE e.payload ->> 'change' IN ('enrol', 'add')
+                   AND e.payload ->> 'credential_id' IS NOT NULL
+                 ORDER BY e.payload ->> 'credential_id', e.seq) src
+         WHERE src.credential_id = k.credential_id;
     END IF;
 END $$;
 """
@@ -952,6 +1004,45 @@ CREATE TABLE IF NOT EXISTS rejected_bearers (
 """
 SCHEMA_SQL += PRINCIPAL_ACTIVITY_SCHEMA_SQL
 
+# v59: the Console's signed-in browsers and the one-time codes that sign
+# one in (spec 2026-11-02, sections 3 and 4). A session is a bearer the
+# browser minted, stored only as its SHA-256 (``token_hash``), acting as an
+# existing ``principal``; ``source`` is how the issuing credential
+# authenticated (``environment`` or ``store``), ``issuer`` what issued it
+# (the SHA-256 of the issuing bearer for a link, the passkey credential id
+# for a passkey sign-in) and ``method`` which (``link`` or ``passkey``). A
+# sign-in code is kept only as its SHA-256 too, with the ``origin`` the
+# Console may redeem it from. The tables are created here and nothing
+# reads or writes them before the sign-in routes land. Credentials of this
+# deployment, like v53's and v54's: never in a logical export
+# (transfer_cli.EXCLUDED_TABLES); a physical backup carries them.
+CONSOLE_SESSIONS_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS console_sessions (
+    session_id   TEXT PRIMARY KEY,
+    token_hash   TEXT NOT NULL UNIQUE,
+    principal    TEXT NOT NULL,
+    source       TEXT NOT NULL,
+    issuer       TEXT NOT NULL,
+    method       TEXT NOT NULL,
+    label        TEXT NOT NULL DEFAULT '',
+    created_at   DOUBLE PRECISION NOT NULL,
+    last_used_at DOUBLE PRECISION,
+    expires_at   DOUBLE PRECISION NOT NULL,
+    revoked_at   DOUBLE PRECISION
+);
+CREATE TABLE IF NOT EXISTS console_signin_codes (
+    code_hash  TEXT PRIMARY KEY,
+    principal  TEXT NOT NULL,
+    source     TEXT NOT NULL,
+    issuer     TEXT NOT NULL,
+    origin     TEXT NOT NULL,
+    expires_at DOUBLE PRECISION NOT NULL,
+    used_at    DOUBLE PRECISION,
+    created_at DOUBLE PRECISION NOT NULL
+);
+"""
+SCHEMA_SQL += CONSOLE_SESSIONS_SCHEMA_SQL
+
 # Every table this schema declares — the ONE list a bench/test reset
 # truncates. It lives here, beside the DDL, because it has to grow in the
 # same edit that adds a table; `tests/test_bench_reset_tables.py` fails the
@@ -991,6 +1082,7 @@ BENCH_RESET_TABLES = (
     "maintainer_passkeys", "maintainer_bootstrap", "maintainer_nonces",
     "reference_chunks", "cms_counters",
     "principal_activity", "rejected_bearers",
+    "console_sessions", "console_signin_codes",
 )
 
 # A test or bench reset reaps every other backend on its database, applies

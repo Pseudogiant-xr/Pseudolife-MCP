@@ -290,7 +290,9 @@ The installer also turns the agent board on: it mints a bearer token in
 `ops/.env` (owner-only, never printed) and gives each shim client it wires an
 owner-only token file. Re-running it on an existing install adds that file to
 the Claude Code registration in place. The ladder's last line, and
-`pseudolife-mcp doctor`, say whether the board is on or why it is off.
+`pseudolife-mcp doctor`, say whether the board is on or why it is off. At the
+end it opens the Console in your browser, signed in (`pseudolife-mcp
+console`, which an unattended install names instead of running).
 Use `doctor --host codex` or `--host claude-code` for a compact coordination
 snapshot: reachability, bearer admission, registration evidence, tool inventory
 and configured wake are separate. Default doctor is read-only; health and a
@@ -1347,7 +1349,7 @@ mistaken for a real bank.
 | Consolidation | `memory_consolidation_candidates` + `memory_consolidate` |
 | Optional components | Cross-encoder reranker (`rerank=True`, ~80 MB, downloaded on first use; the offline daemon image does not include it); ONNX embedding backend (`pip install .[onnx]` — load-only, and auto-selected when installed and the configured model's artifact is already on disk, ~3x faster CPU encode on MiniLM. The configured artifact must already exist locally: the daemon image provisions MiniLM's while building, while a pip install stays on torch until you provision it yourself. Models whose Transformer module loads from a subfolder use torch on native Windows, and the default Qwen3-Embedding-0.6B has no ONNX export at all); NLI contradiction scorer (`pip install .[nli]`, ~278 MB) |
 | Web console | Cortex Console at `/ui/` — health/stats, fact review + history, 3D graph and review queue, search/trace, coordination board, config editor (read-mostly, token-gated like `/mcp`) |
-| Schema version | v58 (Postgres meta version) — additive `ADD COLUMN IF NOT EXISTS` migrations on daemon start, **except v25**: the `vector(384)`→`vector(1024)` move is not additive, so the daemon refuses to start against an older-dimensioned bank until you run [`ops/migrate_embeddings.py`](docs/runbooks/embedding-v25-migration.md); legacy file-mode `.pt` banks auto-migrate into Postgres; [full version history](docs/guide/configuration.md#schema-version-history) |
+| Schema version | v59 (Postgres meta version) — additive `ADD COLUMN IF NOT EXISTS` migrations on daemon start, **except v25**: the `vector(384)`→`vector(1024)` move is not additive, so the daemon refuses to start against an older-dimensioned bank until you run [`ops/migrate_embeddings.py`](docs/runbooks/embedding-v25-migration.md); legacy file-mode `.pt` banks auto-migrate into Postgres; [full version history](docs/guide/configuration.md#schema-version-history) |
 
 ## Troubleshooting
 
@@ -1391,9 +1393,13 @@ pseudolife-mcp-daemon`).
 - **Port already in use**: the stack binds `127.0.0.1:8765` (daemon) and
   `127.0.0.1:5433` (Postgres). Change the host side in
   `ops/docker-compose.yml` if either collides.
-- **Console shows "offline" / Unauthorized**: "offline" means the daemon
-  isn't reachable (see above); a 401 prompt means it runs with
-  `PSEUDOLIFE_MCP_TOKEN` — paste that token into the Console's Token dialog.
+- **Console shows "offline" / asks you to sign in**: "offline" means the daemon
+  isn't reachable (see above); a sign-in prompt means it runs with a token.
+  Run `pseudolife-mcp console` on the daemon's machine, or on any machine that
+  uses Pseudolife once `pseudolife-mcp maintainer setup` gave the Console an
+  HTTPS address: it opens the Console signed in (or prints a link and a short
+  code where there is no browser). Pasting the daemon's token under
+  "Advanced" still works.
 - **The coding agent doesn't see the tools**: `claude mcp list` or
   `codex mcp list` should show
   `pseudolife-memory` ✓ connected. If not, re-check the URL

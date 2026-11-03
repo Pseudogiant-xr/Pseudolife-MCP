@@ -10,7 +10,7 @@
   <p class="state-body">{explained.body}</p>
   {#if explained.token}
     <button type="button" class="btn btn-secondary btn-sm" onclick={() => (ui.tokenOpen = true)}>
-      Set a bearer token
+      Sign in
     </button>
   {/if}
 </div>

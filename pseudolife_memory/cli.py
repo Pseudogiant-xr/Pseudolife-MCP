@@ -57,6 +57,10 @@ modes:
                  host (`pair <url> <code>`, or --read-code): mints the token
                  here, writes it owner-only and sends the daemon only its
                  SHA-256; never prints the token or the code
+  console        open the Console in a browser, signed in with a one-time
+                 link from this machine's token (--no-open prints the link
+                 and code; --list shows signed-in browsers, --revoke ID
+                 signs one out; --help for options)
   expose         on the daemon host: put the daemon on the tailnet with
                  Tailscale Serve (`expose tailscale`), refusing a daemon
                  without a token and never replacing another serve;
@@ -190,6 +194,9 @@ def main() -> None:
     elif mode == "pair":
         from pseudolife_memory.pair_cli import main as pair_main
         sys.exit(pair_main(sys.argv[2:]))
+    elif mode == "console":
+        from pseudolife_memory.console_cli import main as console_main
+        sys.exit(console_main(sys.argv[2:]))
     elif mode == "expose":
         from pseudolife_memory.expose_cli import main as expose_main
         sys.exit(expose_main(sys.argv[2:]))

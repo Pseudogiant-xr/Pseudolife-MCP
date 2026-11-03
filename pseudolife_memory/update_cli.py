@@ -63,6 +63,7 @@ from pathlib import Path
 from typing import Callable
 
 from pseudolife_memory import __version__
+from pseudolife_memory import child_python
 
 DAEMON_CONTAINER = "pseudolife-mcp-daemon"
 PG_CONTAINER = "pseudolife-mcp-postgres"
@@ -438,6 +439,10 @@ def _run_stdout(argv) -> tuple[int, str]:
     except (OSError, subprocess.TimeoutExpired) as exc:
         return 1, f"{type(exc).__name__}: {exc}"
     return proc.returncode, (proc.stdout if proc.returncode == 0 else (proc.stderr or proc.stdout))
+
+
+# The schema that made every principal the owner's (v59, spec 2026-11-02).
+OWNER_SCOPE_SCHEMA = 59
 
 
 # ── the update ──────────────────────────────────────────────────────────────
@@ -1094,6 +1099,7 @@ class Update:
             self.clients(repo, str(repo), health)
         else:
             self.hooks_changed_note(previous_digest, health)
+        self.console_notes(health)
         if not self.o.no_test_login:
             try:
                 self.ensure_test_login()
@@ -1265,7 +1271,62 @@ class Update:
             self.clients(None, f"pseudolife-mcp=={target}", health)
         else:
             self.hooks_changed_note(previous_digest, health)
+        self.console_notes(health)
         # No cache prune: nothing was built.
+
+    def console_notes(self, health: dict | None) -> None:
+        """After a healthy deploy, two lines a user may need and nothing
+        asked (spec 2026-11-02, "Install, update"): when this deploy moved
+        the bank to schema v59, that every principal is now treated as the
+        owner's (naming them, and the two ways to say one is not); and when
+        the daemon offers Console sign-in but no browser is signed in yet,
+        the command that opens the Console signed in."""
+        before, after = self.schema_before, (health or {}).get("schema")
+        if type(before) is int and type(after) is int and before < OWNER_SCOPE_SCHEMA <= after:
+            names = self._owner_names()
+            listed = f" ({', '.join(names)})" if names else ""
+            self.step(f"schema v{OWNER_SCOPE_SCHEMA}: every principal is now treated as yours{listed}, so "
+                      "your Console's Board shows their sessions' mail. For one that is someone "
+                      "else's: pseudolife-mcp invite <name> --someone-else, or for a "
+                      "PSEUDOLIFE_MCP_TOKENS name, list it in coordination.not_owner_principals in "
+                      "config.yaml")
+        if ((health or {}).get("console_signin") or {}).get("link") and self._no_console_signin():
+            self.step("open the Console signed in: pseudolife-mcp console")
+
+    def _owner_names(self) -> list[str]:
+        """The principals now the owner's, from ``invite --list --json`` in
+        this runtime (empty when that cannot be read: the line still says
+        what changed)."""
+        code, out = run_cli(child_python.cli_argv("invite", "--list", "--json"), timeout=120,
+                            stdout_only=True)
+        if code != 0:
+            return []
+        # The report is indented JSON (invite's --json), after any relayed
+        # line a Docker exec may print first.
+        start = out.find("{")
+        if start < 0:
+            return []
+        try:
+            rows = json.loads(out[start:]).get("principals") or []
+        except (ValueError, AttributeError):
+            return []
+        return sorted({row["principal"] for row in rows
+                       if isinstance(row, dict) and isinstance(row.get("principal"), str)
+                       and row.get("state") != "revoked" and row.get("owner", True)})
+
+    def _no_console_signin(self) -> bool:
+        """Whether the daemon answers that no browser is signed in, asked
+        with this machine's token; False when that cannot be told."""
+        from pseudolife_memory import console_cli
+        try:
+            _origin, token, _source = console_cli.credentials()
+            if not token:
+                return False
+            status, payload = console_cli.request(self.o.daemon_url.rstrip("/"),
+                                                  "/api/console/sessions", token)
+        except Exception:  # noqa: BLE001 - a hint only; never fail an update over it
+            return False
+        return status == 200 and isinstance(payload, dict) and payload.get("sessions") == []
 
     def hooks_changed_note(self, previous_digest: str | None, health: dict | None) -> None:
         """When the daemon's hook scripts changed and this run moved no

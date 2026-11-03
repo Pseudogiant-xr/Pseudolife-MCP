@@ -1,8 +1,8 @@
 usage: pseudolife-mcp invite [-h] [--tier {minimal,core,full}]
                              [--board | --no-board] [--expires EXPIRES]
-                             [--replace] [--url URL] [--port PORT]
-                             [--bank FINGERPRINT] [--list] [--revoke NAME]
-                             [--yes] [--json]
+                             [--someone-else | --mine] [--replace] [--url URL]
+                             [--port PORT] [--bank FINGERPRINT] [--list]
+                             [--revoke NAME] [--yes] [--json]
                              [name]
 
 Give another machine its own principal on this bank: prints a short-lived,
@@ -20,6 +20,11 @@ options:
                         default)
   --no-board            do not admit it to the agent board
   --expires EXPIRES     how long the code lives: 15m (default), at most 24h
+  --someone-else        the machine is not yours: the bank owner's Console
+                        does not show its board mail (a re-invite keeps what
+                        the name was)
+  --mine                the machine is yours (a new name's default; undoes
+                        --someone-else)
   --replace             give a paired principal a new code (its token works
                         until redeemed)
   --url URL             the daemon URL to print (default: expose status)

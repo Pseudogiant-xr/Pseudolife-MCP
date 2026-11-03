@@ -90,7 +90,7 @@
         Appearance<span class="sr-only">, switch to the {ui.theme === "dark" ? "light" : "dark"} theme</span>
       </button>
       <button type="button" class="foot-btn" onclick={() => (ui.tokenOpen = true)}>
-        Token<span class="sr-only">{ui.hasToken ? ", one is stored" : ", none stored"}</span>
+        {ui.hasToken ? "Signed in" : "Sign in"}<span class="sr-only">{ui.hasToken ? ", change this browser's sign-in" : ", this browser is not signed in"}</span>
       </button>
     </div>
   </div>

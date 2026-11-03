@@ -14,6 +14,7 @@ W1A = ('tokens', 'tokenless', 'pair-budget', 'config', 'extractor', 'db-down',
        'lease-held', 'reaper', 'dim-mismatch', 'stamped', 'seeded',
        'json-float-shortest-ties', 'trust-bind', 'null-embedding',
        'unconstrained-dims', 'db-lost', 'encodings', 'map-order', 'map-order-reversed',
+       'mcp-modern', 'mcp-modern-subscriptions', 'mcp-cancellation', 'mcp-modern-cancellation',
        'mcp-dream-rollback', 'mcp-search-explain')
 
 # These are observed differences, not comparator relaxations. Each omitted
@@ -79,6 +80,9 @@ EXCEPTIONS = {
 }
 
 DAEMON_CONTROLS = {
+    'mcp-cancel-ignored': ['mcp-cancellation'],
+    'mcp-modern-envelope-ignored': ['mcp-modern'],
+    'mcp-modern-subscription-id-lost': ['mcp-modern-subscriptions'],
     'mcp-dream-rollback-audit-kept': ['mcp-dream-rollback'],
     'trace-no-trace': ['mcp-search-explain'],
     'auth-candidate-order': ['encodings'],

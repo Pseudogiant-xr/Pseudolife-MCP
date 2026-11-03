@@ -85,6 +85,20 @@ connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors
 API answers carry `nosniff` too). The Console has no inline script: its
 theme bootstrap is served as `/ui/theme.js`.
 
+**A Console sign-in is a bank bearer.** `pseudolife-mcp console` and the
+passkey sign-in each give the browser a bearer of its own, which reads and
+writes the bank as the principal it signed in as, for up to 90 days (30
+from its last use). It works on the Console's `/api` routes only, never on
+`/mcp`, the plugin hooks or the board's mailbox routes, so it cannot act as
+an agent session or send board mail, and only a sign-in from an environment
+token may change the daemon's settings. **A passkey is now a way to get such
+a bearer:** anyone who can use the maintainer passkey at the Console's HTTPS
+address can sign a browser in, and a synced passkey can do that from every
+device in its sync group. Revoking the key (Settings, Your passkeys, or
+`pseudolife-mcp maintainer revoke` on the host) signs out every browser it
+signed in, and Settings, Signed-in browsers, or `pseudolife-mcp console
+--list` / `--revoke` shows and ends any one of them.
+
 ## Mechanism → threat map
 
 Every row ships today. "Default" says what a fresh install does, because a

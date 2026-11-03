@@ -76,6 +76,42 @@ def test_version_cut_uses_new_identity_on_pr_and_push_without_followup(release, 
     assert select_release(root, head, followup)["oracle_head"] == head
 
 
+@pytest.mark.parametrize("behavior_change", [False, True])
+def test_branch_stress_uses_the_pr_release_rule_and_preserves_its_receipt(release, monkeypatch, behavior_change):
+    root, base, head = release
+    if behavior_change:
+        write(root, "pseudolife_memory/shim.py", "CONTRACT = 'changed'\n")
+        head = commit(root)
+    # Master advanced on a different branch: use the actual common ancestor,
+    # not the current master tip or the candidate itself.
+    git(root, "checkout", "--quiet", "--detach", base)
+    write(root, "master-only.txt", "Unrelated master change.\n")
+    master = commit(root)
+    git(root, "update-ref", "refs/remotes/origin/master", master)
+    git(root, "checkout", "--quiet", "--detach", head)
+    selected = oracle.select(root, "workflow_dispatch", {"inputs": {"mode": "stress"}}, head,
+                             github_ref="refs/heads/release-candidate")
+    expected = select_release(root, master, head)
+    assert selected["base_head"] == master
+    assert selected["oracle_head"] == expected["oracle_head"] == (base if behavior_change else head)
+    assert selected.get("release_cut") == expected.get("release_cut")
+    monkeypatch.setenv(oracle.SELECTION_ENV, json.dumps(selected))
+    git(root, "update-ref", "refs/remotes/origin/master", head)
+    assert oracle.selected_oracle(root) == selected
+
+
+@pytest.mark.parametrize("shadow", ["refs/tags/origin/master", "refs/heads/origin/master"])
+def test_branch_stress_ignores_tags_and_branches_shadowing_the_remote_master(release, shadow):
+    root, base, _ = release
+    write(root, "pseudolife_memory/shim.py", "CONTRACT = 'changed'\n")
+    head = commit(root)
+    git(root, "update-ref", "refs/remotes/origin/master", base)
+    git(root, "update-ref", shadow, head)
+    selected = oracle.select(root, "workflow_dispatch", {"inputs": {"mode": "stress"}}, head,
+                             github_ref="refs/heads/origin/master")
+    assert selected["base_head"] == selected["oracle_head"] == base
+
+
 def test_a_cut_carrying_the_batch_regenerated_census_is_still_a_release(release):
     # A cut changes plugin/release.json, which the producer census hashes, so
     # `ops/integrate.py build` adds a regenerated census to the cut's batch.

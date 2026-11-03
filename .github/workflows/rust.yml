@@ -1280,7 +1280,7 @@ jobs:
       # - Cases marked live-only (Case.golden False) are left out of goldens
       #   and run in the live pass: transfer keeps help, the no-database
       #   refusals and the float-tie cases (the whole row is 14 MB of bank
-      #   dumps); invite leaves out the 24 cases that show principals its
+      #   dumps); invite leaves out the 31 cases that show principals its
       #   seed stamps with the wall clock and random codes, and one 2.6 MB
       #   report.
       - name: Build the test_login container image
@@ -1394,14 +1394,20 @@ jobs:
           if-no-files-found: error
       - name: Run unchanged candidates and differential judges
         if: matrix.suite == 'judges'
-        timeout-minutes: 15
+        # #1211 (2026-11-03): Windows took 554s/519s on passing runs,
+        # but a slower runner exhausted 900s after the judges passed.
+        timeout-minutes: ${{ runner.os == 'Windows' && 20 || 15 }}
         shell: pwsh
         run: |
           $checkoutRoot = (Get-Location).Path
           $oracleRoot = Join-Path $env:RUNNER_TEMP 'phase1-oracle'
+          $judgePhase = [Diagnostics.Stopwatch]::StartNew()
           python -m evals.rust_port.phase1_oracle --destination $oracleRoot
+          Write-Host ("judges phase=oracle-setup elapsed_seconds={0:F3}" -f $judgePhase.Elapsed.TotalSeconds)
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $judgePhase = [Diagnostics.Stopwatch]::StartNew()
           python -m pseudolife_memory.cli lease check full-suite
+          Write-Host ("judges phase=lease-check elapsed_seconds={0:F3}" -f $judgePhase.Elapsed.TotalSeconds)
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $resourceCheckedAt = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')
           $binaryName = if ($IsWindows) { 'pseudolife-stdio.exe' } else { 'pseudolife-stdio' }
@@ -1420,14 +1426,20 @@ jobs:
           $env:PSEUDOLIFE_RUST_BINARY = $candidatePath
           $env:PSEUDOLIFE_WAIT_MAIL_ORACLE_ROOT = $oracleSource
           $env:PSEUDOLIFE_WAIT_MAIL_NATIVE_REQUIRED = '1'
+          $judgePhase = [Diagnostics.Stopwatch]::StartNew()
           & $oraclePython -m pytest -q evals/rust_port/test_cli_wait_mail.py evals/rust_port/test_wait_mail_phase2d_native.py evals/rust_port/test_wait_mail_reduction_native.py evals/rust_port/test_wait_mail_producer_native.py evals/rust_port/test_wait_mail_candidate_contract.py evals/rust_port/test_wait_mail_measurement.py evals/rust_port/test_wait_mail_listener_events.py -ra --durations=30 --junitxml (Join-Path $env:RUNNER_TEMP 'junit/run-unchanged-candidates-and-differential-judges.xml')
+          Write-Host ("judges phase=wait-mail-tests elapsed_seconds={0:F3}" -f $judgePhase.Elapsed.TotalSeconds)
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $leaseHeaderReceipt = Join-Path $env:RUNNER_TEMP 'lease-header-policy.json'
+          $judgePhase = [Diagnostics.Stopwatch]::StartNew()
           & $oraclePython -m evals.rust_port.lease_headers --root $checkoutRoot --candidate $candidatePath --out $leaseHeaderReceipt
+          Write-Host ("judges phase=lease-headers elapsed_seconds={0:F3}" -f $judgePhase.Elapsed.TotalSeconds)
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $privateArgvReceipt = Join-Path $env:RUNNER_TEMP 'rust-cli-argv.json'
           $publicArgvReceipt = Join-Path $checkoutRoot "evals/results/rust-cli-argv-$env:RUNNER_OS.json"
+          $judgePhase = [Diagnostics.Stopwatch]::StartNew()
           & $oraclePython -m evals.rust_port.cli_argv --oracle-root $oracleSource --candidate-json $candidateCommand --out $privateArgvReceipt --public-out $publicArgvReceipt
+          Write-Host ("judges phase=cli-argv elapsed_seconds={0:F3}" -f $judgePhase.Elapsed.TotalSeconds)
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $judgeBootstrap = @'
           import pathlib, subprocess, sys
@@ -1436,7 +1448,9 @@ jobs:
           command = module_command("evals.rust_port.phase1_ci", root, sys.argv[2:])
           raise SystemExit(subprocess.run(command, cwd=root).returncode)
           '@
+          $judgePhase = [Diagnostics.Stopwatch]::StartNew()
           & $oraclePython -c $judgeBootstrap $oracleSource --oracle-root $oracleSource --candidate-json $candidateCommand --candidate-root $checkoutRoot --out $privateReceipt --public-out $publicReceipt --offline-resource-checked-at $resourceCheckedAt
+          Write-Host ("judges phase=phase1-judges elapsed_seconds={0:F3}" -f $judgePhase.Elapsed.TotalSeconds)
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $phase2Bootstrap = @'
           import pathlib, subprocess, sys
@@ -1447,7 +1461,9 @@ jobs:
           '@
           $phase2Evidence = Join-Path $env:RUNNER_TEMP 'phase2-cli-tests'
           $phase2Receipt = Join-Path $checkoutRoot "evals/results/rust-phase2-ci-$env:RUNNER_OS.json"
+          $judgePhase = [Diagnostics.Stopwatch]::StartNew()
           & $oraclePython -c $phase2Bootstrap $oracleSource --oracle-root $oracleSource --candidate-json $candidateCommand --candidate-root $checkoutRoot --evidence-directory $phase2Evidence --out $phase2Receipt --offline-resource-checked-at $resourceCheckedAt
+          Write-Host ("judges phase=phase2-dispatch elapsed_seconds={0:F3}" -f $judgePhase.Elapsed.TotalSeconds)
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $processBootstrap = @'
           import os, pathlib, subprocess, sys, tempfile
@@ -1471,7 +1487,9 @@ jobs:
           '@
           $processReceipt = Join-Path $env:RUNNER_TEMP 'phase2b-cli-process.json'
           $processPublicReceipt = Join-Path $env:RUNNER_TEMP 'phase2b-cli-process-public.json'
+          $judgePhase = [Diagnostics.Stopwatch]::StartNew()
           & $oraclePython -c $processBootstrap $oracleSource --oracle-root $oracleSource --candidate-json $candidateCommand --candidate-root $checkoutRoot --out $processReceipt --public-out $processPublicReceipt --modes help version lease --offline-resource-checked-at $resourceCheckedAt
+          Write-Host ("judges phase=cli-process elapsed_seconds={0:F3}" -f $judgePhase.Elapsed.TotalSeconds)
           exit $LASTEXITCODE
       - name: Retain parity pytest reports
         if: always()
@@ -1878,8 +1896,9 @@ jobs:
 
   # A stress loop (mode=stress): run one selection on N fresh hosted runners
   # and report every iteration (rust/ci/stress.py). It compares against this
-  # checkout's Python on any branch; the event oracle binds best-effort (only
-  # a master dispatch with frozen_head has one). Inputs reach the scripts only through env,
+  # checkout's Python on any branch; branch dispatches also bind an event oracle
+  # from the merge base with master, frozen once by the plan for every iteration.
+  # Inputs reach the scripts only through env,
   # never inlined into a script.
   stress-plan:
     name: Stress / plan
@@ -1889,8 +1908,23 @@ jobs:
     outputs:
       iterations: ${{ steps.plan.outputs.iterations }}
       kind: ${{ steps.plan.outputs.kind }}
+      oracle_base: ${{ steps.oracle.outputs.oracle_base }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Freeze the branch-stress oracle base
+        id: oracle
+        # Actions string comparisons ignore case; Git branch refs do not.
+        shell: python
+        run: |
+          import os
+          import subprocess
+          if os.environ["GITHUB_REF"] != "refs/heads/master":
+              base = subprocess.check_output(
+                  ["git", "rev-parse", "--verify", "refs/remotes/origin/master^{commit}"], text=True).strip()
+              with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+                  output.write(f"oracle_base={base}\n")
       - name: Check the selection and list the iterations
         id: plan
         env:
@@ -2057,21 +2091,22 @@ jobs:
         with:
           name: stress-tests-${{ runner.os }}
           path: ${{ runner.temp }}/stress-tests
-      # Best effort: the event oracle binds only for a master dispatch with
-      # frozen_head. The CLI and daemon harnesses never read it; pytest
-      # selections under evals/rust_port that call selected_oracle() need it,
-      # and on a branch they fail with its "select the event oracle" error.
+      # Best effort for selections that do not consume the event oracle.
+      # Branch stress freezes the merge base with master; master captures
+      # retain frozen_head. Oracle-dependent selections still fail if binding
+      # fails, including an unaccepted production source pin.
       - name: Bind the event-selected Python oracle when the dispatch has one
         continue-on-error: true
         shell: pwsh
         env:
           GITHUB_REF: ${{ github.ref }}
+          PSEUDOLIFE_PORT_DISPATCH_BASE: ${{ needs.stress-plan.outputs.oracle_base }}
         run: |
           python -m evals.rust_port.oracle_selection --out (Join-Path $env:RUNNER_TEMP 'oracle-selection.json') --github-env $env:GITHUB_ENV
           exit $LASTEXITCODE
       # The Rust job's Nextest step has the selected package metadata, which
-      # cli_version_contract reads; it needs the oracle above, so on a branch
-      # it is skipped and that test fails rather than passing.
+      # cli_version_contract reads; it needs the oracle above, and fails
+      # rather than passing if the selected metadata could not be prepared.
       - name: Prepare selected package metadata for the Rust identity contract
         if: env.STRESS_KIND == 'cargo'
         continue-on-error: true

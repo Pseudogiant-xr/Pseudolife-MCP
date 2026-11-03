@@ -71,6 +71,7 @@ pub struct MemoryConfig {
     pub surprise_threshold: f64,
     pub meta_filter_enabled: bool,
     pub cortex_auto_promote: bool,
+    pub cortex_promote_confidence: f64,
     pub retention_boost: f64,
     pub search: SearchConfig,
     pub bm25: Bm25Config,
@@ -576,6 +577,9 @@ pub struct CoordinationConfig {
     pub allowed_principals: Vec<String>,
     pub daemon_notice_principals: Vec<String>,
     pub maintainer_principals: Vec<String>,
+    /// v59: environment principals that are someone else's, not the bank
+    /// owner's (`coordination.not_owner_principals`, config.yaml only).
+    pub not_owner_principals: Vec<String>,
     pub audit_retention_days: i64,
     pub maintainer_per_recipient_per_hour: i64,
     /// `coordination.maintainer.rp_id` and `.origin` ("" unset): the
@@ -897,6 +901,7 @@ impl Default for MemoryConfig {
             surprise_threshold: 0.0,
             meta_filter_enabled: false,
             cortex_auto_promote: false,
+            cortex_promote_confidence: 0.5,
             search: SearchConfig::default(),
             bm25: Bm25Config::default(),
             reranker_enabled: false,
@@ -973,6 +978,7 @@ impl Default for CoordinationConfig {
             allowed_principals: vec![DEFAULT_PRINCIPAL.to_string()],
             daemon_notice_principals: Vec::new(),
             maintainer_principals: Vec::new(),
+            not_owner_principals: Vec::new(),
             audit_retention_days: 90,
             maintainer_per_recipient_per_hour: 30,
             maintainer_rp_id: String::new(),
@@ -2124,6 +2130,8 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
         }
         if let Some(c) = section(m, "cortex", "memory.")? {
             memory.cortex_auto_promote = want_bool(c, "auto_promote", "memory.cortex", false)?;
+            memory.cortex_promote_confidence =
+                want_float(c, "promote_confidence", "memory.cortex", 0.5)?;
         }
         // `self.config.memory.reference.persist_dir = ...` (service.py:857).
         // `_dict_to_dataclass` checks no types; a non-integer size makes
@@ -2953,6 +2961,7 @@ fn read_coordination(c: &[(Node, Node)]) -> Result<CoordinationConfig, ConfigErr
     let allowed = principal_list(c, "allowed_principals")?;
     let notice = principal_list(c, "daemon_notice_principals")?;
     let maintainers = principal_list(c, "maintainer_principals")?;
+    let not_owner = principal_list(c, "not_owner_principals")?;
     let mut shared: Vec<&str> = [DAEMON_PRINCIPAL, DEFAULT_PRINCIPAL]
         .into_iter()
         .filter(|p| maintainers.iter().any(|m| m == p))
@@ -2989,6 +2998,7 @@ fn read_coordination(c: &[(Node, Node)]) -> Result<CoordinationConfig, ConfigErr
         },
         daemon_notice_principals: dedupe(notice),
         maintainer_principals: dedupe(maintainers),
+        not_owner_principals: dedupe(not_owner),
         audit_retention_days: lookup(c, "audit_retention_days")?
             .and_then(|n| exact_int_at_least(n, 0))
             .unwrap_or(defaults.audit_retention_days),
@@ -3643,6 +3653,23 @@ mod tests {
             "coordination:\n  maintainer:\n    bogus: 1\n",
             "coordination:\n  maintainer:\n    rp_id: 5\n",
             "coordination:\n  maintainer:\n    maintainer_per_recipient_per_hour: -1\n",
+        ] {
+            assert!(refused(text), "{text:?}");
+        }
+    }
+
+    /// v59 `coordination.not_owner_principals`, validated and normalized as
+    /// tests/test_principals.py pins Python's.
+    #[test]
+    fn not_owner_principals_is_a_list_of_names() {
+        assert!(cfg("").coordination.not_owner_principals.is_empty());
+        let c = cfg("coordination:\n  not_owner_principals: [' Friend ', default, friend]\n");
+        assert_eq!(c.coordination.not_owner_principals, ["friend", "default"]);
+        for text in [
+            "coordination:\n  not_owner_principals: friend\n",
+            "coordination:\n  not_owner_principals: ['']\n",
+            "coordination:\n  not_owner_principals: [3]\n",
+            "coordination:\n  not_owner_principals:\n",
         ] {
             assert!(refused(text), "{text:?}");
         }

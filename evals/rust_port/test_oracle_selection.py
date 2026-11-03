@@ -18,6 +18,8 @@ def graph(monkeypatch):
 
     def git(root, *arguments):
         calls.append(arguments)
+        if arguments == ("rev-parse", "refs/remotes/origin/master^{commit}"):
+            return BASE
         if arguments[:2] == ("merge-base", "--all"):
             return MERGE
         return arguments[-1].split("^")[0]
@@ -90,7 +92,8 @@ def test_dispatch_uses_frozen_head_without_new_input(graph):
     assert not any(arguments[0] == "merge-base" for arguments in graph)
 
 
-@pytest.mark.parametrize("ref", [None, "", "refs/heads/topic", "refs/tags/master"])
+@pytest.mark.parametrize("ref", [None, "", "refs/heads/topic", "refs/tags/master",
+                                 "refs/heads/Master", "refs/heads/MASTER"])
 def test_dispatch_requires_the_master_branch_ref(graph, ref):
     with pytest.raises(ValueError, match="dispatch requires refs/heads/master"):
         oracle.select("root", "workflow_dispatch", {"inputs": {"frozen_head": HEAD}}, HEAD,
@@ -106,6 +109,76 @@ def test_loaded_dispatch_selection_rechecks_recorded_ref(graph, monkeypatch):
     monkeypatch.setenv(oracle.SELECTION_ENV, json.dumps(selection))
     with pytest.raises(ValueError, match="dispatch requires refs/heads/master"):
         oracle.selected_oracle("root")
+
+
+def test_branch_stress_freezes_master_and_rechecks_without_following_the_ref(graph, monkeypatch):
+    selected = oracle.select("root", "workflow_dispatch", {"inputs": {"mode": "stress"}}, HEAD,
+                             github_ref="refs/heads/topic")
+    assert selected["oracle_head"] == MERGE
+    assert selected["candidate_head"] == selected["checkout_head"] == HEAD
+    assert selected["base_head"] == BASE
+    assert selected["dispatch_mode"] == "stress"
+    assert ("merge-base", "--all", BASE, HEAD) in graph
+    monkeypatch.setenv(oracle.SELECTION_ENV, json.dumps(selected))
+    original_git = oracle.git
+
+    def moved_master(root, *args):
+        assert args != ("rev-parse", "refs/remotes/origin/master^{commit}"), "receipt must retain its frozen base"
+        return original_git(root, *args)
+
+    monkeypatch.setattr(oracle, "git", moved_master)
+    assert oracle.selected_oracle("root") == selected
+    selected["oracle_head"] = HEAD
+    monkeypatch.setenv(oracle.SELECTION_ENV, json.dumps(selected))
+    with pytest.raises(ValueError, match="immutable event binding"):
+        oracle.selected_oracle("root")
+
+
+@pytest.mark.parametrize("mode", ["ci", "wait-mail", "stressful", "", None])
+def test_only_explicit_stress_can_dispatch_from_a_branch(graph, mode):
+    with pytest.raises(ValueError, match="dispatch requires refs/heads/master"):
+        oracle.select("root", "workflow_dispatch", {"inputs": {"mode": mode, "frozen_head": HEAD}},
+                      HEAD, github_ref="refs/heads/topic")
+
+
+@pytest.mark.parametrize("ref", [None, "", "refs/tags/topic", "refs/pull/1/merge", "refs/heads/"])
+def test_branch_stress_requires_a_branch_ref(graph, ref):
+    with pytest.raises(ValueError, match="stress dispatch requires a branch ref"):
+        oracle.select("root", "workflow_dispatch", {"inputs": {"mode": "stress"}}, HEAD,
+                      github_ref=ref)
+
+
+def test_branch_stress_cannot_replace_the_dispatched_checkout_with_frozen_head(graph):
+    with pytest.raises(ValueError, match="dispatch frozen head and checkout head differ"):
+        oracle.select("root", "workflow_dispatch", {
+            "inputs": {"mode": "stress", "frozen_head": BASE}}, HEAD, github_ref="refs/heads/topic")
+
+
+def test_stress_does_not_change_the_existing_master_frozen_capture(graph):
+    selected = oracle.select("root", "workflow_dispatch", {
+        "inputs": {"mode": "stress", "frozen_head": HEAD}}, HEAD, github_ref="refs/heads/master")
+    assert selected["oracle_head"] == HEAD
+    assert selected["base_head"] is None
+    assert not any(args[0] == "merge-base" for args in graph)
+
+
+@pytest.mark.parametrize("ref", ["refs/heads/topic", "refs/heads/Master", "refs/heads/MASTER"])
+def test_stress_cli_uses_the_run_wide_base_after_master_moves(graph, monkeypatch, tmp_path, ref):
+    original_git = oracle.git
+    monkeypatch.setattr(oracle, "git", lambda root, *args:
+                        HEAD if args in (("rev-parse", "HEAD"),
+                                         ("rev-parse", "refs/remotes/origin/master^{commit}"),
+                                         ("rev-parse", "origin/master^{commit}")) else original_git(root, *args))
+    payload, receipt = tmp_path / "event.json", tmp_path / "selection.json"
+    payload.write_text(json.dumps({"inputs": {"mode": "stress"}}), encoding="utf-8")
+    monkeypatch.setenv("PSEUDOLIFE_PORT_DISPATCH_BASE", BASE)
+    monkeypatch.setattr(sys, "argv", ["selection", "--root", str(tmp_path),
+        "--event-name", "workflow_dispatch", "--event-path", str(payload),
+        "--checkout-head", HEAD, "--github-ref", ref, "--out", str(receipt)])
+    oracle.main()
+    selected = json.loads(receipt.read_text(encoding="utf-8"))
+    assert selected["base_head"] == BASE
+    assert ("merge-base", "--all", BASE, HEAD) in graph
 
 
 @pytest.mark.parametrize("name,event", [

@@ -611,7 +611,11 @@ impl From<Refused> for WriteError {
 /// the target's ASCII letters except their own upper and lower case.
 fn protected(path: &str) -> bool {
     let folded = py_strip(path).to_lowercase();
-    folded == "coordination.maintainer" || folded.starts_with("coordination.maintainer.")
+    folded == "coordination.maintainer"
+        || folded.starts_with("coordination.maintainer.")
+        // v59: whose principals are the owner's, config.yaml only.
+        || folded == "coordination.not_owner_principals"
+        || folded.starts_with("coordination.not_owner_principals.")
 }
 
 /// A coerced value as YAML writes it. An integer past i64 (an int knob

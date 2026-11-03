@@ -117,6 +117,9 @@ EXCLUDED_TABLES = (
     # v58: when each principal last authenticated here, and the refused
     # bearers' hash prefixes: this daemon's serving history.
     "principal_activity", "rejected_bearers",
+    # v59: the Console's signed-in browsers and one-time sign-in codes are
+    # credentials of this deployment: full backups only.
+    "console_sessions", "console_signin_codes",
 )
 
 # Columns of an exported table that are serving telemetry under the same

@@ -127,6 +127,7 @@
   ],
   "invite": [
     "invite-expired-is-pending",
+    "invite-keep-owned-lost",
     "invite-keep-tier-lost",
     "invite-list-order",
     "invite-message-token",

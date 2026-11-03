@@ -150,9 +150,13 @@ def merge_base(root, base, head):
     return commit(bases[0])
 
 
-def select(root, event_name, event, checkout_head, *, github_ref=None):
+def select(root, event_name, event, checkout_head, *, github_ref=None, dispatch_base=None):
     checkout_head = commit(checkout_head)
     release = None
+    # Keep this exact, case-sensitive ref check aligned with rust.yml's stress plan.
+    branch_stress = (event_name == "workflow_dispatch"
+                     and event.get("inputs", {}).get("mode") == "stress"
+                     and github_ref != "refs/heads/master")
     if event_name == "pull_request":
         request = event["pull_request"]
         base, head = commit(request["base"]["sha"]), commit(request["head"]["sha"])
@@ -183,12 +187,29 @@ def select(root, event_name, event, checkout_head, *, github_ref=None):
         head = oracle = checkout_head
         base = None
     elif event_name == "workflow_dispatch":
-        if github_ref != "refs/heads/master":
-            raise ValueError("dispatch requires refs/heads/master")
-        head = oracle = commit(event["inputs"]["frozen_head"])
-        base = None
-        if head != checkout_head:
-            raise ValueError("dispatch frozen head and checkout head differ")
+        if branch_stress:
+            if not isinstance(github_ref, str) or not github_ref.startswith("refs/heads/") \
+                    or github_ref == "refs/heads/":
+                raise ValueError("stress dispatch requires a branch ref")
+            head = checkout_head
+            frozen = event["inputs"].get("frozen_head")
+            if frozen and commit(frozen) != head:
+                raise ValueError("dispatch frozen head and checkout head differ")
+            # Resolve master once, then replay receipts against that immutable
+            # SHA even if the remote-tracking ref has advanced (or is absent).
+            base = commit(dispatch_base if dispatch_base is not None
+                          else git(root, "rev-parse", "refs/remotes/origin/master^{commit}"))
+            oracle = merge_base(root, base, head)
+            release = release_cut(root, oracle, head)
+            if release is not None:
+                oracle = head
+        else:
+            if github_ref != "refs/heads/master":
+                raise ValueError("dispatch requires refs/heads/master")
+            head = oracle = commit(event["inputs"]["frozen_head"])
+            base = None
+            if head != checkout_head:
+                raise ValueError("dispatch frozen head and checkout head differ")
     else:
         raise ValueError("unsupported oracle selection event")
     # An object that is absent or is not a commit is a setup error, not parity.
@@ -196,6 +217,7 @@ def select(root, event_name, event, checkout_head, *, github_ref=None):
         raise ValueError("selected oracle commit unavailable")
     return {"event": event_name, "github_ref": github_ref, "checkout_head": checkout_head,
             "base_head": base, "candidate_head": head, "oracle_head": oracle,
+            **({"dispatch_mode": "stress"} if branch_stress else {}),
             **({"release_cut": release} if release is not None else {})}
 
 
@@ -212,8 +234,12 @@ def selected_oracle(root=ROOT):
                                    "head_sha": observed["candidate_head"]}}
              if name == "merge_group" else {"after": observed["candidate_head"]}
              if name == "push" else {} if name == "schedule"
-             else {"inputs": {"frozen_head": observed["candidate_head"]}})
-    checked = select(root, name, event, observed["checkout_head"], github_ref=observed.get("github_ref"))
+             else {"inputs": {"frozen_head": observed["candidate_head"],
+                               "mode": observed.get("dispatch_mode")}})
+    dispatch_base = (commit(observed["base_head"])
+                     if name == "workflow_dispatch" and observed.get("dispatch_mode") == "stress" else None)
+    checked = select(root, name, event, observed["checkout_head"], github_ref=observed.get("github_ref"),
+                     dispatch_base=dispatch_base)
     if observed != checked:
         raise ValueError("oracle selection differs from its immutable event binding")
     return checked
@@ -238,6 +264,8 @@ def main():
     parser.add_argument("--event-path", type=Path, default=os.environ.get("GITHUB_EVENT_PATH"))
     parser.add_argument("--checkout-head", default=os.environ.get("GITHUB_SHA"))
     parser.add_argument("--github-ref", default=os.environ.get("GITHUB_REF"))
+    parser.add_argument("--dispatch-base", default=os.environ.get("PSEUDOLIFE_PORT_DISPATCH_BASE") or None,
+                        help="full master SHA frozen by the branch-stress plan for every iteration")
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--github-env", type=Path)
     args = parser.parse_args()
@@ -246,7 +274,7 @@ def main():
         raise ValueError("event checkout head and actual checkout differ")
     selection = select(args.root, args.event_name,
                        json.loads(args.event_path.read_text(encoding="utf-8")), actual,
-                       github_ref=args.github_ref)
+                       github_ref=args.github_ref, dispatch_base=args.dispatch_base)
     # PR captures deliberately use their merge base. Check the originating
     # production change too, before it can become a successor PR's oracle.
     for head in dict.fromkeys((selection["candidate_head"], actual)):
