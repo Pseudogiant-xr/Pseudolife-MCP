@@ -833,8 +833,8 @@ def _cases() -> list[core.Case]:
         add(write_case(case_id, "empty", ["zulu.1", "--expires", "900s", "--url", "u", *json_flag],
                        extra_env={"PSEUDOLIFE_MCP_PORT": str(port), "PSEUDOLIFE_DAEMON_EXEC": None},
                        daemon=_daemon(port, health())))
-    # Forwarded as a current host CLI does (PSEUDOLIFE_DAEMON_EXEC set): the
-    # same note.
+    # Run with PSEUDOLIFE_DAEMON_EXEC set, as a current host CLI forwards it
+    # (here with --port too, which no host forwards): the same note.
     inviting("invite-forwarded", "empty", ["zulu.1", "--expires", "900s", "--url", "u"],
              extra_env={"PSEUDOLIFE_DAEMON_EXEC": "1"})
     inviting("invite-health-int-at-limit", "states", ["laptop", "--url", "u", "--json"],
