@@ -86,7 +86,8 @@ def after(arm, obs):
         for field in ("dump", "state"):
             path = Path(row["value"]["backup"][field])
             if path.is_absolute():
-                relative = path.relative_to(arm.home / "bank" / "backups")
+                # Windows may report a long path for a home created through an 8.3 alias.
+                relative = path.resolve().relative_to((arm.home / "bank" / "backups").resolve())
                 assert path.is_file(), "committed recovery path must name its backup"
                 row["value"]["backup"][field] = "{HOME}/bank/backups/" + relative.as_posix()
         current["tables"]["meta"][index] = json.dumps(row, sort_keys=True)
