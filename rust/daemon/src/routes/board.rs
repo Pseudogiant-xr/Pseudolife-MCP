@@ -14,7 +14,7 @@ pub(super) async fn route(req: &mut Request<'_>) -> Option<Response> {
         ("GET", "/api/agents")
             if req.params.get("view").map(String::as_str) == Some("coordination") =>
         {
-            Some(crate::board::http::console(req.app, req.headers, req.params).await)
+            Some(crate::board::http::console(req.app, req.headers, req.params, req.session).await)
         }
         ("GET", "/api/agents") => {
             Some(crate::read::console::agents(req.app, req.params, req.headers).await)

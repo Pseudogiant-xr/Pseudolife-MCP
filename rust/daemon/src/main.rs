@@ -13,6 +13,7 @@ mod board;
 mod briefing;
 mod config;
 mod config_io;
+mod console_sessions;
 mod consolidation_tools;
 mod contradiction;
 mod correction_tools;
@@ -307,11 +308,15 @@ fn main() {
         // v58: the gate's activity record, written by the refresher; an
         // open daemon records nothing (daemon.py start_stored_principals).
         let activity = (auth_configured && !read_only).then(|| Arc::new(principal_activity::Recorder::new()));
+        // v59: Console sign-in sessions, reloaded by the same refresher. An
+        // open daemon has no principals to sign in as, so none.
+        let sessions = auth_configured.then(|| Arc::new(console_sessions::SessionSnapshot::new()));
         principals::spawn_refresher(
             dsn.clone(),
             store.clone(),
             env_principals,
             activity.clone(),
+            sessions.clone(),
             read_only,
         );
         let service_dsn = dsn.clone();
@@ -345,7 +350,8 @@ fn main() {
         background.start_heap_trim(trim_every);
         let app = Arc::new(
             http::App::new(service.clone(), tokens, store, static_dir, board)
-                .with_activity(activity),
+                .with_activity(activity)
+                .with_sessions(sessions),
         );
         let router = axum::Router::new().fallback(http::handle).with_state(app);
         let listener = match tokio::net::TcpListener::bind((host.as_str(), port)).await {

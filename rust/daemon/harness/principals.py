@@ -54,6 +54,15 @@ def operator_post_paths():
 
 
 OPERATOR_POST_PATHS = operator_post_paths()
+
+
+def operator_allowed(source, issued_by):
+    """``web/api.py`` ``_operator`` (a closure there, so modelled here): an
+    environment principal, an open daemon, or a Console session an
+    environment principal issued."""
+    if source in (None, identities.SOURCE_OPEN, identities.SOURCE_ENVIRONMENT):
+        return True
+    return source == identities.SOURCE_SESSION and issued_by == identities.SOURCE_ENVIRONMENT
 OPERATOR_REQUESTS = [{"method": method, "path": path}
                      for path in sorted(OPERATOR_POST_PATHS) + ["/api/stats"]
                      for method in ("GET", "POST")]
@@ -327,10 +336,14 @@ class PythonArm:
                 except identities.PrincipalsUnavailable:
                     principal = source = None
                     status = "unavailable"
-                policy = [{**request, "allowed": not (
-                    source == identities.SOURCE_STORE and request["method"] == "POST"
-                    and request["path"] in OPERATOR_POST_PATHS)}
-                    for request in v.get("operator_requests", [])]
+                # web/api.py ``_operator``: the allowlist (spec 2026-11-02,
+                # section 3). This resolver never yields a Console session,
+                # so ``issued_by`` is always None here and the answers equal
+                # the old store-only denylist's: the goldens do not move.
+                policy = [{**request, "allowed": request["method"] != "POST"
+                           or request["path"] not in OPERATOR_POST_PATHS
+                           or operator_allowed(source, None)}
+                          for request in v.get("operator_requests", [])]
                 resolved.append({"status": status, "principal": principal, "source": source,
                                  "operator_policy": policy})
             return {"available": self.snapshot.available(), "len": len(self.snapshot),
