@@ -469,9 +469,15 @@ impl SessionSnapshot {
         s.loaded_at = Some(read.started);
     }
 
-    /// A sign-in that just committed: usable at once.
+    /// A sign-in that just committed: usable at once, unless a revocation
+    /// of it already committed and was dropped here. A redemption publishes
+    /// after its COMMIT, so an operator can list and revoke the session in
+    /// between; the later publish must not bring it back.
     pub fn add(&self, row: ConsoleSession) {
         let mut s = self.lock();
+        if s.dropped.contains_key(&row.session_id) {
+            return;
+        }
         s.seq += 1;
         let seq = s.seq;
         s.added.insert(row.session_id.clone(), (seq, row.clone()));

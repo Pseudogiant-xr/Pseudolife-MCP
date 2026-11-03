@@ -403,6 +403,31 @@ fn a_revoked_session_stops_at_once_and_stays_gone_through_an_older_refresh() {
 }
 
 #[test]
+fn a_revocation_that_lands_before_its_sign_in_is_published_stays_revoked() {
+    // The redemption commits, an operator lists and revokes the new session,
+    // and only then does the redemption publish it.
+    let (s, now) = (loaded(), wall_now());
+    let row = env_session(now);
+    let read = s.begin_refresh(); // a refresh whose read began before both
+    s.drop_ids(&["s1".to_string()]);
+    s.add(row.clone());
+    assert!(
+        resolve_with(&s, SESSION_TOKEN, &env(), &loaded_store(), now)
+            .unwrap()
+            .is_none(),
+        "the late publish cannot bring it back"
+    );
+    s.finish_refresh(read, vec![row.clone()], vec![]);
+    assert!(
+        s.lookup(&row.token_hash).is_none(),
+        "nor can a read that began before the revocation"
+    );
+    // A refresh that started after it holds no live row for it.
+    s.finish_refresh(s.begin_refresh(), vec![], vec![]);
+    assert!(s.lookup(&row.token_hash).is_none());
+}
+
+#[test]
 fn a_sign_in_survives_a_refresh_that_began_before_it() {
     let (s, now) = (loaded(), wall_now());
     let read = s.begin_refresh();
