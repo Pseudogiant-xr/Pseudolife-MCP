@@ -253,7 +253,7 @@ function Wait-TaskStopped([string]$taskName, [string]$ownership) {
     while ($true) {
         $task = try { Get-TaskRegistration $taskName $deadline }
                 catch { throw "could not confirm task $taskName stopped: $($_.Exception.Message); inspect its scheduler state" }
-        if ($task -and $ownership -and (Get-TaskOwnership $task) -ne $ownership) { throw "task $taskName registration changed; refusing to remove it" }
+        if ($task -and $ownership -and (Get-TaskOwnership $task) -ne $ownership) { throw "task $taskName registration changed; refusing to change it" }
         if (-not $task -or $task.State -notin @('Running', 'Queued')) { return }
         if ((Get-Date) -ge $deadline) { throw "task $taskName did not stop; inspect its scheduler state" }
         Start-Sleep -Milliseconds 200
@@ -261,14 +261,15 @@ function Wait-TaskStopped([string]$taskName, [string]$ownership) {
 }
 function Remove-OwnedTask([string]$taskName, [string]$expectedOwnership, [switch]$RequireExpectedOwnership) {
     $task = Get-TaskRegistration $taskName
-    if (-not $task) { return }
+    # False means another operation already removed the registration; callers
+    # must not restore previous XML in response to that concurrent deletion.
+    if (-not $task) { return $false }
     if ($RequireExpectedOwnership -and (-not $expectedOwnership -or (Get-TaskOwnership $task) -ne $expectedOwnership)) {
         throw "task $taskName registration changed; inspect its action before retrying; refusing to remove it"
     }
     Assert-ShimRegistration $task
     $ownership = Get-TaskOwnership $task
-    $script:removedRegistration = $true
-    $captured = @(Get-OwnedTaskProcesses $task)
+    $captured = @(Get-OwnedTaskProcesses $task -RequireSettled)
     # Capture children before stopping the wrapper: its exit can orphan them.
     Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
     foreach ($process in @($captured | Sort-Object CreationDate -Descending)) { Stop-CapturedProcess $process }
@@ -297,6 +298,8 @@ function Remove-OwnedTask([string]$taskName, [string]$expectedOwnership, [switch
         # needs its registration to disappear. Both share the same deadline.
         Start-Sleep -Milliseconds 200
     }
+    if ($accepted) { $script:removedRegistration = $true }
+    return $accepted
 }
 function Restart-UnchangedTask([string]$taskName, $ownership, [bool]$wasActive) {
     $current = Get-TaskRegistration $taskName
@@ -319,7 +322,7 @@ if ($c.Remove) {
     if ($name -eq 'Pseudolife Claude Shim') { $names += 'Pseudolife Sonnet Shim' }
     foreach ($task in $names) { Assert-ShimRegistration (Get-TaskRegistration $task) }
     foreach ($task in $names) {
-        Remove-OwnedTask $task
+        $null = Remove-OwnedTask $task
     }
     if ($script:removedRegistration) { Write-Host "Removed $name" }
     return
@@ -439,7 +442,7 @@ try {
     $rollbackErrors = @()
     $rollbackRemoved = $false
     if ($replacementRegistered) {
-        try { Remove-OwnedTask $name $rollbackOwnership -RequireExpectedOwnership; $rollbackRemoved = $true }
+        try { $rollbackRemoved = Remove-OwnedTask $name $rollbackOwnership -RequireExpectedOwnership }
         catch { $rollbackErrors += "removing replacement task: $($_.Exception.Message)" }
     }
     try {
@@ -460,7 +463,7 @@ try {
         # Stopping the original is not replacing its registration. Restart only
         # that unchanged task; a concurrent deletion must remain a deletion.
         try { Restart-UnchangedTask $name $originalOwnership $wasActive }
-        catch { $rollbackErrors += "restarting previous task: $($_.Exception.Message)" }
+        catch { $rollbackErrors += "recovering task state: $($_.Exception.Message)" }
     }
     if ($mutated -and $legacyWasActive) {
         try { Restart-UnchangedTask $legacy.TaskName (Get-TaskOwnership $legacy) $true }
@@ -476,12 +479,12 @@ try {
     throw $failure
 }
 if ($name -eq 'Pseudolife Claude Shim') {
-    Remove-OwnedTask 'Pseudolife Sonnet Shim'
+    $null = Remove-OwnedTask 'Pseudolife Sonnet Shim'
 }
 if ($c.ReplaceSibling) {
     foreach ($sibling in $siblings) {
         if ($sibling -ne $name) {
-            Remove-OwnedTask $sibling
+            $null = Remove-OwnedTask $sibling
         }
     }
 }

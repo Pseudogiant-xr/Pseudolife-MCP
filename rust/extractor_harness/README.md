@@ -94,7 +94,9 @@ checked again before each removal attempt. Rollback preserves a concurrently
 replaced task and reports the incomplete recovery instead of overwriting it.
 Installation checks ambiguous runtimes before stopping the original task. If a
 late runtime forces refusal after that stop, rollback restarts the unchanged
-original; a concurrently removed registration stays absent.
+original; a concurrently removed registration stays absent, including removal
+during the replacement health wait. Uninstall and post-install sibling cleanup
+check ambiguous runtimes before stopping a task.
 
 Legacy Windows migration recognizes each historical installer's own argument
 template: Sonnet's prompt flag, Claude's model and prompt flags, and Codex's

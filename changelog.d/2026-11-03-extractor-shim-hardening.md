@@ -12,4 +12,6 @@
   an actionable diagnostic. Process-query and termination failures explain
   what to inspect before retrying. Installation checks ambiguous runtimes before
   stopping the original shim, restarts an unchanged original after a late refusal,
-  and preserves concurrent task removal during failed replacement.
+  and preserves concurrent task removal during failed replacement, including
+  removal during the health wait. Uninstall and sibling cleanup also check
+  ambiguous runtimes before stopping their tasks.
