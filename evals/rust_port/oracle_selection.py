@@ -197,7 +197,7 @@ def select(root, event_name, event, checkout_head, *, github_ref=None, dispatch_
             # Resolve master once, then replay receipts against that immutable
             # SHA even if the remote-tracking ref has advanced (or is absent).
             base = commit(dispatch_base if dispatch_base is not None
-                          else git(root, "rev-parse", "origin/master^{commit}"))
+                          else git(root, "rev-parse", "refs/remotes/origin/master^{commit}"))
             oracle = merge_base(root, base, head)
             release = release_cut(root, oracle, head)
             if release is not None:
@@ -263,6 +263,8 @@ def main():
     parser.add_argument("--event-path", type=Path, default=os.environ.get("GITHUB_EVENT_PATH"))
     parser.add_argument("--checkout-head", default=os.environ.get("GITHUB_SHA"))
     parser.add_argument("--github-ref", default=os.environ.get("GITHUB_REF"))
+    parser.add_argument("--dispatch-base", default=os.environ.get("PSEUDOLIFE_PORT_DISPATCH_BASE") or None,
+                        help="full master SHA frozen by the branch-stress plan for every iteration")
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--github-env", type=Path)
     args = parser.parse_args()
@@ -271,7 +273,7 @@ def main():
         raise ValueError("event checkout head and actual checkout differ")
     selection = select(args.root, args.event_name,
                        json.loads(args.event_path.read_text(encoding="utf-8")), actual,
-                       github_ref=args.github_ref)
+                       github_ref=args.github_ref, dispatch_base=args.dispatch_base)
     # PR captures deliberately use their merge base. Check the originating
     # production change too, before it can become a successor PR's oracle.
     for head in dict.fromkeys((selection["candidate_head"], actual)):

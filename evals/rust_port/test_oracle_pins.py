@@ -29,6 +29,7 @@ def select_cli(monkeypatch, root, base, head, tmp_path, event_name="pull_request
              if event_name == "workflow_dispatch" else {"after": head})
     if event_name == "workflow_dispatch":
         git(root, "update-ref", "refs/remotes/origin/master", base)
+        monkeypatch.setenv("PSEUDOLIFE_PORT_DISPATCH_BASE", base)
     payload, receipt, environment = (tmp_path / name for name in ("event.json", "selection.json", "env"))
     payload.write_text(json.dumps(event), encoding="utf-8")
     monkeypatch.setattr(sys, "argv", ["selection", "--root", str(root), "--event-name", event_name,

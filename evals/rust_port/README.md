@@ -273,7 +273,8 @@ The selection JSON records the ref. No extra dispatch input is needed.
 On a non-master branch, manual `stress` mode instead selects the merge base of
 the dispatched checkout and `origin/master`, with the same release-only
 exception as a pull request. Its receipt freezes both SHAs and the stress mode;
-rechecking it does not follow a later master tip. It needs no `frozen_head`,
+the stress plan resolves the remote master once for all iterations, and
+rechecking a receipt does not follow a later master tip. It needs no `frozen_head`,
 but a supplied value must match the dispatched checkout. Other manual modes
 remain master-only, and candidate source-pin checks still run before export.
 Each new receipt records `oracle_head`; source receipts also retain the event

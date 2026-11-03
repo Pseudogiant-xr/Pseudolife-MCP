@@ -100,6 +100,18 @@ def test_branch_stress_uses_the_pr_release_rule_and_preserves_its_receipt(releas
     assert oracle.selected_oracle(root) == selected
 
 
+@pytest.mark.parametrize("shadow", ["refs/tags/origin/master", "refs/heads/origin/master"])
+def test_branch_stress_ignores_tags_and_branches_shadowing_the_remote_master(release, shadow):
+    root, base, _ = release
+    write(root, "pseudolife_memory/shim.py", "CONTRACT = 'changed'\n")
+    head = commit(root)
+    git(root, "update-ref", "refs/remotes/origin/master", base)
+    git(root, "update-ref", shadow, head)
+    selected = oracle.select(root, "workflow_dispatch", {"inputs": {"mode": "stress"}}, head,
+                             github_ref="refs/heads/origin/master")
+    assert selected["base_head"] == selected["oracle_head"] == base
+
+
 def test_a_cut_carrying_the_batch_regenerated_census_is_still_a_release(release):
     # A cut changes plugin/release.json, which the producer census hashes, so
     # `ops/integrate.py build` adds a regenerated census to the cut's batch.

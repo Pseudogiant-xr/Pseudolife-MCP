@@ -1879,7 +1879,8 @@ jobs:
   # A stress loop (mode=stress): run one selection on N fresh hosted runners
   # and report every iteration (rust/ci/stress.py). It compares against this
   # checkout's Python on any branch; branch dispatches also bind an event oracle
-  # from the merge base with master. Inputs reach the scripts only through env,
+  # from the merge base with master, frozen once by the plan for every iteration.
+  # Inputs reach the scripts only through env,
   # never inlined into a script.
   stress-plan:
     name: Stress / plan
@@ -1889,8 +1890,17 @@ jobs:
     outputs:
       iterations: ${{ steps.plan.outputs.iterations }}
       kind: ${{ steps.plan.outputs.kind }}
+      oracle_base: ${{ steps.oracle.outputs.oracle_base }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Freeze the branch-stress oracle base
+        id: oracle
+        if: github.ref != 'refs/heads/master'
+        run: |
+          base=$(git rev-parse --verify "refs/remotes/origin/master^{commit}")
+          echo "oracle_base=$base" >> "$GITHUB_OUTPUT"
       - name: Check the selection and list the iterations
         id: plan
         env:
@@ -2066,6 +2076,7 @@ jobs:
         shell: pwsh
         env:
           GITHUB_REF: ${{ github.ref }}
+          PSEUDOLIFE_PORT_DISPATCH_BASE: ${{ needs.stress-plan.outputs.oracle_base }}
         run: |
           python -m evals.rust_port.oracle_selection --out (Join-Path $env:RUNNER_TEMP 'oracle-selection.json') --github-env $env:GITHUB_ENV
           exit $LASTEXITCODE
