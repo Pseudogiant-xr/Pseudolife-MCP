@@ -12,6 +12,7 @@ tests/test_console_sessions_pg.py covers the real ones.
 """
 from __future__ import annotations
 
+import dataclasses
 import json
 import time
 
@@ -150,9 +151,12 @@ def test_a_used_session_lives_past_thirty_days_but_never_past_ninety(sessions):
     now = time.time()
     sessions.add(_session(created=now - 60 * 86400, last_used=now - 86400))
     assert _resolve(sessions, now=now) is not None
-    # Its own id: a session revoked here stays revoked, so re-adding s1
-    # would prove nothing about the absolute limit.
-    sessions.add(_session("past-ninety", created=now - 91 * 86400, last_used=now - 60, sid="s2"))
+    # Its own id (a session revoked here stays revoked, so re-adding s1
+    # would prove nothing), and its stored expiry pushed out, so only the
+    # absolute limit can refuse it.
+    sessions.add(dataclasses.replace(
+        _session("past-ninety", created=now - 91 * 86400, last_used=now - 60, sid="s2"),
+        expires_at=now + 86400))
     assert sessions.lookup(secret_sha256("past-ninety")) is not None
     assert _resolve(sessions, "past-ninety", now=now) is None
 
