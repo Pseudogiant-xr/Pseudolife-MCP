@@ -865,6 +865,7 @@ class MemoryService(DreamOps, MaintainerOps):
         else:
             cfg_candidate = Path(config_path)
         self.config = load_config(cfg_candidate)
+        self._migration_config_path = cfg_candidate
 
         # Override save_dir so memory tensors land inside data_dir even
         # when the config wasn't tailored for this install.
@@ -1574,6 +1575,11 @@ class MemoryService(DreamOps, MaintainerOps):
         (``weights_reset``), the pre-v57 chromadb document import, dream
         tracking (a failure disables the dream alone, surfaced as
         ``dream_tracking_error``), and the v0.1 file-mode loads."""
+        if self._storage is not None:
+            from pseudolife_memory.migrate_flat_cli import require_config_finalized
+            require_config_finalized(self._storage, self._migration_config_path,
+                                     [(b.name, b.max_entries, b.retention_policy)
+                                      for b in self.config.memory.miras.bands])
         # Documents live in the Postgres bank (schema v57); file mode has no
         # document store, like it has no cortex. A pre-v57 chromadb store in
         # the data dir is copied in once first. A failed import never fails

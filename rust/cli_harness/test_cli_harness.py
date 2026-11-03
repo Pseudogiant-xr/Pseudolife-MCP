@@ -34,6 +34,49 @@ def test_equal_observations_have_no_diff():
     assert compare.diff(obs(stdout=b"x"), obs(stdout=b"x"), ()) == []
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows 8.3 path aliases")
+@pytest.mark.parametrize("short_side", ["home", "backup"])
+def test_migrate_flat_backup_paths_accept_short_aliases(tmp_path, monkeypatch, short_side):
+    import ctypes
+    import json
+    from types import SimpleNamespace
+    from cli_harness.rows import migrate_flat
+
+    home = tmp_path / "migration recovery home"
+    home.mkdir()
+    short_path = ctypes.windll.kernel32.GetShortPathNameW
+    short_path.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_uint32]
+    short_path.restype = ctypes.c_uint32
+    buffer = ctypes.create_unicode_buffer(32768)
+    length = short_path(str(home), buffer, len(buffer))
+    assert 0 < length < len(buffer)
+    alias = Path(buffer.value)
+    if str(alias).casefold() == str(home).casefold():
+        pytest.skip("temporary volume does not create 8.3 aliases")
+    assert alias.samefile(home)
+    backups = home / "bank" / "backups" / "fixture"
+    backups.mkdir(parents=True)
+    paths = {}
+    for field in ("dump", "state"):
+        path = backups / field
+        path.write_bytes(b"fixture")
+        paths[field] = str(alias / path.relative_to(home) if short_side == "backup" else path)
+    before = {"tables": {"entries": [json.dumps({"id": 1, "band": "working"})],
+                         "meta": []}, "sequences": {}}
+    current = {"tables": {"entries": [json.dumps({"id": 1, "band": "flat"})],
+                          "meta": [json.dumps({"key": "writer_lease_epoch", "value": 1}),
+                                   json.dumps({"key": migrate_flat.MARKER,
+                                               "value": {"backup": paths}})]}, "sequences": {}}
+    monkeypatch.setattr(migrate_flat._bank, "dump", lambda _: current)
+    arm = SimpleNamespace(home=alias if short_side == "home" else home,
+                          state={"before": before})
+    observed = {"exit": 0}
+    migrate_flat.after(arm, observed)
+    marker = json.loads(observed["db"]["tables"]["meta"][1])
+    assert marker["value"]["backup"] == {
+        field: "{HOME}/bank/backups/fixture/" + field for field in ("dump", "state")}
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX umask inheritance")
 @pytest.mark.parametrize("inherited", [0o002, 0o077])
 @pytest.mark.parametrize("mode", [[], ["--record"], ["--golden"]])
