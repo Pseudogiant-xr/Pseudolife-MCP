@@ -391,16 +391,23 @@ for the MCP surface.
 
 | # | Exact item | Source |
 |---|---|---|
-| MS1 | After binding: `explain=true` is declared (MCP-SEARCH-EXPLAIN). Unknown band names refuse as `invalid_argument` prose with Python's `repr` lists (the REST route's 400 text now uses the same lists); empty lists are no filter, as `list(x) if x else None`; episodes expand to their subtrees (`_episode_subtree`) and log sorted; a blank query answers `{"entries": [], "query": "", "count": 0, "low_confidence": true, "cortex": []}` with no event. | `service.py:1958-1970, 2091-2108, 6261-6280` |
+| MS1 | After binding: unknown band names refuse as `invalid_argument` prose with Python's `repr` lists (the REST route's 400 text now uses the same lists); empty lists are no filter, as `list(x) if x else None`; episodes expand to their subtrees (`_episode_subtree`) and log sorted; a blank query answers `{"entries": [], "query": "", "count": 0, "low_confidence": true, "cortex": []}` with no event, adding `trace: null` when explaining. | `service.py:1958-1970, 2091-2108, 6261-6280` |
 | MS2 | Otherwise `service.search` with `top_k`, the filters, `min_score`, recency, rerank and BM25 overrides and the caller's `X-PL-Session`, then the cortex-first block on the raw query with `fact_k = min(5, max(1, top_k))` under `memory.mcp.compact_payloads` (else 5) and `attach_served_facts`, all under the search lock (`search_route::search_with_facts`, shared with the REST route). The search result keeps Python's key order: `query, count, low_confidence, entries, [events, events_total]`. | `mcp_server.py:1122-1158` |
 | MS3 | Projection: `cortex` always present; each served fact re-selected in `_project_search`'s key order, dates through `_iso_seconds` (local time, to the second, after microsecond rounding), freshness fields off `evergreen`, contender fields when contested, `warning`, `last_known_value`, `re_verify`, labels, `pinned`, and `correct_with` (the resolve path when contested, else `memory_fact_set` when stale or older than TTL/3, slots in Python `repr`); `correction_note` when any fact has one; entries restating a fact value dropped and `count` recomputed; `low_confidence` only with no cortex fact. | `mcp_server.py:993-1029, 1171-1310`, `freshness.py:66` |
-| MS4 | Compact entries (not `verbose`): `id, text, source, tags, score`, `date` (the local write date), `superseded`, `replaced_by` (`id, at, preview` of 120 code points, `verified, current`), labels, then the text capped at `memory.mcp.entry_text_chars` code points with `"…"` and `truncated: true` (no cap when `compact_payloads` is false). Verbose entries are the service's dicts. | `mcp_server.py:858-948` |
+| MS4 | Compact entries (neither `verbose` nor `explain`): `id, text, source, tags, score`, `date` (the local write date), `superseded`, `replaced_by` (`id, at, preview` of 120 code points, `verified, current`), labels, then the text capped at `memory.mcp.entry_text_chars` code points with `"…"` and `truncated: true` (no cap when `compact_payloads` is false). Verbose entries are the service's dicts. | `mcp_server.py:858-948` |
+| MS5 | Explain first performs MS2 and MS3 with verbose entries, then independently calls `service.trace` with the stripped query, top-k, sources, bands, original episodes, normalized tags, rerank and BM25 overrides. It does not forward the search's min-score or recency override. The trace retains the caller's episode order without subtree expansion. Its retrieval adds access counts but no second retrieval event or slot reads; returned entries retain the first search's counts. Only the trace object is appended, leaving the projected cortex and entries intact. | `mcp_server.py:1164-1178`; `service.py:2212-2267` |
 
 `harness/w2d_search.py --only mcp-search` compares 20 calls against the
 Python oracle on a derived template that adds an aged volatile fact, a
 contender and a restating entry, with coverage requirements for each
 projection branch; the `mcp-search-no-dedup` and
 `mcp-search-no-correct-with` mutants must be caught.
+
+`w2d_search.py live --only mcp-search-explain mcp-search` also compares
+explain filters, blank and invalid input, the independent trace floor,
+reranking, cortex projection, episode subtrees and subsequent access
+counts. `run.py live --only mcp-search-explain --record` records the
+offline fixture's complete structured trace for golden replay.
 
 ### memory_recent over MCP (2026-10-17)
 
@@ -792,8 +799,8 @@ Python: `memory/lessons.py` (`LessonRecord`, `current_records`, `search`
 | # | Exact item | Source |
 |---|---|---|
 | LS1 | Hydration at init: every `lessons` row in id order (`confidence` as its REAL text, `support`/`provenance` as their string items). No Rust path writes lessons, so the store is fixed after init. | `sync.py:474-505`; `postgres.py:1998-2008` |
-| LS2 | `memory_lesson_search(query, top_k=5, verbose=False)`; read-only (no `mutation` on an internal failure). Under the service lock (Rust: `Ready.write`, which the log's session resolution needs). | `mcp_server.py:2062-2093` |
-| LS3 | The width is `top_k` (the binder always passes one, so the config's `memory.lessons.top_k` is never read over MCP); the floor is `max(0.0, memory.lessons.min_confidence)`. | `service.py:5353-5354` |
+| LS2 | `memory_lesson_search(query, top_k=None, verbose=False)`; read-only (no `mutation` on an internal failure). Under the service lock (Rust: `Ready.write`, which the log's session resolution needs). Explicit null still fails the integer schema. | `mcp_server.py:memory_lesson_search` |
+| LS3 | An omitted `top_k` uses `memory.lessons.top_k` (default 5); an explicit positive integer overrides it. A configured width at or below zero returns no lessons. The floor is `max(0.0, memory.lessons.min_confidence)`. | `service.py:lesson_search`; `memory/lessons.py:search` |
 | LS4 | The query embedding; current lessons with an embedding scored by f32 cosine against the normalised query, at or above the floor, stably sorted by descending score, cut to the width; a stored vector of another length fails (torch raises). | `lessons.py:220-238`; `service.py:5355-5356` |
 | LS5 | Each hit as `_lesson_record_to_dict` (`task, aspect, lesson, about, polarity, outcome, status, confidence` (4 places), `origin`, sorted `provenance`, `asserted_at, last_confirmed, supersedes_value, superseded_by_value, superseded_at`) plus `score` (4 places). | `service.py:411-430, 5357-5358` |
 | LS6 | `re_verify`: with any personal-cortex record (the change index: per normalised entity, the latest `max(asserted_at, superseded_at or 0)` over every record), each row's name (`about`, else `task`, stripped) keys the index directly, else through its graph entity (`find_entity(norm_name(name))`, keyed by its canonical); a change after `max(asserted_at, last_confirmed)` adds `re_verify: true` and `re_verify_reason: "facts about <name> changed since this lesson"`. No index, no graph lookup. | `service.py:5399-5443` |

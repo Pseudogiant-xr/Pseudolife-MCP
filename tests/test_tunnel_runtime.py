@@ -437,6 +437,33 @@ def test_stable_command_prefers_the_runtimes_launcher_over_path(tmp_path, monkey
     assert runtime.stable_command() == [str(older)]
 
 
+def test_stable_command_falls_back_to_this_interpreter_without_the_working_directory(tmp_path, monkeypatch):
+    """With no launcher and no venv the saved command names this
+    interpreter's module; written from a directory that is not the
+    package's own, it leaves that directory off the child's import path."""
+    import sys
+    from pseudolife_memory import credentials
+
+    def behind_a_junction(path):
+        raise credentials.CredentialError('an ancestor is a junction')
+
+    # Whatever lies under the real interpreter's path (a junction, a
+    # symlink): this checks the arguments, not the path safety checks.
+    monkeypatch.setattr(credentials, '_reject_ancestor_redirects', behind_a_junction)
+    python = tmp_path / 'bin' / 'python'
+    python.parent.mkdir()
+    python.write_text('interpreter', encoding='utf-8')
+    monkeypatch.setattr(runtime.sys, 'executable', str(python))
+    monkeypatch.setattr(runtime, 'checked_path', lambda path: Path(path))
+    monkeypatch.setattr(runtime, 'installed_launcher', lambda: None)
+    monkeypatch.setattr(runtime.shutil, 'which', lambda name: None)
+    monkeypatch.setattr(runtime.sys, 'base_prefix', runtime.sys.prefix)
+    monkeypatch.chdir(tmp_path)
+    command = runtime.stable_command()
+    assert command[0] == str(python) and command[-2:] == ['-m', 'pseudolife_memory.cli']
+    assert ('-P' in command) == (sys.version_info >= (3, 11))
+
+
 DIR, FILE, LINK = stat.S_IFDIR | 0o755, stat.S_IFREG | 0o755, stat.S_IFLNK | 0o777
 
 
@@ -556,7 +583,7 @@ def test_root_run_refuses_a_chain_a_user_could_change_before_anything_starts(tmp
     monkeypatch.setattr(runtime, '_root_linux', lambda: True)
     monkeypatch.setattr(runtime, 'root_command_chain', lambda command, store: [launcher])
     _tree(monkeypatch, {'/': (0, DIR), '/opt': (0, DIR), '/opt/pl': (1000, DIR), '/opt/pl/bin': (0, DIR), launcher: (0, FILE)})
-    monkeypatch.setattr(runtime, 'stable_command', lambda: [launcher])
+    monkeypatch.setattr(runtime, 'stable_command', lambda saved=False: [launcher])
     monkeypatch.setattr(runtime, 'ensure_runtime', lambda *a, **k: pytest.fail('runtime prepared'))
     monkeypatch.setattr(runtime, 'snapshot_bridge', lambda *a, **k: pytest.fail('bridge frozen'))
     monkeypatch.setattr(runtime.subprocess, 'Popen', lambda *a, **k: pytest.fail('process started'))

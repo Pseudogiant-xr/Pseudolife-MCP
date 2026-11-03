@@ -71,19 +71,30 @@ pub(crate) struct Ident {
     pub(crate) transport_session: Option<String>,
 }
 
+fn mcp_limits(
+    a: &Map<String, Value>,
+    cfg: &crate::config::RecallConfig,
+) -> (i64, i64, Option<Value>) {
+    let hops = a.get("hops").filter(|v| !v.is_null());
+    let width = a.get("top_k").filter(|v| !v.is_null());
+    (
+        hops.map_or(cfg.default_hops, int_saturating),
+        width.map_or(cfg.default_top_k.max(1), int_saturating),
+        width.filter(|n| n.as_i64().is_none()).cloned(),
+    )
+}
+
 fn mcp_memory_recall<'a>(app: &'a crate::http::App, call: ToolCall<'a>) -> ToolFuture<'a> {
     Box::pin(async move {
         let a = call.args;
         let query = a.get("query").and_then(Value::as_str).unwrap_or("");
-        let hops = a.get("hops").map_or(3, int_saturating);
-        let top_k = a.get("top_k").map_or(5, int_saturating);
+        let (hops, top_k, beyond) = mcp_limits(a, &app.service.config.memory.recall);
         let verbose = a.get("verbose").and_then(Value::as_bool).unwrap_or(false);
         let ident = Ident {
             header_session: call.ident.header_session.clone(),
             transport_session: call.ident.transport_session.clone(),
         };
         let ready = app.service.ensure_init().await.map_err(internal)?;
-        let beyond = a.get("top_k").filter(|n| n.as_i64().is_none()).cloned();
         let out = recall(
             &app.service,
             &ready,
@@ -1241,6 +1252,24 @@ mod tests {
     use super::*;
     use std::io::{Read, Write};
     use std::sync::Mutex;
+
+    #[test]
+    fn mcp_omitted_limits_use_config_without_a_large_integer_override() {
+        let cfg = crate::config::RecallConfig {
+            default_hops: 1,
+            default_top_k: 2,
+            ..Default::default()
+        };
+        for a in [json!({}), json!({"hops": null, "top_k": null})] {
+            assert_eq!(mcp_limits(a.as_object().unwrap(), &cfg), (1, 2, None));
+        }
+        let a = json!({"hops": 4, "top_k": 7});
+        assert_eq!(mcp_limits(a.as_object().unwrap(), &cfg), (4, 7, None));
+        let a: Value = serde_json::from_str(r#"{"top_k":9223372036854775808}"#).unwrap();
+        let (_, width, beyond) = mcp_limits(a.as_object().unwrap(), &cfg);
+        assert_eq!(width, i64::MAX);
+        assert_eq!(beyond, Some(a["top_k"].clone()));
+    }
 
     // Expected values below come from running CPython 3.11 on
     // `memory/recall.py` (`_seed_prompt`, `_parse_name_list`) and on the

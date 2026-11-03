@@ -55,6 +55,7 @@ import time
 import uuid
 from pathlib import Path
 
+from pseudolife_memory import child_python
 from pseudolife_memory.os_lock import OsLock
 from pseudolife_memory.lease_cli import (
     MAX_SCOPE, _connect, _pid_alive, _printable, _project, _Refused, _Transient,
@@ -766,7 +767,7 @@ def _detach(argv: list[str], args, owner: str, state: Path, spawn, clock, sleep)
         child += ["--state", str(state)]
     pid_path = state.with_suffix(".pid")
     log = state.with_suffix(".log")
-    pid = spawn([sys.executable, "-m", "pseudolife_memory.cli", "conductor-watch", *child], log)
+    pid = spawn(child_python.cli_argv("conductor-watch", *child), log)
     deadline = clock() + DETACH_WAIT
     while True:
         try:

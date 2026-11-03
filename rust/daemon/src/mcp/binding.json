@@ -1333,7 +1333,7 @@
     {
      "name": "top_k",
      "literal_text": false,
-     "default": 5,
+     "default": null,
      "schema": {
       "kind": "int",
       "strict": false,
@@ -2085,7 +2085,7 @@
     {
      "name": "hops",
      "literal_text": false,
-     "default": 3,
+     "default": null,
      "schema": {
       "kind": "int",
       "strict": false
@@ -2094,7 +2094,7 @@
     {
      "name": "top_k",
      "literal_text": false,
-     "default": 5,
+     "default": null,
      "schema": {
       "kind": "int",
       "strict": false,
