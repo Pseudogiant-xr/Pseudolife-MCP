@@ -131,11 +131,11 @@ pub fn memory_headroom(cgroup_root: &Path, proc_self: &Path) -> Value {
     json!({"source": "unavailable"})
 }
 
-/// `plugin_hooks.daemon_hooks_digest` with the plugin dir from
-/// `PSEUDOLIFE_PLUGIN_DIR` (the beside-the-package fallback has no Rust
-/// equivalent: a declared divergence).
+/// `plugin_hooks.daemon_hooks_digest` with an explicit plugin directory or
+/// the plugin sources beside this native build's checkout.
 pub fn hooks_digest(plugin_dir: Option<&Path>) -> Option<String> {
-    let dir = plugin_dir?;
+    let checkout = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plugin");
+    let dir = plugin_dir.unwrap_or(&checkout);
     if !dir.join("hooks").join(HOOK_SCRIPTS[0]).is_file() {
         return None;
     }
@@ -692,6 +692,16 @@ mod tests {
             (Value::Null, Value::Null)
         );
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn compatibility_checkout_hooks_digest_has_a_default() {
+        let checkout = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plugin");
+        let expected = hooks_digest(Some(&checkout)).expect("checkout carries the hook scripts");
+        assert_eq!(hooks_digest(None).as_deref(), Some(expected.as_str()));
+        let empty = dir("empty-plugin");
+        assert_eq!(hooks_digest(Some(&empty)), None);
+        std::fs::remove_dir_all(empty).unwrap();
     }
 
     #[test]

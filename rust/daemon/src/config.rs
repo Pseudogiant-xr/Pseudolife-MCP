@@ -461,7 +461,7 @@ pub struct RerankerConfig {
 impl Default for RerankerConfig {
     fn default() -> Self {
         RerankerConfig {
-            model_name: "cross-encoder/ms-marco-MiniLM-L-6-v2".to_string(),
+            model_name: crate::onnx_artifacts::provision::RERANKER_MODEL.to_string(),
             top_n: 20,
             fusion_weight: 0.7,
             skip_margin: 0.0,

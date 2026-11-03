@@ -1,0 +1,83 @@
+[
+  {
+    "now": 1000.0,
+    "active_seconds": 0,
+    "last_activity": 999.75,
+    "wake": {
+      "decision": "not_needed",
+      "reason": "no_park"
+    }
+  },
+  {
+    "now": 1000.0,
+    "active_seconds": 0,
+    "last_activity": 1000.0,
+    "wake": {
+      "decision": "not_needed",
+      "reason": "no_park"
+    }
+  },
+  {
+    "now": 1000.0,
+    "active_seconds": 0,
+    "last_activity": 1000.25,
+    "wake": {
+      "decision": "hinted",
+      "reason": "active"
+    }
+  },
+  {
+    "now": 1000.0,
+    "active_seconds": 1,
+    "last_activity": 998.75,
+    "wake": {
+      "decision": "not_needed",
+      "reason": "no_park"
+    }
+  },
+  {
+    "now": 1000.0,
+    "active_seconds": 1,
+    "last_activity": 999.0,
+    "wake": {
+      "decision": "not_needed",
+      "reason": "no_park"
+    }
+  },
+  {
+    "now": 1000.0,
+    "active_seconds": 1,
+    "last_activity": 999.25,
+    "wake": {
+      "decision": "hinted",
+      "reason": "active"
+    }
+  },
+  {
+    "now": 1000.0,
+    "active_seconds": 600,
+    "last_activity": 399.75,
+    "wake": {
+      "decision": "not_needed",
+      "reason": "no_park"
+    }
+  },
+  {
+    "now": 1000.0,
+    "active_seconds": 600,
+    "last_activity": 400.0,
+    "wake": {
+      "decision": "not_needed",
+      "reason": "no_park"
+    }
+  },
+  {
+    "now": 1000.0,
+    "active_seconds": 600,
+    "last_activity": 400.25,
+    "wake": {
+      "decision": "hinted",
+      "reason": "active"
+    }
+  }
+]
