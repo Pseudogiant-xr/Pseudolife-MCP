@@ -3,6 +3,7 @@
 # Bash port of ops/update.ps1 for Linux/macOS hosts.
 #
 #   ops/update.sh                  # backup -> tag rollback -> daemon-only rebuild -> health
+#   ops/update.sh --native         # use the installed native updater explicitly
 #   ops/update.sh --tag pre-x      # name the rollback image tag suffix
 #   ops/update.sh --no-backup      # skip the pg_dump (NOT recommended)
 #   ops/update.sh --keep-rollbacks 5  # rollback tags to retain (default 2)
@@ -42,9 +43,63 @@ step() {
     fi
 }
 
+args=(--checkout "$repo" --health-retries "${HEALTH_RETRIES:-30}" --health-delay-ms "${HEALTH_DELAY_MS:-1500}")
+native_update="${PSEUDOLIFE_NATIVE_UPDATE:-0}"
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --native)         native_update=1; shift ;;
+        --tag)            args+=(--rollback-tag "$2"); shift 2 ;;
+        --engine)         args+=(--engine "$2"); shift 2 ;;
+        --shadow)         args+=(--shadow); shift ;;
+        --no-backup)      args+=(--no-backup); shift ;;
+        --keep-rollbacks) args+=(--keep-rollbacks "$2"); shift 2 ;;
+        --keep-cache-hours) args+=(--keep-cache-hours "$2"); shift 2 ;;
+        --no-cache-prune)   args+=(--no-cache-prune); shift ;;
+        --force-rollback-tag) args+=(--force-rollback-tag); shift ;;
+        --all)            args+=(--all); shift ;;
+        --allow-dirty)    args+=(--allow-dirty); shift ;;
+        --no-test-login)  args+=(--no-test-login); shift ;;
+        --clients-only)   # a release-mode option of `pseudolife-mcp update`
+            echo "--clients-only is a release-mode option; a checkout deploy builds what the tree holds (for the clients alone: python ops/update_clients.py)" >&2
+            exit 2 ;;
+        *) echo "unknown argument: $1" >&2; exit 2 ;;
+    esac
+done
+
+# Explicit native selection skips Python entirely and never falls back.
+native_cli="${PSEUDOLIFE_NATIVE_CLI:-${PSEUDOLIFE_SHIM_LAUNCHER:-${XDG_DATA_HOME:-$HOME/.local/share}/pseudolife-mcp/bin/pseudolife-mcp}}"
+python_cmd=""
+if [ "$native_update" = 1 ]; then
+    if [ ! -f "$native_cli" ] || [ ! -x "$native_cli" ]; then
+        echo "native update CLI is missing; install the native runtime or set PSEUDOLIFE_NATIVE_CLI to its binary; nothing was changed" >&2
+        exit 2
+    fi
+else
+    for candidate in python3 python; do
+        if command -v "$candidate" >/dev/null 2>&1 &&
+            "$candidate" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' 2>/dev/null; then
+            python_cmd="$candidate"; break
+        fi
+    done
+    if [ -z "$python_cmd" ]; then
+        # Runtime installation alone does not prove that update is implemented.
+        native_help='pseudolife-mcp native-update-v1'
+        if [ -f "$native_cli" ] && [ -x "$native_cli" ] &&
+            help_output="$("$native_cli" update --native-capability 2>/dev/null)" &&
+            [ "${help_output%$'\r'}" = "$native_help" ]; then
+            native_update=1
+            echo "No Python >= 3.10 on PATH; using the verified native update CLI." >&2
+        else
+            echo "No Python >= 3.10 or verified native update CLI is available; install the native runtime or install Python >= 3.10 and the pseudolife-mcp package, then re-run; nothing was changed" >&2
+            exit 1
+        fi
+    fi
+fi
+
 env_file="$repo/ops/.env"
-# The Python deploy reads ops/.env itself; the rewrite happens here, before
-# it starts, so ops/install.sh and this script keep one identical block.
+# Check wrapper arguments and runtime availability before rewriting ops/.env.
+# Keep the installer normalization block identical.
 # >>> env line endings >>>
 # An ops/.env copied from a Windows host carries CRLF line endings, and a
 # value read from it here then ends in a CR: `docker volume create` refused
@@ -64,37 +119,7 @@ normalize_env_line_endings() {  # $1 = env file; says so when it rewrote it
 }
 normalize_env_line_endings "$env_file"
 # <<< env line endings <<<
-args=(--checkout "$repo" --health-retries "${HEALTH_RETRIES:-30}" --health-delay-ms "${HEALTH_DELAY_MS:-1500}")
-
-while [ $# -gt 0 ]; do
-    case "$1" in
-        --tag)            args+=(--rollback-tag "$2"); shift 2 ;;
-        --engine)         args+=(--engine "$2"); shift 2 ;;
-        --shadow)         args+=(--shadow); shift ;;
-        --no-backup)      args+=(--no-backup); shift ;;
-        --keep-rollbacks) args+=(--keep-rollbacks "$2"); shift 2 ;;
-        --keep-cache-hours) args+=(--keep-cache-hours "$2"); shift 2 ;;
-        --no-cache-prune)   args+=(--no-cache-prune); shift ;;
-        --force-rollback-tag) args+=(--force-rollback-tag); shift ;;
-        --all)            args+=(--all); shift ;;
-        --allow-dirty)    args+=(--allow-dirty); shift ;;
-        --no-test-login)  args+=(--no-test-login); shift ;;
-        --clients-only)   # a release-mode option of `pseudolife-mcp update`
-            echo "--clients-only is a release-mode option; a checkout deploy builds what the tree holds (for the clients alone: python ops/update_clients.py)" >&2
-            exit 2 ;;
-        *) echo "unknown argument: $1" >&2; exit 2 ;;
-    esac
-done
-
-python_cmd=""
-for candidate in python3 python; do
-    if command -v "$candidate" >/dev/null 2>&1 &&
-        "$candidate" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' 2>/dev/null; then
-        python_cmd="$candidate"; break
-    fi
-done
-if [ -z "$python_cmd" ]; then
-    echo "WARNING: no Python >= 3.10 on PATH: the deploy is Python (ops/update.py). Install one and re-run." >&2
-    exit 1
+if [ "$native_update" = 1 ]; then
+    exec "$native_cli" update "${args[@]}"
 fi
 exec "$python_cmd" "$repo/ops/update.py" "${args[@]}"

@@ -47,6 +47,7 @@ whose remaining item is a proof keeps that boundary visible in its entry.
 
 | Entry | Caller | Closing stream or batch |
 |---|---|---|
+| [R4-NATIVE-UPDATE](startup-and-configuration/r4-native-update.md) | release/checkout CLI and unattended updates in `rust/shim/src/cli/update` | R4 / B11 and OPS-CUTOVER |
 | [W2F-CLOCK-RETRY](coordination-board-completion-w2/w2f-clock-retry.md) | board sends and daemon notices through `rust/daemon/src/board/dispatch.rs` / `board/notice.rs` during a reconnect | B5 board; B4 writer-session refresh |
 | [DOC-INGEST-LOCK](document-store-b7-document/doc-ingest-lock.md) | MCP `document_ingest` concurrent with `document_search`/`memory_search`, registered in `rust/daemon/src/mcp/dispatch.rs::registry` | B7 documents |
 | [DOC-PDF-ENGINE](document-store-b7-document/doc-pdf-engine.md) | `pseudolife_memory/mcp_server.py::document_ingest` / Rust `documents.rs::mcp_document_ingest` on a PDF after library loss or bad installation | B7 documents; B11 provisioning via R4/R5 |

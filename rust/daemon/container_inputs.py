@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 import subprocess
+import re
 
 EXACT_INPUTS = {
     ".dockerignore",
@@ -19,6 +20,37 @@ def needs_image(paths: list[str]) -> bool:
     return any(path in EXACT_INPUTS or path.startswith(("rust/daemon/", "rust/shim/", "rust/shared/", "plugin/hooks/",
                                                       "pseudolife_memory/web/static/"))
                for path in paths)
+
+
+def missing_compile_inputs(root: Path) -> list[str]:
+    """Literal include macros must resolve inside an input copied to /build.
+
+    The image compiles both crates; a host checkout can otherwise hide an
+    accidentally added dependency on source omitted from the builder stage.
+    """
+    dockerfile = (root / "ops/Dockerfile.daemon-rust").read_text(encoding="utf-8")
+    builder = dockerfile.split("FROM ", 2)[1]
+    copied = []
+    for source, destination in re.findall(r"(?m)^COPY ([^\s]+) (/build/[^\s]+)\s*$", builder):
+        copied.append((root / source).resolve())
+    missing = []
+    for crate in ("shim", "daemon", "shared"):
+        base = root / "rust" / crate
+        sources = list((base / "src" if (base / "src").is_dir() else base).rglob("*.rs"))
+        test_modules = set()
+        for source in sources:
+            for name in re.findall(r'#\[cfg\(test\)\]\s*#\[path\s*=\s*"([^"]+)"\]\s*mod\s+\w+;', source.read_text(encoding="utf-8")):
+                test_modules.add((source.parent / name).resolve())
+        for source in sources:
+            if "target" in source.parts:
+                continue
+            if source.resolve() in test_modules:
+                continue
+            for target in re.findall(r'include(?:_str|_bytes)?!\(\s*"([^"\n]+)"', source.read_text(encoding="utf-8")):
+                path = (source.parent / target).resolve()
+                if not any(path == item or item.is_dir() and path.is_relative_to(item) for item in copied):
+                    missing.append(str(source.relative_to(root)) + ": " + target)
+    return sorted(missing)
 
 
 def main() -> None:
