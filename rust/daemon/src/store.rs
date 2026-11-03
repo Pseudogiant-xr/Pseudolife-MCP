@@ -11,9 +11,11 @@ use crate::config::MemoryConfig;
 use crate::contradiction::{self, Candidate};
 use crate::episodes::{self, Caller, WriteState};
 use crate::labels::{self, Resolved};
-use crate::service::Ready;
+use crate::service::{Ready, Service};
 use crate::slots::{self, Slot};
 use crate::txn;
+
+mod promotion;
 
 /// Admitted writes outlive their callers, but must finish before exit.
 #[derive(Clone, Default)]
@@ -573,9 +575,11 @@ fn mcp_memory_store<'a>(
             transport_session: call.ident.transport_session.clone(),
         };
         memory_store(
+            &app.service,
             &ready,
             &app.service.runtime_config().memory,
             &caller,
+            &call.ident.writer,
             call.args,
         )
         .await
@@ -592,14 +596,17 @@ fn mcp_memory_store<'a>(
 /// thread that a disconnecting client cannot stop (`_async_offload`), so a
 /// store whose caller hung up still lands.
 pub async fn memory_store(
+    svc: &Arc<Service>,
     ready: &Arc<Ready>,
     cfg: &MemoryConfig,
     caller: &Caller,
+    writer: &str,
     args: &Map<String, Value>,
 ) -> Result<Value, ToolError> {
     let writes = ready.writes.clone();
     let (ready, cfg, caller, args) = (ready.clone(), cfg.clone(), caller.clone(), args.clone());
-    let task = async move { store_body(&ready, &cfg, &caller, &args).await };
+    let (svc, writer) = (svc.clone(), writer.to_string());
+    let task = async move { store_body(&svc, &ready, &cfg, &caller, &writer, &args).await };
     if crate::mutants::active("store-cancellable") {
         return task.await;
     }
@@ -610,9 +617,11 @@ pub async fn memory_store(
 }
 
 async fn store_body(
+    svc: &Service,
     ready: &Arc<Ready>,
     cfg: &MemoryConfig,
     caller: &Caller,
+    writer: &str,
     args: &Map<String, Value>,
 ) -> Result<Value, ToolError> {
     let raw_text = arg_str(args, "text").unwrap_or("");
@@ -679,6 +688,33 @@ async fn store_body(
     } else {
         "rejected"
     });
+    let promoted =
+        if cfg.cortex.enabled && cfg.cortex_auto_promote && reason != Some("filtered_meta") {
+            let promoted = promotion::promote(
+                svc,
+                ready,
+                cfg,
+                promotion::Input {
+                    text,
+                    source,
+                    origin: arg_str(args, "origin"),
+                    writer,
+                    // An episode handle redirects the entry, not the fact's writer context.
+                    session: ws.resolve_session(caller).map_err(ToolError::Invalid)?,
+                    authority: auth.clone(),
+                    distortion: dt.clone(),
+                },
+            )
+            .await;
+            if promoted > 0 {
+                crate::fact_set::save_cortex(svc, ready)
+                    .await
+                    .map_err(|e| ToolError::Internal(format!("{e:?}")))?;
+            }
+            promoted
+        } else {
+            0
+        };
     out.insert("stored".into(), json!(stored));
     out.insert(
         "surprise".into(),
@@ -689,7 +725,7 @@ async fn store_body(
         }),
     );
     out.insert("reason".into(), json!(reason));
-    out.insert("cortex_promoted".into(), json!(0));
+    out.insert("cortex_promoted".into(), json!(promoted));
     if let Some(a) = auth {
         out.insert("authority".into(), json!(a));
     }

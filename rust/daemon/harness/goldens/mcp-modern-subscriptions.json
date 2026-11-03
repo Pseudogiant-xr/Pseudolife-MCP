@@ -1,0 +1,125 @@
+{
+ "db_state": {
+  "catalog": {
+   "column_types": {
+    "rows": 0,
+    "sha256": "4f53cda18c2baa0c0354bb5f"
+   },
+   "columns": {
+    "rows": 0,
+    "sha256": "4f53cda18c2baa0c0354bb5f"
+   },
+   "constraints": {
+    "rows": 0,
+    "sha256": "4f53cda18c2baa0c0354bb5f"
+   },
+   "extensions": {
+    "rows": 2,
+    "sha256": "379f1d04a33d23de5113afa2"
+   },
+   "functions": {
+    "rows": 0,
+    "sha256": "4f53cda18c2baa0c0354bb5f"
+   },
+   "indexes": {
+    "rows": 0,
+    "sha256": "4f53cda18c2baa0c0354bb5f"
+   },
+   "owners_and_comments": {
+    "rows": 0,
+    "sha256": "4f53cda18c2baa0c0354bb5f"
+   },
+   "schemas": {
+    "rows": 1,
+    "sha256": "7bc06edb30fe47a6a1afd841"
+   },
+   "sequence_bounds": {
+    "rows": 0,
+    "sha256": "4f53cda18c2baa0c0354bb5f"
+   },
+   "sequences": {
+    "rows": 0,
+    "sha256": "4f53cda18c2baa0c0354bb5f"
+   },
+   "triggers": {
+    "rows": 0,
+    "sha256": "4f53cda18c2baa0c0354bb5f"
+   },
+   "views": {
+    "rows": 0,
+    "sha256": "4f53cda18c2baa0c0354bb5f"
+   }
+  },
+  "rows": {}
+ },
+ "normalizers": {
+  "db_declared": [
+   [
+    "row",
+    "meta",
+    "dream_ack_secret_v1",
+    "dream tracking init writes a random secret (W3-H)"
+   ],
+   [
+    "row",
+    "meta",
+    "curation_listing_spelling_v2",
+    "the listing-spelling carry-over stamps the clock (W2-E)"
+   ],
+   [
+    "warmup",
+    "retrieval_events",
+    null,
+    "one warmup probe and its sequence increment (W2-D telemetry)"
+   ]
+  ],
+  "db_nondeterministic": [
+   [
+    "relations",
+    "created_at",
+    "clock: wall clock per row (storage/postgres.py:765)"
+   ],
+   [
+    "retrieval_events",
+    "created_at",
+    "clock: retrieval event wall clock per row"
+   ]
+  ],
+  "golden": "golden_scrub in run.py",
+  "health": "normalize_health in run.py"
+ },
+ "responses": [
+  {
+   "headers": {},
+   "json": {
+    "jsonrpc": "2.0",
+    "method": "notifications/subscriptions/acknowledged",
+    "params": {
+     "_meta": {
+      "io.modelcontextprotocol/subscriptionId": "subscription-probe"
+     },
+     "notifications": {
+      "resourceSubscriptions": [
+       "memory://one"
+      ],
+      "toolsListChanged": true
+     }
+    }
+   },
+   "status": 200
+  },
+  {
+   "headers": {},
+   "json": {
+    "jsonrpc": "2.0",
+    "method": "notifications/tools/list_changed",
+    "params": {
+     "_meta": {
+      "io.modelcontextprotocol/subscriptionId": "subscription-probe"
+     }
+    }
+   },
+   "status": 200
+  }
+ ]
+}

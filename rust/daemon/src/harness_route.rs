@@ -54,7 +54,13 @@ pub async fn call(app: &App, path: &str, h: &HeaderMap, body: &mut RequestBody) 
     let config = app.service.runtime_config();
     let cfg = &config.memory;
     let result = match name {
-        "memory_store" => store::memory_store(&ready, cfg, &caller, &args).await,
+        "memory_store" => {
+            let writer = last_header(h, "x-pl-writer")
+                .filter(|w| !w.is_empty())
+                .or_else(crate::mcp::identity::env_writer)
+                .unwrap_or_else(|| "unknown".into());
+            store::memory_store(&app.service, &ready, cfg, &caller, &writer, &args).await
+        }
         _ => return json_response(404, &json!({"error": "unknown_tool", "tool": name})),
     };
     match result {

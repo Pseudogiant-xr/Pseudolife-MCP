@@ -47,3 +47,5 @@ Declared route cases and `/health` keys live one file each under
 
 `<slug>` is the name lowercased with each run of other characters replaced
 by `-` (`maintainer known GET` is `maintainer-known-get.json`).
+
+The `mcp-search-explain` oracle scenarios compare `structuredContent` and bank state, not the duplicate MCP text block. Python prints an unbounded trace half-life as `Infinity` in that text; Rust prints JSON `null`, and both structured results use `null`. This accepted presentation difference is recorded in `divergences/mcp-surface-w2-g/mcp-search-explain-text-nonfinite.md`.

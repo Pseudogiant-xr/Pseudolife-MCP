@@ -72,11 +72,22 @@ def _opener():
 
 
 def open_browser(url: str) -> bool:
-    """Open ``url`` in the system browser; False when none could be."""
+    """Open ``url`` in a graphical browser; False when none could be. A
+    terminal browser (lynx, w3m, links: the ``GenericBrowser`` controllers
+    Python falls back to with a stale ``DISPLAY``) is never used: it would
+    take over the terminal, the installer's included, and cannot run the
+    Console. The link is printed instead."""
     import webbrowser
     try:
-        return bool(webbrowser.open(url, new=2))
+        controller = webbrowser.get()
     except Exception:  # noqa: BLE001 - no browser is not an error
+        return False
+    if (isinstance(controller, webbrowser.GenericBrowser)
+            and not isinstance(controller, webbrowser.BackgroundBrowser)):
+        return False
+    try:
+        return bool(controller.open(url, new=2))
+    except Exception:  # noqa: BLE001
         return False
 
 
@@ -161,6 +172,9 @@ def _parser() -> argparse.ArgumentParser:
                         help="list the browsers signed in to this bank")
     parser.add_argument("--revoke", metavar="SESSION_ID",
                         help="sign one browser out (an id from --list)")
+    parser.add_argument("--unless-signed-in", action="store_true",
+                        help="do nothing when a browser is already signed in to this bank "
+                             "(what install runs, so a rerun opens no new tab)")
     parser.add_argument("--json", action="store_true", help="print one JSON object")
     return parser
 
@@ -208,6 +222,13 @@ def main(argv: list[str] | None = None, environ=None) -> int:
             status, payload = request(origin, "/api/console/sessions/revoke", token,
                                       body={"session_id": args.revoke})
         else:
+            if args.unless_signed_in:
+                status, listed = request(origin, "/api/console/sessions", token)
+                if (status == 200 and isinstance(listed, dict)
+                        and isinstance(listed.get("sessions"), list) and listed["sessions"]):
+                    return _emit({"state": "already_signed_in"}, args.json,
+                                 "Console: a browser is already signed in (to sign in another: "
+                                 "pseudolife-mcp console).", EXIT_OK)
             body = {"origin": origin}
             if args.to:
                 body["to"] = args.to

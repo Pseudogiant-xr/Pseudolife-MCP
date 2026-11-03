@@ -210,7 +210,8 @@ def test_a_session_a_paired_machine_issued_is_unavailable_while_the_store_is_sta
 
 
 def test_a_passkey_session_needs_its_key_active(sessions):
-    sessions.add(_session(method="passkey", issuer="credential-1"))
+    # Loaded by a refresh while its key is not active (revoked meanwhile).
+    sessions.refresh(lambda: ([_session(method="passkey", issuer="credential-1")], []))
     assert _resolve(sessions) is None
     sessions.refresh(lambda: ([_session(method="passkey", issuer="credential-1")],
                               ["credential-1"]))

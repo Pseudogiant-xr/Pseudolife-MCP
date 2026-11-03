@@ -321,19 +321,25 @@ pub(crate) async fn cortex_write(
 }
 
 /// `_ensure_subject_entity` (`service.py:1859`): mint the subject's graph
-/// node unless its name is junk-shaped or it already resolves.
-pub(crate) async fn ensure_subject_entity(db: &Client, entity: &str) -> anyhow::Result<()> {
+/// node unless its name is junk-shaped or it already resolves. Return a
+/// newly minted id so auto-promotion can propose write-time deduplication.
+pub(crate) async fn ensure_subject_entity(
+    db: &Client,
+    entity: &str,
+) -> anyhow::Result<Option<i64>> {
     if crate::junk_names::junk_name_reason(entity).is_some() {
-        return Ok(());
+        return Ok(None);
     }
     let n = crate::storage::graph::norm_name(entity);
     if n.is_empty() {
-        return Ok(());
+        return Ok(None);
     }
     if crate::storage::graph::find_entity(db, &n).await?.is_null() {
-        crate::storage::graph::ensure_entity(db, &n, Some(py_strip(entity)), None).await?;
+        return crate::storage::graph::ensure_entity(db, &n, Some(py_strip(entity)), None)
+            .await
+            .map(Some);
     }
-    Ok(())
+    Ok(None)
 }
 
 /// `_save_cortex` (`service.py:3746`): the per-slot sync. A failure counts

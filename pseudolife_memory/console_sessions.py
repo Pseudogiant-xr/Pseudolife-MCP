@@ -198,6 +198,10 @@ class SessionSnapshot:
         self._seq = 0
         self._loaded_at: float | None = None
         self.active_passkeys: frozenset[str] = frozenset()
+        # Keys a passkey sign-in just proved active, and keys just revoked:
+        # held, like _added and _dropped, until a refresh that started after.
+        self._keys_added: dict[str, int] = {}
+        self._keys_dropped: dict[str, int] = {}
 
     def refresh(self, load: Callable[[], tuple[list[ConsoleSession], Iterable[str]]]) -> None:
         """Replace the view with ``load()``'s ``(sessions, active passkey
@@ -209,6 +213,9 @@ class SessionSnapshot:
         with self._lock:
             self._added = {k: v for k, v in self._added.items() if v[0] > started_seq}
             self._dropped = {k: v for k, v in self._dropped.items() if v > started_seq}
+            self._keys_added = {k: v for k, v in self._keys_added.items() if v > started_seq}
+            self._keys_dropped = {k: v for k, v in self._keys_dropped.items()
+                                  if v > started_seq}
             merged = {row.token_hash: row for row in rows
                       if row.session_id not in self._dropped}
             for _seq, row in self._added.values():
@@ -217,7 +224,8 @@ class SessionSnapshot:
             live = {row.session_id for row in merged.values()}
             # Uses of sessions that are gone have nothing left to extend.
             self._used = {sid: t for sid, t in self._used.items() if sid in live}
-            self.active_passkeys = frozenset(passkeys)
+            self.active_passkeys = (frozenset(passkeys) | frozenset(self._keys_added)) - frozenset(
+                self._keys_dropped)
             self._loaded_at = started_at
 
     def add(self, row: ConsoleSession) -> None:
@@ -225,6 +233,22 @@ class SessionSnapshot:
             self._seq += 1
             self._added[row.session_id] = (self._seq, row)
             self._by_hash[row.token_hash] = row
+            if row.method == METHOD_PASSKEY:
+                # complete() just verified the key active: a sign-in in the
+                # 10 s after its confirm must not bounce back to the dialog.
+                self._keys_added[row.issuer] = self._seq
+                self._keys_dropped.pop(row.issuer, None)
+                self.active_passkeys = self.active_passkeys | {row.issuer}
+
+    def drop_key(self, credential_id: str) -> None:
+        """A key just revoked: its passkey sessions and the key leave the
+        view at once."""
+        self.drop_issuer(credential_id)
+        with self._lock:
+            self._seq += 1
+            self._keys_dropped[credential_id] = self._seq
+            self._keys_added.pop(credential_id, None)
+            self.active_passkeys = self.active_passkeys - {credential_id}
 
     def drop(self, session_ids: Iterable[str]) -> None:
         """Revocations that just committed: gone at once."""
@@ -238,6 +262,15 @@ class SessionSnapshot:
                 self._added.pop(sid, None)
             self._by_hash = {h: row for h, row in self._by_hash.items()
                              if row.session_id not in ids}
+
+    def drop_issuer(self, issuer: str, *, keep_principal: str | None = None) -> None:
+        """A key's passkey sessions just revoked (all, or all but those
+        signed in as ``keep_principal``)."""
+        with self._lock:
+            ids = [row.session_id for row in self._by_hash.values()
+                   if row.method == METHOD_PASSKEY and row.issuer == issuer
+                   and row.principal != keep_principal]
+        self.drop(ids)
 
     def drop_principal(self, principal: str) -> None:
         with self._lock:
@@ -500,20 +533,14 @@ def redeem_code(dsn: str, code_hash: str, token_hash: str, *, origin: str, label
             conn.rollback()
             return None
         try:
-            row = conn.execute(
-                f"""
-                INSERT INTO public.console_sessions
-                       (session_id, token_hash, principal, source, issuer, method, label,
-                        created_at, last_used_at, expires_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, {_NOW}, {_NOW}, {_NOW} + %s)
-             RETURNING {_SESSION_COLUMNS}
-                """, (secrets.token_hex(8), token_hash, code[0], code[1], code[2],
-                      METHOD_LINK, label, SESSION_MAX_S)).fetchone()
+            session = insert_session(conn, token_hash=token_hash, principal=code[0],
+                                     source=code[1], issuer=code[2], method=METHOD_LINK,
+                                     label=label)
         except psycopg.errors.UniqueViolation:
             conn.rollback()
             return None
         conn.commit()
-    return _row(row)
+    return session
 
 
 def list_sessions(dsn: str, *, principal: str | None = None) -> list[dict]:
@@ -579,6 +606,41 @@ def revoke_principal_sessions(conn, principal: str, *, method: str | None = None
     return len(rows)
 
 
+def revoke_issuer_sessions(conn, issuer: str | None, *, keep_principal: str | None = None) -> int:
+    """Revoke the live passkey sessions ``issuer`` (a credential id; every
+    passkey's with ``None``) signed in, on ``conn`` inside the caller's
+    transaction; ``keep_principal`` spares those signed in as it (a rebind
+    to the same principal). A bank before v59 has no sessions: 0."""
+    if not conn.execute(_HAS_SESSIONS_SQL).fetchone()[0]:
+        return 0
+    clauses = ["method = %(method)s", "revoked_at IS NULL"]
+    if issuer is not None:
+        clauses.append("issuer = %(issuer)s")
+    if keep_principal is not None:
+        clauses.append("principal <> %(keep)s")
+    rows = conn.execute(
+        f"UPDATE public.console_sessions SET revoked_at = {_NOW} "
+        f"WHERE {' AND '.join(clauses)} RETURNING session_id",
+        {"method": METHOD_PASSKEY, "issuer": issuer, "keep": keep_principal}).fetchall()
+    return len(rows)
+
+
+def insert_session(conn, *, token_hash: str, principal: str, source: str, issuer: str,
+                   method: str, label: str) -> ConsoleSession:
+    """Insert a session on ``conn`` inside the caller's transaction (on the
+    database clock); a token hash already in use raises ``UniqueViolation``."""
+    row = conn.execute(
+        f"""
+        INSERT INTO public.console_sessions
+               (session_id, token_hash, principal, source, issuer, method, label,
+                created_at, last_used_at, expires_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, {_NOW}, {_NOW}, {_NOW} + %s)
+     RETURNING {_SESSION_COLUMNS}
+        """, (secrets.token_hex(8), token_hash, principal, source, issuer, method, label,
+              SESSION_MAX_S)).fetchone()
+    return _row(row)
+
+
 def with_last_use(rows: list[dict], sessions: SessionSnapshot | None) -> list[dict]:
     """``rows`` with each last use the daemon has seen but not written yet."""
     if sessions is None:
@@ -597,7 +659,8 @@ __all__ = [
     "CODE_TTL_S", "ConsoleSession", "METHOD_LINK", "METHOD_PASSKEY", "SESSION_IDLE_S",
     "SESSION_MAX_S", "SessionHit", "SessionSnapshot", "bearer_hashes", "clean_label",
     "describe", "environment_issuers", "flush_uses", "install_sessions",
-    "installed_sessions", "is_loopback_origin", "issue_code", "list_sessions",
+    "insert_session", "installed_sessions", "is_loopback_origin", "issue_code",
+    "list_sessions", "revoke_issuer_sessions",
     "load_sessions", "normalize_origin", "origin_key", "redeem_code", "resolve", "still_resolves",
     "revoke_principal_sessions", "revoke_session", "valid_route_id", "with_last_use",
 ]

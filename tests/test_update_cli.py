@@ -1596,3 +1596,74 @@ def test_an_explicit_suite_setting_decides_without_asking(world, clients, test_l
     root, _ = _checkout(world, tmp_path)
     assert _run(["--checkout", str(root), "--no-backup", "--no-cache-prune"]) == 0
     assert test_login["seen"] == [["create"]] and test_login["term"]["asked"] == []
+
+
+# -- Console sign-in notes (schema v59, spec 2026-11-02 "Install, update") ---------
+
+def _notes_update(monkeypatch, *, names_json=None, sessions=None, token="host-token"):
+    from pseudolife_memory import console_cli
+    from pseudolife_memory import update_cli as uc
+    lines = []
+    up = uc.Update(uc.Options(), log=lines.append, warn=lambda t: lines.append("WARNING: " + t))
+    calls = []
+
+    def fake_run(argv, **kw):
+        calls.append(argv)
+        if names_json is None:
+            return 1, ""
+        # As invite --json prints it (indented), after a relayed line.
+        return 0, "relayed: docker exec\n" + json.dumps(names_json, indent=2) + "\n"
+    monkeypatch.setattr(uc, "run_cli", fake_run)
+    monkeypatch.setattr(console_cli, "credentials", lambda environ=None: (
+        "http://127.0.0.1:8765", token, "environment"))
+    monkeypatch.setattr(console_cli, "request", lambda url, path, tok, body=None: (
+        (200, {"sessions": sessions}) if sessions is not None else (404, None)))
+    return up, lines, calls
+
+
+def test_crossing_v59_names_the_principals_now_treated_as_yours(monkeypatch):
+    up, lines, calls = _notes_update(monkeypatch, names_json={"principals": [
+        {"principal": "laptop", "state": "paired", "owner": True},
+        {"principal": "guest", "state": "paired", "owner": False},
+        {"principal": "old", "state": "revoked", "owner": True},
+        {"principal": "default", "state": "environment", "owner": True}]})
+    up.schema_before = 58
+    up.console_notes({"schema": 59})
+    [line] = [x for x in lines if "v59" in x]
+    assert "(default, laptop)" in line and "guest" not in line and "old" not in line
+    assert "invite <name> --someone-else" in line and "not_owner_principals" in line
+    assert calls and calls[0][-3:] == ["invite", "--list", "--json"]
+
+
+@pytest.mark.parametrize("before,after", [(59, 59), (59, 60), (None, 59), (57, 58)])
+def test_no_owner_note_unless_this_deploy_crossed_v59(monkeypatch, before, after):
+    up, lines, calls = _notes_update(monkeypatch, names_json={"principals": []})
+    up.schema_before = before
+    up.console_notes({"schema": after})
+    assert not [x for x in lines if "treated as yours" in x] and calls == []
+
+
+def test_the_owner_note_survives_an_unreadable_list(monkeypatch):
+    up, lines, _ = _notes_update(monkeypatch, names_json=None)
+    up.schema_before = 58
+    up.console_notes({"schema": 59})
+    assert [x for x in lines if "every principal is now treated as yours, so" in x]
+
+
+def test_with_no_signed_in_browser_the_sign_in_command_is_named(monkeypatch):
+    up, lines, _ = _notes_update(monkeypatch, sessions=[])
+    up.console_notes({"schema": 59, "console_signin": {"link": True, "passkey": False}})
+    assert lines == ["open the Console signed in: pseudolife-mcp console"]
+
+
+@pytest.mark.parametrize("health,sessions,token", [
+    ({"console_signin": {"link": True}}, [{"session_id": "s1"}], "t"),   # someone is signed in
+    ({"console_signin": {"link": False}}, [], "t"),                       # no sign-in offered
+    ({}, [], "t"),                                                        # an older daemon
+    ({"console_signin": {"link": True}}, None, "t"),                      # cannot tell
+    ({"console_signin": {"link": True}}, [], None),                       # no token here
+])
+def test_the_sign_in_line_is_quiet_otherwise(monkeypatch, health, sessions, token):
+    up, lines, _ = _notes_update(monkeypatch, sessions=sessions, token=token)
+    up.console_notes(health)
+    assert lines == []
