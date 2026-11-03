@@ -26,6 +26,7 @@ ACCEPTED_BLOBS = {
         # 2026-11-02 exception; the PR also pins the new usage hash and
         # defers `console` in the native shim).
         "bb5321f0d5344c10b802e67d79bfcf1f3fa6cce2",
+        "1f9865ce14a03b6da519b04d927a5eb9cb899945",
     ),
     "pseudolife_memory/wait_mail_cli.py": ("236636957e2f5affbe2eec21d9e125c35ffae5f2",),
 }
