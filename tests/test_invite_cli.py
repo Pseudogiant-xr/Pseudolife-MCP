@@ -226,8 +226,7 @@ def test_without_a_dsn_it_runs_inside_the_daemon_container(docker, capsys):
                      "pseudolife_memory.cli", "invite", "--version-check"]
     assert run == ["docker", "exec", "-i", "-e", "PSEUDOLIFE_DAEMON_EXEC=1", "pseudolife-mcp-daemon", "python", "-m",
                    "pseudolife_memory.cli", "invite", "laptop", "--tier", "minimal", "--expires",
-                   "900s", "--replace", "--url", "http://100.64.0.2:8765",
-                   "--caller-takes-ownership"]
+                   "900s", "--replace", "--url", "http://100.64.0.2:8765"]
 
 
 def test_an_older_image_is_refused(docker, capsys):
@@ -463,10 +462,10 @@ def _owned(pg_url):
 def test_an_invite_is_the_owners_and_names_the_flag_for_someone_elses(bank, pg_url, capsys):
     code, out, _err = _run(capsys, "laptop")
     assert code == 0 and _owned(pg_url) == {"laptop": True}
-    assert "for a machine that is not yours, add --someone-else" in out
+    assert NOTE in out.splitlines()
     report = json.loads(_run(capsys, "phone", "--json")[1])
     assert report["owned"] is True
-    assert "for a machine that is not yours, add --someone-else" in report["notes"]
+    assert NOTE in report["notes"]
 
 
 def test_someone_else_invites_a_machine_that_is_not_the_owners(bank, pg_url, capsys):
@@ -508,8 +507,8 @@ def test_the_list_has_an_owner_column(bank, env, pg_url, capsys, tmp_path):
 def test_someone_else_is_forwarded_to_the_daemon_container(docker, capsys):
     code, _out, _err = _run(capsys, "guest", "--someone-else")
     assert code == 0
-    assert docker.calls[-1][-7:] == ["guest", "--expires", "900s", "--someone-else", "--url",
-                                     "http://100.64.0.2:8765", "--caller-takes-ownership"]
+    assert docker.calls[-1][-6:] == ["guest", "--expires", "900s", "--someone-else", "--url",
+                                     "http://100.64.0.2:8765"]
 
 
 def test_a_stopped_container_lists_ownership_through_postgres(bank, pg_url, env, capsys):
@@ -620,7 +619,7 @@ def test_the_ownership_flags_take_the_highest_version_line(docker, capsys, answe
     code, _out, err = _run(capsys, "guest", "--someone-else")
     if admitted:
         assert code == 0, err
-        assert docker.calls[-1][-7:-3] == ["guest", "--expires", "900s", "--someone-else"]
+        assert docker.calls[-1][-6:-2] == ["guest", "--expires", "900s", "--someone-else"]
     else:
         assert code == 4 and "update the daemon to schema 59" in err, err
 
@@ -648,68 +647,111 @@ def test_a_paired_machine_changes_owner_without_a_new_code(bank, pg_url, capsys)
 
 # -- the --someone-else note through an older host CLI (2026-11-03) -------------
 
-OLD_HOST_NOTE = ("for a machine that is not yours, update pseudolife-mcp on this host, then re-run "
-                 "with --someone-else")
-PLAIN_NOTE = "for a machine that is not yours, add --someone-else"
+NOTE = ("for a machine that is not yours, add --someone-else (an older pseudolife-mcp refuses it: "
+        "update it first)")
 
 
-@pytest.mark.parametrize("forwarded, marker, note", [
-    (None, False, PLAIN_NOTE),          # run directly: the flag works here
-    ("1", False, OLD_HOST_NOTE),        # forwarded by a host CLI before v59
-    ("1", True, PLAIN_NOTE),            # forwarded by one that takes the flag
-    ("", False, PLAIN_NOTE),            # an empty value is not forwarded
-], ids=["direct", "forwarded-old-host", "forwarded-new-host", "empty-env"])
-def test_the_someone_else_note_names_the_flag_only_where_the_caller_takes_it(
-        bank, env, capsys, forwarded, marker, note):
-    """A host CLI before v59 forwards an invite without
-    --caller-takes-ownership, and its parser refuses --someone-else: the
-    image's note must not tell the user to run that."""
+def _v021_forward(name, url):
+    """What the released v0.21.0 host CLI runs in the daemon's container for
+    a plain invite (``git show v0.21.0:pseudolife_memory/invite_cli.py``,
+    ``_in_container`` and ``_forward``): ``docker exec -i <container> python
+    -m pseudolife_memory.cli invite`` with no ``-e``, so no
+    PSEUDOLIFE_DAEMON_EXEC, then the name, ``--expires <N>s`` and ``--url``.
+    Its own parser has no --someone-else."""
+    return [name, "--expires", "900s", "--url", url]
+
+
+def test_the_note_holds_for_an_invite_forwarded_by_v0_21_0(bank, env, capsys):
+    """Through a v0.21.0 host CLI the image cannot tell it was forwarded,
+    and that CLI refuses --someone-else: the one note says to update it."""
+    env.delenv("PSEUDOLIFE_DAEMON_EXEC", raising=False)
+    code, out, err = _run(capsys, *_v021_forward("laptop", "http://100.64.0.2:8765"))
+    assert code == 0, err
+    notes = [line for line in out.splitlines() if "--someone-else" in line]
+    assert notes == [NOTE]
+    assert "update it first" in notes[0]
+    report = json.loads(_run(capsys, *_v021_forward("phone", "u"), "--json")[1])
+    assert [note for note in report["notes"] if "--someone-else" in note] == [NOTE]
+
+
+@pytest.mark.parametrize("forwarded", [None, "", "1"], ids=["direct", "empty-env", "forwarded"])
+def test_the_note_is_one_text_however_invite_ran(bank, env, capsys, forwarded):
     if forwarded is None:
         env.delenv("PSEUDOLIFE_DAEMON_EXEC", raising=False)
     else:
         env.setenv("PSEUDOLIFE_DAEMON_EXEC", forwarded)
-    extra = ["--caller-takes-ownership"] if marker else []
-    other = PLAIN_NOTE if note == OLD_HOST_NOTE else OLD_HOST_NOTE
-    code, out, _err = _run(capsys, "laptop", *extra)
-    assert code == 0 and note in out.splitlines() and other not in out.splitlines()
-    report = json.loads(_run(capsys, "phone", *extra, "--json")[1])
-    assert note in report["notes"] and other not in report["notes"]
+    code, out, _err = _run(capsys, "laptop", "--url", "u")
+    assert code == 0 and NOTE in out.splitlines()
+    assert NOTE in json.loads(_run(capsys, "phone", "--url", "u", "--json")[1])["notes"]
 
 
-def test_the_marker_is_hidden_from_the_help():
-    assert "caller-takes-ownership" not in invite_cli._parser().format_help()
+def _base_parser():
+    """The invite parser of an image built from #1154 alone
+    (``git show origin/feat/console-owner-scope:pseudolife_memory/invite_cli.py``,
+    ``_parser``), vendored with its help texts dropped: that image already
+    answers ``pseudolife-mcp invite 2``, so a current host CLI forwards to it,
+    and its argparse refuses any option it lacks."""
+    import argparse
+    parser = argparse.ArgumentParser(prog="pseudolife-mcp invite")
+    parser.add_argument("name", nargs="?")
+    parser.add_argument("--tier", choices=invite_cli.TIERS)
+    board = parser.add_mutually_exclusive_group()
+    board.add_argument("--board", dest="board", action="store_const", const=True, default=None)
+    board.add_argument("--no-board", dest="board", action="store_const", const=False)
+    parser.add_argument("--expires", type=invite_cli._expires, default=15 * 60)
+    owner = parser.add_mutually_exclusive_group()
+    owner.add_argument("--someone-else", dest="owned", action="store_const", const=False,
+                       default=None)
+    owner.add_argument("--mine", dest="owned", action="store_const", const=True)
+    parser.add_argument("--replace", action="store_true")
+    parser.add_argument("--url")
+    parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument("--bank", metavar="FINGERPRINT")
+    parser.add_argument("--list", action="store_true")
+    parser.add_argument("--revoke", metavar="NAME")
+    parser.add_argument("--yes", action="store_true")
+    parser.add_argument("--json", action="store_true")
+    parser.add_argument("--version-check", action="store_true")
+    return parser
 
 
-@pytest.mark.parametrize("answer, marked", [
-    ("pseudolife-mcp invite 1\npseudolife-mcp invite 2\n", True),
-    ("pseudolife-mcp invite 1\npseudolife-mcp invite 3\n", True),
-    ("pseudolife-mcp invite 1\n", False),
-], ids=["v2", "v3", "v1"])
-def test_only_an_invite_to_a_v2_image_says_the_caller_takes_ownership(docker, env, capsys,
-                                                                     answer, marked):
-    """An image before v59 would refuse the marker as unrecognized."""
+@pytest.mark.parametrize("argv", [
+    ["laptop"],
+    ["laptop", "--json"],
+    ["laptop", "--tier", "core", "--no-board", "--replace", "--bank", "abc", "--json"],
+    ["guest", "--someone-else"],
+    ["laptop", "--mine", "--expires", "2h"],
+    ["--list", "--json"],
+    ["--revoke", "laptop"],
+], ids=["plain", "plain-json", "options", "someone-else", "mine", "list", "revoke"])
+def test_an_image_from_1154_parses_what_the_host_forwards(docker, env, capsys, argv):
+    """A current host CLI at image version 2 forwards only what #1154's
+    parser takes: an extra option fails every invite with "unrecognized
+    arguments"."""
     env.setattr(invite_cli, "interactive", lambda: True)
     env.setattr(invite_cli, "_ask", lambda question: True)
-    docker.version = answer
-    assert _run(capsys, "laptop", "--json")[0] == 0
-    invite = docker.calls[-1]
-    tail = ["laptop", "--expires", "900s", "--url", "http://100.64.0.2:8765",
-            *(["--caller-takes-ownership"] if marked else []), "--json"]
-    assert invite[-len(tail):] == tail and invite[-len(tail) - 1] == "invite"
-    # List and revoke never carry it.
-    assert _run(capsys, "--list")[0] == 0
-    assert "--caller-takes-ownership" not in docker.calls[-1]
-    assert _run(capsys, "--revoke", "laptop")[0] == 0
-    assert "--caller-takes-ownership" not in docker.calls[-1]
+    docker.version = "pseudolife-mcp invite 1\npseudolife-mcp invite 2\n"
+    code, _out, err = _run(capsys, *argv)
+    assert code == 0, err
+    forwarded = docker.calls[-1]
+    forwarded = forwarded[forwarded.index("invite") + 1:]
+    try:
+        _base_parser().parse_args(forwarded)
+    except SystemExit:
+        pytest.fail(f"an image from #1154 refuses {forwarded}: "
+                    f"{capsys.readouterr().err.strip()}")
 
 
 # Each case is also in rust/shim/src/cli/pairing/invite_transport.rs
 # (the_image_version_reads_as_the_oracle_does): both read the probe alike.
 @pytest.mark.parametrize("stdout, version", [
-    ("pseudolife-mcp invite 1\rpseudolife-mcp invite 2\n", None),
-    ("pseudolife-mcp invite 1\n\rpseudolife-mcp invite 2\n", 1),
-    ("pseudolife-mcp invite 2\r", None),
-    ("pseudolife-mcp invite 2\r\r\n", None),
+    ("pseudolife-mcp invite 1\rpseudolife-mcp invite 2", 2),
+    ("pseudolife-mcp invite 1\rpseudolife-mcp invite 2\n", 2),
+    ("pseudolife-mcp invite 1\n\rpseudolife-mcp invite 2\n", 2),
+    ("pseudolife-mcp invite 2\r", 2),
+    ("pseudolife-mcp invite 2\r\r\n", 2),
+    ("pseudolife-mcp invite 1\r\rpseudolife-mcp invite 3\r\n", 3),
+    ("pseudolife-mcp invite 2 \r\n", None),
     ("pseudolife-mcp invite 2", 2),
     ("pseudolife-mcp invite 1\npseudolife-mcp invite " + "1" * 25 + "\n", 1),
     ("pseudolife-mcp invite 18446744073709551615\n", 2**64 - 1),
@@ -721,7 +763,8 @@ def test_only_an_invite_to_a_v2_image_says_the_caller_takes_ownership(docker, en
     ("pseudolife-mcp invite \u0662\n", None),
     ("pseudolife-mcp invite 1\npseudolife-mcp invite \uff12\n", 1),
     ("pseudolife-mcp invite 1\u2028pseudolife-mcp invite 2\n", None),
-], ids=["lone-cr", "cr-starts-a-line", "trailing-lone-cr", "cr-cr-lf", "no-newline",
+], ids=["lone-cr", "lone-cr-then-lf", "cr-starts-a-line", "trailing-lone-cr", "cr-cr-lf",
+        "cr-cr-then-crlf", "space-before-crlf", "no-newline",
         "past-u64", "u64-max", "u64-max-plus-one", "leading-zeros", "zero", "empty",
         "blank-line", "arabic-indic-digit", "fullwidth-digit", "unicode-line-separator"])
 def test_the_image_version_reads_as_the_shim_does(stdout, version):

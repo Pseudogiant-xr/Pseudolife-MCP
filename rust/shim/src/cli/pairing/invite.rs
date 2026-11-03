@@ -24,14 +24,11 @@ const URL_PLACEHOLDER: &str = "<daemon-url>";
 /// `pseudolife-mcp invite 1`: without it, a host CLI one release behind
 /// refuses a plain invite as an image that predates `invite`.
 const VERSION_LINES: [&str; 2] = ["pseudolife-mcp invite 1", "pseudolife-mcp invite 2"];
-/// `CALLER_TAKES_OWNERSHIP`: what a host CLI at image version 2 or later adds
-/// to a forwarded invite (it takes `--someone-else`); hidden from the help.
-const CALLER_TAKES_OWNERSHIP: &str = "--caller-takes-ownership";
-/// `OWNERSHIP_NOTE` / `OWNERSHIP_NOTE_OLD_HOST`: the `--someone-else` note,
-/// and its form for an invite forwarded by a host CLI before v59, whose
-/// parser refuses that flag.
-const OWNERSHIP_NOTE: &str = "for a machine that is not yours, add --someone-else";
-const OWNERSHIP_NOTE_OLD_HOST: &str = "for a machine that is not yours, update pseudolife-mcp on this host, then re-run with --someone-else";
+/// `OWNERSHIP_NOTE`: the `--someone-else` note, one text however invite
+/// was run, since a host CLI before v59 forwards an invite into the image
+/// with nothing that tells it apart from a direct run, and its own parser
+/// refuses `--someone-else`.
+const OWNERSHIP_NOTE: &str = "for a machine that is not yours, add --someone-else (an older pseudolife-mcp refuses it: update it first)";
 
 #[derive(Default)]
 struct Args {
@@ -51,9 +48,6 @@ struct Args {
     yes: bool,
     json: bool,
     version_check: bool,
-    /// The hidden `--caller-takes-ownership`: the forwarding host CLI
-    /// takes `--someone-else`.
-    caller_takes_ownership: bool,
 }
 
 /// `_expires` for its ASCII spellings `<digits>[smhd]` (any case), within
@@ -146,7 +140,6 @@ fn parse(arguments: &[String]) -> Result<Args, Defer> {
             "--yes" => flag(&mut args.yes)?,
             "--json" => flag(&mut args.json)?,
             "--version-check" => flag(&mut args.version_check)?,
-            CALLER_TAKES_OWNERSHIP => flag(&mut args.caller_takes_ownership)?,
             positional if !positional.starts_with('-') => once(&mut args.name, item.clone())?,
             _ => return Err(Defer),
         }
@@ -419,23 +412,6 @@ fn not_owner_in_config() -> Vec<String> {
         .and_then(|config| coordination_lists(&config))
         .map(|(_, not_owner)| not_owner)
         .unwrap_or_default()
-}
-
-/// `_ownership_note`: run directly, or forwarded by a host CLI that takes
-/// `--someone-else`, the note names the flag; forwarded by an older host
-/// CLI, whose parser refuses it, it says to update that CLI first.
-fn ownership_note(forwarded: bool, caller_takes_ownership: bool) -> &'static str {
-    if !forwarded || caller_takes_ownership {
-        OWNERSHIP_NOTE
-    } else {
-        OWNERSHIP_NOTE_OLD_HOST
-    }
-}
-
-/// `os.environ.get(daemon_exec.NESTED_ENV)` is truthy: this run was
-/// forwarded into the daemon container by a host CLI.
-fn forwarded() -> bool {
-    std::env::var_os("PSEUDOLIFE_DAEMON_EXEC").is_some_and(|value| !value.is_empty())
 }
 
 fn python_bool(value: bool) -> J {
@@ -745,8 +721,7 @@ async fn local(
             args.expires.unwrap_or(900),
             // The note is offered only where the flag can work: a bank with
             // the column, and neither flag given.
-            (ownership && args.owned.is_none())
-                .then(|| ownership_note(forwarded(), args.caller_takes_ownership)),
+            ownership && args.owned.is_none(),
         )),
         Ok(Err(refusal)) => Ok(report.fail_units(EXIT_REFUSED, refusal)),
         Err(DbError::UndefinedTable) => Ok(report.fail(EXIT_REFUSED, NO_TABLE)),
@@ -778,15 +753,15 @@ fn minutes(seconds: u32) -> u32 {
     }
 }
 
-/// `_invite`'s report, after the row was written. `ownership_note`: the
-/// `--someone-else` note, printed when the row is the owner's.
+/// `_invite`'s report, after the row was written. `ownership_note`:
+/// whether to print `OWNERSHIP_NOTE` when the row is the owner's.
 fn invite_report(
     report: &mut Report,
     name: &str,
     created: &invite_db::Created,
     url: Option<String>,
     seconds: u32,
-    ownership_note: Option<&str>,
+    ownership_note: bool,
 ) -> u8 {
     let (Some(raw), Some(expires_at)) = (created.code.as_deref(), created.expires_at) else {
         // A paired machine's ownership alone: no code, nothing to re-pair.
@@ -853,8 +828,8 @@ fn invite_report(
     if listed_in_config(name) {
         report.note(&format!("note: {name} is already listed in coordination.allowed_principals; the invite gives it a token"));
     }
-    if let Some(note) = ownership_note.filter(|_| created.owned) {
-        report.note(note);
+    if ownership_note && created.owned {
+        report.note(OWNERSHIP_NOTE);
     }
     report.note("an invited machine can read and write the whole bank and use the agent board, but not change the daemon's configuration");
     report.finish(EXIT_OK)
@@ -1048,7 +1023,6 @@ mod tests {
             &["--revoke", "laptop", "--yes"],
             &["laptop", "--someone-else"],
             &["--mine", "laptop"],
-            &["laptop", "--caller-takes-ownership"],
             &["--version-check"],
             &[""],
         ] {
@@ -1060,8 +1034,6 @@ mod tests {
             &["--json", "--json"],
             &["x", "--mine", "--someone-else"],
             &["x", "--someone-else", "--someone-else"],
-            &["x", "--caller-takes-ownership", "--caller-takes-ownership"],
-            &["x", "--caller"],
             &["--tier", "writer", "x"],
             &["--tier"],
             &["--expires", "30s", "x"],
@@ -1078,21 +1050,6 @@ mod tests {
         ] {
             assert!(parse(&strings(deferred)).is_err(), "{deferred:?}");
         }
-    }
-
-    #[test]
-    fn the_ownership_note_names_the_flag_only_where_the_caller_takes_it() {
-        // Run directly: the flag works here.
-        assert_eq!(ownership_note(false, false), OWNERSHIP_NOTE);
-        assert_eq!(ownership_note(false, true), OWNERSHIP_NOTE);
-        // Forwarded by a host CLI at image version 2 or later.
-        assert_eq!(ownership_note(true, true), OWNERSHIP_NOTE);
-        // Forwarded by a host CLI before v59, which refuses --someone-else.
-        assert_eq!(ownership_note(true, false), OWNERSHIP_NOTE_OLD_HOST);
-        assert_eq!(
-            OWNERSHIP_NOTE_OLD_HOST,
-            "for a machine that is not yours, update pseudolife-mcp on this host, then re-run with --someone-else"
-        );
     }
 
     #[test]

@@ -598,11 +598,9 @@ def _transport_cases():
                 base = ['-e', 'PSEUDOLIFE_DAEMON_EXEC=1', 'pseudolife-mcp-daemon', *cli, 'invite']
                 assert calls[2]['argv'] == ['exec', *base, '--version-check']
                 if forwarded:
-                    # An image at version 2 hears that this CLI takes
-                    # --someone-else, for the note it prints.
+                    # Only options an image from #1154 parses.
                     assert calls[3]['argv'] == ['exec', '-i', *base, 'laptop', '--expires', '900s',
-                                                '--someone-else', '--url', 'https://example.com',
-                                                '--caller-takes-ownership']
+                                                '--someone-else', '--url', 'https://example.com']
                     assert obs['exit'] == 0
                 else:
                     assert len(calls) == 3 and obs['exit'] == 4
@@ -824,20 +822,21 @@ def _cases() -> list[core.Case]:
     inviting("invite-bank-match", "states", ["laptop", "--bank", FINGERPRINT, "--url", "u"])
     inviting("invite-bank-other", "states", ["laptop", "--bank", OTHER_FINGERPRINT, "--url", "u"])
     inviting("invite-empty-bank", "empty", ["zulu.1", "--url", "u", "--json"])
-    # Inside the daemon container (PSEUDOLIFE_DAEMON_EXEC, as a host CLI
-    # forwards an invite): without --caller-takes-ownership the forwarding
-    # host CLI predates v59 and refuses --someone-else, so the note says to
-    # update it first; with it, the note names the flag.
-    inviting("invite-forwarded-old-host", "empty", ["zulu.1", "--url", "u"],
+    # The --someone-else note on a plain invite, one text however invite ran.
+    # First exactly as the released v0.21.0 host CLI runs it in the daemon's
+    # container: `docker exec -i` with no PSEUDOLIFE_DAEMON_EXEC, the name,
+    # --expires <N>s and --url (no --port: the port is the container's
+    # PSEUDOLIFE_MCP_PORT). That CLI refuses --someone-else, so the note
+    # says to update it first.
+    for case_id, json_flag in [("invite-v021-forward", []), ("invite-v021-forward-json", ["--json"])]:
+        port = free_port()
+        add(write_case(case_id, "empty", ["zulu.1", "--expires", "900s", "--url", "u", *json_flag],
+                       extra_env={"PSEUDOLIFE_MCP_PORT": str(port), "PSEUDOLIFE_DAEMON_EXEC": None},
+                       daemon=_daemon(port, health())))
+    # Forwarded as a current host CLI does (PSEUDOLIFE_DAEMON_EXEC set): the
+    # same note.
+    inviting("invite-forwarded", "empty", ["zulu.1", "--expires", "900s", "--url", "u"],
              extra_env={"PSEUDOLIFE_DAEMON_EXEC": "1"})
-    inviting("invite-forwarded-old-host-json", "empty", ["zulu.1", "--url", "u", "--json"],
-             extra_env={"PSEUDOLIFE_DAEMON_EXEC": "1"})
-    inviting("invite-forwarded-new-host", "empty",
-             ["zulu.1", "--url", "u", "--caller-takes-ownership"],
-             extra_env={"PSEUDOLIFE_DAEMON_EXEC": "1"})
-    # The marker alone, run directly: the plain note, as without it.
-    inviting("invite-direct-marker-json", "empty",
-             ["zulu.1", "--caller-takes-ownership", "--url", "u", "--json"])
     inviting("invite-health-int-at-limit", "states", ["laptop", "--url", "u", "--json"],
              payload=json.dumps(health())[:-1].encode() + b', "x": -' + b"9" * 4300 + b"}")
     port = free_port()

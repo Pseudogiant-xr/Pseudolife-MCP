@@ -128,16 +128,11 @@ VERSION_LINES = ("pseudolife-mcp invite 1", "pseudolife-mcp invite 2")
 # ASCII digits only, as the shim's `image_version` reads them.
 _VERSION = re.compile(r"pseudolife-mcp invite ([0-9]+)")
 _U64_MAX = 2**64 - 1
-# What a host CLI at image version 2 or later adds to a forwarded invite: it
-# takes --someone-else, so the image's note may name that flag. Hidden from
-# the help, and spelled so no existing option's abbreviation (`--h` for
-# --help) becomes ambiguous.
-CALLER_TAKES_OWNERSHIP = "--caller-takes-ownership"
-# The --someone-else note. A forwarded invite without that marker came from a
-# host CLI before v59, whose parser refuses --someone-else.
-OWNERSHIP_NOTE = "for a machine that is not yours, add --someone-else"
-OWNERSHIP_NOTE_OLD_HOST = ("for a machine that is not yours, update pseudolife-mcp on this host, "
-                           "then re-run with --someone-else")
+# The --someone-else note, one text however invite was run: a host CLI
+# before v59 forwards an invite into this image with nothing that tells it
+# apart from a direct run, and its own parser refuses --someone-else.
+OWNERSHIP_NOTE = ("for a machine that is not yours, add --someone-else (an older pseudolife-mcp "
+                  "refuses it: update it first)")
 # The refusal of --someone-else / --mine through an image that predates them.
 OWNERSHIP_NEEDS_NEWER_IMAGE = (
     "the daemon's image predates --someone-else and --mine: update the daemon to schema 59 "
@@ -409,13 +404,6 @@ def _local(args, report: _Report, dsn: str) -> int:
             return report.fail(EXIT_FAILED, f"the database refused the change ({type(exc).__name__})")
 
 
-def _ownership_note(forwarded: bool, caller_takes_ownership: bool) -> str:
-    """The --someone-else note: run directly, or forwarded by a host CLI that
-    takes the flag, it names the flag; forwarded by an older host CLI, whose
-    parser refuses it, it says to update that CLI first."""
-    return OWNERSHIP_NOTE if not forwarded or caller_takes_ownership else OWNERSHIP_NOTE_OLD_HOST
-
-
 def _invite(args, report: _Report, store, conn) -> int:
     note = _listed_note(args.name)
     # Whether this bank records ownership (v59): the --someone-else note is
@@ -458,8 +446,7 @@ def _invite(args, report: _Report, store, conn) -> int:
     if note:
         report.note(note)
     if ownership and created["owned"] and args.owned is None:
-        report.note(_ownership_note(bool(os.environ.get(daemon_exec.NESTED_ENV)),
-                                    args.caller_takes_ownership))
+        report.note(OWNERSHIP_NOTE)
     report.note("an invited machine can read and write the whole bank and use the agent board, "
                 "but not change the daemon's configuration")
     return report.finish(EXIT_OK)
@@ -510,10 +497,10 @@ def _list(report: _Report, rows: list[dict], rejected: list[dict]) -> int:
 
 # ── the Docker path ───────────────────────────────────────────────────────────
 
-def _forward(args, version: int) -> list[str]:
+def _forward(args) -> list[str]:
     """The same request for the container, with the URL and the
-    confirmation resolved here. An invite to an image at ``version`` 2 or
-    later carries CALLER_TAKES_OWNERSHIP: this CLI takes --someone-else."""
+    confirmation resolved here. Only options an image at invite version 2
+    (#1154) parses: anything new here breaks every invite through it."""
     out = []
     if args.list:
         out.append("--list")
@@ -531,8 +518,6 @@ def _forward(args, version: int) -> list[str]:
         if args.replace:
             out.append("--replace")
         out += ["--url", args.url or exposed_url(args.port) or URL_PLACEHOLDER]
-        if version >= 2:
-            out.append(CALLER_TAKES_OWNERSHIP)
     if args.bank:
         out += ["--bank", args.bank]
     if args.json:
@@ -601,13 +586,14 @@ def _through_postgres(args, report: _Report) -> int:
 def _image_version(stdout: str | None) -> int | None:
     """The highest ``N`` over the lines of ``invite --version-check`` that
     are exactly ``pseudolife-mcp invite <N>``; None when no line is. Read as
-    the shim's ``image_version`` reads it (Rust ``str::lines`` and ``u64``):
-    lines split on ``\\n``, a ``\\r`` right before it dropped (a lone
-    ``\\r`` elsewhere stays in its line), ``N`` ASCII digits (leading zeros
-    allowed), a line whose ``N`` exceeds 2**64 - 1 ignored."""
+    the shim's ``image_version`` reads it: universal newlines, as ``run``'s
+    ``text=True`` already gives (``\\r\\n``, then a lone ``\\r``, become
+    ``\\n``), done here too so a direct call reads alike; then lines split
+    on ``\\n`` only, ``N`` ASCII digits (leading zeros allowed), a line whose
+    ``N`` exceeds 2**64 - 1 ignored."""
     found = []
-    *ended, last = (stdout or "").split("\n")
-    for line in [line.removesuffix("\r") for line in ended] + [last]:
+    text = (stdout or "").replace("\r\n", "\n").replace("\r", "\n")
+    for line in text.split("\n"):
         match = _VERSION.fullmatch(line)
         if match is None:
             continue
@@ -643,7 +629,7 @@ def _in_container(args, report: _Report) -> int:
     if args.owned is not None and version < 2:
         return report.fail(EXIT_REFUSED, OWNERSHIP_NEEDS_NEWER_IMAGE)
     proc = run([docker, "exec", "-i", "-e", f"{daemon_exec.NESTED_ENV}=1", CONTAINER, *executable, "invite",
-                *_forward(args, version)])
+                *_forward(args)])
     # The container's own report: relayed as it is (it carries the code).
     sys.stdout.write(proc.stdout or "")
     sys.stderr.write(proc.stderr or "")
@@ -688,7 +674,6 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--yes", action="store_true", help="revoke without asking")
     parser.add_argument("--json", action="store_true", help="one JSON report on stdout")
     parser.add_argument("--version-check", action="store_true", help=argparse.SUPPRESS)
-    parser.add_argument(CALLER_TAKES_OWNERSHIP, action="store_true", help=argparse.SUPPRESS)
     return parser
 
 
