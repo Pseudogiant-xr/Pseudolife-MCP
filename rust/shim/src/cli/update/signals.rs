@@ -183,9 +183,11 @@ pub(super) async fn wait(group: Option<u32>) -> i32 {
 
 /// Forward repeated interrupts without extending the original cleanup deadline.
 pub(super) async fn terminate(child: &mut dyn process_wrap::tokio::ChildWrapper, signal: i32) {
+    // Recovery may follow earlier interrupted commands. Only signals arriving
+    // after this cancellation belong to this child's repeated-interrupt loop.
+    let mut seen = COUNT.load(Ordering::Acquire);
     let _ = child.signal(signal);
     let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
-    let mut seen = 1;
     let group = child.id();
     loop {
         tokio::select! {
@@ -223,5 +225,68 @@ impl Drop for Guard {
             unsafe { libc::raise(signal) };
             std::process::exit(128 + signal);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use process_wrap::tokio::ChildWrapper;
+    use std::{future::Future, os::unix::process::ExitStatusExt, pin::Pin, process::ExitStatus};
+
+    // Record forwarding calls directly: ordinary Unix signals can coalesce,
+    // hiding duplicate delivery in a real child-process assertion.
+    #[derive(Debug, Default)]
+    struct RecordingChild(Mutex<Vec<i32>>);
+    impl ChildWrapper for RecordingChild {
+        fn inner(&self) -> &dyn ChildWrapper {
+            self
+        }
+        fn inner_mut(&mut self) -> &mut dyn ChildWrapper {
+            self
+        }
+        fn into_inner(self: Box<Self>) -> Box<dyn ChildWrapper> {
+            self
+        }
+        fn id(&self) -> Option<u32> {
+            None
+        }
+        fn signal(&self, signal: i32) -> std::io::Result<()> {
+            self.0.lock().unwrap().push(signal);
+            Ok(())
+        }
+        fn start_kill(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+        fn wait(
+            &mut self,
+        ) -> Pin<Box<dyn Future<Output = std::io::Result<ExitStatus>> + Send + '_>> {
+            Box::pin(async {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                Ok(ExitStatus::from_raw(0))
+            })
+        }
+    }
+
+    #[test]
+    fn recovery_interrupt_is_forwarded_once() {
+        // Serialize with live signal scopes, but do not install handlers or
+        // re-raise the synthetic interrupts used by this forwarding oracle.
+        let _command = COMMAND.lock().unwrap_or_else(|e| e.into_inner());
+        RECEIVED.store(0, Ordering::Relaxed);
+        COUNT.store(0, Ordering::Relaxed);
+        receive(libc::SIGINT); // Interrupt shadow startup.
+        let recovery = CleanupSignal::new();
+        assert_eq!(received(), 0);
+        receive(libc::SIGINT); // One more Ctrl+C while removing the shadow.
+        let mut child = RecordingChild::default();
+        tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .unwrap()
+            .block_on(terminate(&mut child, received()));
+        drop(recovery);
+        RECEIVED.store(0, Ordering::Relaxed);
+        assert_eq!(*child.0.lock().unwrap(), [libc::SIGINT]);
     }
 }
