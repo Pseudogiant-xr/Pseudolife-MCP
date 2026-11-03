@@ -2,8 +2,8 @@
 //! editor: plain scalars resolve by `SafeLoader`'s YAML 1.1 rules (`yes`,
 //! `017`, `1_000`, `1:30`, `1e5` as a string) and construct as
 //! `SafeConstructor` does (`construct_yaml_bool`, `construct_yaml_int`,
-//! `construct_yaml_float`). The daemon's own start-up load keeps its rules
-//! (`config.rs`).
+//! `construct_yaml_float`). Startup uses the same scalar rules, refusing
+//! consumed values its config tree cannot represent rather than rounding them.
 //!
 //! A timestamp constructs a Python `date` or `datetime`, which this tree
 //! cannot hold: the read for `saved` keeps its text (`str(date)` is the
@@ -15,7 +15,72 @@ use yaml_rust2::scanner::TScalarStyle;
 use super::yaml_dump::{
     TAG_BOOL, TAG_FLOAT, TAG_INT, TAG_MERGE, TAG_NULL, TAG_STR, TAG_TIMESTAMP, resolve,
 };
-use crate::config::{Node, resolve_scalar, safe_load_with};
+use crate::config::{
+    Node, UnsupportedKind, resolve_scalar, safe_load_startup_with, safe_load_with,
+};
+
+/// Startup must preserve values exactly. The editor's read-only projection
+/// may display an oversized integer as a float; startup must not use it.
+pub(crate) fn load_startup(text: &str) -> Result<Option<Node>, String> {
+    safe_load_startup_with(text, construct_startup)
+}
+
+fn construct_startup(
+    value: String,
+    mut style: TScalarStyle,
+    mut tag: Option<Tag>,
+) -> Result<Node, String> {
+    // PyYAML applies implicit resolution to a non-specific tag even when
+    // its scalar is quoted.
+    if tag.as_ref().is_some_and(|t| {
+        (t.handle == "!" && t.suffix.is_empty()) || (t.handle.is_empty() && t.suffix == "!")
+    }) {
+        tag = None;
+        style = TScalarStyle::Plain;
+    }
+    let resolved = match &tag {
+        Some(t) if t.handle == "tag:yaml.org,2002:" => match t.suffix.as_str() {
+            "null" => return Ok(Node::Null),
+            "int" => TAG_INT,
+            "timestamp" => TAG_TIMESTAMP,
+            "binary" => return Ok(Node::Unsupported {
+                kind: UnsupportedKind::Binary,
+                truthy: value.chars().any(|c| !c.is_whitespace()),
+                value,
+                reason: "YAML binary values cannot be used at startup; use a plain value instead of !!binary".into(),
+            }),
+            _ => TAG_STR,
+        },
+        None if style == TScalarStyle::Plain => resolve(&value),
+        _ => TAG_STR,
+    };
+    match resolved {
+        TAG_TIMESTAMP => Ok(Node::Unsupported {
+            kind: UnsupportedKind::Timestamp,
+            truthy: true,
+            value,
+            reason: "YAML timestamps cannot be used at startup; quote the date or timestamp to use it as a string".into(),
+        }),
+        TAG_INT => {
+            // Python constructs every scalar, including unused keys. Only a
+            // valid integer beyond our range may remain an unread placeholder.
+            construct_int_with(&value, |digits, radix| {
+                startup_integer_text(digits, radix).map(|_| 0)
+            })
+            .map_err(|_| format!("cannot read {value:?} as a YAML integer; use integer digits or quote it as a string"))?;
+            Ok(match construct_int_with(&value, startup_integer) {
+            Ok(value) => Node::Int(value),
+            Err(_) => Node::Unsupported {
+                kind: UnsupportedKind::Integer,
+                truthy: true,
+                value,
+                reason: "YAML integer is invalid or outside the signed 64-bit range; use a value from -9223372036854775808 to 9223372036854775807, or quote it for a string setting".into(),
+            },
+            })
+        }
+        _ => construct(value, style, tag, false),
+    }
+}
 
 /// For `_saved_file`: a timestamp keeps its text.
 pub(crate) fn load_reading(text: &str) -> Result<Option<Node>, String> {
@@ -89,6 +154,52 @@ fn construct(
 
 /// `construct_yaml_int`, refused past the i64 range this tree holds.
 fn construct_int(text: &str) -> Result<i64, String> {
+    construct_int_with(text, |digits, radix| {
+        i128::from_str_radix(digits, radix).ok()
+    })
+}
+
+/// PyYAML selects the radix before Python's `int()` consumes whitespace.
+/// Thus `!!int ' 010 '` is decimal 10, while `!!int '010 '` is octal 8.
+fn startup_integer(text: &str, radix: u32) -> Option<i128> {
+    i128::from_str_radix(&startup_integer_text(text, radix)?, radix).ok()
+}
+
+fn startup_integer_text(text: &str, radix: u32) -> Option<String> {
+    let normalized: String = text
+        .trim()
+        .chars()
+        .map(|c| {
+            crate::graph_review::decimal_value(c)
+                .and_then(|d| char::from_digit(d, 10))
+                .unwrap_or(c)
+        })
+        .collect();
+    let (sign, digits) = match normalized.as_bytes().first() {
+        Some(b'-') => ("-", &normalized[1..]),
+        Some(b'+') => ("+", &normalized[1..]),
+        _ => ("", normalized.as_str()),
+    };
+    let prefix = match radix {
+        2 => ["0b", "0B"],
+        8 => ["0o", "0O"],
+        16 => ["0x", "0X"],
+        _ => ["", ""],
+    };
+    let digits = digits
+        .strip_prefix(prefix[0])
+        .or_else(|| digits.strip_prefix(prefix[1]))
+        .unwrap_or(digits);
+    if digits.is_empty() || !digits.chars().all(|c| c.is_digit(radix)) {
+        return None;
+    }
+    Some(format!("{sign}{digits}"))
+}
+
+fn construct_int_with(
+    text: &str,
+    parse: impl Fn(&str, u32) -> Option<i128>,
+) -> Result<i64, String> {
     let value: String = text.chars().filter(|&c| c != '_').collect();
     let (negative, digits) = match value.as_bytes().first() {
         Some(b'-') => (true, &value[1..]),
@@ -98,22 +209,20 @@ fn construct_int(text: &str) -> Result<i64, String> {
     let magnitude: Option<i128> = if digits == "0" {
         Some(0)
     } else if let Some(bin) = digits.strip_prefix("0b") {
-        i128::from_str_radix(bin, 2).ok()
+        parse(bin, 2)
     } else if let Some(hex) = digits.strip_prefix("0x") {
-        i128::from_str_radix(hex, 16).ok()
+        parse(hex, 16)
     } else if digits.starts_with('0') {
-        i128::from_str_radix(digits, 8).ok()
+        parse(digits, 8)
     } else if digits.contains(':') {
         digits.split(':').try_fold(0i128, |total, part| {
-            total
-                .checked_mul(60)?
-                .checked_add(part.parse::<i128>().ok()?)
+            total.checked_mul(60)?.checked_add(parse(part, 10)?)
         })
     } else {
-        digits.parse::<i128>().ok()
+        parse(digits, 10)
     };
     magnitude
-        .map(|m| if negative { -m } else { m })
+        .and_then(|m| if negative { m.checked_neg() } else { Some(m) })
         .and_then(|v| i64::try_from(v).ok())
         .ok_or_else(|| format!("config.yaml holds an integer out of range: {text}"))
 }
