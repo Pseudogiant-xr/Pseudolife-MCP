@@ -263,7 +263,15 @@ impl Session {
             command.env("PSEUDOLIFE_NATIVE_FIXTURE_BEFORE_PIN", "1");
         }
         let mut child = command
-            .args(["--exact", "native_runtime_fixture_child", "--nocapture"])
+            // Single-thread libtest prefixes pretty output without a newline.
+            // Keep readiness frames separate and exercise that mode on every host.
+            .args([
+                "--exact",
+                "native_runtime_fixture_child",
+                "--nocapture",
+                "--test-threads=1",
+                "--quiet",
+            ])
             .env("PSEUDOLIFE_NATIVE_FIXTURE_CHILD", "1")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -309,15 +317,9 @@ impl Session {
 fn launcher_holds_runtime_lock_across_exec_before_child_initializes() {
     let home = Home::new();
     let layout = home.layout();
+    let binary = native_binary_fixture::installable(&std::env::current_exe().unwrap(), &home.0);
     let guard = UpdateLock::acquire(&layout).unwrap();
-    let old = runtime::install_binary(
-        &layout,
-        "1.0.0",
-        "fixture",
-        None,
-        &std::env::current_exe().unwrap(),
-    )
-    .unwrap();
+    let old = runtime::install_binary(&layout, "1.0.0", "fixture", None, &binary).unwrap();
     drop(guard);
     let mut session = Session::start_with_pause(&home, true);
     session.until("fixture-before-pin");
@@ -400,7 +402,9 @@ fn terminating_installed_windows_launcher_closes_its_owned_runtime_job() {
 fn installed_launcher_keeps_old_session_while_new_session_selects_new_runtime() {
     let home = Home::new();
     let layout = home.layout();
-    let binary = std::env::current_exe().unwrap();
+    // Runtime selection verifies the binary: debug symbols must not dominate
+    // the readiness deadline when several lifecycle tests share a CPU.
+    let binary = native_binary_fixture::installable(&std::env::current_exe().unwrap(), &home.0);
     let _lock = UpdateLock::acquire(&layout).unwrap();
     let old = runtime::install_binary(&layout, "1.0.0", "fixture", None, &binary).unwrap();
     drop(_lock);

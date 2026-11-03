@@ -328,6 +328,12 @@ def host(tmp_path, failure="", mode="release"):
     programs = home / "programs"
     programs.mkdir()
     docker = _program(programs / "docker", DOCKER)
+    if os.name != "nt":
+        # PowerShell can live outside Bash's directory on POSIX runners.
+        # Expose only the needed interpreter, keeping Docker isolated.
+        bash = shutil.which("bash")
+        assert bash, "checkout backup fixture requires Bash"
+        (programs / "bash").symlink_to(Path(bash).resolve())
     _program(programs / "git", 'import sys\nprint("a"*40 if "rev-parse" in sys.argv else "")\n')
     backup = programs / "backup.py"
     backup.write_text(BACKUP)
@@ -451,6 +457,30 @@ def run_arm(repo, env, native, args):
     else:
         command = [sys.executable, "-P", "-m", "pseudolife_memory.cli", "update", *args]
     return subprocess.run(command, env=env, cwd=repo, capture_output=True, text=True, timeout=60)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX checkout backup interpreter")
+def test_fixture_backup_finds_bash_when_powershell_is_in_a_separate_directory(tmp_path, monkeypatch):
+    powershell = tmp_path / "powershell-only" / "pwsh"
+    powershell.parent.mkdir()
+    real_which = shutil.which
+
+    def which(command, *args, **kwargs):
+        if command == "pwsh":
+            return str(powershell)
+        return real_which(command, *args, **kwargs)
+
+    monkeypatch.setattr(shutil, "which", which)
+    with host(tmp_path, mode="checkout") as (repo, env, state_path):
+        assert real_which("docker", path=env["PATH"]) == env["PSEUDOLIFE_DOCKER"]
+        assert real_which("bash", path=env["PATH"]), "fixture PATH hides its backup interpreter"
+        result = subprocess.run(["bash", str(repo / "ops/backup.sh")], cwd=repo, env=env,
+                                capture_output=True, text=True, timeout=30)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert json.loads(state_path.read_text())["calls"] == [["fixture-backup"]]
+        directory = Path(env["UPDATE_FIXTURE_BACKUPS"])
+        assert (directory / "pseudolife_memory-20260101-000001.sql.gz").is_file()
+        assert (directory / "pseudolife_state-20260101-000001.tgz").is_file()
 
 
 def stages(state):
