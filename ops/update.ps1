@@ -2,6 +2,7 @@
 # Safely update ONLY the Pseudolife-MCP daemon to the current checkout code.
 #
 #   ops\update.ps1                 # backup -> tag rollback -> daemon-only rebuild -> health
+#   ops\update.ps1 -Native         # use the installed native updater explicitly
 #   ops\update.ps1 -Tag pre-x      # name the rollback image tag suffix
 #   ops\update.ps1 -NoBackup       # skip the pg_dump (NOT recommended)
 #   ops\update.ps1 -KeepRollbacks 5  # rollback tags to retain (default 2)
@@ -30,6 +31,7 @@
 # and nothing here ever runs `down -v`. Run after `git pull`; local edits
 # must be committed first (or deployed with -AllowDirty).
 param(
+    [switch]$Native,
     [ValidateSet("python", "rust")][string]$Engine,
     [switch]$Shadow,
     [string]$Tag = "",
@@ -55,22 +57,6 @@ if ($ClientsOnly) {
     exit 2
 }
 
-# A python that answers (the Store's `python` stub on PATH exits 9009), 3.10 or newer.
-$python = $null
-$pyArgs = @()
-foreach ($candidate in @("python", "python3", "py")) {
-    if (-not (Get-Command $candidate -ErrorAction SilentlyContinue)) { continue }
-    $probeArgs = if ($candidate -eq "py") { @("-3") } else { @() }
-    try {
-        & $candidate @probeArgs -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' 2>$null
-        if ($LASTEXITCODE -eq 0) { $python = $candidate; $pyArgs = $probeArgs; break }
-    } catch { continue }
-}
-if (-not $python) {
-    Write-Warning "No Python >= 3.10 on PATH: the deploy is Python (ops/update.py). Install one and re-run."
-    exit 1
-}
-
 $updateArgs = @("--checkout", $repo, "--keep-rollbacks", "$KeepRollbacks", "--keep-cache-hours", "$KeepCacheHours",
                 "--health-retries", "$HealthRetries", "--health-delay-ms", "$HealthDelayMs")
 if ($Tag) { $updateArgs += @("--rollback-tag", $Tag) }
@@ -82,6 +68,80 @@ if ($NoCachePrune) { $updateArgs += "--no-cache-prune" }
 if ($All) { $updateArgs += "--all" }
 if ($AllowDirty) { $updateArgs += "--allow-dirty" }
 if ($NoTestLogin) { $updateArgs += "--no-test-login" }
+
+$nativeCli = $env:PSEUDOLIFE_NATIVE_CLI
+if (-not $nativeCli) { $nativeCli = $env:PSEUDOLIFE_SHIM_LAUNCHER }
+if (-not $nativeCli) {
+    $localData = if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { Join-Path $HOME 'AppData/Local' }
+    $nativeCli = Join-Path $localData 'pseudolife-mcp/bin/pseudolife-mcp.exe'
+}
+if ($Native -or $env:PSEUDOLIFE_NATIVE_UPDATE -eq "1") {
+    if ($args.Count -gt 0) {
+        [Console]::Error.WriteLine('unknown update argument; use the documented update parameters; nothing was changed')
+        exit 2
+    }
+    if (-not (Test-Path -LiteralPath $nativeCli -PathType Leaf)) {
+        [Console]::Error.WriteLine('native update CLI is missing; install the native runtime or set PSEUDOLIFE_NATIVE_CLI to its binary; nothing was changed')
+        exit 2
+    }
+    try {
+        & $nativeCli update @updateArgs
+        exit $LASTEXITCODE
+    } catch {
+        [Console]::Error.WriteLine('cannot start the native update CLI; check PSEUDOLIFE_NATIVE_CLI; nothing was changed')
+        exit 2
+    }
+}
+
+# A python that answers (the Store's `python` stub on PATH exits 9009), 3.10 or newer.
+$python = $null
+$pyArgs = @()
+$extensions = if ($IsWindows) { $env:PATHEXT -split ';' } else { @('') }
+foreach ($candidate in @("python", "python3", "py")) {
+    # Interpreter discovery must not scan/import PowerShell modules exporting a
+    # same-named function, especially when no Python executable is installed.
+    # Qualified paths keep Get-Command out of module discovery while preserving
+    # PowerShell's platform executable-extension and permission checks.
+    $application = $null
+    foreach ($directory in ($env:PATH -split [IO.Path]::PathSeparator)) {
+        if (-not $directory) { continue }
+        foreach ($extension in $extensions) {
+            $path = [IO.Path]::Combine($directory.Trim('"'), $candidate + $extension)
+            if (-not [IO.File]::Exists($path)) { continue }
+            $application = Get-Command $path -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($application) { break }
+        }
+        if ($application) { break }
+    }
+    if (-not $application) { continue }
+    $probeArgs = if ($candidate -eq "py") { @("-3") } else { @() }
+    try {
+        & $application.Source @probeArgs -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' 2>$null
+        if ($LASTEXITCODE -eq 0) { $python = $application.Source; $pyArgs = $probeArgs; break }
+    } catch { continue }
+}
+if (-not $python) {
+    if ($args.Count -gt 0) {
+        [Console]::Error.WriteLine('unknown update argument; use the documented update parameters; nothing was changed')
+        exit 2
+    }
+    # Runtime installation alone does not prove that update is implemented.
+    $nativeHelp = 'pseudolife-mcp native-update-v1'
+    $verifiedNative = $false
+    if (Test-Path -LiteralPath $nativeCli -PathType Leaf) {
+        try {
+            $helpOutput = & $nativeCli update --native-capability 2>$null
+            $verifiedNative = $LASTEXITCODE -eq 0 -and ($helpOutput -join "`n") -ceq $nativeHelp
+        } catch { $verifiedNative = $false }
+    }
+    if (-not $verifiedNative) {
+        [Console]::Error.WriteLine('No Python >= 3.10 or verified native update CLI is available; install the native runtime or install Python >= 3.10 and the pseudolife-mcp package, then re-run; nothing was changed')
+        exit 1
+    }
+    [Console]::Error.WriteLine('No Python >= 3.10 on PATH; using the verified native update CLI.')
+    & $nativeCli update @updateArgs
+    exit $LASTEXITCODE
+}
 
 & $python @pyArgs (Join-Path $PSScriptRoot "update.py") @updateArgs
 exit $LASTEXITCODE

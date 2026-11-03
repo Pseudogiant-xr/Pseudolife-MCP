@@ -4,6 +4,38 @@ The native runtime installer installs a new Rust CLI beside existing runtimes an
 selects it for the next session. This is opt-in work; it does not change the
 daemon engine default or remove the Python oracle or existing Python installs.
 
+## Checkout update wrappers
+
+`ops/update.sh --native`, `ops/update.ps1 -Native`, or
+`PSEUDOLIFE_NATIVE_UPDATE=1` explicitly selects the native updater. This path
+does not probe Python or fall back after a native failure. The wrappers preserve
+the selected updater's exit status and map the same checkout update flags.
+`ops/update.py` also honors the environment opt-in for callers already using
+Python.
+
+Without explicit selection, the wrappers first probe for Python 3.10 or newer
+as before. A usable Python installation remains selected even when the native
+launcher is installed. If Python is unavailable or too old, the wrappers use a
+native CLI only after its read-only `runtime --help` command succeeds and emits
+the exact native runtime installer usage line. They then print one line to
+stderr explaining the automatic selection. A legacy Python launcher, unrelated
+executable, missing binary or failed probe does not qualify. This capability
+check distinguishes compatible installed launchers; it is not an executable
+signature or a new trust boundary for user-supplied paths.
+
+Native path resolution uses `PSEUDOLIFE_NATIVE_CLI`, then
+`PSEUDOLIFE_SHIM_LAUNCHER`, then the platform's stable launcher path below.
+An invalid configured path refuses rather than trying a lower-priority path.
+When neither runtime is usable, the refusal names both remedies: install the
+native runtime, or install Python 3.10 or newer and the Python package. Wrapper
+argument and runtime refusals leave `ops/.env` unchanged; Bash normalizes its
+line endings only after selecting a usable updater.
+
+Choosing the Python updater does not replace an active native client launcher.
+Set `PSEUDOLIFE_SHIM_ENGINE=python` explicitly to activate Python clients; the
+separate `--engine` option selects the Docker daemon. The Python helper prints
+one stderr notice when it keeps or explicitly replaces a native launcher.
+
 ## Layout and completion
 
 The stable command remains:

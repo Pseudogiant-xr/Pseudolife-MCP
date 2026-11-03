@@ -24,6 +24,7 @@ ROWS = {
     "pair": "CLI-PAIRING",
     "move": "CLI-MOVE-REFUSALS",
     "tunnel": "CLI-TUNNEL-STATUS",
+    "update": "CLI-UPDATE",
 }
 
 

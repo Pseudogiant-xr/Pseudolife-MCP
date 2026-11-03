@@ -13,7 +13,7 @@
         "*": "the required Parity gate reads every gated job's result"
       },
       "source-mutants": {
-        "candidate": "nightly only: its 74 jobs start only once the candidate compiles, so a broken build spends no runners on them"
+        "candidate": "nightly only: its 80 jobs start only once the candidate compiles, so a broken build spends no runners on them"
       },
       "stress-report": {
         "stress-plan": "reports only a loop that was planned"
@@ -161,7 +161,7 @@
       "fixtures": "defc5e07c5ac3f94",
       "candidate": "d71c5590ce6f866a",
       "candidate-harness": "43b859ee9d5fd738",
-      "parity-checks": "fc8882ae92b7f9bb",
+      "parity-checks": "398ff9a598c5f63e",
       "daemon-image": "5c93764cb0f0bab7",
       "parity": "aa4ba434de948ea6"
     },
@@ -250,6 +250,16 @@
         "job": "parity-checks",
         "fingerprint": "fc8882ae92b7f9bb",
         "reason": "Integrate the bounded R1 recovery, setup, transport, config and stats checks into the existing W1-C shards after the installer workflow merge; no new jobs, shards, dependency installation or setup steps, and budget limits remain unchanged. Re-measure the combined steps from the next integration batch."
+      },
+      {
+        "job": "parity-checks",
+        "fingerprint": "398ff9a598c5f63e",
+        "reason": "Preserves master R1 recovery/setup/transport/config/stats registration and adds the update golden/live row and transaction/wrapper acceptance within existing CLI steps. No new PR job, shard, dependency installation or build. Windows stress run 41425900902 at afe57bbf measured the selected transactions at 122.69s median and wrappers at 46.72s across 20 successful runs; earlier complete Windows dev VM files took 204.55s and 49.64s before later regressions. The conductor approved a bounded addition of eight minutes per CLI shard: retained baseline 384.2 plus sixteen = 400.2 within the unchanged 410 limit, pending batch/master remeasurement. CLI step timeout is 15 minutes; job limit remains 35. Existing master acceptance records remain valid for other steps. update-0 adds two nightly/manual-only source jobs outside the PR budget."
+      },
+      {
+        "job": "parity",
+        "fingerprint": "aa4ba434de948ea6",
+        "reason": "Maintainer source changes also select the existing update row because post-update setup invokes maintainer setup. The full batch already selects both rows in the existing CLI shard; no job, shard, timeout or full-batch test selection changes, so the accepted full-batch cost is unchanged."
       }
     ]
   },
