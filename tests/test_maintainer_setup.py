@@ -608,7 +608,6 @@ def test_write_refuses_to_guess_where_a_plain_daemon_reads_its_config(tmp_path, 
     assert not (tmp_path / "data").exists()
 
 
-
 def test_with_a_bearer_the_console_opens_signed_in_at_the_new_address(host, tailnet, capsys,
                                                                       monkeypatch):
     opened = []
@@ -635,3 +634,23 @@ def test_open_signed_in_asks_the_daemon_this_setup_talks_to(monkeypatch):
     monkeypatch.setattr(console_cli, "credentials",
                         lambda environ=None: ("http://127.0.0.1:9000", None, "none"))
     assert ms.open_signed_in(9000) is False
+
+
+def test_container_scope_does_not_leak_into_the_next_invocation(host, capsys):
+    host.rp_id, host.origin = DNS, ORIGIN
+    host.keys = [{"prefix": PREFIX, "label": "laptop", "state": "active"}]
+    assert ms.main(["--container", "second-project-daemon", "--check"]) == 0
+    assert capsys.readouterr().out == "maintainer passkeys: in place\n"
+    assert all("second-project-daemon" in call for call in host.calls)
+    host.calls.clear()
+    assert ms.main(["--check"]) == 0
+    assert capsys.readouterr().out == "maintainer passkeys: in place\n"
+    assert all(ms.DAEMON_CONTAINER in call for call in host.calls)
+
+
+def test_scoped_retry_instruction_retains_the_container(host, tailnet, capsys):
+    host.rp_id, host.origin = DNS, ORIGIN
+    host.tty = False
+    assert ms.main(["--container", "second-project-daemon", "--yes"]) == 0
+    assert "pseudolife-mcp maintainer setup --container second-project-daemon" in capsys.readouterr().out
+    assert ms._CONTAINER_SCOPE.get() is None

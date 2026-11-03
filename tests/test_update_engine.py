@@ -25,6 +25,18 @@ def test_release_rust_refuses_before_docker(monkeypatch, capsys):
     assert "--checkout" in capsys.readouterr().err
 
 
+def test_python_accepts_native_release_activation_and_rejects_failed_retry(tmp_path, monkeypatch):
+    from pseudolife_memory import update_engine as eng
+    monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(tmp_path))
+    labels = {eng.ENGINE_LABEL: "python", eng.ACTIVATION_LABEL: "accepted", eng.RELEASE_LABEL: "0.21.1"}
+    service = {"image": "fixture:0.21.1", "labels": labels}
+    eng._write_overlay(tmp_path / eng.RELEASE_ACCEPTED, service)
+    assert eng._validated_engine_selection(labels) == service
+    for changed in ({eng.ACTIVATION_LABEL: "failed"}, {eng.RELEASE_LABEL: "0.21.2"}, {eng.ACTIVATION_LABEL: None}):
+        with pytest.raises(up.UpdateError, match="rollback"):
+            eng._validated_engine_selection({**labels, **changed})
+
+
 def test_shadow_requires_explicit_rust(capsys):
     assert up.main(["--shadow"]) == 2
     assert "--engine rust" in capsys.readouterr().err
