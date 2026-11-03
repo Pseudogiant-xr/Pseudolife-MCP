@@ -2,14 +2,62 @@
 //! `storage/coordination.py:1831-1899`): one read-only, repeatable-read
 //! snapshot of board metadata for the Console. No registration, mailbox
 //! read, prune or lease settlement; mail counts and events are limited to
-//! the caller's principal; no payload, body, salt or credential leaves it.
+//! the caller's scope (v59: the owner set for an owner principal, else the
+//! caller alone); no payload, body, salt or credential leaves it.
 
 use super::Board;
 use super::canon::float_value;
 use super::db::{obj, opt_str};
 use super::error::{BoardError, Result};
 use super::store::{Store, check_limit, now};
+use crate::auth::{EnvTokens, PrincipalStore};
+use crate::config::CoordinationConfig;
 use serde_json::{Value, json};
+
+/// `CONSOLE_TIMELINE_SQL` (storage/coordination.py), the same text with
+/// `$1` the scope and `$2` the cap; tests/test_coordination_console.py pins
+/// it equal to Python's.
+const TIMELINE_SQL: &str = include_str!("console_timeline.sql");
+/// `CONSOLE_EVENTS_CAP`: 100 events shown and one to say the list was cut.
+const EVENTS_CAP: i64 = 101;
+
+/// `principals.owner_principals` (v59): the environment principals (the
+/// token map's names, and `default` with a singular token) not listed in
+/// `coordination.not_owner_principals`, the owned stored principals that
+/// are not revoked, and `maintainer`; never `daemon`. Sorted, as Python's
+/// `sorted(owners)` passes them.
+pub(crate) fn owner_principals(
+    config: &CoordinationConfig,
+    env: &EnvTokens,
+    store: &PrincipalStore,
+) -> Vec<String> {
+    let mut owners: Vec<String> = env.map.iter().map(|(_, p)| p.clone()).collect();
+    if env.single.is_some() {
+        owners.push("default".to_string());
+    }
+    owners.retain(|p| !config.not_owner_principals.contains(p));
+    // Only a fresh view: past its staleness limit the cache may still hold
+    // a principal since revoked or made someone else's, and an environment
+    // bearer never meets the stored view's 503 (principals.py).
+    if store.available() {
+        owners.extend(store.owned_principals());
+    }
+    owners.retain(|p| p != super::store::DAEMON_PRINCIPAL);
+    owners.push(super::store::MAINTAINER_PRINCIPAL.to_string());
+    owners.sort();
+    owners.dedup();
+    owners
+}
+
+/// The scope a caller's snapshot covers: the owner set when the caller is
+/// the owner's, else the caller alone.
+pub(crate) fn console_scope(principal: &str, owners: Vec<String>) -> Vec<String> {
+    if owners.iter().any(|p| p == principal) {
+        owners
+    } else {
+        vec![principal.to_string()]
+    }
+}
 
 const DETAILS: [&str; 9] = [
     "hinted",
@@ -27,13 +75,18 @@ impl Store {
     pub async fn console_snapshot(
         &self,
         client: &mut tokio_postgres::Client,
-        principal: &str,
+        scope: &[String],
         limit: i64,
     ) -> Result<Value> {
         let tx = client.transaction().await?;
+        // No JIT for this read, as Python's `console_snapshot`: measured
+        // 2026-11-02 on a live-size board (470 agents, 77,767 events,
+        // PostgreSQL 18.6; evals/results/console-snapshot-bench-20261102.json),
+        // turning JIT off took the owner-scope timeline's median from 627 to
+        // 130 ms and one principal's from 532 to 54 ms.
         tx.batch_execute(
             "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY; \
-             SET LOCAL statement_timeout = '5s'",
+             SET LOCAL statement_timeout = '5s'; SET LOCAL jit = off",
         )
         .await?;
         let limit = check_limit(&json!(limit))?;
@@ -51,9 +104,9 @@ impl Store {
             .query(
                 "SELECT m.recipient_agent_id,count(*) AS n FROM coordination_messages m \
                  JOIN coordination_agents a ON a.agent_id=m.recipient_agent_id \
-                 WHERE a.principal=$1 AND m.acknowledged_at IS NULL AND m.expires_at>$2 \
+                 WHERE a.principal=ANY($1) AND m.acknowledged_at IS NULL AND m.expires_at>$2 \
                  AND m.recipient_agent_id=ANY($3) GROUP BY m.recipient_agent_id",
-                &[&principal, &now, &ids],
+                &[&scope, &now, &ids],
             )
             .await?
             .iter()
@@ -61,7 +114,9 @@ impl Store {
             .collect();
         if let Some(agents) = result["agents"].as_array_mut() {
             for agent in agents {
-                let mine = agent["principal"].as_str() == Some(principal);
+                let mine = agent["principal"]
+                    .as_str()
+                    .is_some_and(|p| scope.iter().any(|s| s == p));
                 let id = agent["agent_id"].as_str().unwrap_or("").to_string();
                 agent["pending_count"] = if mine {
                     json!(counts.get(&id).copied().unwrap_or(0))
@@ -76,38 +131,7 @@ impl Store {
                 lease["expired"] = json!(expired);
             }
         }
-        let rows = tx
-            .query(
-                "WITH visible_mail AS MATERIALIZED (\
-                 SELECT message_id FROM coordination_events WHERE event='send' \
-                 AND principal>=$1 AND principal<=$1 UNION \
-                 SELECT e.message_id FROM coordination_agents a CROSS JOIN LATERAL \
-                 (SELECT message_id FROM coordination_events WHERE event='send' \
-                 AND recipient_agent_id>=a.agent_id AND recipient_agent_id<=a.agent_id \
-                 ORDER BY recipient_agent_id,seq) e WHERE a.principal=$1), \
-                 candidates AS (\
-                 (SELECT e.* FROM coordination_events e WHERE principal>=$1 AND principal<=$1 \
-                 AND event IN ('send','read','ack','attempt','served','woke','lease_expire') \
-                 ORDER BY principal DESC,seq DESC LIMIT 101) UNION \
-                 (SELECT e.* FROM visible_mail v CROSS JOIN LATERAL \
-                 (SELECT * FROM coordination_events WHERE message_id>=v.message_id AND message_id<=v.message_id \
-                 AND event IN ('send','read','ack','attempt','served','woke','lease_expire') \
-                 ORDER BY message_id,event,created_at OFFSET 0) e \
-                 ORDER BY e.seq DESC LIMIT 101) UNION \
-                 (SELECT e.* FROM coordination_events e WHERE e.event='expire' AND EXISTS \
-                 (SELECT 1 FROM jsonb_array_elements_text(e.payload::jsonb->'message_ids') AS ids(id) \
-                 JOIN visible_mail v ON v.message_id=ids.id) ORDER BY e.seq DESC LIMIT 101)), \
-                 timeline AS (SELECT e.seq,e.event,e.created_at,e.agent_id,e.recipient_agent_id,\
-                 e.message_id,e.project,e.task, \
-                 CASE e.event WHEN 'send' THEN e.payload::jsonb->>'wake' \
-                 WHEN 'read' THEN e.payload::jsonb->>'path' END AS detail, \
-                 CASE WHEN e.event='expire' THEN (SELECT count(*) FROM \
-                 jsonb_array_elements_text(e.payload::jsonb->'message_ids') AS ids(id) \
-                 JOIN visible_mail v ON v.message_id=ids.id) ELSE 0 END AS expired_count \
-                 FROM candidates e) SELECT * FROM timeline ORDER BY seq DESC LIMIT 101",
-                &[&principal],
-            )
-            .await?;
+        let rows = tx.query(TIMELINE_SQL, &[&scope, &EVENTS_CAP]).await?;
         super::db::commit(tx).await?;
         let events: Vec<Value> = rows
             .iter()
@@ -193,8 +217,108 @@ impl Board {
         if self.service.snapshot().storage.is_none() {
             return Ok(json!({"enabled": true, "available": false, "reason": "not_initialized"}));
         }
+        let owners = owner_principals(&self.config, &EnvTokens::from_env(), &self.principals);
+        let scope = console_scope(principal, owners);
         let mut conn = self.conn.lock().await;
         let client = conn.client().await?;
-        self.store.console_snapshot(client, principal, limit).await
+        self.store.console_snapshot(client, &scope, limit).await
+    }
+}
+
+#[cfg(test)]
+mod owner_tests {
+    use super::*;
+    use crate::auth::StoredPrincipal;
+
+    fn stored(name: &str, revoked: bool, owned: bool) -> StoredPrincipal {
+        StoredPrincipal {
+            principal: name.into(),
+            token_hash: Some(format!("{name:0>64}")),
+            tier: None,
+            board: true,
+            revoked,
+            owned,
+        }
+    }
+
+    fn snapshot() -> PrincipalStore {
+        let store = PrincipalStore::new();
+        let rows = vec![
+            stored("laptop", false, true),
+            stored("guest", false, false),
+            stored("old", true, true),
+        ];
+        store.finish_refresh(store.begin_refresh(), rows, None);
+        store
+    }
+
+    fn env(map: &[(&str, &str)], single: bool) -> EnvTokens {
+        EnvTokens {
+            map: map
+                .iter()
+                .map(|(t, p)| (t.to_string(), p.to_string()))
+                .collect(),
+            single: single.then(|| "t0".to_string()),
+        }
+    }
+
+    fn names(list: &[&str]) -> Vec<String> {
+        list.iter().map(|s| s.to_string()).collect()
+    }
+
+    /// tests/test_principals.py's owner-set cases, mirrored.
+    #[test]
+    fn the_owner_set_matches_python() {
+        let config = CoordinationConfig::default();
+        let owners = owner_principals(
+            &config,
+            &env(&[("t1", "desk"), ("t2", "codex")], true),
+            &snapshot(),
+        );
+        assert_eq!(
+            owners,
+            names(&["codex", "default", "desk", "laptop", "maintainer"])
+        );
+        let open = owner_principals(&config, &env(&[], false), &PrincipalStore::new());
+        assert_eq!(open, names(&["maintainer"]));
+        let config = CoordinationConfig {
+            not_owner_principals: names(&["friend", "default"]),
+            ..CoordinationConfig::default()
+        };
+        let owners = owner_principals(
+            &config,
+            &env(&[("t1", "friend"), ("t2", "codex"), ("t3", "daemon")], true),
+            &snapshot(),
+        );
+        assert_eq!(owners, names(&["codex", "laptop", "maintainer"]));
+    }
+
+    #[test]
+    fn a_stale_stored_view_never_widens_the_owner_set() {
+        let store = PrincipalStore::new();
+        let started = std::time::Instant::now()
+            .checked_sub(crate::auth::STALE_AFTER + std::time::Duration::from_secs(1))
+            .expect("a monotonic clock older than the staleness limit");
+        store.finish_refresh(
+            store.begin_refresh_at(started),
+            vec![stored("laptop", false, true)],
+            None,
+        );
+        let owners = owner_principals(&CoordinationConfig::default(), &env(&[], true), &store);
+        assert_eq!(owners, names(&["default", "maintainer"]));
+    }
+
+    #[test]
+    fn only_an_owner_caller_gets_the_owner_scope() {
+        let owners = names(&["alice", "bob", "maintainer"]);
+        assert_eq!(console_scope("bob", owners.clone()), owners);
+        assert_eq!(console_scope("guest", owners), names(&["guest"]));
+    }
+
+    #[test]
+    fn the_timeline_sql_is_the_shared_text() {
+        assert!(TIMELINE_SQL.starts_with("WITH scope AS (SELECT DISTINCT unnest($1::text[])"));
+        assert!(!TIMELINE_SQL.contains("%("));
+        assert_eq!(TIMELINE_SQL.matches("LIMIT $2").count(), 7);
     }
 }

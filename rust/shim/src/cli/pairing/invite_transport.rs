@@ -222,6 +222,12 @@ fn forward(args: &Args, url: Option<String>) -> Vec<OsString> {
             "--expires".into(),
             format!("{}s", args.expires.unwrap_or(900)),
         ]);
+        // v59: whose machine, in `_forward`'s place, so the container's
+        // invite records it (never dropped: an omission would make someone
+        // else's machine the owner's).
+        if let Some(owned) = args.owned {
+            out.push(if owned { "--mine" } else { "--someone-else" }.into());
+        }
         if args.replace {
             out.push("--replace".into());
         }
@@ -268,13 +274,25 @@ pub(super) async fn run(args: &Args, report: &mut Report, port: u32) -> Result<u
     );
     check.remove(2); // A version probe has no stdin or TTY.
     let checked = capture(&check, None).await;
-    if checked.code != 0 || !checked.stdout.starts_with(VERSION_LINE) {
+    // `_VERSION.match`: `pseudolife-mcp invite <N>` at the start; 2 (v59)
+    // takes --someone-else and --mine.
+    let version = (checked.code == 0)
+        .then(|| checked.stdout.strip_prefix("pseudolife-mcp invite "))
+        .flatten()
+        .and_then(|rest| {
+            let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+            digits.parse::<u64>().ok()
+        });
+    if version.is_none() {
         let message = if checked.code == 127 || checked.stderr.contains("No such container") {
             "no database here (PSEUDOLIFE_MCP_DATABASE_URL is unset and no lite bank was found) and no pseudolife-mcp-daemon container: run this on the daemon's host"
         } else {
             "the daemon's image predates `invite`: update the daemon first (pseudolife-mcp update), then re-run"
         };
         return Ok(report.fail(EXIT_REFUSED, message));
+    }
+    if args.owned.is_some() && version.is_some_and(|v| v < 2) {
+        return Ok(report.fail(EXIT_REFUSED, "the daemon's image predates --someone-else and --mine: update the daemon to schema 59 (pseudolife-mcp update), then re-run. Nothing was changed"));
     }
     let url = match args.url.clone().filter(|u| !u.is_empty()) {
         Some(url) => Some(url),
@@ -357,7 +375,7 @@ async fn through_postgres(args: &Args, report: &mut Report) -> Result<u8, Defer>
             .trim()
             .lines()
             .last()
-            .and_then(|s| decode_list(s).ok());
+            .and_then(|s| decode_list(s, &super::not_owner_in_config()).ok());
         let Some((rows, rejected)) = listed else {
             return Ok(by_hand(
                 report,
@@ -382,11 +400,19 @@ async fn through_postgres(args: &Args, report: &mut Report) -> Result<u8, Defer>
     Ok(report.finish(EXIT_OK))
 }
 
-fn decode_list(text: &str) -> Result<(Vec<invite_db::Listed>, Vec<invite_db::Rejected>), Defer> {
+/// `describe_rows` over psql's JSON: a row is 12 columns, or 13 with v59's
+/// `owned` (null for an environment row, whose owner `not_owner` decides).
+fn decode_list(
+    text: &str,
+    not_owner: &[String],
+) -> Result<(Vec<invite_db::Listed>, Vec<invite_db::Rejected>), Defer> {
     let value: serde_json::Value = serde_json::from_str(text).map_err(|_| Defer)?;
     let mut rows = Vec::new();
     for row in value["principals"].as_array().ok_or(Defer)? {
-        let row = row.as_array().filter(|r| r.len() == 12).ok_or(Defer)?;
+        let row = row
+            .as_array()
+            .filter(|r| r.len() == 12 || r.len() == 13)
+            .ok_or(Defer)?;
         let time = |i: usize| -> Result<Option<f64>, Defer> {
             if row[i].is_null() {
                 Ok(None)
@@ -432,6 +458,13 @@ fn decode_list(text: &str) -> Result<(Vec<invite_db::Listed>, Vec<invite_db::Rej
             paired_at: if stored { time(7)? } else { None },
             revoked_at: if stored { revoked } else { None },
             last_seen_at: time(10)?,
+            owner: if stored {
+                row.get(12)
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(true)
+            } else {
+                !not_owner.iter().any(|name| row[0].as_str() == Some(name))
+            },
         });
     }
     rows.sort_by(|a, b| a.principal.cmp(&b.principal));
@@ -453,13 +486,57 @@ mod tests {
     use super::*;
     #[test]
     fn stopped_daemon_rows_keep_state_and_environment_semantics() {
-        let (rows, rejected) = decode_list(r#"{"principals":[["z",null,null,false,false,null,null,null,null,100,99,false],["a","core",true,false,true,101,50,null,null,100,null,true]],"rejected":[["01234567",3,90,99]]}"#).unwrap();
+        let (rows, rejected) = decode_list(r#"{"principals":[["z",null,null,false,false,null,null,null,null,100,99,false],["a","core",true,false,true,101,50,null,null,100,null,true]],"rejected":[["01234567",3,90,99]]}"#, &[]).unwrap();
         assert_eq!(rows[0].principal, "a");
         assert_eq!(rows[0].state, "pending");
         assert_eq!(rows[1].state, "environment");
         assert_eq!(rows[1].board, None);
         assert_eq!(rejected[0].rejections, 3);
-        assert!(decode_list(r#"{"principals":[[]],"rejected":[]}"#).is_err());
+        assert!(decode_list(r#"{"principals":[[]],"rejected":[]}"#, &[]).is_err());
+        assert!(rows.iter().all(|row| row.owner));
+    }
+
+    #[test]
+    fn the_container_invite_carries_whose_machine_it_is() {
+        let base = |owned| Args {
+            name: Some("laptop".into()),
+            owned,
+            ..Args::default()
+        };
+        let argv = |args: &Args| -> Vec<String> {
+            forward(args, Some("https://example.com".into()))
+                .into_iter()
+                .map(|a| a.to_string_lossy().into_owned())
+                .collect()
+        };
+        let mine = argv(&base(Some(true)));
+        let theirs = argv(&base(Some(false)));
+        assert!(
+            mine.contains(&"--mine".to_owned()) && !mine.contains(&"--someone-else".to_owned())
+        );
+        assert!(
+            theirs.contains(&"--someone-else".to_owned()) && !theirs.contains(&"--mine".to_owned())
+        );
+        // Python's order: after --expires, before --replace and --url.
+        let at = |v: &[String], s: &str| v.iter().position(|a| a == s).unwrap();
+        assert!(at(&theirs, "--expires") < at(&theirs, "--someone-else"));
+        assert!(at(&theirs, "--someone-else") < at(&theirs, "--url"));
+        let neither = argv(&base(None));
+        assert!(
+            !neither
+                .iter()
+                .any(|a| a == "--mine" || a == "--someone-else")
+        );
+    }
+
+    #[test]
+    fn stopped_daemon_rows_carry_v59_ownership() {
+        let (rows, _) = decode_list(r#"{"principals":[["guest",null,true,true,false,null,1,2,null,100,null,true,false],["env",null,null,false,false,null,null,null,null,100,9,false,null],["mine",null,true,true,false,null,1,2,null,100,null,true,true]],"rejected":[]}"#, &["env".to_owned()]).unwrap();
+        let owner: Vec<(&str, bool)> = rows
+            .iter()
+            .map(|r| (r.principal.as_str(), r.owner))
+            .collect();
+        assert_eq!(owner, [("env", false), ("guest", false), ("mine", true)]);
     }
 
     #[test]

@@ -1,7 +1,9 @@
 """``pseudolife-mcp invite``: give another machine its own identity on this bank.
 
     pseudolife-mcp invite <name> [--tier TIER] [--board | --no-board] [--expires 15m]
-                                 [--replace] [--url URL] [--port 8765] [--bank FP] [--json]
+                                 [--someone-else | --mine] [--replace] [--url URL]
+                                 [--port 8765]
+                                 [--bank FP] [--json]
     pseudolife-mcp invite --list [--bank FP] [--json]   (with last seen, and refused tokens)
     pseudolife-mcp invite --revoke <name> [--yes] [--bank FP] [--json]
 
@@ -13,7 +15,10 @@ prints a short-lived, single-use pairing code. The other machine redeems it
 with ``pseudolife-mcp pair <url> <code>`` (or the installer's option 2),
 which mints the bearer token there and registers only its SHA-256: no
 token ever leaves that machine, and no daemon restart is needed. Only the
-code's SHA-256 is stored.
+code's SHA-256 is stored. An invited machine is the bank owner's (schema
+v59: the owner's Console shows its board mail) unless ``--someone-else``
+says it is not; a re-invite keeps what the name was, and ``--mine`` undoes
+a mistaken ``--someone-else``.
 
 Where it runs: with ``PSEUDOLIFE_MCP_DATABASE_URL`` set, or the lite
 tier's embedded Postgres found (as ``export`` finds it), here. Otherwise, on
@@ -37,7 +42,8 @@ prints the SQL to run by hand.
 Names: ``[a-z0-9][a-z0-9._-]{0,63}``; never ``default``, ``daemon`` or
 ``maintainer``, nor a name already in the daemon's ``PSEUDOLIFE_MCP_TOKENS``
 or ``PSEUDOLIFE_MCP_TIER_MAP``. A paired name needs ``--replace`` (its old
-token works until the new code is redeemed); a revoked name may be invited
+token works until the new code is redeemed), except ``--mine`` or
+``--someone-else`` alone, which change only its ownership; a revoked name may be invited
 again. ``--revoke`` takes effect at the daemon's next refresh (within 10 s).
 
 Exit codes: 0 done; 1 the database failed; 2 usage, or not confirmed; 4
@@ -77,19 +83,22 @@ POSTGRES_CONTAINER = "pseudolife-mcp-postgres"
 _PSQL = ["docker", "exec", "-i", POSTGRES_CONTAINER, "sh", "-c",
          'psql -X -q -tA -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"']
 _NOW_SQL = "EXTRACT(EPOCH FROM clock_timestamp())::double precision"
+# principal_store.OWNED_SQL: v59's ``owned``, TRUE on a bank before v59.
+_OWNED_SQL = "COALESCE((to_jsonb(p) ->> 'owned')::boolean, TRUE)"
 # psql's one-line JSON form of principal_store.LIST_SQL and REJECTED_SQL
 # (schema v58), for --list with the daemon container stopped.
 LIST_SQL = (
     "SELECT json_build_object("
     "'principals', (SELECT coalesce(json_agg(json_build_array(l.principal, l.tier, l.board, "
     "l.paired, l.pending, l.code_expires_at, l.created_at, l.paired_at, l.revoked_at, l.now, "
-    "l.last_seen_at, l.stored) ORDER BY l.principal), '[]'::json) FROM ("
+    "l.last_seen_at, l.stored, l.owned) ORDER BY l.principal), '[]'::json) FROM ("
     "SELECT p.principal, p.tier, p.board, p.token_hash IS NOT NULL AS paired, "
     "p.code_hash IS NOT NULL AS pending, p.code_expires_at, p.created_at, p.paired_at, "
-    f"p.revoked_at, {_NOW_SQL} AS now, a.last_seen_at, TRUE AS stored FROM public.principals p "
+    f"p.revoked_at, {_NOW_SQL} AS now, a.last_seen_at, TRUE AS stored, {_OWNED_SQL} AS owned "
+    "FROM public.principals p "
     "LEFT JOIN public.principal_activity a ON a.principal = p.principal UNION ALL "
     "SELECT a.principal, NULL, NULL, FALSE, FALSE, NULL, NULL, NULL, NULL, "
-    f"{_NOW_SQL}, a.last_seen_at, FALSE FROM public.principal_activity a WHERE NOT EXISTS "
+    f"{_NOW_SQL}, a.last_seen_at, FALSE, NULL FROM public.principal_activity a WHERE NOT EXISTS "
     "(SELECT 1 FROM public.principals p WHERE p.principal = a.principal)) l), "
     "'rejected', (SELECT coalesce(json_agg(json_build_array(hash_prefix, rejections, "
     "first_seen_at, last_seen_at) ORDER BY last_seen_at DESC, hash_prefix), '[]'::json) "
@@ -101,8 +110,8 @@ LIST_SQL_V53 = (
     "SELECT json_build_object("
     "'principals', (SELECT coalesce(json_agg(json_build_array(principal, tier, board, "
     f"token_hash IS NOT NULL, code_hash IS NOT NULL, code_expires_at, created_at, paired_at, "
-    f"revoked_at, {_NOW_SQL}, NULL::double precision, TRUE) ORDER BY principal), '[]'::json) "
-    "FROM public.principals), 'rejected', '[]'::json);")
+    f"revoked_at, {_NOW_SQL}, NULL::double precision, TRUE, {_OWNED_SQL}) ORDER BY principal), "
+    "'[]'::json) FROM public.principals p), 'rejected', '[]'::json);")
 BANK_SQL = "SELECT value #>> '{}' FROM public.meta WHERE key = 'coordination_bank_id';"
 DEFAULT_PORT = expose_cli.DEFAULT_PORT
 # Stored principals arrive with schema v53.
@@ -110,8 +119,13 @@ MIN_SCHEMA = 53
 TIERS = ("minimal", "core", "full")
 URL_PLACEHOLDER = "<daemon-url>"
 # The first line `invite --version-check` prints: an image that answers it
-# carries this command.
-VERSION_LINE = "pseudolife-mcp invite 1"
+# carries this command. 2 (schema v59): it takes --someone-else and --mine.
+VERSION_LINE = "pseudolife-mcp invite 2"
+_VERSION = re.compile(r"pseudolife-mcp invite (\d+)")
+# The refusal of --someone-else / --mine through an image that predates them.
+OWNERSHIP_NEEDS_NEWER_IMAGE = (
+    "the daemon's image predates --someone-else and --mine: update the daemon to schema 59 "
+    "(pseudolife-mcp update), then re-run. Nothing was changed")
 _EXPIRES = re.compile(r"(\d+)\s*([smhd]?)")
 _UNIT = {"": 60, "s": 1, "m": 60, "h": 3600, "d": 86400}
 DOCKER_TIMEOUT_S = 60
@@ -291,14 +305,33 @@ def _bank_of(conn) -> str | None:
     return bank_fingerprint(row[0] if row else None)
 
 
-def _listed_note(name: str) -> str | None:
+def _coordination_config():
+    """The daemon's ``coordination`` config as this process finds it, or
+    ``None`` when it cannot be read."""
     try:
         from pseudolife_memory.backup_cli import _default_data_dir
         from pseudolife_memory.utils.config import load_config
-        config = load_config(_default_data_dir(os.environ) / "config.yaml")
-    except Exception:  # noqa: BLE001 - the note is a courtesy
+        # The daemon's own order (mcp_server.py, maintainer_setup._config_path):
+        # PSEUDOLIFE_MCP_CONFIG, else the data dir's config.yaml.
+        override = os.environ.get("PSEUDOLIFE_MCP_CONFIG")
+        path = Path(override) if override else _default_data_dir(os.environ) / "config.yaml"
+        return load_config(path).coordination
+    except Exception:  # noqa: BLE001 - a courtesy, never a failure
         return None
-    if name in config.coordination.allowed_principals:
+
+
+def _not_owner_names() -> list[str]:
+    """``coordination.not_owner_principals`` (v59): environment principals
+    that are someone else's. Empty when the config cannot be read."""
+    config = _coordination_config()
+    return list(config.not_owner_principals) if config is not None else []
+
+
+def _listed_note(name: str) -> str | None:
+    config = _coordination_config()
+    if config is None:
+        return None
+    if name in config.allowed_principals:
         return (f"note: {name} is already listed in coordination.allowed_principals; the invite gives "
                 "it a token")
     return None
@@ -345,7 +378,8 @@ def _local(args, report: _Report, dsn: str) -> int:
                 if refusal:
                     return report.fail(EXIT_REFUSED, refusal)
             if args.list:
-                return _list(report, store.list_principals(conn, environment=_environment_names()),
+                return _list(report, store.list_principals(conn, environment=_environment_names(),
+                                                           not_owner=_not_owner_names()),
                              store.list_rejected(conn))
             if args.revoke:
                 return _revoke(args, report, store, conn)
@@ -361,22 +395,37 @@ def _local(args, report: _Report, dsn: str) -> int:
 
 def _invite(args, report: _Report, store, conn) -> int:
     note = _listed_note(args.name)
+    # Whether this bank records ownership (v59): the --someone-else note is
+    # offered only where the flag can work.
+    ownership = store.has_owned_column(conn)
     created = store.create_invite(conn, args.name,
                                   tier=store.KEEP if args.tier is None else args.tier,
                                   board=store.KEEP if args.board is None else args.board,
+                                  owned=store.KEEP if args.owned is None else args.owned,
                                   ttl_seconds=args.expires, replace=args.replace)
+    if created["code"] is None:
+        # A paired machine's ownership alone (--mine / --someone-else without
+        # --replace): no code, its token and pairing untouched.
+        report.data.update(principal=args.name, state=created["state"], tier=created["tier"],
+                           board=created["board"], owned=created["owned"])
+        whose = "the owner's" if created["owned"] else "someone else's"
+        report.say(f"{args.name}: paired; now {whose} machine. Its token and pairing are "
+                   "unchanged: no new code, nothing to re-pair")
+        return report.finish(EXIT_OK)
     code = format_pairing_code(created["code"])
     url = args.url or exposed_url(args.port) or URL_PLACEHOLDER
     command = f"pseudolife-mcp pair {url} {code}"
     minutes = round(args.expires / 60)
     report.data.update(principal=args.name, state=created["state"], code=code,
                        expires_at=created["expires_at"], tier=created["tier"],
-                       board=created["board"], url=url, pair_command=command)
+                       board=created["board"], owned=created["owned"], url=url,
+                       pair_command=command)
     what = {"new": "invited", "pending": "re-invited (the earlier code no longer works)",
             "revoked": "re-invited after its revocation",
             "paired": "given a replacement code (its current token works until the code is redeemed)"}
     report.say(f"{args.name}: {what[created['state']]}; tier {created['tier'] or 'the daemon default'}, "
-               f"agent board {'on' if created['board'] else 'off'}")
+               f"agent board {'on' if created['board'] else 'off'}"
+               + ("" if created["owned"] else "; someone else's machine"))
     report.say(f"  code     {code}   single use, expires in {minutes} min ({_when(created['expires_at'])})")
     report.say(f"  on the new machine:  {command}")
     report.say("  or run the installer there and answer 2, giving this code where it asks for the token")
@@ -385,6 +434,8 @@ def _invite(args, report: _Report, store, conn) -> int:
                     "<daemon-url> (`pseudolife-mcp expose tailscale` exposes it), or pass --url")
     if note:
         report.note(note)
+    if ownership and created["owned"] and args.owned is None:
+        report.note("for a machine that is not yours, add --someone-else")
     report.note("an invited machine can read and write the whole bank and use the agent board, "
                 "but not change the daemon's configuration")
     return report.finish(EXIT_OK)
@@ -405,16 +456,19 @@ def _list(report: _Report, rows: list[dict], rejected: list[dict]) -> int:
         report.say("no stored principals")
     else:
         report.say(f"  {'name':<24} {'state':<11} {'last seen':<21} {'tier':<8} {'board':<6} "
-                   f"{'created':<21} {'paired':<21} revoked")
+                   f"{'owner':<6} {'created':<21} {'paired':<21} revoked")
     for row in rows:
         state = row["state"] + (f" until {_when(row['code_expires_at'])}" if row["state"] == "pending" else "")
         board = "-" if row["board"] is None else "on" if row["board"] else "off"
+        owner = "yes" if row.get("owner", True) else "no"
         report.say(f"  {row['principal']:<24} {state:<11} {_when(row['last_seen_at'], 'never'):<21} "
-                   f"{row['tier'] or 'default':<8} {board:<6} {_when(row['created_at']):<21} "
+                   f"{row['tier'] or 'default':<8} {board:<6} {owner:<6} {_when(row['created_at']):<21} "
                    f"{_when(row['paired_at']):<21} {_when(row['revoked_at'])}")
     if rows:
         report.say("  (environment: a token in the daemon's PSEUDOLIFE_MCP_TOKENS or "
-                   "PSEUDOLIFE_MCP_TOKEN; last seen: its last accepted request, written once a minute)")
+                   "PSEUDOLIFE_MCP_TOKEN; last seen: its last accepted request, written once a minute;")
+        report.say("   owner: the bank owner's machine, whose board mail the owner's Console shows; "
+                   "`invite --someone-else` and coordination.not_owner_principals say otherwise)")
     report.say()
     if not rejected:
         report.say("no refused tokens recorded")
@@ -445,6 +499,8 @@ def _forward(args) -> list[str]:
         if args.board is not None:
             out.append("--board" if args.board else "--no-board")
         out += ["--expires", f"{args.expires}s"]
+        if args.owned is not None:
+            out.append("--mine" if args.owned else "--someone-else")
         if args.replace:
             out.append("--replace")
         out += ["--url", args.url or exposed_url(args.port) or URL_PLACEHOLDER]
@@ -501,7 +557,8 @@ def _through_postgres(args, report: _Report) -> int:
         except (ValueError, IndexError, KeyError, TypeError):
             return by_hand("psql answered something that is not the list")
         # No environment here: the stopped daemon's is not this shell's.
-        return _list(report, describe_rows(rows), describe_rejected(rejected))
+        return _list(report, describe_rows(rows, not_owner=_not_owner_names()),
+                     describe_rejected(rejected))
     if args.revoke not in output.splitlines():
         return report.fail(EXIT_REFUSED, f"no stored principal is named {args.revoke}")
     report.data.update(principal=args.revoke, state="revoked")
@@ -523,13 +580,16 @@ def _in_container(args, report: _Report) -> int:
     executable = daemon_exec.operator_cli(docker, runner=run)
     base = [docker, "exec", "-e", f"{daemon_exec.NESTED_ENV}=1", CONTAINER, *executable, "invite"]
     check = run([*base, "--version-check"])
-    if check.returncode != 0 or not (check.stdout or "").startswith(VERSION_LINE):
+    version = _VERSION.match(check.stdout or "") if check.returncode == 0 else None
+    if version is None:
         if check.returncode == 127 or "No such container" in (check.stderr or ""):
             return report.fail(EXIT_REFUSED, (
                 f"no database here (PSEUDOLIFE_MCP_DATABASE_URL is unset and no lite bank was found) and "
                 f"no {CONTAINER} container: run this on the daemon's host"))
         return report.fail(EXIT_REFUSED, ("the daemon's image predates `invite`: update the daemon "
                                           "first (pseudolife-mcp update), then re-run"))
+    if args.owned is not None and int(version.group(1)) < 2:
+        return report.fail(EXIT_REFUSED, OWNERSHIP_NEEDS_NEWER_IMAGE)
     proc = run([docker, "exec", "-i", "-e", f"{daemon_exec.NESTED_ENV}=1", CONTAINER, *executable, "invite",
                 *_forward(args)])
     # The container's own report: relayed as it is (it carries the code).
@@ -555,6 +615,13 @@ def _parser() -> argparse.ArgumentParser:
                        help="do not admit it to the agent board")
     parser.add_argument("--expires", type=_expires, default=15 * 60,
                         help="how long the code lives: 15m (default), at most 24h")
+    owner = parser.add_mutually_exclusive_group()
+    owner.add_argument("--someone-else", dest="owned", action="store_const", const=False,
+                       default=None,
+                       help="the machine is not yours: the bank owner's Console does not show "
+                            "its board mail (a re-invite keeps what the name was)")
+    owner.add_argument("--mine", dest="owned", action="store_const", const=True,
+                       help="the machine is yours (a new name's default; undoes --someone-else)")
     parser.add_argument("--replace", action="store_true",
                         help="give a paired principal a new code (its token works until redeemed)")
     parser.add_argument("--url", help="the daemon URL to print (default: expose status)")

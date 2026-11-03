@@ -1,9 +1,9 @@
 <script lang="ts">
-  import type { Component } from "svelte";
+  import { untrack, type Component } from "svelte";
   import Sidebar from "./components/Sidebar.svelte";
   import Topbar from "./components/Topbar.svelte";
   import TabBar from "./components/TabBar.svelte";
-  import TokenDialog from "./components/TokenDialog.svelte";
+  import SignInDialog from "./components/SignInDialog.svelte";
   import ConfirmDialog from "./components/ConfirmDialog.svelte";
   import MaintainerDialog from "./components/MaintainerDialog.svelte";
   import Toasts from "./components/Toasts.svelte";
@@ -23,6 +23,7 @@
   import Settings from "./views/Settings.svelte";
   import { findNav, navForDigit } from "./lib/nav";
   import { loadHealth, loadOverview, navigate, page, refresh, startRouter, ui } from "./lib/state.svelte";
+  import { settleOnStart, takeSigninRoute } from "./lib/signinFlow.svelte";
 
   const VIEWS: Record<string, Component> = {
     observatory: Observatory,
@@ -46,6 +47,19 @@
   const FULL_BLEED = new Set(["graph"]);
 
   $effect(() => startRouter());
+
+  // A sign-in left half-done (the answer lost on the way back) is settled
+  // first, before anything replaces it.
+  $effect(() => {
+    untrack(() => void settleOnStart());
+  });
+
+  // #/signin?code=… is not a view: it takes the code out of the address bar,
+  // lands on the link's target and signs in from the dialog. Pre-effect, so
+  // the "no view called signin" panel never renders.
+  $effect.pre(() => {
+    if (ui.route === "signin") untrack(takeSigninRoute);
+  });
 
   // Health and overview feed the sidebar (health pill, counts) on every view.
   $effect(() => {
@@ -144,7 +158,7 @@
   <Sidebar drawer />
 </dialog>
 
-<TokenDialog />
+<SignInDialog />
 <ConfirmDialog />
 <MaintainerDialog />
 <ReviewAsk />

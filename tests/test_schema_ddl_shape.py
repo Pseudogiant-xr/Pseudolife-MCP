@@ -28,6 +28,7 @@ Deliberately NOT here:
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -135,6 +136,15 @@ _REQUIRED_COLUMNS = [
     # hash prefix (never the token).
     ("principal_activity", {"principal", "last_seen_at"}),
     ("rejected_bearers", {"hash_prefix", "rejections", "first_seen_at", "last_seen_at"}),
+    # v59 — whose principal it is, the Console's signed-in browsers and
+    # their one-time sign-in codes, and which principal a passkey signs in as.
+    ("principals", {"owned"}),
+    ("console_sessions", {"session_id", "token_hash", "principal", "source", "issuer",
+                          "method", "label", "created_at", "last_used_at", "expires_at",
+                          "revoked_at"}),
+    ("console_signin_codes", {"code_hash", "principal", "source", "issuer", "origin",
+                              "expires_at", "used_at", "created_at"}),
+    ("maintainer_passkeys", {"signs_in_as"}),
 ]
 
 
@@ -183,6 +193,10 @@ _COLUMN_TYPES = [
     ("maintainer_passkeys", "public_key", "bytea"),          # v54: the COSE key as registered
     ("maintainer_passkeys", "sign_count", "bigint"),         # v54: a 32-bit counter, unsigned
     ("maintainer_bootstrap", "failed_attempts", "integer"),  # v54: wrong guesses; 5 burn a code
+    ("principals", "owned", "boolean"),                      # v59
+    ("console_sessions", "expires_at", "double precision"),  # v59
+    ("console_signin_codes", "expires_at", "double precision"),
+    ("maintainer_passkeys", "signs_in_as", "text"),          # v59
 ]
 
 _NULLABLE_COLUMNS = [
@@ -235,6 +249,7 @@ _NULLABLE_COLUMNS = [
     ("coordination_messages", "maintainer_proof"),  # v54: NULL = agent mail
     ("coordination_messages", "repudiated_at"),     # v54: NULL = stands
     ("maintainer_passkeys", "active_from"),         # v54: NULL while pending
+    ("maintainer_passkeys", "signs_in_as"),         # v59: NULL = signs in as no one yet
 ]
 
 
@@ -329,6 +344,85 @@ def test_an_early_v54_bootstrap_table_gains_the_failure_count(pg_conn):
     assert pg_conn.execute("SELECT failed_attempts FROM maintainer_bootstrap").fetchone() == (0,)
     pg_conn.execute(MAINTAINER_SCHEMA_SQL)
     assert _column_attr(pg_conn, "maintainer_bootstrap", "failed_attempts", "is_nullable") == "NO"
+
+
+def test_a_v58_bank_gains_principal_ownership_through_the_guarded_pass(pg_conn):
+    """v59: every principal stored before it is the owner's (spec
+    2026-11-02); the column is NOT NULL DEFAULT TRUE, and a second pass adds
+    nothing."""
+    from pseudolife_memory.storage.schema import PRINCIPALS_SCHEMA_SQL
+    pg_conn.autocommit = True
+    pg_conn.execute("INSERT INTO principals (principal, created_at) VALUES ('laptop', 1)")
+    pg_conn.execute("ALTER TABLE principals DROP COLUMN owned")
+    pg_conn.execute(PRINCIPALS_SCHEMA_SQL)
+    assert pg_conn.execute("SELECT owned FROM principals").fetchone() == (True,)
+    assert _column_attr(pg_conn, "principals", "owned", "is_nullable") == "NO"
+    pg_conn.execute("UPDATE principals SET owned = FALSE")
+    pg_conn.execute(PRINCIPALS_SCHEMA_SQL)
+    assert pg_conn.execute("SELECT owned FROM principals").fetchone() == (False,)
+    pg_conn.execute("INSERT INTO principals (principal, created_at) VALUES ('phone', 2)")
+    assert pg_conn.execute("SELECT owned FROM principals WHERE principal = 'phone'"
+                           ).fetchone() == (True,)
+
+
+def _key_event(conn, seq, change, credential_id, principal):
+    payload = json.dumps({"change": change, "credential_id": credential_id, "label": "k",
+                          "by": "bootstrap", "path": "console", "revoked": None})
+    conn.execute("INSERT INTO coordination_events (seq, event, actor, principal, payload, "
+                 "created_at, prev_hash, hash) VALUES (%s, 'maintainer_key', 'maintainer', %s, "
+                 "%s, %s, '', '')", (seq, principal, payload, float(seq)))
+
+
+def test_a_v58_bank_backfills_each_passkeys_sign_in_principal(pg_conn):
+    """v59: ``signs_in_as`` comes only from the key's own enrolment event
+    (``enrol`` or ``add``), never a later ``confirm`` or a host change with
+    an empty principal; a key whose enrolment event was pruned stays NULL.
+    The backfill runs once, with the column: a second pass changes nothing."""
+    from pseudolife_memory.storage.schema import MAINTAINER_SCHEMA_SQL
+    pg_conn.autocommit = True
+    for key in ("k-enrol", "k-add", "k-pruned", "k-host", "k-later"):
+        pg_conn.execute("INSERT INTO maintainer_passkeys (credential_id, public_key, alg, label, "
+                        "enrolled_by, state, created_at) VALUES (%s, '\\x00', -7, 'k', "
+                        "'bootstrap', 'active', 1)", (key,))
+    _key_event(pg_conn, 1, "enrol", "k-enrol", "desk")
+    _key_event(pg_conn, 2, "confirm", "k-enrol", "")
+    _key_event(pg_conn, 3, "add", "k-add", "laptop")
+    _key_event(pg_conn, 4, "revoke", "k-add", "")
+    _key_event(pg_conn, 5, "confirm", "k-pruned", "")       # its enrol event is gone
+    _key_event(pg_conn, 6, "enrol", "k-host", "")            # no principal recorded
+    _key_event(pg_conn, 7, "reset", None, "")
+    _key_event(pg_conn, 8, "add", "k-later", "phone")
+    _key_event(pg_conn, 9, "add", "k-later", "other")        # the key's first enrolment wins
+    pg_conn.execute("INSERT INTO coordination_events (seq, event, actor, principal, payload, "
+                    "created_at, prev_hash, hash) VALUES (10, 'send', 'agent', 'desk', "
+                    "'{\"credential_id\": \"k-pruned\", \"change\": \"add\"}', 10, '', '')")
+    pg_conn.execute("ALTER TABLE maintainer_passkeys DROP COLUMN signs_in_as")
+    pg_conn.execute(MAINTAINER_SCHEMA_SQL)
+
+    def signs_in_as():
+        return dict(pg_conn.execute(
+            "SELECT credential_id, signs_in_as FROM maintainer_passkeys").fetchall())
+
+    expected = {"k-enrol": "desk", "k-add": "laptop", "k-pruned": None, "k-host": None,
+                "k-later": "phone"}
+    assert signs_in_as() == expected
+    _key_event(pg_conn, 11, "add", "k-pruned", "late")
+    pg_conn.execute(MAINTAINER_SCHEMA_SQL)
+    assert signs_in_as() == expected
+
+
+def test_the_console_tables_start_empty_and_key_on_hashes(pg_conn):
+    """v59 creates the tables only; nothing reads or writes them yet."""
+    for table, key in (("console_sessions", "session_id"), ("console_signin_codes", "code_hash")):
+        assert pg_conn.execute(f"SELECT count(*) FROM {table}").fetchone() == (0,)  # noqa: S608
+        assert pg_conn.execute(
+            "SELECT a.attname FROM pg_index i JOIN pg_attribute a ON a.attrelid = i.indrelid "
+            "AND a.attnum = ANY(i.indkey) WHERE i.indrelid = %s::regclass AND i.indisprimary",
+            (table,)).fetchall() == [(key,)]
+    assert pg_conn.execute(
+        "SELECT count(*) FROM pg_index i JOIN pg_attribute a ON a.attrelid = i.indrelid "
+        "AND a.attnum = ANY(i.indkey) WHERE i.indrelid = 'console_sessions'::regclass "
+        "AND i.indisunique AND NOT i.indisprimary AND a.attname = 'token_hash'").fetchone() == (1,)
 
 
 def test_maintainer_origin_defaults_to_agent_mail(pg_conn):

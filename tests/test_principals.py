@@ -122,3 +122,90 @@ def test_resolve_principal_keeps_trailing_utf8_byte_that_latin1_reads_as_space()
         assert resolve_principal("Bearer " + wire, {token: "named"}, None) == "named"
         assert resolve_principal("Bearer " + wire + " \t", {token: "named"},
                                  None) == "named"
+
+
+# -- v59: whose principals are the bank owner's (spec 2026-11-02, section 1) --
+
+def _owner_snapshot():
+    from pseudolife_memory.principal_store import PrincipalSnapshot, StoredPrincipal
+    snap = PrincipalSnapshot(shadowed={"desk"})
+    rows = [StoredPrincipal("laptop", "a" * 64, None, True, False),                 # owned
+            StoredPrincipal("guest", "b" * 64, None, True, False, owned=False),     # someone else's
+            StoredPrincipal("old", "c" * 64, None, True, True),                     # revoked
+            StoredPrincipal("pending", None, None, True, False)]                    # not paired yet
+    snap.refresh(lambda: (rows, None))
+    return snap
+
+
+def _cfg(not_owner=()):
+    from pseudolife_memory.utils.config import CoordinationConfig
+    return CoordinationConfig(not_owner_principals=list(not_owner))
+
+
+def test_the_owner_set_is_environment_owned_stored_and_maintainer():
+    from pseudolife_memory.principals import MAINTAINER_PRINCIPAL, owner_principals
+    owners = owner_principals(_cfg(), store=_owner_snapshot(),
+                              token_map={"t1": "desk", "t2": "codex"}, single_token="t0")
+    assert owners == {"desk", "codex", DEFAULT_PRINCIPAL, "laptop", "pending",
+                      MAINTAINER_PRINCIPAL}
+
+
+def test_the_singular_token_alone_makes_default_the_owners():
+    from pseudolife_memory.principals import MAINTAINER_PRINCIPAL, owner_principals
+    assert owner_principals(_cfg(), store=None, token_map={}, single_token="t0") == {
+        DEFAULT_PRINCIPAL, MAINTAINER_PRINCIPAL}
+    # Open mode (no token at all): no environment principal is anyone's.
+    assert owner_principals(_cfg(), store=None, token_map={}, single_token=None) == {
+        MAINTAINER_PRINCIPAL}
+
+
+def test_not_owner_principals_keeps_an_environment_token_someone_elses():
+    from pseudolife_memory.principals import is_owner_principal, owner_principals
+    cfg = _cfg(not_owner=[" Friend ", "default"])
+    assert cfg.not_owner_principals == ["friend", "default"]
+    owners = owner_principals(cfg, store=None, token_map={"t1": "friend", "t2": "codex"},
+                              single_token="t0")
+    assert "friend" not in owners and DEFAULT_PRINCIPAL not in owners and "codex" in owners
+    kw = {"token_map": {"t1": "friend", "t2": "codex"}, "single_token": "t0"}
+    assert not is_owner_principal(cfg, "friend", None, **kw)
+    assert is_owner_principal(cfg, "codex", None, **kw)
+
+
+def test_unowned_revoked_and_daemon_principals_are_not_the_owners():
+    from pseudolife_memory.principals import DAEMON_PRINCIPAL, is_owner_principal
+    snap = _owner_snapshot()
+    kw = {"token_map": {"t1": DAEMON_PRINCIPAL}, "single_token": None}
+    assert is_owner_principal(_cfg(), "laptop", snap, **kw)
+    for name in ("guest", "old", DAEMON_PRINCIPAL, "nobody", None):
+        assert not is_owner_principal(_cfg(), name, snap, **kw), name
+
+
+def test_the_owner_set_reads_the_daemon_environment_and_installed_store(monkeypatch):
+    from pseudolife_memory import principals
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOKENS", "fixture-env-token:codex")
+    monkeypatch.delenv("PSEUDOLIFE_MCP_TOKEN", raising=False)
+    monkeypatch.setattr(principals, "_STORE", _owner_snapshot())
+    assert principals.owner_principals(_cfg()) == {"codex", "laptop", "pending",
+                                                   principals.MAINTAINER_PRINCIPAL}
+
+
+def test_not_owner_principals_must_be_a_list_of_names():
+    import pytest
+    from pseudolife_memory.utils.config import CoordinationConfig
+    for bad in ("friend", [""], [3]):
+        with pytest.raises(ValueError, match="not_owner_principals"):
+            CoordinationConfig(not_owner_principals=bad)
+    assert CoordinationConfig().not_owner_principals == []
+
+
+def test_a_stale_stored_view_never_widens_the_owner_set():
+    from pseudolife_memory.principal_store import PrincipalSnapshot, StoredPrincipal
+    from pseudolife_memory.principals import owner_principals
+    now = [1000.0]
+    snap = PrincipalSnapshot(max_age=60.0, clock=lambda: now[0])
+    snap.refresh(lambda: ([StoredPrincipal("laptop", "a" * 64, None, True, False)], None))
+    fresh = owner_principals(_cfg(), store=snap, token_map={}, single_token="t0")
+    assert "laptop" in fresh
+    now[0] += 61          # the refresher failed past the staleness limit
+    stale = owner_principals(_cfg(), store=snap, token_map={}, single_token="t0")
+    assert stale == {"default", "maintainer"}

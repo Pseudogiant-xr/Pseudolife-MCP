@@ -179,9 +179,10 @@ function usesConsoleToken(a: BoardAgent): boolean {
   return a.pending_count !== null && a.pending_count !== undefined;
 }
 
-/** Unread mail: counted only for the caller's own principal's peers. */
+/** Unread mail: counted only for peers of the principal this Console is
+ *  signed in as; another principal's peers show none. */
 export function pendingText(a: BoardAgent): string {
-  if (!usesConsoleToken(a)) return "Hidden: uses another token";
+  if (!usesConsoleToken(a)) return "Hidden: another account's session";
   return a.pending_count === 0 ? "None unread" : `${fmtNum(a.pending_count)} unread`;
 }
 

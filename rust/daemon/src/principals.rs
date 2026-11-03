@@ -56,8 +56,10 @@ pub async fn load_rows(
 ) -> Result<(Vec<StoredPrincipal>, Option<String>), tokio_postgres::Error> {
     let rows = match client
         .query(
-            "SELECT principal, token_hash, tier, board, revoked_at IS NOT NULL \
-             FROM public.principals",
+            &format!(
+                "SELECT principal, token_hash, tier, board, revoked_at IS NOT NULL, {OWNED_SQL} \
+                 FROM public.principals p"
+            ),
             &[],
         )
         .await
@@ -85,6 +87,7 @@ pub async fn load_rows(
             tier: r.get(2),
             board: r.get(3),
             revoked: r.get(4),
+            owned: r.get(5),
         })
         .collect();
     Ok((rows, bank_fingerprint(found.as_ref())))
@@ -106,24 +109,31 @@ pub async fn revoke(client: &mut Client, name: &str) -> Result<bool, tokio_postg
     Ok(row.is_some())
 }
 
-/// `principal_store.LIST_SQL` (v58): the stored rows with their last
-/// success, then the names seen with no stored row; the last column says
-/// which half a row is from.
+/// `principal_store.OWNED_SQL` (v59): `owned` read from the whole row, so
+/// one statement also serves a bank before v59 (every row the owner's).
+const OWNED_SQL: &str = "COALESCE((to_jsonb(p) ->> 'owned')::boolean, TRUE)";
+
+/// `principal_store.LIST_SQL` (v58, v59): the stored rows with their last
+/// success, then the names seen with no stored row; the twelfth column says
+/// which half a row is from, the thirteenth whether a stored row is the
+/// owner's.
 const LIST_SQL: &str = "SELECT p.principal, p.tier, p.board, p.token_hash IS NOT NULL, \
      p.code_hash IS NOT NULL, p.code_expires_at, p.created_at, p.paired_at, p.revoked_at, \
-     EXTRACT(EPOCH FROM clock_timestamp())::double precision, a.last_seen_at, TRUE \
+     EXTRACT(EPOCH FROM clock_timestamp())::double precision, a.last_seen_at, TRUE, \
+     COALESCE((to_jsonb(p) ->> 'owned')::boolean, TRUE) \
      FROM public.principals p LEFT JOIN public.principal_activity a ON a.principal = p.principal \
      UNION ALL \
      SELECT a.principal, NULL, NULL, FALSE, FALSE, NULL, NULL, NULL, NULL, \
-     EXTRACT(EPOCH FROM clock_timestamp())::double precision, a.last_seen_at, FALSE \
+     EXTRACT(EPOCH FROM clock_timestamp())::double precision, a.last_seen_at, FALSE, NULL \
      FROM public.principal_activity a \
      WHERE NOT EXISTS (SELECT 1 FROM public.principals p WHERE p.principal = a.principal) \
      ORDER BY 1";
 /// `LIST_SQL_V53`: a bank before v58, the stored rows alone.
 const LIST_SQL_V53: &str = "SELECT principal, tier, board, token_hash IS NOT NULL, \
      code_hash IS NOT NULL, code_expires_at, created_at, paired_at, revoked_at, \
-     EXTRACT(EPOCH FROM clock_timestamp())::double precision, NULL::double precision, TRUE \
-     FROM public.principals ORDER BY principal";
+     EXTRACT(EPOCH FROM clock_timestamp())::double precision, NULL::double precision, TRUE, \
+     COALESCE((to_jsonb(p) ->> 'owned')::boolean, TRUE) \
+     FROM public.principals p ORDER BY principal";
 
 /// `list_principals`/`describe_rows` (no environment names): public
 /// metadata, never hashes or secrets, each row with `last_seen_at`.
@@ -146,7 +156,7 @@ pub async fn list_principals(
                 return serde_json::json!({"principal": name, "state": "environment",
                 "paired": false, "tier": null, "board": null, "code_expires_at": null,
                 "created_at": null, "paired_at": null, "revoked_at": null,
-                "last_seen_at": last_seen});
+                "last_seen_at": last_seen, "owner": true});
             }
             let paired: bool = r.get(3);
             let pending: bool = r.get(4);
@@ -168,7 +178,8 @@ pub async fn list_principals(
             "paired": paired, "tier": r.get::<_, Option<String>>(1), "board": r.get::<_, bool>(2),
             "code_expires_at": if pending { expires } else { None },
             "created_at": r.get::<_, f64>(6), "paired_at": r.get::<_, Option<f64>>(7),
-            "revoked_at": revoked, "last_seen_at": last_seen})
+            "revoked_at": revoked, "last_seen_at": last_seen,
+            "owner": r.get::<_, Option<bool>>(12).unwrap_or(true)})
         })
         .collect();
     // Python's sorted(key=principal): code point order, stable.
@@ -199,11 +210,11 @@ pub async fn redeem(
         "code_expires_at > EXTRACT(EPOCH FROM clock_timestamp())::double precision"
     };
     let query = format!(
-        "UPDATE public.principals SET token_hash = $1, \
+        "UPDATE public.principals p SET token_hash = $1, \
          paired_at = EXTRACT(EPOCH FROM clock_timestamp())::double precision, \
          paired_code_hash = code_hash, code_hash = NULL, code_expires_at = NULL \
          WHERE code_hash = $2 AND {expiry} AND revoked_at IS NULL \
-         AND NOT (principal = ANY($3)) RETURNING principal, tier, board"
+         AND NOT (principal = ANY($3)) RETURNING principal, tier, board, {OWNED_SQL}"
     );
     let mut row = match tx
         .query_opt(&query, &[&token_hash, &code_hash, &exclusions])
@@ -219,9 +230,11 @@ pub async fn redeem(
     if row.is_none() && !crate::mutants::active("principal-redeem-retry") {
         row = tx
             .query_opt(
-                "SELECT principal, tier, board FROM public.principals \
-             WHERE paired_code_hash = $1 AND token_hash = $2 AND revoked_at IS NULL \
-             AND paired_at > EXTRACT(EPOCH FROM clock_timestamp())::double precision - 600",
+                &format!(
+                    "SELECT principal, tier, board, {OWNED_SQL} FROM public.principals p \
+                     WHERE paired_code_hash = $1 AND token_hash = $2 AND revoked_at IS NULL \
+                     AND paired_at > EXTRACT(EPOCH FROM clock_timestamp())::double precision - 600"
+                ),
                 &[&code_hash, &token_hash],
             )
             .await?;
@@ -240,6 +253,7 @@ pub async fn redeem(
         tier: r.get(1),
         board: r.get(2),
         revoked: false,
+        owned: r.get(3),
     }))
 }
 

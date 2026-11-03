@@ -464,7 +464,7 @@
             <p class="empty">
               {why.text}
               {#if why.tokenFix}<button type="button" class="linkish" onclick={() => (ui.tokenOpen = true)}
-                  >Set a bearer token</button
+                  >Sign in</button
                 >{/if}
             </p>
           {:else}

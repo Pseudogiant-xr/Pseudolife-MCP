@@ -570,6 +570,8 @@ export function keyChangeText(c: KeyChange): string {
       return c.path === "host" ? `${key} was revoked on the daemon host` : `${key} revoked itself`;
     case "reset":
       return `every passkey was revoked on the daemon host (reset; ${c.revoked ?? 0} revoked)`;
+    case "bind-sign-in":
+      return `${key} now signs the Console in${c.principal ? ` as ${c.principal}` : ""}`;
     default:
       return `${words(c.change)}: ${key}${c.path === "host" ? " on the daemon host" : ""}`;
   }

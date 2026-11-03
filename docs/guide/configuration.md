@@ -8,7 +8,7 @@ backups. Part of the [user guide](../../README.md#documentation).
 
 | Variable | Default | Effect |
 |----------|---------|--------|
-| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → lite/file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v58). Unset: with the `[lite]` extra installed the daemon auto-starts an embedded PostgreSQL and fills this in itself (its superuser password is a random per-bank secret in the owner-only `<data_dir>/embedded_pg.secret`, with SCRAM authentication; a bank from before 2026-10-25 moves off the old fixed `postgres` password at its next start); otherwise v0.1 file-only mode (announced loudly at startup). |
+| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → lite/file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v59). Unset: with the `[lite]` extra installed the daemon auto-starts an embedded PostgreSQL and fills this in itself (its superuser password is a random per-bank secret in the owner-only `<data_dir>/embedded_pg.secret`, with SCRAM authentication; a bank from before 2026-10-25 moves off the old fixed `postgres` password at its next start); otherwise v0.1 file-only mode (announced loudly at startup). |
 | `PSEUDOLIFE_MCP_STORAGE` | `auto` | `files` opts the daemon out of the `[lite]` embedded Postgres (file mode even when pg0-embedded is installed). Only consulted when no DSN is set. |
 | `PSEUDOLIFE_MCP_DAEMON_URL` | `http://127.0.0.1:8765` | Daemon the shim connects to (and auto-starts). Use an HTTP(S) origin: scheme, host and optional port, without a path, user information, query or fragment. |
 | `PSEUDOLIFE_MCP_NO_SPAWN` | _(unset)_ | Set `1` on the **shim** to disable its spawn-a-daemon fallback: when nothing answers at `PSEUDOLIFE_MCP_DAEMON_URL` it waits up to 5 s for an external daemon instead, then starts the session without it (the last handshake it cached for that URL, retried until the daemon answers; see [the remote bank guide](remote-bank.md#when-the-daemon-is-unreachable)). The Docker-tier installers set this on every shim registration — after a reboot the shim can probe before Docker Desktop has bound the port, and a spawned host fallback then wins the bind race and shadows the real bank with whatever stale local state it finds. Leave unset on pip/lite installs, where the spawn fallback is the intended zero-config path. |
@@ -92,6 +92,7 @@ coordination:
   allowed_principals: [editor, reviewer]
   daemon_notice_principals: []
   maintainer_principals: []
+  not_owner_principals: []
   audit_retention_days: 90
   wake:
     per_recipient_per_hour: 20
@@ -209,6 +210,21 @@ identity either: listing it would let every such session reopen any done
 park. Give the maintainer's own client a `PSEUDOLIFE_MCP_TOKENS` entry of
 its own, list that principal here and in `allowed_principals`, and keep its
 bearer out of agent sessions.
+
+`not_owner_principals` (default empty, schema v59) names the environment
+principals that are someone else's rather than the bank owner's. Every
+principal is the owner's unless it says otherwise: the `PSEUDOLIFE_MCP_TOKENS`
+names and `default` (for `PSEUDOLIFE_MCP_TOKEN`) unless listed here, and
+every machine invited with `pseudolife-mcp invite` unless it was invited with
+`--someone-else` (a re-invite keeps what the name was; `invite <name> --mine`
+undoes a mistaken `--someone-else`). A Console holding an owner principal's token shows the
+board mail of all the owner's principals (see
+[whose mail the Console's Board shows](#whose-mail-the-consoles-board-shows)).
+List a name here when its token belongs to someone else: before `invite`
+existed, the token map was the way to give someone a token. The key is set
+in `config.yaml` only: `POST /api/config` refuses it, since every
+environment principal can call that route. It changes what the Console's
+Board shows and nothing else; such a principal keeps the rights it had.
 
 The installed shim starts its adapter (for Codex, its per-thread registry) by
 default when it holds a bearer token (`PSEUDOLIFE_MCP_TOKEN` or
@@ -994,6 +1010,104 @@ search takes a role without scrolling.
 
 ![The Console's Board on the fixture devserver: the Roles band, the searchable session list with the conductor and coordinator pinned, and each card's short id](../images/cortex-console-board.png)
 
+#### Whose mail the Console's Board shows
+
+The Board lists every session, but its unread counts and its mail and wake
+timeline follow the principal of the token the Console uses (schema v59).
+When that principal is the bank owner's, they cover every principal of the
+owner's: the environment principals not listed in
+`coordination.not_owner_principals`, every invited machine not invited with
+`pseudolife-mcp invite --someone-else` (and not revoked; `--mine` undoes
+that), and passkey-signed
+maintainer mail. Any other principal sees its own mail only. The timeline
+shows who mailed whom and when, the wake decision and the delivery path,
+never a message body, and holds the newest 100 events across those
+principals. Mailboxes do not widen: receiving, acknowledging and reading
+history still need the exact principal and the session's own credential.
+
+This widens what a token can read: any token of the owner's, on any of the
+owner's machines, can read the board metadata of every one of the owner's
+sessions through `GET /api/agents?view=coordination`. Those tokens already
+read and write the whole bank, so the widening is of mail metadata, not of
+content.
+
+### Signing in to the Console
+
+On a daemon with a token, the Console needs to know who you are. Run this on
+any machine that already uses Pseudolife:
+
+```
+pseudolife-mcp console
+```
+
+It opens the Console in your browser, signed in. It finds the daemon and the
+token the way every client command does (`PSEUDOLIFE_MCP_DAEMON_URL`,
+`PSEUDOLIFE_MCP_TOKEN_FILE` / `PSEUDOLIFE_MCP_TOKEN`, else the Claude Code or
+Codex registration `doctor` reads), asks the daemon for a one-time sign-in
+code, and opens `<origin>/ui/#/signin?code=…`. The code lasts 5 minutes,
+works once, and only at the Console address it was made for. The command
+also prints the link and the code. On a machine with no browser, open the
+link on any device that reaches that address, or type the code into the
+Console's sign-in dialog there. `--no-open` only prints, which is also the
+right choice on a machine other people use, since a browser's command line
+is visible to them. `--to <page>` lands on a Console page such as `board`.
+
+The link opens the Console on the daemon's own machine (`localhost`), or at
+its HTTPS address once passkeys are set up ([Maintainer messages and roles
+from the Console](#maintainer-messages-and-roles-from-the-console)): with
+passkeys, every sign-in link is for that address, wherever the command
+reached the daemon. A remote machine on a daemon without passkeys is refused
+with that fix.
+
+What a signed-in browser holds:
+
+- Its own token, minted in the browser; the daemon stores only its SHA-256
+  (`console_sessions`). It acts as the principal whose token asked for the
+  code, with that principal's board view, and it reads and writes the bank
+  as that principal's machine does.
+- It is not an agent credential. It works on the Console's `/api` routes
+  only, never on `/mcp`, the plugin hooks or the board's mailbox routes, so
+  it cannot register a session or send mail.
+- It changes the daemon's settings only when an environment token signed it
+  in (run the command on the daemon's host). A browser a paired machine
+  signed in reads the settings but cannot change them, as that machine
+  cannot.
+- It ends 30 days after its last use, 90 days after sign-in in any case,
+  when it is signed out, when its principal is revoked or re-paired, and
+  when the token that signed it in stops naming that principal.
+
+**With your passkey.** Once passkeys are set up ([Maintainer messages and
+roles from the Console](#maintainer-messages-and-roles-from-the-console)),
+the Console at its HTTPS address also offers "Sign in with your passkey".
+The browser mints its token first and the passkey signs a challenge that
+carries that token's SHA-256, so the assertion is good for that browser's
+token only. The browser is signed in as the passkey's sign-in principal:
+the principal of the Console that enrolled the key (an existing key gets the
+one its enrolment was recorded under). A key with none, or whose principal no
+longer exists, is refused with the way out: run `pseudolife-mcp console` on
+the daemon's host, open Settings, Your passkeys, and choose "Use this
+passkey to sign in", which binds the passkey you sign with to the principal
+this Console is signed in as (the bank owner's only). From then on that
+passkey signs the Console in with the same rights. A passkey can now get a
+bank bearer: see the [security posture](security-posture.md). Revoking a
+key signs out every browser it signed in.
+
+**Install and update do it for you.** A daemon-host install with a token
+ends by running `pseudolife-mcp console --unless-signed-in` (after the
+passkey offer, so the link is for the HTTPS address when you set one up):
+when a browser is signed in already, from the passkey setup or an earlier
+install, it says so in one line and opens nothing. An unattended install
+names the command instead, and a client-only install names it in its
+summary. `console` never hands the link to a terminal browser (lynx, w3m):
+it prints it instead. `pseudolife-mcp update` names it when the daemon offers sign-in and
+no browser is signed in yet, and the update that moves the bank to schema
+v59 says, once, which principals are now treated as yours.
+
+`pseudolife-mcp console --list` shows the signed-in browsers (an operator
+sees all of them, a paired machine its own) and `--revoke <id>` signs one
+out; the Console's Settings view does the same. A token pasted under
+"Advanced" in the sign-in dialog still works as before.
+
 ### Maintainer messages and roles from the Console
 
 The Console's Board can send a session a message that carries your authority,
@@ -1065,14 +1179,14 @@ before changing anything (`--yes` answers for it), then:
    config file, with a backup beside it, and restarts the daemon container
    (`docker restart`: the same container and volumes). A lite daemon is not
    restarted for you: stop `pseudolife-mcp serve` and run the command again.
-3. Prints a one-time enrolment code, valid for 10 minutes. Open the
-   Console at the new address (`<origin>/ui/`). A browser keeps the
-   Console's token per address, so at a new address it has none: click
-   "Set a bearer token" and paste the token your Console uses at its usual
-   address (the daemon's `PSEUDOLIFE_MCP_TOKEN`; a single-token install
-   also keeps it in `~/.pseudolife-mcp/<principal>.token`). Then open
-   Settings, Your passkeys, enter the code and a label, and create the
-   passkey. The command prints the new key's id prefix and label and asks
+3. Opens the Console at the new address (`<origin>/ui/`) signed in, the
+   way `pseudolife-mcp console` does, with the bearer of the environment it
+   runs in; a browser keeps its sign-in per address, so a new address needs
+   one. With no bearer there it says how to sign in instead (`pseudolife-mcp
+   console` from any machine that uses Pseudolife, or the token pasted under
+   "Advanced"). Then it prints a one-time enrolment code, valid for 10
+   minutes: in the Console open Settings, Your passkeys, enter the code and a
+   label, and create the passkey. The command prints the new key's id prefix and label and asks
    whether the Console shows the same: `y` activates the key, anything else
    revokes it (someone else may have redeemed the code); run the command
    again to retry.
@@ -4297,7 +4411,7 @@ session's note points at them.
 
 ## Schema version history
 
-The current Postgres meta version is **v58**; migrations are additive
+The current Postgres meta version is **v59**; migrations are additive
 `ADD COLUMN IF NOT EXISTS` on daemon start, and legacy file-mode `.pt`
 banks auto-migrate into Postgres. The one exception is v25 itself: a
 vector *dimension* change on an existing column is not additive, so
@@ -4374,6 +4488,7 @@ The milestones:
 | v56 | Review-queue judge votes (2026-10-17). `edge_proposals` gains `judge2_verdict`, `judge2_confidence`, `judge2_model`, `judged2_at`, `judge2_relation`, `judge2_served_model` and `judge2_policy`: the link judge's second opinion beside its first (`link_judge_two_vote`, shadow by default). `entity_proposals` gains `judge2_served_model`, `judge2_policy`, `judge3_verdict`, `judge3_confidence`, `judge3_model`, `judged3_at`, `judge3_served_model` and `judge3_policy`: the merge judge's third opinion on a row whose first two disagree (`judge_tiebreak_mode`, shadow by default), and for each later vote the model its endpoint reported serving and that endpoint's judging-policy fingerprint. Both proposal tables gain `judge_served_model`: the model the first opinion's endpoint reported serving (`judge_model` is the configured name; the served name lived only in the judging memo, which every refresh prunes to pending rows). `merge_decisions` gains `votes` (JSONB): room for the judge votes a merge or junk proposal carried when it was decided, kept on the FK-free audit row because an accepted merge CASCADE-deletes the proposal with its votes; nothing writes it yet. All nullable; NULL = not asked (or, for a served model, not reported; for `votes`, no snapshot), the pre-v56 behaviour. Additive/idempotent (`ADD COLUMN IF NOT EXISTS`). |
 | v57 | Documents and CMS counters in the bank (2026-10-23). Ingested documents (`document_ingest` / `document_search`) move from the chromadb store under `<data_dir>/chromadb` into the `reference_chunks` table: chunk id (unchanged md5 of source, chunk index and text head), `source`, `chunk_index`, `text`, `embedding vector(1024)`, `metadata` (the chromadb metadata dict verbatim), `ingested_at` and `created_at`. Search is exact (`ORDER BY embedding <=> q, id COLLATE "C"`, no approximate index), so equal inputs serve equal results in one order. A start on a bank without the `reference_chroma_import` meta marker copies an existing chromadb store in once, committing page by page and writing the marker last, idempotently (`ON CONFLICT DO NOTHING`), reading a temporary copy so the store on disk stays byte-identical; vectors of another dimension are embedded again. Backups and transfers carry the documents inside the bank; an old backup whose documents are only in its state archive imports them at the first start after restore. File mode has no document store (a deprecation: file mode retires with the Rust cutover, decision D1). The same bump adds `cms_counters`, one row (`id = 1`) for the CMS counters that `memory_state/weights.pt` holds: `interaction_count`, `logical_turn_count`, `tier_queries`, `tier_hits` and `surprise_history` (per band, JSONB), `consolidation_events` (JSONB), `preset_name` and `updated_at`; storage mode writes it on every save instead of the file, and a start on a bank without the row imports an existing `weights.pt` (or its `.bak`) and renames it `*.imported`; a file newer than an existing row is imported only when it counts at least as many interactions. It is bank-local (not exported), like the file was. Additive/idempotent. |
 | v58 | When each principal last connected, and the tokens the daemon refused (2026-10-30). Two new tables: `principal_activity` (one row per principal name, stored or environment — `PSEUDOLIFE_MCP_TOKENS` entries and `default` for `PSEUDOLIFE_MCP_TOKEN` — with `last_seen_at`, its last accepted request) and `rejected_bearers` (a refused bearer's first 8 hex SHA-256 characters as `hash_prefix`, never the token, with its `rejections` count and `first_seen_at` / `last_seen_at`; at most 1000 rows, none older than 90 days). The daemon keeps both in memory and writes them at most once a minute. `pseudolife-mcp invite --list` shows them (a last-seen column for every principal and a refused-tokens section; JSON `last_seen_at` and `rejected`), and `pseudolife-mcp doctor` prints the client's own `token_sha256_prefix` to match against. Serving telemetry of this daemon: both tables stay out of logical exports. Additive/idempotent: `CREATE TABLE IF NOT EXISTS`. |
+| v59 | Whose principals are the bank owner's, and the tables for Console sign-in (2026-11-02). `principals.owned` (`BOOLEAN NOT NULL DEFAULT TRUE`): every stored principal is the owner's unless `pseudolife-mcp invite --someone-else` made it someone else's; the migration marks every existing row the owner's, so an existing install needs no step. With the new config key `coordination.not_owner_principals` for environment principals, it decides whose mail the Console's Board shows: a token of the owner's sees the board metadata (never bodies) of all the owner's sessions, and any other token its own. `invite --list` gains an owner column. Two new tables, `console_sessions` (a signed-in browser: the SHA-256 of its token, the principal it acts as, what issued it and how, created, last used, expiry and revocation times) and `console_signin_codes` (a one-time sign-in code's SHA-256, the principal, issuer and origin it was issued for, its expiry and use), which `pseudolife-mcp console` and the Console's sign-in use (see [Signing in to the Console](#signing-in-to-the-console)); both are credentials and stay out of logical exports. `maintainer_passkeys.signs_in_as`: the principal a passkey will sign in to the Console as, filled once from the key's own `enrol` or `add` event in the board's audit log, and empty where retention pruned that event; a Console enrolment records it, and the passkey sign-in signs in as it (see [Signing in to the Console](#signing-in-to-the-console)). Additive/idempotent: guarded `ADD COLUMN` and `CREATE TABLE IF NOT EXISTS`. |
 
 Later additions that write into these tables without new DDL are listed with the feature that added them rather than as schema milestones: `memory_outcome(used_ids=[...])` (2026-09-05; every in-window serving event credited since 2026-09-08) labels served entries under `used_via="outcome"` — see the memory-model guide.
 

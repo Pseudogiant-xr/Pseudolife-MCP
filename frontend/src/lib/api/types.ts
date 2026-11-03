@@ -15,6 +15,8 @@ export interface Health {
   mode?: string;
   fixtures?: boolean;
   error?: string;
+  /** What this daemon offers for Console sign-in; absent on older daemons. */
+  console_signin?: { link?: boolean; passkey?: boolean };
 }
 
 export interface Band {

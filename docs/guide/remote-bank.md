@@ -250,11 +250,21 @@ The rules:
   `daemon` or `maintainer`, and never one already in `PSEUDOLIFE_MCP_TOKENS`
   or `PSEUDOLIFE_MCP_TIER_MAP` (the environment always wins). `--tier
   minimal|core|full` sets its default toolset tier; `--board` /
-  `--no-board` its board access. Re-inviting a name keeps both unless
-  given. A tier sets which tools a client sees at first, not what it may
-  call: `memory_toolset` expands any session to the full set.
+  `--no-board` its board access. `--someone-else` marks a machine that is
+  not yours: the bank owner's Console then does not show its board mail
+  (schema v59; every other invited machine is the owner's, and so are the
+  `PSEUDOLIFE_MCP_TOKENS` principals unless `coordination.not_owner_principals`
+  lists them). `--mine` undoes a mistaken `--someone-else`. On a paired
+  machine either flag alone changes only whose machine it is: no
+  `--replace`, no new code, nothing to pair again. Both need the daemon at
+  schema v59; an older bank or daemon image refuses them and names the
+  update.
+  Re-inviting a name keeps all three unless given. A tier sets
+  which tools a client sees at first, not what it may call:
+  `memory_toolset` expands any session to the full set.
 - `invite --list` shows each name, whether it is paired or pending, its
-  tier, board access and times: never a token or a code. It also lists the
+  tier, board access, whether it is the owner's and times: never a token or
+  a code. It also lists the
   principals whose tokens live in the daemon's environment
   (`PSEUDOLIFE_MCP_TOKENS`, and `default` for `PSEUDOLIFE_MCP_TOKEN`), and
   gives every principal a "last seen" time: its last request the daemon

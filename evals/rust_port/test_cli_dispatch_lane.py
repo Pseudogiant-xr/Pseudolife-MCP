@@ -212,7 +212,7 @@ def test_cli_judge_rejects_exit_stream_and_newline_changes(field, replacement):
 # A help change updates _USAGE, rust/shim/src/cli_help.txt and this pin
 # together (a content pin: a commit pin would name a commit a squash merge
 # discards).
-PINNED_USAGE_SHA256 = "4d649216259501decd94d4b9404bca93c295b195ee183b57405be304e34a3175"
+PINNED_USAGE_SHA256 = "32b2da5e90606740a82ca321675b8d60b2b314ca27ffa40effe4a9b0362c381d"
 
 
 def pinned_usage():

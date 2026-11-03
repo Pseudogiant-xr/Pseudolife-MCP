@@ -29,6 +29,7 @@ fn row(v: &Value) -> Result<StoredPrincipal, String> {
         tier: text(v, "tier"),
         board: v["board"].as_bool().unwrap_or(true),
         revoked: v["revoked"].as_bool().unwrap_or(false),
+        owned: v["owned"].as_bool().unwrap_or(true),
     })
 }
 
@@ -43,7 +44,7 @@ fn rows(v: &Value) -> Result<Vec<StoredPrincipal>, String> {
 
 fn safe_row(row: &StoredPrincipal) -> Value {
     json!({"principal": row.principal, "token_hash": row.token_hash,
-        "tier": row.tier, "board": row.board, "revoked": row.revoked})
+        "tier": row.tier, "board": row.board, "revoked": row.revoked, "owned": row.owned})
 }
 
 fn started(v: &Value) -> Instant {
@@ -89,8 +90,10 @@ fn inspect(v: &Value, env: &EnvTokens, store: &PrincipalStore) -> Value {
     let (shadowed, invalid) = store.skipped_rows();
     let mut excluded = store.excluded_names();
     excluded.sort();
+    let mut owned = store.owned_principals();
+    owned.sort();
     json!({"available": store.available(), "len": store.len(), "bank": store.bank(),
-        "shadowed": shadowed, "invalid": invalid, "excluded": excluded,
+        "shadowed": shadowed, "invalid": invalid, "excluded": excluded, "owned": owned,
         "names": names, "resolved": resolved})
 }
 

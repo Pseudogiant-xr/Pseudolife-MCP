@@ -27,7 +27,7 @@ import pytest
 from pseudolife_memory.storage.schema import SCHEMA_META_VERSION
 
 # Bump this literal in the same commit that bumps SCHEMA_META_VERSION.
-CURRENT_SCHEMA = 58
+CURRENT_SCHEMA = 59
 
 _CHECKLIST = """\
 SCHEMA_META_VERSION is v{actual}, this pin says v{pinned}.

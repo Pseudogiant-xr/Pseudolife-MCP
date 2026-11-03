@@ -28,6 +28,11 @@
     "relations",
     "created_at",
     "clock: wall clock per row (storage/postgres.py:765)"
+   ],
+   [
+    "retrieval_events",
+    "created_at",
+    "clock: retrieval event wall clock per row"
    ]
   ],
   "golden": "golden_scrub in run.py",
@@ -68,7 +73,7 @@
    "status": 307
   },
   {
-   "bytes": "<!doctype html>\n<html lang=\"en\" data-theme=\"dark\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />\n    <meta name=\"color-scheme\" content=\"dark light\" />\n    <meta name=\"robots\" content=\"noindex\" />\n    <title>Cortex Console</title>\n    <!-- Classic, blocking: applies the stored theme before first paint. -->\n    <script src=\"/ui/theme.js\"></script>\n    <script type=\"module\" crossorigin src=\"/ui/assets/index-CGhX_Jw_.js\"></script>\n    <link rel=\"stylesheet\" crossorigin href=\"/ui/assets/index-DvI3bSPG.css\">\n  </head>\n  <body>\n    <div id=\"app\"></div>\n  </body>\n</html>\n",
+   "bytes": "<!doctype html>\n<html lang=\"en\" data-theme=\"dark\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />\n    <meta name=\"color-scheme\" content=\"dark light\" />\n    <meta name=\"robots\" content=\"noindex\" />\n    <title>Cortex Console</title>\n    <!-- Classic, blocking: applies the stored theme before first paint. -->\n    <script src=\"/ui/theme.js\"></script>\n    <script type=\"module\" crossorigin src=\"/ui/assets/index-DYnqP5EG.js\"></script>\n    <link rel=\"stylesheet\" crossorigin href=\"/ui/assets/index-BvsLNk5u.css\">\n  </head>\n  <body>\n    <div id=\"app\"></div>\n  </body>\n</html>\n",
    "headers": {
     "cache-control": "no-store",
     "content-length": "637",
@@ -81,7 +86,7 @@
    "status": 200
   },
   {
-   "bytes": "<!doctype html>\n<html lang=\"en\" data-theme=\"dark\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />\n    <meta name=\"color-scheme\" content=\"dark light\" />\n    <meta name=\"robots\" content=\"noindex\" />\n    <title>Cortex Console</title>\n    <!-- Classic, blocking: applies the stored theme before first paint. -->\n    <script src=\"/ui/theme.js\"></script>\n    <script type=\"module\" crossorigin src=\"/ui/assets/index-CGhX_Jw_.js\"></script>\n    <link rel=\"stylesheet\" crossorigin href=\"/ui/assets/index-DvI3bSPG.css\">\n  </head>\n  <body>\n    <div id=\"app\"></div>\n  </body>\n</html>\n",
+   "bytes": "<!doctype html>\n<html lang=\"en\" data-theme=\"dark\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />\n    <meta name=\"color-scheme\" content=\"dark light\" />\n    <meta name=\"robots\" content=\"noindex\" />\n    <title>Cortex Console</title>\n    <!-- Classic, blocking: applies the stored theme before first paint. -->\n    <script src=\"/ui/theme.js\"></script>\n    <script type=\"module\" crossorigin src=\"/ui/assets/index-DYnqP5EG.js\"></script>\n    <link rel=\"stylesheet\" crossorigin href=\"/ui/assets/index-BvsLNk5u.css\">\n  </head>\n  <body>\n    <div id=\"app\"></div>\n  </body>\n</html>\n",
    "headers": {
     "cache-control": "no-store",
     "content-length": "637",
@@ -94,7 +99,7 @@
    "status": 200
   },
   {
-   "bytes": "<!doctype html>\n<html lang=\"en\" data-theme=\"dark\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />\n    <meta name=\"color-scheme\" content=\"dark light\" />\n    <meta name=\"robots\" content=\"noindex\" />\n    <title>Cortex Console</title>\n    <!-- Classic, blocking: applies the stored theme before first paint. -->\n    <script src=\"/ui/theme.js\"></script>\n    <script type=\"module\" crossorigin src=\"/ui/assets/index-CGhX_Jw_.js\"></script>\n    <link rel=\"stylesheet\" crossorigin href=\"/ui/assets/index-DvI3bSPG.css\">\n  </head>\n  <body>\n    <div id=\"app\"></div>\n  </body>\n</html>\n",
+   "bytes": "<!doctype html>\n<html lang=\"en\" data-theme=\"dark\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />\n    <meta name=\"color-scheme\" content=\"dark light\" />\n    <meta name=\"robots\" content=\"noindex\" />\n    <title>Cortex Console</title>\n    <!-- Classic, blocking: applies the stored theme before first paint. -->\n    <script src=\"/ui/theme.js\"></script>\n    <script type=\"module\" crossorigin src=\"/ui/assets/index-DYnqP5EG.js\"></script>\n    <link rel=\"stylesheet\" crossorigin href=\"/ui/assets/index-BvsLNk5u.css\">\n  </head>\n  <body>\n    <div id=\"app\"></div>\n  </body>\n</html>\n",
    "headers": {
     "cache-control": "no-store",
     "content-length": "637",
@@ -107,7 +112,7 @@
    "status": 200
   },
   {
-   "bytes": "<!doctype html>\n<html lang=\"en\" data-theme=\"dark\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />\n    <meta name=\"color-scheme\" content=\"dark light\" />\n    <meta name=\"robots\" content=\"noindex\" />\n    <title>Cortex Console</title>\n    <!-- Classic, blocking: applies the stored theme before first paint. -->\n    <script src=\"/ui/theme.js\"></script>\n    <script type=\"module\" crossorigin src=\"/ui/assets/index-CGhX_Jw_.js\"></script>\n    <link rel=\"stylesheet\" crossorigin href=\"/ui/assets/index-DvI3bSPG.css\">\n  </head>\n  <body>\n    <div id=\"app\"></div>\n  </body>\n</html>\n",
+   "bytes": "<!doctype html>\n<html lang=\"en\" data-theme=\"dark\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />\n    <meta name=\"color-scheme\" content=\"dark light\" />\n    <meta name=\"robots\" content=\"noindex\" />\n    <title>Cortex Console</title>\n    <!-- Classic, blocking: applies the stored theme before first paint. -->\n    <script src=\"/ui/theme.js\"></script>\n    <script type=\"module\" crossorigin src=\"/ui/assets/index-DYnqP5EG.js\"></script>\n    <link rel=\"stylesheet\" crossorigin href=\"/ui/assets/index-BvsLNk5u.css\">\n  </head>\n  <body>\n    <div id=\"app\"></div>\n  </body>\n</html>\n",
    "headers": {
     "cache-control": "no-store",
     "content-length": "637",
@@ -120,7 +125,7 @@
    "status": 200
   },
   {
-   "bytes": "<!doctype html>\n<html lang=\"en\" data-theme=\"dark\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />\n    <meta name=\"color-scheme\" content=\"dark light\" />\n    <meta name=\"robots\" content=\"noindex\" />\n    <title>Cortex Console</title>\n    <!-- Classic, blocking: applies the stored theme before first paint. -->\n    <script src=\"/ui/theme.js\"></script>\n    <script type=\"module\" crossorigin src=\"/ui/assets/index-CGhX_Jw_.js\"></script>\n    <link rel=\"stylesheet\" crossorigin href=\"/ui/assets/index-DvI3bSPG.css\">\n  </head>\n  <body>\n    <div id=\"app\"></div>\n  </body>\n</html>\n",
+   "bytes": "<!doctype html>\n<html lang=\"en\" data-theme=\"dark\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />\n    <meta name=\"color-scheme\" content=\"dark light\" />\n    <meta name=\"robots\" content=\"noindex\" />\n    <title>Cortex Console</title>\n    <!-- Classic, blocking: applies the stored theme before first paint. -->\n    <script src=\"/ui/theme.js\"></script>\n    <script type=\"module\" crossorigin src=\"/ui/assets/index-DYnqP5EG.js\"></script>\n    <link rel=\"stylesheet\" crossorigin href=\"/ui/assets/index-BvsLNk5u.css\">\n  </head>\n  <body>\n    <div id=\"app\"></div>\n  </body>\n</html>\n",
    "headers": {
     "cache-control": "no-store",
     "content-length": "637",
@@ -211,12 +216,12 @@
    "status": 200
   },
   {
-   "bytes": "<428409 bytes sha256:029298f8c9694cd9f76ee74d>",
+   "bytes": "<116151 bytes sha256:491f0b0905f853a60df1760d>",
    "headers": {
     "cache-control": "no-store",
-    "content-length": "428409",
+    "content-length": "116151",
     "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
-    "content-type": "application/javascript; charset=utf-8",
+    "content-type": "text/css; charset=utf-8",
     "referrer-policy": "no-referrer",
     "x-content-type-options": "nosniff",
     "x-frame-options": "DENY"
@@ -224,12 +229,12 @@
    "status": 200
   },
   {
-   "bytes": "<114099 bytes sha256:2901e5bcec8f4bd9d0d0fee3>",
+   "bytes": "<450195 bytes sha256:2c5ad6830aa25a119691ecb9>",
    "headers": {
     "cache-control": "no-store",
-    "content-length": "114099",
+    "content-length": "450195",
     "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
-    "content-type": "text/css; charset=utf-8",
+    "content-type": "application/javascript; charset=utf-8",
     "referrer-policy": "no-referrer",
     "x-content-type-options": "nosniff",
     "x-frame-options": "DENY"
@@ -263,7 +268,7 @@
    "status": 200
   },
   {
-   "bytes": "<!doctype html>\n<html lang=\"en\" data-theme=\"dark\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />\n    <meta name=\"color-scheme\" content=\"dark light\" />\n    <meta name=\"robots\" content=\"noindex\" />\n    <title>Cortex Console</title>\n    <!-- Classic, blocking: applies the stored theme before first paint. -->\n    <script src=\"/ui/theme.js\"></script>\n    <script type=\"module\" crossorigin src=\"/ui/assets/index-CGhX_Jw_.js\"></script>\n    <link rel=\"stylesheet\" crossorigin href=\"/ui/assets/index-DvI3bSPG.css\">\n  </head>\n  <body>\n    <div id=\"app\"></div>\n  </body>\n</html>\n",
+   "bytes": "<!doctype html>\n<html lang=\"en\" data-theme=\"dark\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />\n    <meta name=\"color-scheme\" content=\"dark light\" />\n    <meta name=\"robots\" content=\"noindex\" />\n    <title>Cortex Console</title>\n    <!-- Classic, blocking: applies the stored theme before first paint. -->\n    <script src=\"/ui/theme.js\"></script>\n    <script type=\"module\" crossorigin src=\"/ui/assets/index-DYnqP5EG.js\"></script>\n    <link rel=\"stylesheet\" crossorigin href=\"/ui/assets/index-BvsLNk5u.css\">\n  </head>\n  <body>\n    <div id=\"app\"></div>\n  </body>\n</html>\n",
    "headers": {
     "cache-control": "no-store",
     "content-length": "637",

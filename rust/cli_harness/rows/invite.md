@@ -7,8 +7,8 @@ Oracle: `pseudolife_memory/invite_cli.py`, `principal_store.py`, `principals.py`
 
 ## Canonical shapes (implemented)
 
-- `invite <name> [--tier T] [--board|--no-board] [--expires D] [--replace] [--url U] [--port P] [--bank FP] [--json]`
-- `invite --list [--bank FP] [--json]`
+- `invite <name> [--tier T] [--board|--no-board] [--expires D] [--someone-else|--mine] [--replace] [--url U] [--port P] [--bank FP] [--json]` (v59: `--someone-else` / `--mine` set `owned`, refused before any write on a bank before v59 (`prev59` seed); a re-invite without either keeps it; on a paired row either alone changes ownership with no code; the report's `owned` member and the `for a machine that is not yours, add --someone-else` note when neither is given, the row is the owner's and the bank has the column)
+- `invite --list [--bank FP] [--json]` (v59: the owner column and footer line, JSON `owner`; deferred where a `config.yaml` could hold `coordination.not_owner_principals`, `PSEUDOLIFE_MCP_CONFIG` included)
 - `invite --revoke <name> [--yes] [--bank FP] [--json]`
 - `invite --version-check` (the Docker path's image probe)
 
@@ -109,7 +109,7 @@ it, and core's program preflight proves both before every arm. Rule
 loads; each arm records it, and only `port <p>`, `127.0.0.1:<p>` and
 `localhost:<p>` with that exact value become `<port>` in the streams.
 
-The 24 cases in `LIVE_ONLY` (`invite.py`) show the seeded principals in
+The 31 cases in `LIVE_ONLY` (`invite.py`) show the seeded principals in
 their output or bank dump. The oracle's writers stamp those rows with the
 wall clock and draw their codes and tokens at random in every harness
 process, so the cases run live only (`Case.golden` False).
