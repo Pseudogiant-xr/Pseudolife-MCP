@@ -270,6 +270,12 @@ which is its `base_sha`, with the group head as the checkout; `push` uses `after
 which must equal the dispatched checkout, with `GITHUB_REF` required to be
 `refs/heads/master`. Both manual `ci` and `wait-mail` modes require `frozen_head`.
 The selection JSON records the ref. No extra dispatch input is needed.
+On a non-master branch, manual `stress` mode instead selects the merge base of
+the dispatched checkout and `origin/master`, with the same release-only
+exception as a pull request. Its receipt freezes both SHAs and the stress mode;
+rechecking it does not follow a later master tip. It needs no `frozen_head`,
+but a supplied value must match the dispatched checkout. Other manual modes
+remain master-only, and candidate source-pin checks still run before export.
 Each new receipt records `oracle_head`; source receipts also retain the event
 selection and actual source/schema. A stale historical pin is information only
 and cannot freeze the port. Source/import binding and behavior comparisons

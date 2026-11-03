@@ -25,17 +25,21 @@ def pinned_repo(tmp_path):
 
 def select_cli(monkeypatch, root, base, head, tmp_path, event_name="pull_request", checkout=None):
     event = ({"pull_request": {"base": {"sha": base}, "head": {"sha": head}}}
-             if event_name == "pull_request" else {"after": head})
+             if event_name == "pull_request" else {"inputs": {"mode": "stress"}}
+             if event_name == "workflow_dispatch" else {"after": head})
+    if event_name == "workflow_dispatch":
+        git(root, "update-ref", "refs/remotes/origin/master", base)
     payload, receipt, environment = (tmp_path / name for name in ("event.json", "selection.json", "env"))
     payload.write_text(json.dumps(event), encoding="utf-8")
     monkeypatch.setattr(sys, "argv", ["selection", "--root", str(root), "--event-name", event_name,
                                      "--event-path", str(payload), "--checkout-head", checkout or head,
-                                     "--out", str(receipt), "--github-env", str(environment)])
+                                     "--out", str(receipt), "--github-env", str(environment),
+                                     "--github-ref", "refs/heads/topic"])
     oracle.main()
     return json.loads(receipt.read_text(encoding="utf-8"))
 
 
-@pytest.mark.parametrize("event_name", ["pull_request", "push"])
+@pytest.mark.parametrize("event_name", ["pull_request", "push", "workflow_dispatch"])
 @pytest.mark.parametrize("name", ["cli.py", "wait_mail_cli.py"])
 def test_originating_change_fails_before_exporting_oracle(
         pinned_repo, monkeypatch, tmp_path, name, event_name):
@@ -54,11 +58,12 @@ def test_originating_change_fails_before_exporting_oracle(
     assert not (tmp_path / "env").exists()
 
 
-def test_unrelated_change_preserves_merge_base_and_export(pinned_repo, monkeypatch, tmp_path):
+@pytest.mark.parametrize("event_name", ["pull_request", "workflow_dispatch"])
+def test_unrelated_change_preserves_merge_base_and_export(pinned_repo, monkeypatch, tmp_path, event_name):
     root, base = pinned_repo
     write(root, "rust/change.txt", "Native-only change.\n")
     head = commit(root)
-    selected = select_cli(monkeypatch, root, base, head, tmp_path)
+    selected = select_cli(monkeypatch, root, base, head, tmp_path, event_name)
     assert selected["oracle_head"] == base
     assert selected["candidate_head"] == head
 

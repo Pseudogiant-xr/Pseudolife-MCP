@@ -737,10 +737,9 @@ def test_stress_jobs_run_only_in_stress_mode_and_reuse_the_candidate():
     for step in loop["steps"]:
         assert not re.search(r"\bcargo (build|test|nextest (archive|run))\b|\bcargo \+", step.get("run", "")), \
             step.get("name")
-    # The event oracle binding accepts only master dispatches with frozen_head,
-    # so a loop on a branch must not stop there (Codex review of e56fe0f6);
-    # but oracle-dependent pytest selections need it when it can bind (Codex
-    # review of 028c3ebb), so it runs best-effort before the selection.
+    # Binding remains best-effort for selections that do not consume an
+    # event oracle. Branch stress can bind its merge-base oracle, and
+    # oracle-dependent selections still require a valid receipt.
     # test_login's container cases need the image the W1-C connection shard
     # builds on Linux (batch #868 review); hosted Windows runs Windows
     # containers only, so the row skips them there.
