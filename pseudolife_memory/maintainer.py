@@ -112,8 +112,12 @@ def _run(service, handler, *args, full=False, body=False):
         with service._coordination_lock:
             board = coordination._store(service)
             m = service.config.coordination.maintainer
-            store = MaintainerStore(board.storage, rp_id=m.rp_id, origin=m.origin,
-                                    clock=board.clock, principal=principal)
+            from pseudolife_memory.principals import is_owner_principal
+            store = MaintainerStore(
+                board.storage, rp_id=m.rp_id, origin=m.origin, clock=board.clock,
+                principal=principal,
+                signs_in_as=principal if is_owner_principal(service.config.coordination,
+                                                            principal) else None)
             result = handler(service, board, store, *args)
     except MaintainerError as exc:
         if exc.check:
@@ -450,14 +454,26 @@ def _enrol(service, board, store, body):
             "_notice": notice}
 
 
+def _drop_key(credential_id) -> None:
+    """A key just revoked under the coordination lock: its Console sign-ins
+    leave the daemon's view at once (the rows were revoked in the change's
+    transaction), not at the next refresh."""
+    from pseudolife_memory.console_sessions import installed_sessions
+    sessions = installed_sessions()
+    if sessions is not None:
+        sessions.drop_key(credential_id)
+
+
 def _cancel(service, board, store, body):
     out = store.cancel(body.get("payload"), body.get("mac"), body.get("assertion"))
+    _drop_key(out["credential_id"])
     return {"state": out["state"],
             "_notice": f"key {key_prefix(out['credential_id'])} was cancelled by an older key"}
 
 
 def _revoke(service, board, store, body):
     out = store.revoke_self(body.get("payload"), body.get("mac"), body.get("assertion"))
+    _drop_key(out["credential_id"])
     return {"state": out["state"],
             "_notice": f"key {key_prefix(out['credential_id'])} revoked itself"}
 

@@ -1,14 +1,22 @@
 <script lang="ts">
   // The sign-in dialog, opened by ui.tokenOpen (a 401, the sidebar, a "Sign
-  // in" button, or a sign-in link). A one-time code from
-  // `pseudolife-mcp console` is the way in; pasting a token under Advanced
-  // stores it under localStorage "pl_token" exactly as before.
+  // in" button, or a sign-in link). The passkey (at the passkey origin) and a
+  // one-time code from `pseudolife-mcp console` are the ways in; pasting a
+  // token under Advanced stores it under localStorage "pl_token" as before.
   import { untrack } from "svelte";
   import { readKey, TOKEN_KEY } from "../lib/storage";
   import { loadHealth, saveToken, store, ui } from "../lib/state.svelte";
   import { toast } from "../lib/overlay.svelte";
   import { SIGNIN_COMMAND, signinCapability, signinChoices } from "../lib/signin";
-  import { answerReplace, resetSigninMessage, signInWithCode, signinFlow } from "../lib/signinFlow.svelte";
+  import { fixtureMode } from "../lib/maintainerFlow.svelte";
+  import {
+    answerReplace,
+    resetSigninMessage,
+    signInWithCode,
+    signInWithPasskey,
+    signinFlow,
+  } from "../lib/signinFlow.svelte";
+  import { browserEnv } from "../lib/webauthn";
 
   let dialog: HTMLDialogElement | undefined = $state();
   let code = $state("");
@@ -18,7 +26,11 @@
 
   const healthKnown = $derived(store.health.data !== null);
   const cap = $derived(signinCapability(store.health.data));
-  const choices = $derived(signinChoices(cap));
+  // Whether this page can run a passkey ceremony does not change while it is open.
+  const env = browserEnv();
+  const choices = $derived(signinChoices(cap, env, fixtureMode()));
+  // The daemon signs in with a passkey, but not from this page (not HTTPS).
+  const passkeyElsewhere = $derived(cap?.passkey === true && !choices.passkey);
 
   $effect(() => {
     if (!dialog) return;
@@ -28,7 +40,7 @@
       reveal = false;
       resetSigninMessage();
       void loadHealth();
-      advanced = !!store.health.data && signinChoices(signinCapability(store.health.data)).pasteOnly;
+      advanced = !!store.health.data && signinChoices(signinCapability(store.health.data), env, fixtureMode()).pasteOnly;
       dialog.showModal();
     } else if (!ui.tokenOpen && dialog.open) {
       dialog.close();
@@ -84,6 +96,17 @@
         <button type="button" class="btn btn-primary btn-sm" onclick={() => answerReplace(true)}>{signinFlow.replacing ? "Replace" : "Sign in"}</button>
       </div>
     {:else}
+      {#if choices.passkey}
+        <div class="stack">
+          <button
+            type="button"
+            class="btn btn-primary btn-sm passkey"
+            disabled={signinFlow.busy}
+            onclick={() => void signInWithPasskey()}>Sign in with your passkey</button
+          >
+          <p class="caption">Your browser asks for a passkey enrolled in this Console's Settings, Your passkeys.</p>
+        </div>
+      {/if}
       {#if choices.code}
         <form class="stack" onsubmit={onCode}>
           <label for="signin-code" class="field-label">Sign in with a code</label>
@@ -99,14 +122,22 @@
               disabled={signinFlow.busy}
               bind:value={code}
             />
-            <button type="submit" class="btn btn-primary btn-sm" disabled={signinFlow.busy || !code.trim()}>Sign in</button>
+            <button
+              type="submit"
+              class="btn btn-sm {choices.passkey ? 'btn-secondary' : 'btn-primary'}"
+              disabled={signinFlow.busy || !code.trim()}>Sign in</button
+            >
           </div>
           <p class="caption">
             Run <code class="mono">{SIGNIN_COMMAND}</code> on a machine that already uses Pseudolife. It opens a signed-in
             Console, or shows a code to type here.
           </p>
+          {#if passkeyElsewhere}
+            <p class="caption">Passkey sign-in works at your Console's HTTPS address.</p>
+          {/if}
         </form>
-        <!-- choices.passkey: the passkey choice arrives with step 4 of the spec; nothing renders until then. -->
+      {:else if choices.passkey}
+        <!-- The passkey alone: nothing more to offer above Advanced. -->
       {:else if !healthKnown}
         <p class="caption">
           {store.health.error
@@ -221,6 +252,9 @@
   }
   .question {
     font-weight: 600;
+  }
+  .passkey {
+    align-self: flex-start;
   }
   .msg {
     font-size: 12.5px;

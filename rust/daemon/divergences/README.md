@@ -47,7 +47,7 @@ whose remaining item is a proof keeps that boundary visible in its entry.
 
 | Entry | Caller | Closing stream or batch |
 |---|---|---|
-| [CONSOLE-SIGNIN](routes-whose-handlers-belong-to/console-sign-in-sessions-and-routes.md) | the Console's sign-in dialog and Settings, Signed-in browsers (`frontend/src/lib/signin.ts`), and `pseudolife-mcp console`, against `/api/console/*` and any `/api/*` call with a session bearer | B5 board; G2 |
+| [CONSOLE-SIGNIN](routes-whose-handlers-belong-to/console-sign-in-sessions-and-routes.md) | the Console's sign-in dialog and Settings, Signed-in browsers (`frontend/src/lib/signin.ts`), and `pseudolife-mcp console`, against `/api/console/*` (link and passkey sign-in, signed-in browsers, passkey binding) and any `/api/*` call with a session bearer | B5 board; G2 |
 | [W2F-CLOCK-RETRY](coordination-board-completion-w2/w2f-clock-retry.md) | board sends and daemon notices through `rust/daemon/src/board/dispatch.rs` / `board/notice.rs` during a reconnect | B5 board; B4 writer-session refresh |
 | [DOC-INGEST-LOCK](document-store-b7-document/doc-ingest-lock.md) | MCP `document_ingest` concurrent with `document_search`/`memory_search`, registered in `rust/daemon/src/mcp/dispatch.rs::registry` | B7 documents |
 | [DOC-PDF-ENGINE](document-store-b7-document/doc-pdf-engine.md) | `pseudolife_memory/mcp_server.py::document_ingest` / Rust `documents.rs::mcp_document_ingest` on a PDF after library loss or bad installation | B7 documents; B11 provisioning via R4/R5 |
