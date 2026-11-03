@@ -159,12 +159,22 @@ pub async fn coordination(
 }
 
 /// `GET /api/agents?view=coordination` after W1-A's gate (tokenless
-/// already refused): the Console snapshot, refusals as the board's.
-pub async fn console(app: &App, h: &HeaderMap, params: &HashMap<String, String>) -> Response {
+/// already refused): the Console snapshot, refusals as the board's. A
+/// Console session's principal (`session`, resolved by the gate) is used as
+/// it is: `authenticated_principal` is the agent resolver, which refuses it.
+pub async fn console(
+    app: &App,
+    h: &HeaderMap,
+    params: &HashMap<String, String>,
+    session: Option<&str>,
+) -> Response {
     let headers = header_dict(h);
-    let principal = match authenticated_principal(app, &headers) {
-        Ok(p) => p,
-        Err(e) => return refusal(&e),
+    let principal = match session {
+        Some(principal) => principal.to_string(),
+        None => match authenticated_principal(app, &headers) {
+            Ok(p) => p,
+            Err(e) => return refusal(&e),
+        },
     };
     match app.board.console(&principal, params).await {
         Ok(result) => json(200, &result),
