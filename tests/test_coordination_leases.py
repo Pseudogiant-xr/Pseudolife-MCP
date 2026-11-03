@@ -270,6 +270,7 @@ def test_list_settles_an_expired_hold_before_reporting(store):
     store.acquire_lease(*creds(a), name="gpu", ttl=60)
     store.acquire_lease(*creds(b), name="gpu", ttl=60)
     store.test_time[0] += 61
+    store.update(*creds(b), status="ready")
     [lease] = store.list_leases()["leases"]
     assert lease["holder"]["agent_id"] == b["agent_id"] and lease["queued"] == 0
     assert [e["event"] for e in events(store)][-2:] == ["lease_expire", "lease_grant"]
@@ -596,6 +597,7 @@ def test_a_full_queue_after_a_settle_logs_nothing(store, monkeypatch):
     # refusal follow a settle that expires a and grants b (queue: c, full).
     monkeypatch.setattr(module, "LEASE_QUEUE_MAX", 1)
     store.test_time[0] += 60
+    store.update(*creds(b), status="ready")
     before = len(events(store))
     with pytest.raises(CoordinationError, match="lease_queue_full"):
         store.acquire_lease(*creds(d), name="gpu", ttl=60)

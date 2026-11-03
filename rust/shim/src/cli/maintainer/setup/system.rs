@@ -7,7 +7,7 @@ pub(super) const CONTAINER: &str = "pseudolife-mcp-daemon";
 #[derive(Clone, Debug)]
 pub(super) enum Tier {
     Local,
-    Docker(OsString),
+    Docker(OsString, String),
 }
 
 pub(super) fn which(name: &str) -> Option<PathBuf> {
@@ -144,25 +144,42 @@ pub(super) async fn run(command: &[OsString], seconds: u64) -> Output {
     }
 }
 
-pub(super) async fn tier() -> Result<Tier> {
+pub(super) async fn tier(selected: Option<&str>) -> Result<Tier> {
+    let container = selected.unwrap_or(CONTAINER);
+    let scoped_refusal = || {
+        Error::refused(format!(
+            "cannot read running container {container}; use docker ps to find the daemon, then run pseudolife-mcp maintainer setup --container <name>"
+        ))
+    };
     // The in-image helpers never inspect or recurse into Docker.
-    if std::env::var_os("PSEUDOLIFE_DAEMON_EXEC").is_some_and(|v| !v.is_empty()) {
+    if selected.is_none()
+        && std::env::var_os("PSEUDOLIFE_DAEMON_EXEC").is_some_and(|v| !v.is_empty())
+    {
         return Ok(Tier::Local);
     }
     let docker = std::env::var_os("PSEUDOLIFE_DOCKER")
         .filter(|v| !v.is_empty())
         .unwrap_or_else(|| "docker".into());
     if docker == "docker" && which("docker").is_none() {
+        if selected.is_some() {
+            return Err(scoped_refusal());
+        }
         return Ok(Tier::Local);
     }
-    let output = run(&pg_inspect(&docker), 60).await;
+    let output = run(&scoped_inspect(&docker, container, false), 60).await;
     if output.code == 0 {
         if output.out.trim() != "true" {
+            if selected.is_some() {
+                return Err(scoped_refusal());
+            }
             return Err(Error::refused(format!(
                 "the {CONTAINER} container is not running: start it first"
             )));
         }
-        return Ok(Tier::Docker(docker));
+        return Ok(Tier::Docker(docker, container.into()));
+    }
+    if selected.is_some() {
+        return Err(scoped_refusal());
     }
     if format!("{}{}", output.out, output.err)
         .to_lowercase()
@@ -175,8 +192,14 @@ pub(super) async fn tier() -> Result<Tier> {
         output.detail()
     )))
 }
-fn pg_inspect(docker: &std::ffi::OsStr) -> Vec<OsString> {
-    crate::pg::resolution::container_inspect(docker)
+fn scoped_inspect(docker: &std::ffi::OsStr, container: &str, engine: bool) -> Vec<OsString> {
+    let mut command = if engine {
+        crate::pg::resolution::container_engine_inspect(docker)
+    } else {
+        crate::pg::resolution::container_inspect(docker)
+    };
+    *command.last_mut().expect("container inspect argument") = container.into();
+    command
 }
 
 pub(super) fn command(tier: &Tier, args: &[&str]) -> Result<Vec<OsString>> {
@@ -188,12 +211,12 @@ pub(super) fn command(tier: &Tier, args: &[&str]) -> Result<Vec<OsString>> {
                 .map_err(|_| Error::refused("cannot locate this CLI executable"))?
                 .into_os_string(),
         ],
-        Tier::Docker(docker) => vec![
+        Tier::Docker(docker, container) => vec![
             docker.clone(),
             "exec".into(),
             "-e".into(),
             "PSEUDOLIFE_DAEMON_EXEC=1".into(),
-            CONTAINER.into(),
+            container.into(),
             "pseudolife-mcp".into(),
         ],
     };
@@ -215,10 +238,10 @@ pub(super) async fn host(tier: &Tier, args: &[&str]) -> Result<Value> {
             )
         });
     }
-    let Tier::Docker(docker) = tier else {
+    let Tier::Docker(docker, container) = tier else {
         unreachable!()
     };
-    let engine = run(&crate::pg::resolution::container_engine_inspect(docker), 60).await;
+    let engine = run(&scoped_inspect(docker, container, true), 60).await;
     let invocation = if engine.code == 0 && engine.out.trim() == "rust" {
         command(tier, &[&["maintainer", "setup"][..], args].concat())?
     } else {
@@ -227,7 +250,7 @@ pub(super) async fn host(tier: &Tier, args: &[&str]) -> Result<Value> {
         let mut command = vec![
             docker.clone(),
             "exec".into(),
-            CONTAINER.into(),
+            container.into(),
             "python".into(),
             "-m".into(),
             "pseudolife_memory.maintainer_setup".into(),
@@ -301,15 +324,23 @@ pub(super) async fn running_name(port: u16) -> Option<(String, String)> {
     None
 }
 
+pub(super) fn setup_command(tier: &Tier) -> String {
+    super::setup_command(match tier {
+        Tier::Docker(_, container) => Some(container),
+        Tier::Local => None,
+    })
+}
+
 pub(super) async fn restart(tier: &Tier, port: u16) -> Result<()> {
-    let Tier::Docker(docker) = tier else {
+    let resume = setup_command(tier);
+    let Tier::Docker(docker, container) = tier else {
         return Ok(());
     };
-    let output = run(&[docker.clone(), "restart".into(), CONTAINER.into()], 300).await;
+    let output = run(&[docker.clone(), "restart".into(), container.into()], 300).await;
     if output.code != 0 {
         return Err(Error::new(
             format!(
-                "the daemon restart failed ({}); the config is written: run `docker restart {CONTAINER}`, then `pseudolife-mcp maintainer setup` again",
+                "the daemon restart failed ({}); the config is written: run `docker restart {container}`, then `{resume}` again",
                 output.detail()
             ),
             5,
@@ -325,7 +356,7 @@ pub(super) async fn restart(tier: &Tier, port: u16) -> Result<()> {
         if tokio::time::Instant::now() >= deadline {
             return Err(Error::new(
                 format!(
-                    "the daemon did not report healthy within 180 s of its restart: check `docker logs {CONTAINER}`, then run `pseudolife-mcp maintainer setup` again"
+                    "the daemon did not report healthy within 180 s of its restart: check `docker logs {container}`, then run `{resume}` again"
                 ),
                 5,
             ));

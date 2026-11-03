@@ -17,6 +17,12 @@ use system::Tier;
 use tokio::io::AsyncBufReadExt;
 
 const SETUP: &str = "pseudolife-mcp maintainer setup";
+fn setup_command(container: Option<&str>) -> String {
+    match container.filter(|name| *name != system::CONTAINER) {
+        Some(container) => format!("{SETUP} --container {container}"),
+        None => SETUP.into(),
+    }
+}
 static OUTPUT_FAILED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 fn line(arguments: std::fmt::Arguments<'_>) {
     if super::print(&format!("{arguments}\n")).is_err() {
@@ -52,6 +58,7 @@ struct Args {
     https_port: u16,
     yes: bool,
     check: bool,
+    container: Option<String>,
 }
 fn parse(values: &[String]) -> Result<Args> {
     let mut args = Args {
@@ -68,6 +75,23 @@ fn parse(values: &[String]) -> Result<Args> {
             ("--local", None) => args.local = true,
             ("--yes", None) => args.yes = true,
             ("--check", None) => args.check = true,
+            ("--container", _) => {
+                let value = inline
+                    .or_else(|| values.next().map(String::as_str))
+                    .unwrap_or("");
+                if value.is_empty()
+                    || !value.as_bytes()[0].is_ascii_alphanumeric()
+                    || !value
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || b"_.-".contains(&b))
+                {
+                    return Err(Error::new(
+                        "argument --container: use docker ps to find the daemon, then pass --container <name>",
+                        2,
+                    ));
+                }
+                args.container = Some(value.into());
+            }
             ("--port" | "--https-port", _) => {
                 let value = inline
                     .or_else(|| values.next().map(String::as_str))
@@ -150,6 +174,12 @@ fn run_inner(values: Vec<OsString>) -> u8 {
     else {
         return 4;
     };
+    let resume = setup_command(
+        parse(&values)
+            .ok()
+            .and_then(|args| args.container)
+            .as_deref(),
+    );
     let pending: Pending = Arc::new(Mutex::new(None));
     let result=runtime.block_on(async {
         tokio::select! {
@@ -163,7 +193,7 @@ fn run_inner(values: Vec<OsString>) -> u8 {
                         crate::stderrln!("\nmaintainer setup: passkey {prefix} {}",if revoked {"revoked".into()} else {format!("NOT revoked: run `pseudolife-mcp maintainer revoke {prefix}`")});
                     } else {crate::stderrln!("\nmaintainer setup: passkey {prefix} is still pending");}
                 }
-                Err(Error::new(format!("interrupted. What was done stays done; run `{SETUP}` again to pick up from there"),130))
+                Err(Error::new(format!("interrupted. What was done stays done; run `{resume}` again to pick up from there"),130))
             }
         }
     });
@@ -204,8 +234,9 @@ async fn entry(values: &[String], pending: Pending) -> Result<u8> {
     }
     let args = parse(values)?;
     if args.check {
-        let state = match system::tier().await {
+        let state = match system::tier(args.container.as_deref()).await {
             Ok(tier) => system::host(&tier, &["--host-state"]).await.ok(),
+            Err(error) if args.container.is_some() => return Err(Error::new(error.message, 2)),
             Err(_) => None,
         };
         let (code, text) = match state {
@@ -340,6 +371,7 @@ fn bank_error(error: tokio_postgres::Error) -> Error {
 }
 
 async fn setup(args: Args, pending: Pending) -> Result<u8> {
+    let resume = setup_command(args.container.as_deref());
     let url = format!("http://127.0.0.1:{}", args.port);
     let answer = system::health(args.port).await.ok_or_else(|| {
         Error::refused(format!(
@@ -351,7 +383,7 @@ async fn setup(args: Args, pending: Pending) -> Result<u8> {
             "the daemon at {url} does not report \"auth\": true; maintainer passkeys need a daemon that requires a bearer token (an install without --no-token, or PSEUDOLIFE_MCP_TOKEN(S) in its environment)"
         )));
     }
-    let tier = system::tier().await?;
+    let tier = system::tier(args.container.as_deref()).await?;
     if matches!(tier, Tier::Local) {
         refuse_lite()?;
     }
@@ -429,10 +461,13 @@ async fn setup(args: Args, pending: Pending) -> Result<u8> {
         None
     };
     let restart = write || loaded.is_some_and(|v| v != (rp.clone(), origin.clone()));
-    if restart && matches!(tier, Tier::Docker(_)) {
+    if restart && matches!(tier, Tier::Docker(..)) {
         plan.push(format!(
             "restart  the daemon container ({}) so it reads them",
-            system::CONTAINER
+            match &tier {
+                Tier::Docker(_, container) => container.as_str(),
+                Tier::Local => unreachable!(),
+            }
         ));
     }
     if origin.starts_with("http://localhost") {
@@ -472,17 +507,17 @@ async fn setup(args: Args, pending: Pending) -> Result<u8> {
                     .unwrap_or_default()
             );
         }
-        if restart && matches!(tier, Tier::Docker(_)) {
+        if restart && matches!(tier, Tier::Docker(..)) {
             system::restart(&tier, args.port).await?;
         }
     }
     if restart && matches!(tier, Tier::Local) {
         println!(
-            "Restart the daemon so it reads the name (stop the `pseudolife-mcp serve` process; your next session starts it again), then run `{SETUP}` again to enrol your passkey."
+            "Restart the daemon so it reads the name (stop the `pseudolife-mcp serve` process; your next session starts it again), then run `{resume}` again to enrol your passkey."
         );
         return Ok(if write { 0 } else { 4 });
     }
-    let keys=state["keys"].as_array().ok_or_else(||Error::refused(format!("could not read the passkeys ({}); the name is in place: run `{SETUP}` again once the bank answers",state["keys_error"].as_str().unwrap_or("None"))))?;
+    let keys=state["keys"].as_array().ok_or_else(||Error::refused(format!("could not read the passkeys ({}); the name is in place: run `{resume}` again once the bank answers",state["keys_error"].as_str().unwrap_or("None"))))?;
     let active = keys.iter().filter(|v| v["state"] == "active").count();
     if active != 0 {
         println!(
@@ -497,7 +532,7 @@ async fn setup(args: Args, pending: Pending) -> Result<u8> {
     }
     if !interactive() {
         println!(
-            "The name is in place ({origin}). Enrolling a passkey needs you at the Console: run `{SETUP}` in a terminal."
+            "The name is in place ({origin}). Enrolling a passkey needs you at the Console: run `{resume}` in a terminal."
         );
         return Ok(0);
     }
@@ -517,6 +552,7 @@ async fn check_key(
     fresh: bool,
     pending: Pending,
 ) -> Result<u8> {
+    let resume = system::setup_command(tier);
     *pending
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner) =
@@ -551,7 +587,7 @@ async fn check_key(
             format!("NOT revoked (run `pseudolife-mcp maintainer revoke {prefix}`)")
         };
         println!(
-            "passkey {prefix} {state}. If someone else redeemed the code, check `pseudolife-mcp maintainer list`; to try again, run `{SETUP}`"
+            "passkey {prefix} {state}. If someone else redeemed the code, check `pseudolife-mcp maintainer list`; to try again, run `{resume}`"
         );
     } else {
         println!(
@@ -587,6 +623,7 @@ fn python_repr(value: &str) -> String {
     text
 }
 async fn enrol(tier: &Tier, origin: &str, pending: Pending) -> Result<u8> {
+    let resume = system::setup_command(tier);
     println!(
         "\nNext, in your browser: open {origin}/ui/. A browser keeps the Console's token per address: if this one says it did not accept the console's token, click \"Set a bearer token\" and paste the token your Console uses at its usual address: the daemon's PSEUDOLIFE_MCP_TOKEN, which a single-token install also keeps in your client's token file, ~/.pseudolife-mcp/<principal>.token. Then open Settings, Your passkeys, enter the code below with a label for this passkey, and create the passkey when the browser asks."
     );
@@ -634,7 +671,7 @@ async fn enrol(tier: &Tier, origin: &str, pending: Pending) -> Result<u8> {
     let _ = child.wait().await;
     let Some((prefix, label)) = enrolled else {
         crate::stderrln!(
-            "maintainer setup: no passkey was enrolled; run `{SETUP}` again for a new code"
+            "maintainer setup: no passkey was enrolled; run `{resume}` again for a new code"
         );
         return Ok(4);
     };

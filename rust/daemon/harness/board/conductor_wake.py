@@ -194,4 +194,3 @@ SCENARIOS = {s.name: s for s in (ConductorWake, ConductorWakeFences,
                                 ConductorWakeOffers, MaintainerWakeOffers,
                                 UnservedConductorOffers, UnservedConductorAttention,
                                 UnservedMaintainerOffers, UnservedMaintainerAttention)}
-
