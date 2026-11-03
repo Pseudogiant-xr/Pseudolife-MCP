@@ -173,11 +173,53 @@ export function adapterText(a: BoardAgent): string | null {
   return v ? "Live adapter available" : "No live adapter";
 }
 
+/** Whether a listed peer runs under the Console's own token: the snapshot
+ *  counts unread mail only for those, and serves null for everyone else's. */
+function usesConsoleToken(a: BoardAgent): boolean {
+  return a.pending_count !== null && a.pending_count !== undefined;
+}
+
 /** Unread mail: counted only for peers of the principal this Console is
  *  signed in as; another principal's peers show none. */
 export function pendingText(a: BoardAgent): string {
-  if (a.pending_count === null || a.pending_count === undefined) return "Hidden: another account's session";
+  if (!usesConsoleToken(a)) return "Hidden: another account's session";
   return a.pending_count === 0 ? "None unread" : `${fmtNum(a.pending_count)} unread`;
+}
+
+const TOKEN_SCOPE = "the Console shows only mail sent or received by sessions that use its own token";
+
+/** Why the mail timeline is empty. The snapshot serves only events of the
+ *  caller's principal, so a Console whose token no listed session uses sees
+ *  nothing however busy the board is; say so, and offer the token dialog
+ *  (`tokenFix`), rather than blame audit retention. An empty roster proves
+ *  nothing, so it keeps the retention reason. */
+export function timelineEmpty(
+  scope: "peer" | "all",
+  selected: BoardAgent | null,
+  agents: BoardAgent[],
+): { text: string; tokenFix: boolean } {
+  if (scope === "peer" && selected) {
+    const name = agentName(selected);
+    if (usesConsoleToken(selected)) return { text: `No retained mail or wake event involves ${name}.`, tokenFix: false };
+    return {
+      text: `No mail involving ${name} is shown: ${name} uses a different token from this Console, and ${TOKEN_SCOPE}.`,
+      tokenFix: true,
+    };
+  }
+  if (agents.length > 0 && !agents.some(usesConsoleToken)) {
+    return {
+      text:
+        `No mail is shown because none of the sessions listed here use this Console's token: ${TOKEN_SCOPE}. ` +
+        "To see their mail, give the Console the token those sessions use.",
+      tokenFix: true,
+    };
+  }
+  return {
+    text:
+      "No retained mail or wake event involves a session that uses this Console's token. " +
+      "Events are kept for the configured audit retention.",
+    tokenFix: false,
+  };
 }
 
 /** A child entry with an agent id was listed by the SubagentStart hook; one without, by its parent. */

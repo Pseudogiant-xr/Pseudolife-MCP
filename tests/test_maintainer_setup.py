@@ -405,12 +405,19 @@ def test_a_daemon_still_running_the_old_name_is_restarted(host, tailnet, monkeyp
     assert not [c for c in host.calls if "write" in c]
 
 
-def test_the_lite_tier_writes_locally_and_names_the_restart(host, tailnet, capsys):
+def test_the_lite_tier_writes_locally_and_names_the_restart(host, tailnet, capsys, monkeypatch, tmp_path):
     host.container = None
     host.answers = ["y"]
+    # Run from a directory that is not the package's own (an older checkout,
+    # say): every local child leaves that directory off its import path.
+    monkeypatch.chdir(tmp_path)
     assert ms.main(["--local"]) == 0
     calls = [c for c in host.calls if ms.MODULE in c]
     assert calls and all(c[0] == sys.executable for c in calls)
+    safe = ["-P"] if sys.version_info >= (3, 11) else []
+    assert all(c[:len(safe) + 3] == [sys.executable, *safe, "-m", ms.MODULE] for c in calls)
+    assert ms._maintainer("local", "show") == [sys.executable, *safe, "-m", "pseudolife_memory.cli",
+                                               "maintainer", "show"]
     assert not host.named("restart") and not host.named("enrol-code")
     out = capsys.readouterr().out
     assert "restart" in out.lower() and "pseudolife-mcp maintainer setup" in out

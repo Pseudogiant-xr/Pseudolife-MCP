@@ -4,7 +4,7 @@ Canonical argv (README, docs/guide/configuration.md "Coordination
 diagnostic quickstart", docs/guide/providers.md, ops/install.*): ``doctor``
 and ``doctor --host codex|claude-code|claude-desktop|generic``, with
 ``--timeout SECONDS`` and ``--agent-state FILE``. A nonempty
-``--disposable-proof`` database defers (Rust tests cover deferrals).
+``--disposable-proof`` uses the live acceptance cell in test_doctor_proof.py.
 
 Each case runs against the stdlib fixture daemon below, bound to
 one loopback port for both arms, so the daemon URL, the shim's handshake
@@ -703,6 +703,8 @@ def cases() -> list[Case]:
     c: list[Case] = []
     add = c.append
     ok = {"/health": healthy()}
+    add(case("proof-missing-dsn", ["--disposable-proof"], daemon=False))
+    add(case("proof-saved-state-refused", ["--disposable-proof", "--agent-state", "saved.json"], daemon=False))
 
     # No daemon at the URL: no request answers, no handshake.
     add(case("unreachable", daemon=False))

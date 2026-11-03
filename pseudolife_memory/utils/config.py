@@ -1437,11 +1437,10 @@ class WakeConfig:
     the hourly ring to an idle, unparked session, is retired with that
     ring (2026-10-02, regular mail never wakes): a config.yaml that still
     names it loads, and the key does nothing (``RETIRED_WAKE_KEYS``).
-    ``authority_per_sender_per_hour`` bounds the urgent rings one sender
-    may cause as the maintainer or the maintainer's conductor for a project
-    (2026-10-03), which reopen done parks and no longer spend the plain
-    urgent allowance; the per-recipient, nightly and stagger caps still
-    apply.
+    ``authority_per_sender_per_hour`` bounds rings from a verified project
+    conductor and legacy maintainer-principal urgent mail. A conductor uses
+    maintainer delivery: no urgency/need gate, peer cap or fan-out stagger.
+    Signed maintainer mail keeps its separate per-recipient allowance.
     """
 
     per_recipient_per_hour: int = 20
@@ -1449,12 +1448,9 @@ class WakeConfig:
     nightly_total: int = 200
     fan_out_stagger_seconds: int = 30
     active_seconds: int = 60
-    # A starting value, not a measurement: twice the largest burst the board
-    # has carried (six recipients, a host fix sent to every session on
-    # 2026-09-27), so a conductor can relay one incident decision and a
-    # follow-up to every session in an hour; on 2026-10-03 such relays came
-    # back capped under the 6-an-hour urgent allowance.
-    authority_per_sender_per_hour: int = 12
+    # Starting budget, not a measurement: five broadcasts to eleven peers
+    # plus five individual follow-ups per hour (2026-11-03).
+    authority_per_sender_per_hour: int = 60
 
     def __post_init__(self) -> None:
         for name in ("per_recipient_per_hour", "urgent_per_sender_per_hour", "nightly_total",
