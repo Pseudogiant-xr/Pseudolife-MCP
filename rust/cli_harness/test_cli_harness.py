@@ -35,6 +35,60 @@ def test_equal_observations_have_no_diff():
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows 8.3 path aliases")
+@pytest.mark.parametrize("encoding", ["raw", "json", "url"])
+@pytest.mark.parametrize("reported", ["short", "long"])
+def test_home_tokens_accept_long_paths_under_short_temp(tmp_path, encoding, reported):
+    import ctypes
+    import json
+    from urllib.parse import quote
+    from cli_harness import runner
+
+    temp = tmp_path / "long temporary directory"
+    temp.mkdir()
+    short_path = ctypes.windll.kernel32.GetShortPathNameW
+    short_path.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_uint32]
+    short_path.restype = ctypes.c_uint32
+    buffer = ctypes.create_unicode_buffer(32768)
+    length = short_path(str(temp), buffer, len(buffer))
+    assert 0 < length < len(buffer)
+    alias = Path(buffer.value)
+    if str(alias).casefold() == str(temp).casefold():
+        pytest.skip("temporary volume does not create 8.3 aliases")
+    assert alias.samefile(temp)
+    encode = {"raw": lambda s: s, "json": lambda s: json.dumps(s)[1:-1],
+              "url": lambda s: quote(s, safe="")}[encoding]
+    observations = []
+    for pid in (101, 202):
+        home = alias / f"pl-cli-diff-{pid}" / "h"
+        home.mkdir(parents=True)
+        long_home = str(home.resolve())
+        payload = (encode(long_home if reported == "long" else str(home))
+                   + "/bank/backups/fixture").encode()
+        unrelated = encode(str(temp / "another-home" / "backup")).encode()
+        observed = obs(stdout=payload, stderr=payload, files={"path": payload})
+        observed["home"] = str(home)
+        observed["files"]["link"] = "link:" + payload.decode()
+        observed["requests"] = [{"target": payload.decode(), "body": payload.decode()}]
+        observed["files"]["unrelated"] = "file:" + b64(unrelated)
+        # Live comparison runs after teardown; only the temp ancestor remains.
+        home.rmdir()
+        home.parent.rmdir()
+        normalize.home_tokens(observed, str(home))
+        expected = b"{HOME}/bank/backups/fixture"
+        assert core.decode(observed, "stdout") == expected
+        assert core.decode(observed, "stderr") == expected
+        assert observed["files"] == {"path": "file:" + b64(expected),
+                                     "unrelated": "file:" + b64(unrelated),
+                                     "link": "link:" + expected.decode()}
+        assert observed["requests"] == [{"target": expected.decode(), "body": expected.decode()}]
+        # Recording must already have removed the whole disposable path before
+        # host-identifier scrubbing; differing process ids cannot enter goldens.
+        runner._scrub(observed, [(str(temp.resolve()).encode(), b"{USER_HOME}")])
+        observations.append(core.decode(observed, "stdout"))
+    assert observations[0] == observations[1]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows 8.3 path aliases")
 @pytest.mark.parametrize("short_side", ["home", "backup"])
 def test_migrate_flat_backup_paths_accept_short_aliases(tmp_path, monkeypatch, short_side):
     import ctypes
