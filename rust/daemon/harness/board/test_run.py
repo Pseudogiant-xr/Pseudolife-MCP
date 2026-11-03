@@ -32,6 +32,28 @@ def test_mail_records_both_sides_of_activity_and_checks_the_decisions():
             step.save(None, {"wake": {"decision": "hinted", "reason": "active"}})
 
 
+@pytest.mark.parametrize("name", ["conductor-wake", "conductor-wake-fences"])
+def test_conductor_scenarios_reject_identically_wrong_wake_receipts(name):
+    """Equal refusals on both arms must not masquerade as successful delivery."""
+    steps = run.S.SCENARIOS[name]().steps()
+    checks = [step for step in steps if hasattr(step, "check")]
+    assert checks
+    for step in checks:
+        with pytest.raises(AssertionError):
+            step.check(None, None, {"status": 200, "json": {
+                "wake": {"decision": "hinted", "reason": "active"}}}, None)
+
+
+def test_conductor_expiry_fixture_preserves_literal_and_rejects_other_old_times():
+    from board.conductor_wake import ExpiredGrantNormalizer
+    from board.norm import Windows
+
+    norm = ExpiredGrantNormalizer(Windows())
+    assert norm.value(1, "expires_at") == 1
+    assert norm.value(2, "expires_at") == 2
+    assert norm.problems
+
+
 @pytest.mark.parametrize("name,status,body", [
     ("coordination hub (authenticated)", 401, {"error": "agent_required"}),
     ("api agents coordination view", 200, {"agents": []}),
