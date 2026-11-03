@@ -99,6 +99,38 @@ def _shell_program(shell):
     return shutil.which(shell)
 
 
+def test_powershell_python_discovery_does_not_autoload_modules(tmp_path):
+    wrapper = Wrapper(tmp_path, "pwsh")
+    modules = tmp_path / "modules"
+    module = modules / "FixturePython"
+    module.mkdir(parents=True)
+    loaded = tmp_path / "module-loaded"
+    literal = str(loaded).replace("'", "''")
+    (module / "FixturePython.psd1").write_text(
+        "@{ ModuleVersion='1.0'; RootModule='FixturePython.psm1'; FunctionsToExport=@('python') }",
+        encoding="utf-8")
+    (module / "FixturePython.psm1").write_text(
+        f"[IO.File]::WriteAllText('{literal}', 'loaded')\n"
+        "function python { $global:LASTEXITCODE = 0 }\n", encoding="utf-8")
+    wrapper.env["PSModulePath"] = str(modules)
+    result = wrapper.run()
+    assert not loaded.exists(), "interpreter discovery imported an unrelated PowerShell module"
+    assert result.returncode == 7, result.stderr
+    assert wrapper.native_args.exists()
+
+
+def test_powershell_python_discovery_keeps_literal_path_entries(tmp_path):
+    wrapper = Wrapper(tmp_path, "pwsh")
+    literal = tmp_path / "path [with] spaces"
+    wrapper.bin.rename(literal)
+    wrapper.bin = literal
+    wrapper.env["PATH"] = str(literal)
+    wrapper.python()
+    result = wrapper.run()
+    assert result.returncode == 5, result.stderr
+    assert wrapper.python_args.exists()
+
+
 class Wrapper:
     """A closed PATH with Python oracle drivers standing in for both runtimes."""
 

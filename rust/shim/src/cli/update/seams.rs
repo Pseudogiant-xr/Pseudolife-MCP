@@ -75,6 +75,11 @@ pub(crate) fn run_cli(
     timeout: u64,
     stream: bool,
 ) -> (i32, String) {
+    #[cfg(unix)]
+    let _signals = match super::signals::Guard::new() {
+        Ok(guard) => guard,
+        Err(_) => return (1, "cannot install command cancellation handlers".into()),
+    };
     let _ = std::io::stdout().flush();
     let _ = std::io::stderr().flush();
     block_on(async {
@@ -83,8 +88,15 @@ pub(crate) fn run_cli(
         };
         use process_wrap::tokio::{CommandWrap, KillOnDrop};
         use tokio::io::AsyncReadExt;
+        #[cfg(windows)]
+        let job = match super::windows_job::Job::new() {
+            Ok(job) => job,
+            Err(_) => return (1, "cannot contain the requested command".into()),
+        };
         let mut command = CommandWrap::with_new(program, |command| {
             command.args(&argv[1..]).stdin(Stdio::null());
+            #[cfg(windows)]
+            command.creation_flags(windows_sys::Win32::System::Threading::CREATE_SUSPENDED);
             if let Some(env) = env {
                 command.env_clear().envs(env);
             }
@@ -95,8 +107,6 @@ pub(crate) fn run_cli(
             }
         });
         command.wrap(KillOnDrop);
-        #[cfg(windows)]
-        command.wrap(process_wrap::tokio::JobObject);
         #[cfg(unix)]
         command.wrap(process_wrap::tokio::ProcessGroup::leader());
         let mut child = match command.spawn() {
@@ -113,6 +123,17 @@ pub(crate) fn run_cli(
                 );
             }
         };
+        #[cfg(windows)]
+        if child
+            .try_inner_child()
+            .ok_or_else(|| std::io::Error::other("no native child"))
+            .and_then(|child| job.assign(child))
+            .is_err()
+        {
+            let _ = child.start_kill();
+            let _ = child.wait().await;
+            return (1, "cannot contain the requested command".into());
+        }
         let mut stdout = child.stdout().take();
         let mut stderr = child.stderr().take();
         let (mut out, mut err) = (Vec::new(), Vec::new());
@@ -134,8 +155,29 @@ pub(crate) fn run_cli(
             )?;
             Ok::<_, std::io::Error>(status)
         };
-        match tokio::time::timeout(Duration::from_secs(timeout), wait).await {
+        #[cfg(unix)]
+        let result = tokio::select! {
+            biased;
+            signal = super::signals::wait() => {
+                // The terminal only signals our foreground group. Forward to
+                // the isolated child group, give it a bounded cleanup window,
+                // then kill any remaining descendants before releasing the lock.
+                let _ = child.signal(signal);
+                let _ = tokio::time::timeout(Duration::from_secs(5), child.wait()).await;
+                let _ = child.start_kill();
+                let _ = tokio::time::timeout(Duration::from_secs(5), child.wait()).await;
+                return (128 + signal, "command interrupted".into());
+            }
+            result = tokio::time::timeout(Duration::from_secs(timeout), wait) => result,
+        };
+        #[cfg(not(unix))]
+        let result = tokio::time::timeout(Duration::from_secs(timeout), wait).await;
+        match result {
             Ok(Ok(status)) => {
+                #[cfg(windows)]
+                if job.complete().is_err() {
+                    return (1, "cannot release completed command helpers".into());
+                }
                 let code = status.code().unwrap_or(1);
                 let bytes = if code != 0 && out.is_empty() {
                     &err
@@ -150,6 +192,8 @@ pub(crate) fn run_cli(
                 // Kill the owned group/job even if its leader exited while a
                 // descendant kept a pipe open. Dropping Tokio Child alone only
                 // kills that leader on Unix.
+                #[cfg(windows)]
+                drop(job);
                 let _ = child.start_kill();
                 let _ = tokio::time::timeout(Duration::from_secs(5), child.wait()).await;
                 (

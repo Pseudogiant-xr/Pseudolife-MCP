@@ -96,12 +96,28 @@ if ($Native -or $env:PSEUDOLIFE_NATIVE_UPDATE -eq "1") {
 # A python that answers (the Store's `python` stub on PATH exits 9009), 3.10 or newer.
 $python = $null
 $pyArgs = @()
+$extensions = if ($IsWindows) { $env:PATHEXT -split ';' } else { @('') }
 foreach ($candidate in @("python", "python3", "py")) {
-    if (-not (Get-Command $candidate -ErrorAction SilentlyContinue)) { continue }
+    # Interpreter discovery must not scan/import PowerShell modules exporting a
+    # same-named function, especially when no Python executable is installed.
+    # Qualified paths keep Get-Command out of module discovery while preserving
+    # PowerShell's platform executable-extension and permission checks.
+    $application = $null
+    foreach ($directory in ($env:PATH -split [IO.Path]::PathSeparator)) {
+        if (-not $directory) { continue }
+        foreach ($extension in $extensions) {
+            $path = [IO.Path]::Combine($directory.Trim('"'), $candidate + $extension)
+            if (-not [IO.File]::Exists($path)) { continue }
+            $application = Get-Command $path -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($application) { break }
+        }
+        if ($application) { break }
+    }
+    if (-not $application) { continue }
     $probeArgs = if ($candidate -eq "py") { @("-3") } else { @() }
     try {
-        & $candidate @probeArgs -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' 2>$null
-        if ($LASTEXITCODE -eq 0) { $python = $candidate; $pyArgs = $probeArgs; break }
+        & $application.Source @probeArgs -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' 2>$null
+        if ($LASTEXITCODE -eq 0) { $python = $application.Source; $pyArgs = $probeArgs; break }
     } catch { continue }
 }
 if (-not $python) {

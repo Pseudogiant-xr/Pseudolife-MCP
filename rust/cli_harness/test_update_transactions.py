@@ -17,6 +17,7 @@ import subprocess
 import sys
 import tarfile
 import threading
+import time
 
 import pytest
 
@@ -29,6 +30,147 @@ FILES = ("docker-compose.yml", "docker-compose.ghcr.yml", "docker-compose.rust-d
 def _native_binary():
     candidate = os.environ.get("PSEUDOLIFE_UPDATE_TEST_BINARY") or os.environ.get("PSEUDOLIFE_RUST_BINARY")
     return str(Path(candidate).resolve()) if candidate else None
+
+
+def _fallback_fixture(tmp_path, source):
+    """Use explicit legacy delegation to exercise the shipped process boundary."""
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("native candidate required")
+    package = tmp_path / "pseudolife_memory"
+    package.mkdir()
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "cli.py").write_text(source, encoding="utf-8")
+    env = {k: v for k, v in os.environ.items() if not k.startswith("PSEUDOLIFE_")}
+    env.update(PYTHONPATH=str(tmp_path), HOME=str(tmp_path), USERPROFILE=str(tmp_path),
+               PSEUDOLIFE_MCP_DATA_DIR=str(tmp_path / "data"))
+    return subprocess.Popen([binary, "update", "--python-runtime", sys.executable],
+                            cwd=tmp_path, env=env, stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL)
+
+
+def _await_file(path, process):
+    deadline = time.monotonic() + 30
+    while not path.exists() and time.monotonic() < deadline:
+        assert process.poll() is None, "fixture exited before readiness"
+        time.sleep(0.02)
+    assert path.exists(), "fixture did not become ready"
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="POSIX process-group cancellation")
+@pytest.mark.parametrize("signal_name", ["SIGINT", "SIGTERM", "SIGHUP"])
+@pytest.mark.parametrize("resistant", [False, True])
+def test_native_update_forwards_cancellation_to_owned_descendants(tmp_path, signal_name, resistant):
+    import signal
+
+    child = tmp_path / "child.py"
+    if resistant:
+        (tmp_path / "resist").touch()
+    child.write_text('''import os, pathlib, signal, time
+root = pathlib.Path(__file__).parent
+def stop(signum, frame):
+    (root / "child-signal").write_text(str(signum))
+    if (root / "resist").exists():
+        return
+    raise SystemExit(0)
+for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+    signal.signal(signum, stop)
+(root / "ready").write_text(str(os.getpid()))
+deadline = time.monotonic() + 60
+while not (root / "stop").exists() and time.monotonic() < deadline:
+    time.sleep(.02)
+''', encoding="utf-8")
+    proc = _fallback_fixture(tmp_path, '''import pathlib, signal, subprocess, sys, time
+root = pathlib.Path.cwd()
+child = subprocess.Popen([sys.executable, str(root / "child.py")])
+def stop(signum, frame):
+    child.wait(timeout=10)
+    raise SystemExit(128 + signum)
+for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+    signal.signal(signum, stop)
+deadline = time.monotonic() + 60
+while not (root / "stop").exists() and time.monotonic() < deadline:
+    time.sleep(.02)
+child.wait(timeout=10)
+''')
+    try:
+        _await_file(tmp_path / "ready", proc)
+        proc.send_signal(getattr(signal, signal_name))
+        proc.wait(timeout=15)
+        assert (tmp_path / "child-signal").exists(), "updater abandoned its child group"
+        assert int((tmp_path / "child-signal").read_text()) == getattr(signal, signal_name)
+        assert proc.returncode in (-getattr(signal, signal_name), 128 + getattr(signal, signal_name))
+        status = Path("/proc") / (tmp_path / "ready").read_text() / "stat"
+        assert not status.exists() or status.read_text().split(")", 1)[1].split()[0] == "Z"
+    finally:
+        (tmp_path / "stop").touch()
+        if proc.poll() is None:
+            proc.kill()
+        proc.wait(timeout=15)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows Job Object completion")
+def test_native_update_does_not_wait_for_successful_background_helpers(tmp_path):
+    proc = _fallback_fixture(tmp_path, '''import pathlib, subprocess, sys, time
+source = """import pathlib, time
+root = pathlib.Path.cwd()
+(root / 'helper-ready').touch()
+deadline = time.monotonic() + 60
+while not (root / 'stop').exists() and time.monotonic() < deadline:
+    (root / 'heartbeat').write_text(str(time.monotonic()))
+    time.sleep(.05)
+"""
+subprocess.Popen([sys.executable, '-c', source], stdin=subprocess.DEVNULL,
+                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+deadline = time.monotonic() + 30
+while not pathlib.Path('helper-ready').exists() and time.monotonic() < deadline:
+    time.sleep(.02)
+pathlib.Path('ready').touch()
+raise SystemExit(7)
+''')
+    try:
+        _await_file(tmp_path / "ready", proc)
+        assert proc.wait(timeout=10) == 7
+        before = (tmp_path / "heartbeat").read_text()
+        deadline = time.monotonic() + 5
+        while (tmp_path / "heartbeat").read_text() == before and time.monotonic() < deadline:
+            time.sleep(.02)
+        assert (tmp_path / "heartbeat").read_text() != before, "completed command killed its helper"
+    finally:
+        (tmp_path / "stop").touch()
+        if proc.poll() is None:
+            proc.kill()
+        proc.wait(timeout=15)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows Git fsmonitor background service")
+def test_native_update_preserves_git_fsmonitor(tmp_path):
+    git = shutil.which("git")
+    if not git:
+        pytest.skip("Git required")
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    env.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull)
+    subprocess.run([git, "init", "-q", str(tmp_path)], env=env, check=True, timeout=15)
+    subprocess.run([git, "-C", str(tmp_path), "config", "core.fsmonitor", "true"],
+                   env=env, check=True, timeout=15)
+    proc = _fallback_fixture(tmp_path, f'''import os, pathlib, subprocess
+env = {{k:v for k,v in os.environ.items() if not k.startswith('GIT_')}}
+env.update(GIT_CONFIG_NOSYSTEM='1', GIT_CONFIG_GLOBAL=os.devnull)
+subprocess.run([{git!r}, 'status', '--porcelain'], env=env, check=True, timeout=15)
+pathlib.Path('ready').touch()
+''')
+    try:
+        _await_file(tmp_path / "ready", proc)
+        assert proc.wait(timeout=10) == 0
+        status = subprocess.run([git, "-C", str(tmp_path), "fsmonitor--daemon", "status"],
+                                env=env, capture_output=True, timeout=15)
+        assert status.returncode == 0, "completed git status lost its fsmonitor daemon"
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+        proc.wait(timeout=15)
+        subprocess.run([git, "-C", str(tmp_path), "fsmonitor--daemon", "stop"],
+                       env=env, capture_output=True, timeout=15)
 
 
 def test_native_transactions_use_the_standard_lane_candidate(monkeypatch):
@@ -414,6 +556,12 @@ def test_optional_test_login_uses_selected_project_postgres(tmp_path):
     if not binary:
         pytest.skip("set PSEUDOLIFE_RUST_BINARY to the built native CLI")
     with host(tmp_path, mode="checkout") as (repo, env, state_path):
+        if os.name == "nt":
+            # test-login uses bare `docker`, unlike update's explicit override.
+            # Rust searches its executable directory and System32 before the
+            # inherited PATH; hosted Windows has Docker in System32. Keep this
+            # copied candidate beside our stub so no host Docker can resolve.
+            binary = shutil.copyfile(binary, Path(env["PSEUDOLIFE_DOCKER"]).with_name(Path(binary).name))
         env["PSEUDOLIFE_TEST_PG_HOST_PORT"] = "127.0.0.1:5433"
         result = run_arm(repo, env, binary, ["--checkout", str(repo), "--json", "--no-cache-prune"])
         assert result.returncode == 0, result.stdout + result.stderr

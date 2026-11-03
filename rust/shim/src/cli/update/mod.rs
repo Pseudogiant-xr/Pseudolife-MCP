@@ -6,7 +6,11 @@ mod options;
 mod release;
 mod seams;
 mod shadow;
+#[cfg(unix)]
+mod signals;
 mod unattended;
+#[cfg(windows)]
+mod windows_job;
 
 use super::lease::lock as os_lock;
 pub(crate) use options::Options;
