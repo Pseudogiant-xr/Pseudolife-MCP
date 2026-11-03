@@ -185,7 +185,8 @@ def proof(binary, root, fixture, launcher_exe, provider, scenario="all"):
                      "ProcessIdentityChanged", "QueryInitialRetry", "QueryRollbackRetry", "QueryRemovalRetry",
                      "QueryFailure", "QueryAccessDenied", "QueryNamedAbsent", "DisabledReinstall",
                      "QueryStopFailure", "QueryRemovalFailure", "ForeignRemoval", "ForeignLegacy", "ForeignSibling",
-                     "ForeignUninstallLegacy", "ForeignNativeArguments", "CustomLauncherRemoval", "ForeignEncodedArguments"):
+                     "ForeignUninstallLegacy", "ForeignNativeArguments", "CustomLauncherRemoval", "ForeignEncodedArguments",
+                     "ForeignNativeBasename", "DetachedClaude", "DetachedCodex", "DetachedCodexCli"):
             checked(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(Path(__file__).with_name("scheduler_failures.ps1")),
                      "-Source", str(run.ROOT / "rust/shim/src/extractor_shim/autostart.ps1"), "-Root", str(root), "-Case", case], step=case)
     if not windows and scenario in ("all", "preflight"):

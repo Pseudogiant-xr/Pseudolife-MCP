@@ -1,4 +1,4 @@
-param([string]$Source, [string]$Root, [ValidateSet('PasswordRollback','LegacyMigration','LegacyJuly','LegacyDetached','DelayedStop','DelayedRemoval','DeleteRetry','DeleteFailure','StopTimeout','RemovalTimeout','ProcessExitRace','ProcessStopFailure','ProcessIdentityChanged','QueryInitialRetry','QueryRollbackRetry','QueryRemovalRetry','QueryFailure','QueryAccessDenied','QueryNamedAbsent','DisabledReinstall','QueryStopFailure','QueryRemovalFailure','ForeignRemoval','ForeignLegacy','ForeignSibling','ForeignUninstallLegacy','ForeignNativeArguments','CustomLauncherRemoval','ForeignEncodedArguments')][string]$Case)
+param([string]$Source, [string]$Root, [ValidateSet('PasswordRollback','LegacyMigration','LegacyJuly','LegacyDetached','DelayedStop','DelayedRemoval','DeleteRetry','DeleteFailure','StopTimeout','RemovalTimeout','ProcessExitRace','ProcessStopFailure','ProcessIdentityChanged','QueryInitialRetry','QueryRollbackRetry','QueryRemovalRetry','QueryFailure','QueryAccessDenied','QueryNamedAbsent','DisabledReinstall','QueryStopFailure','QueryRemovalFailure','ForeignRemoval','ForeignLegacy','ForeignSibling','ForeignUninstallLegacy','ForeignNativeArguments','CustomLauncherRemoval','ForeignEncodedArguments','ForeignNativeBasename','DetachedClaude','DetachedCodex','DetachedCodexCli')][string]$Case)
 $ErrorActionPreference = 'Stop'
 # Every scheduler/process operation is mocked; these cases need no credentials,
 # real registrations, listeners or process termination.
@@ -29,6 +29,63 @@ $global:r6newProcess = $null
 $global:r6queryFaults = 0
 $global:r6startupFailed = $false
 $global:r6enabled = $false
+if ($Case -in @('DetachedClaude','DetachedCodex','DetachedCodexCli')) {
+    # Actual detached actions immediately before 5de8b597f introduced the
+    # ops/.env runner. Keep both providers' flags and quoting from that source.
+    $repo = Join-Path $directory 'old checkout'
+    $PythonExe = Join-Path $repo '.venv\Scripts\python.exe'
+    $Port = 12345
+    $LogFile = Join-Path $directory 'shim.log'
+    if ($Case -eq 'DetachedClaude') {
+        $provider = 'claude'
+        $Model = 'claude-opus-5-5'
+        $promptPath = Join-Path $repo 'evals\prompts\sonnet_extractor_v5.md'
+        $innerCmd = "`"$PythonExe`" `"$repo\evals\claude_shim.py`" --port $Port " +
+                    "--model $Model --system-prompt-file `"$promptPath`""
+        $historicalName = 'Pseudolife Claude Shim'
+    } else {
+        $provider = 'codex'
+        $Model = 'gpt-5.6-terra'
+        $HealthTtl = 1800
+        $CodexCli = if ($Case -eq 'DetachedCodexCli') { Join-Path $directory 'provider stub\codex.exe' } else { '' }
+        $innerCmd = "`"$PythonExe`" `"$repo\evals\codex_shim.py`" --port $Port " +
+                    "--model $Model --health-ttl $HealthTtl"
+        if ($CodexCli) { $innerCmd += " --cli `"$CodexCli`"" }
+        $historicalName = 'Pseudolife Codex Shim'
+    }
+    $cmdArgs = "/c `"$innerCmd >> `"`"$LogFile`"`" 2>&1`""
+    $inner = @"
+`$psi = New-Object System.Diagnostics.ProcessStartInfo
+`$psi.FileName = 'cmd.exe'
+`$psi.Arguments = '$($cmdArgs -replace "'", "''")'
+`$psi.UseShellExecute = `$false
+`$psi.CreateNoWindow = `$true
+`$psi.WorkingDirectory = '$repo'
+[System.Diagnostics.Process]::Start(`$psi) | Out-Null
+"@
+    $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($inner))
+    $task = [PSCustomObject]@{TaskName=$historicalName;Actions=@([PSCustomObject]@{Execute='powershell.exe';Arguments="-NoProfile -WindowStyle Hidden -EncodedCommand $encoded"})}
+    $ast = [Management.Automation.Language.Parser]::ParseFile($Source, [ref]$null, [ref]$null)
+    foreach ($functionName in @('Test-SamePath','Get-NativeTaskCode','Get-RegisteredInvocation','Get-OwnedTaskProcesses')) {
+        $definition = $ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $functionName }, $true)
+        Invoke-Expression $definition.Extent.Text
+    }
+    $invocations = @(Get-RegisteredInvocation $task)
+    $expectedScript = "$repo\evals\${provider}_shim.py"
+    if ($invocations.Count -ne 1 -or $invocations[0].PythonScript -ne $expectedScript -or ($invocations[0].Ports -join ',') -ne "$Port") { throw "$Case did not identify the historical script and port exactly" }
+    $global:r6historicalProcess = [PSCustomObject]@{ProcessId=4242;ParentProcessId=1;CreationDate=[datetime]'2026-01-01';ExecutablePath=$PythonExe;CommandLine=$innerCmd}
+    $global:r6otherCheckout = $global:r6historicalProcess.PSObject.Copy()
+    $global:r6otherCheckout.ProcessId = 4243
+    $global:r6otherCheckout.CommandLine = $innerCmd.Replace($repo, "$repo-other")
+    $global:r6otherPort = $global:r6historicalProcess.PSObject.Copy()
+    $global:r6otherPort.ProcessId = 4244
+    $global:r6otherPort.CommandLine = $innerCmd.Replace('--port 12345', '--port 12346')
+    function Get-CimInstance { @($global:r6historicalProcess, $global:r6otherCheckout, $global:r6otherPort) }
+    $owned = @(Get-OwnedTaskProcesses $task)
+    if (($owned.ProcessId -join ',') -ne '4242') { throw "$Case did not isolate the historical listener from other checkouts and ports" }
+    Write-Output "$Case passed without real scheduler operations"
+    return
+}
 if ($Case -in @('ProcessExitRace','ProcessStopFailure','ProcessIdentityChanged')) {
     $ast = [Management.Automation.Language.Parser]::ParseFile($Source, [ref]$null, [ref]$null)
     $stopper = $ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Stop-CapturedProcess' }, $true)
@@ -66,7 +123,7 @@ if ($Case -in @('ProcessExitRace','ProcessStopFailure','ProcessIdentityChanged')
 }
 $taskName = 'fixture-native'
 if ($Case -in @('CustomLauncherRemoval','ForeignEncodedArguments')) {
-    $custom = Join-Path $directory 'custom-launcher.exe'
+    $custom = if ($Case -eq 'ForeignEncodedArguments') { $writer } else { Join-Path $directory 'custom-launcher.exe' }
     $arguments = 'extractor-shim claude --env-file "' + $settings + '"'
     $inner = @"
 `$psi = New-Object System.Diagnostics.ProcessStartInfo
@@ -88,9 +145,10 @@ exit `$process.ExitCode
     $global:r6fixtureTask = [PSCustomObject]@{ TaskName=$taskName; State='Ready'; Actions=@([PSCustomObject]@{Execute=$writer;Arguments=('extractor-shim claude --env-file "' + $settings + '"')}) }
     $global:r6legacyTask = [PSCustomObject]@{ TaskName='Pseudolife Sonnet Shim'; State='Ready'; Actions=@([PSCustomObject]@{Execute='foreign.exe';Arguments='--unrelated'}) }
     $expectedFailure = 'not a recognized shim registration'
-} elseif ($Case -eq 'ForeignNativeArguments') {
+} elseif ($Case -in @('ForeignNativeArguments','ForeignNativeBasename')) {
     $global:r6fixtureTask = [PSCustomObject]@{ TaskName=$taskName; State='Ready'; Actions=@([PSCustomObject]@{Execute='foreign.exe';Arguments=('extractor-shim claude --env-file "' + $settings + '"')}) }
     $expectedFailure = 'not a recognized shim registration'
+    if ($Case -eq 'ForeignNativeBasename') { $global:r6fixtureTask.Actions[0].Execute = Join-Path $directory 'foreign/pseudolife-mcp.exe' }
 } elseif ($Case -eq 'ForeignRemoval') {
     $global:r6fixtureTask = [PSCustomObject]@{ TaskName=$taskName; State='Ready'; Actions=@([PSCustomObject]@{Execute='foreign.exe';Arguments='--unrelated'}) }
     $expectedFailure = 'not a recognized shim registration'
@@ -102,13 +160,13 @@ exit `$process.ExitCode
     $global:r6legacyTask = [PSCustomObject]@{ TaskName='Pseudolife Sonnet Shim'; State='Ready'; Actions=@([PSCustomObject]@{Execute='foreign.exe';Arguments='--unrelated'}) }
     $expectedFailure = 'not a recognized shim registration'
 } elseif ($Case -eq 'PasswordRollback') {
-    $global:r6fixtureTask = [PSCustomObject]@{ TaskName=$taskName; State='Ready'; Principal=[PSCustomObject]@{LogonType='Password'}; Actions=@([PSCustomObject]@{Execute='pseudolife-mcp.exe';Arguments=('extractor-shim claude --env-file "' + $settings + '"')}) }
+    $global:r6fixtureTask = [PSCustomObject]@{ TaskName=$taskName; State='Ready'; Principal=[PSCustomObject]@{LogonType='Password'}; Actions=@([PSCustomObject]@{Execute=$writer;Arguments=('extractor-shim claude --env-file "' + $settings + '"')}) }
     $expectedFailure = 'original fixture startup failure'
 } elseif ($Case -in @('LegacyMigration','LegacyJuly','LegacyDetached')) {
     $taskName = 'Pseudolife Claude Shim'
     $arguments = 'extractor-shim claude --env-file "' + $settings + '"'
-    $global:r6legacyTask = [PSCustomObject]@{ TaskName='Pseudolife Sonnet Shim'; State='Running'; Actions=@([PSCustomObject]@{Execute='pseudolife-stdio.exe';Arguments=$arguments}) }
-    $global:r6legacyProcess = [PSCustomObject]@{ ProcessId=4242; ParentProcessId=1; CreationDate=[datetime]'2026-01-01'; ExecutablePath='pseudolife-stdio.exe'; CommandLine=('pseudolife-stdio.exe ' + $arguments) }
+    $global:r6legacyTask = [PSCustomObject]@{ TaskName='Pseudolife Sonnet Shim'; State='Running'; Actions=@([PSCustomObject]@{Execute=$writer;Arguments=$arguments}) }
+    $global:r6legacyProcess = [PSCustomObject]@{ ProcessId=4242; ParentProcessId=1; CreationDate=[datetime]'2026-01-01'; ExecutablePath=$writer; CommandLine=('"' + $writer + '" ' + $arguments) }
     if ($Case -ne 'LegacyMigration') {
         $repo = Join-Path $directory 'old checkout'
         $PythonExe = Join-Path $repo '.venv\Scripts\python.exe'
@@ -254,7 +312,7 @@ function Invoke-WebRequest {
 }
 function Write-Warning { param($Message) $global:r6warningText += $Message }
 $config = Join-Path $directory 'registration.json'
-@{ Native=$writer;OwnerExe=$writer;Kind='claude';Port=12345;Host='127.0.0.1';Name=$taskName;EnvFile=$settings;LogonType='S4U';Timeout=1;Remove=($Case -in @('QueryNamedAbsent','ForeignRemoval','ForeignUninstallLegacy','ForeignNativeArguments','CustomLauncherRemoval','ForeignEncodedArguments'));ReplaceSibling=($Case -eq 'ForeignSibling');ConfigArgs=@();ServeArgs=@('extractor-shim','claude','--env-file',$settings) } |
+@{ Native=$writer;OwnerExe=$writer;Kind='claude';Port=12345;Host='127.0.0.1';Name=$taskName;EnvFile=$settings;LogonType='S4U';Timeout=1;Remove=($Case -in @('QueryNamedAbsent','ForeignRemoval','ForeignUninstallLegacy','ForeignNativeArguments','CustomLauncherRemoval','ForeignEncodedArguments','ForeignNativeBasename'));ReplaceSibling=($Case -eq 'ForeignSibling');ConfigArgs=@();ServeArgs=@('extractor-shim','claude','--env-file',$settings) } |
     ConvertTo-Json | Set-Content -LiteralPath $config -Encoding UTF8
 $caught = ''
 try { & $Source -ConfigPath $config } catch { $caught = $_.Exception.Message }
@@ -262,7 +320,7 @@ if ($Case -eq 'CustomLauncherRemoval') {
     if ($caught -or $global:r6fixtureTask -or $global:r6deleteAttempts -ne 1 -or ($global:r6stoppedPids -join ',') -ne '4242') { throw "custom native launcher was not removed: $caught" }
     Write-Output "$Case passed without real scheduler operations"
     return
-} elseif ($Case -in @('ForeignRemoval','ForeignLegacy','ForeignSibling','ForeignUninstallLegacy','ForeignNativeArguments','ForeignEncodedArguments')) {
+} elseif ($Case -in @('ForeignRemoval','ForeignLegacy','ForeignSibling','ForeignUninstallLegacy','ForeignNativeArguments','ForeignEncodedArguments','ForeignNativeBasename')) {
     if ($caught -notlike '*not a recognized shim registration*' -or $global:r6registered -or $global:r6deleteAttempts -or $global:r6stoppedLegacy -or $global:r6stoppedPids.Count -or [IO.File]::ReadAllText($settings) -ne 'before') { throw "foreign registration was changed or not refused: $caught" }
     Write-Output "$Case passed without real scheduler operations"
     return

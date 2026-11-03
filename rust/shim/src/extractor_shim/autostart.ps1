@@ -44,7 +44,9 @@ function Get-RegisteredInvocation($task) {
         $exe = $item.Execute
         $arguments = $item.Arguments
         $nativeWrapper = $false
+        $encodedWrapper = $false
         if ($arguments -match '-EncodedCommand ([A-Za-z0-9+/=]+)') {
+            $encodedWrapper = $true
             if ([IO.Path]::GetFileName($exe) -notin @('powershell.exe', 'pwsh.exe')) { continue }
             try {
                 $code = [Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($Matches[1]))
@@ -71,9 +73,10 @@ function Get-RegisteredInvocation($task) {
             } catch { continue }
         }
         if ([IO.Path]::GetFileName($exe) -eq 'cmd.exe') {
-            # The later Sonnet installer detached cmd.exe with this quoted
-            # redirection template. Only its Python script and port own a child.
-            if ($arguments -match '^/c ""([^"]+)" "([^"]+[\\/]evals[\\/]sonnet_shim\.py)" --port (\d+) --system-prompt-file "[^"]+" >> ""[^"]+"" 2>&1"$') {
+            # The later Sonnet, Claude and Codex installers detached cmd.exe
+            # with these quoted flags/redirection templates. Only the recorded
+            # Python script and port own a child; model/CLI flags are not run.
+            if ($arguments -match '^/c ""([^"]+)" "([^"]+[\\/]evals[\\/](?:sonnet|claude|codex)_shim\.py)" --port (\d+) (?:(?:--model [^"\s&|<>]+ )?--system-prompt-file "[^"]+"|--model [^"\s&|<>]+ --health-ttl \d+(?: --cli "[^"]+")?) >> ""[^"]+"" 2>&1"$') {
                 $script = $Matches[2]
                 $scriptPort = [int]$Matches[3]
                 if ([IO.Path]::GetFileName($Matches[1]) -match '^python(?:w|\d+(?:\.\d+)*)?\.exe$') {
@@ -85,8 +88,8 @@ function Get-RegisteredInvocation($task) {
         if ($arguments -match '^"?extractor-shim"?\s+"?(claude|codex)"?\s+"?--env-file"?\s+"([^"]+)"') {
             $provider = $Matches[1]
             $settingsFile = $Matches[2]
-            if ($nativeWrapper -or [IO.Path]::GetFileName($exe) -in @('pseudolife-mcp.exe', 'pseudolife-stdio.exe') -or
-                (Test-SamePath $exe $native) -or (Test-SamePath $exe $ownerExe)) {
+            if ($nativeWrapper -or (-not $encodedWrapper -and
+                ((Test-SamePath $exe $native) -or (Test-SamePath $exe $ownerExe)))) {
                 [PSCustomObject]@{ Exe=$exe; Kind=$provider; EnvFile=$settingsFile }
             }
         } elseif ($arguments -match '^"?(.+?[\\/]ops[\\/]shim_autostart\.py)"?\s+run\s+(claude|codex)(\s|$)') {
