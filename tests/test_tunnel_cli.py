@@ -104,7 +104,7 @@ def test_failed_key_renewal_preserves_profile_key_and_proof(isolated, monkeypatc
     candidate = token.parent / 'candidate'
     private_write(candidate, b'candidate-fixture-key')
     from pseudolife_memory import tunnel_runtime
-    monkeypatch.setattr(tunnel_runtime, 'stable_command', lambda: ['fixture-shim'])
+    monkeypatch.setattr(tunnel_runtime, 'stable_command', lambda saved=False: ['fixture-shim'])
     monkeypatch.setattr(tunnel_runtime, 'verify_key', lambda *args: False)
     assert cli.main(['setup', '--profile-dir', str(store.root), '--key-file', str(candidate),
                      '--key-expires-at', '2026-12-01T00:00:00Z']) == 2
@@ -267,7 +267,7 @@ def test_update_transport_failure_is_sanitized(isolated, monkeypatch):
                        tunnel_id='tunnel_0123', state='ready'))
     store.set_key('dot', 'fixture-tunnel-key')
     from pseudolife_memory import tunnel_runtime
-    monkeypatch.setattr(tunnel_runtime, 'stable_command', lambda: ['fixture-shim'])
+    monkeypatch.setattr(tunnel_runtime, 'stable_command', lambda saved=False: ['fixture-shim'])
     def failure(*args):
         raise RuntimeError('SECRET TRANSPORT OUTPUT')
     monkeypatch.setattr(tunnel_runtime, 'update_profile', failure)
@@ -339,7 +339,7 @@ def test_failed_refresh_needs_attention_in_update_and_status(isolated, monkeypat
     store.set_key('dot', 'fixture-tunnel-key')
     before = store.profile_path('dot').read_bytes()
     from pseudolife_memory import tunnel_runtime
-    monkeypatch.setattr(tunnel_runtime, 'stable_command', lambda: ['fixture-shim'])
+    monkeypatch.setattr(tunnel_runtime, 'stable_command', lambda saved=False: ['fixture-shim'])
     result = {'state': state, 'changed': False, 'running': state == 'rolled-back',
               'rolled_back': state == 'rolled-back'}
     monkeypatch.setattr(tunnel_runtime, 'update_profile', lambda *args: result)
@@ -388,7 +388,7 @@ def test_documented_autostart_consent_installs_without_redundant_flag(isolated, 
                       tunnel_id='tunnel_0123', state='ready')
     store.save(profile)
     from pseudolife_memory import tunnel_runtime, tunnel_service
-    monkeypatch.setattr(tunnel_runtime, 'stable_command', lambda: ['fixture-shim'])
+    monkeypatch.setattr(tunnel_runtime, 'stable_command', lambda saved=False: ['fixture-shim'])
     called = []
     def install(profile, store, command, **kwargs):
         if not kwargs.get('persistent') or not profile.autostart_consent:
@@ -408,7 +408,7 @@ def test_saved_autostart_consent_alone_does_not_grant_new_persistence(isolated, 
     store.save(profile)
     before = store.profile_path('dot').read_bytes()
     from pseudolife_memory import tunnel_runtime, tunnel_service
-    monkeypatch.setattr(tunnel_runtime, 'stable_command', lambda: ['fixture-shim'])
+    monkeypatch.setattr(tunnel_runtime, 'stable_command', lambda saved=False: ['fixture-shim'])
     called = []
     monkeypatch.setattr(tunnel_service, 'install_service', lambda *a, **kw: called.append(kw) or {'installed': True})
     assert cli.main(['service', 'install', '--profile-dir', str(store.root)]) == 2

@@ -553,7 +553,10 @@ pub(crate) async fn reference_pool(
         _ => cfg.reference.max_results,
     };
     let Some(limit) = limit else {
-        eprintln!("reference pool skipped: memory.reference.max_results is null");
+        eprintln!(
+            "reference pool skipped: memory.reference.max_results is not an integer: {}",
+            cfg.reference.max_results_raw
+        );
         return Vec::new();
     };
     match nearest(db, query, limit).await {

@@ -1,0 +1,2603 @@
+{
+ "db_state": {
+  "catalog": {
+   "column_types": {
+    "rows": 520,
+    "sha256": "ef9953fff052e57fbc89baa9"
+   },
+   "columns": {
+    "rows": 520,
+    "sha256": "b8115ba89a92ec0cd5dfa329"
+   },
+   "constraints": {
+    "rows": 384,
+    "sha256": "3fcb9795b8792dc379f78350"
+   },
+   "extensions": {
+    "rows": 2,
+    "sha256": "379f1d04a33d23de5113afa2"
+   },
+   "functions": {
+    "rows": 0,
+    "sha256": "4f53cda18c2baa0c0354bb5f"
+   },
+   "indexes": {
+    "rows": 104,
+    "sha256": "484e2fccacb2f852dc18c783"
+   },
+   "owners_and_comments": {
+    "rows": 170,
+    "sha256": "04f3f05816c2eb564ce461f3"
+   },
+   "schemas": {
+    "rows": 1,
+    "sha256": "7bc06edb30fe47a6a1afd841"
+   },
+   "sequence_bounds": {
+    "rows": 19,
+    "sha256": "39772a7c4953e87dab66f88a"
+   },
+   "sequences": {
+    "rows": 19,
+    "sha256": "1cc156fc08abe5c48d6c75e7"
+   },
+   "triggers": {
+    "rows": 0,
+    "sha256": "4f53cda18c2baa0c0354bb5f"
+   },
+   "views": {
+    "rows": 0,
+    "sha256": "4f53cda18c2baa0c0354bb5f"
+   }
+  },
+  "rows": {
+   "public.chronicle_events": {
+    "columns": [
+     "id",
+     "occurred_at",
+     "occurred_phrase",
+     "recorded_at",
+     "actor",
+     "actor_norm",
+     "description",
+     "description_norm",
+     "episode",
+     "src_entry_id",
+     "hlc_phys",
+     "hlc_logical",
+     "writer_id",
+     "invalidated_at"
+    ],
+    "rows": []
+   },
+   "public.client_sessions": {
+    "columns": [
+     "session_key",
+     "registered_via",
+     "principal",
+     "started_at",
+     "ended_at",
+     "end_reason",
+     "policy_variant",
+     "episode_ids",
+     "start_times"
+    ],
+    "rows": []
+   },
+   "public.cms_counters": {
+    "columns": [
+     "id",
+     "preset_name",
+     "interaction_count",
+     "logical_turn_count",
+     "tier_queries",
+     "tier_hits",
+     "surprise_history",
+     "consolidation_events",
+     "updated_at"
+    ],
+    "rows": []
+   },
+   "public.communities": {
+    "columns": [
+     "id",
+     "label",
+     "size",
+     "cohesion",
+     "computed_at"
+    ],
+    "rows": []
+   },
+   "public.coordination_agents": {
+    "columns": [
+     "agent_id",
+     "principal",
+     "credential_hash",
+     "label",
+     "project",
+     "task",
+     "status",
+     "episode",
+     "capabilities",
+     "wake_enabled",
+     "created_at",
+     "last_activity",
+     "lifecycle",
+     "next_sequence",
+     "attachment_id",
+     "generation",
+     "lease_until",
+     "status_expires_at",
+     "children",
+     "park_reason",
+     "park_needs",
+     "park_clear_by",
+     "park_resume",
+     "park_expires",
+     "park_set_at",
+     "parent_agent_id",
+     "parent_thread",
+     "name",
+     "name_source",
+     "name_set_at",
+     "harness_name"
+    ],
+    "rows": []
+   },
+   "public.coordination_events": {
+    "columns": [
+     "seq",
+     "event",
+     "actor",
+     "principal",
+     "agent_id",
+     "recipient_agent_id",
+     "project",
+     "task",
+     "message_id",
+     "payload",
+     "created_at",
+     "hlc",
+     "prev_hash",
+     "hash",
+     "body",
+     "body_salt"
+    ],
+    "rows": []
+   },
+   "public.coordination_lease_waiters": {
+    "columns": [
+     "name",
+     "agent_id",
+     "ticket",
+     "principal",
+     "purpose",
+     "ttl",
+     "expect",
+     "enqueued_at"
+    ],
+    "rows": []
+   },
+   "public.coordination_leases": {
+    "columns": [
+     "name",
+     "holder_agent_id",
+     "holder_principal",
+     "purpose",
+     "fence",
+     "acquired_at",
+     "expires_at",
+     "expect",
+     "expected_end",
+     "freed_at"
+    ],
+    "rows": []
+   },
+   "public.coordination_messages": {
+    "columns": [
+     "message_id",
+     "sender_agent_id",
+     "recipient_agent_id",
+     "sender_principal",
+     "project",
+     "task",
+     "text",
+     "reply_to",
+     "request_id",
+     "fingerprint",
+     "recipient_sequence",
+     "hlc",
+     "created_at",
+     "expires_at",
+     "attempt_at",
+     "attempt_generation",
+     "attempts",
+     "acknowledged_at",
+     "first_read_at",
+     "wake",
+     "origin",
+     "maintainer_proof",
+     "repudiated_at"
+    ],
+    "rows": []
+   },
+   "public.coordination_wakes": {
+    "columns": [
+     "wake_id",
+     "recipient_agent_id",
+     "sender_agent_id",
+     "message_id",
+     "decision",
+     "reason",
+     "urgent",
+     "ring_at",
+     "created_at",
+     "served_at"
+    ],
+    "rows": []
+   },
+   "public.curation_judgments": {
+    "columns": [
+     "store",
+     "a_key",
+     "b_key",
+     "verdict",
+     "keep",
+     "fold",
+     "confidence",
+     "note",
+     "model",
+     "judged_at"
+    ],
+    "rows": []
+   },
+   "public.dismissed_pairs": {
+    "columns": [
+     "a_norm",
+     "b_norm",
+     "dismissed_at"
+    ],
+    "rows": []
+   },
+   "public.dream_run_slots": {
+    "columns": [
+     "id",
+     "run_id",
+     "seq",
+     "entity",
+     "attribute",
+     "entity_norm",
+     "attribute_norm",
+     "kind",
+     "op",
+     "prev_kind",
+     "prev_value",
+     "prev_status",
+     "prev_confidence",
+     "prev_support",
+     "new_value",
+     "action",
+     "src_entry_id",
+     "at",
+     "chronicle_event_id"
+    ],
+    "rows": []
+   },
+   "public.dream_runs": {
+    "columns": [
+     "id",
+     "started_at",
+     "finished_at",
+     "cursor_before",
+     "cursor_after",
+     "pulled",
+     "claims",
+     "tallies",
+     "status",
+     "extractor",
+     "writer_id",
+     "rolled_back_at"
+    ],
+    "rows": []
+   },
+   "public.edge_evidence": {
+    "columns": [
+     "edge_id",
+     "entry_id"
+    ],
+    "rows": []
+   },
+   "public.edge_proposals": {
+    "columns": [
+     "id",
+     "src_id",
+     "relation",
+     "dst_id",
+     "confidence",
+     "similarity",
+     "rationale",
+     "source",
+     "created_at",
+     "status",
+     "judge_verdict",
+     "judge_confidence",
+     "judge_note",
+     "judge_model",
+     "judged_at",
+     "judge_relation",
+     "decided_by",
+     "decided_at",
+     "judge_served_model",
+     "judge2_verdict",
+     "judge2_confidence",
+     "judge2_model",
+     "judged2_at",
+     "judge2_relation",
+     "judge2_served_model",
+     "judge2_policy"
+    ],
+    "rows": []
+   },
+   "public.edges": {
+    "columns": [
+     "id",
+     "src_id",
+     "relation",
+     "dst_id",
+     "confidence",
+     "origin",
+     "asserted_at",
+     "superseded_at",
+     "tx_time",
+     "valid_time",
+     "hlc_phys",
+     "hlc_logical",
+     "writer_id",
+     "session_id",
+     "version"
+    ],
+    "rows": []
+   },
+   "public.entities": {
+    "columns": [
+     "id",
+     "canonical",
+     "display",
+     "etype",
+     "created_at"
+    ],
+    "rows": []
+   },
+   "public.entity_aliases": {
+    "columns": [
+     "alias",
+     "entity_id"
+    ],
+    "rows": []
+   },
+   "public.entity_communities": {
+    "columns": [
+     "entity_id",
+     "community_id",
+     "computed_at"
+    ],
+    "rows": []
+   },
+   "public.entity_kinds": {
+    "columns": [
+     "entity_norm",
+     "kind",
+     "origin",
+     "confidence",
+     "decided_at"
+    ],
+    "rows": []
+   },
+   "public.entity_proposals": {
+    "columns": [
+     "id",
+     "kind",
+     "entity_id",
+     "into_id",
+     "score",
+     "reason",
+     "status",
+     "created_at",
+     "decided_by",
+     "decided_at",
+     "judge_verdict",
+     "judge_confidence",
+     "judge_note",
+     "judge_model",
+     "judged_at",
+     "judge2_verdict",
+     "judge2_confidence",
+     "judge2_model",
+     "judged2_at",
+     "judge_served_model",
+     "judge2_served_model",
+     "judge2_policy",
+     "judge3_verdict",
+     "judge3_confidence",
+     "judge3_model",
+     "judged3_at",
+     "judge3_served_model",
+     "judge3_policy"
+    ],
+    "rows": []
+   },
+   "public.entity_sources": {
+    "columns": [
+     "entity_id",
+     "source",
+     "count",
+     "origin",
+     "updated_at"
+    ],
+    "rows": []
+   },
+   "public.entries": {
+    "columns": [
+     "id",
+     "band",
+     "text",
+     "embedding",
+     "surprise",
+     "ts",
+     "access_count",
+     "source",
+     "superseded_at",
+     "superseded_by_text",
+     "last_logical_turn",
+     "episode_id",
+     "episode_title",
+     "tags",
+     "slots",
+     "authority",
+     "distortion_tolerance",
+     "dream_state",
+     "reinforcements",
+     "explicit_reinforcements"
+    ],
+    "rows": [
+     [
+      1,
+      "flat",
+      "memory 0",
+      "<vector sha256:52e6134ca673db5b>",
+      0.0,
+      1700000000.0,
+      0,
+      "agent",
+      null,
+      null,
+      null,
+      null,
+      null,
+      [
+       "probe"
+      ],
+      [],
+      null,
+      null,
+      "pending",
+      0,
+      0
+     ],
+     [
+      2,
+      "flat",
+      "memory 1",
+      "<vector sha256:18b7734b2833133e>",
+      0.0,
+      1700000000.0,
+      0,
+      "agent",
+      null,
+      null,
+      null,
+      null,
+      null,
+      [
+       "probe"
+      ],
+      [],
+      null,
+      null,
+      "pending",
+      0,
+      0
+     ],
+     [
+      3,
+      "flat",
+      "memory 2",
+      "<vector sha256:827b68c6d5c9b491>",
+      0.0,
+      1700000000.0,
+      0,
+      "agent",
+      null,
+      null,
+      null,
+      null,
+      null,
+      [
+       "probe"
+      ],
+      [],
+      null,
+      null,
+      "pending",
+      0,
+      0
+     ]
+    ]
+   },
+   "public.entry_reinstatement_decisions": {
+    "columns": [
+     "operation_id",
+     "entry_id",
+     "request_sha256",
+     "entry_text_sha256",
+     "entry_source_sha256",
+     "prior_superseded_at",
+     "prior_superseded_by_text",
+     "prior_superseded_by_text_sha256",
+     "evidence_packet_sha256",
+     "reviewer_ids",
+     "reason",
+     "decided_by",
+     "decided_at"
+    ],
+    "rows": []
+   },
+   "public.episodes": {
+    "columns": [
+     "id",
+     "title",
+     "hint",
+     "started_at",
+     "ended_at",
+     "closed_by_new_start",
+     "session_key",
+     "parent_id"
+    ],
+    "rows": []
+   },
+   "public.facts": {
+    "columns": [
+     "id",
+     "entity",
+     "attribute",
+     "entity_norm",
+     "attribute_norm",
+     "value",
+     "polarity",
+     "status",
+     "confidence",
+     "origin",
+     "support",
+     "provenance",
+     "asserted_at",
+     "last_confirmed",
+     "supersedes_value",
+     "superseded_by_value",
+     "superseded_at",
+     "embedding",
+     "entity_id",
+     "object_entity_id",
+     "freshness_class",
+     "kind",
+     "value_norm",
+     "stance",
+     "authority",
+     "distortion_tolerance",
+     "tx_time",
+     "valid_time",
+     "hlc_phys",
+     "hlc_logical",
+     "writer_id",
+     "session_id",
+     "version"
+    ],
+    "rows": []
+   },
+   "public.lesson_search_events": {
+    "columns": [
+     "id",
+     "query_text",
+     "session_id",
+     "episode_id",
+     "served",
+     "created_at"
+    ],
+    "rows": []
+   },
+   "public.lessons": {
+    "columns": [
+     "id",
+     "entity",
+     "attribute",
+     "entity_norm",
+     "attribute_norm",
+     "value",
+     "about",
+     "polarity",
+     "outcome",
+     "status",
+     "confidence",
+     "origin",
+     "support",
+     "provenance",
+     "asserted_at",
+     "last_confirmed",
+     "supersedes_value",
+     "superseded_by_value",
+     "superseded_at",
+     "embedding",
+     "entity_id",
+     "object_entity_id",
+     "tx_time",
+     "valid_time",
+     "hlc_phys",
+     "hlc_logical",
+     "writer_id",
+     "session_id",
+     "version"
+    ],
+    "rows": []
+   },
+   "public.maintainer_bootstrap": {
+    "columns": [
+     "code_hash",
+     "expires_at",
+     "used_at",
+     "credential_id",
+     "failed_attempts"
+    ],
+    "rows": []
+   },
+   "public.maintainer_nonces": {
+    "columns": [
+     "nonce",
+     "expires_at"
+    ],
+    "rows": []
+   },
+   "public.maintainer_passkeys": {
+    "columns": [
+     "credential_id",
+     "public_key",
+     "alg",
+     "sign_count",
+     "label",
+     "enrolled_by",
+     "state",
+     "active_from",
+     "created_at",
+     "last_used_at",
+     "revoked_at",
+     "revoked_by",
+     "flagged_at"
+    ],
+    "rows": []
+   },
+   "public.memory_trace_invalidations": {
+    "columns": [
+     "entity_norm",
+     "attribute_norm",
+     "source_entry_id",
+     "invalidated_at",
+     "cause"
+    ],
+    "rows": []
+   },
+   "public.memory_traces": {
+    "columns": [
+     "entity_norm",
+     "attribute_norm",
+     "entry_id",
+     "created_at"
+    ],
+    "rows": []
+   },
+   "public.merge_decisions": {
+    "columns": [
+     "id",
+     "proposal_id",
+     "entity_display",
+     "into_display",
+     "status",
+     "score",
+     "reason",
+     "decided_by",
+     "decided_at",
+     "votes"
+    ],
+    "rows": []
+   },
+   "public.meta": {
+    "columns": [
+     "key",
+     "value"
+    ],
+    "rows": [
+     [
+      "schema_version",
+      58
+     ],
+     [
+      "writer_lease_epoch",
+      2
+     ]
+    ]
+   },
+   "public.outcome_signals": {
+    "columns": [
+     "id",
+     "task",
+     "outcome",
+     "about",
+     "detail",
+     "polarity",
+     "origin",
+     "episode_id",
+     "created_at",
+     "consumed_at",
+     "used_ids"
+    ],
+    "rows": []
+   },
+   "public.principal_activity": {
+    "columns": [
+     "principal",
+     "last_seen_at"
+    ],
+    "rows": []
+   },
+   "public.principals": {
+    "columns": [
+     "principal",
+     "token_hash",
+     "tier",
+     "board",
+     "code_hash",
+     "code_expires_at",
+     "paired_code_hash",
+     "created_at",
+     "paired_at",
+     "revoked_at"
+    ],
+    "rows": []
+   },
+   "public.reference_chunks": {
+    "columns": [
+     "id",
+     "source",
+     "chunk_index",
+     "text",
+     "embedding",
+     "metadata",
+     "ingested_at",
+     "created_at"
+    ],
+    "rows": []
+   },
+   "public.rejected_bearers": {
+    "columns": [
+     "hash_prefix",
+     "rejections",
+     "first_seen_at",
+     "last_seen_at"
+    ],
+    "rows": []
+   },
+   "public.relations": {
+    "columns": [
+     "name",
+     "description",
+     "src_type",
+     "dst_type",
+     "transitive",
+     "inverse_of",
+     "builtin",
+     "created_at"
+    ],
+    "rows": [
+     [
+      "avoids",
+      "src (a task-type) should avoid dead-end dst (negative lesson)",
+      null,
+      null,
+      false,
+      null,
+      true,
+      1793623564.344837
+     ],
+     [
+      "configures",
+      "src sets configuration for dst",
+      null,
+      null,
+      false,
+      null,
+      true,
+      1793623564.3437726
+     ],
+     [
+      "depends-on",
+      "src requires dst to function",
+      null,
+      null,
+      true,
+      null,
+      true,
+      1793623564.3420641
+     ],
+     [
+      "hosts",
+      "src is the host/platform for dst",
+      null,
+      null,
+      false,
+      null,
+      true,
+      1793623564.3428702
+     ],
+     [
+      "implements",
+      "src (a source file) realizes concept/role dst",
+      null,
+      null,
+      false,
+      null,
+      true,
+      1793623564.3442547
+     ],
+     [
+      "part-of",
+      "src is a component of dst",
+      null,
+      null,
+      true,
+      null,
+      true,
+      1793623564.342637
+     ],
+     [
+      "prefers",
+      "src (a task-type) prefers approach/tool dst (positive lesson)",
+      null,
+      null,
+      false,
+      null,
+      true,
+      1793623564.3446486
+     ],
+     [
+      "related-to",
+      "untyped catch-all association",
+      null,
+      null,
+      false,
+      null,
+      true,
+      1793623564.344435
+     ],
+     [
+      "runs-on",
+      "src executes on host/platform dst",
+      null,
+      null,
+      false,
+      "hosts",
+      true,
+      1793623564.3431141
+     ],
+     [
+      "stores-data-in",
+      "src persists its data in dst",
+      null,
+      null,
+      false,
+      null,
+      true,
+      1793623564.344071
+     ],
+     [
+      "uses",
+      "src makes use of dst",
+      null,
+      null,
+      false,
+      null,
+      true,
+      1793623564.343578
+     ]
+    ]
+   },
+   "public.retrieval_events": {
+    "columns": [
+     "id",
+     "query_text",
+     "origin",
+     "session_id",
+     "episode_id",
+     "served",
+     "created_at",
+     "params",
+     "served_facts"
+    ],
+    "rows": [
+     [
+      1,
+      "warmup probe",
+      "search",
+      null,
+      null,
+      [
+       {
+        "bank": "flat",
+        "components": {
+         "band": "flat",
+         "band_depth": 0,
+         "channel": "dense",
+         "dense": 1.0,
+         "recency": 0.0,
+         "recency_boost": 0.0,
+         "source_mult": 1.0,
+         "supersession_mult": 1.0,
+         "surprise": 0.0
+        },
+        "entry_id": 3,
+        "rank": 0,
+        "score": 1.0,
+        "via": null
+       }
+      ],
+      "<created_at>",
+      {
+       "band_count": 1,
+       "bm25": {
+        "enabled": false
+       },
+       "candidate_pool": {
+        "fusion": "weighted_sum",
+        "multiplier": 1,
+        "pool_size": 1,
+        "rerank_position": "after_cut"
+       },
+       "contiguity_neighbors": 0,
+       "filters": {
+        "bands": null,
+        "episodes": null,
+        "min_logical_turn": null,
+        "sources": null,
+        "tags": null
+       },
+       "hide_superseded": false,
+       "min_score": 0.0,
+       "min_score_explicit": false,
+       "recency_base_half_life_s": 86400.0,
+       "recency_boost": false,
+       "reranker": {
+        "candidate_count": 1,
+        "enabled": false,
+        "fired": false,
+        "scored_candidates": 0,
+        "scoring_policy": "complete_pool_or_skip",
+        "skip_reason": null,
+        "top_n": 20
+       },
+       "timeline": {
+        "enabled": false,
+        "fired": false
+       },
+       "top_k": 1
+      },
+      null
+     ],
+     [
+      2,
+      "memory",
+      "search",
+      null,
+      null,
+      [
+       {
+        "bank": "flat",
+        "components": {
+         "band": "flat",
+         "band_depth": 0,
+         "channel": "dense",
+         "dense": 1.0,
+         "recency": 0.0,
+         "recency_boost": 0.0,
+         "source_mult": 1.0,
+         "supersession_mult": 1.0,
+         "surprise": 0.0
+        },
+        "entry_id": 1,
+        "rank": 0,
+        "score": 1.0,
+        "via": null
+       },
+       {
+        "bank": "flat",
+        "components": {
+         "band": "flat",
+         "band_depth": 0,
+         "channel": "dense",
+         "dense": 0.800000011920929,
+         "recency": 0.0,
+         "recency_boost": 0.0,
+         "source_mult": 1.0,
+         "supersession_mult": 1.0,
+         "surprise": 0.0
+        },
+        "entry_id": 2,
+        "rank": 1,
+        "score": 0.8,
+        "via": null
+       },
+       {
+        "bank": "flat",
+        "components": {
+         "band": "flat",
+         "band_depth": 0,
+         "channel": "dense",
+         "dense": 0.2800000309944153,
+         "recency": 0.0,
+         "recency_boost": 0.0,
+         "source_mult": 1.0,
+         "supersession_mult": 1.0,
+         "surprise": 0.0
+        },
+        "entry_id": 3,
+        "rank": 2,
+        "score": 0.28,
+        "via": null
+       }
+      ],
+      "<created_at>",
+      {
+       "band_count": 1,
+       "bm25": {
+        "enabled": false
+       },
+       "candidate_pool": {
+        "fusion": "weighted_sum",
+        "multiplier": 1,
+        "pool_size": 3,
+        "rerank_position": "after_cut"
+       },
+       "contiguity_neighbors": 0,
+       "filters": {
+        "bands": null,
+        "episodes": null,
+        "min_logical_turn": null,
+        "sources": null,
+        "tags": null
+       },
+       "hide_superseded": false,
+       "min_score": 0.0,
+       "min_score_explicit": false,
+       "recency_base_half_life_s": 86400.0,
+       "recency_boost": false,
+       "reranker": {
+        "candidate_count": 3,
+        "enabled": false,
+        "fired": false,
+        "scored_candidates": 0,
+        "scoring_policy": "complete_pool_or_skip",
+        "skip_reason": null,
+        "top_n": 20
+       },
+       "timeline": {
+        "enabled": false,
+        "fired": false
+       },
+       "top_k": 8
+      },
+      null
+     ],
+     [
+      3,
+      "memory",
+      "search",
+      null,
+      null,
+      [
+       {
+        "bank": "flat",
+        "components": {
+         "band": "flat",
+         "band_depth": 0,
+         "channel": "dense",
+         "dense": 1.0,
+         "recency": 0.0,
+         "recency_boost": 0.0,
+         "source_mult": 1.0,
+         "supersession_mult": 1.0,
+         "surprise": 0.0
+        },
+        "entry_id": 1,
+        "rank": 0,
+        "score": 1.0,
+        "via": null
+       },
+       {
+        "bank": "flat",
+        "components": {
+         "band": "flat",
+         "band_depth": 0,
+         "channel": "dense",
+         "dense": 0.800000011920929,
+         "recency": 0.0,
+         "recency_boost": 0.0,
+         "source_mult": 1.0,
+         "supersession_mult": 1.0,
+         "surprise": 0.0
+        },
+        "entry_id": 2,
+        "rank": 1,
+        "score": 0.8,
+        "via": null
+       },
+       {
+        "bank": "flat",
+        "components": {
+         "band": "flat",
+         "band_depth": 0,
+         "channel": "dense",
+         "dense": 0.2800000309944153,
+         "recency": 0.0,
+         "recency_boost": 0.0,
+         "source_mult": 1.0,
+         "supersession_mult": 1.0,
+         "surprise": 0.0
+        },
+        "entry_id": 3,
+        "rank": 2,
+        "score": 0.28,
+        "via": null
+       }
+      ],
+      "<created_at>",
+      {
+       "band_count": 1,
+       "bm25": {
+        "enabled": false
+       },
+       "candidate_pool": {
+        "fusion": "weighted_sum",
+        "multiplier": 1,
+        "pool_size": 3,
+        "rerank_position": "after_cut"
+       },
+       "contiguity_neighbors": 0,
+       "filters": {
+        "bands": null,
+        "episodes": null,
+        "min_logical_turn": null,
+        "sources": null,
+        "tags": null
+       },
+       "hide_superseded": false,
+       "min_score": 0.0,
+       "min_score_explicit": false,
+       "recency_base_half_life_s": 86400.0,
+       "recency_boost": false,
+       "reranker": {
+        "candidate_count": 3,
+        "enabled": false,
+        "fired": false,
+        "scored_candidates": 0,
+        "scoring_policy": "complete_pool_or_skip",
+        "skip_reason": null,
+        "top_n": 20
+       },
+       "timeline": {
+        "enabled": false,
+        "fired": false
+       },
+       "top_k": 8
+      },
+      null
+     ],
+     [
+      4,
+      "memory",
+      "search",
+      null,
+      null,
+      [
+       {
+        "bank": "flat",
+        "components": {
+         "band": "flat",
+         "band_depth": 0,
+         "channel": "dense",
+         "dense": 1.0,
+         "recency": 0.0,
+         "recency_boost": 0.0,
+         "source_mult": 1.0,
+         "supersession_mult": 1.0,
+         "surprise": 0.0
+        },
+        "entry_id": 1,
+        "rank": 0,
+        "score": 1.0,
+        "via": null
+       }
+      ],
+      "<created_at>",
+      {
+       "band_count": 1,
+       "bm25": {
+        "enabled": false
+       },
+       "candidate_pool": {
+        "fusion": "weighted_sum",
+        "multiplier": 1,
+        "pool_size": 3,
+        "rerank_position": "after_cut"
+       },
+       "contiguity_neighbors": 0,
+       "filters": {
+        "bands": null,
+        "episodes": null,
+        "min_logical_turn": null,
+        "sources": null,
+        "tags": null
+       },
+       "hide_superseded": false,
+       "min_score": 1.0,
+       "min_score_explicit": true,
+       "recency_base_half_life_s": 86400.0,
+       "recency_boost": false,
+       "reranker": {
+        "candidate_count": 1,
+        "enabled": false,
+        "fired": false,
+        "scored_candidates": 0,
+        "scoring_policy": "complete_pool_or_skip",
+        "skip_reason": null,
+        "top_n": 20
+       },
+       "timeline": {
+        "enabled": false,
+        "fired": false
+       },
+       "top_k": 8
+      },
+      null
+     ],
+     [
+      5,
+      "memory",
+      "search",
+      null,
+      null,
+      [
+       {
+        "bank": "flat",
+        "components": {
+         "band": "flat",
+         "band_depth": 0,
+         "channel": "dense",
+         "dense": 1.0,
+         "recency": 0.0,
+         "recency_boost": 0.0,
+         "source_mult": 1.0,
+         "supersession_mult": 1.0,
+         "surprise": 0.0
+        },
+        "entry_id": 1,
+        "rank": 0,
+        "score": 1.0,
+        "via": null
+       },
+       {
+        "bank": "flat",
+        "components": {
+         "band": "flat",
+         "band_depth": 0,
+         "channel": "dense",
+         "dense": 0.800000011920929,
+         "recency": 0.0,
+         "recency_boost": 0.0,
+         "source_mult": 1.0,
+         "supersession_mult": 1.0,
+         "surprise": 0.0
+        },
+        "entry_id": 2,
+        "rank": 1,
+        "score": 0.8,
+        "via": null
+       },
+       {
+        "bank": "flat",
+        "components": {
+         "band": "flat",
+         "band_depth": 0,
+         "channel": "dense",
+         "dense": 0.2800000309944153,
+         "recency": 0.0,
+         "recency_boost": 0.0,
+         "source_mult": 1.0,
+         "supersession_mult": 1.0,
+         "surprise": 0.0
+        },
+        "entry_id": 3,
+        "rank": 2,
+        "score": 0.28,
+        "via": null
+       }
+      ],
+      "<created_at>",
+      {
+       "band_count": 1,
+       "bm25": {
+        "enabled": false
+       },
+       "candidate_pool": {
+        "fusion": "weighted_sum",
+        "multiplier": 1,
+        "pool_size": 3,
+        "rerank_position": "after_cut"
+       },
+       "contiguity_neighbors": 0,
+       "filters": {
+        "bands": null,
+        "episodes": null,
+        "min_logical_turn": null,
+        "sources": null,
+        "tags": [
+         "probe"
+        ]
+       },
+       "hide_superseded": false,
+       "min_score": 0.0,
+       "min_score_explicit": false,
+       "recency_base_half_life_s": 86400.0,
+       "recency_boost": false,
+       "reranker": {
+        "candidate_count": 3,
+        "enabled": false,
+        "fired": false,
+        "scored_candidates": 0,
+        "scoring_policy": "complete_pool_or_skip",
+        "skip_reason": null,
+        "top_n": 20
+       },
+       "timeline": {
+        "enabled": false,
+        "fired": false
+       },
+       "top_k": 8
+      },
+      null
+     ],
+     [
+      6,
+      "memory",
+      "search",
+      null,
+      null,
+      [],
+      "<created_at>",
+      {
+       "band_count": 1,
+       "bm25": {
+        "enabled": false
+       },
+       "candidate_pool": {
+        "fusion": "weighted_sum",
+        "multiplier": 1,
+        "pool_size": 0,
+        "rerank_position": "after_cut"
+       },
+       "contiguity_neighbors": 0,
+       "filters": {
+        "bands": null,
+        "episodes": [
+         "a",
+         "z"
+        ],
+        "min_logical_turn": null,
+        "sources": null,
+        "tags": null
+       },
+       "hide_superseded": false,
+       "min_score": 0.0,
+       "min_score_explicit": false,
+       "recency_base_half_life_s": 86400.0,
+       "recency_boost": false,
+       "reranker": {
+        "candidate_count": 0,
+        "enabled": false,
+        "fired": false,
+        "scored_candidates": 0,
+        "scoring_policy": "complete_pool_or_skip",
+        "skip_reason": null,
+        "top_n": 20
+       },
+       "timeline": {
+        "enabled": false,
+        "fired": false
+       },
+       "top_k": 8
+      },
+      null
+     ],
+     [
+      7,
+      "memory",
+      "search",
+      null,
+      null,
+      [
+       {
+        "bank": "flat",
+        "components": {
+         "band": "flat",
+         "band_depth": 0,
+         "channel": "dense",
+         "dense": 1.0,
+         "recency": 0.0,
+         "recency_boost": 0.0,
+         "source_mult": 1.0,
+         "supersession_mult": 1.0,
+         "surprise": 0.0
+        },
+        "entry_id": 1,
+        "rank": 0,
+        "score": 1.0,
+        "via": null
+       },
+       {
+        "bank": "flat",
+        "components": {
+         "band": "flat",
+         "band_depth": 0,
+         "channel": "dense",
+         "dense": 0.800000011920929,
+         "recency": 0.0,
+         "recency_boost": 0.0,
+         "source_mult": 1.0,
+         "supersession_mult": 1.0,
+         "surprise": 0.0
+        },
+        "entry_id": 2,
+        "rank": 1,
+        "score": 0.8,
+        "via": null
+       },
+       {
+        "bank": "flat",
+        "components": {
+         "band": "flat",
+         "band_depth": 0,
+         "channel": "dense",
+         "dense": 0.2800000309944153,
+         "recency": 0.0,
+         "recency_boost": 0.0,
+         "source_mult": 1.0,
+         "supersession_mult": 1.0,
+         "surprise": 0.0
+        },
+        "entry_id": 3,
+        "rank": 2,
+        "score": 0.28,
+        "via": null
+       }
+      ],
+      "<created_at>",
+      {
+       "band_count": 1,
+       "bm25": {
+        "enabled": false
+       },
+       "candidate_pool": {
+        "fusion": "weighted_sum",
+        "multiplier": 1,
+        "pool_size": 3,
+        "rerank_position": "after_cut"
+       },
+       "contiguity_neighbors": 0,
+       "filters": {
+        "bands": null,
+        "episodes": null,
+        "min_logical_turn": null,
+        "sources": null,
+        "tags": null
+       },
+       "hide_superseded": false,
+       "min_score": 0.0,
+       "min_score_explicit": false,
+       "recency_base_half_life_s": 86400.0,
+       "recency_boost": false,
+       "reranker": {
+        "candidate_count": 3,
+        "enabled": false,
+        "fired": false,
+        "scored_candidates": 0,
+        "scoring_policy": "complete_pool_or_skip",
+        "skip_reason": null,
+        "top_n": 20
+       },
+       "timeline": {
+        "enabled": false,
+        "fired": false
+       },
+       "top_k": 8
+      },
+      null
+     ],
+     [
+      8,
+      "memory",
+      "search",
+      null,
+      null,
+      [
+       {
+        "bank": "flat",
+        "components": {
+         "band": "flat",
+         "band_depth": 0,
+         "channel": "dense",
+         "dense": 1.0,
+         "recency": 0.0,
+         "recency_boost": 0.0,
+         "source_mult": 1.0,
+         "supersession_mult": 1.0,
+         "surprise": 0.0
+        },
+        "entry_id": 1,
+        "rank": 0,
+        "score": 1.0,
+        "via": null
+       },
+       {
+        "bank": "flat",
+        "components": {
+         "band": "flat",
+         "band_depth": 0,
+         "channel": "dense",
+         "dense": 0.800000011920929,
+         "recency": 0.0,
+         "recency_boost": 0.0,
+         "source_mult": 1.0,
+         "supersession_mult": 1.0,
+         "surprise": 0.0
+        },
+        "entry_id": 2,
+        "rank": 1,
+        "score": 0.8,
+        "via": null
+       },
+       {
+        "bank": "flat",
+        "components": {
+         "band": "flat",
+         "band_depth": 0,
+         "channel": "dense",
+         "dense": 0.2800000309944153,
+         "recency": 0.0,
+         "recency_boost": 0.0,
+         "source_mult": 1.0,
+         "supersession_mult": 1.0,
+         "surprise": 0.0
+        },
+        "entry_id": 3,
+        "rank": 2,
+        "score": 0.28,
+        "via": null
+       }
+      ],
+      "<created_at>",
+      {
+       "band_count": 1,
+       "bm25": {
+        "enabled": false
+       },
+       "candidate_pool": {
+        "fusion": "weighted_sum",
+        "multiplier": 1,
+        "pool_size": 3,
+        "rerank_position": "after_cut"
+       },
+       "contiguity_neighbors": 0,
+       "filters": {
+        "bands": null,
+        "episodes": null,
+        "min_logical_turn": null,
+        "sources": null,
+        "tags": null
+       },
+       "hide_superseded": false,
+       "min_score": 0.0,
+       "min_score_explicit": false,
+       "recency_base_half_life_s": 86400.0,
+       "recency_boost": false,
+       "reranker": {
+        "candidate_count": 3,
+        "enabled": false,
+        "fired": false,
+        "scored_candidates": 0,
+        "scoring_policy": "complete_pool_or_skip",
+        "skip_reason": null,
+        "top_n": 20
+       },
+       "timeline": {
+        "enabled": false,
+        "fired": false
+       },
+       "top_k": 8
+      },
+      null
+     ]
+    ]
+   },
+   "public.retrieval_uses": {
+    "columns": [
+     "event_id",
+     "entry_id",
+     "used_via",
+     "created_at"
+    ],
+    "rows": []
+   },
+   "public.slot_reads": {
+    "columns": [
+     "entity_norm",
+     "attribute_norm",
+     "read_count",
+     "last_read_at"
+    ],
+    "rows": []
+   },
+   "public.store_decisions": {
+    "columns": [
+     "id",
+     "store",
+     "entity_norm",
+     "attribute_norm",
+     "action",
+     "decided_by",
+     "reason",
+     "record",
+     "decided_at"
+    ],
+    "rows": []
+   },
+   "public.world_facts": {
+    "columns": [
+     "id",
+     "entity",
+     "attribute",
+     "entity_norm",
+     "attribute_norm",
+     "value",
+     "polarity",
+     "status",
+     "confidence",
+     "origin",
+     "support",
+     "provenance",
+     "asserted_at",
+     "last_confirmed",
+     "supersedes_value",
+     "superseded_by_value",
+     "superseded_at",
+     "embedding",
+     "source_url",
+     "source_quote",
+     "retrieved_at",
+     "freshness_class",
+     "content_hash",
+     "source_doc_id",
+     "tx_time",
+     "valid_time",
+     "hlc_phys",
+     "hlc_logical",
+     "writer_id",
+     "session_id",
+     "version"
+    ],
+    "rows": []
+   }
+  }
+ },
+ "normalizers": {
+  "db_declared": [
+   [
+    "row",
+    "meta",
+    "dream_ack_secret_v1",
+    "dream tracking init writes a random secret (W3-H)"
+   ],
+   [
+    "row",
+    "meta",
+    "curation_listing_spelling_v2",
+    "the listing-spelling carry-over stamps the clock (W2-E)"
+   ],
+   [
+    "warmup",
+    "retrieval_events",
+    null,
+    "one warmup probe and its sequence increment (W2-D telemetry)"
+   ]
+  ],
+  "db_nondeterministic": [
+   [
+    "relations",
+    "created_at",
+    "clock: wall clock per row (storage/postgres.py:765)"
+   ]
+  ],
+  "golden": "golden_scrub in run.py",
+  "health": "normalize_health in run.py"
+ },
+ "responses": [
+  {
+   "headers": {
+    "content-type": "mcp"
+   },
+   "json": {
+    "cortex": [],
+    "count": 3,
+    "entries": [
+     {
+      "date": "2023-11-14",
+      "id": 1,
+      "score": 1.0,
+      "source": "agent",
+      "tags": [
+       "probe"
+      ],
+      "text": "memory 0"
+     },
+     {
+      "date": "2023-11-14",
+      "id": 2,
+      "score": 0.8,
+      "source": "agent",
+      "tags": [
+       "probe"
+      ],
+      "text": "memory 1"
+     },
+     {
+      "date": "2023-11-14",
+      "id": 3,
+      "score": 0.28,
+      "source": "agent",
+      "tags": [
+       "probe"
+      ],
+      "text": "memory 2"
+     }
+    ],
+    "low_confidence": false,
+    "query": "memory"
+   },
+   "status": 200
+  },
+  {
+   "headers": {
+    "content-type": "mcp"
+   },
+   "json": {
+    "cortex": [],
+    "count": 3,
+    "entries": [
+     {
+      "access_count": 2,
+      "bank": "flat",
+      "episode_id": null,
+      "episode_title": null,
+      "id": 1,
+      "score": 1.0,
+      "source": "agent",
+      "superseded": false,
+      "superseded_at": null,
+      "superseded_by_text": null,
+      "surprise_score": 0.0,
+      "tags": [
+       "probe"
+      ],
+      "text": "memory 0",
+      "timestamp": 1700000000.0
+     },
+     {
+      "access_count": 2,
+      "bank": "flat",
+      "episode_id": null,
+      "episode_title": null,
+      "id": 2,
+      "score": 0.8,
+      "source": "agent",
+      "superseded": false,
+      "superseded_at": null,
+      "superseded_by_text": null,
+      "surprise_score": 0.0,
+      "tags": [
+       "probe"
+      ],
+      "text": "memory 1",
+      "timestamp": 1700000000.0
+     },
+     {
+      "access_count": 2,
+      "bank": "flat",
+      "episode_id": null,
+      "episode_title": null,
+      "id": 3,
+      "score": 0.28,
+      "source": "agent",
+      "superseded": false,
+      "superseded_at": null,
+      "superseded_by_text": null,
+      "surprise_score": 0.0,
+      "tags": [
+       "probe"
+      ],
+      "text": "memory 2",
+      "timestamp": 1700000000.0
+     }
+    ],
+    "low_confidence": false,
+    "query": "memory",
+    "trace": {
+     "bm25": {
+      "fired": false,
+      "hits": []
+     },
+     "candidate_pool": {
+      "fusion": "weighted_sum",
+      "multiplier": 1,
+      "pool_size": 3,
+      "rerank_position": "after_cut"
+     },
+     "chain_residual": {
+      "enabled": false,
+      "synthetic_hits": []
+     },
+     "config": {
+      "chain_residual": false,
+      "preset": "flat",
+      "top_k": 8
+     },
+     "filters": {
+      "bands": null,
+      "episodes": null,
+      "min_logical_turn": null,
+      "sources": null,
+      "tags": null
+     },
+     "final_topk": [
+      {
+       "bank": "flat",
+       "score": 1.0,
+       "source": "agent",
+       "text_preview": "memory 0"
+      },
+      {
+       "bank": "flat",
+       "score": 0.8,
+       "source": "agent",
+       "text_preview": "memory 1"
+      },
+      {
+       "bank": "flat",
+       "score": 0.28,
+       "source": "agent",
+       "text_preview": "memory 2"
+      }
+     ],
+     "reference_pool": [],
+     "reranker": {
+      "candidates": [],
+      "fired": false
+     },
+     "slot_pool": [],
+     "tiers": [
+      {
+       "boost": 0.0,
+       "candidates": [
+        {
+         "adjusted_score": 1.0,
+         "drop_reason": null,
+         "kept": true,
+         "raw_score": 1.0,
+         "relevance": 1.0,
+         "source": "agent",
+         "source_mult": 1.0,
+         "superseded": false,
+         "supersession_mult": 1.0,
+         "text_preview": "memory 0"
+        },
+        {
+         "adjusted_score": 0.8,
+         "drop_reason": null,
+         "kept": true,
+         "raw_score": 0.8,
+         "relevance": 0.8,
+         "source": "agent",
+         "source_mult": 1.0,
+         "superseded": false,
+         "supersession_mult": 1.0,
+         "text_preview": "memory 1"
+        },
+        {
+         "adjusted_score": 0.28,
+         "drop_reason": null,
+         "kept": true,
+         "raw_score": 0.28,
+         "relevance": 0.28,
+         "source": "agent",
+         "source_mult": 1.0,
+         "superseded": false,
+         "supersession_mult": 1.0,
+         "text_preview": "memory 2"
+        }
+       ],
+       "depth": 0,
+       "eligible_count": 3,
+       "entry_count": 3,
+       "excluded_count": 0,
+       "filtered_out": false,
+       "half_life_s": null,
+       "name": "flat"
+      }
+     ]
+    }
+   },
+   "status": 200
+  },
+  {
+   "headers": {
+    "content-type": "mcp"
+   },
+   "json": {
+    "cortex": [],
+    "count": 1,
+    "entries": [
+     {
+      "access_count": 4,
+      "bank": "flat",
+      "episode_id": null,
+      "episode_title": null,
+      "id": 1,
+      "score": 1.0,
+      "source": "agent",
+      "superseded": false,
+      "superseded_at": null,
+      "superseded_by_text": null,
+      "surprise_score": 0.0,
+      "tags": [
+       "probe"
+      ],
+      "text": "memory 0",
+      "timestamp": 1700000000.0
+     }
+    ],
+    "low_confidence": false,
+    "query": "memory",
+    "trace": {
+     "bm25": {
+      "fired": false,
+      "hits": []
+     },
+     "candidate_pool": {
+      "fusion": "weighted_sum",
+      "multiplier": 1,
+      "pool_size": 3,
+      "rerank_position": "after_cut"
+     },
+     "chain_residual": {
+      "enabled": false,
+      "synthetic_hits": []
+     },
+     "config": {
+      "chain_residual": false,
+      "preset": "flat",
+      "top_k": 8
+     },
+     "filters": {
+      "bands": null,
+      "episodes": null,
+      "min_logical_turn": null,
+      "sources": null,
+      "tags": null
+     },
+     "final_topk": [
+      {
+       "bank": "flat",
+       "score": 1.0,
+       "source": "agent",
+       "text_preview": "memory 0"
+      },
+      {
+       "bank": "flat",
+       "score": 0.8,
+       "source": "agent",
+       "text_preview": "memory 1"
+      },
+      {
+       "bank": "flat",
+       "score": 0.28,
+       "source": "agent",
+       "text_preview": "memory 2"
+      }
+     ],
+     "reference_pool": [],
+     "reranker": {
+      "candidates": [],
+      "fired": false
+     },
+     "slot_pool": [],
+     "tiers": [
+      {
+       "boost": 0.0,
+       "candidates": [
+        {
+         "adjusted_score": 1.0,
+         "drop_reason": null,
+         "kept": true,
+         "raw_score": 1.0,
+         "relevance": 1.0,
+         "source": "agent",
+         "source_mult": 1.0,
+         "superseded": false,
+         "supersession_mult": 1.0,
+         "text_preview": "memory 0"
+        },
+        {
+         "adjusted_score": 0.8,
+         "drop_reason": null,
+         "kept": true,
+         "raw_score": 0.8,
+         "relevance": 0.8,
+         "source": "agent",
+         "source_mult": 1.0,
+         "superseded": false,
+         "supersession_mult": 1.0,
+         "text_preview": "memory 1"
+        },
+        {
+         "adjusted_score": 0.28,
+         "drop_reason": null,
+         "kept": true,
+         "raw_score": 0.28,
+         "relevance": 0.28,
+         "source": "agent",
+         "source_mult": 1.0,
+         "superseded": false,
+         "supersession_mult": 1.0,
+         "text_preview": "memory 2"
+        }
+       ],
+       "depth": 0,
+       "eligible_count": 3,
+       "entry_count": 3,
+       "excluded_count": 0,
+       "filtered_out": false,
+       "half_life_s": null,
+       "name": "flat"
+      }
+     ]
+    }
+   },
+   "status": 200
+  },
+  {
+   "headers": {
+    "content-type": "mcp"
+   },
+   "json": {
+    "cortex": [],
+    "count": 3,
+    "entries": [
+     {
+      "access_count": 6,
+      "bank": "flat",
+      "episode_id": null,
+      "episode_title": null,
+      "id": 1,
+      "score": 1.0,
+      "source": "agent",
+      "superseded": false,
+      "superseded_at": null,
+      "superseded_by_text": null,
+      "surprise_score": 0.0,
+      "tags": [
+       "probe"
+      ],
+      "text": "memory 0",
+      "timestamp": 1700000000.0
+     },
+     {
+      "access_count": 5,
+      "bank": "flat",
+      "episode_id": null,
+      "episode_title": null,
+      "id": 2,
+      "score": 0.8,
+      "source": "agent",
+      "superseded": false,
+      "superseded_at": null,
+      "superseded_by_text": null,
+      "surprise_score": 0.0,
+      "tags": [
+       "probe"
+      ],
+      "text": "memory 1",
+      "timestamp": 1700000000.0
+     },
+     {
+      "access_count": 5,
+      "bank": "flat",
+      "episode_id": null,
+      "episode_title": null,
+      "id": 3,
+      "score": 0.28,
+      "source": "agent",
+      "superseded": false,
+      "superseded_at": null,
+      "superseded_by_text": null,
+      "surprise_score": 0.0,
+      "tags": [
+       "probe"
+      ],
+      "text": "memory 2",
+      "timestamp": 1700000000.0
+     }
+    ],
+    "low_confidence": false,
+    "query": "memory",
+    "trace": {
+     "bm25": {
+      "fired": false,
+      "hits": []
+     },
+     "candidate_pool": {
+      "fusion": "weighted_sum",
+      "multiplier": 1,
+      "pool_size": 3,
+      "rerank_position": "after_cut"
+     },
+     "chain_residual": {
+      "enabled": false,
+      "synthetic_hits": []
+     },
+     "config": {
+      "chain_residual": false,
+      "preset": "flat",
+      "top_k": 8
+     },
+     "filters": {
+      "bands": null,
+      "episodes": null,
+      "min_logical_turn": null,
+      "sources": null,
+      "tags": [
+       "probe"
+      ]
+     },
+     "final_topk": [
+      {
+       "bank": "flat",
+       "score": 1.0,
+       "source": "agent",
+       "text_preview": "memory 0"
+      },
+      {
+       "bank": "flat",
+       "score": 0.8,
+       "source": "agent",
+       "text_preview": "memory 1"
+      },
+      {
+       "bank": "flat",
+       "score": 0.28,
+       "source": "agent",
+       "text_preview": "memory 2"
+      }
+     ],
+     "reference_pool": [],
+     "reranker": {
+      "candidates": [],
+      "fired": false
+     },
+     "slot_pool": [],
+     "tiers": [
+      {
+       "boost": 0.0,
+       "candidates": [
+        {
+         "adjusted_score": 1.0,
+         "drop_reason": null,
+         "kept": true,
+         "raw_score": 1.0,
+         "relevance": 1.0,
+         "source": "agent",
+         "source_mult": 1.0,
+         "superseded": false,
+         "supersession_mult": 1.0,
+         "text_preview": "memory 0"
+        },
+        {
+         "adjusted_score": 0.8,
+         "drop_reason": null,
+         "kept": true,
+         "raw_score": 0.8,
+         "relevance": 0.8,
+         "source": "agent",
+         "source_mult": 1.0,
+         "superseded": false,
+         "supersession_mult": 1.0,
+         "text_preview": "memory 1"
+        },
+        {
+         "adjusted_score": 0.28,
+         "drop_reason": null,
+         "kept": true,
+         "raw_score": 0.28,
+         "relevance": 0.28,
+         "source": "agent",
+         "source_mult": 1.0,
+         "superseded": false,
+         "supersession_mult": 1.0,
+         "text_preview": "memory 2"
+        }
+       ],
+       "depth": 0,
+       "eligible_count": 3,
+       "entry_count": 3,
+       "excluded_count": 0,
+       "filtered_out": false,
+       "half_life_s": null,
+       "name": "flat"
+      }
+     ]
+    }
+   },
+   "status": 200
+  },
+  {
+   "headers": {
+    "content-type": "mcp"
+   },
+   "json": {
+    "cortex": [],
+    "count": 0,
+    "entries": [],
+    "low_confidence": true,
+    "query": "memory",
+    "trace": {
+     "bm25": {
+      "fired": false,
+      "hits": []
+     },
+     "candidate_pool": {
+      "fusion": "weighted_sum",
+      "multiplier": 1,
+      "pool_size": 0,
+      "rerank_position": "after_cut"
+     },
+     "chain_residual": {
+      "enabled": false,
+      "synthetic_hits": []
+     },
+     "config": {
+      "chain_residual": false,
+      "preset": "flat",
+      "top_k": 8
+     },
+     "filters": {
+      "bands": null,
+      "episodes": [
+       "z",
+       "a",
+       "z"
+      ],
+      "min_logical_turn": null,
+      "sources": null,
+      "tags": null
+     },
+     "final_topk": [],
+     "reference_pool": [],
+     "reranker": {
+      "candidates": [],
+      "fired": false
+     },
+     "slot_pool": [],
+     "tiers": [
+      {
+       "boost": 0.0,
+       "candidates": [],
+       "depth": 0,
+       "eligible_count": 0,
+       "entry_count": 3,
+       "excluded_count": 3,
+       "filtered_out": false,
+       "half_life_s": null,
+       "name": "flat"
+      }
+     ]
+    }
+   },
+   "status": 200
+  },
+  {
+   "headers": {
+    "content-type": "mcp"
+   },
+   "json": {
+    "cortex": [],
+    "count": 3,
+    "entries": [
+     {
+      "access_count": 8,
+      "bank": "flat",
+      "episode_id": null,
+      "episode_title": null,
+      "id": 1,
+      "score": 1.0,
+      "source": "agent",
+      "superseded": false,
+      "superseded_at": null,
+      "superseded_by_text": null,
+      "surprise_score": 0.0,
+      "tags": [
+       "probe"
+      ],
+      "text": "memory 0",
+      "timestamp": 1700000000.0
+     },
+     {
+      "access_count": 7,
+      "bank": "flat",
+      "episode_id": null,
+      "episode_title": null,
+      "id": 2,
+      "score": 0.8,
+      "source": "agent",
+      "superseded": false,
+      "superseded_at": null,
+      "superseded_by_text": null,
+      "surprise_score": 0.0,
+      "tags": [
+       "probe"
+      ],
+      "text": "memory 1",
+      "timestamp": 1700000000.0
+     },
+     {
+      "access_count": 7,
+      "bank": "flat",
+      "episode_id": null,
+      "episode_title": null,
+      "id": 3,
+      "score": 0.28,
+      "source": "agent",
+      "superseded": false,
+      "superseded_at": null,
+      "superseded_by_text": null,
+      "surprise_score": 0.0,
+      "tags": [
+       "probe"
+      ],
+      "text": "memory 2",
+      "timestamp": 1700000000.0
+     }
+    ],
+    "low_confidence": false,
+    "query": "memory",
+    "trace": {
+     "bm25": {
+      "fired": false,
+      "hits": []
+     },
+     "candidate_pool": {
+      "fusion": "weighted_sum",
+      "multiplier": 1,
+      "pool_size": 3,
+      "rerank_position": "after_cut"
+     },
+     "chain_residual": {
+      "enabled": false,
+      "synthetic_hits": []
+     },
+     "config": {
+      "chain_residual": false,
+      "preset": "flat",
+      "top_k": 8
+     },
+     "filters": {
+      "bands": null,
+      "episodes": null,
+      "min_logical_turn": null,
+      "sources": null,
+      "tags": null
+     },
+     "final_topk": [
+      {
+       "bank": "flat",
+       "score": 1.0,
+       "source": "agent",
+       "text_preview": "memory 0"
+      },
+      {
+       "bank": "flat",
+       "score": 0.8,
+       "source": "agent",
+       "text_preview": "memory 1"
+      },
+      {
+       "bank": "flat",
+       "score": 0.28,
+       "source": "agent",
+       "text_preview": "memory 2"
+      }
+     ],
+     "reference_pool": [],
+     "reranker": {
+      "candidates": [],
+      "fired": false
+     },
+     "slot_pool": [],
+     "tiers": [
+      {
+       "boost": 0.0,
+       "candidates": [
+        {
+         "adjusted_score": 1.0,
+         "drop_reason": null,
+         "kept": true,
+         "raw_score": 1.0,
+         "relevance": 1.0,
+         "source": "agent",
+         "source_mult": 1.0,
+         "superseded": false,
+         "supersession_mult": 1.0,
+         "text_preview": "memory 0"
+        },
+        {
+         "adjusted_score": 0.8,
+         "drop_reason": null,
+         "kept": true,
+         "raw_score": 0.8,
+         "relevance": 0.8,
+         "source": "agent",
+         "source_mult": 1.0,
+         "superseded": false,
+         "supersession_mult": 1.0,
+         "text_preview": "memory 1"
+        },
+        {
+         "adjusted_score": 0.28,
+         "drop_reason": null,
+         "kept": true,
+         "raw_score": 0.28,
+         "relevance": 0.28,
+         "source": "agent",
+         "source_mult": 1.0,
+         "superseded": false,
+         "supersession_mult": 1.0,
+         "text_preview": "memory 2"
+        }
+       ],
+       "depth": 0,
+       "eligible_count": 3,
+       "entry_count": 3,
+       "excluded_count": 0,
+       "filtered_out": false,
+       "half_life_s": null,
+       "name": "flat"
+      }
+     ]
+    }
+   },
+   "status": 200
+  },
+  {
+   "headers": {
+    "content-type": "mcp"
+   },
+   "json": {
+    "cortex": [],
+    "count": 0,
+    "entries": [],
+    "low_confidence": true,
+    "query": "",
+    "trace": null
+   },
+   "status": 200
+  },
+  {
+   "headers": {
+    "content-type": "mcp"
+   },
+   "json": {
+    "error": "invalid_argument",
+    "message": "unknown band name(s) ['absent'] \u2014 this preset has ['flat']"
+   },
+   "status": 422
+  },
+  {
+   "headers": {
+    "content-type": "mcp"
+   },
+   "json": {
+    "cortex": [],
+    "count": 3,
+    "entries": [
+     {
+      "access_count": 10,
+      "bank": "flat",
+      "episode_id": null,
+      "episode_title": null,
+      "id": 1,
+      "score": 1.0,
+      "source": "agent",
+      "superseded": false,
+      "superseded_at": null,
+      "superseded_by_text": null,
+      "surprise_score": 0.0,
+      "tags": [
+       "probe"
+      ],
+      "text": "memory 0",
+      "timestamp": 1700000000.0
+     },
+     {
+      "access_count": 9,
+      "bank": "flat",
+      "episode_id": null,
+      "episode_title": null,
+      "id": 2,
+      "score": 0.8,
+      "source": "agent",
+      "superseded": false,
+      "superseded_at": null,
+      "superseded_by_text": null,
+      "surprise_score": 0.0,
+      "tags": [
+       "probe"
+      ],
+      "text": "memory 1",
+      "timestamp": 1700000000.0
+     },
+     {
+      "access_count": 9,
+      "bank": "flat",
+      "episode_id": null,
+      "episode_title": null,
+      "id": 3,
+      "score": 0.28,
+      "source": "agent",
+      "superseded": false,
+      "superseded_at": null,
+      "superseded_by_text": null,
+      "surprise_score": 0.0,
+      "tags": [
+       "probe"
+      ],
+      "text": "memory 2",
+      "timestamp": 1700000000.0
+     }
+    ],
+    "low_confidence": false,
+    "query": "memory"
+   },
+   "status": 200
+  }
+ ]
+}

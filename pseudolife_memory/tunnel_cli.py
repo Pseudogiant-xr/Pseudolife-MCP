@@ -32,9 +32,11 @@ def runtime_status(name, store):
     return status_profile(name, store)
 
 
-def shim_command(profile, store):
+def shim_command(profile, store, *, saved: bool = False):
+    """``saved``: the command goes into a service that runs it later, not a
+    launch now (see ``tunnel_runtime.stable_command``)."""
     from pseudolife_memory.tunnel_runtime import stable_command
-    return stable_command() + ['tunnel', 'shim',
+    return stable_command(saved=saved) + ['tunnel', 'shim',
             '--profile', profile.name, '--profile-dir', str(store.root)]
 
 
@@ -341,7 +343,9 @@ def main(argv=None):
         if args.command == 'shim':
             return run_bridge(store, profile)
         from pseudolife_memory import tunnel_runtime as runtime
-        command = shim_command(profile, store)
+        # A service's command runs later from the service manager's working
+        # directory; run and start launch this one now.
+        command = shim_command(profile, store, saved=args.command == 'service')
         if args.command == 'run':
             return runtime.run_profile(profile, store, command)
         if args.command == 'start':

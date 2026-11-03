@@ -44,6 +44,16 @@ fn hook_text(body: &str) -> Response {
     )
 }
 
+async fn append_reminder(
+    text: &mut String,
+    reminder: impl std::future::Future<Output = &'static str>,
+) {
+    // An empty note has no cursor; preserve it and do not start a lookup.
+    if !text.is_empty() {
+        text.push_str(reminder.await);
+    }
+}
+
 pub(crate) async fn route(
     app: &App,
     path: &str,
@@ -66,18 +76,21 @@ pub(crate) async fn route(
     }
     match path {
         // Status notes and lessons are memory content: an unauthorized
-        // caller gets the empty body, and the hook keeps its cursor. The
-        // maintainer's conductor's reminder line (`?agent=`) is not ported
-        // (declared in divergences.md).
+        // caller gets the empty body, and the hook keeps its cursor.
         "/api/hook/memory-changes" => {
             if !authorized(app, h) {
                 return hook_text("");
             }
             let params = parse_query(raw_query);
-            let text = crate::memory_changes::hook_memory_changes(
+            let mut text = crate::memory_changes::hook_memory_changes(
                 app,
                 params.get("session_id").map(String::as_str),
                 params.get("since").map(String::as_str),
+            )
+            .await;
+            append_reminder(
+                &mut text,
+                crate::board::conductor::reminder(app, h, params.get("agent")),
             )
             .await;
             hook_text(&text)
@@ -185,6 +198,19 @@ pub(crate) async fn route(
 #[cfg(test)]
 mod tests {
     use crate::http::tests::{authed_request, mcp_refusal_app};
+
+    #[tokio::test]
+    async fn empty_memory_note_never_looks_up_or_appends_a_reminder() {
+        let mut text = String::new();
+        super::append_reminder(&mut text, async {
+            panic!("failed note must skip the lookup")
+        })
+        .await;
+        assert!(text.is_empty());
+        let mut text = "100.000000\nnote\n".to_string();
+        super::append_reminder(&mut text, async { "reminder\n" }).await;
+        assert_eq!(text, "100.000000\nnote\nreminder\n");
+    }
 
     async fn text_of(path: &str) -> (u16, String) {
         let response = crate::http::handle(

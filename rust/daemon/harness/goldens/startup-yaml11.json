@@ -1,0 +1,313 @@
+{
+  "pyyaml": "6.0.3",
+  "cases": [
+    {
+      "yaml": "yes",
+      "expected": true
+    },
+    {
+      "yaml": "Yes",
+      "expected": true
+    },
+    {
+      "yaml": "YES",
+      "expected": true
+    },
+    {
+      "yaml": "no",
+      "expected": false
+    },
+    {
+      "yaml": "No",
+      "expected": false
+    },
+    {
+      "yaml": "NO",
+      "expected": false
+    },
+    {
+      "yaml": "on",
+      "expected": true
+    },
+    {
+      "yaml": "On",
+      "expected": true
+    },
+    {
+      "yaml": "ON",
+      "expected": true
+    },
+    {
+      "yaml": "off",
+      "expected": false
+    },
+    {
+      "yaml": "Off",
+      "expected": false
+    },
+    {
+      "yaml": "OFF",
+      "expected": false
+    },
+    {
+      "yaml": "true",
+      "expected": true
+    },
+    {
+      "yaml": "True",
+      "expected": true
+    },
+    {
+      "yaml": "TRUE",
+      "expected": true
+    },
+    {
+      "yaml": "false",
+      "expected": false
+    },
+    {
+      "yaml": "False",
+      "expected": false
+    },
+    {
+      "yaml": "FALSE",
+      "expected": false
+    },
+    {
+      "yaml": "y",
+      "expected": "y"
+    },
+    {
+      "yaml": "Y",
+      "expected": "Y"
+    },
+    {
+      "yaml": "n",
+      "expected": "n"
+    },
+    {
+      "yaml": "N",
+      "expected": "N"
+    },
+    {
+      "yaml": "yEs",
+      "expected": "yEs"
+    },
+    {
+      "yaml": "nO",
+      "expected": "nO"
+    },
+    {
+      "yaml": "oN",
+      "expected": "oN"
+    },
+    {
+      "yaml": "oFF",
+      "expected": "oFF"
+    },
+    {
+      "yaml": "tRuE",
+      "expected": "tRuE"
+    },
+    {
+      "yaml": "fAlSe",
+      "expected": "fAlSe"
+    },
+    {
+      "yaml": "010",
+      "expected": 8
+    },
+    {
+      "yaml": "-010",
+      "expected": -8
+    },
+    {
+      "yaml": "+010",
+      "expected": 8
+    },
+    {
+      "yaml": "1_000",
+      "expected": 1000
+    },
+    {
+      "yaml": "0x10",
+      "expected": 16
+    },
+    {
+      "yaml": "0b11",
+      "expected": 3
+    },
+    {
+      "yaml": "1:30",
+      "expected": 90
+    },
+    {
+      "yaml": "1:30.5",
+      "expected": 90.5
+    },
+    {
+      "yaml": "0o10",
+      "expected": "0o10"
+    },
+    {
+      "yaml": "08",
+      "expected": "08"
+    },
+    {
+      "yaml": "1e5",
+      "expected": "1e5"
+    },
+    {
+      "yaml": "1e-1",
+      "expected": "1e-1"
+    },
+    {
+      "yaml": "1.0e-1",
+      "expected": 0.1
+    },
+    {
+      "yaml": "null",
+      "expected": null
+    },
+    {
+      "yaml": "Null",
+      "expected": null
+    },
+    {
+      "yaml": "NULL",
+      "expected": null
+    },
+    {
+      "yaml": "~",
+      "expected": null
+    },
+    {
+      "yaml": "",
+      "expected": null
+    },
+    {
+      "yaml": "!!bool yEs",
+      "expected": true
+    },
+    {
+      "yaml": "!!null Null",
+      "expected": null
+    },
+    {
+      "yaml": "!!null ignored",
+      "expected": null
+    },
+    {
+      "yaml": "!!int '010'",
+      "expected": 8
+    },
+    {
+      "yaml": "!!float '1e5'",
+      "expected": 100000.0
+    },
+    {
+      "yaml": "! yes",
+      "expected": true
+    },
+    {
+      "yaml": "! 'yes'",
+      "expected": true
+    },
+    {
+      "yaml": "! '010'",
+      "expected": 8
+    },
+    {
+      "yaml": "! 'NULL'",
+      "expected": null
+    },
+    {
+      "yaml": "! 'yEs'",
+      "expected": "yEs"
+    },
+    {
+      "yaml": "!!str yes",
+      "expected": "yes"
+    },
+    {
+      "yaml": "'yes'",
+      "expected": "yes"
+    },
+    {
+      "yaml": "\"off\"",
+      "expected": "off"
+    },
+    {
+      "yaml": "'010'",
+      "expected": "010"
+    },
+    {
+      "yaml": "'NULL'",
+      "expected": "NULL"
+    },
+    {
+      "yaml": "9223372036854775807",
+      "expected": 9223372036854775807
+    },
+    {
+      "yaml": "-9223372036854775808",
+      "expected": -9223372036854775808
+    },
+    {
+      "yaml": "!!int ' 10 '",
+      "expected": 10
+    },
+    {
+      "yaml": "!!int |\n  10\n",
+      "expected": 10
+    },
+    {
+      "yaml": "!!int ' 010 '",
+      "expected": 10
+    },
+    {
+      "yaml": "!!int '010 '",
+      "expected": 8
+    },
+    {
+      "yaml": "!!int ' 1 : 30 '",
+      "expected": 90
+    },
+    {
+      "yaml": "!!int '0x FF '",
+      "expected": 255
+    },
+    {
+      "yaml": "!!int '١٢'",
+      "expected": 12
+    },
+    {
+      "yaml": "!!int '0b0b10'",
+      "expected": 2
+    },
+    {
+      "yaml": ".inf",
+      "nonfinite": "inf"
+    },
+    {
+      "yaml": "-.inf",
+      "nonfinite": "-inf"
+    },
+    {
+      "yaml": ".nan",
+      "nonfinite": "nan"
+    },
+    {
+      "yaml": "{=: general}",
+      "expected": {
+        "=": "general"
+      }
+    },
+    {
+      "yaml": "{!!value '=': general}",
+      "expected": {
+        "=": "general"
+      }
+    }
+  ]
+}

@@ -340,7 +340,7 @@ def test_failed_mac_restart_of_stopped_definition_removes_new_registration(tmp_p
 
 def test_service_preview_replaces_shim_with_stable_supervisor(tmp_path, monkeypatch):
     from pseudolife_memory import tunnel_runtime
-    monkeypatch.setattr(tunnel_runtime, 'stable_command', lambda: [str(tmp_path/'bin'/'pseudolife-mcp')])
+    monkeypatch.setattr(tunnel_runtime, 'stable_command', lambda saved=False: [str(tmp_path/'bin'/'pseudolife-mcp')])
     output = render_service(profile(tmp_path), ProfileStore(tmp_path/'profiles'), [str(tmp_path/'.venv'/'python'), '-m', 'pseudolife_memory.cli', 'tunnel', 'shim'], platform='linux')
     assert '"run"' in output
     assert '"--profile-dir"' in output

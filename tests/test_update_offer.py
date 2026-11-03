@@ -262,10 +262,14 @@ def _health_for(version, unattended=True):
 def test_shim_runs_the_client_half_unattended_when_the_daemon_is_newer(home, monkeypatch, capsys):
     from pseudolife_memory import shim
     calls = _spawns(monkeypatch)
+    # From a directory that is not the package's own (an older checkout,
+    # say), the child leaves the working directory off its import path.
+    monkeypatch.chdir(home)
     note = shim._unattended_clients("http://127.0.0.1:8765", _health_for("99.0.0"))
     assert len(calls) == 1
     argv, log = calls[0]
-    assert argv == [sys.executable, "-m", "pseudolife_memory.cli", "update", "--clients-only", "--tag", "99.0.0",
+    safe = ["-P"] if sys.version_info >= (3, 11) else []
+    assert argv == [sys.executable, *safe, "-m", "pseudolife_memory.cli", "update", "--clients-only", "--tag", "99.0.0",
                     "--result-file", str(home / ".pseudolife-mcp" / "update-clients.99.0.0.result")]
     assert log == home / ".pseudolife-mcp" / "update-clients.log"
     assert "99.0.0" in note and "unattended" in note
