@@ -928,10 +928,14 @@ def _dispatch(service, action: str, parameters: dict, *, headers=None,
             if now - getattr(service, "_coordination_pruned_at", float("-inf")) >= 60:
                 store.prune(audit_retention_days=cfg.audit_retention_days)
                 service._coordination_pruned_at = now
+        if action != "history":
+            _drain_lease_grants_locked(service, store)
         if action == "register":
             return store.register(principal, **parameters)
         if action == "leases":
-            return store.list_leases(**parameters)
+            result = store.list_leases(**parameters)
+            _drain_lease_grants_locked(service, store)
+            return result
         if attachment:
             store.check_attachment(principal, agent_id, credential, **attachment)
             # The adapter's live path skips messages whose delivery attempts
@@ -949,6 +953,8 @@ def _dispatch(service, action: str, parameters: dict, *, headers=None,
         method = {"agents": "list_agents", "attempt": "mark_attempt",
                   "lease": "acquire_lease", "release": "release_lease"}.get(action, action)
         result = getattr(store, method)(principal, agent_id, credential, **parameters)
+        if action in {"lease", "release", "agents"}:
+            _drain_lease_grants_locked(service, store)
         if action == "receive" and acknowledge:
             _acknowledge_page(store, principal, agent_id, credential, result)
         if action == "receive":
@@ -968,6 +974,65 @@ def _dispatch(service, action: str, parameters: dict, *, headers=None,
             for recipient in (send_recipients(result) if action == "send" else [agent_id]):
                 notify(recipient)
     return result
+
+
+def _drain_lease_grants_locked(service, store):
+    """Best effort after settlement, never initialize the full service.
+    The audit outbox retains work across cold startup, failures and restart."""
+    try:
+        if not _tier_ready(service, full=True):
+            return
+        refused = getattr(service, "_lease_grant_refusals", set())
+        service._lease_grant_refusals = refused
+        pending_fences = set()
+        after_name = ""
+        while grants := store.pending_lease_grants(after_name):
+            # Advance past refusals too: a full first page cannot starve
+            # later grants. Each lease is attempted at most once per drain.
+            after_name = grants[-1]["name"]
+            for grant in grants:
+                pending_fences.add(grant["fence"])
+                for attempt in range(2):
+                    identity = getattr(service, "_daemon_board_identity", None)
+                    if identity is None:
+                        row = store.register(DAEMON_PRINCIPAL, label="daemon", status="daemon notices")
+                        identity = (row["agent_id"], row["credential"])
+                        service._daemon_board_identity = identity
+                    epoch = {}
+                    if hasattr(service, "_coordination_hlc_epoch"):
+                        epoch = {"enforce_writer_epoch": True,
+                                 "expected_writer_epoch": service._coordination_hlc_epoch}
+                    try:
+                        result = store.send_lease_grant(*identity, **grant,
+                            hlc=":".join(map(str, service._hlc.tick())), **epoch)
+                    except CoordinationError as exc:
+                        if attempt == 0 and exc.code in {"instance_not_found", "invalid_credential"}:
+                            service._daemon_board_identity = None
+                            continue
+                        if grant["fence"] not in refused:
+                            refused.add(grant["fence"])
+                            logger.info("lease grant notice refused (%s)", exc.code)
+                        break
+                    notify = getattr(service, "_coordination_notifier", None)
+                    if result is not None and notify is not None:
+                        notify(result["recipient_agent_id"])
+                    break
+        refused.intersection_update(pending_fences)
+    except Exception as exc:  # noqa: BLE001 — leave the outbox for the next drain
+        logger.info("lease grant notice not sent (%s)", type(exc).__name__)
+
+
+def drain_lease_grants(service):
+    """Startup completion hook: recover unsent grants without cold init."""
+    try:
+        if (not service.config.coordination.enabled or not getattr(service, "_db_url", None)
+                or not _tier_ready(service, full=True)):
+            return
+        _ensure_tier(service, full=False)
+        with service._coordination_lock:
+            _drain_lease_grants_locked(service, _store(service))
+    except Exception as exc:  # noqa: BLE001 — startup succeeds; the outbox survives
+        logger.info("lease grant drain unavailable (%s)", type(exc).__name__)
 
 
 def daemon_notice(service, text: str) -> dict | None:

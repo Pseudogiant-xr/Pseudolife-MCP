@@ -323,6 +323,13 @@ fn main() {
             auth_configured,
         ));
         read::search_route::LazyReranker::prepare();
+        let board = Arc::new(board::Board::new(
+            service.config.coordination.clone(),
+            service_dsn,
+            service.clone(),
+            store.clone(),
+        ));
+        service.install(&board);
         let background = background::Background::default();
         background.start_background_durability(service.clone(), autosave_every);
         if !read_only {
@@ -336,13 +343,6 @@ fn main() {
         );
         background.start_release_check(service.release_check.clone(), &service.config.updates);
         background.start_heap_trim(trim_every);
-        let board = Arc::new(board::Board::new(
-            service.config.coordination.clone(),
-            service_dsn,
-            service.clone(),
-            store.clone(),
-        ));
-        service.install(&board);
         let app = Arc::new(
             http::App::new(service.clone(), tokens, store, static_dir, board)
                 .with_activity(activity),

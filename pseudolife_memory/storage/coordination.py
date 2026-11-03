@@ -480,7 +480,7 @@ REPUDIATE_EVENT = "maintainer_repudiate"
 # hourly cap (``coordination.maintainer.maintainer_per_recipient_per_hour``)
 # counts these rows per recipient.
 MAINTAINER_WAKE_REASON = "maintainer_message"
-_PRIVILEGED_WAKE_REASONS = (MAINTAINER_WAKE_REASON, "conductor")
+_PRIVILEGED_WAKE_REASONS = (MAINTAINER_WAKE_REASON, "conductor", "lease_grant")
 # The audit log (schema v42): one append-only row per board mutation, written
 # in the mutation's own transaction and chained by sha256(prev_hash ||
 # canonical row), so an edited, inserted, reordered or removed row fails
@@ -2076,6 +2076,19 @@ class CoordinationStore:
             "purpose='',acquired_at=NULL,expires_at=NULL,expect=NULL,expected_end=NULL,"
             "freed_at=%s WHERE name=%s RETURNING *", (now, name))
 
+    def _unaccepted_grant(self, row, name):
+        return self._one(
+            "SELECT payload FROM coordination_events e WHERE e.event='lease_grant' "
+            "AND e.actor='daemon' AND e.agent_id=%s AND e.created_at>=%s AND e.created_at<=%s "
+            "AND e.payload::jsonb->>'name'=%s AND e.payload::jsonb->>'fence'=%s "
+            "AND NOT EXISTS (SELECT 1 FROM coordination_events a WHERE a.event='lease_update' "
+            "AND a.created_at>=%s AND a.created_at<=%s AND a.agent_id=e.agent_id "
+            "AND a.payload::jsonb->>'name'=%s AND a.payload::jsonb->>'fence'=%s "
+            "AND a.payload::jsonb->>'accepted'='true') ORDER BY e.seq DESC LIMIT 1",
+            (row["holder_agent_id"], row["acquired_at"], row["acquired_at"] + LEASE_GRANT_WINDOW,
+             name, str(row["fence"]), row["acquired_at"], row["acquired_at"] + LEASE_GRANT_WINDOW,
+             name, str(row["fence"])))
+
     def _settle(self, name, now, events):
         """Expire a lapsed hold on ``name`` and grant a free lease to the head
         of its queue, inside the caller's transaction. Returns the locked row,
@@ -2085,7 +2098,17 @@ class CoordinationStore:
         row = self._one("SELECT * FROM coordination_leases WHERE name=%s FOR UPDATE", (name,))
         if row is None:
             return None
+        missed = None
         if row["holder_agent_id"] is not None and row["expires_at"] <= now:
+            # Only an unaccepted queue grant gets one retry. A direct hold,
+            # a renewal beyond the grant window, or an already retried grant
+            # expires normally. Match the generation, never just the agent.
+            grant = self._unaccepted_grant(row, name)
+            if grant is not None:
+                grant = json.loads(grant["payload"])
+                if (not grant.get("retry") and row["expires_at"] <=
+                        row["acquired_at"] + grant["window"] + 0.001):
+                    missed = (row, grant["window"])
             events.append(self._event("lease_expire", {"name": name, "fence": row["fence"]},
                                       actor="daemon", agent_id=row["holder_agent_id"]))
             row = self._vacate(name, now)
@@ -2118,8 +2141,18 @@ class CoordinationStore:
             waiter = self._one(
                 "SELECT w.* FROM coordination_lease_waiters w JOIN coordination_agents a "
                 "ON a.agent_id=w.agent_id AND a.credential_hash IS NOT NULL "
-                "WHERE w.name=%s ORDER BY w.ticket LIMIT 1 FOR UPDATE OF w", (name,))
+                "WHERE w.name=%s AND (a.lease_until>%s OR a.last_activity>%s) "
+                "ORDER BY w.ticket LIMIT 1 FOR UPDATE OF w",
+                (name, now - ATTACHMENT_LEASE, now - ATTACHMENT_LEASE))
             if waiter is not None:
+                # A dead-looking waiter is skipped, not deleted: after a
+                # daemon/shim restart its next heartbeat restores its turn.
+                retry = self._one(
+                    "SELECT 1 FROM coordination_events WHERE event='lease_queue' "
+                    "AND actor='daemon' AND agent_id=%s AND created_at=%s "
+                    "AND payload::jsonb->>'name'=%s "
+                    "AND payload::jsonb->>'reason'='missed_grant' LIMIT 1",
+                    (waiter["agent_id"], waiter["enqueued_at"], name)) is not None
                 self.storage.conn.execute(
                     "DELETE FROM coordination_lease_waiters WHERE name=%s AND agent_id=%s",
                     (name, waiter["agent_id"]))
@@ -2128,8 +2161,27 @@ class CoordinationStore:
                                   hold=hold, expect=waiter["expect"], purpose=waiter["purpose"])
                 events.append(self._event(
                     "lease_grant", {"name": name, "fence": row["fence"], "window": hold,
-                                    "expect": waiter["expect"], "purpose": waiter["purpose"]},
+                                    "expect": waiter["expect"], "purpose": waiter["purpose"],
+                                    **({"retry": True} if retry else {})},
                     actor="daemon", agent_id=waiter["agent_id"]))
+                if missed is not None:
+                    old, window = missed
+                    # Second in line means after the successor just granted,
+                    # before remaining waiters. The lease lock serializes
+                    # tickets; the retry cannot repeatedly hold up the queue.
+                    self.storage.conn.execute(
+                        "INSERT INTO coordination_lease_waiters "
+                        "(name,agent_id,principal,purpose,ttl,expect,enqueued_at,ticket) "
+                        "SELECT %s,%s,%s,%s,%s,%s,%s,COALESCE(min(ticket)-1, "
+                        "nextval('coordination_lease_waiters_ticket_seq')) "
+                        "FROM coordination_lease_waiters WHERE name=%s "
+                        "ON CONFLICT (name,agent_id) DO NOTHING",
+                        (name, old["holder_agent_id"], old["holder_principal"], old["purpose"],
+                         window, old["expect"], now, name))
+                    events.append(self._event(
+                        "lease_queue", {"name": name, "ttl": window, "expect": old["expect"],
+                                        "purpose": old["purpose"], "reason": "missed_grant"},
+                        actor="daemon", agent_id=old["holder_agent_id"]))
         return row
 
     def _drop_reserved_waiters(self, name, events):
@@ -2140,6 +2192,53 @@ class CoordinationStore:
                            "RETURNING agent_id", (name,)):
             events.append(self._event("lease_dequeue", {"name": name, "reason": "reserved"},
                                       actor="daemon", agent_id=r["agent_id"]))
+
+    def pending_lease_grants(self, after_name=""):
+        """Committed grants are an outbox until their one daemon notice is
+        committed. Only a still-current, live grant is useful to deliver."""
+        return self._all(
+            "SELECT l.name,l.fence FROM coordination_leases l WHERE l.expires_at>%s AND l.acquired_at>%s "
+            "AND l.name>%s AND NOT EXISTS (SELECT 1 FROM coordination_events a "
+            "WHERE a.event='lease_update' AND a.agent_id=l.holder_agent_id "
+            "AND a.created_at>=l.acquired_at AND a.created_at<=l.acquired_at+%s "
+            "AND a.payload::jsonb->>'name'=l.name AND a.payload::jsonb->>'fence'=l.fence::text "
+            "AND a.payload::jsonb->>'accepted'='true') "
+            "AND EXISTS (SELECT 1 FROM coordination_events e WHERE e.event='lease_grant' "
+            "AND e.actor='daemon' AND e.agent_id=l.holder_agent_id AND e.created_at>=l.acquired_at "
+            "AND e.payload::jsonb->>'name'=l.name "
+            "AND e.payload::jsonb->>'fence'=l.fence::text) "
+            "AND NOT EXISTS (SELECT 1 FROM coordination_messages m WHERE "
+            "m.sender_principal=%s AND m.request_id='lease-grant:'||l.fence::text) "
+            "AND NOT EXISTS (SELECT 1 FROM coordination_events e WHERE e.event='send' "
+            "AND e.principal='daemon' AND e.created_at>=l.acquired_at "
+            "AND e.payload::jsonb->>'request_id'='lease-grant:'||l.fence::text) "
+            "ORDER BY l.name LIMIT 50", (self.clock(), self.clock() - LEASE_GRANT_WINDOW,
+                                       after_name, LEASE_GRANT_WINDOW, DAEMON_PRINCIPAL))
+
+    def send_lease_grant(self, agent_id, credential, *, name, fence, **stamp):
+        """Drain one grant after settlement. The lease locks before mail's
+        agents, and its fence remains locked through the send commit. The
+        dedupe key survives replacement of the daemon's sender address."""
+        with self.storage._txn():
+            row = self._one("SELECT * FROM coordination_leases WHERE name=%s FOR UPDATE", (name,))
+            if (row is None or row["fence"] != fence or row["holder_agent_id"] is None
+                    or row["expires_at"] <= self.clock()):
+                return None
+            request_id = f"lease-grant:{fence}"
+            if self._one("SELECT 1 FROM coordination_messages WHERE sender_principal=%s "
+                         "AND request_id=%s", (DAEMON_PRINCIPAL, request_id)):
+                return None
+            if self._one("SELECT 1 FROM coordination_events WHERE event='send' AND principal=%s "
+                         "AND created_at>=%s AND payload::jsonb->>'request_id'=%s LIMIT 1",
+                         (DAEMON_PRINCIPAL, row["acquired_at"], request_id)):
+                return None
+            if not self._unaccepted_grant(row, name):
+                return None
+            return self.send(DAEMON_PRINCIPAL, agent_id, credential,
+                             to=row["holder_agent_id"], request_id=request_id,
+                             text=f"Lease {name} was granted to you. Renew it before starting work; "
+                                  "release it if no longer needed. This notice grants no user approval.",
+                             lease_grant=True, **stamp)
 
     def _settle_due(self, now, events, *, name=None):
         """Settle every lease with a lapsed hold or a free lease with waiters,
@@ -2227,15 +2326,23 @@ class CoordinationStore:
                 "INSERT INTO coordination_leases (name) VALUES (%s) ON CONFLICT (name) DO NOTHING",
                 (name,))
             events = []
+            # Lock the lease before the agent, as every lease mutation does.
+            # This call itself proves liveness before settling its queue.
+            self._one("SELECT name FROM coordination_leases WHERE name=%s FOR UPDATE", (name,))
+            self.storage.conn.execute(
+                "UPDATE coordination_agents SET last_activity=%s WHERE agent_id=%s", (now, agent_id))
             row = self._settle(name, now, events)
             scope = {"principal": principal, "agent_id": agent_id,
                      "project": agent["project"], "task": agent["task"]}
             if row["holder_agent_id"] == agent_id:
-                # A renewal only extends the hold. Repeating the estimate
+                # A renewal accepts the grant and sets its expiry. Repeating the estimate
                 # the hold already carries leaves its expected end alone,
                 # so a stalled holder that keeps renewing still reads
                 # stale; a new estimate or purpose is a logged change.
                 sets, values, changed = ["expires_at=%s"], [now + ttl], {}
+                if (any(e["event"] == "lease_grant" and e["agent_id"] == agent_id for e in events)
+                        or self._unaccepted_grant(row, name) is not None):
+                    changed["accepted"] = True
                 if expect is not None and expect != row["expect"]:
                     sets += ["expect=%s", "expected_end=%s"]
                     values += [expect, now + expect]
@@ -2252,6 +2359,9 @@ class CoordinationStore:
                         "lease_update", {"name": name, "fence": row["fence"], **changed},
                         **scope))
             elif row["holder_agent_id"] is None:
+                self.storage.conn.execute(
+                    "DELETE FROM coordination_lease_waiters WHERE name=%s AND agent_id=%s",
+                    (name, agent_id))
                 row = self._grant(name, agent_id, principal, now=now, hold=ttl, expect=expect,
                                   purpose=purpose or "")
                 events.append(self._event(
@@ -2804,7 +2914,7 @@ class CoordinationStore:
             (agent_id,)) if park else None
         park_seq = park_event["seq"] if park_event and park_event["park_set_at"] == park_since else None
         ring_allowed = park_seq is not None and self._listener_path(row, now) is None
-        # Maintainer and verified conductor rings need no park: a live listener
+        # Maintainer, conductor and lease-grant rings need no park: a live listener
         # is enough, a done park included.
         listening = self._listener_path(row, now) is None
         if not codex and self._listener_path(row, now) is not None:
@@ -2818,8 +2928,11 @@ class CoordinationStore:
             "JOIN coordination_messages m ON m.message_id=w.message_id "
             "AND m.recipient_agent_id=w.recipient_agent_id WHERE w.recipient_agent_id=%s "
             "AND w.decision IN ('rung','attention') "
-            "AND m.acknowledged_at IS NULL AND m.expires_at>%s",
-            (park_seq or 0, agent_id, now))
+            "AND m.acknowledged_at IS NULL AND m.expires_at>%s "
+            "AND (w.reason<>'lease_grant' OR EXISTS (SELECT 1 FROM coordination_leases l "
+            "WHERE l.holder_agent_id=m.recipient_agent_id AND l.expires_at>%s "
+            "AND m.request_id='lease-grant:'||l.fence::text))",
+            (park_seq or 0, agent_id, now, now))
         if reopen_only:
             rows = [item for item in rows if item["reason"] in _PRIVILEGED_WAKE_REASONS or (
                 park_seq is not None and item["decision"] == "rung"
@@ -2842,9 +2955,11 @@ class CoordinationStore:
             rows = [item for item in rows if item["decision"] == "attention"]
             if not rows:
                 return None
-        # Offer authority rows before marking them served. A peer arriving
+        # Offer system rows before marking them served. A peer arriving
         # after them cannot postpone or downgrade that first handoff.
         # Thereafter newest-offer selection lets later peer bells through.
+        # Losing peer rows stay unstamped and may ring after the system mail
+        # is acknowledged; they have not yet had a handoff.
         newest = max(rows, key=lambda r: (r["created_at"], r["wake_id"]))
         privileged = [item for item in rows if item["reason"] in _PRIVILEGED_WAKE_REASONS
                       and (codex or item["queued"] or item["served_at"] is None
@@ -3138,6 +3253,23 @@ class CoordinationStore:
                     **need, **reopened, **ring}
         return {"decision": decision, "reason": reason, "ring_at": ring_at, **reopened, **ring}
 
+    def _lease_grant_wake(self, sender, recipient, now, *, message_id):
+        """A committed grant rings once without spending peer wake budgets.
+        Queue and send-rate bounds still apply to its ordinary daemon mail."""
+        self.storage.conn.execute(
+            "INSERT INTO coordination_wakes (recipient_agent_id,sender_agent_id,message_id,"
+            "decision,reason,urgent,ring_at,created_at) "
+            "VALUES (%s,%s,%s,'rung','lease_grant',false,%s,%s)",
+            (recipient["agent_id"], sender["agent_id"], message_id, now, now))
+        missing = self._listener_path(recipient, now)
+        if missing is not None:
+            codex = "codex" in (recipient.get("capabilities") or {})
+            return {"decision": "no_path", "reason": missing, "queued": True,
+                    "last_activity": recipient["last_activity"], "_ring": "lease_grant",
+                    "fallback": FALLBACK_CODEX if codex else FALLBACK_CLAUDE,
+                    "fallback_paths": list(FALLBACK_PATHS_CODEX if codex else FALLBACK_PATHS_CLAUDE)}
+        return {"decision": "rung", "reason": "lease_grant", "ring_at": now, "_ring": "lease_grant"}
+
     def _maintainer_wake(self, sender, recipient, now, *, message_id, conductor=False):
         """Maintainer delivery, also used by a conductor proven at send time.
 
@@ -3375,7 +3507,7 @@ class CoordinationStore:
     def send(self, principal, agent_id, credential, *, to=None, text, request_id,
              reply_to=None, expires_at=None, hlc="", expected_writer_epoch=None,
              enforce_writer_epoch=False, clears=None, urgent=False, notice=False,
-             maintainer_proof=None):
+             maintainer_proof=None, lease_grant=False):
         """Queue ``text`` for ``to``: one agent (a full id, or a unique
         prefix of at least ID_PREFIX_MIN hex characters), or a burst,
         ``project:<name>`` or ``all`` (see ``_fanout_rows``), at most
@@ -3407,7 +3539,7 @@ class CoordinationStore:
         row or a subagent's), stored with origin ``maintainer`` and the
         proof, its wake decided by the maintainer branch of
         ``_wake_decision``."""
-        if notice and principal != DAEMON_PRINCIPAL:
+        if (notice or lease_grant) and principal != DAEMON_PRINCIPAL:
             raise CoordinationError("invalid_request")
         maintainer = maintainer_proof is not None
         if maintainer != (principal == MAINTAINER_PRINCIPAL) or (
@@ -3617,7 +3749,8 @@ class CoordinationStore:
                 # Decided on the recipient row as the message arrives (the row
                 # is locked above); a burst's earlier rings are visible here,
                 # so the fan-out stagger spaces them.
-                wake = (dict(DAEMON_NOTICE_WAKE) if notice else
+                wake = (self._lease_grant_wake(sender, recipient, now, message_id=message_id)
+                        if lease_grant else dict(DAEMON_NOTICE_WAKE) if notice else
                         self._wake_decision(sender, recipient, now, clears=clears,
                                             urgent=urgent, message_id=message_id,
                                             maintainer=maintainer))
@@ -3700,7 +3833,13 @@ class CoordinationStore:
                 raise CoordinationError("invalid_cursor") from None
             if seq > row["next_sequence"]:
                 raise CoordinationError("invalid_cursor", "cursor_ahead")
-        attempt_clause = (" AND attempts<%s AND sender_principal<>%s AND (wake IS NULL OR "
+        attempt_clause = (" AND attempts<%s AND (sender_principal<>%s OR "
+                          "EXISTS (SELECT 1 FROM coordination_wakes g WHERE "
+                          "g.message_id=coordination_messages.message_id AND g.reason='lease_grant' "
+                          "AND EXISTS (SELECT 1 FROM coordination_leases l WHERE "
+                          "l.holder_agent_id=coordination_messages.recipient_agent_id AND l.expires_at>%s "
+                          "AND coordination_messages.request_id='lease-grant:'||l.fence::text))) "
+                          "AND (wake IS NULL OR "
                           "wake->>'decision' IN ('rung','hinted') OR "
                           "(wake->>'queued'='true' AND NOT EXISTS (SELECT 1 FROM "
                           "coordination_wakes w WHERE w.recipient_agent_id="
@@ -3709,7 +3848,7 @@ class CoordinationStore:
                           "w.decision='nudged'))) AND repudiated_at IS NULL"
                           if for_delivery else "")
         now = self.clock()
-        params = ([agent_id, seq, now] + ([MAX_ATTEMPTS, DAEMON_PRINCIPAL] if for_delivery else [])
+        params = ([agent_id, seq, now] + ([MAX_ATTEMPTS, DAEMON_PRINCIPAL, now] if for_delivery else [])
                   + [limit])
         rows = self._all("SELECT * FROM coordination_messages WHERE recipient_agent_id=%s "
                          "AND recipient_sequence>%s AND acknowledged_at IS NULL AND expires_at>%s"

@@ -303,6 +303,7 @@ pub struct SendArgs<'a> {
     pub expected_writer_epoch: Option<i64>,
     pub enforce_writer_epoch: bool,
     pub notice: bool,
+    pub lease_grant: bool,
     pub maintainer_proof: Option<Value>,
 }
 
@@ -533,7 +534,7 @@ impl Store {
         credential: &str,
         args: SendArgs<'_>,
     ) -> Result<Value> {
-        if args.notice && principal != DAEMON_PRINCIPAL {
+        if (args.notice || args.lease_grant) && principal != DAEMON_PRINCIPAL {
             return Err(BoardError::code("invalid_request"));
         }
         let maintainer = args.maintainer_proof.is_some();
@@ -856,7 +857,9 @@ impl Store {
         for recipient in &recipients {
             let seq = recipient.next_sequence + 1;
             let message_id = uuid_hex();
-            let mut decision = if args.notice {
+            let mut decision = if args.lease_grant {
+                wake::lease_grant_wake(tx, &sender, recipient, now, &message_id).await?
+            } else if args.notice {
                 let mut m = Map::new();
                 m.insert("decision".into(), json!("hinted"));
                 m.insert("reason".into(), json!("daemon_notice"));
@@ -1028,7 +1031,11 @@ impl Store {
                 .query(
                     "SELECT * FROM coordination_messages WHERE recipient_agent_id=$1 \
                      AND recipient_sequence>$2 AND acknowledged_at IS NULL AND expires_at>$3 \
-                     AND attempts<$4 AND sender_principal<>$5 AND (wake IS NULL OR \
+                     AND attempts<$4 AND (sender_principal<>$5 OR EXISTS \
+                     (SELECT 1 FROM coordination_wakes g WHERE g.message_id=coordination_messages.message_id \
+                     AND g.reason='lease_grant' AND EXISTS (SELECT 1 FROM coordination_leases l WHERE \
+                     l.holder_agent_id=coordination_messages.recipient_agent_id AND l.expires_at>$3 \
+                     AND coordination_messages.request_id='lease-grant:'||l.fence::text))) AND (wake IS NULL OR \
                      wake->>'decision' IN ('rung','hinted') OR \
                      (wake->>'queued'='true' AND NOT EXISTS (SELECT 1 FROM \
                      coordination_wakes w WHERE w.recipient_agent_id=\
