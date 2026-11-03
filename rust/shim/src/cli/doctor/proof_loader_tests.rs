@@ -26,6 +26,10 @@ fn child_environment_capture() {
     if !root.with_file_name("capture-enabled").is_file() {
         return;
     }
+    assert!(
+        std::env::var_os("R2_PROOF_LOADER_ROOT").is_none(),
+        "isolated capture child inherited the parent fixture sentinel"
+    );
     let value = std::env::var_os("ORT_DYLIB_PATH");
     let bytes = value.as_ref().and_then(|path| fs::read(path).ok());
     fs::write(
