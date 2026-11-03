@@ -17,7 +17,18 @@ const DEFAULT_PORT: u32 = 8765;
 const MIN_SCHEMA: i64 = 53;
 const TIERS: [&str; 3] = ["minimal", "core", "full"];
 const URL_PLACEHOLDER: &str = "<daemon-url>";
-const VERSION_LINE: &str = "pseudolife-mcp invite 2";
+/// `VERSION_LINES`: what `invite --version-check` prints, the highest
+/// version listed being this image's; 2 (v59) takes `--someone-else` and
+/// `--mine`. Line 1 stays first because every host CLI before v59, Python
+/// and shim alike, accepts the image only when its output starts with
+/// `pseudolife-mcp invite 1`: without it, a host CLI one release behind
+/// refuses a plain invite as an image that predates `invite`.
+const VERSION_LINES: [&str; 2] = ["pseudolife-mcp invite 1", "pseudolife-mcp invite 2"];
+/// `OWNERSHIP_NOTE`: the `--someone-else` note, one text however invite
+/// was run, since a host CLI before v59 forwards an invite into the image
+/// with nothing that tells it apart from a direct run, and its own parser
+/// refuses `--someone-else`.
+const OWNERSHIP_NOTE: &str = "for a machine that is not yours, add --someone-else (an older pseudolife-mcp refuses it: update it first)";
 
 #[derive(Default)]
 struct Args {
@@ -417,7 +428,9 @@ pub(super) async fn run(arguments: &[String]) -> Result<u8, Defer> {
         Err(_) => return Err(Defer),
     };
     if args.version_check {
-        super::print(VERSION_LINE);
+        for line in VERSION_LINES {
+            super::print(line);
+        }
         return Ok(EXIT_OK);
     }
     let mut report = Report::new(args.json);
@@ -706,8 +719,9 @@ async fn local(
             &created,
             url,
             args.expires.unwrap_or(900),
-            args.owned,
-            ownership,
+            // The note is offered only where the flag can work: a bank with
+            // the column, and neither flag given.
+            ownership && args.owned.is_none(),
         )),
         Ok(Err(refusal)) => Ok(report.fail_units(EXIT_REFUSED, refusal)),
         Err(DbError::UndefinedTable) => Ok(report.fail(EXIT_REFUSED, NO_TABLE)),
@@ -739,15 +753,15 @@ fn minutes(seconds: u32) -> u32 {
     }
 }
 
-/// `_invite`'s report, after the row was written.
+/// `_invite`'s report, after the row was written. `ownership_note`:
+/// whether to print `OWNERSHIP_NOTE` when the row is the owner's.
 fn invite_report(
     report: &mut Report,
     name: &str,
     created: &invite_db::Created,
     url: Option<String>,
     seconds: u32,
-    owned: Option<bool>,
-    ownership: bool,
+    ownership_note: bool,
 ) -> u8 {
     let (Some(raw), Some(expires_at)) = (created.code.as_deref(), created.expires_at) else {
         // A paired machine's ownership alone: no code, nothing to re-pair.
@@ -814,8 +828,8 @@ fn invite_report(
     if listed_in_config(name) {
         report.note(&format!("note: {name} is already listed in coordination.allowed_principals; the invite gives it a token"));
     }
-    if ownership && created.owned && owned.is_none() {
-        report.note("for a machine that is not yours, add --someone-else");
+    if ownership_note && created.owned {
+        report.note(OWNERSHIP_NOTE);
     }
     report.note("an invited machine can read and write the whole bank and use the agent board, but not change the daemon's configuration");
     report.finish(EXIT_OK)
@@ -870,7 +884,11 @@ fn list_report(
             when_or(row.last_seen_at, "never")?,
             tier,
             board,
-            if row.owner { "yes" } else { "no" },
+            match row.owner {
+                None => "-",
+                Some(true) => "yes",
+                Some(false) => "no",
+            },
             when(row.created_at)?,
             when(row.paired_at)?,
             when(row.revoked_at)?
@@ -893,7 +911,7 @@ fn list_report(
             ("paired_at".into(), float(row.paired_at)),
             ("revoked_at".into(), float(row.revoked_at)),
             ("last_seen_at".into(), float(row.last_seen_at)),
-            ("owner".into(), J::Bool(row.owner)),
+            ("owner".into(), row.owner.map_or(J::Null, J::Bool)),
         ]));
     }
     let mut refused_lines = Vec::new();
@@ -931,7 +949,8 @@ fn list_report(
     }
     if !rows.is_empty() {
         report.say("  (environment: a token in the daemon's PSEUDOLIFE_MCP_TOKENS or PSEUDOLIFE_MCP_TOKEN; last seen: its last accepted request, written once a minute;");
-        report.say("   owner: the bank owner's machine, whose board mail the owner's Console shows; `invite --someone-else` and coordination.not_owner_principals say otherwise)");
+        report.say("   owner: the bank owner's machine, whose board mail the owner's Console shows; `invite --someone-else` and coordination.not_owner_principals say otherwise;");
+        report.say("   owner -: unknown, an environment token listed with the daemon stopped)");
     }
     report.say("");
     if rejected.is_empty() {
