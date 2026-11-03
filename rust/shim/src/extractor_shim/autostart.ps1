@@ -397,6 +397,13 @@ try {
         $deadline = (Get-Date).AddSeconds(15)
         while ((Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 200 }
         if (Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue) { throw "port $port did not become free; restoring the previous registration" }
+        # Process and port settlement can outlive the earlier ownership check.
+        # A new registration also requires the name to have remained absent.
+        $beforeRegister = Get-TaskRegistration $name
+        if (($beforeRegister -and (-not $rollbackOwnership -or (Get-TaskOwnership $beforeRegister) -ne $rollbackOwnership)) -or
+            (-not $beforeRegister -and $rollbackOwnership)) {
+            throw "task $name registration changed; inspect its action before retrying; refusing to overwrite it"
+        }
         $installed = Register-ScheduledTask -TaskName $name -Action $action -Principal $principal -Trigger $trigger -Settings $settings -Description "Native $kind extractor CLI shim" -Force
         $rollbackOwnership = Get-TaskOwnership $installed
         if (-not (Get-TaskRegistration $name)) { throw "task was not registered: $name" }
