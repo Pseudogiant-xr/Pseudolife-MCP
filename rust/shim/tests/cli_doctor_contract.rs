@@ -52,7 +52,7 @@ fn original_absent_and_empty_disposable_dsn_cells() {
 }
 
 #[test]
-fn saved_state_proof_requests_stay_deferred_without_mutation() {
+fn saved_state_proof_requests_are_usage_errors_without_mutation() {
     let home = Home::new();
     let path = home.0.join("owned-state.json");
     let sentinel = b"owned state sentinel\n";
@@ -70,7 +70,13 @@ fn saved_state_proof_requests_stay_deferred_without_mutation() {
             if !proof_first {
                 command.arg("--disposable-proof");
             }
-            deferred(command.output().unwrap());
+            let output = command.output().unwrap();
+            assert_eq!(output.status.code(), Some(2));
+            assert!(output.stdout.is_empty());
+            assert!(
+                String::from_utf8_lossy(&output.stderr)
+                    .contains("--disposable-proof cannot use a saved --agent-state")
+            );
         }
     }
     assert_eq!(std::fs::read(&path).unwrap(), sentinel);
@@ -158,7 +164,7 @@ fn noncanonical_arguments_defer_without_parser_diagnostics() {
 }
 
 #[test]
-fn nonempty_proof_and_unsupported_help_stay_deferred() {
+fn nonempty_proof_requires_native_prerequisites_and_help_stays_deferred() {
     let home = Home::new();
     deferred(
         command(&home)
@@ -167,12 +173,16 @@ fn nonempty_proof_and_unsupported_help_stay_deferred() {
             .unwrap(),
     );
     for dsn in [" ", "postgresql://fixture.invalid/disposable"] {
-        deferred(
-            command(&home)
-                .env("PSEUDOLIFE_TEST_DATABASE_URL", dsn)
-                .args(["doctor", "--disposable-proof"])
-                .output()
-                .unwrap(),
+        let output = command(&home)
+            .env("PSEUDOLIFE_TEST_DATABASE_URL", dsn)
+            .args(["doctor", "--disposable-proof"])
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(2));
+        let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert!(
+            ["NativeDaemonRequired", "ProvisionedModelsRequired"]
+                .contains(&report["error"].as_str().unwrap())
         );
     }
     assert_eq!(std::fs::read_dir(&home.0).unwrap().count(), 0);
