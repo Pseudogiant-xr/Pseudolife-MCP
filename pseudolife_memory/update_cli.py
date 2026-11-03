@@ -63,6 +63,7 @@ from pathlib import Path
 from typing import Callable
 
 from pseudolife_memory import __version__
+from pseudolife_memory import child_python
 
 DAEMON_CONTAINER = "pseudolife-mcp-daemon"
 PG_CONTAINER = "pseudolife-mcp-postgres"
@@ -1296,8 +1297,8 @@ class Update:
         """The principals now the owner's, from ``invite --list --json`` in
         this runtime (empty when that cannot be read: the line still says
         what changed)."""
-        code, out = run_cli([sys.executable, "-m", "pseudolife_memory.cli", "invite", "--list",
-                             "--json"], timeout=120, stdout_only=True)
+        code, out = run_cli(child_python.cli_argv("invite", "--list", "--json"), timeout=120,
+                            stdout_only=True)
         if code != 0:
             return []
         # The report is indented JSON (invite's --json), after any relayed
