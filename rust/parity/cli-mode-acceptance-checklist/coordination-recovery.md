@@ -1,3 +1,3 @@
 | Mode | Phase | Status | Native | Evidence |
 |---|---|---|---|---|
-| coordination-recovery | 2 | deferred | defers | Requested A, actual direct PostgreSQL via `coordination_recovery.py`/CoordinationStore; Phase 4 recovery transaction; `test_coordination_recovery.py::test_recovery_revokes_and_rebinds_private_state_without_exposing_key`, `test_rebind_state_failure_rolls_back_credential_issuance` |
+| coordination-recovery | 4 | ported-with-substitution | native | Offline recover/rebind, stopped-daemon and restore confirmations, no bank startup or migration, private state persisted before commit. `shim/src/cli/coordination_recovery/`; `shim/tests/cli_coordination_recovery_contract.rs`; `cli_harness/rows/coordination_recovery.py`; bound Linux oracle golden recorded/replayed; Linux native build and all 20 live disposable-bank cases passed; native Windows contracts passed; all 20 Windows live cases and nine golden cases passed; hosted stress pending. |

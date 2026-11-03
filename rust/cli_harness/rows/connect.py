@@ -35,10 +35,9 @@ configuration (or a backup or temporary file beside it, or a token file in
 the real ``~/.pseudolife-mcp``) changed, or if a path the arm reported lies
 outside its home.
 
-A daemon "on another machine" is reached as ``http://localhost.:<port>``:
-``_is_loopback_url`` (and the candidate) treat the trailing-dot name as
-remote, and the resolver still answers it with this machine's loopback
-addresses, where the fixture listens.
+A daemon "on another machine" uses ``127.1`` on Linux and ``localhost.``
+on Windows: both spellings retain strict non-loopback classification. Linux's
+numeric form avoids DNS; Windows resolves localhost. but rejects 127.1.
 """
 
 from __future__ import annotations
@@ -355,7 +354,8 @@ def _free_port() -> int:
 
 def _target(remote: bool = False) -> tuple[int, str]:
     port = _free_port()
-    return port, (f"http://localhost.:{port}" if remote else f"http://127.0.0.1:{port}")
+    remote_host = "localhost." if WINDOWS else "127.1"
+    return port, (f"http://{remote_host}:{port}" if remote else f"http://127.0.0.1:{port}")
 
 
 def _fixture(port: int, url: str, **options):

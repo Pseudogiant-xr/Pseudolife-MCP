@@ -1684,6 +1684,11 @@ class MemoryService(DreamOps, MaintainerOps):
                 self._cortex.load(self._cortex_path())
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Cortex load skipped: %s", exc)
+            # A legacy snapshot carries its old confidence margin. Runtime
+            # policy comes from the current config, including pre-init Console
+            # edits, rather than the policy in force when that snapshot saved.
+            self._cortex.supersede_confidence_margin = cc.supersede_confidence_margin
+            self._cortex.protect_provenance = cc.protect_provenance
 
         self._initialize_dream_tracking()
 

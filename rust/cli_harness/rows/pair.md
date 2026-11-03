@@ -36,7 +36,7 @@ most once, a value as the next argument.
 | `POST /api/pair`: body `{"code": "<canonical>", "token_sha256": "<hex>"}` (`json.dumps` defaults), `Content-Type: application/json`, no `Origin`, no `Authorization`, no proxy, no redirect, 10 s | `post_pair` 128-141, `redeem` 244 |
 | Outcomes: 200 + object -> paired; after an unknown attempt any 3xx/4xx -> exit 5, file kept; 400 refused; 429 `rate_limited` and its text; 401/404/405 the old-daemon text; other 3xx/4xx refused (`HTTP n`); a 5xx, a non-200 2xx, or a 200 without a JSON object -> unknown, retried after 1, 2, 4 s with the same body; four unknowns -> exit 5, file kept; every refusal removes the file | `redeem` 257-286 |
 | Answer: `tier` / `bank` kept when printable str of 1..128 characters; a principal that is a valid, unreserved name moves the default file to `<principal>.token` without replacing one (link, then unlink: both-names warning; existing target: kept-name warning); otherwise the pairing-name warning | `redeem` 288-313, `_text` 165-169, `_move_no_replace` 177-189 |
-| Verification: `GET /api/episodes?limit=1` with the bearer, final status 200 (redirects followed), else `unverified`, exit 5, file kept | `redeem` 315-318, `installer_credential_valid` |
+| Verification: `GET /api/episodes?limit=1` with the bearer, status 200 without following redirects, else `unverified`, exit 5, file kept | `redeem` 315-318, `installer_credential_valid` |
 | Plain-HTTP warning first for a non-loopback `http://` URL (`localhost` or a loopback address is local) | `main` 391-393, `_is_loopback_url` |
 | Report: `json.dumps(report, indent=2)` with keys `url, state, principal, tier, bank, token_file, warnings, error, exit`; text: `pair: warning: ...` lines and `pair: <error>` on stderr, `paired: <principal or ...>[ (tier T)] on <url>` and `token file: <path>` on stdout | `_report` 192-194, `_emit` 346-359 |
 
@@ -52,12 +52,7 @@ most once, a value as the next argument.
 
 ## Deferred before any effect
 
-- An `https` URL (the TLS trust store differs between the runtimes).
-- Environment proxies (any non-empty `*_proxy` but `no_proxy`): the
-  oracle's token check honours them through `urlopen`.
-- `--read-code` with a terminal on stdin (`getpass`), non-ASCII code text
-  (`str.upper` can map it into the alphabet).
-- Argparse errors, `--help`, a code after an option, repeated options,
+- Argparse errors, a code after an option, repeated options,
   `--opt=value`, abbreviations, a `--token-file` value starting with `-`.
 - A home (`USERPROFILE`, else `HOME`) that pathlib would respell, or none;
   a target whose existence check pathlib would raise on; a non-Unicode path.
@@ -85,10 +80,8 @@ Others:
   oracle's own way) where the oracle renames without replace; on a volume
   without hard links the native move refuses (kept-name warning, exit 0)
   where Python renames.
-- The token check's redirect following keeps reqwest's rule (the bearer is
-  dropped on a cross-origin redirect); urllib 3.11 keeps it.
 - Windows registry proxy settings: the native token check never uses a
-  proxy; urllib's `getproxies()` reads the registry when no proxy variable
+  proxy through registry settings; urllib's `getproxies()` reads the registry when no proxy variable
   is set.
 - An `OSError` while writing the token file is named by `io::ErrorKind`
   (`PermissionError`, `FileNotFoundError`, `FileExistsError`,
@@ -97,9 +90,31 @@ Others:
 
 ## Hosted CI and goldens
 
+Both Python and Rust token verification refuse same-origin and cross-origin
+redirects, preserve the token for recovery, and record no redirected request.
+The plain-HTTP warning fixtures use the DNS-independent numeric origin `127.1`
+on Linux and the tested `localhost.` spelling on Windows, whose resolver rejects
+the numeric abbreviation. Both remain outside either arm's strict loopback
+classification; both cases must pair successfully and emit the warning.
+
 Both Parity lanes run the row live and against `goldens/pair.<os>.json`.
 `refused-unreachable` names core's closed loopback port (`127.0.0.1:9`)
 rather than a free port, so its URL is the same in every run. The oracle's
 tracebacks in deferral cases are recorded with the oracle checkout, its
 interpreter and the real home replaced by tokens (`runner.record`); the
 deferral rules replace those streams anyway.
+
+## Operator transport extension (2026-11-02 candidate)
+
+Engine-labelled daemon reruns select `pseudolife-mcp` for `rust` and the
+Python module for Python or absent labels, retaining the nesting guard.
+Invite adds stopped-daemon psql list/revoke for v53 and v58; pair adds
+trusted/untrusted HTTPS and terminal code input; maintainer adds help and
+polling; test-login adds help while retaining its host-local login file.
+Linux native builds and the live differential rows passed, including the engine-selected transport and help cases. Native Windows contract tests passed; pairing interruption and backspace also passed both oracle and native console arms.
+The activated former deferral cases now compare the actual oracle outcome;
+their old case IDs remain stable. Linux goldens were re-recorded from the verified oracle tree at
+`7dcd738fa736c15c111fd67c5ffb83ea3f158b91` and replayed against the native candidate.
+The corresponding Windows goldens also replayed successfully. Hosted stress
+remains a separate qualification step. This extension makes
+no claim about guided setup or lite storage.

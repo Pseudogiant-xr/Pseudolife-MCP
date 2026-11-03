@@ -77,13 +77,13 @@ fn skeleton(svc: &Service, req: &Request) -> Map<String, Value> {
             "preset": cfg.preset,
             // No config field sets it any more: `getattr(..., False)`.
             "chain_residual": false,
-            "top_k": top_k,
+            "top_k": req.top_k_beyond.clone().unwrap_or(json!(top_k)),
         },
         "filters": {
             "bands": req.bands,
             "sources": req.sources,
-            "episodes": null,
-            "tags": null,
+            "episodes": req.episodes,
+            "tags": req.tags.as_ref().map(|tags| super::search_route::normalize_tags(tags)),
             "min_logical_turn": null,
         },
         "tiers": [],
@@ -100,7 +100,11 @@ fn skeleton(svc: &Service, req: &Request) -> Map<String, Value> {
 }
 
 /// `MemoryService.trace` after the band check and the blank-query answer.
-async fn trace(svc: &Arc<Service>, ready: &Arc<Ready>, req: Request) -> Result<Value, String> {
+pub(crate) async fn trace(
+    svc: &Arc<Service>,
+    ready: &Arc<Ready>,
+    req: Request,
+) -> Result<Value, String> {
     let cfg = &svc.config.memory;
     let k = match req.top_k {
         0 => cfg.top_k.max(0) as usize,

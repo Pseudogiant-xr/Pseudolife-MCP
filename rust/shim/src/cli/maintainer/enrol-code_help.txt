@@ -1,0 +1,5 @@
+usage: pseudolife-mcp maintainer enrol-code [-h] [--no-wait]
+
+options:
+  -h, --help  show this help message and exit
+  --no-wait   print the code and exit without waiting for the Console

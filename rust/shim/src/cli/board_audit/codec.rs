@@ -37,7 +37,7 @@ fn compact(value: &impl Serialize) -> Result<Vec<u8>, serde_json::Error> {
     Ok(serializer.into_inner())
 }
 
-pub(super) fn hash(row: &Value, created_at: f64) -> Result<String, serde_json::Error> {
+pub(in crate::cli) fn hash(row: &Value, created_at: f64) -> Result<String, serde_json::Error> {
     let payload = if let Some(text) = row["payload"].as_str() {
         text.to_owned()
     } else {
@@ -65,7 +65,7 @@ pub(super) fn hash(row: &Value, created_at: f64) -> Result<String, serde_json::E
 }
 
 /// `_canonical`: `json.dumps(sort_keys=True, ensure_ascii=False)`, compact.
-pub(super) fn canonical(value: &Value) -> Result<String, serde_json::Error> {
+pub(in crate::cli) fn canonical(value: &Value) -> Result<String, serde_json::Error> {
     let mut value = value.clone();
     value.sort_all_objects();
     Ok(String::from_utf8(compact(&value)?).expect("JSON is UTF-8"))
