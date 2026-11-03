@@ -34,6 +34,69 @@ def test_equal_observations_have_no_diff():
     assert compare.diff(obs(stdout=b"x"), obs(stdout=b"x"), ()) == []
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX umask inheritance")
+@pytest.mark.parametrize("inherited", [0o002, 0o077])
+@pytest.mark.parametrize("mode", [[], ["--record"], ["--golden"]])
+def test_harness_process_pins_only_recorded_fixture_and_child_modes(tmp_path, inherited, mode):
+    import json
+    import subprocess
+
+    entry = Path(__file__).with_name("__main__.py")
+    script = r'''
+import json, os, pathlib, stat, subprocess, sys
+os.umask(int(sys.argv[2]))
+entry, root = sys.argv[1], pathlib.Path(sys.argv[3])
+sys.path.insert(0, str(pathlib.Path(entry).parent.parent))
+from cli_harness import runner
+try:
+    runner.main(["--row", "doctor", "--case", "absent-umask-case", *json.loads(sys.argv[4])])
+except SystemExit as error:
+    assert error.code != 0
+(root / "fixture").mkdir()
+(root / "fixture/input").write_bytes(b"fixture")
+subprocess.run([sys.executable, "-c", "from pathlib import Path; Path('child').write_bytes(b'fixture')"], cwd=root, check=True)
+print(json.dumps([stat.S_IMODE((root / path).stat().st_mode)
+                  for path in ("fixture", "fixture/input", "child")]))
+'''
+    result = subprocess.run([sys.executable, "-B", "-c", script, str(entry),
+                             str(inherited), str(tmp_path), json.dumps(mode)], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    expected = 0o022 if mode else inherited
+    assert json.loads(result.stdout.splitlines()[-1]) == [0o777 & ~expected, 0o666 & ~expected, 0o666 & ~expected]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX mode comparison")
+def test_live_077_detects_hard_coded_file_mode_mutant(tmp_path):
+    import json
+    import subprocess
+
+    writer = tmp_path / "writer.py"
+    writer.write_text("from pathlib import Path\nimport sys\np=Path.home()/'mode.txt'\np.write_bytes(b'fixture')\nif '--mutant' in sys.argv: p.chmod(0o644)\n")
+    driver = tmp_path / "driver.py"
+    driver.write_text(r'''import os,sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+from cli_harness import core,rows,runner
+os.umask(0o077)
+rows.ROWS["umask_probe"]="CLI-UMASK-PROBE"
+rows.load=lambda row:[core.Case("inherited-mode",[])]
+core.python_target=lambda *args:core.Target("python",[sys.executable,sys.argv[2]])
+core.rust_target=lambda *args:core.Target("rust",[sys.executable,sys.argv[2],*sys.argv[4:]])
+raise SystemExit(runner.main(["--row","umask_probe","--candidate",sys.executable,"--out",sys.argv[3]]))
+''')
+    for mutant in (False, True):
+        report = tmp_path / ("mutant.json" if mutant else "baseline.json")
+        args = [sys.executable, "-B", str(driver), str(Path(__file__).resolve().parent.parent),
+                str(writer), str(report), *(["--mutant"] if mutant else [])]
+        result = subprocess.run(args, capture_output=True, text=True, timeout=30)
+        assert result.returncode == int(mutant), result.stdout + result.stderr
+        row = json.loads(report.read_text())["rows"]["umask_probe"]
+        assert row["diffs"] == (["inherited-mode"] if mutant else [])
+        if mutant:
+            detail = " ".join(row["results"]["inherited-mode"]["detail"])
+            assert "mode.txt" in detail and "0o600" in detail and "0o644" in detail
+
+
 @pytest.mark.parametrize("fault", [
     {"mismatches": ["fifo:missing"]},
     {"hardlink_same_inode": False},
@@ -2150,7 +2213,7 @@ def test_the_harness_pins_the_umask_both_arms_inherit(tmp_path):
         os.umask(previous)
 
 
-def test_the_runner_pins_the_umask_before_anything_else(monkeypatch):
+def test_the_runner_pins_the_umask_before_recording_or_replaying(monkeypatch):
     from cli_harness import runner
 
     class Pinned(Exception):
@@ -2159,5 +2222,6 @@ def test_the_runner_pins_the_umask_before_anything_else(monkeypatch):
     def pin():
         raise Pinned
     monkeypatch.setattr(core, "pin_umask", pin)
-    with pytest.raises(Pinned):
-        runner.main(["--row", "invite"])
+    for mode in (["--record"], ["--golden"]):
+        with pytest.raises(Pinned):
+            runner.main(["--row", "invite", *mode])

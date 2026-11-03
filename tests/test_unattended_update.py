@@ -578,7 +578,12 @@ def test_a_daemon_url_rides_into_the_scheduled_command(scheduler, tmp_path, monk
     monkeypatch.setattr(uu.sys, "executable", str(tmp_path / "py"))
     monkeypatch.setenv("PSEUDOLIFE_SHIM_LAUNCHER", str(tmp_path / "no-launcher"))
     monkeypatch.setenv("PSEUDOLIFE_SHIM_RUNTIMES", str(tmp_path / "rt"))
-    assert uu._command("http://127.0.0.1:8765") == [str(tmp_path / "py"), "-m", "pseudolife_memory.cli", "update", "--unattended"]
+    # Written from a directory that is not the package's own, the saved
+    # command leaves the working directory off the child's import path.
+    monkeypatch.chdir(tmp_path)
+    safe = ["-P"] if sys.version_info >= (3, 11) else []
+    assert uu._command("http://127.0.0.1:8765") == [str(tmp_path / "py"), *safe, "-m", "pseudolife_memory.cli",
+                                                    "update", "--unattended"]
     assert uu._command("http://10.0.0.7:8765")[-2:] == ["--daemon-url", "http://10.0.0.7:8765"]
 
 

@@ -32,7 +32,7 @@ import uuid
 from dataclasses import dataclass
 from typing import NoReturn
 
-from pseudolife_memory import __version__
+from pseudolife_memory import __version__, child_python
 from pseudolife_memory.coordination_identity import default_digest_dir, digest_path_for
 from pseudolife_memory.daemon_url import (  # noqa: F401 — re-exported
     DEFAULT_URL, _daemon_url, _is_loopback_url, _NoRedirectHandler,
@@ -612,9 +612,7 @@ def spawn_daemon() -> subprocess.Popen:
         )
     else:  # pragma: no cover - windows deployment
         kwargs["start_new_session"] = True
-    return subprocess.Popen(
-        [sys.executable, "-m", "pseudolife_memory.cli", "serve"], **kwargs,
-    )
+    return subprocess.Popen(child_python.cli_argv("serve"), **kwargs)
 
 
 def _notice_if_cortex_is_inert(health: dict) -> dict:
@@ -943,8 +941,8 @@ def _unattended_clients(url: str, health: dict) -> str:
                     f"{__version__}. Start a new session to run on the new runtime.{codex}")
         _UNATTENDED_NOTES[(url, daemon_version)] = note
         return note
-    argv = [sys.executable, "-m", "pseudolife_memory.cli", "update", "--clients-only", "--tag", daemon_version,
-            "--result-file", str(result)]
+    argv = child_python.cli_argv("update", "--clients-only", "--tag", daemon_version,
+                                 "--result-file", str(result))
     try:
         state.mkdir(parents=True, exist_ok=True)
         if stamp is not None:

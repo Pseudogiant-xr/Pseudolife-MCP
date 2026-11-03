@@ -87,9 +87,36 @@ pub struct Reservation {
 }
 
 fn identity(file: &File) -> Result<Vec<u128>> {
-    let meta = file.metadata().map_err(|_| "state_unavailable")?;
+    identity_detailed(file).map_err(|error| error.code())
+}
+
+/// Preserve the failing operation's I/O error across handle cleanup.
+#[derive(Debug)]
+pub enum OpenError {
+    Io(std::io::Error),
+    InvalidState,
+}
+impl OpenError {
+    fn code(&self) -> &'static str {
+        match self {
+            Self::Io(_) => "state_unavailable",
+            Self::InvalidState => "invalid_state",
+        }
+    }
+}
+impl std::fmt::Display for OpenError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Io(error) => write!(formatter, "state_unavailable; {:?}: {error}", error.kind()),
+            Self::InvalidState => formatter.write_str("invalid_state"),
+        }
+    }
+}
+
+fn identity_detailed(file: &File) -> std::result::Result<Vec<u128>, OpenError> {
+    let meta = file.metadata().map_err(OpenError::Io)?;
     if !meta.is_file() {
-        return Err("invalid_state");
+        return Err(OpenError::InvalidState);
     }
     #[cfg(unix)]
     {
@@ -98,7 +125,7 @@ fn identity(file: &File) -> Result<Vec<u128>> {
             || meta.mode() & 0o077 != 0
             || meta.nlink() != 1
         {
-            return Err("invalid_state");
+            return Err(OpenError::InvalidState);
         }
         Ok(vec![meta.dev() as u128, meta.ino() as u128])
     }
@@ -106,7 +133,7 @@ fn identity(file: &File) -> Result<Vec<u128>> {
     {
         crate::credentials::windows_security::validate(file)
             .map(|parts| parts[..2].to_vec())
-            .map_err(|_| "invalid_state")
+            .map_err(|_| OpenError::InvalidState)
     }
 }
 fn options(create: bool, write: bool) -> OpenOptions {
@@ -133,11 +160,18 @@ pub fn open(path: &Path) -> Result<PrivateFile> {
     open_with_write(path, false)
 }
 pub fn open_with_write(path: &Path, write: bool) -> Result<PrivateFile> {
-    crate::credentials::reject_ancestor_redirects(path).map_err(|_| "invalid_state")?;
-    let file = options(false, write)
-        .open(path)
-        .map_err(|_| "state_unavailable")?;
-    let identity = identity(&file)?;
+    open_detailed_with_write(path, write).map_err(|error| error.code())
+}
+pub fn open_detailed(path: &Path) -> std::result::Result<PrivateFile, OpenError> {
+    open_detailed_with_write(path, false)
+}
+fn open_detailed_with_write(
+    path: &Path,
+    write: bool,
+) -> std::result::Result<PrivateFile, OpenError> {
+    crate::credentials::reject_ancestor_redirects(path).map_err(|_| OpenError::InvalidState)?;
+    let file = options(false, write).open(path).map_err(OpenError::Io)?;
+    let identity = identity_detailed(&file)?;
     Ok(PrivateFile { file, identity })
 }
 pub fn create(path: &Path) -> Result<PrivateFile> {

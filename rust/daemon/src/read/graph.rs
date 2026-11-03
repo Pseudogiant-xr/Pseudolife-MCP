@@ -50,6 +50,12 @@ fn i_param(q: &HashMap<String, String>, key: &str, default: i64) -> i64 {
     })
 }
 
+fn recall_limit(q: &HashMap<String, String>, key: &str, default: i64) -> Option<i64> {
+    // Only absence reaches service.recall's configured default. An explicit
+    // blank or invalid parameter keeps the Console's historical fallback.
+    q.contains_key(key).then(|| i_param(q, key, default))
+}
+
 fn internal(e: impl std::fmt::Display) -> ToolError {
     ToolError::Internal(anyhow::anyhow!(e.to_string()))
 }
@@ -86,8 +92,8 @@ pub(crate) async fn route(
                 &svc,
                 &ready,
                 s(&q, "q").unwrap_or(""),
-                Some(i_param(&q, "hops", 3)),
-                Some(i_param(&q, "top_k", 5)),
+                recall_limit(&q, "hops", 3),
+                recall_limit(&q, "top_k", 5),
                 beyond,
                 &ident,
             )
@@ -577,6 +583,19 @@ async fn wiki(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recall_omission_reaches_config_but_explicit_invalid_keeps_defaults() {
+        for (key, default) in [("hops", 3), ("top_k", 5)] {
+            assert_eq!(recall_limit(&HashMap::new(), key, default), None);
+            for value in ["", "invalid"] {
+                let q = HashMap::from([(key.into(), value.into())]);
+                assert_eq!(recall_limit(&q, key, default), Some(default));
+            }
+            let q = HashMap::from([(key.into(), "0".into())]);
+            assert_eq!(recall_limit(&q, key, default), Some(0));
+        }
+    }
 
     #[test]
     fn console_integer_uses_python_decimal_conversion_limit() {
