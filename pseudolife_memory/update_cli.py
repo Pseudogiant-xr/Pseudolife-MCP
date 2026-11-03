@@ -31,7 +31,7 @@ Codex hook step, which is printed because it needs consent.
 
 Docker tier, checkout mode (``--checkout <repo>``; what the wrappers pass)
 rebuilds the daemon image from the tree instead: the clean-tree guard and
-build stamp, the checkout's backup and retention scripts, the rollback-tag
+build stamp, the checkout's backup and cache-retention scripts, the rollback-tag
 guard against an unvalidated build, ``docker compose up -d --no-deps
 --build``, health, then the clients from the checkout with ``--all``.
 
@@ -887,48 +887,21 @@ class Update:
         return "tagged"
 
     def prune_rollbacks(self, checkout: Path | None, repository: str) -> None:
-        script = self._checkout_script(checkout, "prune-rollbacks")
-        if script is not None:
-            flag = "-Keep" if script.suffix == ".ps1" else "--keep"
-            repo_flag = "-Repository" if script.suffix == ".ps1" else "--repository"
-            code, out = run_cli(self._script_argv(script) + [flag, str(self.o.keep_rollbacks), repo_flag, repository],
-                                timeout=600, stream=not self.o.as_json)
-            if code != 0:
-                self.warn(f"rollback-tag retention failed (deploy continues): {_last_line(out)}")
+        # Older checkout scripts scan host-wide tags without project evidence.
+        if self._checkout_script(checkout, "prune-rollbacks") is not None:
+            self.warn("rollback-tag retention skipped: checkout pruning scripts cannot verify project ownership; all tags retained")
             return
         self.builtin_prune_rollbacks(repository)
 
     def builtin_prune_rollbacks(self, repository: str) -> None:
-        """Drop ``<repository>:*-pre-*`` tags beyond the newest N, never an
-        image a running container uses."""
-        code, out = run_cli([self.docker, "ps", "-q"], timeout=60)
-        in_use: set[str] = set()
-        ids = [line.strip() for line in out.splitlines() if line.strip()] if code == 0 else []
-        if ids:
-            code, out = run_cli([self.docker, "inspect", "--format", "{{.Image}}", *ids], timeout=60)
-            if code == 0:
-                in_use = {line.strip() for line in out.splitlines() if line.strip()}
-        code, out = run_cli([self.docker, "image", "ls", repository, "--format", "{{.Repository}}:{{.Tag}}"], timeout=60)
-        if code != 0:
-            self.warn(f"rollback-tag retention failed (deploy continues): {_last_line(out)}")
-            return
-        refs = [line.strip() for line in out.splitlines() if re.search(r":.+-pre-", line)]
-        candidates = []
-        for ref in refs:
-            code, out = run_cli([self.docker, "image", "inspect", "--format", "{{.Created}}|{{.Id}}", ref], timeout=60)
-            if code == 0 and "|" in out:
-                created, image_id = out.strip().split("|", 1)
-                candidates.append((created, ref, image_id.strip()))
-        candidates.sort(reverse=True)
-        for _created, ref, image_id in candidates[self.o.keep_rollbacks:]:
-            if image_id in in_use:
-                self.step(f"rollback retention: keeping {ref} (image in use by a running container)")
-                continue
-            code, out = run_cli([self.docker, "rmi", ref], timeout=300)
-            if code == 0:
-                self.step(f"rollback retention: removed stale tag {ref}")
-            else:
-                self.warn(f"rollback retention: docker rmi {ref} failed; leaving it")
+        """Retain unscoped Python rollback tags, regardless of the keep limit.
+
+        Legacy tag names and image creation times cannot prove project or
+        producer ownership. Native scoped tags belong to the native updater;
+        Python must not count or prune those either, even in this repository.
+        Keep this entry point safe for callers without a checkout as well.
+        """
+        self.warn("rollback-tag retention skipped: Python rollback tags have no verified project scope; all tags retained")
 
     def wait_health(self, expect_version: str | None = None) -> dict:
         self.step("waiting for the daemon to report healthy...")
@@ -1482,7 +1455,8 @@ def build_parser() -> argparse.ArgumentParser:
                         help="rebuild the daemon from this checkout instead of pulling a release (ops/update.* pass this)")
     parser.add_argument("--rollback-tag", default="", help="suffix of the rollback image tag (default: pre-update-<stamp>)")
     parser.add_argument("--no-backup", action="store_true", help="skip the bank backup (NOT recommended)")
-    parser.add_argument("--keep-rollbacks", type=int, default=2, help="rollback tags to retain (default 2)")
+    parser.add_argument("--keep-rollbacks", type=int, default=2,
+                        help="rollback retention limit (default 2; legacy Python tags are retained without pruning)")
     parser.add_argument("--keep-cache-hours", type=int, default=168, help="build cache to retain, hours (default 168)")
     parser.add_argument("--no-cache-prune", action="store_true", help="skip build-cache retention")
     parser.add_argument("--force-rollback-tag", action="store_true",

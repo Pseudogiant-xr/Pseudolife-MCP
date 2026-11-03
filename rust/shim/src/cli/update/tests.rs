@@ -163,11 +163,24 @@ impl Drop for Temp {
 #[test]
 #[ignore = "subprocess fixture for command-tree timeout"]
 fn native_update_timeout_child() {
+    use std::time::Duration;
+
     let home = PathBuf::from(std::env::var_os("UPDATE_TIMEOUT_HOME").unwrap());
     if std::env::var_os("UPDATE_TIMEOUT_DESCENDANT").is_some() {
+        // Readiness means this process holds the lock. Only process exit (or
+        // explicit fixture teardown) releases it, regardless of scheduling.
+        let active = fs::OpenOptions::new()
+            .create_new(true)
+            .read(true)
+            .write(true)
+            .open(home.join("descendant.lock"))
+            .unwrap();
+        active.try_lock().unwrap();
         fs::write(home.join("ready"), b"ready").unwrap();
-        std::thread::sleep(std::time::Duration::from_secs(4));
-        fs::write(home.join("survived"), b"survived").unwrap();
+        while home.exists() && !home.join("stop").exists() {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        drop(active);
     } else {
         let mut child = std::process::Command::new(std::env::current_exe().unwrap())
             .args([
@@ -184,7 +197,19 @@ fn native_update_timeout_child() {
 
 #[test]
 fn native_update_timeout_terminates_command_descendants() {
+    use std::time::{Duration, Instant};
+
+    struct StopOnDrop<'a>(&'a Path);
+    impl Drop for StopOnDrop<'_> {
+        fn drop(&mut self) {
+            // A broken cleanup implementation must fail without leaving its
+            // surviving descendant behind, including during panic unwinding.
+            let _ = fs::write(self.0.join("stop"), b"stop");
+        }
+    }
+
     let temp = Temp::new();
+    let _stop = StopOnDrop(&temp.0);
     let mut env: Environment = std::env::vars().collect();
     env.insert(
         "UPDATE_TIMEOUT_HOME".into(),
@@ -202,17 +227,34 @@ fn native_update_timeout_terminates_command_descendants() {
             "--ignored".into(),
         ],
         Some(&env),
-        2,
+        // The old two-second deadline raced two executable startups on
+        // Windows (#1195). Match the client fixture's 30-second readiness
+        // allowance; no descendant work races an observation sleep afterward.
+        30,
         false,
     );
     assert_eq!(code, 1);
     assert_eq!(message, "command timed out");
     assert!(temp.0.join("ready").is_file(), "descendant never started");
-    std::thread::sleep(std::time::Duration::from_secs(3));
-    assert!(
-        !temp.0.join("survived").exists(),
-        "descendant survived command timeout"
-    );
+    let lifetime = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(temp.0.join("descendant.lock"))
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        match lifetime.try_lock() {
+            Ok(()) => break,
+            Err(fs::TryLockError::WouldBlock) => {
+                assert!(
+                    Instant::now() < deadline,
+                    "descendant survived command timeout: lifetime lock still held"
+                );
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            Err(error) => panic!("cannot check descendant lifetime lock: {error}"),
+        }
+    }
 }
 fn gzip(bytes: &[u8]) -> Vec<u8> {
     let mut gz = flate2::write::GzEncoder::new(vec![], flate2::Compression::default());

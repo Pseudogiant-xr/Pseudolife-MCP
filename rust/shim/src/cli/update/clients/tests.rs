@@ -578,7 +578,7 @@ fn native_client_runner_timeout_stops_descendants() {
 #[allow(unsafe_code)]
 fn native_client_runner_forwards_cancellation_to_descendants() {
     use std::os::unix::process::ExitStatusExt;
-    for signal in [libc::SIGINT, libc::SIGTERM, libc::SIGHUP] {
+    for signal in [libc::SIGINT, libc::SIGTERM, libc::SIGHUP, libc::SIGQUIT] {
         for mode in ["cooperative", "resistant"] {
             let mut process = ClientProcess::start(mode);
             process.wait_file("heartbeat");
@@ -601,7 +601,22 @@ fn native_client_runner_forwards_cancellation_to_descendants() {
 
 #[test]
 #[ignore = "subprocess fixture"]
+#[allow(unsafe_code)]
 fn client_runner_child() {
+    #[cfg(unix)]
+    for signal in [
+        libc::SIGINT,
+        libc::SIGTERM,
+        libc::SIGHUP,
+        libc::SIGQUIT,
+        libc::SIGTSTP,
+    ] {
+        // SAFETY: this isolated fixture, not the outer test process, owns its
+        // initial dispositions even when a background shell ignored INT/HUP.
+        unsafe {
+            libc::signal(signal, libc::SIG_DFL);
+        }
+    }
     let root = std::env::var("PSEUDOLIFE_CLIENT_FIXTURE").unwrap();
     let mode = std::env::var("PSEUDOLIFE_CLIENT_MODE").unwrap();
     let result = command::NativeRunner.run(

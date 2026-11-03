@@ -80,6 +80,13 @@ pub(crate) fn run_cli(
         Ok(guard) => guard,
         Err(_) => return (1, "cannot install command cancellation handlers".into()),
     };
+    #[cfg(unix)]
+    if super::signals::checkpoint() != 0 {
+        return (
+            128 + super::signals::received(),
+            "command interrupted".into(),
+        );
+    }
     let _ = std::io::stdout().flush();
     let _ = std::io::stderr().flush();
     block_on(async {
@@ -137,6 +144,8 @@ pub(crate) fn run_cli(
         let mut stdout = child.stdout().take();
         let mut stderr = child.stderr().take();
         let (mut out, mut err) = (Vec::new(), Vec::new());
+        #[cfg(unix)]
+        let group = child.id();
         let wait = async {
             let (status, _, _) = tokio::try_join!(
                 child.wait(),
@@ -158,14 +167,11 @@ pub(crate) fn run_cli(
         #[cfg(unix)]
         let result = tokio::select! {
             biased;
-            signal = super::signals::wait() => {
+            signal = super::signals::wait(group) => {
                 // The terminal only signals our foreground group. Forward to
                 // the isolated child group, give it a bounded cleanup window,
                 // then kill any remaining descendants before releasing the lock.
-                let _ = child.signal(signal);
-                let _ = tokio::time::timeout(Duration::from_secs(5), child.wait()).await;
-                let _ = child.start_kill();
-                let _ = tokio::time::timeout(Duration::from_secs(5), child.wait()).await;
+                super::signals::terminate(&mut *child, signal).await;
                 return (128 + signal, "command interrupted".into());
             }
             result = tokio::time::timeout(Duration::from_secs(timeout), wait) => result,

@@ -588,6 +588,10 @@ impl Update {
     ) -> Result<Value> {
         self.step("waiting for the daemon to report healthy...");
         for attempt in 0..self.o.health_retries {
+            #[cfg(unix)]
+            if super::signals::checkpoint() != 0 {
+                return Err(UpdateError::new("health check interrupted"));
+            }
             let health = seams::fetch_health_json(
                 &format!("{}/health", self.o.daemon_url.trim_end_matches('/')),
                 3,
@@ -625,8 +629,16 @@ impl Update {
                 }
                 return Ok(health);
             }
+            #[cfg(unix)]
+            if super::signals::checkpoint() != 0 {
+                return Err(UpdateError::new("health check interrupted"));
+            }
             if attempt + 1 < self.o.health_retries {
-                std::thread::sleep(std::time::Duration::from_millis(self.o.health_delay_ms));
+                let delay = std::time::Duration::from_millis(self.o.health_delay_ms);
+                #[cfg(unix)]
+                super::signals::sleep(delay);
+                #[cfg(not(unix))]
+                std::thread::sleep(delay);
             }
         }
         Err(UpdateError::new(if token.is_some() {

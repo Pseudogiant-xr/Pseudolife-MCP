@@ -53,6 +53,13 @@ impl Runner for NativeRunner {
                 };
             }
         };
+        #[cfg(unix)]
+        if super::super::signals::checkpoint() != 0 {
+            return Output {
+                code: 128 + super::super::signals::received(),
+                bytes: vec![],
+            };
+        }
         let executable = executable.to_owned();
         let args: Vec<_> = args.iter().map(|s| s.to_string()).collect();
         let cwd = cwd.map(Path::to_owned);
@@ -159,6 +166,8 @@ impl Runner for NativeRunner {
                     }
                     Some(bytes)
                 });
+                #[cfg(unix)]
+                let group = child.id();
                 let wait = async {
                     let status = child.wait().await.ok()?;
                     let mut bytes = out.await.ok()??;
@@ -175,11 +184,8 @@ impl Runner for NativeRunner {
                 #[cfg(unix)]
                 let result = tokio::select! {
                     biased;
-                    signal = super::super::signals::wait() => {
-                        let _ = child.signal(signal);
-                        let _ = tokio::time::timeout(Duration::from_secs(5), child.wait()).await;
-                        let _ = child.start_kill();
-                        let _ = tokio::time::timeout(Duration::from_secs(5), child.wait()).await;
+                    signal = super::super::signals::wait(group) => {
+                        super::super::signals::terminate(&mut *child, signal).await;
                         return Output { code: 128 + signal, bytes: vec![] };
                     }
                     result = tokio::time::timeout(timeout, wait) => result,
