@@ -12,3 +12,5 @@ plaintext connections, and system trust tolerates malformed individual roots.
 Root/CRL loading follows libpq file-root rules; four further benign environment
 defaults honor DSN precedence. Multi-host fallback is tested against libpq; the remaining GSS-prefer
 difference is explicitly documented.
+URI query parameters now replace authority fields as libpq does, so a
+query-supplied Unix socket or port works in native images and external DSNs.

@@ -312,30 +312,34 @@ async fn review_unix_sockets_ignore_all_tls_modes() {
         "verify-ca",
         "verify-full",
     ] {
-        let listener = tokio::net::UnixListener::bind(&path).unwrap();
-        let config = super::tls::parse_in(
-            &format!(
+        for dsn in [
+            format!(
                 "host='{}' port=54823 user=fixture dbname=pl_cf_tls sslmode={mode}",
                 directory.display()
             ),
-            super::tls::Environment::default(),
-        )
-        .unwrap();
-        let server = tokio::spawn(async move {
-            let (mut stream, _) = listener.accept().await.unwrap();
-            startup(&mut stream).await;
-            ready(&mut stream).await;
-        });
-        let (client, task) = super::connect(&config, Duration::from_secs(3))
-            .await
-            .unwrap();
-        drop(client);
-        task.await.unwrap();
-        tokio::time::timeout(Duration::from_secs(3), server)
-            .await
-            .unwrap()
-            .unwrap();
-        std::fs::remove_file(&path).unwrap();
+            format!(
+                "postgresql://fixture@localhost:54823/pl_cf_tls?host={}&sslmode={mode}",
+                directory.display()
+            ),
+        ] {
+            let listener = tokio::net::UnixListener::bind(&path).unwrap();
+            let config = super::tls::parse_in(&dsn, super::tls::Environment::default()).unwrap();
+            let server = tokio::spawn(async move {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                startup(&mut stream).await;
+                ready(&mut stream).await;
+            });
+            let (client, task) = super::connect(&config, Duration::from_secs(3))
+                .await
+                .unwrap();
+            drop(client);
+            task.await.unwrap();
+            tokio::time::timeout(Duration::from_secs(3), server)
+                .await
+                .unwrap()
+                .unwrap();
+            std::fs::remove_file(&path).unwrap();
+        }
     }
     std::fs::remove_dir(&directory).unwrap();
 }
@@ -554,8 +558,13 @@ async fn disposable_postgres_tls_matrix() {
                 .iter()
                 .all(|port| *port > 1024 && ![5432, 5433, 5434].contains(port))
         );
-        // Require the same target in the tested DSN; fixture paths remain private.
-        assert!(dsn.starts_with(case["guard_dsn"].as_str().unwrap()));
+        // URI spellings cannot share the keyword prefix. The parsed-target
+        // equality check below still runs before every connection, including
+        // URI cases; the authority's overridden host must never be contacted.
+        assert!(
+            dsn.starts_with(case["guard_dsn"].as_str().unwrap())
+                || dsn.starts_with("postgresql://fixture@")
+        );
         // Fixture DSNs carry every option under test. Never read the test
         // user's ambient libpq files or environment into this connection.
         let mut environment = super::tls::Environment::default();

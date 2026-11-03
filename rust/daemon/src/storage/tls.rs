@@ -302,31 +302,52 @@ pub(super) fn parse_in(dsn: &str, environment: Environment) -> Result<Config, St
             return Err(unsupported(name));
         }
     }
-    let driver_text = if uri {
-        let query = fields
-            .iter()
-            .map(|(k, v)| {
-                format!(
-                    "{}={}",
-                    percent_encoding::utf8_percent_encode(k, percent_encoding::NON_ALPHANUMERIC),
-                    percent_encoding::utf8_percent_encode(v, percent_encoding::NON_ALPHANUMERIC)
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("&");
-        if query.is_empty() {
-            base.to_owned()
-        } else {
-            format!("{base}?{query}")
+    let driver_text = fields
+        .iter()
+        .map(|(k, v)| format!("{k}='{}'", v.replace('\\', "\\\\").replace('\'', "\\'")))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let mut driver: tokio_postgres::Config = driver_text.parse().map_err(|_| INVALID.to_owned())?;
+    if uri {
+        // libpq query parameters replace URI authority/path fields. The
+        // driver's URI parser appends hosts and ports instead, which turns
+        // localhost?host=/run/postgresql into a spurious mixed-transport list.
+        // Parse the query once, then supply only absent authority fields.
+        let authority: tokio_postgres::Config = base.parse().map_err(|_| INVALID.to_owned())?;
+        if !fields.contains_key("user")
+            && let Some(user) = authority.get_user()
+        {
+            driver.user(user);
         }
-    } else {
-        fields
-            .iter()
-            .map(|(k, v)| format!("{k}='{}'", v.replace('\\', "\\\\").replace('\'', "\\'")))
-            .collect::<Vec<_>>()
-            .join(" ")
-    };
-    let driver: tokio_postgres::Config = driver_text.parse().map_err(|_| INVALID.to_owned())?;
+        if !fields.contains_key("password")
+            && let Some(password) = authority.get_password()
+        {
+            driver.password(password);
+        }
+        if !fields.contains_key("dbname")
+            && let Some(dbname) = authority.get_dbname()
+        {
+            driver.dbname(dbname);
+        }
+        if !fields.contains_key("host") {
+            for host in authority.get_hosts() {
+                match host {
+                    tokio_postgres::config::Host::Tcp(host) => {
+                        driver.host(host);
+                    }
+                    #[cfg(unix)]
+                    tokio_postgres::config::Host::Unix(path) => {
+                        driver.host_path(path);
+                    }
+                }
+            }
+        }
+        if !fields.contains_key("port") {
+            for port in authority.get_ports() {
+                driver.port(*port);
+            }
+        }
+    }
     #[cfg(unix)]
     {
         use tokio_postgres::config::Host;
@@ -614,6 +635,41 @@ pub(super) async fn connect(config: &Config) -> Result<(Client, JoinHandle<()>),
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn review_uri_query_fields_replace_authority_fields() {
+        let config = parse_in(
+            "postgresql://old:old@old.example:5433/old?host=new.example&port=5434&user=new&password=new&dbname=new",
+            Environment::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            config.get_hosts(),
+            &[tokio_postgres::config::Host::Tcp("new.example".into())]
+        );
+        assert_eq!(config.get_ports(), &[5434]);
+        assert_eq!(config.get_user(), Some("new"));
+        assert_eq!(config.get_password(), Some(&b"new"[..]));
+        assert_eq!(config.get_dbname(), Some("new"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn review_uri_query_socket_replaces_authority_host() {
+        let config = parse_in(
+            "postgresql://imageproof@localhost/pl_cf_image_fixture?host=/run/postgresql",
+            Environment::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            config.get_hosts(),
+            &[tokio_postgres::config::Host::Unix("/run/postgresql".into())]
+        );
+        assert_eq!(config.get_ports(), &[5432]);
+        assert_eq!(config.get_user(), Some("imageproof"));
+        assert_eq!(config.get_dbname(), Some("pl_cf_image_fixture"));
+    }
+
     struct Directory(PathBuf);
     impl Directory {
         fn new() -> Self {

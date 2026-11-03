@@ -19,6 +19,7 @@ import subprocess
 import tempfile
 import time
 from unittest.mock import patch
+from urllib.parse import urlencode
 
 import psycopg
 from cryptography import x509
@@ -135,6 +136,19 @@ def compare(docker, image, root, evidence, oracle_only):
                             if identity: options += f" sslcert='{root/'fixture.pem'}' sslkey='{root/'fixture-key.pem'}'"
                             cases.append(dict(name=f"{policy}/{mode}/{ca}/client={identity}", guard_dsn=guard, dsn=guard+options))
                 if policy == "both":
+                    port = psycopg.conninfo.conninfo_to_dict(guard)["port"]
+                    for mode in MODES:
+                        options = {"port": port, "sslrootcert": str(root/"ca.pem")}
+                        if mode != "default":
+                            options["sslmode"] = mode
+                        for override_host in (False, True):
+                            query = dict(options)
+                            if override_host:
+                                query["host"] = "localhost"
+                            authority = "unused.invalid" if override_host else "localhost"
+                            cases.append(dict(name=f"uri-override/{mode}/host={override_host}",
+                                              guard_dsn=guard,
+                                              dsn=f"postgresql://fixture@{authority}:1/pl_cf_tls?{urlencode(query)}"))
                     cases.append(dict(name="system/implicit-verify-full",guard_dsn=guard,dsn=guard+" sslrootcert=system"))
                     for mode in ("prefer", "require"):
                         cases.append(dict(name=f"unused-crl/{mode}/no-file-root",guard_dsn=guard,

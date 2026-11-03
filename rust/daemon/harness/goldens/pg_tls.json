@@ -175,6 +175,76 @@
     "tls": null
   },
   {
+    "name": "uri-override/default/host=False",
+    "accepted": true,
+    "tls": true
+  },
+  {
+    "name": "uri-override/default/host=True",
+    "accepted": true,
+    "tls": true
+  },
+  {
+    "name": "uri-override/disable/host=False",
+    "accepted": true,
+    "tls": false
+  },
+  {
+    "name": "uri-override/disable/host=True",
+    "accepted": true,
+    "tls": false
+  },
+  {
+    "name": "uri-override/allow/host=False",
+    "accepted": true,
+    "tls": false
+  },
+  {
+    "name": "uri-override/allow/host=True",
+    "accepted": true,
+    "tls": false
+  },
+  {
+    "name": "uri-override/prefer/host=False",
+    "accepted": true,
+    "tls": true
+  },
+  {
+    "name": "uri-override/prefer/host=True",
+    "accepted": true,
+    "tls": true
+  },
+  {
+    "name": "uri-override/require/host=False",
+    "accepted": true,
+    "tls": true
+  },
+  {
+    "name": "uri-override/require/host=True",
+    "accepted": true,
+    "tls": true
+  },
+  {
+    "name": "uri-override/verify-ca/host=False",
+    "accepted": true,
+    "tls": true
+  },
+  {
+    "name": "uri-override/verify-ca/host=True",
+    "accepted": true,
+    "tls": true
+  },
+  {
+    "name": "uri-override/verify-full/host=False",
+    "accepted": true,
+    "tls": true
+  },
+  {
+    "name": "uri-override/verify-full/host=True",
+    "accepted": true,
+    "tls": true
+  },
+  {
     "name": "system/implicit-verify-full",
     "accepted": true,
     "tls": true
