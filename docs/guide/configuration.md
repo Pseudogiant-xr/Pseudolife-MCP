@@ -100,7 +100,7 @@ coordination:
     nightly_total: 200
     fan_out_stagger_seconds: 30
     active_seconds: 60
-    authority_per_sender_per_hour: 12
+    authority_per_sender_per_hour: 60
 ```
 
 `audit_retention_days` is how long the [audit log](#audit-log) keeps each event:
@@ -116,9 +116,14 @@ the `urgent` flag; `nightly_total` (200) is a rolling day of rings across the
 bank; `fan_out_stagger_seconds` (30) spaces the rings from one sender's burst;
 `active_seconds` (60) is the window in which a recipient's own last board
 action makes ordinary mail `hinted` rather than rung;
-`authority_per_sender_per_hour` (12) bounds the urgent rings one sender causes
-as the maintainer or the maintainer's conductor for a project, which spend it instead of
-`urgent_per_sender_per_hour` (see [Reopening a done park](#reopening-a-done-park)).
+`authority_per_sender_per_hour` (60) bounds a verified project conductor's rings
+and legacy maintainer-principal urgent rings. Conductor mail takes the maintainer
+wake path even without `urgent`: it bypasses peer need/activity gates, the
+per-recipient and nightly caps, and fan-out staggering. Signed maintainer mail
+keeps its separate `maintainer_per_recipient_per_hour` budget (30 by default).
+The conductor default is an unmeasured starting budget: five broadcasts to eleven
+sessions plus five individual follow-ups per hour. Explicit settings are preserved
+(see [Reopening a done park](#reopening-a-done-park)).
 Unparked Codex urgency
 takes capped attention first, with unknown host turn state. The values are whole
 numbers; a cap of 0 rings nobody (or never honours `urgent`), and
@@ -2371,12 +2376,14 @@ tool-result hints and the prompt-hook digest are unchanged.
 A `done` park means "I expect no follow-up", not "unreachable" (maintainer
 decision 2026-10-03: a coordinator's review of a finished PR surfaced two
 required changes, and the session that opened it, parked `done`, answered
-`parked_done`). Plain mail still never rings it, and neither does a peer's
-`urgent` mail, `park_clear_by: anyone` included: the session said nobody
-needs to reach it. `urgent` mail reopens it when the sender is one of:
+`parked_done`). A verified project conductor or signed maintainer mail can
+ring it without `urgent`; this neither clears its park nor grants approval.
+Other plain mail and ordinary peer urgency do not reopen it, including
+`park_clear_by: anyone`. The permitted senders are:
 
 - **the maintainer**: the sender's bearer principal is listed in
-  `coordination.maintainer_principals` (`reason: maintainer`);
+  `coordination.maintainer_principals` with `urgent` (`reason: maintainer`),
+  or signed maintainer mail (`reason: maintainer_message`);
 - **the maintainer's conductor for the project**: the operator made the
   sending session the conductor for the recipient's own, non-empty `project`
   with [`pseudolife-mcp lease conductor`](#leases-pseudolife-mcp-lease), and the grant has
@@ -2418,11 +2425,13 @@ never a shared one: the Claude Desktop app's own MCP server, for example, is
 one board address shared by every Desktop conversation, so granting it would
 make all of them the conductor.
 
-Maintainer and conductor urgency, to a done park or any other, spends the
-sender's `wake.authority_per_sender_per_hour` (12) instead of the plain
-urgent allowance (6), so a conductor relaying an incident decision to
-every session is not capped halfway; the per-recipient, nightly and stagger
-caps still bind it. A burst (`to: project:<name>` or `all`) reaches only
+Conductor mail spends the sender's `wake.authority_per_sender_per_hour` (60)
+instead of the plain urgent allowance (6), whether urgent or ordinary. It bypasses
+the per-recipient, nightly and stagger caps; its own exhausted allowance still
+returns `capped` with `reason: authority_sender_hour`. Legacy maintainer-principal
+urgent mail retains peer caps; signed maintainer mail has its independent budget.
+The sender must hold a live lease with a matching operator or maintainer grant
+record for its current fence; a role label or purpose text supplies no authority. A burst (`to: project:<name>` or `all`) reaches only
 peers active within the last three hours, so address a session that parked
 done longer ago directly. A named clearer's reopen spends the plain urgent
 allowance. A done park still lapses after its `park_expires` (12 hours by

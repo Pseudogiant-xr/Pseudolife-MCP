@@ -444,8 +444,8 @@ def scrub_transport(state: dict, ids: list) -> None:
 class McpSearch(Scenario):
     """memory_search over MCP: the projection (compact, verbose, truncation,
     replaced_by, cortex whitelist, correct_with, dedup, low_confidence),
-    fact_k narrowing and the list filters. ``explain`` is declared
-    (MCP-SEARCH-EXPLAIN) and not compared."""
+    fact_k narrowing and the list filters, including explain's exact
+    episode filter after search expands its subtree."""
     name = "mcp-search"
     mcp_extra_seed = True
     require = {"with_entries": 12, "with_cortex": 8, "correct_with.contested": 1,
@@ -473,6 +473,8 @@ class McpSearch(Scenario):
             mcp_case("blank query", {"query": "   "}),
             mcp_case("episode filter reaches the child episode",
                      {"query": EPISODE_PROBE, "episodes": ["<seed-episode>"]}),
+            mcp_case("explain traces the original episode filter",
+                     {"query": EPISODE_PROBE, "episodes": ["<seed-episode>"], "explain": True}),
             mcp_case("session header", {"query": "deploy the daemon"}, [("X-PL-Session", "sess-mcp")]),
             mcp_case("min_score and recency", {"query": "deploy the daemon", "min_score": 0.5,
                                                "disable_recency_boost": True}),
@@ -480,6 +482,35 @@ class McpSearch(Scenario):
                                              "bm25": False}),
             mcp_case("padded query", {"query": "   what os does the homelab box run  "}),
             mcp_case("nothing relevant", {"query": "zebra crossing quantum marmalade"}),
+        ]
+
+
+class McpExplain(Scenario):
+    """Explain runs an ordinary search, then an independently filtered trace.
+
+    The returned entries precede the trace's access bump; the next search
+    and the compared retrieval-event rows expose either missing or extra work.
+    """
+    name = "mcp-search-explain"
+    require = {"trace.responses": 9, "trace.final": 3, "with_entries": 5}
+
+    def cases(self):
+        def explain(name, **args):
+            return mcp_case(name, {"explain": True, **args})
+        return [
+            explain("explain implies verbose", query="how does dreaming consolidate memory"),
+            explain("cortex projection remains", query="what os does the homelab box run"),
+            explain("trace ignores the search floor", query="deploy the daemon", min_score=1.0),
+            explain("trace source filter", query="deploy", sources=["conversation"]),
+            explain("trace tag normalization", query="deploy", tags=["DEPLOY", " bug"]),
+            explain("trace filter caller order", query="deploy", episodes=["z", "a", "z"]),
+            explain("trace rerank and bm25 overrides", query="how do I back up the bank",
+                    rerank=True, bm25=False, top_k=3),
+            explain("trace empty lists", query="deploy", sources=[], bands=[], tags=[], episodes=[]),
+            explain("trace blank query", query="   "),
+            explain("trace invalid band", query="deploy", bands=["absent"]),
+            explain("trace padded query", query="  deploy the daemon  "),
+            mcp_case("after explain access counts", {"query": "deploy the daemon", "verbose": True}),
         ]
 
 
@@ -752,7 +783,7 @@ class TraceTimeline(Scenario):
 
 SCENARIOS = {s.name: s for s in (Default, Timeline, Contiguity, RrfPool, MarginGate, LogOff,
                                   LogOffControl, Continuum, HideSuperseded, ConfidenceFloor,
-                                  PointerExpired, ConfidenceRounding, McpSearch,
+                                  PointerExpired, ConfidenceRounding, McpSearch, McpExplain,
                                   McpTransportSession, McpRecent, McpFactGet, McpGet,
                                   McpStats, McpStatsContinuum, McpStatsCapacity, Trace,
                                   TraceRerank, TraceContinuum, TraceTimeline)}

@@ -457,7 +457,6 @@ def _write_summary(out: Path | None, summary: dict) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     global GOLDENS
-    core.pin_umask()
     parser = argparse.ArgumentParser(prog="cli_harness",
                                      description="Python CLI vs Rust CLI differential harness")
     parser.add_argument("--row", action="append", choices=sorted(rows.ROWS), required=True)
@@ -480,6 +479,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--fixture", action="store_true", help="use the offline CPU embedder for real daemon fixtures")
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args(argv)
+    if args.record or args.golden:
+        # Record and replay share a baseline; live arms inherit the caller's
+        # umask so permission differences remain observable there.
+        core.pin_umask()
     if args.golden_dir:
         GOLDENS = args.golden_dir.resolve()
         GOLDENS.mkdir(parents=True, exist_ok=True)
