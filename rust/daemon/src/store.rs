@@ -657,7 +657,8 @@ async fn store_body(
     let client = ready.storage.client();
     let mut session = ws.resolve_session(caller).map_err(ToolError::Invalid)?;
     let resolved = ws.resolve_handle(client, episode).await;
-    let warning = episode.is_some_and(|e| !e.is_empty()) && resolved.is_none();
+    let warning = (episode.is_some_and(|e| !e.is_empty()) && resolved.is_none())
+        .then(|| ws.handle_warning(episode, caller));
     match &resolved {
         Some((_, key)) => {
             if caller.header_session.as_deref().is_none_or(str::is_empty) {
@@ -753,11 +754,8 @@ async fn store_body(
             )),
         );
     }
-    if warning {
-        out.insert(
-            "episode_warning".into(),
-            json!("unknown or closed episode handle"),
-        );
+    if let Some(warning) = warning {
+        out.insert("episode_warning".into(), json!(warning));
     }
     if let Some(r) = reason {
         // `_store_noted`: an exact duplicate reads as filtered_meta.

@@ -1840,7 +1840,7 @@ class MemoryService(DreamOps, MaintainerOps):
             embedding = self._embedder.encode_single(text)
             _, session_id = self._resolve_writer()
             resolved = self._resolve_episode_handle(episode)
-            episode_warning = bool(episode) and resolved is None
+            episode_warning = self._episode_handle_warning(episode) if resolved is None else None
             if resolved is not None:
                 _, header_session, _ = resolve_writer_detailed(self._writer_id)
                 if not header_session:
@@ -1910,7 +1910,7 @@ class MemoryService(DreamOps, MaintainerOps):
                     "session episode is untitled — call "
                     f"memory_session_title('<project> - <topic>'{handle_arg})")
             if episode_warning:
-                out["episode_warning"] = "unknown or closed episode handle"
+                out["episode_warning"] = episode_warning
             return out
 
     def _promote_slots(self, text: str, *, source: str, origin: str | None,
@@ -4110,7 +4110,7 @@ class MemoryService(DreamOps, MaintainerOps):
             slot_emb = self._embedder.encode_single(f"{entity} {attribute}".strip())
             writer_id, session_id = self._resolve_writer()
             resolved = self._resolve_episode_handle(episode)
-            episode_warning = bool(episode) and resolved is None
+            episode_warning = self._episode_handle_warning(episode) if resolved is None else None
             if resolved is not None:
                 _, header_session, _ = resolve_writer_detailed(self._writer_id)
                 if not header_session:
@@ -4165,7 +4165,7 @@ class MemoryService(DreamOps, MaintainerOps):
                     cur, stale_policy=self._stale_policy)
                     if cur is not None else None)
             if episode_warning:
-                out["episode_warning"] = "unknown or closed episode handle"
+                out["episode_warning"] = episode_warning
             return out
 
     def set_add(
@@ -5152,7 +5152,7 @@ class MemoryService(DreamOps, MaintainerOps):
             if not self.config.memory.lessons.enabled:
                 return {"recorded": False, "reason": "lessons disabled"}
             resolved = self._resolve_episode_handle(episode)
-            episode_warning = bool(episode) and resolved is None
+            episode_warning = self._episode_handle_warning(episode) if resolved is None else None
             # One resolution serves both the attribution and the used_ids
             # label, so the two can never disagree about who the caller is.
             _, session_id = self._resolve_writer()
@@ -5164,7 +5164,7 @@ class MemoryService(DreamOps, MaintainerOps):
                 episode_id=episode_id)
             out = {"recorded": True, "signal_id": sid, "task": task, "outcome": outcome}
             if episode_warning:
-                out["episode_warning"] = "unknown or closed episode handle"
+                out["episode_warning"] = episode_warning
             if used_ids:
                 report, record = self._label_used_entries(used_ids, session_id)
                 out.update(report)
@@ -6446,7 +6446,7 @@ class MemoryService(DreamOps, MaintainerOps):
             # Keyless roots are rejected inside the resolver itself now, so
             # every handle consumer shares one contract.
             resolved = self._resolve_episode_handle(episode)
-            episode_warning = bool(episode) and resolved is None
+            episode_warning = self._episode_handle_warning(episode) if resolved is None else None
             parent = None
             if resolved is not None:
                 root_id, session_id = resolved
@@ -6465,7 +6465,7 @@ class MemoryService(DreamOps, MaintainerOps):
             self._persist_episodes()
             out = self._episode_to_dict(ep)
             if episode_warning:
-                out["episode_warning"] = "unknown or closed episode handle"
+                out["episode_warning"] = episode_warning
             return out
 
     def episode_end(self, episode: str | None = None) -> dict[str, Any]:
@@ -6498,7 +6498,7 @@ class MemoryService(DreamOps, MaintainerOps):
                 resolved = self._resolve_episode_handle(episode, resume=False)
                 if resolved is None:
                     return {"closed": None,
-                            "reason": "unknown or closed episode handle"}
+                            "reason": self._episode_handle_warning(episode)}
                 root_id, skey = resolved
                 leaf = em.open_subtree_leaf(root_id, skey)
                 if leaf is None:
@@ -6934,7 +6934,8 @@ class MemoryService(DreamOps, MaintainerOps):
             resume: bool = True) -> tuple[str, str | None] | None:
         """Identity tier 2 (spec 2026-07-18): match ``handle`` (a daemon-minted
         episode id or an unambiguous prefix, >=8 chars) against an OPEN root
-        episode — or a reaped one (within
+        episode. The board's exact session key also anchors an open root.
+        A daemon-minted handle also matches a reaped episode (within
         ``PSEUDOLIFE_HANDLE_RESUME_SECONDS``, its own window, far longer
         than the session-key one), which is reopened, or a swept-empty one,
         which is recreated from its tombstone: the briefing advertises the
@@ -6948,6 +6949,19 @@ class MemoryService(DreamOps, MaintainerOps):
         (a stale handle must not lose a memory)."""
         if not handle or len(handle) < 8 or self._cms is None:
             return None
+        # The board advertises the host session key as its episode. Accept
+        # that exact key too. Never
+        # resume a closed root through this alias: only a daemon handle has
+        # the existing explicit resume contract below.
+        roots = [e for e in self._cms.episodes.episodes.values()
+                 if e.parent_id is None and e.session_key == handle]
+        if roots:
+            opened = [e for e in roots if e.ended_at is None]
+            if len(opened) != 1:
+                return None
+            root = opened[0]
+            self._episode_touches[root.id] = time.time()
+            return (root.id, root.session_key)
         matches = [e for e in self._cms.episodes.episodes.values()
                    if e.parent_id is None and e.ended_at is None
                    and e.id.startswith(handle)]
@@ -7010,6 +7024,21 @@ class MemoryService(DreamOps, MaintainerOps):
         self._reopen_client_session_locked(ep)
         logger.info("recreated swept session episode %s via handle", tid)
         return (tid, skey)
+
+    def _episode_handle_warning(self, handle: str | None) -> str | None:
+        """Name the bootstrap for a board id without opening a closed root."""
+        if not handle:
+            return None
+        if self._cms is not None and any(
+                e.parent_id is None and e.session_key == handle and e.ended_at is not None
+                for e in self._cms.episodes.episodes.values()):
+            return ("This session's episode is closed; call memory_session_title "
+                    "without episode to start a new episode.")
+        _, header_session, _ = resolve_writer_detailed(self._writer_id)
+        if handle == header_session:
+            return ("No open episode matches this session id; call memory_session_title "
+                    "without episode, then retry.")
+        return "unknown or closed episode handle"
 
     def _ensure_session_episode(self, session_key: str | None) -> str | None:
         """Daemon-owned lazy episode open. In the direct-HTTP transport there is
@@ -7126,7 +7155,7 @@ class MemoryService(DreamOps, MaintainerOps):
                 return {"ok": True, "id": root.id, "title": title}, root
             if episode:
                 return {"ok": False,
-                        "reason": "unknown or closed episode handle"}, None
+                        "reason": self._episode_handle_warning(episode)}, None
             _, session_id = self._resolve_writer()
             if not session_id:
                 return {"ok": False, "reason": "no session id on this request"}, None
