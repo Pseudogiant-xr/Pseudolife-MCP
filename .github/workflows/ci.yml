@@ -601,6 +601,8 @@ jobs:
           tests/test_runner_cleanup.py
           tests/test_selfhosted_windows_scripts.py
           tests/test_child_python.py
+          tests/test_installer_reruns.py
+          tests/test_shim_runtime_reuse.py
           tests/test_installer_unattended.py
           tests/test_installer_client_update_schedule.py
           tests/test_tunnel_profiles.py

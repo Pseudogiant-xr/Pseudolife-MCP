@@ -142,6 +142,7 @@ EXTRACTOR_URL=""
 MODEL=""
 MODEL_SET=""
 CLIENT=""
+EXPLICIT_ARGS=""
 CODEX_HOOKS=auto
 CODEX_HOOK_TRUST=ask
 CLAUDE_PLUGIN=auto
@@ -172,6 +173,7 @@ usage() {
 }
 
 while [ $# -gt 0 ]; do
+    EXPLICIT_ARGS="$EXPLICIT_ARGS $1"
     case "$1" in
         --extractor) EXTRACTOR="$2"; shift 2 ;;
         --extractor-url) EXTRACTOR_URL="$2"; shift 2 ;;
@@ -376,12 +378,54 @@ LEGACY_SHIM_OVERRIDE_MARKER="# pseudolife-mcp install: managed override (shim-on
 ENV_BEGIN="# >>> pseudolife-mcp install (managed block — installer rewrites between markers) >>>"
 ENV_END="# <<< pseudolife-mcp install <<<"
 
+# >>> recorded choices >>>
+installer_state() {
+    local state_python
+    state_python="$(installer_python)"
+    [ -n "$state_python" ] || { echo "Python >= 3.10 is needed to read recorded installer choices; install it and rerun." >&2; return 1; }
+    "$state_python" "$repo/ops/installer_state.py" "$@"
+}
+INSTALLER_RERUN=""
+RECORDED_BANK_LOCATION=""
+RECORDED_INSTRUCTIONS_GEMINI=""
+RECORDED_INSTRUCTIONS_GENERIC=""
+restored_extractor=""
+if [ -z "${CLIENT_ONLY:-}${DAEMON_URL:-}${PSEUDOLIFE_MCP_DAEMON_URL:-}" ] && [ -f "$env_file" ]; then
+    recorded_choices="$(installer_state choices --env-file "$env_file")" || exit 2
+    while IFS='=' read -r choice_key choice_value; do
+        case "$choice_key" in
+            EXTRACTOR)
+                if [ -z "$EXTRACTOR" ]; then EXTRACTOR="$choice_value"; restored_extractor=1; fi ;;
+            MODEL) [ -z "$restored_extractor" ] || [ -n "$MODEL" ] || MODEL="$choice_value" ;;
+            EXTRACTOR_URL) [ -z "$restored_extractor" ] || [ -n "$EXTRACTOR_URL" ] || EXTRACTOR_URL="$choice_value" ;;
+            SHIM_PORT) case " $EXPLICIT_ARGS " in *" --shim-port "*) ;; *) [ -z "$restored_extractor" ] || [ "$SHIM_PORT" != 0 ] || SHIM_PORT="$choice_value" ;; esac ;;
+            CLIENT) [ -n "$CLIENT" ] || CLIENT="$choice_value" ;;
+            BANK_LOCATION) RECORDED_BANK_LOCATION="$choice_value"; INSTALLER_RERUN=1 ;;
+            INSTRUCTIONS_GEMINI) RECORDED_INSTRUCTIONS_GEMINI="$choice_value" ;;
+            INSTRUCTIONS_GENERIC) RECORDED_INSTRUCTIONS_GENERIC="$choice_value" ;;
+            GENERIC_TARGET_JSON)
+                case " $EXPLICIT_ARGS " in *" --agents-file "*) ;; *)
+                    AGENTS_FILE="$(printf '%s' "$choice_value" | "$(installer_python)" -c 'import json,sys; sys.stdout.buffer.write(json.load(sys.stdin).encode("utf-8"))')"
+                    if command -v cygpath >/dev/null 2>&1; then AGENTS_FILE="$(cygpath -u "$AGENTS_FILE")"; fi ;;
+                esac ;;
+            INSTRUCTIONS) case " $EXPLICIT_ARGS " in *" --instructions "*|*" --claude-md "*) ;; *) INSTRUCTIONS="$choice_value" ;; esac ;;
+            CODEX_HOOKS) case " $EXPLICIT_ARGS " in *" --codex-hooks "*) ;; *) CODEX_HOOKS="$choice_value" ;; esac ;;
+            CLAUDE_PLUGIN) case " $EXPLICIT_ARGS " in *" --claude-plugin "*) ;; *) CLAUDE_PLUGIN="$choice_value" ;; esac ;;
+            CLAUDE_LEGACY_HOOKS) case " $EXPLICIT_ARGS " in *" --claude-legacy-hooks "*) ;; *) CLAUDE_LEGACY_HOOKS="$choice_value" ;; esac ;;
+            TRANSPORT) case " $EXPLICIT_ARGS " in *" --transport "*) ;; *) TRANSPORT="$choice_value" ;; esac ;;
+            NO_TOKEN) case " $EXPLICIT_ARGS " in *" --no-token "*) ;; *) [ "$choice_value" != 1 ] || NO_TOKEN=1 ;; esac ;;
+        esac
+    done <<< "$recorded_choices"
+    [ -z "$restored_extractor" ] || check_extractor_args
+fi
+# <<< recorded choices <<<
+
 # ── presentation helpers ───────────────────────────────────────────────────
 # Art and color are interactive sugar only: a real TTY, NO_COLOR unset,
 # TERM not dumb, and no --no-art. Escapes are generated (\033), never raw
 # ESC bytes — the tracked-tree control-byte guard bans those.
 art_ok() {
-    [ -z "${INSTALLER_UNATTENDED:-}" ] && [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-}" != "dumb" ] \
+    [ -z "${INSTALLER_UNATTENDED:-}${INSTALLER_RERUN:-}" ] && [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-}" != "dumb" ] \
         && [ -z "$NO_ART" ]
 }
 step() {
@@ -529,6 +573,10 @@ PL_SHARED_BANK
 # again before it changes anything. A failure is reported, not fatal: the
 # install itself is complete.
 offer_shared_bank_expose() {
+    if [ -n "${INSTALLER_RERUN:-}" ]; then
+        echo "Shared-bank exposure unchanged; run pseudolife-mcp expose tailscale to change it."
+        return 0
+    fi
     bank_can_ask || return 0
     bank_read "Run pseudolife-mcp expose tailscale now? It changes this machine's tailnet serve [y/N]: " ||
         BANK_REPLY=""
@@ -563,7 +611,7 @@ offer_maintainer_setup() {
         echo "Maintainer passkeys: in place."
         return 0
     fi
-    if ! bank_can_ask; then
+    if [ -n "${INSTALLER_RERUN:-}" ] || ! bank_can_ask; then
         echo "Maintainer passkeys (sign Console messages and roles): run pseudolife-mcp maintainer setup in a terminal when you want them."
         return 0
     fi
@@ -657,7 +705,7 @@ show_banner
 # mean another machine, so with any of them only the URL is asked. The mode block below then
 # resolves and checks the answer exactly as it does the flags. Without a
 # terminal nothing is asked; end of input at one is no answer (exit 2).
-BANK_LOCATION=local
+BANK_LOCATION="${RECORDED_BANK_LOCATION:-local}"
 show_bank_location_question() {
     cat <<'PL_BANK_LOCATION'
 
@@ -668,7 +716,7 @@ Where does the memory bank live?
 PL_BANK_LOCATION
 }
 bank_can_ask() {  # status 0 when there is a terminal to ask on
-    [ -z "${INSTALLER_UNATTENDED:-}" ] && [ -t 0 ]
+    [ -z "${INSTALLER_UNATTENDED:-}${INSTALLER_RERUN:-}" ] && [ -t 0 ]
 }
 bank_read() {  # $1 = the prompt; sets BANK_REPLY; fails at end of input
     printf '%s' "$1"
@@ -685,6 +733,10 @@ bank_trimmed() {  # $1 = a reply; echoes it without surrounding whitespace or on
     printf '%s' "$bank_value"
 }
 choose_bank_location() {
+    if [ -n "${RECORDED_BANK_LOCATION:-}" ]; then
+        step "Bank location unchanged: $BANK_LOCATION"
+        return 0
+    fi
     if [ -n "$DAEMON_URL" ] || [ -n "$CLIENT_ONLY" ] || [ -n "${PSEUDOLIFE_MCP_DAEMON_URL:-}" ]; then
         return 0
     fi
@@ -893,7 +945,7 @@ esac
 
 # ── 1. provider selection (before preflight, so it checks what you picked) ─
 if [ -z "$CLIENT" ]; then
-    if { [ -n "${INSTALLER_UNATTENDED:-}" ] || [ ! -t 0 ]; }; then
+    if { [ -n "${INSTALLER_UNATTENDED:-}${INSTALLER_RERUN:-}" ] || [ ! -t 0 ]; }; then
         CLIENT=""
         for detected_client in claude codex gemini; do
             if command -v "$detected_client" >/dev/null 2>&1; then
@@ -940,7 +992,7 @@ fi
 CLIENTS="$(normalize_clients "$CLIENT")"
 CLIENT_LIST="$(printf '%s' "$CLIENTS" | tr ' ' ',')"
 step "Providers: $CLIENTS"
-if [ -z "${INSTALLER_UNATTENDED:-}" ] && [ -t 0 ] && [ -t 1 ]; then
+if [ -z "${INSTALLER_UNATTENDED:-}${INSTALLER_RERUN:-}" ] && [ -t 0 ] && [ -t 1 ]; then
     echo ""
     echo "What each agent gets:"
     echo ""
@@ -1021,16 +1073,16 @@ client_only_preflight() {
             echo "client-only install: --read-token creates the token file, and it already exists: $TOKEN_FILE. Drop --read-token to use it, or remove it first" >&2
             exit 1
         fi
-        if [ -n "${INSTALLER_UNATTENDED:-}" ] && [ -t 0 ]; then
+        if [ -n "${INSTALLER_UNATTENDED:-}${INSTALLER_RERUN:-}" ] && [ -t 0 ]; then
             echo "Unattended --read-token needs redirected stdin; pipe the credential, or use --token-file with an existing file. Nothing changed." >&2
             exit 2
         fi
         # Read unechoed, and handed to the helper on stdin through a shell
         # builtin: the token never reaches an argument list or the output.
-        { [ -n "${INSTALLER_UNATTENDED:-}" ] || [ ! -t 0 ]; } || printf "Paste the daemon's bearer token, or a pairing code from pseudolife-mcp invite (not shown), then Enter: " >&2
+        { [ -n "${INSTALLER_UNATTENDED:-}${INSTALLER_RERUN:-}" ] || [ ! -t 0 ]; } || printf "Paste the daemon's bearer token, or a pairing code from pseudolife-mcp invite (not shown), then Enter: " >&2
         token_value=""
         IFS= read -rs token_value || true
-        { [ -n "${INSTALLER_UNATTENDED:-}" ] || [ ! -t 0 ]; } || echo "" >&2
+        { [ -n "${INSTALLER_UNATTENDED:-}${INSTALLER_RERUN:-}" ] || [ ! -t 0 ]; } || echo "" >&2
         if printf '%s\n' "$token_value" | is_pairing_code; then
             PAIRING_CODE="$token_value"
             token_value=""
@@ -1112,13 +1164,13 @@ fi
 # ── 3. extractor choice (explicit, no default) ─────────────────────────────
 # A client-only install has none: the remote daemon runs its own extractor.
 if [ -z "$EXTRACTOR" ] && [ -z "$CLIENT_ONLY" ]; then
-    if { [ -n "${INSTALLER_UNATTENDED:-}" ] || [ ! -t 0 ]; }; then
+    if { [ -n "${INSTALLER_UNATTENDED:-}${INSTALLER_RERUN:-}" ] || [ ! -t 0 ]; }; then
         if [ -f "${env_file:-}" ] && awk -v b="$ENV_BEGIN" -v e="$ENV_END" '
             { sub(/\r$/, "") }
             $0 == b { inside=1; next } $0 == e { inside=0; next }
             inside && /^PSEUDOLIFE_DREAM_BASE_URL=.+/ { found=1 }
             END { exit !found }' "$env_file"; then
-            echo "Existing extractor settings are recorded in ops/.env. Repeat this run with --extractor <original-mode> (and --extractor-url/--model for an endpoint). Nothing changed." >&2
+            echo "The original extractor family is not recorded; rerun with --extractor endpoint --extractor-url <url> --model extractor, --extractor claude-only, or --extractor openai-only (use the corresponding -fallback mode if configured), and nothing has been changed." >&2
             exit 2
         fi
         EXTRACTOR=sidecar
@@ -1216,7 +1268,7 @@ case "$EXTRACTOR" in endpoint|endpoint-fallback) endpoint_preflight ;; esac
 # claude-* names, so this is only the launch default — switchable later from
 # the Console's Extractor panel without a reinstall.
 if [ -n "$claude_shim_mode" ] && [ -z "$MODEL" ]; then
-    if [ -z "${INSTALLER_UNATTENDED:-}" ] && [ -t 0 ]; then
+    if [ -z "${INSTALLER_UNATTENDED:-}${INSTALLER_RERUN:-}" ] && [ -t 0 ]; then
         echo ""
         echo "Which Claude model should extract memories (the 'dreamer')?"
         echo "  1) claude-opus-5-5   — recommended: clears the extraction-ladder gate with no regression against claude-opus-5 (evals/results/ladder-opus55-paired-verdict-threshold.json, 2026-09-28); the 2026-08-02 judged comparison that chose Opus over Sonnet (best measured extraction quality) ran on claude-opus-5"
@@ -1252,7 +1304,7 @@ fi
 # shim's balanced default. The GPT-6 ids were accepted by the Codex CLI on
 # 2026-09-29; no ladder run has measured them.
 if [ -n "$codex_shim_mode" ] && [ -z "$MODEL" ]; then
-    if [ -z "${INSTALLER_UNATTENDED:-}" ] && [ -t 0 ]; then
+    if [ -z "${INSTALLER_UNATTENDED:-}${INSTALLER_RERUN:-}" ] && [ -t 0 ]; then
         echo ""
         echo "Which GPT model should extract memories (the 'dreamer')?"
         echo "  1) gpt-5.6-terra — balanced default (extraction quality unmeasured)"
@@ -1307,9 +1359,16 @@ get_env() { [ -f "$env_file" ] && sed -n "s/^$1=//p" "$env_file" | tail -1 | tr 
 bank_vol="$(get_env PSEUDOLIFE_BANK_VOLUME)"; bank_vol="${bank_vol:-pseudolife-mcp-bank}"
 state_vol="$(get_env PSEUDOLIFE_STATE_VOLUME)"; state_vol="${state_vol:-pseudolife-mcp-state}"
 if [ -z "$CLIENT_ONLY" ]; then
-    docker volume create "$bank_vol" >/dev/null
-    docker volume create "$state_vol" >/dev/null
-    step "Volumes ready: $bank_vol, $state_vol"
+    existing_volumes="$(docker volume ls --format '{{.Name}}')"
+    volumes_changed=""
+    for volume in "$bank_vol" "$state_vol"; do
+        if ! printf '%s\n' "$existing_volumes" | grep -Fxq -- "$volume"; then
+            docker volume create "$volume" >/dev/null
+            volumes_changed=1
+        fi
+    done
+    if [ -n "$volumes_changed" ]; then step "Volumes ready: $bank_vol, $state_vol"
+    else step "Volumes unchanged: $bank_vol, $state_vol"; fi
 fi
 # <<< volumes <<<
 
@@ -1370,20 +1429,29 @@ case "$CLIENTS" in
     gemini) WRITER_ID=gemini ;;
     *)      WRITER_ID=mcp-client ;;
 esac
+# >>> managed configuration >>>
 if [ -z "$CLIENT_ONLY" ]; then
-    [ -f "$env_file" ] || cp "$repo/ops/.env.example" "$env_file"
-    # Drop any previous managed block, then append the new one.
-    tmp="$(mktemp)"
-    awk -v b="$ENV_BEGIN" -v e="$ENV_END" '
-        $0 == b {skip=1; next} $0 == e {skip=0; next} !skip {print}' \
-        "$env_file" > "$tmp" && mv "$tmp" "$env_file"
-    {
+    managed_block="$({
         echo "$ENV_BEGIN"
         extractor_env_lines
         echo "PSEUDOLIFE_WRITER_ID=$WRITER_ID"
+        echo "PSEUDOLIFE_INSTALL_EXTRACTOR=$EXTRACTOR"
+        echo "PSEUDOLIFE_INSTALL_MODEL=$MODEL"
+        echo "PSEUDOLIFE_INSTALL_EXTRACTOR_URL=$EXTRACTOR_URL"
+        echo "PSEUDOLIFE_INSTALL_SHIM_PORT=$SHIM_PORT"
+        echo "PSEUDOLIFE_INSTALL_CLIENT=$CLIENT_LIST"
+        echo "PSEUDOLIFE_INSTALL_BANK_LOCATION=$BANK_LOCATION"
+        echo "PSEUDOLIFE_INSTALL_INSTRUCTIONS=${INSTRUCTIONS:-${CLAUDE_MD:-auto}}"
+        echo "PSEUDOLIFE_INSTALL_CODEX_HOOKS=$CODEX_HOOKS"
+        echo "PSEUDOLIFE_INSTALL_CLAUDE_PLUGIN=$CLAUDE_PLUGIN"
+        echo "PSEUDOLIFE_INSTALL_CLAUDE_LEGACY_HOOKS=$CLAUDE_LEGACY_HOOKS"
+        echo "PSEUDOLIFE_INSTALL_TRANSPORT=$TRANSPORT"
+        echo "PSEUDOLIFE_INSTALL_NO_TOKEN=${NO_TOKEN:-0}"
         echo "$ENV_END"
-    } >> "$env_file"
-    step "Wrote managed block in ops/.env"
+    })"
+    managed_status="$(printf '%s\n' "$managed_block" | installer_state write-env --env-file "$env_file" --template "$repo/ops/.env.example")" || exit 1
+    if [ "$managed_status" = unchanged ]; then step "Managed configuration unchanged: ops/.env"
+    else step "Wrote managed block in ops/.env"; fi
     case "$EXTRACTOR" in endpoint|endpoint-fallback)
         endpoint_in_container="$(extractor_container_url "$EXTRACTOR_URL")"
         [ "$endpoint_in_container" = "$EXTRACTOR_URL" ] ||
@@ -1391,6 +1459,7 @@ if [ -z "$CLIENT_ONLY" ]; then
         echo "    If the server wants a key, set PSEUDOLIFE_DREAM_API_KEY in ops/.env outside the managed block." ;;
     esac
 fi
+# <<< managed configuration <<<
 
 # ── 5b. bearer token (the agent board needs one) ──────────────────────────
 # A default install mints one, so the board is on; every client wired below
@@ -1454,7 +1523,7 @@ if [ -n "$CLIENT_ONLY" ]; then
     :  # no local daemon here, so its compose override is not this run's to change
 elif extractor_disables_sidecar; then
     if [ ! -f "$override_file" ] || installer_owns_override; then
-        cat > "$override_file" <<EOF
+        override_contents="$(cat <<EOF
 $OVERRIDE_MARKER
 # A profiled service is skipped by \`up\` entirely: the extractor image is
 # never built or pulled. Re-run ops/install.sh with a sidecar mode to remove.
@@ -1462,13 +1531,20 @@ services:
   pseudolife-extractor:
     profiles: ["disabled"]
 EOF
-        step "Sidecar disabled via ops/docker-compose.override.yml"
+)"
+        override_status="$(printf '%s\n' "$override_contents" | "$(installer_python)" "$repo/ops/installer_state.py" write-file --path "$override_file")" || exit 1
+        if [ "$override_status" = unchanged ]; then step "Sidecar override unchanged (disabled)."
+        else step "Sidecar disabled via ops/docker-compose.override.yml"; fi
     else
-        echo "NOTE: ops/docker-compose.override.yml exists and is not installer-managed."
-        echo "      Add this to it yourself to disable the sidecar:"
-        echo "        services:"
-        echo "          pseudolife-extractor:"
-        echo "            profiles: [\"disabled\"]"
+        if [ -n "${INSTALLER_RERUN:-}" ]; then
+            step "Operator override unchanged (not installer-managed)."
+        else
+            echo "NOTE: ops/docker-compose.override.yml exists and is not installer-managed."
+            echo "      Add this to it yourself to disable the sidecar:"
+            echo "        services:"
+            echo "          pseudolife-extractor:"
+            echo "            profiles: [\"disabled\"]"
+        fi
     fi
     # Remove a leftover running extractor container (container only — it has
     # no volumes; the image is kept for an easy switch back).
@@ -1480,6 +1556,8 @@ else
     if installer_owns_override; then
         rm "$override_file"
         step "Removed installer-managed override (sidecar re-enabled)"
+    else
+        step "Sidecar override unchanged (enabled)."
     fi
 fi
 # <<< sidecar override <<<
@@ -1488,8 +1566,19 @@ fi
 if [ -z "$CLIENT_ONLY" ]; then
     compose=(--env-file "$env_file" -f "$compose_file")
     [ -f "$override_file" ] && compose+=(-f "$override_file")
-    step "docker compose up -d --build (first build downloads images — grab a coffee)..."
-    docker compose "${compose[@]}" up -d --build
+    compose_snapshot_json="$(installer_state plan --snapshot --repo "$repo" --env-file "$env_file" --override "$override_file")" || exit 1
+    compose_plan="$(printf '%s' "$compose_snapshot_json" | "$(installer_python)" -c 'import json,sys; sys.stdout.write(json.load(sys.stdin)["action"])')"
+    case "$compose_plan" in
+        unchanged) step "Docker stack unchanged; no Compose up or build needed." ;;
+        start)
+            step "Starting Docker stack with existing images (no build)..."
+            docker compose "${compose[@]}" up -d --no-build ;;
+        build)
+            step "docker compose up -d --build (checkout or images changed)..."
+            docker compose "${compose[@]}" up -d --build ;;
+        *) echo "Cannot determine the Docker startup step; rerun ops/preflight.sh." >&2; exit 1 ;;
+    esac
+    compose_snapshot_json="$(printf '%s' "$compose_snapshot_json" | installer_state started --expected-stdin --repo "$repo" --env-file "$env_file" --override "$override_file")" || exit 1
 fi
 
 # ── 8b. Claude Code plugin (hooks + commands layer) ────────────────────────
@@ -1613,7 +1702,7 @@ install_claude_plugin
 LEGACY_CLAUDE=""
 LEGACY_CLAUDE_BACKUP=""
 claude_legacy_answer() {  # prints the reply; fails when there is no terminal
-    [ -z "${INSTALLER_UNATTENDED:-}" ] && [ -t 0 ] || return 1
+    [ -z "${INSTALLER_UNATTENDED:-}${INSTALLER_RERUN:-}" ] && [ -t 0 ] || return 1
     printf 'Remove them from ~/.claude/settings.json (a timestamped backup is taken first)? [y/N] ' >&2
     read -r legacy_reply || legacy_reply=""
     printf '%s' "$legacy_reply"
@@ -2228,7 +2317,7 @@ print(r.get("daemon_url") or "")
             if [ -z "$CODEX_CREDENTIAL_BOOTSTRAP_FAILED" ]; then
                 setup_args=("$repo/ops/setup-codex-hooks.py" --source "$CODEX_HOOKS"
                     --trust "$CODEX_HOOK_TRUST" --instructions "$instruction_choice")
-                if { [ -n "${INSTALLER_UNATTENDED:-}" ] || [ ! -t 0 ]; }; then setup_args+=(--non-interactive); fi
+                if { [ -n "${INSTALLER_UNATTENDED:-}${INSTALLER_RERUN:-}" ] || [ ! -t 0 ]; }; then setup_args+=(--non-interactive); fi
                 setup_exit=0
                 if [ -n "$CODEX_CONNECTION_CONFIGURED" ]; then
                     if [ -n "$CODEX_CREDENTIAL_FILE" ]; then
@@ -2286,6 +2375,9 @@ done
 INSTR_CLAUDE=""
 INSTR_GEMINI=""
 INSTR_GENERIC=""
+RESOLVED_INSTRUCTIONS_GEMINI=""
+RESOLVED_INSTRUCTIONS_GENERIC=""
+RESOLVED_GENERIC_TARGET=""
 
 record_instr() {
     case "$1" in
@@ -2362,6 +2454,15 @@ for selected_client in $CLIENTS; do
             continue
         fi
     fi
+    choice="$instruction_choice"
+    if [ "$choice" = auto ]; then
+        case " $EXPLICIT_ARGS " in *" --instructions "*|*" --claude-md "*) ;; *)
+            case "$selected_client" in
+                gemini) choice="${RECORDED_INSTRUCTIONS_GEMINI:-auto}" ;;
+                generic) case " $EXPLICIT_ARGS " in *" --agents-file "*) ;; *) choice="${RECORDED_INSTRUCTIONS_GENERIC:-auto}" ;; esac ;;
+            esac ;;
+        esac
+    fi
     case "$selected_client" in
         gemini)  instruction_path="$HOME/.gemini/GEMINI.md" ;;
         generic) instruction_path="$AGENTS_FILE" ;;
@@ -2371,9 +2472,14 @@ for selected_client in $CLIENTS; do
             && grep -q "pseudolife-memory" "$instruction_path" 2>/dev/null; then
         step "Memory block already present in $instruction_path — skipping."
         record_instr "$selected_client" "present:$instruction_path"
+        case "$selected_client" in
+            gemini) RESOLVED_INSTRUCTIONS_GEMINI="${choice/auto/append}" ;;
+            generic)
+                RESOLVED_INSTRUCTIONS_GENERIC="${choice/auto/append}"
+                case "$instruction_path" in /*|[A-Za-z]:*) RESOLVED_GENERIC_TARGET="$instruction_path" ;; *) RESOLVED_GENERIC_TARGET="$PWD/$instruction_path" ;; esac ;;
+        esac
         continue
     fi
-    choice="$instruction_choice"
     if [ "$choice" = auto ]; then
         case "$selected_client" in
             claude)
@@ -2382,7 +2488,7 @@ for selected_client in $CLIENTS; do
                 # this block; the summary names the file to append it to.
                 choice=skip ;;
             gemini)
-                if [ -z "${INSTALLER_UNATTENDED:-}" ] && [ -t 0 ]; then
+                if [ -z "${INSTALLER_UNATTENDED:-}${INSTALLER_RERUN:-}" ] && [ -t 0 ]; then
                     printf 'Gemini CLI has no hook system - append the standing memory block to %s? [Y/n] ' "$instruction_path"
                     read -r yn
                     case "$yn" in n|N|no|NO) choice=skip ;; *) choice=append ;; esac
@@ -2393,7 +2499,7 @@ for selected_client in $CLIENTS; do
             generic)
                 if [ -n "$AGENTS_FILE" ]; then
                     choice=append
-                elif [ -z "${INSTALLER_UNATTENDED:-}" ] && [ -t 0 ]; then
+                elif [ -z "${INSTALLER_UNATTENDED:-}${INSTALLER_RERUN:-}" ] && [ -t 0 ]; then
                     printf 'Append the standing memory block to which file? (Enter = %s, "-" to skip) ' "$HOME/AGENTS.md"
                     read -r answer
                     if [ "$answer" = "-" ]; then
@@ -2414,12 +2520,19 @@ for selected_client in $CLIENTS; do
         echo "NOTE: generic append needs a target — pass --agents-file <path>." >&2
         choice=skip
     fi
+    case "$selected_client" in
+        gemini) RESOLVED_INSTRUCTIONS_GEMINI="$choice" ;;
+        generic) RESOLVED_INSTRUCTIONS_GENERIC="$choice" ;;
+    esac
     if [ "$choice" = append ]; then
         append_block "$instruction_path" "$selected_client"
     else
         hint_path="${instruction_path:-<your AGENTS.md>}"
-        step "Standing memory block not written for $selected_client. To add it:"
-        echo "  cat $repo/examples/CLAUDE.memory.md >> $hint_path"
+        if [ -n "${INSTALLER_RERUN:-}" ]; then step "Standing instructions unchanged (skipped): $selected_client"
+        else
+            step "Standing memory block not written for $selected_client. To add it:"
+            echo "  cat $repo/examples/CLAUDE.memory.md >> $hint_path"
+        fi
         record_instr "$selected_client" "skipped:$hint_path"
     fi
 done
@@ -3136,7 +3249,7 @@ firewall_rule_wanted() {
     esac
     # The prompt goes to stderr, which stays the terminal when stdout is
     # captured; with no terminal on either side nothing is asked.
-    if { [ -n "${INSTALLER_UNATTENDED:-}" ] || [ ! -t 0 ]; } || [ ! -t 2 ]; then
+    if { [ -n "${INSTALLER_UNATTENDED:-}${INSTALLER_RERUN:-}" ] || [ ! -t 0 ]; } || [ ! -t 2 ]; then
         echo "  Not added (no terminal to ask on): run the command above, or re-run with --firewall-rule yes."
         return 1
     fi
@@ -3191,7 +3304,7 @@ shim_container_probe() {
         # Without a terminal on both sides sudo must not ask for a password
         # (it could still prompt on /dev/tty and wait): -n fails instead.
         sudo_ask=-n
-        if [ -z "${INSTALLER_UNATTENDED:-}" ] && [ -t 0 ] && [ -t 2 ]; then sudo_ask=""; fi
+        if [ -z "${INSTALLER_UNATTENDED:-}${INSTALLER_RERUN:-}" ] && [ -t 0 ] && [ -t 2 ]; then sudo_ask=""; fi
         if sudo ${sudo_ask:+"$sudo_ask"} ufw allow from "$subnet" to "$bridge" port "$SHIM_PORT" proto tcp comment 'pseudolife dream shim'; then
             if container_reaches_shim "$probe_url"; then
                 ENDPOINT_CONTAINER=reachable
@@ -3289,7 +3402,7 @@ fi
 # A client-only install checked the remote daemon at preflight, and nothing
 # starts locally, so there is nothing to wait for.
 if [ -z "$CLIENT_ONLY" ]; then
-    step "Waiting for the daemon to report healthy..."
+    if [ "${compose_plan:-}" != unchanged ]; then step "Waiting for the daemon to report healthy..."; fi
     healthy=""
     for _ in $(seq 1 40); do
         if curl -fsS --max-time 3 http://127.0.0.1:8765/health 2>/dev/null \
@@ -3492,6 +3605,15 @@ if [ -n "$CLIENT_ONLY" ]; then show_client_only_notes; echo ""; fi
 if [ "${BANK_LOCATION:-}" = shared ]; then show_shared_bank_notes; echo ""; fi
 if [ "${BANK_LOCATION:-}" = shared ]; then offer_shared_bank_expose; fi
 if [ -n "$SHIM_HELD" ]; then echo "WARNING: $SHIM_HELD" >&2; fi
+# >>> record successful deployment >>>
+if [ -z "$CLIENT_ONLY" ]; then
+    record_args=(record --expected-stdin --repo "$repo" --env-file "$env_file" --override "$override_file")
+    [ -z "${RESOLVED_INSTRUCTIONS_GEMINI:-}" ] || record_args+=(--instruction-gemini "$RESOLVED_INSTRUCTIONS_GEMINI")
+    [ -z "${RESOLVED_INSTRUCTIONS_GENERIC:-}" ] || record_args+=(--instruction-generic "$RESOLVED_INSTRUCTIONS_GENERIC")
+    [ -z "${RESOLVED_GENERIC_TARGET:-}" ] || record_args+=(--generic-target "$RESOLVED_GENERIC_TARGET")
+    printf '%s' "$compose_snapshot_json" | installer_state "${record_args[@]}" >/dev/null
+fi
+# <<< record successful deployment <<<
 if [ -z "$CLIENT_ONLY" ]; then offer_maintainer_setup; fi
 if [ -z "$CLIENT_ONLY" ]; then open_console_signin; fi
 # >>> update line >>>

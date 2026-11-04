@@ -344,8 +344,15 @@ to optional firewall, exposure, hook trust or scheduled jobs.
 
 A fresh local install uses the CPU sidecar by default; override it with
 `--extractor` / `-Extractor`. A client-only install has no extractor choice.
-On an existing non-sidecar install, repeat its extractor flags; omitting
-them refuses before changing the recorded settings.
+Reruns reuse the installer choices recorded in `ops/.env`; explicit flags
+override them. They preserve unchanged managed files and shim runtimes, and
+skip Docker startup/build when the checkout, configuration and running images
+match the last healthy install. Stopped containers use existing images.
+Older endpoint and CLI-shim configurations are recovered from their managed
+settings and shim autostart records. If an older local endpoint named
+`extractor` has no record identifying its family, repeat its original
+extractor flags once; the installer preserves the configuration instead of
+guessing a CLI family from the port.
 Omitted `--client` / `-Client` selects installed Claude, Codex and Gemini
 CLIs, or `generic` when none are found. Explicit client flags override this.
 For an existing remote bank, use `--client-only --daemon-url <url>` with
