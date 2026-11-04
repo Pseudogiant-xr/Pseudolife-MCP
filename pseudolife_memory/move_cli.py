@@ -221,13 +221,14 @@ try:
     from psycopg.conninfo import conninfo_to_dict
     def endpoint(values):
         connection = conninfo_to_dict(values['PSEUDOLIFE_MCP_DATABASE_URL'])
-        user = connection.get('user') or values.get('PGUSER')
-        database = connection.get('dbname') or values.get('PGDATABASE') or user
-        return (user, database, connection.get('host') or values.get('PGHOST'),
-                connection.get('hostaddr') or values.get('PGHOSTADDR'),
-                connection.get('port') or values.get('PGPORT') or '5432',
-                connection.get('password') or values.get('PGPASSWORD'),
-                connection.get('service') or values.get('PGSERVICE'))
+        setting = lambda key, env: connection.get(key, values.get(env))
+        user = setting('user', 'PGUSER')
+        database = setting('dbname', 'PGDATABASE') or user
+        return (user, database, setting('host', 'PGHOST') or '',
+                setting('hostaddr', 'PGHOSTADDR') or '',
+                setting('port', 'PGPORT') or '5432',
+                setting('password', 'PGPASSWORD'),
+                setting('service', 'PGSERVICE') or '')
     original = dict(request.get('connection_defaults') or {}, PSEUDOLIFE_MCP_DATABASE_URL=request['database_url'])
     if endpoint(live) != endpoint(original):
         raise up.UpdateError('the exported libpq defaults would change the actual bank or its credentials: '
@@ -572,13 +573,13 @@ def _dsn_parts(dsn: str | None, environment: dict[str, str] | None = None) -> tu
     except Exception:  # libpq errors can contain the credential-bearing input
         raise MoveError(f"the daemon's database configuration cannot be read: {fix}. Nothing was changed",
                         EXIT_REFUSED) from None
-    if connection.get("service") or environment.get("PGSERVICE"):
+    if connection.get("service", environment.get("PGSERVICE")):
         raise MoveError("the daemon's service-file connection cannot be verified outside its container: "
                         "replace service/PGSERVICE defaults with an explicit PSEUDOLIFE_MCP_DATABASE_URL, "
                         "restart the original daemon, and retry. Nothing was changed",
                         EXIT_REFUSED)
-    user = connection.get("user") or environment.get("PGUSER")
-    db = connection.get("dbname") or environment.get("PGDATABASE") or user
+    user = connection.get("user", environment.get("PGUSER"))
+    db = connection.get("dbname", environment.get("PGDATABASE")) or user
     if not user or not db:
         raise MoveError(f"the daemon's database defaults cannot be identified: {fix}. Nothing was changed", EXIT_REFUSED)
     if not (_IDENT.match(db) and _IDENT.match(user)):
@@ -590,7 +591,7 @@ def _dsn_parts(dsn: str | None, environment: dict[str, str] | None = None) -> tu
 
 def _dsn_port(dsn: str, environment: dict) -> str:
     from psycopg.conninfo import conninfo_to_dict
-    port = conninfo_to_dict(dsn).get("port") or environment.get("PGPORT") or "5432"
+    port = conninfo_to_dict(dsn).get("port", environment.get("PGPORT")) or "5432"
     if not re.fullmatch(r"[0-9]+", port) or not 1 <= int(port) <= 65535:
         raise MoveError("the daemon needs one explicit PostgreSQL port: correct its database URL or PGPORT and retry. Nothing was changed", EXIT_REFUSED)
     return str(int(port))
@@ -922,6 +923,10 @@ class Mover:
         if health.get("ready") is False:
             raise self.refuse(f"the source daemon is still warming up: wait for {SOURCE_URL}/health "
                               "to report ready: true, then retry")
+        for flag, path in (("--target-checkout", self.checkout), ("--target-work-dir", o.target_work_dir)):
+            if path and not path.startswith(("/", "~/")):
+                raise self.refuse(f"{flag} must be an absolute target path or begin with ~/: "
+                                  "pass the full target directory, such as /srv/pseudolife or ~/pseudolife")
         result = self.local([self.docker, "inspect", "--type", "container", DAEMON], timeout=60)
         container = _container(result.text) if result.ok else None
         if container is None:
@@ -1067,6 +1072,15 @@ class Mover:
             if not result.ok or result.text.strip() != "pseudolife-mcp checkout-handover-v1":
                 raise self.refuse("the target checkout updater lacks stopped handover support: update the target checkout "
                                   "and its CLI dependencies, then retry move --dry-run")
+            if not o.keep_tokens:
+                script = ("# move checkout bearer preflight\nimport sys\n"
+                          "from pseudolife_memory.update_cli import _env_file_sets_credentials\n"
+                          "sys.exit(0 if _env_file_sets_credentials(sys.argv[1]) else 3)")
+                result = self.ssh(f"cd {rq(self.checkout)} && python3 -c {shlex.quote(script)} {rq(self.env_path)}", timeout=60)
+                if not result.ok:
+                    raise self.refuse(f"checkout --no-keep-tokens requires {self.env_path} to declare "
+                                      "PSEUDOLIFE_MCP_TOKEN or PSEUDOLIFE_MCP_TOKENS: put the existing daemon's "
+                                      "bearer settings explicitly in that file, then retry")
         self.check_probe_bearer()
         self.read_exposure()
         self.read_sizes()
@@ -1142,7 +1156,7 @@ class Mover:
                               "select the matching upstream stack before retrying move --dry-run")
         self.target_postgres = postgres
         result = self.ssh("python3 -m pseudolife_memory.cli restore --help", timeout=60)
-        if not result.ok or "--leave-stopped" not in result.text:
+        if not result.ok or any(flag not in result.text for flag in ("--leave-stopped", "--container", "--db-port")):
             raise self.refuse("the target's installed CLI lacks clone-free restore: install the same CLI "
                               "release as this command (python3 -m pip install --upgrade pseudolife-mcp), "
                               "then retry move --dry-run; --target-checkout can select an owning checkout")
@@ -2093,7 +2107,10 @@ class Mover:
         except CredentialError:
             token = None
         result = self.psql_local("SELECT token_hash FROM principals WHERE revoked_at IS NULL AND token_hash IS NOT NULL", self.db)
-        if not token or not result.ok or hashlib.sha256(token.encode()).hexdigest() not in result.text.splitlines():
+        if not result.ok:
+            raise self.refuse("could not read active source principal hashes: restore the source PostgreSQL "
+                              "role's access over its local socket and retry move")
+        if not token or hashlib.sha256(token.encode()).hexdigest() not in result.text.splitlines():
             raise self.refuse("stored-principal handover needs an existing source bearer: set PSEUDOLIFE_MCP_TOKEN_FILE "
                               "to its private token file (connect to the source first if needed), then retry")
         self.probe_token = token
@@ -2114,15 +2131,25 @@ class Mover:
         finally:
             previous = self._set_signals(signal.SIG_IGN)
             try:
-                result = self.ssh(f"rm -f {rq(self.probe_path)}", timeout=60)
-                if result.ok:
-                    self.mark(probe_written=False)
-                else:
-                    self.warn(f"remove the private updater bearer file on the target: {self.probe_path}")
-                    self.follow_ups.append({"what": "remove the private updater bearer file",
-                                            "command": f"ssh {self.o.target} rm -f {rq(self.probe_path)}", "why": "cleanup failed"})
+                self.cleanup_probe()
             finally:
                 self._restore_signals(previous)
+
+    def cleanup_probe(self) -> bool:
+        command = f"ssh {self.o.target} rm -f {rq(self.probe_path)}"
+        try:
+            result = self.ssh(f"rm -f {rq(self.probe_path)}", timeout=60)
+            ok = result.ok
+        except Exception:  # cleanup must never replace the updater's result
+            ok = False
+        if ok:
+            self.mark(probe_written=False)
+            self.follow_ups[:] = [item for item in self.follow_ups if item["command"] != command]
+        else:
+            self.warn(f"remove the private updater bearer file on the target: {self.probe_path}")
+            if not any(item["command"] == command for item in self.follow_ups):
+                self.follow_ups.append({"what": "remove the private updater bearer file", "command": command, "why": "cleanup failed"})
+        return ok
 
     def wait_target(self) -> str:
         """The target's ``/health`` ``bank`` once it is non-null, polled
@@ -2282,6 +2309,9 @@ class Mover:
 
         self.say("==> rolling back")
         complete, can_start, gate_missing = True, True, False
+        if self.probe_written:
+            complete = attempt("remove the private updater bearer file",
+                               lambda: Result(0 if self.cleanup_probe() else 1))
         if self.expose_pending:
             def resolve_exposure():
                 if self.settle_exposure():
@@ -2289,7 +2319,7 @@ class Mover:
                 return Result(1, err=(f"ownership unknown: inspect {self.exposure_receipt} and run "
                                       f"pseudolife-mcp expose status on {self.o.target}; "
                                       "no unowned serve was removed").encode())
-            complete = attempt("resolve the target exposure ownership", resolve_exposure)
+            complete = attempt("resolve the target exposure ownership", resolve_exposure) and complete
         if self.exposed_now:
             if attempt("undo the target expose (pseudolife-mcp expose off --yes)",
                        lambda: self.ssh(self.target_cli("expose off --yes --json"), timeout=300)):
