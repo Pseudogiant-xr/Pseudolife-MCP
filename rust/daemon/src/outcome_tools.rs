@@ -281,7 +281,8 @@ async fn record_outcome(
     }
     let client = ready.storage.client();
     let resolved = ws.resolve_handle(client, a.handle.as_deref()).await;
-    let warning = a.handle.is_some() && resolved.is_none();
+    let warning = (a.handle.is_some() && resolved.is_none())
+        .then(|| ws.handle_warning(a.handle.as_deref(), caller));
     let session = ws.resolve_session(caller).map_err(ToolError::Invalid)?;
     let episode_id = match resolved {
         Some((root, _)) if !crate::mutants::active("mcp-outcome-ignore-handle") => Some(root),
@@ -320,11 +321,8 @@ async fn record_outcome(
     out.insert("signal_id".into(), json!(signal_id));
     out.insert("task".into(), json!(a.task));
     out.insert("outcome".into(), json!(a.outcome));
-    if warning {
-        out.insert(
-            "episode_warning".into(),
-            json!("unknown or closed episode handle"),
-        );
+    if let Some(warning) = warning {
+        out.insert("episode_warning".into(), json!(warning));
     }
     if !a.ids.is_empty() {
         let (report, record) = label_used_entries(client, cfg, &a.ids, session.as_deref()).await;

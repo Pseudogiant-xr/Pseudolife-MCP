@@ -117,7 +117,32 @@ class _Shell:
         env = dict(self.env)
         env.update(extra_env or {})
         return subprocess.run([self.bash], input=prelude + body, capture_output=True,
-                              text=True, timeout=120, env=env, check=False)
+                              text=True, encoding="utf-8", timeout=120, env=env, check=False)
+
+
+@pytest.mark.parametrize("direction", ["input", "output", "ascii"])
+def test_shell_fragment_transport_is_utf8_with_a_cp1252_parent(tmp_path, monkeypatch, direction):
+    shell = object.__new__(_Shell)
+    shell.bash = "fixture-bash"
+    shell.env = {}
+    shell.home, shell.bin, shell.calls = (tmp_path / name for name in ("home", "bin", "calls"))
+    monkeypatch.setattr(shell, "path", lambda path: "/fixture")
+    payload = "memory ready" if direction == "ascii" else "memory ─ café"
+    body = f"# {payload}\n" if direction == "input" else "# ASCII source\n"
+
+    def cp1252_transport(argv, **kwargs):
+        # Exercise both codec boundaries without starting a process. The
+        # controlled shell emits UTF-8; an unspecified parent codec is cp1252.
+        assert kwargs["text"] is True
+        codec = kwargs.get("encoding") or "cp1252"
+        received = kwargs["input"].encode(codec).decode("utf-8")
+        assert received.endswith(body)
+        return subprocess.CompletedProcess(argv, 0, payload.encode("utf-8").decode(codec), "")
+
+    monkeypatch.setattr(subprocess, "run", cp1252_transport)
+    result = shell.run(body)
+    assert result.returncode == 0
+    assert result.stdout == payload
 
 
 # -- flags and what they imply --------------------------------------------------

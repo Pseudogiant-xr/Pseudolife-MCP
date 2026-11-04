@@ -74,21 +74,22 @@ if (Get-Command docker -ErrorAction SilentlyContinue) {
     else { Fail "docker buildx plugin missing - the image build needs BuildKit for its RUN --mount caches" "Docker Desktop bundles it - update Docker Desktop" }
 }
 
-# -- ports 8765 (daemon) / 5433 (postgres): free, or held by our own stack -----
-# Warn-only: a taken port turns into a cryptic "port is already allocated" at
-# compose up; held-by-us means an existing install (idempotent re-run is fine).
-$running = @(docker ps --format "{{.Names}}" 2>$null)
-foreach ($p in @(@{Port=8765; Svc="daemon"; Cont="pseudolife-mcp-daemon"},
-                 @{Port=5433; Svc="postgres"; Cont="pseudolife-mcp-postgres"})) {
-    if ($running -contains $p.Cont) {
-        Ok "port $($p.Port) held by $($p.Cont) (existing install)"
-    } elseif (Get-NetTCPConnection -LocalPort $p.Port -State Listen -ErrorAction SilentlyContinue) {
-        Warn "port $($p.Port) is already in use (needed for the $($p.Svc))" `
-             "free the port (e.g. a native Postgres on 5433), then re-run - compose up will otherwise fail with 'port is already allocated'"
-    } else {
-        Ok "port $($p.Port) free ($($p.Svc))"
-    }
+# -- ports, volumes and Compose ownership: fail before any installer writes ----
+$resourcePython = $null
+foreach ($candidate in @("python", "python3", "py")) {
+    if (-not (Get-Command $candidate -ErrorAction SilentlyContinue)) { continue }
+    $probeArgs = if ($candidate -eq "py") { @("-3") } else { @() }
+    try {
+        $probe = & $candidate @probeArgs -c 'import sys; sys.exit(1) if sys.version_info < (3, 10) else print(sys.executable)' 2>$null
+        if ($LASTEXITCODE -eq 0 -and $probe) { $resourcePython = "$probe".Trim(); break }
+    } catch { continue }
 }
+if (-not $resourcePython) {
+    Fail "Python >= 3.10 is needed to verify Docker ownership safely" "install Python 3.10 or newer, then rerun ops/preflight.ps1"
+    exit 1
+}
+& $resourcePython (Join-Path $PSScriptRoot "preflight.py") --env-file (Join-Path $PSScriptRoot ".env")
+if ($LASTEXITCODE -ne 0) { exit 1 }
 
 # -- git ----------------------------------------------------------------------
 if (Get-Command git -ErrorAction SilentlyContinue) { Ok "git" }

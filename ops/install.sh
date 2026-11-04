@@ -1262,13 +1262,17 @@ normalize_env_line_endings() {  # $1 = env file; says so when it rewrote it
 # <<< env line endings <<<
 
 # ── 4. volumes (respect names overridden in an existing ops/.env) ─────────
+resolve_installer_volumes() {
+    "$(installer_python)" "$repo/ops/preflight.py" --env-file "$env_file" --volume-names
+}
 # >>> volumes >>>
 # A trailing CR is dropped here too: a reader placed before stage 3c, or a
 # file rewritten by hand, still yields clean names.
 get_env() { [ -f "$env_file" ] && sed -n "s/^$1=//p" "$env_file" | tail -1 | tr -d '\r' || true; }
-bank_vol="$(get_env PSEUDOLIFE_BANK_VOLUME)"; bank_vol="${bank_vol:-pseudolife-mcp-bank}"
-state_vol="$(get_env PSEUDOLIFE_STATE_VOLUME)"; state_vol="${state_vol:-pseudolife-mcp-state}"
 if [ -z "$CLIENT_ONLY" ]; then
+    resolved_volumes="$(resolve_installer_volumes)" || exit 1
+    bank_vol="$(printf '%s\n' "$resolved_volumes" | sed -n '1p')"
+    state_vol="$(printf '%s\n' "$resolved_volumes" | sed -n '2p')"
     docker volume create "$bank_vol" >/dev/null
     docker volume create "$state_vol" >/dev/null
     step "Volumes ready: $bank_vol, $state_vol"
@@ -1434,8 +1438,10 @@ EOF
     fi
     # Remove a leftover running extractor container (container only — it has
     # no volumes; the image is kept for an easy switch back).
-    if docker ps -a --format '{{.Names}}' | grep -qx pseudolife-mcp-extractor; then
-        docker rm -f pseudolife-mcp-extractor >/dev/null
+    extractor_owner="$(docker inspect -f '{{.Id}} {{index .Config.Labels "com.docker.compose.project"}}' pseudolife-mcp-extractor 2>/dev/null || true)"
+    if [[ "$extractor_owner" =~ ^([a-f0-9]+)\ pseudolife-mcp$ ]]; then
+        # Remove the verified ID, never a name another stack could acquire.
+        docker rm -f "${BASH_REMATCH[1]}" >/dev/null
         step "Removed the running extractor container"
     fi
 else
@@ -1448,7 +1454,7 @@ fi
 
 # ── 7. bring the stack up ──────────────────────────────────────────────────
 if [ -z "$CLIENT_ONLY" ]; then
-    compose=(--env-file "$env_file" -f "$compose_file")
+    compose=(-p pseudolife-mcp --env-file "$env_file" -f "$compose_file")
     [ -f "$override_file" ] && compose+=(-f "$override_file")
     step "docker compose up -d --build (first build downloads images — grab a coffee)..."
     docker compose "${compose[@]}" up -d --build
@@ -3013,6 +3019,18 @@ for selected_client in $CLIENTS; do
 done
 
 # ── 12. health ─────────────────────────────────────────────────────────────
+# >>> claude profile scope >>>
+case "${MCP_CLAUDE:-}" in
+    ""|skipped|failed) ;;
+    *)
+        echo "Claude Code user-profile MCP destination: ${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json"
+        echo "Project/local registrations may take precedence over this user-scope file."
+        echo "MCP registration is per-profile; shared plugins or settings do not share memory tools."
+        echo "To add another profile, rerun this installer with CLAUDE_CONFIG_DIR set to that profile's directory; unset CLAUDE_CONFIG_DIR for the default profile."
+        ;;
+esac
+# <<< claude profile scope <<<
+
 # >>> endpoint container probe >>>
 # A server named on this machine's loopback is written as host.docker.internal
 # (the extractor env block). Docker Desktop routes that name to this

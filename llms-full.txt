@@ -2,6 +2,238 @@
 
 > Persistent long-term memory for Claude Code, Codex, and other MCP clients: an associative store that ages and supersedes, a slot-keyed canonical-fact cortex, dream consolidation into facts and a knowledge graph, procedural lessons, and cited world facts — served by a local daemon your coding agent calls over MCP.
 
+<!-- source: docs/guide/install-and-move.md -->
+
+# Install and move
+
+Use the [installer](../../README.md#durable-tier--docker-recommended-for-a-long-lived-bank) for a Docker bank:
+`ops/install.sh` on Linux/macOS or `ops/install.ps1` on Windows. For a lite
+bank without Docker, install `pip install 'pseudolife-mcp[lite]'` and follow
+the [lite quickstart](../../README.md#quickstart). To relocate an
+existing Docker bank, use [`pseudolife-mcp move`](remote-bank.md#moving-a-bank)
+from its current host; install the destination first and review `--dry-run`.
+Never hand-write or flatten a compose file to install or move a bank.
+
+## Running under Portainer or another stack manager
+
+Use [`ops/docker-compose.stack.yml`](../../ops/docker-compose.stack.yml)
+unchanged with Portainer, Dockge, Komodo, or a plain Docker Compose folder.
+It is self-contained: two GHCR images, no local builds, includes, or overlays.
+This is a Docker Compose deployment, not a Swarm stack.
+The source-build installer remains the normal path, including automated
+extractor setup. This alternative lets a stack manager own the containers.
+
+### Prepare a fresh Docker host
+
+Run these commands on the Docker host, with Docker Compose v2, Python 3,
+`curl`, and the GitHub CLI installed. Download from the selected published
+release tag, keeping a host copy for updates and recovery:
+
+```bash
+mkdir -p ~/pseudolife-stack
+cd ~/pseudolife-stack
+VERSION="$(gh release view --repo Pseudogiant-xr/Pseudolife-MCP --json tagName --jq .tagName)"
+curl -fLo docker-compose.stack.yml \
+  "https://raw.githubusercontent.com/Pseudogiant-xr/Pseudolife-MCP/$VERSION/ops/docker-compose.stack.yml"
+```
+
+The stack file ships in version-tagged source. The release asset
+`pseudolife-compose-<version>.tar.gz` contains the native updater's compose
+bundle; use the source file above for this path.
+
+These next commands are for a **new, empty bank only**. If either container
+or volume already exists, stop and identify its bank first. To relocate an
+existing bank, use `move`; to retain pre-rename volumes, keep their exact
+names in `PSEUDOLIFE_BANK_VOLUME` / `PSEUDOLIFE_STATE_VOLUME` instead of
+creating empty replacement volumes.
+
+```bash
+[ ! -e .env ] && [ ! -e client.token ] || { echo "Keep existing credentials; stop here" >&2; exit 1; }
+for container in pseudolife-mcp-daemon pseudolife-mcp-postgres; do
+  if docker container inspect "$container" >/dev/null 2>&1; then
+    echo "Existing $container: identify its bank before continuing" >&2; exit 1
+  fi
+done
+for volume in pseudolife-mcp-bank pseudolife-mcp-state; do
+  if docker volume inspect "$volume" >/dev/null 2>&1; then
+    echo "Existing $volume: identify its bank before continuing" >&2; exit 1
+  fi
+done
+docker volume create pseudolife-mcp-bank
+docker volume create pseudolife-mcp-state
+umask 077
+python3 - "${VERSION#v}" <<'PY'
+from pathlib import Path
+import secrets
+import sys
+token = secrets.token_urlsafe(32)
+password = secrets.token_hex(32)
+with Path('.env').open('x') as env:
+    env.write(f'POSTGRES_PASSWORD={password}\nPSEUDOLIFE_MCP_TOKEN={token}\n')
+    env.write(f'PSEUDOLIFE_IMAGE_TAG={sys.argv[1]}\n')
+with Path('client.token').open('x') as credential:
+    credential.write(token + '\n')
+PY
+chmod 600 .env client.token
+```
+
+The first token authenticates the reserved `default` principal. Keep it
+private; never paste it into chat or tracked YAML. After connecting, use
+[`pseudolife-mcp invite`](remote-bank.md#adding-a-machine-invite-and-pair) to issue
+separate credentials to other machines. The stack passes through every
+runtime setting from `ops/docker-compose.yml`, including
+`PSEUDOLIFE_MCP_TOKENS`, `PSEUDOLIFE_MCP_TIER_MAP`, the dream, fallback and
+judge keys, memory limits, and both volume-name overrides. Put overrides in
+the same env file, not in a rewritten compose file.
+
+### Deploy and connect clients
+
+In your manager, name the Compose project/stack **`pseudolife-mcp`**, paste
+the unchanged stack file, and load `.env` as its substitution environment.
+Keep the host copy of that env file synchronized with the manager's values.
+If the manager changes the project name despite top-level `name:`, use its
+Compose-project setting to retain `pseudolife-mcp`. For a plain folder:
+
+```bash
+docker compose --env-file .env -f docker-compose.stack.yml up -d
+curl --fail http://127.0.0.1:8765/health
+```
+
+Ports remain loopback-only: Postgres on 5433 and the daemon on 8765. For
+clients on another machine, follow the [remote-bank guide](remote-bank.md)
+to expose the daemon with authentication; keep Postgres private.
+
+The fresh stack needs no extractor process. `/health` reports
+`extractor: "none"`: storage, search and explicit facts work, but
+automatic dream extraction writes no facts until you configure an
+extractor. Existing volumes can retain an extractor configured in the
+Console; an empty environment value does not erase that configuration.
+
+Install the clients using a checkout of the same release, **client-only**
+so the installer does not take over the stack. On the Docker host:
+
+```bash
+git clone https://github.com/Pseudogiant-xr/Pseudolife-MCP.git
+cd Pseudolife-MCP
+git checkout "$VERSION"
+ops/install.sh --client-only --client codex \
+  --daemon-url http://127.0.0.1:8765 \
+  --token-file "$HOME/pseudolife-stack/client.token"
+```
+
+Choose `--client claude`, `--client gemini`, or a comma-separated list as
+needed. On a remote client, use its reachable daemon URL and redeem an
+invite, or supply its own private token file. To repoint clients that are
+already registered (connect does not create missing registrations):
+
+```bash
+pseudolife-mcp connect http://127.0.0.1:8765 \
+  --token-file "$HOME/pseudolife-stack/client.token"
+```
+
+### Enable an extractor when wanted
+
+Choose one path, then redeploy with the same env file:
+
+- **Existing OpenAI-compatible endpoint:** set `PSEUDOLIFE_DREAM_BASE_URL`
+  to its container-reachable `/v1` URL, `PSEUDOLIFE_DREAM_MODEL` to the served
+  model, and `PSEUDOLIFE_DREAM_API_KEY` when required. A host endpoint uses
+  `host.docker.internal`, not `localhost`; it must listen where Docker can
+  reach it. See [endpoint examples](dreaming.md#upgrading-the-extractor--bigger-local-models).
+- **Claude or Codex CLI shim:** from the client checkout run
+  `ops/install-shim-autostart.sh` (Claude) or
+  `ops/install-codex-shim-autostart.sh` (Codex), optionally with `--model`.
+  These register a Linux user service; Windows has matching `.ps1` scripts.
+  Set the stack's
+  `PSEUDOLIFE_DREAM_BASE_URL` to `http://host.docker.internal:8082/v1`
+  (Claude) or `http://host.docker.internal:8086/v1` (Codex), and
+  `PSEUDOLIFE_DREAM_MODEL` to the shim's model. The CLI must be signed in
+  on that host. [Shim setup](dreaming.md) includes platform and firewall details.
+- **CPU sidecar (explicit local build):** the extractor image is not
+  published on GHCR. In a checkout, opt into
+  [`ops/docker-compose.stack-extractor.yml`](../../ops/docker-compose.stack-extractor.yml)
+  as a second file; set `PSEUDOLIFE_DREAM_BASE_URL` to
+  `http://pseudolife-extractor:8081/v1` and `PSEUDOLIFE_DREAM_MODEL=extractor`.
+  Run `docker compose --env-file "$HOME/pseudolife-stack/.env" -f
+  ops/docker-compose.stack.yml -f ops/docker-compose.stack-extractor.yml up -d
+  --build`. This path needs the checkout/build context and a manager that
+  supports local builds; keep the default two-image file for GHCR-only hosts.
+
+If the Console owns the extractor settings (`extractor_source: config`),
+configure its Extractor panel there instead. Check `pseudolife-mcp doctor`
+and the Console's dream status after enabling an extractor.
+
+### Updates, backups and names to preserve
+
+Run release-mode update **on the Docker host**, where Docker can inspect
+the containers, with the retained host env file:
+
+```bash
+pseudolife-mcp update --env-file "$HOME/pseudolife-stack/.env"
+```
+
+It backs up, tags the previous image for rollback, recreates only the daemon,
+checks health, then updates clients. It recognizes the compose project from
+container labels when the original compose files exist on the host (for
+example, a plain compose folder or a manager with a shared compose
+directory). Keep that env file available and identical to the manager's
+environment, especially passwords, tokens and legacy volume names.
+
+If the manager keeps its compose files inside its own container (Portainer
+commonly does), export its original stack YAML and environment to the host.
+For this unchanged stack, the retained files above are those originals:
+
+```bash
+pseudolife-mcp update \
+  --compose-file "$HOME/pseudolife-stack/docker-compose.stack.yml" \
+  --env-file "$HOME/pseudolife-stack/.env"
+```
+
+Repeat `--compose-file` for each original overlay in the original order.
+The updater retains the running project label and adds the GHCR image
+overlay. An env file alone cannot recover a missing compose file; update
+refuses that path before changing the stack. Never substitute a flattened
+or installer compose file for the manager's original configuration.
+
+If the manager must perform the redeploy itself, first run the standalone
+backup below and retain the old image tag for rollback. Set
+`PSEUDOLIFE_IMAGE_TAG` in both manager and host env file to the chosen
+published release, redeploy the unchanged stack, and verify `/health` and
+a memory call. Run `pseudolife-mcp update --clients-only --tag <that-version>`
+on client machines afterwards.
+
+Before the manager's **next redeploy**, set `PSEUDOLIFE_IMAGE_TAG` in both
+its environment and the host env file to the version the successful update
+reports (without `v`). Update's image-tag override applies to that command;
+a manager redeploy with an old pin can start old code against a newer schema.
+Disable automatic image-only redeploys; a manager-driven update needs the
+explicit backup, previous tag and verification above. Retain the compose file and secrets
+alongside backups; never rotate the Postgres password by editing `.env`
+alone on an existing database.
+
+For a standalone backup with today's checkout tooling:
+
+```bash
+ops/backup.sh --out-dir "$HOME/pseudolife-backups"
+# Windows: ops/backup.ps1 -OutDir <backup-directory>
+```
+
+Keep both the database dump and state archive, and copy them to another
+disk/host. [Backup and restore](configuration.md#backups) explains
+the paired artifacts and restore procedure. An update's automatic backup
+is additional protection, not a backup schedule.
+
+The manager must preserve project `pseudolife-mcp`, service names
+`pseudolife-pg` / `pseudolife-daemon`, container names
+`pseudolife-mcp-postgres` / `pseudolife-mcp-daemon` (and
+`pseudolife-mcp-extractor` if opted in), and the **existing** external bank
+and state volume names. Keep the loopback port bindings, log limits and
+daemon capabilities/security options. Never use `down -v`, delete a state
+volume, or let the manager replace an external volume with an empty one.
+Keep one daemon for one bank.
+
+---
+
 <!-- source: README.md -->
 
 # Pseudolife-MCP
@@ -219,7 +451,10 @@ health-checked services, and backup/rollback tooling. Requires Docker
 (with the compose v2 and buildx plugins) and
 at least one MCP-capable coding agent — Claude Code, Codex, and Gemini CLI
 are wired end-to-end; anything else gets paste-ready config
-([provider matrix](docs/guide/providers.md)). One command from clone to
+([provider matrix](docs/guide/providers.md)). For Portainer, Dockge, Komodo
+or a plain compose folder, use the
+[supported external-stack path](docs/guide/install-and-move.md#running-under-portainer-or-another-stack-manager);
+never hand-flatten the source compose. One command from clone to
 first memory:
 
 ```bash
@@ -287,8 +522,8 @@ append` always writes the block from `examples/CLAUDE.memory.md` into
 `~/.claude/CLAUDE.md` / `~/.codex/AGENTS.md` / `~/.gemini/GEMINI.md`
 (useful for subagent visibility even with hooks).
 Idempotent — re-run any time; `--extractor <mode>` switches extractor
-setups. Non-interactive example:
-`ops/install.sh --extractor sidecar --client codex --codex-hook-trust yes`.
+setups. See [unattended installation](#unattended-install) for explicit
+extractor, client and trust choices.
 Without explicit hook approval, unattended setup does not grant trust; use
 `--codex-hooks skip --instructions append` for instructions only. Explicit
 `--instructions skip` prevents fallback edits.
@@ -327,6 +562,35 @@ at a terminal, defaulting to no, and probes again once the rule is added; an una
 changes no firewall unless given `--firewall-rule yes`, and prints the
 command instead. `ops/install.ps1` has no equivalent: the check and the
 flag are Linux-only.
+
+### Unattended install
+
+For an agent or script, pass the extractor and client explicitly:
+
+```bash
+ops/install.sh --extractor sidecar --client codex --codex-hook-trust yes </dev/null
+# Windows (pwsh 7+), with stdin redirected by the caller:
+# ops/install.ps1 -Extractor sidecar -Client codex -CodexHookTrust yes
+```
+
+No terminal on stdin selects unattended behavior. A fresh local install
+requires `--extractor` / `-Extractor`; a client-only install has no
+extractor choice. Pass `--client` / `-Client` to avoid assuming Claude Code.
+For an existing remote bank, use `--client-only --daemon-url <url>` with
+`--token-file <existing-path>` or `--pairing-code <code>` (PowerShell:
+`-ClientOnly`, `-DaemonUrl`, `-TokenFile`, `-PairingCode`). To create a new
+private token file, use `--token-file <new-path> --read-token` and supply
+the token through stdin; PowerShell uses `-TokenFile <new-path> -ReadToken`
+with the same stdin requirement. A pseudoterminal is still interactive;
+redirect stdin when the agent cannot answer prompts.
+
+Unattended runs keep existing legacy hooks. Codex hooks receive no trust
+without `--codex-hook-trust yes` / `-CodexHookTrust yes`; choose
+`--codex-hooks skip --instructions append` for standing instructions.
+An `ask` firewall rule or client-update schedule is skipped with the
+finishing command. On Linux, `--firewall-rule yes` authorizes that rule;
+client-only `--client-update-schedule yes|HH:MM` opts into its timer.
+The Console is not opened; the summary prints `pseudolife-mcp console`.
 
 Image sizes, the Windows WSL2 memory cap, and what the installer automates:
 [the containerized install](#install--containerized-any-os) below.
@@ -425,6 +689,7 @@ deep material lives in the user guide:
 
 | Page | What's in it |
 |---|---|
+| [Install and move](docs/guide/install-and-move.md) | Installer and lite setup, moving a bank, and running under Portainer or another stack manager |
 | [Configuration](docs/guide/configuration.md) | Env vars, tuned defaults, toolset tiers, stdio shim, LAN sharing, data layout, backups, schema history |
 | [Providers](docs/guide/providers.md) | Capability matrix per coding agent, memory instruction layers, AGENTS.md standard, Codex hook setup and verification, writer ids |
 | [Retrieval](docs/guide/retrieval.md) | Reranker, BM25 hybrid, abstention floors, ranking-trace debugging, `memory_recall`, the knowledge graph |
@@ -546,7 +811,14 @@ knowledge graph walkable via `memory_graph` and multi-hop `memory_recall`
 ## Install — containerized (any OS)
 
 What [the durable tier](#durable-tier--docker-recommended-for-a-long-lived-bank)
-installer above does, by hand. The whole stack — Postgres **and** the memory daemon — runs in Docker.
+installer above does, by hand. Prefer the installer: `pseudolife-mcp update`
+and `pseudolife-mcp move` need its project `pseudolife-mcp`, persistent
+`ops/.env` and unmodified compose files. Keep that checkout and env file
+available; copying or flattening YAML loses the deployment context those
+commands need. For a stack manager, use the
+[supported external-stack path](docs/guide/install-and-move.md#running-under-portainer-or-another-stack-manager).
+
+The whole stack — Postgres **and** the memory daemon — runs in Docker.
 No host Python, no torch install, no version skew; the daemon image bakes
 in CPU-only torch and the embedding weights — `Qwen/Qwen3-Embedding-0.6B`
 (the default retrieval backbone since schema v25) plus `all-MiniLM-L6-v2`
@@ -608,6 +880,10 @@ can use this daemon too, through a client-only install that runs just the
 shim. Exposing the daemon (Tailscale Serve, a LAN publish or a reverse
 proxy), per-machine tokens and board admission:
 [Sharing one bank across machines](docs/guide/remote-bank.md).
+
+To relocate the bank itself, install the destination first, then run
+[`pseudolife-mcp move`](docs/guide/remote-bank.md#moving-a-bank) on its current
+host; start with `--dry-run` instead of manually copying volumes.
 
 **Host-process install (Windows, for GPU / dev):** run Postgres in Docker
 but the daemon on host Python — for hacking on the daemon or running the

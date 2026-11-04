@@ -587,6 +587,10 @@ jobs:
           tests/test_migrate_flat.py
           tests/test_schema_version.py
           tests/test_doctor_cli.py
+          tests/test_installer_claude_profile.py
+          tests/test_installer_client_only.py::test_shell_fragment_transport_is_utf8_with_a_cp1252_parent
+          tests/test_installer_client_only_ps.py::test_powershell_fragment_transport_is_utf8_with_a_cp1252_parent
+          tests/test_installer_client_only_ps.py::test_powershell_fixture_roundtrips_unicode_stdio
           tests/test_unattended_update.py
           tests/test_update_engine.py
           tests/test_tool_annotations.py::test_all_tools_have_conservative_approval_hints
@@ -610,6 +614,7 @@ jobs:
           tests/test_move_cli.py::test_interactive_yes_requires_an_explicit_expose_flag
           tests/test_move_cli.py::test_interactive_move_asks_separately_for_persistent_exposure
           tests/test_installer_client_update_schedule.py
+          tests/test_installer_resources.py
           tests/test_tunnel_profiles.py
           tests/test_tunnel_service.py
           tests/test_tunnel_cli.py

@@ -81,6 +81,26 @@ impl EpisodeLog {
         self.episodes.iter().find(|e| e.id == id)
     }
 
+    /// None means this is not a session alias; an empty list is a known
+    /// closed alias and must never fall through to handle resumption.
+    fn open_session_alias(&self, handle: &str) -> Option<Vec<usize>> {
+        let roots: Vec<_> = (0..self.episodes.len())
+            .filter(|&i| {
+                let e = &self.episodes[i];
+                e.parent_id.is_none() && e.session_key.as_deref() == Some(handle)
+            })
+            .collect();
+        if roots.is_empty() {
+            return None;
+        }
+        Some(
+            roots
+                .into_iter()
+                .filter(|&i| self.episodes[i].ended_at.is_none())
+                .collect(),
+        )
+    }
+
     /// `open_leaf_for`: the deepest open episode for the key. Python's
     /// `max(..., key=started_at)` keeps the first of equal maxima.
     pub fn open_leaf_for(&self, key: Option<&str>) -> Option<usize> {
@@ -515,6 +535,22 @@ impl WriteState {
         env_f64("PSEUDOLIFE_HANDLE_RESUME_SECONDS", 2_592_000.0).unwrap_or(2_592_000.0)
     }
 
+    pub fn handle_warning(&self, handle: Option<&str>, caller: &Caller) -> &'static str {
+        if let Some(handle) = handle {
+            if self.log.episodes.iter().any(|e| {
+                e.parent_id.is_none()
+                    && e.session_key.as_deref() == Some(handle)
+                    && e.ended_at.is_some()
+            }) {
+                return "This session's episode is closed; call memory_session_title without episode to start a new episode.";
+            }
+            if caller.header_session.as_deref() == Some(handle) {
+                return "No open episode matches this session id; call memory_session_title without episode, then retry.";
+            }
+        }
+        "unknown or closed episode handle"
+    }
+
     /// `_resolve_episode_handle` with `resume=True` (spec W2.3): the root id
     /// and its session key, or None on any miss.
     pub async fn resolve_handle(
@@ -535,6 +571,17 @@ impl WriteState {
         resume: bool,
     ) -> Option<(String, Option<String>)> {
         let handle = handle.filter(|h| h.chars().count() >= 8)?;
+        // The board advertises the host session key. Only an exact alias
+        // of one open root resolves; aliases never reopen closed roots.
+        if let Some(aliases) = self.log.open_session_alias(handle) {
+            let [index] = aliases[..] else {
+                return None;
+            };
+            let root = &self.log.episodes[index];
+            let found = (root.id.clone(), root.session_key.clone());
+            self.log.touches.insert(found.0.clone(), now());
+            return Some(found);
+        }
         let open: Vec<usize> = (0..self.log.episodes.len())
             .filter(|&i| {
                 let e = &self.log.episodes[i];
@@ -643,6 +690,51 @@ mod tests {
             session_key: key.map(String::from),
             parent_id: parent.map(String::from),
         }
+    }
+
+    #[test]
+    fn board_session_alias_is_exact_and_never_reopens_closed_or_ambiguous_roots() {
+        let key = "01234567-89ab-4cde-8fab-0123456789ab";
+        let mut log = EpisodeLog {
+            episodes: vec![
+                ep("root", Some(key), None, 1.0, None),
+                ep("child", Some(key), Some("root"), 2.0, None),
+            ],
+            ..Default::default()
+        };
+        assert_eq!(log.open_session_alias(key), Some(vec![0]));
+        assert_eq!(log.open_session_alias(&key[..12]), None);
+        log.episodes[0].ended_at = Some(3.0);
+        assert_eq!(log.open_session_alias(key), Some(vec![]));
+        log.episodes[0].ended_at = None;
+        log.episodes
+            .push(ep("second-root", Some(key), None, 4.0, None));
+        assert_eq!(log.open_session_alias(key), Some(vec![0, 2]));
+    }
+
+    #[test]
+    fn hookless_board_alias_warning_names_the_bootstrap_and_distinguishes_closed() {
+        let key = "01234567-89ab-4cde-8fab-0123456789ab";
+        let caller = Caller {
+            header_session: Some(key.into()),
+            ..Default::default()
+        };
+        let mut ws = WriteState::default();
+        assert_eq!(
+            ws.handle_warning(Some(key), &caller),
+            "No open episode matches this session id; call memory_session_title without episode, then retry."
+        );
+        ws.log
+            .episodes
+            .push(ep("closed-root", Some(key), None, 1.0, Some(2.0)));
+        assert_eq!(
+            ws.handle_warning(Some(key), &caller),
+            "This session's episode is closed; call memory_session_title without episode to start a new episode."
+        );
+        assert_eq!(
+            ws.handle_warning(Some("unknown"), &caller),
+            "unknown or closed episode handle"
+        );
     }
 
     #[test]
