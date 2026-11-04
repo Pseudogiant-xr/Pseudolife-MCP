@@ -7,6 +7,237 @@ use std::{
     time::{Duration, SystemTime},
 };
 
+const CONNECTION_FIX: &str = "cannot resolve the daemon's backup connection; set a direct PSEUDOLIFE_MCP_DATABASE_URL in its container environment naming the host, port, user and database on the selected PostgreSQL container's shared network, without PGSERVICE/service or an unmatched PGHOSTADDR/hostaddr, then retry; nothing was deployed";
+
+fn connection_fix(_daemon: &Value) -> String {
+    CONNECTION_FIX.into()
+}
+
+fn connection_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\\', "\\\\").replace('\'', "\\'"))
+}
+
+pub(super) fn database_arg(database: &str) -> String {
+    format!("dbname={}", connection_quote(database))
+}
+
+// Read only the authority fields; TLS options remain the daemon's concern.
+// Keep libpq keyword quoting and URI query overrides without ever logging a DSN.
+fn connection_fields(raw: &str) -> Option<BTreeMap<String, String>> {
+    if raw.contains('\0') {
+        return None;
+    }
+    let mut fields = BTreeMap::new();
+    if raw.starts_with("postgresql://") || raw.starts_with("postgres://") {
+        if raw.contains('#') {
+            return None;
+        }
+        let (base, query) = raw.split_once('?').unwrap_or((raw, ""));
+        let origin = base.parse::<tokio_postgres::Config>().ok()?;
+        match origin.get_hosts() {
+            [] => (),
+            [tokio_postgres::config::Host::Tcp(host)] => {
+                fields.insert("host".into(), host.clone());
+            }
+            _ => return None,
+        }
+        // The URI driver inserts 5432 even when libpq would use PGPORT.
+        let authority = base
+            .split_once("://")?
+            .1
+            .split('/')
+            .next()?
+            .rsplit('@')
+            .next()?;
+        let explicit_port = if authority.starts_with('[') {
+            authority.split_once(']')?.1.starts_with(':')
+        } else {
+            authority.contains(':')
+        };
+        if explicit_port {
+            match origin.get_ports() {
+                [port] => {
+                    fields.insert("port".into(), port.to_string());
+                }
+                _ => return None,
+            }
+        }
+        for (key, value) in [("user", origin.get_user()), ("dbname", origin.get_dbname())] {
+            if let Some(value) = value {
+                fields.insert(key.into(), value.into());
+            }
+        }
+        let decode = |value: &str| {
+            if value.as_bytes().iter().enumerate().any(|(i, b)| {
+                *b == b'%'
+                    && (value
+                        .as_bytes()
+                        .get(i + 1)
+                        .is_none_or(|b| !b.is_ascii_hexdigit())
+                        || value
+                            .as_bytes()
+                            .get(i + 2)
+                            .is_none_or(|b| !b.is_ascii_hexdigit()))
+            }) {
+                return None;
+            }
+            percent_encoding::percent_decode_str(value)
+                .decode_utf8()
+                .ok()
+                .map(|s| s.into_owned())
+        };
+        for part in query.split('&').filter(|s| !s.is_empty()) {
+            let (key, value) = part.split_once('=')?;
+            fields.insert(decode(key)?, decode(value)?);
+        }
+        return Some(fields);
+    }
+    let mut input = raw.chars().peekable();
+    loop {
+        while input.peek().is_some_and(|c| c.is_ascii_whitespace()) {
+            input.next();
+        }
+        if input.peek().is_none() {
+            return Some(fields);
+        }
+        let mut key = String::new();
+        while input
+            .peek()
+            .is_some_and(|c| *c != '=' && !c.is_ascii_whitespace())
+        {
+            key.push(input.next()?);
+        }
+        if key.is_empty() || !key.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_') {
+            return None;
+        }
+        while input.peek().is_some_and(|c| c.is_ascii_whitespace()) {
+            input.next();
+        }
+        if input.next()? != '=' {
+            return None;
+        }
+        while input.peek().is_some_and(|c| c.is_ascii_whitespace()) {
+            input.next();
+        }
+        let quoted = input.peek() == Some(&'\'');
+        if quoted {
+            input.next();
+        }
+        let mut value = String::new();
+        let mut closed = !quoted;
+        while let Some(c) = input.next() {
+            if c == '\\' {
+                value.push(input.next()?);
+            } else if quoted && c == '\'' {
+                closed = true;
+                break;
+            } else if !quoted && c.is_ascii_whitespace() {
+                break;
+            } else {
+                value.push(c);
+            }
+        }
+        if !closed || (quoted && input.peek().is_some_and(|c| !c.is_ascii_whitespace())) {
+            return None;
+        }
+        fields.insert(key, value);
+    }
+}
+
+// Compatibility for stopped-handover callers that still pin 5432 and raw dbname.
+#[allow(dead_code)]
+pub(super) fn connection_parts(daemon: &Value, postgres: &Value) -> Option<(String, String)> {
+    let (user, db, port) = connection_details(daemon, postgres)?;
+    (port == 5432 && !db.contains('=') && !db.contains("://")).then_some((user, db))
+}
+
+pub(super) fn connection_details(
+    daemon: &Value,
+    postgres: &Value,
+) -> Option<(String, String, u16)> {
+    let mut env = BTreeMap::new();
+    for item in daemon["Config"]["Env"].as_array()? {
+        let (key, value) = item.as_str()?.split_once('=')?;
+        if env.insert(key, value).is_some() {
+            return None;
+        }
+    }
+    let get = |key| env.get(key).copied().filter(|s| !s.is_empty());
+    let fields = connection_fields(get("PSEUDOLIFE_MCP_DATABASE_URL")?)?;
+    let field = |key: &str| {
+        fields
+            .get(key)
+            .map(String::as_str)
+            .filter(|s| !s.is_empty())
+    };
+    if field("service").is_some() || get("PGSERVICE").is_some() {
+        return None;
+    }
+    let host = field("host").or_else(|| get("PGHOST")).unwrap_or("");
+    let address = field("hostaddr")
+        .or_else(|| get("PGHOSTADDR"))
+        .unwrap_or("");
+    let port = field("port")
+        .or_else(|| get("PGPORT"))
+        .unwrap_or("5432")
+        .parse::<u16>()
+        .ok()?;
+    let runtime_user = daemon["Config"]["User"].as_str().and_then(|user| {
+        let name = user.split(':').next()?;
+        if name.is_empty() {
+            Some("root")
+        } else if name.bytes().all(|b| b.is_ascii_digit()) {
+            None
+        } else {
+            Some(name)
+        }
+    });
+    let user = field("user").or_else(|| get("PGUSER")).or(runtime_user)?;
+    let db = field("dbname")
+        .or_else(|| get("PGDATABASE"))
+        .unwrap_or(user);
+    if port == 0
+        || user.chars().chain(db.chars()).any(|c| c < ' ')
+        || host.contains(',')
+        || address.contains(',')
+    {
+        return None;
+    }
+    let daemon_networks = daemon["NetworkSettings"]["Networks"].as_object()?;
+    let pg_networks = postgres["NetworkSettings"]["Networks"].as_object()?;
+    let address = if address.is_empty() {
+        None
+    } else {
+        Some(address.parse::<std::net::IpAddr>().ok()?)
+    };
+    let found = pg_networks
+        .iter()
+        .filter(|(name, _)| daemon_networks.contains_key(*name))
+        .any(|(_, network)| {
+            if let Some(address) = address {
+                return ["IPAddress", "GlobalIPv6Address"].iter().any(|key| {
+                    network[key]
+                        .as_str()
+                        .and_then(|ip| ip.parse::<std::net::IpAddr>().ok())
+                        == Some(address)
+                });
+            }
+            !host.is_empty()
+                && (postgres["Name"]
+                    .as_str()
+                    .is_some_and(|n| n.trim_start_matches('/') == host)
+                    || ["IPAddress", "GlobalIPv6Address"]
+                        .iter()
+                        .any(|key| network[key].as_str() == Some(host))
+                    || ["Aliases", "DNSNames"].iter().any(|key| {
+                        network[key].as_array().is_some_and(|names| {
+                            names.iter().any(|name| name.as_str() == Some(host))
+                        })
+                    }))
+        });
+    found.then(|| (user.to_owned(), db.to_owned(), port))
+}
+
 pub(super) fn dump_complete(path: &Path) -> bool {
     fn check(path: &Path) -> std::io::Result<bool> {
         let mut stream = BufReader::new(MultiGzDecoder::new(File::open(path)?));
@@ -34,6 +265,46 @@ pub(super) fn dump_complete(path: &Path) -> bool {
         Ok(complete)
     }
     check(path).unwrap_or(false)
+}
+fn own_backup_file(path: &Path) -> Result<()> {
+    own_backup_file_with(path, |source, target| fs::rename(source, target))
+}
+fn own_backup_file_with(
+    path: &Path,
+    replace: impl FnOnce(&Path, &Path) -> std::io::Result<()>,
+) -> Result<()> {
+    // A privileged Docker wrapper may own its copy. Stream it into a new
+    // operator-owned file before accepting the backup or moving a rollback tag.
+    let owned = path.with_extension(format!("owned-{}", uuid::Uuid::new_v4().simple()));
+    let mut complete = false;
+    let result = (|| -> std::io::Result<()> {
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut output = options.open(&owned)?;
+        std::io::copy(&mut File::open(path)?, &mut output)?;
+        output.sync_all()?;
+        drop(output);
+        complete = true;
+        replace(&owned, path)
+    })();
+    if result.is_err() {
+        if complete {
+            return Err(UpdateError::usage(format!(
+                "cannot replace the operator-owned backup; the complete copy is retained at {}; repair access to the backup file and directory and retry; nothing was deployed",
+                owned.display()
+            )));
+        }
+        let _ = fs::remove_file(&owned);
+        return Err(UpdateError::usage(
+            "cannot save an operator-owned backup; repair access to the backup file and directory and retry; nothing was deployed",
+        ));
+    }
+    Ok(())
 }
 fn state_complete(path: &Path) -> bool {
     fn check(path: &Path) -> std::io::Result<()> {
@@ -147,6 +418,13 @@ pub(super) fn rotate(directory: &Path, keep: &BTreeSet<String>) -> Vec<PathBuf> 
     removed
 }
 impl Update {
+    fn rotate_after_backup(&self, directory: &Path, keep: &BTreeSet<String>) -> Vec<PathBuf> {
+        if self.stopped_handover {
+            vec![]
+        } else {
+            rotate(directory, keep)
+        }
+    }
     pub fn set_rollback_scope(&mut self, config: &Value, running: &Value) -> Result<()> {
         use sha2::{Digest, Sha256};
         let project = config["name"].as_str().filter(|s| !s.is_empty());
@@ -179,7 +457,57 @@ impl Update {
         )
     }
     fn requires_state_backup(&self) -> bool {
-        self.o.engine.is_some() || self.selected_engine == "rust"
+        self.o.engine.is_some() || self.selected_engine == "rust" || self.o.allow_auth_change
+    }
+    pub(super) fn with_state_helper<T>(
+        &self,
+        daemon: &str,
+        image: &str,
+        script: &str,
+        action: impl FnOnce(&str) -> Result<T>,
+    ) -> Result<T> {
+        // A unique owned name permits cleanup even if create times out before
+        // returning its ID. Inherited mounts remain read-only and offline.
+        let helper = format!("pseudolife-update-state-{}", uuid::Uuid::new_v4().simple());
+        let args = [
+            "create",
+            "--name",
+            &helper,
+            "--network",
+            "none",
+            "--user",
+            "0",
+            "--volumes-from",
+            &format!("{daemon}:ro"),
+            "--entrypoint",
+            "sh",
+            image,
+            "-c",
+            &format!(
+                "timeout --kill-after=5s 3500s sh -c {}",
+                seams::quote(script)
+            ),
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect::<Vec<_>>();
+        let (code, _) = self.command(&args, None, 60, false);
+        let result = if code == 0 {
+            action(&helper)
+        } else {
+            Err(UpdateError::usage(
+                "cannot create the stopped daemon's state helper; restore its local image and retry; nothing was deployed",
+            ))
+        };
+        let cleanup = self
+            .command(&["rm".into(), "-f".into(), helper], None, 120, false)
+            .0;
+        if code == 0 && cleanup != 0 {
+            return Err(UpdateError::usage(
+                "cannot remove the owned state helper; remove the pseudolife-update-state helper container before retrying; nothing was deployed",
+            ));
+        }
+        result
     }
     fn verify_backup(
         &mut self,
@@ -227,22 +555,18 @@ impl Update {
             }
             return self.verify_backup(&directory, &before);
         }
-        self.builtin_backup(
-            PG_CONTAINER,
-            DAEMON_CONTAINER,
-            "pseudolife",
-            "pseudolife_memory",
-            &data_dir().join("backups"),
-        )
+        self.builtin_backup(PG_CONTAINER, DAEMON_CONTAINER, &data_dir().join("backups"))
     }
-    pub fn builtin_backup(
-        &mut self,
-        pg: &str,
-        daemon: &str,
-        user: &str,
-        db: &str,
-        directory: &Path,
-    ) -> Result<Value> {
+    pub fn builtin_backup(&mut self, pg: &str, daemon: &str, directory: &Path) -> Result<Value> {
+        // Runtime container settings remain available when the daemon is stopped.
+        // The caller's Compose initialization settings cannot identify its bank.
+        let running =
+            engine::inspect(self, daemon).map_err(|_| UpdateError::usage(CONNECTION_FIX))?;
+        let postgres = engine::inspect(self, pg).map_err(|_| UpdateError::usage(CONNECTION_FIX))?;
+        let (user, db, port) = connection_details(&running, &postgres)
+            .ok_or_else(|| UpdateError::usage(connection_fix(&running)))?;
+        let port = port.to_string();
+        let db = database_arg(&db);
         fs::create_dir_all(directory)?;
         let stamp = stamp();
         let dump = directory.join(format!("pseudolife_memory-{stamp}.sql.gz"));
@@ -261,7 +585,7 @@ impl Update {
         self.step("backing up the bank (pg_dump in the container + state volume tar)...");
         let remote = format!("/tmp/pl_backup-{stamp}.sql.gz");
         let sql = format!(
-            "pg_dump -U \"$1\" -d \"$2\" -Z9 > {}",
+            "unset PGHOSTADDR PGSERVICE PGSERVICEFILE; pg_dump -h /var/run/postgresql -p \"$1\" -U \"$2\" -d \"$3\" -Z9 > {}",
             seams::quote(&remote)
         );
         let (code, _) = self.command(
@@ -278,8 +602,9 @@ impl Update {
                 "-c",
                 &sql,
                 "sh",
-                user,
-                db,
+                &port,
+                &user,
+                &db,
             ]
             .iter()
             .map(|s| s.to_string())
@@ -305,6 +630,9 @@ impl Update {
             false,
         );
         self.docker_call(&["exec", pg, "rm", "-f", &remote]);
+        if code == 0 && self.o.allow_auth_change && self.o.checkout.is_some() {
+            own_backup_file(&part)?;
+        }
         if code != 0 || !dump_complete(&part) {
             return Err(UpdateError::new(
                 "the backup is INCOMPLETE ('PostgreSQL database dump complete' missing or gzip damaged); fix the dump or use --no-backup for a plain update; nothing was deployed",
@@ -312,36 +640,78 @@ impl Update {
         }
         fs::rename(&part, &dump)?;
         let remote = format!("/tmp/pl_state-{stamp}.tgz");
-        let (code, _) = self.command(
-            &[
-                "exec".into(),
-                daemon.into(),
-                "timeout".into(),
-                "--kill-after=5s".into(),
-                "3500s".into(),
-                "sh".into(),
-                "-c".into(),
-                format!("tar czf {remote} -C /data ."),
-            ],
-            None,
-            3600,
-            false,
-        );
-        let copied = code == 0
-            && self
-                .command(
-                    &[
-                        "cp".into(),
-                        format!("{daemon}:{remote}"),
-                        state.to_string_lossy().into_owned(),
-                    ],
-                    None,
-                    3600,
-                    false,
-                )
-                .0
-                == 0;
-        self.docker_call(&["exec", daemon, "rm", "-f", &remote]);
+        let copied = if self.o.allow_auth_change && self.o.checkout.is_some() {
+            let running = engine::inspect(self, daemon)?;
+            let image = running["Image"].as_str().filter(|image| !image.is_empty())
+                .ok_or_else(|| UpdateError::usage("cannot identify the stopped image; restore its local image before retrying; nothing was deployed"))?;
+            self.with_state_helper(
+                daemon,
+                image,
+                &format!("tar czf {remote} -C /data ."),
+                |helper| {
+                    if self
+                        .command(
+                            &["start".into(), "-a".into(), helper.into()],
+                            None,
+                            3600,
+                            false,
+                        )
+                        .0
+                        != 0
+                    {
+                        return Ok(false);
+                    }
+                    Ok(self
+                        .command(
+                            &[
+                                "cp".into(),
+                                format!("{helper}:{remote}"),
+                                state.to_string_lossy().into_owned(),
+                            ],
+                            None,
+                            3600,
+                            false,
+                        )
+                        .0
+                        == 0)
+                },
+            )?
+        } else {
+            let (code, _) = self.command(
+                &[
+                    "exec".into(),
+                    daemon.into(),
+                    "timeout".into(),
+                    "--kill-after=5s".into(),
+                    "3500s".into(),
+                    "sh".into(),
+                    "-c".into(),
+                    format!("tar czf {remote} -C /data ."),
+                ],
+                None,
+                3600,
+                false,
+            );
+            let copied = code == 0
+                && self
+                    .command(
+                        &[
+                            "cp".into(),
+                            format!("{daemon}:{remote}"),
+                            state.to_string_lossy().into_owned(),
+                        ],
+                        None,
+                        3600,
+                        false,
+                    )
+                    .0
+                    == 0;
+            self.docker_call(&["exec", daemon, "rm", "-f", &remote]);
+            copied
+        };
+        if copied && self.o.allow_auth_change && self.o.checkout.is_some() {
+            own_backup_file(&state)?;
+        }
         let state_ok = copied && state_complete(&state);
         if !state_ok {
             if self.requires_state_backup() {
@@ -352,7 +722,7 @@ impl Update {
             self.warn("state archive could not be made; continuing with the complete SQL dump (the daemon may be stopped)");
         }
         self.step(format!(
-            "backup: {}{}; restore with ops/restore.* -BackupFile / --backup-file {}",
+            "backup: {}{}; restore with pseudolife-mcp restore --backup-file {}",
             dump.display(),
             if state_ok {
                 format!(" + {}", state.file_name().unwrap().to_string_lossy())
@@ -367,7 +737,7 @@ impl Update {
         ]
         .into_iter()
         .collect();
-        let removed = rotate(directory, &keep);
+        let removed = self.rotate_after_backup(directory, &keep);
         if !removed.is_empty() {
             self.step(format!(
                 "rotated {} backup file(s) older than 7 days",
@@ -558,5 +928,384 @@ impl Update {
         if code != 0 {
             self.warn("build-cache retention failed (deploy already succeeded)");
         }
+    }
+}
+
+#[cfg(all(test, unix))]
+mod stopped_backup_ownership_tests {
+    use super::*;
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+    #[test]
+    fn stopped_backup_copy_is_private_and_owned_by_the_operator() {
+        let directory =
+            std::env::temp_dir().join(format!("pseudolife-backup-owner-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&directory).unwrap();
+        let path = directory.join("fixture.sql.gz.part");
+        fs::write(&path, b"fixture backup").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+        let original = fs::metadata(&path).unwrap().ino();
+        own_backup_file(&path).unwrap();
+        let accepted = fs::metadata(&path).unwrap();
+        assert_ne!(accepted.ino(), original);
+        assert_eq!(accepted.uid(), fs::metadata(&directory).unwrap().uid());
+        assert_eq!(accepted.permissions().mode() & 0o777, 0o600);
+        assert_eq!(fs::read(&path).unwrap(), b"fixture backup");
+        assert_eq!(fs::read_dir(&directory).unwrap().count(), 1);
+        fs::remove_dir_all(directory).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod connection_tests {
+    use super::*;
+
+    fn fixture(dsn: &str, extra: &[&str]) -> (Value, Value) {
+        let mut env = vec![format!("PSEUDOLIFE_MCP_DATABASE_URL={dsn}")];
+        env.extend(extra.iter().map(|v| v.to_string()));
+        (
+            json!({"Config":{"Env":env}, "State":{"Running":false},
+            "NetworkSettings":{"Networks":{"bank":{}}}}),
+            json!({"Name":"/fixture-pg", "Config":{"Env":["POSTGRES_USER=wrong","POSTGRES_DB=wrong"]},
+            "NetworkSettings":{"Networks":{"bank":{"Aliases":["pseudolife-pg"]}}}}),
+        )
+    }
+
+    #[test]
+    fn backup_connection_uses_runtime_authority_and_libpq_defaults() {
+        for (dsn, extra, user, db) in [
+            (
+                "postgresql://custom@pseudolife-pg/bank?port=5432",
+                vec!["PGPORT=9999"],
+                "custom",
+                "bank",
+            ),
+            (
+                "user=custom dbname=bank",
+                vec!["PGHOST=pseudolife-pg"],
+                "custom",
+                "bank",
+            ),
+            (
+                "postgresql://custom@/bank",
+                vec!["PGHOST=pseudolife-pg"],
+                "custom",
+                "bank",
+            ),
+            (
+                "postgresql://custom@pseudolife-pg:5432/bank",
+                vec!["PGPORT=9999"],
+                "custom",
+                "bank",
+            ),
+            (
+                "postgresql://custom@pseudolife-pg/bank?sslmode=verify-full&sslrootcert=/fixture/root.pem",
+                vec![],
+                "custom",
+                "bank",
+            ),
+            (
+                "host=pseudolife-pg user=custom dbname=bank sslmode=verify-full sslrootcert=/fixture/root.pem",
+                vec![],
+                "custom",
+                "bank",
+            ),
+            (
+                "postgresql://custom:fixture@pseudolife-pg/custom_bank",
+                vec![],
+                "custom",
+                "custom_bank",
+            ),
+            (
+                "postgresql://pseudolife:fixture@pseudolife-pg/pseudolife_memory",
+                vec![],
+                "pseudolife",
+                "pseudolife_memory",
+            ),
+            (
+                "postgresql://custom:fixture@pseudolife-pg",
+                vec![],
+                "custom",
+                "custom",
+            ),
+            (
+                "postgresql://custom:fixture@pseudolife-pg",
+                vec!["PGDATABASE=runtime_bank"],
+                "custom",
+                "runtime_bank",
+            ),
+            (
+                "host=pseudolife-pg user=custom dbname='bank with spaces' password=fixture",
+                vec![],
+                "custom",
+                "bank with spaces",
+            ),
+            (
+                "postgresql://pseudolife-pg",
+                vec!["PGUSER=runtime_user"],
+                "runtime_user",
+                "runtime_user",
+            ),
+            (
+                "postgresql://custom:fixture@pseudolife-pg/wrong?dbname=actual",
+                vec![],
+                "custom",
+                "actual",
+            ),
+        ] {
+            let (daemon, pg) = fixture(dsn, &extra);
+            assert_eq!(
+                connection_parts(&daemon, &pg),
+                Some((user.into(), db.into()))
+            );
+        }
+    }
+
+    #[test]
+    fn backup_connection_refuses_opaque_or_foreign_targets() {
+        for (dsn, extra) in [
+            ("", vec![]),
+            ("service=opaque", vec![]),
+            (
+                "host=pseudolife-pg hostaddr=10.0.0.2 user=custom dbname=bank",
+                vec![],
+            ),
+            (
+                "postgresql://custom@pseudolife-pg/bank?hostaddr=10.0.0.2",
+                vec![],
+            ),
+            ("invalid fixture", vec![]),
+            ("postgresql://custom@elsewhere/bank", vec![]),
+            (
+                "postgresql://custom@pseudolife-pg/bank",
+                vec!["PGSERVICE=opaque"],
+            ),
+            (
+                "postgresql://custom@pseudolife-pg/bank",
+                vec!["PGHOSTADDR=10.0.0.1"],
+            ),
+            ("postgresql://pseudolife-pg/bank", vec![]),
+            (
+                "host=pseudolife-pg user=custom dbname='host=elsewhere'",
+                vec![],
+            ),
+            ("postgresql://custom@pseudolife-pg:9999/bank", vec![]),
+            (
+                "postgresql://custom@pseudolife-pg/bank",
+                vec!["PGPORT=9999"],
+            ),
+        ] {
+            let (daemon, pg) = fixture(dsn, &extra);
+            assert!(connection_parts(&daemon, &pg).is_none());
+        }
+    }
+    #[test]
+    fn backup_details_preserve_nondefault_ports_and_literal_selectors() {
+        for (dsn, extra, user, db, port) in [
+            (
+                "postgresql://custom@pseudolife-pg:6543/bank",
+                vec!["PGPORT=7654"],
+                "custom",
+                "bank",
+                6543,
+            ),
+            (
+                "postgresql://custom@pseudolife-pg/bank",
+                vec!["PGPORT=6543"],
+                "custom",
+                "bank",
+                6543,
+            ),
+            (
+                "host=pseudolife-pg user=custom dbname='host=elsewhere'",
+                vec![],
+                "custom",
+                "host=elsewhere",
+                5432,
+            ),
+            (
+                "postgresql://custom@pseudolife-pg/postgresql%3A%2F%2Felsewhere",
+                vec![],
+                "custom",
+                "postgresql://elsewhere",
+                5432,
+            ),
+            (
+                "host=pseudolife-pg user=custom dbname='bank with spaces'",
+                vec![],
+                "custom",
+                "bank with spaces",
+                5432,
+            ),
+            (
+                "host=pseudolife-pg user=custom dbname='bank\\'quote'",
+                vec![],
+                "custom",
+                "bank'quote",
+                5432,
+            ),
+            (
+                "postgresql://",
+                vec!["PGHOST=pseudolife-pg", "PGUSER=runtime"],
+                "runtime",
+                "runtime",
+                5432,
+            ),
+        ] {
+            let (daemon, pg) = fixture(dsn, &extra);
+            assert_eq!(
+                connection_details(&daemon, &pg),
+                Some((user.into(), db.into(), port)),
+                "runtime case {dsn}"
+            );
+        }
+    }
+
+    #[test]
+    fn backup_details_match_hostaddr_only_on_the_shared_container_network() {
+        for source in [
+            "host=pseudolife-pg user=custom hostaddr=10.0.0.2",
+            "host=pseudolife-pg user=custom",
+        ] {
+            let (mut daemon, mut pg) = fixture(source, &[]);
+            if !source.contains("hostaddr") {
+                daemon["Config"]["Env"]
+                    .as_array_mut()
+                    .unwrap()
+                    .push(json!("PGHOSTADDR=10.0.0.2"));
+            }
+            pg["NetworkSettings"]["Networks"]["bank"]["IPAddress"] = json!("10.0.0.2");
+            assert_eq!(
+                connection_details(&daemon, &pg),
+                Some(("custom".into(), "custom".into(), 5432))
+            );
+            pg["NetworkSettings"]["Networks"]["bank"]["IPAddress"] = json!("10.0.0.3");
+            assert!(connection_details(&daemon, &pg).is_none());
+            pg["NetworkSettings"]["Networks"] = json!({"other":{"IPAddress":"10.0.0.2"}});
+            assert!(connection_details(&daemon, &pg).is_none());
+        }
+    }
+
+    #[test]
+    fn backup_details_use_daemon_os_role_defaults_not_cluster_init() {
+        for (configured, expected) in [("worker", "worker"), ("", "root")] {
+            let (mut daemon, pg) = fixture("host=pseudolife-pg", &[]);
+            daemon["Config"]["User"] = json!(configured);
+            assert_eq!(
+                connection_details(&daemon, &pg),
+                Some((expected.into(), expected.into(), 5432))
+            );
+        }
+    }
+
+    #[test]
+    fn backup_database_argument_keeps_conninfo_shaped_names_literal() {
+        for db in [
+            "host=elsewhere",
+            "postgresql://elsewhere",
+            "bank with spaces",
+            "bank'quote",
+            "bank\\slash",
+        ] {
+            let parsed = database_arg(db).parse::<tokio_postgres::Config>().unwrap();
+            assert_eq!(parsed.get_dbname(), Some(db));
+            assert!(parsed.get_hosts().is_empty());
+        }
+    }
+
+    #[test]
+    fn backup_details_refuse_multihost_and_unknown_numeric_runtime_users() {
+        for dsn in [
+            "host=pseudolife-pg,elsewhere user=custom",
+            "host=pseudolife-pg user=custom port=5432,6543",
+            "host=pseudolife-pg service=opaque",
+        ] {
+            let (daemon, pg) = fixture(dsn, &[]);
+            assert!(connection_details(&daemon, &pg).is_none());
+        }
+        let (mut daemon, pg) = fixture("host=pseudolife-pg", &[]);
+        daemon["Config"]["User"] = json!("1000:1000");
+        assert!(connection_details(&daemon, &pg).is_none());
+    }
+
+    #[test]
+    fn backup_details_reject_file_mode_despite_ambient_libpq_defaults() {
+        for absent in [false, true] {
+            let (mut daemon, pg) = fixture(
+                "",
+                &[
+                    "PGHOST=pseudolife-pg",
+                    "PGUSER=ambient_role",
+                    "PGDATABASE=ambient_bank",
+                ],
+            );
+            daemon["Config"]["User"] = json!("misleading_role");
+            if absent {
+                daemon["Config"]["Env"]
+                    .as_array_mut()
+                    .unwrap()
+                    .retain(|item| {
+                        !item
+                            .as_str()
+                            .unwrap()
+                            .starts_with("PSEUDOLIFE_MCP_DATABASE_URL=")
+                    });
+            }
+            assert!(connection_details(&daemon, &pg).is_none());
+        }
+    }
+}
+
+#[cfg(test)]
+mod handover_review_tests {
+    use super::*;
+    #[test]
+    fn review_failed_backup_replace_retains_both_complete_copies() {
+        let directory =
+            std::env::temp_dir().join(format!("pseudolife-backup-copy-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&directory).unwrap();
+        let path = directory.join("fixture.sql.gz.part");
+        fs::write(&path, b"complete fixture backup").unwrap();
+        let mut replacement = None;
+        let result = own_backup_file_with(&path, |source, _| {
+            replacement = Some(source.to_owned());
+            Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied))
+        });
+        let original = fs::read(&path).ok();
+        let copied = fs::read(replacement.unwrap()).ok();
+        fs::remove_dir_all(&directory).unwrap();
+        assert!(result.is_err());
+        assert_eq!(
+            original.as_deref(),
+            Some(b"complete fixture backup".as_slice())
+        );
+        assert_eq!(copied, original);
+    }
+
+    #[test]
+    fn review_stopped_handover_never_rotates_older_backups() {
+        let directory =
+            std::env::temp_dir().join(format!("pseudolife-backup-retain-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&directory).unwrap();
+        for stamp in 1..=4 {
+            for (prefix, suffix) in [("pseudolife_memory", "sql.gz"), ("pseudolife_state", "tgz")] {
+                let path = directory.join(format!("{prefix}-20000101-00000{stamp}.{suffix}"));
+                let file = File::create(path).unwrap();
+                file.set_times(fs::FileTimes::new().set_modified(SystemTime::UNIX_EPOCH))
+                    .unwrap();
+            }
+        }
+        let mut update = Update::new(Options::default());
+        update.stopped_handover = true;
+        let removed = update.rotate_after_backup(&directory, &BTreeSet::new());
+        let remaining = fs::read_dir(&directory).unwrap().count();
+        update.stopped_handover = false;
+        let ordinary_removed = update
+            .rotate_after_backup(&directory, &BTreeSet::new())
+            .len();
+        fs::remove_dir_all(&directory).unwrap();
+        assert!(removed.is_empty());
+        assert_eq!(remaining, 8);
+        assert_eq!(ordinary_removed, 2);
     }
 }

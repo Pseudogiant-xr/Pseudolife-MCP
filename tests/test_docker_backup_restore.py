@@ -104,6 +104,7 @@ def docker_bank(tmp_path, monkeypatch):
     from pseudolife_memory import docker_backup_restore as module
     from pseudolife_memory.docker_backup_restore import DockerBank
     world = DockerWorld()
+    world.original_run_cli = up.run_cli
     monkeypatch.setattr(up, "run_cli", world.run)
     monkeypatch.setattr(module, "copy_from_container", lambda docker, source, target: world.run([docker, "cp", source, str(target)]))
     monkeypatch.setattr(up, "home", lambda: tmp_path / "home")
@@ -128,11 +129,125 @@ def test_docker_backup_uses_actual_role_and_database_and_stopped_state(docker_ba
     result = bank.backup(out=tmp_path / "artifacts")
     assert result["dump"].is_file() and result["state"].is_file()
     dump = next(c for c in world.calls if "pg_dump" in " ".join(c))
-    assert dump[-3:-1] == ["custom_role", "custom_bank"]
+    from psycopg.conninfo import conninfo_to_dict
+    assert dump[-3] == "custom_role" and conninfo_to_dict(dump[-2]) == {"dbname": "custom_bank"}
     create = next(c for c in world.calls if c[0] == "create")
     assert create[create.index("--volumes-from") + 1] == up.DAEMON_CONTAINER + ":ro"
     assert not any(c == ["start", up.DAEMON_CONTAINER] for c in world.calls)
     assert any(c[0] == "rm" and c[-1].startswith("helper-") for c in world.calls)
+
+
+def test_docker_backup_treats_a_conninfo_shaped_database_name_as_a_literal(docker_bank, tmp_path):
+    from psycopg.conninfo import conninfo_to_dict
+    bank, world = docker_bank
+    bank.db = "host=elsewhere"
+    bank.backup(out=tmp_path / "artifacts")
+    dump = next(c for c in world.calls if "pg_dump" in " ".join(c))
+    selected = conninfo_to_dict(dump[-2])
+    assert selected.get("dbname") == bank.db and "host" not in selected
+
+
+def test_restore_treats_a_conninfo_shaped_database_name_as_a_literal(docker_bank, tmp_path):
+    from psycopg.conninfo import conninfo_to_dict
+    bank, world = docker_bank
+    bank.db = "host=elsewhere"
+    bank.restore(_input_dump(tmp_path), leave_stopped=True)
+    replay = next(c for c in world.calls if "psql" in c and "-f" in c)
+    selected = conninfo_to_dict(replay[replay.index("-d") + 1])
+    assert selected == {"dbname": bank.db}
+    drop = next(c[-1] for c in world.calls if "DROP DATABASE" in " ".join(c))
+    assert '"host=elsewhere"' in drop
+
+
+@pytest.mark.parametrize("name", ["bank with spaces", "bank-name", "bank'quote"])
+def test_restore_keeps_legitimate_literal_database_names(docker_bank, tmp_path, name):
+    from psycopg.conninfo import conninfo_to_dict
+    bank, world = docker_bank
+    bank.db = name
+    bank.restore(_input_dump(tmp_path), leave_stopped=True)
+    replay = next(c for c in world.calls if "psql" in c and "-f" in c)
+    assert conninfo_to_dict(replay[replay.index("-d") + 1]) == {"dbname": name}
+
+
+def test_missing_postgres_socket_names_the_database_port_fix(docker_bank, monkeypatch):
+    bank, world = docker_bank
+    original = world.run
+
+    def missing_socket(argv, **kwargs):
+        if "psql" in argv:
+            return 2, "psql: connection to server on socket failed: No such file or directory"
+        return original(argv, **kwargs)
+
+    monkeypatch.setattr(up, "run_cli", missing_socket)
+    with pytest.raises(up.UpdateError, match="--db-port"):
+        bank.database_exists()
+
+
+def test_missing_socket_advice_reads_real_command_stderr(docker_bank, monkeypatch):
+    import subprocess
+    bank, world = docker_bank
+    monkeypatch.setattr(up, "run_cli", world.original_run_cli)
+    monkeypatch.setattr(subprocess, "run", lambda argv, **kwargs: subprocess.CompletedProcess(
+        argv, 2, stdout="", stderr="psql: connection to server on socket failed: No such file or directory"))
+    with pytest.raises(up.UpdateError, match="--db-port"):
+        bank.database_exists()
+
+
+def test_successful_postgres_queries_keep_stderr_out_of_data(docker_bank, monkeypatch):
+    import subprocess
+    bank, world = docker_bank
+    monkeypatch.setattr(up, "run_cli", world.original_run_cli)
+    monkeypatch.setattr(subprocess, "run", lambda argv, **kwargs: subprocess.CompletedProcess(
+        argv, 0, stdout="t\n", stderr="a server warning\n"))
+    assert bank.database_exists()
+
+
+def test_restore_binds_every_postgres_client_to_the_selected_local_container(docker_bank, tmp_path):
+    bank, world = docker_bank
+    world.pg["Config"]["Env"] += ["PGHOSTADDR=10.0.0.2", "PGSERVICE=unrelated", "PGSERVICEFILE=/tmp/profile"]
+    bank.restore(_input_dump(tmp_path), leave_stopped=True)
+    clients = [c for c in world.calls if "psql" in c]
+    assert clients
+    for command in clients:
+        assert command[command.index("-h") + 1].startswith("/")
+        assert command[command.index("-p") + 1] == "5432"
+        assert all(name in command for name in ("PGHOSTADDR", "PGSERVICE", "PGSERVICEFILE"))
+    dump = next(c for c in world.calls if "pg_dump" in " ".join(c))
+    assert "unset PGHOSTADDR PGSERVICE PGSERVICEFILE" in " ".join(dump)
+
+
+def test_database_port_follows_runtime_connection_and_explicit_override(docker_bank):
+    from pseudolife_memory.docker_backup_restore import DockerBank
+    _bank, world = docker_bank
+    world.daemon["Config"]["Env"] = ["PSEUDOLIFE_MCP_DATABASE_URL=postgresql://custom_role@db:6543/custom_bank"]
+    for requested, expected in [(None, 6543), (7654, 7654)]:
+        bank = DockerBank(db_port=requested, log=lambda _: None)
+        assert bank.database_exists()
+        command = next(c for c in reversed(world.calls) if "psql" in c)
+        assert command[command.index("-p") + 1] == str(expected)
+
+
+@pytest.mark.parametrize("runtime_port,expected", [(None, 5432), ("6543", 6543)])
+def test_postgres_client_environment_does_not_override_daemon_port(docker_bank, runtime_port, expected):
+    from pseudolife_memory.docker_backup_restore import DockerBank
+    _bank, world = docker_bank
+    world.pg["Config"]["Env"].append("PGPORT=7654")
+    world.daemon["Config"]["Env"] = ["PSEUDOLIFE_MCP_DATABASE_URL=postgresql://custom_role@db/custom_bank"]
+    if runtime_port is not None:
+        world.daemon["Config"]["Env"].append("PGPORT=" + runtime_port)
+    bank = DockerBank(log=lambda _: None)
+    assert bank.database_exists()
+    command = next(c for c in reversed(world.calls) if "psql" in c)
+    assert command[command.index("-p") + 1] == str(expected)
+
+
+@pytest.mark.parametrize("port", [0, -1, 65536])
+def test_invalid_database_port_refuses_before_writing(docker_bank, port):
+    from pseudolife_memory.docker_backup_restore import DockerBank
+    _bank, world = docker_bank
+    with pytest.raises(up.UpdateError, match="--db-port"):
+        DockerBank(db_port=port, log=lambda _: None)
+    assert not any(c[0] in ("stop", "create", "cp") for c in world.calls)
 
 
 @pytest.mark.parametrize("failure", ["dump", "state"])
@@ -235,13 +350,15 @@ def test_backup_copy_creates_host_owned_file_instead_of_extracting_container_own
     assert target.read_bytes() == b"payload"
 
 
-def test_unknown_database_host_requires_explicit_container(docker_bank):
+def test_unknown_database_host_requires_all_explicit_selectors(docker_bank):
     from pseudolife_memory.docker_backup_restore import DockerBank
     _, world = docker_bank
     world.daemon["Config"]["Env"] = ["PSEUDOLIFE_MCP_DATABASE_URL=postgresql://custom_role:fixture@other-db/custom_bank"]
     with pytest.raises(up.UpdateError, match="--container"):
         DockerBank()
-    bank = DockerBank(container=up.PG_CONTAINER)
+    with pytest.raises(up.UpdateError):
+        DockerBank(container=up.PG_CONTAINER)
+    bank = DockerBank(container=up.PG_CONTAINER, db="custom_bank", user="custom_role", db_port=5432)
     assert bank.db == "custom_bank" and bank.user == "custom_role"
     assert all(c[0] == "inspect" for c in world.calls)
 
@@ -293,9 +410,9 @@ def test_yes_and_move_selectors_skip_prompt_and_leave_stopped(tmp_path, monkeypa
     monkeypatch.setattr(restore_cli, "DockerBank", Bank)
     assert restore_cli.main(["--backup-file", str(_input_dump(tmp_path)), "--yes", "--leave-stopped",
                              "--container", "project-pg", "--daemon-container", "project-daemon", "--db", "bank",
-                             "--user", "owner"]) == 0
+                             "--user", "owner", "--db-port", "6543"]) == 0
     assert seen["selectors"] == {"container": "project-pg", "daemon_container": "project-daemon", "db": "bank", "user": "owner",
-                                 "daemon_url": None}
+                                 "db_port": 6543, "daemon_url": None}
     assert seen["restore"]["leave_stopped"] is True
 
 
@@ -435,7 +552,8 @@ def test_database_alias_on_another_network_does_not_select_wrong_bank(docker_ban
     world.daemon["NetworkSettings"] = {"Networks": {"other-project": {}}}
     with pytest.raises(up.UpdateError, match="--container"):
         DockerBank()
-    assert DockerBank(container=up.PG_CONTAINER).db == "custom_bank"
+    with pytest.raises(up.UpdateError):
+        DockerBank(container=up.PG_CONTAINER)
 
 
 def test_recovery_quotes_space_and_apostrophe_arguments():
@@ -512,7 +630,7 @@ def test_ambiguous_daemon_database_requires_explicit_selectors(docker_bank):
     world.daemon["Config"]["Env"] = []
     with pytest.raises(up.UpdateError, match="--db.*--user"):
         DockerBank()
-    bank = DockerBank(db="actual_bank", user="actual_owner")
+    bank = DockerBank(container=up.PG_CONTAINER, db="actual_bank", user="actual_owner", db_port=5432)
     assert (bank.user, bank.db) == ("actual_owner", "actual_bank")
 
 
@@ -543,7 +661,7 @@ def test_opaque_libpq_service_requires_explicit_target(docker_bank):
     world.daemon["Config"]["Env"] = ["PSEUDOLIFE_MCP_DATABASE_URL=service=fixture host=db user=owner", "PGDATABASE=not_the_service_bank"]
     with pytest.raises(up.UpdateError, match="--container.*--db.*--user"):
         DockerBank()
-    bank = DockerBank(container=up.PG_CONTAINER, db="service_bank", user="service_owner")
+    bank = DockerBank(container=up.PG_CONTAINER, db="service_bank", user="service_owner", db_port=5432)
     assert (bank.user, bank.db) == ("service_owner", "service_bank")
 
 
@@ -556,3 +674,57 @@ def test_desktop_mount_mapping_keeps_safety_outside_state(docker_bank, tmp_path,
     bank.running["Mounts"] = [{"Destination": "/data", "Type": "bind", "Source": mapped}]
     with pytest.raises(up.UpdateError, match="--safety-dir"):
         bank.restore(_input_dump(tmp_path), leave_stopped=True)
+
+
+@pytest.mark.parametrize("env,changes,expected", [
+    (["PSEUDOLIFE_MCP_DATABASE_URL=postgresql://", "PGHOST=db", "PGUSER=runtime", "PGPORT=6543"], {}, ("runtime", "runtime", 6543)),
+    (["PSEUDOLIFE_MCP_DATABASE_URL=host=db"], {"User": "worker"}, ("worker", "worker", 5432)),
+    (["PSEUDOLIFE_MCP_DATABASE_URL=host=db"], {"User": ""}, ("root", "root", 5432)),
+])
+def test_docker_bank_uses_the_same_runtime_defaults(docker_bank, env, changes, expected):
+    from pseudolife_memory.docker_backup_restore import DockerBank
+    _, world = docker_bank
+    world.daemon["Config"].update(changes)
+    world.daemon["Config"]["Env"] = env
+    bank = DockerBank()
+    assert (bank.user, bank.db, bank.db_port) == expected
+
+
+@pytest.mark.parametrize("address,shared,accept", [("10.0.0.2", True, True), ("10.0.0.3", True, False), ("10.0.0.2", False, False)])
+def test_docker_bank_hostaddr_requires_selected_ip_on_shared_network(docker_bank, address, shared, accept):
+    from pseudolife_memory.docker_backup_restore import DockerBank
+    _, world = docker_bank
+    world.daemon["Config"]["Env"].append("PGHOSTADDR=" + address)
+    world.pg["NetworkSettings"]["Networks"] = {"fixture" if shared else "other": {"IPAddress": "10.0.0.2", "Aliases": ["db"]}}
+    if accept:
+        assert DockerBank().db == "custom_bank"
+    else:
+        with pytest.raises(up.UpdateError):
+            DockerBank(container=up.PG_CONTAINER)
+
+
+def test_explicit_opaque_target_also_needs_its_port(docker_bank):
+    from pseudolife_memory.docker_backup_restore import DockerBank
+    _, world = docker_bank
+    world.daemon["Config"]["Env"] = ["PSEUDOLIFE_MCP_DATABASE_URL=service=opaque"]
+    with pytest.raises(up.UpdateError, match="--db-port"):
+        DockerBank(container=up.PG_CONTAINER, db="bank", user="owner")
+    bank = DockerBank(container=up.PG_CONTAINER, db="bank", user="owner", db_port=6543)
+    assert (bank.user, bank.db, bank.db_port) == ("owner", "bank", 6543)
+
+
+@pytest.mark.parametrize("dsn", [None, ""])
+def test_file_mode_daemon_requires_explicit_standalone_target(docker_bank, tmp_path, dsn):
+    from pseudolife_memory.docker_backup_restore import DockerBank
+    _, world = docker_bank
+    world.daemon["Config"]["Env"] = ["PGHOST=db", "PGUSER=ambient_role", "PGDATABASE=ambient_bank"]
+    world.daemon["Config"]["User"] = "misleading_role"
+    if dsn is not None:
+        world.daemon["Config"]["Env"].append("PSEUDOLIFE_MCP_DATABASE_URL=" + dsn)
+    before = len(world.calls)
+    with pytest.raises(up.UpdateError, match="PSEUDOLIFE_MCP_DATABASE_URL"):
+        DockerBank()
+    assert all(call[0] == "inspect" for call in world.calls[before:])
+    assert not (tmp_path / "artifacts").exists()
+    bank = DockerBank(container=up.PG_CONTAINER, db="chosen_bank", user="chosen_role", db_port=6543)
+    assert (bank.user, bank.db, bank.db_port) == ("chosen_role", "chosen_bank", 6543)

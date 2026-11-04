@@ -1,5 +1,58 @@
 use super::*;
 
+#[test]
+fn failed_health_endpoint_hint_uses_only_valid_loopback_publications() {
+    for (ports, url) in [
+        ("0.0.0.0:9876\n[::]:9876\n", "http://127.0.0.1:9876"),
+        ("127.0.0.1:9876", "http://127.0.0.1:9876"),
+        ("[::1]:9876", "http://[::1]:9876"),
+    ] {
+        let hint = release::health_endpoint_hint(ports);
+        assert!(hint.contains(&format!("--daemon-url {url}")));
+        // Port output is Docker-host-local even with a remote DOCKER_HOST or context.
+        assert!(hint.contains("on the Docker host"));
+        assert!(hint.contains("If Docker runs on this machine"));
+    }
+    for ports in [
+        "",
+        "10.0.0.7:9876",
+        "127.0.0.1:0",
+        "127.0.0.1:65536",
+        "garbage:9876",
+        "127.0.0.1:+9876",
+    ] {
+        let hint = release::health_endpoint_hint(ports);
+        assert!(hint.contains("--daemon-url"));
+        assert!(!hint.contains("--daemon-url http://"));
+    }
+}
+
+#[test]
+fn native_update_client_release_never_guesses_when_endpoint_has_no_version() {
+    for health in [
+        None,
+        Some(json!({"status":"ok"})),
+        Some(json!({"version":""})),
+    ] {
+        for tag in [None, Some("0.16.0")] {
+            let error = client_release_target(health.as_ref(), tag).unwrap_err();
+            assert_eq!(error.exit_code, 2);
+            assert!(error.message.contains("--daemon-url"));
+        }
+    }
+    let health = json!({"version":"0.15.1"});
+    assert_eq!(
+        client_release_target(Some(&health), None).unwrap(),
+        "0.15.1"
+    );
+    let checkout = json!({"version":"0.15.1+checkout"});
+    assert!(client_release_target(Some(&checkout), None).is_err());
+    assert_eq!(
+        client_release_target(Some(&checkout), Some("0.15.1")).unwrap(),
+        "0.15.1"
+    );
+}
+
 fn verify_bank_identity(config: &Value, running: &Value) -> Result<()> {
     engine::verify_bank_identity_with(config, running, |name| {
         Some(json!([
