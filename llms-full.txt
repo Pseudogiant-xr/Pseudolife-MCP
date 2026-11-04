@@ -11973,7 +11973,7 @@ volumes before installing a fresh target with distinct
 
 ```bash
 pseudolife-mcp move --to root@box --dry-run   # the plan; changes nothing
-pseudolife-mcp move --to root@box             # asks once, then moves
+pseudolife-mcp move --to root@box             # confirms the move and any new exposure
 ```
 
 `--to` is anything `ssh` accepts (`root@box`, or a `~/.ssh/config` alias).
