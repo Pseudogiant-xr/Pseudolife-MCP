@@ -324,7 +324,64 @@ fn ephemeral_mount(
     Ok(true)
 }
 
+fn verify_compose_bearers(configured: &Value, running: &Value, allow_change: bool) -> Result<()> {
+    let unreadable = || {
+        UpdateError::usage(
+            "cannot verify the daemon's Compose bearer settings; restore the original compose and env files, then retry. Nothing was changed",
+        )
+    };
+    let configured = configured.as_object().ok_or_else(unreadable)?;
+    let entries = running.as_array().ok_or_else(unreadable)?;
+    let mut current = serde_json::Map::new();
+    for entry in entries {
+        let (name, value) = entry
+            .as_str()
+            .and_then(|s| s.split_once('='))
+            .ok_or_else(unreadable)?;
+        current.insert(name.into(), json!(value));
+    }
+    let identity = |env: &serde_json::Map<String, Value>| -> Result<_> {
+        let read = |name| match env.get(name) {
+            None | Some(Value::Null) => Ok(""),
+            Some(Value::String(value)) => Ok(value.as_str()),
+            _ => Err(unreadable()),
+        };
+        let token = read("PSEUDOLIFE_MCP_TOKEN")?;
+        let raw = read("PSEUDOLIFE_MCP_TOKENS")?;
+        let mut mapped = std::collections::BTreeMap::new();
+        for part in raw.split(',') {
+            if let Some((token, principal)) = part.rsplit_once(':') {
+                let (token, principal) = (token.trim(), principal.trim().to_lowercase());
+                if !token.is_empty()
+                    && !principal.is_empty()
+                    && !matches!(principal.as_str(), "default" | "maintainer")
+                {
+                    mapped.entry(token.to_owned()).or_insert(principal);
+                }
+            }
+        }
+        let invalid = if !raw.trim().is_empty() && mapped.is_empty() {
+            raw.to_owned()
+        } else {
+            String::new()
+        };
+        Ok((token.to_owned(), mapped, invalid))
+    };
+    let expected = identity(configured)?;
+    if expected != identity(&current)? && (!allow_change || !expected.2.is_empty()) {
+        return Err(UpdateError::usage(
+            "the Compose configuration would change the running daemon's bearer settings. Restore its original bearer settings in the project's env file (release mode: --env-file <original-file>), then retry. Nothing was changed",
+        ));
+    }
+    Ok(())
+}
+
 pub(super) fn verify_bank_identity(u: &Update, config: &Value, running: &Value) -> Result<()> {
+    verify_compose_bearers(
+        &config["services"][DAEMON_SERVICE]["environment"],
+        &running["Config"]["Env"],
+        u.o.allow_auth_change,
+    )?;
     verify_bank_identity_with(config, running, |name| {
         let (code, out) = u.docker_call(&["volume", "inspect", name]);
         if code != 0 {
@@ -878,4 +935,51 @@ pub(super) fn deploy(u: &mut Update, repo: &Path) -> Result<()> {
         u.warn("could not remove the temporary engine overlay; the rollback instructions remain usable");
     }
     result.map_err(|e| u.rollback_error(e.message))
+}
+
+#[cfg(test)]
+mod bearer_source_tests {
+    use super::*;
+
+    #[test]
+    fn explicit_auth_transfer_accepts_carried_or_stored_credentials_but_not_malformed_maps() {
+        let running = json!(["PSEUDOLIFE_MCP_TOKEN=fixture-original"]);
+        for configured in [json!({"PSEUDOLIFE_MCP_TOKEN":"fixture-carried"}), json!({})] {
+            verify_compose_bearers(&configured, &running, true).unwrap();
+            assert!(verify_compose_bearers(&configured, &running, false).is_err());
+        }
+        assert!(
+            verify_compose_bearers(
+                &json!({"PSEUDOLIFE_MCP_TOKENS":"invalid-map"}),
+                &running,
+                true
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn compose_bearers_preserve_credentials_without_a_client_environment() {
+        let running = json!(["PSEUDOLIFE_MCP_TOKEN=fixture-daemon"]);
+        for config in [json!({}), json!({"PSEUDOLIFE_MCP_TOKEN":"fixture-client"})] {
+            let refused = verify_compose_bearers(&config, &running, false).unwrap_err();
+            assert_eq!(refused.exit_code, 2);
+            assert!(refused.message.contains("--env-file"));
+            assert!(!refused.message.contains("fixture-daemon"));
+            assert!(!refused.message.contains("fixture-client"));
+        }
+        verify_compose_bearers(&json!({}), &json!([]), false).unwrap();
+        verify_compose_bearers(
+            &json!({"PSEUDOLIFE_MCP_TOKEN":"fixture-daemon"}),
+            &running,
+            false,
+        )
+        .unwrap();
+        verify_compose_bearers(
+            &json!({"PSEUDOLIFE_MCP_TOKENS":"fixture-b:second, fixture-a:FIRST"}),
+            &json!(["PSEUDOLIFE_MCP_TOKENS=fixture-a:first,fixture-b:second"]),
+            false,
+        )
+        .unwrap();
+    }
 }

@@ -1,0 +1,97 @@
+# Self-contained GHCR stack for Portainer, Dockge, Komodo or a compose folder.
+# Setup, tokens, clients and updates: docs/guide/install-and-move.md.
+# Keep project, service/container names, external volumes and hardening intact.
+# Configure substitutions in the manager's environment or a compose --env-file.
+# Default extractor: unconfigured; storage/search work, automatic facts need an endpoint.
+# Set PSEUDOLIFE_DREAM_BASE_URL / MODEL / API_KEY for another endpoint.
+# The unpublished CPU sidecar is opt-in via docker-compose.stack-extractor.yml.
+# Runtime parity with docker-compose.yml: tests/test_external_stack_compose.py.
+name: pseudolife-mcp
+x-logging: &id001
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: '3'
+services:
+  pseudolife-pg:
+    image: ghcr.io/pseudogiant-xr/pseudolife-pg:18
+    container_name: pseudolife-mcp-postgres
+    restart: unless-stopped
+    logging: *id001
+    environment:
+      POSTGRES_USER: pseudolife
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pseudolife}
+      POSTGRES_DB: pseudolife_memory
+    ports:
+    - 127.0.0.1:5433:5432
+    volumes:
+    - pseudolife_pgdata:/var/lib/postgresql
+    healthcheck:
+      test:
+      - CMD-SHELL
+      - pg_isready -U pseudolife -d pseudolife_memory
+      interval: 10s
+      timeout: 5s
+      retries: 5
+  pseudolife-daemon:
+    image: ghcr.io/pseudogiant-xr/pseudolife-daemon:${PSEUDOLIFE_IMAGE_TAG:-latest}
+    container_name: pseudolife-mcp-daemon
+    restart: unless-stopped
+    security_opt:
+    - no-new-privileges:true
+    cap_drop:
+    - ALL
+    cap_add:
+    - CHOWN
+    - DAC_OVERRIDE
+    - SETUID
+    - SETGID
+    logging: *id001
+    mem_limit: ${PSEUDOLIFE_DAEMON_MEM_LIMIT:-6g}
+    memswap_limit: ${PSEUDOLIFE_DAEMON_MEM_LIMIT:-6g}
+    depends_on:
+      pseudolife-pg:
+        condition: service_healthy
+    environment:
+      PSEUDOLIFE_MCP_DATABASE_URL: postgresql://pseudolife:${POSTGRES_PASSWORD:-pseudolife}@pseudolife-pg:5432/pseudolife_memory
+      PSEUDOLIFE_MCP_HOST: 0.0.0.0
+      PSEUDOLIFE_MCP_PORT: '8765'
+      PSEUDOLIFE_MCP_DATA_DIR: /data
+      TZ: ${TZ:-UTC}
+      PSEUDOLIFE_MCP_TRUST_BIND: '1'
+      PSEUDOLIFE_MCP_TOKEN: ${PSEUDOLIFE_MCP_TOKEN:-}
+      PSEUDOLIFE_MCP_TOKENS: ${PSEUDOLIFE_MCP_TOKENS:-}
+      PSEUDOLIFE_WRITER_ID: ${PSEUDOLIFE_WRITER_ID:-mcp-client}
+      PSEUDOLIFE_MCP_TOOLSET: ${PSEUDOLIFE_MCP_TOOLSET:-core}
+      PSEUDOLIFE_MCP_TIER_MAP: ${PSEUDOLIFE_MCP_TIER_MAP:-}
+      CUDA_VISIBLE_DEVICES: '-1'
+      HF_HUB_OFFLINE: '1'
+      TRANSFORMERS_OFFLINE: '1'
+      MALLOC_ARENA_MAX: '2'
+      PSEUDOLIFE_EMBEDDING_CPU_DTYPE: ${PSEUDOLIFE_EMBEDDING_CPU_DTYPE:-}
+      PSEUDOLIFE_DREAM_BASE_URL: ${PSEUDOLIFE_DREAM_BASE_URL:-}
+      PSEUDOLIFE_DREAM_MODEL: ${PSEUDOLIFE_DREAM_MODEL:-extractor}
+      PSEUDOLIFE_DREAM_API_KEY: ${PSEUDOLIFE_DREAM_API_KEY:-}
+      PSEUDOLIFE_DREAM_TIMEOUT_SECONDS: ${PSEUDOLIFE_DREAM_TIMEOUT_SECONDS:-480}
+      PSEUDOLIFE_DREAM_MAX_TOKENS: ${PSEUDOLIFE_DREAM_MAX_TOKENS:-2048}
+      PSEUDOLIFE_DREAM_FALLBACK_BASE_URL: ${PSEUDOLIFE_DREAM_FALLBACK_BASE_URL:-}
+      PSEUDOLIFE_DREAM_FALLBACK_MODEL: ${PSEUDOLIFE_DREAM_FALLBACK_MODEL:-}
+      PSEUDOLIFE_DREAM_FALLBACK_API_KEY: ${PSEUDOLIFE_DREAM_FALLBACK_API_KEY:-}
+      PSEUDOLIFE_DREAM_EXTRACTOR_MODE: ${PSEUDOLIFE_DREAM_EXTRACTOR_MODE:-primary}
+      PSEUDOLIFE_JUDGE_API_KEY: ${PSEUDOLIFE_JUDGE_API_KEY:-}
+      PSEUDOLIFE_JUDGE_SECOND_API_KEY: ${PSEUDOLIFE_JUDGE_SECOND_API_KEY:-}
+      PSEUDOLIFE_JUDGE_THIRD_API_KEY: ${PSEUDOLIFE_JUDGE_THIRD_API_KEY:-}
+      PSEUDOLIFE_MALLOC_TRIM_SECONDS: ${PSEUDOLIFE_MALLOC_TRIM_SECONDS:-}
+    extra_hosts:
+    - host.docker.internal:host-gateway
+    ports:
+    - 127.0.0.1:8765:8765
+    volumes:
+    - pseudolife_data:/data
+volumes:
+  pseudolife_pgdata:
+    external: true
+    name: ${PSEUDOLIFE_BANK_VOLUME:-pseudolife-mcp-bank}
+  pseudolife_data:
+    external: true
+    name: ${PSEUDOLIFE_STATE_VOLUME:-pseudolife-mcp-state}

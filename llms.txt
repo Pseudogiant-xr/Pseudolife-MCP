@@ -4,6 +4,7 @@
 
 ## Documentation
 
+- [Install and move](https://raw.githubusercontent.com/Pseudogiant-xr/Pseudolife-MCP/master/docs/guide/install-and-move.md): Installer and lite pip setup, pseudolife-mcp move, and the supported compose file for external stack managers; never hand-write a compose file
 - [Pseudolife-MCP](https://raw.githubusercontent.com/Pseudogiant-xr/Pseudolife-MCP/master/README.md): Overview, quickstart, tool reference, and operations — start here
 - [The memory model — cortex, world facts, lessons, and time](https://raw.githubusercontent.com/Pseudogiant-xr/Pseudolife-MCP/master/docs/guide/memory-model.md): The canonical-fact layers: cortex slots, supersession, contenders, world facts, lessons, and the temporal/multi-writer stamp
 - [Retrieval — search, recall, and the knowledge graph](https://raw.githubusercontent.com/Pseudogiant-xr/Pseudolife-MCP/master/docs/guide/retrieval.md): How memory_search ranks: hybrid dense+lexical scoring, reranking, and the explain trace

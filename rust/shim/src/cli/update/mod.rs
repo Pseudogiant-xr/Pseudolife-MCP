@@ -746,7 +746,7 @@ pub(crate) fn run(arguments: Vec<OsString>) -> u8 {
         return run_cli(&argv, None, 14400, true).0.clamp(0, 255) as u8;
     }
     if arguments.iter().any(|s| s == "--help" || s == "-h") {
-        return if output("usage: pseudolife-mcp update [--checkout REPO] [--tag VERSION] [--engine python|rust] [--shadow]\n       [--all | --daemon-only | --clients-only] [--check] [--reinstall] [--allow-downgrade]\n       [--no-backup] [--rollback-tag SUFFIX] [--force-rollback-tag] [--allow-dirty]\n       [--keep-rollbacks N] [--keep-cache-hours N] [--no-cache-prune] [--no-test-login]\n       [--env-file PATH] [--daemon-url URL] [--health-retries N] [--health-delay-ms N]\n       [--unattended | --schedule HH:MM | --unschedule] [--allow-no-bearer] [--result-file PATH] [--json]\n       [--python-runtime INTERPRETER] (explicit legacy/lite updater)\n",false).is_ok(){0}else{120};
+        return if output("usage: pseudolife-mcp update [--checkout REPO] [--tag VERSION] [--engine python|rust] [--shadow]\n       [--all | --daemon-only | --clients-only] [--check] [--reinstall] [--allow-downgrade]\n       [--no-backup] [--rollback-tag SUFFIX] [--force-rollback-tag] [--allow-dirty]\n       [--keep-rollbacks N] [--keep-cache-hours N] [--no-cache-prune] [--no-test-login]\n       [--env-file PATH] [--allow-auth-change] [--daemon-url URL] [--health-retries N] [--health-delay-ms N]\n       [--unattended | --schedule HH:MM | --unschedule] [--allow-no-bearer] [--result-file PATH] [--json]\n       [--python-runtime INTERPRETER] (explicit legacy/lite updater)\n",false).is_ok(){0}else{120};
     }
     match Options::parse(arguments) {
         Ok(o) => Update::new(o).run(),
