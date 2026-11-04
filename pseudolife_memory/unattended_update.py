@@ -350,7 +350,7 @@ def _run_clients(update) -> int:
     if not health:
         raise UpdateError(f"the daemon at {o.daemon_url} did not answer /health, and the unattended client run "
                           f"follows its release rather than guess one; nothing was changed. It tries again at the "
-                          f"next scheduled run", 2)
+                          f"next scheduled run. {_client_rearm_hint()}", 2)
     if not isinstance(daemon, str) or not daemon:
         raise UpdateError(f"the daemon at {o.daemon_url} reports no version on /health; nothing was changed", 2)
     # /health is unauthenticated and the version becomes a pip requirement:
@@ -426,6 +426,13 @@ def _updated_text(update, current: str | None, latest: str) -> str:
 
 
 # ── the schedule ────────────────────────────────────────────────────────────
+
+def _client_rearm_hint(when: str = "HH:MM") -> str:
+    time = " and your chosen daily time" if when == "HH:MM" else ""
+    return ("If the daemon moved, re-arm this machine's client schedule with "
+            f"`pseudolife-mcp update --schedule {when} --daemon-url <new-url>` "
+            f"using the new daemon URL{time}.")
+
 
 def _command(daemon_url: str | None = None) -> list[str]:
     """What the task or unit runs: the stable shim launcher when one is
@@ -622,9 +629,8 @@ def _schedule_clients(update, hour: int, minute: int, platform: str) -> int:
     if not update.daemon_health():
         raise UpdateError(f"this is a client machine (a shim runtime with no daemon container here), and the daemon "
                           f"at {url} did not answer /health; the scheduled run follows that daemon's release, so it "
-                          f"would change nothing. Check that the daemon is up, or name it with --daemon-url "
-                          f"http(s)://<host>:<port> (or PSEUDOLIFE_MCP_DAEMON_URL), and run --schedule again. "
-                          f"Nothing was installed", 2)
+                          f"would change nothing. Check that the daemon is up. "
+                          f"Nothing was installed. {_client_rearm_hint(f'{hour:02d}:{minute:02d}')}", 2)
     command = _command(url)
     shown = " ".join(f'"{part}"' if " " in part else part for part in command)
     if platform.startswith("win"):
@@ -661,6 +667,7 @@ def _schedule_clients(update, hour: int, minute: int, platform: str) -> int:
     update.step(f"the run moves this machine's clients (shim runtime, plugin cache, Codex step) to the release the "
                 f"daemon at {url} runs, never past it; running sessions keep their runtime. The log is "
                 f"{data_dir() / LOG_NAME}")
+    update.step(_client_rearm_hint(f"{hour:02d}:{minute:02d}"))
     return 0
 
 
