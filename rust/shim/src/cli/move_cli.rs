@@ -15,15 +15,19 @@ use std::{
 const HELP: &str = concat!(
     "usage: pseudolife-mcp move [-h] --to SSH-TARGET [--target-checkout PATH]\n",
     "                           [--target-url URL] [--no-keep-tokens] [--resume]\n",
-    "                           [--dry-run] [--expose-target] [--yes] [--json]\n",
+    "                           [--dry-run] [--expose-target] [--target-release]\n",
+    "                           [--target-env-file TARGET_ENV_FILE]\n",
+    "                           [--target-compose-file TARGET_COMPOSE_FILE]\n",
+    "                           [--target-work-dir TARGET_WORK_DIR] [--yes]\n",
+    "                           [--json]\n",
     "\n",
-    "Move this host's Docker-tier bank to another Docker-tier checkout host over\n",
-    "key-based ssh: preflight, final backup from the stopped source, database\n",
-    "fence, restore and verify on the target, start it once, re-point this\n",
-    "machine's clients. A failure rolls back. Exit codes: 0 moved, 1 failed and\n",
-    "rolled back, 2 usage or not confirmed, 4 refused before any change, 5 moved\n",
-    "but re-pointing failed, 6 failed and the rollback could not finish. Run it\n",
-    "under tmux, screen or nohup.\n",
+    "Move this host's Docker-tier bank to another Docker host with an owning\n",
+    "checkout or installed CLI over key-based ssh: preflight, final backup from the\n",
+    "stopped source, database fence, restore and verify on the target, start it\n",
+    "once, re-point this machine's clients. A failure rolls back. Exit codes: 0\n",
+    "moved, 1 failed and rolled back, 2 usage or not confirmed, 4 refused before\n",
+    "any change, 5 moved but re-pointing failed, 6 failed and the rollback could\n",
+    "not finish. Run it under tmux, screen or nohup.\n",
     "\n",
     "options:\n",
     "  -h, --help            show this help message and exit\n",
@@ -41,6 +45,17 @@ const HELP: &str = concat!(
     "  --dry-run             show the plan; change nothing\n",
     "  --expose-target       consent to creating a persistent Tailscale serve on\n",
     "                        the target if needed\n",
+    "  --target-release      use the target's installed CLI even when an unrelated\n",
+    "                        checkout exists\n",
+    "  --target-env-file TARGET_ENV_FILE\n",
+    "                        original stack environment on the target (clone-free\n",
+    "                        mode)\n",
+    "  --target-compose-file TARGET_COMPOSE_FILE\n",
+    "                        original exported target compose file; repeat for\n",
+    "                        overlays (clone-free mode)\n",
+    "  --target-work-dir TARGET_WORK_DIR\n",
+    "                        target artifact directory outside bank mounts and\n",
+    "                        checkouts\n",
     "  --yes                 confirm the bank move (exposure needs --expose-target)\n",
     "  --json                one JSON report on stdout\n",
 );
@@ -49,13 +64,15 @@ const BAD_TO: &str = "move: --to takes an ssh target such as root@box or a ~/.ss
 const BAD_URL: &str = "move: --target-url must be an http(s) origin such as http://100.64.0.2:8765 \
                        (no path, query or credentials)\n";
 const BAD_CHECKOUT: &str = "move: --target-checkout holds a control character\n";
-const FLAGS: [&str; 6] = [
+const BAD_DEPLOY_PATH: &str = "move: target environment, compose and work directory paths must contain no control characters\n";
+const FLAGS: [&str; 7] = [
     "--no-keep-tokens",
     "--resume",
     "--dry-run",
     "--yes",
     "--json",
     "--expose-target",
+    "--target-release",
 ];
 
 /// What the oracle's output depends on besides argv.
@@ -93,6 +110,7 @@ struct Args<'a> {
     checkout: Option<&'a str>,
     url: Option<&'a str>,
     json: bool,
+    deployment_paths: Vec<&'a str>,
 }
 
 /// Python's `str.isspace`: Unicode `White_Space` plus the four information
@@ -118,17 +136,19 @@ fn parse(arguments: &[String]) -> Option<Args<'_>> {
             args.json |= token == "--json";
             continue;
         }
-        let slot = match token {
-            "--to" => &mut args.to,
-            "--target-checkout" => &mut args.checkout,
-            "--target-url" => &mut args.url,
-            _ => return None,
-        };
         let value = tokens.next()?;
         if value.starts_with('-') {
             return None;
         }
-        *slot = Some(value.as_str());
+        match token {
+            "--to" => args.to = Some(value.as_str()),
+            "--target-checkout" => args.checkout = Some(value.as_str()),
+            "--target-url" => args.url = Some(value.as_str()),
+            "--target-env-file" | "--target-compose-file" | "--target-work-dir" => {
+                args.deployment_paths.push(value.as_str());
+            }
+            _ => return None,
+        }
     }
     Some(args)
 }
@@ -307,6 +327,17 @@ pub(super) fn decide(arguments: &[String], context: &Context<'_>) -> Decision {
             Decision::Defer
         } else {
             Decision::Refuse(BAD_CHECKOUT.to_owned())
+        };
+    }
+    if args
+        .deployment_paths
+        .iter()
+        .any(|path| path.contains(['\n', '\r', '\0']))
+    {
+        return if args.json {
+            Decision::Defer
+        } else {
+            Decision::Refuse(BAD_DEPLOY_PATH.to_owned())
         };
     }
     Decision::Defer
@@ -687,6 +718,40 @@ mod tests {
                 &plain(None)
             ),
             Decision::Refuse(BAD_URL.to_owned())
+        );
+    }
+
+    #[test]
+    fn clone_free_options_preserve_path_refusals_without_effects() {
+        for option in [
+            "--target-env-file",
+            "--target-compose-file",
+            "--target-work-dir",
+        ] {
+            assert_eq!(
+                decide(&argv(&["--to", "box", option, "bad\npath"]), &plain(None)),
+                Decision::Refuse(BAD_DEPLOY_PATH.to_owned())
+            );
+            assert_eq!(
+                decide(
+                    &argv(&["--to", "box", option, "bad\npath", "--json"]),
+                    &plain(None)
+                ),
+                Decision::Defer
+            );
+        }
+        assert_eq!(
+            decide(
+                &argv(&[
+                    "--to",
+                    "box",
+                    "--target-release",
+                    "--target-work-dir",
+                    "/srv/moves"
+                ]),
+                &plain(None)
+            ),
+            Decision::Defer
         );
     }
 }
