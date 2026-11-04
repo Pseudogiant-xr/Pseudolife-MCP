@@ -164,13 +164,11 @@ pub(super) fn connection_details(
     }
     let get = |key| env.get(key).copied().filter(|s| !s.is_empty());
     let fields = connection_fields(get("PSEUDOLIFE_MCP_DATABASE_URL")?)?;
-    let field = |key: &str| {
-        fields
-            .get(key)
-            .map(String::as_str)
-            .filter(|s| !s.is_empty())
-    };
-    if field("service").is_some() || get("PGSERVICE").is_some() {
+    let field = |key: &str| fields.get(key).map(String::as_str);
+    if field("service")
+        .or_else(|| get("PGSERVICE"))
+        .is_some_and(|value| !value.is_empty())
+    {
         return None;
     }
     let host = field("host").or_else(|| get("PGHOST")).unwrap_or("");
@@ -179,6 +177,7 @@ pub(super) fn connection_details(
         .unwrap_or("");
     let port = field("port")
         .or_else(|| get("PGPORT"))
+        .filter(|value| !value.is_empty())
         .unwrap_or("5432")
         .parse::<u16>()
         .ok()?;
@@ -192,9 +191,13 @@ pub(super) fn connection_details(
             Some(name)
         }
     });
-    let user = field("user").or_else(|| get("PGUSER")).or(runtime_user)?;
+    let user = field("user")
+        .or_else(|| get("PGUSER"))
+        .filter(|value| !value.is_empty())
+        .or(runtime_user)?;
     let db = field("dbname")
         .or_else(|| get("PGDATABASE"))
+        .filter(|value| !value.is_empty())
         .unwrap_or(user);
     if port == 0
         || user.chars().chain(db.chars()).any(|c| c < ' ')
@@ -793,6 +796,59 @@ impl Update {
 #[cfg(test)]
 mod connection_tests {
     use super::*;
+
+    #[test]
+    fn explicit_empty_address_does_not_inherit_a_different_server() {
+        let (daemon, mut pg) = fixture(
+            "host=external-db hostaddr='' user=owner dbname=bank",
+            &["PGHOSTADDR=10.0.0.2"],
+        );
+        pg["NetworkSettings"]["Networks"]["bank"]["IPAddress"] = json!("10.0.0.2");
+        assert!(connection_details(&daemon, &pg).is_none());
+        let (daemon, pg) = fixture("host='' user=owner dbname=bank", &["PGHOST=pseudolife-pg"]);
+        assert!(connection_details(&daemon, &pg).is_none());
+    }
+
+    #[test]
+    fn explicit_empty_identity_fields_use_defaults_without_environment_fallback() {
+        for (dsn, env, user, db, port) in [
+            (
+                "host=pseudolife-pg user='' dbname=bank",
+                vec!["PGUSER=ambient"],
+                "runtime_user",
+                "bank",
+                5432,
+            ),
+            (
+                "host=pseudolife-pg user=owner dbname=''",
+                vec!["PGDATABASE=ambient"],
+                "owner",
+                "owner",
+                5432,
+            ),
+            (
+                "host=pseudolife-pg user=owner dbname=bank port=''",
+                vec!["PGPORT=6543"],
+                "owner",
+                "bank",
+                5432,
+            ),
+            (
+                "host=pseudolife-pg user=owner dbname=bank service=''",
+                vec!["PGSERVICE=opaque"],
+                "owner",
+                "bank",
+                5432,
+            ),
+        ] {
+            let (mut daemon, pg) = fixture(dsn, &env);
+            daemon["Config"]["User"] = json!("runtime_user");
+            assert_eq!(
+                connection_details(&daemon, &pg),
+                Some((user.into(), db.into(), port))
+            );
+        }
+    }
 
     fn fixture(dsn: &str, extra: &[&str]) -> (Value, Value) {
         let mut env = vec![format!("PSEUDOLIFE_MCP_DATABASE_URL={dsn}")];

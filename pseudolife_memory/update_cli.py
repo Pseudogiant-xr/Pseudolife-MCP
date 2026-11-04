@@ -1617,20 +1617,24 @@ def _backup_connection_values(daemon: dict, postgres: dict) -> tuple[str, str, i
     if not raw:
         raise ValueError("the daemon has no PostgreSQL database URL")
     parts = conninfo_to_dict(raw)
-    if parts.get("service") or env.get("PGSERVICE"):
+
+    def setting(key, variable):
+        return parts[key] if key in parts else env.get(variable)
+
+    if setting("service", "PGSERVICE"):
         raise UpdateError("cannot resolve the daemon's backup connection; replace PGSERVICE/service "
                           "with a direct PSEUDOLIFE_MCP_DATABASE_URL naming its PostgreSQL host, port, "
                           "user and database, then retry; nothing was deployed")
-    host = parts.get("host") or env.get("PGHOST", "")
-    address = parts.get("hostaddr") or env.get("PGHOSTADDR", "")
-    port = int(parts.get("port") or env.get("PGPORT") or "5432")
+    host = setting("host", "PGHOST") or ""
+    address = setting("hostaddr", "PGHOSTADDR") or ""
+    port = int(setting("port", "PGPORT") or "5432")
     runtime_user = daemon["Config"].get("User")
     if runtime_user is not None:
         runtime_user = runtime_user.split(":", 1)[0] or "root"
         if runtime_user.isdecimal():
             runtime_user = None  # A numeric UID does not identify its passwd name.
-    user = parts.get("user") or env.get("PGUSER") or runtime_user
-    database = parts.get("dbname") or env.get("PGDATABASE") or user
+    user = setting("user", "PGUSER") or runtime_user
+    database = setting("dbname", "PGDATABASE") or user
     if not user or not database or not 1 <= port <= 65535 or any(
         ord(c) < 32 for c in user + database
     ) or "," in host or "," in address:
