@@ -939,6 +939,25 @@ class Update:
         """
         self.warn("rollback-tag retention skipped: Python rollback tags have no verified project scope; all tags retained")
 
+    def _health_endpoint_hint(self) -> str:
+        """Offer a published local endpoint only after verification failed."""
+        code, out = run_cli([self.docker, "port", DAEMON_CONTAINER, "8765/tcp"], timeout=60)
+        urls = set()
+        for line in out.splitlines() if code == 0 else ():
+            host, _, port = line.strip().rpartition(":")
+            if not port.isascii() or not port.isdigit() or len(port) > 5 or not 0 < int(port) <= 65535:
+                continue
+            if host in ("127.0.0.1", "0.0.0.0"):
+                urls.add(f"http://127.0.0.1:{int(port)}")
+            elif host in ("[::1]", "[::]"):
+                urls.add(f"http://[::1]:{int(port)}")
+        if urls:
+            url = sorted(urls)[0]
+            return (f"Docker reports a daemon publication at {url} on the Docker host. "
+                    "If Docker runs on this machine and this is the intended daemon, "
+                    f"retry with --daemon-url {url}; otherwise check your proxy/custom endpoint.")
+        return "Check --daemon-url http(s)://<host>:<port> for the intended daemon or proxy endpoint."
+
     def wait_health(self, expect_version: str | None = None) -> dict:
         self.step("waiting for the daemon to report healthy...")
         health = None
@@ -950,7 +969,8 @@ class Update:
             if attempt < self.o.health_retries - 1:
                 sleep(self.o.health_delay_ms / 1000.0)
         if not health:
-            lines = ["daemon did not report healthy. Logs: docker logs " + DAEMON_CONTAINER, "to roll back:"] + self.rollback_lines
+            lines = ["daemon did not report healthy at the configured endpoint. Logs: docker logs " + DAEMON_CONTAINER,
+                     self._health_endpoint_hint(), "to roll back:"] + self.rollback_lines
             if self.rollback_lines:
                 lines += self._schema_rollback_note(None)
             raise UpdateError("\n".join(lines))
@@ -961,9 +981,10 @@ class Update:
             self.rollback_lines = self.rollback_lines + self._schema_rollback_note(after)
             self.report.rollback["restore_required"] = True
         if expect_version and health.get("version") != expect_version:
-            lines = [f"the daemon reports version {health.get('version')}, not the {expect_version} that was pulled: "
-                     f"the compose project's image setting won (check `docker compose config` for the daemon "
-                     f"service). The client side was not moved. To roll back:"] + self.rollback_lines
+            lines = [f"the configured endpoint reports version {health.get('version')}, not the {expect_version} that was pulled. "
+                     "The client side was not moved.", self._health_endpoint_hint(),
+                     "If the endpoint is correct, check `docker compose config` for the daemon service's image. "
+                     "To roll back:"] + self.rollback_lines
             raise UpdateError("\n".join(lines))
         if type(self.auth_before) is bool and (type(health.get("auth")) is not bool
                                                or health["auth"] != self.auth_before):

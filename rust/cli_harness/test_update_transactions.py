@@ -295,7 +295,7 @@ elif a[:2]==["image","inspect"]:
  elif a[-1] in s["images"]: out=s["images"][a[-1]]
  else: code=1
 elif a[:2]==["image","ls"]: out="\n".join(s["images"]) if s.get("list_images") else ""
-elif a[:1]==["port"]:out="127.0.0.1:5433"
+elif a[:1]==["port"]:out="127.0.0.1:9876" if a[-1]=="8765/tcp" else "127.0.0.1:5433"
 elif a[:2]==["volume","inspect"]:
  if s.get("volume_inspect_failure"):code=1
  else:out=json.dumps(s.get("volume_inspections",{}).get(a[-1],[]))
@@ -840,6 +840,9 @@ def test_release_fault_chronology_and_no_client_movement(tmp_path, native, failu
         observed = stages(json.loads(state_path.read_text()))
         assert observed == (["pull"] if failure == "pull" else ["pull", "backup"] if failure == "backup" else ["pull", "backup", "tag", "up"])
         assert report["clients"] is None
+        if failure in ("health", "version"):
+            assert "--daemon-url http://127.0.0.1:9876" in result.stdout
+            assert "image setting won" not in result.stdout
         if failure not in ("pull", "backup"):
             assert report["rollback"]["state"] == "tagged"
 
