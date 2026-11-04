@@ -106,7 +106,7 @@ def test_busy_port_is_a_refusal_not_a_warning(guard, port):
 
 def test_our_managed_install_and_its_own_bound_port_are_allowed(guard):
     module, env, containers, volumes, busy, _ = guard
-    env.write_text(f"{BEGIN}\n# extractor: sidecar\n{END}\nPOSTGRES_PASSWORD=fixture-password\n")
+    env.write_text(f"{BEGIN}\n# extractor: sidecar\n{END}\nPOSTGRES_PASSWORD=fixture-password\n", encoding="utf-8")
     volumes.extend(["pseudolife-mcp-bank", "pseudolife-mcp-state"])
     containers.append(container())
     busy.add(8765)
@@ -152,7 +152,7 @@ def test_preflight_precedes_every_local_mutation(script):
 
 def test_changed_postgres_password_refuses_before_writing_anything(guard):
     module, env, containers, _, _, _ = guard
-    env.write_text("POSTGRES_PASSWORD=different-fixture-password\n")
+    env.write_text("POSTGRES_PASSWORD=different-fixture-password\n", encoding="utf-8")
     containers.append(container("postgres"))
     with pytest.raises(module.Refusal, match="Restore POSTGRES_PASSWORD") as error:
         module.check(env)
@@ -164,7 +164,7 @@ def test_changed_postgres_password_refuses_before_writing_anything(guard):
 def test_compose_resolved_password_allows_a_legitimate_rerun(guard, monkeypatch, quoted, password):
     module, env, containers, _, _, _ = guard
     monkeypatch.setenv("SAMPLE_PART", "resolved")
-    env.write_text(f"POSTGRES_PASSWORD={quoted}\n")
+    env.write_text(f"POSTGRES_PASSWORD={quoted}\n", encoding="utf-8")
     containers.append(container("postgres", password=password))
     module.check(env)
 
@@ -172,7 +172,7 @@ def test_compose_resolved_password_allows_a_legitimate_rerun(guard, monkeypatch,
 def test_literal_container_password_does_not_mask_compose_interpolation(guard, monkeypatch):
     module, env, containers, _, _, _ = guard
     monkeypatch.setenv("SAMPLE_PART", "resolved")
-    env.write_text("POSTGRES_PASSWORD=fixture$SAMPLE_PART\n")
+    env.write_text("POSTGRES_PASSWORD=fixture$SAMPLE_PART\n", encoding="utf-8")
     containers.append(container("postgres", password="fixture$SAMPLE_PART"))
     with pytest.raises(module.Refusal, match="Restore POSTGRES_PASSWORD"):
         module.check(env)
@@ -180,7 +180,7 @@ def test_literal_container_password_does_not_mask_compose_interpolation(guard, m
 
 def test_valid_rotated_password_is_not_compared_to_container_initialization(guard):
     module, env, containers, _, _, calls = guard
-    env.write_text("POSTGRES_PASSWORD=rotated-fixture\n")
+    env.write_text("POSTGRES_PASSWORD=rotated-fixture\n", encoding="utf-8")
     c = container("postgres", password="old-fixture")
     c["_fixture_actual_password"] = "rotated-fixture"
     containers.append(c)
@@ -192,7 +192,7 @@ def test_valid_rotated_password_is_not_compared_to_container_initialization(guar
 
 def test_resolved_volume_names_are_the_only_values_printed(guard, monkeypatch, capsys):
     module, env, _, _, _, _ = guard
-    env.write_text('PSEUDOLIFE_BANK_VOLUME="custom-bank"\nPSEUDOLIFE_STATE_VOLUME=${STATE_NAME}\nPOSTGRES_PASSWORD=fixture-private\n')
+    env.write_text('PSEUDOLIFE_BANK_VOLUME="custom-bank"\nPSEUDOLIFE_STATE_VOLUME=${STATE_NAME}\nPOSTGRES_PASSWORD=fixture-private\n', encoding="utf-8")
     monkeypatch.setenv("STATE_NAME", "custom-state")
     monkeypatch.setattr(sys, "argv", ["preflight.py", "--env-file", str(env), "--volume-names"])
     assert module.main() == 0
@@ -241,7 +241,7 @@ def test_ipv6_only_listener_does_not_block_ipv4_compose_publication(guard, monke
 
 def test_recorded_volume_attached_to_a_foreign_container_is_not_ours(guard):
     module, env, containers, volumes, _, _ = guard
-    env.write_text("PSEUDOLIFE_BANK_VOLUME=custom-bank\n")
+    env.write_text("PSEUDOLIFE_BANK_VOLUME=custom-bank\n", encoding="utf-8")
     volumes.append("custom-bank")
     c = container(project="user-stack", volume="custom-bank")
     c["Name"] = "/user-bank"
