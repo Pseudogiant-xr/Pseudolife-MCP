@@ -68,6 +68,13 @@ TARGET_DOTENV = (f"POSTGRES_PASSWORD={TARGET_PG_PASSWORD}\r\n"
                  f"PSEUDOLIFE_MCP_TOKEN={TARGET_OLD_TOKEN}\r\n"
                  "TZ=UTC\r\n")
 
+
+def compose_labels(service, *, project="pseudolife-mcp", checkout="/root/src/Pseudolife-MCP", overlays=()):
+    return {"com.docker.compose.project": project,
+            "com.docker.compose.service": service,
+            "com.docker.compose.project.config_files": ",".join(
+                [f"{checkout}/ops/docker-compose.yml", *overlays])}
+
 DUMP = (
     "-- PostgreSQL database dump\n"
     "COPY public.entries (id, text) FROM stdin;\n1\tone\n2\ttwo\n\\.\n"
@@ -199,6 +206,8 @@ class World:
         self.target_respawns = target_respawns     # a remote update.sh that keeps going brings it back
         self.restore_fails_after_drop = restore_fails_after_drop
         self.target_live_env = list(TARGET_ENV)
+        self.target_labels = compose_labels("pseudolife-daemon")
+        self.postgres_labels = compose_labels("pseudolife-pg")
         self.overlap = False   # ever a running target beside a running source on the moved bank
 
     # -- helpers ---------------------------------------------------------
@@ -332,9 +341,21 @@ class World:
                 return 0, "".join(f"{hit}\n" for hit in self.grep_hits).encode(), b""
             return 1, b"", b""
         if cmd.startswith("docker inspect --type container pseudolife-mcp-daemon"):
-            return 0, json.dumps([{"Config": {"Env": self.target_live_env, "Image": "pseudolife-daemon:0.15.0"},
+            return 0, json.dumps([{"Config": {"Env": self.target_live_env, "Image": "pseudolife-daemon:0.15.0",
+                                              "Labels": self.target_labels},
                                    "State": {"Running": self.target_running},
                                    "HostConfig": {"RestartPolicy": _policy(self.target_policy)}}]).encode(), b""
+        if cmd == "docker inspect --type container pseudolife-mcp-postgres":
+            return 0, json.dumps([{"Config": {"Labels": self.postgres_labels},
+                                   "State": {"Running": self.target_pg_running == "true"}}]).encode(), b""
+        if cmd.startswith("python3 -c") and "realpath" in cmd:
+            import posixpath
+            # The target's home and paths are POSIX, even in a Windows test run.
+            expected = posixpath.normpath(self.requested_checkout.replace("~/", "/root/", 1)
+                                          + "/ops/docker-compose.yml")
+            paths = json.loads(stdin)
+            return 0, json.dumps([expected in [posixpath.normpath(p) for p in group]
+                                  for group in paths]).encode(), b""
         if cmd.startswith("docker inspect -f") and cmd.endswith("pseudolife-mcp-daemon"):
             return 0, (b"true\n" if self.target_running else b"false\n"), b""
         if cmd.startswith("docker inspect -f"):
@@ -485,7 +506,8 @@ SCHEDULE = {"where": "unit", "time": "03:30", "url": LOCAL}
 
 
 def mover(world, tmp_path, *, schedule=SCHEDULE, interactive=False, answer=True, platform="linux", **options):
-    opts = move_cli.Options(target=TARGET, checkout=CHECKOUT, yes=options.pop("yes", True),
+    world.requested_checkout = options.pop("checkout", CHECKOUT)
+    opts = move_cli.Options(target=TARGET, checkout=world.requested_checkout, yes=options.pop("yes", True),
                             health_delay=2.0, **options)
     return move_cli.Mover(opts, FakeRunner(world), detect_schedule=lambda: schedule,
                           interactive=lambda: interactive, ask=lambda question: answer,
@@ -702,6 +724,34 @@ def test_no_token_or_password_ever_appears_in_a_command_line(tmp_path, capsys):
 
 
 # ── preflight: refused, nothing changed ──────────────────────────────────────
+
+@pytest.mark.parametrize("container", ["target_labels", "postgres_labels"])
+@pytest.mark.parametrize("labels", [
+    {},
+    compose_labels("pseudolife-daemon", project="foreign-stack"),
+    compose_labels("pseudolife-daemon", checkout="/root/another-clone"),
+])
+def test_target_stack_ownership_is_checked_before_any_change(tmp_path, capsys, container, labels):
+    world = World()
+    setattr(world, container, labels)
+    assert run_move(world, tmp_path, as_json=True) == 4
+    error = json.loads(capsys.readouterr().out)["error"]
+    assert "--target-checkout" in error
+    assert "PSEUDOLIFE_BANK_VOLUME" in error and "PSEUDOLIFE_STATE_VOLUME" in error
+    assert mutating_calls(world) == []
+    assert not world.target_restored and world.source_running
+
+
+@pytest.mark.parametrize("overlay", ["docker-compose.ghcr.yml", "docker-compose.rust-shadow.yml",
+                                   "docker-compose.rust-engine.yml", "docker-compose.override.yml"])
+def test_own_checkout_stack_accepts_overlays_and_nondefault_checkout(tmp_path, overlay):
+    world = World(dotenv=TARGET_DOTENV + "PSEUDOLIFE_BANK_VOLUME=ops_pseudolife_pgdata\n"
+                  "PSEUDOLIFE_STATE_VOLUME=ops_pseudolife_data\n")
+    checkout = "/srv/bank"
+    world.target_labels = compose_labels("pseudolife-daemon", checkout=checkout,
+                                         overlays=(f"{checkout}/ops/{overlay}",))
+    world.postgres_labels = compose_labels("pseudolife-pg", checkout=checkout)
+    assert run_move(world, tmp_path, checkout=checkout) == 0
 
 PREFLIGHT_CASES = {
     "source_unhealthy": ({"source_healthy": False}, "/health"),

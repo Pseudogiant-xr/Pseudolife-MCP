@@ -709,6 +709,7 @@ class Mover:
         if target is None:
             raise self.refuse(f"the target has no {DAEMON} container ({result.why(out=False)}): run the "
                               f"installer there first ({INSTALL_LINE})")
+        self.check_target_stack(target)
         self.target_image = str((target.get("Config") or {}).get("Image") or "")
         self.target_policy = _restart_policy(target)
         target_env = _env_of(target)
@@ -749,6 +750,41 @@ class Mover:
                                "needs_expose": self.needs_expose, "database": self.target_db,
                                "restart_policy": self.target_policy,
                                "unattended_update": self.target_timer_enabled}
+
+    def check_target_stack(self, daemon: dict) -> None:
+        """The checkout used by restore/update must own both containers.
+
+        Container names alone also match a stack manager's unrelated stack,
+        or another checkout of the same compose project. Resolve paths on
+        the target so a symlink to the owning checkout is legitimate.
+        Overlays and explicit volume names do not change ownership.
+        """
+        result = self.ssh(f"docker inspect --type container {POSTGRES}", timeout=60)
+        postgres = _container(result.text) if result.ok else None
+        labels = [(c.get("Config") or {}).get("Labels") or {} for c in (daemon, postgres or {})]
+        fix = ("Retry with --target-checkout pointing to the checkout that owns both containers. "
+               "For a stack managed elsewhere, first back up that bank, stop its stack without removing "
+               "volumes, then install a fresh target with distinct PSEUDOLIFE_BANK_VOLUME and "
+               "PSEUDOLIFE_STATE_VOLUME names; retry move --dry-run")
+        for name, service, label in zip((DAEMON, POSTGRES), ("pseudolife-daemon", "pseudolife-pg"), labels):
+            if (label.get("com.docker.compose.project") != "pseudolife-mcp"
+                    or label.get("com.docker.compose.service") != service):
+                raise self.refuse(f"the target's {name} is not owned by this checkout's pseudolife-mcp "
+                                  f"compose stack. {fix}")
+        paths = [str(label.get("com.docker.compose.project.config_files") or "").split(",") for label in labels]
+        script = ("import json,os,sys; "
+                  "expected=os.path.realpath(os.path.join(os.path.expanduser(sys.argv[1]),'ops/docker-compose.yml')); "
+                  "print(json.dumps([expected in [os.path.realpath(p) for p in group if p] "
+                  "for group in json.load(sys.stdin)]))")
+        result = self.ssh(f"python3 -c {shlex.quote(script)} {shlex.quote(self.checkout)}",
+                          stdin=json.dumps(paths).encode(), timeout=60)
+        try:
+            managed = json.loads(result.text) if result.ok else None
+        except ValueError:
+            managed = None
+        if managed != [True, True]:
+            raise self.refuse(f"the target's running compose stack does not use "
+                              f"{self.checkout}/ops/docker-compose.yml for both containers. {fix}")
 
     def check_postgres_versions(self) -> None:
         """A plain-format dump restores into the same or a newer PostgreSQL
