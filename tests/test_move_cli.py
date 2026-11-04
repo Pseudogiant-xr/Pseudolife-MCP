@@ -726,18 +726,25 @@ def test_no_token_or_password_ever_appears_in_a_command_line(tmp_path, capsys):
 # ── preflight: refused, nothing changed ──────────────────────────────────────
 
 @pytest.mark.parametrize("container", ["target_labels", "postgres_labels"])
-@pytest.mark.parametrize("labels", [
-    {},
-    compose_labels("pseudolife-daemon", project="foreign-stack"),
-    compose_labels("pseudolife-daemon", checkout="/root/another-clone"),
-])
-def test_target_stack_ownership_is_checked_before_any_change(tmp_path, capsys, container, labels):
+@pytest.mark.parametrize("mismatch", ["missing", "project", "service", "checkout"])
+def test_target_stack_ownership_is_checked_before_any_change(tmp_path, capsys, container, mismatch):
     world = World()
+    service = "pseudolife-daemon" if container == "target_labels" else "pseudolife-pg"
+    labels = compose_labels(service)
+    if mismatch == "missing":
+        labels = {}
+    elif mismatch == "project":
+        labels["com.docker.compose.project"] = "foreign-stack"
+    elif mismatch == "service":
+        labels["com.docker.compose.service"] = "unrelated-service"
+    else:
+        labels = compose_labels(service, checkout="/root/another-clone")
     setattr(world, container, labels)
     assert run_move(world, tmp_path, as_json=True) == 4
     error = json.loads(capsys.readouterr().out)["error"]
     assert "--target-checkout" in error
     assert "PSEUDOLIFE_BANK_VOLUME" in error and "PSEUDOLIFE_STATE_VOLUME" in error
+    assert "remove its containers" in error and "retain its volumes" in error
     assert mutating_calls(world) == []
     assert not world.target_restored and world.source_running
 

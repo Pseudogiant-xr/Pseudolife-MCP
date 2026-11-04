@@ -763,8 +763,9 @@ class Mover:
         postgres = _container(result.text) if result.ok else None
         labels = [(c.get("Config") or {}).get("Labels") or {} for c in (daemon, postgres or {})]
         fix = ("Retry with --target-checkout pointing to the checkout that owns both containers. "
-               "For a stack managed elsewhere, first back up that bank, stop its stack without removing "
-               "volumes, then install a fresh target with distinct PSEUDOLIFE_BANK_VOLUME and "
+               "For a stack managed elsewhere, first back up that bank, use its stack manager to "
+               "remove its containers and retain its volumes (docker compose down without -v), "
+               "then install a fresh target with distinct PSEUDOLIFE_BANK_VOLUME and "
                "PSEUDOLIFE_STATE_VOLUME names; retry move --dry-run")
         for name, service, label in zip((DAEMON, POSTGRES), ("pseudolife-daemon", "pseudolife-pg"), labels):
             if (label.get("com.docker.compose.project") != "pseudolife-mcp"
