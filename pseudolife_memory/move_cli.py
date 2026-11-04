@@ -606,7 +606,10 @@ def _meta_fingerprint(value: str) -> str | None:
     return hashlib.sha256(identity.encode("utf-8")).hexdigest()[:16] if isinstance(identity, str) else None
 
 
-def _schema_version(source: str) -> int | None:
+def _schema_version(source: str, *, rust: bool = False) -> int | None:
+    if rust:
+        match = re.search(r"^pub const SCHEMA_META_VERSION: i64 = ([1-9][0-9]*);[ \t]*\r?$", source, re.M)
+        return int(match[1]) if match else None
     try:
         tree = ast.parse(source)
         for node in tree.body:
@@ -1196,13 +1199,17 @@ class Mover:
                 image = self.target_container.get("Image") or self.target_image
                 schema = record.get("target_schema") if record.get("target_image") == image else None
                 if type(schema) is not int:
-                    result = self.ssh(f"docker cp {DAEMON}:/app/pseudolife_memory/storage/schema.py -", timeout=60)
-                    try:
-                        with tarfile.open(fileobj=io.BytesIO(result.out), mode="r:*") as archive:
-                            files = [m for m in archive if m.isfile()]
-                            schema = _schema_version(archive.extractfile(files[0]).read().decode("utf-8")) if result.ok and len(files) == 1 else None
-                    except (OSError, ValueError, UnicodeError, tarfile.TarError):
-                        schema = None
+                    for path, rust in [("/app/pseudolife_memory/storage/schema.py", False),
+                                       ("/app/pseudolife-schema.rs", True)]:
+                        result = self.ssh(f"docker cp {DAEMON}:{path} -", timeout=60)
+                        try:
+                            with tarfile.open(fileobj=io.BytesIO(result.out), mode="r:*") as archive:
+                                files = [m for m in archive if m.isfile()]
+                                schema = _schema_version(archive.extractfile(files[0]).read().decode("utf-8"), rust=rust) if result.ok and len(files) == 1 else None
+                        except (OSError, ValueError, UnicodeError, tarfile.TarError):
+                            schema = None
+                        if type(schema) is int:
+                            break
         if type(schema) is not int or schema < self.source_schema:
             raise refuse(f"the target deployment schema ({schema}) is unreadable or older than the source's "
                          f"({self.source_schema}): update the target checkout/image to a compatible version "
@@ -2147,10 +2154,20 @@ class Mover:
                                      "moved_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())},
                                     indent=2) + "\n", encoding="utf-8")
         self.mark(moved_written=True)
-        result = self.local([self.docker, "cp", str(moved), f"{DAEMON}:{MOVED}"], timeout=120)
-        if not result.ok:
-            raise MoveError(f"could not write {MOVED} into the stopped source container ({result.why()})")
-        self.mark(committed=True)
+        # A successful copy confirms the commit. Defer signals until that
+        # result and its in-memory/durable flags agree; rollback is still
+        # safe if the copy fails, but must never undo a confirmed move.
+        pending = []
+        previous = self._set_signals(lambda signum, _frame: pending.append(signum))
+        try:
+            result = self.local([self.docker, "cp", str(moved), f"{DAEMON}:{MOVED}"], timeout=120)
+            if not result.ok:
+                raise MoveError(f"could not write {MOVED} into the stopped source container ({result.why()})")
+            self.mark(committed=True)
+        finally:
+            self._restore_signals(previous)
+        if pending:
+            self._handle_kill(pending[0], None)
         # The commit point: the target serves the bank and both checks
         # passed, and the source now refuses to start. Nothing after this
         # line rolls back (finish_target).

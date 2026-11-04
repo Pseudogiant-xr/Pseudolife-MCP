@@ -174,6 +174,7 @@ class World:
         self.checkout_schema = 52
         self.checkout_head = "c" * 40
         self.checkout_dirty = False
+        self.rust_image = False
         self.target_ready = True
         self.target_readiness_delay = 0.0
         self.source_healthy = source_healthy
@@ -368,7 +369,11 @@ class World:
             if " show " in cmd and cmd.endswith(":pseudolife_memory/storage/schema.py"):
                 return 0, f"SCHEMA_META_VERSION = {self.checkout_schema}\n".encode(), b""
         if cmd == "docker cp pseudolife-mcp-daemon:/app/pseudolife_memory/storage/schema.py -":
+            if self.rust_image:
+                return 1, b"", b"no Python source in Rust image"
             return 0, _tar({"schema.py": f"SCHEMA_META_VERSION = {self.target_schema}\n".encode()}), b""
+        if cmd == "docker cp pseudolife-mcp-daemon:/app/pseudolife-schema.rs -" and self.rust_image:
+            return 0, _tar({"pseudolife-schema.rs": f"pub const SCHEMA_META_VERSION: i64 = {self.target_schema};\n".encode()}), b""
         if "target-original-state.tgz.part" in cmd:
             self.files.setdefault(shlex.split(cmd)[-1], _tar({k.removeprefix("/data/"): v
                                                               for k, v in self.data_files.items()}))
@@ -2201,6 +2206,24 @@ def test_release_resume_checks_a_changed_images_schema(tmp_path):
     assert mutating_calls(world) == []
 
 
+def test_release_resume_supports_a_compatible_changed_rust_image(tmp_path):
+    world = World(checkout=False, fail=(lambda c: c.remote == "docker start pseudolife-mcp-daemon",))
+    world.release_cli = True
+    assert run_move(world, tmp_path, keep_tokens=False) == 1
+    world.fail = ()
+    world.target_image = "local-rust-image:compatible-schema"
+    world.target_schema = 59
+    world.rust_image = True
+    assert run_move(world, tmp_path, keep_tokens=False, resume=True) == 0
+
+
+def test_rust_image_ships_the_schema_constant_compiled_into_its_daemon():
+    root = Path(__file__).resolve().parents[1]
+    assert "COPY rust/daemon/src/storage/schema_meta.rs /app/pseudolife-schema.rs" in (root / "ops/Dockerfile.daemon-rust").read_text()
+    version = (root / "rust/daemon/src/storage/schema_meta.rs").read_text()
+    assert move_cli._schema_version(version, rust=True) == move_cli._schema_version((root / "pseudolife_memory/storage/schema.py").read_text())
+
+
 @pytest.mark.parametrize("value, expected", [("59", 59), ("True", None), ("None", None), ("unknown()", None)])
 def test_schema_probe_reads_literals_without_executing_target_code(value, expected):
     assert move_cli._schema_version("SCHEMA_META_VERSION = " + value) == expected
@@ -2241,6 +2264,24 @@ def test_signal_after_confirmed_moved_marker_never_rolls_back_the_commit(tmp_pat
     assert move.run() == 5
     assert world.target_running and world.fenced and world.moved and not world.source_running
     assert move.data["rollback"] == []
+
+
+@pytest.mark.parametrize("sig", [signal.SIGTERM, signal.SIGINT])
+def test_signal_between_confirmed_marker_and_commit_record_is_deferred(tmp_path, sig):
+    world = World()
+    move = mover(world, tmp_path)
+    mark = move.mark
+
+    def interrupted(**flags):
+        if flags.get("committed"):
+            signal.getsignal(sig)(sig, None)
+        mark(**flags)
+
+    move.mark = interrupted
+    assert move.run() == 5
+    assert world.target_running and world.fenced and world.moved and not world.source_running
+    assert move.data["rollback"] == []
+    assert json.loads((move.local_dir / "record.json").read_text())["committed"]
 
 @pytest.mark.parametrize("text, expected", [
     (json.dumps({"exposed": True, "url": TARGET_URL}), ("exposed", TARGET_URL)),

@@ -332,8 +332,8 @@
       "lock-resolve": "83bcc6b654896c6d",
       "test": "ac414107d3d9c71d",
       "test-lite-linux": "44e2a8f2c01baeab",
-      "test-lite-windows": "22c2566a848419ff",
-      "test-lite-macos": "5ced77a48cb6e58f",
+      "test-lite-windows": "03dc6fca4e795860",
+      "test-lite-macos": "a7539d45a566d5f6",
       "frontend": "b1b6a1a1278f2e60"
     },
     "accepted": [
@@ -456,6 +456,16 @@
         "job": "test-lite-macos",
         "fingerprint": "5ced77a48cb6e58f",
         "reason": "Adds four mocked move signal-boundary cases without process or network effects; they take less than one second locally and retain the measured macOS lane cost."
+      },
+      {
+        "job": "test-lite-windows",
+        "fingerprint": "03dc6fca4e795860",
+        "reason": "Adds two mocked signal callbacks at the confirmed move marker; the five new signal cases spawn no child processes and finish in under one second, retaining the measured lane cost."
+      },
+      {
+        "job": "test-lite-macos",
+        "fingerprint": "a7539d45a566d5f6",
+        "reason": "Adds two mocked signal callbacks at the confirmed move marker to the four selected boundary cases; six cases finish in under one second without external effects, retaining the measured lane cost."
       }
     ]
   }
