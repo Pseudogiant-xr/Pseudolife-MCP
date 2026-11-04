@@ -701,6 +701,17 @@ fn ask(question: &str) -> bool {
 }
 
 pub(crate) fn run(arguments: Vec<OsString>) -> u8 {
+    if arguments == [OsString::from("--checkout-handover-capability")]
+        || (arguments.len() == 3
+            && arguments[0] == "--checkout"
+            && arguments[2] == "--checkout-handover-capability")
+    {
+        return if output("pseudolife-mcp checkout-handover-v1\n", false).is_ok() {
+            0
+        } else {
+            120
+        };
+    }
     // Wrapper capability probe: exact, read-only and absent from deferred CLIs.
     if arguments == [OsString::from("--native-capability")] {
         return if output("pseudolife-mcp native-update-v1\n", false).is_ok() {

@@ -220,8 +220,16 @@ class EngineUpdate:
             raise up.UpdateError("cannot inspect the project's running daemon; start it and retry", 2) from exc
 
     def sql(self, query):
-        code, out = self.command(["exec", self.pg, "psql", "-X", "-v", "ON_ERROR_STOP=1", "-U", self.pg_user,
-                                  "-d", self.pg_db, "-Atc", query], timeout=60)
+        prefix = ["exec", self.pg]
+        database = self.pg_db
+        if getattr(self, "stopped_handover", False):
+            from psycopg.conninfo import make_conninfo
+            prefix += ["env", "-u", "PGHOSTADDR", "-u", "PGSERVICE", "-u", "PGSERVICEFILE"]
+            database = make_conninfo(dbname=database)
+        client = ["psql", "-X", "-v", "ON_ERROR_STOP=1"]
+        if getattr(self, "stopped_handover", False):
+            client += ["-h", "/var/run/postgresql", "-p", "5432"]
+        code, out = self.command([*prefix, *client, "-U", self.pg_user, "-d", database, "-Atc", query], timeout=60)
         if code:
             raise up.UpdateError("cannot check the bank schema; start the project's PostgreSQL and retry; nothing was changed", 2)
         return out.strip()
@@ -258,6 +266,13 @@ class EngineUpdate:
         up.verify_compose_bearers(daemon_env, running_env, allow_change=self.o.allow_auth_change)
         if running_env.get("PSEUDOLIFE_MCP_DATABASE_URL") != daemon_env.get("PSEUDOLIFE_MCP_DATABASE_URL"):
             raise up.UpdateError("the host Compose configuration names a different bank from the running daemon; restore its original env file before switching; nothing was changed", 2)
+        if self.stopped_handover:
+            pg = self.inspect(self.pg)
+            try:
+                self.pg_user, self.pg_db = up._backup_connection_parts(self.running, pg)
+            except (ValueError, KeyError, TypeError, up.UpdateError) as exc:
+                raise up.UpdateError("cannot verify the handover bank on the project's shared PostgreSQL network; "
+                                     "restore the daemon's original direct database connection and retry; nothing was deployed", 2) from exc
         data_mount = next((v for v in config["services"][up.DAEMON_SERVICE].get("volumes", []) if v.get("target") == "/data"), None)
         actual_mount = next((v for v in self.running.get("Mounts", []) if v.get("Destination") == "/data"), None)
         expected_volume = (config.get("volumes", {}).get(data_mount.get("source"), {}).get("name")
@@ -337,18 +352,13 @@ class EngineUpdate:
         return token
 
     def stopped_preflight(self):
-        from psycopg.conninfo import conninfo_to_dict
         config = self.config(self.base)
         pg = self.inspect(self.pg)
         try:
-            source = conninfo_to_dict(config["services"][up.DAEMON_SERVICE]["environment"]["PSEUDOLIFE_MCP_DATABASE_URL"])
-            aliases = {"pseudolife-pg", self.pg, (pg.get("Name") or "").lstrip("/")}
-            for network in (pg.get("NetworkSettings", {}).get("Networks") or {}).values():
-                aliases.update(network.get("Aliases") or [])
-            if (not pg.get("State", {}).get("Running") or source.get("host") not in aliases
-                    or source.get("hostaddr") or source.get("service")
-                    or source.get("user") != self.pg_user or source.get("dbname") != self.pg_db
-                    or source.get("port", "5432") != "5432"):
+            running_env = dict(value.split("=", 1) for value in self.running["Config"]["Env"])
+            if (not pg.get("State", {}).get("Running")
+                    or config["services"][up.DAEMON_SERVICE]["environment"].get("PSEUDOLIFE_MCP_DATABASE_URL") != running_env.get("PSEUDOLIFE_MCP_DATABASE_URL")
+                    or up._backup_connection_parts(self.running, pg) != (self.pg_user, self.pg_db)):
                 raise ValueError("bank")
         except Exception:
             # Driver errors may include the credential-bearing connection URL.

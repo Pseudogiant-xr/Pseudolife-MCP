@@ -26,7 +26,7 @@ fn connection_fix(daemon: &Value) -> String {
     CONNECTION_FIX.into()
 }
 
-fn connection_parts(daemon: &Value, postgres: &Value) -> Option<(String, String)> {
+pub(super) fn connection_parts(daemon: &Value, postgres: &Value) -> Option<(String, String)> {
     let mut env = BTreeMap::new();
     for item in daemon["Config"]["Env"].as_array()? {
         let (key, value) = item.as_str()?.split_once('=')?;

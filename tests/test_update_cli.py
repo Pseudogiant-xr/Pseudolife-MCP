@@ -1058,6 +1058,7 @@ def test_a_different_compose_bearer_refuses_before_any_deploy_work(world, client
                                                                  monkeypatch, capsys, checkout, source):
     if checkout:
         root, _ = _checkout(world, tmp_path)
+        original_env = (root / "ops/.env").read_bytes()
         argv = ["--checkout", str(root), "--no-cache-prune"]
     else:
         _project(world, tmp_path)
@@ -1087,7 +1088,7 @@ def test_a_different_compose_bearer_refuses_before_any_deploy_work(world, client
                    for c in world.docker_calls())
     assert clients == []
     if checkout:
-        assert not (root / "ops" / ".env").exists()
+        assert (root / "ops/.env").read_bytes() == original_env
 
 
 @pytest.mark.parametrize("configured,running", [
@@ -1189,8 +1190,12 @@ def test_explicit_auth_transfer_still_refuses_a_wholly_invalid_map():
                                   {"PSEUDOLIFE_MCP_TOKEN": "fixture-original"}, allow_change=True)
 
 
-def test_checkout_recreation_uses_the_credential_source_that_passed_preflight(world, clients, tmp_path, monkeypatch):
+@pytest.mark.parametrize("installed", [False, True])
+def test_checkout_recreation_uses_the_credential_source_that_passed_preflight(world, clients, tmp_path, monkeypatch, installed):
     root, _ = _checkout(world, tmp_path)
+    original_env = (root / "ops/.env").read_bytes()
+    if not installed:
+        (root / "ops/.env").unlink()
     credentials = tmp_path / "daemon.env"
     credentials.write_text("PSEUDOLIFE_MCP_TOKEN=fixture-daemon\n", encoding="utf-8")
     monkeypatch.setenv("COMPOSE_ENV_FILES", str(credentials))
@@ -1208,10 +1213,15 @@ def test_checkout_recreation_uses_the_credential_source_that_passed_preflight(wo
         return original(argv, **kw)
 
     monkeypatch.setattr(up, "run_cli", metadata)
-    assert _run(["--checkout", str(root), "--no-backup", "--no-cache-prune"]) == 0
+    result = _run(["--checkout", str(root), "--no-backup", "--no-cache-prune"])
+    if not installed:
+        assert result == 2 and not checked and _compose_call(world) == (None, None)
+        assert not (root / "ops/.env").exists()
+        return
+    assert result == 0
     recreated, environment = _compose_call(world)
     assert checked == [(recreated[2:recreated.index("up")], environment)]
-    assert not (root / "ops/.env").exists()
+    assert (root / "ops/.env").read_bytes() == original_env
 
 
 @pytest.mark.parametrize("file_keys,cleared", [

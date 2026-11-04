@@ -1216,6 +1216,14 @@ def test_checkout_handover_rejects_ambiguous_authority_before_discovery(engine_h
     assert not s["calls"]
 
 
+@pytest.mark.parametrize("checkout", [False, True])
+def test_checkout_handover_capability_is_exact_and_read_only(monkeypatch, capsys, checkout, tmp_path):
+    monkeypatch.setattr(up.Update, "detect_tier", lambda _: pytest.fail("capability probe must not inspect Docker"))
+    args = ["--checkout", str(tmp_path)] if checkout else []
+    assert up.main([*args, "--checkout-handover-capability"]) == 0
+    assert capsys.readouterr().out == "pseudolife-mcp checkout-handover-v1\n"
+
+
 def _stopped_handover(s, monkeypatch, *, engine="python", stored=False):
     """Track the stopped-backup dependency through the existing Docker seam."""
     from contextlib import contextmanager
@@ -1224,6 +1232,7 @@ def _stopped_handover(s, monkeypatch, *, engine="python", stored=False):
     from pseudolife_memory import update_engine as eng
     from pseudolife_memory.principals import secret_sha256
     s["running"]["State"]["Running"] = False
+    s["running"]["NetworkSettings"] = {"Networks": {"handover": {}}}
     s["running"]["Config"]["Env"].append("PSEUDOLIFE_MCP_DATABASE_URL=postgresql://fixture:fixture@pseudolife-pg:5432/fixture")
     s["config"]["services"][up.DAEMON_SERVICE]["environment"].update(
         PSEUDOLIFE_MCP_TOKEN="" if stored else "fixture-carried",
@@ -1250,7 +1259,9 @@ def _stopped_handover(s, monkeypatch, *, engine="python", stored=False):
             return 0, s["running"]["Image"]
         if list(argv)[1:2] == ["inspect"] and argv[-1] == "fixture-pg":
             s["calls"].append(list(argv))
-            return 0, json.dumps([{"State": {"Running": True}}])
+            return 0, json.dumps([{"State": {"Running": True}, "Name": "/fixture-pg",
+                                  "Config": {"Env": ["POSTGRES_USER=initial", "POSTGRES_DB=initial"]},
+                                  "NetworkSettings": {"Networks": {"handover": {"Aliases": ["pseudolife-pg"]}}}}])
         if "psql" in argv and "token_hash" in argv[-1]:
             s["calls"].append(list(argv))
             return 0, secret_sha256("fixture-stored")
@@ -1316,6 +1327,33 @@ def test_stopped_checkout_handover_backs_up_exact_image_and_retains_selection(en
     assert selected["labels"][eng.ENGINE_LABEL] == engine
     assert any(call[1:2] == ["rm"] and call[-1] == "owned-helper" for call in calls)
     assert not any(call[1:3] == ["exec", "fixture-daemon"] for call in calls)
+
+
+def test_stopped_checkout_handover_uses_runtime_bank_not_cluster_initialization(engine_host, monkeypatch):
+    from psycopg.conninfo import conninfo_to_dict
+    from pseudolife_memory import update_engine as eng
+    s = engine_host
+    update, _, _ = _stopped_handover(s, monkeypatch)
+    uri = "postgresql://actual_role:fixture@pseudolife-pg:5432/actual_bank"
+    s["running"]["Config"]["Env"][-1] = "PSEUDOLIFE_MCP_DATABASE_URL=" + uri
+    s["config"]["services"][up.DAEMON_SERVICE]["environment"]["PSEUDOLIFE_MCP_DATABASE_URL"] = uri
+    update._selected_engine = "python"
+    eng.deploy_engine(update, s["repo"])
+    queries = [call for call in s["calls"] if "psql" in call]
+    assert queries and all(call[call.index("-U") + 1] == "actual_role" for call in queries)
+    assert all(conninfo_to_dict(call[call.index("-d") + 1]) == {"dbname": "actual_bank"} for call in queries)
+    assert all(call[call.index("-h") + 1] == "/var/run/postgresql" for call in queries)
+
+
+def test_stopped_checkout_handover_refuses_aliases_on_unshared_networks(engine_host, monkeypatch):
+    from pseudolife_memory import update_engine as eng
+    s = engine_host
+    update, _, _ = _stopped_handover(s, monkeypatch)
+    s["running"]["NetworkSettings"] = {"Networks": {"unrelated": {}}}
+    update._selected_engine = "python"
+    with pytest.raises(up.UpdateError):
+        eng.deploy_engine(update, s["repo"])
+    assert not any(call[1:2] == ["tag"] or "build" in call or "up" in call for call in s["calls"])
 
 
 @pytest.mark.parametrize("failure", ["backup", "probe"])

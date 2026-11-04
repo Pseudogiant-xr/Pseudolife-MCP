@@ -607,20 +607,29 @@ pub(super) fn require_imported_with(
     Ok(())
 }
 pub(super) fn sql(u: &Update, pg: &str, user: &str, db: &str, query: &str) -> Result<String> {
-    let (code, out) = u.docker_call(&[
-        "exec",
-        pg,
-        "psql",
-        "-X",
-        "-v",
-        "ON_ERROR_STOP=1",
-        "-U",
-        user,
-        "-d",
-        db,
-        "-Atc",
-        query,
-    ]);
+    let database = if u.o.allow_auth_change && u.o.checkout.is_some() {
+        format!("dbname='{}'", db.replace('\\', "\\\\").replace('\'', "\\'"))
+    } else {
+        db.to_owned()
+    };
+    let mut args = vec!["exec", pg];
+    if u.o.allow_auth_change && u.o.checkout.is_some() {
+        args.extend([
+            "env",
+            "-u",
+            "PGHOSTADDR",
+            "-u",
+            "PGSERVICE",
+            "-u",
+            "PGSERVICEFILE",
+        ]);
+    }
+    args.extend(["psql", "-X", "-v", "ON_ERROR_STOP=1"]);
+    if u.o.allow_auth_change && u.o.checkout.is_some() {
+        args.extend(["-h", "/var/run/postgresql", "-p", "5432"]);
+    }
+    args.extend(["-U", user, "-d", &database, "-Atc", query]);
+    let (code, out) = u.docker_call(&args);
     if code == 0 {
         Ok(out.trim().into())
     } else {
@@ -947,12 +956,27 @@ pub(super) fn deploy(u: &mut Update, repo: &Path) -> Result<()> {
     u.set_rollback_scope(&config, &running)?;
     u.maintainer_context = Some((base.clone(), env.clone()));
     let pg_env = &config["services"]["pseudolife-pg"]["environment"];
-    let user = pg_env["POSTGRES_USER"]
-        .as_str()
-        .ok_or_else(|| UpdateError::usage("cannot resolve PostgreSQL user"))?;
-    let db = pg_env["POSTGRES_DB"]
-        .as_str()
-        .ok_or_else(|| UpdateError::usage("cannot resolve PostgreSQL database"))?;
+    let runtime = if stopped_handover {
+        backup::connection_parts(&running, &inspect(u, &pg)?).ok_or_else(|| UpdateError::usage(
+            "cannot verify the handover bank on the project's shared PostgreSQL network; restore the daemon's original direct database connection and retry; nothing was deployed"
+        ))?
+    } else {
+        (String::new(), String::new())
+    };
+    let user = if stopped_handover {
+        runtime.0.as_str()
+    } else {
+        pg_env["POSTGRES_USER"]
+            .as_str()
+            .ok_or_else(|| UpdateError::usage("cannot resolve PostgreSQL user"))?
+    };
+    let db = if stopped_handover {
+        runtime.1.as_str()
+    } else {
+        pg_env["POSTGRES_DB"]
+            .as_str()
+            .ok_or_else(|| UpdateError::usage("cannot resolve PostgreSQL database"))?
+    };
     let configured_env = &config["services"][DAEMON_SERVICE]["environment"];
     let raw_map = configured_env["PSEUDOLIFE_MCP_TOKENS"]
         .as_str()
@@ -1007,7 +1031,7 @@ pub(super) fn deploy(u: &mut Update, repo: &Path) -> Result<()> {
         );
     }
     let backups = if stopped_handover {
-        u.builtin_backup(&pg, &daemon, user, db, &repo.join("data/backups"))?
+        u.builtin_backup(&pg, &daemon, &repo.join("data/backups"))?
     } else {
         u.project_backup(&repo, &pg, &daemon, user, db)?
     };

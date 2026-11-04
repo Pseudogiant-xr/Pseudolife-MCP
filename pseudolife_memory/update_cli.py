@@ -1797,6 +1797,19 @@ def options_from_args(args) -> Options:
 
 
 def main(argv: list[str] | None = None) -> int:
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    probe = arguments == ["--checkout-handover-capability"] or (
+        len(arguments) == 3 and arguments[0] == "--checkout" and arguments[2] == "--checkout-handover-capability")
+    if probe:
+        try:
+            from pseudolife_memory.docker_backup_restore import DockerBank
+            if not callable(getattr(DockerBank, "psql", None)):
+                raise ImportError
+        except ImportError:
+            print("checkout handover needs the current stopped-backup backend; upgrade this updater before moving", file=sys.stderr)
+            return 2
+        print("pseudolife-mcp checkout-handover-v1")
+        return 0
     args = build_parser().parse_args(argv)
     if args.clients_only and args.daemon_only:
         print("--clients-only and --daemon-only exclude each other", file=sys.stderr)
