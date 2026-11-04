@@ -614,6 +614,17 @@ jobs:
           tests/test_runner_cleanup.py
           tests/test_selfhosted_windows_scripts.py
           tests/test_child_python.py
+          tests/test_move_cli.py::test_signal_during_target_expose_undoes_serve
+          tests/test_move_cli.py::test_a_new_target_expose_is_undone_on_move_failure
+          tests/test_move_cli.py::test_failed_exposure_cleanup_is_recorded_for_manual_recovery
+          tests/test_move_cli.py::test_new_exposure_intent_is_recorded_before_the_remote_command
+          tests/test_move_cli.py::test_failed_new_exposure_can_be_resumed_from_a_stopped_target
+          tests/test_move_cli.py::test_lost_expose_reply_never_removes_another_operators_serve
+          tests/test_move_cli.py::test_lost_reply_undoes_a_serve_attributed_to_this_move
+          tests/test_move_cli.py::test_resume_never_uses_a_stale_exposure_receipt_to_remove_a_serve
+          tests/test_move_cli.py::test_yes_alone_never_consents_to_a_persistent_target_serve
+          tests/test_move_cli.py::test_interactive_yes_requires_an_explicit_expose_flag
+          tests/test_move_cli.py::test_interactive_move_asks_separately_for_persistent_exposure
           tests/test_installer_client_update_schedule.py
           tests/test_installer_resources.py
           tests/test_tunnel_profiles.py

@@ -2132,6 +2132,43 @@ def test_mutant_source_copy_drops_files_the_checkout_no_longer_has(tmp_path, mon
     assert (copy / "shim" / "src" / "main.rs").stat().st_mtime > old + 1800
 
 
+def _mutant_compile_input_fixture(tmp_path, monkeypatch):
+    from cli_harness import mutants
+    inputs = ("evals/prompts/assistant_facts_provenance.txt", "evals/prompts/sonnet_extractor_v5.md")
+    source, target = tmp_path / "checkout/rust", tmp_path / "target"
+    source.mkdir(parents=True)
+    (source / "Cargo.toml").write_text("[workspace]\n")
+    for index, relative in enumerate(inputs):
+        path = source.parent / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(f"prompt-{index}\r\n".encode())
+        old = time.time() - 3600
+        os.utime(path, (old, old))
+    monkeypatch.setattr(mutants, "RUST", source)
+    monkeypatch.setenv("CARGO_TARGET_DIR", str(target))
+    return mutants, source, target, inputs
+
+
+def test_mutant_copy_preserves_compile_inputs_and_invalidates_old_builds(tmp_path, monkeypatch):
+    mutants, source, target, inputs = _mutant_compile_input_fixture(tmp_path, monkeypatch)
+    copy = mutants._sync_source([])
+    for relative in inputs:
+        original, copied = source.parent / relative, copy.parent / relative
+        assert copied.read_bytes() == original.read_bytes()
+        assert copied.stat().st_mtime > original.stat().st_mtime + 1800
+    assert copy == target / "mutant-src/rust"
+
+
+def test_mutant_copy_updates_and_prunes_compile_inputs(tmp_path, monkeypatch):
+    mutants, source, _, inputs = _mutant_compile_input_fixture(tmp_path, monkeypatch)
+    copy = mutants._sync_source([])
+    (source.parent / inputs[0]).write_bytes(b"updated\n")
+    (source.parent / inputs[1]).unlink()
+    mutants._sync_source([])
+    assert (copy.parent / inputs[0]).read_bytes() == b"updated\n"
+    assert not (copy.parent / inputs[1]).exists()
+
+
 # ---- RealDaemon start: the readiness contract, and an oracle older than it --
 
 def _health_stub(answers):

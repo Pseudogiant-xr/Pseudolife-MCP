@@ -2230,6 +2230,11 @@ jobs:
         with:
           pattern: stress-row-*
           path: stress-rows
+          # Select the whole workflow run through REST, so rows retained
+          # from earlier attempts accompany the one replacement row.
+          github-token: ${{ github.token }}
+          run-id: ${{ github.run_id }}
+          repository: ${{ github.repository }}
       - name: Read every stress job attempt
         env:
           GH_TOKEN: ${{ github.token }}
