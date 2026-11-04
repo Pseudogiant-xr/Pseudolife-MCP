@@ -1092,6 +1092,55 @@ def test_kept_checkout_rollback_keeps_env_file_authentication_ahead_of_client_be
             else "env -u PSEUDOLIFE_MCP_TOKEN -u PSEUDOLIFE_MCP_TOKENS docker compose" in command)
 
 
+@pytest.mark.parametrize("carried", ["fixture-carried", ""], ids=["environment-bearer", "stored-principals-only"])
+def test_explicit_attended_recreation_can_transfer_the_declared_bearer_source(world, clients, tmp_path,
+                                                                            monkeypatch, carried):
+    project = _project(world, tmp_path)
+    source = project / ".env"
+    source.write_text(f"PSEUDOLIFE_MCP_TOKEN={carried}\nPSEUDOLIFE_MCP_TOKENS=\n", encoding="utf-8")
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOKEN", "fixture-client")
+    original = world.run_cli
+
+    def metadata(argv, **kw):
+        if "{{json .Config.Env}}" in argv:
+            return 0, json.dumps(["PSEUDOLIFE_MCP_TOKEN=fixture-target-before-move"])
+        if "config" in argv and "--format" in argv:
+            assert "PSEUDOLIFE_MCP_TOKEN" not in kw["env"]
+            return 0, json.dumps({"services": {up.DAEMON_SERVICE: {"environment": {
+                "PSEUDOLIFE_MCP_TOKEN": carried, "PSEUDOLIFE_MCP_TOKENS": ""}}}})
+        return original(argv, **kw)
+
+    monkeypatch.setattr(up, "run_cli", metadata)
+    assert _run(["--allow-auth-change", "--env-file", str(source), "--reinstall", "--daemon-only",
+                 "--tag", "0.15.0", "--health-delay-ms", "1"]) == 0
+    assert any(" up " in c for c in world.docker_calls()) and clients == []
+
+
+@pytest.mark.parametrize("invalid", ["env-file", "tag", "reinstall", "daemon-only", "no-declarations",
+                                     "unattended", "clients-only", "check", "schedule", "checkout", "engine"])
+def test_auth_transfer_requires_explicit_attended_recreation_before_discovery(world, tmp_path, capsys, invalid):
+    source = tmp_path / "source.env"
+    source.write_text("# no bearer settings\n" if invalid == "no-declarations" else "PSEUDOLIFE_MCP_TOKEN=fixture\n")
+    args = ["--allow-auth-change", "--env-file", str(source), "--tag", "0.15.0", "--reinstall", "--daemon-only"]
+    if invalid in ("env-file", "tag", "reinstall", "daemon-only"):
+        offset = args.index("--" + invalid)
+        del args[offset:offset + (2 if invalid in ("env-file", "tag") else 1)]
+    elif invalid != "no-declarations":
+        args += {"schedule": ["--schedule", "07:05"], "checkout": ["--checkout", str(tmp_path)],
+                 "engine": ["--engine", "python"]}.get(invalid, ["--" + invalid])
+    assert _run(args) == 2
+    error = capsys.readouterr().err
+    assert ("--clients-only and --daemon-only exclude" in error if invalid == "clients-only"
+            else "--allow-auth-change requires" in error)
+    assert world.calls == []
+
+
+def test_explicit_auth_transfer_still_refuses_a_wholly_invalid_map():
+    with pytest.raises(up.UpdateError):
+        up.verify_compose_bearers({"PSEUDOLIFE_MCP_TOKENS": "invalid-map"},
+                                  {"PSEUDOLIFE_MCP_TOKEN": "fixture-original"}, allow_change=True)
+
+
 def test_checkout_recreation_uses_the_credential_source_that_passed_preflight(world, clients, tmp_path, monkeypatch):
     root, _ = _checkout(world, tmp_path)
     credentials = tmp_path / "daemon.env"

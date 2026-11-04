@@ -265,6 +265,7 @@ class Options:
     no_cache_prune: bool = False
     force_rollback_tag: bool = False
     allow_dirty: bool = False
+    allow_auth_change: bool = False
     health_retries: int = 30
     health_delay_ms: int = 1500
     all_clients: bool = False          # checkout mode: also the client side (-All)
@@ -409,7 +410,7 @@ def compose_environment(env_file, extra: dict | None = None) -> dict:
     return env
 
 
-def verify_compose_bearers(configured: dict, running: dict) -> None:
+def verify_compose_bearers(configured: dict, running: dict, *, allow_change=False) -> None:
     """Compare credential sources internally; never put their values in errors."""
     from pseudolife_memory.principals import parse_token_map
 
@@ -420,7 +421,8 @@ def verify_compose_bearers(configured: dict, running: dict) -> None:
         invalid = raw if raw.strip() and not mapped else ""
         return env.get("PSEUDOLIFE_MCP_TOKEN") or "", mapped, invalid
 
-    if identity(configured) != identity(running):
+    expected = identity(configured)
+    if expected != identity(running) and (not allow_change or expected[2]):
         raise UpdateError("the Compose configuration would change the running daemon's bearer settings. "
                           "Restore its original bearer settings in the project's env file "
                           "(release mode: --env-file <original-file>), then retry. Nothing was changed", 2)
@@ -525,6 +527,13 @@ class Update:
         return self.report.exit_code
 
     def _run(self) -> None:
+        if self.o.allow_auth_change and (self.o.checkout is not None or self.o.engine or self.o.shadow
+                or self.o.clients_only or self.o.all_clients or self.o.unattended or self.o.schedule
+                or self.o.unschedule or self.o.check or not self.o.tag or not self.o.reinstall
+                or not self.o.daemon_only or not _env_file_sets_credentials(self.o.env_file)):
+            raise UpdateError("--allow-auth-change requires an attended release recreation with "
+                              "--env-file <bearer file>, --tag, --reinstall and --daemon-only. "
+                              "Nothing was changed", 2)
         if self.o.shadow and (not self.o.engine or self.o.checkout is None):
             raise UpdateError("--shadow requires --engine rust --checkout <repo> to start, or --engine python --checkout <repo> to remove; nothing was changed", 2)
         if self.o.engine == "rust" and self.o.checkout is None:
@@ -885,7 +894,9 @@ class Update:
         except (ValueError, KeyError, TypeError, AttributeError) as exc:
             raise UpdateError("cannot verify the daemon's Compose bearer settings; restore the original compose "
                               "and env files, then retry. Nothing was changed", 2) from exc
-        verify_compose_bearers(configured, running)
+        verify_compose_bearers(configured, running, allow_change=self.o.allow_auth_change)
+        if self.o.allow_auth_change:
+            self.step("using the explicitly requested daemon bearer settings from --env-file")
 
     def tag_rollback(self, image_tag: str, running_id: str | None, tag_id: str | None,
                      source: str | None = None, rollback: str | None = None,
@@ -1647,6 +1658,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--force-rollback-tag", action="store_true",
                         help="tag the rollback even when the version tag is not the running daemon's image")
     parser.add_argument("--allow-dirty", action="store_true", help="checkout mode: deploy an uncommitted tree (stamped dirty)")
+    parser.add_argument("--allow-auth-change", action="store_true", help="explicit release recreation: apply bearer settings from --env-file (requires --tag, --reinstall and --daemon-only)")
     parser.add_argument("--health-retries", type=int, default=30)
     parser.add_argument("--health-delay-ms", type=int, default=1500)
     parser.add_argument("--all", action="store_true", help="checkout mode: also move the client side (shim, plugin, Codex)")
@@ -1671,6 +1683,7 @@ def options_from_args(args) -> Options:
                    rollback_suffix=args.rollback_tag, no_backup=args.no_backup, keep_rollbacks=args.keep_rollbacks,
                    keep_cache_hours=args.keep_cache_hours, no_cache_prune=args.no_cache_prune,
                    force_rollback_tag=args.force_rollback_tag, allow_dirty=args.allow_dirty,
+                   allow_auth_change=args.allow_auth_change,
                    health_retries=args.health_retries, health_delay_ms=args.health_delay_ms,
                    all_clients=args.all, no_test_login=args.no_test_login,
                    clients_only=args.clients_only, daemon_only=args.daemon_only,

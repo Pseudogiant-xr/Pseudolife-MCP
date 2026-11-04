@@ -370,6 +370,9 @@ impl Update {
         let (code, out) = self.command(&config_args, Some(&env), 60, false);
         let config:Value=serde_json::from_str(&out).ok().filter(|_:&Value|code==0).ok_or_else(||UpdateError::usage("cannot resolve the Compose project; check its files and env file, then retry; nothing was changed"))?;
         engine::verify_bank_identity(self, &config, &context.running)?;
+        if self.o.allow_auth_change {
+            self.step("using the explicitly requested daemon bearer settings from --env-file");
+        }
         self.set_rollback_scope(&config, &context.running)?;
         self.maintainer_context = Some((context.args.clone(), env.clone()));
         let token = if activating {
