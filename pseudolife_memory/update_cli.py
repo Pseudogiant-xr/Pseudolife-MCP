@@ -481,6 +481,8 @@ class Update:
         # The bank's schema version on the daemon this run replaces, when
         # /health said; a deploy that moves it changes what a rollback takes.
         self.schema_before: int | None = None
+        self.auth_before: bool | None = None
+        self.credential_env_file: Path | None = None
 
     # -- output ------------------------------------------------------------
     def step(self, text: str) -> None:
@@ -716,8 +718,7 @@ class Update:
         """A shim runtime on a machine with no daemon container: the daemon
         runs elsewhere, so ``update`` and ``--clients-only`` move this
         machine's clients (a new shim runtime, the plugin cache, the Codex
-        step) to the daemon's release, or to the newest release when the
-        daemon does not answer; ``--daemon-only`` has nothing to act on."""
+        step) to the daemon's release; ``--daemon-only`` has nothing to act on."""
         from urllib.parse import urlsplit
         host = urlsplit(self.o.daemon_url).hostname or self.o.daemon_url
         if self.o.daemon_only:
@@ -725,17 +726,18 @@ class Update:
                               f"run pseudolife-mcp update on {host}, where it runs. Nothing was changed", 2)
         health = self.daemon_health()
         daemon_version = (health or {}).get("version")
+        if not isinstance(daemon_version, str) or not daemon_version:
+            raise UpdateError("the configured daemon did not report its release on /health; retry with "
+                              "--daemon-url http(s)://<host>:<port> for the running daemon. Nothing was changed", 2)
         if isinstance(daemon_version, str) and daemon_version and not plain_release(daemon_version) and not self.o.tag:
             raise UpdateError(f"the daemon at {self.o.daemon_url} reports the version {daemon_version[:64]!r} on /health, "
                               f"which is not a plain release number (N.N.N), so it is not installed as one. Name the "
                               f"release with --tag <version>. Nothing was changed", 2)
         daemon_version = daemon_version if plain_release(daemon_version) else None
-        target = self.o.tag or daemon_version or self.target_version()
+        target = self.o.tag or daemon_version
         self.report.mode = "clients"
         self.report.current, self.report.target = daemon_version, target
         self.refuse_downgrade(daemon_version, target)
-        if daemon_version is None:
-            self.warn(f"the daemon at {self.o.daemon_url} did not answer; installing the newest release, {target}")
         self.refuse_checkout_shadow(target)
         self.step(f"the daemon runs on {host}; updating this machine's clients to {target}")
         self.clients(None, f"pseudolife-mcp=={target}", health)
@@ -868,7 +870,8 @@ class Update:
         if code != 0 or not state.is_file() or state.stat().st_size == 0:
             self.warn(f"the state volume could not be archived ({_last_line(out)}); the bank dump {dump.name} is complete")
         self.step(f"backup: {dump}" + (f" + {state.name}" if state.is_file() else "")
-                  + f"; restore with ops/restore.* -BackupFile / --backup-file {dump}")
+                  + f"; restore with pseudolife-mcp restore --backup-file {dump}"
+                  + (f" --state-archive {state}" if state.is_file() else ""))
         rotated = _rotate_backups(out_dir, keep_days=7, keep={dump.name} | ({state.name} if state.is_file() else set()))
         if rotated:
             self.step(f"rotated {len(rotated)} backup file(s) older than 7 days")
@@ -1003,6 +1006,11 @@ class Update:
                      f"the compose project's image setting won (check `docker compose config` for the daemon "
                      f"service). The client side was not moved. To roll back:"] + self.rollback_lines
             raise UpdateError("\n".join(lines))
+        if type(self.auth_before) is bool and (type(health.get("auth")) is not bool
+                                               or health["auth"] != self.auth_before):
+            raise UpdateError("the daemon's authentication mode changed or could not be verified after deploy; "
+                              f"restore the original credentials in {self.credential_env_file}, then roll back. "
+                              "The client side was not moved. To roll back:\n" + "\n".join(self.rollback_lines))
         if self.rollback_lines and not self.o.as_json:
             print("    Rolled-back deploy if ever needed:")
             for line in self.rollback_lines:
@@ -1025,7 +1033,7 @@ class Update:
                   else "the backup taken above")
         return [head,
                 f"      so after rolling back the image, restore {source} with",
-                "      ops/restore.ps1 -Apply -BackupFile <dump> (ops/restore.sh --apply --backup-file <dump>)."]
+                "      pseudolife-mcp restore --backup-file <dump> --state-archive <state.tgz>."]
 
     def prune_cache(self, checkout: Path | None) -> None:
         if self.o.no_cache_prune:
@@ -1133,12 +1141,29 @@ class Update:
         stamp = {"PSEUDOLIFE_BUILD_GIT_SHA": tree["sha"], "PSEUDOLIFE_BUILD_DIRTY": tree["dirty"],
                  "PSEUDOLIFE_BUILD_TIME": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
         env_file = repo / "ops" / ".env"
+        if not env_file.is_file():
+            code, out = run_cli([self.docker, "inspect", "-f", "{{json .Config.Env}}", DAEMON_CONTAINER],
+                                timeout=60, stdout_only=True)
+            try:
+                running_env = json.loads(out) if code == 0 else []
+            except ValueError:
+                running_env = []
+            names = sorted({entry.partition("=")[0] for entry in running_env if isinstance(entry, str)
+                            and entry.partition("=")[0] in ("PSEUDOLIFE_MCP_TOKEN", "PSEUDOLIFE_MCP_TOKENS",
+                                                            "PSEUDOLIFE_MCP_DATABASE_URL")
+                            and entry.partition("=")[2]}) if isinstance(running_env, list) else []
+            source = f" The running daemon's environment supplies {', '.join(names)}." if names else ""
+            raise UpdateError(f"{env_file} is missing; copying .env.example would replace the original "
+                              f"password, token and volume settings with defaults.{source} Restore {env_file} "
+                              "from the original install's environment before retrying. Nothing was changed", 2)
         compose = self._compose_args([compose_file, repo / "ops" / "docker-compose.override.yml"], env_file)
         environment = compose_environment(env_file, stamp)
         self.verify_compose_authentication(compose, environment)
         self._compose_shown = compose
         self._compose_clear_bearers = _env_file_sets_credentials(env_file)
         before = self.daemon_health() or {}
+        self.auth_before = before.get("auth") if type(before.get("auth")) is bool else None
+        self.credential_env_file = env_file
         previous_digest = before.get("hooks_digest")
         self.schema_before = before.get("schema")
         self.backup(repo)

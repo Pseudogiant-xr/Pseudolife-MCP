@@ -27,6 +27,9 @@ ACCEPTED_BLOBS = {
         # defers `console` in the native shim).
         "bb5321f0d5344c10b802e67d79bfcf1f3fa6cce2",
         "1f9865ce14a03b6da519b04d927a5eb9cb899945",
+        # Docker backup/restore help and dispatch; the native shim mirrors
+        # the help and explicitly defers restore.
+        "63071ce01d700c17090aa0d2d51bf8a2ec984cef",
     ),
     "pseudolife_memory/wait_mail_cli.py": ("236636957e2f5affbe2eec21d9e125c35ffae5f2",),
 }
