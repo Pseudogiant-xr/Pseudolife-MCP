@@ -12,7 +12,7 @@ nothing ever types a password). The order:
 1. **Preflight, no changes.** The source is healthy, Docker tier and reports
    its bank fingerprint; ssh works; the target checkout exists; the target
    daemon is healthy, its schema is at least the source's, its fingerprint
-   differs, and its bank is empty (no entries, facts or principals), unless
+   differs, and its bank has no user data in any table, unless
    ``--resume`` names this move's half-restored bank by its marker. The
    target URL is ``--target-url``, else the target's ``expose status``.
 2. **Plan and confirm** (``--dry-run`` stops after the plan; a run that is
@@ -115,6 +115,17 @@ SSH_OPTS = ("ssh", "-o", "BatchMode=yes", "-o", "ServerAliveInterval=15", "-o", 
 # What ops/restore.sh prints just before it drops the database it replaces.
 RESTORE_BOUNDARY = "==> Dropping + recreating"
 BANK_ID_SQL ="SELECT value FROM meta WHERE key = 'coordination_bank_id'"
+# Only known fresh-bank seed rows may be replaced. Unknown meta keys carry
+# user state, so future keys are protected without a client update.
+EMPTY_TARGET_META_KEYS = ("schema_version", "coordination_bank_id", "maintainer_secret_v1",
+                          "dream_ack_secret_v1", "flat_band_migration_v1", "curation_listing_spelling_v2",
+                          "writer_lease_epoch", "coordination_hlc_highwater")
+_STATE_SAFETY_CHECK = """import gzip, os, shutil, sys, tarfile
+with gzip.open(sys.argv[1], 'rb') as source, open(os.devnull, 'wb') as sink:
+    shutil.copyfileobj(source, sink)
+with tarfile.open(sys.argv[1], 'r:gz') as archive:
+    archive.getmembers()
+"""
 # Where a client on the target may hold a token (``grep -lsF`` reads the
 # tokens from stdin; a path that does not exist is skipped).
 TARGET_CLIENT_FILES = ("~/.pseudolife-mcp/*.token", "~/.claude.json", "~/.claude/settings.json",
@@ -473,6 +484,7 @@ class MoveInterrupted(BaseException):
 # What the rollback must undo, in the order the move sets them; each flip
 # is written to the move record with the manual rollback beside it.
 FLAGS = ("target_timer_paused", "target_policy_paused", "schedule_paused", "source_stopped", "fenced",
+         "target_quiesced",
          "marker_written", "target_restored", "gate_written", "env_backup", "env_written", "target_started",
          "source_policy_changed", "moved_written")
 
@@ -710,6 +722,7 @@ class Mover:
             raise self.refuse(f"the target has no {DAEMON} container ({result.why(out=False)}): run the "
                               f"installer there first ({INSTALL_LINE})")
         self.check_target_stack(target)
+        self.target_was_running = bool((target.get("State") or {}).get("Running"))
         self.target_image = str((target.get("Config") or {}).get("Image") or "")
         self.target_policy = _restart_policy(target)
         target_env = _env_of(target)
@@ -806,6 +819,7 @@ class Mover:
     def check_target_bank(self) -> None:
         """The target bank is empty, or (``--resume``) a marker on the target
         names a move this host started from this bank."""
+        refuse = self.refuse if not self.recording else MoveError
         if self.o.resume:
             markers = self.target_markers()
             if not markers:
@@ -823,27 +837,52 @@ class Mover:
             named = ", ".join(f"{m.get('move_id')!r} from bank {m.get('source_bank')!r}" for m in markers)
             raise self.refuse(f"the target's move markers name {named}, none of them a move this host started "
                               f"from this bank: --resume overwrites only this move's own half-restored bank")
-        result = self.psql_remote("SELECT relname FROM pg_class WHERE relkind = 'r' AND relnamespace = "
-                                  "'public'::regnamespace AND relname IN ('entries', 'facts', 'principals') "
-                                  "ORDER BY 1")
+        result = self.psql_remote("SELECT coalesce(json_agg(relname ORDER BY relname), '[]'::json) "
+                                  "FROM pg_class WHERE relkind IN ('r', 'p') AND relnamespace = "
+                                  "'public'::regnamespace")
         if not result.ok:
-            raise self.refuse(f"could not read the target bank ({result.why()})")
-        tables = [line.strip() for line in result.text.splitlines() if line.strip()]
+            raise refuse(f"could not read the target bank ({result.why()}); check the target's PostgreSQL "
+                         "logs and retry")
+        try:
+            tables = json.loads(result.text)
+        except ValueError:
+            tables = None
+        if not isinstance(tables, list) or not all(isinstance(t, str) and t for t in tables):
+            raise refuse("could not enumerate the target bank's tables: check the target's "
+                         "PostgreSQL logs and retry")
         counts = {}
         if tables:
-            result = self.psql_remote("SELECT " + ", ".join(f"(SELECT count(*) FROM {t})" for t in tables))
+            # Quote identifiers from the catalog, including extension tables;
+            # no table name can become SQL or an extra psql output row.
+            filters = {
+                "meta": " WHERE key NOT IN (" + ", ".join(_lit(k) for k in EMPTY_TARGET_META_KEYS)
+                        + ") AND right(key, 15) <> '_schema_version'",
+                "relations": " WHERE NOT builtin",
+                "maintainer_bootstrap": " WHERE used_at IS NOT NULL OR credential_id IS NOT NULL",
+                "cms_counters": " WHERE interaction_count <> 0 OR logical_turn_count <> 0 OR tier_queries <> 0 "
+                                "OR EXISTS (SELECT 1 FROM jsonb_each(tier_hits) WHERE value <> '0'::jsonb) "
+                                "OR EXISTS (SELECT 1 FROM jsonb_each(surprise_history) WHERE value <> '[]'::jsonb) "
+                                "OR consolidation_events <> '[]'::jsonb",
+            }
+            result = self.psql_remote("SELECT " + ", ".join(
+                '(SELECT count(*) FROM public."' + t.replace('"', '""') + '"'
+                + filters.get(t, "") + ")" for t in tables))
             row = _rows(result.text)[0] if result.ok and _rows(result.text) else []
             if len(row) != len(tables):
-                raise self.refuse(f"could not count the target bank's rows ({result.why()})")
+                raise refuse(f"could not count the target bank's rows ({result.why()}); check the target's "
+                             "PostgreSQL logs and retry")
             counts = dict(zip(tables, (int(value) if value.strip().isdigit() else -1 for value in row)))
         used = {table: n for table, n in counts.items() if n != 0}
         if used:
             listed = ", ".join(f"{table} {n}" for table, n in used.items())
             markers = self.target_markers()
             hint = (f"; it carries a move marker (move {markers[0].get('move_id')}), so if this host started that "
-                    f"move, retry with --resume") if markers else ""
-            raise self.refuse(f"the target bank is not empty ({listed}): move never merges into or "
-                              f"overwrites a used bank{hint}")
+                    f"move, retry with --resume") if markers else (
+                    "; back up and remove that bank before retrying, or install a fresh target with distinct "
+                    "PSEUDOLIFE_BANK_VOLUME and PSEUDOLIFE_STATE_VOLUME names; use pseudolife-mcp export / "
+                    "import to merge knowledge instead")
+            raise refuse(f"the target bank is not empty ({listed}): move never merges into or "
+                         f"overwrites a used bank{hint}")
 
     def target_markers(self) -> list[dict]:
         """Every move marker on the target (one JSON object per line); exit 1
@@ -1018,6 +1057,7 @@ class Mover:
                       "target_url": self.target_url, "source_bank": self.source_bank, "state": state,
                       "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                       "flags": {flag: getattr(self, flag) for flag in FLAGS},
+                      "target_state_backup": self.data.get("target", {}).get("state_backup"),
                       "manual_rollback": self.manual_rollback()}
             temporary = self.local_dir / "record.json.tmp"
             temporary.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
@@ -1084,9 +1124,11 @@ class Mover:
                     self.in_rollback = False
                     self._restore_signals(ignored)
                 if complete:
-                    raise MoveError(f"{reason}. Rolled back: the source daemon runs again and the target is "
-                                    f"stopped; the target keeps its move marker, so `move --resume` may overwrite "
-                                    f"that half-restored bank on the next attempt", EXIT_FAILED) from None
+                    target_note = ("the target is stopped and keeps its move marker, so `move --resume` may "
+                                   "overwrite that half-restored bank on the next attempt" if self.target_restored
+                                   else "the target's original bank was preserved")
+                    raise MoveError(f"{reason}. Rolled back: the source daemon runs again; {target_note}",
+                                    EXIT_FAILED) from None
                 left = "; ".join(f"{s['step']}" + (f" ({s['detail'][:200]})" if s.get("detail") else "")
                                  for s in self.data["rollback"] if not s.get("ok"))
                 raise MoveError(f"{reason}. The rollback is INCOMPLETE: {left}. See the rollback steps, and the move "
@@ -1274,6 +1316,35 @@ class Mover:
                         stdin=(json.dumps(gate) + "\n").encode("utf-8"), timeout=300)
 
     def restore_target(self) -> None:
+        # The preflight snapshot can become stale while the operator reads
+        # the plan or the source is copied. Stop the target's writer before
+        # its safety dump, then check again before replacing anything.
+        self.mark(target_quiesced=self.target_was_running)
+        result = self.ssh(f"docker stop {DAEMON}", timeout=300)
+        if not result.ok:
+            raise MoveError(f"could not stop the target before the final emptiness check ({result.why()})")
+        result = self.ssh(f"docker inspect -f '{{{{.State.Running}}}}' {DAEMON}", timeout=60)
+        if not result.ok or result.text.strip() != "false":
+            raise MoveError("the target is still running: stop it before retrying move")
+        if not self.o.resume:
+            self.check_target_bank()
+        # restore.sh's safety backup uses docker exec for /data, which
+        # cannot run in this quiesced daemon. Keep a verified archive of the
+        # original state through a helper before restore can replace it.
+        snapshot = f"{self.remote_dir}/target-original-state.tgz"
+        partial = snapshot + ".part"
+        result = self.ssh(f"if [ ! -f {rq(snapshot)} ]; then "
+                          f"docker run --rm --entrypoint tar --volumes-from {DAEMON} "
+                          f"{shlex.quote(self.target_image)} czf - -C /data . > {rq(partial)} && "
+                          f"python3 -c {shlex.quote(_STATE_SAFETY_CHECK)} {rq(partial)} && "
+                          f"mv -f {rq(partial)} {rq(snapshot)} || exit 1; fi; "
+                          f"python3 -c {shlex.quote(_STATE_SAFETY_CHECK)} {rq(snapshot)}", timeout=_TIMEOUT_LONG)
+        if not result.ok:
+            raise MoveError(f"could not verify the target's state safety archive ({result.why()}); "
+                            "the target's original bank and state were not replaced")
+        self.data["target"]["state_backup"] = snapshot
+        self.write_record(self.state)
+        self.step(f"the target's original state safety archive is {snapshot}")
         marker = {"move_id": self.move_id, "source_bank": self.source_bank,
                   "written_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
         self.mark(marker_written=True)
@@ -1296,7 +1367,10 @@ class Mover:
                           f"{rq(dump)} --state-archive {rq(state)} --db {shlex.quote(self.target_db)} "
                           f"--user {shlex.quote(self.target_user)}", timeout=_TIMEOUT_LONG)
         if not result.ok:
-            if RESTORE_BOUNDARY not in result.text:
+            # A timeout or killed transport may discard stdout after DROP.
+            # Only a completed, ordinary command failure can prove the
+            # boundary was never reached; unknown outcomes stay gated.
+            if 0 < result.code < 128 and result.code != 124 and RESTORE_BOUNDARY not in result.text:
                 self.mark(target_restored=False)
             raise MoveError(f"ops/restore.sh on the target failed ({result.why()})"
                             + ("" if self.target_restored else "; the target's own bank was not touched"))
@@ -1636,6 +1710,12 @@ class Mover:
                 log.append({"step": "the source stays stopped", "ok": False,
                             "detail": "it cannot start while the fence or moved.json is in place; finish those by "
                                       f"hand, then: docker start {DAEMON}"})
+        if self.target_quiesced and not self.target_restored:
+            if attempt("restart the target's original bank",
+                       lambda: self.ssh(f"docker start {DAEMON}", timeout=300)):
+                self.mark(target_quiesced=False)
+            else:
+                complete = False
         return complete
 
     def manual_rollback(self) -> list[str]:
@@ -1668,6 +1748,8 @@ class Mover:
             lines.append(" ".join(self._schedule_argv(enable=True)))
         if self.source_stopped:
             lines.append(f"docker start {DAEMON}")
+        if self.target_quiesced and not self.target_restored:
+            lines.append(f"ssh {t} docker start {DAEMON}")
         if self.moved_written:
             lines.append(f"pseudolife-mcp connect {SOURCE_URL} --yes")
         return lines
@@ -1736,6 +1818,9 @@ class Mover:
                             "coordination-recovery rebind (docs/guide/coordination-recovery.md)")}
         notes = [f"the source is stopped and fenced, not deleted; the final backup stays in {self.local_dir}, "
                  f"and the target's copy in {o.target}:{self.remote_dir}"]
+        if self.data["target"].get("state_backup"):
+            notes.append(f"the target's original /data safety archive is "
+                         f"{o.target}:{self.data['target']['state_backup']}")
         if o.keep_tokens:
             using = (f"; these files on {o.target} held it and need re-pointing there (move did not rewrite them): "
                      f"{', '.join(self.target_registrations)}" if self.target_registrations else
