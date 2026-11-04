@@ -157,150 +157,6 @@ pub(super) fn dump_complete(path: &Path) -> bool {
     check(path).unwrap_or(false)
 }
 
-#[cfg(test)]
-mod connection_tests {
-    use super::*;
-
-    fn fixture(dsn: &str, extra: &[&str]) -> (Value, Value) {
-        let mut env = vec![format!("PSEUDOLIFE_MCP_DATABASE_URL={dsn}")];
-        env.extend(extra.iter().map(|v| v.to_string()));
-        (
-            json!({"Config":{"Env":env}, "State":{"Running":false},
-            "NetworkSettings":{"Networks":{"bank":{}}}}),
-            json!({"Name":"/fixture-pg", "Config":{"Env":["POSTGRES_USER=wrong","POSTGRES_DB=wrong"]},
-            "NetworkSettings":{"Networks":{"bank":{"Aliases":["pseudolife-pg"]}}}}),
-        )
-    }
-
-    #[test]
-    fn backup_connection_uses_runtime_authority_and_libpq_defaults() {
-        for (dsn, extra, user, db) in [
-            (
-                "postgresql://custom@pseudolife-pg/bank?port=5432",
-                vec!["PGPORT=9999"],
-                "custom",
-                "bank",
-            ),
-            (
-                "user=custom dbname=bank",
-                vec!["PGHOST=pseudolife-pg"],
-                "custom",
-                "bank",
-            ),
-            (
-                "postgresql://custom@/bank",
-                vec!["PGHOST=pseudolife-pg"],
-                "custom",
-                "bank",
-            ),
-            (
-                "postgresql://custom@pseudolife-pg:5432/bank",
-                vec!["PGPORT=9999"],
-                "custom",
-                "bank",
-            ),
-            (
-                "postgresql://custom@pseudolife-pg/bank?sslmode=verify-full&sslrootcert=/fixture/root.pem",
-                vec![],
-                "custom",
-                "bank",
-            ),
-            (
-                "host=pseudolife-pg user=custom dbname=bank sslmode=verify-full sslrootcert=/fixture/root.pem",
-                vec![],
-                "custom",
-                "bank",
-            ),
-            (
-                "postgresql://custom:fixture@pseudolife-pg/custom_bank",
-                vec![],
-                "custom",
-                "custom_bank",
-            ),
-            (
-                "postgresql://pseudolife:fixture@pseudolife-pg/pseudolife_memory",
-                vec![],
-                "pseudolife",
-                "pseudolife_memory",
-            ),
-            (
-                "postgresql://custom:fixture@pseudolife-pg",
-                vec![],
-                "custom",
-                "custom",
-            ),
-            (
-                "postgresql://custom:fixture@pseudolife-pg",
-                vec!["PGDATABASE=runtime_bank"],
-                "custom",
-                "runtime_bank",
-            ),
-            (
-                "host=pseudolife-pg user=custom dbname='bank with spaces' password=fixture",
-                vec![],
-                "custom",
-                "bank with spaces",
-            ),
-            (
-                "postgresql://pseudolife-pg",
-                vec!["PGUSER=runtime_user"],
-                "runtime_user",
-                "runtime_user",
-            ),
-            (
-                "postgresql://custom:fixture@pseudolife-pg/wrong?dbname=actual",
-                vec![],
-                "custom",
-                "actual",
-            ),
-        ] {
-            let (daemon, pg) = fixture(dsn, &extra);
-            assert_eq!(
-                connection_parts(&daemon, &pg),
-                Some((user.into(), db.into()))
-            );
-        }
-    }
-
-    #[test]
-    fn backup_connection_refuses_opaque_or_foreign_targets() {
-        for (dsn, extra) in [
-            ("", vec![]),
-            ("service=opaque", vec![]),
-            (
-                "host=pseudolife-pg hostaddr=10.0.0.2 user=custom dbname=bank",
-                vec![],
-            ),
-            (
-                "postgresql://custom@pseudolife-pg/bank?hostaddr=10.0.0.2",
-                vec![],
-            ),
-            ("invalid fixture", vec![]),
-            ("postgresql://custom@elsewhere/bank", vec![]),
-            (
-                "postgresql://custom@pseudolife-pg/bank",
-                vec!["PGSERVICE=opaque"],
-            ),
-            (
-                "postgresql://custom@pseudolife-pg/bank",
-                vec!["PGHOSTADDR=10.0.0.1"],
-            ),
-            ("postgresql://pseudolife-pg/bank", vec![]),
-            (
-                "host=pseudolife-pg user=custom dbname='host=elsewhere'",
-                vec![],
-            ),
-            ("postgresql://custom@pseudolife-pg:9999/bank", vec![]),
-            (
-                "postgresql://custom@pseudolife-pg/bank",
-                vec!["PGPORT=9999"],
-            ),
-        ] {
-            let (daemon, pg) = fixture(dsn, &extra);
-            assert!(connection_parts(&daemon, &pg).is_none());
-        }
-    }
-}
 fn state_complete(path: &Path) -> bool {
     fn check(path: &Path) -> std::io::Result<()> {
         let mut decoder = MultiGzDecoder::new(File::open(path)?);
@@ -817,6 +673,151 @@ impl Update {
         };
         if code != 0 {
             self.warn("build-cache retention failed (deploy already succeeded)");
+        }
+    }
+}
+
+#[cfg(test)]
+mod connection_tests {
+    use super::*;
+
+    fn fixture(dsn: &str, extra: &[&str]) -> (Value, Value) {
+        let mut env = vec![format!("PSEUDOLIFE_MCP_DATABASE_URL={dsn}")];
+        env.extend(extra.iter().map(|v| v.to_string()));
+        (
+            json!({"Config":{"Env":env}, "State":{"Running":false},
+            "NetworkSettings":{"Networks":{"bank":{}}}}),
+            json!({"Name":"/fixture-pg", "Config":{"Env":["POSTGRES_USER=wrong","POSTGRES_DB=wrong"]},
+            "NetworkSettings":{"Networks":{"bank":{"Aliases":["pseudolife-pg"]}}}}),
+        )
+    }
+
+    #[test]
+    fn backup_connection_uses_runtime_authority_and_libpq_defaults() {
+        for (dsn, extra, user, db) in [
+            (
+                "postgresql://custom@pseudolife-pg/bank?port=5432",
+                vec!["PGPORT=9999"],
+                "custom",
+                "bank",
+            ),
+            (
+                "user=custom dbname=bank",
+                vec!["PGHOST=pseudolife-pg"],
+                "custom",
+                "bank",
+            ),
+            (
+                "postgresql://custom@/bank",
+                vec!["PGHOST=pseudolife-pg"],
+                "custom",
+                "bank",
+            ),
+            (
+                "postgresql://custom@pseudolife-pg:5432/bank",
+                vec!["PGPORT=9999"],
+                "custom",
+                "bank",
+            ),
+            (
+                "postgresql://custom@pseudolife-pg/bank?sslmode=verify-full&sslrootcert=/fixture/root.pem",
+                vec![],
+                "custom",
+                "bank",
+            ),
+            (
+                "host=pseudolife-pg user=custom dbname=bank sslmode=verify-full sslrootcert=/fixture/root.pem",
+                vec![],
+                "custom",
+                "bank",
+            ),
+            (
+                "postgresql://custom:fixture@pseudolife-pg/custom_bank",
+                vec![],
+                "custom",
+                "custom_bank",
+            ),
+            (
+                "postgresql://pseudolife:fixture@pseudolife-pg/pseudolife_memory",
+                vec![],
+                "pseudolife",
+                "pseudolife_memory",
+            ),
+            (
+                "postgresql://custom:fixture@pseudolife-pg",
+                vec![],
+                "custom",
+                "custom",
+            ),
+            (
+                "postgresql://custom:fixture@pseudolife-pg",
+                vec!["PGDATABASE=runtime_bank"],
+                "custom",
+                "runtime_bank",
+            ),
+            (
+                "host=pseudolife-pg user=custom dbname='bank with spaces' password=fixture",
+                vec![],
+                "custom",
+                "bank with spaces",
+            ),
+            (
+                "postgresql://pseudolife-pg",
+                vec!["PGUSER=runtime_user"],
+                "runtime_user",
+                "runtime_user",
+            ),
+            (
+                "postgresql://custom:fixture@pseudolife-pg/wrong?dbname=actual",
+                vec![],
+                "custom",
+                "actual",
+            ),
+        ] {
+            let (daemon, pg) = fixture(dsn, &extra);
+            assert_eq!(
+                connection_parts(&daemon, &pg),
+                Some((user.into(), db.into()))
+            );
+        }
+    }
+
+    #[test]
+    fn backup_connection_refuses_opaque_or_foreign_targets() {
+        for (dsn, extra) in [
+            ("", vec![]),
+            ("service=opaque", vec![]),
+            (
+                "host=pseudolife-pg hostaddr=10.0.0.2 user=custom dbname=bank",
+                vec![],
+            ),
+            (
+                "postgresql://custom@pseudolife-pg/bank?hostaddr=10.0.0.2",
+                vec![],
+            ),
+            ("invalid fixture", vec![]),
+            ("postgresql://custom@elsewhere/bank", vec![]),
+            (
+                "postgresql://custom@pseudolife-pg/bank",
+                vec!["PGSERVICE=opaque"],
+            ),
+            (
+                "postgresql://custom@pseudolife-pg/bank",
+                vec!["PGHOSTADDR=10.0.0.1"],
+            ),
+            ("postgresql://pseudolife-pg/bank", vec![]),
+            (
+                "host=pseudolife-pg user=custom dbname='host=elsewhere'",
+                vec![],
+            ),
+            ("postgresql://custom@pseudolife-pg:9999/bank", vec![]),
+            (
+                "postgresql://custom@pseudolife-pg/bank",
+                vec!["PGPORT=9999"],
+            ),
+        ] {
+            let (daemon, pg) = fixture(dsn, &extra);
+            assert!(connection_parts(&daemon, &pg).is_none());
         }
     }
 }
