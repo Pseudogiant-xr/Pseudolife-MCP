@@ -295,9 +295,7 @@ if ($startup.Count -eq 0) {
 }
 Write-Host "Registered + started '$taskName' ($Model, port $Port, pid $($listener.OwningProcess), python $PythonExe, log $LogFile)."
 Write-Host "To change the model, prompt file, port or CLI later: edit the PSEUDOLIFE_CLAUDE_SHIM_* lines in ops\.env, then run: python ops\shim_autostart.py restart claude (no elevation)."
-Write-Host "Cutover env for the daemon (.env or compose override):"
-Write-Host "  PSEUDOLIFE_DREAM_BASE_URL=http://host.docker.internal:$Port/v1"
-Write-Host "  PSEUDOLIFE_DREAM_MODEL=extractor"
-Write-Host "  PSEUDOLIFE_DREAM_FALLBACK_BASE_URL=http://pseudolife-extractor:8081/v1"
-Write-Host "  PSEUDOLIFE_DREAM_FALLBACK_MODEL=extractor"
-Write-Host "  PSEUDOLIFE_DREAM_EXTRACTOR_MODE=auto"
+# >>> shim cutover >>>
+& $PythonExe (Join-Path $repo "ops/shim_cutover.py") --repo $repo --port $Port
+if ($LASTEXITCODE -ne 0) { throw "could not report daemon cutover settings" }
+# <<< shim cutover <<<
