@@ -474,6 +474,46 @@ def read_connection(path: Path) -> tuple[str, str] | None:
             "repair or remove it before retrying.") from error
 
 
+def host_command_environment(environ) -> dict[str, str]:
+    """Connection additions for a CLI launched inside a Codex session.
+
+    MCP server env is private to the shim; Codex's shell commands do not
+    inherit it. Read the install/connect-managed hook connection instead.
+    An explicit origin is authoritative. An ambient bearer without one
+    must match the saved connection before its origin can be used.
+    """
+    if ("PSEUDOLIFE_MCP_DAEMON_URL" in environ
+            or not (environ.get("CODEX_SESSION_ID") or environ.get("CODEX_THREAD_ID"))):
+        return {}
+    home = Path(environ.get("CODEX_HOME") or Path.home() / ".codex").expanduser()
+    recorded = read_connection(connection_path(home))
+    if recorded is None:
+        return {}
+    url, token_file = recorded
+    url = _validated_daemon_url(url)
+    ambient_file = environ.get(TOKEN_FILE_KEY)
+    ambient_token = environ.get(TOKEN_KEY)
+    if TOKEN_FILE_KEY in environ or ambient_token:
+        import hmac
+        try:
+            ambient = (CredentialProvider(path=ambient_file) if TOKEN_FILE_KEY in environ
+                       else CredentialProvider(token=ambient_token)).snapshot().token
+            saved = CredentialProvider(path=token_file).snapshot().token if token_file else None
+        except (CredentialError, OSError, UnicodeError) as error:
+            raise SetupError(
+                "The Codex command's credential could not be matched to its saved daemon. "
+                "Set PSEUDOLIFE_MCP_DAEMON_URL to the intended daemon and retry.") from error
+        if not ambient or not saved or not hmac.compare_digest(ambient.encode(), saved.encode()):
+            raise SetupError(
+                "The Codex command's credential differs from its saved daemon connection. "
+                "Set PSEUDOLIFE_MCP_DAEMON_URL to the intended daemon and retry.")
+        return {URL_KEY: url}
+    result = {URL_KEY: url}
+    if token_file:
+        result[TOKEN_FILE_KEY] = token_file
+    return result
+
+
 def plan_replace(config, home, daemon_url, *, token_file=None, no_spawn=False):
     """What replace mode writes, from a ``config/read`` result: ``(env,
     new_env, literal)``, the user-level server env before and after, and
