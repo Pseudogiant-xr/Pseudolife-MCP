@@ -302,22 +302,31 @@ fn coordination_snapshot(
     } else {
         board_state
     };
-    let selected = wake.get(if host == "codex" {
-        "codex"
-    } else {
-        "claude_code"
-    });
-    let configured = selected.and_then(|selected| {
-        selected.get(if host == "codex" {
-            "doorbell"
-        } else {
-            "stop_hook"
-        })
-    });
-    let wake_state = if host == "generic" || host == "claude-desktop" {
+    let mut paths = Vec::new();
+    if matches!(host, "generic" | "claude-code")
+        && wake
+            .get("claude_code")
+            .and_then(|client| client.get("stop_hook"))
+            .and_then(Value::as_str)
+            == Some("on")
+    {
+        paths.push("Claude Code wakes via the plugin Stop hook; wake_enabled controls only the optional push path.");
+    }
+    if matches!(host, "generic" | "codex")
+        && wake
+            .get("codex")
+            .and_then(|client| client.get("doorbell"))
+            .and_then(Value::as_str)
+            == Some("on")
+    {
+        paths.push("Codex wakes via the doorbell.");
+    }
+    let wake_state = if host == "claude-desktop" {
         "unsupported"
-    } else if configured == Some(&json!("on")) {
+    } else if !paths.is_empty() {
         "configured"
+    } else if host == "generic" {
+        "unsupported"
     } else {
         "unavailable"
     };
@@ -341,9 +350,12 @@ fn coordination_snapshot(
     }
     if host == "claude-desktop" {
         next.push("Claude Desktop shares its MCP process across conversations; use a supported session host for a mailbox.");
-    } else if wake_state == "unsupported" {
-        next.push("This host has no verified idle wake path; pull mail on the next turn.");
+    } else if host == "generic" && paths.is_empty() {
+        next.push("No host selected and no configured wake path detected; use --host claude-code or --host codex to diagnose that client's wake setup.");
+    } else if wake_state == "unavailable" {
+        next.push("This host has no configured idle wake path; check its stop_hook or doorbell reason above and enable that client's plugin or wake setting, or pull mail on the next turn.");
     } else {
+        next.extend(paths);
         next.push("Configured wake is not delivery evidence; verify enqueue, hint/ring, receive and explicit ack in a disposable bank.");
     }
     json!({
@@ -698,6 +710,46 @@ mod tests {
 
     fn report(pairs: Value) -> Map<String, Value> {
         pairs.as_object().unwrap().clone()
+    }
+
+    #[test]
+    fn coordination_reports_configured_wake_paths_without_claiming_delivery() {
+        let health = report(json!({"status": "ok", "coordination": {"wake_enabled": false}}));
+        let wake = report(json!({"claude_code": {"stop_hook": "on"}}));
+        for host in ["generic", "claude-code"] {
+            let snapshot = coordination_snapshot(Some(&health), "on", &wake, host, None, None);
+            assert_eq!(snapshot["wake"]["state"], "configured");
+            assert_eq!(snapshot["delivery"], "unverified");
+            assert!(snapshot["next"].as_array().unwrap().contains(&json!(
+                "Claude Code wakes via the plugin Stop hook; wake_enabled controls only the optional push path."
+            )));
+        }
+        let codex = report(json!({"codex": {"doorbell": "on"}}));
+        let snapshot = coordination_snapshot(Some(&health), "on", &codex, "generic", None, None);
+        assert_eq!(snapshot["wake"]["state"], "configured");
+        assert!(
+            snapshot["next"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("Codex wakes via the doorbell."))
+        );
+        let disabled = report(json!({"claude_code": {"stop_hook": "off (plugin disabled)"}}));
+        let snapshot =
+            coordination_snapshot(Some(&health), "on", &disabled, "claude-code", None, None);
+        assert_eq!(snapshot["wake"]["state"], "unavailable");
+        assert!(
+            snapshot["next"]
+                .as_array()
+                .unwrap()
+                .last()
+                .unwrap()
+                .as_str()
+                .unwrap()
+                .contains("no configured idle wake path")
+        );
+        let snapshot =
+            coordination_snapshot(Some(&health), "on", &wake, "claude-desktop", None, None);
+        assert_eq!(snapshot["wake"]["state"], "unsupported");
     }
 
     #[test]
