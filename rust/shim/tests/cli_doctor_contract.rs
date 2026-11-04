@@ -288,7 +288,7 @@ fn offline_coordination(host: &str) -> Value {
     let (wake, last) = match host {
         "generic" => (
             "unsupported",
-            "This host has no verified idle wake path; pull mail on the next turn.",
+            "No host selected and no configured wake path detected; use --host claude-code or --host codex to diagnose that client's wake setup.",
         ),
         "claude-desktop" => (
             "unsupported",
@@ -296,7 +296,7 @@ fn offline_coordination(host: &str) -> Value {
         ),
         _ => (
             "unavailable",
-            "Configured wake is not delivery evidence; verify enqueue, hint/ring, receive and explicit ack in a disposable bank.",
+            "This host has no configured idle wake path; check its stop_hook or doorbell reason above and enable that client's plugin or wake setting, or pull mail on the next turn.",
         ),
     };
     json!({
