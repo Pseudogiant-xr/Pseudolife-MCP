@@ -332,7 +332,7 @@
       "lock-resolve": "83bcc6b654896c6d",
       "test": "ac414107d3d9c71d",
       "test-lite-linux": "44e2a8f2c01baeab",
-      "test-lite-windows": "8b52f3592654f7f6",
+      "test-lite-windows": "39f9b5bdf29bb2fd",
       "test-lite-macos": "c4a0ad0c70bb205a",
       "frontend": "b1b6a1a1278f2e60"
     },
@@ -441,6 +441,11 @@
         "job": "test-lite-windows",
         "fingerprint": "8b52f3592654f7f6",
         "reason": "Adds six mocked codec cases and one short PowerShell Unicode round-trip to the existing Python step. No new jobs, shards or dependency setup; retain the measured lane baseline within unchanged limits pending the next batch measurement."
+      },
+      {
+        "job": "test-lite-windows",
+        "fingerprint": "39f9b5bdf29bb2fd",
+        "reason": "Combine locale-safe shared fixtures with bounded installer ownership coverage in the existing Windows lane; no new job or setup step."
       }
     ]
   }
