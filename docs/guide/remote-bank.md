@@ -687,6 +687,10 @@ the explicit flag when a new serve is needed. To use an existing reachable conne
 pass `--target-url <URL>`; Tailscale is then unnecessary. A failed move removes
 only the serve it created, and records an `expose off --yes` recovery command
 if that removal fails. A pre-existing serve stays in place.
+The target records whether it created the serve before returning the result,
+so a lost SSH reply can be recovered safely. If ownership cannot be established,
+move leaves the forward alone and reports the receipt and status commands to
+inspect. On resume, an unexposed target is exposed after its daemon starts.
 
 **Run it under `tmux`, `screen` or `nohup`.** A move takes as long as a
 dump, a copy and a restore of the whole bank. On Linux and macOS a closed

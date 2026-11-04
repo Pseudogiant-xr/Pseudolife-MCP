@@ -406,13 +406,23 @@ class World:
         if "expose status" in cmd:
             body = {"exposed": True, "url": TARGET_URL} if self.exposed else {"exposed": False, "url": None}
             return 0, json.dumps(body).encode(), b""
+        if cmd == "tailscale ip -4":
+            return 0, b"100.64.0.9\n", b""
+        if cmd.startswith("cat ") and cmd.endswith("/expose.json"):
+            data = self.files.get(shlex.split(cmd)[-1])
+            return (0, data, b"") if data is not None else (1, b"", b"no receipt")
         if "expose tailscale" in cmd:
+            request = json.loads(stdin)
             if self.expose_exit:
                 if self.expose_exit == 5:
                     self.exposed = True  # serve applied, verification failed
+                self.files[request["receipt"]] = json.dumps({"move_id": request["move_id"], "attempt": request["attempt"],
+                    "ownership": "absent" if self.expose_exit in (2, 4) else "unknown"}).encode()
                 return self.expose_exit, b"", b"expose: run sudo tailscale set --operator=$USER"
             was_exposed = self.exposed
             self.exposed = True
+            self.files[request["receipt"]] = json.dumps({"move_id": request["move_id"], "attempt": request["attempt"],
+                "ownership": "borrowed" if was_exposed else "owned"}).encode()
             return 0, json.dumps({"state": "already_exposed" if was_exposed else "exposed",
                                    "url": TARGET_URL}).encode(), b""
         if "expose off" in cmd:
@@ -1089,7 +1099,7 @@ def test_usage_errors_exit_2(capsys):
 def test_an_unexposed_target_is_exposed_before_the_source_stops(tmp_path):
     world = World(exposed=False)
     assert run_move(world, tmp_path, expose_target=True) == 0
-    expose = index(world, lambda c: c.remote is not None and "expose tailscale --yes" in c.remote)
+    expose = index(world, lambda c: c.remote is not None and "expose tailscale" in c.remote)
     stop = index(world, local_is("docker", "stop"))
     assert -1 < expose < stop
 
@@ -1157,9 +1167,10 @@ def test_new_exposure_intent_is_recorded_before_the_remote_command(tmp_path):
     move = mover(world, tmp_path, expose_target=True)
     observed = []
     world.hooks = {"expose tailscale": lambda w, c: observed.append(
-        json.loads((move.local_dir / "record.json").read_text())["flags"]["exposed_now"])}
+        tuple(json.loads((move.local_dir / "record.json").read_text())["flags"][key]
+              for key in ("expose_pending", "exposed_now")))}
     assert move.run() == 0
-    assert observed == [True] and world.exposed
+    assert observed == [(True, False)] and world.exposed
     record = json.loads((move.local_dir / "record.json").read_text())
     assert record["flags"]["exposed_now"]
     assert any("expose off --yes" in line for line in record["manual_rollback"])
@@ -1167,7 +1178,7 @@ def test_new_exposure_intent_is_recorded_before_the_remote_command(tmp_path):
 
 def test_signal_during_target_expose_undoes_serve(tmp_path):
     def interrupted(world, call):
-        world.exposed = True
+        world.remote(call.remote, call.stdin)  # the remote result is durable before ssh replies
         signal.getsignal(signal.SIGTERM)(signal.SIGTERM, None)
 
     world = World(exposed=False, hooks={"expose tailscale": interrupted})
@@ -1196,14 +1207,97 @@ def test_rollback_keeps_preexisting_or_concurrently_created_exposure(tmp_path, a
     assert not any(c.remote and "expose off" in c.remote for c in world.calls)
 
 
-def test_an_ambiguous_expose_failure_is_undone(tmp_path):
+def test_an_unattributed_expose_failure_is_left_for_safe_manual_recovery(tmp_path):
     world = World(exposed=False, expose_exit=5)
-    assert run_move(world, tmp_path, expose_target=True) == 4
-    assert not world.exposed and world.source_running
+    move = mover(world, tmp_path, expose_target=True)
+    assert move.run() == 6
+    assert world.exposed and world.source_running
+    record = json.loads((move.local_dir / "record.json").read_text())
+    assert record["flags"]["expose_pending"] and not record["flags"]["exposed_now"]
+    assert any("expose status" in line for line in record["manual_rollback"])
+    assert not any(c.remote and "expose off" in c.remote for c in world.calls)
 
 
 def test_the_parser_accepts_explicit_exposure_consent():
     assert move_cli._parser().parse_args(["--to", TARGET, "--expose-target"]).expose_target
+
+
+def test_failed_new_exposure_can_be_resumed_from_a_stopped_target(tmp_path):
+    world = World(exposed=False, fail=("bash ops/update.sh",))
+    remote = world.remote
+
+    def require_healthy_daemon(cmd, stdin):
+        if "expose tailscale" in cmd and not world.target_running:
+            return 4, b"", b"expose requires a healthy local daemon"
+        return remote(cmd, stdin)
+
+    world.remote = require_healthy_daemon
+    assert run_move(world, tmp_path, expose_target=True) == 1
+    assert not world.exposed and not world.target_running and world.source_running
+    world.fail = ()
+    assert run_move(world, tmp_path, resume=True, expose_target=True) == 0
+    assert world.exposed and world.target_running and not world.source_running
+
+
+def test_lost_expose_reply_never_removes_another_operators_serve(tmp_path):
+    def borrowed_before_reply(world, call):
+        world.exposed = True
+        world.remote(call.remote, call.stdin)  # the command finds an already-exposed daemon
+        world.fail255 = ("expose tailscale",)
+
+    world = World(exposed=False, hooks={"expose tailscale": borrowed_before_reply})
+    assert run_move(world, tmp_path, expose_target=True) == 4
+    assert world.exposed and world.source_running
+    assert not any(c.remote and "expose off" in c.remote for c in world.calls)
+
+
+def test_lost_reply_undoes_a_serve_attributed_to_this_move(tmp_path):
+    def created_before_reply(world, call):
+        world.remote(call.remote, call.stdin)
+        world.fail255 = ("expose tailscale",)
+
+    world = World(exposed=False, hooks={"expose tailscale": created_before_reply})
+    assert run_move(world, tmp_path, expose_target=True) == 4
+    assert not world.exposed and world.source_running
+
+
+def test_resume_never_uses_a_stale_exposure_receipt_to_remove_a_serve(tmp_path):
+    world = World(exposed=False, fail=("bash ops/update.sh",))
+    assert run_move(world, tmp_path, expose_target=True) == 1
+
+    def lost_before_wrapper_starts(world, call):
+        world.exposed = True  # another operator created it after resume preflight
+        world.fail255 = ("expose tailscale",)
+
+    world.fail = ()
+    world.hooks = {"expose tailscale": lost_before_wrapper_starts}
+    before = len(world.calls)
+    assert run_move(world, tmp_path, resume=True, expose_target=True) == 6
+    assert world.exposed and world.source_running
+    assert not any(c.remote and "expose off" in c.remote for c in world.calls[before:])
+
+
+@pytest.mark.skipif(os.name == "nt", reason="the target exposure wrapper uses POSIX flock")
+@pytest.mark.parametrize("state, ownership", [("exposed", "owned"), ("already_exposed", "borrowed")])
+def test_remote_exposure_receipt_precedes_the_reply(tmp_path, monkeypatch, state, ownership):
+    import subprocess
+
+    receipt = tmp_path / "move" / "expose.json"
+    request = {"move_id": "test-move", "attempt": "test-attempt", "receipt": str(receipt), "checkout": str(tmp_path)}
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(request)))
+    reply = json.dumps({"state": state, "url": TARGET_URL})
+    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: subprocess.CompletedProcess(a, 0, reply, ""))
+
+    class Reply(io.StringIO):
+        def write(self, text):
+            assert json.loads(receipt.read_text())["ownership"] == ownership
+            return super().write(text)
+
+    monkeypatch.setattr(sys, "stdout", Reply())
+    with pytest.raises(SystemExit) as stopped:
+        exec(move_cli._EXPOSE_TARGET, {})
+    assert stopped.value.code == 0
+    assert json.loads(receipt.read_text()) == {"move_id": "test-move", "attempt": "test-attempt", "ownership": ownership}
 
 def _env_backup(c) -> bool:
     return c.remote is not None and c.remote.startswith("cp -p") and len(c.remote.split()) == 4 \
