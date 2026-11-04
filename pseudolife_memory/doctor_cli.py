@@ -409,10 +409,12 @@ def _codex_hooks_line(health: dict) -> str:
     from pseudolife_memory.client_updates import check_codex_hooks
 
     try:
-        result = check_codex_hooks(None, daemon_digest=health.get("hooks_digest"))
+        result = check_codex_hooks(None, daemon_digest=health.get("hooks_digest"), verify_runtime=True)
     except Exception as exc:  # noqa: BLE001 - doctor reports, never fails on this
         return f"unknown ({type(exc).__name__})"
     changed = result.get("changed_files")
+    if result.get("recovery"):
+        return result["state"] + ": " + result["recovery"]
     return result["state"] + (f" (changed: {', '.join(changed)})" if changed else "")
 
 

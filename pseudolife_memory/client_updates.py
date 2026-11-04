@@ -1569,8 +1569,46 @@ def _upgrade_codex_plugin(codex_home: Path, repo: Path | None, daemon_digest: st
     return dict(after, detail=f"after codex plugin marketplace upgrade {MARKETPLACE}: {after['detail']}")
 
 
+def _codex_runtime_hook_status(codex_home: Path, manifest_dir: Path) -> str:
+    """Read Codex's own trust verdict; a saved hash alone proves nothing."""
+    from pseudolife_memory.codex_connection import codex
+
+    executable = codex_executable(codex_home)
+    if executable is None:
+        return "unknown"
+    try:
+        definition = _codex_hook_manifest((manifest_dir / "hooks.json").read_bytes())
+        manifest = json.loads(definition)["hooks"]
+        expected = {
+            f"{PLUGIN_ID}:hooks/hooks.json:{re.sub(r'(?<!^)(?=[A-Z])', '_', event).lower()}:{g}:{h}"
+            for event, groups in manifest.items() for g, group in enumerate(groups)
+            for h, _ in enumerate(group.get("hooks") or [])}
+        with codex(executable, codex_home, Path.cwd()) as client:
+            result = client.rpc("hooks/list", {"cwds": [str(Path.cwd())]})
+        entries = result.get("data", [])
+        if (len(entries) != 1 or not isinstance(entries[0].get("errors"), list)
+                or entries[0]["errors"]):
+            return "unknown"
+        hooks = entries[0].get("hooks")
+        if not isinstance(hooks, list):
+            return "unknown"
+        own = {h.get("key"): h for h in hooks if isinstance(h, dict)
+               and isinstance(h.get("key"), str) and h["key"] in expected}
+        if not expected or set(own) != expected:
+            return "not-loaded"
+        if any(h.get("enabled") is True and h.get("trustStatus") in {"modified", "untrusted"}
+               for h in own.values()):
+            return "needs-approval"
+        if any(h.get("enabled") is False for h in own.values()):
+            return "disabled"
+        return ("current" if all(h.get("enabled") is True and h.get("trustStatus") == "trusted"
+                                 for h in own.values()) else "unknown")
+    except Exception:  # A runtime failure must never turn a file match into execution evidence.
+        return "unknown"
+
+
 def check_codex_hooks(repo: Path | None = None, daemon_digest: str | None = None,
-                      refresh: bool = False) -> dict:
+                      refresh: bool = False, verify_runtime: bool = False) -> dict:
     """Codex hooks come either as manual copies under ``<codex
     home>/pseudolife/hooks`` (``setup-codex-hooks.py``) or from the Codex
     plugin, whose marketplace clone Codex keeps itself. Codex approves a hook
@@ -1656,6 +1694,13 @@ def check_codex_hooks(repo: Path | None = None, daemon_digest: str | None = None
                     "detail": f"Codex skips {len(missing)} plugin hook handler(s) it has not approved; "
                               "approve them: python ops/setup-codex-hooks.py --source plugin --trust ask "
                               "(or /hooks in the Codex terminal app)"}
+        if verify_runtime:
+            state = _codex_runtime_hook_status(codex_home, clone_hooks)
+            if state != "current":
+                return {"state": state, "source": "plugin", "changed_files": [],
+                        "detail": "Codex's runtime hook trust differs from its matching script copy.",
+                        "recovery": ("Run python ops/setup-codex-hooks.py --source plugin --trust ask, "
+                                     "then start a new session.")}
         return {"state": "current", "detail": "Codex runs the plugin's hooks; its copy matches "
                                               + ("the checkout's scripts" if repo else "the daemon's scripts")}
     if changed and definitions_match:

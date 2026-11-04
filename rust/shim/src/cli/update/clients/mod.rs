@@ -14,7 +14,7 @@ use std::{
     time::Duration,
 };
 
-pub use codex::{check_codex_hooks, codex_reapproval_text};
+pub use codex::{check_codex_hooks, codex_reapproval_text, runtime_hook_status};
 use plugin::update_plugin;
 
 pub fn run_steps(

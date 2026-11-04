@@ -574,10 +574,38 @@ async fn diagnose(args: &Args) -> Res<(Value, bool)> {
         };
         let hooks_line = match hooks {
             clients::CodexHooks::Line(line) => line,
-            clients::CodexHooks::Plugin => match health.get("hooks_digest") {
-                None | Some(Value::Null) => "unknown".into(),
-                Some(_) => return Err(Defer),
-            },
+            clients::CodexHooks::Plugin => {
+                let checked = super::update::clients::check_codex_hooks(
+                    None,
+                    health.get("hooks_digest").and_then(Value::as_str),
+                    false,
+                );
+                let state = checked["state"].as_str().unwrap_or("unknown");
+                if state == "current" {
+                    let trust = super::update::clients::runtime_hook_status().await;
+                    if trust == "current" {
+                        trust.into()
+                    } else {
+                        format!(
+                            "{trust}: Run python ops/setup-codex-hooks.py --source plugin --trust ask, then start a new session."
+                        )
+                    }
+                } else {
+                    let changed = checked["changed_files"]
+                        .as_array()
+                        .filter(|v| !v.is_empty())
+                        .map(|v| {
+                            v.iter()
+                                .filter_map(Value::as_str)
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        });
+                    match changed {
+                        Some(changed) => format!("{state} (changed: {changed})"),
+                        None => state.into(),
+                    }
+                }
+            }
         };
         put(&mut report, "daemon_version", json!(daemon_version));
         put(&mut report, "codex_hooks", json!(hooks_line));
