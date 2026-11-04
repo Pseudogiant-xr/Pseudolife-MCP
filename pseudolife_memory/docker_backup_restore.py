@@ -129,49 +129,26 @@ class DockerBank:
         self.log = log
         self.running = self.inspect(self.daemon)
         pg = self.inspect(self.pg)
-        env = dict(v.split("=", 1) for v in self.running.get("Config", {}).get("Env", []) if "=" in v)
-        source = {}
-        if env.get("PSEUDOLIFE_MCP_DATABASE_URL"):
-            from psycopg.conninfo import conninfo_to_dict
-            try:
-                source = conninfo_to_dict(env["PSEUDOLIFE_MCP_DATABASE_URL"])
-            except Exception:  # driver errors may include the credential-bearing URL
-                raise up.UpdateError("cannot read the daemon's database configuration; restore its original "
-                                     "PSEUDOLIFE_MCP_DATABASE_URL and retry. Nothing was restored", 2) from None
-        if (source.get("service") or env.get("PGSERVICE")) and not (container and db and user):
-            raise up.UpdateError("the daemon's libpq service profile cannot be resolved here; name the actual "
-                                 "target with --container <postgres> --db <database> --user <role>. Nothing was restored", 2)
-        source_host = source.get("hostaddr") or env.get("PGHOSTADDR") or source.get("host") or env.get("PGHOST")
-        if source_host and container is None:
-            networks = pg.get("NetworkSettings", {}).get("Networks", {})
-            shared = set(self.running.get("NetworkSettings", {}).get("Networks", {})) & set(networks)
-            names = set()
-            for key in shared:
-                network = networks[key]
-                names.update((self.pg, (pg.get("Name") or "").lstrip("/"), pg.get("Config", {}).get("Hostname")))
-                names.update(network.get("Aliases") or [])
-                names.add(network.get("IPAddress"))
-            if source_host not in names:
-                raise up.UpdateError("the daemon's database host cannot be matched to the default PostgreSQL "
-                                     "container; name its actual database container with --container. Nothing was restored", 2)
-        # Container initialization variables do not describe libpq's current
-        # connection. In particular, an omitted dbname defaults to its user.
-        connection_user = source.get("user") or env.get("PGUSER")
-        connection_db = source.get("dbname") or env.get("PGDATABASE") or connection_user
-        if not env.get("PSEUDOLIFE_MCP_DATABASE_URL"):
-            connection_user = connection_db = None
-        self.user, self.db = user or connection_user, db or connection_db
-        if not self.user or not self.db:
-            raise up.UpdateError("the daemon's database defaults cannot be identified safely; name its actual "
-                                 "bank with --db <database> --user <role>. Nothing was restored", 2)
+        # Automatic selection uses exactly the update backup's runtime authority.
+        # All four explicit selectors intentionally bypass an opaque daemon source.
+        explicit = bool(container and db and user and db_port is not None)
         try:
-            self.db_port = int(db_port if db_port is not None else
-                               source.get("port") or env.get("PGPORT") or "5432")
+            connection_user, connection_db, connection_port = up._backup_connection_details(self.running, pg)
+        except Exception:
+            if not explicit:
+                raise up.UpdateError("the daemon's database connection cannot be resolved safely; set a direct "
+                                     "PSEUDOLIFE_MCP_DATABASE_URL on a network shared with the selected PostgreSQL "
+                                     "container, or name the actual bank with --container <postgres> --db <database> "
+                                     "--user <role> --db-port <port>. Nothing was restored", 2) from None
+            connection_user, connection_db, connection_port = user, db, db_port
+        self.user, self.db = user or connection_user, db or connection_db
+        try:
+            self.db_port = int(db_port if db_port is not None else connection_port)
             if not 1 <= self.db_port <= 65535:
                 raise ValueError("port range")
-        except (ValueError, TypeError) as exc:
+        except (ValueError, TypeError):
             raise up.UpdateError("the database port is ambiguous; name the selected container's server port "
-                                 "with --db-port <port>. Nothing was restored", 2) from exc
+                                 "with --db-port <port>. Nothing was restored", 2) from None
         self._database_arg(self.db)
         self.image = self.running.get("Image")
         if not self.image or not any(m.get("Destination") == "/data" for m in self.running.get("Mounts", [])):

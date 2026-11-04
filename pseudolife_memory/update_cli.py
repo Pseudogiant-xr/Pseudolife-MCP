@@ -811,15 +811,17 @@ class Update:
         older than seven days that match those names in that directory are
         rotated once the new pair is in place. No manifest, row-count gate
         or mirror: those stay with the checkout's ``ops/backup.*``."""
-        user, database = self._backup_connection()
+        user, database, port = self._backup_connection_details()
+        from psycopg.conninfo import make_conninfo
+        selector = make_conninfo(dbname=database)
         out_dir = data_dir() / "backups"
         out_dir.mkdir(parents=True, exist_ok=True)
         stamp = _stamp()
         dump = out_dir / f"pseudolife_memory-{stamp}.sql.gz"
         tmp = f"/tmp/pl_backup-{stamp}.sql.gz"
         code, out = run_cli([self.docker, "exec", PG_CONTAINER, "sh", "-c",
-                             f'unset PGHOSTADDR PGSERVICE PGSERVICEFILE; pg_dump -h /var/run/postgresql -p 5432 -U "$1" -d "$2" -Z9 > {tmp}',
-                             "sh", user, database], timeout=3600)
+                             f'unset PGHOSTADDR PGSERVICE PGSERVICEFILE; pg_dump -h /var/run/postgresql -p "$1" -U "$2" -d "$3" -Z9 > {tmp}',
+                             "sh", str(port), user, selector], timeout=3600)
         if code != 0:
             run_cli([self.docker, "exec", PG_CONTAINER, "rm", "-f", tmp], timeout=120)
             raise UpdateError(f"pg_dump failed inside {PG_CONTAINER}; check its PostgreSQL access; nothing was deployed")
@@ -850,6 +852,12 @@ class Update:
         return {"dump": str(dump), "state": str(state) if state.is_file() else None, "rotated": rotated}
 
     def _backup_connection(self) -> tuple[str, str]:
+        user, database, port = self._backup_connection_details()
+        if port != 5432 or "=" in database or "://" in database:
+            raise UpdateError("this backup caller requires port 5432 and a plain database selector; use pseudolife-mcp backup instead; nothing was deployed")
+        return user, database
+
+    def _backup_connection_details(self) -> tuple[str, str, int]:
         """Inspect even a stopped daemon: its environment is the connection authority."""
         refused = ("cannot resolve the daemon's backup connection; set PSEUDOLIFE_MCP_DATABASE_URL "
                    "in its container environment to an explicit PostgreSQL host, user and database "
@@ -863,7 +871,7 @@ class Update:
                 value = json.loads(out)
                 # Accept the normal inspect array too, for command adapters.
                 objects.append(value[0] if isinstance(value, list) and len(value) == 1 else value)
-            return _backup_connection_parts(*objects)
+            return _backup_connection_details(*objects)
         except UpdateError:
             raise
         except Exception:
@@ -1577,48 +1585,73 @@ def _compose_image_tag(compose_file: Path) -> str | None:
 
 
 def _backup_connection_parts(daemon: dict, postgres: dict) -> tuple[str, str]:
+    """Compatibility for callers that still pin port 5432 and pass a raw dbname."""
+    user, database, port = _backup_connection_details(daemon, postgres)
+    if port != 5432 or "=" in database or "://" in database:
+        raise ValueError("legacy backup selector")
+    return user, database
+
+
+def _backup_connection_details(daemon: dict, postgres: dict) -> tuple[str, str, int]:
+    """Resolve runtime libpq identity without exposing credential-bearing parse errors."""
+    try:
+        return _backup_connection_values(daemon, postgres)
+    except UpdateError:
+        raise
+    except Exception:
+        raise ValueError("cannot resolve runtime backup connection") from None
+
+
+def _backup_connection_values(daemon: dict, postgres: dict) -> tuple[str, str, int]:
+    """Container initialization variables never identify a runtime connection."""
     from psycopg.conninfo import conninfo_to_dict
+    import ipaddress
 
-    def environment(container):
-        result = {}
-        for item in container["Config"]["Env"]:
-            key, value = item.split("=", 1)
-            if key in result:
-                raise ValueError
-            result[key] = value
-        return result
-
-    env = environment(daemon)
-    for key in ("PGSERVICE", "PGHOSTADDR"):
-        if env.get(key):
-            raise UpdateError(f"cannot resolve the daemon's backup connection; unset {key} in its "
-                              "container environment and retry; nothing was deployed")
-    if not env.get("PSEUDOLIFE_MCP_DATABASE_URL"):
-        raise ValueError
-    parts = conninfo_to_dict(env["PSEUDOLIFE_MCP_DATABASE_URL"])
-    if parts.get("service") or parts.get("hostaddr"):
-        raise ValueError
+    env = {}
+    for item in daemon["Config"]["Env"]:
+        key, value = item.split("=", 1)
+        if key in env:
+            raise ValueError("duplicate environment key")
+        env[key] = value
+    parts = conninfo_to_dict(env.get("PSEUDOLIFE_MCP_DATABASE_URL") or "")
+    if parts.get("service") or env.get("PGSERVICE"):
+        raise UpdateError("cannot resolve the daemon's backup connection; replace PGSERVICE/service "
+                          "with a direct PSEUDOLIFE_MCP_DATABASE_URL naming its PostgreSQL host, port, "
+                          "user and database, then retry; nothing was deployed")
     host = parts.get("host") or env.get("PGHOST", "")
-    port = parts.get("port") or env.get("PGPORT") or "5432"
-    user = parts.get("user") or env.get("PGUSER", "")
-    # POSTGRES_DB/USER initialize a cluster; they are not libpq defaults.
+    address = parts.get("hostaddr") or env.get("PGHOSTADDR", "")
+    port = int(parts.get("port") or env.get("PGPORT") or "5432")
+    runtime_user = daemon["Config"].get("User")
+    if runtime_user is not None:
+        runtime_user = runtime_user.split(":", 1)[0] or "root"
+        if runtime_user.isdecimal():
+            runtime_user = None  # A numeric UID does not identify its passwd name.
+    user = parts.get("user") or env.get("PGUSER") or runtime_user
     database = parts.get("dbname") or env.get("PGDATABASE") or user
-    if not user or not database or "=" in database or "://" in database or any(
+    if not user or not database or not 1 <= port <= 65535 or any(
         ord(c) < 32 for c in user + database
-    ) or port != "5432":
-        raise ValueError
+    ) or "," in host or "," in address:
+        raise ValueError("ambiguous runtime connection")
     daemon_networks = daemon["NetworkSettings"]["Networks"]
     pg_networks = postgres["NetworkSettings"]["Networks"]
-    aliases = set()
+    aliases, addresses = set(), set()
     for name in daemon_networks.keys() & pg_networks.keys():
         network = pg_networks[name]
         aliases.update(network.get("Aliases") or [])
         aliases.update(network.get("DNSNames") or [])
-        aliases.add(network.get("IPAddress", ""))
+        for key in ("IPAddress", "GlobalIPv6Address"):
+            if network.get(key):
+                addresses.add(ipaddress.ip_address(network[key]))
+                aliases.add(network[key])
         aliases.add(postgres.get("Name", "").lstrip("/"))
-    if not host or host not in aliases:
-        raise ValueError
-    return user, database
+    if address:
+        if ipaddress.ip_address(address) not in addresses:
+            raise UpdateError("cannot match PGHOSTADDR/hostaddr to the selected PostgreSQL container "
+                              "on a shared network; set a direct PSEUDOLIFE_MCP_DATABASE_URL to that "
+                              "container and remove the unmatched address, then retry; nothing was deployed")
+    elif not host or host not in aliases:
+        raise ValueError("unmatched runtime host")
+    return user, database, port
 
 
 def _rotate_backups(out_dir: Path, *, keep_days: int, keep: set, keep_newest: int = 3) -> list[str]:
