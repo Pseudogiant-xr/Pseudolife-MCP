@@ -50,12 +50,13 @@ PARITY_CHECKS = {
     "Principal store differential and golden harness": "cli-store",
     "Daemon static HTTP parity": "cli-store",
 
-    "Daemon schema startup parity": "cli-daemon",
+    "Daemon schema startup parity": "cli-startup",
     "Graph store differential and recorded oracle": "cli-store",
     "Daemon body admission parity": "cli-live",
     "Daemon security admission parity": "cli-live",
     "Daemon MCP live parity and controls": "cli-live",
-    "Daemon resident startup parity": "cli-daemon*",
+    "Daemon resident startup parity": "cli-startup",
+    "Daemon resident startup parity part 2": "cli-startup",
     "Run unchanged candidates and differential judges": "judges",
 }
 # Parity uploads carry the lane prefix: empty on hosted, set by parity-selfhosted.
@@ -106,7 +107,7 @@ def row_commands(invocations, required_rows, golden):
 
 W1C_SUITES = ("w1c-doctor", "w1c-pairing", "w1c-connection", "w1c-connect")
 H5_SUITES = ("h5-audit", "h5-backup", "h5-w1a", "h5-background", "h5-daemon-mutants", "h5-graph-mutants")
-CLI_SUITES = ("cli", "cli-store", "cli-daemon", "cli-daemon-2", "cli-live")
+CLI_SUITES = ("cli", "cli-store", "cli-startup", "cli-live")
 # h5-light: Linux runs h5-audit, h5-backup and h5-background in one job.
 PARITY_SUITES = ["eval", *CLI_SUITES, "judges", *W1C_SUITES, *H5_SUITES, "h5-light"]
 # The live Python-versus-Rust comparisons hosted Windows cannot run
@@ -515,7 +516,7 @@ def test_shards_cover_both_systems_and_build_once():
                    if step.get("name") == "Download daemon storage test executable")
     assert stored["with"]["name"] == fetched["with"]["name"] == "daemon-storage-test-${{ runner.os }}"
     assert stored["with"]["if-no-files-found"] == "error"
-    assert fetched["if"] == "startsWith(matrix.suite, 'cli-daemon')"
+    assert fetched["if"] == "matrix.suite == 'cli-startup'"
     assert fetched["with"]["path"] == "rust/target/storage-test"
     # Read-only: the Rust job's own key, never saved from here.
     cache = next(step for step in fixtures["steps"] if step.get("uses") == "Swatinem/rust-cache@v2")
@@ -536,6 +537,8 @@ def test_original_checks_remain_gated_on_the_expected_shards():
             expected = ("startsWith(matrix.suite, 'w1c-')" if suite == "w1c" else
                         f"startsWith(matrix.suite, '{suite[:-1]}')" if suite and suite.endswith("*") else
                         f"matrix.suite == '{suite}'" if suite else None)
+            if name in ("Daemon resident startup parity", "Daemon resident startup parity part 2"):
+                expected = "${{ !cancelled() && matrix.suite == 'cli-startup' && steps.startup_setup.outcome == 'success' }}"
             assert actual.get("if") == expected
     check_executable_coverage(jobs)
 
@@ -1469,7 +1472,7 @@ def test_timeout_reduction_is_limited_to_cli_and_new_w1c_suites():
     assert set(PARITY_SUITES) - set(budgets) == {"eval", "judges"}
 
 
-def test_no_cli_shard_is_an_hour_long_serial_job():
+def test_cli_budgets_preserve_separate_startup_part_limits():
     # Hosted Windows ran cli as one 61-70 minute job (master runs
     # 39205533092, 39236836263, 2026-10-19). Each shard now measures about
     # 26 minutes there, and its budget stays about twice that.
@@ -1477,39 +1480,39 @@ def test_no_cli_shard_is_an_hour_long_serial_job():
     budgets = {shard["suite"]: shard.get("job_timeout")
                for shard in job["strategy"]["matrix"]["include"]}
     for suite in CLI_SUITES:
-        assert 0 < budgets[suite] <= 60, suite
+        assert 0 < budgets[suite] <= (75 if suite == "cli-startup" else 60), suite
     steps = job["steps"]
     by_suite = {}
     for step in steps:
         for suite in CLI_SUITES:
             if step.get("if") == f"matrix.suite == '{suite}'" and step.get("run"):
                 by_suite.setdefault(suite, []).append(step["name"])
-    # Both cli-daemon shards run resident startup parity (one part each) on
-    # the storage test binary the fixtures job built; schema parity runs in
-    # the first. The startup steps keep the pydantic pin the MCP step gave
-    # them when they ran after it in the single cli job (reviewer, 2026-10-20).
-    shared = [step["name"] for step in steps
-              if step.get("if") == "startsWith(matrix.suite, 'cli-daemon')" and step.get("run")]
-    assert shared == ["Keep the oracle's pydantic pin for the startup steps", "Daemon resident startup parity"]
-    assert by_suite["cli-daemon"] == ["Daemon schema startup parity"]
-    assert "cli-daemon-2" not in by_suite
+    # Both logical parts keep their selectors and budgets in one physical job.
+    assert by_suite["cli-startup"] == ["Keep the oracle's pydantic pin for the startup steps", "Daemon schema startup parity"]
     parts = {shard["suite"]: shard.get("startup_part") for shard in job["strategy"]["matrix"]["include"]}
-    assert (parts["cli-daemon"], parts["cli-daemon-2"]) == (1, 2)
+    assert parts["cli-startup"] == 1
     assert "--part ${{ matrix.startup_part }}" in next(
         s for s in steps if s.get("name") == "Daemon resident startup parity")["run"]
-    pin = next(s for s in steps if s.get("name") == shared[0])
+    second = next(s for s in steps if s.get("name") == "Daemon resident startup parity part 2")
+    assert "--part 2 " in second["run"]
+    first = next(s for s in steps if s.get("name") == "Daemon resident startup parity")
+    assert first["timeout-minutes"] == second["timeout-minutes"] == 26
+    assert first["if"] == second["if"] == "${{ !cancelled() && matrix.suite == 'cli-startup' && steps.startup_setup.outcome == 'success' }}"
+    pin = next(s for s in steps if s.get("name") == "Keep the oracle's pydantic pin for the startup steps")
     mcp = next(s for s in steps if s.get("name") == "Daemon MCP live parity and controls")
     for package in ("pydantic==2.14.0", "pydantic-core==2.50.0"):
         assert package in pin["run"] and package in mcp["run"]
     names = [step.get("name") for step in steps]
     assert names.index("Daemon schema startup parity") < names.index("Daemon resident startup parity")
-    for upload, condition in (("Retain daemon schema parity", "matrix.suite == 'cli-daemon'"),
+    assert names.index("Daemon resident startup parity") < names.index(second["name"])
+    for upload, condition in (("Retain daemon schema parity", "matrix.suite == 'cli-startup'"),
                               ("Retain daemon resident startup parity",
-                               "startsWith(matrix.suite, 'cli-daemon')")):
+                               "matrix.suite == 'cli-startup'")):
         step = next(s for s in steps if s.get("name") == upload)
         assert step["if"] == "always() && " + condition
     startup_upload = next(s for s in steps if s.get("name") == "Retain daemon resident startup parity")
     assert startup_upload["with"]["name"].endswith("-${{ matrix.suite }}")
+    assert "daemon-startup-parity*.json" in startup_upload["with"]["path"]
 
 
 @pytest.mark.parametrize("name", [

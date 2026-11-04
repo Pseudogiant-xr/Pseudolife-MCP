@@ -34,7 +34,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 # Every parity suite, in matrix order. Windows step medians on 2026-10-10,
 # 14 successful runs (eval, cli, judges): 317s/476s/552.5s.
-SUITES = ["eval", "cli", "cli-store", "cli-daemon", "cli-daemon-2", "cli-live", "judges",
+SUITES = ["eval", "cli", "cli-store", "cli-startup", "cli-live", "judges",
           "w1c-doctor", "w1c-pairing", "w1c-connection", "w1c-connect",
           "h5-audit", "h5-backup", "h5-w1a", "h5-background", "h5-daemon-mutants", "h5-graph-mutants",
           "h5-light"]
@@ -56,13 +56,10 @@ SHARDS = [
     # cli-store: dream cursor, static, graph store, background and
     # principal steps, 9.6 min.
     {"suite": "cli-store", "job_timeout": 35},
-    # Schema startup 4.7 min, then 11 resident startup cases at about 29 s
-    # each, on the storage test binary the fixtures job built.
-    {"suite": "cli-daemon", "startup_part": 1, "job_timeout": 40},
-    # The other 11 cases (every mutant's control among them), 9 startup
-    # mutants, the clock retry and the writer guard, about 10.6 min
-    # (startup_cases.part_cases).
-    {"suite": "cli-daemon-2", "startup_part": 2, "job_timeout": 40},
+    # Both existing logical parts share checkout, downloads and Python setup.
+    # Batch 2 (2026-11-05): the old jobs totaled about 12.2 minutes on Ubuntu
+    # and 22.6 on Windows. Retain each part's own step budget and receipt.
+    {"suite": "cli-startup", "startup_part": 1, "job_timeout": 75},
     # Same runs, the four live steps: Windows 22.4 min (body 2.5, security
     # 8.6, MCP 8.9, CLI live arms about 2.5) plus about 4 min setup; Linux
     # 14 min. About twice the Windows total.
@@ -127,9 +124,9 @@ EVENT_BOUND = ("eval", "judges")
 
 # Every pull request that runs parity at all runs these: the CLI rows most
 # changes touch (mail, hook, episode, lease), the daemon store, startup, live
-# and W1-A rows, and the eval harness. cli-store and cli-daemon-2 hold steps
-# the cli and cli-daemon shards ran until 2026-10-24.
-FLOOR = ("eval", "cli", "cli-store", "cli-daemon", "cli-daemon-2", "cli-live", "h5-w1a")
+# and W1-A rows, and the eval harness. The two startup parts always ran
+# together; cli-startup keeps both in one physical shard per OS.
+FLOOR = ("eval", "cli", "cli-store", "cli-startup", "cli-live", "h5-w1a")
 ALL = tuple(SUITES)
 
 # The rust/cli_harness rows outside the floor, by the suite that runs them
@@ -149,7 +146,7 @@ ROW_SUITES = {
 SHIM = ("cli", "cli-live", "judges", "w1c-doctor", "w1c-pairing", "w1c-connection", "w1c-connect",
         "h5-audit", "h5-backup")
 # The pseudolife-daemon crate (and its graph and dream contract binaries).
-DAEMON = ("cli", "cli-store", "cli-daemon", "cli-daemon-2", "cli-live", "eval", "h5-w1a", "h5-background",
+DAEMON = ("cli", "cli-store", "cli-startup", "cli-live", "eval", "h5-w1a", "h5-background",
           "h5-daemon-mutants", "h5-graph-mutants")
 # rust/shim/src/cli entries whose users are covered by the listed rows;
 # any other shim file reaches the whole binary. Shared

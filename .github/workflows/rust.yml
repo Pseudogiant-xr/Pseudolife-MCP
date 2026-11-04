@@ -213,7 +213,7 @@ jobs:
       # the pairs its merged batch passed (see below). A pull request
       # that scope marks full (one from integrate/*; the others skip the
       # matrix, see `full` above)
-      # runs the floor (eval, cli, cli-daemon, cli-live, h5-w1a) plus the
+      # runs the floor (eval, cli, cli-store, cli-startup, cli-live, h5-w1a) plus the
       # suites its diff reaches: a row, its golden or its command's shim code
       # reaches the shard that runs the row, the daemon crate its daemon
       # suites, and anything the module cannot place (the Python oracle,
@@ -566,7 +566,7 @@ jobs:
     # - The loopback bind fixture (cli-live, h5-w1a): the Rust job's override
     #   step's mutants dev build, the only build carrying the debug-only
     #   loopback override.
-    # - The daemon storage test executable the cli-daemon shards run schema
+    # - The daemon storage test executable the cli-startup shard runs schema
     #   and startup parity on, built by schema_ci.py's own command; each
     #   cli-daemon shard compiled it itself before.
     needs: scope
@@ -932,7 +932,7 @@ jobs:
       # One key per suite. All suites shared one key: the first to save fixed
       # it, and on an exact hit no later suite's compile was ever saved.
       # Only the suites that compile cache (sent-YAML mutants in cli,
-      # which_comparison in eval; the cli-daemon shards take their storage
+      # which_comparison in eval; cli-startup takes its storage
       # test binary from the fixtures job); the rest restored a 71 MB
       # registry they never read (master run 39236836263, 2026-10-19).
       - uses: Swatinem/rust-cache@v2
@@ -969,7 +969,7 @@ jobs:
           name: daemon-bind-fixture-${{ runner.os }}
           path: rust/target/debug
       - name: Download daemon storage test executable
-        if: startsWith(matrix.suite, 'cli-daemon')
+        if: matrix.suite == 'cli-startup'
         uses: actions/download-artifact@v4
         with:
           name: daemon-storage-test-${{ runner.os }}
@@ -1315,10 +1315,11 @@ jobs:
       # pydantic for the Python oracle; keep the same pin now that they run
       # in their own shard.
       - name: Keep the oracle's pydantic pin for the startup steps
-        if: startsWith(matrix.suite, 'cli-daemon')
+        id: startup_setup
+        if: matrix.suite == 'cli-startup'
         run: python -m pip install "pydantic==2.14.0" "pydantic-core==2.50.0"
       - name: Daemon schema startup parity
-        if: matrix.suite == 'cli-daemon'
+        if: matrix.suite == 'cli-startup'
         timeout-minutes: 10
         shell: pwsh
         run: |
@@ -1328,7 +1329,7 @@ jobs:
           python rust/daemon/harness/schema_ci.py --no-build --rust-test-bin $storageTest --out (Join-Path $env:RUNNER_TEMP 'daemon-schema-parity.json')
           exit $LASTEXITCODE
       - name: Retain daemon schema parity
-        if: always() && matrix.suite == 'cli-daemon'
+        if: always() && matrix.suite == 'cli-startup'
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.PARITY_ARTIFACT_PREFIX }}daemon-schema-parity-${{ runner.os }}
@@ -1345,12 +1346,11 @@ jobs:
             ${{ runner.temp }}/graph-read-live.json
             ${{ runner.temp }}/graph-read-golden.json
           if-no-files-found: error
-      # Two parts, one per cli-daemon shard (matrix.startup_part,
-      # startup_cases.part_cases): the whole matrix was 31 cells at about
-      # 29 s each, 16.1 minutes, on hosted Windows (batch run 40047950017,
-      # 2026-10-24), the longest step of any shard.
+      # The original two parts keep their selectors and separate receipts.
+      # The shared-setup barrier keeps disk/lease/setup failures fatal before
+      # either part; explicit status permits comparison-failure continuation.
       - name: Daemon resident startup parity
-        if: startsWith(matrix.suite, 'cli-daemon')
+        if: ${{ !cancelled() && matrix.suite == 'cli-startup' && steps.startup_setup.outcome == 'success' }}
         # Windows CI 2026-10-10: about 28s/cell x 25 cells plus clock/guard,
         # about 13 minutes in total; allow twice that validation duration.
         timeout-minutes: 26
@@ -1361,17 +1361,27 @@ jobs:
           $testName = if ($IsWindows) { 'pseudolife-daemon-storage-test.exe' } else { 'pseudolife-daemon-storage-test' }
           $candidate = (Resolve-Path (Join-Path 'rust/target/storage-test' $testName)).Path
           if (-not $IsWindows) { chmod +x $candidate }
-          python rust/daemon/harness/startup_ci.py --no-build --rust-test-bin $candidate --part ${{ matrix.startup_part }} --out (Join-Path $env:RUNNER_TEMP 'daemon-startup-parity.json')
+          python rust/daemon/harness/startup_ci.py --no-build --rust-test-bin $candidate --part ${{ matrix.startup_part }} --out (Join-Path $env:RUNNER_TEMP 'daemon-startup-parity-part1.json')
+          exit $LASTEXITCODE
+      - name: Daemon resident startup parity part 2
+        if: ${{ !cancelled() && matrix.suite == 'cli-startup' && steps.startup_setup.outcome == 'success' }}
+        timeout-minutes: 26
+        shell: pwsh
+        run: |
+          python -m pip install "onnx==1.22.0" "onnxruntime==1.27.0"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $testName = if ($IsWindows) { 'pseudolife-daemon-storage-test.exe' } else { 'pseudolife-daemon-storage-test' }
+          $candidate = (Resolve-Path (Join-Path 'rust/target/storage-test' $testName)).Path
+          if (-not $IsWindows) { chmod +x $candidate }
+          python rust/daemon/harness/startup_ci.py --no-build --rust-test-bin $candidate --part 2 --out (Join-Path $env:RUNNER_TEMP 'daemon-startup-parity-part2.json')
           exit $LASTEXITCODE
       - name: Retain daemon resident startup parity
-        if: always() && startsWith(matrix.suite, 'cli-daemon')
+        if: always() && matrix.suite == 'cli-startup'
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.PARITY_ARTIFACT_PREFIX }}daemon-startup-parity-${{ runner.os }}-${{ matrix.suite }}
           path: |
-            ${{ runner.temp }}/daemon-startup-parity.json
-            ${{ runner.temp }}/daemon-startup-parity-clock-retry.json
-            ${{ runner.temp }}/daemon-startup-parity-writer-guard.json
+            ${{ runner.temp }}/daemon-startup-parity*.json
           if-no-files-found: error
       - name: Prepare disposable PostgreSQL for W1-C rows
         if: startsWith(matrix.suite, 'w1c-')
