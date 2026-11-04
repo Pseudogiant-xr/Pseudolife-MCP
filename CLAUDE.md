@@ -50,7 +50,8 @@ the memory bank; procedures belong in a skill or doc this file points to.
    skill's exceptions: `docs/dev/merge-batches.md`).
    A batch merges through `python ops/integrate.py merge`, which refuses
    anything but a green batch at its built head, except a merge under the
-   `merge-forward` skill's exceptions, which the maintainer makes by hand.
+   `merge-forward` skill's exceptions or item 11, which the maintainer
+   (or a session they delegated it to) makes by hand.
    Independent review is still required, and the maintainer owns the merge.
    **Merge queue: CI ready, queue off** (2026-10-19): both workflows run on
    `merge_group`, but enabling GitHub's merge queue is a ruleset change only
@@ -90,12 +91,15 @@ the memory bank; procedures belong in a skill or doc this file points to.
    and raises a limit only with its reason (`rust/ci/test_ci_budget.py`
    enforces both), because every job shares the account's 20 hosted slots
    (`docs/dev/ci-budget.md`).
-10. **A Python behaviour change that a Rust parity row covers changes the
-    native implementation in the same PR**, with those rows run locally,
-    because the Parity gate compares the two and otherwise fails the batch.
-    A change to `cli.py`'s usage text also fails the judges' five
-    `cli_dispatch` help cases by construction (their oracle is merge-base
-    Python): the PR says so, and the maintainer approves it for that batch.
+10. **A Python behaviour change that a `rust/cli_harness` row covers is
+    ported to Rust in the same PR, with those rows run locally**, because
+    the rows compare head Python with head Rust (`rust/PARITY.md` maps rows
+    to code) and otherwise fail the batch.
+11. **A change the parity judges cover fails their cases by construction
+    until its base includes it**, because PR and batch runs use merge-base
+    Python as the judges' oracle (`evals/rust_port/README.md`): the PR lists
+    the failing cases, and only the maintainer approves landing that batch
+    with them red (item 4's one exception besides `merge-forward`).
 
 ## Install and update experience
 
@@ -358,13 +362,12 @@ bank ("dev machines homelab"), never in the tree.
   without a VM attempt only when a deflake PR or issue already names it or
   the VM is busy (say so), on the current merge ref, and name the deflake
   in the PR or merge comment.
-- **A PR adding a test, or changing what one spawns, waits on or times,
-  that runs on `windows-latest` and rests on real process
-  spawn/wait/kill, sockets or named pipes, file locks or atomic replace, or
-  timeouts (a harness `run.py` scenario included; a test that only mocks
-  them is exempt) merges only after 20
+- **A PR that adds a test running on `windows-latest` that rests on real
+  process spawn/wait/kill, sockets or named pipes, file locks or atomic
+  replace, or timeouts (a harness `run.py` scenario included), or changes
+  how such a test's own code uses them, merges only after 20
   clean hosted `windows-latest` runs of that test** (the Rust workflow's
-  `mode=stress` dispatch), because the VM admits what the runner then
+  `mode=stress` dispatch; a test that only mocks them is exempt), because the VM admits what the runner then
   fails (#835: 0 of 525 on the VM, 3 of 5 hosted).
 - **Windows-sensitive Rust changes** (`cfg(windows)` / `windows-sys`,
   process spawn/wait/kill, sockets or named pipes, file locks or atomic
@@ -438,9 +441,10 @@ prove are yours.
   process tree. Verify its findings against the code and record both reviews in the PR (or
   commit body), each finding labelled by source with its verdict; a
   missing, signed-out or failed Codex run is recorded as a single-reviewer
-  pass. A PR that Codex itself authored meets both passes with one fresh
-  `gpt-6.1-sol` reviewer, since a second same-model review adds cost but
-  no independence.
+  pass. When Codex authored and owns the PR, one fresh `gpt-6.1-sol`
+  reviewer at high effort or above meets both passes, since a second
+  same-model review adds cost but no independence; a Claude session that
+  owns or forwards it still runs both.
 - **Those two rules bind only the session that owns the PR** (the main
   thread opening or forwarding it; for an outside contributor's PR, the
   maintainer's session that takes it up). A reviewer of
@@ -448,7 +452,7 @@ prove are yours.
   or Codex run, and does not call its pass single-reviewer.
 - **Under a conductor, the PR's opener reviews once and the conductor
   reviews each fix round:** the opener runs its review pass and Codex second
-  review before first handing the PR to the conductor, then sends fixes for
+  review (one review for a Codex-owned PR) before first handing the PR to the conductor, then sends fixes for
   the conductor's findings back without another pair for the conductor's own
   delta review (a scope-widening or self-initiated change still gets the
   opener's fresh pair), because two pairs on one fix round only duplicate
