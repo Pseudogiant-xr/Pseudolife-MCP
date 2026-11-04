@@ -70,6 +70,12 @@ class World:
     def docker(self, a: list[str]):
         if self.docker_down:
             return 1, self.docker_error
+        if a[:3] == ["inspect", "-f", "{{json .}}"]:
+            if self.container is None:
+                return 1, "Error: No such object"
+            return 0, json.dumps({"Name": "/" + a[-1], "Config": {"Env": [
+                "PSEUDOLIFE_MCP_DATABASE_URL=postgresql://pseudolife@pseudolife-pg/pseudolife_memory"]},
+                "NetworkSettings": {"Networks": {"fixture": {"Aliases": ["pseudolife-pg"]}}}})
         if a[:2] == ["inspect", "-f"] or a[:2] == ["inspect", "--format"]:
             fmt, target = a[2], a[3]
             if target == DAEMON:
@@ -1518,7 +1524,7 @@ def _pg_aware(world: World) -> None:
     inner = world.docker
 
     def docker(a):
-        if a[:2] == ["inspect", "-f"] and a[3] == PG:
+        if a[:2] == ["inspect", "-f"] and a[3] == PG and "State.Running" in a[2]:
             state = getattr(world, "pg_running", None)
             return (0, state + "\n") if state else (1, "Error: No such object")
         if a[:2] == ["port", PG]:
