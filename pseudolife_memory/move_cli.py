@@ -708,13 +708,11 @@ class Mover:
                               f"is POSIX and curl, python3 and docker are on PATH there (exit {result.code})")
         # Inspect existing resources before suggesting a fresh install: a
         # foreign stack without a clone would collide with the installer.
-        result = self.ssh(f"docker inspect --type container {DAEMON}", timeout=60)
-        target = _container(result.text) if result.ok else None
+        target = self.inspect_target(DAEMON)
         if target is None:
-            postgres = self.ssh(f"docker inspect --type container {POSTGRES}", timeout=60)
-            if postgres.ok and _container(postgres.text) is not None:
+            if self.inspect_target(POSTGRES) is not None:
                 self.check_target_stack({})
-            raise self.refuse(f"the target has no {DAEMON} container ({result.why(out=False)}): run the "
+            raise self.refuse(f"the target has no {DAEMON} container: run the "
                               f"installer there first ({INSTALL_LINE})")
         self.check_target_stack(target)
         co = rq(self.checkout)
@@ -769,6 +767,21 @@ class Mover:
                                "restart_policy": self.target_policy,
                                "unattended_update": self.target_timer_enabled}
 
+    def inspect_target(self, name: str) -> dict | None:
+        """Only a successful exact-name listing can prove absence."""
+        result = self.ssh(f"docker inspect --type container {name}", timeout=60)
+        container = _container(result.text) if result.ok else None
+        if container is not None:
+            return container
+        if not result.ok:
+            listing = self.ssh(f"docker ps -a --filter {shlex.quote('name=^/' + name + '$')} "
+                               "--format '{{.Names}}'", timeout=60)
+            if listing.ok and not listing.text.strip():
+                return None
+        cause = result.why(out=False) if not result.ok else "Docker returned invalid container JSON"
+        raise self.refuse(f"could not inspect the target's {name} ({cause}): verify Docker is running and "
+                          "the ssh user can run docker ps -a, then retry move --dry-run")
+
     def check_target_stack(self, daemon: dict) -> None:
         """The checkout used by restore/update must own both containers.
 
@@ -777,8 +790,7 @@ class Mover:
         the target so a symlink to the owning checkout is legitimate.
         Overlays and explicit volume names do not change ownership.
         """
-        result = self.ssh(f"docker inspect --type container {POSTGRES}", timeout=60)
-        postgres = _container(result.text) if result.ok else None
+        postgres = self.inspect_target(POSTGRES)
         labels = [(c.get("Config") or {}).get("Labels") or {} for c in (daemon, postgres or {})]
         fix = ("Retry with --target-checkout pointing to the checkout that owns both containers. "
                "For a stack managed elsewhere, first back up that bank, use its stack manager to "

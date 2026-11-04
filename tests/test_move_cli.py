@@ -217,6 +217,8 @@ class World:
         self.target_respawns = target_respawns     # a remote update.sh that keeps going brings it back
         self.restore_fails_after_drop = restore_fails_after_drop
         self.target_live_env = list(TARGET_ENV)
+        self.target_daemon_exists = True
+        self.target_postgres_exists = True
         self.target_labels = compose_labels("pseudolife-daemon")
         self.postgres_labels = compose_labels("pseudolife-pg")
         self.overlap = False   # ever a running target beside a running source on the moved bank
@@ -356,13 +358,21 @@ class World:
                 return 0, "".join(f"{hit}\n" for hit in self.grep_hits).encode(), b""
             return 1, b"", b""
         if cmd.startswith("docker inspect --type container pseudolife-mcp-daemon"):
+            if not self.target_daemon_exists:
+                return 1, b"", b"No such container"
             return 0, json.dumps([{"Config": {"Env": self.target_live_env, "Image": "pseudolife-daemon:0.15.0",
                                               "Labels": self.target_labels},
                                    "State": {"Running": self.target_running},
                                    "HostConfig": {"RestartPolicy": _policy(self.target_policy)}}]).encode(), b""
         if cmd == "docker inspect --type container pseudolife-mcp-postgres":
+            if not self.target_postgres_exists:
+                return 1, b"", b"No such container"
             return 0, json.dumps([{"Config": {"Labels": self.postgres_labels},
                                    "State": {"Running": self.target_pg_running == "true"}}]).encode(), b""
+        if cmd.startswith("docker ps -a --filter"):
+            name = move_cli.DAEMON if move_cli.DAEMON in cmd else move_cli.POSTGRES
+            exists = self.target_daemon_exists if name == move_cli.DAEMON else self.target_postgres_exists
+            return 0, (name + "\n").encode() if exists else b"", b""
         if cmd.startswith("python3 -c") and "realpath" in cmd:
             import posixpath
             # The target's home and paths are POSIX, even in a Windows test run.
@@ -783,10 +793,9 @@ def test_foreign_stack_without_a_checkout_never_suggests_the_installer(tmp_path,
 
 @pytest.mark.parametrize("postgres_exists", [False, True])
 def test_only_a_target_without_existing_containers_gets_the_install_line(tmp_path, capsys, postgres_exists):
-    missing = [f"docker inspect --type container {move_cli.DAEMON}"]
-    if not postgres_exists:
-        missing.append(f"docker inspect --type container {move_cli.POSTGRES}")
-    world = World(checkout=False, fail=tuple(lambda c, cmd=cmd: c.remote == cmd for cmd in missing))
+    world = World(checkout=False)
+    world.target_daemon_exists = False
+    world.target_postgres_exists = postgres_exists
     world.postgres_labels = compose_labels("pseudolife-pg", project="foreign-stack")
     assert run_move(world, tmp_path, as_json=True) == 4
     error = json.loads(capsys.readouterr().out)["error"]
@@ -800,6 +809,22 @@ def test_no_target_tailscale_names_explicit_url_as_the_fix(tmp_path, capsys):
     error = json.loads(capsys.readouterr().out)["error"]
     assert "--target-url" in error
     assert world.source_running and not world.fenced
+
+
+@pytest.mark.parametrize("malformed", [False, True])
+def test_docker_inspection_failure_never_suggests_installation(tmp_path, capsys, malformed):
+    world = World(checkout=False)
+    if malformed:
+        remote = world.remote
+        world.remote = lambda cmd, stdin: ((0, b"not JSON", b"") if cmd.startswith("docker inspect --type")
+                                           else remote(cmd, stdin))
+    else:
+        world.fail = (lambda c: c.remote is not None and c.remote.startswith(("docker inspect", "docker ps -a")),)
+    assert run_move(world, tmp_path, as_json=True) == 4
+    error = json.loads(capsys.readouterr().out)["error"]
+    assert move_cli.INSTALL_LINE not in error
+    assert "Docker" in error and "docker ps -a" in error
+    assert mutating_calls(world) == []
 
 
 def test_target_write_after_preflight_is_preserved_and_refused(tmp_path):
