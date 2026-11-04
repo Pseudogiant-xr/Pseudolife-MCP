@@ -210,7 +210,9 @@ class Runner:
             else:
                 kwargs["stdout"] = subprocess.PIPE
             proc = subprocess.run(argv, stderr=subprocess.PIPE, timeout=timeout, check=False, **kwargs)
-        except (OSError, subprocess.TimeoutExpired) as exc:
+        except subprocess.TimeoutExpired:
+            return Result(124, b"", f"command timed out after {timeout}s; its outcome is unknown".encode())
+        except OSError as exc:
             return Result(1, b"", f"{type(exc).__name__}: {exc}".encode("utf-8", "replace"))
         finally:
             for handle in handles:
