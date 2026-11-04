@@ -12,7 +12,7 @@ nothing ever types a password). The order:
 1. **Preflight, no changes.** The source is healthy, Docker tier and reports
    its bank fingerprint; ssh works; the target checkout exists; the target
    daemon is healthy, its schema is at least the source's, its fingerprint
-   differs, and its bank is empty (no entries, facts or principals), unless
+   differs, and its bank has no user data in any table, unless
    ``--resume`` names this move's half-restored bank by its marker. The
    target URL is ``--target-url``, else the target's ``expose status``.
 2. **Plan and confirm** (``--dry-run`` stops after the plan; a run that is
@@ -115,6 +115,10 @@ SSH_OPTS = ("ssh", "-o", "BatchMode=yes", "-o", "ServerAliveInterval=15", "-o", 
 # What ops/restore.sh prints just before it drops the database it replaces.
 RESTORE_BOUNDARY = "==> Dropping + recreating"
 BANK_ID_SQL ="SELECT value FROM meta WHERE key = 'coordination_bank_id'"
+# Only daemon-initialized metadata/counters and unused bootstrap codes may
+# be replaced on a fresh bank. Everything else is counted from the target's
+# catalog, including tables added by newer builds or extensions.
+EMPTY_TARGET_SEEDS = ("meta", "cms_counters", "maintainer_bootstrap")
 # Where a client on the target may hold a token (``grep -lsF`` reads the
 # tokens from stdin; a path that does not exist is skipped).
 TARGET_CLIENT_FILES = ("~/.pseudolife-mcp/*.token", "~/.claude.json", "~/.claude/settings.json",
@@ -823,15 +827,26 @@ class Mover:
             named = ", ".join(f"{m.get('move_id')!r} from bank {m.get('source_bank')!r}" for m in markers)
             raise self.refuse(f"the target's move markers name {named}, none of them a move this host started "
                               f"from this bank: --resume overwrites only this move's own half-restored bank")
-        result = self.psql_remote("SELECT relname FROM pg_class WHERE relkind = 'r' AND relnamespace = "
-                                  "'public'::regnamespace AND relname IN ('entries', 'facts', 'principals') "
-                                  "ORDER BY 1")
+        result = self.psql_remote("SELECT coalesce(json_agg(relname ORDER BY relname), '[]'::json) "
+                                  "FROM pg_class WHERE relkind IN ('r', 'p') AND relnamespace = "
+                                  "'public'::regnamespace")
         if not result.ok:
             raise self.refuse(f"could not read the target bank ({result.why()})")
-        tables = [line.strip() for line in result.text.splitlines() if line.strip()]
+        try:
+            tables = json.loads(result.text)
+        except ValueError:
+            tables = None
+        if not isinstance(tables, list) or not all(isinstance(t, str) and t for t in tables):
+            raise self.refuse("could not enumerate the target bank's tables: check the target's "
+                              "PostgreSQL logs and retry")
+        tables = [t for t in tables if t not in EMPTY_TARGET_SEEDS]
         counts = {}
         if tables:
-            result = self.psql_remote("SELECT " + ", ".join(f"(SELECT count(*) FROM {t})" for t in tables))
+            # Quote identifiers from the catalog, including extension tables;
+            # no table name can become SQL or an extra psql output row.
+            result = self.psql_remote("SELECT " + ", ".join(
+                '(SELECT count(*) FROM public."' + t.replace('"', '""') + '"'
+                + (" WHERE NOT builtin" if t == "relations" else "") + ")" for t in tables))
             row = _rows(result.text)[0] if result.ok and _rows(result.text) else []
             if len(row) != len(tables):
                 raise self.refuse(f"could not count the target bank's rows ({result.why()})")
@@ -841,7 +856,10 @@ class Mover:
             listed = ", ".join(f"{table} {n}" for table, n in used.items())
             markers = self.target_markers()
             hint = (f"; it carries a move marker (move {markers[0].get('move_id')}), so if this host started that "
-                    f"move, retry with --resume") if markers else ""
+                    f"move, retry with --resume") if markers else (
+                    "; back up and remove that bank before retrying, or install a fresh target with distinct "
+                    "PSEUDOLIFE_BANK_VOLUME and PSEUDOLIFE_STATE_VOLUME names; use pseudolife-mcp export / "
+                    "import to merge knowledge instead")
             raise self.refuse(f"the target bank is not empty ({listed}): move never merges into or "
                               f"overwrites a used bank{hint}")
 

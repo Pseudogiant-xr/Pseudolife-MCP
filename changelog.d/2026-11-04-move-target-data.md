@@ -1,0 +1,2 @@
+### Fixed (2026-11-04 — Protect all user data on move targets)
+- `pseudolife-mcp move` counts the target database's tables from its schema catalog before restoring, including episodes, lessons, world facts, graph data, documents and board state. Only fresh-bank bootstrap metadata, counters and built-in relations are exempt; new tables are protected automatically. Refusals explain how to preserve the existing bank, choose fresh volumes or merge knowledge with export/import.

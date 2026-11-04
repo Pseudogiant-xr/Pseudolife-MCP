@@ -23,6 +23,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import signal
 import stat
 import sys
@@ -32,6 +33,13 @@ from pathlib import Path
 import pytest
 
 from pseudolife_memory import move_cli
+from tests.pg_fixtures import pg_conn, pg_url  # noqa: F401 — fixtures
+
+# Include the additive-migration tail as well as SCHEMA_SQL. A new schema
+# table automatically gets a non-empty-target refusal case.
+SCHEMA_TABLES = sorted(set(re.findall(r"CREATE TABLE IF NOT EXISTS (\w+)",
+    (Path(__file__).resolve().parents[1] / "pseudolife_memory/storage/schema.py").read_text(encoding="utf-8"))))
+EMPTY_TARGET_SEEDS = {"meta", "cms_counters", "maintainer_bootstrap"}
 
 TARGET = "root@box"
 CHECKOUT = "~/src/Pseudolife-MCP"
@@ -168,6 +176,9 @@ class World:
         self.target_running = True
         self.target_healthy = target_healthy
         self.target_empty = target_empty
+        self.target_rows = {t: 0 for t in SCHEMA_TABLES}
+        if not target_empty:
+            self.target_rows.update(entries=5, facts=3)
         self.target_schema = target_schema
         self.target_bank = target_bank
         self.source_bank = source_bank
@@ -438,8 +449,13 @@ class World:
             return 0, "".join(f"{t}|{n}\n" for t, n in counts.items()).encode(), b""
         if "relname IN" in cmd:
             return 0, b"entries\nfacts\nprincipals\n", b""
+        if "json_agg(relname" in cmd:
+            return 0, json.dumps(sorted(self.target_rows)).encode(), b""
         if "count(*) FROM entries" in cmd:
             return 0, (b"0|0|0\n" if self.target_empty else b"5|3|0\n"), b""
+        if 'count(*) FROM public.' in cmd:
+            tables = re.findall(r'count\(\*\) FROM public\."([^"]+)"', cmd)
+            return 0, ("|".join(str(self.target_rows[t]) for t in tables) + "\n").encode(), b""
         if "coordination_leases" in cmd:
             return 0, b"full-suite|laptop\n", b""
         if "coordination_messages" in cmd:
@@ -724,6 +740,59 @@ def test_no_token_or_password_ever_appears_in_a_command_line(tmp_path, capsys):
 
 
 # ── preflight: refused, nothing changed ──────────────────────────────────────
+
+@pytest.mark.parametrize("table", [t for t in SCHEMA_TABLES if t not in EMPTY_TARGET_SEEDS])
+def test_every_schema_table_with_user_data_refuses_before_restore(tmp_path, capsys, table):
+    world = World()
+    world.target_rows[table] = 1
+    assert run_move(world, tmp_path, as_json=True) == 4
+    error = json.loads(capsys.readouterr().out)["error"]
+    assert table in error
+    for fix in ("back up", "remove", "PSEUDOLIFE_BANK_VOLUME", "PSEUDOLIFE_STATE_VOLUME", "export", "import"):
+        assert fix in error
+    assert mutating_calls(world) == [] and not world.target_restored
+
+
+def test_new_target_tables_are_protected_without_a_client_update(tmp_path):
+    world = World()
+    world.target_rows["future_user_table"] = 1
+    assert run_move(world, tmp_path) == 4
+    assert mutating_calls(world) == []
+
+
+def test_target_catalog_counts_real_schema_and_allows_fresh_bank_seeds(pg_conn, tmp_path):
+    move = mover(World(), tmp_path)
+
+    def sql_remote(sql, database=None):
+        rows = pg_conn.execute(sql).fetchall()
+        return move_cli.Result(0, ("\n".join("|".join(
+            json.dumps(v) if isinstance(v, (dict, list)) else str(v) for v in row)
+            for row in rows) + "\n").encode(), b"")
+
+    move.psql_remote = sql_remote
+    move.target_markers = lambda: []
+    actual = {row[0] for row in pg_conn.execute(
+        "SELECT relname FROM pg_class WHERE relkind IN ('r', 'p') AND relnamespace = 'public'::regnamespace")}
+    assert actual == set(SCHEMA_TABLES)
+    assert set(move_cli.EMPTY_TARGET_SEEDS) == EMPTY_TARGET_SEEDS
+    pg_conn.execute("INSERT INTO relations (name, description, builtin, created_at) "
+                    "VALUES ('builtin', 'seed', true, 0)")
+    pg_conn.execute("INSERT INTO maintainer_bootstrap (code_hash, expires_at) VALUES ('seed', 0)")
+    pg_conn.execute("INSERT INTO cms_counters VALUES (1, 'flat', 0, 0, 0, '{}', '{}', '[]', 0)")
+    move.check_target_bank()  # schema metadata, built-in vocabulary, counters and bootstrap are legitimate
+    pg_conn.execute("INSERT INTO relations (name, description, created_at) VALUES ('custom', 'user', 0)")
+    with pytest.raises(move_cli.MoveError, match="relations 1"):
+        move.check_target_bank()
+    pg_conn.execute("DELETE FROM relations WHERE NOT builtin")
+    # Neither table-name quoting nor newly added extension data may bypass
+    # the guard. This exists only inside the fixture-owned database.
+    pg_conn.execute('CREATE TABLE "future user table" (value text)')
+    try:
+        pg_conn.execute('INSERT INTO "future user table" VALUES (\'keep\')')
+        with pytest.raises(move_cli.MoveError, match="future user table 1"):
+            move.check_target_bank()
+    finally:
+        pg_conn.execute('DROP TABLE "future user table"')
 
 @pytest.mark.parametrize("container", ["target_labels", "postgres_labels"])
 @pytest.mark.parametrize("mismatch", ["missing", "project", "service", "checkout"])
