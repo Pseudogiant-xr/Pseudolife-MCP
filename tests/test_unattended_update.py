@@ -473,11 +473,18 @@ def test_a_client_machine_never_guesses_a_release_when_the_daemon_is_silent(worl
     """Attended, a silent daemon falls back to the newest release; the
     unattended run must not move past a daemon it cannot see."""
     _client(world, monkeypatch, daemon=None)
+    monkeypatch.setattr("builtins.input", lambda *_: pytest.fail("unattended update prompted"))
     world.pypi = "0.16.0"
     assert up.main(["--unattended", "--daemon-url", REMOTE]) == 2
     err = capsys.readouterr().err
     assert REMOTE in err and "nothing was changed" in err.lower()
     assert clients == [] and "did not answer" in _log(tmp_path)
+    hint = "pseudolife-mcp update --schedule HH:MM --daemon-url <new-url>"
+    assert hint in err and hint in _log(tmp_path)
+    assert "If the daemon moved" in err
+    assert board["notices"] == []
+    assert not (tmp_path / "data" / "update.lock").exists()
+    assert not (tmp_path / "data" / "client-update.0.16.0.incomplete").exists()
 
 
 def test_a_client_machine_installs_only_a_plain_release_number_the_daemon_reports(world, board, clients,
@@ -799,6 +806,23 @@ def test_schedule_on_a_client_machine_writes_its_own_systemd_timer(scheduler, tm
                          ["systemctl", "--user", "enable", "--now", f"{uu.CLIENT_UNIT_NAME}.timer"]]
 
 
+@pytest.mark.parametrize("platform", ["win32", "linux"])
+def test_client_schedule_confirmation_names_the_rearm_command(scheduler, tmp_path, monkeypatch, capsys, platform):
+    update = _client_machine(scheduler, monkeypatch, tmp_path)
+    assert uu.schedule(update, "7:05", platform=platform) == 0
+    out = capsys.readouterr().out
+    assert "pseudolife-mcp update --schedule 07:05 --daemon-url <new-url>" in out
+    assert "If the daemon moved" in out
+    assert update.o.daemon_url == REMOTE
+    if platform == "win32":
+        assert scheduler[0][scheduler[0].index("/TN") + 1] == uu.CLIENT_TASK_NAME
+        assert scheduler[0][scheduler[0].index("/TR") + 1].endswith(f"--daemon-url {REMOTE}")
+    else:
+        unit_dir = tmp_path / "xdg" / "systemd" / "user"
+        assert f"--daemon-url {REMOTE}" in (unit_dir / f"{uu.CLIENT_UNIT_NAME}.service").read_text(encoding="utf-8")
+        assert not (unit_dir / f"{uu.UNIT_NAME}.service").exists()
+
+
 def test_schedule_on_a_client_machine_refuses_when_its_daemon_does_not_answer(scheduler, tmp_path, monkeypatch):
     """The run would exit 2 every day: say so now, naming --daemon-url (a
     client machine that never said where its daemon is has the loopback
@@ -810,6 +834,7 @@ def test_schedule_on_a_client_machine_refuses_when_its_daemon_does_not_answer(sc
         text = str(refused.value)
         assert refused.value.exit_code == 2 and REMOTE in text and "--daemon-url" in text
         assert "Nothing was installed" in text
+        assert "pseudolife-mcp update --schedule 03:30 --daemon-url <new-url>" in text
     assert scheduler == [] and not (tmp_path / "xdg" / "systemd" / "user").exists()
 
 
