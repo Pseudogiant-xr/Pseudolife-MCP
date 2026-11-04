@@ -659,9 +659,16 @@ ones), 4 verification refused, 5 applied but the post-apply check failed.
 installer has already run from a checkout (its daemon and Postgres
 containers exist), with no lost writes. Run it on the bank's current host:
 
+**Install the destination first**, then run the move on the source. The
+destination checkout must own both running containers' compose project;
+use `--target-checkout` to name that checkout. For an existing stack managed
+elsewhere, back up its bank and remove its containers while retaining its
+volumes before installing a fresh target with distinct
+`PSEUDOLIFE_BANK_VOLUME` and `PSEUDOLIFE_STATE_VOLUME` names.
+
 ```bash
 pseudolife-mcp move --to root@box --dry-run   # the plan; changes nothing
-pseudolife-mcp move --to root@box             # asks once, then moves
+pseudolife-mcp move --to root@box             # confirms the move and any new exposure
 ```
 
 `--to` is anything `ssh` accepts (`root@box`, or a `~/.ssh/config` alias).
@@ -673,8 +680,17 @@ The target must be a Linux or macOS host with a POSIX login shell and
 `curl`, `python3` and `docker` on its PATH. Its checkout is
 `~/src/Pseudolife-MCP` unless `--target-checkout` names another. The URL
 clients will use is `--target-url`, else the target's `pseudolife-mcp
-expose status`; when the target is not exposed yet, the move runs `expose
-tailscale --yes` there first.
+expose status`. Creating a persistent target Tailscale serve needs separate
+consent: pass `--expose-target`, or answer its interactive y/N question when
+running without `--yes`. `--yes` confirms the bank move only and requires
+the explicit flag when a new serve is needed. To use an existing reachable connection,
+pass `--target-url <URL>`; Tailscale is then unnecessary. A failed move removes
+only the serve it created, and records an `expose off --yes` recovery command
+if that removal fails. A pre-existing serve stays in place.
+The target records whether it created the serve before returning the result,
+so a lost SSH reply can be recovered safely. If ownership cannot be established,
+move leaves the forward alone and reports the receipt and status commands to
+inspect. On resume, an unexposed target is exposed after its daemon starts.
 
 **Run it under `tmux`, `screen` or `nohup`.** A move takes as long as a
 dump, a copy and a restore of the whole bank. On Linux and macOS a closed
@@ -702,12 +718,16 @@ The order:
 1. **Preflight, nothing changed.** The source is healthy and reports its
    bank fingerprint; ssh works; the target checkout exists; the target
    daemon is healthy, at the source's schema or newer, serving a different
-   bank, and its bank is empty (no entries, facts or invited principals).
-   `move` never merges into or overwrites a used bank. A target that is not
-   ready is refused with the install line to run there.
+   bank, and its bank has no user data in any schema table. Episodes,
+   lessons, world facts, graph data, documents, principals and board state
+   all count; only specific fresh-bank seed rows are exempt. `move` never
+   merges into or overwrites a used bank: back up and remove that bank,
+   choose fresh volume names, or use export/import to merge knowledge.
+   Existing target containers are checked before installation is suggested.
 2. **Plan and confirm.** Every step, with sizes and the target URL.
    `--dry-run` stops here; a run that is not interactive needs `--yes`.
-3. **Expose the target** if needed, and check this host reaches
+   A persistent serve additionally needs `--expose-target` or its own confirmation.
+3. **Expose the target** if needed and explicitly chosen, and check this host reaches
    `<target-url>/health`.
 4. **Pause, then stop the source.** The target's unattended update and its
    daemon's restart policy are paused (either could start the target's
@@ -723,7 +743,10 @@ The order:
    `~/.pseudolife-mcp/moves/<move id>/` on the source.
 6. **Copy** the three files to the target over ssh and check their SHA-256
    there.
-7. **Restore on the target without starting it**: a resume marker is
+7. **Stop and recheck the target**, then restore without starting it. The
+   bank must still be empty after stopping its daemon. Its original state
+   volume is archived through a helper container and verified; the archive
+   path is in the move record and report. A resume marker is
    written beside the copies (`<checkout>/data/move-<move id>/marker.json`,
    outside the daemon's `/data`), then `ops/restore.sh --apply --no-start
    --backup-file <the dump> --state-archive <the archive>` (it takes the
@@ -766,12 +789,15 @@ The order:
     the target (`config.yaml`, and `last-backup.json` until the target's
     first backup).
 
-**Rollback.** A failure in steps 4 to 9 undoes, in this order: the target
+**Rollback.** A failure in steps 3 to 9 removes any target serve this move
+created, then undoes, in this order: the target
 daemon is stopped if it was started (and its `/data/move.json` put back),
 the target's `ops/.env`, unattended update and restart policy are restored,
 the database fence is lifted, the source's `moved.json` is removed, its
 restart policy and paused schedule are restored, and the source daemon is
-started again. The target is never left running beside a running source:
+started again. If the target bank was never replaced, its original daemon
+is restarted when the move stopped it. The target is never left serving a
+restored copy beside a running source:
 if it cannot be stopped, the source stays down, and so it does while the
 fence or `moved.json` cannot be undone; the move then exits 6 and the
 report and the record say what to finish by hand. A target that comes
@@ -788,8 +814,10 @@ marker names another move.
 daemon refuses to start, and the bank under it is a clone of the source's.
 To abandon the move there, restore the target's own pre-move safety dump
 (the one `ops/restore.sh` took first, in its `data/backups`) with
-`ops/restore.sh --apply --backup-file <that dump> --state-archive <its
-state archive>`, which replaces `/data`, gate included. Remove the gate by
+`ops/restore.sh --apply --backup-file <that dump> --state-archive
+<checkout>/data/move-<move id>/target-original-state.tgz`, which replaces
+`/data`, gate included. The move record's `target_state_backup` names this
+verified pre-move archive; a resumed move retains the original. Remove the gate by
 hand (`docker run --rm --volumes-from pseudolife-mcp-daemon <image> rm -f
 /data/move.json`) only to finish a move deliberately, with the source
 stopped and fenced.

@@ -154,6 +154,10 @@ def test_workflow_always_checks_history_with_read_only_permissions():
     report = workflow["jobs"]["stress-report"]
     assert report["permissions"] == {"contents": "read", "actions": "read"}
     steps = report["steps"]
+    download = next(s for s in steps if s.get("uses") == "actions/download-artifact@v4")
+    assert download["with"]["github-token"] == "${{ github.token }}"
+    assert download["with"]["run-id"] == "${{ github.run_id }}"
+    assert download["with"]["repository"] == "${{ github.repository }}"
     collect = next(s for s in steps if s.get("name") == "Read every stress job attempt")
     join = next(s for s in steps if s.get("name") == "Join the iterations")
     assert steps.index(collect) < steps.index(join)

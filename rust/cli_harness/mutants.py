@@ -44,6 +44,7 @@ def _target() -> Path:
 
 
 IGNORE = shutil.ignore_patterns("target", "cli_harness", "__pycache__")
+COMPILE_INPUTS = ("evals/prompts/assistant_facts_provenance.txt", "evals/prompts/sonnet_extractor_v5.md")
 
 
 def _prune(source: Path, copy: Path) -> None:
@@ -75,6 +76,18 @@ def _sync_source(mutants: list[Mutant]) -> Path:
         _prune(RUST, copy)
     shutil.copytree(RUST, copy, dirs_exist_ok=True, ignore=IGNORE)
     now = time.time()
+    # include_str! reaches outside rust/; mirror those inputs too. Refresh
+    # their copied mtimes so an older checkout cannot retain embedded bytes.
+    for relative in COMPILE_INPUTS:
+        source, destination = RUST.parent / relative, copy.parent / relative
+        if destination.is_symlink():
+            destination.unlink()
+        if source.is_file():
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, destination)
+            os.utime(destination, (now, now))
+        elif destination.is_file():
+            destination.unlink()
     # Copies keep the original mtime; a file a previous mutant changed must
     # look newer than the last build or Cargo would reuse the mutant binary.
     for mutant in mutants:
