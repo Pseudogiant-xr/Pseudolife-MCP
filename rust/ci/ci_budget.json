@@ -332,7 +332,7 @@
       "lock-resolve": "83bcc6b654896c6d",
       "test": "ac414107d3d9c71d",
       "test-lite-linux": "44e2a8f2c01baeab",
-      "test-lite-windows": "39f9b5bdf29bb2fd",
+      "test-lite-windows": "e319b9ae1454170d",
       "test-lite-macos": "c4a0ad0c70bb205a",
       "frontend": "b1b6a1a1278f2e60"
     },
@@ -446,6 +446,11 @@
         "job": "test-lite-windows",
         "fingerprint": "39f9b5bdf29bb2fd",
         "reason": "Combine locale-safe shared fixtures with bounded installer ownership coverage in the existing Windows lane; no new job or setup step."
+      },
+      {
+        "job": "test-lite-windows",
+        "fingerprint": "e319b9ae1454170d",
+        "reason": "Add bounded read-only lite-bank preflight coverage to the existing Windows installer lane; no new job or setup step."
       }
     ]
   }

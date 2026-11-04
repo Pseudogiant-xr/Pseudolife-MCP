@@ -14,6 +14,9 @@ import socket
 import subprocess
 import sys
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from ops import preflight_lite
+
 PROJECT = "pseudolife-mcp"
 BEGIN = "# >>> pseudolife-mcp install (managed block — installer rewrites between markers) >>>"
 END = "# <<< pseudolife-mcp install <<<"
@@ -140,6 +143,11 @@ def check(env_file: Path) -> None:
             raise Refusal(f"Existing volume {volume} was not recorded by this install; its bank and password may belong to another install. "
                           "Restore the original ops/.env (including POSTGRES_PASSWORD and PSEUDOLIFE_BANK_VOLUME/STATE_VOLUME), "
                           "then rerun. Nothing changed; do not delete the volume.")
+    if message := preflight_lite.refusal(
+            containers, configured=env_file.is_file(),
+            recorded_volumes=managed and all(volume in volumes for volume in selected.values()),
+            port_busy=port_busy):
+        raise Refusal(message)
     for port in (8765, 5433):
         bound_by_us = any(
             c.get("State", {}).get("Running")
