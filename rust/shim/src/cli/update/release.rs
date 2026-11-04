@@ -455,13 +455,6 @@ impl Update {
             None
         };
         let pg = engine::container(self, &context.args, Some(&env), "pseudolife-pg")?;
-        let pg_env = &config["services"]["pseudolife-pg"]["environment"];
-        let user = pg_env["POSTGRES_USER"]
-            .as_str()
-            .ok_or_else(|| UpdateError::usage("cannot resolve PostgreSQL user"))?;
-        let db = pg_env["POSTGRES_DB"]
-            .as_str()
-            .ok_or_else(|| UpdateError::usage("cannot resolve PostgreSQL database"))?;
         let daemon = context.running["Id"].as_str().unwrap_or(DAEMON_CONTAINER);
         let backups = if self.o.no_backup {
             self.warn("skipping backup (--no-backup)");
@@ -471,9 +464,16 @@ impl Update {
             .as_deref()
             .filter(|repo| self.checkout_script(repo, "backup").is_some())
         {
+            let pg_env = &config["services"]["pseudolife-pg"]["environment"];
+            let user = pg_env["POSTGRES_USER"]
+                .as_str()
+                .ok_or_else(|| UpdateError::usage("cannot resolve PostgreSQL user"))?;
+            let db = pg_env["POSTGRES_DB"]
+                .as_str()
+                .ok_or_else(|| UpdateError::usage("cannot resolve PostgreSQL database"))?;
             self.project_backup(repo, &pg, daemon, user, db)?
         } else {
-            self.builtin_backup(&pg, daemon, user, db, &data_dir().join("backups"))?
+            self.builtin_backup(&pg, daemon, &data_dir().join("backups"))?
         };
         if let Some(callback) = before_recreate.as_mut() {
             callback()?;
@@ -702,17 +702,17 @@ impl Update {
             self.backup(None)?;
         } else {
             let pg = engine::container(self, &compose, Some(&env), "pseudolife-pg")?;
-            let pg_env = &config["services"]["pseudolife-pg"]["environment"];
-            let user = pg_env["POSTGRES_USER"].as_str().ok_or_else(|| {
-                UpdateError::usage("cannot resolve the project's PostgreSQL user; set POSTGRES_USER in its Compose environment and retry; nothing was deployed")
-            })?;
-            let db = pg_env["POSTGRES_DB"].as_str().ok_or_else(|| {
-                UpdateError::usage("cannot resolve the project's PostgreSQL database; set POSTGRES_DB in its Compose environment and retry; nothing was deployed")
-            })?;
             if self.checkout_script(&repo, "backup").is_some() {
+                let pg_env = &config["services"]["pseudolife-pg"]["environment"];
+                let user = pg_env["POSTGRES_USER"].as_str().ok_or_else(|| {
+                    UpdateError::usage("cannot resolve the project's PostgreSQL user; set POSTGRES_USER in its Compose environment and retry; nothing was deployed")
+                })?;
+                let db = pg_env["POSTGRES_DB"].as_str().ok_or_else(|| {
+                    UpdateError::usage("cannot resolve the project's PostgreSQL database; set POSTGRES_DB in its Compose environment and retry; nothing was deployed")
+                })?;
                 self.project_backup(&repo, &pg, &daemon, user, db)?;
             } else {
-                self.builtin_backup(&pg, &daemon, user, db, &data_dir().join("backups"))?;
+                self.builtin_backup(&pg, &daemon, &data_dir().join("backups"))?;
             }
         }
         let text = fs::read_to_string(&file)?;

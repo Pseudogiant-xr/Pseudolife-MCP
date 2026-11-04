@@ -288,8 +288,9 @@ if a[:1]==["inspect"]:
   elif "Labels" in f: out=json.dumps(s["running"]["Config"]["Labels"])
   elif "Config.Env" in f: out=json.dumps(s["running"]["Config"]["Env"])
   elif "|" in f: out=s["running"]["Image"]+"|"+s["running"]["Config"]["Image"]
+  elif f=="{{json .}}":out=json.dumps(s["running"])
   else: out=s["running"]["Id"]
- else: out=json.dumps([s["running"]])
+ else: out=json.dumps([s["running"]] if a[-1]!="fixture-pg" else [{"Name":"/fixture-pg","NetworkSettings":{"Networks":{"fixture":{"Aliases":["pseudolife-pg"]}}}}])
 elif a[:2]==["image","inspect"]:
  if "Created" in " ".join(a): out="2026-01-01|"+s["images"].get(a[-1],s["running"]["Image"])
  elif a[-1] in s["images"]: out=s["images"][a[-1]]
@@ -433,6 +434,7 @@ def host(tmp_path, failure="", mode="release"):
     state_path = home / "fixture-state.json"
     state = {"calls": [], "deployed": False, "failure": failure, "images": {"pseudolife-daemon:0.21.0": "sha256:validated"},
              "running": {"Id": "fixture-daemon", "Image": "sha256:validated", "State": {"Running": True},
+                         "NetworkSettings": {"Networks": {"fixture": {"Aliases": ["pseudolife-pg"]}}},
                          "Mounts": [{"Destination": "/data", "Name": "fixture-state", "Type": "volume", "RW": True}],
                          "Config": {"Image": "pseudolife-daemon:0.21.0", "Labels": None,
                                     "Env": ["PSEUDOLIFE_MCP_DATABASE_URL=postgresql://fixture:fixture@pseudolife-pg:5432/fixture",
