@@ -1434,8 +1434,10 @@ EOF
     fi
     # Remove a leftover running extractor container (container only — it has
     # no volumes; the image is kept for an easy switch back).
-    if docker ps -a --format '{{.Names}}' | grep -qx pseudolife-mcp-extractor; then
-        docker rm -f pseudolife-mcp-extractor >/dev/null
+    extractor_owner="$(docker inspect -f '{{.Id}} {{index .Config.Labels "com.docker.compose.project"}}' pseudolife-mcp-extractor 2>/dev/null || true)"
+    if [[ "$extractor_owner" =~ ^([a-f0-9]+)\ pseudolife-mcp$ ]]; then
+        # Remove the verified ID, never a name another stack could acquire.
+        docker rm -f "${BASH_REMATCH[1]}" >/dev/null
         step "Removed the running extractor container"
     fi
 else
@@ -1448,7 +1450,7 @@ fi
 
 # ── 7. bring the stack up ──────────────────────────────────────────────────
 if [ -z "$CLIENT_ONLY" ]; then
-    compose=(--env-file "$env_file" -f "$compose_file")
+    compose=(-p pseudolife-mcp --env-file "$env_file" -f "$compose_file")
     [ -f "$override_file" ] && compose+=(-f "$override_file")
     step "docker compose up -d --build (first build downloads images — grab a coffee)..."
     docker compose "${compose[@]}" up -d --build

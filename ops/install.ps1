@@ -1179,7 +1179,9 @@ $bankVol = (Get-EnvValue "PSEUDOLIFE_BANK_VOLUME"); if (-not $bankVol) { $bankVo
 $stateVol = (Get-EnvValue "PSEUDOLIFE_STATE_VOLUME"); if (-not $stateVol) { $stateVol = "pseudolife-mcp-state" }
 if (-not $ClientOnly) {
     docker volume create $bankVol | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Could not create bank volume $bankVol; fix Docker access and rerun." }
     docker volume create $stateVol | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Could not create state volume $stateVol; fix Docker access and rerun." }
     Step "Volumes ready: $bankVol, $stateVol"
 }
 
@@ -1350,9 +1352,11 @@ if ($ClientOnly) {
     }
     # Remove a leftover running extractor container (container only - it has
     # no volumes; the image is kept for an easy switch back).
-    $names = docker ps -a --format '{{.Names}}'
-    if ($names -contains "pseudolife-mcp-extractor") {
-        docker rm -f pseudolife-mcp-extractor | Out-Null
+    $extractorOwner = docker inspect -f '{{.Id}} {{index .Config.Labels "com.docker.compose.project"}}' pseudolife-mcp-extractor 2>$null
+    if ($LASTEXITCODE -eq 0 -and "$extractorOwner" -match '^([a-f0-9]+) pseudolife-mcp$') {
+        # Remove the verified ID, never a name another stack could acquire.
+        docker rm -f $Matches[1] | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Could not remove this install's extractor; check docker info and rerun." }
         Step "Removed the running extractor container"
     }
 } elseif (InstallerOwnsOverride) {
@@ -1363,7 +1367,7 @@ if ($ClientOnly) {
 
 # -- 7. bring the stack up --------------------------------------------------------
 if (-not $ClientOnly) {
-    $compose = @("--env-file", $envFile, "-f", $composeFile)
+    $compose = @("-p", "pseudolife-mcp", "--env-file", $envFile, "-f", $composeFile)
     if (Test-Path $overrideFile) { $compose += @("-f", $overrideFile) }
     Step "docker compose up -d --build (first build downloads images - grab a coffee)..."
     docker compose @compose up -d --build
