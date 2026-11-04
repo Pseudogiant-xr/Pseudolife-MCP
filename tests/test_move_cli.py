@@ -39,7 +39,6 @@ from tests.pg_fixtures import pg_conn, pg_url  # noqa: F401 — fixtures
 # table automatically gets a non-empty-target refusal case.
 SCHEMA_TABLES = sorted(set(re.findall(r"CREATE TABLE IF NOT EXISTS (\w+)",
     (Path(__file__).resolve().parents[1] / "pseudolife_memory/storage/schema.py").read_text(encoding="utf-8"))))
-EMPTY_TARGET_SEEDS = {"meta", "cms_counters", "maintainer_bootstrap"}
 
 TARGET = "root@box"
 CHECKOUT = "~/src/Pseudolife-MCP"
@@ -439,7 +438,7 @@ class World:
             self.target_empty = False
             self.data_files = {"/data/config.yaml": b"memory: {}\n", "/data/last-backup.json": b"{}\n"}
             return 0, b"==> Restore complete; the daemon was left stopped (--no-start).\n", b""
-        if "coordination_bank_id" in cmd:
+        if "coordination_bank_id" in cmd and "count(*)" not in cmd:
             meta = self.target_meta_after if self.target_restored else TARGET_META
             return 0, (meta + "\n").encode(), b""
         if "UNION ALL" in cmd:
@@ -486,10 +485,15 @@ class World:
             self.dotenv = None
             return 0, b"", b""
         if cmd == "docker stop pseudolife-mcp-daemon":
-            if self.stop_target_fails:
+            if self.stop_target_fails and self.target_restored:
                 return 1, b"", b"daemon unreachable"
-            self.target_running = self.target_respawns > 0
-            self.target_respawns = max(0, self.target_respawns - 1)
+            self.target_running = self.target_restored and self.target_respawns > 0
+            if self.target_restored:
+                self.target_respawns = max(0, self.target_respawns - 1)
+            return 0, b"", b""
+        if cmd == "docker start pseudolife-mcp-daemon":
+            self.target_running = True
+            self._check_overlap()
             return 0, b"", b""
         raise AssertionError(f"unexpected remote command: {cmd}")
 
@@ -590,7 +594,8 @@ def test_a_move_runs_every_step_in_order_and_reports(tmp_path, capsys):
         index(world, lambda c: c.remote is not None and c.remote.endswith("/marker.json")
               and c.remote.startswith("cat > ")),
         first(world, "bash ops/restore.sh"),
-        index(world, lambda c: c.remote is not None and "coordination_bank_id" in c.remote),
+        index(world, lambda c: c.remote is not None and "coordination_bank_id" in c.remote
+              and "count(*)" not in c.remote),
         first(world, "UNION ALL"),
         index(world, lambda c: c.remote is not None and "cat > /data/move.json" in c.remote),
         index(world, is_env_write),
@@ -741,7 +746,7 @@ def test_no_token_or_password_ever_appears_in_a_command_line(tmp_path, capsys):
 
 # ── preflight: refused, nothing changed ──────────────────────────────────────
 
-@pytest.mark.parametrize("table", [t for t in SCHEMA_TABLES if t not in EMPTY_TARGET_SEEDS])
+@pytest.mark.parametrize("table", SCHEMA_TABLES)
 def test_every_schema_table_with_user_data_refuses_before_restore(tmp_path, capsys, table):
     world = World()
     world.target_rows[table] = 1
@@ -760,6 +765,35 @@ def test_new_target_tables_are_protected_without_a_client_update(tmp_path):
     assert mutating_calls(world) == []
 
 
+def test_target_write_after_preflight_is_preserved_and_refused(tmp_path):
+    def late_write(world, call):
+        world.target_rows["episodes"] = 1
+
+    world = World(hooks={"cat > " + CHECKOUT + "/data/move-": late_write})
+    assert run_move(world, tmp_path) == 1
+    assert not world.target_restored
+    assert world.source_running and world.target_running
+    assert world.target_rows["episodes"] == 1
+
+
+def test_target_that_cannot_be_quiesced_is_never_restored(tmp_path):
+    world = World(fail=(lambda c: c.remote == "docker stop pseudolife-mcp-daemon",))
+    assert run_move(world, tmp_path) == 1
+    assert not world.target_restored and world.source_running and world.target_running
+
+
+def test_restore_is_preceded_by_a_stopped_target_and_final_emptiness_check(tmp_path):
+    seen = {}
+
+    def restoring(world, call):
+        seen["running"] = world.target_running
+        seen["checks"] = sum("json_agg(relname" in c.text for c in world.calls)
+
+    world = World(hooks={"bash ops/restore.sh": restoring})
+    assert run_move(world, tmp_path) == 0
+    assert seen == {"running": False, "checks": 2}
+
+
 def test_target_catalog_counts_real_schema_and_allows_fresh_bank_seeds(pg_conn, tmp_path):
     move = mover(World(), tmp_path)
 
@@ -774,12 +808,16 @@ def test_target_catalog_counts_real_schema_and_allows_fresh_bank_seeds(pg_conn, 
     actual = {row[0] for row in pg_conn.execute(
         "SELECT relname FROM pg_class WHERE relkind IN ('r', 'p') AND relnamespace = 'public'::regnamespace")}
     assert actual == set(SCHEMA_TABLES)
-    assert set(move_cli.EMPTY_TARGET_SEEDS) == EMPTY_TARGET_SEEDS
     pg_conn.execute("INSERT INTO relations (name, description, builtin, created_at) "
                     "VALUES ('builtin', 'seed', true, 0)")
     pg_conn.execute("INSERT INTO maintainer_bootstrap (code_hash, expires_at) VALUES ('seed', 0)")
-    pg_conn.execute("INSERT INTO cms_counters VALUES (1, 'flat', 0, 0, 0, '{}', '{}', '[]', 0)")
+    pg_conn.execute("INSERT INTO cms_counters VALUES (1, 'flat', 0, 0, 0, "
+                    "'{\"forever\": 0}', '{\"forever\": []}', '[]', 0)")
     move.check_target_bank()  # schema metadata, built-in vocabulary, counters and bootstrap are legitimate
+    pg_conn.execute("INSERT INTO meta VALUES ('cortex_dream_cursor', '99')")
+    with pytest.raises(move_cli.MoveError, match="meta 1"):
+        move.check_target_bank()
+    pg_conn.execute("DELETE FROM meta WHERE key = 'cortex_dream_cursor'")
     pg_conn.execute("INSERT INTO relations (name, description, created_at) VALUES ('custom', 'user', 0)")
     with pytest.raises(move_cli.MoveError, match="relations 1"):
         move.check_target_bank()
@@ -1467,13 +1505,14 @@ def test_a_dropped_ssh_after_the_commit_point_never_rolls_back(tmp_path, capsys,
 def test_a_gate_the_rollback_cannot_write_leaves_the_targets_update_and_policy_paused(tmp_path, capsys):
     world = World(fail=("bash ops/update.sh",))
     stopped = []
-    world.hooks = {"docker stop pseudolife-mcp-daemon": lambda w, c: stopped.append(c) if c.remote else None}
+    world.hooks = {"docker stop pseudolife-mcp-daemon":
+                   lambda w, c: stopped.append(c) if c.remote and w.target_restored else None}
     world.fail = ("bash ops/update.sh",
                   lambda c: bool(stopped) and c.remote is not None and "cat > /data/move.json" in c.remote)
     code = run_move(world, tmp_path, as_json=True)
     report = json.loads(capsys.readouterr().out)
     assert code == 6, report
-    after = world.calls[index(world, lambda c: c.remote == "docker stop pseudolife-mcp-daemon"):]
+    after = world.calls[world.calls.index(stopped[0]):]
     assert not any(c.remote and c.remote.startswith(("systemctl --user enable", "docker update --restart=unless"))
                    for c in after)
     assert world.target_timer == "disabled" and world.target_policy == "no"
@@ -1486,7 +1525,7 @@ def test_a_target_that_comes_back_after_the_stop_is_stopped_again_first(tmp_path
     assert run_move(world, tmp_path) == 1
     stops = [i for i, c in enumerate(world.calls) if c.remote == "docker stop pseudolife-mcp-daemon"]
     start = index(world, local_is("docker", "start"))
-    assert len(stops) == 2 and stops[-1] < start
+    assert len(stops) == 3 and stops[-1] < start
     checks = [i for i, c in enumerate(world.calls) if c.remote is not None
               and c.remote.startswith("docker inspect -f") and c.remote.endswith("pseudolife-mcp-daemon")]
     assert checks and checks[-1] < start
