@@ -163,7 +163,7 @@ pub(super) fn connection_details(
         }
     }
     let get = |key| env.get(key).copied().filter(|s| !s.is_empty());
-    let fields = connection_fields(get("PSEUDOLIFE_MCP_DATABASE_URL").unwrap_or(""))?;
+    let fields = connection_fields(get("PSEUDOLIFE_MCP_DATABASE_URL")?)?;
     let field = |key: &str| {
         fields
             .get(key)
@@ -1145,7 +1145,7 @@ mod connection_tests {
                 5432,
             ),
             (
-                "",
+                "postgresql://",
                 vec!["PGHOST=pseudolife-pg", "PGUSER=runtime"],
                 "runtime",
                 "runtime",
@@ -1226,6 +1226,33 @@ mod connection_tests {
         let (mut daemon, pg) = fixture("host=pseudolife-pg", &[]);
         daemon["Config"]["User"] = json!("1000:1000");
         assert!(connection_details(&daemon, &pg).is_none());
+    }
+
+    #[test]
+    fn backup_details_reject_file_mode_despite_ambient_libpq_defaults() {
+        for absent in [false, true] {
+            let (mut daemon, pg) = fixture(
+                "",
+                &[
+                    "PGHOST=pseudolife-pg",
+                    "PGUSER=ambient_role",
+                    "PGDATABASE=ambient_bank",
+                ],
+            );
+            daemon["Config"]["User"] = json!("misleading_role");
+            if absent {
+                daemon["Config"]["Env"]
+                    .as_array_mut()
+                    .unwrap()
+                    .retain(|item| {
+                        !item
+                            .as_str()
+                            .unwrap()
+                            .starts_with("PSEUDOLIFE_MCP_DATABASE_URL=")
+                    });
+            }
+            assert!(connection_details(&daemon, &pg).is_none());
+        }
     }
 }
 
