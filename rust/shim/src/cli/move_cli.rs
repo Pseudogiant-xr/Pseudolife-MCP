@@ -569,10 +569,8 @@ mod tests {
             panic!("expected the usage error");
         };
         assert!(text.starts_with("usage: pseudolife-mcp move [-h] --to SSH-TARGET"));
-        assert!(text.ends_with(&format!(
-            "[--dry-run] [--expose-target] [--yes] [--json]\n{REQUIRED}"
-        )));
-        assert_eq!(text.matches('\n').count(), 4);
+        assert!(text.ends_with(&format!("[--json]\n{REQUIRED}")));
+        assert_eq!(text.matches('\n').count(), 8);
         assert_eq!(
             decide(&argv(&["--yes"]), &plain(Some("81"))),
             Decision::Defer
