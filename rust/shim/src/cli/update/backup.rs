@@ -591,7 +591,7 @@ impl Update {
             self.warn("state archive could not be made; continuing with the complete SQL dump (the daemon may be stopped)");
         }
         self.step(format!(
-            "backup: {}{}; restore with ops/restore.* -BackupFile / --backup-file {}",
+            "backup: {}{}; restore with pseudolife-mcp restore --backup-file {}",
             dump.display(),
             if state_ok {
                 format!(" + {}", state.file_name().unwrap().to_string_lossy())

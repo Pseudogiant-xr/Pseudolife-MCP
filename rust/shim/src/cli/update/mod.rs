@@ -583,7 +583,7 @@ impl Update {
         }
     }
     pub fn schema_rollback_note(&self) -> Vec<String> {
-        vec!["      If the new daemon upgraded the bank's schema before failing, the older daemon refuses it,".into(),format!("      so after rolling back the image, restore {} with",if self.o.no_backup {"a backup taken before this deploy (this run took none: --no-backup)"}else{"the backup taken above"}),"      ops/restore.ps1 -Apply -BackupFile <dump> (ops/restore.sh --apply --backup-file <dump>).".into()]
+        vec!["      If the new daemon upgraded the bank's schema before failing, the older daemon refuses it,".into(),format!("      so after rolling back the image, restore {} with",if self.o.no_backup {"a backup taken before this deploy (this run took none: --no-backup)"}else{"the backup taken above"}),"      pseudolife-mcp restore --backup-file <dump> --state-archive <state.tgz> --yes. (Omit --state-archive only if no state archive was taken.)".into()]
     }
     pub fn hooks_changed_note(&mut self, previous: Option<&str>, health: Option<&Value>) {
         if let (Some(a), Some(b)) = (previous, health.and_then(|h| h["hooks_digest"].as_str()))
