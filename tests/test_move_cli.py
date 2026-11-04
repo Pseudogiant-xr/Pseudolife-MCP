@@ -922,6 +922,43 @@ def test_clone_free_restore_failure_keeps_the_source_and_gates_the_target(tmp_pa
     assert world.source_running and not world.target_running and "/data/move.json" in world.data_files
 
 
+def test_clone_free_restore_timeout_keeps_the_restored_copy_gated(tmp_path):
+    world = World(checkout=False)
+    world.release_cli = True
+    remote = world.remote
+
+    def lost_restore_result(command, stdin):
+        result = remote(command, stdin)
+        return (124, b"", b"timed out") if " restore --yes " in command else result
+
+    world.remote = lost_restore_result
+    assert run_move(world, tmp_path, keep_tokens=False) == 1
+    assert world.source_running and not world.target_running and not world.overlap
+    assert "/data/move.json" in world.data_files
+
+
+def test_clone_free_restore_keeps_custom_database_and_role_selectors(tmp_path):
+    world = World(checkout=False)
+    world.release_cli = True
+    world.target_live_env[0] = "PSEUDOLIFE_MCP_DATABASE_URL=postgresql://custom_owner:fixture@pseudolife-pg:5432/custom_bank"
+    assert run_move(world, tmp_path, keep_tokens=False) == 0
+    command = next(c.remote for c in world.calls if c.remote and " restore --yes " in c.remote)
+    assert "--db custom_bank --user custom_owner" in command
+
+
+def test_clone_free_no_keep_tokens_requires_auth_and_names_the_reconnect_token_file(tmp_path, capsys):
+    world = World(checkout=False)
+    world.release_cli = True
+    world.target_auth = False
+    assert run_move(world, tmp_path, keep_tokens=False) == 4
+    assert mutating_calls(world) == []
+    capsys.readouterr()
+    world.target_auth = True
+    world.connect_exit = 4
+    assert run_move(world, tmp_path, keep_tokens=False, as_json=True) == 5
+    assert "--token-file <target-token-file>" in json.loads(capsys.readouterr().out)["error"]
+
+
 def test_clone_free_resume_retains_its_original_archive_and_target_configuration(tmp_path):
     world = World(checkout=False, fail=(lambda c: c.remote == "docker start pseudolife-mcp-daemon",))
     world.release_cli = True
@@ -975,7 +1012,9 @@ def test_clone_free_resume_never_redeploys_a_stale_release_over_a_changed_image(
     assert not any(word in c.text for c in world.calls[before:] for word in MUTATING)
 
 
-@pytest.mark.parametrize("issue", [None, "extra_pg_mount", "bind", "custom_port", "host_network", "tokens", "database", "port", "state_volume", "bank_volume", "env_missing", "compose"])
+@pytest.mark.parametrize("issue", [None, "extra_pg_mount", "bind", "custom_port", "host_network", "wildcard", "port_range",
+                                   "tokens", "database", "port", "broaden_bind", "narrow_bind", "extra_port",
+                                   "state_volume", "bank_volume", "env_missing", "compose"])
 def test_release_preflight_renders_identities_connection_and_legacy_volumes(tmp_path, monkeypatch, capsys, issue):
     import subprocess
     from types import SimpleNamespace
@@ -985,12 +1024,13 @@ def test_release_preflight_renders_identities_connection_and_legacy_volumes(tmp_
     dsn = TARGET_ENV[0].split("=", 1)[1]
     environment = dict(carried, PSEUDOLIFE_MCP_DATABASE_URL=dsn)
     config = {"services": {
-        "pseudolife-daemon": {"environment": environment, "ports": [{"target": 8765, "published": "8765"}],
+        "pseudolife-daemon": {"environment": environment, "ports": [{"host_ip": "127.0.0.1", "target": 8765, "published": "8765"}],
                                "volumes": [{"type": "volume", "source": "state", "target": "/data"}]},
         "pseudolife-pg": {"volumes": [{"type": "volume", "source": "bank", "target": "/var/lib/postgresql"}]}},
         "volumes": {"state": {"name": "ops_pseudolife_data"}, "bank": {"name": "ops_pseudolife_pgdata"}}}
     request = {"compose_files": [], "env_file": None, "version": "0.22.0", "carried": carried, "database_url": dsn,
                "daemon_mounts": [{"Type": "volume", "Name": "ops_pseudolife_data", "Destination": "/data"}],
+               "daemon_ports": {"8765/tcp": [{"HostIp": "127.0.0.1", "HostPort": "8765"}]},
                "postgres_mounts": [{"Type": "volume", "Name": "ops_pseudolife_pgdata", "Destination": "/var/lib/postgresql"}]}
     if issue == "tokens":
         environment["PSEUDOLIFE_MCP_TOKEN"] = "hardcoded-other-token"
@@ -1007,16 +1047,29 @@ def test_release_preflight_renders_identities_connection_and_legacy_volumes(tmp_
         config["services"]["pseudolife-daemon"]["ports"][0]["published"] = "9876"
         if issue == "custom_port":
             request["port"] = 9876
+            request["daemon_ports"]["8765/tcp"][0]["HostPort"] = "9876"
     elif issue == "host_network":
         request["host_network"] = True
         config["services"]["pseudolife-daemon"].update(network_mode="host", ports=[])
+    elif issue == "broaden_bind":
+        config["services"]["pseudolife-daemon"]["ports"][0]["host_ip"] = "0.0.0.0"
+    elif issue == "narrow_bind":
+        request["daemon_ports"]["8765/tcp"][0]["HostIp"] = "0.0.0.0"
+    elif issue == "extra_port":
+        config["services"]["pseudolife-daemon"]["ports"].append({"target": 9876, "published": "9876"})
+    elif issue == "wildcard":
+        config["services"]["pseudolife-daemon"]["ports"][0].pop("host_ip")
+        request["daemon_ports"] = {"8765/tcp": [{"HostIp": "0.0.0.0", "HostPort": "8765"}, {"HostIp": "::", "HostPort": "8765"}]}
+    elif issue == "port_range":
+        config["services"]["pseudolife-daemon"]["ports"] = [{"host_ip": "127.0.0.1", "target": "8765-8766", "published": "8765-8766"}]
+        request["daemon_ports"]["8766/tcp"] = [{"HostIp": "127.0.0.1", "HostPort": "8766"}]
     monkeypatch.setattr(up, "Options", lambda **kw: SimpleNamespace(**kw))
     plan = {"args": [], "env_file": [] if issue == "env_missing" else [tmp_path / "stack.env"], "project": "managed-stack"}
     monkeypatch.setattr(up.Update, "compose_context", lambda self: plan)
     monkeypatch.setattr(up, "compose_environment", lambda *a, **kw: {})
     monkeypatch.setattr(subprocess, "run", lambda *a, **kw: subprocess.CompletedProcess(a, int(issue == "compose"), json.dumps(config), ""))
     monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(request)))
-    if issue in (None, "extra_pg_mount", "bind", "custom_port", "host_network"):
+    if issue in (None, "extra_pg_mount", "bind", "custom_port", "host_network", "wildcard", "port_range"):
         exec(move_cli._RELEASE_PREFLIGHT, {})
         assert json.loads(capsys.readouterr().out)["env_file"].endswith("stack.env")
     else:

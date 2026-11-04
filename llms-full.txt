@@ -12013,7 +12013,7 @@ pseudolife-mcp move --to root@box --target-release \
 Repeat `--target-compose-file` for overlays, in their original order. These
 are paths on the target. Omit them when the existing compose labels identify
 readable original files. Preflight renders the deployment and checks the
-carried identities, database connection, data volumes and port before either
+carried identities, database connection, data volumes and complete network bindings before either
 bank changes. Hardcoded tokens must interpolate from the original environment
 file to be carried. A stack manager's next redeploy must use that updated file;
 synchronize its saved environment before redeploying.

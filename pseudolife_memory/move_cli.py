@@ -172,7 +172,7 @@ with open(os.path.join(os.path.dirname(directory), '.move-expose.lock'), 'a') as
 sys.exit(result.returncode)
 """
 _RELEASE_PREFLIGHT = """# move release preflight: render the same deployment that update will use
-import json, os, subprocess, sys
+import ipaddress, json, os, subprocess, sys
 from pathlib import Path
 from pseudolife_memory import update_cli as up
 request = json.load(sys.stdin)
@@ -218,10 +218,33 @@ try:
     if request.get('host_network'):
         ports_match = daemon.get('network_mode') == 'host'
     else:
-        ports_match = any(str(p.get('target')) == '8765' and str(p.get('published')) == str(request.get('port', 8765))
-                          and p.get('protocol', 'tcp') == 'tcp' for p in daemon.get('ports', []))
+        actual = {(str(ipaddress.ip_address(b.get('HostIp') or '0.0.0.0')), int(b['HostPort']), int(key.split('/')[0]), key.split('/')[1])
+                  for key, bindings in request['daemon_ports'].items() for b in bindings or []}
+        def ports(value):
+            parts = str(value).split('-')
+            first, last = int(parts[0]), int(parts[-1])
+            if len(parts) > 2 or not 1 <= first <= last <= 65535:
+                raise ValueError('invalid published port range')
+            return range(first, last + 1)
+        wanted = set()
+        for binding in daemon.get('ports', []):
+            targets, published = ports(binding['target']), ports(binding.get('published'))
+            if len(targets) != len(published):
+                raise ValueError('unfixed published port')
+            protocol = binding.get('protocol') or 'tcp'
+            for target, port in zip(targets, published):
+                if binding.get('host_ip'):
+                    addresses = {str(ipaddress.ip_address(binding['host_ip']))}
+                else:
+                    # An omitted host_ip is Docker's dual-stack wildcard;
+                    # preserve the daemon's existing enabled address families.
+                    addresses = {ip for ip, host, container, proto in actual
+                                 if host == port and container == target and proto == protocol and ip in ('0.0.0.0', '::')}
+                    addresses = addresses or {'0.0.0.0', '::'}
+                wanted.update((ip, port, target, protocol) for ip in addresses)
+        ports_match = wanted == actual
     if not ports_match:
-        raise up.UpdateError('the exported compose file would change the target daemon port: export its original '
+        raise up.UpdateError('the exported compose file would change target network bindings: export its original '
                              'settings and retry with --target-compose-file and --target-env-file')
     pg_mounts = [m for m in config['services']['pseudolife-pg'].get('volumes', [])
                  if m.get('target', '').startswith('/var/lib/postgresql')]
@@ -1015,6 +1038,7 @@ class Mover:
                    "database_url": _env_of(self.target_container).get("PSEUDOLIFE_MCP_DATABASE_URL"),
                    "daemon_mounts": self.target_container.get("Mounts", []),
                    "postgres_mounts": self.target_postgres.get("Mounts", []), "port": self.target_port,
+                   "daemon_ports": (self.target_container.get("NetworkSettings") or {}).get("Ports") or {},
                    "host_network": (self.target_container.get("HostConfig") or {}).get("NetworkMode") == "host"}
         result = self.ssh(f"python3 -c {shlex.quote(_RELEASE_PREFLIGHT)}",
                           stdin=json.dumps(request).encode(), timeout=180)
