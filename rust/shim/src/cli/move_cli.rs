@@ -15,7 +15,7 @@ use std::{
 const HELP: &str = concat!(
     "usage: pseudolife-mcp move [-h] --to SSH-TARGET [--target-checkout PATH]\n",
     "                           [--target-url URL] [--no-keep-tokens] [--resume]\n",
-    "                           [--dry-run] [--yes] [--json]\n",
+    "                           [--dry-run] [--expose-target] [--yes] [--json]\n",
     "\n",
     "Move this host's Docker-tier bank to another Docker-tier checkout host over\n",
     "key-based ssh: preflight, final backup from the stopped source, database\n",
@@ -39,7 +39,9 @@ const HELP: &str = concat!(
     "  --resume              overwrite the half-restored bank an earlier attempt of\n",
     "                        this move left on the target\n",
     "  --dry-run             show the plan; change nothing\n",
-    "  --yes                 move without asking\n",
+    "  --expose-target       consent to creating a persistent Tailscale serve on\n",
+    "                        the target if needed\n",
+    "  --yes                 confirm the bank move (exposure needs --expose-target)\n",
     "  --json                one JSON report on stdout\n",
 );
 const REQUIRED: &str = "pseudolife-mcp move: error: the following arguments are required: --to\n";
@@ -47,12 +49,13 @@ const BAD_TO: &str = "move: --to takes an ssh target such as root@box or a ~/.ss
 const BAD_URL: &str = "move: --target-url must be an http(s) origin such as http://100.64.0.2:8765 \
                        (no path, query or credentials)\n";
 const BAD_CHECKOUT: &str = "move: --target-checkout holds a control character\n";
-const FLAGS: [&str; 5] = [
+const FLAGS: [&str; 6] = [
     "--no-keep-tokens",
     "--resume",
     "--dry-run",
     "--yes",
     "--json",
+    "--expose-target",
 ];
 
 /// What the oracle's output depends on besides argv.
@@ -535,7 +538,9 @@ mod tests {
             panic!("expected the usage error");
         };
         assert!(text.starts_with("usage: pseudolife-mcp move [-h] --to SSH-TARGET"));
-        assert!(text.ends_with(&format!("[--dry-run] [--yes] [--json]\n{REQUIRED}")));
+        assert!(text.ends_with(&format!(
+            "[--dry-run] [--expose-target] [--yes] [--json]\n{REQUIRED}"
+        )));
         assert_eq!(text.matches('\n').count(), 4);
         assert_eq!(
             decide(&argv(&["--yes"]), &plain(Some("81"))),
@@ -662,5 +667,26 @@ mod tests {
             assert!(colour_env(|var| var == name), "{name}");
         }
         assert!(!colour_env(|var| var == "TERM"));
+    }
+
+    #[test]
+    fn exposure_consent_preserves_pure_refusals_and_effectful_deferral() {
+        assert_eq!(
+            decide(&argv(&["--to", "box", "--expose-target"]), &plain(None)),
+            Decision::Defer
+        );
+        assert_eq!(
+            decide(
+                &argv(&[
+                    "--to",
+                    "box",
+                    "--expose-target",
+                    "--target-url",
+                    "ftp://box"
+                ]),
+                &plain(None)
+            ),
+            Decision::Refuse(BAD_URL.to_owned())
+        );
     }
 }
