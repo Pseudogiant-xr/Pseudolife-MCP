@@ -928,7 +928,8 @@ class Update:
                 urls.add(f"http://[::1]:{int(port)}")
         if urls:
             url = sorted(urls)[0]
-            return (f"Docker publishes the daemon at {url}. If this is the intended daemon, "
+            return (f"Docker reports a daemon publication at {url} on the Docker host. "
+                    "If Docker runs on this machine and this is the intended daemon, "
                     f"retry with --daemon-url {url}; otherwise check your proxy/custom endpoint.")
         return "Check --daemon-url http(s)://<host>:<port> for the intended daemon or proxy endpoint."
 

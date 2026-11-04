@@ -40,7 +40,7 @@ pub(super) fn health_endpoint_hint(ports: &str) -> String {
     }
     if let Some(url) = urls.first() {
         format!(
-            "Docker publishes the daemon at {url}. If this is the intended daemon, retry with --daemon-url {url}; otherwise check your proxy/custom endpoint."
+            "Docker reports a daemon publication at {url} on the Docker host. If Docker runs on this machine and this is the intended daemon, retry with --daemon-url {url}; otherwise check your proxy/custom endpoint."
         )
     } else {
         "Check --daemon-url http(s)://<host>:<port> for the intended daemon or proxy endpoint."

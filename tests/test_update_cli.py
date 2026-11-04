@@ -546,7 +546,10 @@ def test_clients_only_and_daemon_only(world, clients, tmp_path):
 
 
 @pytest.mark.parametrize("answer", [None, {"status": "ok", "version": "0.15.0"}])
-def test_failed_verification_suggests_published_daemon_url(world, clients, tmp_path, capsys, monkeypatch, answer):
+@pytest.mark.parametrize("connection", [None, ("DOCKER_HOST", "ssh://example.com"), ("DOCKER_CONTEXT", "remote-fixture")])
+def test_failed_verification_suggests_published_daemon_url(world, clients, tmp_path, capsys, monkeypatch, answer, connection):
+    if connection:
+        monkeypatch.setenv(*connection)
     _project(world, tmp_path)
     world.health = [{"status": "ok", "version": "0.15.0"}, answer]
     original = world.run_cli
@@ -560,6 +563,8 @@ def test_failed_verification_suggests_published_daemon_url(world, clients, tmp_p
     assert _run(["--health-retries", "1"]) == 1
     err = capsys.readouterr().err
     assert "--daemon-url http://127.0.0.1:9876" in err
+    assert "on the Docker host" in err
+    assert "If Docker runs on this machine" in err
     assert "image setting won" not in err
     assert clients == []
 

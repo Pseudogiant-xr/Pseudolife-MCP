@@ -7,7 +7,11 @@ fn failed_health_endpoint_hint_uses_only_valid_loopback_publications() {
         ("127.0.0.1:9876", "http://127.0.0.1:9876"),
         ("[::1]:9876", "http://[::1]:9876"),
     ] {
-        assert!(release::health_endpoint_hint(ports).contains(&format!("--daemon-url {url}")));
+        let hint = release::health_endpoint_hint(ports);
+        assert!(hint.contains(&format!("--daemon-url {url}")));
+        // Port output is Docker-host-local even with a remote DOCKER_HOST or context.
+        assert!(hint.contains("on the Docker host"));
+        assert!(hint.contains("If Docker runs on this machine"));
     }
     for ports in [
         "",
