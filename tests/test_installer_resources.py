@@ -123,6 +123,17 @@ def test_our_container_name_does_not_excuse_an_unrelated_listener(guard):
         module.check(env)
 
 
+@pytest.mark.parametrize("protocol,address", [("udp", "127.0.0.1"), ("tcp", "::1"), ("tcp", "10.0.0.2")])
+def test_only_an_ipv4_loopback_tcp_publication_can_own_the_requested_port(guard, protocol, address):
+    module, env, containers, _, busy, _ = guard
+    value = container()
+    value["NetworkSettings"]["Ports"] = {f"8765/{protocol}": [{"HostPort": "8765", "HostIp": address}]}
+    containers.append(value)
+    busy.add(8765)
+    with pytest.raises(module.Refusal, match="listening on 8765"):
+        module.check(env)
+
+
 def test_pre_rename_volumes_recorded_in_crlf_env_are_allowed(guard):
     module, env, _, volumes, _, _ = guard
     content = b"PSEUDOLIFE_BANK_VOLUME=ops_pseudolife_pgdata\r\nPSEUDOLIFE_STATE_VOLUME=ops_pseudolife_data\r\n"

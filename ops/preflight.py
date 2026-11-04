@@ -145,7 +145,9 @@ def check(env_file: Path) -> None:
             c.get("State", {}).get("Running")
             and (c.get("Config", {}).get("Labels") or {}).get("com.docker.compose.project") == PROJECT
             and any(str(port) == binding.get("HostPort")
-                    for bindings in (c.get("NetworkSettings", {}).get("Ports") or {}).values()
+                    and binding.get("HostIp", "") in ("", "127.0.0.1", "0.0.0.0")
+                    for publication, bindings in (c.get("NetworkSettings", {}).get("Ports") or {}).items()
+                    if publication.endswith("/tcp")
                     for binding in (bindings or []))
             for c in containers
         )
