@@ -1,7 +1,8 @@
 # CLI-DOCTOR contract (native `pseudolife-mcp doctor`)
 
-Oracle: `pseudolife_memory/doctor_cli.py` at this branch's base (35b8f5d2),
-with the helpers it calls. Line numbers are that file's unless named.
+Oracle: `pseudolife_memory/doctor_cli.py` and its helpers from the selected
+oracle source. Legacy line numbers below refer to `35b8f5d2` unless named;
+the Codex plugin runtime section describes the current helper contract.
 
 ## Canonical argv
 
