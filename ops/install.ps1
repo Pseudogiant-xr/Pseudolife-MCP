@@ -2925,6 +2925,15 @@ foreach ($selectedClient in $clients) {
     }
 }
 
+# >>> claude profile scope >>>
+if ($mcpState["claude"] -and $mcpState["claude"] -notin "skipped", "failed") {
+    $profileHome = if ($env:CLAUDE_CONFIG_DIR) { $env:CLAUDE_CONFIG_DIR } else { $env:USERPROFILE }
+    Write-Host "Claude Code MCP registration file: $(Join-Path $profileHome '.claude.json')"
+    Write-Host "MCP registration is per-profile; shared plugins or settings do not share memory tools."
+    Write-Host "To add another profile, rerun this installer with CLAUDE_CONFIG_DIR set to that profile's directory; remove Env:CLAUDE_CONFIG_DIR for the default profile."
+}
+# <<< claude profile scope <<<
+
 # -- 12. health -----------------------------------------------------------------------
 # >>> endpoint container probe >>>
 # A server named on this machine's loopback is written as host.docker.internal

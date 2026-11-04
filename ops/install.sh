@@ -3012,6 +3012,17 @@ for selected_client in $CLIENTS; do
     fi
 done
 
+# >>> claude profile scope >>>
+case "${MCP_CLAUDE:-}" in
+    ""|skipped|failed) ;;
+    *)
+        echo "Claude Code MCP registration file: ${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json"
+        echo "MCP registration is per-profile; shared plugins or settings do not share memory tools."
+        echo "To add another profile, rerun this installer with CLAUDE_CONFIG_DIR set to that profile's directory; unset CLAUDE_CONFIG_DIR for the default profile."
+        ;;
+esac
+# <<< claude profile scope <<<
+
 # ── 12. health ─────────────────────────────────────────────────────────────
 # >>> endpoint container probe >>>
 # A server named on this machine's loopback is written as host.docker.internal
