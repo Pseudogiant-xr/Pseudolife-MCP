@@ -274,6 +274,7 @@ class Options:
     reinstall: bool = False            # release mode: proceed at the same version
     allow_downgrade: bool = False      # release mode: a target older than the daemon
     env_file: Path | None = None       # release mode: the compose env file when the labelled one is gone
+    compose_files: list[Path] = field(default_factory=list)  # original stack files exported from a manager
     check: bool = False
     result_file: Path | None = None    # the exit code is written here at the end (an unattended caller reads it)
     unattended: bool = False           # the scheduled run: apply only when the knob is on and the board is idle
@@ -518,7 +519,7 @@ class Update:
         if self.o.checkout is not None:
             for name, value in (("--clients-only", self.o.clients_only), ("--tag", self.o.tag),
                                 ("--reinstall", self.o.reinstall), ("--allow-downgrade", self.o.allow_downgrade),
-                                ("--env-file", self.o.env_file)):
+                                ("--env-file", self.o.env_file), ("--compose-file", self.o.compose_files)):
                 if value:
                     raise UpdateError(f"{name} is a release-mode option; a checkout deploy builds what the tree "
                                       f"holds (for the clients alone: python ops/update_clients.py)", 2)
@@ -570,9 +571,14 @@ class Update:
         # Held from before the daemon's version is read until the run ends,
         # so an unattended run (or a second terminal) cannot interleave.
         with UpdateLock():
+            if self.o.checkout is not None and (self.o.allow_dirty or (self.o.shadow and self.o.engine == "python") or
+                    tree_state(Path(self.o.checkout).resolve())["dirty"] == "false"):
+                self.refuse_foreign_checkout_project()
             from pseudolife_memory.update_engine import selected_checkout, deploy_engine
             engine_checkout = selected_checkout(self)
             if engine_checkout is not None:
+                if self.o.checkout is None:
+                    self.refuse_foreign_checkout_project(engine_checkout)
                 self.report.mode = "checkout"
                 deploy_engine(self, engine_checkout)
             elif self.o.checkout is not None:
@@ -1014,6 +1020,44 @@ class Update:
             self.step(text)
 
     # -- docker: checkout mode ---------------------------------------------
+    def refuse_foreign_checkout_project(self, checkout: Path | None = None) -> None:
+        """A checkout builds the installer's project, never another stack
+        that happens to use the same container names. Check before even
+        scaffolding its env file, backing up or tagging a rollback."""
+        code, out = run_cli([self.docker, "inspect", "-f", "{{json .Config.Labels}}", DAEMON_CONTAINER], timeout=60)
+        if code != 0:
+            if "no such object" in out.lower() or "no such container" in out.lower():
+                return
+            raise UpdateError("Docker could not inspect the running daemon's compose project; "
+                              "start Docker and retry when it answers. Nothing was changed", 2)
+        try:
+            labels = json.loads(out.strip().splitlines()[0]) or {}
+            if not isinstance(labels, dict):
+                raise ValueError("labels")
+        except (ValueError, IndexError) as exc:
+            raise UpdateError("Docker did not return the daemon's compose project labels; "
+                              "retry when Docker inspect returns valid labels. Nothing was changed", 2) from exc
+        project = labels.get("com.docker.compose.project")
+        if not project:
+            return
+        repo = Path(checkout or self.o.checkout).resolve()
+        env_file = repo / "ops" / ".env"
+        compose = self._compose_args([repo / "ops" / "docker-compose.yml",
+                                      repo / "ops" / "docker-compose.override.yml"], env_file)
+        code, out = run_cli([self.docker, "compose", *compose, "config", "--format", "json"],
+                            timeout=60, env=compose_environment(env_file), stdout_only=True)
+        try:
+            expected = json.loads(out).get("name") if code == 0 else None
+        except (ValueError, AttributeError):
+            expected = None
+        if not expected:
+            raise UpdateError("cannot resolve the checkout's compose project; restore its ops/.env and "
+                              "compose files, then retry. Nothing was changed", 2)
+        if project != expected:
+            raise UpdateError(f"the running daemon belongs to compose project {project!r}, while checkout mode "
+                              f"would deploy {expected!r}. Use release mode to update the running project: "
+                              "`pseudolife-mcp update`. Nothing was changed", 2)
+
     def deploy_checkout(self) -> None:
         repo = Path(self.o.checkout).resolve()
         compose_file = repo / "ops" / "docker-compose.yml"
@@ -1348,6 +1392,29 @@ class Update:
         config_files = [Path(p) for p in (labels.get("com.docker.compose.project.config_files") or "").split(",") if p]
         working_dir = labels.get("com.docker.compose.project.working_dir")
         project = labels.get("com.docker.compose.project") or "pseudolife-mcp"
+        if self.o.compose_files:
+            config_files = [Path(p).resolve() for p in self.o.compose_files]
+            for path in config_files:
+                if not path.is_file():
+                    raise UpdateError(f"--compose-file {path} does not exist; restore the exported stack file "
+                                      "there and retry. Nothing was changed", 2)
+        missing = [p for p in config_files if not p.is_file()]
+        # Only the installer's packaged layout can be reconstructed. A
+        # manager (Portainer labels /data/compose/<id>/docker-compose.yml)
+        # may keep its own ports, mounts and credentials in a container-only
+        # file; an env file alone cannot recover those settings.
+        packaged_layout = (project == "pseudolife-mcp" and config_files
+                           and all(p.name in ("docker-compose.yml", "docker-compose.ghcr.yml")
+                                   and (p.parent.name == "ops" or p.parent == data_dir() / "compose")
+                                   for p in config_files))
+        if missing and not (packaged_layout and len(missing) == len(config_files)):
+            raise UpdateError(f"compose project {project!r} has files unavailable on this host: "
+                              f"{', '.join(map(str, missing))}. Its settings cannot be recovered from --env-file; "
+                              f"the bundled compose files would replace this stack's configuration. "
+                              f"Export the original stack file and environment to this host (Portainer: "
+                              f"Stacks > {project} > Editor), then rerun with --compose-file <stack.yml> "
+                              f"--env-file <stack.env>. "
+                              f"Nothing was changed; the stack was left unchanged", 2)
         # The env file: --env-file, else the labelled one(s) (comma-joined
         # when several were given), else compose's implicit <working dir>/.env.
         # It carries the Postgres password, the volume names and the daemon's
@@ -1360,7 +1427,7 @@ class Update:
             env_files = [p for p in labelled if p.is_file()]
         elif working_dir and (Path(working_dir) / ".env").is_file():
             env_files = [Path(working_dir) / ".env"]
-        if (labelled or self.o.env_file) and not env_files:
+        if (self.o.env_file is None and any(not p.is_file() for p in labelled)):
             raise UpdateError(f"the daemon's env file(s) {', '.join(map(str, labelled or [self.o.env_file]))} no "
                               f"longer exist; recreating the container without them would reset the Postgres "
                               f"password, the volume names and the bearer. Name the file with --env-file. "
@@ -1368,6 +1435,9 @@ class Update:
         for path in env_files:
             if not path.is_file():
                 raise UpdateError(f"--env-file {path} does not exist; nothing was changed", 2)
+        if self.o.compose_files and not env_files:
+            raise UpdateError("the original stack environment is unavailable; export it and rerun with "
+                              "--env-file <stack.env> alongside --compose-file. Nothing was changed", 2)
         existing = [p for p in config_files if p.is_file()]
         checkout = None
         if working_dir and (Path(working_dir).parent / "pyproject.toml").is_file() and (Path(working_dir).parent / "ops").is_dir():
@@ -1386,7 +1456,12 @@ class Update:
         overlay = next((p.with_name("docker-compose.ghcr.yml") for p in existing
                         if p.with_name("docker-compose.ghcr.yml").is_file()), None) or self._bundled("docker-compose.ghcr.yml")
         files = existing + ([overlay] if overlay not in existing else [])
-        args = ["-p", project] + self._compose_args(files, env_files)
+        args = ["-p", project]
+        if self.o.compose_files and working_dir:
+            # Relative mounts, env_file entries and other resources retain
+            # their original meaning even when the YAML was exported elsewhere.
+            args += ["--project-directory", working_dir]
+        args += self._compose_args(files, env_files)
         return {"args": args, "env_file": env_files, "checkout": checkout,
                 "files": [str(p) for p in files], "project": project}
 
@@ -1555,6 +1630,8 @@ def build_parser() -> argparse.ArgumentParser:
                         help="release mode: allow a --tag older than the version the daemon runs")
     parser.add_argument("--env-file", default=None,
                         help="release mode: the compose env file, when the one the container was created with is gone")
+    parser.add_argument("--compose-file", action="append", type=Path, default=[],
+                        help="release mode: original stack file exported to this host; repeat for overlays in order")
     parser.add_argument("--daemon-url", default=os.environ.get("PSEUDOLIFE_MCP_DAEMON_URL") or DEFAULT_DAEMON_URL)
     parser.add_argument("--json", action="store_true", help="one JSON report instead of the step lines")
     return parser
@@ -1570,6 +1647,7 @@ def options_from_args(args) -> Options:
                    clients_only=args.clients_only, daemon_only=args.daemon_only,
                    reinstall=args.reinstall, allow_downgrade=args.allow_downgrade,
                    env_file=Path(args.env_file) if args.env_file else None,
+                   compose_files=args.compose_file,
                    check=args.check, as_json=args.json, daemon_url=args.daemon_url,
                    result_file=Path(args.result_file) if args.result_file else None,
                    unattended=args.unattended, schedule=args.schedule, unschedule=args.unschedule,

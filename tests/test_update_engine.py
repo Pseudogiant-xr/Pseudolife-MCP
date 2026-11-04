@@ -42,6 +42,30 @@ def test_shadow_requires_explicit_rust(capsys):
     assert "--engine rust" in capsys.readouterr().err
 
 
+@pytest.mark.parametrize("engine,shadow", [("rust", False), ("rust", True), ("python", False)])
+def test_engine_checkout_refuses_foreign_project_before_mutation(engine_host, capsys, engine, shadow, monkeypatch, tmp_path):
+    state = engine_host
+    state["config"]["name"] = "pseudolife-mcp"
+    monkeypatch.setattr(up, "data_dir", lambda: tmp_path / "update-data")
+    state["running"]["Config"]["Labels"] = {"com.docker.compose.project": "external-stack"}
+    update = state["update"](engine, shadow=shadow)
+    assert update.run() == 2
+    assert "pseudolife-mcp update" in capsys.readouterr().err
+    assert not any("backup." in " ".join(c) or c[1:2] == ["tag"] or "build" in c or "up" in c
+                   for c in state["calls"])
+
+
+def test_dirty_shadow_removal_still_checks_project_ownership(engine_host, monkeypatch, capsys, tmp_path):
+    state = engine_host
+    state["config"]["name"] = "pseudolife-mcp"
+    monkeypatch.setattr(up, "data_dir", lambda: tmp_path / "update-data")
+    state["running"]["Config"]["Labels"] = {"com.docker.compose.project": "external-stack"}
+    monkeypatch.setattr(up, "tree_state", lambda _: {"sha": "a" * 40, "dirty": "true", "lines": [" M README.md"]})
+    assert state["update"]("python", shadow=True).run() == 2
+    assert "pseudolife-mcp update" in capsys.readouterr().err
+    assert not any("rm" in c or "up" in c or "build" in c for c in state["calls"])
+
+
 def test_d2_preflight_rejects_old_schema_and_pending_import():
     from pseudolife_memory.update_engine import require_imported_bank
     for schema, pending in ((56, False), (58, True), (None, False)):
