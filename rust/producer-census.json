@@ -415,7 +415,7 @@
     "rust/shim/src/cli/lease/operator/secrets.rs": "7156f1498e15f7fd9417f42ceb0de45834ea28d5deda02da8d1010a90a707b34",
     "rust/shim/src/cli/lease/operator/store.rs": "1ce77b9a2f4446565e9a88765520d57da65a8d2f12ff1dccf91ffdb68f6545a9",
     "rust/shim/src/cli/lease/operator/store/conductor.rs": "95b0795ea6e0cde4980656c067854206a396f79574d6cbe3397db8d8912604ec",
-    "rust/shim/src/cli/lease/run.rs": "e9bbb4483073133380737b84bd3517aa100a6b60f58c03bbee415e397e39e8fb",
+    "rust/shim/src/cli/lease/run.rs": "c5f84b3b6b89538fa7ae231a8b3d5063250e0e3c8304a88f632b9e1f4ccd8935",
     "rust/shim/src/cli/lease/sigint.rs": "ff7d18768305ff0560a508ad5956f06f4875403efe7c161710277633d41e9430",
     "rust/shim/src/cli/lease/view.rs": "ceeeea9ee6bfcfb2394235cf3b32c8b2032f1fd88365c4de64ca1339a37c7921",
     "rust/shim/src/cli/maintainer/bank.rs": "154ce1a717be2f0efdac512d35a4aace55ff08aa541c225a0f954dead81c0a4a",
@@ -4734,7 +4734,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/lease/run.rs:448",
+          "location": "rust/shim/src/cli/lease/run.rs:456",
           "shape": {
             "argv_source": "lease run {} -- COMMAND\",",
             "channel": "argv",
@@ -30957,7 +30957,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/lease/run.rs:364",
+          "location": "rust/shim/src/cli/lease/run.rs:372",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -30969,7 +30969,7 @@
         },
         {
           "evidence": "static",
-          "location": "rust/shim/src/cli/lease/run.rs:369",
+          "location": "rust/shim/src/cli/lease/run.rs:377",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -96608,13 +96608,13 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/lease/run.rs:364",
+      "location": "rust/shim/src/cli/lease/run.rs:372",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_LEASES_HELD"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/lease/run.rs:448",
+      "location": "rust/shim/src/cli/lease/run.rs:456",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:lease"
     },
