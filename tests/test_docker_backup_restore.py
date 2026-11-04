@@ -75,6 +75,8 @@ class DockerWorld:
     def run(self, argv, **kwargs):
         args = list(map(str, argv[1:]))
         self.calls.append(args)
+        if args[0] == "exec" and "df" in args:
+            return 0, "Filesystem 1024-blocks Used Available Capacity Mounted on\noverlay 99999999 1 99999998 1% /\n"
         if args[0] == "inspect":
             return 0, json.dumps([self.pg if args[1] == self.pg_name else self.daemon])
         if args[0] == "create":
@@ -120,6 +122,47 @@ def _input_dump(tmp_path):
     path = tmp_path / "input.sql.gz"
     path.write_bytes(gzip.compress(b"-- PostgreSQL database dump complete\n"))
     return path
+
+
+@pytest.mark.parametrize("action", ["backup", "restore"])
+def test_low_disk_refuses_docker_backup_and_restore_before_artifacts_or_stop(docker_bank, tmp_path, monkeypatch, action):
+    from pseudolife_memory import docker_backup_restore as module
+    bank, world = docker_bank
+    monkeypatch.setattr(module.shutil, "disk_usage", lambda _: types.SimpleNamespace(free=8 * 1024**3 - 1))
+    with pytest.raises(up.UpdateError, match="8 GiB"):
+        if action == "backup":
+            bank.backup(out=tmp_path / "artifacts")
+        else:
+            bank.restore(_input_dump(tmp_path), leave_stopped=True, safety_dir=tmp_path / "safety")
+    assert not any(c[0] in ("stop", "create", "cp") or "pg_dump" in " ".join(c) for c in world.calls)
+    assert not (tmp_path / "artifacts").exists() and not (tmp_path / "safety").exists()
+
+
+@pytest.mark.parametrize("location", ["storage", "pg-tmp"])
+@pytest.mark.parametrize("database_exists", [True, False])
+def test_low_docker_disk_refuses_restore_before_stopping_the_daemon(docker_bank, tmp_path, monkeypatch, location, database_exists):
+    bank, world = docker_bank
+    world.database_exists = database_exists
+    original = world.run
+
+    def low_disk(argv, **kwargs):
+        if "df" in argv and argv[-1] == ("/" if location == "storage" else "/tmp"):
+            return 0, "Filesystem 1024-blocks Used Available Capacity Mounted on\noverlay 999 998 1 99% /\n"
+        return original(argv, **kwargs)
+
+    monkeypatch.setattr(up, "run_cli", low_disk)
+    with pytest.raises(up.UpdateError, match="8 GiB"):
+        bank.restore(_input_dump(tmp_path), leave_stopped=True, safety_dir=tmp_path / "safety")
+    assert not any(c[0] in ("stop", "create", "cp") or "pg_dump" in " ".join(c) for c in world.calls)
+    assert not (tmp_path / "safety").exists()
+
+
+def test_the_exact_disk_floor_allows_a_clone_free_backup(docker_bank, tmp_path, monkeypatch):
+    from pseudolife_memory import disk_space
+    bank, _world = docker_bank
+    monkeypatch.setattr(disk_space.shutil, "disk_usage", lambda _: types.SimpleNamespace(free=disk_space.MIN_FREE))
+    result = bank.backup(out=tmp_path / "artifacts")
+    assert result["dump"].is_file() and result["state"].is_file()
 
 
 def test_docker_backup_uses_actual_role_and_database_and_stopped_state(docker_bank, tmp_path):

@@ -237,8 +237,17 @@ class DockerBank:
         finally:
             self.command("rm", "-f", helper, check=False, timeout=120)
 
+    def _backup_space(self, directory: Path, *, include_database=True) -> None:
+        from pseudolife_memory import disk_space
+        disk_space.host(directory)
+        disk_space.host(Path(tempfile.gettempdir()))
+        disk_space.docker_storage(self.docker, [self.pg, self.daemon], self.image)
+        if include_database:
+            disk_space.container(self.docker, self.pg)
+
     def backup(self, *, out: Path | None = None, keep_days=7.0, include_database=True) -> dict:
         directory = Path(out) if out else up.data_dir() / "backups"
+        self._backup_space(directory, include_database=include_database)
         directory.mkdir(parents=True, exist_ok=True, mode=0o700)
         stamp = up._stamp() + "-" + secrets.token_hex(4)
         dump = directory / f"pseudolife_memory-{stamp}.sql.gz"
@@ -338,6 +347,9 @@ class DockerBank:
             if source_path.is_absolute() and safety_dir.is_relative_to(source_path.resolve()):
                 raise up.UpdateError("the safety backup would be inside the state mount being replaced; choose "
                                      "--safety-dir <directory outside the state mount>. Nothing was restored", 2)
+        # Restore stages and decompresses SQL in PostgreSQL's /tmp even when
+        # there is no existing database to include in the safety backup.
+        self._backup_space(safety_dir)
         was_running = self.running.get("State", {}).get("Running", False)
         destructive = False
         safety = None

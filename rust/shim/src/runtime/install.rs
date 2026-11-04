@@ -503,14 +503,14 @@ fn ensure_build_space(path: &Path) -> Result<()> {
     Ok(())
 }
 #[cfg(unix)]
-fn available_space(path: &Path) -> Result<u64> {
+pub(crate) fn available_space(path: &Path) -> Result<u64> {
     let stats = rustix::fs::statvfs(path)
         .map_err(|_| "could not check available disk space; no build started")?;
     Ok((stats.f_bavail as u64).saturating_mul(stats.f_frsize as u64))
 }
 #[cfg(windows)]
 #[allow(unsafe_code)]
-fn available_space(path: &Path) -> Result<u64> {
+pub(crate) fn available_space(path: &Path) -> Result<u64> {
     use std::os::windows::ffi::OsStrExt;
     let path: Vec<u16> = path.as_os_str().encode_wide().chain([0]).collect();
     let mut available = 0u64;

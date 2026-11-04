@@ -412,6 +412,13 @@ impl Update {
             PYTHON_IMAGE
         };
         let image = format!("{repository}:{target}");
+        disk::host(&data_dir())?;
+        let pg = engine::container(self, &context.args, Some(&env), "pseudolife-pg")?;
+        self.disk_storage(
+            context.running["Id"].as_str().unwrap_or(DAEMON_CONTAINER),
+            &pg,
+            context.running["Image"].as_str(),
+        )?;
         self.step(format!("pulling {image}..."));
         if self
             .command(&["pull".into(), image.clone()], None, 7200, true)
@@ -454,7 +461,6 @@ impl Update {
         } else {
             None
         };
-        let pg = engine::container(self, &context.args, Some(&env), "pseudolife-pg")?;
         let daemon = context.running["Id"].as_str().unwrap_or(DAEMON_CONTAINER);
         let backups = if self.o.no_backup {
             self.warn("skipping backup (--no-backup)");
@@ -669,6 +675,7 @@ impl Update {
                 "commit, stash or remove the listed paths, or re-run with --allow-dirty to deploy this tree as it is (stamped dirty, or unknown when git cannot describe it)",
             ));
         }
+        disk::host(&repo)?;
         let env_file = repo.join("ops/.env");
         let compose = compose_args(
             &[file.clone(), repo.join("ops/docker-compose.override.yml")],
@@ -696,12 +703,13 @@ impl Update {
         let daemon = engine::container(self, &compose, Some(&env), DAEMON_SERVICE)?;
         let running = engine::inspect(self, &daemon)?;
         engine::verify_checkout_identity(self, &config, &running, &daemon)?;
+        let pg = engine::container(self, &compose, Some(&env), "pseudolife-pg")?;
+        self.disk_storage(&daemon, &pg, running["Image"].as_str())?;
         self.set_rollback_scope(&config, &running)?;
         self.maintainer_context = Some((compose.clone(), env.clone()));
         if self.o.no_backup {
             self.backup(None)?;
         } else {
-            let pg = engine::container(self, &compose, Some(&env), "pseudolife-pg")?;
             if self.checkout_script(&repo, "backup").is_some() {
                 let pg_env = &config["services"]["pseudolife-pg"]["environment"];
                 let user = pg_env["POSTGRES_USER"].as_str().ok_or_else(|| {

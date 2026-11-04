@@ -19,6 +19,32 @@ def test_engine_flags_reach_options():
     assert options.engine == "rust" and options.shadow
 
 
+@pytest.mark.parametrize("engine,shadow,location", [
+    (engine, shadow, location)
+    for engine, shadow in [("python", False), ("rust", False), ("rust", True)]
+    for location in (["host", "storage"] if shadow else ["host", "storage", "pg-tmp", "daemon-tmp"])
+])
+def test_disk_floor_precedes_engine_backup_build_and_shadow_changes(shadow_host, monkeypatch, engine, shadow, location):
+    from types import SimpleNamespace
+    from pseudolife_memory import disk_space, update_engine as eng
+    s = shadow_host
+    original_env = (s["repo"] / "ops/.env").read_bytes()
+    if location == "host":
+        monkeypatch.setattr(disk_space.shutil, "disk_usage", lambda _: SimpleNamespace(free=disk_space.MIN_FREE - 1))
+    else:
+        original = up.run_cli
+        def run(argv, **kw):
+            target = "fixture-pg" if location == "pg-tmp" else "fixture-daemon"
+            if "df" in argv and (location == "storage" or (argv[2] == target and argv[-1] == "/tmp")):
+                return 0, "overlay 99999999 1 1 99% /\n"
+            return original(argv, **kw)
+        monkeypatch.setattr(up, "run_cli", run)
+    with pytest.raises(up.UpdateError, match="8 GiB"):
+        eng.deploy_engine(s["update"](engine, shadow=shadow), s["repo"])
+    assert (s["repo"] / "ops/.env").read_bytes() == original_env
+    assert not any("build" in c or "up" in c or c[1:2] == ["tag"] or any("backup." in str(v) for v in c) for c in s["calls"])
+
+
 def test_release_rust_refuses_before_docker(monkeypatch, capsys):
     monkeypatch.setattr(up, "run_cli", lambda *a, **kw: pytest.fail("refusal must precede Docker"))
     assert up.main(["--engine", "rust"]) == 2
@@ -120,6 +146,8 @@ def engine_host(tmp_path, monkeypatch):
     def run(argv, **kwargs):
         argv = list(map(str, argv))
         state["calls"].append(argv)
+        if "df" in argv:
+            return 0, "Filesystem 1024-blocks Used Available Capacity Mounted on\noverlay 99999999 1 99999998 1% /\n"
         if argv[:2] == ["docker", "compose"]:
             if "config" in argv:
                 return 0, json.dumps(config)

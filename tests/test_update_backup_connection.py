@@ -24,7 +24,11 @@ def fake_backup(monkeypatch, tmp_path, config, *, dump_rc=0, tar_rc=0):
 
     def run(argv, **kwargs):
         calls.append(argv)
+        if "df" in argv:
+            return 0, "overlay 99999999 1 99999998 1% /\n"
         if argv[1] == "inspect":
+            if "{{.State.Running}}" in argv:
+                return 0, str(config[argv[-1]].get("State", {}).get("Running", True)).lower()
             return 0, json.dumps([config[argv[-1]]])
         if argv[1] == "cp":
             from pathlib import Path

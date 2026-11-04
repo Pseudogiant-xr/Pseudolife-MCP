@@ -330,7 +330,8 @@ elif a[:1]==["compose"]:
    s["running"]["Image"]="sha256:replacement"
    s["running"]["Id"]=s.get("replacement_id",s["running"]["Id"])
 elif a[:1]==["exec"]:
- if "--host-state" in a or "pseudolife_memory.maintainer_setup" in a:
+ if "df" in a: out="Filesystem 1024-blocks Used Available Capacity Mounted on\noverlay 99999999 1 99999998 1% /\n"
+ elif "--host-state" in a or "pseudolife_memory.maintainer_setup" in a:
   out=s.get("setup_reply",json.dumps({"problem":None,"keys":[{"state":"active"}]}))
  elif "psql" in a:
   if "cms_counters" in a[-1]:out="f" if s["failure"]=="pending_import" else "t"
