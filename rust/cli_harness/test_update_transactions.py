@@ -330,7 +330,7 @@ elif a[:1]==["compose"]:
    s["running"]["Image"]="sha256:replacement"
    s["running"]["Id"]=s.get("replacement_id",s["running"]["Id"])
 elif a[:1]==["exec"]:
- if "df" in a: out="Filesystem 1024-blocks Used Available Capacity Mounted on\noverlay 99999999 1 99999998 1% /\n"
+ if "df" in a: out="Filesystem 1024-blocks Used Available Capacity Mounted on\noverlay 99999999 1 99999998 1% /"
  elif "--host-state" in a or "pseudolife_memory.maintainer_setup" in a:
   out=s.get("setup_reply",json.dumps({"problem":None,"keys":[{"state":"active"}]}))
  elif "psql" in a:
@@ -349,6 +349,24 @@ p.write_text(json.dumps(s))
 print(out)
 raise SystemExit(code)
 '''
+
+
+@pytest.mark.parametrize("path", ["/", "/tmp"])
+def test_fixture_df_emits_one_terminated_filesystem_record(tmp_path, monkeypatch, capsys, path):
+    state_path = tmp_path / "fixture-state.json"
+    state_path.write_text(json.dumps({"calls": []}))
+    args = ["exec", "fixture-pg", "df", "-Pk", path]
+    monkeypatch.setenv("UPDATE_FIXTURE_STATE", str(state_path))
+    monkeypatch.setattr(sys, "argv", ["docker", *args])
+    with pytest.raises(SystemExit) as stopped:
+        exec(compile(DOCKER, "fixture-docker", "exec"), {})
+    assert stopped.value.code == 0
+    assert capsys.readouterr().out == (
+        "Filesystem 1024-blocks Used Available Capacity Mounted on\n"
+        "overlay 99999999 1 99999998 1% /\n"
+    )
+    assert json.loads(state_path.read_text())["calls"] == [args]
+
 
 BACKUP = r'''
 import gzip,io,json,os,pathlib,sys,tarfile
