@@ -281,7 +281,7 @@ if a[:1]==["inspect"]:
   f=a[a.index("-f")+1]
   if "State.Running" in f:
    if a[-1]=="missing-daemon":code=1;out="No such container"
-   else:out="false" if s.get("deployed") and s["failure"]=="recreated_stopped" else "true"
+   else:out=("false" if s["failure"]=="recreated_stopped" else "true") if s.get("deployed") else str(s["running"].get("State",{}).get("Running",True)).lower()
   elif "State.Status" in f:
    out={"recreated_stopped":"exited","recreated_restarting":"restarting"}.get(s["failure"],"running") if s.get("deployed") else "running"
   elif "index .Config.Labels" in f: out=s.get("setup_engine","python")
@@ -366,6 +366,23 @@ def test_fixture_df_emits_one_terminated_filesystem_record(tmp_path, monkeypatch
         "overlay 99999999 1 99999998 1% /\n"
     )
     assert json.loads(state_path.read_text())["calls"] == [args]
+
+
+@pytest.mark.parametrize("running,deployed,failure,expected", [
+    (True, False, "", "true"), (False, False, "", "false"),
+    (False, True, "", "true"), (True, True, "recreated_stopped", "false"),
+])
+def test_fixture_running_format_preserves_pre_recreate_state(tmp_path, monkeypatch, capsys, running, deployed, failure, expected):
+    state_path = tmp_path / "fixture-state.json"
+    state_path.write_text(json.dumps({"calls": [], "running": {"State": {"Running": running}},
+                                      "deployed": deployed, "failure": failure}))
+    args = ["inspect", "-f", "{{.State.Running}}", "fixture-daemon"]
+    monkeypatch.setenv("UPDATE_FIXTURE_STATE", str(state_path))
+    monkeypatch.setattr(sys, "argv", ["docker", *args])
+    with pytest.raises(SystemExit) as stopped:
+        exec(compile(DOCKER, "fixture-docker", "exec"), {})
+    assert stopped.value.code == 0
+    assert capsys.readouterr().out == expected + "\n"
 
 
 BACKUP = r'''
