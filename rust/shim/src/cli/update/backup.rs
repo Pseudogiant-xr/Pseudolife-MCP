@@ -38,14 +38,50 @@ fn connection_parts(daemon: &Value, postgres: &Value) -> Option<(String, String)
     if get("PGSERVICE").is_some() || get("PGHOSTADDR").is_some() {
         return None;
     }
-    // This parser accepts PostgreSQL URLs and keyword conninfo. Unsupported
-    // service/hostaddr indirections fail closed without printing the DSN.
-    let config = get("PSEUDOLIFE_MCP_DATABASE_URL")?
-        .parse::<tokio_postgres::Config>()
-        .ok()?;
-    if !config.get_hostaddrs().is_empty() {
-        return None;
-    }
+    let raw = get("PSEUDOLIFE_MCP_DATABASE_URL")?;
+    let quote = |value: &str| format!("'{}'", value.replace('\\', "\\\\").replace('\'', "\\'"));
+    // Resolve ambient defaults before the URI parser inserts its own 5432.
+    // The shared parser understands the daemon's TLS options and rejects
+    // opaque service/hostaddr indirections without printing the DSN.
+    let normalized = if raw.starts_with("postgresql://") || raw.starts_with("postgres://") {
+        let (base, query) = raw.split_once('?').unwrap_or((raw, ""));
+        let authority = base
+            .split_once("://")?
+            .1
+            .split('/')
+            .next()?
+            .rsplit('@')
+            .next()?;
+        let explicit_port = if authority.starts_with('[') {
+            authority.split_once(']')?.1.starts_with(':')
+        } else {
+            authority.contains(':')
+        };
+        let origin = base.parse::<tokio_postgres::Config>().ok()?;
+        let encode = |value: &str| {
+            percent_encoding::utf8_percent_encode(value, percent_encoding::NON_ALPHANUMERIC)
+                .to_string()
+        };
+        let mut defaults = vec![];
+        if !explicit_port {
+            defaults.push(format!("port={}", encode(get("PGPORT").unwrap_or("5432"))));
+        }
+        if origin.get_hosts().is_empty()
+            && let Some(host) = get("PGHOST")
+        {
+            defaults.push(format!("host={}", encode(host)));
+        }
+        defaults.push(query.into());
+        format!("{base}?{}", defaults.join("&"))
+    } else {
+        format!(
+            "host={} port={} {raw}",
+            quote(get("PGHOST").unwrap_or("")),
+            quote(get("PGPORT").unwrap_or("5432"))
+        )
+    };
+    let parsed = crate::pg::Dsn::parse_with_connection_options(&normalized).ok()?;
+    let config = parsed.config();
     let host = match config.get_hosts() {
         [] => get("PGHOST")?,
         [tokio_postgres::config::Host::Tcp(host)] => host,
@@ -139,6 +175,24 @@ mod connection_tests {
     #[test]
     fn backup_connection_uses_runtime_authority_and_libpq_defaults() {
         for (dsn, extra, user, db) in [
+            (
+                "postgresql://custom@pseudolife-pg/bank?port=5432",
+                vec!["PGPORT=9999"],
+                "custom",
+                "bank",
+            ),
+            (
+                "user=custom dbname=bank",
+                vec!["PGHOST=pseudolife-pg"],
+                "custom",
+                "bank",
+            ),
+            (
+                "postgresql://custom@/bank",
+                vec!["PGHOST=pseudolife-pg"],
+                "custom",
+                "bank",
+            ),
             (
                 "postgresql://custom@pseudolife-pg:5432/bank",
                 vec!["PGPORT=9999"],

@@ -49,6 +49,9 @@ def fake_backup(monkeypatch, tmp_path, config, *, dump_rc=0, tar_rc=0):
     ("postgresql://pseudolife-pg", {"PGUSER": "runtime_user"}, ("runtime_user", "runtime_user")),
     ("postgresql://custom:fixture@pseudolife-pg/wrong?dbname=actual", {}, ("custom", "actual")),
     ("postgresql://custom@pseudolife-pg:5432/bank", {"PGPORT": "9999"}, ("custom", "bank")),
+    ("postgresql://custom@pseudolife-pg/bank?port=5432", {"PGPORT": "9999"}, ("custom", "bank")),
+    ("user=custom dbname=bank", {"PGHOST": "pseudolife-pg"}, ("custom", "bank")),
+    ("postgresql://custom@/bank", {"PGHOST": "pseudolife-pg"}, ("custom", "bank")),
     ("postgresql://custom@pseudolife-pg/bank?sslmode=verify-full&sslrootcert=/fixture/root.pem", {}, ("custom", "bank")),
     ("host=pseudolife-pg user=custom dbname=bank sslmode=verify-full sslrootcert=/fixture/root.pem", {}, ("custom", "bank")),
 ])
