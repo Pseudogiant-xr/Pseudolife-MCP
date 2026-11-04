@@ -538,7 +538,9 @@ mod tests {
             panic!("expected the usage error");
         };
         assert!(text.starts_with("usage: pseudolife-mcp move [-h] --to SSH-TARGET"));
-        assert!(text.ends_with(&format!("[--dry-run] [--yes] [--json]\n{REQUIRED}")));
+        assert!(text.ends_with(&format!(
+            "[--dry-run] [--expose-target] [--yes] [--json]\n{REQUIRED}"
+        )));
         assert_eq!(text.matches('\n').count(), 4);
         assert_eq!(
             decide(&argv(&["--yes"]), &plain(Some("81"))),
@@ -675,7 +677,13 @@ mod tests {
         );
         assert_eq!(
             decide(
-                &argv(&["--to", "box", "--expose-target", "--target-url", "ftp://box"]),
+                &argv(&[
+                    "--to",
+                    "box",
+                    "--expose-target",
+                    "--target-url",
+                    "ftp://box"
+                ]),
                 &plain(None)
             ),
             Decision::Refuse(BAD_URL.to_owned())
