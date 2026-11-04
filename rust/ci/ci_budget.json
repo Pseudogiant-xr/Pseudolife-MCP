@@ -332,7 +332,7 @@
       "lock-resolve": "83bcc6b654896c6d",
       "test": "ac414107d3d9c71d",
       "test-lite-linux": "44e2a8f2c01baeab",
-      "test-lite-windows": "2ecebc7617992401",
+      "test-lite-windows": "cf1d8050c3b9d6d3",
       "test-lite-macos": "c4a0ad0c70bb205a",
       "frontend": "b1b6a1a1278f2e60"
     },
@@ -451,6 +451,26 @@
         "job": "test-lite-windows",
         "fingerprint": "2ecebc7617992401",
         "reason": "Add bounded original-checkout credential and epilogue coverage to the existing Windows installer lane; no new job or setup step."
+      },
+      {
+        "job": "test-lite-windows",
+        "fingerprint": "fdd232a6fa8ee551",
+        "reason": "Adds eight fixture-only Claude profile notice cases to the existing Python step. They take seconds in targeted runs, add no jobs, shards or dependency setup, and retain the measured baseline within unchanged limits pending the next batch measurement."
+      },
+      {
+        "job": "test-lite-windows",
+        "fingerprint": "7a0a0b4ce51f8771",
+        "reason": "Combines eight fixture-only Claude profile cases with six mocked codec cases and one short PowerShell Unicode round-trip in the existing Python step. No new jobs, shards or dependency setup; retain the measured lane baseline within unchanged limits pending the next batch measurement."
+      },
+      {
+        "job": "test-lite-windows",
+        "fingerprint": "7fbfb546bd825bd1",
+        "reason": "Retain installer ownership tests with the upstream UTF-8 fixture and Claude profile coverage in the existing Windows step; no new job, setup step or retry."
+      },
+      {
+        "job": "test-lite-windows",
+        "fingerprint": "cf1d8050c3b9d6d3",
+        "reason": "Retain clone-authority and epilogue coverage with the merged installer UTF-8 and Claude profile cases in the existing Windows step; no new job, setup step or retry."
       }
     ]
   }
