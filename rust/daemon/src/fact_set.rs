@@ -20,9 +20,6 @@ use crate::stores::cortex_write::{FactWrite, norm_support};
 
 /// The tool-boundary refusal for a set-valued slot (`service.py:4014`).
 pub const SET_SLOT_REFUSAL: &str = "slot holds a set; use memory_set_add / memory_set_remove";
-/// `episode_warning` for an unknown, closed or ambiguous handle.
-const EPISODE_WARNING: &str = "unknown or closed episode handle";
-
 pub fn mcp_tools() -> Vec<(&'static str, ToolFn)> {
     vec![("memory_fact_set", mcp_memory_fact_set)]
 }
@@ -245,7 +242,8 @@ pub(crate) async fn cortex_write(
     let slot_embedding = embed(ready, slot_text).await?;
     let mut session = ws.resolve_session(caller).map_err(ToolError::Invalid)?;
     let resolved = ws.resolve_handle(db, a.episode.as_deref()).await;
-    let warning = a.episode.as_deref().is_some_and(|e| !e.is_empty()) && resolved.is_none();
+    let warning = (a.episode.as_deref().is_some_and(|e| !e.is_empty()) && resolved.is_none())
+        .then(|| ws.handle_warning(a.episode.as_deref(), caller));
     if let Some((_, key)) = &resolved
         && caller.header_session.as_deref().is_none_or(str::is_empty)
     {
@@ -314,8 +312,8 @@ pub(crate) async fn cortex_write(
             });
         out.insert("current".into(), current);
     }
-    if warning {
-        out.insert("episode_warning".into(), json!(EPISODE_WARNING));
+    if let Some(warning) = warning {
+        out.insert("episode_warning".into(), json!(warning));
     }
     Ok(Value::Object(out))
 }

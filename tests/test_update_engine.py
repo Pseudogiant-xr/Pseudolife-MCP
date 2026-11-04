@@ -1321,6 +1321,7 @@ def _stopped_handover(s, monkeypatch, *, engine="python", stored=False):
     class StoppedBank:
         def __init__(self, **kw):
             assert kw["container"] == "fixture-pg" and kw["daemon_container"] == "fixture-daemon"
+            s["stopped_bank_selectors"] = kw
         @contextmanager
         def helper(self, script):
             s["calls"].append(["docker", "create", "--network", "none", "--volumes-from", "fixture-daemon:ro", s["running"]["Image"], script])
@@ -1380,6 +1381,26 @@ def test_stopped_checkout_handover_backs_up_exact_image_and_retains_selection(en
     assert not any(call[1:3] == ["exec", "fixture-daemon"] for call in calls)
 
 
+@pytest.mark.parametrize("engine", ["python", "rust"])
+def test_running_checkout_refuses_even_a_subset_bearer_handover(engine_host, monkeypatch, engine):
+    from pseudolife_memory import update_engine as eng
+    s = engine_host
+    update, override, _ = _stopped_handover(s, monkeypatch, engine=engine)
+    update._selected_engine = engine
+    s["running"]["State"]["Running"] = True
+    s["running"]["Config"]["Env"] = [
+        "PSEUDOLIFE_MCP_TOKEN=fixture-carried",
+        "PSEUDOLIFE_MCP_TOKENS=fixture-carried:owner,fixture-removed:peer",
+        "PSEUDOLIFE_MCP_DATABASE_URL=postgresql://fixture:fixture@pseudolife-pg:5432/fixture"]
+    s["config"]["services"][up.DAEMON_SERVICE]["environment"]["PSEUDOLIFE_MCP_TOKENS"] = "fixture-carried:owner"
+    before = (s["repo"] / "ops/.env").read_bytes(), override.read_bytes()
+    with pytest.raises(up.UpdateError, match="stopped"):
+        eng.deploy_engine(update, s["repo"])
+    assert ((s["repo"] / "ops/.env").read_bytes(), override.read_bytes()) == before
+    assert not any(call[1:2] == ["tag"] or "build" in call or "up" in call or "backup.ps1" in " ".join(call)
+                   or "backup.sh" in " ".join(call) or call == ["complete-stopped-backup"] for call in s["calls"])
+
+
 def test_stopped_checkout_handover_uses_runtime_bank_not_cluster_initialization(engine_host, monkeypatch):
     from psycopg.conninfo import conninfo_to_dict
     from pseudolife_memory import update_engine as eng
@@ -1394,6 +1415,25 @@ def test_stopped_checkout_handover_uses_runtime_bank_not_cluster_initialization(
     assert queries and all(call[call.index("-U") + 1] == "actual_role" for call in queries)
     assert all(conninfo_to_dict(call[call.index("-d") + 1]) == {"dbname": "actual_bank"} for call in queries)
     assert all(call[call.index("-h") + 1] == "/var/run/postgresql" for call in queries)
+
+
+@pytest.mark.parametrize("port", [5432, 6543])
+def test_stopped_handover_retains_runtime_port_and_literal_database(engine_host, monkeypatch, port):
+    from psycopg.conninfo import make_conninfo, conninfo_to_dict
+    from pseudolife_memory import update_engine as eng
+    s = engine_host
+    update, _, _ = _stopped_handover(s, monkeypatch)
+    database = "host=elsewhere bank'quote"
+    source = make_conninfo(host="pseudolife-pg", port=port, user="actual_role", dbname=database)
+    s["running"]["Config"]["Env"][-1] = "PSEUDOLIFE_MCP_DATABASE_URL=" + source
+    s["config"]["services"][up.DAEMON_SERVICE]["environment"]["PSEUDOLIFE_MCP_DATABASE_URL"] = source
+    update._selected_engine = "python"
+    eng.deploy_engine(update, s["repo"])
+    queries = [call for call in s["calls"] if "psql" in call]
+    assert queries and all(call[call.index("-p") + 1] == str(port) for call in queries)
+    assert all(conninfo_to_dict(call[call.index("-d") + 1]) == {"dbname": database} for call in queries)
+    assert s["stopped_bank_selectors"]["db_port"] == port
+    assert s["stopped_bank_selectors"]["db"] == database
 
 
 def test_stopped_checkout_handover_refuses_aliases_on_unshared_networks(engine_host, monkeypatch):

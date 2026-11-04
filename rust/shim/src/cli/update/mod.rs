@@ -100,6 +100,8 @@ pub(crate) struct Update {
     pub selected_engine: String,
     pub maintainer_context: Option<(Vec<String>, Environment)>,
     pub rollback_scope: Option<String>,
+    pub stopped_handover: bool,
+    pub handover_port: u16,
 }
 
 fn output(text: &str, stderr: bool) -> std::io::Result<()> {
@@ -192,6 +194,8 @@ impl Update {
             selected_engine: "python".into(),
             maintainer_context: None,
             rollback_scope: None,
+            stopped_handover: false,
+            handover_port: 5432,
         }
     }
     pub fn step(&mut self, text: impl Into<String>) {

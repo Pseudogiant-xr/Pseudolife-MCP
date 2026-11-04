@@ -228,7 +228,7 @@ class EngineUpdate:
             database = make_conninfo(dbname=database)
         client = ["psql", "-X", "-v", "ON_ERROR_STOP=1"]
         if getattr(self, "stopped_handover", False):
-            client += ["-h", "/var/run/postgresql", "-p", "5432"]
+            client += ["-h", "/var/run/postgresql", "-p", str(self.pg_port)]
         code, out = self.command([*prefix, *client, "-U", self.pg_user, "-d", database, "-Atc", query], timeout=60)
         if code:
             raise up.UpdateError("cannot check the bank schema; start the project's PostgreSQL and retry; nothing was changed", 2)
@@ -255,6 +255,9 @@ class EngineUpdate:
             _validated_engine_selection(self.running_labels)
         self.stopped_handover = (self.o.allow_auth_change and self.o.checkout is not None
                                 and self.running.get("State", {}).get("Running") is False)
+        if self.o.allow_auth_change and self.o.checkout is not None and not self.stopped_handover:
+            raise up.UpdateError(f"checkout --allow-auth-change requires a stopped daemon; run docker stop {self.daemon} "
+                                 "after restoring the target, then retry. Nothing was changed", 2)
         if not self.running.get("State", {}).get("Running") and not self.stopped_handover:
             raise up.UpdateError("the current daemon must be running for the backup and rollback tag; start it and retry", 2)
         daemon_env = config["services"][up.DAEMON_SERVICE].get("environment", {})
@@ -269,7 +272,7 @@ class EngineUpdate:
         if self.stopped_handover:
             pg = self.inspect(self.pg)
             try:
-                self.pg_user, self.pg_db = up._backup_connection_parts(self.running, pg)
+                self.pg_user, self.pg_db, self.pg_port = up._backup_connection_details(self.running, pg)
             except (ValueError, KeyError, TypeError, up.UpdateError) as exc:
                 raise up.UpdateError("cannot verify the handover bank on the project's shared PostgreSQL network; "
                                      "restore the daemon's original direct database connection and retry; nothing was deployed", 2) from exc
@@ -332,7 +335,7 @@ class EngineUpdate:
         except ImportError as exc:
             raise up.UpdateError("stopped checkout handover needs complete stopped-daemon backups; upgrade the update runtime to a version with DockerBank backup support, then retry; nothing was deployed", 2) from exc
         return DockerBank(container=self.pg, daemon_container=self.daemon, user=self.pg_user,
-                          db=self.pg_db, log=self.u.step)
+                          db=self.pg_db, db_port=self.pg_port, log=self.u.step)
 
     def stopped_probe(self, script):
         bank = self.stopped_bank()
@@ -358,7 +361,7 @@ class EngineUpdate:
             running_env = dict(value.split("=", 1) for value in self.running["Config"]["Env"])
             if (not pg.get("State", {}).get("Running")
                     or config["services"][up.DAEMON_SERVICE]["environment"].get("PSEUDOLIFE_MCP_DATABASE_URL") != running_env.get("PSEUDOLIFE_MCP_DATABASE_URL")
-                    or up._backup_connection_parts(self.running, pg) != (self.pg_user, self.pg_db)):
+                    or up._backup_connection_details(self.running, pg) != (self.pg_user, self.pg_db, self.pg_port)):
                 raise ValueError("bank")
         except Exception:
             # Driver errors may include the credential-bearing connection URL.

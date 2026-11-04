@@ -10,3 +10,14 @@
 - PostgreSQL clients stay on the selected container's local socket and treat
   database names literally; inherited address/service settings cannot redirect
   a restore. `--db-port` selects a non-default server port and survives recovery.
+  Automatic port selection follows the daemon's connection rather than client
+  defaults in the PostgreSQL container.
+- Automatic backup selection now follows the same runtime connection policy in
+  standalone backup/restore and both update implementations, including daemon
+  environment defaults, non-default ports and literal database names. Automatic
+  inference requires a nonempty daemon database URL, since an absent URL selects
+  file mode even when libpq environment defaults exist. A host address must be
+  the selected PostgreSQL container's IP on a shared network.
+  Opaque service profiles require a direct daemon connection; standalone
+  backup/restore can instead deliberately override it with all four selectors:
+  `--container`, `--db`, `--user` and `--db-port`.
