@@ -1,8 +1,8 @@
 """``pseudolife-mcp backup`` — tier-agnostic bank backup.
 
-The Docker tier keeps ``ops/backup.ps1`` (pg_dump inside the container +
-state-volume tar). This command serves the pip tiers, mirroring that
-script's shape:
+The Docker tier uses the existing containers (including a stopped daemon's
+state mount), with no checkout or host PostgreSQL tools. The pip path backs
+up the bank directly, mirroring the checkout scripts' artifact shape:
 
 * pg_dump | gzip of the bank when a DSN is resolvable — the explicit
   ``PSEUDOLIFE_MCP_DATABASE_URL``, or the lite tier's embedded instance
@@ -219,7 +219,27 @@ def run_backup() -> None:
         "--keep-days", type=float, default=7.0,
         help="rotate this tool's own backups older than N days (default 7)",
     )
+    parser.add_argument("--container", help="Docker PostgreSQL container")
+    parser.add_argument("--daemon-container", help="Docker daemon container")
+    parser.add_argument("--db", help="Docker database name (default: daemon configuration)")
+    parser.add_argument("--user", help="Docker database role (default: daemon configuration)")
     args = parser.parse_args(sys.argv[2:])
+    from pseudolife_memory import update_cli as up
+    try:
+        docker = bool(args.container or args.daemon_container) or (
+            args.data_dir is None and up.Update(up.Options()).detect_tier() == "docker")
+        if docker:
+            from pseudolife_memory.docker_backup_restore import DockerBank
+            with up.UpdateLock():
+                bank = DockerBank(container=args.container, daemon_container=args.daemon_container,
+                                  db=args.db, user=args.user)
+                result = bank.backup(out=args.out, keep_days=args.keep_days)
+            print(f"bank dump:     {result['dump']}")
+            print(f"state archive: {result['state']}")
+            return
+    except (up.UpdateError, OSError) as exc:
+        print(f"backup failed: {exc}", file=sys.stderr)
+        sys.exit(exc.exit_code if isinstance(exc, up.UpdateError) else 1)
     data_dir = args.data_dir or _default_data_dir(os.environ)
     if not data_dir.exists():
         print(f"data dir {data_dir} does not exist — nothing to back up.",

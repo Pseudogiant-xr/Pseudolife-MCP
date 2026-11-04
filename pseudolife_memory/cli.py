@@ -80,7 +80,9 @@ modes:
                  (`--check` only reports whether a newer release exists;
                  `--tag X` pins one; pip installs upgrade the package)
   backup         back up the bank: pg_dump + state archive with rotation
-                 (pip tiers; the Docker tier keeps ops/backup.ps1)
+                 (Docker and pip tiers; no checkout needed)
+  restore        replace a Docker bank from --backup-file and --state-archive,
+                 after a safety backup and one confirmation (--yes)
   migrate-flat   back up and flatten a stopped bank without dropping entries
                  (--apply --data-dir PATH; opt-in)
   export         write a portable logical export of the bank (ZIP of JSONL
@@ -212,6 +214,9 @@ def main() -> None:
     elif mode == "backup":
         from pseudolife_memory.backup_cli import run_backup
         run_backup()
+    elif mode == "restore":
+        from pseudolife_memory.restore_cli import main as restore_main
+        sys.exit(restore_main(sys.argv[2:]))
     elif mode in ("export", "import"):
         from pseudolife_memory import transfer_cli
         transfer_cli.run_transfer(mode)

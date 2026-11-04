@@ -268,7 +268,7 @@ def test_a_rollback_across_a_schema_change_names_the_restore(world, clients, tmp
     note = f"The new daemon's schema is v{after}, the previous one's v{before}"
     assert (note in out) is moved
     assert ("restore the backup taken above" in out) is moved
-    assert ("ops/restore.ps1 -Apply -BackupFile <dump>" in out) is moved
+    assert ("pseudolife-mcp restore --backup-file <dump>" in out) is moved
 
 
 def test_a_checkout_deploy_that_moves_the_schema_names_the_restore(world, clients, tmp_path, capsys):
@@ -281,7 +281,7 @@ def test_a_checkout_deploy_that_moves_the_schema_names_the_restore(world, client
     assert "The new daemon's schema is v50, the previous one's v49" in out
     # --no-backup: the note never points at a backup this run did not take
     assert "this run took none: --no-backup" in out and "taken above" not in out
-    assert "ops/restore.sh --apply --backup-file <dump>" in out
+    assert "pseudolife-mcp restore --backup-file <dump>" in out
 
 
 def test_an_unhealthy_deploy_names_the_restore_in_case_the_schema_moved(world, clients, tmp_path, capsys):
@@ -358,7 +358,7 @@ def test_the_bundled_compose_files_are_used_when_the_projects_are_gone(world, cl
     """Compose files gone: the bundled copies. The env file gone too: stop,
     since recreating without it resets the Postgres password, the volume
     names and the bearer; --env-file names a replacement."""
-    _project(world, tmp_path, files_exist=False)
+    _project(world, tmp_path, files_exist=False, checkout=True)
     assert _run(["--health-delay-ms", "1"]) == 2
     assert "no longer exist" in capsys.readouterr().err and not any(c.startswith("pull") for c in world.docker_calls())
     env_file = tmp_path / "kept.env"
@@ -371,6 +371,102 @@ def test_the_bundled_compose_files_are_used_when_the_projects_are_gone(world, cl
     assert f"--env-file {env_file}" in compose
     assert (bundled / "docker-compose.yml").read_bytes() == (ROOT / "ops" / "docker-compose.yml").read_bytes()
     assert "bundled" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("project", ["external-stack", "pseudolife-mcp"])
+@pytest.mark.parametrize("explicit_env", [False, True])
+def test_missing_manager_compose_refuses_before_mutation(world, clients, tmp_path, capsys, project, explicit_env):
+    """Portainer CE labels its container-only compose path on the daemon;
+    --env-file cannot turn that stack into the bundled installer's layout."""
+    _project(world, tmp_path)
+    manager_dir = tmp_path / "manager-data" / "compose" / "1"
+    world.container["labels"] = {
+        "com.docker.compose.project": project,
+        "com.docker.compose.project.config_files": str(manager_dir / "docker-compose.yml"),
+        "com.docker.compose.project.working_dir": str(manager_dir),
+    }
+    env_file = tmp_path / "saved.env"
+    env_file.write_text("POSTGRES_PASSWORD=fixture\n", encoding="utf-8")
+    args = ["--tag", "0.15.0", "--reinstall", "--daemon-only"]
+    if explicit_env:
+        args += ["--env-file", str(env_file)]
+    assert _run(args) == 2
+    err = capsys.readouterr().err
+    assert project in err and "Portainer" in err and "Editor" in err
+    assert "--compose-file <stack.yml> --env-file <stack.env>" in err and "Nothing was changed" in err
+    assert not any(c.startswith(("pull ", "tag ", "compose ", "exec ", "cp ", "rmi ")) for c in world.docker_calls())
+    assert not (tmp_path / "data" / "compose").exists() and clients == []
+
+
+def test_exported_manager_stack_files_keep_the_project_and_settings(world, clients, tmp_path):
+    _project(world, tmp_path)
+    world.container["labels"] = {
+        "com.docker.compose.project": "external-stack",
+        "com.docker.compose.project.config_files": "/data/compose/1/docker-compose.yml",
+        "com.docker.compose.project.environment_file": "/data/compose/1/stack.env",
+        "com.docker.compose.project.working_dir": "/data/compose/1",
+    }
+    exported = tmp_path / "stack.yml"
+    exported.write_text("services: {}\n", encoding="utf-8")
+    extra = tmp_path / "overlay.yml"
+    extra.write_text("services: {}\n", encoding="utf-8")
+    env_file = tmp_path / "stack.env"
+    env_file.write_text("POSTGRES_PASSWORD=fixture\nPSEUDOLIFE_BANK_VOLUME=old_pgdata\n", encoding="utf-8")
+    assert _run(["--tag", "0.15.0", "--reinstall", "--daemon-only", "--compose-file", str(exported),
+                 "--compose-file", str(extra), "--env-file", str(env_file)]) == 0
+    argv, env = _compose_call(world)
+    assert argv[2:4] == ["-p", "external-stack"]
+    assert str(exported) in argv and str(extra) in argv and str(env_file) in argv
+    assert argv.index(str(exported)) < argv.index(str(extra))
+    assert "/data/compose/1/docker-compose.yml" not in argv
+    assert env["PSEUDOLIFE_IMAGE_TAG"] == "0.15.0"
+
+
+def test_a_missing_explicit_stack_file_refuses_before_pull(world, tmp_path, capsys):
+    _project(world, tmp_path)
+    assert _run(["--compose-file", str(tmp_path / "absent.yml")]) == 2
+    assert "--compose-file" in capsys.readouterr().err
+    assert not any(c.startswith("pull ") for c in world.docker_calls())
+
+
+@pytest.mark.parametrize("env_state", ["present", "missing", "partial"])
+def test_exported_stack_retains_labelled_env_authority(world, tmp_path, capsys, env_state):
+    project = _project(world, tmp_path)
+    env_file = project / ".env"
+    if env_state == "missing":
+        env_file.unlink()
+    elif env_state == "partial":
+        world.container["labels"]["com.docker.compose.project.environment_file"] += "," + str(project / "missing.env")
+    exported = tmp_path / "stack.yml"
+    exported.write_text("services: {}\n", encoding="utf-8")
+    update = up.Update(up.Options(compose_files=[exported]))
+    if env_state == "present":
+        context = update.compose_context()
+        assert context["env_file"] == [env_file]
+        assert str(env_file) in context["args"]
+        assert context["args"][2:4] == ["--project-directory", str(project)]
+    else:
+        with pytest.raises(up.UpdateError, match="--env-file"):
+            update.compose_context()
+
+
+def test_exported_stack_keeps_original_relative_resource_directory(world, tmp_path):
+    project = _project(world, tmp_path)
+    exported = tmp_path / "exported.yml"
+    exported.write_text("services:\n  pseudolife-daemon:\n    volumes: [./state:/data]\n", encoding="utf-8")
+    update = up.Update(up.Options(compose_files=[exported], env_file=project / ".env"))
+    args = update.compose_context()["args"]
+    assert args[args.index("--project-directory") + 1] == str(project)
+
+
+def test_a_foreign_projects_host_accessible_compose_is_kept(world, clients, tmp_path):
+    project = _project(world, tmp_path)
+    world.container["labels"]["com.docker.compose.project"] = "external-stack"
+    world.health = [{"status": "ok", "version": "0.15.0"}, {"status": "ok", "version": "0.15.1"}]
+    assert _run(["--daemon-only"]) == 0
+    argv, _ = _compose_call(world)
+    assert argv[2:4] == ["-p", "external-stack"]
+    assert str(project / "docker-compose.yml") in argv
 
 
 def test_the_env_file_falls_back_to_the_working_directorys(world, clients, tmp_path):
