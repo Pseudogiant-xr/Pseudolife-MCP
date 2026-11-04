@@ -26,7 +26,7 @@
     "docs/guide/coordination-recovery.md": "04425509736ec7e40beb4bc46e7810d32ee0a68d791a969b77876c945ab5cb79",
     "docs/guide/dreaming.md": "64c92fa9d4a2eb224f3d5e72e6f03cfe81219c959f15914ea745464db93ec249",
     "docs/guide/episodes.md": "547f36bb2469f3ae352107374ba63ebbeecb3929be344730af9c7501d8802f49",
-    "docs/guide/install-and-move.md": "8a3adbba77bee36c1e1447496c03cc9f7ec4af071bf0c60a29a2e21d905df757",
+    "docs/guide/install-and-move.md": "78fc0654076a3761d58af5a2d6d0766958e7b23d0b96f5c4566371be1428fbf2",
     "docs/guide/memory-model.md": "6e295c317f53ad8558e3a3b1d6cd8ea74e01401eb6d8cce82b9143c5b087ed5f",
     "docs/guide/providers.md": "755967b36f1b4fe65a189b925a9df8f7c0244025270746fc9cc002966d793d16",
     "docs/guide/remote-bank.md": "97d476e7f8cc6afa08d1815bebd157a820913f1dcedf241fcac6d072a09fb059",
@@ -241,8 +241,8 @@
     "ops/docker-compose.rust.yml": "29b3590c58a8cd7a13a581d0e0488e48b2f934ad10844b4bf7b0b2eed4670ce0",
     "ops/docker-compose.stack-extractor.yml": "2af67c750ef93efe2528d7936ff2a8e5d3bd97c6d27721f41467ad79a1126091",
     "ops/docker-compose.stack.yml": "7afb522a29a8fe3afbfff23708327affb0e4566d560c39c9b414fecde061c389",
-    "ops/docker-compose.yml": "7cabdd7438423bb1b0613f7e44af76b295695f842355a8d681e9ace5f8480791",
-    "ops/gen_llms_txt.py": "325d0ab0f29782204a975cc58d798b39c3d4f1971f37b06dfeb40cd7257fee88",
+    "ops/docker-compose.yml": "4c9ef128b78e372049a0a064efc5f7f84cd790fa8233df227769014035f88c0c",
+    "ops/gen_llms_txt.py": "b3e88325c54345808e8895ed439c73b1158eca5f031fbdd1be6abcb33f1ff2f2",
     "ops/install-autostart.ps1": "453da0472d4b9566f6774aca6128b531341a2ef91e79d44f980e0b571a22671b",
     "ops/install-backup-task.ps1": "5fa15b92ff18a616d3165436cc283ea32c3790590e6e4b969ca22461ae85830f",
     "ops/install-cache-retention.ps1": "5d56fb78696529456a075eba16537459331ecacd0a88053d560173b9c6634173",
@@ -253,8 +253,8 @@
     "ops/install-shim-autostart.ps1": "44e117d39cb4f384a4ce3c2dc23d2af3b4b599f462219d63a31487de5a0ec2aa",
     "ops/install-shim-autostart.sh": "a6ff60a60c644f6bd9e67b404f4ae7e2ec3f69c2c5d56253ad3b85277d9e8c30",
     "ops/install-worktree-retention.ps1": "1ff8d9a77f2cca9a19e38c89d85959a2d4ce03400e73eda3b8c79f1dabf52d29",
-    "ops/install.ps1": "096590d4b1d7ce1bebe253d951668d9df05c4bc73eea14953a546d65cdd18df5",
-    "ops/install.sh": "b2b5a1cacce8e69775da54647282f31edceb226043d469cdfafa439a1c53e330",
+    "ops/install.ps1": "4e56cf9d2583bebb1e84714c30deda47b3130d65983e8cee9ac82a4962a053f0",
+    "ops/install.sh": "a5902e19f2de10b859640946d19db06a75ea4571fb026e7845b33c695e70191b",
     "ops/integrate.py": "d40dbb28b1f4f78dd60fae5df67a22adfd32fb61a68294f43f1f2ba7bae23b9f",
     "ops/measure_reverify_population.py": "413ff8baa0e0b25b8a727b6bead248df753d4d26e7c697aa6a0542b68715cfa5",
     "ops/migrate-pg18.ps1": "a2a8bd96ab754249395a9d42b26bfd8e6b5ecf8d6da1cd72383ebf745c0acde8",
@@ -471,15 +471,15 @@
     "rust/shim/src/cli/update/clients/plugin.rs": "1fe97238c132861daf024e5aae55b43f8629ec8d48c6c4b1488e6a3bf6702fad",
     "rust/shim/src/cli/update/clients/tests.rs": "81faa98fc3643307298e943f61436cb5d9ec11ad7005dd476123ef2577b8f5c8",
     "rust/shim/src/cli/update/engine.rs": "ce2a1639087d3be15f3d4d2e428eed4c1d192d4a45f8d365e91dba4f954bb949",
-    "rust/shim/src/cli/update/mod.rs": "a9040f24a06a752aafbe58cb2f3d51f67b9b929340ec4ea30f0537c0545d0753",
+    "rust/shim/src/cli/update/mod.rs": "db8810e352b0e574fa0631f4bb47af5a3b9b9975c742ead32fbacd84cd9f4ea7",
     "rust/shim/src/cli/update/options.rs": "1fa41aa989c0ebd1706889bb58d83a68dcec4f6a9bb134c44c13c9d6445edbf0",
     "rust/shim/src/cli/update/release.rs": "24cebaea2256563c5b2b7d403f79755f3696aab1ed6e54c13e93155b1b4df0fa",
     "rust/shim/src/cli/update/seams.rs": "da8b4ae1a6df9e9c97af062b5bf337a8ecc0b7bcf2354c52ce1a9d339817cf66",
     "rust/shim/src/cli/update/shadow.rs": "be4da00a9b8cc9e593a0be00ce364ace769d2e59767a65802e11426445c80aa3",
     "rust/shim/src/cli/update/signals.rs": "f0c47d95a459ab923b34f0c0ebcd84c62db54a75d8fb592b4b2fdcce69866f93",
-    "rust/shim/src/cli/update/tests.rs": "25d11091d1c14ab62793a61fb7b8dc993befd30a8e5df3875cfc253c64368145",
-    "rust/shim/src/cli/update/unattended.rs": "e90a94661e925c6f369cadf0f6ec30c8e07626b14cef9f9ae1339d9acc170373",
-    "rust/shim/src/cli/update/unattended/schedule.rs": "d1cec1cd86e0a0877e6994bcca14a6c4fe26516a589e04599ba24d1260509b00",
+    "rust/shim/src/cli/update/tests.rs": "38edfb4726e79e8d67c3d5fe3fd490c40718e2542d60a8344afcc783b4e24d7b",
+    "rust/shim/src/cli/update/unattended.rs": "7ec039a6b6df7f44bae633e69ddced1c762049d3216efb5108f95fc2179eb6b9",
+    "rust/shim/src/cli/update/unattended/schedule.rs": "8c273ad628993e1d7c755fd2e908f36e159458b48e39b29bdcfe958dbd184298",
     "rust/shim/src/cli/update/unattended/tests.rs": "b79b8350dbd19bb20cc63b287e49bb93a6498f7d4e2a05931835efd5c40bd77f",
     "rust/shim/src/cli/update/windows_job.rs": "5225ea5f3668f836fb243549954fb8ab04258358ad9ab84447c4f4982e7ca377",
     "rust/shim/src/cli/version.rs": "8d866132b0855fa5603e9989746d5fdc7e8bb0ef581c76db8823aac723743b9d",
@@ -3625,7 +3625,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.ps1:3314",
+          "location": "ops/install.ps1:3324",
           "shape": {
             "argv_source": "invite <name> on the daemon's host and $updCmd connect $PairingHintUrl --read-code here. A machine paired with invite, or given a token no other machine uses, already has its own: nothing to do.\"",
             "channel": "argv",
@@ -3759,7 +3759,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:3481",
+          "location": "ops/install.sh:3493",
           "shape": {
             "argv_source": "invite <name> on the daemon's host and $upd_cmd connect $PAIRING_HINT_URL --read-code here. A machine paired with invite, or given a token no other machine uses, already has its own: nothing to do.\"",
             "channel": "argv",
@@ -4968,6 +4968,19 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
+          "location": "ops/gen_llms_txt.py:72",
+          "shape": {
+            "argv_source": "move \"),",
+            "channel": "argv",
+            "complete": false,
+            "expression": "\"),",
+            "omitted_optional": null,
+            "parameters": {}
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
           "location": "rust/shim/src/cli/move_cli.rs:16",
           "shape": {
             "argv_source": "move [-h] --to SSH-TARGET [--target-checkout PATH]\\n\",",
@@ -5917,7 +5930,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.ps1:3095",
+          "location": "ops/install.ps1:3105",
           "shape": {
             "argv_source": "shim , which is unavailable (see above).\"",
             "channel": "argv",
@@ -5930,7 +5943,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.ps1:3380",
+          "location": "ops/install.ps1:3390",
           "shape": {
             "argv_source": "shim is unavailable (see above), so automatic client updates were not set up: run pseudolife-mcp update --schedule $time --daemon-url $url once it is installed.\"",
             "channel": "argv",
@@ -6179,7 +6192,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:3289",
+          "location": "ops/install.sh:3301",
           "shape": {
             "argv_source": "shim , which is unavailable (see above).\" >&2",
             "channel": "argv",
@@ -6192,7 +6205,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:3550",
+          "location": "ops/install.sh:3562",
           "shape": {
             "argv_source": "shim is unavailable (see above), so automatic client updates were not set up: run pseudolife-mcp update --schedule $sched_time --daemon-url $sched_url once it is installed.\" >&2",
             "channel": "argv",
@@ -6335,7 +6348,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.ps1:3453",
+          "location": "ops/install.ps1:3463",
           "shape": {
             "argv_source": "tunnel setup.\"",
             "channel": "argv",
@@ -6348,7 +6361,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.ps1:3462",
+          "location": "ops/install.ps1:3472",
           "shape": {
             "argv_source": "tunnel setup",
             "channel": "argv",
@@ -6362,7 +6375,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.ps1:3470",
+          "location": "ops/install.ps1:3480",
           "shape": {
             "argv_source": "tunnel setup (guided private key and app setup; docs/guide/tunnels.md).\"",
             "channel": "argv",
@@ -6375,7 +6388,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:3622",
+          "location": "ops/install.sh:3634",
           "shape": {
             "argv_source": "tunnel setup.\" >&2",
             "channel": "argv",
@@ -6388,7 +6401,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:3626",
+          "location": "ops/install.sh:3638",
           "shape": {
             "argv_source": "tunnel setup",
             "channel": "argv",
@@ -6402,7 +6415,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:3628",
+          "location": "ops/install.sh:3640",
           "shape": {
             "argv_source": "tunnel setup",
             "channel": "argv",
@@ -6416,7 +6429,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:3631",
+          "location": "ops/install.sh:3643",
           "shape": {
             "argv_source": "tunnel setup (guided private key and app setup; docs/guide/tunnels.md).\"",
             "channel": "argv",
@@ -6610,6 +6623,26 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
+          "location": "docs/guide/install-and-move.md:196",
+          "shape": {
+            "argv_source": "update --clients-only --tag <that-version>",
+            "channel": "argv",
+            "complete": false,
+            "expression": "--clients-only --tag <that-version>",
+            "omitted_optional": null,
+            "parameters": {
+              "--clients-only": {
+                "literal": true
+              },
+              "--tag": {
+                "expression": "<that-version>"
+              }
+            }
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "documented",
           "location": "docs/guide/remote-bank.md:524",
           "shape": {
             "argv_source": "update --schedule 04:30 --daemon-url <url>",
@@ -6690,7 +6723,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.ps1:3386",
+          "location": "ops/install.ps1:3396",
           "shape": {
             "argv_source": "update --schedule installs the client job only from one; re-run the installer once the runtime installs to be offered them.\"",
             "channel": "argv",
@@ -6707,7 +6740,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.ps1:3393",
+          "location": "ops/install.ps1:3403",
           "shape": {
             "argv_source": "update --schedule here would install the daemon host's job rather than the client's; once that container is removed (docker rm $ClientScheduleContainer keeps its volumes and bank), $command sets them up.\"",
             "channel": "argv",
@@ -6724,7 +6757,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.ps1:3426",
+          "location": "ops/install.ps1:3436",
           "shape": {
             "argv_source": "update --unattended, which moves the shim and plugin to the release the daemon at $url runs, never past it. Set it up? [y/N]\"",
             "channel": "argv",
@@ -6737,7 +6770,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.ps1:3435",
+          "location": "ops/install.ps1:3445",
           "shape": {
             "argv_source": "update --schedule $time --daemon-url $url",
             "channel": "argv",
@@ -6775,7 +6808,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:3556",
+          "location": "ops/install.sh:3568",
           "shape": {
             "argv_source": "update --schedule installs the client job only from one; re-run the installer once the runtime installs to be offered them.\"",
             "channel": "argv",
@@ -6792,7 +6825,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:3564",
+          "location": "ops/install.sh:3576",
           "shape": {
             "argv_source": "update --schedule here would install the daemon host's job rather than the client's; once that container is removed (docker rm $CLIENT_SCHEDULE_CONTAINER keeps its volumes and bank), $sched_cmd sets them up.\"",
             "channel": "argv",
@@ -6809,7 +6842,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:3598",
+          "location": "ops/install.sh:3610",
           "shape": {
             "argv_source": "update --unattended, which moves the shim and plugin to the release the daemon at $sched_url runs, never past it. Set it up? [y/N]: \" ||",
             "channel": "argv",
@@ -6822,7 +6855,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:3609",
+          "location": "ops/install.sh:3621",
           "shape": {
             "argv_source": "update --schedule \"$sched_time\" --daemon-url \"$sched_url\" </dev/null",
             "channel": "argv",
@@ -6997,7 +7030,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/mod.rs:149",
+          "location": "rust/shim/src/cli/update/mod.rs:162",
           "shape": {
             "argv_source": "update is running (pid {holder}); nothing was changed. Run this again when it has finished\"",
             "channel": "argv",
@@ -7010,7 +7043,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/mod.rs:297",
+          "location": "rust/shim/src/cli/update/mod.rs:310",
           "shape": {
             "argv_source": "update )\"",
             "channel": "argv",
@@ -7023,7 +7056,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/mod.rs:518",
+          "location": "rust/shim/src/cli/update/mod.rs:531",
           "shape": {
             "argv_source": "update where it runs. Nothing was changed\",",
             "channel": "argv",
@@ -7036,7 +7069,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/mod.rs:589",
+          "location": "rust/shim/src/cli/update/mod.rs:591",
           "shape": {
             "argv_source": "update --clients-only --tag <this version> (from a checkout: ops/update.ps1 -All or ops/update.sh --all) for the shim, plugin cache and Codex re-approval steps\");",
             "channel": "argv",
@@ -7059,7 +7092,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/mod.rs:735",
+          "location": "rust/shim/src/cli/update/mod.rs:737",
           "shape": {
             "argv": [
               {
@@ -7077,7 +7110,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/mod.rs:749",
+          "location": "rust/shim/src/cli/update/mod.rs:751",
           "shape": {
             "argv_source": "update [--checkout REPO] [--tag VERSION] [--engine python|rust] [--shadow]\\n       [--all | --daemon-only | --clients-only] [--check] [--reinstall] [--allow-downgrade]\\n       [--no-backup] [--rollback-tag SUFFIX] [--force-rollback-tag] [--allow-dirty]\\n       [--keep-rollbacks N] [--keep-cache-hours N] [--no-cache-prune] [--no-test-login]\\n       [--env-file PATH] [--daemon-url URL] [--health-retries N] [--health-delay-ms N]\\n       [--unattended | --schedule HH:MM | --unschedule] [--allow-no-bearer] [--result-file PATH] [--json]\\n       [--python-runtime INTERPRETER] (explicit legacy/lite updater)\\n\",false).is_ok(){0}else{120};",
             "channel": "argv",
@@ -7229,7 +7262,27 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/unattended.rs:572",
+          "location": "rust/shim/src/cli/update/unattended.rs:557",
+          "shape": {
+            "argv_source": "update --schedule {when} --daemon-url <new-url>` using the new daemon URL{time}.\"",
+            "channel": "argv",
+            "complete": false,
+            "expression": "--schedule {when} --daemon-url <new-url>` using the new daemon URL{time}.\"",
+            "omitted_optional": null,
+            "parameters": {
+              "--daemon-url": {
+                "expression": "<new-url>`"
+              },
+              "--schedule": {
+                "expression": "{when}"
+              }
+            }
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/update/unattended.rs:588",
           "shape": {
             "argv_source": "update is running (pid \")",
             "channel": "argv",
@@ -7666,17 +7719,13 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/install-and-move.md:182",
+          "location": "docs/guide/install-and-move.md:181",
           "shape": {
-            "argv_source": "update --clients-only",
+            "argv_source": "update \\",
             "channel": "argv",
             "complete": true,
             "omitted_optional": null,
-            "parameters": {
-              "--clients-only": {
-                "literal": true
-              }
-            }
+            "parameters": {}
           }
         },
         {
@@ -9695,7 +9744,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/unattended/schedule.rs:510",
+          "location": "rust/shim/src/cli/update/unattended/schedule.rs:513",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -10218,7 +10267,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/unattended/schedule.rs:510",
+          "location": "rust/shim/src/cli/update/unattended/schedule.rs:513",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -11564,7 +11613,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/docker-compose.yml:228",
+          "location": "ops/docker-compose.yml:232",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -11905,7 +11954,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/docker-compose.yml:228",
+          "location": "ops/docker-compose.yml:232",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -15173,7 +15222,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/docker-compose.yml:125",
+          "location": "ops/docker-compose.yml:129",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -15189,7 +15238,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/docker-compose.yml:198",
+          "location": "ops/docker-compose.yml:202",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -15274,7 +15323,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/docker-compose.yml:125",
+          "location": "ops/docker-compose.yml:129",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -15287,7 +15336,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/docker-compose.yml:198",
+          "location": "ops/docker-compose.yml:202",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -20816,7 +20865,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/unattended/schedule.rs:509",
+          "location": "rust/shim/src/cli/update/unattended/schedule.rs:512",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -21013,7 +21062,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/unattended/schedule.rs:509",
+          "location": "rust/shim/src/cli/update/unattended/schedule.rs:512",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -24957,7 +25006,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/docker-compose.yml:322",
+          "location": "ops/docker-compose.yml:326",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -25051,7 +25100,7 @@
         },
         {
           "evidence": "documented",
-          "location": "ops/docker-compose.yml:16",
+          "location": "ops/docker-compose.yml:20",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -25152,7 +25201,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/docker-compose.yml:93",
+          "location": "ops/docker-compose.yml:97",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -25242,7 +25291,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/docker-compose.yml:92",
+          "location": "ops/docker-compose.yml:96",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -25370,7 +25419,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/docker-compose.yml:94",
+          "location": "ops/docker-compose.yml:98",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -26784,7 +26833,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/docker-compose.yml:128",
+          "location": "ops/docker-compose.yml:132",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -26797,7 +26846,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/docker-compose.yml:139",
+          "location": "ops/docker-compose.yml:143",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -26810,7 +26859,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/docker-compose.yml:140",
+          "location": "ops/docker-compose.yml:144",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -27298,7 +27347,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/mod.rs:172",
+          "location": "rust/shim/src/cli/update/mod.rs:185",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -27449,7 +27498,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/docker-compose.yml:210",
+          "location": "ops/docker-compose.yml:214",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -27849,7 +27898,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/docker-compose.yml:208",
+          "location": "ops/docker-compose.yml:212",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -28261,7 +28310,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/docker-compose.yml:227",
+          "location": "ops/docker-compose.yml:231",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -28576,7 +28625,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/docker-compose.yml:226",
+          "location": "ops/docker-compose.yml:230",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -28740,7 +28789,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/docker-compose.yml:221",
+          "location": "ops/docker-compose.yml:225",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -29021,7 +29070,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/docker-compose.yml:222",
+          "location": "ops/docker-compose.yml:226",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -29276,7 +29325,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/docker-compose.yml:215",
+          "location": "ops/docker-compose.yml:219",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -29509,7 +29558,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/docker-compose.yml:209",
+          "location": "ops/docker-compose.yml:213",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -29895,7 +29944,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/docker-compose.yml:214",
+          "location": "ops/docker-compose.yml:218",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -29908,7 +29957,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/docker-compose.yml:284",
+          "location": "ops/docker-compose.yml:288",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -30024,7 +30073,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/docker-compose.yml:200",
+          "location": "ops/docker-compose.yml:204",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -30071,7 +30120,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/docker-compose.yml:300",
+          "location": "ops/docker-compose.yml:304",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -30159,7 +30208,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/install-and-move.md:180",
+          "location": "docs/guide/install-and-move.md:194",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -30172,7 +30221,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/install-and-move.md:186",
+          "location": "docs/guide/install-and-move.md:199",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -30263,7 +30312,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/tests.rs:810",
+          "location": "rust/shim/src/cli/update/tests.rs:836",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -30399,7 +30448,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install.ps1:3234",
+          "location": "ops/install.ps1:3244",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -30414,7 +30463,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install.ps1:3242",
+          "location": "ops/install.ps1:3252",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -30444,7 +30493,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install.sh:3414",
+          "location": "ops/install.sh:3426",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -30586,7 +30635,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/docker-compose.yml:232",
+          "location": "ops/docker-compose.yml:236",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -30646,7 +30695,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/docker-compose.yml:233",
+          "location": "ops/docker-compose.yml:237",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -31057,7 +31106,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/docker-compose.yml:238",
+          "location": "ops/docker-compose.yml:242",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -31702,7 +31751,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.ps1:3455",
+          "location": "ops/install.ps1:3465",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -32533,7 +32582,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install.ps1:3459",
+          "location": "ops/install.ps1:3469",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -32548,7 +32597,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install.ps1:3465",
+          "location": "ops/install.ps1:3475",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -32758,7 +32807,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install.sh:3626",
+          "location": "ops/install.sh:3638",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -33215,7 +33264,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/docker-compose.yml:153",
+          "location": "ops/docker-compose.yml:157",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -33987,7 +34036,7 @@
         },
         {
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/tests.rs:586",
+          "location": "rust/shim/src/cli/update/tests.rs:612",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -34002,7 +34051,7 @@
         },
         {
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/tests.rs:590",
+          "location": "rust/shim/src/cli/update/tests.rs:616",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -34017,7 +34066,7 @@
         },
         {
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/tests.rs:617",
+          "location": "rust/shim/src/cli/update/tests.rs:643",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -34032,7 +34081,7 @@
         },
         {
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/tests.rs:621",
+          "location": "rust/shim/src/cli/update/tests.rs:647",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -34047,7 +34096,7 @@
         },
         {
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/tests.rs:651",
+          "location": "rust/shim/src/cli/update/tests.rs:677",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -34062,7 +34111,7 @@
         },
         {
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/tests.rs:655",
+          "location": "rust/shim/src/cli/update/tests.rs:681",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -34077,7 +34126,7 @@
         },
         {
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/tests.rs:665",
+          "location": "rust/shim/src/cli/update/tests.rs:691",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -34092,7 +34141,7 @@
         },
         {
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/tests.rs:670",
+          "location": "rust/shim/src/cli/update/tests.rs:696",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -34107,7 +34156,7 @@
         },
         {
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/tests.rs:684",
+          "location": "rust/shim/src/cli/update/tests.rs:710",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -34122,7 +34171,7 @@
         },
         {
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/tests.rs:688",
+          "location": "rust/shim/src/cli/update/tests.rs:714",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -34137,37 +34186,7 @@
         },
         {
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/tests.rs:704",
-          "shape": {
-            "channel": "environment",
-            "complete": true,
-            "omitted_optional": null,
-            "parameters": {
-              "value": {
-                "literal": "fixture"
-              }
-            }
-          },
-          "usage": "assignment"
-        },
-        {
-          "evidence": "static",
-          "location": "rust/shim/src/cli/update/tests.rs:708",
-          "shape": {
-            "channel": "environment",
-            "complete": true,
-            "omitted_optional": null,
-            "parameters": {
-              "value": {
-                "literal": "fixture"
-              }
-            }
-          },
-          "usage": "assignment"
-        },
-        {
-          "evidence": "static",
-          "location": "rust/shim/src/cli/update/tests.rs:731",
+          "location": "rust/shim/src/cli/update/tests.rs:730",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -34197,6 +34216,21 @@
         },
         {
           "evidence": "static",
+          "location": "rust/shim/src/cli/update/tests.rs:757",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "fixture"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
           "location": "rust/shim/src/cli/update/tests.rs:760",
           "shape": {
             "channel": "environment",
@@ -34212,7 +34246,22 @@
         },
         {
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/tests.rs:763",
+          "location": "rust/shim/src/cli/update/tests.rs:786",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "fixture"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/update/tests.rs:789",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -34470,7 +34519,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/docker-compose.yml:156",
+          "location": "ops/docker-compose.yml:160",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -34893,7 +34942,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/docker-compose.yml:154",
+          "location": "ops/docker-compose.yml:158",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -36081,7 +36130,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/docker-compose.yml:155",
+          "location": "ops/docker-compose.yml:159",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -36685,7 +36734,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/docker-compose.yml:184",
+          "location": "ops/docker-compose.yml:188",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -37606,7 +37655,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/docker-compose.yml:169",
+          "location": "ops/docker-compose.yml:173",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -38672,7 +38721,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/tests.rs:803",
+          "location": "rust/shim/src/cli/update/tests.rs:829",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -38698,7 +38747,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/unattended/schedule.rs:459",
+          "location": "rust/shim/src/cli/update/unattended/schedule.rs:461",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -38711,7 +38760,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/unattended/schedule.rs:461",
+          "location": "rust/shim/src/cli/update/unattended/schedule.rs:463",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -39354,7 +39403,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/docker-compose.yml:170",
+          "location": "ops/docker-compose.yml:174",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -39809,7 +39858,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/unattended/schedule.rs:510",
+          "location": "rust/shim/src/cli/update/unattended/schedule.rs:513",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -39847,7 +39896,7 @@
         },
         {
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/tests.rs:580",
+          "location": "rust/shim/src/cli/update/tests.rs:606",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -40434,7 +40483,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.ps1:3456",
+          "location": "ops/install.ps1:3466",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -41344,7 +41393,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/unattended/schedule.rs:454",
+          "location": "rust/shim/src/cli/update/unattended/schedule.rs:456",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -41357,7 +41406,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/unattended/schedule.rs:456",
+          "location": "rust/shim/src/cli/update/unattended/schedule.rs:458",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -41560,7 +41609,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install.ps1:3460",
+          "location": "ops/install.ps1:3470",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -41575,7 +41624,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install.ps1:3466",
+          "location": "ops/install.ps1:3476",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -41815,7 +41864,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install.sh:3626",
+          "location": "ops/install.sh:3638",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -42382,7 +42431,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/docker-compose.yml:179",
+          "location": "ops/docker-compose.yml:183",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -42395,7 +42444,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/docker-compose.yml:182",
+          "location": "ops/docker-compose.yml:186",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -42753,7 +42802,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/docker-compose.yml:164",
+          "location": "ops/docker-compose.yml:168",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -43992,7 +44041,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/docker-compose.yml:328",
+          "location": "ops/docker-compose.yml:332",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -44060,7 +44109,7 @@
         },
         {
           "evidence": "documented",
-          "location": "ops/docker-compose.yml:17",
+          "location": "ops/docker-compose.yml:21",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -45500,7 +45549,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/mod.rs:627",
+          "location": "rust/shim/src/cli/update/mod.rs:629",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -45513,7 +45562,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/mod.rs:637",
+          "location": "rust/shim/src/cli/update/mod.rs:639",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -45526,7 +45575,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/mod.rs:666",
+          "location": "rust/shim/src/cli/update/mod.rs:668",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -46107,7 +46156,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/docker-compose.yml:172",
+          "location": "ops/docker-compose.yml:176",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -55224,54 +55273,6 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.ps1:3259",
-          "shape": {
-            "channel": "parameters",
-            "complete": false,
-            "expression": "action=\"\"status\"\"",
-            "omitted_optional": null,
-            "parameters": {
-              "action": {
-                "expression": "\"\"status\"\""
-              }
-            }
-          }
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "static",
-          "location": "ops/install.ps1:3262",
-          "shape": {
-            "channel": "parameters",
-            "complete": false,
-            "expression": "action=\"\"status\"\"",
-            "omitted_optional": null,
-            "parameters": {
-              "action": {
-                "expression": "\"\"status\"\""
-              }
-            }
-          }
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "static",
-          "location": "ops/install.ps1:3265",
-          "shape": {
-            "channel": "parameters",
-            "complete": false,
-            "expression": "action=\"\"status\"\"",
-            "omitted_optional": null,
-            "parameters": {
-              "action": {
-                "expression": "\"\"status\"\""
-              }
-            }
-          }
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "static",
           "location": "ops/install.ps1:3269",
           "shape": {
             "channel": "parameters",
@@ -55304,7 +55305,55 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:3435",
+          "location": "ops/install.ps1:3275",
+          "shape": {
+            "channel": "parameters",
+            "complete": false,
+            "expression": "action=\"\"status\"\"",
+            "omitted_optional": null,
+            "parameters": {
+              "action": {
+                "expression": "\"\"status\"\""
+              }
+            }
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "ops/install.ps1:3279",
+          "shape": {
+            "channel": "parameters",
+            "complete": false,
+            "expression": "action=\"\"status\"\"",
+            "omitted_optional": null,
+            "parameters": {
+              "action": {
+                "expression": "\"\"status\"\""
+              }
+            }
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "ops/install.ps1:3282",
+          "shape": {
+            "channel": "parameters",
+            "complete": false,
+            "expression": "action=\"\"status\"\"",
+            "omitted_optional": null,
+            "parameters": {
+              "action": {
+                "expression": "\"\"status\"\""
+              }
+            }
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "ops/install.sh:3447",
           "shape": {
             "channel": "parameters",
             "complete": false,
@@ -55320,7 +55369,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:3437",
+          "location": "ops/install.sh:3449",
           "shape": {
             "channel": "parameters",
             "complete": false,
@@ -55336,7 +55385,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:3439",
+          "location": "ops/install.sh:3451",
           "shape": {
             "channel": "parameters",
             "complete": false,
@@ -55352,7 +55401,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:3442",
+          "location": "ops/install.sh:3454",
           "shape": {
             "channel": "parameters",
             "complete": false,
@@ -55368,7 +55417,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:3444",
+          "location": "ops/install.sh:3456",
           "shape": {
             "channel": "parameters",
             "complete": false,
@@ -64566,7 +64615,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "cli",
-      "location": "ops/install.ps1:2980",
+      "location": "ops/install.ps1:2990",
       "name": "test-login",
       "shape": {
         "argv_source": "test-login create\"",
@@ -64694,7 +64743,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "cli",
-      "location": "ops/install.sh:3190",
+      "location": "ops/install.sh:3202",
       "name": "test-login",
       "shape": {
         "argv_source": "test-login create\" >&2",
@@ -65472,7 +65521,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "cli",
-      "location": "rust/shim/src/cli/update/mod.rs:429",
+      "location": "rust/shim/src/cli/update/mod.rs:442",
       "name": "maintainer",
       "shape": {
         "argv_source": "maintainer setup --container <name>\");",
@@ -65490,7 +65539,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "cli",
-      "location": "rust/shim/src/cli/update/mod.rs:616",
+      "location": "rust/shim/src/cli/update/mod.rs:618",
       "name": "test-login",
       "shape": {
         "argv_source": "test-login create --container <project-postgres>\");",
@@ -65508,7 +65557,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "cli",
-      "location": "rust/shim/src/cli/update/mod.rs:620",
+      "location": "rust/shim/src/cli/update/mod.rs:622",
       "name": "test-login",
       "shape": {
         "argv_source": "test-login create --container <project-postgres>\");",
@@ -65526,7 +65575,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "cli",
-      "location": "rust/shim/src/cli/update/mod.rs:666",
+      "location": "rust/shim/src/cli/update/mod.rs:668",
       "name": "test-login",
       "shape": {
         "argv_source": "test-login create\");",
@@ -65540,7 +65589,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "cli",
-      "location": "rust/shim/src/cli/update/mod.rs:683",
+      "location": "rust/shim/src/cli/update/mod.rs:685",
       "name": "test-login",
       "shape": {
         "argv_source": "test-login create --container {}\", seams::quote(&pg)));",
@@ -65558,7 +65607,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "cli",
-      "location": "rust/shim/src/cli/update/mod.rs:704",
+      "location": "rust/shim/src/cli/update/mod.rs:706",
       "name": "native-update-v",
       "shape": {
         "argv_source": "native-update-v 1\\n\", false).is_ok() {",
@@ -66245,7 +66294,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/docker-compose.yml:234",
+      "location": "ops/docker-compose.yml:238",
       "name": "PSEUDOLIFE_JUDGE_THIRD_API_KEY",
       "shape": {
         "channel": "environment",
@@ -67435,7 +67484,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "rust/shim/src/cli/update/mod.rs:609",
+      "location": "rust/shim/src/cli/update/mod.rs:611",
       "name": "PSEUDOLIFE_TEST_PG_LOGIN_FILE",
       "shape": {
         "channel": "environment",
@@ -68946,7 +68995,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "docs/guide/install-and-move.md:182",
+      "location": "docs/guide/install-and-move.md:195",
       "method": null,
       "name": "/health",
       "shape": {
@@ -71022,7 +71071,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "ops/docker-compose.yml:270",
+      "location": "ops/docker-compose.yml:274",
       "method": null,
       "name": "/health",
       "shape": {
@@ -71120,7 +71169,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "ops/install.ps1:3064",
+      "location": "ops/install.ps1:3074",
       "method": null,
       "name": "/health",
       "shape": {
@@ -71134,7 +71183,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "ops/install.ps1:3073",
+      "location": "ops/install.ps1:3083",
       "method": null,
       "name": "/health",
       "shape": {
@@ -71302,7 +71351,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "ops/install.sh:3135",
+      "location": "ops/install.sh:3147",
       "method": null,
       "name": "/health",
       "shape": {
@@ -71316,7 +71365,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "ops/install.sh:3254",
+      "location": "ops/install.sh:3266",
       "method": null,
       "name": "/health",
       "shape": {
@@ -71330,7 +71379,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "ops/install.sh:3264",
+      "location": "ops/install.sh:3276",
       "method": null,
       "name": "/health",
       "shape": {
@@ -71708,7 +71757,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "rust/shim/src/cli/update/mod.rs:222",
+      "location": "rust/shim/src/cli/update/mod.rs:235",
       "method": null,
       "name": "/health",
       "shape": {
@@ -71722,7 +71771,21 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "rust/shim/src/cli/update/mod.rs:293",
+      "location": "rust/shim/src/cli/update/mod.rs:306",
+      "method": null,
+      "name": "/health",
+      "shape": {
+        "channel": "body",
+        "complete": false,
+        "expression": "Request helper, URL suffix or body requires resolution at this location.",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "unverified",
+      "kind": "route",
+      "location": "rust/shim/src/cli/update/mod.rs:38",
       "method": null,
       "name": "/health",
       "shape": {
@@ -71820,7 +71883,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "rust/shim/src/cli/update/unattended.rs:491",
+      "location": "rust/shim/src/cli/update/unattended.rs:493",
       "method": null,
       "name": "/health",
       "shape": {
@@ -71834,7 +71897,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "rust/shim/src/cli/update/unattended.rs:492",
+      "location": "rust/shim/src/cli/update/unattended.rs:497",
       "method": null,
       "name": "/health",
       "shape": {
@@ -78434,19 +78497,25 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/install-and-move.md:180",
+      "location": "docs/guide/install-and-move.md:194",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_IMAGE_TAG"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/install-and-move.md:182",
+      "location": "docs/guide/install-and-move.md:195",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/install-and-move.md:186",
+      "location": "docs/guide/install-and-move.md:196",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "cli:update"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/install-and-move.md:199",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_IMAGE_TAG"
     },
@@ -89752,259 +89821,265 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/docker-compose.yml:125",
+      "location": "ops/docker-compose.yml:129",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:EmbeddingConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/docker-compose.yml:125",
+      "location": "ops/docker-compose.yml:129",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:EmbeddingConfig.cpu_dtype"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/docker-compose.yml:128",
+      "location": "ops/docker-compose.yml:132",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_DAEMON_MEM_LIMIT"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/docker-compose.yml:139",
+      "location": "ops/docker-compose.yml:143",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_DAEMON_MEM_LIMIT"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/docker-compose.yml:140",
+      "location": "ops/docker-compose.yml:144",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_DAEMON_MEM_LIMIT"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/docker-compose.yml:153",
+      "location": "ops/docker-compose.yml:157",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DATABASE_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/docker-compose.yml:154",
+      "location": "ops/docker-compose.yml:158",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_HOST"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/docker-compose.yml:155",
+      "location": "ops/docker-compose.yml:159",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_PORT"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/docker-compose.yml:156",
+      "location": "ops/docker-compose.yml:160",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DATA_DIR"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/docker-compose.yml:164",
+      "location": "ops/docker-compose.yml:168",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TRUST_BIND"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/docker-compose.yml:169",
+      "location": "ops/docker-compose.yml:173",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/docker-compose.yml:170",
+      "location": "ops/docker-compose.yml:174",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/docker-compose.yml:172",
+      "location": "ops/docker-compose.yml:176",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_WRITER_ID"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/docker-compose.yml:179",
+      "location": "ops/docker-compose.yml:183",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOOLSET"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/docker-compose.yml:182",
+      "location": "ops/docker-compose.yml:186",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOOLSET"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/docker-compose.yml:184",
+      "location": "ops/docker-compose.yml:188",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TIER_MAP"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/docker-compose.yml:198",
+      "location": "ops/docker-compose.yml:202",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:EmbeddingConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/docker-compose.yml:198",
+      "location": "ops/docker-compose.yml:202",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:EmbeddingConfig.cpu_dtype"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/docker-compose.yml:200",
+      "location": "ops/docker-compose.yml:204",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_EMBEDDING_CPU_DTYPE"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/docker-compose.yml:208",
+      "location": "ops/docker-compose.yml:212",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_DREAM_BASE_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/docker-compose.yml:209",
+      "location": "ops/docker-compose.yml:213",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_DREAM_MODEL"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/docker-compose.yml:210",
+      "location": "ops/docker-compose.yml:214",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_DREAM_API_KEY"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/docker-compose.yml:214",
+      "location": "ops/docker-compose.yml:218",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_DREAM_TIMEOUT_SECONDS"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/docker-compose.yml:215",
+      "location": "ops/docker-compose.yml:219",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_DREAM_MAX_TOKENS"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/docker-compose.yml:221",
+      "location": "ops/docker-compose.yml:225",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_DREAM_FALLBACK_BASE_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/docker-compose.yml:222",
+      "location": "ops/docker-compose.yml:226",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_DREAM_FALLBACK_MODEL"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/docker-compose.yml:226",
+      "location": "ops/docker-compose.yml:230",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_DREAM_FALLBACK_API_KEY"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/docker-compose.yml:227",
+      "location": "ops/docker-compose.yml:231",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_DREAM_EXTRACTOR_MODE"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/docker-compose.yml:228",
+      "location": "ops/docker-compose.yml:232",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DeepDreamConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/docker-compose.yml:228",
+      "location": "ops/docker-compose.yml:232",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DeepDreamConfig.judge_url"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/docker-compose.yml:232",
+      "location": "ops/docker-compose.yml:236",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_JUDGE_API_KEY"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/docker-compose.yml:233",
+      "location": "ops/docker-compose.yml:237",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_JUDGE_SECOND_API_KEY"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/docker-compose.yml:234",
+      "location": "ops/docker-compose.yml:238",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_JUDGE_THIRD_API_KEY"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/docker-compose.yml:238",
+      "location": "ops/docker-compose.yml:242",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MALLOC_TRIM_SECONDS"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/docker-compose.yml:270",
+      "location": "ops/docker-compose.yml:274",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/docker-compose.yml:284",
+      "location": "ops/docker-compose.yml:288",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_DREAM_TIMEOUT_SECONDS"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/docker-compose.yml:300",
+      "location": "ops/docker-compose.yml:304",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_EXTRACTOR_SLEEP_IDLE_SECONDS"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/docker-compose.yml:322",
+      "location": "ops/docker-compose.yml:326",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_BANK_VOLUME"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/docker-compose.yml:328",
+      "location": "ops/docker-compose.yml:332",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_STATE_VOLUME"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/docker-compose.yml:92",
+      "location": "ops/docker-compose.yml:96",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_BUILD_GIT_SHA"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/docker-compose.yml:93",
+      "location": "ops/docker-compose.yml:97",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_BUILD_DIRTY"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/docker-compose.yml:94",
+      "location": "ops/docker-compose.yml:98",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_BUILD_TIME"
     },
     {
       "dynamic": "unresolved",
       "location": "ops/gen_llms_txt.py:35",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "cli:move"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/gen_llms_txt.py:72",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:move"
     },
@@ -90884,50 +90959,32 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.ps1:2980",
+      "location": "ops/install.ps1:2990",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:cli:test-login"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.ps1:3064",
+      "location": "ops/install.ps1:3074",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.ps1:3064",
+      "location": "ops/install.ps1:3074",
       "reason": "request target supplied dynamically or external"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.ps1:3073",
+      "location": "ops/install.ps1:3083",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.ps1:3095",
+      "location": "ops/install.ps1:3105",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:shim"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/install.ps1:3259",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "tool:memory_dream"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/install.ps1:3262",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "tool:memory_dream"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/install.ps1:3265",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "tool:memory_dream"
     },
     {
       "dynamic": "unresolved",
@@ -90943,72 +91000,90 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.ps1:3314",
+      "location": "ops/install.ps1:3275",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "tool:memory_dream"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/install.ps1:3279",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "tool:memory_dream"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/install.ps1:3282",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "tool:memory_dream"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/install.ps1:3324",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:invite"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.ps1:3366",
+      "location": "ops/install.ps1:3376",
       "reason": "shell-built command"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.ps1:3380",
+      "location": "ops/install.ps1:3390",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:shim"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.ps1:3386",
+      "location": "ops/install.ps1:3396",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:update"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.ps1:3393",
+      "location": "ops/install.ps1:3403",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:update"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.ps1:3426",
+      "location": "ops/install.ps1:3436",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:update"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.ps1:3435",
+      "location": "ops/install.ps1:3445",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:update"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.ps1:3453",
+      "location": "ops/install.ps1:3463",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:tunnel"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.ps1:3455",
+      "location": "ops/install.ps1:3465",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DAEMON_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.ps1:3456",
+      "location": "ops/install.ps1:3466",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.ps1:3462",
+      "location": "ops/install.ps1:3472",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:tunnel"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.ps1:3470",
+      "location": "ops/install.ps1:3480",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:tunnel"
     },
@@ -91817,136 +91892,136 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:3135",
+      "location": "ops/install.sh:3147",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:3135",
+      "location": "ops/install.sh:3147",
       "reason": "request target supplied dynamically or external"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:3190",
+      "location": "ops/install.sh:3202",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:cli:test-login"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:3254",
+      "location": "ops/install.sh:3266",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:3254",
+      "location": "ops/install.sh:3266",
       "reason": "request target supplied dynamically or external"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:3264",
+      "location": "ops/install.sh:3276",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:3289",
+      "location": "ops/install.sh:3301",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:shim"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:3435",
+      "location": "ops/install.sh:3447",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "tool:memory_dream"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:3437",
+      "location": "ops/install.sh:3449",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "tool:memory_dream"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:3439",
+      "location": "ops/install.sh:3451",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "tool:memory_dream"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:3442",
+      "location": "ops/install.sh:3454",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "tool:memory_dream"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:3444",
+      "location": "ops/install.sh:3456",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "tool:memory_dream"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:3481",
+      "location": "ops/install.sh:3493",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:invite"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:3550",
+      "location": "ops/install.sh:3562",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:shim"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:3556",
+      "location": "ops/install.sh:3568",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:update"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:3564",
+      "location": "ops/install.sh:3576",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:update"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:3598",
+      "location": "ops/install.sh:3610",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:update"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:3609",
+      "location": "ops/install.sh:3621",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:update"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:3609",
+      "location": "ops/install.sh:3621",
       "reason": "shell-built command"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:3622",
+      "location": "ops/install.sh:3634",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:tunnel"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:3626",
+      "location": "ops/install.sh:3638",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:tunnel"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:3628",
+      "location": "ops/install.sh:3640",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:tunnel"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:3631",
+      "location": "ops/install.sh:3643",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:tunnel"
     },
@@ -97449,115 +97524,121 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/mod.rs:149",
+      "location": "rust/shim/src/cli/update/mod.rs:162",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:update"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/mod.rs:172",
+      "location": "rust/shim/src/cli/update/mod.rs:185",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_DOCKER"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/mod.rs:222",
+      "location": "rust/shim/src/cli/update/mod.rs:235",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/mod.rs:293",
+      "location": "rust/shim/src/cli/update/mod.rs:306",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/mod.rs:297",
+      "location": "rust/shim/src/cli/update/mod.rs:310",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:update"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/mod.rs:429",
+      "location": "rust/shim/src/cli/update/mod.rs:38",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/health"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/update/mod.rs:442",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:cli:maintainer"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/mod.rs:518",
+      "location": "rust/shim/src/cli/update/mod.rs:531",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:update"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/mod.rs:589",
+      "location": "rust/shim/src/cli/update/mod.rs:591",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:update"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/mod.rs:609",
+      "location": "rust/shim/src/cli/update/mod.rs:611",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_TEST_PG_LOGIN_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/mod.rs:616",
+      "location": "rust/shim/src/cli/update/mod.rs:618",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:cli:test-login"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/mod.rs:620",
+      "location": "rust/shim/src/cli/update/mod.rs:622",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:cli:test-login"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/mod.rs:627",
+      "location": "rust/shim/src/cli/update/mod.rs:629",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_TEST_PG_HOST_PORT"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/mod.rs:637",
+      "location": "rust/shim/src/cli/update/mod.rs:639",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_TEST_PG_HOST_PORT"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/mod.rs:666",
+      "location": "rust/shim/src/cli/update/mod.rs:668",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_TEST_PG_HOST_PORT"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/mod.rs:666",
+      "location": "rust/shim/src/cli/update/mod.rs:668",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:cli:test-login"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/mod.rs:683",
+      "location": "rust/shim/src/cli/update/mod.rs:685",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:cli:test-login"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/mod.rs:704",
+      "location": "rust/shim/src/cli/update/mod.rs:706",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:cli:native-update-v"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/mod.rs:735",
+      "location": "rust/shim/src/cli/update/mod.rs:737",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:update"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/mod.rs:749",
+      "location": "rust/shim/src/cli/update/mod.rs:751",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:update"
     },
@@ -97713,13 +97794,13 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/tests.rs:803",
+      "location": "rust/shim/src/cli/update/tests.rs:829",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/tests.rs:810",
+      "location": "rust/shim/src/cli/update/tests.rs:836",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_IMAGE_TAG"
     },
@@ -97838,19 +97919,25 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/unattended.rs:491",
+      "location": "rust/shim/src/cli/update/unattended.rs:493",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/unattended.rs:492",
+      "location": "rust/shim/src/cli/update/unattended.rs:497",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/unattended.rs:572",
+      "location": "rust/shim/src/cli/update/unattended.rs:557",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "cli:update"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/update/unattended.rs:588",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:update"
     },
@@ -97892,21 +97979,15 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/unattended/schedule.rs:454",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
-    },
-    {
-      "dynamic": "unresolved",
       "location": "rust/shim/src/cli/update/unattended/schedule.rs:456",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/unattended/schedule.rs:459",
+      "location": "rust/shim/src/cli/update/unattended/schedule.rs:458",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
     },
     {
       "dynamic": "unresolved",
@@ -97916,31 +97997,37 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/unattended/schedule.rs:509",
+      "location": "rust/shim/src/cli/update/unattended/schedule.rs:463",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/update/unattended/schedule.rs:512",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:UpdatesConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/unattended/schedule.rs:509",
+      "location": "rust/shim/src/cli/update/unattended/schedule.rs:512",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:UpdatesConfig.unattended_daemon"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/unattended/schedule.rs:510",
+      "location": "rust/shim/src/cli/update/unattended/schedule.rs:513",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:CoordinationConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/unattended/schedule.rs:510",
+      "location": "rust/shim/src/cli/update/unattended/schedule.rs:513",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:CoordinationConfig.daemon_notice_principals"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/unattended/schedule.rs:510",
+      "location": "rust/shim/src/cli/update/unattended/schedule.rs:513",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
     },

@@ -488,7 +488,12 @@ fn run_clients(update: &mut Update) -> Result<u8> {
             "--tag cannot be combined with --unattended on a client machine: the unattended client run follows the daemon's release. Run pseudolife-mcp update --clients-only --tag <version> yourself for another one. Nothing was changed",
         ));
     }
-    let health=update.daemon_health().ok_or_else(||UpdateError::usage("the daemon did not answer /health, and the unattended client run follows its release rather than guess one; nothing was changed. Check --daemon-url and try again"))?;
+    let health = update.daemon_health().ok_or_else(|| {
+        UpdateError::usage(format!(
+            "the daemon at {} did not answer /health, and the unattended client run follows its release rather than guess one; nothing was changed. It tries again at the next scheduled run. {}",
+            update.o.daemon_url, client_rearm_hint("HH:MM")
+        ))
+    })?;
     let daemon=health["version"].as_str().filter(|s|crate::lifecycle::plain_client_release(s)).ok_or_else(||UpdateError::usage("the daemon at --daemon-url reports no plain release number (N.N.N) on /health; nothing was changed"))?.to_owned();
     let own = client_version();
     update.report.current = Some(own.clone());
@@ -540,6 +545,17 @@ fn run_clients(update: &mut Update) -> Result<u8> {
         update.step(format!("updated this machine's clients unattended from {own} to {daemon}; running sessions keep their runtime and new sessions start on the new one. The log is {}",seams::data_dir().join(LOG_NAME).display()));
     }
     Ok(update.report.exit_code)
+}
+
+fn client_rearm_hint(when: &str) -> String {
+    let time = if when == "HH:MM" {
+        " and your chosen daily time"
+    } else {
+        ""
+    };
+    format!(
+        "If the daemon moved, re-arm this machine's client schedule with `pseudolife-mcp update --schedule {when} --daemon-url <new-url>` using the new daemon URL{time}."
+    )
 }
 
 fn client_version() -> String {
