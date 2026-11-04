@@ -419,6 +419,7 @@ deep material lives in the user guide:
 
 | Page | What's in it |
 |---|---|
+| [Install and move](docs/guide/install-and-move.md) | Installer and lite setup, moving a bank, and running under Portainer or another stack manager |
 | [Configuration](docs/guide/configuration.md) | Env vars, tuned defaults, toolset tiers, stdio shim, LAN sharing, data layout, backups, schema history |
 | [Providers](docs/guide/providers.md) | Capability matrix per coding agent, memory instruction layers, AGENTS.md standard, Codex hook setup and verification, writer ids |
 | [Retrieval](docs/guide/retrieval.md) | Reranker, BM25 hybrid, abstention floors, ranking-trace debugging, `memory_recall`, the knowledge graph |
