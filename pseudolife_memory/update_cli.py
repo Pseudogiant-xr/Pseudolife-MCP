@@ -462,6 +462,8 @@ class Update:
         # The bank's schema version on the daemon this run replaces, when
         # /health said; a deploy that moves it changes what a rollback takes.
         self.schema_before: int | None = None
+        self.auth_before: bool | None = None
+        self.credential_env_file: Path | None = None
 
     # -- output ------------------------------------------------------------
     def step(self, text: str) -> None:
@@ -940,6 +942,11 @@ class Update:
                      f"the compose project's image setting won (check `docker compose config` for the daemon "
                      f"service). The client side was not moved. To roll back:"] + self.rollback_lines
             raise UpdateError("\n".join(lines))
+        if type(self.auth_before) is bool and (type(health.get("auth")) is not bool
+                                               or health["auth"] != self.auth_before):
+            raise UpdateError("the daemon's authentication mode changed or could not be verified after deploy; "
+                              f"restore the original credentials in {self.credential_env_file}, then roll back. "
+                              "The client side was not moved. To roll back:\n" + "\n".join(self.rollback_lines))
         if self.rollback_lines and not self.o.as_json:
             print("    Rolled-back deploy if ever needed:")
             for line in self.rollback_lines:
@@ -1070,13 +1077,26 @@ class Update:
         stamp = {"PSEUDOLIFE_BUILD_GIT_SHA": tree["sha"], "PSEUDOLIFE_BUILD_DIRTY": tree["dirty"],
                  "PSEUDOLIFE_BUILD_TIME": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
         env_file = repo / "ops" / ".env"
-        example = repo / "ops" / ".env.example"
-        if not env_file.is_file() and example.is_file():
-            shutil.copyfile(example, env_file)
-            self.step("scaffolded ops/.env from ops/.env.example (all values commented)")
+        if not env_file.is_file():
+            code, out = run_cli([self.docker, "inspect", "-f", "{{json .Config.Env}}", DAEMON_CONTAINER],
+                                timeout=60, stdout_only=True)
+            try:
+                running_env = json.loads(out) if code == 0 else []
+            except ValueError:
+                running_env = []
+            names = sorted({entry.partition("=")[0] for entry in running_env if isinstance(entry, str)
+                            and entry.partition("=")[0] in ("PSEUDOLIFE_MCP_TOKEN", "PSEUDOLIFE_MCP_TOKENS",
+                                                            "PSEUDOLIFE_MCP_DATABASE_URL")
+                            and entry.partition("=")[2]}) if isinstance(running_env, list) else []
+            source = f" The running daemon's environment supplies {', '.join(names)}." if names else ""
+            raise UpdateError(f"{env_file} is missing; copying .env.example would replace the original "
+                              f"password, token and volume settings with defaults.{source} Restore {env_file} "
+                              "from the original install's environment before retrying. Nothing was changed", 2)
         compose = self._compose_args([compose_file, repo / "ops" / "docker-compose.override.yml"], env_file)
         self._compose_shown = compose
         before = self.daemon_health() or {}
+        self.auth_before = before.get("auth") if type(before.get("auth")) is bool else None
+        self.credential_env_file = env_file
         previous_digest = before.get("hooks_digest")
         self.schema_before = before.get("schema")
         self.backup(repo)
