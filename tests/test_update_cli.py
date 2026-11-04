@@ -687,13 +687,26 @@ def test_plain_checkout_update_with_null_daemon_labels(world, clients, tmp_path)
     assert argv[-5:] == ["up", "-d", "--no-deps", "--build", "pseudolife-daemon"]
 
 
-def test_checkout_refuses_foreign_project_before_backup_or_env_write(world, clients, tmp_path, capsys, monkeypatch):
+def _project_guard_checkout(world, tmp_path, monkeypatch, project="pseudolife-mcp"):
     root, _ = _checkout(world, tmp_path, repo=False)
     monkeypatch.setattr(up, "tree_state", lambda _: {"sha": "a" * 40, "dirty": "false", "lines": [], "error": ""})
+    original = world.run_cli
+
+    def compose_config(argv, **kw):
+        if argv[1:2] == ["compose"] and "config" in argv:
+            return 0, json.dumps({"name": project})
+        return original(argv, **kw)
+
+    monkeypatch.setattr(up, "run_cli", compose_config)
+    return root
+
+
+def test_checkout_refuses_foreign_project_before_backup_or_env_write(world, clients, tmp_path, capsys, monkeypatch):
+    root = _project_guard_checkout(world, tmp_path, monkeypatch)
     world.container["labels"] = {"com.docker.compose.project": "external-stack"}
     assert _run(["--checkout", str(root)]) == 2
     err = capsys.readouterr().err
-    assert "external-stack" in err and "docker compose -p external-stack down" in err
+    assert "external-stack" in err and " down" not in err
     assert "pseudolife-mcp update" in err and "release mode" in err and "Nothing was changed" in err
     assert "down -v" not in err
     assert not (root / "ops" / ".env").exists()
@@ -703,11 +716,45 @@ def test_checkout_refuses_foreign_project_before_backup_or_env_write(world, clie
 
 
 def test_checkout_accepts_installer_project_from_another_checkout_path(world, clients, tmp_path, monkeypatch):
-    root, _ = _checkout(world, tmp_path, repo=False)
-    monkeypatch.setattr(up, "tree_state", lambda _: {"sha": "a" * 40, "dirty": "false", "lines": [], "error": ""})
+    root = _project_guard_checkout(world, tmp_path, monkeypatch)
     (root / "ops" / ".env").write_text("PSEUDOLIFE_BANK_VOLUME=ops_pseudolife_pgdata\n"
                                        "PSEUDOLIFE_STATE_VOLUME=ops_pseudolife_data\n", encoding="utf-8")
     world.container["labels"] = {"com.docker.compose.project": "pseudolife-mcp"}
+    assert _run(["--checkout", str(root), "--no-backup", "--no-cache-prune"]) == 0
+    assert _compose_call(world)[0] is not None
+
+
+def test_checkout_accepts_its_resolved_custom_project(world, tmp_path, monkeypatch):
+    root = _project_guard_checkout(world, tmp_path, monkeypatch, project="custom-stack")
+    world.container["labels"] = {"com.docker.compose.project": "custom-stack"}
+    monkeypatch.setenv("COMPOSE_PROJECT_NAME", "custom-stack")
+    assert _run(["--checkout", str(root), "--no-backup", "--no-cache-prune"]) == 0
+    assert _compose_call(world)[0] is not None
+
+
+@pytest.mark.parametrize("code,output", [(1, "Cannot connect to the Docker daemon"), (0, "not JSON")])
+def test_checkout_project_inspection_failure_refuses_before_mutation(world, tmp_path, monkeypatch, capsys, code, output):
+    root, _ = _checkout(world, tmp_path, repo=False)
+    monkeypatch.setattr(up, "tree_state", lambda _: {"sha": "a" * 40, "dirty": "false", "lines": [], "error": ""})
+    original = world.run_cli
+
+    def failed_inspect(argv, **kw):
+        if "{{json .Config.Labels}}" in argv:
+            return code, output
+        return original(argv, **kw)
+
+    monkeypatch.setattr(up, "run_cli", failed_inspect)
+    assert _run(["--checkout", str(root)]) == 2
+    assert "Docker" in capsys.readouterr().err
+    assert not (root / "ops" / ".env").exists()
+    assert _compose_call(world)[0] is None
+    assert not any(c.startswith(("tag ", "exec ", "cp ", "builder ")) for c in world.docker_calls())
+
+
+def test_checkout_with_proven_absent_daemon_is_not_blocked_by_project_guard(world, tmp_path, monkeypatch):
+    root, _ = _checkout(world, tmp_path, repo=False)
+    monkeypatch.setattr(up, "tree_state", lambda _: {"sha": "a" * 40, "dirty": "false", "lines": [], "error": ""})
+    world.container = None
     assert _run(["--checkout", str(root), "--no-backup", "--no-cache-prune"]) == 0
     assert _compose_call(world)[0] is not None
 
