@@ -1684,6 +1684,15 @@ def check_codex_hooks(repo: Path | None = None, daemon_digest: str | None = None
         # the raw-file refresh to remove Codex's startup warning.
         if refresh and changed:
             return _upgrade_codex_plugin(codex_home, repo, daemon_digest, changed)
+        if verify_runtime:
+            state = _codex_runtime_hook_status(codex_home, clone_hooks)
+            if state == "current":
+                return {"state": "current", "source": "plugin", "changed_files": [],
+                        "detail": "Codex's runtime enables and trusts every matching plugin handler."}
+            return {"state": state, "source": "plugin", "changed_files": [],
+                    "detail": "Codex's runtime hook trust differs from its matching script copy.",
+                    "recovery": ("Run python ops/setup-codex-hooks.py --source plugin --trust ask, "
+                                 "then start a new session.")}
         missing = _unapproved_plugin_handlers(clone_hooks, config_text)
         if missing is None and not _plugin_definitions_match(clone_hooks, clone_hooks):
             return {"state": "unknown", "source": "plugin", "changed_files": [],
@@ -1694,13 +1703,6 @@ def check_codex_hooks(repo: Path | None = None, daemon_digest: str | None = None
                     "detail": f"Codex skips {len(missing)} plugin hook handler(s) it has not approved; "
                               "approve them: python ops/setup-codex-hooks.py --source plugin --trust ask "
                               "(or /hooks in the Codex terminal app)"}
-        if verify_runtime:
-            state = _codex_runtime_hook_status(codex_home, clone_hooks)
-            if state != "current":
-                return {"state": state, "source": "plugin", "changed_files": [],
-                        "detail": "Codex's runtime hook trust differs from its matching script copy.",
-                        "recovery": ("Run python ops/setup-codex-hooks.py --source plugin --trust ask, "
-                                     "then start a new session.")}
         return {"state": "current", "detail": "Codex runs the plugin's hooks; its copy matches "
                                               + ("the checkout's scripts" if repo else "the daemon's scripts")}
     if changed and definitions_match:

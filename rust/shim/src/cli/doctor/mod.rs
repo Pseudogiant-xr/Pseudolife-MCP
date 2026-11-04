@@ -579,7 +579,7 @@ async fn diagnose(args: &Args) -> Res<(Value, bool)> {
                 Some(digest) => {
                     let checked =
                         super::update::clients::check_codex_hooks(None, digest.as_str(), false);
-                    if checked["state"] != "current" {
+                    if checked["state"] != "current" && checked["state"] != "needs-approval" {
                         return Err(Defer);
                     }
                     let trust = super::update::clients::runtime_hook_status().await;

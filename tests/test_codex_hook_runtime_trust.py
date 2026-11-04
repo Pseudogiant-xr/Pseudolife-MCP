@@ -5,7 +5,7 @@ import pytest
 
 from pseudolife_memory import client_updates as clients, codex_connection, doctor_cli
 from tests.test_codex_reapproval import ROOT, _clone
-from tests.test_update_clients import _plugin_handler_keys, cli  # noqa: F401
+from tests.test_update_clients import _codex_plugin_config, _plugin_handler_keys, cli  # noqa: F401
 
 
 @pytest.mark.parametrize("trust,enabled,state", [
@@ -13,8 +13,11 @@ from tests.test_update_clients import _plugin_handler_keys, cli  # noqa: F401
     ("trusted", True, "current"), ("trusted", False, "disabled"),
     ("future-state", True, "unknown"),
 ])
-def test_doctor_names_the_fix_for_matching_but_unapproved_handlers(cli, monkeypatch, trust, enabled, state):
+@pytest.mark.parametrize("global_hashes", [True, False])
+def test_doctor_names_the_fix_for_matching_but_unapproved_handlers(cli, monkeypatch, trust, enabled, state, global_hashes):
     _clone(cli)
+    if not global_hashes:
+        _codex_plugin_config(cli, approved=[])
     calls = []
 
     class Runtime:
