@@ -41,12 +41,26 @@ fn connection_fields(raw: &str) -> Option<BTreeMap<String, String>> {
             }
             _ => return None,
         }
-        match origin.get_ports() {
-            [] => (),
-            [port] => {
-                fields.insert("port".into(), port.to_string());
+        // The URI driver inserts 5432 even when libpq would use PGPORT.
+        let authority = base
+            .split_once("://")?
+            .1
+            .split('/')
+            .next()?
+            .rsplit('@')
+            .next()?;
+        let explicit_port = if authority.starts_with('[') {
+            authority.split_once(']')?.1.starts_with(':')
+        } else {
+            authority.contains(':')
+        };
+        if explicit_port {
+            match origin.get_ports() {
+                [port] => {
+                    fields.insert("port".into(), port.to_string());
+                }
+                _ => return None,
             }
-            _ => return None,
         }
         for (key, value) in [("user", origin.get_user()), ("dbname", origin.get_dbname())] {
             if let Some(value) = value {
