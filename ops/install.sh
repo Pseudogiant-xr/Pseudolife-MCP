@@ -3012,6 +3012,7 @@ for selected_client in $CLIENTS; do
     fi
 done
 
+# ── 12. health ─────────────────────────────────────────────────────────────
 # >>> claude profile scope >>>
 case "${MCP_CLAUDE:-}" in
     ""|skipped|failed) ;;
@@ -3023,7 +3024,6 @@ case "${MCP_CLAUDE:-}" in
 esac
 # <<< claude profile scope <<<
 
-# ── 12. health ─────────────────────────────────────────────────────────────
 # >>> endpoint container probe >>>
 # A server named on this machine's loopback is written as host.docker.internal
 # (the extractor env block). Docker Desktop routes that name to this

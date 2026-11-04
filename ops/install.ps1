@@ -2925,6 +2925,7 @@ foreach ($selectedClient in $clients) {
     }
 }
 
+# -- 12. health -----------------------------------------------------------------------
 # >>> claude profile scope >>>
 if ($mcpState["claude"] -and $mcpState["claude"] -notin "skipped", "failed") {
     $profileHome = if ($env:CLAUDE_CONFIG_DIR) { $env:CLAUDE_CONFIG_DIR } else { $env:USERPROFILE }
@@ -2934,7 +2935,6 @@ if ($mcpState["claude"] -and $mcpState["claude"] -notin "skipped", "failed") {
 }
 # <<< claude profile scope <<<
 
-# -- 12. health -----------------------------------------------------------------------
 # >>> endpoint container probe >>>
 # A server named on this machine's loopback is written as host.docker.internal
 # (the extractor env block). Docker Desktop routes that name to this
