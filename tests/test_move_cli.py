@@ -770,6 +770,38 @@ def test_new_target_tables_are_protected_without_a_client_update(tmp_path):
     assert mutating_calls(world) == []
 
 
+def test_foreign_stack_without_a_checkout_never_suggests_the_installer(tmp_path, capsys):
+    world = World(checkout=False)
+    world.target_labels = compose_labels("pseudolife-daemon", project="foreign-stack")
+    world.postgres_labels = compose_labels("pseudolife-pg", project="foreign-stack")
+    assert run_move(world, tmp_path, as_json=True) == 4
+    error = json.loads(capsys.readouterr().out)["error"]
+    assert move_cli.INSTALL_LINE not in error
+    assert "remove its containers" in error and "retain its volumes" in error
+    assert mutating_calls(world) == []
+
+
+@pytest.mark.parametrize("postgres_exists", [False, True])
+def test_only_a_target_without_existing_containers_gets_the_install_line(tmp_path, capsys, postgres_exists):
+    missing = [f"docker inspect --type container {move_cli.DAEMON}"]
+    if not postgres_exists:
+        missing.append(f"docker inspect --type container {move_cli.POSTGRES}")
+    world = World(checkout=False, fail=tuple(lambda c, cmd=cmd: c.remote == cmd for cmd in missing))
+    world.postgres_labels = compose_labels("pseudolife-pg", project="foreign-stack")
+    assert run_move(world, tmp_path, as_json=True) == 4
+    error = json.loads(capsys.readouterr().out)["error"]
+    assert (move_cli.INSTALL_LINE in error) is not postgres_exists
+    assert mutating_calls(world) == []
+
+
+def test_no_target_tailscale_names_explicit_url_as_the_fix(tmp_path, capsys):
+    world = World(exposed=False, expose_exit=4)
+    assert run_move(world, tmp_path, as_json=True) == 4
+    error = json.loads(capsys.readouterr().out)["error"]
+    assert "--target-url" in error
+    assert world.source_running and not world.fenced
+
+
 def test_target_write_after_preflight_is_preserved_and_refused(tmp_path):
     def late_write(world, call):
         world.target_rows["episodes"] = 1

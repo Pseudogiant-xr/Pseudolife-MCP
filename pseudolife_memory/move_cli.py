@@ -706,6 +706,17 @@ class Mover:
         if not result.ok:
             raise self.refuse(f"the target must be a Linux or macOS Docker-tier checkout host: its login shell "
                               f"is POSIX and curl, python3 and docker are on PATH there (exit {result.code})")
+        # Inspect existing resources before suggesting a fresh install: a
+        # foreign stack without a clone would collide with the installer.
+        result = self.ssh(f"docker inspect --type container {DAEMON}", timeout=60)
+        target = _container(result.text) if result.ok else None
+        if target is None:
+            postgres = self.ssh(f"docker inspect --type container {POSTGRES}", timeout=60)
+            if postgres.ok and _container(postgres.text) is not None:
+                self.check_target_stack({})
+            raise self.refuse(f"the target has no {DAEMON} container ({result.why(out=False)}): run the "
+                              f"installer there first ({INSTALL_LINE})")
+        self.check_target_stack(target)
         co = rq(self.checkout)
         result = self.ssh(f"test -f {co}/ops/restore.sh && test -f {co}/ops/update.sh && "
                           f"test -f {co}/ops/docker-compose.yml", timeout=60)
@@ -716,12 +727,6 @@ class Mover:
         if not result.ok:
             raise self.refuse(f"the target checkout's ops/restore.sh has no --no-start: update the checkout "
                               f"on {o.target} (git pull) and retry")
-        result = self.ssh(f"docker inspect --type container {DAEMON}", timeout=60)
-        target = _container(result.text) if result.ok else None
-        if target is None:
-            raise self.refuse(f"the target has no {DAEMON} container ({result.why(out=False)}): run the "
-                              f"installer there first ({INSTALL_LINE})")
-        self.check_target_stack(target)
         self.target_was_running = bool((target.get("State") or {}).get("Running"))
         self.target_image = str((target.get("Config") or {}).get("Image") or "")
         self.target_policy = _restart_policy(target)
@@ -1157,8 +1162,9 @@ class Mover:
                               f"--yes --json", timeout=300)
             if not result.ok:
                 raise MoveError(f"`pseudolife-mcp expose tailscale` on {o.target} failed (exit {result.code}: "
-                                f"{result.why()}). Fix that there and retry; nothing was changed and the source "
-                                f"still runs", EXIT_REFUSED)
+                                f"{result.why()}). Configure Tailscale there and retry, or pass "
+                                f"--target-url <the reachable URL clients will use> to use another connection. "
+                                f"The source still runs", EXIT_REFUSED)
             self.exposed_now = True
             state, url = parse_expose_status(result.text)
             if state != "exposed":
