@@ -1210,6 +1210,7 @@ class Update:
         previous_digest = before.get("hooks_digest")
         self.schema_before = before.get("schema")
         self.backup(repo)
+        self.preflight_disk(repo)
         image_tag = _compose_image_tag(compose_file)
         if not image_tag:
             raise UpdateError(f"could not find the {DAEMON_SERVICE} image tag in {compose_file}")

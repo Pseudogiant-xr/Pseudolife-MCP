@@ -12,7 +12,8 @@ fn require(free: u64, location: &str) -> Result<()> {
 }
 
 pub(super) fn host(path: &Path) -> Result<()> {
-    let mut target = path;
+    let absolute = std::path::absolute(path).map_err(|_| UpdateError::usage("cannot resolve the destination filesystem; restore its directory and retry. Nothing was changed"))?;
+    let mut target = absolute.as_path();
     while !target.exists() {
         target = target.parent().ok_or_else(|| UpdateError::usage("cannot find the destination filesystem; restore its directory and retry. Nothing was changed"))?;
     }
@@ -51,6 +52,9 @@ impl Update {
             return Ok(());
         };
         let helper = format!("pseudolife-diskcheck-{}", uuid::Uuid::new_v4().simple());
+        // Defer cancellation exit until the owned helper has been removed.
+        #[cfg(unix)]
+        let _signals = signals::Guard::new()?;
         let created =
             self.docker_call(&[
                 "create",
@@ -82,7 +86,11 @@ impl Update {
                 "cannot check Docker storage space; make `df -Pk /` work in the current daemon image and retry. Nothing was changed",
             ))
         };
-        let cleanup = self.docker_call(&["rm", "-f", "-v", &helper]).0;
+        let cleanup = {
+            #[cfg(unix)]
+            let _cleanup_signal = signals::CleanupSignal::new();
+            self.docker_call(&["rm", "-f", "-v", &helper]).0
+        };
         if created && cleanup != 0 {
             return Err(UpdateError::usage(format!(
                 "the disk-check helper could not be removed; run `docker rm -f -v {helper}` and retry. The daemon was not changed"
@@ -108,6 +116,14 @@ impl Update {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn missing_relative_destination_uses_the_current_filesystem() {
+        let path = PathBuf::from(format!("missing-backups-{}", uuid::Uuid::new_v4().simple()));
+        assert!(!path.exists());
+        host(&path).unwrap();
+        assert!(!path.exists());
+    }
+
     #[test]
     fn disk_floor_and_df_units_fail_closed_at_the_boundary() {
         assert!(require(MIN_FREE - 1, "fixture").is_err());

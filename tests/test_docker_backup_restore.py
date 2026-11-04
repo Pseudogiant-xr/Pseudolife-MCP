@@ -89,6 +89,8 @@ class DockerWorld:
             return 1, "database absent"
         if args[:2] == ["start", "-a"]:
             script = self.helpers[args[-1]]
+            if "df -Pk" in script:
+                return 0, "overlay 99999999 1 99999998 1% /data\n"
             return (1 if self.fail_state and "tar czf" in script else 0), ""
         if args[0] == "cp" and ":" in args[1] and not Path(args[1]).is_file():
             target = Path(args[2])
@@ -164,6 +166,65 @@ def test_the_exact_disk_floor_allows_a_clone_free_backup(docker_bank, tmp_path, 
     monkeypatch.setattr(disk_space.shutil, "disk_usage", lambda _: types.SimpleNamespace(free=disk_space.MIN_FREE))
     result = bank.backup(out=tmp_path / "artifacts")
     assert result["dump"].is_file() and result["state"].is_file()
+
+
+@pytest.mark.parametrize("location", ["/var/lib/postgresql/legacy", "/data", "/data/nested", None])
+def test_restore_checks_separate_destination_mounts_before_stop(docker_bank, tmp_path, monkeypatch, location):
+    bank, world = docker_bank
+    world.pg["Mounts"] = [{"Destination": "/var/lib/postgresql/legacy", "Name": "legacy-pg", "RW": True}]
+    world.pg["Mounts"].append({"Destination": "/readonly", "Name": "settings", "RW": False})
+    bank.running["Mounts"].append({"Destination": "/data/nested", "Name": "legacy-nested"})
+    original = world.run
+    def run(argv, **kw):
+        if "df" in argv and argv[-1] == "/readonly":
+            pytest.fail("read-only configuration is not a restore destination")
+        if "df" in argv and argv[-1] == location:
+            return 0, "overlay 99999999 1 1 99% /\n"
+        if argv[1:3] == ["start", "-a"] and "df -Pk" in world.helpers.get(argv[-1], ""):
+            script = world.helpers[argv[-1]]
+            return 0, "\n".join("overlay 99999999 1 " + ("1" if path == location else "8388608") + " 1% " + path
+                                for path in ["/data", "/data/nested"] if path in script)
+        return original(argv, **kw)
+    monkeypatch.setattr(up, "run_cli", run)
+    state_file = tmp_path / "state.tgz"
+    state_file.write_bytes(_state_bytes())
+    if location is None:
+        bank.restore(_input_dump(tmp_path), state_archive=state_file, leave_stopped=True)
+        assert any("DROP DATABASE" in str(call) for call in world.calls)
+        return
+    with pytest.raises(up.UpdateError, match="8 GiB"):
+        bank.restore(_input_dump(tmp_path), state_archive=state_file, leave_stopped=True)
+    assert not any(call[0] == "stop" or "DROP DATABASE" in str(call) for call in world.calls)
+
+
+@pytest.mark.parametrize("phase", ["backup", "staging", "state-staging"])
+def test_restore_rechecks_space_after_safety_backup_and_staging(docker_bank, tmp_path, monkeypatch, phase):
+    from pseudolife_memory import disk_space
+    bank, world = docker_bank
+    low = {"now": False}
+    original = world.run
+    def run(argv, **kw):
+        result = original(argv, **kw)
+        if phase == "staging" and "gunzip -c" in str(argv):
+            low["now"] = True
+        if phase == "state-staging" and argv[1:2] == ["cp"] and str(argv[-1]).endswith(":/tmp/pl_state.tgz"):
+            low["now"] = True
+        return result
+    monkeypatch.setattr(up, "run_cli", run)
+    original_backup = bank.backup
+    def backup(**kw):
+        result = original_backup(**kw)
+        if phase == "backup":
+            low["now"] = True
+        return result
+    monkeypatch.setattr(bank, "backup", backup)
+    monkeypatch.setattr(disk_space.shutil, "disk_usage", lambda _: types.SimpleNamespace(free=disk_space.MIN_FREE - int(low["now"])))
+    state_file = tmp_path / "state.tgz"
+    state_file.write_bytes(_state_bytes())
+    with pytest.raises(up.UpdateError, match="8 GiB"):
+        bank.restore(_input_dump(tmp_path), state_archive=state_file, leave_stopped=True)
+    assert not any("DROP DATABASE" in str(call) for call in world.calls)
+    assert ["start", bank.daemon] in world.calls
 
 
 def test_docker_backup_uses_actual_role_and_database_and_stopped_state(docker_bank, tmp_path):

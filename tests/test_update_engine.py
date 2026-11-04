@@ -45,6 +45,29 @@ def test_disk_floor_precedes_engine_backup_build_and_shadow_changes(shadow_host,
     assert not any("build" in c or "up" in c or c[1:2] == ["tag"] or any("backup." in str(v) for v in c) for c in s["calls"])
 
 
+@pytest.mark.parametrize("engine", ["python", "rust", "stopped"])
+def test_engine_rechecks_space_after_backup(engine_host, monkeypatch, engine):
+    from types import SimpleNamespace
+    from pseudolife_memory import disk_space, update_engine as eng
+    s = engine_host
+    if engine == "stopped":
+        update, _, _ = _stopped_handover(s, monkeypatch)
+        update._selected_engine = "python"
+    else:
+        update = s["update"](engine)
+    state = {"backed_up": False}
+    def backup(self):
+        state["backed_up"] = True
+        self.backup_paths = {}
+    monkeypatch.setattr(eng.EngineUpdate, "backup", backup)
+    monkeypatch.setattr(disk_space.shutil, "disk_usage", lambda _: SimpleNamespace(
+        free=disk_space.MIN_FREE - int(state["backed_up"])))
+    with pytest.raises(up.UpdateError, match="8 GiB"):
+        eng.deploy_engine(update, s["repo"])
+    assert state["backed_up"]
+    assert not any("build" in c or "up" in c or c[1:2] == ["tag"] for c in s["calls"])
+
+
 def test_release_rust_refuses_before_docker(monkeypatch, capsys):
     monkeypatch.setattr(up, "run_cli", lambda *a, **kw: pytest.fail("refusal must precede Docker"))
     assert up.main(["--engine", "rust"]) == 2

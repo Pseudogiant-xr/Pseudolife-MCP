@@ -724,6 +724,8 @@ impl Update {
             }
         }
         let text = fs::read_to_string(&file)?;
+        disk::host(&repo)?;
+        self.disk_storage(&daemon, &pg, running["Image"].as_str())?;
         let image = text
             .lines()
             .find_map(|l| {

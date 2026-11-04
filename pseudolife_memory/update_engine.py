@@ -440,6 +440,8 @@ class EngineUpdate:
             from pseudolife_memory.update_shadow import ShadowUpdate
             return ShadowUpdate(self).start()
         self.backup()
+        disk_space.host(self.repo)
+        disk_space.docker_storage(self.u.docker, [self.pg, self.daemon], self.running.get("Image"), self.u.warn)
         if self.stopped_handover:
             current = self.inspect(self.daemon)
             if current.get("Image") != self.running.get("Image") or current.get("State", {}).get("Running") is not False or current.get("Config") != self.running.get("Config"):

@@ -1047,6 +1047,8 @@ pub(super) fn deploy(u: &mut Update, repo: &Path) -> Result<()> {
     } else {
         u.project_backup(&repo, &pg, &daemon, user, db)?
     };
+    disk::host(&repo)?;
+    u.disk_storage(&daemon, &pg, running["Image"].as_str())?;
     if stopped_handover {
         let current = inspect(u, &daemon)?;
         if current["Image"] != running["Image"]

@@ -58,10 +58,11 @@ def docker_storage(docker: str, names, image: str | None = None, warn=lambda _: 
              "check passed. Keep at least 8 GiB free in Docker's data storage")
         return
     helper = "pseudolife-diskcheck-" + uuid.uuid4().hex
-    code, _ = up.run_cli([docker, "create", "--name", helper, "--read-only", "--network", "none", "--entrypoint", "df",
-                              image, "-Pk", "/"], timeout=60, stdout_only=True)
-    created = code == 0
+    created = False
     try:
+        code, _ = up.run_cli([docker, "create", "--name", helper, "--read-only", "--network", "none", "--entrypoint", "df",
+                                  image, "-Pk", "/"], timeout=60, stdout_only=True)
+        created = code == 0
         if code:
             raise up.UpdateError("cannot check Docker storage space; restore Docker's ability to create a "
                                  "container from the current daemon image and retry. Nothing was changed", 2)

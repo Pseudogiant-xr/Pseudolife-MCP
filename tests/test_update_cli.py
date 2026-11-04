@@ -267,6 +267,19 @@ def test_low_docker_storage_refuses_before_pull(world, clients, tmp_path, monkey
     assert not any(c.startswith(("pull ", "tag ")) or " up " in c for c in world.docker_calls())
 
 
+def test_checkout_rechecks_space_consumed_by_backup(world, clients, tmp_path, monkeypatch, capsys):
+    from types import SimpleNamespace
+    from pseudolife_memory import disk_space
+    root, _ = _checkout(world, tmp_path)
+    state = {"backed_up": False}
+    monkeypatch.setattr(up.Update, "backup", lambda *a: state.update(backed_up=True))
+    monkeypatch.setattr(disk_space.shutil, "disk_usage", lambda _: SimpleNamespace(
+        free=disk_space.MIN_FREE - int(state["backed_up"])))
+    assert _run(["--checkout", str(root), "--no-cache-prune"]) == 2
+    assert state["backed_up"] and "8 GiB" in capsys.readouterr().err
+    assert not any(c.startswith("tag ") or " up " in c for c in world.docker_calls())
+
+
 def test_the_exact_host_disk_floor_allows_a_release_recreation(world, clients, tmp_path, monkeypatch):
     from types import SimpleNamespace
     from pseudolife_memory import disk_space

@@ -48,6 +48,21 @@ def test_timed_out_create_cleans_up_only_the_known_helper_name(monkeypatch):
     assert calls[-1] == ["docker", "rm", "-f", "-v", create[create.index("--name") + 1]]
 
 
+@pytest.mark.parametrize("interrupted", [KeyboardInterrupt, SystemExit])
+def test_interrupted_create_still_cleans_up_the_owned_name(monkeypatch, interrupted):
+    calls = []
+    def run(argv, **kw):
+        calls.append(argv)
+        if argv[1] == "create":
+            raise interrupted()
+        return 0, ""
+    monkeypatch.setattr(up, "run_cli", run)
+    with pytest.raises(interrupted):
+        disk.docker_storage("docker", [], "sha256:fixture")
+    create = calls[0]
+    assert calls[-1] == ["docker", "rm", "-f", "-v", create[create.index("--name") + 1]]
+
+
 def test_cleanup_failure_names_the_owned_helper(monkeypatch):
     calls = []
     def run(argv, **kw):

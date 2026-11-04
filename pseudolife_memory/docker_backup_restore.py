@@ -13,7 +13,7 @@ import subprocess
 import tarfile
 import tempfile
 import time
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 
 from pseudolife_memory import update_cli as up
@@ -252,6 +252,30 @@ class DockerBank:
         if include_database:
             disk_space.container(self.docker, self.pg)
 
+    def _restore_space(self, directory: Path, *, state: bool) -> None:
+        from pseudolife_memory import disk_space
+        self._backup_space(directory)
+        # Cover the writable layer and every writable PostgreSQL mount, including
+        # relocated PGDATA and tablespaces, without requiring a database role
+        # that can read superuser-only data_directory settings.
+        postgres = self.inspect(self.pg)
+        paths = sorted({"/", *(m["Destination"] for m in postgres.get("Mounts", [])
+                               if m.get("RW", True) and m.get("Destination", "").startswith("/"))})
+        for path in paths:
+            disk_space.container(self.docker, self.pg, path)
+        if state:
+            paths = sorted({"/data", *(m["Destination"] for m in self.running.get("Mounts", [])
+                                      if m.get("Destination", "").startswith("/data/"))})
+            script = " && ".join("LC_ALL=C df -Pk -- " + shlex.quote(path) for path in paths)
+            with self.helper(script) as helper:
+                _, output = self.command("start", "-a", helper, timeout=60)
+            rows = [line for line in output.splitlines() if not line.startswith("Filesystem")]
+            if len(rows) != len(paths):
+                raise up.UpdateError("cannot read free space on the state mounts; make df -Pk work in the "
+                                     "daemon image and retry. Nothing was restored", 2)
+            for path, row in zip(paths, rows):
+                disk_space.require(disk_space._available(row, path), f"{self.daemon}:{path}")
+
     def backup(self, *, out: Path | None = None, keep_days=7.0, include_database=True) -> dict:
         directory = Path(out) if out else up.data_dir() / "backups"
         self._backup_space(directory, include_database=include_database)
@@ -356,11 +380,13 @@ class DockerBank:
                                      "--safety-dir <directory outside the state mount>. Nothing was restored", 2)
         # Restore stages and decompresses SQL in PostgreSQL's /tmp even when
         # there is no existing database to include in the safety backup.
-        self._backup_space(safety_dir)
+        self._restore_space(safety_dir, state=state_archive is not None)
         was_running = self.running.get("State", {}).get("Running", False)
         destructive = False
         safety = None
         remote = f"/tmp/pl_restore-{secrets.token_hex(8)}.sql.gz"
+        sql_tmp = remote + ".sql"
+        staged = ExitStack()
         try:
             if was_running:
                 self.command("stop", self.daemon)
@@ -368,7 +394,18 @@ class DockerBank:
             safety = self.backup(out=safety_dir, keep_days=None, include_database=exists)
             self.log(f"Safety backup: {safety['dump']} + {safety['state']}" if exists else
                      f"Safety state backup: {safety['state']} (destination database was absent)")
+            self._backup_space(safety_dir)
             self.command("cp", str(backup_file), f"{self.pg}:{remote}")
+            # Stage the complete SQL before any destructive query; decompression
+            # can consume the last free space even when the compressed dump fits.
+            self.command("exec", self.pg, "sh", "-c", 'gunzip -c "$1" > "$2"', "_", remote, sql_tmp)
+            state_helper = None
+            if state_archive is not None:
+                script = ("find /data -mindepth 1 -maxdepth 1 ! -name move.json -exec rm -rf -- {} + && "
+                          "tar --exclude=move.json --exclude=./move.json -xzf /tmp/pl_state.tgz -C /data")
+                state_helper = staged.enter_context(self.helper(script, writable=True))
+                self.command("cp", str(state_archive), f"{state_helper}:/tmp/pl_state.tgz")
+            self._restore_space(safety_dir, state=state_archive is not None)
             self.log(f"==> Dropping + recreating {self.db}...")
             up._flush_output()
             destructive = True
@@ -378,20 +415,14 @@ class DockerBank:
             self.psql("postgres", "-v", "ON_ERROR_STOP=1", "-c", f"REVOKE CONNECT ON DATABASE {database} FROM PUBLIC")
             # Separate decompression from psql: POSIX sh has no pipefail, so
             # a failed gunzip must not look like a successful empty restore.
-            sql_tmp = remote + ".sql"
             try:
-                self.command("exec", self.pg, "sh", "-c", 'gunzip -c "$1" > "$2"', "_", remote, sql_tmp)
                 self.psql(self.db, "-q", "-v", "ON_ERROR_STOP=1", "-f", sql_tmp)
             finally:
                 self.command("exec", self.pg, "rm", "-f", sql_tmp, check=False, timeout=120)
             if state_archive is not None:
                 # Preserve an active move gate throughout replay: restoring an
                 # archive must never reopen a quiesced target behind move's back.
-                script = ("find /data -mindepth 1 -maxdepth 1 ! -name move.json -exec rm -rf -- {} + && "
-                          "tar --exclude=move.json --exclude=./move.json -xzf /tmp/pl_state.tgz -C /data")
-                with self.helper(script, writable=True) as helper:
-                    self.command("cp", str(state_archive), f"{helper}:/tmp/pl_state.tgz")
-                    self.command("start", "-a", helper)
+                self.command("start", "-a", state_helper)
             if not leave_stopped:
                 self.command("start", self.daemon)
                 self.wait_ready()
@@ -418,4 +449,5 @@ class DockerBank:
                                      f"Recover with {_shell_command(argv)}") from exc
             raise
         finally:
-            self.command("exec", self.pg, "rm", "-f", remote, check=False, timeout=120)
+            staged.close()
+            self.command("exec", self.pg, "rm", "-f", remote, sql_tmp, check=False, timeout=120)
