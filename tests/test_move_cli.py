@@ -2309,6 +2309,29 @@ def test_an_unobserved_restore_outcome_never_restarts_a_second_bank_copy(tmp_pat
     assert not world.overlap
 
 
+def test_real_runner_timeout_after_restore_never_restarts_a_second_copy(tmp_path, monkeypatch):
+    world = World()
+
+    class RestoreTimeoutRunner(FakeRunner):
+        def run(self, argv, **kwargs):
+            if argv[0] == "ssh" and "bash ops/restore.sh" in argv[-1]:
+                world.remote(argv[-1], kwargs.get("stdin"))
+
+                def timed_out(*args, **options):
+                    raise move_cli.subprocess.TimeoutExpired(args[0], options["timeout"])
+
+                with monkeypatch.context() as patch:
+                    patch.setattr(move_cli.subprocess, "run", timed_out)
+                    return move_cli.Runner().run(argv, **kwargs)
+            return super().run(argv, **kwargs)
+
+    move = mover(world, tmp_path)
+    move.runner = RestoreTimeoutRunner(world)
+    assert move.run() == 1
+    assert world.source_running and not world.target_running
+    assert "/data/move.json" in world.data_files and not world.overlap
+
+
 # ── the manual rollback lists only what is needed ───────────────────────────
 
 def test_the_recorded_manual_rollback_follows_the_progress(tmp_path):
