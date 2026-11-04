@@ -332,7 +332,7 @@ async fn work(
         }
         say(&format!(
             "lease: board skipped: {}; waiting on the local lock for {} alone (not FIFO)",
-            skipped.unwrap_or_else(|| "None".into()),
+            skipped.as_deref().unwrap_or("None"),
             repr(name)
         ));
     }
@@ -346,6 +346,14 @@ async fn work(
         .map_err(|e| {
             RunError::CannotRun(126, format!("lease: cannot run {}: {e}", args.command[0]))
         })?;
+    if renewer.is_none() {
+        let code = exit_status(status);
+        say(&format!(
+            "lease: LOCAL LOCK ONLY: command exited {code}; board lease was not acquired for {} ({}).",
+            repr(name),
+            skipped.as_deref().unwrap_or("None")
+        ));
+    }
     Ok(exit_status(status))
 }
 pub async fn run(args: Args) -> i32 {
