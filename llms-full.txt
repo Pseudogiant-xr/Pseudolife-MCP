@@ -12312,14 +12312,18 @@ Target artifacts and safety backups must stay outside mounted bank directories
 and, for installed-CLI restore, outside checkouts. `--target-work-dir <directory>`
 selects another target artifact root when a custom bind mount overlaps the
 default location. Per-attempt restore safety pairs are kept under its `safety`
-directory. A checkout target must advertise stopped handover support from its
+directory. `--target-checkout` and `--target-work-dir` must be absolute target
+paths or begin with `~/`. A checkout target must advertise stopped handover support from its
 own `ops/update.py`; update that checkout and its CLI dependencies if preflight
 names this requirement. For a source authenticated only by stored principals,
 set `PSEUDOLIFE_MCP_TOKEN_FILE` to an existing private source token file. Move
 checks the candidate against active source principals before changing anything,
 sends it through ssh stdin to a private temporary target file for the updater's
 authenticated read, and removes that file after the attempt. It never recovers
-plaintext from the database. Repeat the original target-mode, file and work-directory flags when
+plaintext from the database. Under checkout `--no-keep-tokens`, the target's
+`ops/.env` must explicitly declare its existing `PSEUDOLIFE_MCP_TOKEN` or
+`PSEUDOLIFE_MCP_TOKENS` setting. Empty declarations remain valid for stored
+principals. Repeat the original target-mode, file and work-directory flags when
 using `--resume`.
 
 A resume marker is bound to the selected database/storage, rather than granting
