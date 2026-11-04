@@ -1,7 +1,7 @@
 """``pseudolife-mcp move``: move this host's Docker-tier bank to another host.
 
     pseudolife-mcp move --to <ssh-target> [--target-checkout PATH]
-        [--target-url URL] [--no-keep-tokens] [--resume]
+        [--target-url URL] [--expose-target] [--no-keep-tokens] [--resume]
         [--dry-run] [--yes] [--json]
 
 Run on the source host, a Docker-tier daemon. The target is a Docker-tier
@@ -12,12 +12,13 @@ nothing ever types a password). The order:
 1. **Preflight, no changes.** The source is healthy, Docker tier and reports
    its bank fingerprint; ssh works; the target checkout exists; the target
    daemon is healthy, its schema is at least the source's, its fingerprint
-   differs, and its bank is empty (no entries, facts or principals), unless
+   differs, and its bank has no user data in any table, unless
    ``--resume`` names this move's half-restored bank by its marker. The
    target URL is ``--target-url``, else the target's ``expose status``.
 2. **Plan and confirm** (``--dry-run`` stops after the plan; a run that is
    not interactive needs ``--yes``).
-3. **Expose the target** when it is not exposed, and check this host
+3. **Expose the target** when it is not exposed, with separate consent
+   (``--expose-target`` or its own interactive question), and check this host
    reaches ``<target-url>/health``.
 4. **Stop the source daemon** (``docker stop -t 120``, never ``rm``), after
    pausing the target's unattended update and restart policy (either could
@@ -55,7 +56,8 @@ nothing ever types a password). The order:
     leases, undelivered mail, the source leftovers to retire, and what the
     state archive replaced on the target.
 
-A failure in steps 4-9, or SIGTERM / SIGHUP / Ctrl-C, rolls back in a fixed
+A failure in steps 3-9, or SIGTERM / SIGHUP / Ctrl-C, removes any target
+serve this move created, then rolls back in a fixed
 order (Ctrl-C is ignored while it runs): stop the target daemon if it was
 started (and put its ``/data/move.json`` back); restore the target's
 ``ops/.env``, unattended update and restart policy; lift the database
@@ -115,6 +117,55 @@ SSH_OPTS = ("ssh", "-o", "BatchMode=yes", "-o", "ServerAliveInterval=15", "-o", 
 # What ops/restore.sh prints just before it drops the database it replaces.
 RESTORE_BOUNDARY = "==> Dropping + recreating"
 BANK_ID_SQL ="SELECT value FROM meta WHERE key = 'coordination_bank_id'"
+# Only known fresh-bank seed rows may be replaced. Unknown meta keys carry
+# user state, so future keys are protected without a client update.
+EMPTY_TARGET_META_KEYS = ("schema_version", "coordination_bank_id", "maintainer_secret_v1",
+                          "dream_ack_secret_v1", "flat_band_migration_v1", "curation_listing_spelling_v2",
+                          "writer_lease_epoch", "coordination_hlc_highwater")
+_STATE_SAFETY_CHECK = """import gzip, os, shutil, sys, tarfile
+with gzip.open(sys.argv[1], 'rb') as source, open(os.devnull, 'wb') as sink:
+    shutil.copyfileobj(source, sink)
+with tarfile.open(sys.argv[1], 'r:gz') as archive:
+    archive.getmembers()
+"""
+_EXPOSE_TARGET = """# move expose tailscale: retain ownership even if ssh loses the reply
+import fcntl, json, os, subprocess, sys
+request = json.load(sys.stdin)
+receipt = os.path.expanduser(request['receipt'])
+directory = os.path.dirname(receipt)
+os.makedirs(directory, mode=0o700, exist_ok=True)
+os.chmod(directory, 0o700)
+def save(ownership):
+    temporary = receipt + '.tmp'
+    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, 'w') as output:
+        json.dump({'move_id': request['move_id'], 'attempt': request['attempt'], 'ownership': ownership}, output)
+        output.flush()
+        os.fsync(output.fileno())
+    os.replace(temporary, receipt)
+with open(os.path.join(os.path.dirname(directory), '.move-expose.lock'), 'a') as lock:
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        save('absent')
+        sys.stderr.write('another move is exposing this target; retry after it finishes\\n')
+        sys.exit(4)
+    save('pending')
+    result = subprocess.run([sys.executable, '-m', 'pseudolife_memory.cli', 'expose', 'tailscale', '--yes', '--json'],
+                            cwd=os.path.expanduser(request['checkout']), capture_output=True, text=True)
+    try:
+        reply = json.loads(result.stdout)
+    except ValueError:
+        reply = {}
+    state = reply.get('state') if isinstance(reply, dict) else None
+    ownership = ('owned' if result.returncode == 0 and state == 'exposed' else
+                 'borrowed' if state == 'already_exposed' else
+                 'absent' if result.returncode in (2, 4) else 'unknown')
+    save(ownership)
+    sys.stdout.write(result.stdout)
+    sys.stderr.write(result.stderr)
+sys.exit(result.returncode)
+"""
 # Where a client on the target may hold a token (``grep -lsF`` reads the
 # tokens from stdin; a path that does not exist is skipped).
 TARGET_CLIENT_FILES = ("~/.pseudolife-mcp/*.token", "~/.claude.json", "~/.claude/settings.json",
@@ -199,7 +250,9 @@ class Runner:
             else:
                 kwargs["stdout"] = subprocess.PIPE
             proc = subprocess.run(argv, stderr=subprocess.PIPE, timeout=timeout, check=False, **kwargs)
-        except (OSError, subprocess.TimeoutExpired) as exc:
+        except subprocess.TimeoutExpired:
+            return Result(124, b"", f"command timed out after {timeout}s; its outcome is unknown".encode())
+        except OSError as exc:
             return Result(1, b"", f"{type(exc).__name__}: {exc}".encode("utf-8", "replace"))
         finally:
             for handle in handles:
@@ -446,6 +499,7 @@ class Options:
     target: str
     checkout: str = DEFAULT_CHECKOUT
     target_url: str | None = None
+    expose_target: bool = False
     keep_tokens: bool = True
     resume: bool = False
     dry_run: bool = False
@@ -473,6 +527,7 @@ class MoveInterrupted(BaseException):
 # What the rollback must undo, in the order the move sets them; each flip
 # is written to the move record with the manual rollback beside it.
 FLAGS = ("target_timer_paused", "target_policy_paused", "schedule_paused", "source_stopped", "fenced",
+         "target_quiesced", "exposed_now", "expose_pending",
          "marker_written", "target_restored", "gate_written", "env_backup", "env_written", "target_started",
          "source_policy_changed", "moved_written")
 
@@ -518,6 +573,7 @@ class Mover:
         self.target_timer_enabled = False
         self.target_db, self.target_user = "pseudolife_memory", "pseudolife"
         self.target_url: str | None = None
+        self.expose_attempt: str | None = None
         self.needs_expose = False
         self.sizes: dict = {"database": None, "data": None}
         self.stored_principals: list[str] = []
@@ -527,7 +583,6 @@ class Mover:
         self.board = {"leases": None, "mail": None}
         for flag in FLAGS:
             setattr(self, flag, None if flag == "env_backup" else False)
-        self.exposed_now = False
         self.data = {"move_id": self.move_id, "dry_run": options.dry_run, "source": {}, "target": {},
                      "plan": [], "steps": [], "rollback": [], "report": {}, "connect": None,
                      "warnings": [], "error": None, "exit": None}
@@ -603,6 +658,10 @@ class Mover:
     @property
     def env_path(self) -> str:
         return f"{self.checkout}/ops/.env"
+
+    @property
+    def exposure_receipt(self) -> str:
+        return f"{self.remote_dir}/expose.json"
 
     def mark(self, **flags) -> None:
         """Flip progress flags and write them to the move record at once:
@@ -694,6 +753,15 @@ class Mover:
         if not result.ok:
             raise self.refuse(f"the target must be a Linux or macOS Docker-tier checkout host: its login shell "
                               f"is POSIX and curl, python3 and docker are on PATH there (exit {result.code})")
+        # Inspect existing resources before suggesting a fresh install: a
+        # foreign stack without a clone would collide with the installer.
+        target = self.inspect_target(DAEMON)
+        if target is None:
+            if self.inspect_target(POSTGRES) is not None:
+                self.check_target_stack({})
+            raise self.refuse(f"the target has no {DAEMON} container: run the "
+                              f"installer there first ({INSTALL_LINE})")
+        self.check_target_stack(target)
         co = rq(self.checkout)
         result = self.ssh(f"test -f {co}/ops/restore.sh && test -f {co}/ops/update.sh && "
                           f"test -f {co}/ops/docker-compose.yml", timeout=60)
@@ -704,12 +772,7 @@ class Mover:
         if not result.ok:
             raise self.refuse(f"the target checkout's ops/restore.sh has no --no-start: update the checkout "
                               f"on {o.target} (git pull) and retry")
-        result = self.ssh(f"docker inspect --type container {DAEMON}", timeout=60)
-        target = _container(result.text) if result.ok else None
-        if target is None:
-            raise self.refuse(f"the target has no {DAEMON} container ({result.why(out=False)}): run the "
-                              f"installer there first ({INSTALL_LINE})")
-        self.check_target_stack(target)
+        self.target_was_running = bool((target.get("State") or {}).get("Running"))
         self.target_image = str((target.get("Config") or {}).get("Image") or "")
         self.target_policy = _restart_policy(target)
         target_env = _env_of(target)
@@ -751,6 +814,21 @@ class Mover:
                                "restart_policy": self.target_policy,
                                "unattended_update": self.target_timer_enabled}
 
+    def inspect_target(self, name: str) -> dict | None:
+        """Only a successful exact-name listing can prove absence."""
+        result = self.ssh(f"docker inspect --type container {name}", timeout=60)
+        container = _container(result.text) if result.ok else None
+        if container is not None:
+            return container
+        if not result.ok:
+            listing = self.ssh(f"docker ps -a --filter {shlex.quote('name=^/' + name + '$')} "
+                               "--format '{{.Names}}'", timeout=60)
+            if listing.ok and not listing.text.strip():
+                return None
+        cause = result.why(out=False) if not result.ok else "Docker returned invalid container JSON"
+        raise self.refuse(f"could not inspect the target's {name} ({cause}): verify Docker is running and "
+                          "the ssh user can run docker ps -a, then retry move --dry-run")
+
     def check_target_stack(self, daemon: dict) -> None:
         """The checkout used by restore/update must own both containers.
 
@@ -759,8 +837,7 @@ class Mover:
         the target so a symlink to the owning checkout is legitimate.
         Overlays and explicit volume names do not change ownership.
         """
-        result = self.ssh(f"docker inspect --type container {POSTGRES}", timeout=60)
-        postgres = _container(result.text) if result.ok else None
+        postgres = self.inspect_target(POSTGRES)
         labels = [(c.get("Config") or {}).get("Labels") or {} for c in (daemon, postgres or {})]
         fix = ("Retry with --target-checkout pointing to the checkout that owns both containers. "
                "For a stack managed elsewhere, first back up that bank, use its stack manager to "
@@ -806,6 +883,7 @@ class Mover:
     def check_target_bank(self) -> None:
         """The target bank is empty, or (``--resume``) a marker on the target
         names a move this host started from this bank."""
+        refuse = self.refuse if not self.recording else MoveError
         if self.o.resume:
             markers = self.target_markers()
             if not markers:
@@ -823,27 +901,52 @@ class Mover:
             named = ", ".join(f"{m.get('move_id')!r} from bank {m.get('source_bank')!r}" for m in markers)
             raise self.refuse(f"the target's move markers name {named}, none of them a move this host started "
                               f"from this bank: --resume overwrites only this move's own half-restored bank")
-        result = self.psql_remote("SELECT relname FROM pg_class WHERE relkind = 'r' AND relnamespace = "
-                                  "'public'::regnamespace AND relname IN ('entries', 'facts', 'principals') "
-                                  "ORDER BY 1")
+        result = self.psql_remote("SELECT coalesce(json_agg(relname ORDER BY relname), '[]'::json) "
+                                  "FROM pg_class WHERE relkind IN ('r', 'p') AND relnamespace = "
+                                  "'public'::regnamespace")
         if not result.ok:
-            raise self.refuse(f"could not read the target bank ({result.why()})")
-        tables = [line.strip() for line in result.text.splitlines() if line.strip()]
+            raise refuse(f"could not read the target bank ({result.why()}); check the target's PostgreSQL "
+                         "logs and retry")
+        try:
+            tables = json.loads(result.text)
+        except ValueError:
+            tables = None
+        if not isinstance(tables, list) or not all(isinstance(t, str) and t for t in tables):
+            raise refuse("could not enumerate the target bank's tables: check the target's "
+                         "PostgreSQL logs and retry")
         counts = {}
         if tables:
-            result = self.psql_remote("SELECT " + ", ".join(f"(SELECT count(*) FROM {t})" for t in tables))
+            # Quote identifiers from the catalog, including extension tables;
+            # no table name can become SQL or an extra psql output row.
+            filters = {
+                "meta": " WHERE key NOT IN (" + ", ".join(_lit(k) for k in EMPTY_TARGET_META_KEYS)
+                        + ") AND right(key, 15) <> '_schema_version'",
+                "relations": " WHERE NOT builtin",
+                "maintainer_bootstrap": " WHERE used_at IS NOT NULL OR credential_id IS NOT NULL",
+                "cms_counters": " WHERE interaction_count <> 0 OR logical_turn_count <> 0 OR tier_queries <> 0 "
+                                "OR EXISTS (SELECT 1 FROM jsonb_each(tier_hits) WHERE value <> '0'::jsonb) "
+                                "OR EXISTS (SELECT 1 FROM jsonb_each(surprise_history) WHERE value <> '[]'::jsonb) "
+                                "OR consolidation_events <> '[]'::jsonb",
+            }
+            result = self.psql_remote("SELECT " + ", ".join(
+                '(SELECT count(*) FROM public."' + t.replace('"', '""') + '"'
+                + filters.get(t, "") + ")" for t in tables))
             row = _rows(result.text)[0] if result.ok and _rows(result.text) else []
             if len(row) != len(tables):
-                raise self.refuse(f"could not count the target bank's rows ({result.why()})")
+                raise refuse(f"could not count the target bank's rows ({result.why()}); check the target's "
+                             "PostgreSQL logs and retry")
             counts = dict(zip(tables, (int(value) if value.strip().isdigit() else -1 for value in row)))
         used = {table: n for table, n in counts.items() if n != 0}
         if used:
             listed = ", ".join(f"{table} {n}" for table, n in used.items())
             markers = self.target_markers()
             hint = (f"; it carries a move marker (move {markers[0].get('move_id')}), so if this host started that "
-                    f"move, retry with --resume") if markers else ""
-            raise self.refuse(f"the target bank is not empty ({listed}): move never merges into or "
-                              f"overwrites a used bank{hint}")
+                    f"move, retry with --resume") if markers else (
+                    "; back up and remove that bank before retrying, or install a fresh target with distinct "
+                    "PSEUDOLIFE_BANK_VOLUME and PSEUDOLIFE_STATE_VOLUME names; use pseudolife-mcp export / "
+                    "import to merge knowledge instead")
+            raise refuse(f"the target bank is not empty ({listed}): move never merges into or "
+                         f"overwrites a used bank{hint}")
 
     def target_markers(self) -> list[dict]:
         """Every move marker on the target (one JSON object per line); exit 1
@@ -875,6 +978,19 @@ class Mover:
             self.target_url = url
         elif state == "not-exposed":
             self.needs_expose = True
+            if self.o.resume:
+                # expose requires a healthy local daemon. Resolve its future
+                # URL without creating the serve while the target is gated.
+                from ipaddress import IPv4Address
+                result = self.ssh("tailscale ip -4", timeout=60)
+                try:
+                    ip = IPv4Address(result.text.strip()) if result.ok else None
+                except ValueError:
+                    ip = None
+                if ip is None:
+                    raise self.refuse("the resumed target has no readable Tailscale IPv4 address: "
+                                      "pass --target-url <an existing reachable URL> and retry")
+                self.target_url = f"http://{ip}:8765"
         else:
             raise self.refuse(f"could not read the target's exposure (`pseudolife-mcp expose status` there: "
                               f"{result.why()}); pass --target-url <the URL clients will use>, or update the "
@@ -958,9 +1074,10 @@ class Mover:
             f"target: {o.target}, checkout {self.checkout}"
             + (f" (--resume: over move {self.move_id}'s half-restored bank)" if o.resume else ""),
             f"target URL: {url}" if url else
-            "target URL: not exposed yet; step 3 runs `pseudolife-mcp expose tailscale --yes` there",
+            "target URL: not exposed yet; step 3 needs --expose-target or separate interactive consent",
             "1. preflight: done, nothing changed",
-            ("3. expose the target (pseudolife-mcp expose tailscale --yes on the target), then check this host "
+            ("3. expose the target with separate consent (pseudolife-mcp expose tailscale --yes on the target), "
+             "then check this host "
              "reaches <its URL>/health") if self.needs_expose else
             (f"3. the target daemon is stopped (--resume): {url}/health is checked after step 9 starts it"
              if o.resume else f"3. check this host reaches {url}/health"),
@@ -984,7 +1101,8 @@ class Mover:
             f"write {MOVED} into it",
             f"10. re-point this machine's clients: pseudolife-mcp connect {url or '<target URL>'} --yes",
             "11. report: the rollback, other machines' connect lines, held leases, undelivered mail, leftovers",
-            "a failure in steps 4-9 rolls back: target stopped, its ops/.env and schedule restored, the fence "
+            "a failure in steps 3-9 rolls back: new target exposure removed, target stopped, its ops/.env and "
+            "schedule restored, the fence "
             f"lifted, {MOVED} removed, the source's restart policy and schedule restored, the source started",
             "run it under tmux, screen or nohup: a closed terminal or a kill signal rolls the move back",
         ]
@@ -994,6 +1112,14 @@ class Mover:
             self.say(f"  {line}")
 
     def confirm(self) -> None:
+        if self.needs_expose and not self.o.expose_target:
+            if self.o.yes or not self.interactive():
+                raise self.refuse("creating a persistent target tailnet serve needs separate consent: "
+                                  "pass --expose-target, or --target-url <an existing reachable URL>; "
+                                  "--yes confirms only the bank move")
+            if not self.ask("Create a persistent Tailscale serve on the target for this bank? [y/N] "):
+                raise MoveError("target exposure was not confirmed; pass --target-url <an existing reachable "
+                                "URL> to move without creating a serve. Nothing was changed", EXIT_USAGE)
         if self.o.yes:
             return
         if not self.interactive():
@@ -1018,6 +1144,10 @@ class Mover:
                       "target_url": self.target_url, "source_bank": self.source_bank, "state": state,
                       "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                       "flags": {flag: getattr(self, flag) for flag in FLAGS},
+                      "target_state_backup": self.data.get("target", {}).get("state_backup"),
+                      "target_exposure_receipt": self.exposure_receipt if self.expose_pending or self.exposed_now
+                                                 else None,
+                      "target_exposure_attempt": self.expose_attempt,
                       "manual_rollback": self.manual_rollback()}
             temporary = self.local_dir / "record.json.tmp"
             temporary.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
@@ -1053,8 +1183,6 @@ class Mover:
     def execute(self) -> int:
         self.recording = True
         self.write_record("started")
-        self.expose_and_reach()
-        self.phase_code = EXIT_FAILED
         previous = {}
         for sig in _SIGNALS:
             if sig is signal.SIGINT:
@@ -1065,6 +1193,8 @@ class Mover:
                 pass
         try:
             try:
+                self.expose_and_reach()
+                self.phase_code = EXIT_FAILED
                 self.write_record("moving")
                 self.stop_source()
                 self.final_backup()
@@ -1084,9 +1214,11 @@ class Mover:
                     self.in_rollback = False
                     self._restore_signals(ignored)
                 if complete:
-                    raise MoveError(f"{reason}. Rolled back: the source daemon runs again and the target is "
-                                    f"stopped; the target keeps its move marker, so `move --resume` may overwrite "
-                                    f"that half-restored bank on the next attempt", EXIT_FAILED) from None
+                    target_note = ("the target is stopped and keeps its move marker, so `move --resume` may "
+                                   "overwrite that half-restored bank on the next attempt" if self.target_restored
+                                   else "the target's original bank was preserved")
+                    raise MoveError(f"{reason}. Rolled back: the source daemon runs again; {target_note}",
+                                    self.phase_code) from None
                 left = "; ".join(f"{s['step']}" + (f" ({s['detail'][:200]})" if s.get("detail") else "")
                                  for s in self.data["rollback"] if not s.get("ok"))
                 raise MoveError(f"{reason}. The rollback is INCOMPLETE: {left}. See the rollback steps, and the move "
@@ -1107,17 +1239,46 @@ class Mover:
             code = EXIT_PARTIAL
         return code
 
-    def expose_and_reach(self) -> None:
+    def settle_exposure(self) -> bool:
+        """Only a remote creation result establishes ownership; intent cannot."""
+        result = self.ssh(f"cat {rq(self.exposure_receipt)}", timeout=60)
+        try:
+            receipt = json.loads(result.text) if result.ok else None
+        except ValueError:
+            receipt = None
+        if (not isinstance(receipt, dict) or receipt.get("move_id") != self.move_id or not self.expose_attempt
+                or receipt.get("attempt") != self.expose_attempt):
+            return False
+        ownership = receipt.get("ownership")
+        if ownership not in ("owned", "borrowed", "absent"):
+            return False
+        self.mark(expose_pending=False, exposed_now=ownership == "owned")
+        return True
+
+    def expose_and_reach(self, *, after_start: bool = False) -> None:
         o = self.o
+        if o.resume and self.needs_expose and not after_start:
+            self.step("--resume: target exposure waits until its daemon has started")
+            return
         if self.needs_expose:
             self.step(f"exposing the target: pseudolife-mcp expose tailscale --yes on {o.target}")
-            result = self.ssh(f"cd {rq(self.checkout)} && python3 -m pseudolife_memory.cli expose tailscale "
-                              f"--yes --json", timeout=300)
+            # Intent and ownership are separate: the remote receipt survives
+            # a lost ssh reply and distinguishes a new serve from a no-op.
+            self.expose_attempt = secrets.token_hex(8)
+            self.mark(expose_pending=True)
+            request = {"move_id": self.move_id, "attempt": self.expose_attempt,
+                       "checkout": self.checkout, "receipt": self.exposure_receipt}
+            result = self.ssh(f"python3 -c {shlex.quote(_EXPOSE_TARGET)}",
+                              stdin=json.dumps(request).encode(), timeout=300)
+            if not self.settle_exposure():
+                raise MoveError("could not attribute the target serve to this move; inspect "
+                                f"{self.exposure_receipt} and pseudolife-mcp expose status on {o.target} "
+                                "before removing any forward", EXIT_REFUSED)
             if not result.ok:
                 raise MoveError(f"`pseudolife-mcp expose tailscale` on {o.target} failed (exit {result.code}: "
-                                f"{result.why()}). Fix that there and retry; nothing was changed and the source "
-                                f"still runs", EXIT_REFUSED)
-            self.exposed_now = True
+                                f"{result.why()}). Configure Tailscale there and retry, or pass "
+                                f"--target-url <the reachable URL clients will use> to use another connection. "
+                                f"The source still runs", EXIT_REFUSED)
             state, url = parse_expose_status(result.text)
             if state != "exposed":
                 again = self.ssh(f"cd {rq(self.checkout)} && python3 -m pseudolife_memory.cli expose status "
@@ -1133,11 +1294,9 @@ class Mover:
             return
         health = self.runner.get_json(f"{self.target_url}/health", timeout=10.0)
         if not isinstance(health, dict) or health.get("status") != "ok":
-            undo = (f" The target stays exposed (`pseudolife-mcp expose off` on {o.target} undoes it)."
-                    if self.exposed_now else "")
             raise MoveError(f"this host cannot reach {self.target_url}/health: the URL clients will use must "
                             f"answer from here before the source stops. Nothing in either bank was changed; "
-                            f"the source still runs.{undo}", EXIT_REFUSED)
+                            f"the source still runs", EXIT_REFUSED)
         self.step(f"this host reaches {self.target_url}/health")
 
     def stop_source(self) -> None:
@@ -1274,6 +1433,35 @@ class Mover:
                         stdin=(json.dumps(gate) + "\n").encode("utf-8"), timeout=300)
 
     def restore_target(self) -> None:
+        # The preflight snapshot can become stale while the operator reads
+        # the plan or the source is copied. Stop the target's writer before
+        # its safety dump, then check again before replacing anything.
+        self.mark(target_quiesced=self.target_was_running)
+        result = self.ssh(f"docker stop {DAEMON}", timeout=300)
+        if not result.ok:
+            raise MoveError(f"could not stop the target before the final emptiness check ({result.why()})")
+        result = self.ssh(f"docker inspect -f '{{{{.State.Running}}}}' {DAEMON}", timeout=60)
+        if not result.ok or result.text.strip() != "false":
+            raise MoveError("the target is still running: stop it before retrying move")
+        if not self.o.resume:
+            self.check_target_bank()
+        # restore.sh's safety backup uses docker exec for /data, which
+        # cannot run in this quiesced daemon. Keep a verified archive of the
+        # original state through a helper before restore can replace it.
+        snapshot = f"{self.remote_dir}/target-original-state.tgz"
+        partial = snapshot + ".part"
+        result = self.ssh(f"if [ ! -f {rq(snapshot)} ]; then "
+                          f"docker run --rm --entrypoint tar --volumes-from {DAEMON} "
+                          f"{shlex.quote(self.target_image)} czf - -C /data . > {rq(partial)} && "
+                          f"python3 -c {shlex.quote(_STATE_SAFETY_CHECK)} {rq(partial)} && "
+                          f"mv -f {rq(partial)} {rq(snapshot)} || exit 1; fi; "
+                          f"python3 -c {shlex.quote(_STATE_SAFETY_CHECK)} {rq(snapshot)}", timeout=_TIMEOUT_LONG)
+        if not result.ok:
+            raise MoveError(f"could not verify the target's state safety archive ({result.why()}); "
+                            "the target's original bank and state were not replaced")
+        self.data["target"]["state_backup"] = snapshot
+        self.write_record(self.state)
+        self.step(f"the target's original state safety archive is {snapshot}")
         marker = {"move_id": self.move_id, "source_bank": self.source_bank,
                   "written_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
         self.mark(marker_written=True)
@@ -1296,7 +1484,10 @@ class Mover:
                           f"{rq(dump)} --state-archive {rq(state)} --db {shlex.quote(self.target_db)} "
                           f"--user {shlex.quote(self.target_user)}", timeout=_TIMEOUT_LONG)
         if not result.ok:
-            if RESTORE_BOUNDARY not in result.text:
+            # A timeout or killed transport may discard stdout after DROP.
+            # Only a completed, ordinary command failure can prove the
+            # boundary was never reached; unknown outcomes stay gated.
+            if 0 < result.code < 128 and result.code != 124 and RESTORE_BOUNDARY not in result.text:
                 self.mark(target_restored=False)
             raise MoveError(f"ops/restore.sh on the target failed ({result.why()})"
                             + ("" if self.target_restored else "; the target's own bank was not touched"))
@@ -1457,6 +1648,8 @@ class Mover:
         result = self.ssh(f"cd {rq(self.checkout)} && bash ops/update.sh", timeout=_TIMEOUT_LONG)
         if not result.ok:
             raise MoveError(f"ops/update.sh on the target failed ({result.why()})")
+        if self.o.resume and self.needs_expose:
+            self.expose_and_reach(after_start=True)
         bank = self.wait_target()
         if bank != self.source_bank:
             raise MoveError(f"the target reports bank {bank}, not this bank's {self.source_bank}: it is not "
@@ -1527,6 +1720,21 @@ class Mover:
 
         self.say("==> rolling back")
         complete, can_start, gate_missing = True, True, False
+        if self.expose_pending:
+            def resolve_exposure():
+                if self.settle_exposure():
+                    return Result(0)
+                return Result(1, err=(f"ownership unknown: inspect {self.exposure_receipt} and run "
+                                      f"pseudolife-mcp expose status on {self.o.target}; "
+                                      "no unowned serve was removed").encode())
+            complete = attempt("resolve the target exposure ownership", resolve_exposure)
+        if self.exposed_now:
+            if attempt("undo the target expose (pseudolife-mcp expose off --yes)",
+                       lambda: self.ssh(f"cd {rq(self.checkout)} && python3 -m pseudolife_memory.cli "
+                                        "expose off --yes --json", timeout=300)):
+                self.mark(exposed_now=False)
+            else:
+                complete = False
 
         def blocked(reason: str) -> bool:
             log.append({"step": "the source stays stopped: two daemons must never serve one bank", "ok": False,
@@ -1636,6 +1844,12 @@ class Mover:
                 log.append({"step": "the source stays stopped", "ok": False,
                             "detail": "it cannot start while the fence or moved.json is in place; finish those by "
                                       f"hand, then: docker start {DAEMON}"})
+        if self.target_quiesced and not self.target_restored:
+            if attempt("restart the target's original bank",
+                       lambda: self.ssh(f"docker start {DAEMON}", timeout=300)):
+                self.mark(target_quiesced=False)
+            else:
+                complete = False
         return complete
 
     def manual_rollback(self) -> list[str]:
@@ -1668,8 +1882,15 @@ class Mover:
             lines.append(" ".join(self._schedule_argv(enable=True)))
         if self.source_stopped:
             lines.append(f"docker start {DAEMON}")
+        if self.target_quiesced and not self.target_restored:
+            lines.append(f"ssh {t} docker start {DAEMON}")
         if self.moved_written:
             lines.append(f"pseudolife-mcp connect {SOURCE_URL} --yes")
+        if self.exposed_now:
+            lines.append(f'ssh {t} "cd {rq(self.checkout)} && python3 -m pseudolife_memory.cli expose off --yes"')
+        elif self.expose_pending:
+            lines.append(f"ssh {t} cat {rq(self.exposure_receipt)}")
+            lines.append(f'ssh {t} "cd {rq(self.checkout)} && python3 -m pseudolife_memory.cli expose status --json"')
         return lines
 
     # -- 10. re-point --------------------------------------------------------
@@ -1736,6 +1957,9 @@ class Mover:
                             "coordination-recovery rebind (docs/guide/coordination-recovery.md)")}
         notes = [f"the source is stopped and fenced, not deleted; the final backup stays in {self.local_dir}, "
                  f"and the target's copy in {o.target}:{self.remote_dir}"]
+        if self.data["target"].get("state_backup"):
+            notes.append(f"the target's original /data safety archive is "
+                         f"{o.target}:{self.data['target']['state_backup']}")
         if o.keep_tokens:
             using = (f"; these files on {o.target} held it and need re-pointing there (move did not rewrite them): "
                      f"{', '.join(self.target_registrations)}" if self.target_registrations else
@@ -1861,7 +2085,9 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--resume", action="store_true",
                         help="overwrite the half-restored bank an earlier attempt of this move left on the target")
     parser.add_argument("--dry-run", action="store_true", help="show the plan; change nothing")
-    parser.add_argument("--yes", action="store_true", help="move without asking")
+    parser.add_argument("--expose-target", action="store_true",
+                        help="consent to creating a persistent Tailscale serve on the target if needed")
+    parser.add_argument("--yes", action="store_true", help="confirm the bank move (exposure needs --expose-target)")
     parser.add_argument("--json", action="store_true", help="one JSON report on stdout")
     return parser
 
@@ -1880,6 +2106,7 @@ def main(argv: list[str] | None = None) -> int:
                   "query or credentials)", file=sys.stderr)
             return EXIT_USAGE
     options = Options(target=args.to, checkout=args.target_checkout, target_url=args.target_url,
+                      expose_target=args.expose_target,
                       keep_tokens=not args.no_keep_tokens, resume=args.resume, dry_run=args.dry_run,
                       yes=args.yes, as_json=args.json)
     if not args.to or args.to.startswith("-") or any(ch.isspace() for ch in args.to):

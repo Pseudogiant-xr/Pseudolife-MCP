@@ -1,0 +1,2 @@
+### Fixed (2026-11-04 — Update backs up the daemon's configured database)
+- Built-in update backups resolve the PostgreSQL role and database from the daemon container's runtime connection settings, including libpq's omitted-database defaults, instead of assuming the default bank or using cluster initialization settings. Opaque or foreign connection targets refuse before writing a backup or deploying, without printing credentials.
