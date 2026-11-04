@@ -415,6 +415,12 @@
       "fingerprint": "7fbfb546bd825bd1",
       "reason": "Retain installer ownership tests with the upstream UTF-8 fixture and Claude profile coverage in the existing Windows step; no new job, setup step or retry.",
       "workflow": "ci.yml"
+    },
+    {
+      "job": "test-lite-windows",
+      "fingerprint": "987e397aa179f20a",
+      "reason": "Forwards the reviewed move exposure consent and rollback selectors into the existing Windows pytest step; mocked external effects add no setup or process stress and retain measured lane cost.",
+      "workflow": "ci.yml"
     }
   ]
 }

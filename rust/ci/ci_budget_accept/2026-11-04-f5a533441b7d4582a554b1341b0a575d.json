@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "test-lite-windows",
+  "before": "731d6fea7bc2e679",
+  "fingerprint": "5280501b9e433401",
+  "reason": "Forward onto master c96ff52b retains its Windows lite selection plus the same two precheck data-only modules. New checks use data or mocks, with no added timing-sensitive cases or runtime work; retain the measured lite price for this combined definition."
+}

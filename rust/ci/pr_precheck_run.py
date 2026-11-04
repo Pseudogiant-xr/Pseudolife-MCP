@@ -15,7 +15,7 @@ import sys
 import time
 
 from judge_summary import receipt_details
-from pr_precheck import JUDGES, ROOT, ROWS
+from pr_precheck import JUDGES, POSTGRES_ROWS, ROOT, ROWS
 
 sys.path.insert(0, str(ROOT))
 
@@ -241,7 +241,7 @@ def run(plan: dict, candidate: Path, private: Path, public: Path, only="all") ->
         raise ValueError("unknown precheck group")
     private.mkdir(parents=True, exist_ok=False)
     platform = "windows" if os.name == "nt" else "linux"
-    fixture_rows = [row for row in plan[platform] if recorded_actions(row) or row == "test_login"]
+    fixture_rows = [row for row in plan[platform] if row in POSTGRES_ROWS or recorded_actions(row)]
     direct = [row for row in plan[platform] if row not in fixture_rows]
     recipes = {row: row_commands(row, candidate, private) for row in plan[platform]}
     phases = [phase for row in direct for phase, _, _ in recipes[row]]

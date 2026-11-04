@@ -75,9 +75,9 @@ def test_failures_do_not_skip_later_rows_or_judges(tmp_path, monkeypatch):
                 "failed_cases": [phase + "/case"] if phase in ("golden/doctor", "lease-headers") else [],
                 "seconds": 0, "diagnostic_errors": []}
     monkeypatch.setattr(replay, "execute", execute)
-    value = plan(linux=["doctor", "lease"], windows=["doctor", "lease"], judges=["lease-headers", "cli-argv"])
+    value = plan(linux=["doctor", "mail"], windows=["doctor", "mail"], judges=["lease-headers", "cli-argv"])
     assert replay.run(value, Path("candidate"), tmp_path / "private", tmp_path / "public") == 1
-    assert calls == ["golden/doctor", "golden/lease", "oracle-setup", "lease-check", "lease-headers", "cli-argv"]
+    assert calls == ["golden/doctor", "golden/mail", "oracle-setup", "lease-check", "lease-headers", "cli-argv"]
     summary = json.loads((tmp_path / "public/summary.json").read_text())
     assert summary["failed"] == ["golden/doctor", "lease-headers"] and summary["complete"] is True
     assert summary["phases"][0]["failed_cases"] == ["golden/doctor/case"]
@@ -109,7 +109,8 @@ def test_setup_failure_keeps_unrun_rows_visible_and_continues_independent_judges
     assert "private connection detail" not in text
 
 
-def test_test_login_prepares_the_pg_bundle_before_its_cluster_cases(tmp_path, monkeypatch):
+@pytest.mark.parametrize("row", ["lease", "lease_operator", "transfer", "maintainer", "invite", "test_login"])
+def test_bank_rows_prepare_owned_pg_before_their_existing_cases(tmp_path, monkeypatch, row):
     mock_summary_replace(monkeypatch)
     events = []
     @contextmanager
@@ -119,14 +120,14 @@ def test_test_login_prepares_the_pg_bundle_before_its_cluster_cases(tmp_path, mo
         events.append("pg-close")
     def execute(phase, *args, env=None, **kwargs):
         events.append(phase)
-        if phase == "golden/test_login":
+        if phase == f"golden/{row}":
             assert env == {"owned": "fixture"}
         return {"phase": phase, "exit_code": 0, "seconds": 0, "failed_cases": [], "diagnostic_errors": []}
     monkeypatch.setattr(replay, "golden_postgres", postgres)
     monkeypatch.setattr(replay, "execute", execute)
-    value = plan(linux=["test_login"], windows=["test_login"])
+    value = plan(linux=[row], windows=[row])
     assert replay.run(value, Path("candidate"), tmp_path / "private", tmp_path / "public") == 0
-    assert events == ["golden-lease-check", "pg-open", "golden/test_login", "pg-close"]
+    assert events == ["golden-lease-check", "pg-open", f"golden/{row}", "pg-close"]
 
 
 def test_owned_golden_fixture_does_not_inherit_a_configured_bank(tmp_path, monkeypatch):

@@ -36,6 +36,8 @@ Each change waits for hosted CI once, on its batch:
   differ, ignoring only recording clocks and arm metadata. The H5 rows use
   their existing record-then-golden action definitions and an owned
   PostgreSQL fixture, rather than replaying unused historical captures.
+  Lease, lease-operator, transfer, maintainer and invite also use that
+  owned fixture for their existing database-backed cases.
   Other rows compare with the committed goldens, so stale records fail on
   the PR before Nextest. The native candidate shares the Rust job's debug dependencies and
   the daemon it already built for PDF provisioning; Python dependencies

@@ -144,7 +144,8 @@ def test_lease_and_shared_cli_changes_select_their_frozen_judges():
     assert precheck.judges_for("rust/shim/src/main.rs", graph, owners) == precheck.JUDGES
 
 
-@pytest.mark.parametrize("row,full", [("doctor", False), ("transfer", True), ("test_login", True)])
+@pytest.mark.parametrize("row,full", [("doctor", False), ("transfer", True), ("test_login", True),
+                                    ("lease", True), ("lease_operator", True), ("maintainer", True), ("invite", True)])
 def test_scope_outputs_distinguish_light_and_seeder_runtimes(tmp_path, monkeypatch, row, full):
     value = {"schema": 1, "linux": [row], "windows": [row], "judges": []}
     monkeypatch.setattr(precheck, "select", lambda files: value)
