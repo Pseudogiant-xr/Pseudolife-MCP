@@ -39,9 +39,15 @@ def test_doctor_names_the_fix_for_matching_but_unapproved_handlers(cli, monkeypa
     monkeypatch.setattr(clients, "check_codex_hooks", lambda repo, **kwargs:
                         original(ROOT, **kwargs))
     line = doctor_cli._codex_hooks_line({})
-    assert line == ("current" if state == "current" else
-                    f"{state}: Run python ops/setup-codex-hooks.py "
-                    "--source plugin --trust ask, then start a new session.")
+    expected = {
+        "current": "current",
+        "needs-approval": ("needs-approval: Run python ops/setup-codex-hooks.py "
+                           "--source plugin --trust ask, then start a new session."),
+        "disabled": ("disabled: If you want these hooks enabled, enable the Pseudolife "
+                     "handlers in Codex /hooks, then start a new session."),
+        "unknown": "current" if global_hashes else "needs-approval",
+    }
+    assert line == expected[state]
     assert calls == ["hooks/list"]
 
 
@@ -68,3 +74,31 @@ def test_same_plugin_runtime_inventory_must_be_exact_and_duplicate_free(cli, mon
     monkeypatch.setattr(codex_connection, "codex", runtime)
     monkeypatch.setattr(clients, "codex_executable", lambda home: "fixture-codex")
     assert clients._codex_runtime_hook_status(cli.home / "codex", directory) == "unknown"
+
+
+@pytest.mark.parametrize("failure", ["missing-executable", "rpc-error", "not-loaded"])
+def test_unavailable_or_unloaded_runtime_does_not_offer_approval(cli, monkeypatch, failure):
+    _clone(cli)
+
+    class Runtime:
+        def rpc(self, method, params):
+            if failure == "rpc-error":
+                raise RuntimeError("fixture runtime unavailable")
+            return {"data": [{"errors": [], "hooks": []}]}
+
+    @contextmanager
+    def runtime(*args, **kwargs):
+        yield Runtime()
+
+    monkeypatch.setattr(codex_connection, "codex", runtime)
+    monkeypatch.setattr(clients, "codex_executable", lambda home:
+                        None if failure == "missing-executable" else "fixture-codex")
+    result = clients.check_codex_hooks(ROOT, verify_runtime=True)
+    if failure == "not-loaded":
+        assert result["state"] == "not-loaded"
+        assert result["detail"] == "Codex did not load the complete Pseudolife plugin hook set."
+        assert result["recovery"] == (
+            "Check that the Pseudolife plugin is installed and enabled in Codex's plugin "
+            "manager, then start a new session.")
+    else:
+        assert result["state"] == "current" and "recovery" not in result

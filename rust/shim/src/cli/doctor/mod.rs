@@ -583,13 +583,10 @@ async fn diagnose(args: &Args) -> Res<(Value, bool)> {
                         return Err(Defer);
                     }
                     let trust = super::update::clients::runtime_hook_status().await;
-                    if trust == "current" {
-                        trust.into()
-                    } else {
-                        format!(
-                            "{trust}: Run python ops/setup-codex-hooks.py --source plugin --trust ask, then start a new session."
-                        )
-                    }
+                    super::update::clients::runtime_hook_line(
+                        trust,
+                        checked["state"].as_str().unwrap_or("unknown"),
+                    )
                 }
             },
         };

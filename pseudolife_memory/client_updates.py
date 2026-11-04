@@ -1694,10 +1694,23 @@ def check_codex_hooks(repo: Path | None = None, daemon_digest: str | None = None
             if state == "current":
                 return {"state": "current", "source": "plugin", "changed_files": [],
                         "detail": "Codex's runtime enables and trusts every matching plugin handler."}
-            return {"state": state, "source": "plugin", "changed_files": [],
-                    "detail": "Codex's runtime hook trust differs from its matching script copy.",
-                    "recovery": ("Run python ops/setup-codex-hooks.py --source plugin --trust ask, "
-                                 "then start a new session.")}
+            advice = {
+                "needs-approval": (
+                    "Codex skips enabled Pseudolife hooks whose definitions are not trusted.",
+                    "Run python ops/setup-codex-hooks.py --source plugin --trust ask, then start a new session."),
+                "disabled": (
+                    "Pseudolife hook handlers are disabled in Codex; this may be intentional.",
+                    "If you want these hooks enabled, enable the Pseudolife handlers in Codex /hooks, then start a new session."),
+                "not-loaded": (
+                    "Codex did not load the complete Pseudolife plugin hook set.",
+                    "Check that the Pseudolife plugin is installed and enabled in Codex's plugin manager, then start a new session."),
+            }
+            if state in advice:
+                detail, recovery = advice[state]
+                return {"state": state, "source": "plugin", "changed_files": [],
+                        "detail": detail, "recovery": recovery}
+            # An unavailable runtime is no evidence of lost approval. Keep
+            # the previous file/config verdict when no runtime verdict exists.
         missing = _unapproved_plugin_handlers(clone_hooks, config_text)
         if missing is None and not _plugin_definitions_match(clone_hooks, clone_hooks):
             return {"state": "unknown", "source": "plugin", "changed_files": [],

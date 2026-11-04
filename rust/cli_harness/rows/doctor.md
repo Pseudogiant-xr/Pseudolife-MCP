@@ -268,6 +268,25 @@ prior executable-directory lookup; this follow-up does not claim macOS testing.
   hard-codes `C:\Program Files\Git\bin\bash.exe` and the x86 variant with
   no environment override. A Rust unit test pins the finalization instead.
 
+## Codex plugin runtime trust
+
+A Codex plugin copy matching the daemon's `hooks_digest`, with a file/config
+verdict of `current` or `needs-approval`, is answered natively. The effective
+runtime's `hooks/list` verdict distinguishes trusted handlers, enabled handlers
+requiring approval, intentionally disabled handlers and an unloaded hook set.
+Only `needs-approval` offers the approval command. Disabled handlers point to
+`/hooks` if the user wants them enabled; an unloaded set points to the plugin
+manager. If runtime verification is unavailable, the previous file/config
+verdict remains the answer, without new approval advice.
+
+The five `codex-hooks-plugin-matching-*` cases cover these answers against
+Python. Their matching hook copy is synthetic and never executed. The oracle's
+Python interpreter carries a Codex stdio protocol fixture in the disposable
+cwd; it answers only setup RPCs and records the exact `initialize`, `initialized`,
+`hooks/list` sequence. Each arm independently checks its expected diagnostic,
+so a failed fixture cannot make both arms match by falling back. No real Codex
+installation, model turn or client configuration is used.
+
 ## Deferral domain (before the first request unless noted)
 
 noncanonical argv; `--timeout` past
@@ -288,8 +307,9 @@ Python's repr (floats, non-empty containers); `~` in
 PATH absent on POSIX (`os.confstr`); stat errors pathlib would raise.
 After a read-only GET (board, maintainer or health) but always before the
 handshake starts the shim: a non-object health body, a
-non-string `status`, a truthy non-string `version`, a `hooks_digest` with a
-Codex plugin configured (digest comparison not ported), a health redirect
+non-string `status`, a truthy non-string `version`, a Codex-plugin
+`hooks_digest` whose installed copy cannot be verified as `current` or
+`needs-approval`, a health redirect
 to `ftp:` or to a target that is not text (urllib would follow it), a
 maintainer error body that fails to read (Python crashes there), a
 duplicate or non-ASCII `X-PL-Board` header, maintainer `rp_id`/`origin`

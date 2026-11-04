@@ -296,6 +296,23 @@ fn runtime_status(result: &Value, expected: &[String]) -> &'static str {
     }
 }
 
+pub fn runtime_hook_line(trust: &str, file_state: &str) -> String {
+    let recovery = match trust {
+        "current" => return "current".into(),
+        "needs-approval" => {
+            "Run python ops/setup-codex-hooks.py --source plugin --trust ask, then start a new session."
+        }
+        "disabled" => {
+            "If you want these hooks enabled, enable the Pseudolife handlers in Codex /hooks, then start a new session."
+        }
+        "not-loaded" => {
+            "Check that the Pseudolife plugin is installed and enabled in Codex's plugin manager, then start a new session."
+        }
+        _ => return file_state.into(),
+    };
+    format!("{trust}: {recovery}")
+}
+
 pub async fn runtime_hook_status() -> &'static str {
     use crate::setup::codex::{Client, Rpc};
     let home = registrations::codex_home();
@@ -773,5 +790,23 @@ mod runtime_trust_tests {
             ),
             "unknown"
         );
+    }
+    #[test]
+    fn recovery_matches_the_runtime_cause_and_unknown_preserves_file_verdict() {
+        assert_eq!(runtime_hook_line("unknown", "current"), "current");
+        assert_eq!(
+            runtime_hook_line("unknown", "needs-approval"),
+            "needs-approval"
+        );
+        assert_eq!(runtime_hook_line("current", "needs-approval"), "current");
+        assert_eq!(
+            runtime_hook_line("disabled", "current"),
+            "disabled: If you want these hooks enabled, enable the Pseudolife handlers in Codex /hooks, then start a new session."
+        );
+        assert_eq!(
+            runtime_hook_line("not-loaded", "current"),
+            "not-loaded: Check that the Pseudolife plugin is installed and enabled in Codex's plugin manager, then start a new session."
+        );
+        assert!(runtime_hook_line("needs-approval", "current").contains("--trust ask"));
     }
 }
