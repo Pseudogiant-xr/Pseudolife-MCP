@@ -14,6 +14,8 @@
   defaults in the PostgreSQL container.
 - Explicitly empty database connection fields override inherited environment
   values, so ambient settings cannot redirect automatic bank selection.
+- Native backup advice includes the state archive, and standalone dump failures
+  name `--db-port` when the selected PostgreSQL socket is unavailable.
 - Automatic backup selection now follows the same runtime connection policy in
   standalone backup/restore and both update implementations, including daemon
   environment defaults, non-default ports and literal database names. Automatic
