@@ -332,7 +332,7 @@
       "lock-resolve": "83bcc6b654896c6d",
       "test": "ac414107d3d9c71d",
       "test-lite-linux": "44e2a8f2c01baeab",
-      "test-lite-windows": "40f503540d2b0f92",
+      "test-lite-windows": "f88c9c88e7636b10",
       "test-lite-macos": "c4a0ad0c70bb205a",
       "frontend": "b1b6a1a1278f2e60"
     },
@@ -439,13 +439,28 @@
       },
       {
         "job": "test-lite-windows",
-        "fingerprint": "ea0ed09500aa4a66",
-        "reason": "Adds mocked move consent and rollback cases to the existing pytest process; no new job, setup, subprocess, socket, timeout or parallelism is introduced."
+        "fingerprint": "fdd232a6fa8ee551",
+        "reason": "Adds eight fixture-only Claude profile notice cases to the existing Python step. They take seconds in targeted runs, add no jobs, shards or dependency setup, and retain the measured baseline within unchanged limits pending the next batch measurement."
       },
       {
         "job": "test-lite-windows",
-        "fingerprint": "40f503540d2b0f92",
-        "reason": "Composes the reviewed S2 Docker restore file and S3 mocked move selectors in the existing pytest step. No new job, setup, shard, or parallelism; both components use fake external effects in these checks."
+        "fingerprint": "7b21e54535e9e185",
+        "reason": "Accept the merged Windows lite lane with existing profile notice coverage and mocked Docker backup/restore coverage; no jobs, setup steps or dependencies were added and measured limits remain unchanged."
+      },
+      {
+        "job": "test-lite-windows",
+        "fingerprint": "7a0a0b4ce51f8771",
+        "reason": "Combines eight fixture-only Claude profile cases with six mocked codec cases and one short PowerShell Unicode round-trip in the existing Python step. No new jobs, shards or dependency setup; retain the measured lane baseline within unchanged limits pending the next batch measurement."
+      },
+      {
+        "job": "test-lite-windows",
+        "fingerprint": "d0ebc44de922485c",
+        "reason": "Combines the existing mocked Docker backup and restore coverage with the merged profile and codec cases in the same Windows Python step; no new jobs, setup steps or dependencies, and existing measured limits remain unchanged."
+      },
+      {
+        "job": "test-lite-windows",
+        "fingerprint": "f88c9c88e7636b10",
+        "reason": "Composes the reviewed stopped restore tests with the existing mocked move exposure selection in one pytest step; no job or setup changes and no added child process stress."
       }
     ]
   }
