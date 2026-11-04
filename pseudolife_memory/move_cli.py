@@ -120,6 +120,12 @@ BANK_ID_SQL ="SELECT value FROM meta WHERE key = 'coordination_bank_id'"
 EMPTY_TARGET_META_KEYS = ("schema_version", "coordination_bank_id", "maintainer_secret_v1",
                           "dream_ack_secret_v1", "flat_band_migration_v1", "curation_listing_spelling_v2",
                           "writer_lease_epoch", "coordination_hlc_highwater")
+_STATE_SAFETY_CHECK = """import gzip, os, shutil, sys, tarfile
+with gzip.open(sys.argv[1], 'rb') as source, open(os.devnull, 'wb') as sink:
+    shutil.copyfileobj(source, sink)
+with tarfile.open(sys.argv[1], 'r:gz') as archive:
+    archive.getmembers()
+"""
 # Where a client on the target may hold a token (``grep -lsF`` reads the
 # tokens from stdin; a path that does not exist is skipped).
 TARGET_CLIENT_FILES = ("~/.pseudolife-mcp/*.token", "~/.claude.json", "~/.claude/settings.json",
@@ -1051,6 +1057,7 @@ class Mover:
                       "target_url": self.target_url, "source_bank": self.source_bank, "state": state,
                       "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                       "flags": {flag: getattr(self, flag) for flag in FLAGS},
+                      "target_state_backup": self.data.get("target", {}).get("state_backup"),
                       "manual_rollback": self.manual_rollback()}
             temporary = self.local_dir / "record.json.tmp"
             temporary.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
@@ -1321,6 +1328,23 @@ class Mover:
             raise MoveError("the target is still running: stop it before retrying move")
         if not self.o.resume:
             self.check_target_bank()
+        # restore.sh's safety backup uses docker exec for /data, which
+        # cannot run in this quiesced daemon. Keep a verified archive of the
+        # original state through a helper before restore can replace it.
+        snapshot = f"{self.remote_dir}/target-original-state.tgz"
+        partial = snapshot + ".part"
+        result = self.ssh(f"if [ ! -f {rq(snapshot)} ]; then "
+                          f"docker run --rm --entrypoint tar --volumes-from {DAEMON} "
+                          f"{shlex.quote(self.target_image)} czf - -C /data . > {rq(partial)} && "
+                          f"python3 -c {shlex.quote(_STATE_SAFETY_CHECK)} {rq(partial)} && "
+                          f"mv -f {rq(partial)} {rq(snapshot)} || exit 1; fi; "
+                          f"python3 -c {shlex.quote(_STATE_SAFETY_CHECK)} {rq(snapshot)}", timeout=_TIMEOUT_LONG)
+        if not result.ok:
+            raise MoveError(f"could not verify the target's state safety archive ({result.why()}); "
+                            "the target's original bank and state were not replaced")
+        self.data["target"]["state_backup"] = snapshot
+        self.write_record(self.state)
+        self.step(f"the target's original state safety archive is {snapshot}")
         marker = {"move_id": self.move_id, "source_bank": self.source_bank,
                   "written_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
         self.mark(marker_written=True)
@@ -1791,6 +1815,9 @@ class Mover:
                             "coordination-recovery rebind (docs/guide/coordination-recovery.md)")}
         notes = [f"the source is stopped and fenced, not deleted; the final backup stays in {self.local_dir}, "
                  f"and the target's copy in {o.target}:{self.remote_dir}"]
+        if self.data["target"].get("state_backup"):
+            notes.append(f"the target's original /data safety archive is "
+                         f"{o.target}:{self.data['target']['state_backup']}")
         if o.keep_tokens:
             using = (f"; these files on {o.target} held it and need re-pointing there (move did not rewrite them): "
                      f"{', '.join(self.target_registrations)}" if self.target_registrations else

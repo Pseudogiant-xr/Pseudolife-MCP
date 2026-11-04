@@ -1,2 +1,3 @@
 ### Fixed (2026-11-04 — Protect all user data on move targets)
 - `pseudolife-mcp move` counts the target database's tables from its schema catalog, including episodes, lessons, world facts, graph data, documents and board state. Only specific fresh-bank seed rows are exempt; new tables and unknown metadata are protected automatically. Move stops the target daemon and repeats the check before its safety dump and restore, restarting the original target if that check fails. Refusals explain how to preserve the existing bank, choose fresh volumes or merge knowledge with export/import.
+- The stopped target's original state volume is archived through a helper container and checked before restore; its recovery path is recorded and retained on resume.

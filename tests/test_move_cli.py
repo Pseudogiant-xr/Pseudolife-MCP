@@ -24,6 +24,7 @@ import io
 import json
 import os
 import re
+import shlex
 import signal
 import stat
 import sys
@@ -338,6 +339,10 @@ class World:
 
     def remote(self, cmd, stdin):
         remote_dir = None
+        if "target-original-state.tgz.part" in cmd:
+            self.files.setdefault(shlex.split(cmd)[-1], _tar({k.removeprefix("/data/"): v
+                                                              for k, v in self.data_files.items()}))
+            return 0, b"", b""
         if cmd == "true":
             return 0, b"", b""
         if cmd.startswith("command -v curl"):
@@ -792,6 +797,54 @@ def test_restore_is_preceded_by_a_stopped_target_and_final_emptiness_check(tmp_p
     world = World(hooks={"bash ops/restore.sh": restoring})
     assert run_move(world, tmp_path) == 0
     assert seen == {"running": False, "checks": 2}
+
+
+def test_stopped_target_state_is_safety_copied_before_restore(tmp_path):
+    world = World()
+    original = {k.removeprefix("/data/"): v for k, v in world.data_files.items()}
+    move = mover(world, tmp_path)
+    assert move.run() == 0
+    snapshot = next((c for c in world.calls if c.remote and "target-original-state.tgz.part" in c.remote), None)
+    assert snapshot is not None
+    assert "--volumes-from pseudolife-mcp-daemon" in snapshot.remote
+    assert "tarfile" in snapshot.remote and "gzip" in snapshot.remote
+    assert world.calls.index(snapshot) < first(world, "bash ops/restore.sh")
+    path = next((p for p in world.files if p.endswith("/target-original-state.tgz")), None)
+    assert path
+    assert move.data["target"]["state_backup"] == path
+    assert any(path in note for note in move.data["report"]["notes"])
+    assert json.loads((move.local_dir / "record.json").read_text())["target_state_backup"] == path
+    with tarfile.open(fileobj=io.BytesIO(world.files[path]), mode="r:gz") as archive:
+        assert {m.name: archive.extractfile(m).read() for m in archive if m.isfile()} == original
+
+
+def test_failed_target_state_safety_copy_never_restores(tmp_path):
+    world = World(fail=("target-original-state.tgz.part",))
+    assert run_move(world, tmp_path) == 1
+    assert not world.target_restored and world.target_running and world.source_running
+
+
+@pytest.mark.parametrize("corrupt", [False, True])
+def test_state_safety_verifier_reads_the_archive_integrity(tmp_path, monkeypatch, corrupt):
+    path = tmp_path / "state.tgz"
+    payload = _tar({"config.yaml": b"original"})
+    path.write_bytes(payload[:-8] if corrupt else payload)
+    monkeypatch.setattr(sys, "argv", ["verify", str(path)])
+    if corrupt:
+        with pytest.raises((OSError, EOFError, tarfile.TarError)):
+            exec(move_cli._STATE_SAFETY_CHECK, {})
+    else:
+        exec(move_cli._STATE_SAFETY_CHECK, {})
+
+
+def test_resume_keeps_the_original_target_state_safety_archive(tmp_path):
+    world = World(fail=("bash ops/update.sh",))
+    assert run_move(world, tmp_path) == 1
+    path = next(p for p in world.files if p.endswith("/target-original-state.tgz"))
+    original = world.files[path]
+    world.fail = ()
+    assert run_move(world, tmp_path, resume=True) == 0
+    assert world.files[path] == original
 
 
 def test_target_catalog_counts_real_schema_and_allows_fresh_bank_seeds(pg_conn, tmp_path):
