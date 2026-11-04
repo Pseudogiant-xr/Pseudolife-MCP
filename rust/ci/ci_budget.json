@@ -161,7 +161,7 @@
       "fixtures": "2c17c5dbf6eed90d",
       "candidate": "0930d9d93aaa182c",
       "candidate-harness": "bd0fa77d268d561a",
-      "parity-checks": "4cbb211eb8ea7eaa",
+      "parity-checks": "9b57a9a883e0be80",
       "daemon-image": "028fd79f06c19794",
       "parity": "4b13f8c55b6e3de3"
     },
@@ -340,6 +340,11 @@
         "job": "daemon-image",
         "fingerprint": "028fd79f06c19794",
         "reason": "Adds manual-CI-only frozen-base binding and admission checks; PR, merge-group, push and scheduled execution costs and case selections are unchanged."
+      },
+      {
+        "job": "parity-checks",
+        "fingerprint": "9b57a9a883e0be80",
+        "reason": "Successful judge commands and case selectors are identical. Native failures are accumulated across comparison phases; setup and resource gates remain fatal. Adds only a standard-library receipt summary, no jobs or shards; hosted after-cost measurement remains pending."
       }
     ]
   },

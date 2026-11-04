@@ -1424,15 +1424,38 @@ jobs:
         timeout-minutes: ${{ runner.os == 'Windows' && 20 || 15 }}
         shell: pwsh
         run: |
+          # Native comparison failures are recorded explicitly; setup and
+          # resource checks below still stop before any dependent work.
+          $PSNativeCommandUseErrorActionPreference = $false
+          $phaseManifest = Join-Path $env:RUNNER_TEMP 'judge-phases.json'
+          $phaseResults = [System.Collections.Generic.List[object]]::new()
+          function Save-JudgePhases {
+            @{ schema = 1; phases = @($phaseResults.ToArray()) } | ConvertTo-Json -Depth 6 |
+              Set-Content -LiteralPath $phaseManifest -Encoding utf8
+          }
+          function Start-JudgePhase([string]$Name) {
+            $phaseResults.Add(@{ name = $Name; exit_code = $null; seconds = $null })
+            Save-JudgePhases
+            $script:judgePhase = [Diagnostics.Stopwatch]::StartNew()
+          }
+          function Complete-JudgePhase([int]$ExitCode) {
+            $current = $phaseResults[$phaseResults.Count - 1]
+            $current.exit_code = $ExitCode
+            $current.seconds = [math]::Round($judgePhase.Elapsed.TotalSeconds, 3)
+            Save-JudgePhases
+          }
+          Save-JudgePhases
           $checkoutRoot = (Get-Location).Path
           $oracleRoot = Join-Path $env:RUNNER_TEMP 'phase1-oracle'
-          $judgePhase = [Diagnostics.Stopwatch]::StartNew()
+          Start-JudgePhase 'oracle-setup'
           python -m evals.rust_port.phase1_oracle --destination $oracleRoot
           Write-Host ("judges phase=oracle-setup elapsed_seconds={0:F3}" -f $judgePhase.Elapsed.TotalSeconds)
+          Complete-JudgePhase $LASTEXITCODE
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $judgePhase = [Diagnostics.Stopwatch]::StartNew()
+          Start-JudgePhase 'lease-check'
           python -m pseudolife_memory.cli lease check full-suite
           Write-Host ("judges phase=lease-check elapsed_seconds={0:F3}" -f $judgePhase.Elapsed.TotalSeconds)
+          Complete-JudgePhase $LASTEXITCODE
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $resourceCheckedAt = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')
           $binaryName = if ($IsWindows) { 'pseudolife-stdio.exe' } else { 'pseudolife-stdio' }
@@ -1451,21 +1474,21 @@ jobs:
           $env:PSEUDOLIFE_RUST_BINARY = $candidatePath
           $env:PSEUDOLIFE_WAIT_MAIL_ORACLE_ROOT = $oracleSource
           $env:PSEUDOLIFE_WAIT_MAIL_NATIVE_REQUIRED = '1'
-          $judgePhase = [Diagnostics.Stopwatch]::StartNew()
+          Start-JudgePhase 'wait-mail-tests'
           & $oraclePython -m pytest -q evals/rust_port/test_cli_wait_mail.py evals/rust_port/test_wait_mail_phase2d_native.py evals/rust_port/test_wait_mail_reduction_native.py evals/rust_port/test_wait_mail_producer_native.py evals/rust_port/test_wait_mail_candidate_contract.py evals/rust_port/test_wait_mail_measurement.py evals/rust_port/test_wait_mail_listener_events.py -ra --durations=30 --junitxml (Join-Path $env:RUNNER_TEMP 'junit/run-unchanged-candidates-and-differential-judges.xml')
           Write-Host ("judges phase=wait-mail-tests elapsed_seconds={0:F3}" -f $judgePhase.Elapsed.TotalSeconds)
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Complete-JudgePhase $LASTEXITCODE
           $leaseHeaderReceipt = Join-Path $env:RUNNER_TEMP 'lease-header-policy.json'
-          $judgePhase = [Diagnostics.Stopwatch]::StartNew()
+          Start-JudgePhase 'lease-headers'
           & $oraclePython -m evals.rust_port.lease_headers --root $checkoutRoot --candidate $candidatePath --out $leaseHeaderReceipt
           Write-Host ("judges phase=lease-headers elapsed_seconds={0:F3}" -f $judgePhase.Elapsed.TotalSeconds)
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Complete-JudgePhase $LASTEXITCODE
           $privateArgvReceipt = Join-Path $env:RUNNER_TEMP 'rust-cli-argv.json'
           $publicArgvReceipt = Join-Path $checkoutRoot "evals/results/rust-cli-argv-$env:RUNNER_OS.json"
-          $judgePhase = [Diagnostics.Stopwatch]::StartNew()
+          Start-JudgePhase 'cli-argv'
           & $oraclePython -m evals.rust_port.cli_argv --oracle-root $oracleSource --candidate-json $candidateCommand --out $privateArgvReceipt --public-out $publicArgvReceipt
           Write-Host ("judges phase=cli-argv elapsed_seconds={0:F3}" -f $judgePhase.Elapsed.TotalSeconds)
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Complete-JudgePhase $LASTEXITCODE
           $judgeBootstrap = @'
           import pathlib, subprocess, sys
           from evals.rust_port.provenance import module_command
@@ -1473,10 +1496,10 @@ jobs:
           command = module_command("evals.rust_port.phase1_ci", root, sys.argv[2:])
           raise SystemExit(subprocess.run(command, cwd=root).returncode)
           '@
-          $judgePhase = [Diagnostics.Stopwatch]::StartNew()
+          Start-JudgePhase 'phase1-judges'
           & $oraclePython -c $judgeBootstrap $oracleSource --oracle-root $oracleSource --candidate-json $candidateCommand --candidate-root $checkoutRoot --out $privateReceipt --public-out $publicReceipt --offline-resource-checked-at $resourceCheckedAt
           Write-Host ("judges phase=phase1-judges elapsed_seconds={0:F3}" -f $judgePhase.Elapsed.TotalSeconds)
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Complete-JudgePhase $LASTEXITCODE
           $phase2Bootstrap = @'
           import pathlib, subprocess, sys
           from evals.rust_port.provenance import module_command
@@ -1486,10 +1509,10 @@ jobs:
           '@
           $phase2Evidence = Join-Path $env:RUNNER_TEMP 'phase2-cli-tests'
           $phase2Receipt = Join-Path $checkoutRoot "evals/results/rust-phase2-ci-$env:RUNNER_OS.json"
-          $judgePhase = [Diagnostics.Stopwatch]::StartNew()
+          Start-JudgePhase 'phase2-dispatch'
           & $oraclePython -c $phase2Bootstrap $oracleSource --oracle-root $oracleSource --candidate-json $candidateCommand --candidate-root $checkoutRoot --evidence-directory $phase2Evidence --out $phase2Receipt --offline-resource-checked-at $resourceCheckedAt
           Write-Host ("judges phase=phase2-dispatch elapsed_seconds={0:F3}" -f $judgePhase.Elapsed.TotalSeconds)
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Complete-JudgePhase $LASTEXITCODE
           $processBootstrap = @'
           import os, pathlib, subprocess, sys, tempfile
           from psycopg.conninfo import conninfo_to_dict, make_conninfo
@@ -1512,9 +1535,20 @@ jobs:
           '@
           $processReceipt = Join-Path $env:RUNNER_TEMP 'phase2b-cli-process.json'
           $processPublicReceipt = Join-Path $env:RUNNER_TEMP 'phase2b-cli-process-public.json'
-          $judgePhase = [Diagnostics.Stopwatch]::StartNew()
+          Start-JudgePhase 'cli-process'
           & $oraclePython -c $processBootstrap $oracleSource --oracle-root $oracleSource --candidate-json $candidateCommand --candidate-root $checkoutRoot --out $processReceipt --public-out $processPublicReceipt --modes help version lease --offline-resource-checked-at $resourceCheckedAt
           Write-Host ("judges phase=cli-process elapsed_seconds={0:F3}" -f $judgePhase.Elapsed.TotalSeconds)
+          Complete-JudgePhase $LASTEXITCODE
+          foreach ($phase in $phaseResults) {
+            if ($phase.exit_code -ne 0) { exit $phase.exit_code }
+          }
+          exit 0
+      - name: Summarize every judge phase
+        if: always() && matrix.suite == 'judges'
+        timeout-minutes: 5
+        shell: pwsh
+        run: |
+          python rust/ci/judge_summary.py --manifest (Join-Path $env:RUNNER_TEMP 'judge-phases.json') --checkout . --temporary $env:RUNNER_TEMP --platform $env:RUNNER_OS --out-dir (Join-Path $env:RUNNER_TEMP 'judge-summary') --summary $env:GITHUB_STEP_SUMMARY
           exit $LASTEXITCODE
       - name: Retain parity pytest reports
         if: always()
@@ -1535,6 +1569,7 @@ jobs:
             evals/results/rust-cli-argv-*.json
             ${{ runner.temp }}/phase2b-cli-process-public.json
             ${{ runner.temp }}/lease-header-policy.json
+            ${{ runner.temp }}/judge-summary/*.json
             ${{ runner.temp }}/oracle-selection.json
           if-no-files-found: warn
 
