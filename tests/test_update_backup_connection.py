@@ -59,6 +59,8 @@ def test_builtin_backup_uses_daemon_connection(monkeypatch, tmp_path, dsn, env, 
 
 @pytest.mark.parametrize("dsn,env", [
     ("", {}), ("service=opaque", {}), ("invalid fixture", {}),
+    ("host=pseudolife-pg hostaddr=10.0.0.2 user=custom dbname=bank", {}),
+    ("postgresql://custom@pseudolife-pg/bank?hostaddr=10.0.0.2", {}),
     ("postgresql://custom@elsewhere/bank", {}),
     ("postgresql://custom@pseudolife-pg/bank", {"PGSERVICE": "opaque"}),
     ("postgresql://custom@pseudolife-pg/bank", {"PGHOSTADDR": "10.0.0.1"}),

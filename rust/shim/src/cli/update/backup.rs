@@ -192,6 +192,14 @@ mod connection_tests {
         for (dsn, extra) in [
             ("", vec![]),
             ("service=opaque", vec![]),
+            (
+                "host=pseudolife-pg hostaddr=10.0.0.2 user=custom dbname=bank",
+                vec![],
+            ),
+            (
+                "postgresql://custom@pseudolife-pg/bank?hostaddr=10.0.0.2",
+                vec![],
+            ),
             ("invalid fixture", vec![]),
             ("postgresql://custom@elsewhere/bank", vec![]),
             (
