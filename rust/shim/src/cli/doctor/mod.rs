@@ -94,6 +94,17 @@ fn emit(text: &str, code: u8) -> ExitCode {
 }
 
 pub(super) fn run(values: Vec<OsString>) -> Option<ExitCode> {
+    let arguments = values
+        .iter()
+        .map(|value| value.to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+    let environment = match super::host_connection::Environment::discover("doctor", &arguments) {
+        Ok(environment) => environment,
+        Err(error) => {
+            crate::stderrln!("pseudolife-mcp: {error}");
+            return Some(ExitCode::from(2));
+        }
+    };
     let args = parse(&values)?;
     if args.proof {
         if args.agent_state.is_some() {
@@ -149,7 +160,7 @@ pub(super) fn run(values: Vec<OsString>) -> Option<ExitCode> {
         .enable_all()
         .build()
         .ok()?;
-    let (report, ok) = runtime.block_on(diagnose(&args)).ok()?;
+    let (report, ok) = runtime.block_on(diagnose(&args, &environment)).ok()?;
     Some(emit(
         &(pyjson::dumps(&report) + "\n"),
         if ok { 0 } else { 1 },
@@ -405,7 +416,10 @@ fn finalize(
     }
 }
 
-async fn diagnose(args: &Args) -> Res<(Value, bool)> {
+async fn diagnose(
+    args: &Args,
+    environment: &super::host_connection::Environment,
+) -> Res<(Value, bool)> {
     // Everything before the first request: environment and client files.
     no_proxy_environment()?;
     // Python's int() digit limit is part of what json.loads accepts.
@@ -413,6 +427,9 @@ async fn diagnose(args: &Args) -> Res<(Value, bool)> {
         return Err(Defer);
     }
     let mut env = Env::default();
+    for (key, value) in environment.additions() {
+        env.set(key, value.clone());
+    }
     let (overrides, credential_source) = clients::registration_credentials(&env)?;
     for (key, value) in overrides {
         env.set(&key, value);

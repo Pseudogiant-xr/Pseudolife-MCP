@@ -21,7 +21,9 @@ OS lock is retried.
 
 Without the board (no token, daemon unreachable, a bearer the board refuses,
 coordination off, a daemon without leases, or ``--no-board``) it says once
-why, then waits on the OS lock alone: polled, not FIFO. A board that answers
+why, then waits on the OS lock alone: polled, not FIFO. A final stderr line
+reports LOCAL LOCK ONLY and the command's exit status when no board lease
+was acquired; the exit status remains the command's own. A board that answers
 and then keeps failing for ``BOARD_GIVE_UP`` seconds is dropped the same way.
 A board failure never stops the command from running under the OS lock, and
 the OS lock is what excludes: a renewal that finds the lease lost warns once
@@ -885,7 +887,11 @@ def _run(args, command: list[str], transport) -> int:
                  f"{name!r} alone (not FIFO)")
         _wait_for_lock(lock, name, deadline, board_holds=renewer is not None)
         child = _start(command, name)
-        return _exit_status(_wait_up_to(child, None))
+        code = _exit_status(_wait_up_to(child, None))
+        if renewer is None:
+            _say(f"lease: LOCAL LOCK ONLY: command exited {code}; board lease was not acquired "
+                 f"for {name!r} ({skipped}).")
+        return code
     except _TimedOut:
         _say(f"lease: gave up waiting for {name!r} after {_span(args.timeout)} "
              f"(--timeout); the command did not run")
