@@ -333,7 +333,7 @@
       "test": "ac414107d3d9c71d",
       "test-lite-linux": "44e2a8f2c01baeab",
       "test-lite-windows": "e319b9ae1454170d",
-      "test-lite-macos": "c4a0ad0c70bb205a",
+      "test-lite-macos": "27de32b3bc9e0128",
       "frontend": "b1b6a1a1278f2e60"
     },
     "accepted": [
@@ -451,6 +451,16 @@
         "job": "test-lite-windows",
         "fingerprint": "e319b9ae1454170d",
         "reason": "Add bounded read-only lite-bank preflight coverage to the existing Windows installer lane; no new job or setup step."
+      },
+      {
+        "job": "test-lite-windows",
+        "fingerprint": "e319b9ae1454170d",
+        "reason": "Retain bounded read-only lite-bank tests in the existing Windows lane; no new job or setup step."
+      },
+      {
+        "job": "test-lite-macos",
+        "fingerprint": "27de32b3bc9e0128",
+        "reason": "Exercise platform data-directory detection in the existing macOS lite lane; no new job or setup step."
       }
     ]
   }

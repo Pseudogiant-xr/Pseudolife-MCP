@@ -41,7 +41,8 @@ def refusal(containers: list[dict], *, configured: bool, recorded_volumes: bool,
         c.get("State", {}).get("Running")
         and any(binding.get("HostPort") == "8765"
                 and binding.get("HostIp", "") in ("", "127.0.0.1", "0.0.0.0")
-                for bindings in (c.get("NetworkSettings", {}).get("Ports") or {}).values()
+                for publication, bindings in (c.get("NetworkSettings", {}).get("Ports") or {}).items()
+                if publication.endswith("/tcp")
                 for binding in (bindings or []))
         for c in own_daemons)
     # A completed Docker migration can leave a stopped lite cluster behind.
@@ -52,9 +53,10 @@ def refusal(containers: list[dict], *, configured: bool, recorded_volumes: bool,
     bank = banks[0]
     return (
         f'An initialized lite bank exists at {bank}. Docker installation would not migrate it. '
-        f'Migrate the lite bank first: run pseudolife-mcp backup --data-dir "{bank}", '
-        'then restore its database dump and state archive into Docker using the lite-to-Docker '
-        'backup/restore path in docs/guide/configuration.md#backups '
-        '(https://github.com/Pseudogiant-xr/Pseudolife-MCP/blob/master/docs/guide/configuration.md#backups). '
+        f'Migrate it first: stop the lite daemon and clients, run pseudolife-mcp backup --data-dir "{bank}" '
+        '--out <new-backup-dir-outside-lite-data>, verify its Postgres is stopped, '
+        'move only embedded_pg to a preserved sibling, install Docker, then explicitly restore both artifacts; '
+        'the complete sequence is docs/guide/configuration.md#move-a-lite-bank-to-docker '
+        '(https://github.com/Pseudogiant-xr/Pseudolife-MCP/blob/master/docs/guide/configuration.md#move-a-lite-bank-to-docker). '
         'Keep the lite bank and its backups until the Docker bank is verified. Nothing changed.'
     )

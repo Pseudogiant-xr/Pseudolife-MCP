@@ -8958,6 +8958,103 @@ files. A backup never initializes a bank that doesn't exist yet, a run
 that produced no dump never rotates dumps, and rotation only ever
 deletes files the tool itself wrote.
 
+### Move a lite bank to Docker
+
+An initialized lite bank is deliberately refused by the Docker installer. A
+backup alone does not clear that guard: preserve the stopped cluster before
+creating the Docker destination, then restore both backup artifacts explicitly.
+Use the exact data directory named by preflight; do not substitute another bank.
+
+1. Close coding clients and their shims so they cannot wake lite again. Stop
+   the lite daemon gracefully: press **Ctrl-C once** in its foreground terminal
+   and wait for exit, or stop its own registered service/task. For an unmanaged
+   background launch, use the PID and start time recorded when launching it and
+   verify ownership before stopping it. Do not kill processes by name. Confirm
+   that TCP `127.0.0.1:8765` is free before continuing. There is no `stop` CLI
+   mode; do not invent one.
+
+2. Back up the stopped bank to a **new empty directory outside** the lite data
+   directory. Clear an inherited `PSEUDOLIFE_MCP_DATABASE_URL` for this command
+   so it cannot select a different server. The backup can temporarily start an
+   existing embedded cluster; it never initializes a new one. Keep the exact
+   database dump and state archive paths printed by the command.
+
+   ```bash
+   env -u PSEUDOLIFE_MCP_DATABASE_URL pseudolife-mcp backup \
+     --data-dir "<lite-data-dir>" --out "<new-backup-dir>"
+   ```
+
+   ```powershell
+   $migrationOldDsn = $env:PSEUDOLIFE_MCP_DATABASE_URL
+   try {
+       Remove-Item Env:PSEUDOLIFE_MCP_DATABASE_URL -ErrorAction SilentlyContinue
+       pseudolife-mcp backup --data-dir '<lite-data-dir>' --out '<new-backup-dir>'
+       if ($LASTEXITCODE -ne 0) { throw 'Lite backup failed; do not continue.' }
+   } finally {
+       $env:PSEUDOLIFE_MCP_DATABASE_URL = $migrationOldDsn
+   }
+   ```
+
+3. Verify that both artifacts are nonempty and that the embedded Postgres is
+   stopped. A backup that **attaches** to an already-running instance leaves it
+   running. Use the matching bundled `pg_ctl` (beside its `pg_dump`) with
+   `pg_ctl -D "<lite-data-dir>/embedded_pg" status`: **exit code 3** means no
+   server is running. If it reports a running server, first verify that it is
+   this bank's instance, then use the same `pg_ctl -D ... stop -m fast` and
+   repeat `status`. Do not rely on a stale `postmaster.pid` alone, and do not
+   move files while their Postgres is running.
+
+4. Preserve **only** the stopped `embedded_pg/` directory at a new sibling
+   outside the data directory. Keep `embedded_pg.secret` and the rest of the
+   old data directory. In particular, do not move `runtimes/`, `bin/` or
+   `native/`: they can hold installed software still in use. The old
+   `embedded_pg/PG_VERSION` path must be absent afterwards. Never overwrite a
+   previous preserved cluster, and **never delete** it to satisfy preflight.
+
+   ```bash
+   lite_data_dir="<absolute-lite-data-dir>"
+   preserved_pg="${lite_data_dir}.lite-pg-before-docker"
+   test ! -e "$preserved_pg" || { echo 'Preserved destination exists; stop.'; exit 1; }
+   mv -- "$lite_data_dir/embedded_pg" "$preserved_pg"
+   ```
+
+   ```powershell
+   $liteDataDir = (Resolve-Path -LiteralPath '<absolute-lite-data-dir>').Path
+   $clusterDir = (Resolve-Path -LiteralPath (Join-Path $liteDataDir 'embedded_pg')).Path
+   $preservedPg = "$liteDataDir.lite-pg-before-docker"
+   if ($clusterDir -ne (Join-Path $liteDataDir 'embedded_pg')) { throw 'Unexpected cluster source; stop.' }
+   if (Test-Path -LiteralPath $preservedPg) { throw 'Preserved destination exists; stop.' }
+   Move-Item -LiteralPath $clusterDir -Destination $preservedPg
+   ```
+
+5. Install Docker from the checkout with `ops/install.sh --yes` or
+   `ops\install.ps1 -Yes`, adding explicit client/extractor flags when desired.
+   Let its health check finish before restoring. Do not add new memories to
+   this fresh destination: restore replaces it. The installers wire Docker
+   clients with the no-spawn guard so they cannot recreate the old lite bank.
+
+6. Restore the **named pair** into the new Docker containers. Rehearse the
+   dump first, then explicitly apply it together with its matching state tar;
+   do not use the default picker for the differently named lite artifacts.
+
+   ```bash
+   ops/restore.sh --backup-file "<pseudolife_lite_memory-timestamp.sql.gz>"
+   ops/restore.sh --apply --backup-file "<pseudolife_lite_memory-timestamp.sql.gz>" \
+     --state-archive "<pseudolife_lite_state-timestamp.tar.gz>"
+   ```
+
+   ```powershell
+   ops\restore.ps1 -BackupFile '<pseudolife_lite_memory-timestamp.sql.gz>'
+   ops\restore.ps1 -Apply -BackupFile '<pseudolife_lite_memory-timestamp.sql.gz>' `
+     -StateArchive '<pseudolife_lite_state-timestamp.tar.gz>'
+   ```
+
+7. Verify Docker health with `pseudolife-mcp doctor`, check the expected bank
+   counts and a known memory in the Console, and exercise recall from a wired
+   client. Keep the preserved cluster, its secret, the old state and both
+   backup artifacts **until** the Docker bank and clients are **verified**.
+   Keep the installer checkout and its `ops/.env` as well.
+
 ### Logical export / import
 
 Beside the physical backups, `pseudolife-mcp export` writes the bank as a

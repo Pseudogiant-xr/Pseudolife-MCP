@@ -2,10 +2,12 @@
 import importlib.util
 import json
 from pathlib import Path
+import shlex
 import subprocess
 import sys
 
 import pytest
+import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 BEGIN = "# >>> pseudolife-mcp install (managed block — installer rewrites between markers) >>>"
@@ -85,7 +87,7 @@ def test_initialized_lite_bank_refuses_before_docker_takes_the_free_port(guard, 
     message = str(error.value)
     assert "pseudolife-mcp backup --data-dir" in message
     assert str(bank) in message
-    assert "restore" in message and "configuration.md#backups" in message
+    assert "restore" in message and "configuration.md#move-a-lite-bank-to-docker" in message
     assert "Nothing changed" in message
     assert (snapshot(disposable_home), env.read_bytes()) == before
     assert all(call[0] in ("ps", "inspect", "compose", "volume") for call in calls)
@@ -243,3 +245,81 @@ def test_cli_refuses_with_migration_advice_without_traceback(guard, monkeypatch,
     assert "backup --data-dir" in output.err
     assert "Traceback" not in output.err
     assert not env.exists()
+
+
+@pytest.mark.parametrize("complete_preflight", [False, True])
+def test_own_udp_publication_does_not_excuse_a_busy_tcp_lite_bank(guard, complete_preflight):
+    module, env, containers, _, busy, _ = guard
+    initialized_bank(module.preflight_lite.data_dirs()[0])
+    env.write_text(f"{BEGIN}\n{END}\n", encoding="utf-8")
+    daemon = container()
+    daemon["NetworkSettings"]["Ports"] = {"8765/udp": [{"HostPort": "8765"}]}
+    containers.append(daemon)
+    busy.add(8765)
+    if complete_preflight:
+        with pytest.raises(module.Refusal, match="backup --data-dir"):
+            module.check(env)
+    else:
+        assert module.preflight_lite.refusal(
+            containers, configured=True, recorded_volumes=False,
+            port_busy=module.port_busy) is not None
+
+
+def test_preserved_stopped_cluster_no_longer_blocks_first_docker_setup(guard, tmp_path):
+    module, env, _, _, _, _ = guard
+    bank = initialized_bank(module.preflight_lite.data_dirs()[0])
+    (bank / "embedded_pg/postmaster.pid").unlink()  # disposable stopped-cluster fixture
+    for name in ("runtimes", "bin"):
+        (bank / name).mkdir()
+        (bank / name / "keep").write_text("fixture runtime\n", encoding="utf-8")
+    backup_dir = tmp_path / "lite-backups"
+    backup_dir.mkdir()
+    (backup_dir / "memory.sql.gz").write_bytes(b"fixture dump")
+    (backup_dir / "state.tar.gz").write_bytes(b"fixture state")
+    pg_before = snapshot(bank / "embedded_pg")
+    state_before = snapshot(bank)
+    backup_before = snapshot(backup_dir)
+    preserved_pg = bank.with_name(bank.name + ".lite-preserved")
+    (bank / "embedded_pg").rename(preserved_pg)
+    module.check(env)
+    assert snapshot(preserved_pg) == pg_before
+    assert snapshot(bank) == {name: value for name, value in state_before.items()
+                              if not name.startswith("embedded_pg")}
+    assert snapshot(backup_dir) == backup_before
+    assert not env.exists()  # first install, without existing Docker containers or volumes
+
+
+def test_refusal_names_the_steps_that_clear_the_guard_without_deleting_the_bank(guard):
+    module, env, _, _, _, _ = guard
+    initialized_bank(module.preflight_lite.data_dirs()[0])
+    with pytest.raises(module.Refusal) as error:
+        module.check(env)
+    message = str(error.value)
+    assert "--out" in message
+    assert "stop" in message.lower()
+    assert "move only embedded_pg" in message
+    assert message.index("move only embedded_pg") < message.index("install Docker") < message.index("restore")
+
+
+def test_lite_to_docker_guide_pins_the_complete_safe_sequence():
+    doc = (ROOT / "docs/guide/configuration.md").read_text(encoding="utf-8")
+    assert "### Move a lite bank to Docker" in doc
+    section = doc.split("### Move a lite bank to Docker\n", 1)[1].split("\n### ", 1)[0]
+    steps = ["1. Close", "2. Back up", "3. Verify", "4. Preserve", "5. Install", "6. Restore", "7. Verify"]
+    positions = [section.index(step) for step in steps]
+    assert positions == sorted(positions)
+    for required in ("Ctrl-C", "ownership", "postmaster.pid", "pg_ctl", "status", "exit code 3",
+                     "attaches", "outside", "--data-dir", "--out", "PG_VERSION", "sibling",
+                     "runtimes/", "bin/", "never delete", "ops/install.sh", "ops\\install.ps1",
+                     "--apply --backup-file", "--state-archive", "-Apply -BackupFile", "-StateArchive",
+                     "until", "verified"):
+        assert required in section, required
+    assert "pseudolife-mcp stop" not in section
+    assert "serve --stop" not in section
+
+
+@pytest.mark.parametrize("lane", ["test-lite-windows", "test-lite-macos"])
+def test_lite_preflight_is_in_both_platform_lanes(lane):
+    workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8"))
+    runs = [step.get("run", "") for step in workflow["jobs"][lane]["steps"]]
+    assert any("tests/test_installer_lite.py" in shlex.split(run) for run in runs)
