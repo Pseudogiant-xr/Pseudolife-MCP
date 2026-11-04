@@ -649,11 +649,12 @@ pub(super) fn sql(u: &Update, pg: &str, user: &str, db: &str, query: &str) -> Re
 }
 fn sql_args(u: &Update, pg: &str, user: &str, db: &str, query: &str) -> Vec<String> {
     let database = if u.stopped_handover {
-        format!("dbname='{}'", db.replace('\\', "\\\\").replace('\'', "\\'"))
+        backup::database_arg(db)
     } else {
         db.to_owned()
     };
     let mut args = vec!["exec", pg];
+    let port = u.handover_port.to_string();
     if u.stopped_handover {
         args.extend([
             "env",
@@ -667,7 +668,7 @@ fn sql_args(u: &Update, pg: &str, user: &str, db: &str, query: &str) -> Vec<Stri
     }
     args.extend(["psql", "-X", "-v", "ON_ERROR_STOP=1"]);
     if u.stopped_handover {
-        args.extend(["-h", "/var/run/postgresql", "-p", "5432"]);
+        args.extend(["-h", "/var/run/postgresql", "-p", &port]);
     }
     args.extend(["-U", user, "-d", &database, "-Atc", query]);
     args.into_iter().map(str::to_owned).collect()
@@ -809,6 +810,7 @@ fn verify_stopped_database(
     pg: &Value,
     user: &str,
     db: &str,
+    port: u16,
 ) -> Result<()> {
     let refusal = || {
         UpdateError::usage(
@@ -825,7 +827,7 @@ fn verify_stopped_database(
     });
     if pg["State"]["Running"] != true
         || actual != Some(declared)
-        || backup::connection_parts(running, pg) != Some((user.to_owned(), db.to_owned()))
+        || backup::connection_details(running, pg) != Some((user.to_owned(), db.to_owned(), port))
     {
         return Err(refusal());
     }
@@ -861,12 +863,12 @@ fn stopped_preflight(
     u: &Update,
     running: &Value,
     daemon: &str,
-    connection: (&str, &str, &str),
+    connection: (&str, &str, &str, u16),
     choice: &str,
     config: &Value,
 ) -> Result<Value> {
-    let (pg, user, db) = connection;
-    verify_stopped_database(config, running, &inspect(u, pg)?, user, db)?;
+    let (pg, user, db, port) = connection;
+    verify_stopped_database(config, running, &inspect(u, pg)?, user, db, port)?;
     let id = running["Image"].as_str().filter(|id| !id.is_empty())
         .ok_or_else(|| UpdateError::usage("the stopped daemon's existing image is unavailable; restore that local image before retrying; nothing was deployed"))?;
     let (code, out) = u.docker_call(&["image", "inspect", "-f", "{{.Id}}", id]);
@@ -978,12 +980,13 @@ pub(super) fn deploy(u: &mut Update, repo: &Path) -> Result<()> {
     u.maintainer_context = Some((base.clone(), env.clone()));
     let pg_env = &config["services"]["pseudolife-pg"]["environment"];
     let runtime = if stopped_handover {
-        backup::connection_parts(&running, &inspect(u, &pg)?).ok_or_else(|| UpdateError::usage(
+        backup::connection_details(&running, &inspect(u, &pg)?).ok_or_else(|| UpdateError::usage(
             "cannot verify the handover bank on the project's shared PostgreSQL network; restore the daemon's original direct database connection and retry; nothing was deployed"
         ))?
     } else {
-        (String::new(), String::new())
+        (String::new(), String::new(), 5432)
     };
+    u.handover_port = runtime.2;
     let user = if stopped_handover {
         runtime.0.as_str()
     } else {
@@ -1021,7 +1024,14 @@ pub(super) fn deploy(u: &mut Update, repo: &Path) -> Result<()> {
         require_imported_with(u, &pg, user, db, &daemon)?;
     }
     let before = if stopped_handover {
-        stopped_preflight(u, &running, &daemon, (&pg, user, db), &choice, &config)?
+        stopped_preflight(
+            u,
+            &running,
+            &daemon,
+            (&pg, user, db, runtime.2),
+            &choice,
+            &config,
+        )?
     } else {
         u.daemon_health().ok_or_else(||UpdateError::usage("the running daemon did not answer /health; use the previous update's rollback commands before retrying; no rollback tag was moved"))?
     };
@@ -1244,6 +1254,7 @@ mod stopped_handover_tests {
         });
         let ordinary = sql_args(&update, "pg", "role", "bank", "SELECT 1");
         update.stopped_handover = true;
+        update.handover_port = 6543;
         let stopped = sql_args(&update, "pg", "role", "bank", "SELECT 1");
         assert!(!ordinary.iter().any(|arg| arg == "env" || arg == "-h"));
         assert!(
@@ -1251,6 +1262,7 @@ mod stopped_handover_tests {
                 .windows(2)
                 .any(|pair| pair == ["-h", "/var/run/postgresql"])
         );
+        assert!(stopped.windows(2).any(|pair| pair == ["-p", "6543"]));
     }
 
     fn running(config: &Value) -> Value {
@@ -1276,10 +1288,48 @@ mod stopped_handover_tests {
                 "PSEUDOLIFE_MCP_DATABASE_URL":url
             }}}});
             assert!(
-                verify_stopped_database(&config, &running(&config), &pg, "fixture", "fixture")
-                    .is_ok()
+                verify_stopped_database(
+                    &config,
+                    &running(&config),
+                    &pg,
+                    "fixture",
+                    "fixture",
+                    5432
+                )
+                .is_ok()
             );
         }
+    }
+
+    #[test]
+    fn stopped_bank_verification_preserves_nondefault_port_and_literal_database() {
+        let config = json!({"services":{DAEMON_SERVICE:{"environment":{
+            "PSEUDOLIFE_MCP_DATABASE_URL":"postgresql://fixture@legacy-pg:6543/host%3Delsewhere"
+        }}}});
+        let pg = json!({"State":{"Running":true},"Name":"/custom-project-pg",
+            "NetworkSettings":{"Networks":{"fixture":{"Aliases":["legacy-pg"]}}}});
+        assert!(
+            verify_stopped_database(
+                &config,
+                &running(&config),
+                &pg,
+                "fixture",
+                "host=elsewhere",
+                6543
+            )
+            .is_ok()
+        );
+        assert!(
+            verify_stopped_database(
+                &config,
+                &running(&config),
+                &pg,
+                "fixture",
+                "host=elsewhere",
+                5432
+            )
+            .is_err()
+        );
     }
 
     #[cfg(unix)]
@@ -1330,7 +1380,8 @@ mod stopped_handover_tests {
         let mut pg = json!({"State":{"Running":true},"Name":"/custom-project-pg",
             "NetworkSettings":{"Networks":{"fixture":{"Aliases":["legacy-pg"]}}}});
         assert!(
-            verify_stopped_database(&config, &running(&config), &pg, "fixture", "fixture").is_ok()
+            verify_stopped_database(&config, &running(&config), &pg, "fixture", "fixture", 5432)
+                .is_ok()
         );
         for url in [
             "postgresql://fixture:fixture@external-pg:5432/fixture",
@@ -1341,15 +1392,23 @@ mod stopped_handover_tests {
             config["services"][DAEMON_SERVICE]["environment"]["PSEUDOLIFE_MCP_DATABASE_URL"] =
                 json!(url);
             assert!(
-                verify_stopped_database(&config, &running(&config), &pg, "fixture", "fixture")
-                    .is_err()
+                verify_stopped_database(
+                    &config,
+                    &running(&config),
+                    &pg,
+                    "fixture",
+                    "fixture",
+                    5432
+                )
+                .is_err()
             );
         }
         config["services"][DAEMON_SERVICE]["environment"]["PSEUDOLIFE_MCP_DATABASE_URL"] =
             json!("postgresql://fixture:fixture@legacy-pg:5432/fixture");
         pg["State"]["Running"] = json!(false);
         assert!(
-            verify_stopped_database(&config, &running(&config), &pg, "fixture", "fixture").is_err()
+            verify_stopped_database(&config, &running(&config), &pg, "fixture", "fixture", 5432)
+                .is_err()
         );
     }
 }

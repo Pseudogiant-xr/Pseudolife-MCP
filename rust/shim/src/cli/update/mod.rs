@@ -100,6 +100,7 @@ pub(crate) struct Update {
     pub maintainer_context: Option<(Vec<String>, Environment)>,
     pub rollback_scope: Option<String>,
     pub stopped_handover: bool,
+    pub handover_port: u16,
 }
 
 fn output(text: &str, stderr: bool) -> std::io::Result<()> {
@@ -193,6 +194,7 @@ impl Update {
             maintainer_context: None,
             rollback_scope: None,
             stopped_handover: false,
+            handover_port: 5432,
         }
     }
     pub fn step(&mut self, text: impl Into<String>) {

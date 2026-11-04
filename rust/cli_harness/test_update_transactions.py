@@ -296,7 +296,7 @@ elif a[:2]==["image","inspect"]:
  elif a[-1] in s["images"]: out=s["images"][a[-1]]
  else: code=1
 elif a[:2]==["image","ls"]: out="\n".join(s["images"]) if s.get("list_images") else ""
-elif a[:1]==["port"]:out="127.0.0.1:5433"
+elif a[:1]==["port"]:out="127.0.0.1:9876" if a[-1]=="8765/tcp" else "127.0.0.1:5433"
 elif a[:2]==["volume","inspect"]:
  if s.get("volume_inspect_failure"):code=1
  else:out=json.dumps(s.get("volume_inspections",{}).get(a[-1],[]))
@@ -777,7 +777,9 @@ def test_native_checkout_scopes_backup_and_rollback_to_its_compose_project(tmp_p
             assert [backup[backup.index(flag) + 1] for flag in flags] == ["fixture-pg", "fixture-daemon", "fixture", "fixture"]
         else:
             backup = next(args for args in calls if args[:1] == ["exec"] and any("pg_dump" in part for part in args))
-            assert backup[1] == "fixture-pg" and backup[-2:] == ["fixture", "fixture"]
+            from psycopg.conninfo import conninfo_to_dict
+            assert backup[1] == "fixture-pg" and backup[-3:-1] == ["5432", "fixture"]
+            assert conninfo_to_dict(backup[-1]) == {"dbname": "fixture"}
         assert stages(state) == ["backup", "tag", "up"]
         report = json.loads(result.stdout)
         assert report["clients"] is None
@@ -842,6 +844,9 @@ def test_release_fault_chronology_and_no_client_movement(tmp_path, native, failu
         observed = stages(json.loads(state_path.read_text()))
         assert observed == (["pull"] if failure == "pull" else ["pull", "backup"] if failure == "backup" else ["pull", "backup", "tag", "up"])
         assert report["clients"] is None
+        if failure in ("health", "version"):
+            assert "--daemon-url http://127.0.0.1:9876" in result.stdout
+            assert "image setting won" not in result.stdout
         if failure not in ("pull", "backup"):
             assert report["rollback"]["state"] == "tagged"
 

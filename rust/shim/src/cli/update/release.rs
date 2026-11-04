@@ -13,6 +13,41 @@ const COMPOSE_FILES: [&str; 6] = [
     "Dockerfile.extractor",
 ];
 
+pub(super) fn health_endpoint_hint(ports: &str) -> String {
+    let mut urls = std::collections::BTreeSet::new();
+    for line in ports.lines() {
+        let Some((host, port)) = line.trim().rsplit_once(':') else {
+            continue;
+        };
+        if port.is_empty() || !port.bytes().all(|b| b.is_ascii_digit()) {
+            continue;
+        }
+        let Ok(port) = port.parse::<u16>() else {
+            continue;
+        };
+        if port == 0 {
+            continue;
+        }
+        match host {
+            "127.0.0.1" | "0.0.0.0" => {
+                urls.insert(format!("http://127.0.0.1:{port}"));
+            }
+            "[::1]" | "[::]" => {
+                urls.insert(format!("http://[::1]:{port}"));
+            }
+            _ => {}
+        }
+    }
+    if let Some(url) = urls.first() {
+        format!(
+            "Docker reports a daemon publication at {url} on the Docker host. If Docker runs on this machine and this is the intended daemon, retry with --daemon-url {url}; otherwise check your proxy/custom endpoint."
+        )
+    } else {
+        "Check --daemon-url http(s)://<host>:<port> for the intended daemon or proxy endpoint."
+            .into()
+    }
+}
+
 pub(super) fn verified_compose(
     version: &str,
     sums: &[u8],
@@ -644,11 +679,25 @@ impl Update {
                 std::thread::sleep(delay);
             }
         }
-        Err(UpdateError::new(if token.is_some() {
-            "the daemon failed its expected version, schema or authenticated-read health gate; the client side was not moved"
+        let failure = if token.is_some() {
+            "the daemon failed its expected version, schema or authenticated-read health gate at the configured endpoint; the client side was not moved"
         } else {
-            "the daemon did not report healthy at the expected version; inspect docker logs and use the rollback commands below; the client side was not moved"
-        }))
+            "the daemon did not report healthy at the expected version at the configured endpoint; inspect docker logs and use the rollback commands below; the client side was not moved"
+        };
+        // Shadow verification uses its temporary endpoint, not the main daemon's port.
+        let ports = if !shadow {
+            self.maintainer_context.as_ref().and_then(|(compose, env)| {
+                let daemon = engine::container(self, compose, Some(env), DAEMON_SERVICE).ok()?;
+                let (code, out) = self.docker_call(&["port", &daemon, "8765/tcp"]);
+                (code == 0).then_some(out)
+            })
+        } else {
+            None
+        };
+        Err(UpdateError::new(format!(
+            "{failure}\n{}",
+            health_endpoint_hint(ports.as_deref().unwrap_or(""))
+        )))
     }
     pub fn deploy_checkout(&mut self, repo: &Path) -> Result<()> {
         let repo = fs::canonicalize(repo)
