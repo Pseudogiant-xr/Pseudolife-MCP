@@ -156,13 +156,13 @@
       }
     },
     "fingerprints": {
-      "scope": "d23643b742a21a7f",
-      "rust": "33fe61909b0b90e2",
-      "fixtures": "defc5e07c5ac3f94",
-      "candidate": "d71c5590ce6f866a",
-      "candidate-harness": "43b859ee9d5fd738",
-      "parity-checks": "ab282b9140895f8a",
-      "daemon-image": "31a69053363f366c",
+      "scope": "702c44bef393994a",
+      "rust": "7590eb3bcb1d8a02",
+      "fixtures": "2c17c5dbf6eed90d",
+      "candidate": "0930d9d93aaa182c",
+      "candidate-harness": "bd0fa77d268d561a",
+      "parity-checks": "4cbb211eb8ea7eaa",
+      "daemon-image": "028fd79f06c19794",
       "parity": "4b13f8c55b6e3de3"
     },
     "accepted": [
@@ -305,6 +305,41 @@
         "job": "parity",
         "fingerprint": "4b13f8c55b6e3de3",
         "reason": "Only skips repeated schedule coverage after an exact-SHA successful push; budgeted events execute the same steps."
+      },
+      {
+        "job": "scope",
+        "fingerprint": "702c44bef393994a",
+        "reason": "Adds manual-CI-only frozen-base binding and admission checks; PR, merge-group, push and scheduled execution costs and case selections are unchanged."
+      },
+      {
+        "job": "rust",
+        "fingerprint": "7590eb3bcb1d8a02",
+        "reason": "Adds manual-CI-only frozen-base binding and admission checks; PR, merge-group, push and scheduled execution costs and case selections are unchanged."
+      },
+      {
+        "job": "fixtures",
+        "fingerprint": "2c17c5dbf6eed90d",
+        "reason": "Adds manual-CI-only frozen-base binding and admission checks; PR, merge-group, push and scheduled execution costs and case selections are unchanged."
+      },
+      {
+        "job": "candidate",
+        "fingerprint": "0930d9d93aaa182c",
+        "reason": "Adds manual-CI-only frozen-base binding and admission checks; PR, merge-group, push and scheduled execution costs and case selections are unchanged."
+      },
+      {
+        "job": "candidate-harness",
+        "fingerprint": "bd0fa77d268d561a",
+        "reason": "Adds manual-CI-only frozen-base binding and admission checks; PR, merge-group, push and scheduled execution costs and case selections are unchanged."
+      },
+      {
+        "job": "parity-checks",
+        "fingerprint": "4cbb211eb8ea7eaa",
+        "reason": "Adds manual-CI-only frozen-base binding and admission checks; PR, merge-group, push and scheduled execution costs and case selections are unchanged."
+      },
+      {
+        "job": "daemon-image",
+        "fingerprint": "028fd79f06c19794",
+        "reason": "Adds manual-CI-only frozen-base binding and admission checks; PR, merge-group, push and scheduled execution costs and case selections are unchanged."
       }
     ]
   },

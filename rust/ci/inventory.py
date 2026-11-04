@@ -225,7 +225,8 @@ def check(workflow):
                      "--out-dir (Join-Path $env:RUNNER_TEMP 'h5-source')")
     oracle = next(s for s in source['steps'] if s.get('name') == 'Bind the source-control Python oracle')
     assert source['steps'].index(oracle) < source['steps'].index(invocation)
-    assert oracle['env'] == {'GITHUB_REF': '${{ github.ref }}'}
+    assert oracle['env'] == {'GITHUB_REF': '${{ github.ref }}',
+                             'PSEUDOLIFE_PORT_DISPATCH_BASE': '${{ needs.scope.outputs.oracle_base }}'}
     assert commands(oracle['run'])[0][:3] == ['python', '-m', 'evals.rust_port.oracle_selection']
     assert '--github-env' in commands(oracle['run'])[0]
 

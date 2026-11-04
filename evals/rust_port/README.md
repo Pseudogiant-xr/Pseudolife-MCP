@@ -270,13 +270,17 @@ which is its `base_sha`, with the group head as the checkout; `push` uses `after
 which must equal the dispatched checkout, with `GITHUB_REF` required to be
 `refs/heads/master`. Both manual `ci` and `wait-mail` modes require `frozen_head`.
 The selection JSON records the ref. No extra dispatch input is needed.
-On a non-master branch, manual `stress` mode instead selects the merge base of
+On a non-master branch, manual `ci` and `stress` modes instead select the merge base of
 the dispatched checkout and `origin/master`, with the same release-only
-exception as a pull request. Its receipt freezes both SHAs and the stress mode;
-the stress plan resolves the remote master once for all iterations, and
-rechecking a receipt does not follow a later master tip. It needs no `frozen_head`,
-but a supplied value must match the dispatched checkout. Other manual modes
-remain master-only, and candidate source-pin checks still run before export.
+exception as a pull request. The receipt freezes both SHAs and the dispatch mode;
+CI's scope job and the stress plan each resolve master once for all their
+consumers, and rechecking a receipt does not follow a later master tip.
+Branch CI requires `frozen_head` to be the full reviewed checkout SHA; stress
+needs no `frozen_head`, but a supplied value must match the checkout.
+The `wait-mail` capture remains master-only, and candidate source-pin checks
+still run before export. For a reviewed branch CI run, dispatch
+`gh workflow run rust.yml --ref <branch> -f mode=ci -f frozen_head=<full-reviewed-SHA>`;
+coordinate the hosted capacity window with the integration batch conductor.
 Each new receipt records `oracle_head`; source receipts also retain the event
 selection and actual source/schema. A stale historical pin is information only
 and cannot freeze the port. Source/import binding and behavior comparisons

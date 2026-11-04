@@ -23,7 +23,7 @@ on:
         default: wait-mail-long-ring-watermark
         required: false
       frozen_head:
-        description: 'Required for ci and wait-mail: full reviewed commit ID, equal to the dispatched master head'
+        description: 'Required for ci and wait-mail: full reviewed commit ID, equal to the dispatched checkout head'
         type: string
         required: false
       # A machine's trial (docs/specs/2026-10-19-self-hosted-parity-lane.md):
@@ -132,6 +132,7 @@ jobs:
       parity_selfhosted: ${{ steps.parity.outputs.selfhosted }}
       batch_passed: ${{ steps.batch.outputs.passed }}
       push_passed: ${{ steps.push.outputs.passed }}
+      oracle_base: ${{ steps.ci_oracle.outputs.oracle_base }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -163,6 +164,12 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: python3 -m ops.ci_push_passed --workflow .github/workflows/rust.yml --github-output "$GITHUB_OUTPUT"
 
+      # A manual branch CI run compares with one immutable master base,
+      # shared by every oracle consumer even if master moves mid-run.
+      - name: Freeze the branch CI oracle base
+        id: ci_oracle
+        if: github.event_name == 'workflow_dispatch' && inputs.mode == 'ci'
+        run: python3 -m evals.rust_port.oracle_selection --freeze-ci-base --github-output "$GITHUB_OUTPUT"
       - name: Classify the change
         id: scope
         shell: pwsh
@@ -237,7 +244,7 @@ jobs:
     # a wait-mail capture or a stress loop needs no Rust or parity job, and
     # a stress loop takes only scope and candidate.
     needs: scope
-    if: ${{ !cancelled() && needs.scope.outputs.push_passed != 'true' && (github.event_name != 'workflow_dispatch' || inputs.mode == 'ci') && needs.scope.outputs.rust != 'false' }}
+    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.mode != 'ci' || needs.scope.result == 'success') && needs.scope.outputs.push_passed != 'true' && (github.event_name != 'workflow_dispatch' || inputs.mode == 'ci') && needs.scope.outputs.rust != 'false' }}
     name: Rust / ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -321,6 +328,7 @@ jobs:
         working-directory: .
         env:
           GITHUB_REF: ${{ github.ref }}
+          PSEUDOLIFE_PORT_DISPATCH_BASE: ${{ needs.scope.outputs.oracle_base }}
         run: |
           python -m evals.rust_port.oracle_selection --out (Join-Path $env:RUNNER_TEMP 'oracle-selection.json') --github-env $env:GITHUB_ENV
           exit $LASTEXITCODE
@@ -463,7 +471,7 @@ jobs:
     #   and startup parity on, built by schema_ci.py's own command; each
     #   cli-daemon shard compiled it itself before.
     needs: scope
-    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.mode == 'ci') && needs.scope.outputs.rust != 'false' && needs.scope.outputs.full != 'false' }}
+    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.mode != 'ci' || needs.scope.result == 'success') && (github.event_name != 'workflow_dispatch' || inputs.mode == 'ci') && needs.scope.outputs.rust != 'false' && needs.scope.outputs.full != 'false' }}
     name: Fixtures / ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -545,7 +553,7 @@ jobs:
     needs: scope
     # The parity jobs need its release builds, so skipping it on an ordinary
     # pull request (scope's `full`) skips the parity matrix as well.
-    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || (inputs.mode == 'ci' || inputs.mode == 'stress')) && needs.scope.outputs.rust != 'false' && needs.scope.outputs.full != 'false' }}
+    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.mode != 'ci' || needs.scope.result == 'success') && (github.event_name != 'workflow_dispatch' || (inputs.mode == 'ci' || inputs.mode == 'stress')) && needs.scope.outputs.rust != 'false' && needs.scope.outputs.full != 'false' }}
     name: Candidate / ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -616,7 +624,7 @@ jobs:
     # its own; the cli-daemon parity cache this workflow stopped using frees
     # about as much.
     needs: scope
-    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || (inputs.mode == 'ci' || inputs.mode == 'stress')) && needs.scope.outputs.rust != 'false' && needs.scope.outputs.full != 'false' }}
+    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.mode != 'ci' || needs.scope.result == 'success') && (github.event_name != 'workflow_dispatch' || (inputs.mode == 'ci' || inputs.mode == 'stress')) && needs.scope.outputs.rust != 'false' && needs.scope.outputs.full != 'false' }}
     name: Candidate harness / ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -882,6 +890,7 @@ jobs:
         shell: pwsh
         env:
           GITHUB_REF: ${{ github.ref }}
+          PSEUDOLIFE_PORT_DISPATCH_BASE: ${{ needs.scope.outputs.oracle_base }}
         run: |
           python -m evals.rust_port.oracle_selection --out (Join-Path $env:RUNNER_TEMP 'oracle-selection.json') --github-env $env:GITHUB_ENV
           exit $LASTEXITCODE
@@ -1541,7 +1550,7 @@ jobs:
     # Linux cli-live shard, which stays required.
     if: ${{ !cancelled() && (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'ci')) && needs.candidate.result == 'success' && needs.candidate-harness.result == 'success' && needs.fixtures.result == 'success' }}
     name: Parity live (non-gating) / ${{ matrix.os }} / ${{ matrix.suite }}
-    needs: [candidate, candidate-harness, fixtures]
+    needs: [scope, candidate, candidate-harness, fixtures]
     continue-on-error: true
     strategy:
       fail-fast: false
@@ -1682,7 +1691,7 @@ jobs:
     name: Source mutants / ${{ matrix.os }} / ${{ matrix.shard }}
     # These shards compile their own source copies and consume no rust-job
     # artifact; the final Parity gate still requires both Rust jobs.
-    needs: [candidate]
+    needs: [scope, candidate]
     strategy:
       fail-fast: false
       matrix:
@@ -1755,6 +1764,7 @@ jobs:
         shell: pwsh
         env:
           GITHUB_REF: ${{ github.ref }}
+          PSEUDOLIFE_PORT_DISPATCH_BASE: ${{ needs.scope.outputs.oracle_base }}
         run: |
           python -m evals.rust_port.oracle_selection --out (Join-Path $env:RUNNER_TEMP 'h5-source-oracle.json') --github-env $env:GITHUB_ENV
           exit $LASTEXITCODE
@@ -1789,7 +1799,7 @@ jobs:
     needs: scope
     # A master push skips it when its merged batch passed it on the same
     # tree: the batch's base-to-head image inputs are the push's.
-    if: ${{ !cancelled() && needs.scope.outputs.push_passed != 'true' && (github.event_name != 'workflow_dispatch' || inputs.mode == 'ci') && needs.scope.outputs.rust != 'false' && !contains(fromJSON(needs.scope.outputs.batch_passed || '[]'), 'Rust daemon / disposable image') }}
+    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.mode != 'ci' || needs.scope.result == 'success') && needs.scope.outputs.push_passed != 'true' && (github.event_name != 'workflow_dispatch' || inputs.mode == 'ci') && needs.scope.outputs.rust != 'false' && !contains(fromJSON(needs.scope.outputs.batch_passed || '[]'), 'Rust daemon / disposable image') }}
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
