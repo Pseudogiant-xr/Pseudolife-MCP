@@ -1306,6 +1306,7 @@ def _autostart_interpreters(*, windows: bool | None = None) -> list[str] | None:
     """
     windows = os.name == "nt" if windows is None else windows
     found = []
+    repos = set()
     try:
         if windows:
             actions = _scheduled_extractor_actions()
@@ -1324,6 +1325,9 @@ def _autostart_interpreters(*, windows: bool | None = None) -> list[str] | None:
                         found.append(match[1].replace("''", "'"))
                     else:
                         return None
+                    working = re.search(r"(?m)^\$psi\.WorkingDirectory = '((?:''|[^'])*)'\r?$", inner)
+                    if working:
+                        repos.add(Path(working[1].replace("''", "'")))
         else:
             config = Path(os.environ.get("XDG_CONFIG_HOME") or home() / ".config")
             for name in ("pseudolife-sonnet-shim.service", "pseudolife-codex-shim.service"):
@@ -1333,10 +1337,31 @@ def _autostart_interpreters(*, windows: bool | None = None) -> list[str] | None:
                 except FileNotFoundError:
                     continue
                 for line in text.splitlines():
+                    if line.startswith("WorkingDirectory="):
+                        repos.add(Path(line.partition("=")[2].strip().strip('"')))
                     if line.startswith("ExecStart="):
                         argv = shlex.split(line[len("ExecStart="):])
                         if argv:
                             found.append(argv[0])
+        for repo in repos:
+            try:
+                lines = (repo / "ops" / ".env").read_text(encoding="utf-8").splitlines()
+            except FileNotFoundError:
+                continue
+            values = {}
+            for line in lines:
+                match = re.match(r"^\s*(?:export\s+)?PSEUDOLIFE_(CLAUDE|CODEX)_SHIM_PYTHON\s*=(.*)$", line)
+                if match:
+                    value = match[2].strip()
+                    if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+                        inner = value[1:-1]
+                        value = inner.replace('\\"', '"').replace("\\\\", "\\") if value[0] == '"' else inner
+                    else:
+                        value = value.split(" #", 1)[0].strip()
+                    values[match[1]] = value
+            for value in filter(None, values.values()):
+                path = Path(value)
+                found.append(str(path if path.is_absolute() else repo / path))
         return found
     except (OSError, ValueError, UnicodeError, TypeError, AttributeError):
         return None
@@ -1387,9 +1412,9 @@ def remove_unused(layout: Layout, *, pinned: Iterable[Path] = (),
                                "Retry pruning when Task Scheduler or the user service files are readable.")
             return result
         for interpreter in interpreters:
-            if _under(interpreter, layout.root):
-                relative = os.path.relpath(interpreter, layout.root)
-                keep.add(os.path.normcase(str(layout.root / Path(relative).parts[0])))
+            for runtime in list_runtimes(layout):
+                if _under(interpreter, runtime.path):
+                    keep.add(os.path.normcase(str(runtime.path)))
     candidates: list[Path] = []
     try:
         for name in sorted(os.listdir(layout.root)):

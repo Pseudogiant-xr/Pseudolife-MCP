@@ -25,8 +25,12 @@ def advice(repo: Path, port: int, labels: dict) -> str:
     files = labels.get("com.docker.compose.project.config_files") or ""
     project = labels.get("com.docker.compose.project")
     checkout = repo.resolve() / "ops" / "docker-compose.yml"
-    is_checkout = any(Path(p).resolve() == checkout for p in files.split(",") if p)
-    if is_checkout:
+    configs = {Path(p).resolve() for p in files.split(",") if p}
+    is_release = repo.resolve() / "ops" / "docker-compose.ghcr.yml" in configs
+    if checkout in configs and is_release:
+        heading = f"Cutover env for the release-mode daemon ({repo / 'ops' / '.env'}):"
+        redeploy = "Then redeploy in release mode: pseudolife-mcp update"
+    elif checkout in configs:
         heading = f"Cutover env for the checkout daemon ({repo / 'ops' / '.env'}):"
         redeploy = f'Then redeploy: pseudolife-mcp update --checkout "{repo}"'
     elif project:

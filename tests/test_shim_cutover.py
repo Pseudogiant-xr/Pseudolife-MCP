@@ -11,7 +11,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 
 
-@pytest.mark.parametrize("overlay", ["", "docker-compose.ghcr.yml", "docker-compose.rust-shadow.yml", "docker-compose.rust.yml"])
+@pytest.mark.parametrize("overlay", ["", "docker-compose.rust-shadow.yml", "docker-compose.rust.yml", "docker-compose.rust-daemon.yml"])
 def test_a_non_default_checkout_keeps_its_own_cutover_advice(tmp_path, overlay):
     import runpy
     advice = runpy.run_path(str(ROOT / "ops/shim_cutover.py"))["advice"]
@@ -23,6 +23,19 @@ def test_a_non_default_checkout_keeps_its_own_cutover_advice(tmp_path, overlay):
                              "com.docker.compose.project": "pseudolife-mcp"})
     assert "checkout daemon" in text and str(repo / "ops/.env") in text
     assert f'update --checkout "{repo}"' in text
+
+
+@pytest.mark.parametrize("rust", [False, True])
+def test_ghcr_release_overlay_keeps_release_update_advice(tmp_path, rust):
+    import runpy
+    advice = runpy.run_path(str(ROOT / "ops/shim_cutover.py"))["advice"]
+    files = ",".join(str(tmp_path / "ops" / name) for name in ("docker-compose.yml", "docker-compose.ghcr.yml"))
+    if rust:
+        files += "," + str(tmp_path / "ops/docker-compose.rust-ghcr.yml")
+    text = advice(tmp_path, 8082, {"com.docker.compose.project.config_files": files,
+                                 "com.docker.compose.project": "pseudolife-mcp"})
+    assert "--checkout" not in text
+    assert "release-mode" in text and "pseudolife-mcp update" in text
 
 
 def test_a_packaged_compose_copy_is_not_this_checkout(tmp_path):

@@ -466,7 +466,7 @@ def test_managed_runtime_is_reused_only_if_its_dependencies_import(monkeypatch, 
     console.write_text("", encoding="utf-8")
     (runtime / "runtime.json").write_text(json.dumps({"version": "0.0.0"}), encoding="utf-8")
     fallback = _touch_path_python(isolated["bin"])
-    asked = _stub_probe(monkeypatch, {managed, fallback} if compatible else {fallback})
+    asked = _stub_probe(monkeypatch, {managed} if compatible else {fallback})
     monkeypatch.setattr(shim_python, "create_venv", lambda *a: pytest.fail("unnecessary venv build"))
     code, out, err = _run(capsys, "--repo", isolated["repo"], "--venv-dir", isolated["venv_dir"])
     assert code == 0, err
