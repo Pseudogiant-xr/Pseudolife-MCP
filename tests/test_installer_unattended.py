@@ -113,3 +113,53 @@ def test_ps_interactive_enter_uses_the_same_sidecar_default(tmp_path):
                                     + block + '\n"MODE=$Extractor"\n')
     assert proc.returncode == 0, _output(proc)
     assert "MODE=sidecar" in _output(proc)
+
+
+@pytest.mark.parametrize("on_path", [False, True])
+def test_ps_detected_codex_is_callable_even_in_off_path_official_install(tmp_path, on_path):
+    source = text("install.ps1")
+    block = source[source.index("# -- 1. provider selection"):source.index("# -- 2. preflight")]
+    prelude = (
+        "$Client=''\n$interactive=$false\n"
+        "function fixture_codex { 'FIXTURE|' + ($args -join ' '); $global:LASTEXITCODE=0 }\n"
+        "function Get-Command { if ($args[0] -eq 'codex' -and (Test-Path function:codex)) { [pscustomobject]@{Name='codex'} } }\n"
+        "function Get-ProviderList($value) { $value }\nfunction Invoke-BankTokenQuestion { }\n")
+    prelude += ("function codex { fixture_codex @args }\nfunction Get-ChildItem { throw 'PATH command must win' }\n"
+                if on_path else
+                "function Get-ChildItem { [pscustomobject]@{FullName='fixture_codex'; LastWriteTime=[datetime]::Now} }\n")
+    proc = _PowerShell(tmp_path).run(prelude + block + "\ncodex mcp get pseudolife-memory\n")
+    assert proc.returncode == 0, _output(proc)
+    assert "Providers: codex" in _output(proc)
+    assert "FIXTURE|mcp get pseudolife-memory" in _output(proc)
+
+
+@pytest.mark.parametrize("script", ["install.sh", "install.ps1"])
+@pytest.mark.parametrize("explicit", [False, True])
+def test_unattended_fresh_default_does_not_overwrite_an_existing_extractor(tmp_path, script, explicit):
+    from tests.test_installer_existing_upgrade import _bash_variants
+    begin = "# >>> pseudolife-mcp install (managed block — installer rewrites between markers) >>>"
+    end = "# <<< pseudolife-mcp install <<<"
+    env = tmp_path / ".env"
+    original = f"{begin}\nPSEUDOLIFE_DREAM_BASE_URL=http://example.invalid:8081/v1\n{end}\n"
+    env.write_text(original, encoding="utf-8")
+    source = text(script)
+    if script.endswith(".ps1"):
+        block = source[source.index("# -- 3. extractor choice"):source.index('$claudeShimMode =')]
+        proc = _PowerShell(tmp_path).run(
+            f"$envFile='{_q(env)}'\n$EnvBegin='{begin}'\n$EnvEnd='{end}'\n"
+            f"$Extractor='{'endpoint' if explicit else ''}'\n$ClientOnly=$false\n$interactive=$false\nfunction Assert-ExtractorArgs {{ }}\n"
+            + block + "\n'WOULD_REWRITE'\n")
+        output = _output(proc)
+    else:
+        variants = _bash_variants()
+        if not variants:
+            pytest.skip("Bash unavailable")
+        shell = _Shell(variants[0], tmp_path)
+        block = source[source.index("# ── 3. extractor choice"):source.index('claude_shim_mode="";')]
+        proc = shell.run(f"env_file='{shell.path(env)}'\nENV_BEGIN='{begin}'\nENV_END='{end}'\n"
+                         f"EXTRACTOR='{'endpoint' if explicit else ''}'\nCLIENT_ONLY=''\ncheck_extractor_args() {{ :; }}\n"
+                         + block + "\necho WOULD_REWRITE\n")
+        output = proc.stdout + proc.stderr
+    assert (proc.returncode == 0) == explicit, output
+    assert ("WOULD_REWRITE" in output) == explicit
+    assert env.read_text(encoding="utf-8") == original

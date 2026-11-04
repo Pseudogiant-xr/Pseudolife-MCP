@@ -830,6 +830,17 @@ if (-not $ClientOnly -and "$ClientUpdateSchedule" -notin "", "ask", "no") {
 # <<< client-only mode <<<
 
 # -- 1. provider selection (before preflight, so it checks what you picked) ------
+# The official Windows CLI may be installed outside PATH. Keep its forwarding
+# command in this script's scope so discovery, preflight and registration use
+# the same executable without changing the user's PATH.
+if (-not (Get-Command codex -ErrorAction SilentlyContinue)) {
+    $installedCodex = Get-ChildItem "$env:LOCALAPPDATA/OpenAI/Codex/bin/*/codex.exe" -File -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    if ($installedCodex) {
+        $script:installerCodexExecutable = $installedCodex.FullName
+        function script:codex { & $script:installerCodexExecutable @args }
+    }
+}
 if (-not $Client) {
     if (-not $interactive) {
         $found = @()
@@ -1043,6 +1054,18 @@ if ($ClientOnly) {
 # A client-only install has none: the remote daemon runs its own extractor.
 if (-not $Extractor -and -not $ClientOnly) {
     if (-not $interactive) {
+        $insideManaged = $false
+        $previousExtractor = $false
+        if ($envFile -and (Test-Path -LiteralPath $envFile)) {
+            foreach ($line in Get-Content -LiteralPath $envFile) {
+                if ($line -eq $EnvBegin) { $insideManaged = $true; continue }
+                if ($line -eq $EnvEnd) { $insideManaged = $false; continue }
+                if ($insideManaged -and $line -match '^PSEUDOLIFE_DREAM_BASE_URL=.+') { $previousExtractor = $true }
+            }
+        }
+        if ($previousExtractor) {
+            throw "Existing extractor settings are recorded in ops/.env. Repeat this run with -Extractor <original-mode> (and -ExtractorUrl/-Model for an endpoint). Nothing changed."
+        }
         $Extractor = "sidecar"
         Write-Host "Unattended default: extractor=sidecar (local CPU; no CLI login required)."
     } else {

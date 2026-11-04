@@ -582,6 +582,8 @@ to optional firewall, exposure, hook trust or scheduled jobs.
 
 A fresh local install uses the CPU sidecar by default; override it with
 `--extractor` / `-Extractor`. A client-only install has no extractor choice.
+On an existing non-sidecar install, repeat its extractor flags; omitting
+them refuses before changing the recorded settings.
 Omitted `--client` / `-Client` selects installed Claude, Codex and Gemini
 CLIs, or `generic` when none are found. Explicit client flags override this.
 For an existing remote bank, use `--client-only --daemon-url <url>` with

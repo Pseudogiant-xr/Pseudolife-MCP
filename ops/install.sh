@@ -1113,6 +1113,14 @@ fi
 # A client-only install has none: the remote daemon runs its own extractor.
 if [ -z "$EXTRACTOR" ] && [ -z "$CLIENT_ONLY" ]; then
     if { [ -n "${INSTALLER_UNATTENDED:-}" ] || [ ! -t 0 ]; }; then
+        if [ -f "${env_file:-}" ] && awk -v b="$ENV_BEGIN" -v e="$ENV_END" '
+            { sub(/\r$/, "") }
+            $0 == b { inside=1; next } $0 == e { inside=0; next }
+            inside && /^PSEUDOLIFE_DREAM_BASE_URL=.+/ { found=1 }
+            END { exit !found }' "$env_file"; then
+            echo "Existing extractor settings are recorded in ops/.env. Repeat this run with --extractor <original-mode> (and --extractor-url/--model for an endpoint). Nothing changed." >&2
+            exit 2
+        fi
         EXTRACTOR=sidecar
         echo "Unattended default: extractor=sidecar (local CPU; no CLI login required)."
     else
