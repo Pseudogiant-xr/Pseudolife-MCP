@@ -510,7 +510,7 @@ jobs:
           exit $LASTEXITCODE
       - name: Retain ordinary PR parity precheck case IDs
         if: always() && steps.precheck.outputs.enabled == 'true'
-        continue-on-error: ${{ steps.precheck.outputs.golden != 'true' }}
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: pr-parity-precheck-${{ runner.os }}

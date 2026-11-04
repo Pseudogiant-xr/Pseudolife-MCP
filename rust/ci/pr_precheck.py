@@ -111,18 +111,12 @@ def judges_for(path: str, graph: dict[str, set[str]], owners: dict[str, tuple[st
         groups = [group for group, roots in JUDGE_ROOTS.items()
                   if path in dependencies(graph, [f"pseudolife_memory/{name}.py" for name in roots])]
         return tuple(groups) if groups else (JUDGES if path not in owners else ())
-    if path.startswith("rust/shim/src/cli/"):
-        parts = PurePosixPath(path).parts
-        name = parts[4] if len(parts) > 4 else ""
-        if name.startswith("lease"):
-            return ("lease-headers", "cli-process")
-        if name.startswith("wait_mail"):
-            return ("wait-mail-tests",)
-        from parity_scope import SHIM_COMMANDS
-        return () if name in SHIM_COMMANDS else JUDGES
+    if path.startswith("rust/shim/"):
+        from parity_scope import reached
+        return JUDGES if "judges" in reached(path) else ()
     if path.startswith("rust/ci/ci_budget"):
         return ()
-    if path.startswith(("rust/shim/", "rust/shared/", "evals/rust_port/", "evals/rust_baseline/", "rust/ci/")):
+    if path.startswith(("rust/shared/", "evals/rust_port/", "evals/rust_baseline/", "rust/ci/")):
         return JUDGES
     if path in ("tests/test_cli_dispatch.py", "tests/conftest.py", "tests/pg_defaults.py", "tests/fake_embedder.py"):
         return JUDGES

@@ -4,6 +4,7 @@ import json
 import pytest
 
 import pr_precheck as precheck
+from parity_scope import SHIM_COMMANDS, reached
 
 
 def test_transitive_relative_and_function_local_imports_are_owners():
@@ -80,6 +81,21 @@ def test_shared_build_inputs_and_test_package_initializer_keep_all_judges(path):
     assert selected["judges"] == list(precheck.JUDGES)
 
 
+@pytest.mark.parametrize("path", [*[f"rust/shim/src/cli/{entry}" for entry in SHIM_COMMANDS],
+    "rust/shim/src/cli/doctor/mod.rs", "rust/shim/src/cli/lease/mod.rs", "rust/shim/src/cli/wait_mail.rs",
+    "rust/shim/src/shared.rs", "rust/shim/README.md"])
+def test_shim_precheck_judges_match_batch_ownership(path):
+    expected = list(precheck.JUDGES) if "judges" in reached(path) else []
+    assert precheck.select([path])["judges"] == expected
+
+
+def test_report_artifact_upload_is_not_a_pr_gate():
+    import yaml
+    job = yaml.safe_load((precheck.ROOT / ".github/workflows/rust.yml").read_text())["jobs"]["rust"]
+    upload = next(step for step in job["steps"] if step.get("name") == "Retain ordinary PR parity precheck case IDs")
+    assert upload["continue-on-error"] is True
+
+
 def goldens(root, *, windows=None):
     directory = root / "rust/cli_harness/goldens"
     directory.mkdir(parents=True)
@@ -124,7 +140,7 @@ def test_lease_and_shared_cli_changes_select_their_frozen_judges():
     assert precheck.judges_for("pseudolife_memory/cli.py", graph, owners) == precheck.JUDGES
     assert precheck.judges_for("pseudolife_memory/os_lock.py", graph, owners) == ("lease-headers", "cli-process")
     assert precheck.judges_for("pseudolife_memory/doctor_cli.py", graph, owners) == ()
-    assert precheck.judges_for("rust/shim/src/cli/lease.rs", graph, owners) == ("lease-headers", "cli-process")
+    assert precheck.judges_for("rust/shim/src/cli/lease.rs", graph, owners) == precheck.JUDGES
     assert precheck.judges_for("rust/shim/src/main.rs", graph, owners) == precheck.JUDGES
 
 
