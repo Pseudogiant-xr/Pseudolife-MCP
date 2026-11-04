@@ -332,7 +332,7 @@
       "lock-resolve": "83bcc6b654896c6d",
       "test": "ac414107d3d9c71d",
       "test-lite-linux": "44e2a8f2c01baeab",
-      "test-lite-windows": "03dc6fca4e795860",
+      "test-lite-windows": "f327c779efc5d666",
       "test-lite-macos": "a7539d45a566d5f6",
       "frontend": "b1b6a1a1278f2e60"
     },
@@ -439,33 +439,38 @@
       },
       {
         "job": "test-lite-windows",
-        "fingerprint": "ea0ed09500aa4a66",
-        "reason": "Adds mocked move consent and rollback cases to the existing pytest process; no new job, setup, subprocess, socket, timeout or parallelism is introduced."
+        "fingerprint": "fdd232a6fa8ee551",
+        "reason": "Adds eight fixture-only Claude profile notice cases to the existing Python step. They take seconds in targeted runs, add no jobs, shards or dependency setup, and retain the measured baseline within unchanged limits pending the next batch measurement."
       },
       {
         "job": "test-lite-windows",
-        "fingerprint": "40f503540d2b0f92",
-        "reason": "Composes the reviewed S2 Docker restore file and S3 mocked move selectors in the existing pytest step. No new job, setup, shard, or parallelism; both components use fake external effects in these checks."
+        "fingerprint": "7b21e54535e9e185",
+        "reason": "Accept the merged Windows lite lane with existing profile notice coverage and mocked Docker backup/restore coverage; no jobs, setup steps or dependencies were added and measured limits remain unchanged."
       },
       {
         "job": "test-lite-windows",
-        "fingerprint": "22c2566a848419ff",
-        "reason": "Adds three mocked move signal-boundary cases with no child processes; native targeted move selection remains about five seconds and the existing measured job budget holds."
-      },
-      {
-        "job": "test-lite-macos",
-        "fingerprint": "5ced77a48cb6e58f",
-        "reason": "Adds four mocked move signal-boundary cases without process or network effects; they take less than one second locally and retain the measured macOS lane cost."
+        "fingerprint": "7a0a0b4ce51f8771",
+        "reason": "Combines eight fixture-only Claude profile cases with six mocked codec cases and one short PowerShell Unicode round-trip in the existing Python step. No new jobs, shards or dependency setup; retain the measured lane baseline within unchanged limits pending the next batch measurement."
       },
       {
         "job": "test-lite-windows",
-        "fingerprint": "03dc6fca4e795860",
-        "reason": "Adds two mocked signal callbacks at the confirmed move marker; the five new signal cases spawn no child processes and finish in under one second, retaining the measured lane cost."
+        "fingerprint": "d0ebc44de922485c",
+        "reason": "Combines the existing mocked Docker backup and restore coverage with the merged profile and codec cases in the same Windows Python step; no new jobs, setup steps or dependencies, and existing measured limits remain unchanged."
+      },
+      {
+        "job": "test-lite-windows",
+        "fingerprint": "f88c9c88e7636b10",
+        "reason": "Composes the reviewed stopped restore tests with the existing mocked move exposure selection in one pytest step; no job or setup changes and no added child process stress."
+      },
+      {
+        "job": "test-lite-windows",
+        "fingerprint": "f327c779efc5d666",
+        "reason": "Composes reviewed stopped restore coverage with the mocked move signal-boundary selectors in the existing pytest step; measured job cost and setup remain unchanged."
       },
       {
         "job": "test-lite-macos",
         "fingerprint": "a7539d45a566d5f6",
-        "reason": "Adds two mocked signal callbacks at the confirmed move marker to the four selected boundary cases; six cases finish in under one second without external effects, retaining the measured lane cost."
+        "reason": "Retains the previously selected mocked move signal-boundary cases while forwarding the tested dependency; no new child process or setup cost."
       }
     ]
   }

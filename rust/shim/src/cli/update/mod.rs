@@ -31,6 +31,19 @@ pub(crate) const DAEMON_SERVICE: &str = "pseudolife-daemon";
 pub(crate) const PYPI_JSON: &str = "https://pypi.org/pypi/pseudolife-mcp/json";
 pub(crate) type Result<T> = std::result::Result<T, UpdateError>;
 
+fn client_release_target(health: Option<&Value>, tag: Option<&str>) -> Result<String> {
+    let current = health
+        .and_then(|h| h["version"].as_str())
+        .filter(|version| !version.is_empty())
+        .ok_or_else(|| UpdateError::usage("the configured daemon did not report its release on /health; retry with --daemon-url http(s)://<host>:<port> for the running daemon. Nothing was changed"))?;
+    if !plain_release(current) && tag.is_none() {
+        return Err(UpdateError::usage(
+            "the daemon reports a version which is not a plain release number (N.N.N); name the release with --tag <version>. Nothing was changed",
+        ));
+    }
+    Ok(tag.unwrap_or(current).to_owned())
+}
+
 #[derive(Debug)]
 pub(crate) struct UpdateError {
     pub message: String,
@@ -86,6 +99,8 @@ pub(crate) struct Update {
     pub selected_engine: String,
     pub maintainer_context: Option<(Vec<String>, Environment)>,
     pub rollback_scope: Option<String>,
+    pub stopped_handover: bool,
+    pub handover_port: u16,
 }
 
 fn output(text: &str, stderr: bool) -> std::io::Result<()> {
@@ -178,6 +193,8 @@ impl Update {
             selected_engine: "python".into(),
             maintainer_context: None,
             rollback_scope: None,
+            stopped_handover: false,
+            handover_port: 5432,
         }
     }
     pub fn step(&mut self, text: impl Into<String>) {
@@ -520,19 +537,8 @@ impl Update {
             )));
         }
         let health = self.daemon_health();
+        let target = client_release_target(health.as_ref(), self.o.tag.as_deref())?;
         let current = health.as_ref().and_then(|h| h["version"].as_str());
-        if current.is_some_and(|v| !plain_release(v)) && self.o.tag.is_none() {
-            return Err(UpdateError::usage(
-                "the daemon reports a version which is not a plain release number (N.N.N); name the release with --tag <version>. Nothing was changed",
-            ));
-        }
-        let target = self
-            .o
-            .tag
-            .clone()
-            .or_else(|| current.filter(|v| plain_release(v)).map(str::to_owned))
-            .map(Ok)
-            .unwrap_or_else(|| self.target_version())?;
         self.refuse_downgrade(current, &target)?;
         self.refuse_checkout_shadow(&target)?;
         self.report.mode = "clients".into();
@@ -580,7 +586,7 @@ impl Update {
         }
     }
     pub fn schema_rollback_note(&self) -> Vec<String> {
-        vec!["      If the new daemon upgraded the bank's schema before failing, the older daemon refuses it,".into(),format!("      so after rolling back the image, restore {} with",if self.o.no_backup {"a backup taken before this deploy (this run took none: --no-backup)"}else{"the backup taken above"}),"      ops/restore.ps1 -Apply -BackupFile <dump> (ops/restore.sh --apply --backup-file <dump>).".into()]
+        vec!["      If the new daemon upgraded the bank's schema before failing, the older daemon refuses it,".into(),format!("      so after rolling back the image, restore {} with",if self.o.no_backup {"a backup taken before this deploy (this run took none: --no-backup)"}else{"the backup taken above"}),"      pseudolife-mcp restore --backup-file <dump> --state-archive <state.tgz> --yes. (Omit --state-archive only if no state archive was taken.)".into()]
     }
     pub fn hooks_changed_note(&mut self, previous: Option<&str>, health: Option<&Value>) {
         if let (Some(a), Some(b)) = (previous, health.and_then(|h| h["hooks_digest"].as_str()))
@@ -699,6 +705,17 @@ fn ask(question: &str) -> bool {
 }
 
 pub(crate) fn run(arguments: Vec<OsString>) -> u8 {
+    if arguments == [OsString::from("--checkout-handover-capability")]
+        || (arguments.len() == 3
+            && arguments[0] == "--checkout"
+            && arguments[2] == "--checkout-handover-capability")
+    {
+        return if output("pseudolife-mcp checkout-handover-v1\n", false).is_ok() {
+            0
+        } else {
+            120
+        };
+    }
     // Wrapper capability probe: exact, read-only and absent from deferred CLIs.
     if arguments == [OsString::from("--native-capability")] {
         return if output("pseudolife-mcp native-update-v1\n", false).is_ok() {
@@ -746,7 +763,7 @@ pub(crate) fn run(arguments: Vec<OsString>) -> u8 {
         return run_cli(&argv, None, 14400, true).0.clamp(0, 255) as u8;
     }
     if arguments.iter().any(|s| s == "--help" || s == "-h") {
-        return if output("usage: pseudolife-mcp update [--checkout REPO] [--tag VERSION] [--engine python|rust] [--shadow]\n       [--all | --daemon-only | --clients-only] [--check] [--reinstall] [--allow-downgrade]\n       [--no-backup] [--rollback-tag SUFFIX] [--force-rollback-tag] [--allow-dirty]\n       [--keep-rollbacks N] [--keep-cache-hours N] [--no-cache-prune] [--no-test-login]\n       [--env-file PATH] [--daemon-url URL] [--health-retries N] [--health-delay-ms N]\n       [--unattended | --schedule HH:MM | --unschedule] [--allow-no-bearer] [--result-file PATH] [--json]\n       [--python-runtime INTERPRETER] (explicit legacy/lite updater)\n",false).is_ok(){0}else{120};
+        return if output("usage: pseudolife-mcp update [--checkout REPO] [--tag VERSION] [--engine python|rust] [--shadow]\n       [--all | --daemon-only | --clients-only] [--check] [--reinstall] [--allow-downgrade]\n       [--no-backup] [--rollback-tag SUFFIX] [--force-rollback-tag] [--allow-dirty]\n       [--keep-rollbacks N] [--keep-cache-hours N] [--no-cache-prune] [--no-test-login]\n       [--env-file PATH] [--allow-auth-change] [--daemon-url URL] [--health-retries N] [--health-delay-ms N]\n       [--unattended | --schedule HH:MM | --unschedule] [--allow-no-bearer] [--result-file PATH] [--json]\n       [--python-runtime INTERPRETER] (explicit legacy/lite updater)\n",false).is_ok(){0}else{120};
     }
     match Options::parse(arguments) {
         Ok(o) => Update::new(o).run(),

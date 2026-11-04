@@ -417,7 +417,9 @@ def test_both_scope_jobs_ask_on_a_master_push_only(name, scope_id):
     scope = workflow["jobs"][scope_id]
     assert scope["permissions"] == SCOPE_PERMISSIONS
     for job_id, job in workflow["jobs"].items():
-        if job_id != scope_id:
+        if name == "rust.yml" and job_id == "stress-report":
+            assert job["permissions"] == {"contents": "read", "actions": "read"}
+        elif job_id != scope_id:
             assert "permissions" not in job, job_id
     assert scope["outputs"]["batch_passed"] == "${{ steps.batch.outputs.passed }}"
     step = next(s for s in scope["steps"] if s.get("id") == "batch")

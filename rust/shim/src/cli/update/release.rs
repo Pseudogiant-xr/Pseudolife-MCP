@@ -13,6 +13,41 @@ const COMPOSE_FILES: [&str; 6] = [
     "Dockerfile.extractor",
 ];
 
+pub(super) fn health_endpoint_hint(ports: &str) -> String {
+    let mut urls = std::collections::BTreeSet::new();
+    for line in ports.lines() {
+        let Some((host, port)) = line.trim().rsplit_once(':') else {
+            continue;
+        };
+        if port.is_empty() || !port.bytes().all(|b| b.is_ascii_digit()) {
+            continue;
+        }
+        let Ok(port) = port.parse::<u16>() else {
+            continue;
+        };
+        if port == 0 {
+            continue;
+        }
+        match host {
+            "127.0.0.1" | "0.0.0.0" => {
+                urls.insert(format!("http://127.0.0.1:{port}"));
+            }
+            "[::1]" | "[::]" => {
+                urls.insert(format!("http://[::1]:{port}"));
+            }
+            _ => {}
+        }
+    }
+    if let Some(url) = urls.first() {
+        format!(
+            "Docker reports a daemon publication at {url} on the Docker host. If Docker runs on this machine and this is the intended daemon, retry with --daemon-url {url}; otherwise check your proxy/custom endpoint."
+        )
+    } else {
+        "Check --daemon-url http(s)://<host>:<port> for the intended daemon or proxy endpoint."
+            .into()
+    }
+}
+
 pub(super) fn verified_compose(
     version: &str,
     sums: &[u8],
@@ -370,6 +405,9 @@ impl Update {
         let (code, out) = self.command(&config_args, Some(&env), 60, false);
         let config:Value=serde_json::from_str(&out).ok().filter(|_:&Value|code==0).ok_or_else(||UpdateError::usage("cannot resolve the Compose project; check its files and env file, then retry; nothing was changed"))?;
         engine::verify_bank_identity(self, &config, &context.running)?;
+        if self.o.allow_auth_change {
+            self.step("using the explicitly requested daemon bearer settings from --env-file");
+        }
         self.set_rollback_scope(&config, &context.running)?;
         self.maintainer_context = Some((context.args.clone(), env.clone()));
         let token = if activating {
@@ -452,13 +490,6 @@ impl Update {
             None
         };
         let pg = engine::container(self, &context.args, Some(&env), "pseudolife-pg")?;
-        let pg_env = &config["services"]["pseudolife-pg"]["environment"];
-        let user = pg_env["POSTGRES_USER"]
-            .as_str()
-            .ok_or_else(|| UpdateError::usage("cannot resolve PostgreSQL user"))?;
-        let db = pg_env["POSTGRES_DB"]
-            .as_str()
-            .ok_or_else(|| UpdateError::usage("cannot resolve PostgreSQL database"))?;
         let daemon = context.running["Id"].as_str().unwrap_or(DAEMON_CONTAINER);
         let backups = if self.o.no_backup {
             self.warn("skipping backup (--no-backup)");
@@ -468,9 +499,16 @@ impl Update {
             .as_deref()
             .filter(|repo| self.checkout_script(repo, "backup").is_some())
         {
+            let pg_env = &config["services"]["pseudolife-pg"]["environment"];
+            let user = pg_env["POSTGRES_USER"]
+                .as_str()
+                .ok_or_else(|| UpdateError::usage("cannot resolve PostgreSQL user"))?;
+            let db = pg_env["POSTGRES_DB"]
+                .as_str()
+                .ok_or_else(|| UpdateError::usage("cannot resolve PostgreSQL database"))?;
             self.project_backup(repo, &pg, daemon, user, db)?
         } else {
-            self.builtin_backup(&pg, daemon, user, db, &data_dir().join("backups"))?
+            self.builtin_backup(&pg, daemon, &data_dir().join("backups"))?
         };
         if let Some(callback) = before_recreate.as_mut() {
             callback()?;
@@ -641,11 +679,25 @@ impl Update {
                 std::thread::sleep(delay);
             }
         }
-        Err(UpdateError::new(if token.is_some() {
-            "the daemon failed its expected version, schema or authenticated-read health gate; the client side was not moved"
+        let failure = if token.is_some() {
+            "the daemon failed its expected version, schema or authenticated-read health gate at the configured endpoint; the client side was not moved"
         } else {
-            "the daemon did not report healthy at the expected version; inspect docker logs and use the rollback commands below; the client side was not moved"
-        }))
+            "the daemon did not report healthy at the expected version at the configured endpoint; inspect docker logs and use the rollback commands below; the client side was not moved"
+        };
+        // Shadow verification uses its temporary endpoint, not the main daemon's port.
+        let ports = if !shadow {
+            self.maintainer_context.as_ref().and_then(|(compose, env)| {
+                let daemon = engine::container(self, compose, Some(env), DAEMON_SERVICE).ok()?;
+                let (code, out) = self.docker_call(&["port", &daemon, "8765/tcp"]);
+                (code == 0).then_some(out)
+            })
+        } else {
+            None
+        };
+        Err(UpdateError::new(format!(
+            "{failure}\n{}",
+            health_endpoint_hint(ports.as_deref().unwrap_or(""))
+        )))
     }
     pub fn deploy_checkout(&mut self, repo: &Path) -> Result<()> {
         let repo = fs::canonicalize(repo)
@@ -667,10 +719,6 @@ impl Update {
             ));
         }
         let env_file = repo.join("ops/.env");
-        if !env_file.is_file() && repo.join("ops/.env.example").is_file() {
-            seams::write_atomic(&env_file, &fs::read(repo.join("ops/.env.example"))?)?;
-            self.step("scaffolded ops/.env from ops/.env.example (all values commented)");
-        }
         let compose = compose_args(
             &[file.clone(), repo.join("ops/docker-compose.override.yml")],
             std::slice::from_ref(&env_file),
@@ -703,17 +751,17 @@ impl Update {
             self.backup(None)?;
         } else {
             let pg = engine::container(self, &compose, Some(&env), "pseudolife-pg")?;
-            let pg_env = &config["services"]["pseudolife-pg"]["environment"];
-            let user = pg_env["POSTGRES_USER"].as_str().ok_or_else(|| {
-                UpdateError::usage("cannot resolve the project's PostgreSQL user; set POSTGRES_USER in its Compose environment and retry; nothing was deployed")
-            })?;
-            let db = pg_env["POSTGRES_DB"].as_str().ok_or_else(|| {
-                UpdateError::usage("cannot resolve the project's PostgreSQL database; set POSTGRES_DB in its Compose environment and retry; nothing was deployed")
-            })?;
             if self.checkout_script(&repo, "backup").is_some() {
+                let pg_env = &config["services"]["pseudolife-pg"]["environment"];
+                let user = pg_env["POSTGRES_USER"].as_str().ok_or_else(|| {
+                    UpdateError::usage("cannot resolve the project's PostgreSQL user; set POSTGRES_USER in its Compose environment and retry; nothing was deployed")
+                })?;
+                let db = pg_env["POSTGRES_DB"].as_str().ok_or_else(|| {
+                    UpdateError::usage("cannot resolve the project's PostgreSQL database; set POSTGRES_DB in its Compose environment and retry; nothing was deployed")
+                })?;
                 self.project_backup(&repo, &pg, &daemon, user, db)?;
             } else {
-                self.builtin_backup(&pg, &daemon, user, db, &data_dir().join("backups"))?;
+                self.builtin_backup(&pg, &daemon, &data_dir().join("backups"))?;
             }
         }
         let text = fs::read_to_string(&file)?;

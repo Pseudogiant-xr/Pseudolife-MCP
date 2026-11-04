@@ -223,16 +223,17 @@ def run_backup() -> None:
     parser.add_argument("--daemon-container", help="Docker daemon container")
     parser.add_argument("--db", help="Docker database name (default: daemon configuration)")
     parser.add_argument("--user", help="Docker database role (default: daemon configuration)")
+    parser.add_argument("--db-port", type=int, help="PostgreSQL port inside the Docker container (default: daemon configuration)")
     args = parser.parse_args(sys.argv[2:])
     from pseudolife_memory import update_cli as up
     try:
-        docker = bool(args.container or args.daemon_container) or (
+        docker = bool(args.container or args.daemon_container or args.db_port is not None) or (
             args.data_dir is None and up.Update(up.Options()).detect_tier() == "docker")
         if docker:
             from pseudolife_memory.docker_backup_restore import DockerBank
             with up.UpdateLock():
                 bank = DockerBank(container=args.container, daemon_container=args.daemon_container,
-                                  db=args.db, user=args.user)
+                                  db=args.db, user=args.user, db_port=args.db_port)
                 result = bank.backup(out=args.out, keep_days=args.keep_days)
             print(f"bank dump:     {result['dump']}")
             print(f"state archive: {result['state']}")

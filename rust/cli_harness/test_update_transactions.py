@@ -286,15 +286,17 @@ if a[:1]==["inspect"]:
    out={"recreated_stopped":"exited","recreated_restarting":"restarting"}.get(s["failure"],"running") if s.get("deployed") else "running"
   elif "index .Config.Labels" in f: out=s.get("setup_engine","python")
   elif "Labels" in f: out=json.dumps(s["running"]["Config"]["Labels"])
+  elif "Config.Env" in f: out=json.dumps(s["running"]["Config"]["Env"])
   elif "|" in f: out=s["running"]["Image"]+"|"+s["running"]["Config"]["Image"]
+  elif f=="{{json .}}":out=json.dumps(s["running"])
   else: out=s["running"]["Id"]
- else: out=json.dumps([s["running"]])
+ else: out=json.dumps([s["running"]] if a[-1]!="fixture-pg" else [{"Name":"/fixture-pg","NetworkSettings":{"Networks":{"fixture":{"Aliases":["pseudolife-pg"]}}}}])
 elif a[:2]==["image","inspect"]:
  if "Created" in " ".join(a): out="2026-01-01|"+s["images"].get(a[-1],s["running"]["Image"])
  elif a[-1] in s["images"]: out=s["images"][a[-1]]
  else: code=1
 elif a[:2]==["image","ls"]: out="\n".join(s["images"]) if s.get("list_images") else ""
-elif a[:1]==["port"]:out="127.0.0.1:5433"
+elif a[:1]==["port"]:out="127.0.0.1:9876" if a[-1]=="8765/tcp" else "127.0.0.1:5433"
 elif a[:2]==["volume","inspect"]:
  if s.get("volume_inspect_failure"):code=1
  else:out=json.dumps(s.get("volume_inspections",{}).get(a[-1],[]))
@@ -432,9 +434,11 @@ def host(tmp_path, failure="", mode="release"):
     state_path = home / "fixture-state.json"
     state = {"calls": [], "deployed": False, "failure": failure, "images": {"pseudolife-daemon:0.21.0": "sha256:validated"},
              "running": {"Id": "fixture-daemon", "Image": "sha256:validated", "State": {"Running": True},
+                         "NetworkSettings": {"Networks": {"fixture": {"Aliases": ["pseudolife-pg"]}}},
                          "Mounts": [{"Destination": "/data", "Name": "fixture-state", "Type": "volume", "RW": True}],
                          "Config": {"Image": "pseudolife-daemon:0.21.0", "Labels": None,
-                                    "Env": ["PSEUDOLIFE_MCP_DATABASE_URL=postgresql://fixture:fixture@pseudolife-pg:5432/fixture"]}}}
+                                    "Env": ["PSEUDOLIFE_MCP_DATABASE_URL=postgresql://fixture:fixture@pseudolife-pg:5432/fixture",
+                                            "PSEUDOLIFE_MCP_TOKEN=fixture-bearer"]}}}
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):
@@ -773,7 +777,9 @@ def test_native_checkout_scopes_backup_and_rollback_to_its_compose_project(tmp_p
             assert [backup[backup.index(flag) + 1] for flag in flags] == ["fixture-pg", "fixture-daemon", "fixture", "fixture"]
         else:
             backup = next(args for args in calls if args[:1] == ["exec"] and any("pg_dump" in part for part in args))
-            assert backup[1] == "fixture-pg" and backup[-2:] == ["fixture", "fixture"]
+            from psycopg.conninfo import conninfo_to_dict
+            assert backup[1] == "fixture-pg" and backup[-3:-1] == ["5432", "fixture"]
+            assert conninfo_to_dict(backup[-1]) == {"dbname": "fixture"}
         assert stages(state) == ["backup", "tag", "up"]
         report = json.loads(result.stdout)
         assert report["clients"] is None
@@ -838,6 +844,9 @@ def test_release_fault_chronology_and_no_client_movement(tmp_path, native, failu
         observed = stages(json.loads(state_path.read_text()))
         assert observed == (["pull"] if failure == "pull" else ["pull", "backup"] if failure == "backup" else ["pull", "backup", "tag", "up"])
         assert report["clients"] is None
+        if failure in ("health", "version"):
+            assert "--daemon-url http://127.0.0.1:9876" in result.stdout
+            assert "image setting won" not in result.stdout
         if failure not in ("pull", "backup"):
             assert report["rollback"]["state"] == "tagged"
 
@@ -922,6 +931,8 @@ def test_plain_update_accepts_tokenless_host_and_scaffolded_env(tmp_path, mode):
     with host(tmp_path, mode=mode) as (repo, env, state_path):
         state = json.loads(state_path.read_text())
         state["config"]["services"][SERVICE]["environment"].pop("PSEUDOLIFE_MCP_TOKEN")
+        state["running"]["Config"]["Env"] = [entry for entry in state["running"]["Config"]["Env"]
+                                             if not entry.startswith("PSEUDOLIFE_MCP_TOKEN=")]
         state_path.write_text(json.dumps(state))
         if mode == "checkout":
             (repo / "ops/.env").unlink()
@@ -931,6 +942,8 @@ def test_plain_update_accepts_tokenless_host_and_scaffolded_env(tmp_path, mode):
         result = run_arm(repo, env, binary, [*args, "--json", "--health-retries", "1"])
         assert result.returncode == 0, result.stdout + result.stderr
         assert stages(json.loads(state_path.read_text()))[-2:] == ["tag", "up"]
+        if mode == "checkout":
+            assert not (repo / "ops/.env").exists()
 
 
 def test_plain_release_can_recover_an_unhealthy_daemon(tmp_path):
@@ -1127,6 +1140,8 @@ def test_plain_release_after_python_activation_does_not_require_bearer(tmp_path)
         labels.update({"org.pseudolife.engine": "python", "org.pseudolife.release": "0.21.0",
                        "org.pseudolife.activation": "accepted-fixture"})
         state["config"]["services"][SERVICE]["environment"].pop("PSEUDOLIFE_MCP_TOKEN")
+        state["running"]["Config"]["Env"] = [entry for entry in state["running"]["Config"]["Env"]
+                                             if not entry.startswith("PSEUDOLIFE_MCP_TOKEN=")]
         state_path.write_text(json.dumps(state))
         accepted = Path(env["PSEUDOLIFE_MCP_DATA_DIR"]) / "update-engine/docker-compose.release-accepted.json"
         accepted.parent.mkdir(parents=True)

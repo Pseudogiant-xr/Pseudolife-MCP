@@ -731,7 +731,14 @@ Target artifacts and safety backups must stay outside mounted bank directories
 and, for installed-CLI restore, outside checkouts. `--target-work-dir <directory>`
 selects another target artifact root when a custom bind mount overlaps the
 default location. Per-attempt restore safety pairs are kept under its `safety`
-directory. Repeat the original target-mode, file and work-directory flags when
+directory. A checkout target must advertise stopped handover support from its
+own `ops/update.py`; update that checkout and its CLI dependencies if preflight
+names this requirement. For a source authenticated only by stored principals,
+set `PSEUDOLIFE_MCP_TOKEN_FILE` to an existing private source token file. Move
+checks the candidate against active source principals before changing anything,
+sends it through ssh stdin to a private temporary target file for the updater's
+authenticated read, and removes that file after the attempt. It never recovers
+plaintext from the database. Repeat the original target-mode, file and work-directory flags when
 using `--resume`.
 
 A resume marker is bound to the selected database/storage, rather than granting
@@ -801,8 +808,8 @@ The order:
    path is in the move record and report. A resume marker is
    written beside the copies (`<checkout>/data/move-<move id>/marker.json`,
    or `~/.pseudolife-mcp/moves/<move id>/marker.json` without a clone),
-   outside the daemon's `/data`. Restore uses `ops/restore.sh --apply --no-start`
-   or the installed `pseudolife-mcp restore --yes --leave-stopped`, with the
+   outside the daemon's `/data`. Restore uses the checkout's or installed
+   `pseudolife-mcp restore --yes --leave-stopped` CLI, with the
    dump and state archive (it takes the
    target's own safety dump first). The restored bank's identity (`meta`
    `coordination_bank_id`) and row counts must match the source's. Then
@@ -822,7 +829,7 @@ The order:
    again.
 9. **Start the target once.** The deployment schema and checkout HEAD are
    checked again before `/data/move.json` is lifted. The owning checkout's
-   `ops/update.sh`, or an installed same-version
+   `ops/update.py` stopped handover, or an installed same-version
    `update --reinstall --daemon-only`, recreates the daemon with carried
    identities. Under `--no-keep-tokens`, a clone-free target uses `docker start`
    with its existing configuration. Its `/health` `bank` fingerprint
@@ -872,8 +879,8 @@ marker names another move.
 **A target left gated.** While `/data/move.json` is there the target's
 daemon refuses to start, and the bank under it is a clone of the source's.
 To abandon the move there, restore the target's own pre-move safety dump
-(the one `ops/restore.sh` took first, in its `data/backups`) with
-`ops/restore.sh --apply --backup-file <that dump> --state-archive
+(under the move artifact directory's `safety` directory) with
+`pseudolife-mcp restore --yes --leave-stopped --backup-file <that dump> --state-archive
 <checkout>/data/move-<move id>/target-original-state.tgz`, which replaces
 `/data`, gate included. The move record's `target_state_backup` names this
 verified pre-move archive; a resumed move retains the original. Remove the gate by

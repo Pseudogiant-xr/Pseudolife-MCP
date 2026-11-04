@@ -121,48 +121,35 @@ def copy_from_container(docker: str, source: str, target: Path) -> None:
 
 class DockerBank:
     def __init__(self, *, container: str | None = None, daemon_container: str | None = None,
-                 db: str | None = None, user: str | None = None, daemon_url: str | None = None, log=print):
+                 db: str | None = None, user: str | None = None, db_port: int | None = None,
+                 daemon_url: str | None = None, log=print):
         self.docker = up.docker_cmd()
         self.pg = container or up.PG_CONTAINER
         self.daemon = daemon_container or up.DAEMON_CONTAINER
         self.log = log
         self.running = self.inspect(self.daemon)
         pg = self.inspect(self.pg)
-        env = dict(v.split("=", 1) for v in self.running.get("Config", {}).get("Env", []) if "=" in v)
-        source = {}
-        if env.get("PSEUDOLIFE_MCP_DATABASE_URL"):
-            from psycopg.conninfo import conninfo_to_dict
-            try:
-                source = conninfo_to_dict(env["PSEUDOLIFE_MCP_DATABASE_URL"])
-            except Exception:  # driver errors may include the credential-bearing URL
-                raise up.UpdateError("cannot read the daemon's database configuration; restore its original "
-                                     "PSEUDOLIFE_MCP_DATABASE_URL and retry. Nothing was restored", 2) from None
-        if (source.get("service") or env.get("PGSERVICE")) and not (container and db and user):
-            raise up.UpdateError("the daemon's libpq service profile cannot be resolved here; name the actual "
-                                 "target with --container <postgres> --db <database> --user <role>. Nothing was restored", 2)
-        source_host = source.get("hostaddr") or env.get("PGHOSTADDR") or source.get("host") or env.get("PGHOST")
-        if source_host and container is None:
-            networks = pg.get("NetworkSettings", {}).get("Networks", {})
-            shared = set(self.running.get("NetworkSettings", {}).get("Networks", {})) & set(networks)
-            names = set()
-            for key in shared:
-                network = networks[key]
-                names.update((self.pg, (pg.get("Name") or "").lstrip("/"), pg.get("Config", {}).get("Hostname")))
-                names.update(network.get("Aliases") or [])
-                names.add(network.get("IPAddress"))
-            if source_host not in names:
-                raise up.UpdateError("the daemon's database host cannot be matched to the default PostgreSQL "
-                                     "container; name its actual database container with --container. Nothing was restored", 2)
-        # Container initialization variables do not describe libpq's current
-        # connection. In particular, an omitted dbname defaults to its user.
-        connection_user = source.get("user") or env.get("PGUSER")
-        connection_db = source.get("dbname") or env.get("PGDATABASE") or connection_user
-        if not env.get("PSEUDOLIFE_MCP_DATABASE_URL"):
-            connection_user = connection_db = None
+        # Automatic selection uses exactly the update backup's runtime authority.
+        # All four explicit selectors intentionally bypass an opaque daemon source.
+        explicit = bool(container and db and user and db_port is not None)
+        try:
+            connection_user, connection_db, connection_port = up._backup_connection_details(self.running, pg)
+        except Exception:
+            if not explicit:
+                raise up.UpdateError("the daemon's database connection cannot be resolved safely; set a direct "
+                                     "PSEUDOLIFE_MCP_DATABASE_URL on a network shared with the selected PostgreSQL "
+                                     "container, or name the actual bank with --container <postgres> --db <database> "
+                                     "--user <role> --db-port <port>. Nothing was restored", 2) from None
+            connection_user, connection_db, connection_port = user, db, db_port
         self.user, self.db = user or connection_user, db or connection_db
-        if not self.user or not self.db:
-            raise up.UpdateError("the daemon's database defaults cannot be identified safely; name its actual "
-                                 "bank with --db <database> --user <role>. Nothing was restored", 2)
+        try:
+            self.db_port = int(db_port if db_port is not None else connection_port)
+            if not 1 <= self.db_port <= 65535:
+                raise ValueError("port range")
+        except (ValueError, TypeError):
+            raise up.UpdateError("the database port is ambiguous; name the selected container's server port "
+                                 "with --db-port <port>. Nothing was restored", 2) from None
+        self._database_arg(self.db)
         self.image = self.running.get("Image")
         if not self.image or not any(m.get("Destination") == "/data" for m in self.running.get("Mounts", [])):
             raise up.UpdateError("the daemon has no reusable /data mount or local image; restore its Docker "
@@ -180,11 +167,34 @@ class DockerBank:
             self.daemon_url = f"http://{host}:{bindings[0]['HostPort']}"
 
     def command(self, *args, check=True, timeout=3600):
-        code, output = up.run_cli([self.docker, *args], timeout=timeout, stdout_only=True)
+        code, output = up.run_cli([self.docker, *args], timeout=timeout, stdout_only=True, stderr_on_failure=True)
         if check and code:
             # Docker/psql diagnostics can include private data or resolved URLs.
             raise up.UpdateError(f"Docker {args[0]} failed for the backup/restore; check the containers "
                                  f"with docker logs {self.pg} and docker logs {self.daemon}, then retry")
+        return code, output
+
+    @staticmethod
+    def _database_arg(database: str) -> str:
+        from psycopg.conninfo import make_conninfo
+        try:
+            return make_conninfo(dbname=database)
+        except Exception:
+            raise up.UpdateError("the database selector is invalid; name its literal database with --db "
+                                 "and retry. Nothing was restored", 2) from None
+
+    def psql(self, database: str, *args):
+        # The container is the target authority. Inherited libpq address or
+        # service settings must never redirect a backup or destructive query.
+        code, output = self.command("exec", self.pg, "env", "-u", "PGHOSTADDR", "-u", "PGSERVICE", "-u", "PGSERVICEFILE",
+                                    "psql", "-X", "-h", "/var/run/postgresql", "-p", str(self.db_port),
+                                    "-U", self.user, "-d", self._database_arg(database), *args, check=False)
+        if code:
+            reason = output.lower()
+            if code == 2 and "socket" in reason and ("no such file" in reason or "connection refused" in reason):
+                raise up.UpdateError(f"PostgreSQL's local socket is unavailable on port {self.db_port}; "
+                                     "name the selected container's server port with --db-port <port> and retry", 2)
+            raise up.UpdateError(f"PostgreSQL failed inside {self.pg}; check docker logs {self.pg} before retrying")
         return code, output
 
     def inspect(self, container):
@@ -221,8 +231,9 @@ class DockerBank:
         state_tmp = f"/tmp/pl_state-{stamp}.tgz"
         try:
             if include_database:
-                self.command("exec", self.pg, "sh", "-c", 'pg_dump --no-owner --no-acl -U "$1" -d "$2" -Z9 > "$3"',
-                             "_", self.user, self.db, remote)
+                self.command("exec", self.pg, "sh", "-c",
+                             'unset PGHOSTADDR PGSERVICE PGSERVICEFILE; pg_dump --no-owner --no-acl -h "$1" -p "$2" -U "$3" -d "$4" -Z9 > "$5"',
+                             "_", "/var/run/postgresql", str(self.db_port), self.user, self._database_arg(self.db), remote)
                 copy_from_container(self.docker, f"{self.pg}:{remote}", dump_part)
                 if not up._dump_complete(dump_part):
                     raise up.UpdateError("the database dump is incomplete; retry backup before restoring anything")
@@ -255,8 +266,7 @@ class DockerBank:
 
     def database_exists(self):
         literal = "'" + self.db.replace("'", "''") + "'"
-        _, output = self.command("exec", self.pg, "psql", "-X", "-U", self.user, "-d", "postgres", "-Atc",
-                                  f"SELECT EXISTS(SELECT 1 FROM pg_database WHERE datname = {literal})")
+        _, output = self.psql("postgres", "-Atc", f"SELECT EXISTS(SELECT 1 FROM pg_database WHERE datname = {literal})")
         if output.strip() not in ("t", "f"):
             raise up.UpdateError("cannot determine whether the destination database exists; verify PostgreSQL "
                                  "and retry. Nothing was restored", 2)
@@ -327,19 +337,15 @@ class DockerBank:
             up._flush_output()
             destructive = True
             database = _ident(self.db)
-            self.command("exec", self.pg, "psql", "-X", "-v", "ON_ERROR_STOP=1", "-U", self.user, "-d", "postgres",
-                         "-c", f"DROP DATABASE IF EXISTS {database} WITH (FORCE)")
-            self.command("exec", self.pg, "psql", "-X", "-v", "ON_ERROR_STOP=1", "-U", self.user, "-d", "postgres",
-                         "-c", f"CREATE DATABASE {database}")
-            self.command("exec", self.pg, "psql", "-X", "-v", "ON_ERROR_STOP=1", "-U", self.user, "-d", "postgres",
-                         "-c", f"REVOKE CONNECT ON DATABASE {database} FROM PUBLIC")
+            self.psql("postgres", "-v", "ON_ERROR_STOP=1", "-c", f"DROP DATABASE IF EXISTS {database} WITH (FORCE)")
+            self.psql("postgres", "-v", "ON_ERROR_STOP=1", "-c", f"CREATE DATABASE {database}")
+            self.psql("postgres", "-v", "ON_ERROR_STOP=1", "-c", f"REVOKE CONNECT ON DATABASE {database} FROM PUBLIC")
             # Separate decompression from psql: POSIX sh has no pipefail, so
             # a failed gunzip must not look like a successful empty restore.
             sql_tmp = remote + ".sql"
             try:
                 self.command("exec", self.pg, "sh", "-c", 'gunzip -c "$1" > "$2"', "_", remote, sql_tmp)
-                self.command("exec", self.pg, "psql", "-X", "-q", "-v", "ON_ERROR_STOP=1", "-U", self.user,
-                             "-d", self.db, "-f", sql_tmp)
+                self.psql(self.db, "-q", "-v", "ON_ERROR_STOP=1", "-f", sql_tmp)
             finally:
                 self.command("exec", self.pg, "rm", "-f", sql_tmp, check=False, timeout=120)
             if state_archive is not None:
@@ -365,7 +371,7 @@ class DockerBank:
                 if recovery_state:
                     argv += ["--state-archive", str(recovery_state)]
                 argv += ["--container", self.pg, "--daemon-container", self.daemon, "--db", self.db,
-                         "--user", self.user, "--safety-dir", str(safety_dir), "--yes"]
+                         "--user", self.user, "--db-port", str(self.db_port), "--safety-dir", str(safety_dir), "--yes"]
                 if leave_stopped:
                     argv.append("--leave-stopped")
                 if self.daemon_url:
