@@ -141,7 +141,31 @@ pub(super) fn selected_checkout(u: &mut Update) -> Result<Option<PathBuf>> {
 pub(super) fn write_overlay(path: &Path, service: &Value) -> Result<()> {
     let body =
         serde_json::to_vec_pretty(&json!({"services":{DAEMON_SERVICE:service}})).expect("overlay");
-    seams::write_atomic(path, &body)
+    // Python-created overlays can be readable by other users. Replace their
+    // directory entry with a private staged file rather than opening them as
+    // private board state or changing the old file's permissions in place.
+    if let Ok(metadata) = fs::symlink_metadata(path)
+        && !metadata.is_file()
+    {
+        return Err(UpdateError::usage(
+            "the engine overlay is not a regular file; restore its original file before retrying",
+        ));
+    }
+    let staged = path.with_file_name(format!(".engine-overlay-{}", uuid::Uuid::new_v4().simple()));
+    seams::write_atomic(&staged, &body)?;
+    let result = (|| -> std::io::Result<()> {
+        fs::rename(&staged, path)?;
+        #[cfg(unix)]
+        std::fs::File::open(path.parent().expect("overlay directory"))?.sync_all()?;
+        Ok(())
+    })();
+    let _ = fs::remove_file(&staged);
+    result.map_err(|_| {
+        UpdateError::new(format!(
+            "cannot replace the engine overlay; restore write access to {} and retry",
+            path.parent().expect("overlay directory").display()
+        ))
+    })
 }
 pub(super) fn build_environment(tree: &seams::Tree) -> Environment {
     [
@@ -771,8 +795,8 @@ pub(super) fn rollback_commands(
 
 fn verify_stopped_database(
     config: &Value,
+    running: &Value,
     pg: &Value,
-    pg_id: &str,
     user: &str,
     db: &str,
 ) -> Result<()> {
@@ -781,30 +805,17 @@ fn verify_stopped_database(
             "the restored bank cannot be matched to this project's PostgreSQL; restore its original database configuration before retrying; nothing was deployed",
         )
     };
-    let source = config["services"][DAEMON_SERVICE]["environment"]["PSEUDOLIFE_MCP_DATABASE_URL"]
+    let declared = config["services"][DAEMON_SERVICE]["environment"]["PSEUDOLIFE_MCP_DATABASE_URL"]
         .as_str()
         .ok_or_else(refusal)?;
-    let source = source
-        .parse::<tokio_postgres::Config>()
-        .map_err(|_| refusal())?;
-    let mut aliases = vec![
-        "pseudolife-pg",
-        pg_id,
-        pg["Name"].as_str().unwrap_or("").trim_start_matches('/'),
-    ];
-    if let Some(networks) = pg["NetworkSettings"]["Networks"].as_object() {
-        for network in networks.values() {
-            if let Some(names) = network["Aliases"].as_array() {
-                aliases.extend(names.iter().filter_map(Value::as_str));
-            }
-        }
-    }
+    let actual = running["Config"]["Env"].as_array().and_then(|env| {
+        env.iter()
+            .filter_map(Value::as_str)
+            .find_map(|item| item.strip_prefix("PSEUDOLIFE_MCP_DATABASE_URL="))
+    });
     if pg["State"]["Running"] != true
-        || source.get_user() != Some(user)
-        || source.get_dbname() != Some(db)
-        || source.get_ports().iter().any(|port| *port != 5432)
-        || !source.get_hostaddrs().is_empty()
-        || !matches!(source.get_hosts(), [tokio_postgres::config::Host::Tcp(host)] if aliases.contains(&host.as_str()))
+        || actual != Some(declared)
+        || backup::connection_parts(running, pg) != Some((user.to_owned(), db.to_owned()))
     {
         return Err(refusal());
     }
@@ -845,7 +856,7 @@ fn stopped_preflight(
     config: &Value,
 ) -> Result<Value> {
     let (pg, user, db) = connection;
-    verify_stopped_database(config, &inspect(u, pg)?, pg, user, db)?;
+    verify_stopped_database(config, running, &inspect(u, pg)?, user, db)?;
     let id = running["Image"].as_str().filter(|id| !id.is_empty())
         .ok_or_else(|| UpdateError::usage("the stopped daemon's existing image is unavailable; restore that local image before retrying; nothing was deployed"))?;
     let (code, out) = u.docker_call(&["image", "inspect", "-f", "{{.Id}}", id]);
@@ -1191,6 +1202,75 @@ mod bearer_source_tests {
 mod stopped_handover_tests {
     use super::*;
 
+    fn running(config: &Value) -> Value {
+        let environment = config["services"][DAEMON_SERVICE]["environment"]
+            .as_object()
+            .unwrap();
+        let entries: Vec<_> = environment
+            .iter()
+            .map(|(key, value)| format!("{key}={}", value.as_str().unwrap()))
+            .collect();
+        json!({"Config":{"Env":entries},"NetworkSettings":{"Networks":{"fixture":{}}}})
+    }
+
+    #[test]
+    fn stopped_bank_verification_accepts_libpq_database_defaults_and_tls_options() {
+        let pg = json!({"State":{"Running":true},"Name":"/custom-project-pg",
+            "NetworkSettings":{"Networks":{"fixture":{"Aliases":["legacy-pg"]}}}});
+        for url in [
+            "postgresql://fixture:fixture@legacy-pg",
+            "postgresql://fixture:fixture@legacy-pg/fixture?sslmode=require&sslrootcert=/run/ca.pem",
+        ] {
+            let config = json!({"services":{DAEMON_SERVICE:{"environment":{
+                "PSEUDOLIFE_MCP_DATABASE_URL":url
+            }}}});
+            assert!(
+                verify_stopped_database(&config, &running(&config), &pg, "fixture", "fixture")
+                    .is_ok()
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn overlay_replacement_accepts_python_written_file_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("pseudolife-overlay-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&dir).unwrap();
+        let path = dir.join("accepted.json");
+        fs::write(&path, b"previous Python overlay").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+        let service = json!({"image":"fixture:accepted","labels":{ENGINE_LABEL:"rust"}});
+        let result = write_overlay(&path, &service);
+        let bytes = fs::read(&path).unwrap();
+        let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        fs::remove_dir_all(&dir).unwrap();
+        result.unwrap();
+        assert_eq!(
+            serde_json::from_slice::<Value>(&bytes).unwrap()["services"][DAEMON_SERVICE],
+            service
+        );
+        assert_eq!(mode, 0o600);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn overlay_replacement_rejects_redirects_without_changing_the_target() {
+        let dir = std::env::temp_dir().join(format!("pseudolife-overlay-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&dir).unwrap();
+        let target = dir.join("original.json");
+        let link = dir.join("accepted.json");
+        fs::write(&target, b"original").unwrap();
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        let result = write_overlay(&link, &json!({"image":"fixture:accepted"}));
+        let bytes = fs::read(&target).unwrap();
+        let entries = fs::read_dir(&dir).unwrap().count();
+        fs::remove_dir_all(&dir).unwrap();
+        assert!(result.is_err());
+        assert_eq!(bytes, b"original");
+        assert_eq!(entries, 2);
+    }
+
     #[test]
     fn stopped_bank_verification_is_scoped_to_the_declared_project_database() {
         let mut config = json!({"services":{DAEMON_SERVICE:{"environment":{
@@ -1198,7 +1278,9 @@ mod stopped_handover_tests {
         }}}});
         let mut pg = json!({"State":{"Running":true},"Name":"/custom-project-pg",
             "NetworkSettings":{"Networks":{"fixture":{"Aliases":["legacy-pg"]}}}});
-        assert!(verify_stopped_database(&config, &pg, "scoped-pg", "fixture", "fixture").is_ok());
+        assert!(
+            verify_stopped_database(&config, &running(&config), &pg, "fixture", "fixture").is_ok()
+        );
         for url in [
             "postgresql://fixture:fixture@external-pg:5432/fixture",
             "postgresql://fixture:fixture@legacy-pg:5432/other",
@@ -1208,12 +1290,15 @@ mod stopped_handover_tests {
             config["services"][DAEMON_SERVICE]["environment"]["PSEUDOLIFE_MCP_DATABASE_URL"] =
                 json!(url);
             assert!(
-                verify_stopped_database(&config, &pg, "scoped-pg", "fixture", "fixture").is_err()
+                verify_stopped_database(&config, &running(&config), &pg, "fixture", "fixture")
+                    .is_err()
             );
         }
         config["services"][DAEMON_SERVICE]["environment"]["PSEUDOLIFE_MCP_DATABASE_URL"] =
             json!("postgresql://fixture:fixture@legacy-pg:5432/fixture");
         pg["State"]["Running"] = json!(false);
-        assert!(verify_stopped_database(&config, &pg, "scoped-pg", "fixture", "fixture").is_err());
+        assert!(
+            verify_stopped_database(&config, &running(&config), &pg, "fixture", "fixture").is_err()
+        );
     }
 }
