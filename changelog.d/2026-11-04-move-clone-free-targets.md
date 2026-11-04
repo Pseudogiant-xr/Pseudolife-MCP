@@ -1,0 +1,3 @@
+### Added (2026-11-04 — Move banks to release-mode and stack-manager targets)
+- `pseudolife-mcp move` can restore with the target's installed CLI when no clone exists; `--target-release` selects that path beside an unrelated checkout. Original exported deployment files can be named with `--target-compose-file` and `--target-env-file`.
+- Before carrying tokens and redeploying the same published release, move validates the rendered identities, database connection, volumes and port against the running target. `--no-keep-tokens` instead restarts its existing container without requiring host-accessible compose files. Backups, resume markers and ownership records remain outside the target state volume.
