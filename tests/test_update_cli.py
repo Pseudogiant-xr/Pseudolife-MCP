@@ -70,6 +70,12 @@ class World:
     def docker(self, a: list[str]):
         if self.docker_down:
             return 1, self.docker_error
+        if a[:3] == ["inspect", "-f", "{{json .}}"]:
+            if self.container is None:
+                return 1, "Error: No such object"
+            return 0, json.dumps({"Name": "/" + a[-1], "Config": {"Env": [
+                "PSEUDOLIFE_MCP_DATABASE_URL=postgresql://pseudolife@pseudolife-pg/pseudolife_memory"]},
+                "NetworkSettings": {"Networks": {"fixture": {"Aliases": ["pseudolife-pg"]}}}})
         if a[:2] == ["inspect", "-f"] or a[:2] == ["inspect", "--format"]:
             fmt, target = a[2], a[3]
             if target == DAEMON:
@@ -251,6 +257,117 @@ def test_a_release_update_pulls_backs_up_tags_recreates_and_moves_the_clients(wo
     assert "PSEUDOLIFE_IMAGE_TAG=0.15.0-pre-update-" in out and "$env:PSEUDOLIFE_IMAGE_TAG='0.15.0-pre-update-" in out
     assert "docker tag " not in out
     assert world.slept == [0.001]
+
+
+@pytest.mark.parametrize("kind", ["variable", "literal"])
+@pytest.mark.parametrize("as_json", [False, True])
+def test_release_update_warns_once_about_older_persistent_image_pin(world, clients, tmp_path, monkeypatch, capsys, kind, as_json):
+    project = _project(world, tmp_path)
+    image = (up.GHCR_IMAGE + ":${PSEUDOLIFE_IMAGE_TAG:-0.15.0}" if kind == "variable"
+             else up.GHCR_IMAGE + ":0.15.0")
+    (project / "docker-compose.yml").write_text("services:\n  pseudolife-daemon:\n    image: " + image + "\n", encoding="utf-8")
+    (project / ".env").write_text("PSEUDOLIFE_IMAGE_TAG=0.15.0\n", encoding="utf-8")
+    world.health = [{"status": "ok", "version": "0.15.0"}, {"status": "ok", "version": "0.15.1"}]
+    original = world.run_cli
+    config_envs = []
+
+    def config(argv, **kw):
+        if argv[1:2] == ["compose"] and "config" in argv:
+            config_envs.append(kw.get("env"))
+            configured = image if "--no-interpolate" in argv else up.GHCR_IMAGE + ":0.15.0"
+            return 0, json.dumps({"services": {up.DAEMON_SERVICE: {"image": configured}}})
+        return original(argv, **kw)
+
+    monkeypatch.setattr(up, "run_cli", config)
+    monkeypatch.setenv("PSEUDOLIFE_IMAGE_TAG", "0.15.1")
+    assert _run(["--tag", "0.15.1", "--daemon-only"] + (["--json"] if as_json else [])) == 0
+    captured = capsys.readouterr()
+    message = "\n".join(json.loads(captured.out)["steps"]) if as_json else captured.err
+    assert message.count("manager redeploy") == 1 and "0.15.0" in message and "0.15.1" in message
+    if kind == "variable":
+        assert "PSEUDOLIFE_IMAGE_TAG=0.15.1" in message
+    else:
+        assert str(project / "docker-compose.yml") in message and f"image: {up.GHCR_IMAGE}:0.15.1" in message
+    assert config_envs and "PSEUDOLIFE_IMAGE_TAG" not in config_envs[0]
+
+
+@pytest.mark.parametrize("pin", ["0.15.1", "latest", "sha256:fixture"])
+def test_release_update_does_not_warn_for_current_or_unversioned_pin(world, tmp_path, monkeypatch, capsys, pin):
+    project = _project(world, tmp_path)
+    (project / "docker-compose.yml").write_text("services:\n  pseudolife-daemon:\n    image: " + up.GHCR_IMAGE + ":" + pin + "\n", encoding="utf-8")
+    world.health = [{"status": "ok", "version": "0.15.0"}, {"status": "ok", "version": "0.15.1"}]
+    original = world.run_cli
+
+    def config(argv, **kw):
+        if argv[1:2] == ["compose"] and "config" in argv:
+            return 0, json.dumps({"services": {up.DAEMON_SERVICE: {"image": up.GHCR_IMAGE + ":" + pin}}})
+        return original(argv, **kw)
+
+    monkeypatch.setattr(up, "run_cli", config)
+    assert _run(["--tag", "0.15.1", "--daemon-only"]) == 0
+    assert "manager redeploy" not in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("expression", [up.GHCR_IMAGE + ":${PSEUDOLIFE_IMAGE_TAG:+0.15.0}",
+                                       "${PSEUDOLIFE_IMAGE_TAG}/daemon:0.15.0"])
+def test_pin_hint_uses_file_edit_when_variable_does_not_select_the_version(world, tmp_path, monkeypatch, capsys, expression):
+    project = _project(world, tmp_path)
+    (project / "docker-compose.yml").write_text("services:\n  pseudolife-daemon:\n    image: " + expression + "\n", encoding="utf-8")
+    world.health = [{"status": "ok", "version": "0.15.0"}, {"status": "ok", "version": "0.15.1"}]
+    original = world.run_cli
+
+    def config(argv, **kw):
+        if argv[1:2] == ["compose"] and "config" in argv:
+            image = expression if "--no-interpolate" in argv else up.GHCR_IMAGE + ":0.15.0"
+            return 0, json.dumps({"services": {up.DAEMON_SERVICE: {"image": image}}})
+        return original(argv, **kw)
+
+    monkeypatch.setattr(up, "run_cli", config)
+    assert _run(["--tag", "0.15.1", "--daemon-only"]) == 0
+    message = capsys.readouterr().err
+    assert f"image: {up.GHCR_IMAGE}:0.15.1" in message
+    assert "PSEUDOLIFE_IMAGE_TAG=0.15.1" not in message
+
+
+def test_real_digest_pin_does_not_look_like_an_older_numeric_tag(world, tmp_path, monkeypatch, capsys):
+    _project(world, tmp_path)
+    digest = up.GHCR_IMAGE + "@sha256:" + "0a" * 32
+    world.health = [{"status": "ok", "version": "0.15.0"}, {"status": "ok", "version": "0.15.1"}]
+    original = world.run_cli
+
+    def config(argv, **kw):
+        if argv[1:2] == ["compose"] and "config" in argv:
+            return 0, json.dumps({"services": {up.DAEMON_SERVICE: {"image": digest}}})
+        return original(argv, **kw)
+
+    monkeypatch.setattr(up, "run_cli", config)
+    assert _run(["--tag", "0.15.1", "--daemon-only"]) == 0
+    assert "manager redeploy" not in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("packaged_pair", [False, True])
+def test_previously_added_cached_overlay_does_not_hide_original_manager_pin(world, tmp_path, monkeypatch, capsys, packaged_pair):
+    project = _project(world, tmp_path)
+    cached = tmp_path / "data" / "compose"
+    cached.mkdir(parents=True)
+    overlay = cached / "docker-compose.ghcr.yml"
+    overlay.write_bytes((up.BUNDLED_COMPOSE / overlay.name).read_bytes())
+    base = cached / "docker-compose.yml" if packaged_pair else project / "docker-compose.yml"
+    base.write_text("services:\n  pseudolife-daemon:\n    image: " + up.GHCR_IMAGE + ":0.15.0\n", encoding="utf-8")
+    world.container["labels"]["com.docker.compose.project.config_files"] = f"{base},{overlay}"
+    world.health = [{"status": "ok", "version": "0.15.0"}, {"status": "ok", "version": "0.15.1"}]
+    original = world.run_cli
+
+    def config(argv, **kw):
+        if argv[1:2] == ["compose"] and "config" in argv:
+            tag = "latest" if str(overlay) in argv else "0.15.0"
+            return 0, json.dumps({"services": {up.DAEMON_SERVICE: {"image": up.GHCR_IMAGE + ":" + tag}}})
+        return original(argv, **kw)
+
+    monkeypatch.setattr(up, "run_cli", config)
+    assert _run(["--tag", "0.15.1", "--daemon-only"]) == 0
+    message = capsys.readouterr().err
+    assert ("manager redeploy" in message) is not packaged_pair
 
 
 @pytest.mark.parametrize("schemas, moved", [((56, 57), True), ((57, 57), False), ((None, 57), False)])
@@ -545,6 +662,49 @@ def test_clients_only_and_daemon_only(world, clients, tmp_path):
     assert clients == [] and any(c.startswith("compose") for c in world.docker_calls())
 
 
+@pytest.mark.parametrize("answer", [None, {"status": "ok", "version": "0.15.0"}])
+@pytest.mark.parametrize("connection", [None, ("DOCKER_HOST", "ssh://example.com"), ("DOCKER_CONTEXT", "remote-fixture")])
+def test_failed_verification_suggests_published_daemon_url(world, clients, tmp_path, capsys, monkeypatch, answer, connection):
+    if connection:
+        monkeypatch.setenv(*connection)
+    _project(world, tmp_path)
+    world.health = [{"status": "ok", "version": "0.15.0"}, answer]
+    original = world.run_cli
+
+    def run(argv, **kw):
+        if argv[1:] == ["port", DAEMON, "8765/tcp"]:
+            return 0, "0.0.0.0:9876\n[::]:9876\n"
+        return original(argv, **kw)
+
+    monkeypatch.setattr(up, "run_cli", run)
+    assert _run(["--health-retries", "1"]) == 1
+    err = capsys.readouterr().err
+    assert "--daemon-url http://127.0.0.1:9876" in err
+    assert "on the Docker host" in err
+    assert "If Docker runs on this machine" in err
+    assert "image setting won" not in err
+    assert clients == []
+
+
+@pytest.mark.parametrize("published", ["", "10.0.0.7:9876", "127.0.0.1:0", "127.0.0.1:65536", "garbage:9876"])
+def test_failed_health_without_loopback_publish_still_names_daemon_url(world, monkeypatch, published):
+    monkeypatch.setattr(up, "run_cli", lambda *a, **kw: (0, published))
+    update = up.Update(up.Options(health_retries=1))
+    with pytest.raises(up.UpdateError) as exc:
+        update.wait_health()
+    assert "--daemon-url" in str(exc.value)
+    assert "--daemon-url http://127.0.0.1:" not in str(exc.value)
+
+
+@pytest.mark.parametrize("url", ["http://127.0.0.1:8765", "http://127.0.0.1:9876", "https://proxy.example.com/memory"])
+def test_healthy_custom_endpoints_do_not_require_matching_published_port(world, clients, tmp_path, url):
+    _project(world, tmp_path)
+    world.health = [{"status": "ok", "version": "0.15.0"}, {"status": "ok", "version": "0.15.1"}]
+    assert _run(["--daemon-url", url]) == 0
+    assert clients
+    assert not any(c.startswith("port ") for c in world.docker_calls())
+
+
 @pytest.fixture
 def held_update_lock(world, tmp_path):
     """Another ``pseudolife-mcp update`` on this host: the OS lock on
@@ -747,6 +907,7 @@ def _checkout(world: World, tmp_path: Path, *, repo: bool = True, dirty: int = 0
     (root / "ops").mkdir(parents=True)
     (root / "ops" / "docker-compose.yml").write_text(f"image: pseudolife-daemon:{version}\n", encoding="utf-8", newline="\n")
     (root / "ops" / ".env.example").write_text("# PSEUDOLIFE_MCP_TOKEN=\n", encoding="utf-8", newline="\n")
+    (root / "ops" / ".env").write_text("# isolated installed checkout\n", encoding="utf-8", newline="\n")
     (root / "README.md").write_text("sandbox\n", encoding="utf-8", newline="\n")
     (root / "pyproject.toml").write_text("[project]\nname='x'\n", encoding="utf-8", newline="\n")
     # as in the repository: the scaffolded ops/.env is gitignored, so it
@@ -783,6 +944,45 @@ def test_plain_checkout_update_with_null_daemon_labels(world, clients, tmp_path)
     assert argv[-5:] == ["up", "-d", "--no-deps", "--build", "pseudolife-daemon"]
 
 
+@pytest.mark.parametrize("token_variable", ["PSEUDOLIFE_MCP_TOKEN", "PSEUDOLIFE_MCP_TOKENS"])
+def test_checkout_missing_env_refuses_before_resetting_credentials(world, clients, tmp_path, monkeypatch, capsys,
+                                                                 token_variable):
+    root, _ = _checkout(world, tmp_path, repo=False)
+    env_file = root / "ops" / ".env"
+    env_file.unlink()
+    original = world.run_cli
+    monkeypatch.setattr(up, "tree_state", lambda _: {"sha": "a" * 40, "dirty": "false", "lines": [], "error": ""})
+
+    def inspect_env(argv, **kw):
+        if "{{json .Config.Env}}" in argv:
+            return 0, json.dumps([f"{token_variable}=fixture-secret", "PSEUDOLIFE_MCP_DATABASE_URL=postgresql://owner:fixture-password@db/bank"])
+        return original(argv, **kw)
+
+    monkeypatch.setattr(up, "run_cli", inspect_env)
+    assert _run(["--checkout", str(root), "--all"]) == 2
+    captured = capsys.readouterr()
+    assert str(env_file) in captured.err and "restore" in captured.err.lower() and "Nothing was changed" in captured.err
+    assert token_variable in captured.err and "PSEUDOLIFE_MCP_DATABASE_URL" in captured.err
+    assert "fixture-secret" not in captured.err and "fixture-password" not in captured.err
+    assert not env_file.exists() and _compose_call(world)[0] is None and clients == []
+    assert not any(c.startswith(("tag ", "exec ", "cp ", "builder ")) for c in world.docker_calls())
+
+
+@pytest.mark.parametrize("before,after,expected", [(True, False, 1), (False, True, 1), (True, None, 1), (True, True, 0)])
+def test_checkout_compares_auth_before_and_after(world, clients, tmp_path, monkeypatch, capsys, before, after, expected):
+    root, _ = _checkout(world, tmp_path, repo=False)
+    monkeypatch.setattr(up, "tree_state", lambda _: {"sha": "a" * 40, "dirty": "false", "lines": [], "error": ""})
+    world.health = [{"status": "ok", "version": "0.1.0", "auth": before},
+                    {"status": "ok", "version": "0.1.0", "auth": after}]
+    assert _run(["--checkout", str(root), "--no-backup", "--no-cache-prune", "--all"]) == expected
+    if expected:
+        err = capsys.readouterr().err
+        assert "authentication" in err and str(root / "ops" / ".env") in err and "roll back" in err
+        assert clients == []
+    else:
+        assert len(clients) == 1
+
+
 def _project_guard_checkout(world, tmp_path, monkeypatch, project="pseudolife-mcp"):
     root, _ = _checkout(world, tmp_path, repo=False)
     monkeypatch.setattr(up, "tree_state", lambda _: {"sha": "a" * 40, "dirty": "false", "lines": [], "error": ""})
@@ -799,6 +999,7 @@ def _project_guard_checkout(world, tmp_path, monkeypatch, project="pseudolife-mc
 
 def test_checkout_refuses_foreign_project_before_backup_or_env_write(world, clients, tmp_path, capsys, monkeypatch):
     root = _project_guard_checkout(world, tmp_path, monkeypatch)
+    (root / "ops" / ".env").unlink()
     world.container["labels"] = {"com.docker.compose.project": "external-stack"}
     assert _run(["--checkout", str(root)]) == 2
     err = capsys.readouterr().err
@@ -831,6 +1032,7 @@ def test_checkout_accepts_its_resolved_custom_project(world, tmp_path, monkeypat
 @pytest.mark.parametrize("code,output", [(1, "Cannot connect to the Docker daemon"), (0, "not JSON")])
 def test_checkout_project_inspection_failure_refuses_before_mutation(world, tmp_path, monkeypatch, capsys, code, output):
     root, _ = _checkout(world, tmp_path, repo=False)
+    (root / "ops" / ".env").unlink()
     monkeypatch.setattr(up, "tree_state", lambda _: {"sha": "a" * 40, "dirty": "false", "lines": [], "error": ""})
     original = world.run_cli
 
@@ -865,7 +1067,7 @@ def test_a_clean_checkout_is_built_with_its_commit_stamp(world, clients, tmp_pat
     assert env["PSEUDOLIFE_BUILD_TIME"].endswith("Z") and "T" in env["PSEUDOLIFE_BUILD_TIME"]
     assert "PSEUDOLIFE_BUILD_GIT_SHA" not in os.environ      # the caller's environment is left alone
     assert "tag pseudolife-daemon:0.1.0 pseudolife-daemon:0.1.0-unittest" in world.docker_calls()
-    assert (root / "ops" / ".env").is_file()                # scaffolded from the example
+    assert (root / "ops" / ".env").is_file()                # retained from the installer
     assert clients == []                                    # no --all
 
 
@@ -1254,12 +1456,14 @@ def test_a_client_only_machine_updates_its_clients_to_the_daemons_release(world,
     assert not any(c[1:4] == ["-m", "pip", "install"] for c in world.calls)
 
 
-def test_a_client_only_machine_takes_the_newest_release_when_the_daemon_is_silent(world, clients, monkeypatch):
+@pytest.mark.parametrize("flags", [[], ["--clients-only"], ["--clients-only", "--tag", "0.16.0"]])
+@pytest.mark.parametrize("health", [None, {"status": "ok"}, {"status": "ok", "version": ""}])
+def test_a_client_only_machine_never_guesses_release_when_daemon_url_is_stale(world, clients, monkeypatch, capsys, flags, health):
     _on_a_shim_runtime(monkeypatch)
-    world.health = []
+    world.health = [health]
     world.pypi = "0.16.0"
-    assert _run(["--clients-only"]) == 0
-    assert clients[0]["source"] == "pseudolife-mcp==0.16.0" and clients[0]["daemon_digest"] is None
+    assert _run(flags) == 2
+    assert clients == [] and "--daemon-url" in capsys.readouterr().err
 
 
 def test_a_client_machine_whose_docker_this_user_cannot_use_still_updates_its_clients(world, clients, monkeypatch,
@@ -1518,7 +1722,7 @@ def _pg_aware(world: World) -> None:
     inner = world.docker
 
     def docker(a):
-        if a[:2] == ["inspect", "-f"] and a[3] == PG:
+        if a[:2] == ["inspect", "-f"] and a[3] == PG and "State.Running" in a[2]:
             state = getattr(world, "pg_running", None)
             return (0, state + "\n") if state else (1, "Error: No such object")
         if a[:2] == ["port", PG]:

@@ -2159,6 +2159,9 @@ jobs:
     if: ${{ always() && needs.stress-plan.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -2168,17 +2171,21 @@ jobs:
         with:
           pattern: stress-row-*
           path: stress-rows
+      - name: Read every stress job attempt
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 rust/ci/stress_history.py --out stress-job-history.json
       - name: Join the iterations
         env:
           STRESS_SELECTION: ${{ inputs.selection }}
           STRESS_ITERATIONS: ${{ inputs.iterations }}
           STRESS_OS: ${{ inputs.os }}
-        run: python3 rust/ci/stress.py report --selection "$STRESS_SELECTION" --iterations "$STRESS_ITERATIONS" --os "$STRESS_OS" --rows stress-rows --out stress-report.json --summary "$GITHUB_STEP_SUMMARY"
+        run: python3 rust/ci/stress.py report --selection "$STRESS_SELECTION" --iterations "$STRESS_ITERATIONS" --os "$STRESS_OS" --rows stress-rows --out stress-report.json --summary "$GITHUB_STEP_SUMMARY" --job-history stress-job-history.json
       - name: Retain the stress report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: stress-report
+          name: stress-report-${{ github.run_attempt }}
           path: stress-report.json
           if-no-files-found: warn
 

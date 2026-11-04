@@ -225,7 +225,7 @@ def registration_credentials(env) -> tuple[dict, str | None]:
     carries a token, with a label naming it; ``({}, None)`` when none does.
     A plain shell has neither key, and without them the handshake's shim
     exits on its missing-credential line (2026-09-29)."""
-    if env.get("PSEUDOLIFE_MCP_TOKEN") or "PSEUDOLIFE_MCP_TOKEN_FILE" in env:
+    if "PSEUDOLIFE_MCP_TOKEN" in env or "PSEUDOLIFE_MCP_TOKEN_FILE" in env:
         return {}, "environment"
     for label, block in _registration_env_blocks(env):
         found = {key: block[key] for key in _TOKEN_KEYS
