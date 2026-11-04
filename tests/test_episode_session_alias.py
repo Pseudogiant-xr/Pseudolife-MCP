@@ -42,7 +42,7 @@ def test_pruned_closed_board_alias_is_refused_even_with_own_header(pg_service):
         result = pg_service.set_session_title("Must stay closed", episode=SESSION)
     finally:
         reset_writer_context(token)
-    assert result == {"ok": False, "reason": "unknown or closed episode handle"}
+    assert result == {"ok": False, "reason": "No open episode matches this session id; call memory_session_title without episode, then retry."}
     assert not any(e.session_key == SESSION
                    for e in pg_service._cms.episodes.episodes.values())
 
@@ -52,7 +52,7 @@ def test_closed_board_alias_is_refused_without_reopening(pg_service):
     pg_service.store("Keep this closed session in history.", episode=root["id"])
     pg_service.episode_end_session(SESSION, run_dream=False)
     assert pg_service.set_session_title("Must stay closed", episode=SESSION) == {
-        "ok": False, "reason": "unknown or closed episode handle"}
+        "ok": False, "reason": "This session's episode is closed; call memory_session_title without episode to start a new episode."}
     assert pg_service._cms.episodes.get(root["id"]).ended_at is not None
 
 
@@ -70,3 +70,24 @@ def test_unknown_alias_cannot_open_someone_elses_session(pg_service):
     assert result["ok"] is False
     assert not any(e.session_key == SESSION
                    for e in pg_service._cms.episodes.episodes.values())
+
+
+@pytest.mark.parametrize("operation", ["store", "outcome"])
+def test_first_hookless_write_names_the_bootstrap(pg_service, operation):
+    token = set_writer_context("codex", SESSION)
+    try:
+        if operation == "store":
+            result = pg_service.store("Nightly backups use the archive disk.", episode=SESSION)
+        else:
+            result = pg_service.record_outcome(task="first hookless outcome", outcome="success",
+                                               episode=SESSION)
+        named = pg_service.set_session_title("A hookless session")
+        retry = pg_service.record_outcome(task="after bootstrap", outcome="success", episode=SESSION)
+    finally:
+        reset_writer_context(token)
+    assert result["episode_warning"] == (
+        "No open episode matches this session id; call memory_session_title without episode, then retry.")
+    assert named["ok"] and "episode_warning" not in retry
+    signal = next(s for s in pg_service._storage.pending_signals(limit=100)
+                  if s["task"] == "after bootstrap")
+    assert signal["episode_id"] == named["id"]
