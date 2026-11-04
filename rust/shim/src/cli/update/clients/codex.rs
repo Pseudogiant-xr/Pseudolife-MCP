@@ -322,47 +322,6 @@ pub async fn runtime_hook_status() -> &'static str {
         .unwrap_or("unknown")
 }
 
-#[cfg(test)]
-mod runtime_trust_tests {
-    use super::*;
-    #[test]
-    fn runtime_verdict_distinguishes_trust_disabled_and_foreign_handlers() {
-        let key = format!("{PLUGIN}:hooks/hooks.json:session_start:0:0");
-        let expected = vec![key.clone()];
-        for (trust, enabled, answer) in [
-            ("modified", true, "needs-approval"),
-            ("untrusted", true, "needs-approval"),
-            ("trusted", true, "current"),
-            ("trusted", false, "disabled"),
-            ("future-state", true, "unknown"),
-        ] {
-            let value = json!({"data":[{"errors":[],"hooks":[{"key":key,"enabled":enabled,"trustStatus":trust},
-                {"key":"other-plugin:session_start:0:0","enabled":true,"trustStatus":"modified"}]}]});
-            assert_eq!(runtime_status(&value, &expected), answer);
-        }
-        for added in [
-            key.clone(),
-            format!("{PLUGIN}:hooks/hooks.json:session_start:99:0"),
-        ] {
-            let value = json!({"data":[{"errors":[],"hooks":[
-                {"key":key,"enabled":true,"trustStatus":"trusted"},
-                {"key":added,"enabled":true,"trustStatus":"modified"}]}]});
-            assert_eq!(runtime_status(&value, &expected), "unknown");
-        }
-        assert_eq!(
-            runtime_status(&json!({"data":[{"errors":[],"hooks":[]}]}), &expected),
-            "not-loaded"
-        );
-        assert_eq!(
-            runtime_status(
-                &json!({"data":[{"errors":["fixture"],"hooks":[]}]}),
-                &expected
-            ),
-            "unknown"
-        );
-    }
-}
-
 pub fn check_codex_hooks(repo: Option<&Path>, daemon_digest: Option<&str>, refresh: bool) -> Value {
     check_with(
         &registrations::codex_home(),
@@ -774,4 +733,45 @@ pub fn codex_reapproval_text(report: Option<&Value>) -> String {
     format!(
         "Codex: its hook copy needs approval ({changed}); until then unapproved memory and coordination handlers do not run.\n  1. Update the plugin in Codex's plugin manager, or run codex plugin marketplace upgrade pseudolife-mcp.\n  2. In Codex run /hooks and approve the PseudoLife handlers.\n  3. Verify: pseudolife-mcp doctor reports codex_hooks = current."
     )
+}
+
+#[cfg(test)]
+mod runtime_trust_tests {
+    use super::*;
+    #[test]
+    fn runtime_verdict_distinguishes_trust_disabled_and_foreign_handlers() {
+        let key = format!("{PLUGIN}:hooks/hooks.json:session_start:0:0");
+        let expected = vec![key.clone()];
+        for (trust, enabled, answer) in [
+            ("modified", true, "needs-approval"),
+            ("untrusted", true, "needs-approval"),
+            ("trusted", true, "current"),
+            ("trusted", false, "disabled"),
+            ("future-state", true, "unknown"),
+        ] {
+            let value = json!({"data":[{"errors":[],"hooks":[{"key":key,"enabled":enabled,"trustStatus":trust},
+                {"key":"other-plugin:session_start:0:0","enabled":true,"trustStatus":"modified"}]}]});
+            assert_eq!(runtime_status(&value, &expected), answer);
+        }
+        for added in [
+            key.clone(),
+            format!("{PLUGIN}:hooks/hooks.json:session_start:99:0"),
+        ] {
+            let value = json!({"data":[{"errors":[],"hooks":[
+                {"key":key,"enabled":true,"trustStatus":"trusted"},
+                {"key":added,"enabled":true,"trustStatus":"modified"}]}]});
+            assert_eq!(runtime_status(&value, &expected), "unknown");
+        }
+        assert_eq!(
+            runtime_status(&json!({"data":[{"errors":[],"hooks":[]}]}), &expected),
+            "not-loaded"
+        );
+        assert_eq!(
+            runtime_status(
+                &json!({"data":[{"errors":["fixture"],"hooks":[]}]}),
+                &expected
+            ),
+            "unknown"
+        );
+    }
 }
