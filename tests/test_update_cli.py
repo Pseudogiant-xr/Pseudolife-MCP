@@ -429,6 +429,36 @@ def test_a_missing_explicit_stack_file_refuses_before_pull(world, tmp_path, caps
     assert not any(c.startswith("pull ") for c in world.docker_calls())
 
 
+@pytest.mark.parametrize("env_state", ["present", "missing", "partial"])
+def test_exported_stack_retains_labelled_env_authority(world, tmp_path, capsys, env_state):
+    project = _project(world, tmp_path)
+    env_file = project / ".env"
+    if env_state == "missing":
+        env_file.unlink()
+    elif env_state == "partial":
+        world.container["labels"]["com.docker.compose.project.environment_file"] += "," + str(project / "missing.env")
+    exported = tmp_path / "stack.yml"
+    exported.write_text("services: {}\n", encoding="utf-8")
+    update = up.Update(up.Options(compose_files=[exported]))
+    if env_state == "present":
+        context = update.compose_context()
+        assert context["env_file"] == [env_file]
+        assert str(env_file) in context["args"]
+        assert context["args"][2:4] == ["--project-directory", str(project)]
+    else:
+        with pytest.raises(up.UpdateError, match="--env-file"):
+            update.compose_context()
+
+
+def test_exported_stack_keeps_original_relative_resource_directory(world, tmp_path):
+    project = _project(world, tmp_path)
+    exported = tmp_path / "exported.yml"
+    exported.write_text("services:\n  pseudolife-daemon:\n    volumes: [./state:/data]\n", encoding="utf-8")
+    update = up.Update(up.Options(compose_files=[exported], env_file=project / ".env"))
+    args = update.compose_context()["args"]
+    assert args[args.index("--project-directory") + 1] == str(project)
+
+
 def test_a_foreign_projects_host_accessible_compose_is_kept(world, clients, tmp_path):
     project = _project(world, tmp_path)
     world.container["labels"]["com.docker.compose.project"] = "external-stack"

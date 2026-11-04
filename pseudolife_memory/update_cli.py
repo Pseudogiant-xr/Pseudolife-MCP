@@ -1335,7 +1335,6 @@ class Update:
                 if not path.is_file():
                     raise UpdateError(f"--compose-file {path} does not exist; restore the exported stack file "
                                       "there and retry. Nothing was changed", 2)
-            working_dir = str(config_files[0].parent)
         missing = [p for p in config_files if not p.is_file()]
         # Only the installer's packaged layout can be reconstructed. A
         # manager (Portainer labels /data/compose/<id>/docker-compose.yml)
@@ -1352,13 +1351,12 @@ class Update:
                               f"Export the original stack file and environment to this host (Portainer: "
                               f"Stacks > {project} > Editor), then rerun with --compose-file <stack.yml> "
                               f"--env-file <stack.env>. "
-                              f"Nothing was changed; the stack was left running", 2)
+                              f"Nothing was changed; the stack was left unchanged", 2)
         # The env file: --env-file, else the labelled one(s) (comma-joined
         # when several were given), else compose's implicit <working dir>/.env.
         # It carries the Postgres password, the volume names and the daemon's
         # bearer; recreating the daemon without it would interpolate defaults.
-        labelled = ([] if self.o.compose_files else
-                    [Path(p) for p in (labels.get("com.docker.compose.project.environment_file") or "").split(",") if p])
+        labelled = [Path(p) for p in (labels.get("com.docker.compose.project.environment_file") or "").split(",") if p]
         env_files: list[Path] = []
         if self.o.env_file is not None:
             env_files = [Path(self.o.env_file)]
@@ -1366,7 +1364,7 @@ class Update:
             env_files = [p for p in labelled if p.is_file()]
         elif working_dir and (Path(working_dir) / ".env").is_file():
             env_files = [Path(working_dir) / ".env"]
-        if (labelled or self.o.env_file) and not env_files:
+        if (self.o.env_file is None and any(not p.is_file() for p in labelled)):
             raise UpdateError(f"the daemon's env file(s) {', '.join(map(str, labelled or [self.o.env_file]))} no "
                               f"longer exist; recreating the container without them would reset the Postgres "
                               f"password, the volume names and the bearer. Name the file with --env-file. "
@@ -1374,6 +1372,9 @@ class Update:
         for path in env_files:
             if not path.is_file():
                 raise UpdateError(f"--env-file {path} does not exist; nothing was changed", 2)
+        if self.o.compose_files and not env_files:
+            raise UpdateError("the original stack environment is unavailable; export it and rerun with "
+                              "--env-file <stack.env> alongside --compose-file. Nothing was changed", 2)
         existing = [p for p in config_files if p.is_file()]
         checkout = None
         if working_dir and (Path(working_dir).parent / "pyproject.toml").is_file() and (Path(working_dir).parent / "ops").is_dir():
@@ -1392,7 +1393,12 @@ class Update:
         overlay = next((p.with_name("docker-compose.ghcr.yml") for p in existing
                         if p.with_name("docker-compose.ghcr.yml").is_file()), None) or self._bundled("docker-compose.ghcr.yml")
         files = existing + ([overlay] if overlay not in existing else [])
-        args = ["-p", project] + self._compose_args(files, env_files)
+        args = ["-p", project]
+        if self.o.compose_files and working_dir:
+            # Relative mounts, env_file entries and other resources retain
+            # their original meaning even when the YAML was exported elsewhere.
+            args += ["--project-directory", working_dir]
+        args += self._compose_args(files, env_files)
         return {"args": args, "env_file": env_files, "checkout": checkout,
                 "files": [str(p) for p in files], "project": project}
 
