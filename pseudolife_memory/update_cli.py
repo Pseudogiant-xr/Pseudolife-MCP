@@ -921,7 +921,7 @@ class Update:
                                    "      Pick the newest surviving rollback tag and redeploy it:",
                                    f"      docker image ls {repository}",
                                    f"      docker tag <that tag> {image_tag}",
-                                   f"      docker compose {self._compose_display()} up -d --no-deps {DAEMON_SERVICE}"]
+                                   f"      {self._rollback_compose_command(f'docker compose {self._compose_display()} up -d --no-deps {DAEMON_SERVICE}', powershell=os.name == 'nt')}"]
             return "kept"
         code, out = run_cli([self.docker, "tag", source or image_tag, rollback], timeout=120)
         if code != 0:
@@ -1115,14 +1115,9 @@ class Update:
         stamp = {"PSEUDOLIFE_BUILD_GIT_SHA": tree["sha"], "PSEUDOLIFE_BUILD_DIRTY": tree["dirty"],
                  "PSEUDOLIFE_BUILD_TIME": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
         env_file = repo / "ops" / ".env"
-        example = repo / "ops" / ".env.example"
         compose = self._compose_args([compose_file, repo / "ops" / "docker-compose.override.yml"], env_file)
         environment = compose_environment(env_file, stamp)
         self.verify_compose_authentication(compose, environment)
-        if not env_file.is_file() and example.is_file():
-            shutil.copyfile(example, env_file)
-            self.step("scaffolded ops/.env from ops/.env.example (all values commented)")
-        compose = self._compose_args([compose_file, repo / "ops" / "docker-compose.override.yml"], env_file)
         self._compose_shown = compose
         self._compose_clear_bearers = _env_file_sets_credentials(env_file)
         before = self.daemon_health() or {}

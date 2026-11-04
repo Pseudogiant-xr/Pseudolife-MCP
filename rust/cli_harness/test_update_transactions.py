@@ -934,6 +934,8 @@ def test_plain_update_accepts_tokenless_host_and_scaffolded_env(tmp_path, mode):
         result = run_arm(repo, env, binary, [*args, "--json", "--health-retries", "1"])
         assert result.returncode == 0, result.stdout + result.stderr
         assert stages(json.loads(state_path.read_text()))[-2:] == ["tag", "up"]
+        if mode == "checkout":
+            assert not (repo / "ops/.env").exists()
 
 
 def test_plain_release_can_recover_an_unhealthy_daemon(tmp_path):

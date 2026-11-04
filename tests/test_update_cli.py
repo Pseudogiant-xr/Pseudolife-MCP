@@ -753,7 +753,7 @@ def _checkout(world: World, tmp_path: Path, *, repo: bool = True, dirty: int = 0
     (root / "ops" / ".env.example").write_text("# PSEUDOLIFE_MCP_TOKEN=\n", encoding="utf-8", newline="\n")
     (root / "README.md").write_text("sandbox\n", encoding="utf-8", newline="\n")
     (root / "pyproject.toml").write_text("[project]\nname='x'\n", encoding="utf-8", newline="\n")
-    # as in the repository: the scaffolded ops/.env is gitignored, so it
+    # as in the repository: the installed ops/.env is gitignored, so it
     # never makes a clean tree dirty between the guard and the build
     (root / ".gitignore").write_text("ops/.env\n", encoding="utf-8", newline="\n")
     sha = ""
@@ -869,7 +869,7 @@ def test_a_clean_checkout_is_built_with_its_commit_stamp(world, clients, tmp_pat
     assert env["PSEUDOLIFE_BUILD_TIME"].endswith("Z") and "T" in env["PSEUDOLIFE_BUILD_TIME"]
     assert "PSEUDOLIFE_BUILD_GIT_SHA" not in os.environ      # the caller's environment is left alone
     assert "tag pseudolife-daemon:0.1.0 pseudolife-daemon:0.1.0-unittest" in world.docker_calls()
-    assert (root / "ops" / ".env").is_file()                # scaffolded from the example
+    assert not (root / "ops" / ".env").exists()             # updates preserve the resolved credential source
     assert clients == []                                    # no --all
 
 
@@ -1077,6 +1077,44 @@ def test_release_rollback_keeps_env_file_authentication_ahead_of_client_bearers(
     assert "env -u PSEUDOLIFE_MCP_TOKEN -u PSEUDOLIFE_MCP_TOKENS PSEUDOLIFE_IMAGE_TAG=" in out
     assert "Remove-Item Env:PSEUDOLIFE_MCP_TOKEN,Env:PSEUDOLIFE_MCP_TOKENS -ErrorAction SilentlyContinue;" in out
     assert "fixture-client" not in out and "fixture-daemon" not in out
+
+
+def test_kept_checkout_rollback_keeps_env_file_authentication_ahead_of_client_bearers(world, tmp_path, monkeypatch):
+    root, _ = _checkout(world, tmp_path)
+    (root / "ops/.env").write_text("PSEUDOLIFE_MCP_TOKEN=fixture-daemon\n", encoding="utf-8")
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOKEN", "fixture-client")
+    update = up.Update(up.Options(checkout=root), log=lambda _: None, warn=lambda _: None)
+    update._compose_shown = update._compose_args([root / "ops/docker-compose.yml"], root / "ops/.env")
+    update._compose_clear_bearers = True
+    assert update.tag_rollback("pseudolife-daemon:0.1.0", "sha256:running", "sha256:stale") == "kept"
+    command = next(line for line in update.rollback_lines if "docker compose" in line)
+    assert ("Remove-Item Env:PSEUDOLIFE_MCP_TOKEN,Env:PSEUDOLIFE_MCP_TOKENS" in command if os.name == "nt"
+            else "env -u PSEUDOLIFE_MCP_TOKEN -u PSEUDOLIFE_MCP_TOKENS docker compose" in command)
+
+
+def test_checkout_recreation_uses_the_credential_source_that_passed_preflight(world, clients, tmp_path, monkeypatch):
+    root, _ = _checkout(world, tmp_path)
+    credentials = tmp_path / "daemon.env"
+    credentials.write_text("PSEUDOLIFE_MCP_TOKEN=fixture-daemon\n", encoding="utf-8")
+    monkeypatch.setenv("COMPOSE_ENV_FILES", str(credentials))
+    monkeypatch.delenv("PSEUDOLIFE_MCP_TOKEN", raising=False)
+    original = world.run_cli
+    checked = []
+
+    def metadata(argv, **kw):
+        if "{{json .Config.Env}}" in argv:
+            return 0, json.dumps(["PSEUDOLIFE_MCP_TOKEN=fixture-daemon"])
+        if argv[1:2] == ["compose"] and "config" in argv:
+            checked.append((list(argv[2:argv.index("config")]), dict(kw["env"])))
+            return 0, json.dumps({"services": {up.DAEMON_SERVICE: {"environment": {
+                "PSEUDOLIFE_MCP_TOKEN": "fixture-daemon"}}}})
+        return original(argv, **kw)
+
+    monkeypatch.setattr(up, "run_cli", metadata)
+    assert _run(["--checkout", str(root), "--no-backup", "--no-cache-prune"]) == 0
+    recreated, environment = _compose_call(world)
+    assert checked == [(recreated[2:recreated.index("up")], environment)]
+    assert not (root / "ops/.env").exists()
 
 
 @pytest.mark.parametrize("file_keys,cleared", [

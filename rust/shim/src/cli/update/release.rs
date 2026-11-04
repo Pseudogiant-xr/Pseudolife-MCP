@@ -667,10 +667,6 @@ impl Update {
             ));
         }
         let env_file = repo.join("ops/.env");
-        if !env_file.is_file() && repo.join("ops/.env.example").is_file() {
-            seams::write_atomic(&env_file, &fs::read(repo.join("ops/.env.example"))?)?;
-            self.step("scaffolded ops/.env from ops/.env.example (all values commented)");
-        }
         let compose = compose_args(
             &[file.clone(), repo.join("ops/docker-compose.override.yml")],
             std::slice::from_ref(&env_file),
