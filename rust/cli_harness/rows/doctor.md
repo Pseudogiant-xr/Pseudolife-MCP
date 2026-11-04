@@ -288,6 +288,10 @@ cwd; it answers only setup RPCs and records the exact `initialize`, `initialized
 so a failed fixture cannot make both arms match by falling back. No real Codex
 installation, model turn or client configuration is used.
 
+Doctor shares the update client's Codex hook checks. The parity scope map
+therefore includes this row for update changes and the mapped dependencies
+that update imports, so changes to those helpers also run doctor parity.
+
 ## Deferral domain (before the first request unless noted)
 
 noncanonical argv; `--timeout` past
