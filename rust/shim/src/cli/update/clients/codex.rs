@@ -262,13 +262,19 @@ fn runtime_status(result: &Value, expected: &[String]) -> &'static str {
     let Some(hooks) = entries[0]["hooks"].as_array() else {
         return "unknown";
     };
-    let own: BTreeMap<_, _> = hooks
-        .iter()
-        .filter_map(|h| {
-            let key = h["key"].as_str()?;
-            expected.iter().any(|e| e == key).then_some((key, h))
-        })
-        .collect();
+    let mut own = BTreeMap::new();
+    let prefix = format!("{PLUGIN}:");
+    for hook in hooks {
+        let Some(key) = hook["key"].as_str().filter(|key| !key.is_empty()) else {
+            return "unknown";
+        };
+        if !key.starts_with(&prefix) {
+            continue;
+        }
+        if !expected.iter().any(|expected| expected == key) || own.insert(key, hook).is_some() {
+            return "unknown";
+        }
+    }
     if expected.is_empty() || own.len() != expected.len() {
         return "not-loaded";
     }
@@ -333,6 +339,15 @@ mod runtime_trust_tests {
             let value = json!({"data":[{"errors":[],"hooks":[{"key":key,"enabled":enabled,"trustStatus":trust},
                 {"key":"other-plugin:session_start:0:0","enabled":true,"trustStatus":"modified"}]}]});
             assert_eq!(runtime_status(&value, &expected), answer);
+        }
+        for added in [
+            key.clone(),
+            format!("{PLUGIN}:hooks/hooks.json:session_start:99:0"),
+        ] {
+            let value = json!({"data":[{"errors":[],"hooks":[
+                {"key":key,"enabled":true,"trustStatus":"trusted"},
+                {"key":added,"enabled":true,"trustStatus":"modified"}]}]});
+            assert_eq!(runtime_status(&value, &expected), "unknown");
         }
         assert_eq!(
             runtime_status(&json!({"data":[{"errors":[],"hooks":[]}]}), &expected),

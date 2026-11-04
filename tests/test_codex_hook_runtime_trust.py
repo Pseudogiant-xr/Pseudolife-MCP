@@ -43,3 +43,28 @@ def test_doctor_names_the_fix_for_matching_but_unapproved_handlers(cli, monkeypa
                     f"{state}: Run python ops/setup-codex-hooks.py "
                     "--source plugin --trust ask, then start a new session.")
     assert calls == ["hooks/list"]
+
+
+@pytest.mark.parametrize("mutation", ["duplicate", "extra"])
+def test_same_plugin_runtime_inventory_must_be_exact_and_duplicate_free(cli, monkeypatch, mutation):
+    directory = _clone(cli) / "hooks"
+    hooks = [{"key": key, "enabled": True, "trustStatus": "trusted"}
+             for key in _plugin_handler_keys()]
+    extra = dict(hooks[0])
+    if mutation == "extra":
+        extra["key"] = clients.PLUGIN_ID + ":hooks/hooks.json:session_start:99:0"
+        extra["trustStatus"] = "modified"
+    hooks.append(extra)
+
+    class Runtime:
+        def rpc(self, method, params):
+            assert method == "hooks/list"
+            return {"data": [{"errors": [], "hooks": hooks}]}
+
+    @contextmanager
+    def runtime(*args, **kwargs):
+        yield Runtime()
+
+    monkeypatch.setattr(codex_connection, "codex", runtime)
+    monkeypatch.setattr(clients, "codex_executable", lambda home: "fixture-codex")
+    assert clients._codex_runtime_hook_status(cli.home / "codex", directory) == "unknown"

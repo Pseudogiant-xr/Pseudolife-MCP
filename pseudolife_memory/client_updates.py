@@ -1592,17 +1592,22 @@ def _codex_runtime_hook_status(codex_home: Path, manifest_dir: Path) -> str:
         hooks = entries[0].get("hooks")
         if not isinstance(hooks, list):
             return "unknown"
-        own = {h.get("key"): h for h in hooks if isinstance(h, dict)
-               and isinstance(h.get("key"), str) and h["key"] in expected}
-        if not expected or set(own) != expected:
+        if any(not isinstance(h, dict) or not isinstance(h.get("key"), str)
+               or not h["key"] for h in hooks):
+            return "unknown"
+        own = [h for h in hooks if h["key"].startswith(PLUGIN_ID + ":")]
+        keys = [h["key"] for h in own]
+        if len(keys) != len(set(keys)) or set(keys) - expected:
+            return "unknown"
+        if not expected or set(keys) != expected:
             return "not-loaded"
         if any(h.get("enabled") is True and h.get("trustStatus") in {"modified", "untrusted"}
-               for h in own.values()):
+               for h in own):
             return "needs-approval"
-        if any(h.get("enabled") is False for h in own.values()):
+        if any(h.get("enabled") is False for h in own):
             return "disabled"
         return ("current" if all(h.get("enabled") is True and h.get("trustStatus") == "trusted"
-                                 for h in own.values()) else "unknown")
+                                 for h in own) else "unknown")
     except Exception:  # A runtime failure must never turn a file match into execution evidence.
         return "unknown"
 
