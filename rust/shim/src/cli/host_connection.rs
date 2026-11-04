@@ -47,17 +47,24 @@ fn discover_from(
 
 fn selected(mode: &str, arguments: &[String]) -> bool {
     let flags = || arguments.iter().take_while(|value| value.as_str() != "--");
-    matches!(mode, "lease" | "doctor")
-        && !(mode == "lease"
-            && arguments.first().is_some_and(|action| {
+    if flags().any(|value| matches!(value.as_str(), "--help" | "-h")) {
+        return false;
+    }
+    match mode {
+        "lease"
+            if arguments.first().is_some_and(|action| {
                 matches!(
                     action.as_str(),
                     "break" | "conductor" | "delegate" | "designate"
                 )
-            }))
-        && !flags().any(|value| matches!(value.as_str(), "--help" | "-h"))
-        && !(mode == "lease" && flags().any(|value| value == "--no-board"))
-        && !(mode == "doctor" && flags().any(|value| value == "--disposable-proof"))
+            }) =>
+        {
+            false
+        }
+        "lease" => !flags().any(|value| value == "--no-board"),
+        "doctor" => !flags().any(|value| value == "--disposable-proof"),
+        _ => false,
+    }
 }
 
 fn from_lookup(lookup: impl Fn(&str) -> Option<OsString>) -> Result<Environment, SetupError> {
