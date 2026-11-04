@@ -62,7 +62,11 @@ class DockerWorld:
         self.fail_state = False
         self.fail_replay = False
         self.complete = True
+        self.database_exists = True
+        self.pg_name = up.PG_CONTAINER
         self.daemon = {"Image": "sha256:local", "State": {"Running": True},
+                       "HostConfig": {"PortBindings": {"8765/tcp": [{"HostIp": "127.0.0.1", "HostPort": "18765"}]}},
+                       "NetworkSettings": {"Networks": {"fixture": {}}},
                        "Mounts": [{"Destination": "/data", "Name": "legacy-state"}],
                        "Config": {"Env": ["PSEUDOLIFE_MCP_DATABASE_URL=postgresql://custom_role:fixture@db/custom_bank"]}}
         self.pg = {"State": {"Running": True}, "Config": {"Env": ["POSTGRES_USER=custom_role", "POSTGRES_DB=custom_bank"]},
@@ -72,17 +76,21 @@ class DockerWorld:
         args = list(map(str, argv[1:]))
         self.calls.append(args)
         if args[0] == "inspect":
-            return 0, json.dumps([self.pg if args[1] == up.PG_CONTAINER else self.daemon])
+            return 0, json.dumps([self.pg if args[1] == self.pg_name else self.daemon])
         if args[0] == "create":
             helper = f"helper-{len(self.helpers)}"
             self.helpers[helper] = args[-1]
             return 0, helper
+        if args[0] == "exec" and "pg_database" in " ".join(args):
+            return 0, "t" if self.database_exists else "f"
+        if args[0] == "exec" and "pg_dump" in " ".join(args) and not self.database_exists:
+            return 1, "database absent"
         if args[:2] == ["start", "-a"]:
             script = self.helpers[args[-1]]
             return (1 if self.fail_state and "tar czf" in script else 0), ""
         if args[0] == "cp" and ":" in args[1] and not Path(args[1]).is_file():
             target = Path(args[2])
-            if args[1].startswith(up.PG_CONTAINER + ":"):
+            if args[1].startswith(self.pg_name + ":"):
                 target.write_bytes(gzip.compress(b"-- PostgreSQL database dump complete\n" if self.complete else b"SET x;\n"))
             else:
                 target.write_bytes(_state_bytes())
@@ -100,6 +108,8 @@ def docker_bank(tmp_path, monkeypatch):
     monkeypatch.setattr(module, "copy_from_container", lambda docker, source, target: world.run([docker, "cp", source, str(target)]))
     monkeypatch.setattr(up, "home", lambda: tmp_path / "home")
     monkeypatch.setattr(up, "data_dir", lambda: tmp_path / "clone" / "data")
+    monkeypatch.setattr(up, "fetch_json", lambda *a, **kw: {"status": "ok"})
+    monkeypatch.setattr(up, "sleep", lambda _: None)
     clone = tmp_path / "clone"
     clone.mkdir()
     (clone / ".git").write_text("gitdir: fixture\n")
@@ -284,5 +294,174 @@ def test_yes_and_move_selectors_skip_prompt_and_leave_stopped(tmp_path, monkeypa
     assert restore_cli.main(["--backup-file", str(_input_dump(tmp_path)), "--yes", "--leave-stopped",
                              "--container", "project-pg", "--daemon-container", "project-daemon", "--db", "bank",
                              "--user", "owner"]) == 0
-    assert seen["selectors"] == {"container": "project-pg", "daemon_container": "project-daemon", "db": "bank", "user": "owner"}
+    assert seen["selectors"] == {"container": "project-pg", "daemon_container": "project-daemon", "db": "bank", "user": "owner",
+                                 "daemon_url": None}
     assert seen["restore"]["leave_stopped"] is True
+
+
+@pytest.mark.parametrize("corruption", ["footer", "crc"])
+def test_corrupt_gzip_state_refuses_before_any_mutation(docker_bank, tmp_path, corruption):
+    bank, world = docker_bank
+    state = tmp_path / "bad.tgz"
+    data = bytearray(_state_bytes())
+    if corruption == "footer":
+        data = data[:-8]
+    else:
+        data[-8] ^= 0xFF
+    state.write_bytes(data)
+    before = len(world.calls)
+    with pytest.raises(up.UpdateError, match="archive"):
+        bank.restore(_input_dump(tmp_path), state_archive=state)
+    assert len(world.calls) == before
+
+
+def test_symlink_chain_cannot_escape_through_parent_components(docker_bank, tmp_path):
+    bank, world = docker_bank
+    state = tmp_path / "chain.tgz"
+    with tarfile.open(state, "w:gz") as archive:
+        for name, target in (("alias", "."), ("config.yaml", "alias/../outside/config.yaml")):
+            entry = tarfile.TarInfo(name)
+            entry.type = tarfile.SYMTYPE
+            entry.linkname = target
+            archive.addfile(entry)
+    before = len(world.calls)
+    with pytest.raises(up.UpdateError, match="unsafe"):
+        bank.restore(_input_dump(tmp_path), state_archive=state)
+    assert len(world.calls) == before
+
+
+def test_internal_parent_symlink_remains_valid(tmp_path):
+    from pseudolife_memory.docker_backup_restore import validate_state
+    state = tmp_path / "internal.tgz"
+    with tarfile.open(state, "w:gz") as archive:
+        entry = tarfile.TarInfo("dir/link")
+        entry.type = tarfile.SYMTYPE
+        entry.linkname = "../config.yaml"
+        archive.addfile(entry)
+    validate_state(state)
+
+
+def test_recovery_command_retains_all_effective_target_selectors(docker_bank, tmp_path):
+    bank, world = docker_bank
+    bank.pg, bank.daemon, bank.db, bank.user = "custom-pg", "custom-daemon", "other_bank", "other_owner"
+    world.pg_name = bank.pg
+    world.fail_replay = True
+    with pytest.raises(up.UpdateError) as exc:
+        bank.restore(_input_dump(tmp_path), leave_stopped=True)
+    command = str(exc.value)
+    assert "--container custom-pg" in command and "--daemon-container custom-daemon" in command
+    assert "--db other_bank" in command and "--user other_owner" in command and "--leave-stopped" in command
+
+
+def test_safety_backup_never_rotates_selected_restore_inputs(docker_bank, tmp_path):
+    import os
+    bank, _ = docker_bank
+    directory = tmp_path / "home" / ".pseudolife-mcp" / "backups"
+    directory.mkdir(parents=True)
+    for index in range(3):
+        dump = directory / f"pseudolife_memory-20200101-000000-{index:08x}.sql.gz"
+        state = directory / f"pseudolife_state-20200101-000000-{index:08x}.tgz"
+        dump.write_bytes(gzip.compress(b"-- PostgreSQL database dump complete\n"))
+        state.write_bytes(_state_bytes())
+        os.utime(dump, (0, 0))
+        os.utime(state, (0, 0))
+    selected_dump = directory / "pseudolife_memory-20200101-000000-00000000.sql.gz"
+    selected_state = directory / "pseudolife_state-20200101-000000-00000000.tgz"
+    bank.restore(selected_dump, state_archive=selected_state, leave_stopped=True)
+    assert selected_dump.exists() and selected_state.exists()
+
+
+def test_missing_destination_database_can_be_recovered(docker_bank, tmp_path):
+    bank, world = docker_bank
+    world.database_exists = False
+    result = bank.restore(_input_dump(tmp_path), leave_stopped=True)
+    assert result["safety_dump"] is None and result["safety_state"].exists()
+    assert not any("pg_dump" in " ".join(c) for c in world.calls)
+
+
+def test_restore_requires_daemon_readiness_before_success(docker_bank, tmp_path, monkeypatch):
+    bank, world = docker_bank
+    monkeypatch.setattr(up, "fetch_json", lambda *a, **kw: None)
+    with pytest.raises(up.UpdateError):
+        bank.restore(_input_dump(tmp_path))
+    assert world.calls.count(["stop", up.DAEMON_CONTAINER]) >= 2
+
+
+def test_destructive_boundary_is_visible_before_drop(docker_bank, tmp_path, monkeypatch):
+    bank, world = docker_bank
+
+    class BufferedOutput:
+        pending = ""
+        visible = ""
+
+        def write(self, value):
+            self.pending += value
+            return len(value)
+
+        def flush(self):
+            self.visible += self.pending
+            self.pending = ""
+
+    output = BufferedOutput()
+    monkeypatch.setattr(sys, "stdout", output)
+    bank.log = lambda message: print(message)
+    original = world.run
+
+    def observe_drop(argv, **kwargs):
+        if "DROP DATABASE" in " ".join(argv):
+            assert "==> Dropping + recreating" in output.visible
+        return original(argv, **kwargs)
+
+    monkeypatch.setattr(up, "run_cli", observe_drop)
+    bank.restore(_input_dump(tmp_path), leave_stopped=True)
+
+
+def test_archive_checks_link_meaning_at_each_extraction_step(tmp_path):
+    from pseudolife_memory.docker_backup_restore import validate_state
+    state = tmp_path / "changing-links.tgz"
+    with tarfile.open(state, "w:gz") as archive:
+        for name, target in (("alias", "."), ("config.yaml", "alias/../outside/config.yaml"), ("alias", "safe")):
+            entry = tarfile.TarInfo(name)
+            entry.type = tarfile.SYMTYPE
+            entry.linkname = target
+            archive.addfile(entry)
+    with pytest.raises(up.UpdateError, match="unsafe"):
+        validate_state(state)
+
+
+def test_database_alias_on_another_network_does_not_select_wrong_bank(docker_bank):
+    from pseudolife_memory.docker_backup_restore import DockerBank
+    _, world = docker_bank
+    world.daemon["NetworkSettings"] = {"Networks": {"other-project": {}}}
+    with pytest.raises(up.UpdateError, match="--container"):
+        DockerBank()
+    assert DockerBank(container=up.PG_CONTAINER).db == "custom_bank"
+
+
+def test_recovery_quotes_space_and_apostrophe_arguments():
+    import os
+    import shlex
+    from pseudolife_memory.docker_backup_restore import _shell_command
+    argv = ["pseudolife-mcp", "restore", "--backup-file", "folder with space/bank's dump.sql.gz"]
+    command = _shell_command(argv)
+    if os.name == "nt":
+        assert "'folder with space/bank''s dump.sql.gz'" in command
+    else:
+        assert shlex.split(command) == argv
+
+
+def test_absent_port_bindings_still_allow_leave_stopped(docker_bank, tmp_path):
+    from pseudolife_memory.docker_backup_restore import DockerBank
+    _, world = docker_bank
+    world.daemon["HostConfig"]["PortBindings"] = None
+    world.daemon["NetworkSettings"]["Ports"] = None
+    bank = DockerBank()
+    assert bank.restore(_input_dump(tmp_path), leave_stopped=True)["left_stopped"] is True
+
+
+def test_readiness_uses_targets_nondefault_published_port(docker_bank, tmp_path, monkeypatch):
+    bank, _ = docker_bank
+    seen = []
+    monkeypatch.setattr(up, "fetch_json", lambda url, **kwargs: seen.append(url) or {"status": "ok"})
+    assert bank.restore(_input_dump(tmp_path))["left_stopped"] is False
+    assert seen == ["http://127.0.0.1:18765/health"]

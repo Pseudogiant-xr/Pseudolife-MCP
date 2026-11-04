@@ -19,6 +19,7 @@ def main(argv=None) -> int:
     parser.add_argument("--daemon-container", help="daemon container (default: pseudolife-mcp-daemon)")
     parser.add_argument("--db", help="database name (default: the running daemon's configuration)")
     parser.add_argument("--user", help="database role (default: the running daemon's configuration)")
+    parser.add_argument("--daemon-url", help="health endpoint (default: the daemon's published port)")
     args = parser.parse_args(argv)
     try:
         if not up._dump_complete(args.backup_file):
@@ -32,7 +33,8 @@ def main(argv=None) -> int:
                 print("Restore cancelled; nothing was changed.")
                 return 0
         with up.UpdateLock():
-            bank = DockerBank(container=args.container, daemon_container=args.daemon_container, db=args.db, user=args.user)
+            bank = DockerBank(container=args.container, daemon_container=args.daemon_container, db=args.db, user=args.user,
+                              daemon_url=args.daemon_url)
             bank.restore(args.backup_file, state_archive=args.state_archive, leave_stopped=args.leave_stopped)
         return 0
     except (up.UpdateError, OSError) as exc:

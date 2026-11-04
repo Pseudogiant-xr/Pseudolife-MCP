@@ -1,11 +1,13 @@
 """Docker bank artifacts and restore, independent of any compose checkout."""
 from __future__ import annotations
 
+import gzip
 import json
 import os
 import posixpath
 import re
 import secrets
+import shlex
 import shutil
 import subprocess
 import tarfile
@@ -20,24 +22,78 @@ from pseudolife_memory import update_cli as up
 def validate_state(path: Path) -> None:
     """Reject paths and links that could escape the state volume on replay."""
     try:
+        # tarfile stops at tar's end markers and need not consume gzip's
+        # trailer. Verify CRC and EOF before any restore can delete state.
+        with gzip.open(path, "rb") as stream:
+            while stream.read(1024 * 1024):
+                pass
         with tarfile.open(path, "r:gz") as archive:
-            for item in archive:
+            members = archive.getmembers()
+            links = {posixpath.normpath(item.name): item.linkname for item in members if item.issym()}
+
+            def resolve(parts, seen=frozenset()):
+                current = []
+                for part in parts:
+                    if part in ("", "."):
+                        continue
+                    if part == "..":
+                        if not current:
+                            raise ValueError("escaping link")
+                        current.pop()
+                        continue
+                    current.append(part)
+                    key = "/".join(current)
+                    if key in links:
+                        if key in seen:
+                            # A loop cannot be traversed by the filesystem,
+                            # and therefore cannot escape the volume.
+                            return None
+                        target = links[key]
+                        if target.startswith("/") or "\\" in target:
+                            raise ValueError("absolute link")
+                        current = resolve(current[:-1] + target.split("/"), seen | {key})
+                        if current is None:
+                            return None
+                return current
+
+            def check(item):
                 name = posixpath.normpath(item.name)
-                if name.startswith("/") or name == ".." or name.startswith("../") or "\\" in name:
+                if name.startswith("/") or ".." in item.name.split("/") or "\\" in name:
                     raise ValueError("path")
                 if item.isdev() or item.isfifo():
                     raise ValueError("special file")
                 if item.issym() or item.islnk():
-                    link = posixpath.normpath(posixpath.join(posixpath.dirname(name) if item.issym() else "", item.linkname))
-                    if link.startswith("/") or link == ".." or link.startswith("../") or "\\" in link:
+                    if item.linkname.startswith("/") or "\\" in item.linkname:
                         raise ValueError("link")
-    except (OSError, tarfile.TarError, ValueError) as exc:
+                    prefix = posixpath.dirname(name).split("/") if item.issym() else []
+                    resolve(prefix + item.linkname.split("/"), frozenset({name}))
+                resolve(name.split("/"))
+            for item in members:
+                check(item)
+            # Duplicate entries can change an earlier link's meaning during
+            # extraction. Check that transient graph as well as the final one.
+            links.clear()
+            for item in members:
+                resolve(posixpath.normpath(item.name).split("/"))
+                if item.issym():
+                    links[posixpath.normpath(item.name)] = item.linkname
+                else:
+                    links.pop(posixpath.normpath(item.name), None)
+                check(item)
+    except (OSError, EOFError, tarfile.TarError, ValueError, RecursionError) as exc:
         raise up.UpdateError("the state archive is unreadable or contains unsafe paths; use a complete, "
                              "unmodified state backup. Nothing was restored", 2) from exc
 
 
 def _ident(value: str) -> str:
     return '"' + value.replace('"', '""') + '"'
+
+
+def _shell_command(argv) -> str:
+    if os.name == "nt":
+        return " ".join(arg if re.fullmatch(r"[A-Za-z0-9_./:\\-]+", arg)
+                        else "'" + arg.replace("'", "''") + "'" for arg in argv)
+    return shlex.join(argv)
 
 
 def copy_from_container(docker: str, source: str, target: Path) -> None:
@@ -65,7 +121,7 @@ def copy_from_container(docker: str, source: str, target: Path) -> None:
 
 class DockerBank:
     def __init__(self, *, container: str | None = None, daemon_container: str | None = None,
-                 db: str | None = None, user: str | None = None, log=print):
+                 db: str | None = None, user: str | None = None, daemon_url: str | None = None, log=print):
         self.docker = up.docker_cmd()
         self.pg = container or up.PG_CONTAINER
         self.daemon = daemon_container or up.DAEMON_CONTAINER
@@ -83,8 +139,12 @@ class DockerBank:
                 raise up.UpdateError("cannot read the daemon's database configuration; restore its original "
                                      "PSEUDOLIFE_MCP_DATABASE_URL and retry. Nothing was restored", 2) from None
         if source.get("host") and container is None:
-            names = {self.pg, (pg.get("Name") or "").lstrip("/"), pg.get("Config", {}).get("Hostname")}
-            for network in pg.get("NetworkSettings", {}).get("Networks", {}).values():
+            networks = pg.get("NetworkSettings", {}).get("Networks", {})
+            shared = set(self.running.get("NetworkSettings", {}).get("Networks", {})) & set(networks)
+            names = set()
+            for key in shared:
+                network = networks[key]
+                names.update((self.pg, (pg.get("Name") or "").lstrip("/"), pg.get("Config", {}).get("Hostname")))
                 names.update(network.get("Aliases") or [])
                 names.add(network.get("IPAddress"))
             if source["host"] not in names:
@@ -98,6 +158,15 @@ class DockerBank:
                                  "container configuration before backing up or restoring", 2)
         if not pg.get("State", {}).get("Running"):
             raise up.UpdateError(f"PostgreSQL is stopped; run docker start {self.pg} and retry. Nothing was restored", 2)
+        self.daemon_url = daemon_url
+        host_ports = self.running.get("HostConfig", {}).get("PortBindings") or {}
+        network_ports = self.running.get("NetworkSettings", {}).get("Ports") or {}
+        bindings = host_ports.get("8765/tcp") or network_ports.get("8765/tcp") or []
+        if not self.daemon_url and bindings:
+            host = bindings[0].get("HostIp") or "127.0.0.1"
+            host = "127.0.0.1" if host == "0.0.0.0" else "::1" if host == "::" else host
+            host = f"[{host}]" if ":" in host else host
+            self.daemon_url = f"http://{host}:{bindings[0]['HostPort']}"
 
     def command(self, *args, check=True, timeout=3600):
         code, output = up.run_cli([self.docker, *args], timeout=timeout, stdout_only=True)
@@ -130,7 +199,7 @@ class DockerBank:
         finally:
             self.command("rm", "-f", helper, check=False, timeout=120)
 
-    def backup(self, *, out: Path | None = None, keep_days=7.0) -> dict:
+    def backup(self, *, out: Path | None = None, keep_days=7.0, include_database=True) -> dict:
         directory = Path(out) if out else up.data_dir() / "backups"
         directory.mkdir(parents=True, exist_ok=True, mode=0o700)
         stamp = up._stamp() + "-" + secrets.token_hex(4)
@@ -140,18 +209,20 @@ class DockerBank:
         remote = f"/tmp/pl_backup-{stamp}.sql.gz"
         state_tmp = f"/tmp/pl_state-{stamp}.tgz"
         try:
-            self.command("exec", self.pg, "sh", "-c", 'pg_dump --no-owner --no-acl -U "$1" -d "$2" -Z9 > "$3"',
-                         "_", self.user, self.db, remote)
-            copy_from_container(self.docker, f"{self.pg}:{remote}", dump_part)
-            if not up._dump_complete(dump_part):
-                raise up.UpdateError("the database dump is incomplete; retry backup before restoring anything")
+            if include_database:
+                self.command("exec", self.pg, "sh", "-c", 'pg_dump --no-owner --no-acl -U "$1" -d "$2" -Z9 > "$3"',
+                             "_", self.user, self.db, remote)
+                copy_from_container(self.docker, f"{self.pg}:{remote}", dump_part)
+                if not up._dump_complete(dump_part):
+                    raise up.UpdateError("the database dump is incomplete; retry backup before restoring anything")
             # A helper also works when move or an operator already stopped the
             # daemon. Read-only inherited mounts keep this step observational.
             with self.helper(f"tar czf {state_tmp} -C /data .") as helper:
                 self.command("start", "-a", helper)
                 copy_from_container(self.docker, f"{helper}:{state_tmp}", state_part)
             validate_state(state_part)
-            dump_part.replace(dump)
+            if include_database:
+                dump_part.replace(dump)
             state_part.replace(state)
         finally:
             self.command("exec", self.pg, "rm", "-f", remote, check=False, timeout=120)
@@ -160,6 +231,8 @@ class DockerBank:
         # Only this implementation's nonce-stamped files are rotated; legacy
         # script/update artifacts and incomplete runs are outside its namespace.
         pruned = []
+        if keep_days is None:
+            return {"dump": dump if include_database else None, "state": state, "pruned": pruned}
         for prefix, suffix in (("pseudolife_memory", "sql.gz"), ("pseudolife_state", "tgz")):
             pattern = rf"{prefix}-\d{{8}}-\d{{6}}-[0-9a-f]{{8}}\.{re.escape(suffix)}"
             files = sorted((p for p in directory.iterdir() if re.fullmatch(pattern, p.name)), reverse=True)
@@ -167,7 +240,26 @@ class DockerBank:
                 if path.stat().st_mtime < time.time() - keep_days * 86400:
                     path.unlink()
                     pruned.append(path)
-        return {"dump": dump, "state": state, "pruned": pruned}
+        return {"dump": dump if include_database else None, "state": state, "pruned": pruned}
+
+    def database_exists(self):
+        literal = "'" + self.db.replace("'", "''") + "'"
+        _, output = self.command("exec", self.pg, "psql", "-X", "-U", self.user, "-d", "postgres", "-Atc",
+                                  f"SELECT EXISTS(SELECT 1 FROM pg_database WHERE datname = {literal})")
+        if output.strip() not in ("t", "f"):
+            raise up.UpdateError("cannot determine whether the destination database exists; verify PostgreSQL "
+                                 "and retry. Nothing was restored", 2)
+        return output.strip() == "t"
+
+    def wait_ready(self):
+        for attempt in range(30):
+            health = up.fetch_json(self.daemon_url.rstrip("/") + "/health", timeout=3)
+            if health and health.get("status") == "ok":
+                return
+            if attempt < 29:
+                up.sleep(1.5)
+        raise up.UpdateError(f"the restored daemon did not become ready at {self.daemon_url}; "
+                             f"check docker logs {self.daemon} and the --daemon-url setting")
 
     def restore(self, backup_file: Path, *, state_archive: Path | None = None, leave_stopped=False) -> dict:
         backup_file = Path(backup_file).resolve()
@@ -177,6 +269,10 @@ class DockerBank:
         if state_archive is not None:
             state_archive = Path(state_archive).resolve()
             validate_state(state_archive)
+        if not leave_stopped and not self.daemon_url:
+            raise up.UpdateError("the daemon has no published health port; name its endpoint with --daemon-url "
+                                 "or use --leave-stopped. Nothing was restored", 2)
+        exists = self.database_exists()
         # The safety pair deliberately ignores PSEUDOLIFE_MCP_DATA_DIR: a
         # checkout's ./data is not a durable recovery location.
         safety_dir = up.home() / ".pseudolife-mcp" / "backups"
@@ -191,10 +287,12 @@ class DockerBank:
             if was_running:
                 self.command("stop", self.daemon)
             self.log("==> Safety-dumping the current database and state volume...")
-            safety = self.backup(out=safety_dir)
-            self.log(f"Safety backup: {safety['dump']} + {safety['state']}")
+            safety = self.backup(out=safety_dir, keep_days=None, include_database=exists)
+            self.log(f"Safety backup: {safety['dump']} + {safety['state']}" if exists else
+                     f"Safety state backup: {safety['state']} (destination database was absent)")
             self.command("cp", str(backup_file), f"{self.pg}:{remote}")
             self.log(f"==> Dropping + recreating {self.db}...")
+            up._flush_output()
             destructive = True
             database = _ident(self.db)
             self.command("exec", self.pg, "psql", "-X", "-v", "ON_ERROR_STOP=1", "-U", self.user, "-d", "postgres",
@@ -222,15 +320,28 @@ class DockerBank:
                     self.command("start", "-a", helper)
             if not leave_stopped:
                 self.command("start", self.daemon)
+                self.wait_ready()
             self.log("Restore complete; daemon " + ("left stopped (--leave-stopped)." if leave_stopped else "started."))
             return {"safety_dump": safety["dump"], "safety_state": safety["state"], "left_stopped": leave_stopped}
         except BaseException as exc:
             if not destructive and was_running:
                 self.command("start", self.daemon, check=False, timeout=120)
             if destructive and isinstance(exc, Exception):
-                raise up.UpdateError(f"restore failed after database replacement began; the daemon is left stopped. "
-                                     f"Recover with pseudolife-mcp restore --backup-file {safety['dump']} "
-                                     f"--state-archive {safety['state']} --yes") from exc
+                stopped, _ = self.command("stop", self.daemon, check=False, timeout=120)
+                argv = ["pseudolife-mcp", "restore", "--backup-file", str(safety["dump"] or backup_file)]
+                recovery_state = safety["state"] if safety["dump"] else state_archive
+                if recovery_state:
+                    argv += ["--state-archive", str(recovery_state)]
+                argv += ["--container", self.pg, "--daemon-container", self.daemon, "--db", self.db,
+                         "--user", self.user, "--yes"]
+                if leave_stopped:
+                    argv.append("--leave-stopped")
+                if self.daemon_url:
+                    argv += ["--daemon-url", self.daemon_url]
+                state = "the daemon is left stopped" if stopped == 0 else f"run docker stop {self.daemon} first"
+                reason = str(exc) if isinstance(exc, up.UpdateError) else type(exc).__name__
+                raise up.UpdateError(f"restore failed after database replacement began ({reason}); {state}. "
+                                     f"Recover with {_shell_command(argv)}") from exc
             raise
         finally:
             self.command("exec", self.pg, "rm", "-f", remote, check=False, timeout=120)
