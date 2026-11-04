@@ -128,11 +128,68 @@ def test_docker_backup_uses_actual_role_and_database_and_stopped_state(docker_ba
     result = bank.backup(out=tmp_path / "artifacts")
     assert result["dump"].is_file() and result["state"].is_file()
     dump = next(c for c in world.calls if "pg_dump" in " ".join(c))
-    assert dump[-3:-1] == ["custom_role", "custom_bank"]
+    from psycopg.conninfo import conninfo_to_dict
+    assert dump[-3] == "custom_role" and conninfo_to_dict(dump[-2]) == {"dbname": "custom_bank"}
     create = next(c for c in world.calls if c[0] == "create")
     assert create[create.index("--volumes-from") + 1] == up.DAEMON_CONTAINER + ":ro"
     assert not any(c == ["start", up.DAEMON_CONTAINER] for c in world.calls)
     assert any(c[0] == "rm" and c[-1].startswith("helper-") for c in world.calls)
+
+
+def test_docker_backup_treats_a_conninfo_shaped_database_name_as_a_literal(docker_bank, tmp_path):
+    from psycopg.conninfo import conninfo_to_dict
+    bank, world = docker_bank
+    bank.db = "host=elsewhere"
+    bank.backup(out=tmp_path / "artifacts")
+    dump = next(c for c in world.calls if "pg_dump" in " ".join(c))
+    selected = conninfo_to_dict(dump[-2])
+    assert selected.get("dbname") == bank.db and "host" not in selected
+
+
+def test_restore_treats_a_conninfo_shaped_database_name_as_a_literal(docker_bank, tmp_path):
+    from psycopg.conninfo import conninfo_to_dict
+    bank, world = docker_bank
+    bank.db = "host=elsewhere"
+    bank.restore(_input_dump(tmp_path), leave_stopped=True)
+    replay = next(c for c in world.calls if "psql" in c and "-f" in c)
+    selected = conninfo_to_dict(replay[replay.index("-d") + 1])
+    assert selected == {"dbname": bank.db}
+    drop = next(c[-1] for c in world.calls if "DROP DATABASE" in " ".join(c))
+    assert '"host=elsewhere"' in drop
+
+
+def test_restore_binds_every_postgres_client_to_the_selected_local_container(docker_bank, tmp_path):
+    bank, world = docker_bank
+    world.pg["Config"]["Env"] += ["PGHOSTADDR=10.0.0.2", "PGSERVICE=unrelated", "PGSERVICEFILE=/tmp/profile"]
+    bank.restore(_input_dump(tmp_path), leave_stopped=True)
+    clients = [c for c in world.calls if "psql" in c]
+    assert clients
+    for command in clients:
+        assert command[command.index("-h") + 1].startswith("/")
+        assert command[command.index("-p") + 1] == "5432"
+        assert all(name in command for name in ("PGHOSTADDR", "PGSERVICE", "PGSERVICEFILE"))
+    dump = next(c for c in world.calls if "pg_dump" in " ".join(c))
+    assert "unset PGHOSTADDR PGSERVICE PGSERVICEFILE" in " ".join(dump)
+
+
+def test_database_port_follows_runtime_connection_and_explicit_override(docker_bank):
+    from pseudolife_memory.docker_backup_restore import DockerBank
+    _bank, world = docker_bank
+    world.daemon["Config"]["Env"] = ["PSEUDOLIFE_MCP_DATABASE_URL=postgresql://custom_role@db:6543/custom_bank"]
+    for requested, expected in [(None, 6543), (7654, 7654)]:
+        bank = DockerBank(db_port=requested, log=lambda _: None)
+        assert bank.database_exists()
+        command = next(c for c in reversed(world.calls) if "psql" in c)
+        assert command[command.index("-p") + 1] == str(expected)
+
+
+@pytest.mark.parametrize("port", [0, -1, 65536])
+def test_invalid_database_port_refuses_before_writing(docker_bank, port):
+    from pseudolife_memory.docker_backup_restore import DockerBank
+    _bank, world = docker_bank
+    with pytest.raises(up.UpdateError, match="--db-port"):
+        DockerBank(db_port=port, log=lambda _: None)
+    assert not any(c[0] in ("stop", "create", "cp") for c in world.calls)
 
 
 @pytest.mark.parametrize("failure", ["dump", "state"])
@@ -293,9 +350,9 @@ def test_yes_and_move_selectors_skip_prompt_and_leave_stopped(tmp_path, monkeypa
     monkeypatch.setattr(restore_cli, "DockerBank", Bank)
     assert restore_cli.main(["--backup-file", str(_input_dump(tmp_path)), "--yes", "--leave-stopped",
                              "--container", "project-pg", "--daemon-container", "project-daemon", "--db", "bank",
-                             "--user", "owner"]) == 0
+                             "--user", "owner", "--db-port", "6543"]) == 0
     assert seen["selectors"] == {"container": "project-pg", "daemon_container": "project-daemon", "db": "bank", "user": "owner",
-                                 "daemon_url": None}
+                                 "db_port": 6543, "daemon_url": None}
     assert seen["restore"]["leave_stopped"] is True
 
 

@@ -19,6 +19,7 @@ def main(argv=None) -> int:
     parser.add_argument("--daemon-container", help="daemon container (default: pseudolife-mcp-daemon)")
     parser.add_argument("--db", help="database name (default: the running daemon's configuration)")
     parser.add_argument("--user", help="database role (default: the running daemon's configuration)")
+    parser.add_argument("--db-port", type=int, help="PostgreSQL port inside its container (default: daemon configuration)")
     parser.add_argument("--daemon-url", help="health endpoint (default: the daemon's published port)")
     parser.add_argument("--safety-dir", type=Path, help="safety backup directory outside any checkout (default: per-user backups)")
     args = parser.parse_args(argv)
@@ -35,7 +36,7 @@ def main(argv=None) -> int:
                 return 0
         with up.UpdateLock():
             bank = DockerBank(container=args.container, daemon_container=args.daemon_container, db=args.db, user=args.user,
-                              daemon_url=args.daemon_url)
+                              db_port=args.db_port, daemon_url=args.daemon_url)
             bank.restore(args.backup_file, state_archive=args.state_archive, leave_stopped=args.leave_stopped,
                          safety_dir=args.safety_dir)
         return 0

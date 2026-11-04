@@ -7,3 +7,6 @@
   safety pair outside any checkout, and supports `--leave-stopped` for moves.
   It preserves an active move gate and refuses unsafe archives or incomplete
   backups. Schema rollback guidance now names the installed restore command.
+- PostgreSQL clients stay on the selected container's local socket and treat
+  database names literally; inherited address/service settings cannot redirect
+  a restore. `--db-port` selects a non-default server port and survives recovery.
