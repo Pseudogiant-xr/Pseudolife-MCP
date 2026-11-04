@@ -12025,6 +12025,26 @@ compose files are unavailable. Environment principals then need target
 credentials again; if this machine's client reconnect fails, use
 `pseudolife-mcp connect <target-url> --token-file <target-token-file> --yes`.
 
+Move resolves the daemon's actual libpq database/user defaults, including
+`PGDATABASE` and `PGUSER`; opaque service-only configuration must be made
+explicit before moving. The selected source database must match its `/health`
+bank fingerprint. Migration dumps omit source PostgreSQL object ownership and
+grants, so restored objects belong to the target database role; bank principals
+and their MCP identities travel with the data.
+
+Target artifacts and safety backups must stay outside mounted bank directories
+and, for installed-CLI restore, outside checkouts. `--target-work-dir <directory>`
+selects another target artifact root when a custom bind mount overlaps the
+default location. Per-attempt restore safety pairs are kept under its `safety`
+directory. Repeat the original target-mode, file and work-directory flags when
+using `--resume`.
+
+A resume marker is bound to the selected database/storage, rather than granting
+permission over any bank on that host. An untouched original bank is checked
+for new user data again; an owned half-restored source bank can be retried.
+If an older record cannot prove the selection, use fresh target volume names
+and start a new move without `--resume`.
+
 **Run it under `tmux`, `screen` or `nohup`.** A move takes as long as a
 dump, a copy and a restore of the whole bank. On Linux and macOS a closed
 terminal (SIGHUP), a SIGTERM or Ctrl-C rolls it back, and the rollback

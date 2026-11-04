@@ -45,10 +45,10 @@ TARGET = "root@box"
 CHECKOUT = "~/src/Pseudolife-MCP"
 TARGET_URL = "http://100.64.0.9:8765"
 LOCAL = "http://127.0.0.1:8765"
-SOURCE_BANK = "a" * 16
-TARGET_BANK = "b" * 16
 SOURCE_META = '"5f0c6a0e-1111-4222-8333-944444444444"'
 TARGET_META = '"5f0c6a0e-9999-4888-8777-966666666666"'
+SOURCE_BANK = hashlib.sha256(json.loads(SOURCE_META).encode()).hexdigest()[:16]
+TARGET_BANK = hashlib.sha256(json.loads(TARGET_META).encode()).hexdigest()[:16]
 SOURCE_TOKEN = "src-singular-token-0123456789abcdef"
 LAPTOP_TOKEN = "laptop-token-0123456789abcdef0123"
 CI_TOKEN = "ci-token-fedcba9876543210fedcba98"
@@ -169,6 +169,9 @@ class World:
         self.gets: list[tuple[str, bool, float]] = []
         self.clock = Clock()
         self.source_running = True
+        self.source_ready = True
+        self.target_ready = True
+        self.target_readiness_delay = 0.0
         self.source_healthy = source_healthy
         self.source_docker = source_docker
         self.fenced = False
@@ -182,6 +185,9 @@ class World:
         self.target_schema = target_schema
         self.target_bank = target_bank
         self.source_bank = source_bank
+        self.source_meta = SOURCE_META
+        self.require_portable_dump = False
+        self.dump_uses_source_roles = False
         self.bank_after_start = bank_after_start
         self.bank_appears_at = bank_appears_at
         self.started_at = None
@@ -222,6 +228,7 @@ class World:
         self.restore_fails_after_drop = restore_fails_after_drop
         self.target_live_env = list(TARGET_ENV)
         self.target_image = "pseudolife-daemon:0.15.0"
+        self.target_mounts = [{"Type": "volume", "Source": "/var/lib/docker/volumes/bank-state/_data", "Name": "bank-state", "Destination": "/data"}]
         self.target_port = 8765
         self.target_daemon_exists = True
         self.target_postgres_exists = True
@@ -258,7 +265,7 @@ class World:
         if url == LOCAL + "/health":
             if not (self.source_running and self.source_healthy):
                 return None
-            return {"status": "ok", "schema": 52, "auth": True, "bank": self.source_bank, "version": "0.15.0"}
+            return {"status": "ok", "ready": self.source_ready, "schema": 52, "auth": True, "bank": self.source_bank, "version": "0.15.0"}
         if url == TARGET_URL + "/health":
             if not self.target_running or self._matches(self.fail, Call(["GET", url], None)):
                 return None
@@ -269,7 +276,8 @@ class World:
                 bank = self.bank_after_start
                 if self.bank_appears_at is not None and self.clock.now - self.started_at < self.bank_appears_at:
                     bank = None
-            return {"status": "ok", "schema": self.target_schema, "auth": True, "bank": bank}
+            ready = (self.clock.now - self.started_at >= self.target_readiness_delay) if self.target_restored else self.target_ready
+            return {"status": "ok", "ready": ready, "schema": self.target_schema, "auth": True, "bank": bank}
         if url == TARGET_URL + "/api/stats":
             return {"entries": 2}
         return None
@@ -297,6 +305,7 @@ class World:
             return 0, b"", b""
         if argv[:3] == ["docker", "exec", "pseudolife-mcp-postgres"]:
             if "pg_dump" in argv:
+                self.dump_uses_source_roles = not {"--no-owner", "--no-acl"}.issubset(argv)
                 return 0, gzip.compress(DUMP.encode()), b""
             sql = argv[-1]
             if "ALLOW_CONNECTIONS false" in sql:
@@ -312,7 +321,7 @@ class World:
             elif "server_version_num" in sql:
                 return 0, f"{self.source_pg}\n".encode(), b""
             elif "coordination_bank_id" in sql:
-                return 0, (SOURCE_META + "\n").encode(), b""
+                return 0, (self.source_meta + "\n").encode(), b""
             elif "count(*) FROM pg_stat_activity" in sql:
                 return 0, f"{self.lingering_backends}\n".encode(), b""
             return 0, b"", b""
@@ -358,6 +367,13 @@ class World:
         if cmd == "python3 -m pseudolife_memory.cli restore --help":
             return ((0, b"--backup-file --state-archive --leave-stopped", b"") if self.release_cli
                     else (2, b"", b"restore is unavailable"))
+        if cmd.startswith("python3 -c") and "move artifact locations" in cmd:
+            import posixpath
+            request = json.loads(stdin)
+            directories = [posixpath.normpath(p.replace("~/", "/root/", 1)) for p in request["directories"]]
+            sources = [posixpath.normpath(m["Source"]) for m in request["mounts"] if m.get("Source")]
+            safe = not any(p == source or p.startswith(source.rstrip("/") + "/") for p in directories for source in sources)
+            return 0, json.dumps({"safe": safe}).encode(), b""
         if cmd.startswith("python3 -c") and "move release preflight" in cmd:
             request = json.loads(stdin)
             self.env_path_model = request["env_file"] or self.release_env_file
@@ -378,6 +394,7 @@ class World:
             return 0, json.dumps([{"Config": {"Env": self.target_live_env, "Image": self.target_image,
                                               "Labels": self.target_labels},
                                    "State": {"Running": self.target_running},
+                                   "Mounts": self.target_mounts,
                                    "NetworkSettings": {"Ports": {"8765/tcp": [{"HostIp": "127.0.0.1", "HostPort": str(self.target_port)}]}},
                                    "HostConfig": {"RestartPolicy": _policy(self.target_policy)}}]).encode(), b""
         if cmd == "docker inspect --type container pseudolife-mcp-postgres":
@@ -405,6 +422,7 @@ class World:
             if not (self.target_running and self.target_healthy):
                 return 7, b"", b"connection refused"
             return 0, json.dumps({"status": "ok", "schema": self.target_schema, "auth": self.target_auth,
+                                  "ready": self.target_ready,
                                   "version": "0.22.0",
                                   "bank": self.target_bank}).encode(), b""
         if cmd.startswith("systemctl --user is-enabled"):
@@ -476,6 +494,11 @@ class World:
         if "server_version_num" in cmd:
             return 0, f"{self.target_pg}\n".encode(), b""
         restoring = "ops/restore.sh" in cmd or (" restore " in cmd and "--leave-stopped" in cmd)
+        if restoring and self.require_portable_dump and self.dump_uses_source_roles:
+            self.target_running = False
+            self.target_restored = True
+            self.data_files = {}
+            return 1, b"==> Dropping + recreating\n", b"source object owner/grantee roles do not exist on the target"
         if restoring and self.restore_fails_after_drop:
             self.target_running = False
             self.target_restored = True
@@ -486,6 +509,7 @@ class World:
             self.target_running = False
             self.target_restored = True
             self.target_empty = False
+            self.target_rows = {table: DUMP_COUNTS.get("public." + table, 0) for table in SCHEMA_TABLES}
             self.data_files = {"/data/config.yaml": b"memory: {}\n", "/data/last-backup.json": b"{}\n"}
             return 0, b"==> Restore complete; the daemon was left stopped (--no-start).\n", b""
         if "coordination_bank_id" in cmd and "count(*)" not in cmd:
@@ -655,7 +679,7 @@ def test_a_move_runs_every_step_in_order_and_reports(tmp_path, capsys):
               and c.remote.startswith("cat > ")),
         first(world, "bash ops/restore.sh"),
         index(world, lambda c: c.remote is not None and "coordination_bank_id" in c.remote
-              and "count(*)" not in c.remote),
+              and "count(*)" not in c.remote and world.calls.index(c) > first(world, "bash ops/restore.sh")),
         first(world, "UNION ALL"),
         index(world, lambda c: c.remote is not None and "cat > /data/move.json" in c.remote),
         index(world, is_env_write),
@@ -806,6 +830,42 @@ def test_no_token_or_password_ever_appears_in_a_command_line(tmp_path, capsys):
 
 # ── preflight: refused, nothing changed ──────────────────────────────────────
 
+def test_omitted_libpq_database_defaults_to_the_daemon_user():
+    assert move_cli._dsn_parts("postgresql://bank_reader@pseudolife-pg") == ("bank_reader", "bank_reader")
+
+
+def test_opaque_database_configuration_never_uses_compose_initialization_defaults():
+    with pytest.raises(move_cli.MoveError, match="PSEUDOLIFE_MCP_DATABASE_URL"):
+        move_cli._dsn_parts(None)
+
+
+def test_the_selected_source_database_must_match_the_daemons_bank(tmp_path):
+    world = World()
+    world.source_meta = TARGET_META
+    assert run_move(world, tmp_path) == 4
+    assert mutating_calls(world) == []
+
+
+@pytest.mark.parametrize("side", ["source", "target"])
+def test_move_refuses_an_explicitly_unready_bank_before_any_changes(tmp_path, side):
+    world = World()
+    setattr(world, side + "_ready", False)
+    assert run_move(world, tmp_path) == 4
+    assert mutating_calls(world) == []
+
+
+def test_move_waits_for_target_readiness_before_the_commit_point(tmp_path):
+    world = World(checkout=False)
+    world.release_cli = True
+    world.target_readiness_delay = 4.0
+
+    def committing(world, call):
+        if call.remote is None and call.argv[:2] == ["docker", "cp"]:
+            assert world.clock.now - world.started_at >= 4.0
+
+    world.hooks = {":/data/moved.json": committing}
+    assert run_move(world, tmp_path, keep_tokens=False) == 0
+
 @pytest.mark.parametrize("table", SCHEMA_TABLES)
 def test_every_schema_table_with_user_data_refuses_before_restore(tmp_path, capsys, table):
     world = World()
@@ -886,6 +946,47 @@ def test_an_explicit_missing_checkout_is_not_silently_replaced_by_release_mode(t
     assert mutating_calls(world) == []
 
 
+def test_clone_free_artifacts_never_go_inside_the_target_state_mount(tmp_path):
+    world = World(checkout=False)
+    world.release_cli = True
+    world.target_mounts = [{"Type": "bind", "Source": "/root/.pseudolife-mcp", "Destination": "/data"}]
+    assert run_move(world, tmp_path, keep_tokens=False) == 4
+    assert mutating_calls(world) == []
+    assert run_move(world, tmp_path, keep_tokens=False, target_work_dir="/srv/move-artifacts") == 0
+
+
+@pytest.mark.parametrize("layout", ["inside", "sibling", "checkout"])
+def test_artifact_location_guard_checks_real_paths_and_checkout_ancestry(tmp_path, monkeypatch, capsys, layout):
+    state = tmp_path / "state"
+    state.mkdir()
+    directory = state / "moves" if layout == "inside" else tmp_path / "state-backups"
+    if layout == "checkout":
+        (tmp_path / ".git").write_text("gitdir: fixture\n", encoding="utf-8")
+    request = {"directories": [str(directory)], "mounts": [{"Source": str(state)}], "release": True}
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(request)))
+    exec(move_cli._ARTIFACT_LOCATION, {})
+    assert json.loads(capsys.readouterr().out)["safe"] is (layout == "sibling")
+
+
+@pytest.mark.parametrize("dsn, env, expected", [
+    ("postgresql://reader@pseudolife-pg", {}, ("reader", "reader")),
+    ("postgresql://reader@pseudolife-pg", {"PGDATABASE": "bank"}, ("bank", "reader")),
+    ("postgresql://pseudolife-pg/bank", {"PGUSER": "reader"}, ("bank", "reader")),
+    ("host=pseudolife-pg user=reader dbname=bank", {}, ("bank", "reader")),
+    ("postgresql://reader@pseudolife-pg/path?dbname=query_bank", {}, ("query_bank", "reader")),
+])
+def test_move_database_selection_matches_libpq(dsn, env, expected):
+    assert move_cli._dsn_parts(dsn, env) == expected
+
+
+def test_unresolved_service_defaults_and_invalid_dsns_refuse_without_printing_credentials():
+    for dsn in ("service=hidden user=reader", "postgresql://reader:never-print-fixture@[bad/"):
+        with pytest.raises(move_cli.MoveError) as refused:
+            move_cli._dsn_parts(dsn)
+        assert "PSEUDOLIFE_MCP_DATABASE_URL" in str(refused.value)
+        assert "never-print-fixture" not in str(refused.value)
+
+
 @pytest.mark.parametrize("image, keep_tokens, code", [
     ("local-build:latest", True, 4), ("local-build:latest", False, 0),
     ("ghcr.io/pseudogiant-xr/pseudolife-daemon:0.22.0", True, 0),
@@ -944,6 +1045,15 @@ def test_clone_free_restore_keeps_custom_database_and_role_selectors(tmp_path):
     assert run_move(world, tmp_path, keep_tokens=False) == 0
     command = next(c.remote for c in world.calls if c.remote and " restore --yes " in c.remote)
     assert "--db custom_bank --user custom_owner" in command
+
+
+def test_move_dump_is_portable_to_the_targets_database_role(tmp_path):
+    world = World(checkout=False)
+    world.release_cli = True
+    world.require_portable_dump = True
+    world.target_live_env[0] = "PSEUDOLIFE_MCP_DATABASE_URL=postgresql://custom_owner:fixture@pseudolife-pg:5432/custom_bank"
+    assert run_move(world, tmp_path, keep_tokens=False) == 0
+    assert not world.dump_uses_source_roles
 
 
 def test_clone_free_no_keep_tokens_requires_auth_and_names_the_reconnect_token_file(tmp_path, capsys):
@@ -1012,12 +1122,42 @@ def test_clone_free_resume_never_redeploys_a_stale_release_over_a_changed_image(
     assert not any(word in c.text for c in world.calls[before:] for word in MUTATING)
 
 
+def test_resume_marker_never_authorizes_a_different_database(tmp_path):
+    world = World(checkout=False, fail=(lambda c: c.remote == "docker start pseudolife-mcp-daemon",))
+    world.release_cli = True
+    assert run_move(world, tmp_path, keep_tokens=False) == 1
+    world.fail = ()
+    world.target_live_env[0] = world.target_live_env[0].replace("/pseudolife_memory", "/foreign_bank")
+    remote = world.remote
+
+    def other_bank(command, stdin):
+        if "-d foreign_bank " in command and "coordination_bank_id" in command:
+            return 0, b'"another-bank"\n', b""
+        return remote(command, stdin)
+
+    world.remote = other_bank
+    before = len(world.calls)
+    assert run_move(world, tmp_path, keep_tokens=False, resume=True) == 4
+    assert not any(word in c.text for c in world.calls[before:] for word in MUTATING)
+
+
+def test_resume_never_overwrites_writes_to_an_untouched_original_target(tmp_path):
+    world = World(fail=("bash ops/restore.sh",))
+    assert run_move(world, tmp_path) == 1
+    assert world.target_running and not world.target_restored
+    world.fail = ()
+    world.target_rows["episodes"] = 1
+    before = len(world.calls)
+    assert run_move(world, tmp_path, resume=True) == 4
+    assert world.target_rows["episodes"] == 1
+    assert not any(word in c.text for c in world.calls[before:] for word in MUTATING)
+
+
 @pytest.mark.parametrize("issue", [None, "extra_pg_mount", "bind", "custom_port", "host_network", "wildcard", "port_range",
-                                   "tokens", "database", "port", "broaden_bind", "narrow_bind", "extra_port",
+                                   "tokens", "database", "database_default", "ignored_default", "port", "broaden_bind", "narrow_bind", "extra_port",
                                    "state_volume", "bank_volume", "env_missing", "compose"])
 def test_release_preflight_renders_identities_connection_and_legacy_volumes(tmp_path, monkeypatch, capsys, issue):
     import subprocess
-    from types import SimpleNamespace
     from pseudolife_memory import update_cli as up
 
     carried = {"PSEUDOLIFE_MCP_TOKEN": SOURCE_TOKEN, "PSEUDOLIFE_MCP_TOKENS": "", "PSEUDOLIFE_MCP_TIER_MAP": ""}
@@ -1036,6 +1176,14 @@ def test_release_preflight_renders_identities_connection_and_legacy_volumes(tmp_
         environment["PSEUDOLIFE_MCP_TOKEN"] = "hardcoded-other-token"
     elif issue == "database":
         environment["PSEUDOLIFE_MCP_DATABASE_URL"] = "postgresql://other@other/other"
+    elif issue == "database_default":
+        environment["PSEUDOLIFE_MCP_DATABASE_URL"] = "postgresql://reader@pseudolife-pg"
+        request["database_url"] = environment["PSEUDOLIFE_MCP_DATABASE_URL"]
+        request["connection_defaults"] = {"PGDATABASE": "actual_bank"}
+        environment["PGDATABASE"] = "another_bank"
+    elif issue == "ignored_default":
+        request["connection_defaults"] = {"PGDATABASE": "original_unused"}
+        environment["PGDATABASE"] = "different_unused"
     elif issue in ("state_volume", "bank_volume"):
         config["volumes"][issue.split("_")[0]]["name"] = "another-volume"
     elif issue == "extra_pg_mount":
@@ -1063,13 +1211,17 @@ def test_release_preflight_renders_identities_connection_and_legacy_volumes(tmp_
     elif issue == "port_range":
         config["services"]["pseudolife-daemon"]["ports"] = [{"host_ip": "127.0.0.1", "target": "8765-8766", "published": "8765-8766"}]
         request["daemon_ports"]["8766/tcp"] = [{"HostIp": "127.0.0.1", "HostPort": "8766"}]
-    monkeypatch.setattr(up, "Options", lambda **kw: SimpleNamespace(**kw))
-    plan = {"args": [], "env_file": [] if issue == "env_missing" else [tmp_path / "stack.env"], "project": "managed-stack"}
-    monkeypatch.setattr(up.Update, "compose_context", lambda self: plan)
-    monkeypatch.setattr(up, "compose_environment", lambda *a, **kw: {})
+    compose_file, env_file = tmp_path / "stack.yml", tmp_path / "stack.env"
+    compose_file.write_text("services: {}\n", encoding="utf-8")
+    env_file.write_text(f"POSTGRES_PASSWORD={TARGET_PG_PASSWORD}\n", encoding="utf-8")
+    labels = {"com.docker.compose.project": "managed-stack", "com.docker.compose.project.config_files": str(compose_file),
+              "com.docker.compose.project.working_dir": str(tmp_path)}
+    if issue != "env_missing":
+        labels["com.docker.compose.project.environment_file"] = str(env_file)
+    monkeypatch.setattr(up, "run_cli", lambda *a, **kw: (0, json.dumps(labels)))
     monkeypatch.setattr(subprocess, "run", lambda *a, **kw: subprocess.CompletedProcess(a, int(issue == "compose"), json.dumps(config), ""))
     monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(request)))
-    if issue in (None, "extra_pg_mount", "bind", "custom_port", "host_network", "wildcard", "port_range"):
+    if issue in (None, "extra_pg_mount", "bind", "custom_port", "host_network", "wildcard", "port_range", "ignored_default"):
         exec(move_cli._RELEASE_PREFLIGHT, {})
         assert json.loads(capsys.readouterr().out)["env_file"].endswith("stack.env")
     else:
@@ -1079,6 +1231,20 @@ def test_release_preflight_renders_identities_connection_and_legacy_volumes(tmp_
         output = capsys.readouterr().out
         assert "error" in json.loads(output)
         assert not any(secret in output for secret in SECRETS)
+
+
+def test_this_package_ships_the_installed_restore_and_exported_compose_interfaces(monkeypatch, capsys):
+    from pseudolife_memory import cli, update_cli as up
+
+    monkeypatch.setattr(sys, "argv", ["pseudolife-mcp", "restore", "--help"])
+    with pytest.raises(SystemExit) as stopped:
+        cli.main()
+    assert stopped.value.code == 0
+    help_text = capsys.readouterr().out
+    assert all(flag in help_text for flag in ("--leave-stopped", "--backup-file", "--state-archive", "--db", "--user", "--daemon-url"))
+    args = up.build_parser().parse_args(["--compose-file", "/srv/stack.yml", "--env-file", "/srv/stack.env", "--daemon-only", "--reinstall"])
+    options = up.options_from_args(args)
+    assert [Path(path) for path in options.compose_files] == [Path("/srv/stack.yml")]
 
 
 def test_no_target_tailscale_names_explicit_url_as_the_fix(tmp_path, capsys):
@@ -1949,6 +2115,7 @@ def test_resume_takes_over_this_moves_half_restored_bank(tmp_path, capsys):
     _record(tmp_path, move_id)
     world = World(target_empty=False, target_healthy=False, markers=_marker(move_id))
     world.target_running = False
+    world.target_restored = True
     code = run_move(world, tmp_path, resume=True, as_json=True)
     report = json.loads(capsys.readouterr().out)
     assert code == 0, report
