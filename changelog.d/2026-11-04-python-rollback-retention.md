@@ -1,2 +1,0 @@
-### Fixed (2026-11-04 — preserve rollback tags on mixed updater hosts)
-- The legacy Python updater retains rollback tags instead of pruning by host-wide name matches or invoking checkout pruning scripts. Historical Python tags do not prove project ownership, and native scoped tags remain under the native updater's retention policy; manual, in-use and current rollback tags are preserved even with `--keep-rollbacks 0` or unreadable Docker evidence. Python updates warn that retention was skipped; backup rotation and build-cache retention continue as before.

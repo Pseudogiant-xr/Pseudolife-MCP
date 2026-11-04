@@ -1,3 +1,0 @@
-### Fixed (2026-11-02 — The Console Board says why its mail timeline is empty)
-- The Board's mail and wake timeline only shows mail of sessions that use the Console's own token. A Console whose token no listed session uses saw an empty timeline that blamed audit retention. It now says that none of the listed sessions use this Console's token, and offers "Set a bearer token". A selected peer under another token gets the same explanation.
-- The unread-mail field for such a peer reads "Hidden: uses another token", the timeline caption names the token scope, and the "Everything visible" toggle is now "All visible", because it never showed the whole board.

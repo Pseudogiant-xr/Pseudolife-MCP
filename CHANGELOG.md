@@ -6,6 +6,548 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-11-04 — The Console signs you in by link or passkey with no token to paste, the owner's Console shows every owner session's board mail (schema v59), a lossless `migrate-flat` command flattens a stopped bank, updates stay inside their own project, and the Rust daemon can run as a read-only companion beside the Python one
+
+### Fixed (2026-11-04 — Windows judges timeout headroom)
+
+- Allow the Windows differential-judges CI step 20 minutes on slower hosted runners and print each phase duration, preserving its subprocess deadlines and provenance checks.
+
+### Fixed (2026-11-04 — Native update timeout test startup race)
+
+- Give the command-tree timeout fixture a bounded startup allowance and verify descendant exit through an OS lifetime lock, replacing the delayed survival marker that raced slow Windows executable startups.
+- Bound fixture teardown and isolate descendant stdio so a deliberately broken Windows job cleanup fails and releases its surviving fixture instead of hanging in pipe teardown.
+
+### Fixed (2026-11-04 — updater cancellation recovery)
+
+- Remove an armed shadow companion before exiting on cancellation, including streaming health responses and interrupts during failure-path removal, forward repeated Unix interrupts and quit signals to owned commands, and suspend/resume their isolated process groups with the updater.
+- Preserve the remaining updater and client command timeout budget across terminal suspension, so resuming after Ctrl+Z does not time out a step solely because it was stopped.
+- Forward a recovery interrupt once, without replaying the interrupt that cancelled shadow startup and accidentally forcing the cleanup command.
+
+### Fixed (2026-11-04 — Run oracle-dependent stress checks before merge)
+
+- Branch stress dispatches now select the Python oracle from their merge base with master, using the existing pull-request rule for release-only changes. The stress plan freezes the remote master once for all iterations; receipts retain the resolved commit IDs, candidate source-pin checks remain required, and ordinary CI dispatch stays restricted to a frozen master head.
+- Case-distinct branch names such as `Master` also freeze the oracle base; only the exact `refs/heads/master` ref uses the master dispatch path.
+
+### Fixed (2026-11-04 — preserve rollback tags on mixed updater hosts)
+- The legacy Python updater retains rollback tags instead of pruning by host-wide name matches or invoking checkout pruning scripts. Historical Python tags do not prove project ownership, and native scoped tags remain under the native updater's retention policy; manual, in-use and current rollback tags are preserved even with `--keep-rollbacks 0` or unreadable Docker evidence. Python updates warn that retention was skipped; backup rotation and build-cache retention continue as before.
+
+### Fixed (2026-11-04 — Preserve runtime loading in native doctor proofs)
+
+- The native disposable doctor proof preserves ONNX Runtime library resolution when Linux discovers the daemon through a symlink, and resolves Windows drive-relative library paths before isolating the child. It also recognizes libpq TLS aliases and reports the proof's TLS limitation before creating a database. Native child-process contracts now check the isolated launcher's runtime override forwarding without requiring provisioned models.
+
+### Fixed (2026-11-04 — a Console browser revoked right after it signs in stays signed out)
+- A sign-in publishes its session to the daemon's view just after it commits. Revoking that session in Settings, Signed-in browsers in the moment between the two left a late publish that put it back, so the browser stayed signed in for up to ten seconds. The revocation now holds.
+
+### Fixed (2026-11-03 — A full suite waits for another holder of its board lease)
+- A full test suite that held its local lock started even while the board showed its lease (`full-suite`) held by someone else, printing only that it "carries on". A WSL suite cannot see a Windows-side `pseudolife-mcp lease run full-suite` lock, so a native build and a WSL suite ran on the same machine at once. Once a full run holds its local lock it now waits, in the board's queue order, until the board grants it the lease, naming the holder and its purpose about once a minute; `PSEUDOLIFE_SUITE_LOCK=fail` exits instead. The board decides when a hold has lapsed. A record under the run's own lock-directory label while no `lease hold` of the lease runs here, or the enclosing `lease run full-suite -- ...` the run was started by does not stop it: `lease run` now also records its pid in `PSEUDOLIFE_LEASES_HELD_PIDS`, and a recorded pid that is a live ancestor of the run counts; otherwise the lease's lock file here must be held. `ops/wsl-suite.ps1` applies the same check on the Windows side and forwards `PSEUDOLIFE_LEASES_HELD` into WSL only for leases that pass it (a caller's own `WSLENV` entry for it is dropped), and inside WSL a forwarded marker counts even beside a stale lock file there. Fail mode waits for a board that stops answering until its retry has failed too (at most two request timeouts and the retry pause), then starts on the local lock, and without a bearer the local lock alone still rules. The recorded run time starts once the board admits the run. `lease hold` is unchanged.
+
+### Fixed (2026-11-03 — keep updates isolated to their project)
+
+- Native checkout updates refuse crash-looping recreated containers and new mounts that shadow persistent data, report post-deploy failures accurately, and accept equivalent Windows drive and UNC bind paths. Optional test-login setup and automatic rollback retention stay within the selected project; legacy and manually named rollback tags are retained. Timed-out CLI commands terminate their owned descendants, and built-in container backups have their own deadline. Python and native unattended daemon requests bypass environment proxies so bearer and board credentials remain on the configured daemon connection; release downloads still honor proxy settings. The parity ledger records the stricter native health and version checks.
+
+### Fixed (2026-11-03 — Finish update command cleanup before exiting)
+
+- Native updates forward Unix interrupt, termination and hangup signals to their
+  owned command groups and finish bounded cleanup before exiting. Windows updates
+  preserve background helpers after their initiating command completes, while
+  timeouts and I/O failures still terminate the owned job. The PowerShell update
+  wrapper discovers Python applications without importing unrelated modules.
+
+### Fixed (2026-11-03 — Keep post-update passkey setup in the updated project)
+
+- Native updates now resolve the recreated daemon from the selected Compose project before checking or offering maintainer passkey setup. Both native and Python `maintainer setup --container <name>` scope inspection, configuration, key operations and restart to that container; unreadable or missing explicit targets refuse without falling back to another daemon. Calls without the option retain their existing default.
+
+### Fixed (2026-11-03 — Native live maintenance settings)
+
+- Console saves now apply the native daemon's store surprise threshold,
+  canonical compaction settings, retrieval and lesson-signal retention,
+  and dream-run history limit without a restart.
+- The running settings change together after the config file is saved;
+  failed saves leave them unchanged, and concurrent patches retain both changes.
+- Other settings continue to report that a restart is required until their
+  native consumers support live updates.
+
+### Fixed (2026-11-03 — Native store cortex auto-promotion)
+
+- Enabling `memory.cortex.auto_promote` now promotes deterministic slot-shaped
+  facts when storing memories, including below-surprise restatements, and
+  reports the actual promotion count.
+- Promoted facts preserve Python's confidence, provenance, labels, writer and
+  session context, supersession, contenders and freshness behavior; they are
+  immediately readable and survive a daemon restart.
+- Native promotion also creates subject graph nodes and proposes write-time
+  deduplication, while scalar claims for set-valued slots are skipped.
+
+### Added (2026-11-03 — the Rust daemon serves Console link sign-in)
+- The Rust daemon now resolves a browser signed in with `pseudolife-mcp console` as Python does: on the Console's `/api` routes only, never on `/mcp`, the plugin hooks, the board's mailbox routes or the daemon notice. It serves `POST /api/console/link`, `POST /api/console/session`, `GET /api/console/sessions` and `POST /api/console/sessions/revoke`, revokes a principal's sessions when it is revoked or re-paired, and reports `/health` `console_signin: {link, passkey: false}`, so switching daemons no longer signs those browsers out.
+- Its operator gate (`POST /api/config`, `/api/daemon-notice`) is now Python's allowlist: an environment token, an open daemon, or a browser an environment token signed in. Passkey sign-in is not ported yet: on the Rust daemon the Console offers the link sign-in only.
+
+### Fixed (2026-11-03 — Receive preserves later wake delivery)
+- Python now matches the native client's receive-clear behavior: clearing a deferred doorbell preserves Stop-hook marker delivery and allows an identical daemon wake to ring for a later arrival. A successful receive covers current mail even when it uses a cursor or limit.
+
+### Fixed (2026-11-03 — Keep native updates usable across release and host changes)
+
+- Native updates allow new Compose mounts while protecting retained data, discover releases through configured proxies, and require an implemented updater before wrapper fallback. Checkout health checks also verify that the recreated daemon is running, and unattended updates reject malformed version text.
+
+### Fixed (2026-11-03 — Preserve native host configuration behavior)
+
+- The native daemon image includes the Console index and static assets and sets their serving directory.
+- Native checkout builds find the adjacent plugin hooks when no explicit plugin directory is set, preserving hook-digest notices.
+- Missing configured embedding artifacts now name the setting and pinned default repair. Existing local and cached ONNX graphs remain supported. Non-default reranker settings refuse startup with an actionable message instead of silently loading the pinned model.
+
+### Fixed (2026-11-03 — Native MCP transport compatibility)
+
+- The native daemon now serves the stateless MCP protocol, including direct HTTP discovery and subscriptions, while preserving handshake clients. Request cancellation follows the Python daemon: interrupted async handlers stop, and shielded writes finish without delivering a cancelled request's ordinary result.
+
+### Fixed (2026-11-03 — Make mail parity recordings reproducible)
+
+- The board mail compatibility harness now records explicit inactive and reactivated recipients for sends and replies, with a portable golden and exact Python activity-boundary cases. This closes the recording-pacing discrepancy without changing production wake decisions.
+
+### Fixed (2026-11-03 — omitted retrieval limits follow configuration)
+
+- Python MCP lesson search now uses `memory.lessons.top_k` when the caller omits
+  `top_k`, so Console changes to the lesson limit affect the next search.
+  Explicit positive limits keep their behavior, and explicit `null` is
+  still rejected. The native daemon also reads that limit from startup
+  configuration, retaining five as the default.
+- Recall now uses `memory.recall.default_hops` and `default_top_k` when
+  MCP or REST callers omit those arguments. The Console Recall page
+  still supplies its own hop count. Explicit limits and
+  existing invalid-argument handling retain their behavior.
+
+### Fixed (2026-11-03 — Lease queues recover missed turns)
+- Both engines skip queued sessions with neither a recent attachment heartbeat nor a recent poll, retaining their queue position for recovery. A returning session counts as alive in its own lease request.
+- A missed queue grant gets one retry behind the next live holder and before the remaining queue. Direct acquisitions, renewed grants and a second missed grant expire normally.
+- Committed grants now produce one daemon notice with a lease-grant wake. Delivery retries after startup or failure, checks the current holder, fence and expiry, and deduplicates across daemon restarts. A cold service does not block heartbeats to initialize notification delivery; notices grant no user approval.
+- Accepted grants do not generate redundant notices. Outbox pagination advances past refused recipients, and each pending refusal logs once per process. Maintainer, conductor and lease-grant wakes share the same exclusions from peer budgets.
+
+### Changed (2026-11-03 — Inviting keeps working from a host CLI one release behind the daemon)
+
+- After a daemon-only update to schema v59, `pseudolife-mcp invite <name>`
+  from a host CLI one release behind still works through the daemon's
+  container. The invite's note for a machine that is not yours now reads
+  "add --someone-else (an older pseudolife-mcp refuses it: update it
+  first)", wherever the invite ran, since a CLI before v59 has no
+  `--someone-else`.
+- `invite --list` with the daemon container stopped shows an environment
+  token's owner as unknown (`-`, and `null` in `--json`): the stopped
+  daemon's `coordination.not_owner_principals` is in its own volume, not
+  this host's config. Stored principals keep their recorded owner.
+
+### Fixed (2026-11-03 — Confirm extractor task state before replacing or removing it)
+
+- Native Windows extractor autostart retries intermittent scheduler lookup failures within its settlement deadline instead of treating them as a missing registration. Persistent failures remain visible, and confirmed missing tasks still remove quietly.
+
+### Fixed (2026-11-03 — Bound extractor connections and verify cleanup ownership)
+
+- Native extractor shims close connections whose ignored request bodies do not
+  finish within five seconds while retaining immediate responses and normal
+  connection reuse. Windows autostart cleanup rechecks task ownership during
+  deletion retries and rollback, reports scheduler query failures, and pins process handles
+  before stopping captured shim processes. Test fixtures preserve compiler flags
+  and avoid a second panic when cleanup fails during an existing unwind.
+- Windows migration matches each historical provider's installer arguments.
+  New task registrations retain the exact runtime path for cleanup across
+  upgrades; ambiguous legacy processes preserve the registration and produce
+  an actionable diagnostic. Process-query and termination failures explain
+  what to inspect before retrying. Installation checks ambiguous runtimes before
+  stopping the original shim, restarts an unchanged original after a late refusal,
+  and preserves concurrent task removal during failed replacement, including
+  removal during the health wait. Uninstall and sibling cleanup also check
+  ambiguous runtimes before stopping their tasks.
+
+### Fixed (2026-11-03 — Keep extractor registration changes scoped and reversible)
+
+- Native Windows extractor registration refuses wildcard names and preserves unrelated tasks, including legacy and sibling name collisions. Reinstalling a healthy disabled task enables it without restarting the shim.
+- A failed native Linux extractor replacement restores the previous unit enablement as well as its configuration and active state.
+- Windows scheduler errors retain stop/removal context. Test cleanup requires confirmed task absence instead of accepting a failed scheduler query as proof of removal.
+
+### Fixed (2026-11-03 — Preserve extractor registrations during migration)
+
+- Native extractor autostart recognizes both historical Windows Sonnet task
+  templates, checks every uninstall target before removing any registration, and
+  refuses unrelated executables with shim-like arguments. Failed Linux replacements
+  restore the prior local enablement link without changing other service links.
+
+### Fixed (2026-11-03 — extractor rollback after a late launcher child)
+
+- Windows extractor replacement and removal collect native children created while their waiting launcher stops, and wait for termination before restoring the previous task. Failed replacement diagnostics retain rollback warnings in the test output.
+
+### Fixed (2026-11-03 — Migrate detached provider shim tasks)
+
+- Native extractor autostart recognizes historical detached Claude and Codex
+  tasks, including their model, health-cache and optional CLI-path arguments.
+  Native task ownership requires the selected executable path or the exact
+  generated wrapper, rather than a matching executable filename.
+
+### Changed (2026-11-03 — divergence totals are derived on demand, not committed)
+- The declared-divergence index (`rust/daemon/divergences/README.md`) no longer carries the D7 bucket count table: two pull requests that each moved an entry merged into wrong totals or conflicted on the shared count lines, and their integration batch had to drop one. `python rust/daemon/split_divergences.py --counts` prints the totals from the entry files.
+- `split_divergences.py --check` stops comparing committed totals and instead rejects any D7 count table in the index; entry buckets, table widths and the caller routing table are checked as before.
+
+### Fixed (2026-11-03 — Detached watchers run the installed code, not a checkout's)
+- `pseudolife-mcp conductor-watch --detach` run from inside an older checkout of this repository no longer fails with "unknown mode 'conductor-watch'". Every child that re-runs the package (the detached watcher, the daemon the shim starts, the unattended client update, `move`'s re-point, the local maintainer setup, the tunnel bridge's shim and the fallback commands for the scheduled update and the tunnel service) now starts with Python's `-P`, so a `pseudolife_memory` in the working directory no longer shadows the package the parent ran.
+- Unchanged where it would break: on Python 3.10, which has no `-P` (it now says once on stderr when the working directory holds a `pseudolife_memory` the child may run instead, and to run from another directory), and when the parent itself imported the package from the working directory (a checkout run with no install).
+- The scheduled update's and the tunnel service's fallback commands keep the `-P` they were written with: after moving that interpreter back to Python 3.10, rerun `pseudolife-mcp update --schedule <HH:MM>` or `pseudolife-mcp tunnel service install`.
+
+### Fixed (2026-11-03 — Deferred privileged doorbells)
+- Python and native Codex doorbells retain a maintainer or conductor offer only after a queue reservation is deferred, so an already-rung offer is not retained again. Handoff, successful receive, delivery, an empty mailbox, origin expiry or explicit daemon withdrawal clears retained authorization; newer permitted peer attention preserves it.
+
+### Fixed (2026-11-03 — Native daemon connects to TLS PostgreSQL)
+
+- The native daemon now honors PostgreSQL TLS modes, including the default
+`prefer`, CA and hostname verification, configured or default root files,
+system roots and PEM client certificates. Board and principal refresh
+connections use the same policy. Unsupported libpq security controls fail
+with the setting name and an actionable alternative. A disposable PostgreSQL
+comparison covers TLS negotiation, fallback and client authentication against
+the Python engine; remaining libpq conventions stay explicitly tracked.
+Benign TLS environment defaults and unused certificate files no longer block
+plaintext connections, and system trust tolerates malformed individual roots.
+Root/CRL loading follows libpq file-root rules; four further benign environment
+defaults honor DSN precedence. Multi-host fallback is tested against libpq; the remaining GSS-prefer
+difference is explicitly documented.
+URI query parameters now replace authority fields as libpq does, so a
+query-supplied Unix socket or port works in native images and external DSNs.
+
+### Changed (2026-11-03 — install, update and maintainer setup open the Console signed in)
+
+- A daemon-host install with a token now ends by opening the Console in your browser, signed in (`pseudolife-mcp console --unless-signed-in`, after the passkey offer so the link is for the HTTPS address when you set one up). When a browser is signed in already, from the passkey setup or an earlier install, a rerun says so in one line and opens no new tab. An unattended install names the command in one line instead, and a client-only install names it in its summary, with where it works. Nothing is asked: opening a browser changes nothing on the host.
+- `pseudolife-mcp console` gains `--unless-signed-in`, and never hands its link to a terminal browser (lynx, w3m, links, which Python falls back to with a stale `DISPLAY`): it prints the link instead.
+- `pseudolife-mcp update` names `pseudolife-mcp console` when the daemon offers sign-in and no browser is signed in yet. The update that moves the bank to schema v59 says once that every principal is now treated as yours, naming them, with `invite <name> --someone-else` and `coordination.not_owner_principals` for one that is not.
+- `pseudolife-mcp maintainer setup` opens the Console at its new HTTPS address signed in, with the bearer it already reads, instead of asking you to paste the token there; with no bearer it names `pseudolife-mcp console` and the paste under "Advanced".
+- The README and the configuration guide no longer tell you to paste a token into the Console.
+
+### Added (2026-11-03 — sign in to the Console with your passkey)
+
+- At the Console's HTTPS address, the sign-in dialog offers "Sign in with your passkey" once passkeys are set up. The browser mints its own token first and the passkey signs a challenge carrying that token's SHA-256, so an assertion is good for that browser's token only; the daemon verifies it as every maintainer action is verified (an added key past its 24 h quarantine, the sign count moving forward, each challenge used once) and creates the sign-in in the same transaction.
+- The browser is signed in as the passkey's sign-in principal (schema v59's `maintainer_passkeys.signs_in_as`): the principal of the Console that enrolled the key, now recorded at every enrolment. Settings, Your passkeys, "Use this passkey to sign in" binds the passkey you sign with to the principal this Console is signed in as (the bank owner's only; logged as a key change), which also fixes a key enrolled from a paired machine or whose enrolment record has been pruned: sign in once on the daemon's host with `pseudolife-mcp console`, then bind.
+- **A passkey is now a way to get a bank bearer** for up to 90 days, and a synced passkey can do that from every device in its sync group. Revoking a key (revoke-self, an older key's cancel, `maintainer revoke` or `reset` on the host) signs out every browser it signed in, in the same transaction; `docs/guide/security-posture.md` says so.
+- `/health`'s `console_signin.passkey` is true where passkeys are set up. The Rust daemon has none of this yet (divergence CONSOLE-SIGNIN).
+
+### Added (2026-11-03 — sign in to the Console with one command, no token to paste)
+
+- `pseudolife-mcp console` opens the Console in your browser, already signed in. It uses the daemon address and token this machine's clients already use, asks the daemon for a one-time sign-in code, and opens a link carrying it in the URL fragment. The code lasts 5 minutes, works once and only at the Console address it was made for. The command also prints the link and the code, for a machine with no browser; `--no-open` only prints, `--to <page>` lands on a Console page, `--list` shows the signed-in browsers and `--revoke <id>` signs one out.
+- The Console's token dialog is now a sign-in dialog: type a sign-in code, or paste a token under "Advanced" as before. A sign-in link never replaces a working sign-in without asking first, and the browser keeps its old sign-in until the new one succeeds. Settings lists the signed-in browsers and signs them out. The daemon's `/health` gains `console_signin: {link, passkey}`, which the Console reads to decide what to offer.
+- A signed-in browser holds its own token; the daemon stores only its SHA-256 (schema v59's `console_sessions`). It acts as the principal whose token asked for the code, on the Console's `/api` routes only: never on `/mcp`, the plugin hooks or the board's mailbox routes, so it cannot register a session or send mail. It ends 30 days after its last use, 90 days after sign-in in any case, when it is signed out, when its principal is revoked or re-paired, and when the token that signed it in stops naming that principal.
+- The operator routes (`POST /api/config`, `/api/daemon-notice`) are now an allowlist: an environment token, an open daemon, or a browser an environment token signed in. A browser a paired machine signed in is refused them, as that machine is. The Rust daemon does not resolve Console sign-ins yet (a divergence entry records it), so a Console on it offers only a pasted token.
+
+### Fixed (2026-11-03 — Conductor mail reaches parked sessions)
+- In both engines, mail from a session holding the recipient project's current maintainer-granted conductor lease uses the maintainer wake path, including need and done parks, without an urgent flag. Grant name, holder, fence and expiry are checked at send time; legacy delegate grants follow the same rules.
+- Conductor rings bypass peer caps and fan-out staggering and use the configurable authority budget, now 60 per sender per hour by default. Signed maintainer mail keeps its separate 30 per recipient per hour default. Neither is starved by the nightly cap or spends the peer budget; receipts still report a missing listener or an exhausted own budget. Later authority and peer messages retain distinct wake offers while earlier mail is unacknowledged.
+- Waking does not clear a park or supply user approval. Existing installations pick up the policy through the normal update; an explicitly configured authority budget is preserved.
+
+### Fixed (2026-11-03 — Client updater subprocess cleanup)
+
+- Forward Unix cancellation signals to client update subprocesses and terminate remaining descendants before exiting. On Windows, retain job containment during client commands and timeouts while allowing completed commands to leave legitimate background helpers running.
+
+### Fixed (2026-11-02 — Restore Windows terminal echo after pairing interruption)
+- The native pairing code prompt restores the console's original input modes when interrupted with Ctrl-C on Windows, and preserves backspace editing without echoing the code.
+
+### Changed (2026-11-02 — Stress loops can name several rows or scenarios at once)
+- A stress dispatch (`rust.yml` mode=stress) can now name up to six space-separated `row:` items, or up to six `scenario:` items, instead of exactly one. Every iteration runs each item in turn, so stress-testing N rows costs one set of runner jobs (20 by default) instead of N sets. This matters because hosted Windows concurrency is the project's CI bottleneck. More than six items are refused with a message to split the dispatch, because the items share one 45-minute job.
+- Each item still runs alone, as its own harness process, with the binary, flags and environment its required lane uses. An iteration passes only if every item compared at least one case. An item that cannot start is recorded as that item's failure, and the remaining items still run. The iteration's row and the stress report list each item's own result, so a failing row or scenario is named. The row is saved before each item starts, so a job that times out keeps the finished items' results and names the item that was still running. The row is written whole or not at all. The stress report counts a torn or incomplete row file as that iteration's failure, naming the file, instead of crashing and losing every other iteration's result. A run whose evidence cannot be read (for example a harness summary that is not a JSON object) now fails with the error named, where a single-item run that exited 0 used to be recorded as a pass. A row may say "pass" only after its evidence was judged: a timeout or cancel during the check leaves a failed row marked "interrupted before evidence was judged". A row write that fails leaves no temporary file behind.
+- `plan` refuses a selection that mixes rows with scenarios or other kinds, names an item twice or a whole row beside one of its cases, or includes a scenario that needs the debug loopback-bind build. Each refusal names the item. Single-item selections behave and record exactly as before.
+
+### Added (2026-11-02 — Stress library unit tests on hosted runners)
+- Rust stress selections accept `cargo:<package>/lib[::<exact test path>]`, archive library test binaries once, and check each selected test's JUnit result and timing under nextest's package-only binary ID.
+- `lib` is reserved for library unit tests; `test/lib` selects an integration test target literally named `lib`, while `bin/lib` is refused.
+
+### Fixed (2026-11-02 — Stress reports exclude default-ignored Rust tests)
+- Whole-binary Rust stress selections no longer fail solely because nextest excluded an `#[ignore]` test under its default policy. Runtime skips, unrecognized skip reasons and selections with no executed tests still fail.
+
+### Fixed (2026-11-02 — Preserve existing YAML configuration values)
+
+- The native daemon now reads startup configuration with Python's YAML 1.1 scalar rules, including `yes`/`no`/`on`/`off`, octal and sexagesimal numbers, and null spellings. Quoted values remain strings unless a tag requests conversion. Unquoted YAML booleans preserve Python's gate behavior: literal/span gates log without enforcement, and false judges are disabled. Consumed `!!binary` values fail with a plain-value repair, including untyped settings. Unused metadata is ignored; unsupported timestamps, binary values and oversized integers in typed settings fail with the key, source location, value and repair.
+
+### Changed (2026-11-02 — Share PostgreSQL certificate verification)
+
+- Extracted the shim's PostgreSQL certificate verifier and TLS client builder for reuse by the native daemon, preserving the shim's connection and certificate policies.
+
+### Fixed (2026-11-02 — Windows setup configuration paths)
+
+- Native maintainer setup reports configuration paths with Windows separators,
+  matching the existing command when the configured path uses forward slashes.
+
+### Fixed (2026-11-02 — Preserve passkey enrolment diagnostic streams)
+- Native maintainer setup preserves the merged output stream and ordering of passkey enrolment diagnostics.
+
+### Added (2026-11-02 — Compare Rust reads beside the active daemon)
+- The Rust daemon accepts `PSEUDOLIFE_READ_ONLY=1` or `read_only: true` for a shadow that takes no writer lease, skips bank mutations and reports `read_only: true` in health; write requests name the active writer as the destination.
+- Add an idempotent PostgreSQL shadow-reader role script and a read-only side-by-side comparator with explicit normalization, JSON results and a readable digest.
+- Shadow readers reuse resident state until compact row-version probes change, refuse writer credentials and unclassified GET routes, and report effective disabled settings; comparator replays are excluded from later retrieval-log corpora.
+- Shadow request bursts share a probe for one second, and valid bank-bound MCP reads use a read-only coordination identity lookup.
+- Comparator database failures return setup-error exit 2 with a redacted diagnostic and connection guidance, without exposing driver tracebacks.
+
+### Added (2026-11-02 — Start and remove a read-only Rust companion)
+- Checkout `update --engine rust --shadow` starts Rust beside Python on loopback port 8766, with the same bank and a SELECT-only role. It saves a database password once in the host env file, preserving existing file access permissions and making new files private, waits for model provisioning, and verifies read-only health plus an authenticated bank read. An unchanged healthy companion is left running on rerun.
+- `update --engine python --shadow --checkout <repo>` removes only the companion, retaining its model cache and password for reuse. Missing support or unsafe configuration refuses before changes; a failed or interrupted startup removes the companion and leaves Python running.
+
+### Changed (2026-11-02 — editing the Rust cutover plan no longer runs the whole Rust test matrix)
+- A pull request or batch that changes only `rust/CUTOVER.md`, `rust/DEV.md` or `rust/SEMANTICS-CHECKLIST.md` (and other documentation) now counts as documentation-only in the Rust workflow, so it skips the Rust, candidate and parity jobs, as a change to `docs/` already did. Before, any Markdown file under `rust/` ran the full matrix on both operating systems: a two-row recount in the cutover plan queued 16 parity and Rust jobs. A page a job reads (`rust/PARITY.md`) or one an evidence file hashes (such as `rust/PORTING.md`) still runs everything, and a new test fails if any code outside the Python suite starts reading one of the listed pages. The master push that merges such a batch still runs the whole matrix.
+
+### Added (2026-11-02 — Provision Rust daemon models into persistent storage)
+- The opt-in Rust daemon installs pinned fp32 Qwen embedding and MiniLM reranker artifacts with `pseudolife-daemon provision models`; container first start provisions the persistent model cache instead of baking model weights into the image.
+- Model loading checks the compiled checksums, including tokenizer and model metadata, and refuses missing or changed artifacts with a provisioning or repair instruction.
+- A missing or changed optional reranker is disabled with its cause logged once at startup, outside the readiness path; embedding-backed store and search remain available. Explicitly configured custom embedding models retain their loading contract, and local model overrides do not trigger automatic downloads.
+- Container health waits through provisioning and initialization before reporting ready; warm failures use the normal readiness timeout.
+- Searches with reranking disabled do not wait for the optional reranker's startup load.
+
+### Fixed (2026-11-02 — Native MCP search explanations)
+- The Rust daemon serves `memory_search(explain=true)` with verbose search results and Python's independent ranking trace, including filters, access counts and blank-query behavior.
+
+### Added (2026-11-02 — opt-in native release assets)
+- Add version-only Rust daemon image publication and five native CLI
+  archives with a compose bundle and SHA256 checksums, after the existing
+  publication approval and separate maintainer-enabled repository variables.
+  A build-only dispatch proves all targets without publishing. The image
+  guard now uses the native provisioner's admitted model pin, and its build
+  context prepares the two prompts needed by the native extractor shims
+  being integrated separately.
+- Check native crate versions before PyPI publication, verify the exact
+  downloaded asset set before attachment, and recover partial uploads by
+  verifying existing bytes and uploading only missing assets.
+  Archive metadata is fixed so packaging time does not change checksums.
+
+### Added (2026-11-02 — Offline model inference image proof)
+- Verify the disposable Rust image can store and retrieve a memory after a cold restart with networking disabled, using the provisioned model cache, and publish its result and cleanup status.
+
+### Added (2026-11-02 — native CLI in the opt-in Rust image)
+
+- The Rust daemon image now includes `pseudolife-mcp` for operator commands,
+  with a network-disabled version check in image CI. Native release asset
+  names and the compose bundle layout are documented for installers and
+  updaters; an opt-in compose overlay selects an explicit Rust release tag.
+
+### Fixed (2026-11-02 — Rust image extractor prompt)
+
+- Prepare the Rust image build context for the native extractor shims being integrated separately: include their assistant-facts and autostart prompts, and rebuild the image when either changes.
+
+### Fixed (2026-11-02 — Native hook conductor reminder)
+
+- The native daemon appends the conductor reminder to `memory-changes` for
+  an authenticated agent with a valid operator-granted conductor lease,
+  including legacy grants, matching Python's hook output.
+- Reminder lookups share in-flight work, wait at most half a second, and
+  cache results for at most a minute without outliving a proven lease.
+- Both engines recheck a completed lookup's expiry when delivering it to a
+  delayed hook request, so a descheduled waiter cannot receive an expired grant.
+- Invalid non-finite lease deadlines cannot grant a reminder, and a failed
+  native lookup releases its in-flight slot without breaking later hooks.
+
+### Fixed (2026-11-02 — Native dream rollback)
+- The Rust daemon serves dream rollback, restoring the latest committed run's journal through the normal write paths while preserving source traces, audit history and the dream cursor.
+- Partial rollback outcomes preserve typed persistence and database exception classes, and the fault-injection harness declares its external writes.
+
+### Added (2026-11-02 — Opt-in Docker daemon engine selection)
+- Checkout updates accept `--engine rust` and `--engine python`, retain a validated Rust selection, back up the bank and state volume, tag the running image for rollback, and verify the replacement's version, schema and authenticated bank read before accepting it. Switching back to Python restores the ordinary update path. Python remains the default and client installations are unchanged.
+- Rust activation refuses pre-v57 banks and pending Python weights imports. Release-mode Rust selection names checkout mode until a Rust release image exists.
+- Operator commands select the installed native CLI inside Rust-labelled daemon containers and retain Python helpers for Python or unlabelled images. Rollback updates the accepted engine record only after the replacement succeeds.
+- `--engine rust --shadow` provides an isolated loopback companion with a SELECT-only database role and read-only bank state, gated on the checkout containing read-only daemon support.
+
+### Added (2026-11-02 — Nightly Rust daemon body evidence)
+- Run the full write, search and board differentials on self-hosted Linux nightly and through an isolated manual dispatch, publishing compared heads, scenario counts and differences.
+- Respect the registered nightly runners and yield between differentials when the machine's full-suite lease becomes held, preserving an incomplete report.
+- Compare the served tokenless hook `woke` response with Python instead of expecting its retired 501 stub.
+
+### Added (2026-11-02 — Opt-in native host updates)
+
+- Add native release and checkout update transactions, explicit Python or Rust engine selection and read-only shadow lifecycle management without a host Python dependency. Preserve update exclusion, verified backups, rollback protection, authenticated health gates and client failure status.
+- Release updates consume checksum-verified Compose assets and retain the selected engine. Checkout updates resolve backup and rollback containers from their own Compose project, and preserve Windows checkout paths when invoking PowerShell scripts.
+- Printed release rollback commands carry the image tag needed by Compose interpolation, and Windows unattended tasks retain long layout overrides through the Task Scheduler action API.
+
+### Fixed (2026-11-02 — Keep pairing interruptible after terminal input)
+- Ctrl-C cancels native pairing requests after code submission while restoring terminal settings and retaining a token whose redemption may have reached the daemon.
+
+### Fixed (2026-11-02 — Pairing interruption while waiting on a pipe)
+
+- Native pairing accepts interruption while a piped pairing code is incomplete,
+  restores the input descriptor flags, and leaves the token file untouched.
+
+### Fixed (2026-11-02 — Keep HTTP pairing independent of TLS trust overrides)
+- Plain HTTP pairing and invite health checks continue to work when an overridden TLS certificate store is empty or missing; HTTPS retains certificate verification.
+
+### Fixed (2026-11-02 — Clarify native compatibility notices)
+
+- Equivalent Python and native prerelease version spellings no longer produce false plugin-version mismatch notices. Hook-digest checks still detect changed scripts for those matching versions.
+- An explicit bf16 setting now explains the supported `fp32`/`auto` configuration and environment overrides, or how to retain the Python engine when bf16 is required. Native inference remains fp32.
+
+### Fixed (2026-11-02 — Native update interoperability and recovery)
+
+- Native updates preserve Python updater compatibility, accept the published Compose bundle, retain the original project directory and mounts, and refuse unpublished Rust release images.
+- Plain updates keep the existing health policy; engine activation and shadow mode retain authenticated version and schema checks.
+- Checkout updates verify Compose project identity without requiring a loopback health URL, recognize Docker Desktop bind paths, and require complete state backups when the discovered engine is Rust. Releases missing native assets name the Python updater as the remedy.
+- Client refresh preserves absent settings, reports migration failures, respects SSH configuration and requires a verified stable launcher for unattended work.
+- Updates refuse to replace persistent mounts with temporary or anonymous mounts, and distinguish nonexistent release tags from published releases missing native assets before recommending the Python updater.
+- Anonymous cache volumes remain usable across repeated Compose recreations only when Docker volume inspection confirms the anonymous-volume label and the mount is absent from the project's named volumes. External volumes, missing labels and unreadable or legacy provenance refuse safely with a named-volume or recreation remedy.
+
+### Added (2026-11-02 — Native unattended update policy)
+- Add opt-in native unattended daemon and client updates, per-user schedules, board idle checks, durable client retry state and native launches after the first successful client frame.
+
+### Added (2026-11-02 — Native mailbox recovery and maintainer setup)
+
+- The Rust CLI supports offline mailbox recovery and guided maintainer passkey
+  setup, including the installed CLI inside Rust daemon images. Recovery retains
+  pending mail and preserves credential generations; rebinding persists private
+  state before committing a credential. Setup preserves unrelated configuration,
+  backs up replaced files, asks before host changes, and keeps the separate
+  Console passkey verification step.
+- Setup refuses unsupported lite banks before changing configuration, validates
+  retained recipient limits, reads safe YAML tags and merges, and escapes
+  YAML-sensitive Unicode when writing configuration.
+
+### Fixed (2026-11-02 — Run operator commands in either daemon image)
+- Select the native operator executable in Rust-labelled daemon containers while retaining the Python image's command path, argument boundaries, terminal, streams and exit status.
+- Add native stopped-daemon invite administration, HTTPS pairing, terminal code entry, maintainer polling and operator help.
+- Refuse redirects during pairing credential verification, retaining the token for recovery when verification cannot be confirmed.
+- Restore terminal echo when pairing code entry is interrupted on POSIX hosts.
+- Keep piped stdin descriptor flags unchanged during pairing, including abrupt termination, and preserve full container exit statuses on Windows.
+
+### Added (2026-11-02 — Run extractor CLI shims without Python)
+- Opt-in `extractor-shim claude|codex` serves the existing completion, model and health contracts natively, including serialized CLI calls, prompt overrides, timeout cleanup, model pass-through and Claude tool emulation. The production prompt is shared with the Python oracles and embedded in Rust.
+- Native autostart registration reads a stable settings file or a checkout's `ops/.env`, verifies socket ownership, replaces existing registrations and supports sibling removal without a Python runtime. Existing autostart scripts retain their Python path and accept a native opt-in.
+- Stub-only differential tests compare responses and provider invocation on both platforms, including the corrected Windows Claude batch prompt transport.
+- Native registration checks provider health and recorded process ownership, preserves healthy unchanged registrations, and rolls back failed replacements. Real scheduler tests require explicit opt-in or an ephemeral GitHub-hosted runner; unsafe model and effort tokens are refused before CLI invocation.
+- Reinstallation detects settings edited since startup, restores disabled Linux autostart without restarting a healthy process, and recognizes the legacy Windows Claude registration. Slash aliases retain the configured model; persistent accept errors back off with bounded logging, and rollback diagnostics preserve the original failure.
+- Settings verification stays local and hashes only effective shim settings, so unrelated environment edits do not restart a service. Foreign command diagnostics redact credential arguments, and masked Linux units report the unmask command.
+- Native registrations retain the installer-selected receipt directory across scheduler environment changes and recognize Windows short-path aliases. Timeout regression tests observe descendant termination directly instead of inferring it from a short latency bound.
+- Windows path resolution preserves extended path syntax where ordinary paths would change meaning or exceed the length limit. Archived tests embed target-built provider fixtures and split autostart proofs by provider, avoiding runtime toolchain installation and reporting step timings.
+- Windows replacement tolerates an owned process exiting during stop, waits for scheduler stop before replacing or deleting a task, and confirms removal. Rejected task deletion is retried within the existing deadline and retains its error diagnostic. Lifecycle regressions synchronize provider health refreshes with socket handshakes instead of fixed sleeps.
+- Ignored HTTP request bodies are retained and drained in the background without parsing, preserving early route responses while avoiding a premature connection close when headers and body arrive separately.
+
+### Added (2026-11-02 — Native disposable coordination proof)
+- The Rust CLI can run `doctor --disposable-proof` through the native daemon and adapter using an explicitly selected disposable PostgreSQL server. It checks hint and ring delivery, receive and acknowledgement, then removes the fixture bank and files. Missing native daemon or provisioned models are reported before creating a bank; real host delivery and model acknowledgement remain unverified.
+- Cleanup retains the database checkpoint allowance and owns the daemon process tree through interruption. Unsupported database TLS settings are refused before creating a bank, and model or runtime failures name their repair without exposing raw daemon diagnostics.
+- Disposable proofs connect directly despite ambient proxies, pass the same resolved PostgreSQL endpoint to the child, and tolerate optional reranker warnings. Interrupted cleanup reports its checkpoint wait and retries a lost DROP response on a separate owned connection.
+- Doctor explicitly opts into connection timeout and application-name options; ordinary CLI DSN admission retains its existing refusal behavior.
+- ONNX Runtime overrides retain empty/default, executable-relative and OS loader behavior after child isolation; existing caller-relative paths remain usable. Unsupported fixture DSN forms name the native connection limits, unknown keywords remain programming errors, certificate options name the TLS limitation, and CREATE failures preserve PostgreSQL exception classes.
+
+### Added (2026-11-02 — Native daemon statistics for CLI clients)
+- The Rust daemon answers authenticated `GET /api/stats` with the complete service snapshot used by `memory_stats`, allowing native clients to check bank readiness and statistics without a Python daemon.
+- Compare stats response clocks and newly inserted retrieval-event timestamps by their declared clock rules while retaining exact counters, event contents and existing timestamps.
+
+### Fixed (2026-11-02 — Preserve owned Codex recovery state)
+
+- Native client connection failures now return actual backup and compensation
+  events, with a typed recovery handle only when the attempt still owns its
+  writes. Unknown write acknowledgements never authorize rollback.
+- Recovery preserves replacement files even when their bytes match, and checks
+  the compensated configuration version before removing a retained token.
+- Created-file cleanup rechecks identity after moving the file away from its
+  public name. Recovery reports every retained owned file without contradictory
+  restoration events or instructions referring to nonexistent backups.
+- Restoration also preserves replacements made by a concurrent writer, and
+  uses an exclusive rename without a partial hard-link state. Filesystem errors
+  retain their actual cause; early recovery refusals report retained configuration.
+- Windows recovery and exclusive publication support long local and UNC paths.
+  Recovery retains original I/O errors and actual backup paths, explains when
+  exclusive rename is unsupported, and syncs restoration before cleanup.
+
+### Added (2026-11-02 — Native Codex connection configuration)
+
+- The Rust CLI now includes a shared Codex configuration writer for native setup
+  and client reconnection. It uses Codex's versioned configuration API, preserves
+  unrelated settings, validates credential ownership before writing, and keeps
+  private backups with guarded rollback. The Python installer remains the default.
+- Linked Codex homes and configuration files retain their original resolution,
+  explicit no-spawn requests persist in the user layer, and conflicting
+  credential settings identify their configuration file and key without
+  displaying credential values.
+
+Explicit no-spawn requests now persist in the Codex user configuration even
+when a project layer or installer environment already supplies a truthy value.
+Setup diagnostics distinguish empty user credentials from project overrides.
+
+### Added (2026-11-02 — Opt-in native client runtimes)
+
+- Add checksum-verified native client runtimes behind the stable launcher, with side-by-side updates, completion-marker verification and conservative process, registration and tunnel retention.
+- Preserve native runtimes when using the Python compatibility updater, invalidate stale Python launcher records during native activation, and keep detached services independent of launcher lifetime.
+- Reuse an identical verified archive on installer reruns while preserving explicit updater reinstallation.
+- Preserve inherited Windows client-file permissions during atomic replacement for both normal and elevated users.
+- Preserve active native launchers during Python compatibility and unattended updates; activate Python only with `PSEUDOLIFE_SHIM_ENGINE=python`, retain unreadable evidence and native recovery copies, and report the launcher choice on stderr.
+- Stage Windows configuration replacements before publication so a blocked move leaves the original usable; verify executable digests after acquiring runtime pins without redundant pre-pin hashing.
+
+### Added (2026-11-02 — Native client refresh steps)
+
+- Add native plugin and Codex hook refresh steps that preserve running copies, user approvals and marketplace recovery state without invoking Python.
+
+### Fixed (2026-11-02 — allow checkout updates on Python-free native hosts)
+
+- Checkout update wrappers use a verified native runtime when Python 3.10 or newer is unavailable, preserve Python selection when both runtimes are installed, and support explicit native selection without fallback.
+- Wrapper refusals name the available installation remedies and leave the checkout environment file unchanged.
+
+### Added (2026-11-02 — Native audit telemetry and import initialization)
+
+- The native operator CLI computes board audit statistics, accepts local ISO date and time arguments, and forwards audit commands through either daemon image while keeping named files on the invoking host.
+- Native imports initialize and repair target banks with the daemon's existing schema plan, preserving connection guards, schema refusals and the separate schema transaction.
+- Import checks the server's UTF8 encoding before schema initialization can change the target bank.
+
+### Fixed (2026-11-02 — Maintainer configuration scalar validation)
+
+- Native maintainer setup retains non-string validation for YAML timestamps and binary values, accepts unbounded non-negative integer limits in read-only checks, and escapes YAML-forbidden Unicode noncharacters when writing configuration.
+
+### Fixed (2026-11-02 — Read-only YAML mapping keys)
+
+- Native maintainer setup preserves distinct timestamp and binary mapping keys until filtering unrelated non-string keys, so valid configuration remains inspectable without weakening maintainer-value validation.
+
+### Fixed (2026-11-02 — bound CLI harness isolation relaunches)
+
+- Preserve bytecode isolation when the CLI harness starts with Python's `-I` or `-E` flags, and refuse a second relaunch if isolation cannot be established.
+
+### Added (2026-11-02 — lossless flat-bank migration)
+
+- Added the opt-in `pseudolife-mcp migrate-flat --apply --data-dir PATH --external-recovery-verified`
+  command in Python and the native CLI. It backs up a stopped bank and its
+  configuration before moving entries into one flat band, preserving entry
+  identities, timestamps, supersession and episode links. Capacity is retained
+  or raised to fit existing entries, including superseded entries.
+- Interrupted config finalization can be resumed with the same command;
+  startup refuses a migrated bank with mismatched loaded config before
+  hydration. The command refuses before effects unless the operator explicitly
+  acknowledges a rehearsed external restore of this exact bank and config;
+  it prints both backup paths and never guesses a Docker restore target.
+  Existing presets remain supported.
+- Migration refuses mismatched config-path overrides and resumes a pending
+  marker after unrelated edits to a sufficient flat layout. Native planning
+  preserves non-specific YAML tags and cannot inherit the bank's database URL.
+- Migration verifies that every entry is flat before accepting a completed
+  marker, names the required capacity when repairing a flat layout, and
+  preserves YAML value-tag mapping keys. An incompatible native planner now
+  names the matching binary needed instead of reporting a missing database URL.
+- Invalid UTF-8 configuration names the config repair required, and a locked
+  entry table during finalization names the writers that must be stopped.
+- Initial migration and finalization distinguish lock contention from database
+  connection and permission failures before suggesting an operator action.
+
+### Changed (2026-11-02 — Divergence summary index)
+- Allow the divergence ledger's root `README.md` to hold D7 bucket counts and B14b caller routing without treating the index as another divergence; other root files remain invalid.
+- Validate each D7 bucket, table column widths, summary counts and the complete caller-link set with `split_divergences.py --check`.
+
+### Changed (2026-11-02 — The owner's Console shows every owner session's board mail; schema v59)
+- The Console's Board followed one exact principal, so someone with a principal per machine (the installer's pairing codes recommend one) saw none of their other sessions' mail. Every principal is now the bank owner's unless it says otherwise, and a Console whose token is the owner's shows the unread counts and the mail and wake timeline of all the owner's principals: the `PSEUDOLIFE_MCP_TOKENS` names and `default`, every invited machine, and passkey-signed maintainer mail. Any other principal keeps its own mail only.
+- **This widens what a token can read.** Any bearer of an owner principal (any agent token on any of the owner's machines) can read board metadata for all the owner's sessions through `GET /api/agents?view=coordination`: who mailed whom and when, the wake decision and the delivery path. Message bodies stay excluded, and mailboxes are unchanged: receive, ack and history still need the exact principal and the session's own credential. Those tokens already read and write the whole bank, so this widens mail metadata, not content.
+- `pseudolife-mcp invite <name> --someone-else` invites a machine that is not yours, and the new config key `coordination.not_owner_principals` (in `config.yaml` only; `POST /api/config` refuses it) does the same for environment principals. A re-invite keeps what the name was, and `invite <name> --mine` undoes a mistaken `--someone-else`; on a paired machine either flag alone changes only its ownership, with no new code and no re-pairing. Both flags need the daemon at schema v59: an older bank, or an older daemon image on a Docker install, refuses them naming the update (a plain invite still works there). Every invite that does not pass the flag says it in one line where the bank can record it, and `invite --list` gains an owner column (`owner` in `--json`).
+- Schema v59: `principals.owned` (every existing row the owner's, so an existing install needs no step), the `console_sessions` and `console_signin_codes` tables for the coming Console sign-in, and `maintainer_passkeys.signs_in_as`, filled once from each passkey's own enrolment event. Nothing reads the two tables or the column yet; both tables stay out of logical exports. Additive and idempotent.
+- The timeline query was rewritten for several principals: each principal's newest events through its `(principal, seq)` index, merged by sequence, and the mail it can see bounded to each agent's 101 newest sent and 101 newest received messages. For one principal it returns what it returned before, except a late read, ack or expiry by someone outside the scope of a message older than its sending agent's (or receiving agent's) 101 newest, and those of mail whose sending agent's row the board's prune has removed. An expiry's "expired" count now counts only that bounded mail, so it can be lower than before for an expiry naming older messages (two of the 100 rows on the measured board). The snapshot also runs without PostgreSQL's JIT, which took most of its time: on a live-size board (470 agents, 77,767 events) the owner-scope query's median fell from 627 to 130 ms (`evals/results/console-snapshot-bench-20261102.json`).
+- The Rust daemon and the native `pseudolife-mcp` shim do the same: the daemon computes the same owner set and runs the same timeline query, and the shim's `invite` takes `--someone-else` / `--mine` and prints the owner column.
+
+### Fixed (2026-11-02 — Console cortex policy changes take effect immediately)
+
+- Changing cortex provenance protection or the supersession confidence margin
+  in the Console now updates the running cortex before the next fact write,
+  without requiring a daemon restart.
+- Cold file-mode initialization preserves the configured cortex policies when
+  loading a legacy snapshot with an older confidence margin.
+
+### Fixed (2026-11-02 — The Console Board says why its mail timeline is empty)
+- The Board's mail and wake timeline only shows mail of sessions that use the Console's own token. A Console whose token no listed session uses saw an empty timeline that blamed audit retention. It now says that none of the listed sessions use this Console's token, and offers "Set a bearer token". A selected peer under another token gets the same explanation.
+- The unread-mail field for such a peer reads "Hidden: uses another token", the timeline caption names the token scope, and the "Everything visible" toggle is now "All visible", because it never showed the whole board.
+
+### Fixed (2026-11-02 — Codex setup accepts safe Windows token path aliases)
+- Codex setup recognizes long and short Windows paths to the same private token file during configuration checks and readback, while retaining refusals for unsafe files and unconfirmed writes.
+
+### Fixed (2026-11-02 — Preserve Windows Claude batch prompts)
+- Claude extractor calls through Windows npm `.cmd` and `.bat` launchers now pass system prompts through a temporary UTF-8 file, preserving multiline text and its system role instead of silently truncating it. Cleanup runs after success or failure without masking the result if Windows temporarily holds the file; native executable invocation stays unchanged.
+
 ## [0.21.0] - 2026-11-01 — The Rust daemon completes the passkey-signed maintainer actions and runs dreams from the Console, keeps search counts across restarts and gives idle sessions meaningful titles, `doctor` stops blaming the MCP SDK for a stray `mcp.py`, and five unused Console routes are deprecated
 
 ### Fixed (2026-11-01 — Preserve search access counts across daemon restarts)
