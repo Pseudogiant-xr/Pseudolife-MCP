@@ -651,6 +651,7 @@ def _checkout(world: World, tmp_path: Path, *, repo: bool = True, dirty: int = 0
     (root / "ops").mkdir(parents=True)
     (root / "ops" / "docker-compose.yml").write_text(f"image: pseudolife-daemon:{version}\n", encoding="utf-8", newline="\n")
     (root / "ops" / ".env.example").write_text("# PSEUDOLIFE_MCP_TOKEN=\n", encoding="utf-8", newline="\n")
+    (root / "ops" / ".env").write_text("# isolated installed checkout\n", encoding="utf-8", newline="\n")
     (root / "README.md").write_text("sandbox\n", encoding="utf-8", newline="\n")
     (root / "pyproject.toml").write_text("[project]\nname='x'\n", encoding="utf-8", newline="\n")
     # as in the repository: the scaffolded ops/.env is gitignored, so it
@@ -687,6 +688,45 @@ def test_plain_checkout_update_with_null_daemon_labels(world, clients, tmp_path)
     assert argv[-5:] == ["up", "-d", "--no-deps", "--build", "pseudolife-daemon"]
 
 
+@pytest.mark.parametrize("token_variable", ["PSEUDOLIFE_MCP_TOKEN", "PSEUDOLIFE_MCP_TOKENS"])
+def test_checkout_missing_env_refuses_before_resetting_credentials(world, clients, tmp_path, monkeypatch, capsys,
+                                                                 token_variable):
+    root, _ = _checkout(world, tmp_path, repo=False)
+    env_file = root / "ops" / ".env"
+    env_file.unlink()
+    original = world.run_cli
+    monkeypatch.setattr(up, "tree_state", lambda _: {"sha": "a" * 40, "dirty": "false", "lines": [], "error": ""})
+
+    def inspect_env(argv, **kw):
+        if "{{json .Config.Env}}" in argv:
+            return 0, json.dumps([f"{token_variable}=fixture-secret", "PSEUDOLIFE_MCP_DATABASE_URL=postgresql://owner:fixture-password@db/bank"])
+        return original(argv, **kw)
+
+    monkeypatch.setattr(up, "run_cli", inspect_env)
+    assert _run(["--checkout", str(root), "--all"]) == 2
+    captured = capsys.readouterr()
+    assert str(env_file) in captured.err and "restore" in captured.err.lower() and "Nothing was changed" in captured.err
+    assert token_variable in captured.err and "PSEUDOLIFE_MCP_DATABASE_URL" in captured.err
+    assert "fixture-secret" not in captured.err and "fixture-password" not in captured.err
+    assert not env_file.exists() and _compose_call(world)[0] is None and clients == []
+    assert not any(c.startswith(("tag ", "exec ", "cp ", "builder ")) for c in world.docker_calls())
+
+
+@pytest.mark.parametrize("before,after,expected", [(True, False, 1), (False, True, 1), (True, None, 1), (True, True, 0)])
+def test_checkout_compares_auth_before_and_after(world, clients, tmp_path, monkeypatch, capsys, before, after, expected):
+    root, _ = _checkout(world, tmp_path, repo=False)
+    monkeypatch.setattr(up, "tree_state", lambda _: {"sha": "a" * 40, "dirty": "false", "lines": [], "error": ""})
+    world.health = [{"status": "ok", "version": "0.1.0", "auth": before},
+                    {"status": "ok", "version": "0.1.0", "auth": after}]
+    assert _run(["--checkout", str(root), "--no-backup", "--no-cache-prune", "--all"]) == expected
+    if expected:
+        err = capsys.readouterr().err
+        assert "authentication" in err and str(root / "ops" / ".env") in err and "roll back" in err
+        assert clients == []
+    else:
+        assert len(clients) == 1
+
+
 def test_a_clean_checkout_is_built_with_its_commit_stamp(world, clients, tmp_path):
     root, sha = _checkout(world, tmp_path)
     assert _run(["--checkout", str(root), "--no-backup", "--no-cache-prune", "--rollback-tag", "unittest"]) == 0
@@ -697,7 +737,7 @@ def test_a_clean_checkout_is_built_with_its_commit_stamp(world, clients, tmp_pat
     assert env["PSEUDOLIFE_BUILD_TIME"].endswith("Z") and "T" in env["PSEUDOLIFE_BUILD_TIME"]
     assert "PSEUDOLIFE_BUILD_GIT_SHA" not in os.environ      # the caller's environment is left alone
     assert "tag pseudolife-daemon:0.1.0 pseudolife-daemon:0.1.0-unittest" in world.docker_calls()
-    assert (root / "ops" / ".env").is_file()                # scaffolded from the example
+    assert (root / "ops" / ".env").is_file()                # retained from the installer
     assert clients == []                                    # no --all
 
 
