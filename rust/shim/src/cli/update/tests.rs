@@ -1,5 +1,28 @@
 use super::*;
 
+#[test]
+fn failed_health_endpoint_hint_uses_only_valid_loopback_publications() {
+    for (ports, url) in [
+        ("0.0.0.0:9876\n[::]:9876\n", "http://127.0.0.1:9876"),
+        ("127.0.0.1:9876", "http://127.0.0.1:9876"),
+        ("[::1]:9876", "http://[::1]:9876"),
+    ] {
+        assert!(release::health_endpoint_hint(ports).contains(&format!("--daemon-url {url}")));
+    }
+    for ports in [
+        "",
+        "10.0.0.7:9876",
+        "127.0.0.1:0",
+        "127.0.0.1:65536",
+        "garbage:9876",
+        "127.0.0.1:+9876",
+    ] {
+        let hint = release::health_endpoint_hint(ports);
+        assert!(hint.contains("--daemon-url"));
+        assert!(!hint.contains("--daemon-url http://"));
+    }
+}
+
 fn verify_bank_identity(config: &Value, running: &Value) -> Result<()> {
     engine::verify_bank_identity_with(config, running, |name| {
         Some(json!([

@@ -545,6 +545,44 @@ def test_clients_only_and_daemon_only(world, clients, tmp_path):
     assert clients == [] and any(c.startswith("compose") for c in world.docker_calls())
 
 
+@pytest.mark.parametrize("answer", [None, {"status": "ok", "version": "0.15.0"}])
+def test_failed_verification_suggests_published_daemon_url(world, clients, tmp_path, capsys, monkeypatch, answer):
+    _project(world, tmp_path)
+    world.health = [{"status": "ok", "version": "0.15.0"}, answer]
+    original = world.run_cli
+
+    def run(argv, **kw):
+        if argv[1:] == ["port", DAEMON, "8765/tcp"]:
+            return 0, "0.0.0.0:9876\n[::]:9876\n"
+        return original(argv, **kw)
+
+    monkeypatch.setattr(up, "run_cli", run)
+    assert _run(["--health-retries", "1"]) == 1
+    err = capsys.readouterr().err
+    assert "--daemon-url http://127.0.0.1:9876" in err
+    assert "image setting won" not in err
+    assert clients == []
+
+
+@pytest.mark.parametrize("published", ["", "10.0.0.7:9876", "127.0.0.1:0", "127.0.0.1:65536", "garbage:9876"])
+def test_failed_health_without_loopback_publish_still_names_daemon_url(world, monkeypatch, published):
+    monkeypatch.setattr(up, "run_cli", lambda *a, **kw: (0, published))
+    update = up.Update(up.Options(health_retries=1))
+    with pytest.raises(up.UpdateError) as exc:
+        update.wait_health()
+    assert "--daemon-url" in str(exc.value)
+    assert "--daemon-url http://127.0.0.1:" not in str(exc.value)
+
+
+@pytest.mark.parametrize("url", ["http://127.0.0.1:8765", "http://127.0.0.1:9876", "https://proxy.example.com/memory"])
+def test_healthy_custom_endpoints_do_not_require_matching_published_port(world, clients, tmp_path, url):
+    _project(world, tmp_path)
+    world.health = [{"status": "ok", "version": "0.15.0"}, {"status": "ok", "version": "0.15.1"}]
+    assert _run(["--daemon-url", url]) == 0
+    assert clients
+    assert not any(c.startswith("port ") for c in world.docker_calls())
+
+
 @pytest.fixture
 def held_update_lock(world, tmp_path):
     """Another ``pseudolife-mcp update`` on this host: the OS lock on
