@@ -174,14 +174,27 @@ directory). Keep that env file available and identical to the manager's
 environment, especially passwords, tokens and legacy volume names.
 
 If the manager keeps its compose files inside its own container (Portainer
-commonly does), release update cannot safely recreate that deployment from
-a different file. Keep the stack running; use the manager to update it:
-first run the standalone backup below, retain the old image tag for
-rollback, then change `PSEUDOLIFE_IMAGE_TAG` in both manager and host env
-file to the chosen published release. Redeploy the unchanged stack and
-verify `/health` and a memory call; run `pseudolife-mcp update --clients-only
---tag <that-version>` on client machines. Do not work around a missing
-compose path by substituting the installer's compose or only `--env-file`.
+commonly does), export its original stack YAML and environment to the host.
+For this unchanged stack, the retained files above are those originals:
+
+```bash
+pseudolife-mcp update \
+  --compose-file "$HOME/pseudolife-stack/docker-compose.stack.yml" \
+  --env-file "$HOME/pseudolife-stack/.env"
+```
+
+Repeat `--compose-file` for each original overlay in the original order.
+The updater retains the running project label and adds the GHCR image
+overlay. An env file alone cannot recover a missing compose file; update
+refuses that path before changing the stack. Never substitute a flattened
+or installer compose file for the manager's original configuration.
+
+If the manager must perform the redeploy itself, first run the standalone
+backup below and retain the old image tag for rollback. Set
+`PSEUDOLIFE_IMAGE_TAG` in both manager and host env file to the chosen
+published release, redeploy the unchanged stack, and verify `/health` and
+a memory call. Run `pseudolife-mcp update --clients-only --tag <that-version>`
+on client machines afterwards.
 
 Before the manager's **next redeploy**, set `PSEUDOLIFE_IMAGE_TAG` in both
 its environment and the host env file to the version the successful update
