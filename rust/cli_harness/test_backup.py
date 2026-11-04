@@ -154,7 +154,8 @@ def test_help_uses_the_terminal_when_columns_is_unusable():
             if slave is not None:
                 os.close(slave)
 
-    for columns in [None, "invalid", "0", "-1"]:
+    # Explicit widths also cover the cached 80-column help and wider wrapping.
+    for columns in [None, "invalid", "0", "-1", "80", "120"]:
         want = help_output([sys.executable, "-m", "pseudolife_memory.cli"], columns)
         assert want[0] == 0
         assert help_output([native], columns) == want

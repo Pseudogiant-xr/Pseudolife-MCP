@@ -275,6 +275,11 @@ pub(super) fn usage(width: usize) -> String {
         "[--data-dir DATA_DIR]",
         "[--out OUT]",
         "[--keep-days KEEP_DAYS]",
+        "[--container CONTAINER]",
+        "[--daemon-container DAEMON_CONTAINER]",
+        "[--db DB]",
+        "[--user USER]",
+        "[--db-port DB_PORT]",
     ];
     if 7 + prog.len() + 1 + options.join(" ").len() <= width {
         format!("usage: {prog} {}\n", options.join(" "))
@@ -358,6 +363,23 @@ pub(super) fn help(width: usize) -> String {
         (
             "--keep-days KEEP_DAYS",
             "rotate this tool's own backups older than N days (default 7)",
+        ),
+        ("--container CONTAINER", "Docker PostgreSQL container"),
+        (
+            "--daemon-container DAEMON_CONTAINER",
+            "Docker daemon container",
+        ),
+        (
+            "--db DB",
+            "Docker database name (default: daemon configuration)",
+        ),
+        (
+            "--user USER",
+            "Docker database role (default: daemon configuration)",
+        ),
+        (
+            "--db-port DB_PORT",
+            "PostgreSQL port inside the Docker container (default: daemon configuration)",
         ),
     ];
     let position = 24.min(width.saturating_sub(20).max(4));
