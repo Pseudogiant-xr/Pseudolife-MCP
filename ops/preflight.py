@@ -7,10 +7,9 @@ No Docker output (which may contain credentials) is included in errors.
 from __future__ import annotations
 
 import argparse
-import errno
 import json
-import os
 from pathlib import Path
+import re
 import socket
 import subprocess
 import sys
@@ -25,32 +24,27 @@ class Refusal(Exception):
     """A failed safety check with an actionable, non-destructive fix."""
 
 
-def docker(*args: str) -> str:
+def docker(*args: str, input: str | None = None, failure: str | None = None) -> str:
     try:
         result = subprocess.run(["docker", *args], capture_output=True, text=True,
-                                encoding="utf-8", errors="replace", timeout=20, check=False)
+                                encoding="utf-8", errors="replace", timeout=20, check=False, input=input)
     except (OSError, subprocess.TimeoutExpired):
         raise Refusal("Cannot inspect Docker safely. Run docker info, fix Docker access, then rerun.") from None
     if result.returncode:
-        raise Refusal("Cannot inspect Docker safely. Run docker info, fix Docker access, then rerun.")
+        raise Refusal(failure or "Cannot inspect Docker safely. Run docker info, fix Docker access, then rerun.")
     return result.stdout
 
 
 def port_busy(port: int) -> bool:
-    for family, address in ((socket.AF_INET, "127.0.0.1"), (socket.AF_INET6, "::1")):
+    # Both shipped publications bind IPv4 loopback only. An IPv6-only
+    # listener on ::1 can coexist and is not an installer collision.
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         try:
-            sock = socket.socket(family, socket.SOCK_STREAM)
+            if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+            sock.bind(("127.0.0.1", port))
         except OSError:
-            continue  # IPv6 may be disabled.
-        with sock:
-            try:
-                if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
-                    sock.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
-                sock.bind((address, port))
-            except OSError as error:
-                if error.errno == errno.EADDRNOTAVAIL:
-                    continue
-                return True
+            return True
     return False
 
 
@@ -69,19 +63,33 @@ def environment(path: Path) -> tuple[dict[str, str], bool]:
     return values, BEGIN in text.splitlines() and END in text.splitlines()
 
 
+def resolved_environment(path: Path) -> dict[str, str]:
+    # Compose owns dotenv syntax, interpolation and exported-value precedence.
+    # Keep all its output private; only this allowlist is used internally.
+    ops = Path(__file__).resolve().parent
+    source = path if path.is_file() else ops / ".env.example"
+    output = docker("compose", "--env-file", str(source), "-f", str(ops / "docker-compose.yml"),
+                    "config", "--environment",
+                    failure="Cannot resolve ops/.env with Docker Compose. Run docker compose --env-file ops/.env -f ops/docker-compose.yml config --quiet, fix the reported configuration, then rerun. Nothing changed.")
+    return {key: value for line in output.splitlines()
+            for key, sep, value in [line.partition("=")] if sep and key in FIELDS}
+
+
+def volume_names(values: dict[str, str]) -> tuple[str, str]:
+    names = tuple(values.get(key) or default for key, default in (
+        ("PSEUDOLIFE_BANK_VOLUME", "pseudolife-mcp-bank"),
+        ("PSEUDOLIFE_STATE_VOLUME", "pseudolife-mcp-state")))
+    if not all(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]+", name) for name in names):
+        raise Refusal("Invalid bank/state volume name. Set literal Docker volume names in ops/.env, then rerun. Nothing changed.")
+    return names
+
+
 def check(env_file: Path) -> None:
     ids = docker("ps", "-a", "--format", "{{.ID}}").split()
     containers = json.loads(docker("inspect", *ids)) if ids else []
-    values, managed = environment(env_file)
-    selected = {
-        "PSEUDOLIFE_BANK_VOLUME": values.get("PSEUDOLIFE_BANK_VOLUME") or "pseudolife-mcp-bank",
-        "PSEUDOLIFE_STATE_VOLUME": values.get("PSEUDOLIFE_STATE_VOLUME") or "pseudolife-mcp-state",
-    }
-    # Compose's exported settings take precedence over --env-file. Refuse a
-    # disagreement rather than create one volume and attach another.
-    for key, value in selected.items():
-        if os.environ.get(key) and os.environ[key] != value:
-            raise Refusal(f"{key} disagrees with ops/.env. Record its intended value in ops/.env and unset {key}, then rerun.")
+    recorded, managed = environment(env_file)
+    values = resolved_environment(env_file)
+    selected = dict(zip(FIELDS[:2], volume_names(values)))
     for c in containers:
         name = c["Name"].lstrip("/")
         project = (c.get("Config", {}).get("Labels") or {}).get("com.docker.compose.project", "")
@@ -97,24 +105,38 @@ def check(env_file: Path) -> None:
                           "(PowerShell: -ClientOnly -DaemonUrl <url>). Nothing changed.")
         if name == "pseudolife-mcp-postgres" and ours:
             pg_env = dict(v.split("=", 1) for v in c.get("Config", {}).get("Env", []) if "=" in v)
-            expected = os.environ.get("POSTGRES_PASSWORD", values.get("POSTGRES_PASSWORD") or "pseudolife")
-            # Compose reduces doubled dollars before passing the value to Docker.
-            if "POSTGRES_PASSWORD" not in os.environ:
-                expected = expected.replace("$$", "$")
-            if pg_env.get("POSTGRES_PASSWORD") != expected:
-                raise Refusal("POSTGRES_PASSWORD differs from the existing Postgres container; reusing its bank will fail authentication. "
-                              "Restore POSTGRES_PASSWORD from the original ops/.env, then rerun. Nothing changed.")
+            expected = values.get("POSTGRES_PASSWORD") or "pseudolife"
+            if c.get("State", {}).get("Running"):
+                # Postgres initdb can trust localhost, including TCP loopback.
+                # Its bridge address uses the same host rule as the daemon.
+                addresses = [network.get("IPAddress") for network in
+                             c.get("NetworkSettings", {}).get("Networks", {}).values()
+                             if network.get("IPAddress")]
+                if not addresses:
+                    raise Refusal("Cannot verify Postgres authentication without its Docker bridge address. Run docker info and start the original stack with its own compose file, then rerun. Nothing changed.")
+                # stdin keeps the credential out of argv and preserves dollars.
+                # Config.Env records initialization, not a later ALTER USER.
+                docker("exec", "-i", c["Id"], "sh", "-c",
+                       'PGPASSWORD=$(cat; printf x); PGPASSWORD=${PGPASSWORD%x}; export PGPASSWORD; '
+                       'exec psql -h "$1" -U pseudolife -d pseudolife_memory -Atqc "SELECT 1"',
+                       "preflight", addresses[0],
+                       input=expected,
+                       failure="Postgres did not accept the configured POSTGRES_PASSWORD. Restore POSTGRES_PASSWORD from the original ops/.env, then rerun. Nothing changed.")
+            elif pg_env.get("POSTGRES_PASSWORD") != expected:
+                raise Refusal("The stopped Postgres container records a different initialization password; a later password rotation cannot be checked while stopped. "
+                              "Start the original stack with its own compose file, then rerun this preflight. Nothing changed.")
             if mounted and selected["PSEUDOLIFE_BANK_VOLUME"] not in mounted:
                 raise Refusal("PSEUDOLIFE_BANK_VOLUME does not name the existing Postgres bank. "
                               "Restore PSEUDOLIFE_BANK_VOLUME from the original ops/.env, then rerun. Nothing changed.")
     volumes = set(docker("volume", "ls", "--format", "{{.Name}}").splitlines())
     for key, legacy in (("PSEUDOLIFE_BANK_VOLUME", "ops_pseudolife_pgdata"),
                         ("PSEUDOLIFE_STATE_VOLUME", "ops_pseudolife_data")):
-        if legacy in volumes and selected[key] not in volumes and not values.get(key):
+        if legacy in volumes and selected[key] not in volumes and not recorded.get(key):
             raise Refusal(f"Pre-rename volume {legacy} exists. Set {key}={legacy} in the original ops/.env, "
                           "keep its POSTGRES_PASSWORD, then rerun. Nothing changed.")
     for key, volume in selected.items():
-        if volume in volumes and not (values.get(key) or managed):
+        default = "pseudolife-mcp-bank" if key == FIELDS[0] else "pseudolife-mcp-state"
+        if volume in volumes and not (recorded.get(key) or (managed and volume == default)):
             raise Refusal(f"Existing volume {volume} was not recorded by this install; its bank and password may belong to another install. "
                           "Restore the original ops/.env (including POSTGRES_PASSWORD and PSEUDOLIFE_BANK_VOLUME/STATE_VOLUME), "
                           "then rerun. Nothing changed; do not delete the volume.")
@@ -135,8 +157,12 @@ def check(env_file: Path) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--env-file", type=Path, required=True)
+    parser.add_argument("--volume-names", action="store_true", help="print only resolved bank and state volume names")
     args = parser.parse_args()
     try:
+        if args.volume_names:
+            print(*volume_names(resolved_environment(args.env_file)), sep="\n")
+            return 0
         check(args.env_file)
     except (Refusal, OSError, ValueError, KeyError, TypeError) as error:
         message = str(error) if isinstance(error, Refusal) else "Cannot read installer ownership records. Restore the original ops/.env and check docker info, then rerun. Nothing changed."

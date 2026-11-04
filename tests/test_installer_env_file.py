@@ -50,6 +50,7 @@ def _mode(path: Path) -> int:
 
 def _install(shell: _Shell, env: Path, *blocks: str, client_only: str = ""):
     return shell.run(f"env_file='{shell.path(env)}'\nCLIENT_ONLY='{client_only}'\n"
+                     + "resolve_installer_volumes() { get_env PSEUDOLIFE_BANK_VOLUME; get_env PSEUDOLIFE_STATE_VOLUME; }\n"
                      + "".join(_block("install.sh", b) for b in blocks))
 
 

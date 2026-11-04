@@ -1168,6 +1168,7 @@ if ($codexShimMode -and -not $Model) {
 }
 
 # -- 4. volumes (respect names overridden in an existing ops/.env) --------------
+# >>> volumes >>>
 function Get-EnvValue($name) {
     if (Test-Path $envFile) {
         $line = Get-Content $envFile | Where-Object { $_ -match "^$name=" } | Select-Object -Last 1
@@ -1175,15 +1176,18 @@ function Get-EnvValue($name) {
     }
     return $null
 }
-$bankVol = (Get-EnvValue "PSEUDOLIFE_BANK_VOLUME"); if (-not $bankVol) { $bankVol = "pseudolife-mcp-bank" }
-$stateVol = (Get-EnvValue "PSEUDOLIFE_STATE_VOLUME"); if (-not $stateVol) { $stateVol = "pseudolife-mcp-state" }
 if (-not $ClientOnly) {
+    $volumePython = Get-InstallerPython
+    $resolvedVolumes = @(& $volumePython (Join-Path $repo "ops/preflight.py") --env-file $envFile --volume-names)
+    if ($LASTEXITCODE -ne 0 -or $resolvedVolumes.Count -ne 2) { throw "Could not resolve Docker volumes; check ops/.env with ops/preflight.ps1 and rerun." }
+    $bankVol, $stateVol = $resolvedVolumes
     docker volume create $bankVol | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "Could not create bank volume $bankVol; fix Docker access and rerun." }
     docker volume create $stateVol | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "Could not create state volume $stateVol; fix Docker access and rerun." }
     Step "Volumes ready: $bankVol, $stateVol"
 }
+# <<< volumes <<<
 
 # -- 5. managed env block --------------------------------------------------------
 # >>> extractor env >>>

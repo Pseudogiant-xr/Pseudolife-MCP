@@ -1262,13 +1262,17 @@ normalize_env_line_endings() {  # $1 = env file; says so when it rewrote it
 # <<< env line endings <<<
 
 # ── 4. volumes (respect names overridden in an existing ops/.env) ─────────
+resolve_installer_volumes() {
+    "$(installer_python)" "$repo/ops/preflight.py" --env-file "$env_file" --volume-names
+}
 # >>> volumes >>>
 # A trailing CR is dropped here too: a reader placed before stage 3c, or a
 # file rewritten by hand, still yields clean names.
 get_env() { [ -f "$env_file" ] && sed -n "s/^$1=//p" "$env_file" | tail -1 | tr -d '\r' || true; }
-bank_vol="$(get_env PSEUDOLIFE_BANK_VOLUME)"; bank_vol="${bank_vol:-pseudolife-mcp-bank}"
-state_vol="$(get_env PSEUDOLIFE_STATE_VOLUME)"; state_vol="${state_vol:-pseudolife-mcp-state}"
 if [ -z "$CLIENT_ONLY" ]; then
+    resolved_volumes="$(resolve_installer_volumes)" || exit 1
+    bank_vol="$(printf '%s\n' "$resolved_volumes" | sed -n '1p')"
+    state_vol="$(printf '%s\n' "$resolved_volumes" | sed -n '2p')"
     docker volume create "$bank_vol" >/dev/null
     docker volume create "$state_vol" >/dev/null
     step "Volumes ready: $bank_vol, $state_vol"

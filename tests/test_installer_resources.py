@@ -3,9 +3,11 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
+from string import Template
 
 import pytest
 
@@ -29,6 +31,24 @@ def guard(monkeypatch, tmp_path):
             out = json.dumps(containers)
         elif argv[1:3] == ["volume", "ls"]:
             out = "\n".join(volumes)
+        elif argv[1] == "compose":
+            source = Path(argv[argv.index("--env-file") + 1])
+            resolved = {}
+            for line in source.read_text(encoding="utf-8-sig").splitlines():
+                key, sep, value = line.partition("=")
+                if not sep or key not in module.FIELDS:
+                    continue
+                if value.startswith("'"):
+                    value = value.strip("'")
+                else:
+                    value = Template(value.strip('"')).safe_substitute(os.environ)
+                resolved[key] = value
+            out = "\n".join(f"{key}={value}" for key, value in resolved.items())
+        elif argv[1] == "exec":
+            c = next(c for c in containers if c["Id"] == argv[3])
+            initial = c["Config"]["Env"][0].partition("=")[2]
+            actual = c.get("_fixture_actual_password", initial)
+            return subprocess.CompletedProcess(argv, int(kwargs["input"] != actual), "", "")
         else:
             pytest.fail(f"Unexpected Docker operation: {argv[1:]}")
         return subprocess.CompletedProcess(argv, 0, out, "")
@@ -50,7 +70,8 @@ def container(name="daemon", *, project="pseudolife-mcp", running=True,
             "State": {"Running": running},
             "Mounts": [{"Type": "volume", "Name": volume}],
             "HostConfig": {"PortBindings": {"8765/tcp": [{"HostPort": "8765"}]}},
-            "NetworkSettings": {"Ports": {"8765/tcp": [{"HostPort": "8765"}]}}}
+            "NetworkSettings": {"Networks": {"pseudolife-mcp_default": {"IPAddress": "10.0.0.2"}},
+                                "Ports": {"8765/tcp": [{"HostPort": "8765"}]}}}
 
 
 @pytest.mark.parametrize("name", ["daemon", "postgres", "extractor", "other"])
@@ -62,7 +83,7 @@ def test_foreign_containers_including_stopped_are_refused_without_changes(guard,
     with pytest.raises(module.Refusal, match="Use that stack's own compose file"):
         module.check(env)
     assert env.read_bytes() == b"# keep exactly\r\n"
-    assert all(c[0] in ("ps", "inspect", "volume") for c in calls)
+    assert all(c[0] in ("ps", "inspect", "volume", "compose") for c in calls)
 
 
 @pytest.mark.parametrize("volume", ["pseudolife-mcp-bank", "pseudolife-mcp-state"])
@@ -136,6 +157,86 @@ def test_changed_postgres_password_refuses_before_writing_anything(guard):
     with pytest.raises(module.Refusal, match="Restore POSTGRES_PASSWORD") as error:
         module.check(env)
     assert "fixture-password" not in str(error.value)
+
+
+@pytest.mark.parametrize("quoted,password", [
+    ("fixture$SAMPLE_PART", "fixtureresolved"), ("'fixture$$word'", "fixture$$word")])
+def test_compose_resolved_password_allows_a_legitimate_rerun(guard, monkeypatch, quoted, password):
+    module, env, containers, _, _, _ = guard
+    monkeypatch.setenv("SAMPLE_PART", "resolved")
+    env.write_text(f"POSTGRES_PASSWORD={quoted}\n")
+    containers.append(container("postgres", password=password))
+    module.check(env)
+
+
+def test_literal_container_password_does_not_mask_compose_interpolation(guard, monkeypatch):
+    module, env, containers, _, _, _ = guard
+    monkeypatch.setenv("SAMPLE_PART", "resolved")
+    env.write_text("POSTGRES_PASSWORD=fixture$SAMPLE_PART\n")
+    containers.append(container("postgres", password="fixture$SAMPLE_PART"))
+    with pytest.raises(module.Refusal, match="Restore POSTGRES_PASSWORD"):
+        module.check(env)
+
+
+def test_valid_rotated_password_is_not_compared_to_container_initialization(guard):
+    module, env, containers, _, _, calls = guard
+    env.write_text("POSTGRES_PASSWORD=rotated-fixture\n")
+    c = container("postgres", password="old-fixture")
+    c["_fixture_actual_password"] = "rotated-fixture"
+    containers.append(c)
+    module.check(env)
+    probe = next(call for call in calls if call[0] == "exec")
+    assert probe[-1] == "10.0.0.2"  # never the initdb-trusted loopback address
+    assert "rotated-fixture" not in " ".join(probe)
+
+
+def test_resolved_volume_names_are_the_only_values_printed(guard, monkeypatch, capsys):
+    module, env, _, _, _, _ = guard
+    env.write_text('PSEUDOLIFE_BANK_VOLUME="custom-bank"\nPSEUDOLIFE_STATE_VOLUME=${STATE_NAME}\nPOSTGRES_PASSWORD=fixture-private\n')
+    monkeypatch.setenv("STATE_NAME", "custom-state")
+    monkeypatch.setattr(sys, "argv", ["preflight.py", "--env-file", str(env), "--volume-names"])
+    assert module.main() == 0
+    assert capsys.readouterr().out == "custom-bank\ncustom-state\n"
+
+
+def test_ps_volume_creation_consumes_resolved_names_and_stops_on_failure(tmp_path):
+    from tests.test_installer_client_only_ps import _PowerShell, _q, _output
+    text = (ROOT / "ops/install.ps1").read_text(encoding="utf-8")
+    block = text.split("# >>> volumes >>>\n", 1)[1].split("# <<< volumes <<<", 1)[0]
+    ps = _PowerShell(tmp_path)
+    proc = ps.run(
+        "$ClientOnly=$false\n$envFile='fixture.env'\n"
+        "function Get-InstallerPython { 'volume_helper' }\n"
+        "function volume_helper { 'custom-bank'; 'custom-state'; $global:LASTEXITCODE=0 }\n"
+        + ps.stub_function("docker", "$global:LASTEXITCODE=1") + block + "\n'CONTINUED'\n")
+    assert proc.returncode != 0
+    assert "Could not create bank volume custom-bank" in _output(proc)
+    assert ps.logged() == ["docker|volume create custom-bank"]
+    assert "CONTINUED" not in _output(proc)
+
+
+def test_ipv6_only_listener_does_not_block_ipv4_compose_publication(guard, monkeypatch):
+    module, _, _, _, _, _ = guard
+    # The fixture replaced port_busy; retrieve the actual function from its source.
+    spec = importlib.util.spec_from_file_location("port_guard", ROOT / "ops/preflight.py")
+    ports = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(ports)
+
+    class Socket:
+        def __init__(self, family, kind):
+            self.family = family
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            pass
+        def setsockopt(self, *args):
+            pass
+        def bind(self, address):
+            if self.family == ports.socket.AF_INET6:
+                raise OSError(98, "IPv6-only fixture listener")
+
+    monkeypatch.setattr(ports.socket, "socket", Socket)
+    assert ports.port_busy(8765) is False
 
 
 def test_recorded_volume_attached_to_a_foreign_container_is_not_ours(guard):
