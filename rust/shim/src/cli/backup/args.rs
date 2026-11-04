@@ -15,6 +15,13 @@ pub(super) enum Parsed {
     Error(String),
 }
 const OPTIONS: [&str; 4] = ["--help", "--data-dir", "--out", "--keep-days"];
+const DOCKER_OPTIONS: [&str; 5] = [
+    "--container",
+    "--daemon-container",
+    "--db",
+    "--user",
+    "--db-port",
+];
 
 pub(super) fn columns_supported() -> bool {
     let Some(value) = std::env::var("COLUMNS")
@@ -119,6 +126,12 @@ pub(super) fn parse(arguments: &[OsString]) -> Option<Parsed> {
         .collect::<Option<_>>()?;
     // argparse classifies the full argv before executing actions (including help).
     for raw in values.iter().take_while(|raw| **raw != "--") {
+        let name = raw.split_once('=').map_or(*raw, |(name, _)| name);
+        // Python owns Docker selectors, including prefixes whose ambiguity
+        // depends on its complete option set. Defer before parsing or effects.
+        if name.starts_with("--") && DOCKER_OPTIONS.iter().any(|option| option.starts_with(name)) {
+            return None;
+        }
         if let Err(message) = option(raw) {
             return Some(Parsed::Error(message));
         }
