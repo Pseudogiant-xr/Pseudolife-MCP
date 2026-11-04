@@ -227,23 +227,22 @@ and which one to trust:
 
 **The age pass remains the primary mechanism, the ceiling the backstop**:
 aged cache is the cheapest to lose, and its layers free in full once the
-images that held them are cleaned up (old rollback tags pruned by
-`ops/prune-rollbacks.*`). The ceiling loop covers the heavy-build-week
+images that held them are cleaned up (old rollback tags removed by hand
+or by `ops/prune-rollbacks.*` run directly). The ceiling loop covers the heavy-build-week
 case where nothing is old enough yet; when the remaining cache is
 genuinely pinned by live images it stalls, warns, and leaves the rest to
 the age pass on a later run.
 
-**Step ordering still helps the age pass free actual disk, and it is
-accidental.** `ops/prune-rollbacks.*` runs in the deploy's rollback-tag prune
-(`pseudolife_memory/update_cli.py`), *before* the build, retiring old
-rollback image tags; the build-cache age pass runs as the deploy's last
-step, *after* health. By the time `until=168h` fires, the
-images that were pinning the >168h-old cache layers are already gone, so
-deleting those records frees their bytes too. Neither script enforces
-this ordering explicitly — a future change to `-KeepRollbacks` or to
-either script's step position would quietly turn aged-record deletion
-into bookkeeping-only until the pinning images expire, with nothing to
-catch it.
+**Rollback images are no longer retired by the deploy (since 0.22.0).**
+The Python updater (`pseudolife_memory/update_cli.py`) keeps every
+rollback tag and warns `rollback-tag retention skipped`, even with
+`--keep-rollbacks 0`, because a legacy `-pre-` tag name cannot prove which
+project it belongs to; it no longer calls `ops/prune-rollbacks.*`. Rollback
+images therefore accumulate on a host that deploys through it, and each
+one keeps the build-cache layers it holds pinned, so the age pass deletes
+their records without freeing those bytes. List them with `docker image ls
+--filter reference='*:*-pre-*'`, and remove the ones you no longer need
+with `docker image rm <tag>`, keeping the newest last-good one.
 
 **What these scripts will never do:** touch images (that's
 `ops/prune-rollbacks.ps1` / `.sh`), touch containers, or run

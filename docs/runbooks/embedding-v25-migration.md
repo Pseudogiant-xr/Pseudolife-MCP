@@ -252,14 +252,13 @@ exists. If you see that refusal, do not proceed with the migration until
 you know which image is the last-good one; `-ForceRollbackTag` overrides it
 only when you are sure.
 
-**That anchor expires, silently, in two more deploys.** The deploy's
-rollback-tag prune, just before the build (`pseudolife_memory/update_cli.py`,
-which `update.ps1` wraps), calls `ops/prune-rollbacks.ps1`, which matches
-*every* tag containing `-pre-`
-— including this hand-named one — and keeps only the newest `-KeepRollbacks`
-(default **2**). Nothing exempts a deliberately-named rollback tag. If you
-want this image to survive past the next couple of deploys, pin it outside
-that naming scheme or export it now:
+**Running `ops/prune-rollbacks.ps1` by hand removes that anchor.** Since
+0.22.0 the deploy (`pseudolife_memory/update_cli.py`, which `update.ps1`
+wraps) keeps every rollback tag. The standalone script still matches
+*every* tag containing `-pre-` — including this hand-named one — and keeps
+only the newest `-KeepRollbacks` (default **2**). If you prune by hand, or
+want the image to outlive a later cleanup, pin it outside that naming
+scheme or export it now:
 
 ```powershell
 docker tag pseudolife-daemon:<version>-pre-v25-embedding keep-pre-v25:manual
