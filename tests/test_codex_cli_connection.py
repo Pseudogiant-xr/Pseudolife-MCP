@@ -101,3 +101,19 @@ def test_explicit_token_file_can_select_only_its_matching_origin(connection, mon
     monkeypatch.setenv("PSEUDOLIFE_MCP_TOKEN_FILE", str(token))
     assert codex_connection.host_command_environment(os.environ) == {
         "PSEUDOLIFE_MCP_DAEMON_URL": "https://memory.example.com"}
+
+
+def test_unsafe_connection_refuses_without_traceback_or_running_command(connection, monkeypatch, capsys):
+    from pseudolife_memory.private_state import PrivateStateError
+
+    def unsafe(*args):
+        raise PrivateStateError("fixture ownership refusal")
+
+    monkeypatch.setattr(codex_connection, "_open_state", unsafe)
+    called = []
+    monkeypatch.setattr(lease_cli, "main", lambda args: called.append(True))
+    monkeypatch.setattr(sys, "argv", ["pseudolife-mcp", "lease"])
+    with pytest.raises(SystemExit) as result:
+        cli.main()
+    assert result.value.code == 2 and not called
+    assert "unsafe or malformed" in capsys.readouterr().err

@@ -35,7 +35,7 @@ from pseudolife_memory.credentials import (
     CredentialProvider,
     _write_token_file,
 )
-from pseudolife_memory.private_state import open_private as _open_state
+from pseudolife_memory.private_state import PrivateStateError, open_private as _open_state
 
 SERVER = "pseudolife-memory"
 
@@ -468,7 +468,7 @@ def read_connection(path: Path) -> tuple[str, str] | None:
         record = json.loads(data)
         return (base64.b64decode(record["daemon_url"]).decode("utf-8"),
                 base64.b64decode(record["token_file"]).decode("utf-8"))
-    except (OSError, ValueError, UnicodeError, KeyError, TypeError) as error:
+    except (OSError, ValueError, UnicodeError, KeyError, TypeError, PrivateStateError) as error:
         raise SetupError(
             "The managed Codex connection file is unsafe or malformed; "
             "repair or remove it before retrying.") from error
