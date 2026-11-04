@@ -576,11 +576,13 @@ ops/install.sh --extractor sidecar --client codex --codex-hook-trust yes </dev/n
 No terminal on stdin selects unattended behavior. A fresh local install
 requires `--extractor` / `-Extractor`; a client-only install has no
 extractor choice. Pass `--client` / `-Client` to avoid assuming Claude Code.
-For an existing remote bank, use `--client-only --daemon-url <url>` plus
-`--token-file <path>`, `--read-token` or `--pairing-code <code>` as needed
-(PowerShell: `-ClientOnly`, `-DaemonUrl`, `-TokenFile`, `-ReadToken`,
-`-PairingCode`). A pseudoterminal is still interactive; redirect stdin
-when the agent cannot answer prompts.
+For an existing remote bank, use `--client-only --daemon-url <url>` with
+`--token-file <existing-path>` or `--pairing-code <code>` (PowerShell:
+`-ClientOnly`, `-DaemonUrl`, `-TokenFile`, `-PairingCode`). To create a new
+private token file, use `--token-file <new-path> --read-token` and supply
+the token through stdin; PowerShell uses `-TokenFile <new-path> -ReadToken`
+with the same stdin requirement. A pseudoterminal is still interactive;
+redirect stdin when the agent cannot answer prompts.
 
 Unattended runs keep existing legacy hooks. Codex hooks receive no trust
 without `--codex-hook-trust yes` / `-CodexHookTrust yes`; choose
