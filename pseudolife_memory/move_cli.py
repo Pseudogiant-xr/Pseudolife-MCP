@@ -1,7 +1,7 @@
 """``pseudolife-mcp move``: move this host's Docker-tier bank to another host.
 
     pseudolife-mcp move --to <ssh-target> [--target-checkout PATH]
-        [--target-url URL] [--no-keep-tokens] [--resume]
+        [--target-url URL] [--expose-target] [--no-keep-tokens] [--resume]
         [--dry-run] [--yes] [--json]
 
 Run on the source host, a Docker-tier daemon. The target is a Docker-tier
@@ -17,7 +17,8 @@ nothing ever types a password). The order:
    target URL is ``--target-url``, else the target's ``expose status``.
 2. **Plan and confirm** (``--dry-run`` stops after the plan; a run that is
    not interactive needs ``--yes``).
-3. **Expose the target** when it is not exposed, and check this host
+3. **Expose the target** when it is not exposed, with separate consent
+   (``--expose-target`` or its own interactive question), and check this host
    reaches ``<target-url>/health``.
 4. **Stop the source daemon** (``docker stop -t 120``, never ``rm``), after
    pausing the target's unattended update and restart policy (either could
@@ -55,7 +56,8 @@ nothing ever types a password). The order:
     leases, undelivered mail, the source leftovers to retire, and what the
     state archive replaced on the target.
 
-A failure in steps 4-9, or SIGTERM / SIGHUP / Ctrl-C, rolls back in a fixed
+A failure in steps 3-9, or SIGTERM / SIGHUP / Ctrl-C, removes any target
+serve this move created, then rolls back in a fixed
 order (Ctrl-C is ignored while it runs): stop the target daemon if it was
 started (and put its ``/data/move.json`` back); restore the target's
 ``ops/.env``, unattended update and restart policy; lift the database
@@ -457,6 +459,7 @@ class Options:
     target: str
     checkout: str = DEFAULT_CHECKOUT
     target_url: str | None = None
+    expose_target: bool = False
     keep_tokens: bool = True
     resume: bool = False
     dry_run: bool = False
@@ -484,7 +487,7 @@ class MoveInterrupted(BaseException):
 # What the rollback must undo, in the order the move sets them; each flip
 # is written to the move record with the manual rollback beside it.
 FLAGS = ("target_timer_paused", "target_policy_paused", "schedule_paused", "source_stopped", "fenced",
-         "target_quiesced",
+         "target_quiesced", "exposed_now",
          "marker_written", "target_restored", "gate_written", "env_backup", "env_written", "target_started",
          "source_policy_changed", "moved_written")
 
@@ -539,7 +542,6 @@ class Mover:
         self.board = {"leases": None, "mail": None}
         for flag in FLAGS:
             setattr(self, flag, None if flag == "env_backup" else False)
-        self.exposed_now = False
         self.data = {"move_id": self.move_id, "dry_run": options.dry_run, "source": {}, "target": {},
                      "plan": [], "steps": [], "rollback": [], "report": {}, "connect": None,
                      "warnings": [], "error": None, "exit": None}
@@ -1014,9 +1016,10 @@ class Mover:
             f"target: {o.target}, checkout {self.checkout}"
             + (f" (--resume: over move {self.move_id}'s half-restored bank)" if o.resume else ""),
             f"target URL: {url}" if url else
-            "target URL: not exposed yet; step 3 runs `pseudolife-mcp expose tailscale --yes` there",
+            "target URL: not exposed yet; step 3 needs --expose-target or separate interactive consent",
             "1. preflight: done, nothing changed",
-            ("3. expose the target (pseudolife-mcp expose tailscale --yes on the target), then check this host "
+            ("3. expose the target with separate consent (pseudolife-mcp expose tailscale --yes on the target), "
+             "then check this host "
              "reaches <its URL>/health") if self.needs_expose else
             (f"3. the target daemon is stopped (--resume): {url}/health is checked after step 9 starts it"
              if o.resume else f"3. check this host reaches {url}/health"),
@@ -1040,7 +1043,8 @@ class Mover:
             f"write {MOVED} into it",
             f"10. re-point this machine's clients: pseudolife-mcp connect {url or '<target URL>'} --yes",
             "11. report: the rollback, other machines' connect lines, held leases, undelivered mail, leftovers",
-            "a failure in steps 4-9 rolls back: target stopped, its ops/.env and schedule restored, the fence "
+            "a failure in steps 3-9 rolls back: new target exposure removed, target stopped, its ops/.env and "
+            "schedule restored, the fence "
             f"lifted, {MOVED} removed, the source's restart policy and schedule restored, the source started",
             "run it under tmux, screen or nohup: a closed terminal or a kill signal rolls the move back",
         ]
@@ -1050,6 +1054,14 @@ class Mover:
             self.say(f"  {line}")
 
     def confirm(self) -> None:
+        if self.needs_expose and not self.o.expose_target:
+            if self.o.yes or not self.interactive():
+                raise self.refuse("creating a persistent target tailnet serve needs separate consent: "
+                                  "pass --expose-target, or --target-url <an existing reachable URL>; "
+                                  "--yes confirms only the bank move")
+            if not self.ask("Create a persistent Tailscale serve on the target for this bank? [y/N] "):
+                raise MoveError("target exposure was not confirmed; pass --target-url <an existing reachable "
+                                "URL> to move without creating a serve. Nothing was changed", EXIT_USAGE)
         if self.o.yes:
             return
         if not self.interactive():
@@ -1110,8 +1122,6 @@ class Mover:
     def execute(self) -> int:
         self.recording = True
         self.write_record("started")
-        self.expose_and_reach()
-        self.phase_code = EXIT_FAILED
         previous = {}
         for sig in _SIGNALS:
             if sig is signal.SIGINT:
@@ -1122,6 +1132,8 @@ class Mover:
                 pass
         try:
             try:
+                self.expose_and_reach()
+                self.phase_code = EXIT_FAILED
                 self.write_record("moving")
                 self.stop_source()
                 self.final_backup()
@@ -1145,7 +1157,7 @@ class Mover:
                                    "overwrite that half-restored bank on the next attempt" if self.target_restored
                                    else "the target's original bank was preserved")
                     raise MoveError(f"{reason}. Rolled back: the source daemon runs again; {target_note}",
-                                    EXIT_FAILED) from None
+                                    self.phase_code) from None
                 left = "; ".join(f"{s['step']}" + (f" ({s['detail'][:200]})" if s.get("detail") else "")
                                  for s in self.data["rollback"] if not s.get("ok"))
                 raise MoveError(f"{reason}. The rollback is INCOMPLETE: {left}. See the rollback steps, and the move "
@@ -1170,14 +1182,23 @@ class Mover:
         o = self.o
         if self.needs_expose:
             self.step(f"exposing the target: pseudolife-mcp expose tailscale --yes on {o.target}")
+            # Record intent before the command: a dropped ssh or signal can
+            # arrive after serve was created but before its response returns.
+            self.mark(exposed_now=True)
             result = self.ssh(f"cd {rq(self.checkout)} && python3 -m pseudolife_memory.cli expose tailscale "
                               f"--yes --json", timeout=300)
+            try:
+                exposure = json.loads(result.text)
+            except ValueError:
+                exposure = None
+            if result.code in (2, 4) or (isinstance(exposure, dict)
+                                        and exposure.get("state") == "already_exposed"):
+                self.mark(exposed_now=False)
             if not result.ok:
                 raise MoveError(f"`pseudolife-mcp expose tailscale` on {o.target} failed (exit {result.code}: "
                                 f"{result.why()}). Configure Tailscale there and retry, or pass "
                                 f"--target-url <the reachable URL clients will use> to use another connection. "
                                 f"The source still runs", EXIT_REFUSED)
-            self.exposed_now = True
             state, url = parse_expose_status(result.text)
             if state != "exposed":
                 again = self.ssh(f"cd {rq(self.checkout)} && python3 -m pseudolife_memory.cli expose status "
@@ -1193,11 +1214,9 @@ class Mover:
             return
         health = self.runner.get_json(f"{self.target_url}/health", timeout=10.0)
         if not isinstance(health, dict) or health.get("status") != "ok":
-            undo = (f" The target stays exposed (`pseudolife-mcp expose off` on {o.target} undoes it)."
-                    if self.exposed_now else "")
             raise MoveError(f"this host cannot reach {self.target_url}/health: the URL clients will use must "
                             f"answer from here before the source stops. Nothing in either bank was changed; "
-                            f"the source still runs.{undo}", EXIT_REFUSED)
+                            f"the source still runs", EXIT_REFUSED)
         self.step(f"this host reaches {self.target_url}/health")
 
     def stop_source(self) -> None:
@@ -1616,6 +1635,13 @@ class Mover:
 
         self.say("==> rolling back")
         complete, can_start, gate_missing = True, True, False
+        if self.exposed_now:
+            if attempt("undo the target expose (pseudolife-mcp expose off --yes)",
+                       lambda: self.ssh(f"cd {rq(self.checkout)} && python3 -m pseudolife_memory.cli "
+                                        "expose off --yes --json", timeout=300)):
+                self.mark(exposed_now=False)
+            else:
+                complete = False
 
         def blocked(reason: str) -> bool:
             log.append({"step": "the source stays stopped: two daemons must never serve one bank", "ok": False,
@@ -1767,6 +1793,8 @@ class Mover:
             lines.append(f"ssh {t} docker start {DAEMON}")
         if self.moved_written:
             lines.append(f"pseudolife-mcp connect {SOURCE_URL} --yes")
+        if self.exposed_now:
+            lines.append(f'ssh {t} "cd {rq(self.checkout)} && python3 -m pseudolife_memory.cli expose off --yes"')
         return lines
 
     # -- 10. re-point --------------------------------------------------------
@@ -1961,7 +1989,9 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--resume", action="store_true",
                         help="overwrite the half-restored bank an earlier attempt of this move left on the target")
     parser.add_argument("--dry-run", action="store_true", help="show the plan; change nothing")
-    parser.add_argument("--yes", action="store_true", help="move without asking")
+    parser.add_argument("--expose-target", action="store_true",
+                        help="consent to creating a persistent Tailscale serve on the target if needed")
+    parser.add_argument("--yes", action="store_true", help="confirm the bank move (exposure needs --expose-target)")
     parser.add_argument("--json", action="store_true", help="one JSON report on stdout")
     return parser
 
@@ -1980,6 +2010,7 @@ def main(argv: list[str] | None = None) -> int:
                   "query or credentials)", file=sys.stderr)
             return EXIT_USAGE
     options = Options(target=args.to, checkout=args.target_checkout, target_url=args.target_url,
+                      expose_target=args.expose_target,
                       keep_tokens=not args.no_keep_tokens, resume=args.resume, dry_run=args.dry_run,
                       yes=args.yes, as_json=args.json)
     if not args.to or args.to.startswith("-") or any(ch.isspace() for ch in args.to):

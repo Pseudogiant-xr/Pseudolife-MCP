@@ -408,9 +408,16 @@ class World:
             return 0, json.dumps(body).encode(), b""
         if "expose tailscale" in cmd:
             if self.expose_exit:
+                if self.expose_exit == 5:
+                    self.exposed = True  # serve applied, verification failed
                 return self.expose_exit, b"", b"expose: run sudo tailscale set --operator=$USER"
+            was_exposed = self.exposed
             self.exposed = True
-            return 0, json.dumps({"exposed": True, "url": TARGET_URL}).encode(), b""
+            return 0, json.dumps({"state": "already_exposed" if was_exposed else "exposed",
+                                   "url": TARGET_URL}).encode(), b""
+        if "expose off" in cmd:
+            self.exposed = False
+            return 0, json.dumps({"state": "removed"}).encode(), b""
         if cmd.startswith("mkdir -p"):
             return 0, b"", b""
         if cmd.startswith("cat > "):
@@ -805,7 +812,7 @@ def test_only_a_target_without_existing_containers_gets_the_install_line(tmp_pat
 
 def test_no_target_tailscale_names_explicit_url_as_the_fix(tmp_path, capsys):
     world = World(exposed=False, expose_exit=4)
-    assert run_move(world, tmp_path, as_json=True) == 4
+    assert run_move(world, tmp_path, as_json=True, expose_target=True) == 4
     error = json.loads(capsys.readouterr().out)["error"]
     assert "--target-url" in error
     assert world.source_running and not world.fenced
@@ -1081,7 +1088,7 @@ def test_usage_errors_exit_2(capsys):
 
 def test_an_unexposed_target_is_exposed_before_the_source_stops(tmp_path):
     world = World(exposed=False)
-    assert run_move(world, tmp_path) == 0
+    assert run_move(world, tmp_path, expose_target=True) == 0
     expose = index(world, lambda c: c.remote is not None and "expose tailscale --yes" in c.remote)
     stop = index(world, local_is("docker", "stop"))
     assert -1 < expose < stop
@@ -1089,7 +1096,7 @@ def test_an_unexposed_target_is_exposed_before_the_source_stops(tmp_path):
 
 def test_an_expose_refusal_stops_before_the_source_is_touched(tmp_path, capsys):
     world = World(exposed=False, expose_exit=4)
-    code = run_move(world, tmp_path, as_json=True)
+    code = run_move(world, tmp_path, as_json=True, expose_target=True)
     report = json.loads(capsys.readouterr().out)
     assert code == 4 and "operator" in report["error"]
     assert world.source_running and index(world, local_is("docker", "stop")) == -1
@@ -1108,6 +1115,95 @@ def test_an_explicit_target_url_skips_the_exposure_read(tmp_path):
 
 
 # ── failures in steps 4-9 roll back, in order ────────────────────────────────
+
+def test_yes_alone_never_consents_to_a_persistent_target_serve(tmp_path, capsys):
+    world = World(exposed=False)
+    assert run_move(world, tmp_path, as_json=True) == 4
+    error = json.loads(capsys.readouterr().out)["error"]
+    assert "--expose-target" in error and "--target-url" in error
+    assert mutating_calls(world) == []
+
+
+@pytest.mark.parametrize("failure, code", [(f"GET {TARGET_URL}/health", 4), ("pg_dump", 1)])
+def test_a_new_target_expose_is_undone_on_move_failure(tmp_path, failure, code):
+    world = World(exposed=False, fail=(failure,))
+    assert run_move(world, tmp_path, expose_target=True) == code
+    assert not world.exposed
+    assert world.source_running
+
+
+def test_interactive_yes_requires_an_explicit_expose_flag(tmp_path):
+    world = World(exposed=False)
+    move = mover(world, tmp_path, interactive=True)
+    questions = []
+    move.ask = lambda question: questions.append(question) or False
+    assert move.run() == 4
+    assert questions == []
+    assert mutating_calls(world) == []
+
+
+def test_interactive_move_asks_separately_for_persistent_exposure(tmp_path):
+    world = World(exposed=False)
+    move = mover(world, tmp_path, interactive=True, yes=False)
+    questions = []
+    move.ask = lambda question: questions.append(question) or False
+    assert move.run() == 2
+    assert len(questions) == 1 and "persistent" in questions[0]
+    assert mutating_calls(world) == []
+
+
+def test_new_exposure_intent_is_recorded_before_the_remote_command(tmp_path):
+    world = World(exposed=False)
+    move = mover(world, tmp_path, expose_target=True)
+    observed = []
+    world.hooks = {"expose tailscale": lambda w, c: observed.append(
+        json.loads((move.local_dir / "record.json").read_text())["flags"]["exposed_now"])}
+    assert move.run() == 0
+    assert observed == [True] and world.exposed
+    record = json.loads((move.local_dir / "record.json").read_text())
+    assert record["flags"]["exposed_now"]
+    assert any("expose off --yes" in line for line in record["manual_rollback"])
+
+
+def test_signal_during_target_expose_undoes_serve(tmp_path):
+    def interrupted(world, call):
+        world.exposed = True
+        signal.getsignal(signal.SIGTERM)(signal.SIGTERM, None)
+
+    world = World(exposed=False, hooks={"expose tailscale": interrupted})
+    assert run_move(world, tmp_path, expose_target=True) == 4
+    assert not world.exposed and world.source_running
+    assert index(world, local_is("docker", "stop")) == -1
+
+
+def test_failed_exposure_cleanup_is_recorded_for_manual_recovery(tmp_path, capsys):
+    world = World(exposed=False, fail=(f"GET {TARGET_URL}/health", "expose off"))
+    move = mover(world, tmp_path, expose_target=True, as_json=True)
+    assert move.run() == 6
+    record = json.loads((move.local_dir / "record.json").read_text())
+    assert record["flags"]["exposed_now"] and world.source_running and world.exposed
+    assert any("expose off --yes" in line for line in record["manual_rollback"])
+    assert "expose off" in json.loads(capsys.readouterr().out)["error"]
+
+
+@pytest.mark.parametrize("already_exposed", [False, True])
+def test_rollback_keeps_preexisting_or_concurrently_created_exposure(tmp_path, already_exposed):
+    world = World(exposed=already_exposed, fail=("pg_dump",))
+    if not already_exposed:
+        world.hooks = {"expose tailscale": lambda w, c: setattr(w, "exposed", True)}
+    assert run_move(world, tmp_path, expose_target=True) == 1
+    assert world.exposed
+    assert not any(c.remote and "expose off" in c.remote for c in world.calls)
+
+
+def test_an_ambiguous_expose_failure_is_undone(tmp_path):
+    world = World(exposed=False, expose_exit=5)
+    assert run_move(world, tmp_path, expose_target=True) == 4
+    assert not world.exposed and world.source_running
+
+
+def test_the_parser_accepts_explicit_exposure_consent():
+    assert move_cli._parser().parse_args(["--to", TARGET, "--expose-target"]).expose_target
 
 def _env_backup(c) -> bool:
     return c.remote is not None and c.remote.startswith("cp -p") and len(c.remote.split()) == 4 \
