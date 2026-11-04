@@ -1,7 +1,7 @@
 """``pseudolife-mcp move``: move this host's Docker-tier bank to another host.
 
     pseudolife-mcp move --to <ssh-target> [--target-checkout PATH]
-        [--target-url URL] [--no-keep-tokens] [--resume]
+        [--target-url URL] [--expose-target] [--no-keep-tokens] [--resume]
         [--dry-run] [--yes] [--json]
 
 Run on the source host, a Docker-tier daemon. The target is a Docker-tier
@@ -17,7 +17,8 @@ nothing ever types a password). The order:
    target URL is ``--target-url``, else the target's ``expose status``.
 2. **Plan and confirm** (``--dry-run`` stops after the plan; a run that is
    not interactive needs ``--yes``).
-3. **Expose the target** when it is not exposed, and check this host
+3. **Expose the target** when it is not exposed, with separate consent
+   (``--expose-target`` or its own interactive question), and check this host
    reaches ``<target-url>/health``.
 4. **Stop the source daemon** (``docker stop -t 120``, never ``rm``), after
    pausing the target's unattended update and restart policy (either could
@@ -55,7 +56,8 @@ nothing ever types a password). The order:
     leases, undelivered mail, the source leftovers to retire, and what the
     state archive replaced on the target.
 
-A failure in steps 4-9, or SIGTERM / SIGHUP / Ctrl-C, rolls back in a fixed
+A failure in steps 3-9, or SIGTERM / SIGHUP / Ctrl-C, removes any target
+serve this move created, then rolls back in a fixed
 order (Ctrl-C is ignored while it runs): stop the target daemon if it was
 started (and put its ``/data/move.json`` back); restore the target's
 ``ops/.env``, unattended update and restart policy; lift the database
@@ -125,6 +127,44 @@ with gzip.open(sys.argv[1], 'rb') as source, open(os.devnull, 'wb') as sink:
     shutil.copyfileobj(source, sink)
 with tarfile.open(sys.argv[1], 'r:gz') as archive:
     archive.getmembers()
+"""
+_EXPOSE_TARGET = """# move expose tailscale: retain ownership even if ssh loses the reply
+import fcntl, json, os, subprocess, sys
+request = json.load(sys.stdin)
+receipt = os.path.expanduser(request['receipt'])
+directory = os.path.dirname(receipt)
+os.makedirs(directory, mode=0o700, exist_ok=True)
+os.chmod(directory, 0o700)
+def save(ownership):
+    temporary = receipt + '.tmp'
+    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, 'w') as output:
+        json.dump({'move_id': request['move_id'], 'attempt': request['attempt'], 'ownership': ownership}, output)
+        output.flush()
+        os.fsync(output.fileno())
+    os.replace(temporary, receipt)
+with open(os.path.join(os.path.dirname(directory), '.move-expose.lock'), 'a') as lock:
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        save('absent')
+        sys.stderr.write('another move is exposing this target; retry after it finishes\\n')
+        sys.exit(4)
+    save('pending')
+    result = subprocess.run([sys.executable, '-m', 'pseudolife_memory.cli', 'expose', 'tailscale', '--yes', '--json'],
+                            cwd=os.path.expanduser(request['checkout']), capture_output=True, text=True)
+    try:
+        reply = json.loads(result.stdout)
+    except ValueError:
+        reply = {}
+    state = reply.get('state') if isinstance(reply, dict) else None
+    ownership = ('owned' if result.returncode == 0 and state == 'exposed' else
+                 'borrowed' if state == 'already_exposed' else
+                 'absent' if result.returncode in (2, 4) else 'unknown')
+    save(ownership)
+    sys.stdout.write(result.stdout)
+    sys.stderr.write(result.stderr)
+sys.exit(result.returncode)
 """
 # Where a client on the target may hold a token (``grep -lsF`` reads the
 # tokens from stdin; a path that does not exist is skipped).
@@ -459,6 +499,7 @@ class Options:
     target: str
     checkout: str = DEFAULT_CHECKOUT
     target_url: str | None = None
+    expose_target: bool = False
     keep_tokens: bool = True
     resume: bool = False
     dry_run: bool = False
@@ -486,7 +527,7 @@ class MoveInterrupted(BaseException):
 # What the rollback must undo, in the order the move sets them; each flip
 # is written to the move record with the manual rollback beside it.
 FLAGS = ("target_timer_paused", "target_policy_paused", "schedule_paused", "source_stopped", "fenced",
-         "target_quiesced",
+         "target_quiesced", "exposed_now", "expose_pending",
          "marker_written", "target_restored", "gate_written", "env_backup", "env_written", "target_started",
          "source_policy_changed", "moved_written")
 
@@ -532,6 +573,7 @@ class Mover:
         self.target_timer_enabled = False
         self.target_db, self.target_user = "pseudolife_memory", "pseudolife"
         self.target_url: str | None = None
+        self.expose_attempt: str | None = None
         self.needs_expose = False
         self.sizes: dict = {"database": None, "data": None}
         self.stored_principals: list[str] = []
@@ -541,7 +583,6 @@ class Mover:
         self.board = {"leases": None, "mail": None}
         for flag in FLAGS:
             setattr(self, flag, None if flag == "env_backup" else False)
-        self.exposed_now = False
         self.data = {"move_id": self.move_id, "dry_run": options.dry_run, "source": {}, "target": {},
                      "plan": [], "steps": [], "rollback": [], "report": {}, "connect": None,
                      "warnings": [], "error": None, "exit": None}
@@ -617,6 +658,10 @@ class Mover:
     @property
     def env_path(self) -> str:
         return f"{self.checkout}/ops/.env"
+
+    @property
+    def exposure_receipt(self) -> str:
+        return f"{self.remote_dir}/expose.json"
 
     def mark(self, **flags) -> None:
         """Flip progress flags and write them to the move record at once:
@@ -933,6 +978,19 @@ class Mover:
             self.target_url = url
         elif state == "not-exposed":
             self.needs_expose = True
+            if self.o.resume:
+                # expose requires a healthy local daemon. Resolve its future
+                # URL without creating the serve while the target is gated.
+                from ipaddress import IPv4Address
+                result = self.ssh("tailscale ip -4", timeout=60)
+                try:
+                    ip = IPv4Address(result.text.strip()) if result.ok else None
+                except ValueError:
+                    ip = None
+                if ip is None:
+                    raise self.refuse("the resumed target has no readable Tailscale IPv4 address: "
+                                      "pass --target-url <an existing reachable URL> and retry")
+                self.target_url = f"http://{ip}:8765"
         else:
             raise self.refuse(f"could not read the target's exposure (`pseudolife-mcp expose status` there: "
                               f"{result.why()}); pass --target-url <the URL clients will use>, or update the "
@@ -1016,9 +1074,10 @@ class Mover:
             f"target: {o.target}, checkout {self.checkout}"
             + (f" (--resume: over move {self.move_id}'s half-restored bank)" if o.resume else ""),
             f"target URL: {url}" if url else
-            "target URL: not exposed yet; step 3 runs `pseudolife-mcp expose tailscale --yes` there",
+            "target URL: not exposed yet; step 3 needs --expose-target or separate interactive consent",
             "1. preflight: done, nothing changed",
-            ("3. expose the target (pseudolife-mcp expose tailscale --yes on the target), then check this host "
+            ("3. expose the target with separate consent (pseudolife-mcp expose tailscale --yes on the target), "
+             "then check this host "
              "reaches <its URL>/health") if self.needs_expose else
             (f"3. the target daemon is stopped (--resume): {url}/health is checked after step 9 starts it"
              if o.resume else f"3. check this host reaches {url}/health"),
@@ -1042,7 +1101,8 @@ class Mover:
             f"write {MOVED} into it",
             f"10. re-point this machine's clients: pseudolife-mcp connect {url or '<target URL>'} --yes",
             "11. report: the rollback, other machines' connect lines, held leases, undelivered mail, leftovers",
-            "a failure in steps 4-9 rolls back: target stopped, its ops/.env and schedule restored, the fence "
+            "a failure in steps 3-9 rolls back: new target exposure removed, target stopped, its ops/.env and "
+            "schedule restored, the fence "
             f"lifted, {MOVED} removed, the source's restart policy and schedule restored, the source started",
             "run it under tmux, screen or nohup: a closed terminal or a kill signal rolls the move back",
         ]
@@ -1052,6 +1112,14 @@ class Mover:
             self.say(f"  {line}")
 
     def confirm(self) -> None:
+        if self.needs_expose and not self.o.expose_target:
+            if self.o.yes or not self.interactive():
+                raise self.refuse("creating a persistent target tailnet serve needs separate consent: "
+                                  "pass --expose-target, or --target-url <an existing reachable URL>; "
+                                  "--yes confirms only the bank move")
+            if not self.ask("Create a persistent Tailscale serve on the target for this bank? [y/N] "):
+                raise MoveError("target exposure was not confirmed; pass --target-url <an existing reachable "
+                                "URL> to move without creating a serve. Nothing was changed", EXIT_USAGE)
         if self.o.yes:
             return
         if not self.interactive():
@@ -1077,6 +1145,9 @@ class Mover:
                       "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                       "flags": {flag: getattr(self, flag) for flag in FLAGS},
                       "target_state_backup": self.data.get("target", {}).get("state_backup"),
+                      "target_exposure_receipt": self.exposure_receipt if self.expose_pending or self.exposed_now
+                                                 else None,
+                      "target_exposure_attempt": self.expose_attempt,
                       "manual_rollback": self.manual_rollback()}
             temporary = self.local_dir / "record.json.tmp"
             temporary.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
@@ -1112,8 +1183,6 @@ class Mover:
     def execute(self) -> int:
         self.recording = True
         self.write_record("started")
-        self.expose_and_reach()
-        self.phase_code = EXIT_FAILED
         previous = {}
         for sig in _SIGNALS:
             if sig is signal.SIGINT:
@@ -1124,6 +1193,8 @@ class Mover:
                 pass
         try:
             try:
+                self.expose_and_reach()
+                self.phase_code = EXIT_FAILED
                 self.write_record("moving")
                 self.stop_source()
                 self.final_backup()
@@ -1147,7 +1218,7 @@ class Mover:
                                    "overwrite that half-restored bank on the next attempt" if self.target_restored
                                    else "the target's original bank was preserved")
                     raise MoveError(f"{reason}. Rolled back: the source daemon runs again; {target_note}",
-                                    EXIT_FAILED) from None
+                                    self.phase_code) from None
                 left = "; ".join(f"{s['step']}" + (f" ({s['detail'][:200]})" if s.get("detail") else "")
                                  for s in self.data["rollback"] if not s.get("ok"))
                 raise MoveError(f"{reason}. The rollback is INCOMPLETE: {left}. See the rollback steps, and the move "
@@ -1168,18 +1239,46 @@ class Mover:
             code = EXIT_PARTIAL
         return code
 
-    def expose_and_reach(self) -> None:
+    def settle_exposure(self) -> bool:
+        """Only a remote creation result establishes ownership; intent cannot."""
+        result = self.ssh(f"cat {rq(self.exposure_receipt)}", timeout=60)
+        try:
+            receipt = json.loads(result.text) if result.ok else None
+        except ValueError:
+            receipt = None
+        if (not isinstance(receipt, dict) or receipt.get("move_id") != self.move_id or not self.expose_attempt
+                or receipt.get("attempt") != self.expose_attempt):
+            return False
+        ownership = receipt.get("ownership")
+        if ownership not in ("owned", "borrowed", "absent"):
+            return False
+        self.mark(expose_pending=False, exposed_now=ownership == "owned")
+        return True
+
+    def expose_and_reach(self, *, after_start: bool = False) -> None:
         o = self.o
+        if o.resume and self.needs_expose and not after_start:
+            self.step("--resume: target exposure waits until its daemon has started")
+            return
         if self.needs_expose:
             self.step(f"exposing the target: pseudolife-mcp expose tailscale --yes on {o.target}")
-            result = self.ssh(f"cd {rq(self.checkout)} && python3 -m pseudolife_memory.cli expose tailscale "
-                              f"--yes --json", timeout=300)
+            # Intent and ownership are separate: the remote receipt survives
+            # a lost ssh reply and distinguishes a new serve from a no-op.
+            self.expose_attempt = secrets.token_hex(8)
+            self.mark(expose_pending=True)
+            request = {"move_id": self.move_id, "attempt": self.expose_attempt,
+                       "checkout": self.checkout, "receipt": self.exposure_receipt}
+            result = self.ssh(f"python3 -c {shlex.quote(_EXPOSE_TARGET)}",
+                              stdin=json.dumps(request).encode(), timeout=300)
+            if not self.settle_exposure():
+                raise MoveError("could not attribute the target serve to this move; inspect "
+                                f"{self.exposure_receipt} and pseudolife-mcp expose status on {o.target} "
+                                "before removing any forward", EXIT_REFUSED)
             if not result.ok:
                 raise MoveError(f"`pseudolife-mcp expose tailscale` on {o.target} failed (exit {result.code}: "
                                 f"{result.why()}). Configure Tailscale there and retry, or pass "
                                 f"--target-url <the reachable URL clients will use> to use another connection. "
                                 f"The source still runs", EXIT_REFUSED)
-            self.exposed_now = True
             state, url = parse_expose_status(result.text)
             if state != "exposed":
                 again = self.ssh(f"cd {rq(self.checkout)} && python3 -m pseudolife_memory.cli expose status "
@@ -1195,11 +1294,9 @@ class Mover:
             return
         health = self.runner.get_json(f"{self.target_url}/health", timeout=10.0)
         if not isinstance(health, dict) or health.get("status") != "ok":
-            undo = (f" The target stays exposed (`pseudolife-mcp expose off` on {o.target} undoes it)."
-                    if self.exposed_now else "")
             raise MoveError(f"this host cannot reach {self.target_url}/health: the URL clients will use must "
                             f"answer from here before the source stops. Nothing in either bank was changed; "
-                            f"the source still runs.{undo}", EXIT_REFUSED)
+                            f"the source still runs", EXIT_REFUSED)
         self.step(f"this host reaches {self.target_url}/health")
 
     def stop_source(self) -> None:
@@ -1551,6 +1648,8 @@ class Mover:
         result = self.ssh(f"cd {rq(self.checkout)} && bash ops/update.sh", timeout=_TIMEOUT_LONG)
         if not result.ok:
             raise MoveError(f"ops/update.sh on the target failed ({result.why()})")
+        if self.o.resume and self.needs_expose:
+            self.expose_and_reach(after_start=True)
         bank = self.wait_target()
         if bank != self.source_bank:
             raise MoveError(f"the target reports bank {bank}, not this bank's {self.source_bank}: it is not "
@@ -1621,6 +1720,21 @@ class Mover:
 
         self.say("==> rolling back")
         complete, can_start, gate_missing = True, True, False
+        if self.expose_pending:
+            def resolve_exposure():
+                if self.settle_exposure():
+                    return Result(0)
+                return Result(1, err=(f"ownership unknown: inspect {self.exposure_receipt} and run "
+                                      f"pseudolife-mcp expose status on {self.o.target}; "
+                                      "no unowned serve was removed").encode())
+            complete = attempt("resolve the target exposure ownership", resolve_exposure)
+        if self.exposed_now:
+            if attempt("undo the target expose (pseudolife-mcp expose off --yes)",
+                       lambda: self.ssh(f"cd {rq(self.checkout)} && python3 -m pseudolife_memory.cli "
+                                        "expose off --yes --json", timeout=300)):
+                self.mark(exposed_now=False)
+            else:
+                complete = False
 
         def blocked(reason: str) -> bool:
             log.append({"step": "the source stays stopped: two daemons must never serve one bank", "ok": False,
@@ -1772,6 +1886,11 @@ class Mover:
             lines.append(f"ssh {t} docker start {DAEMON}")
         if self.moved_written:
             lines.append(f"pseudolife-mcp connect {SOURCE_URL} --yes")
+        if self.exposed_now:
+            lines.append(f'ssh {t} "cd {rq(self.checkout)} && python3 -m pseudolife_memory.cli expose off --yes"')
+        elif self.expose_pending:
+            lines.append(f"ssh {t} cat {rq(self.exposure_receipt)}")
+            lines.append(f'ssh {t} "cd {rq(self.checkout)} && python3 -m pseudolife_memory.cli expose status --json"')
         return lines
 
     # -- 10. re-point --------------------------------------------------------
@@ -1966,7 +2085,9 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--resume", action="store_true",
                         help="overwrite the half-restored bank an earlier attempt of this move left on the target")
     parser.add_argument("--dry-run", action="store_true", help="show the plan; change nothing")
-    parser.add_argument("--yes", action="store_true", help="move without asking")
+    parser.add_argument("--expose-target", action="store_true",
+                        help="consent to creating a persistent Tailscale serve on the target if needed")
+    parser.add_argument("--yes", action="store_true", help="confirm the bank move (exposure needs --expose-target)")
     parser.add_argument("--json", action="store_true", help="one JSON report on stdout")
     return parser
 
@@ -1985,6 +2106,7 @@ def main(argv: list[str] | None = None) -> int:
                   "query or credentials)", file=sys.stderr)
             return EXIT_USAGE
     options = Options(target=args.to, checkout=args.target_checkout, target_url=args.target_url,
+                      expose_target=args.expose_target,
                       keep_tokens=not args.no_keep_tokens, resume=args.resume, dry_run=args.dry_run,
                       yes=args.yes, as_json=args.json)
     if not args.to or args.to.startswith("-") or any(ch.isspace() for ch in args.to):
