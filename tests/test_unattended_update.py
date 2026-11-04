@@ -470,8 +470,7 @@ def test_a_client_machine_already_on_the_daemons_release_has_nothing_to_do(world
 
 def test_a_client_machine_never_guesses_a_release_when_the_daemon_is_silent(world, board, clients, monkeypatch,
                                                                             tmp_path, capsys):
-    """Attended, a silent daemon falls back to the newest release; the
-    unattended run must not move past a daemon it cannot see."""
+    """A client run must not move past a daemon it cannot see."""
     _client(world, monkeypatch, daemon=None)
     world.pypi = "0.16.0"
     assert up.main(["--unattended", "--daemon-url", REMOTE]) == 2

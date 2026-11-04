@@ -1254,12 +1254,14 @@ def test_a_client_only_machine_updates_its_clients_to_the_daemons_release(world,
     assert not any(c[1:4] == ["-m", "pip", "install"] for c in world.calls)
 
 
-def test_a_client_only_machine_takes_the_newest_release_when_the_daemon_is_silent(world, clients, monkeypatch):
+@pytest.mark.parametrize("flags", [[], ["--clients-only"], ["--clients-only", "--tag", "0.16.0"]])
+@pytest.mark.parametrize("health", [None, {"status": "ok"}, {"status": "ok", "version": ""}])
+def test_a_client_only_machine_never_guesses_release_when_daemon_url_is_stale(world, clients, monkeypatch, capsys, flags, health):
     _on_a_shim_runtime(monkeypatch)
-    world.health = []
+    world.health = [health]
     world.pypi = "0.16.0"
-    assert _run(["--clients-only"]) == 0
-    assert clients[0]["source"] == "pseudolife-mcp==0.16.0" and clients[0]["daemon_digest"] is None
+    assert _run(flags) == 2
+    assert clients == [] and "--daemon-url" in capsys.readouterr().err
 
 
 def test_a_client_machine_whose_docker_this_user_cannot_use_still_updates_its_clients(world, clients, monkeypatch,
