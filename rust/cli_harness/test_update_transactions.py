@@ -286,6 +286,7 @@ if a[:1]==["inspect"]:
    out={"recreated_stopped":"exited","recreated_restarting":"restarting"}.get(s["failure"],"running") if s.get("deployed") else "running"
   elif "index .Config.Labels" in f: out=s.get("setup_engine","python")
   elif "Labels" in f: out=json.dumps(s["running"]["Config"]["Labels"])
+  elif "Config.Env" in f: out=json.dumps(s["running"]["Config"]["Env"])
   elif "|" in f: out=s["running"]["Image"]+"|"+s["running"]["Config"]["Image"]
   else: out=s["running"]["Id"]
  else: out=json.dumps([s["running"]])
