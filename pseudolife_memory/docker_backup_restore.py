@@ -183,6 +183,12 @@ class DockerBank:
             raise up.UpdateError("the database selector is invalid; name its literal database with --db "
                                  "and retry. Nothing was restored", 2) from None
 
+    def _socket_error(self, output):
+        reason = output.lower()
+        if "socket" in reason and ("no such file" in reason or "connection refused" in reason):
+            raise up.UpdateError(f"PostgreSQL's local socket is unavailable on port {self.db_port}; "
+                                 "name the selected container's server port with --db-port <port> and retry", 2)
+
     def psql(self, database: str, *args):
         # The container is the target authority. Inherited libpq address or
         # service settings must never redirect a backup or destructive query.
@@ -190,10 +196,8 @@ class DockerBank:
                                     "psql", "-X", "-h", "/var/run/postgresql", "-p", str(self.db_port),
                                     "-U", self.user, "-d", self._database_arg(database), *args, check=False)
         if code:
-            reason = output.lower()
-            if code == 2 and "socket" in reason and ("no such file" in reason or "connection refused" in reason):
-                raise up.UpdateError(f"PostgreSQL's local socket is unavailable on port {self.db_port}; "
-                                     "name the selected container's server port with --db-port <port> and retry", 2)
+            if code == 2:
+                self._socket_error(output)
             raise up.UpdateError(f"PostgreSQL failed inside {self.pg}; check docker logs {self.pg} before retrying")
         return code, output
 
@@ -278,9 +282,12 @@ class DockerBank:
         state_tmp = f"/tmp/pl_state-{stamp}.tgz"
         try:
             if include_database:
-                self.command("exec", self.pg, "sh", "-c",
+                code, output = self.command("exec", self.pg, "sh", "-c",
                              'unset PGHOSTADDR PGSERVICE PGSERVICEFILE; pg_dump --no-owner --no-acl -h "$1" -p "$2" -U "$3" -d "$4" -Z9 > "$5"',
-                             "_", "/var/run/postgresql", str(self.db_port), self.user, self._database_arg(self.db), remote)
+                             "_", "/var/run/postgresql", str(self.db_port), self.user, self._database_arg(self.db), remote, check=False)
+                if code:
+                    self._socket_error(output)
+                    raise up.UpdateError(f"PostgreSQL backup failed inside {self.pg}; check docker logs {self.pg} before retrying")
                 copy_from_container(self.docker, f"{self.pg}:{remote}", dump_part)
                 if not up._dump_complete(dump_part):
                     raise up.UpdateError("the database dump is incomplete; retry backup before restoring anything")
