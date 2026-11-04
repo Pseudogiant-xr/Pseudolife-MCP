@@ -55,8 +55,8 @@ MAX_ITEMS items, which would not fit one job's time budget.
 Subcommands: ``plan`` checks the inputs and
 lists the iterations, ``archive`` builds a cargo selection's archive,
 ``run`` runs one iteration and writes its row, ``report`` joins the rows
-into stress-report.json and fails unless every iteration passed in the same
-run attempt.
+into stress-report.json and fails unless every iteration passed, allowing
+one verified setup-only retry per iteration when job history is supplied.
 """
 
 from __future__ import annotations
@@ -627,14 +627,23 @@ def report(options) -> int:
     table = [rows.get(i, {"iteration": i, "outcome": "no result", "exit_code": None, "seconds": None,
                           "runner": {}}) for i in range(1, count + 1)]
     passed = sum(row["outcome"] == "pass" for row in table)
-    # "Re-run failed jobs" replaces a failed iteration's row with the retry's:
-    # rows from different attempts hide a failure, so they never count.
+    # Artifact rows alone cannot explain what a rerun replaced. Mixed
+    # attempts require API evidence that the replaced job never ran a test.
     attempts = sorted({row["attempt"] for row in table if "attempt" in row})
     mixed = len(attempts) > 1
+    history = None
+    if options.job_history:
+        from stress_history import assess
+        try:
+            document = json.loads(Path(options.job_history).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            document = None
+        history = assess(document, table, options.os)
     summary = {"selection": options.selection.strip(), "os": options.os, "iterations": count,
                "passed": passed, "failed": sum(row["outcome"] == "fail" for row in table),
                "no_result": sum(row["outcome"] == "no result" for row in table),
-               "attempts": attempts, "clean": passed == count and not mixed, "rows": table}
+               "attempts": attempts, "clean": passed == count and (history["clean"] if history else not mixed),
+               **({"job_history": history} if history else {}), "rows": table}
     # Several rows or scenarios: each item's own tally, so a failing one is named.
     kind, names = parse(options.selection)
     labels = [f"{kind}:{name}" for name in names] if kind in ITEM_KINDS and len(names) > 1 else []
@@ -648,7 +657,12 @@ def report(options) -> int:
     lines = [f"### Stress: {summary['selection']} on {options.os}",
              f"{passed} of {count} iterations passed."]
     lines += [f"- {label}: {tally['passed']} of {count} iterations passed" for label, tally in items.items()]
-    if mixed:
+    if history:
+        lines += [history["reason"], "", "| Iteration | Attempt | Job | Outcome | Cause |",
+                  "| --- | --- | --- | --- | --- |"]
+        lines += [f"| {job['iteration']} | {job['attempt']} | {job['job_id']} | {job['outcome']} | {job['cause']} |"
+                  for job in history["jobs"]]
+    elif mixed:
         lines.append(f"Not clean: rows come from run attempts {attempts}; a re-run of failed jobs "
                      "replaced at least one failure. Dispatch a new loop.")
 
@@ -696,6 +710,7 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--rows", required=True)
     s.add_argument("--out", required=True)
     s.add_argument("--summary")
+    s.add_argument("--job-history", help="jobs API history for every attempt; required to accept a setup-only retry")
     options = parser.parse_args(argv)
     return {"plan": plan, "archive": archive, "run": run, "report": report}[options.action](options)
 

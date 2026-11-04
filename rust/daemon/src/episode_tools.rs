@@ -19,7 +19,6 @@ use crate::service::Ready;
 
 /// `episode_summary` serves at most this many recent entries.
 const RECENT_CAP: usize = 20;
-const HANDLE_WARNING: &str = "unknown or closed episode handle";
 
 pub fn mcp_tools() -> Vec<(&'static str, ToolFn)> {
     vec![
@@ -101,7 +100,8 @@ async fn episode_start(
     let mut ws = ready.write.lock().await;
     let client = ready.storage.client();
     let resolved = ws.resolve_handle(client, handle.as_deref()).await;
-    let warning = handle.is_some() && resolved.is_none();
+    let warning = (handle.is_some() && resolved.is_none())
+        .then(|| ws.handle_warning(handle.as_deref(), caller));
     let (parent, key) = match resolved {
         Some((root, key)) if !crate::mutants::active("mcp-episode-start-no-anchor") => {
             let parent = ws
@@ -121,8 +121,8 @@ async fn episode_start(
     let i = ws.log.start_nested(title, hint, key, parent);
     ws.persist_episodes(client).await;
     let mut out = episode_dict(&ws.log.episodes[i]);
-    if warning {
-        out.insert("episode_warning".into(), json!(HANDLE_WARNING));
+    if let Some(warning) = warning {
+        out.insert("episode_warning".into(), json!(warning));
     }
     Ok(Value::Object(out))
 }
@@ -154,7 +154,7 @@ async fn episode_end(
     let client = ready.storage.client();
     if let Some(h) = handle {
         let Some((root, key)) = ws.resolve_handle_with(client, Some(&h), false).await else {
-            return Ok(json!({"closed": null, "reason": HANDLE_WARNING}));
+            return Ok(json!({"closed": null, "reason": ws.handle_warning(Some(&h), caller)}));
         };
         let Some(leaf) = ws.log.open_subtree_leaf(&root, key.as_deref()) else {
             return Ok(json!({}));
@@ -241,7 +241,10 @@ async fn retitle_session(
         i
     } else {
         if handle.is_some() {
-            return Ok((json!({"ok": false, "reason": HANDLE_WARNING}), None));
+            return Ok((
+                json!({"ok": false, "reason": ws.handle_warning(handle.as_deref(), caller)}),
+                None,
+            ));
         }
         let key = ws.resolve_session(caller).map_err(ToolError::Invalid)?;
         let Some(key) = key.filter(|k| !k.is_empty()) else {

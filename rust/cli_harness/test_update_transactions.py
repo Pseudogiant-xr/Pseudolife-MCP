@@ -287,14 +287,15 @@ if a[:1]==["inspect"]:
   elif "index .Config.Labels" in f: out=s.get("setup_engine","python")
   elif "Labels" in f: out=json.dumps(s["running"]["Config"]["Labels"])
   elif "|" in f: out=s["running"]["Image"]+"|"+s["running"]["Config"]["Image"]
+  elif f=="{{json .}}":out=json.dumps(s["running"])
   else: out=s["running"]["Id"]
- else: out=json.dumps([s["running"]])
+ else: out=json.dumps([s["running"]] if a[-1]!="fixture-pg" else [{"Name":"/fixture-pg","NetworkSettings":{"Networks":{"fixture":{"Aliases":["pseudolife-pg"]}}}}])
 elif a[:2]==["image","inspect"]:
  if "Created" in " ".join(a): out="2026-01-01|"+s["images"].get(a[-1],s["running"]["Image"])
  elif a[-1] in s["images"]: out=s["images"][a[-1]]
  else: code=1
 elif a[:2]==["image","ls"]: out="\n".join(s["images"]) if s.get("list_images") else ""
-elif a[:1]==["port"]:out="127.0.0.1:5433"
+elif a[:1]==["port"]:out="127.0.0.1:9876" if a[-1]=="8765/tcp" else "127.0.0.1:5433"
 elif a[:2]==["volume","inspect"]:
  if s.get("volume_inspect_failure"):code=1
  else:out=json.dumps(s.get("volume_inspections",{}).get(a[-1],[]))
@@ -432,6 +433,7 @@ def host(tmp_path, failure="", mode="release"):
     state_path = home / "fixture-state.json"
     state = {"calls": [], "deployed": False, "failure": failure, "images": {"pseudolife-daemon:0.21.0": "sha256:validated"},
              "running": {"Id": "fixture-daemon", "Image": "sha256:validated", "State": {"Running": True},
+                         "NetworkSettings": {"Networks": {"fixture": {"Aliases": ["pseudolife-pg"]}}},
                          "Mounts": [{"Destination": "/data", "Name": "fixture-state", "Type": "volume", "RW": True}],
                          "Config": {"Image": "pseudolife-daemon:0.21.0", "Labels": None,
                                     "Env": ["PSEUDOLIFE_MCP_DATABASE_URL=postgresql://fixture:fixture@pseudolife-pg:5432/fixture"]}}}
@@ -838,6 +840,9 @@ def test_release_fault_chronology_and_no_client_movement(tmp_path, native, failu
         observed = stages(json.loads(state_path.read_text()))
         assert observed == (["pull"] if failure == "pull" else ["pull", "backup"] if failure == "backup" else ["pull", "backup", "tag", "up"])
         assert report["clients"] is None
+        if failure in ("health", "version"):
+            assert "--daemon-url http://127.0.0.1:9876" in result.stdout
+            assert "image setting won" not in result.stdout
         if failure not in ("pull", "backup"):
             assert report["rollback"]["state"] == "tagged"
 
