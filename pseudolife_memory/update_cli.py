@@ -1252,6 +1252,8 @@ class Update:
         """Compare the manager's persistent image with the release just
         deployed, excluding the overlay and tag used only by this update."""
         files = context["original_files"]
+        if not files:
+            return
         args = []
         values = iter(context["args"])
         for value in values:
@@ -1273,9 +1275,11 @@ class Update:
                 return None
 
         configured = image()
+        if not isinstance(configured, str) or "@" in configured:
+            return
         old = configured.rsplit(":", 1)[-1] if isinstance(configured, str) else ""
         before, after = version_key(old), version_key(target)
-        if not before or not after or before >= after:
+        if not plain_release(old) or not before or not after or before >= after:
             return
         raw = image("--no-interpolate")
         tag_variable = (re.escape(GHCR_IMAGE) +
@@ -1286,8 +1290,10 @@ class Update:
                 fix += " (the manager's environment, or " + str(context["env_file"][-1]) + " for Compose)"
         else:
             fix = f"set services.{DAEMON_SERVICE}.image: {GHCR_IMAGE}:{target} in {files[-1]}"
-        self.warn(f"the stack configuration still pins {old}; before the next manager redeploy, {fix} "
-                  "to keep the deployed release and avoid an older image on the newer-schema bank")
+        when = ("if the next manager redeploy omits the updater overlay" if context["image_pin_overlay_masked"]
+                else "before the next manager redeploy")
+        self.warn(f"a saved compose configuration still pins {old}; {when}, {fix} "
+                  "to keep the deployed release after any schema upgrade")
 
     def console_notes(self, health: dict | None) -> None:
         """After a healthy deploy, two lines a user may need and nothing
@@ -1409,8 +1415,17 @@ class Update:
                         if p.with_name("docker-compose.ghcr.yml").is_file()), None) or self._bundled("docker-compose.ghcr.yml")
         files = existing + ([overlay] if overlay not in existing else [])
         args = ["-p", project] + self._compose_args(files, env_files)
+        original = existing
+        # An earlier update can leave its cached overlay in Compose's labels.
+        # Preserve the package's complete base/overlay pair for ordinary
+        # release installs. Legacy ownership is otherwise unclear,
+        # so that hint is conditional on the manager omitting this overlay.
+        cached = data_dir() / "compose"
+        if not any(p.resolve() == (cached / "docker-compose.yml").resolve() for p in existing):
+            original = [p for p in existing if p.resolve() != (cached / "docker-compose.ghcr.yml").resolve()]
         return {"args": args, "env_file": env_files, "checkout": checkout,
-                "files": [str(p) for p in files], "project": project, "original_files": [str(p) for p in existing]}
+                "files": [str(p) for p in files], "project": project, "original_files": [str(p) for p in original],
+                "image_pin_overlay_masked": len(original) != len(existing)}
 
     def _bundled(self, name: str) -> Path:
         target = data_dir() / "compose" / name
