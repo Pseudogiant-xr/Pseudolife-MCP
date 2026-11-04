@@ -114,7 +114,7 @@ def test_dump_failure_does_not_echo_connection_diagnostics(monkeypatch, tmp_path
     ("postgresql://custom@pseudolife-pg/postgresql%3A%2F%2Felsewhere", {}, ("custom", "postgresql://elsewhere", 5432)),
     ("host=pseudolife-pg user=custom dbname='bank with spaces'", {}, ("custom", "bank with spaces", 5432)),
     ("host=pseudolife-pg user=custom dbname='bank\\'quote'", {}, ("custom", "bank'quote", 5432)),
-    ("", {"PGHOST": "pseudolife-pg", "PGUSER": "runtime"}, ("runtime", "runtime", 5432)),
+    ("postgresql://", {"PGHOST": "pseudolife-pg", "PGUSER": "runtime"}, ("runtime", "runtime", 5432)),
     ("host=pseudolife-pg user=custom hostaddr=10.0.0.2", {}, ("custom", "custom", 5432)),
     ("host=pseudolife-pg user=custom", {"PGHOSTADDR": "10.0.0.2"}, ("custom", "custom", 5432)),
 ])
@@ -174,3 +174,18 @@ def test_connection_parse_error_does_not_disclose_the_source():
     with pytest.raises(ValueError) as error:
         up._backup_connection_details(config[up.DAEMON_CONTAINER], config[up.PG_CONTAINER])
     assert "private-fixture" not in str(error.value)
+
+
+@pytest.mark.parametrize("dsn", [None, ""])
+def test_file_mode_daemon_never_infers_a_database_from_ambient_libpq(monkeypatch, tmp_path, dsn):
+    config = containers(dsn or "", PGHOST="pseudolife-pg", PGUSER="ambient_role", PGDATABASE="ambient_bank")
+    daemon = config[up.DAEMON_CONTAINER]
+    daemon["Config"]["User"] = "misleading_role"
+    if dsn is None:
+        daemon["Config"]["Env"] = [item for item in daemon["Config"]["Env"]
+                                    if not item.startswith("PSEUDOLIFE_MCP_DATABASE_URL=")]
+    calls = fake_backup(monkeypatch, tmp_path, config)
+    with pytest.raises(up.UpdateError, match="PSEUDOLIFE_MCP_DATABASE_URL"):
+        up.Update(up.Options()).builtin_backup()
+    assert all(c[1] == "inspect" for c in calls)
+    assert not (tmp_path / "backups").exists()

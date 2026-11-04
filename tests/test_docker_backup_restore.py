@@ -677,7 +677,7 @@ def test_desktop_mount_mapping_keeps_safety_outside_state(docker_bank, tmp_path,
 
 
 @pytest.mark.parametrize("env,changes,expected", [
-    (["PGHOST=db", "PGUSER=runtime", "PGPORT=6543"], {}, ("runtime", "runtime", 6543)),
+    (["PSEUDOLIFE_MCP_DATABASE_URL=postgresql://", "PGHOST=db", "PGUSER=runtime", "PGPORT=6543"], {}, ("runtime", "runtime", 6543)),
     (["PSEUDOLIFE_MCP_DATABASE_URL=host=db"], {"User": "worker"}, ("worker", "worker", 5432)),
     (["PSEUDOLIFE_MCP_DATABASE_URL=host=db"], {"User": ""}, ("root", "root", 5432)),
 ])
@@ -711,3 +711,20 @@ def test_explicit_opaque_target_also_needs_its_port(docker_bank):
         DockerBank(container=up.PG_CONTAINER, db="bank", user="owner")
     bank = DockerBank(container=up.PG_CONTAINER, db="bank", user="owner", db_port=6543)
     assert (bank.user, bank.db, bank.db_port) == ("owner", "bank", 6543)
+
+
+@pytest.mark.parametrize("dsn", [None, ""])
+def test_file_mode_daemon_requires_explicit_standalone_target(docker_bank, tmp_path, dsn):
+    from pseudolife_memory.docker_backup_restore import DockerBank
+    _, world = docker_bank
+    world.daemon["Config"]["Env"] = ["PGHOST=db", "PGUSER=ambient_role", "PGDATABASE=ambient_bank"]
+    world.daemon["Config"]["User"] = "misleading_role"
+    if dsn is not None:
+        world.daemon["Config"]["Env"].append("PSEUDOLIFE_MCP_DATABASE_URL=" + dsn)
+    before = len(world.calls)
+    with pytest.raises(up.UpdateError, match="PSEUDOLIFE_MCP_DATABASE_URL"):
+        DockerBank()
+    assert all(call[0] == "inspect" for call in world.calls[before:])
+    assert not (tmp_path / "artifacts").exists()
+    bank = DockerBank(container=up.PG_CONTAINER, db="chosen_bank", user="chosen_role", db_port=6543)
+    assert (bank.user, bank.db, bank.db_port) == ("chosen_role", "chosen_bank", 6543)

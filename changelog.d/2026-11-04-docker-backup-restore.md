@@ -14,8 +14,10 @@
   defaults in the PostgreSQL container.
 - Automatic backup selection now follows the same runtime connection policy in
   standalone backup/restore and both update implementations, including daemon
-  environment defaults, non-default ports and literal database names. A host
-  address must be the selected PostgreSQL container's IP on a shared network.
+  environment defaults, non-default ports and literal database names. Automatic
+  inference requires a nonempty daemon database URL, since an absent URL selects
+  file mode even when libpq environment defaults exist. A host address must be
+  the selected PostgreSQL container's IP on a shared network.
   Opaque service profiles require a direct daemon connection; standalone
   backup/restore can instead deliberately override it with all four selectors:
   `--container`, `--db`, `--user` and `--db-port`.

@@ -1613,7 +1613,10 @@ def _backup_connection_values(daemon: dict, postgres: dict) -> tuple[str, str, i
         if key in env:
             raise ValueError("duplicate environment key")
         env[key] = value
-    parts = conninfo_to_dict(env.get("PSEUDOLIFE_MCP_DATABASE_URL") or "")
+    raw = env.get("PSEUDOLIFE_MCP_DATABASE_URL")
+    if not raw:
+        raise ValueError("the daemon has no PostgreSQL database URL")
+    parts = conninfo_to_dict(raw)
     if parts.get("service") or env.get("PGSERVICE"):
         raise UpdateError("cannot resolve the daemon's backup connection; replace PGSERVICE/service "
                           "with a direct PSEUDOLIFE_MCP_DATABASE_URL naming its PostgreSQL host, port, "
