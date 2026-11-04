@@ -3017,7 +3017,8 @@ done
 case "${MCP_CLAUDE:-}" in
     ""|skipped|failed) ;;
     *)
-        echo "Claude Code MCP registration file: ${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json"
+        echo "Claude Code user-profile MCP destination: ${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json"
+        echo "Project/local registrations may take precedence over this user-scope file."
         echo "MCP registration is per-profile; shared plugins or settings do not share memory tools."
         echo "To add another profile, rerun this installer with CLAUDE_CONFIG_DIR set to that profile's directory; unset CLAUDE_CONFIG_DIR for the default profile."
         ;;

@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.mark.parametrize("shell", ["bash", "pwsh"])
-@pytest.mark.parametrize("profile", ["default", "secondary", "failed"])
+@pytest.mark.parametrize("profile", ["default", "secondary", "failed", "project"])
 def test_registration_notice_names_only_the_selected_profile(tmp_path, shell, profile):
     executable = shutil.which(shell)
     if shell == "bash" and os.name == "nt":
@@ -31,7 +31,7 @@ def test_registration_notice_names_only_the_selected_profile(tmp_path, shell, pr
     env.pop("CLAUDE_CONFIG_DIR", None)
     if profile != "default":
         env["CLAUDE_CONFIG_DIR"] = selected.as_posix()
-    state = "failed" if profile == "failed" else "shim-env"
+    state = "failed" if profile == "failed" else "present-custom" if profile == "project" else "shim-env"
     setup = (f"HOME={shlex.quote(home.as_posix())}\nMCP_CLAUDE={state}\n" if shell == "bash"
              else f"$mcpState = @{{claude='{state}'}}\n")
     script = tmp_path / f"scope.{suffix}"
@@ -42,6 +42,7 @@ def test_registration_notice_names_only_the_selected_profile(tmp_path, shell, pr
     assert result.returncode == 0, result.stderr
     if profile == "failed":
         assert "MCP registration file:" not in result.stdout
+        assert "user-profile MCP destination:" not in result.stdout
         return
     target = (home if profile == "default" else selected) / ".claude.json"
     assert str(target).replace("\\", "/") in result.stdout.replace("\\", "/")
@@ -49,3 +50,6 @@ def test_registration_notice_names_only_the_selected_profile(tmp_path, shell, pr
     assert "shared plugins or settings do not share memory tools" in result.stdout
     assert "rerun this installer" in result.stdout
     assert "CLAUDE_CONFIG_DIR" in result.stdout
+    if profile == "project":
+        assert "user-profile MCP destination:" in result.stdout
+        assert "Project/local registrations may take precedence" in result.stdout
