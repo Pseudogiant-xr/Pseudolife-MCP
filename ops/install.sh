@@ -3167,6 +3167,18 @@ for selected_client in $CLIENTS; do
 done
 
 # ── 12. health ─────────────────────────────────────────────────────────────
+# >>> claude profile scope >>>
+case "${MCP_CLAUDE:-}" in
+    ""|skipped|failed) ;;
+    *)
+        echo "Claude Code user-profile MCP destination: ${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json"
+        echo "Project/local registrations may take precedence over this user-scope file."
+        echo "MCP registration is per-profile; shared plugins or settings do not share memory tools."
+        echo "To add another profile, rerun this installer with CLAUDE_CONFIG_DIR set to that profile's directory; unset CLAUDE_CONFIG_DIR for the default profile."
+        ;;
+esac
+# <<< claude profile scope <<<
+
 # >>> endpoint container probe >>>
 # A server named on this machine's loopback is written as host.docker.internal
 # (the extractor env block). Docker Desktop routes that name to this

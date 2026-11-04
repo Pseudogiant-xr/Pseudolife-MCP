@@ -332,7 +332,7 @@
       "lock-resolve": "83bcc6b654896c6d",
       "test": "ac414107d3d9c71d",
       "test-lite-linux": "44e2a8f2c01baeab",
-      "test-lite-windows": "8ffc934b59e52400",
+      "test-lite-windows": "8985a4f4238fee41",
       "test-lite-macos": "c4a0ad0c70bb205a",
       "frontend": "b1b6a1a1278f2e60"
     },
@@ -451,6 +451,21 @@
         "job": "test-lite-windows",
         "fingerprint": "8ffc934b59e52400",
         "reason": "Add bounded recorded-choice, Compose rerun and runtime-reuse regressions to the existing Windows installer lane; no new job or setup step."
+      },
+      {
+        "job": "test-lite-windows",
+        "fingerprint": "fdd232a6fa8ee551",
+        "reason": "Adds eight fixture-only Claude profile notice cases to the existing Python step. They take seconds in targeted runs, add no jobs, shards or dependency setup, and retain the measured baseline within unchanged limits pending the next batch measurement."
+      },
+      {
+        "job": "test-lite-windows",
+        "fingerprint": "7c3eb46156f5ec89",
+        "reason": "Mechanically combine the existing UTF-8 transport, unattended installer and Claude profile cases in the same Windows pytest step; no new job, setup step or retry."
+      },
+      {
+        "job": "test-lite-windows",
+        "fingerprint": "8985a4f4238fee41",
+        "reason": "Retain the existing rerun/runtime tests together with the merged installer UTF-8 and Claude profile coverage in one Windows step; no new job, setup step or retry."
       }
     ]
   }

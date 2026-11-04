@@ -444,9 +444,11 @@ pub(crate) fn schedule(update: &mut Update, when: &str) -> Result<()> {
         ));
     }
     if client && update.daemon_health().is_none() {
-        return Err(UpdateError::usage(
-            "this is a client machine, and the daemon did not answer /health; the scheduled run follows that daemon's release. Check --daemon-url and run --schedule again. Nothing was installed",
-        ));
+        return Err(UpdateError::usage(format!(
+            "this is a client machine, and the daemon at {} did not answer /health; the scheduled run follows that daemon's release. Check that the daemon is up. Nothing was installed. {}",
+            update.o.daemon_url,
+            super::client_rearm_hint(&format!("{hour:02}:{minute:02}"))
+        )));
     }
     let argv = command(&update.o.daemon_url)?;
     if !client {
@@ -505,6 +507,7 @@ pub(crate) fn schedule(update: &mut Update, when: &str) -> Result<()> {
     }
     if client {
         update.step(format!("the run moves this machine's clients to the release the daemon at {} runs, never past it; running sessions keep their runtime. The log is {}",update.o.daemon_url,seams::data_dir().join(LOG_NAME).display()));
+        update.step(super::client_rearm_hint(&format!("{hour:02}:{minute:02}")));
     } else {
         update.step(format!("the run applies a release only while updates.unattended_daemon is on in the daemon's config.yaml (off by default) and no session is active on the board; the log is {}",seams::data_dir().join(LOG_NAME).display()));
         update.step("its board notice needs its own principal: a PSEUDOLIFE_MCP_TOKENS entry token:<name> on the daemon, <name> in coordination.daemon_notice_principals and allowed_principals, and that token as this run's bearer; until then the notice is refused and the log is the only record");
@@ -631,6 +634,15 @@ pub(crate) fn unschedule(update: &mut Update) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn client_rearm_hint_uses_the_chosen_time_or_an_explicit_placeholder() {
+        let known = super::super::client_rearm_hint("07:05");
+        assert!(known.contains("pseudolife-mcp update --schedule 07:05 --daemon-url <new-url>"));
+        assert!(!known.contains("chosen daily time"));
+        let unknown = super::super::client_rearm_hint("HH:MM");
+        assert!(unknown.contains("pseudolife-mcp update --schedule HH:MM --daemon-url <new-url>"));
+        assert!(unknown.contains("your chosen daily time"));
+    }
     #[test]
     fn schedule_time_is_ascii_bounded_and_injection_safe() {
         for input in ["0:00", "03:30", " 23:59 "] {
