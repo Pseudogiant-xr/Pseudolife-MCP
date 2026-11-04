@@ -332,7 +332,7 @@
       "lock-resolve": "83bcc6b654896c6d",
       "test": "ac414107d3d9c71d",
       "test-lite-linux": "44e2a8f2c01baeab",
-      "test-lite-windows": "851aba0f450223ae",
+      "test-lite-windows": "7b21e54535e9e185",
       "test-lite-macos": "c4a0ad0c70bb205a",
       "frontend": "b1b6a1a1278f2e60"
     },
@@ -439,8 +439,13 @@
       },
       {
         "job": "test-lite-windows",
-        "fingerprint": "851aba0f450223ae",
-        "reason": "Add mocked Docker backup/restore safety cases to the existing Windows lite lane. The focused native selection completed in 1.68 seconds without new jobs, dependencies, process fixtures or setup steps; existing measured limits remain unchanged."
+        "fingerprint": "fdd232a6fa8ee551",
+        "reason": "Adds eight fixture-only Claude profile notice cases to the existing Python step. They take seconds in targeted runs, add no jobs, shards or dependency setup, and retain the measured baseline within unchanged limits pending the next batch measurement."
+      },
+      {
+        "job": "test-lite-windows",
+        "fingerprint": "7b21e54535e9e185",
+        "reason": "Accept the merged Windows lite lane with existing profile notice coverage and mocked Docker backup/restore coverage; no jobs, setup steps or dependencies were added and measured limits remain unchanged."
       }
     ]
   }
