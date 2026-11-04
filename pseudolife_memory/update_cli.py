@@ -808,16 +808,18 @@ class Update:
         older than seven days that match those names in that directory are
         rotated once the new pair is in place. No manifest, row-count gate
         or mirror: those stay with the checkout's ``ops/backup.*``."""
+        user, database = self._backup_connection()
         out_dir = data_dir() / "backups"
         out_dir.mkdir(parents=True, exist_ok=True)
         stamp = _stamp()
         dump = out_dir / f"pseudolife_memory-{stamp}.sql.gz"
         tmp = f"/tmp/pl_backup-{stamp}.sql.gz"
         code, out = run_cli([self.docker, "exec", PG_CONTAINER, "sh", "-c",
-                             f"pg_dump -U pseudolife -d pseudolife_memory -Z9 > {tmp}"], timeout=3600)
+                             f'unset PGHOSTADDR PGSERVICE PGSERVICEFILE; pg_dump -h /var/run/postgresql -p 5432 -U "$1" -d "$2" -Z9 > {tmp}',
+                             "sh", user, database], timeout=3600)
         if code != 0:
             run_cli([self.docker, "exec", PG_CONTAINER, "rm", "-f", tmp], timeout=120)
-            raise UpdateError(f"pg_dump failed inside {PG_CONTAINER} ({_last_line(out)}); nothing was deployed")
+            raise UpdateError(f"pg_dump failed inside {PG_CONTAINER}; check its PostgreSQL access; nothing was deployed")
         part = dump.with_name(dump.name + ".part")
         code, out = run_cli([self.docker, "cp", f"{PG_CONTAINER}:{tmp}", str(part)], timeout=3600)
         run_cli([self.docker, "exec", PG_CONTAINER, "rm", "-f", tmp], timeout=120)
@@ -842,6 +844,27 @@ class Update:
         if rotated:
             self.step(f"rotated {len(rotated)} backup file(s) older than 7 days")
         return {"dump": str(dump), "state": str(state) if state.is_file() else None, "rotated": rotated}
+
+    def _backup_connection(self) -> tuple[str, str]:
+        """Inspect even a stopped daemon: its environment is the connection authority."""
+        refused = ("cannot resolve the daemon's backup connection; set PSEUDOLIFE_MCP_DATABASE_URL "
+                   "in its container environment to an explicit PostgreSQL host, user and database "
+                   "on this project's PostgreSQL container (without a service indirection), then retry; nothing was deployed")
+        try:
+            objects = []
+            for container in (DAEMON_CONTAINER, PG_CONTAINER):
+                code, out = run_cli([self.docker, "inspect", "-f", "{{json .}}", container], timeout=60)
+                if code != 0:
+                    raise ValueError
+                value = json.loads(out)
+                # Accept the normal inspect array too, for command adapters.
+                objects.append(value[0] if isinstance(value, list) and len(value) == 1 else value)
+            return _backup_connection_parts(*objects)
+        except UpdateError:
+            raise
+        except Exception:
+            # Parsing errors can contain the DSN, including its password.
+            raise UpdateError(refused) from None
 
     def running_image(self) -> tuple[str | None, str | None]:
         """``(image id, image ref)`` of the daemon container, or Nones."""
@@ -916,6 +939,25 @@ class Update:
         """
         self.warn("rollback-tag retention skipped: Python rollback tags have no verified project scope; all tags retained")
 
+    def _health_endpoint_hint(self) -> str:
+        """Offer a published local endpoint only after verification failed."""
+        code, out = run_cli([self.docker, "port", DAEMON_CONTAINER, "8765/tcp"], timeout=60)
+        urls = set()
+        for line in out.splitlines() if code == 0 else ():
+            host, _, port = line.strip().rpartition(":")
+            if not port.isascii() or not port.isdigit() or len(port) > 5 or not 0 < int(port) <= 65535:
+                continue
+            if host in ("127.0.0.1", "0.0.0.0"):
+                urls.add(f"http://127.0.0.1:{int(port)}")
+            elif host in ("[::1]", "[::]"):
+                urls.add(f"http://[::1]:{int(port)}")
+        if urls:
+            url = sorted(urls)[0]
+            return (f"Docker reports a daemon publication at {url} on the Docker host. "
+                    "If Docker runs on this machine and this is the intended daemon, "
+                    f"retry with --daemon-url {url}; otherwise check your proxy/custom endpoint.")
+        return "Check --daemon-url http(s)://<host>:<port> for the intended daemon or proxy endpoint."
+
     def wait_health(self, expect_version: str | None = None) -> dict:
         self.step("waiting for the daemon to report healthy...")
         health = None
@@ -927,7 +969,8 @@ class Update:
             if attempt < self.o.health_retries - 1:
                 sleep(self.o.health_delay_ms / 1000.0)
         if not health:
-            lines = ["daemon did not report healthy. Logs: docker logs " + DAEMON_CONTAINER, "to roll back:"] + self.rollback_lines
+            lines = ["daemon did not report healthy at the configured endpoint. Logs: docker logs " + DAEMON_CONTAINER,
+                     self._health_endpoint_hint(), "to roll back:"] + self.rollback_lines
             if self.rollback_lines:
                 lines += self._schema_rollback_note(None)
             raise UpdateError("\n".join(lines))
@@ -938,9 +981,10 @@ class Update:
             self.rollback_lines = self.rollback_lines + self._schema_rollback_note(after)
             self.report.rollback["restore_required"] = True
         if expect_version and health.get("version") != expect_version:
-            lines = [f"the daemon reports version {health.get('version')}, not the {expect_version} that was pulled: "
-                     f"the compose project's image setting won (check `docker compose config` for the daemon "
-                     f"service). The client side was not moved. To roll back:"] + self.rollback_lines
+            lines = [f"the configured endpoint reports version {health.get('version')}, not the {expect_version} that was pulled. "
+                     "The client side was not moved.", self._health_endpoint_hint(),
+                     "If the endpoint is correct, check `docker compose config` for the daemon service's image. "
+                     "To roll back:"] + self.rollback_lines
             raise UpdateError("\n".join(lines))
         if type(self.auth_before) is bool and (type(health.get("auth")) is not bool
                                                or health["auth"] != self.auth_before):
@@ -1304,12 +1348,60 @@ class Update:
             raise UpdateError("daemon recreate failed" + (f" ({_last_line(out)})" if out.strip() else "")
                               + "\nto roll back:\n" + "\n".join(self.rollback_lines))
         health = self.wait_health(expect_version=target)
+        self.image_pin_hint(context, target)
         if not self.o.daemon_only:
             self.clients(None, f"pseudolife-mcp=={target}", health)
         else:
             self.hooks_changed_note(previous_digest, health)
         self.console_notes(health)
         # No cache prune: nothing was built.
+
+    def image_pin_hint(self, context: dict, target: str) -> None:
+        """Compare the manager's persistent image with the release just
+        deployed, excluding the overlay and tag used only by this update."""
+        files = context["original_files"]
+        if not files:
+            return
+        args = []
+        values = iter(context["args"])
+        for value in values:
+            if value == "-f":
+                path = next(values)
+                if path in files:
+                    args += [value, path]
+            else:
+                args.append(value)
+        env = compose_environment(context["env_file"])
+        env.pop("PSEUDOLIFE_IMAGE_TAG", None)
+
+        def image(*extra):
+            code, output = run_cli([self.docker, "compose", *args, "config", *extra, "--format", "json"],
+                                    env=env, timeout=60, stdout_only=True)
+            try:
+                return json.loads(output)["services"][DAEMON_SERVICE]["image"] if code == 0 else None
+            except (ValueError, KeyError, TypeError):
+                return None
+
+        configured = image()
+        if not isinstance(configured, str) or "@" in configured:
+            return
+        old = configured.rsplit(":", 1)[-1] if isinstance(configured, str) else ""
+        before, after = version_key(old), version_key(target)
+        if not plain_release(old) or not before or not after or before >= after:
+            return
+        raw = image("--no-interpolate")
+        tag_variable = (re.escape(GHCR_IMAGE) +
+                        r":\$(?:PSEUDOLIFE_IMAGE_TAG|\{PSEUDOLIFE_IMAGE_TAG(?:(?::-|-|:\?|\?)[^}]*)?\})")
+        if isinstance(raw, str) and re.fullmatch(tag_variable, raw):
+            fix = f"set PSEUDOLIFE_IMAGE_TAG={target} in the stack's persistent environment"
+            if context["env_file"]:
+                fix += " (the manager's environment, or " + str(context["env_file"][-1]) + " for Compose)"
+        else:
+            fix = f"set services.{DAEMON_SERVICE}.image: {GHCR_IMAGE}:{target} in {files[-1]}"
+        when = ("if the next manager redeploy omits the updater overlay" if context["image_pin_overlay_masked"]
+                else "before the next manager redeploy")
+        self.warn(f"a saved compose configuration still pins {old}; {when}, {fix} "
+                  "to keep the deployed release after any schema upgrade")
 
     def console_notes(self, health: dict | None) -> None:
         """After a healthy deploy, two lines a user may need and nothing
@@ -1462,8 +1554,17 @@ class Update:
             # their original meaning even when the YAML was exported elsewhere.
             args += ["--project-directory", working_dir]
         args += self._compose_args(files, env_files)
+        original = existing
+        # An earlier update can leave its cached overlay in Compose's labels.
+        # Preserve the package's complete base/overlay pair for ordinary
+        # release installs. Legacy ownership is otherwise unclear,
+        # so that hint is conditional on the manager omitting this overlay.
+        cached = data_dir() / "compose"
+        if not any(p.resolve() == (cached / "docker-compose.yml").resolve() for p in existing):
+            original = [p for p in existing if p.resolve() != (cached / "docker-compose.ghcr.yml").resolve()]
         return {"args": args, "env_file": env_files, "checkout": checkout,
-                "files": [str(p) for p in files], "project": project}
+                "files": [str(p) for p in files], "project": project, "original_files": [str(p) for p in original],
+                "image_pin_overlay_masked": len(original) != len(existing)}
 
     def _bundled(self, name: str) -> Path:
         target = data_dir() / "compose" / name
@@ -1526,6 +1627,51 @@ def _compose_image_tag(compose_file: Path) -> str | None:
     except OSError:
         return None
     return None
+
+
+def _backup_connection_parts(daemon: dict, postgres: dict) -> tuple[str, str]:
+    from psycopg.conninfo import conninfo_to_dict
+
+    def environment(container):
+        result = {}
+        for item in container["Config"]["Env"]:
+            key, value = item.split("=", 1)
+            if key in result:
+                raise ValueError
+            result[key] = value
+        return result
+
+    env = environment(daemon)
+    for key in ("PGSERVICE", "PGHOSTADDR"):
+        if env.get(key):
+            raise UpdateError(f"cannot resolve the daemon's backup connection; unset {key} in its "
+                              "container environment and retry; nothing was deployed")
+    if not env.get("PSEUDOLIFE_MCP_DATABASE_URL"):
+        raise ValueError
+    parts = conninfo_to_dict(env["PSEUDOLIFE_MCP_DATABASE_URL"])
+    if parts.get("service") or parts.get("hostaddr"):
+        raise ValueError
+    host = parts.get("host") or env.get("PGHOST", "")
+    port = parts.get("port") or env.get("PGPORT") or "5432"
+    user = parts.get("user") or env.get("PGUSER", "")
+    # POSTGRES_DB/USER initialize a cluster; they are not libpq defaults.
+    database = parts.get("dbname") or env.get("PGDATABASE") or user
+    if not user or not database or "=" in database or "://" in database or any(
+        ord(c) < 32 for c in user + database
+    ) or port != "5432":
+        raise ValueError
+    daemon_networks = daemon["NetworkSettings"]["Networks"]
+    pg_networks = postgres["NetworkSettings"]["Networks"]
+    aliases = set()
+    for name in daemon_networks.keys() & pg_networks.keys():
+        network = pg_networks[name]
+        aliases.update(network.get("Aliases") or [])
+        aliases.update(network.get("DNSNames") or [])
+        aliases.add(network.get("IPAddress", ""))
+        aliases.add(postgres.get("Name", "").lstrip("/"))
+    if not host or host not in aliases:
+        raise ValueError
+    return user, database
 
 
 def _rotate_backups(out_dir: Path, *, keep_days: int, keep: set, keep_newest: int = 3) -> list[str]:

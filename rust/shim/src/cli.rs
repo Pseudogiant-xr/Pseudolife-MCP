@@ -13,6 +13,7 @@ mod doorbell_seen;
 mod episode;
 mod hook_http;
 mod hook_json;
+mod host_connection;
 pub mod lease;
 pub mod maintainer;
 mod migrate_flat;

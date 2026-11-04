@@ -33,6 +33,10 @@
 # -ClaudeLegacyHooks ask|remove|keep: with the plugin installed, remove the
 #   hooks an earlier install wrote to ~/.claude/settings.json (default: ask -
 #   prompts; unattended runs keep them).
+# -Yes: no prompts; take documented defaults, not broad consent.
+# PSEUDOLIFE_UNATTENDED=1 is the explicit agent-under-pty signal; redirected
+# stdin also enables it. Omitted -Client detects installed CLIs (else generic);
+# omitted -Extractor uses sidecar, the local CPU default.
 # -NoToken (switch): open-loopback install - mint no bearer token, so the
 #   agent board stays off.
 # -TestLogin (switch): also give the test suite its own Postgres login, which
@@ -128,6 +132,7 @@ param(
     # ~/.claude/settings.json; ask prompts, and unattended runs keep them.
     [ValidateSet("ask", "remove", "keep")]
     [string]$ClaudeLegacyHooks = "ask",
+    [switch]$Yes,
     [switch]$NoArt,
     # Open-loopback install: mint no bearer token, so the agent board stays off.
     [switch]$NoToken,
@@ -158,7 +163,12 @@ $LegacyOverrideMarker = "# pseudolife-mcp install: managed override (sonnet-only
 $LegacyShimOverrideMarker = "# pseudolife-mcp install: managed override (shim-only extractor) — do not edit; installer rewrites/removes this file"
 $EnvBegin = "# >>> pseudolife-mcp install (managed block — installer rewrites between markers) >>>"
 $EnvEnd = "# <<< pseudolife-mcp install <<<"
-$interactive = [Environment]::UserInteractive -and -not [Console]::IsInputRedirected
+# >>> unattended mode >>>
+$interactive = ([Environment]::UserInteractive -and -not [Console]::IsInputRedirected) -and -not $Yes -and $env:PSEUDOLIFE_UNATTENDED -ne '1'
+if (-not $interactive -or $script:installerRerun) {
+    Write-Host "Unattended install: no prompts; documented defaults apply (explicit flags override)."
+}
+# <<< unattended mode <<<
 # >>> client update schedule flag >>>
 if ("$ClientUpdateSchedule" -notmatch '^(ask|yes|no|([01]?[0-9]|2[0-3]):[0-5][0-9])$') {
     Write-Host "invalid -ClientUpdateSchedule '$ClientUpdateSchedule' (ask|yes|no, or a time of day as HH:MM)"
@@ -292,13 +302,54 @@ if (Test-ModelBlank) {
 if ($Extractor) { Assert-ExtractorArgs }
 # <<< extractor modes <<<
 
+# >>> recorded choices >>>
+function Invoke-InstallerState {
+    $statePython = Get-InstallerPython
+    if (-not $statePython) { throw "Python >= 3.10 is needed to read recorded installer choices; install it and rerun." }
+    if ($args[0] -in 'write-env', 'write-file', 'started', 'record') {
+        $input | & $statePython (Join-Path $repo "ops/installer_state.py") @args
+    } else {
+        & $statePython (Join-Path $repo "ops/installer_state.py") @args
+    }
+    if ($LASTEXITCODE -ne 0) { throw "Installer state could not be read or saved; fix the line above and rerun." }
+}
+$script:installerRerun = $false
+$script:recordedBankLocation = $null
+$script:recordedInstructionChoices = @{}
+$restoredExtractor = $false
+if (-not $ClientOnly -and -not $DaemonUrl -and -not $env:PSEUDOLIFE_MCP_DAEMON_URL -and (Test-Path -LiteralPath $envFile)) {
+    $recordedChoices = @(Invoke-InstallerState choices --env-file $envFile)
+    foreach ($recordedLine in $recordedChoices) {
+        $key, $value = "$recordedLine" -split '=', 2
+        switch ($key) {
+            'EXTRACTOR' { if (-not $Extractor) { $Extractor = $value; $restoredExtractor = $true } }
+            'MODEL' { if ($restoredExtractor -and -not $Model) { $Model = $value } }
+            'EXTRACTOR_URL' { if ($restoredExtractor -and -not $ExtractorUrl) { $ExtractorUrl = $value } }
+            'SHIM_PORT' { if ($restoredExtractor -and $ShimPort -eq 0 -and -not $PSBoundParameters.ContainsKey('ShimPort')) { $ShimPort = [int]$value } }
+            'CLIENT' { if (-not $Client) { $Client = $value } }
+            'BANK_LOCATION' { $script:recordedBankLocation = $value; $script:installerRerun = $true }
+            'INSTRUCTIONS_GEMINI' { $script:recordedInstructionChoices['gemini'] = $value }
+            'INSTRUCTIONS_GENERIC' { $script:recordedInstructionChoices['generic'] = $value }
+            'GENERIC_TARGET_JSON' { if (-not $PSBoundParameters.ContainsKey('AgentsFile')) { $AgentsFile = $value | ConvertFrom-Json } }
+            'INSTRUCTIONS' { if (-not $PSBoundParameters.ContainsKey('Instructions') -and -not $PSBoundParameters.ContainsKey('ClaudeMd')) { $Instructions = $value } }
+            'CODEX_HOOKS' { if (-not $PSBoundParameters.ContainsKey('CodexHooks')) { $CodexHooks = $value } }
+            'CLAUDE_PLUGIN' { if (-not $PSBoundParameters.ContainsKey('ClaudePlugin')) { $ClaudePlugin = $value } }
+            'CLAUDE_LEGACY_HOOKS' { if (-not $PSBoundParameters.ContainsKey('ClaudeLegacyHooks')) { $ClaudeLegacyHooks = $value } }
+            'TRANSPORT' { if (-not $PSBoundParameters.ContainsKey('Transport')) { $Transport = $value } }
+            'NO_TOKEN' { if (-not $PSBoundParameters.ContainsKey('NoToken') -and $value -eq '1') { $NoToken = [switch]$true } }
+        }
+    }
+    if ($restoredExtractor) { Assert-ExtractorArgs }
+}
+# <<< recorded choices <<<
+
 # -- presentation helpers -------------------------------------------------------
 # Art and color are interactive sugar only: NO_COLOR unset, no -NoArt, and an
 # interactive session. Escapes are generated ([char]27), never raw ESC bytes —
 # the tracked-tree control-byte guard bans those.
 $Esc = [char]27
 function Test-ArtOk {
-    $interactive -and -not $env:NO_COLOR -and -not $NoArt -and
+    $interactive -and -not $script:installerRerun -and -not $env:NO_COLOR -and -not $NoArt -and
         ($env:TERM -ne "dumb")
 }
 function Step($msg) {
@@ -446,7 +497,11 @@ function Show-SharedBankNotes {
 # again before it changes anything. A failure is reported, not fatal: the
 # install itself is complete.
 function Invoke-SharedBankExposeOffer {
-    if (-not $interactive) { return }
+    if ($script:installerRerun) {
+        Write-Host "Shared-bank exposure unchanged; run pseudolife-mcp expose tailscale to change it."
+        return
+    }
+    if (-not $interactive -or $script:installerRerun) { return }
     $reply = Read-BankAnswer "Run pseudolife-mcp expose tailscale now? It changes this machine's tailnet serve [y/N]"
     if ((Get-BankReply $reply) -cnotin "y", "Y", "yes", "Yes", "YES") {
         Write-Host "  Not run: run pseudolife-mcp expose tailscale when you are ready."
@@ -487,7 +542,7 @@ function Invoke-MaintainerSetupOffer {
             return
         }
     }
-    if (-not $interactive) {
+    if ($script:installerRerun -or -not $interactive) {
         Write-Host "Maintainer passkeys (sign Console messages and roles): run pseudolife-mcp maintainer setup in a terminal when you want them."
         return
     }
@@ -532,7 +587,7 @@ function Invoke-MaintainerSetupOffer {
 function Invoke-ConsoleSignin {
     if ($tokenState -notin "minted", "present") { return }
     $haveShim = (Install-ShimOnce) -and $script:shimInstallPath
-    if (-not $interactive) {
+    if (-not $interactive -or $script:installerRerun) {
         Write-Host "Open the Console signed in: pseudolife-mcp console"
         return
     }
@@ -588,7 +643,7 @@ Show-Banner
 # another machine, so with any of them only the URL is asked. The mode block below then
 # resolves and checks the answer exactly as it does the parameters. Without
 # a terminal nothing is asked; end of input at one is no answer (exit 2).
-$script:bankLocation = "local"
+$script:bankLocation = if ($script:recordedBankLocation) { $script:recordedBankLocation } else { "local" }
 function Show-BankLocationQuestion {
     Write-Host @'
 
@@ -612,8 +667,15 @@ function Get-BankReply($reply) {
     return $value
 }
 function Invoke-BankLocationQuestion {
+    if ($script:recordedBankLocation) {
+        Step "Bank location unchanged: $($script:BankLocation)"
+        return
+    }
     if ($script:DaemonUrl -or $script:ClientOnly -or $env:PSEUDOLIFE_MCP_DAEMON_URL) { return }
-    if (-not $interactive) { return }
+    if (-not $interactive -or $script:installerRerun) {
+        Write-Host "Unattended default: bank on this machine (local Docker)."
+        return
+    }
     if (-not $script:TokenFile -and -not $script:ReadToken -and -not $script:PairingCode) {
         Show-BankLocationQuestion
         $remote = $false
@@ -817,9 +879,28 @@ if (-not $ClientOnly -and "$ClientUpdateSchedule" -notin "", "ask", "no") {
 # <<< client-only mode <<<
 
 # -- 1. provider selection (before preflight, so it checks what you picked) ------
+# The official Windows CLI may be installed outside PATH. Keep its forwarding
+# command in this script's scope so discovery, preflight and registration use
+# the same executable without changing the user's PATH.
+if (-not (Get-Command codex -ErrorAction SilentlyContinue)) {
+    $installedCodex = Get-ChildItem "$env:LOCALAPPDATA/OpenAI/Codex/bin/*/codex.exe" -File -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    if ($installedCodex) {
+        $script:installerCodexExecutable = $installedCodex.FullName
+        function script:codex { & $script:installerCodexExecutable @args }
+    }
+}
 if (-not $Client) {
-    if (-not $interactive) {
-        $Client = "claude"
+    if (-not $interactive -or $script:installerRerun) {
+        $found = @()
+        foreach ($candidate in @("claude", "codex", "gemini")) {
+            if ((Get-Command $candidate -ErrorAction SilentlyContinue) -or
+                ($candidate -eq "codex" -and (Get-ChildItem "$env:LOCALAPPDATA/OpenAI/Codex/bin/*/codex.exe" -ErrorAction SilentlyContinue))) {
+                $found += $candidate
+            }
+        }
+        $Client = if ($found) { $found -join "," } else { "generic" }
+        Write-Host "Unattended default: clients=$Client (installed CLIs; generic when none are found)."
     } else {
         Write-Host ""
         Write-Host "Which coding agents should this install wire up?"
@@ -857,7 +938,7 @@ if (-not $Client) {
 $clients = @(Get-ProviderList $Client)
 $clientList = $clients -join ","
 Step "Providers: $($clients -join ' ')"
-if ($interactive) {
+if ($interactive -and -not $script:installerRerun) {
     Write-Host ""
     Write-Host "What each agent gets:"
     Write-Host ""
@@ -932,6 +1013,9 @@ function Invoke-ClientOnlyPreflight {
     } elseif ($ReadToken) {
         if (Test-Path -LiteralPath $script:TokenFile) {
             throw "client-only install: -ReadToken creates the token file, and it already exists: $($script:TokenFile). Drop -ReadToken to use it, or remove it first"
+        }
+        if (-not $interactive -and -not [Console]::IsInputRedirected) {
+            throw "Unattended -ReadToken needs redirected stdin; pipe the credential, or use -TokenFile with an existing file. Nothing changed."
         }
         # Read unechoed (or from piped input) and handed to the helper on
         # stdin: the token never reaches an argument list or the output.
@@ -1018,35 +1102,50 @@ if ($ClientOnly) {
 # -- 3. extractor choice (explicit, no default) ---------------------------------
 # A client-only install has none: the remote daemon runs its own extractor.
 if (-not $Extractor -and -not $ClientOnly) {
-    if (-not $interactive) {
-        throw "Non-interactive run: -Extractor $($extractorModes -join '|') is required."
-    }
-    Write-Host ""
-    Write-Host "Which dream extractor should consolidate memories?"
-    Write-Host "  1) claude-only       - lightest: Claude CLI shim only; sidecar never built (~11.8 GB lighter; needs logged-in Max-plan CLI; dreams pause when the shim is down)"
-    Write-Host "  2) claude-fallback   - Claude CLI shim primary, sidecar auto-fallback (Max-plan CLI plus the ~11.8 GB image)"
-    Write-Host "  3) sidecar           - bundled local CPU model (no Claude plan needed, works for everyone; ~11.8 GB image)"
-    Write-Host "  4) openai-fallback   - Codex CLI (ChatGPT-plan) shim primary, sidecar auto-fallback (ladder-measured at parity with the Claude ceiling - see docs/guide/dreaming.md)"
-    Write-Host "  5) openai-only       - Codex CLI shim only; sidecar never built (ladder-measured; dreams pause when the shim is down)"
-    Write-Host "  6) endpoint          - any OpenAI-compatible server you name (LM Studio, Ollama, vLLM, a hosted API); sidecar never built"
-    Write-Host "  7) endpoint-fallback - that server primary, sidecar auto-fallback (~11.8 GB image)"
-    while (-not $Extractor) {
-        switch (Read-Host "Choose 1-7") {
-            "1" { $Extractor = "claude-only" }
-            "2" { $Extractor = "claude-fallback" }
-            "3" { $Extractor = "sidecar" }
-            "4" { $Extractor = "openai-fallback" }
-            "5" { $Extractor = "openai-only" }
-            "6" { $Extractor = "endpoint" }
-            "7" { $Extractor = "endpoint-fallback" }
-            default { Write-Host "  please answer 1-7" }
+    if (-not $interactive -or $script:installerRerun) {
+        $insideManaged = $false
+        $previousExtractor = $false
+        if ($envFile -and (Test-Path -LiteralPath $envFile)) {
+            foreach ($line in Get-Content -LiteralPath $envFile) {
+                if ($line -eq $EnvBegin) { $insideManaged = $true; continue }
+                if ($line -eq $EnvEnd) { $insideManaged = $false; continue }
+                if ($insideManaged -and $line -match '^PSEUDOLIFE_DREAM_BASE_URL=.+') { $previousExtractor = $true }
+            }
         }
-    }
-    if ($Extractor -in "endpoint", "endpoint-fallback") {
-        while (-not $ExtractorUrl) {
-            $ExtractorUrl = (Read-Host "The server's OpenAI-compatible base URL (e.g. http://127.0.0.1:1234/v1)").TrimEnd("/")
+        if ($previousExtractor) {
+            throw "The original extractor family is not recorded; rerun with -Extractor endpoint -ExtractorUrl <url> -Model extractor, -Extractor claude-only, or -Extractor openai-only (use the corresponding -fallback mode if configured), and nothing has been changed."
         }
-        while (-not $Model) { $Model = Read-Host "The model name that server serves" }
+        $Extractor = "sidecar"
+        Write-Host "Unattended default: extractor=sidecar (local CPU; no CLI login required)."
+    } else {
+        Write-Host ""
+        Write-Host "Which dream extractor should consolidate memories?"
+        Write-Host "  1) claude-only       - lightest: Claude CLI shim only; sidecar never built (~11.8 GB lighter; needs logged-in Max-plan CLI; dreams pause when the shim is down)"
+        Write-Host "  2) claude-fallback   - Claude CLI shim primary, sidecar auto-fallback (Max-plan CLI plus the ~11.8 GB image)"
+        Write-Host "  3) sidecar           - bundled local CPU model (no Claude plan needed, works for everyone; ~11.8 GB image)"
+        Write-Host "  4) openai-fallback   - Codex CLI (ChatGPT-plan) shim primary, sidecar auto-fallback (ladder-measured at parity with the Claude ceiling - see docs/guide/dreaming.md)"
+        Write-Host "  5) openai-only       - Codex CLI shim only; sidecar never built (ladder-measured; dreams pause when the shim is down)"
+        Write-Host "  6) endpoint          - any OpenAI-compatible server you name (LM Studio, Ollama, vLLM, a hosted API); sidecar never built"
+        Write-Host "  7) endpoint-fallback - that server primary, sidecar auto-fallback (~11.8 GB image)"
+        while (-not $Extractor) {
+            switch (Read-Host "Choose 1-7 (Enter = 3, sidecar)") {
+                "1" { $Extractor = "claude-only" }
+                "2" { $Extractor = "claude-fallback" }
+                "" { $Extractor = "sidecar" }
+                "3" { $Extractor = "sidecar" }
+                "4" { $Extractor = "openai-fallback" }
+                "5" { $Extractor = "openai-only" }
+                "6" { $Extractor = "endpoint" }
+                "7" { $Extractor = "endpoint-fallback" }
+                default { Write-Host "  please answer 1-7" }
+            }
+        }
+        if ($Extractor -in "endpoint", "endpoint-fallback") {
+            while (-not $ExtractorUrl) {
+                $ExtractorUrl = (Read-Host "The server's OpenAI-compatible base URL (e.g. http://127.0.0.1:1234/v1)").TrimEnd("/")
+            }
+            while (-not $Model) { $Model = Read-Host "The model name that server serves" }
+        }
     }
     Assert-ExtractorArgs
 }
@@ -1109,7 +1208,7 @@ if ($Extractor -in "endpoint", "endpoint-fallback") { Invoke-EndpointPreflight }
 # claude-* names, so this is only the launch default — switchable later from
 # the Console's Extractor panel without a reinstall.
 if ($claudeShimMode -and -not $Model) {
-    if ($interactive) {
+    if ($interactive -and -not $script:installerRerun) {
         Write-Host ""
         Write-Host "Which Claude model should extract memories (the 'dreamer')?"
         Write-Host "  1) claude-opus-5-5   - recommended: clears the extraction-ladder gate with no regression against claude-opus-5 (evals/results/ladder-opus55-paired-verdict-threshold.json, 2026-09-28); the 2026-08-02 judged comparison that chose Opus over Sonnet (best measured extraction quality) ran on claude-opus-5"
@@ -1136,14 +1235,14 @@ if ($claudeShimMode -and -not $Model) {
     } else {
         $Model = "claude-opus-5-5"
     }
-    Step "Dreamer model: $Model"
+    Step "Dreamer model: $Model$(if (-not $interactive -or $script:installerRerun) { ' (unattended default)' })"
 }
 # GPT menu: no 'recommended' — extraction quality is unmeasured for all of
 # them (the ladder's terra rung exists to measure it); Terra is only the
 # shim's balanced default. The GPT-6 ids were accepted by the Codex CLI on
 # 2026-09-29; no ladder run has measured them.
 if ($codexShimMode -and -not $Model) {
-    if ($interactive) {
+    if ($interactive -and -not $script:installerRerun) {
         Write-Host ""
         Write-Host "Which GPT model should extract memories (the 'dreamer')?"
         Write-Host "  1) gpt-5.6-terra - balanced default (extraction quality unmeasured)"
@@ -1164,7 +1263,7 @@ if ($codexShimMode -and -not $Model) {
     } else {
         $Model = "gpt-5.6-terra"
     }
-    Step "Dreamer model: $Model"
+    Step "Dreamer model: $Model$(if (-not $interactive -or $script:installerRerun) { ' (unattended default)' })"
 }
 
 # -- 4. volumes (respect names overridden in an existing ops/.env) --------------
@@ -1181,11 +1280,18 @@ if (-not $ClientOnly) {
     $resolvedVolumes = @(& $volumePython (Join-Path $repo "ops/preflight.py") --env-file $envFile --volume-names)
     if ($LASTEXITCODE -ne 0 -or $resolvedVolumes.Count -ne 2) { throw "Could not resolve Docker volumes; check ops/.env with ops/preflight.ps1 and rerun." }
     $bankVol, $stateVol = $resolvedVolumes
-    docker volume create $bankVol | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "Could not create bank volume $bankVol; fix Docker access and rerun." }
-    docker volume create $stateVol | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "Could not create state volume $stateVol; fix Docker access and rerun." }
-    Step "Volumes ready: $bankVol, $stateVol"
+    $existingVolumes = @(docker volume ls --format '{{.Name}}')
+    if ($LASTEXITCODE -ne 0) { throw "Could not list Docker volumes; check docker info and rerun." }
+    $volumesChanged = $false
+    foreach ($volume in @($bankVol, $stateVol)) {
+        if ($existingVolumes -notcontains $volume) {
+            docker volume create $volume | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "Could not create volume $volume; fix Docker access and rerun." }
+            $volumesChanged = $true
+        }
+    }
+    if ($volumesChanged) { Step "Volumes ready: $bankVol, $stateVol" }
+    else { Step "Volumes unchanged: $bankVol, $stateVol" }
 }
 # <<< volumes <<<
 
@@ -1251,23 +1357,28 @@ $writerId = if ($clients.Count -eq 1) {
         default { "mcp-client" }
     }
 } else { "mcp-client" }
+# >>> managed configuration >>>
 if (-not $ClientOnly) {
-    if (-not (Test-Path $envFile)) { Copy-Item (Join-Path $repo "ops\.env.example") $envFile }
-    $lines = @(Get-Content $envFile)
-    $kept = New-Object System.Collections.Generic.List[string]
-    $skip = $false
-    foreach ($l in $lines) {
-        if ($l -eq $EnvBegin) { $skip = $true; continue }
-        if ($l -eq $EnvEnd) { $skip = $false; continue }
-        if (-not $skip) { $kept.Add($l) }
-    }
     $block = New-Object System.Collections.Generic.List[string]
     $block.Add($EnvBegin)
     foreach ($line in @(Get-ExtractorEnvLines)) { $block.Add($line) }
     $block.Add("PSEUDOLIFE_WRITER_ID=$writerId")
+    $block.Add("PSEUDOLIFE_INSTALL_EXTRACTOR=$Extractor")
+    $block.Add("PSEUDOLIFE_INSTALL_MODEL=$Model")
+    $block.Add("PSEUDOLIFE_INSTALL_EXTRACTOR_URL=$ExtractorUrl")
+    $block.Add("PSEUDOLIFE_INSTALL_SHIM_PORT=$ShimPort")
+    $block.Add("PSEUDOLIFE_INSTALL_CLIENT=$clientList")
+    $block.Add("PSEUDOLIFE_INSTALL_BANK_LOCATION=$($script:BankLocation)")
+    $block.Add("PSEUDOLIFE_INSTALL_INSTRUCTIONS=$(if ($Instructions) { $Instructions } elseif ($ClaudeMd) { $ClaudeMd } else { 'auto' })")
+    $block.Add("PSEUDOLIFE_INSTALL_CODEX_HOOKS=$CodexHooks")
+    $block.Add("PSEUDOLIFE_INSTALL_CLAUDE_PLUGIN=$ClaudePlugin")
+    $block.Add("PSEUDOLIFE_INSTALL_CLAUDE_LEGACY_HOOKS=$ClaudeLegacyHooks")
+    $block.Add("PSEUDOLIFE_INSTALL_TRANSPORT=$Transport")
+    $block.Add("PSEUDOLIFE_INSTALL_NO_TOKEN=$(if ($NoToken) { '1' } else { '0' })")
     $block.Add($EnvEnd)
-    Set-Content -Path $envFile -Value (@($kept) + @($block)) -Encoding utf8
-    Step "Wrote managed block in ops/.env"
+    $managedStatus = $block | Invoke-InstallerState write-env --env-file $envFile --template (Join-Path $repo "ops/.env.example")
+    if ($managedStatus -eq 'unchanged') { Step "Managed configuration unchanged: ops/.env" }
+    else { Step "Wrote managed block in ops/.env" }
     if ($Extractor -in "endpoint", "endpoint-fallback") {
         $endpointInContainer = ConvertTo-ExtractorContainerUrl $ExtractorUrl
         if ($endpointInContainer -ne $ExtractorUrl) {
@@ -1276,6 +1387,7 @@ if (-not $ClientOnly) {
         Write-Host "    If the server wants a key, set PSEUDOLIFE_DREAM_API_KEY in ops/.env outside the managed block."
     }
 }
+# <<< managed configuration <<<
 
 # -- 5b. bearer token (the agent board needs one) --------------------------------
 # A default install mints one, so the board is on; every client wired below
@@ -1338,21 +1450,28 @@ if ($ClientOnly) {
     # No local daemon here, so its compose override is not this run's to change.
 } elseif (Test-ExtractorDisablesSidecar) {
     if (-not (Test-Path $overrideFile) -or (InstallerOwnsOverride)) {
-        @(
+        $wantedOverride = (@(
             $OverrideMarker
             "# A profiled service is skipped by ``up`` entirely: the extractor image is"
             "# never built or pulled. Re-run ops\install.ps1 with a sidecar mode to remove."
             "services:"
             "  pseudolife-extractor:"
             "    profiles: [`"disabled`"]"
-        ) | Set-Content -Path $overrideFile -Encoding utf8
-        Step "Sidecar disabled via ops/docker-compose.override.yml"
+        ) -join "`n")
+        $overrideStatus = $wantedOverride | & (Get-InstallerPython) (Join-Path $repo "ops/installer_state.py") write-file --path $overrideFile
+        if ($LASTEXITCODE -ne 0) { throw "Could not write this install's override; fix the line above and rerun." }
+        if ($overrideStatus -eq 'unchanged') { Step "Sidecar override unchanged (disabled)." }
+        else { Step "Sidecar disabled via ops/docker-compose.override.yml" }
     } else {
-        Write-Host "NOTE: ops/docker-compose.override.yml exists and is not installer-managed."
-        Write-Host "      Add this to it yourself to disable the sidecar:"
-        Write-Host "        services:"
-        Write-Host "          pseudolife-extractor:"
-        Write-Host "            profiles: [`"disabled`"]"
+        if ($script:installerRerun) {
+            Step "Operator override unchanged (not installer-managed)."
+        } else {
+            Write-Host "NOTE: ops/docker-compose.override.yml exists and is not installer-managed."
+            Write-Host "      Add this to it yourself to disable the sidecar:"
+            Write-Host "        services:"
+            Write-Host "          pseudolife-extractor:"
+            Write-Host "            profiles: [`"disabled`"]"
+        }
     }
     # Remove a leftover running extractor container (container only - it has
     # no volumes; the image is kept for an easy switch back).
@@ -1366,6 +1485,8 @@ if ($ClientOnly) {
 } elseif (InstallerOwnsOverride) {
     Remove-Item $overrideFile
     Step "Removed installer-managed override (sidecar re-enabled)"
+} else {
+    Step "Sidecar override unchanged (enabled)."
 }
 # <<< sidecar override <<<
 
@@ -1373,9 +1494,23 @@ if ($ClientOnly) {
 if (-not $ClientOnly) {
     $compose = @("-p", "pseudolife-mcp", "--env-file", $envFile, "-f", $composeFile)
     if (Test-Path $overrideFile) { $compose += @("-f", $overrideFile) }
-    Step "docker compose up -d --build (first build downloads images - grab a coffee)..."
-    docker compose @compose up -d --build
-    if ($LASTEXITCODE -ne 0) { throw "compose up failed" }
+    $composeSnapshotJson = Invoke-InstallerState plan --snapshot --repo $repo --env-file $envFile --override $overrideFile
+    $composePlan = ($composeSnapshotJson | ConvertFrom-Json).action
+    if ($composePlan -eq 'unchanged') {
+        Step "Docker stack unchanged; no Compose up or build needed."
+    } elseif ($composePlan -in 'start', 'build') {
+        if ($composePlan -eq 'start') {
+            Step "Starting Docker stack with existing images (no build)..."
+            docker compose @compose up -d --no-build
+        } else {
+            Step "docker compose up -d --build (checkout or images changed)..."
+            docker compose @compose up -d --build
+        }
+        if ($LASTEXITCODE -ne 0) { throw "compose up failed" }
+    } else {
+        throw "Cannot determine the Docker startup step; rerun ops/preflight.ps1."
+    }
+    $composeSnapshotJson = $composeSnapshotJson | Invoke-InstallerState started --expected-stdin --repo $repo --env-file $envFile --override $overrideFile
 }
 
 # -- 8b. Claude Code plugin (hooks + commands layer) ------------------------------
@@ -1514,7 +1649,7 @@ $script:legacyClaude = ""
 $script:legacyClaudeBackup = ""
 function Read-ClaudeLegacyAnswer {
     # The reply, or $null when there is no terminal to ask.
-    if (-not $interactive) { return $null }
+    if (-not $interactive -or $script:installerRerun) { return $null }
     return (Read-Host "Remove them from ~/.claude/settings.json (a timestamped backup is taken first)? [y/N]")
 }
 function Invoke-LegacyHookScript([bool]$dryRun) {
@@ -2172,7 +2307,7 @@ foreach ($selectedClient in $clients) {
             if (-not $codexCredentialBootstrapFailed) {
                 $setupArgs = @((Join-Path $repo "ops/setup-codex-hooks.py"), "--source", $CodexHooks,
                     "--trust", $CodexHookTrust, "--instructions", $instructionChoice)
-                if (-not $interactive) { $setupArgs += "--non-interactive" }
+                if (-not $interactive -or $script:installerRerun) { $setupArgs += "--non-interactive" }
                 $setupLaunchFailed = $false
                 try {
                     $setupOutput = & $codexPython @setupArgs
@@ -2223,6 +2358,8 @@ foreach ($selectedClient in $clients) {
 # Codex instructions are resolved by the setup helper after hook verification.
 # Other clients retain the existing auto/append/skip behavior and prompts.
 $instrState = @{}
+$resolvedInstructionChoices = @{}
+$resolvedGenericTarget = $null
 function Add-MemoryBlock($path, $provider) {
     # Presence check HERE, not only at the loop top: the generic prompt
     # resolves its target path after that check ran against an empty
@@ -2290,6 +2427,13 @@ foreach ($selectedClient in $clients) {
             continue
         }
     }
+    $choice = $instructionChoice
+    if ($choice -eq 'auto' -and -not $PSBoundParameters.ContainsKey('Instructions') -and -not $PSBoundParameters.ContainsKey('ClaudeMd')) {
+        if ($script:recordedInstructionChoices -and $script:recordedInstructionChoices.ContainsKey($selectedClient) -and
+            ($selectedClient -ne 'generic' -or -not $PSBoundParameters.ContainsKey('AgentsFile'))) {
+            $choice = $script:recordedInstructionChoices[$selectedClient]
+        }
+    }
     $instructionPath = switch ($selectedClient) {
         "gemini" { Join-Path $env:USERPROFILE ".gemini\GEMINI.md" }
         "generic" { $AgentsFile }
@@ -2300,9 +2444,10 @@ foreach ($selectedClient in $clients) {
     if ($hasBlock) {
         Step "Memory block already present in $instructionPath - skipping."
         $instrState[$selectedClient] = "present:$instructionPath"
+        if ($selectedClient -in 'gemini', 'generic') { $resolvedInstructionChoices[$selectedClient] = if ($choice -eq 'auto') { 'append' } else { $choice } }
+        if ($selectedClient -eq 'generic') { $resolvedGenericTarget = (Get-Item -LiteralPath $instructionPath).FullName }
         continue
     }
-    $choice = $instructionChoice
     if ($choice -eq "auto") {
         switch ($selectedClient) {
             "claude" {
@@ -2312,17 +2457,18 @@ foreach ($selectedClient in $clients) {
                 $choice = "skip"
             }
             "gemini" {
-                if ($interactive) {
+                if ($interactive -and -not $script:installerRerun) {
                     $yn = Read-Host "Gemini CLI has no hook system - append the standing memory block to $instructionPath? [Y/n]"
                     $choice = if ($yn -in "n", "N", "no", "NO") { "skip" } else { "append" }
                 } else {
-                    $choice = "skip"
+                    $choice = "append"
+                    Write-Host "Unattended default: Gemini standing instructions=append ($instructionPath)."
                 }
             }
             "generic" {
                 if ($AgentsFile) {
                     $choice = "append"
-                } elseif ($interactive) {
+                } elseif ($interactive -and -not $script:installerRerun) {
                     $default = Join-Path $env:USERPROFILE "AGENTS.md"
                     $answer = Read-Host "Append the standing memory block to which file? (Enter = $default, `"-`" to skip)"
                     if ($answer -eq "-") {
@@ -2332,7 +2478,9 @@ foreach ($selectedClient in $clients) {
                         $choice = "append"
                     }
                 } else {
-                    $choice = "skip"
+                    $instructionPath = Join-Path $env:USERPROFILE "AGENTS.md"
+                    $choice = "append"
+                    Write-Host "Unattended default: generic standing instructions=append ($instructionPath)."
                 }
             }
         }
@@ -2341,6 +2489,7 @@ foreach ($selectedClient in $clients) {
         Write-Host "NOTE: generic append needs a target - pass -AgentsFile <path>."
         $choice = "skip"
     }
+    if ($selectedClient -in 'gemini', 'generic') { $resolvedInstructionChoices[$selectedClient] = $choice }
     if ($choice -eq "append") {
         Add-MemoryBlock $instructionPath $selectedClient
     } else {
@@ -2348,6 +2497,9 @@ foreach ($selectedClient in $clients) {
         Step "Standing memory block not written for $selectedClient. To add it:"
         Write-Host "  Add-Content `"$hintPath`" (Get-Content `"$repo\examples\CLAUDE.memory.md`" -Raw)"
         $instrState[$selectedClient] = "skipped:$hintPath"
+    }
+    if ($selectedClient -eq 'generic' -and $instructionPath -and (Test-Path -LiteralPath $instructionPath)) {
+        $resolvedGenericTarget = (Get-Item -LiteralPath $instructionPath).FullName
     }
 }
 
@@ -3075,7 +3227,7 @@ if ($claudeShimMode) {
 # A client-only install checked the remote daemon at preflight, and nothing
 # starts locally, so there is nothing to wait for.
 if (-not $ClientOnly) {
-    Step "Waiting for the daemon to report healthy..."
+    if ($composePlan -ne 'unchanged') { Step "Waiting for the daemon to report healthy..." }
     $h = $null
     for ($i = 0; $i -lt 40; $i++) {
         try {
@@ -3298,6 +3450,15 @@ if ($ClientOnly) { Show-ClientOnlyNotes; Write-Host "" }
 if ($script:bankLocation -eq "shared") { Show-SharedBankNotes; Write-Host "" }
 if ($script:bankLocation -eq "shared") { Invoke-SharedBankExposeOffer }
 if ($script:shimUpgradeHeld) { Write-Warning $script:shimUpgradeHeld }
+# >>> record successful deployment >>>
+if (-not $ClientOnly) {
+    $recordArgs = @('record', '--expected-stdin', '--repo', $repo, '--env-file', $envFile, '--override', $overrideFile)
+    if ($resolvedInstructionChoices['gemini']) { $recordArgs += @('--instruction-gemini', $resolvedInstructionChoices['gemini']) }
+    if ($resolvedInstructionChoices['generic']) { $recordArgs += @('--instruction-generic', $resolvedInstructionChoices['generic']) }
+    if ($resolvedGenericTarget) { $recordArgs += @('--generic-target', $resolvedGenericTarget) }
+    $composeSnapshotJson | Invoke-InstallerState @recordArgs | Out-Null
+}
+# <<< record successful deployment <<<
 if (-not $ClientOnly) { Invoke-MaintainerSetupOffer }
 if (-not $ClientOnly) { Invoke-ConsoleSignin }
 # >>> update line >>>
@@ -3437,7 +3598,7 @@ function Invoke-ClientUpdateScheduleOffer {
         Write-Host "Automatic client updates: the scheduled task '$ClientScheduleTask' exists but is disabled, so it never runs."
     }
     if ($mode -eq "ask") {
-        if (-not $interactive) {
+        if (-not $interactive -or $script:installerRerun) {
             $script:clientScheduleState = "skipped"
             Write-Host "Automatic client updates: not set up (no terminal to ask on): $command sets them up, or re-run with -ClientUpdateSchedule yes."
             return
@@ -3467,7 +3628,9 @@ function Invoke-ClientUpdateScheduleOffer {
 # <<< client update schedule offer <<<
 if ($ClientOnly) { Invoke-ClientUpdateScheduleOffer }
 Write-UpdateLine -ShimPath $script:shimInstallPath -ClientOnly:([bool]$ClientOnly) -PairingHintUrl "$script:pairingHintUrl" -Scheduled:($script:clientScheduleState -eq "scheduled")
-if ($Tunnel) {
+if ($Tunnel -and -not $interactive) {
+    Write-Host "Unattended: guided tunnel setup skipped; run pseudolife-mcp tunnel setup when a person can complete it."
+} elseif ($Tunnel) {
     if (-not $script:shimInstallPath) {
         throw "Secure MCP Tunnel setup needs the installed shim; repair its installation, then run pseudolife-mcp tunnel setup."
     }
