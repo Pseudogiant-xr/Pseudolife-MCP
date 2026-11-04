@@ -20,7 +20,18 @@ use crate::config::Node;
 /// Dumps `node` exactly as `yaml.safe_dump(node, default_flow_style=False,
 /// sort_keys=False)` does.
 pub(crate) fn safe_dump(node: &Node) -> String {
+    dump(node, false)
+}
+
+/// Exact PyYAML bytes for migration plans shared between engines. Unlike the
+/// Console writer, this does not add quotes for older YAML 1.2 startup readers.
+pub(crate) fn safe_dump_pyyaml(node: &Node) -> String {
+    dump(node, true)
+}
+
+fn dump(node: &Node, pyyaml_exact: bool) -> String {
     let mut emitter = Emitter::new();
+    emitter.pyyaml_exact = pyyaml_exact;
     // expect_document_start: the first document is implicit (no `---`).
     emitter.expect_node(node, Context::ROOT);
     // expect_document_end
@@ -525,6 +536,7 @@ enum Style {
 }
 
 struct Emitter {
+    pyyaml_exact: bool,
     out: String,
     indents: Vec<Option<usize>>,
     indent: Option<usize>,
@@ -538,6 +550,7 @@ struct Emitter {
 impl Emitter {
     fn new() -> Self {
         Self {
+            pyyaml_exact: false,
             out: String::new(),
             indents: Vec::new(),
             indent: None,
@@ -583,7 +596,11 @@ impl Emitter {
                 }
             }
             _ => {
-                let scalar = represent_scalar(node).expect("non-collection node is a scalar");
+                let mut scalar = represent_scalar(node).expect("non-collection node is a scalar");
+                if self.pyyaml_exact {
+                    scalar.implicit.0 =
+                        resolve(&scalar.text.iter().collect::<String>()) == scalar.tag;
+                }
                 let analysis = analyze_scalar(&scalar.text);
                 let style = self.choose_scalar_style(&analysis, scalar.implicit.0);
                 self.process_tag(&scalar, style);
