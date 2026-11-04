@@ -108,7 +108,7 @@ def docker_bank(tmp_path, monkeypatch):
     monkeypatch.setattr(module, "copy_from_container", lambda docker, source, target: world.run([docker, "cp", source, str(target)]))
     monkeypatch.setattr(up, "home", lambda: tmp_path / "home")
     monkeypatch.setattr(up, "data_dir", lambda: tmp_path / "clone" / "data")
-    monkeypatch.setattr(up, "fetch_json", lambda *a, **kw: {"status": "ok"})
+    monkeypatch.setattr(up, "fetch_json", lambda *a, **kw: {"status": "ok", "ready": True})
     monkeypatch.setattr(up, "sleep", lambda _: None)
     clone = tmp_path / "clone"
     clone.mkdir()
@@ -462,7 +462,7 @@ def test_absent_port_bindings_still_allow_leave_stopped(docker_bank, tmp_path):
 def test_readiness_uses_targets_nondefault_published_port(docker_bank, tmp_path, monkeypatch):
     bank, _ = docker_bank
     seen = []
-    monkeypatch.setattr(up, "fetch_json", lambda url, **kwargs: seen.append(url) or {"status": "ok"})
+    monkeypatch.setattr(up, "fetch_json", lambda url, **kwargs: seen.append(url) or {"status": "ok", "ready": True})
     assert bank.restore(_input_dump(tmp_path))["left_stopped"] is False
     assert seen == ["http://127.0.0.1:18765/health"]
 
@@ -479,3 +479,80 @@ def test_safety_directory_follows_links_before_checking_clone_ancestry(docker_ba
     outside = tmp_path / "outside-safety"
     result = bank.restore(_input_dump(tmp_path), leave_stopped=True, safety_dir=outside)
     assert result["safety_dump"].is_relative_to(outside)
+
+
+def test_safety_backup_cannot_land_inside_state_mount_being_replaced(docker_bank, tmp_path):
+    bank, world = docker_bank
+    bank.running["Mounts"] = [{"Destination": "/data", "Type": "bind", "Source": str(tmp_path / "home" / ".pseudolife-mcp")}]
+    with pytest.raises(up.UpdateError, match="--safety-dir"):
+        bank.restore(_input_dump(tmp_path), leave_stopped=True)
+    assert ["stop", up.DAEMON_CONTAINER] not in world.calls
+    external = tmp_path / "external-safety"
+    result = bank.restore(_input_dump(tmp_path), leave_stopped=True, safety_dir=external)
+    assert result["safety_dump"].is_relative_to(external)
+
+
+@pytest.mark.parametrize("url,extra,expected", [
+    ("postgresql://owner:fixture@db", [], ("owner", "owner")),
+    ("postgresql://owner:fixture@db", ["PGDATABASE=connection_bank"], ("owner", "connection_bank")),
+    ("postgresql://db", ["PGUSER=connection_owner"], ("connection_owner", "connection_owner")),
+    ("postgresql://owner:fixture@db/explicit_bank", ["PGDATABASE=other"], ("owner", "explicit_bank")),
+])
+def test_database_defaults_follow_daemon_libpq_not_postgres_initialization(docker_bank, url, extra, expected):
+    from pseudolife_memory.docker_backup_restore import DockerBank
+    _, world = docker_bank
+    world.daemon["Config"]["Env"] = ["PSEUDOLIFE_MCP_DATABASE_URL=" + url, *extra]
+    bank = DockerBank()
+    assert (bank.user, bank.db) == expected
+
+
+def test_ambiguous_daemon_database_requires_explicit_selectors(docker_bank):
+    from pseudolife_memory.docker_backup_restore import DockerBank
+    _, world = docker_bank
+    world.daemon["Config"]["Env"] = []
+    with pytest.raises(up.UpdateError, match="--db.*--user"):
+        DockerBank()
+    bank = DockerBank(db="actual_bank", user="actual_owner")
+    assert (bank.user, bank.db) == ("actual_owner", "actual_bank")
+
+
+def test_restore_waits_past_ok_but_not_ready(docker_bank, tmp_path, monkeypatch):
+    bank, _ = docker_bank
+    replies = iter([{"status": "ok", "ready": False, "pending": ["init"]}, {"status": "ok", "ready": True}])
+    sleeps = []
+    monkeypatch.setattr(up, "fetch_json", lambda *a, **kw: next(replies))
+    monkeypatch.setattr(up, "sleep", lambda seconds: sleeps.append(seconds))
+    bank.restore(_input_dump(tmp_path))
+    assert sleeps == [1.5]
+
+
+@pytest.mark.parametrize("version,succeeds", [("0.19.0", True), ("0.20.0", False)])
+def test_readiness_compatibility_is_limited_to_pre_contract_releases(docker_bank, tmp_path, monkeypatch, version, succeeds):
+    bank, _ = docker_bank
+    monkeypatch.setattr(up, "fetch_json", lambda *a, **kw: {"status": "ok", "version": version})
+    if succeeds:
+        bank.restore(_input_dump(tmp_path))
+    else:
+        with pytest.raises(up.UpdateError):
+            bank.restore(_input_dump(tmp_path))
+
+
+def test_opaque_libpq_service_requires_explicit_target(docker_bank):
+    from pseudolife_memory.docker_backup_restore import DockerBank
+    _, world = docker_bank
+    world.daemon["Config"]["Env"] = ["PSEUDOLIFE_MCP_DATABASE_URL=service=fixture host=db user=owner", "PGDATABASE=not_the_service_bank"]
+    with pytest.raises(up.UpdateError, match="--container.*--db.*--user"):
+        DockerBank()
+    bank = DockerBank(container=up.PG_CONTAINER, db="service_bank", user="service_owner")
+    assert (bank.user, bank.db) == ("service_owner", "service_bank")
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Docker Desktop bind-path mapping is Windows-only")
+@pytest.mark.parametrize("prefix", ["/host_mnt", "/run/desktop/mnt/host"])
+def test_desktop_mount_mapping_keeps_safety_outside_state(docker_bank, tmp_path, prefix):
+    bank, _ = docker_bank
+    source = tmp_path / "home" / ".pseudolife-mcp"
+    mapped = prefix + "/" + source.drive[0].lower() + "/" + source.as_posix()[3:]
+    bank.running["Mounts"] = [{"Destination": "/data", "Type": "bind", "Source": mapped}]
+    with pytest.raises(up.UpdateError, match="--safety-dir"):
+        bank.restore(_input_dump(tmp_path), leave_stopped=True)
