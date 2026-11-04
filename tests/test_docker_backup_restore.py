@@ -193,6 +193,20 @@ def test_missing_socket_advice_reads_real_command_stderr(docker_bank, monkeypatc
         bank.database_exists()
 
 
+def test_backup_missing_socket_names_the_same_port_fix(docker_bank, monkeypatch, tmp_path):
+    bank, world = docker_bank
+    original = world.run
+
+    def missing_socket(argv, **kwargs):
+        if any("pg_dump" in str(value) for value in argv):
+            return 1, "pg_dump: connection to server on socket failed: No such file or directory"
+        return original(argv, **kwargs)
+
+    monkeypatch.setattr(up, "run_cli", missing_socket)
+    with pytest.raises(up.UpdateError, match="--db-port"):
+        bank.backup(out=tmp_path / "artifacts")
+
+
 def test_successful_postgres_queries_keep_stderr_out_of_data(docker_bank, monkeypatch):
     import subprocess
     bank, world = docker_bank
