@@ -840,12 +840,11 @@ fn stopped_preflight(
     u: &Update,
     running: &Value,
     daemon: &str,
-    pg: &str,
-    user: &str,
-    db: &str,
+    connection: (&str, &str, &str),
     choice: &str,
     config: &Value,
 ) -> Result<Value> {
+    let (pg, user, db) = connection;
     verify_stopped_database(config, &inspect(u, pg)?, pg, user, db)?;
     let id = running["Image"].as_str().filter(|id| !id.is_empty())
         .ok_or_else(|| UpdateError::usage("the stopped daemon's existing image is unavailable; restore that local image before retrying; nothing was deployed"))?;
@@ -1000,7 +999,7 @@ pub(super) fn deploy(u: &mut Update, repo: &Path) -> Result<()> {
         require_imported_with(u, &pg, user, db, &daemon)?;
     }
     let before = if stopped_handover {
-        stopped_preflight(u, &running, &daemon, &pg, user, db, &choice, &config)?
+        stopped_preflight(u, &running, &daemon, (&pg, user, db), &choice, &config)?
     } else {
         u.daemon_health().ok_or_else(||UpdateError::usage("the running daemon did not answer /health; use the previous update's rollback commands before retrying; no rollback tag was moved"))?
     };
