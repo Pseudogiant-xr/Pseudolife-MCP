@@ -464,7 +464,7 @@ pub async fn hold(args: Args) -> i32 {
     let mut mirror = None;
     let work = async {
         wait_lock(&mut lock, &name, deadline, false).await?;
-        let connection = board::connect_hold(args.no_board);
+        let connection = board::connect_hold(args.no_board, &args.environment);
         mirror = Some(Mirror::start(connection, args.clone(), &directory));
         while pid_alive(pid) {
             tokio::time::sleep(Duration::from_millis(500)).await;

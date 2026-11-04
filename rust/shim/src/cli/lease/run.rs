@@ -195,7 +195,11 @@ pub(super) async fn wait_lock(
 }
 /// Start the command; `name` joins PSEUDOLIFE_LEASES_HELD, unless None (a
 /// gated check, which holds nothing).
-fn start(command: &[String], name: Option<&str>) -> Result<Child, RunError> {
+fn start(
+    command: &[String],
+    name: Option<&str>,
+    environment: &super::super::host_connection::Environment,
+) -> Result<Child, RunError> {
     let original = &command[0];
     #[cfg(windows)]
     let program = crate::lifecycle::find_executable(original)
@@ -206,6 +210,12 @@ fn start(command: &[String], name: Option<&str>) -> Result<Child, RunError> {
     let program = std::ffi::OsString::from(original);
     let mut child = Command::new(program);
     child.args(&command[1..]);
+    child.envs(
+        environment
+            .additions()
+            .iter()
+            .map(|(key, value)| (key, value)),
+    );
     if let Some(name) = name {
         let held = std::env::var("PSEUDOLIFE_LEASES_HELD").unwrap_or_default();
         child.env(
@@ -308,7 +318,7 @@ async fn work(
         seconds,
     });
     let mut skipped = None;
-    match board::connect(args.no_board) {
+    match board::connect(args.no_board, &args.environment) {
         Err(e) if e.fatal_input => return Err(RunError::RefusedInput(e.text)),
         Err(reason) => skipped = Some(reason.text),
         Ok(client) => {
@@ -337,7 +347,7 @@ async fn work(
         ));
     }
     wait_lock(lock, name, deadline, renewer.is_some()).await?;
-    *child = Some(start(&args.command, Some(name))?);
+    *child = Some(start(&args.command, Some(name), &args.environment)?);
     let status = child
         .as_mut()
         .expect("started child")
@@ -449,7 +459,7 @@ async fn gated_work(args: &Args, child: &mut Option<Child>) -> i32 {
             return 70;
         }
     }
-    match start(&args.command, None) {
+    match start(&args.command, None, &args.environment) {
         Ok(started) => *child = Some(started),
         Err(RunError::CannotRun(code, message)) => {
             say(&message);

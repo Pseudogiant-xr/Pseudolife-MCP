@@ -2,6 +2,7 @@ use super::{out, repr};
 
 #[derive(Debug)]
 pub struct Args {
+    pub(super) environment: super::super::host_connection::Environment,
     pub action: String,
     pub name: Option<String>,
     pub json: bool,
@@ -294,6 +295,7 @@ pub fn parse(argv: &[String]) -> Result<Args, i32> {
         ));
     }
     let mut args = Args {
+        environment: Default::default(),
         action: action.clone(),
         name: None,
         json: false,
