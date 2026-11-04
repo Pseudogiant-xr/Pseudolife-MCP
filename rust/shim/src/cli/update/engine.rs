@@ -116,6 +116,12 @@ pub(super) fn selected_checkout(u: &mut Update) -> Result<Option<PathBuf>> {
         ));
     }
     if current != "rust" || u.o.clients_only {
+        if u.o.allow_auth_change
+            && let Some(repo) = repo
+        {
+            u.selected_engine = "python".into();
+            return Ok(Some(repo));
+        }
         return Ok(None);
     }
     u.selected_engine = current.into();
@@ -754,6 +760,134 @@ pub(super) fn rollback_commands(
     }
 }
 
+fn verify_stopped_database(
+    config: &Value,
+    pg: &Value,
+    pg_id: &str,
+    user: &str,
+    db: &str,
+) -> Result<()> {
+    let refusal = || {
+        UpdateError::usage(
+            "the restored bank cannot be matched to this project's PostgreSQL; restore its original database configuration before retrying; nothing was deployed",
+        )
+    };
+    let source = config["services"][DAEMON_SERVICE]["environment"]["PSEUDOLIFE_MCP_DATABASE_URL"]
+        .as_str()
+        .ok_or_else(refusal)?;
+    let source = source
+        .parse::<tokio_postgres::Config>()
+        .map_err(|_| refusal())?;
+    let mut aliases = vec![
+        "pseudolife-pg",
+        pg_id,
+        pg["Name"].as_str().unwrap_or("").trim_start_matches('/'),
+    ];
+    if let Some(networks) = pg["NetworkSettings"]["Networks"].as_object() {
+        for network in networks.values() {
+            if let Some(names) = network["Aliases"].as_array() {
+                aliases.extend(names.iter().filter_map(Value::as_str));
+            }
+        }
+    }
+    if pg["State"]["Running"] != true
+        || source.get_user() != Some(user)
+        || source.get_dbname() != Some(db)
+        || source.get_ports().iter().any(|port| *port != 5432)
+        || !source.get_hostaddrs().is_empty()
+        || !matches!(source.get_hosts(), [tokio_postgres::config::Host::Tcp(host)] if aliases.contains(&host.as_str()))
+    {
+        return Err(refusal());
+    }
+    Ok(())
+}
+
+fn stored_probe_token(u: &Update, pg: &str, user: &str, db: &str) -> Result<String> {
+    use sha2::{Digest, Sha256};
+    let token = crate::credentials::CredentialProvider::from_environment()
+        .and_then(|provider| provider.snapshot())
+        .ok()
+        .and_then(|snapshot| snapshot.token().map(str::to_owned));
+    let hashes = sql(
+        u,
+        pg,
+        user,
+        db,
+        "SELECT token_hash FROM principals WHERE revoked_at IS NULL AND token_hash IS NOT NULL",
+    )?;
+    if let Some(token) = token
+        && hashes
+            .lines()
+            .any(|hash| hash == format!("{:x}", Sha256::digest(token.as_bytes())))
+    {
+        return Ok(token);
+    }
+    Err(UpdateError::usage(
+        "stored-principal verification needs a carried bearer; set PSEUDOLIFE_MCP_TOKEN_FILE to its existing private token file and retry; nothing was deployed",
+    ))
+}
+
+fn stopped_preflight(
+    u: &Update,
+    running: &Value,
+    daemon: &str,
+    pg: &str,
+    user: &str,
+    db: &str,
+    choice: &str,
+    config: &Value,
+) -> Result<Value> {
+    verify_stopped_database(config, &inspect(u, pg)?, pg, user, db)?;
+    let id = running["Image"].as_str().filter(|id| !id.is_empty())
+        .ok_or_else(|| UpdateError::usage("the stopped daemon's existing image is unavailable; restore that local image before retrying; nothing was deployed"))?;
+    let (code, out) = u.docker_call(&["image", "inspect", "-f", "{{.Id}}", id]);
+    if code != 0 || out.trim() != id {
+        return Err(UpdateError::usage(
+            "the stopped daemon's existing image is unavailable; restore that local image before retrying; nothing was deployed",
+        ));
+    }
+    let schema = sql(u, pg, user, db, "SELECT value::text FROM meta WHERE key = 'schema_version'")?
+        .trim_matches('"').parse::<i64>()
+        .map_err(|_| UpdateError::usage("cannot verify the restored bank schema; restore a complete bank before retrying; nothing was deployed"))?;
+    let pending = choice == "rust"
+        && (schema < 57
+            || sql(
+                u,
+                pg,
+                user,
+                db,
+                "SELECT EXISTS (SELECT 1 FROM cms_counters WHERE id = 1)",
+            )? != "t");
+    let script = if pending {
+        "test -d /data && test -r /data && test ! -e /data/memory_state/weights.pt && test ! -e /data/memory_state/weights.pt.bak"
+    } else {
+        "test -d /data && test -r /data && test -x /bin/sh"
+    };
+    if choice == "rust" && schema < 57 {
+        return Err(UpdateError::usage(
+            "Rust activation requires schema v57 or later and imported counters; run update --engine python --checkout <repo> first; nothing was changed",
+        ));
+    }
+    let old_rust = running["Config"]["Labels"][ENGINE_LABEL] == "rust";
+    let metadata = if old_rust {
+        "/usr/local/bin/pseudolife-mcp update --schema-version"
+    } else {
+        "cat /app/pseudolife_memory/storage/schema.py"
+    };
+    u.with_state_helper(daemon, id, &format!("{script} && {metadata}"), |helper| {
+        let (code, output) = u.command(&["start".into(), "-a".into(), helper.into()], None, 60, false);
+        let image_schema = if old_rust { output.trim().parse::<i64>().ok() } else {
+            regex::Regex::new(r"(?m)^SCHEMA_META_VERSION\s*=\s*([0-9]+)").expect("schema")
+                .captures(&output).and_then(|c| c[1].parse::<i64>().ok())
+        };
+        if code != 0 || image_schema.is_none_or(|image_schema| image_schema < schema) {
+            return Err(UpdateError::usage("the stopped image cannot verify its state or support the restored schema; restore an accepted image compatible with this bank before retrying; nothing was deployed"));
+        }
+        Ok(())
+    })?;
+    Ok(json!({"schema":schema,"version":"previous"}))
+}
+
 pub(super) fn deploy(u: &mut Update, repo: &Path) -> Result<()> {
     let repo = seams::command_path(fs::canonicalize(repo)?);
     let ops = repo.join("ops");
@@ -802,7 +936,9 @@ pub(super) fn deploy(u: &mut Update, repo: &Path) -> Result<()> {
     if labels[ENGINE_LABEL] == "rust" || truthy(&labels[ACTIVATION_LABEL]) {
         validated(labels)?;
     }
-    if running["State"]["Running"] != true {
+    let stopped_handover =
+        u.o.allow_auth_change && u.o.checkout.is_some() && running["State"]["Running"] == false;
+    if running["State"]["Running"] != true && !stopped_handover {
         return Err(UpdateError::usage(
             "the current daemon must be running for the backup and rollback tag; start it and retry",
         ));
@@ -810,7 +946,6 @@ pub(super) fn deploy(u: &mut Update, repo: &Path) -> Result<()> {
     verify_identity(u, &config, &running, &u.o.daemon_url)?;
     u.set_rollback_scope(&config, &running)?;
     u.maintainer_context = Some((base.clone(), env.clone()));
-    let token = daemon_token(&config)?;
     let pg_env = &config["services"]["pseudolife-pg"]["environment"];
     let user = pg_env["POSTGRES_USER"]
         .as_str()
@@ -818,11 +953,36 @@ pub(super) fn deploy(u: &mut Update, repo: &Path) -> Result<()> {
     let db = pg_env["POSTGRES_DB"]
         .as_str()
         .ok_or_else(|| UpdateError::usage("cannot resolve PostgreSQL database"))?;
-    if choice == "rust" {
+    let configured_env = &config["services"][DAEMON_SERVICE]["environment"];
+    let raw_map = configured_env["PSEUDOLIFE_MCP_TOKENS"]
+        .as_str()
+        .unwrap_or("");
+    if u.o.allow_auth_change && !raw_map.trim().is_empty() {
+        let mut map_only = config.clone();
+        map_only["services"][DAEMON_SERVICE]["environment"]["PSEUDOLIFE_MCP_TOKEN"] = json!("");
+        daemon_token(&map_only)?;
+    }
+    let stored_only = configured_env["PSEUDOLIFE_MCP_TOKEN"]
+        .as_str()
+        .unwrap_or("")
+        .is_empty()
+        && raw_map.trim().is_empty();
+    let token = if stopped_handover && stored_only {
+        stored_probe_token(u, &pg, user, db)?
+    } else {
+        daemon_token(&config)?
+    };
+    if choice == "rust" && !stopped_handover {
         require_imported_with(u, &pg, user, db, &daemon)?;
     }
-    let before=u.daemon_health().ok_or_else(||UpdateError::usage("the running daemon did not answer /health; use the previous update's rollback commands before retrying; no rollback tag was moved"))?;
-    if before["status"] != "ok" || !seams::authenticated_read(&u.o.daemon_url, &token) {
+    let before = if stopped_handover {
+        stopped_preflight(u, &running, &daemon, &pg, user, db, &choice, &config)?
+    } else {
+        u.daemon_health().ok_or_else(||UpdateError::usage("the running daemon did not answer /health; use the previous update's rollback commands before retrying; no rollback tag was moved"))?
+    };
+    if !stopped_handover
+        && (before["status"] != "ok" || !seams::authenticated_read(&u.o.daemon_url, &token))
+    {
         return Err(UpdateError::usage(
             "the running daemon did not pass an authenticated bank read; use the previous update's rollback commands before retrying; no rollback tag was moved",
         ));
@@ -835,13 +995,33 @@ pub(super) fn deploy(u: &mut Update, repo: &Path) -> Result<()> {
         ));
     }
     let (version, schema) = checkout_version_schema(&repo)?;
+    if stopped_handover && u.schema_before.is_some_and(|before| before > schema) {
+        return Err(UpdateError::usage(
+            "the restored bank is newer than this checkout; update the checkout before retrying; nothing was deployed",
+        ));
+    }
     if u.o.shadow {
         return shadow::start(
             u, &repo, &ops, &base, &env, &tree, &config, &running, &pg, user, db, &token, &version,
             schema,
         );
     }
-    let backups = u.project_backup(&repo, &pg, &daemon, user, db)?;
+    let backups = if stopped_handover {
+        u.builtin_backup(&pg, &daemon, user, db, &repo.join("data/backups"))?
+    } else {
+        u.project_backup(&repo, &pg, &daemon, user, db)?
+    };
+    if stopped_handover {
+        let current = inspect(u, &daemon)?;
+        if current["Image"] != running["Image"]
+            || current["State"]["Running"] != false
+            || current["Config"] != running["Config"]
+        {
+            return Err(UpdateError::usage(
+                "the stopped daemon changed during backup; stop other updates and retry; nothing was deployed",
+            ));
+        }
+    }
     let old = labels[ENGINE_LABEL].as_str().unwrap_or("python");
     let suffix = u.rollback_suffix();
     let rollback = format!("pseudolife-daemon-{old}:{running_version}-{suffix}");
@@ -981,5 +1161,36 @@ mod bearer_source_tests {
             false,
         )
         .unwrap();
+    }
+}
+
+#[cfg(test)]
+mod stopped_handover_tests {
+    use super::*;
+
+    #[test]
+    fn stopped_bank_verification_is_scoped_to_the_declared_project_database() {
+        let mut config = json!({"services":{DAEMON_SERVICE:{"environment":{
+            "PSEUDOLIFE_MCP_DATABASE_URL":"postgresql://fixture:fixture@legacy-pg:5432/fixture"
+        }}}});
+        let mut pg = json!({"State":{"Running":true},"Name":"/custom-project-pg",
+            "NetworkSettings":{"Networks":{"fixture":{"Aliases":["legacy-pg"]}}}});
+        assert!(verify_stopped_database(&config, &pg, "scoped-pg", "fixture", "fixture").is_ok());
+        for url in [
+            "postgresql://fixture:fixture@external-pg:5432/fixture",
+            "postgresql://fixture:fixture@legacy-pg:5432/other",
+            "postgresql://other:fixture@legacy-pg:5432/fixture",
+            "postgresql://fixture:fixture@legacy-pg:5433/fixture",
+        ] {
+            config["services"][DAEMON_SERVICE]["environment"]["PSEUDOLIFE_MCP_DATABASE_URL"] =
+                json!(url);
+            assert!(
+                verify_stopped_database(&config, &pg, "scoped-pg", "fixture", "fixture").is_err()
+            );
+        }
+        config["services"][DAEMON_SERVICE]["environment"]["PSEUDOLIFE_MCP_DATABASE_URL"] =
+            json!("postgresql://fixture:fixture@legacy-pg:5432/fixture");
+        pg["State"]["Running"] = json!(false);
+        assert!(verify_stopped_database(&config, &pg, "scoped-pg", "fixture", "fixture").is_err());
     }
 }

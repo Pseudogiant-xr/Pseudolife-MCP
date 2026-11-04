@@ -12,6 +12,7 @@ import gzip
 import os
 import re
 import secrets
+import shlex
 import tarfile
 import time
 import urllib.error
@@ -99,6 +100,9 @@ def selected_checkout(update) -> Path | None:
         raise up.UpdateError("this checkout's engine selection disagrees with the host; use --engine python --checkout <repo> "
                              "to restore the default, or --engine rust --checkout <repo> to explicitly activate Rust; nothing was changed", 2)
     if labels.get(ENGINE_LABEL) != "rust":
+        if o.allow_auth_change and o.checkout is not None:
+            update._selected_engine = "python"
+            return repo
         if o.engine == "python":
             o.daemon_only = True
         return None
@@ -241,7 +245,9 @@ class EngineUpdate:
             # Explicit engine flags cannot promote a replacement of either
             # engine that never passed its gate.
             _validated_engine_selection(self.running_labels)
-        if not self.running.get("State", {}).get("Running"):
+        self.stopped_handover = (self.o.allow_auth_change and self.o.checkout is not None
+                                and self.running.get("State", {}).get("Running") is False)
+        if not self.running.get("State", {}).get("Running") and not self.stopped_handover:
             raise up.UpdateError("the current daemon must be running for the backup and rollback tag; start it and retry", 2)
         daemon_env = config["services"][up.DAEMON_SERVICE].get("environment", {})
         entries = self.running["Config"].get("Env")
@@ -249,7 +255,7 @@ class EngineUpdate:
             raise up.UpdateError("cannot verify the daemon's Compose bearer settings; restore the original compose "
                                  "and env files, then retry. Nothing was changed", 2)
         running_env = dict(item.split("=", 1) for item in entries)
-        up.verify_compose_bearers(daemon_env, running_env)
+        up.verify_compose_bearers(daemon_env, running_env, allow_change=self.o.allow_auth_change)
         if running_env.get("PSEUDOLIFE_MCP_DATABASE_URL") != daemon_env.get("PSEUDOLIFE_MCP_DATABASE_URL"):
             raise up.UpdateError("the host Compose configuration names a different bank from the running daemon; restore its original env file before switching; nothing was changed", 2)
         data_mount = next((v for v in config["services"][up.DAEMON_SERVICE].get("volumes", []) if v.get("target") == "/data"), None)
@@ -267,7 +273,11 @@ class EngineUpdate:
             port = published.get("published", 8765) if published else 8765
             raise up.UpdateError(f"engine verification must reach this project's loopback port; use --daemon-url http://127.0.0.1:{port}; nothing was changed", 2)
         from pseudolife_memory.principals import parse_token_map
+        if self.o.allow_auth_change and (daemon_env.get("PSEUDOLIFE_MCP_TOKENS") or "").strip() and not parse_token_map(daemon_env.get("PSEUDOLIFE_MCP_TOKENS")):
+            raise up.UpdateError("the carried bearer map is invalid; repair PSEUDOLIFE_MCP_TOKENS in ops/.env before retrying; nothing was deployed", 2)
         self.token = daemon_env.get("PSEUDOLIFE_MCP_TOKEN") or next(iter(parse_token_map(daemon_env.get("PSEUDOLIFE_MCP_TOKENS"))), "")
+        if not self.token and self.stopped_handover:
+            self.token = self.stored_probe_token()
         if not self.token or "\r" in self.token or "\n" in self.token:
             raise up.UpdateError("the engine health gate needs bearer auth; set PSEUDOLIFE_MCP_TOKEN in the host env file and retry; nothing was changed", 2)
         if self.o.shadow:
@@ -284,11 +294,12 @@ class EngineUpdate:
             require_imported_bank(schema, False)
             has_row = self.sql("SELECT EXISTS (SELECT 1 FROM cms_counters WHERE id = 1)") == "t"
             if not has_row:
-                code, _ = self.command(["exec", self.daemon, "sh", "-c",
-                                        "test ! -e /data/memory_state/weights.pt && test ! -e /data/memory_state/weights.pt.bak"], timeout=60)
+                script = "test ! -e /data/memory_state/weights.pt && test ! -e /data/memory_state/weights.pt.bak"
+                code = self.stopped_probe(script)[0] if self.stopped_handover else self.command(
+                    ["exec", self.daemon, "sh", "-c", script], timeout=60)[0]
                 require_imported_bank(schema, code != 0)
-        before = self.u.daemon_health() or {}
-        if before.get("status") != "ok" or not authenticated_read(self.o.daemon_url, self.token):
+        before = self.stopped_preflight() if self.stopped_handover else self.u.daemon_health() or {}
+        if not self.stopped_handover and (before.get("status") != "ok" or not authenticated_read(self.o.daemon_url, self.token)):
             raise up.UpdateError("the running daemon did not pass an authenticated bank read; use the previous update's rollback commands before retrying; no rollback tag was moved", 2)
         self.u.schema_before = before.get("schema")
         self.previous_digest = before.get("hooks_digest")
@@ -297,8 +308,79 @@ class EngineUpdate:
             raise up.UpdateError("the running daemon reported an invalid version; restore its previous image before retrying", 2)
         self.version = re.search(r'^version\s*=\s*"([^"]+)"', (self.repo / "pyproject.toml").read_text(), re.M).group(1)
         self.schema = int(re.search(r"^SCHEMA_META_VERSION\s*=\s*(\d+)", (self.repo / "pseudolife_memory/storage/schema.py").read_text(), re.M).group(1))
+        if self.stopped_handover and self.u.schema_before > self.schema:
+            raise up.UpdateError("the restored bank is newer than this checkout; update the checkout before retrying; nothing was deployed", 2)
+
+    def stopped_bank(self):
+        try:
+            from pseudolife_memory.docker_backup_restore import DockerBank
+        except ImportError as exc:
+            raise up.UpdateError("stopped checkout handover needs complete stopped-daemon backups; upgrade the update runtime to a version with DockerBank backup support, then retry; nothing was deployed", 2) from exc
+        return DockerBank(container=self.pg, daemon_container=self.daemon, user=self.pg_user,
+                          db=self.pg_db, log=self.u.step)
+
+    def stopped_probe(self, script):
+        bank = self.stopped_bank()
+        with bank.helper("timeout --kill-after=5s 45s sh -c " + shlex.quote(script)) as helper:
+            return bank.command("start", "-a", helper, check=False, timeout=60)
+
+    def stored_probe_token(self):
+        from pseudolife_memory.credentials import CredentialError, CredentialProvider
+        from pseudolife_memory.principals import secret_sha256
+        try:
+            token = CredentialProvider.from_environment().snapshot().token
+        except CredentialError:
+            token = None
+        hashes = self.sql("SELECT token_hash FROM principals WHERE revoked_at IS NULL AND token_hash IS NOT NULL")
+        if not token or secret_sha256(token) not in hashes.splitlines():
+            raise up.UpdateError("stored-principal verification needs a carried bearer; set PSEUDOLIFE_MCP_TOKEN_FILE to its existing private token file and retry; nothing was deployed", 2)
+        return token
+
+    def stopped_preflight(self):
+        from psycopg.conninfo import conninfo_to_dict
+        config = self.config(self.base)
+        pg = self.inspect(self.pg)
+        try:
+            source = conninfo_to_dict(config["services"][up.DAEMON_SERVICE]["environment"]["PSEUDOLIFE_MCP_DATABASE_URL"])
+            aliases = {"pseudolife-pg", self.pg, (pg.get("Name") or "").lstrip("/")}
+            for network in (pg.get("NetworkSettings", {}).get("Networks") or {}).values():
+                aliases.update(network.get("Aliases") or [])
+            if (not pg.get("State", {}).get("Running") or source.get("host") not in aliases
+                    or source.get("hostaddr") or source.get("service")
+                    or source.get("user") != self.pg_user or source.get("dbname") != self.pg_db
+                    or source.get("port", "5432") != "5432"):
+                raise ValueError("bank")
+        except Exception:
+            # Driver errors may include the credential-bearing connection URL.
+            raise up.UpdateError("the restored bank cannot be matched to this project's PostgreSQL; restore its original database configuration before retrying; nothing was deployed", 2) from None
+        image = self.running.get("Image")
+        code, out = self.command(["image", "inspect", "-f", "{{.Id}}", image or ""], timeout=60)
+        if not image or code or out.strip() != image:
+            raise up.UpdateError("the stopped daemon's existing image is unavailable; restore that local image before retrying; nothing was deployed", 2)
+        raw = self.sql("SELECT value::text FROM meta WHERE key = 'schema_version'")
+        try:
+            schema = int(raw.strip('"'))
+        except ValueError as exc:
+            raise up.UpdateError("cannot verify the restored bank schema; restore a complete bank before retrying; nothing was deployed", 2) from exc
+        # The image-backed helper also proves /data is readable without starting
+        # the daemon or allowing network access to the restored bank.
+        rust = self.running_labels.get(ENGINE_LABEL) == "rust"
+        metadata = ("/usr/local/bin/pseudolife-mcp update --schema-version" if rust else
+                    "cat /app/pseudolife_memory/storage/schema.py")
+        code, output = self.stopped_probe("test -d /data && test -r /data && " + metadata)
+        match = re.fullmatch(r"\s*(\d+)\s*", output) if rust else re.search(r"^SCHEMA_META_VERSION\s*=\s*(\d+)", output, re.M)
+        if code or not match or int(match.group(1)) < schema:
+            raise up.UpdateError("the stopped image cannot verify its state or support the restored schema; restore an accepted image compatible with this bank before retrying; nothing was deployed", 2)
+        return {"schema": schema, "version": "previous"}
 
     def backup(self):
+        if self.stopped_handover:
+            result = self.stopped_bank().backup(out=self.repo / "data/backups", keep_days=None)
+            dump, state = Path(result["dump"]), Path(result["state"])
+            if not up._dump_complete(dump) or not state.is_file():
+                raise up.UpdateError("the stopped bank and state backup is incomplete; fix the backup error and retry; nothing was deployed")
+            self.backup_paths = {"dump": str(dump), "state_archive": str(state)}
+            return
         script = self.u._checkout_script(self.repo, "backup")
         if script is None:
             raise up.UpdateError("the checkout backup script is missing; restore ops/backup.sh or ops/backup.ps1 and retry", 2)
@@ -341,6 +423,10 @@ class EngineUpdate:
             from pseudolife_memory.update_shadow import ShadowUpdate
             return ShadowUpdate(self).start()
         self.backup()
+        if self.stopped_handover:
+            current = self.inspect(self.daemon)
+            if current.get("Image") != self.running.get("Image") or current.get("State", {}).get("Running") is not False or current.get("Config") != self.running.get("Config"):
+                raise up.UpdateError("the stopped daemon changed during backup; stop other updates and retry; nothing was deployed", 2)
         old_engine = self.running_labels.get(ENGINE_LABEL, "python")
         suffix = self.o.rollback_suffix or f"pre-update-{up._stamp()}"
         if not re.fullmatch(r"[A-Za-z0-9_.-]+", suffix):

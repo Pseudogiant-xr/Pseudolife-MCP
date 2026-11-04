@@ -527,12 +527,18 @@ class Update:
         return self.report.exit_code
 
     def _run(self) -> None:
-        if self.o.allow_auth_change and (self.o.checkout is not None or self.o.engine or self.o.shadow
+        checkout_handover = (self.o.checkout is not None and self.o.env_file is not None
+                             and Path(self.o.env_file).resolve() == (Path(self.o.checkout) / "ops/.env").resolve()
+                             and not self.o.tag and not self.o.reinstall and not self.o.allow_downgrade
+                             and not self.o.no_backup)
+        release_handover = self.o.checkout is None and self.o.tag and self.o.reinstall
+        if self.o.allow_auth_change and (not (checkout_handover or release_handover) or self.o.engine or self.o.shadow
                 or self.o.clients_only or self.o.all_clients or self.o.unattended or self.o.schedule
-                or self.o.unschedule or self.o.check or not self.o.tag or not self.o.reinstall
+                or self.o.unschedule or self.o.check
                 or not self.o.daemon_only or not _env_file_sets_credentials(self.o.env_file)):
             raise UpdateError("--allow-auth-change requires an attended release recreation with "
-                              "--env-file <bearer file>, --tag, --reinstall and --daemon-only. "
+                              "--env-file <bearer file>, --tag, --reinstall and --daemon-only, or "
+                              "--checkout <repo> --daemon-only --env-file <repo>/ops/.env with bearer declarations. "
                               "Nothing was changed", 2)
         if self.o.shadow and (not self.o.engine or self.o.checkout is None):
             raise UpdateError("--shadow requires --engine rust --checkout <repo> to start, or --engine python --checkout <repo> to remove; nothing was changed", 2)
@@ -543,7 +549,8 @@ class Update:
         if self.o.checkout is not None:
             for name, value in (("--clients-only", self.o.clients_only), ("--tag", self.o.tag),
                                 ("--reinstall", self.o.reinstall), ("--allow-downgrade", self.o.allow_downgrade),
-                                ("--env-file", self.o.env_file), ("--compose-file", self.o.compose_files)):
+                                ("--env-file", self.o.env_file if not self.o.allow_auth_change else None),
+                                ("--compose-file", self.o.compose_files)):
                 if value:
                     raise UpdateError(f"{name} is a release-mode option; a checkout deploy builds what the tree "
                                       f"holds (for the clients alone: python ops/update_clients.py)", 2)
@@ -1658,7 +1665,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--force-rollback-tag", action="store_true",
                         help="tag the rollback even when the version tag is not the running daemon's image")
     parser.add_argument("--allow-dirty", action="store_true", help="checkout mode: deploy an uncommitted tree (stamped dirty)")
-    parser.add_argument("--allow-auth-change", action="store_true", help="explicit release recreation: apply bearer settings from --env-file (requires --tag, --reinstall and --daemon-only)")
+    parser.add_argument("--allow-auth-change", action="store_true", help="apply declared bearer settings during an attended daemon-only recreation (release: --tag --reinstall; checkout: --env-file <repo>/ops/.env)")
     parser.add_argument("--health-retries", type=int, default=30)
     parser.add_argument("--health-delay-ms", type=int, default=1500)
     parser.add_argument("--all", action="store_true", help="checkout mode: also move the client side (shim, plugin, Codex)")

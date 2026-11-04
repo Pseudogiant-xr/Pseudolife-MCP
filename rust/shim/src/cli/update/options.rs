@@ -131,8 +131,20 @@ impl Options {
     }
 
     pub fn validate(&self) -> Result<()> {
+        let checkout_handover = self.checkout.as_ref().is_some_and(|repo| {
+            self.env_file.as_ref().is_some_and(|file| {
+                std::fs::canonicalize(file)
+                    .ok()
+                    .zip(std::fs::canonicalize(repo.join("ops/.env")).ok())
+                    .is_some_and(|(a, b)| a == b)
+            }) && self.tag.is_none()
+                && !self.reinstall
+                && !self.allow_downgrade
+                && !self.no_backup
+        });
+        let release_handover = self.checkout.is_none() && self.tag.is_some() && self.reinstall;
         if self.allow_auth_change
-            && (self.checkout.is_some()
+            && (!(checkout_handover || release_handover)
                 || self.engine.is_some()
                 || self.shadow
                 || self.clients_only
@@ -141,15 +153,13 @@ impl Options {
                 || self.schedule.is_some()
                 || self.unschedule
                 || self.check
-                || self.tag.is_none()
-                || !self.reinstall
                 || !self.daemon_only
                 || !self.env_file.as_ref().is_some_and(|path| {
                     super::seams::env_file_sets_credentials(std::slice::from_ref(path))
                 }))
         {
             return Err(UpdateError::usage(
-                "--allow-auth-change requires an attended release recreation with --env-file <bearer file>, --tag, --reinstall and --daemon-only. Nothing was changed",
+                "--allow-auth-change requires an attended release recreation with --env-file <bearer file>, --tag, --reinstall and --daemon-only, or --checkout <repo> --daemon-only --env-file <repo>/ops/.env with bearer declarations. Nothing was changed",
             ));
         }
         if self.engine.is_some()
@@ -195,7 +205,10 @@ impl Options {
                 ("--tag", self.tag.is_some()),
                 ("--reinstall", self.reinstall),
                 ("--allow-downgrade", self.allow_downgrade),
-                ("--env-file", self.env_file.is_some()),
+                (
+                    "--env-file",
+                    self.env_file.is_some() && !self.allow_auth_change,
+                ),
             ] {
                 if set {
                     return Err(UpdateError::usage(format!(
@@ -296,5 +309,58 @@ mod auth_transfer_tests {
         std::fs::write(&source, "# no bearer settings\n").unwrap();
         assert!(valid.validate().is_err());
         std::fs::remove_file(source).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod checkout_handover_tests {
+    use super::*;
+
+    #[test]
+    fn checkout_handover_requires_exact_env_file_and_daemon_only_authority() {
+        let root = std::env::temp_dir().join(format!(
+            "pseudolife-checkout-handover-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(root.join("ops")).unwrap();
+        let env = root.join("ops/.env");
+        std::fs::write(&env, "PSEUDOLIFE_MCP_TOKEN=\nPSEUDOLIFE_MCP_TOKENS=\n").unwrap();
+        let valid = Options {
+            checkout: Some(root.clone()),
+            env_file: Some(env),
+            allow_auth_change: true,
+            daemon_only: true,
+            ..Options::default()
+        };
+        assert!(valid.validate().is_ok());
+        let other = root.join("other.env");
+        std::fs::write(&other, "PSEUDOLIFE_MCP_TOKEN=fixture\n").unwrap();
+        for case in 0..12 {
+            let mut invalid = valid.clone();
+            match case {
+                0 => invalid.env_file = Some(other.clone()),
+                1 => invalid.daemon_only = false,
+                2 => invalid.no_backup = true,
+                3 => invalid.engine = Some("python".into()),
+                4 => invalid.shadow = true,
+                5 => invalid.all_clients = true,
+                6 => invalid.unattended = true,
+                7 => invalid.schedule = Some("07:05".into()),
+                8 => invalid.check = true,
+                9 => invalid.tag = Some("0.21.0".into()),
+                10 => invalid.reinstall = true,
+                _ => invalid.allow_downgrade = true,
+            }
+            assert!(
+                invalid
+                    .validate()
+                    .unwrap_err()
+                    .message
+                    .contains("--allow-auth-change requires")
+            );
+        }
+        std::fs::write(valid.env_file.as_ref().unwrap(), "# undeclared\n").unwrap();
+        assert!(valid.validate().is_err());
+        std::fs::remove_dir_all(root).unwrap();
     }
 }
