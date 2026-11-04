@@ -12,9 +12,12 @@ import pytest
 from pseudolife_memory import backup_cli, cli, update_cli as up
 
 
-def test_backup_command_detects_docker_without_a_clone(tmp_path, monkeypatch, capsys):
+@pytest.mark.parametrize("configured", [up.DAEMON_CONTAINER, up.PG_CONTAINER])
+def test_backup_command_detects_docker_without_a_clone(tmp_path, monkeypatch, capsys, configured):
     called = []
-    monkeypatch.setattr(up.Update, "detect_tier", lambda self: "docker")
+    monkeypatch.setattr(up, "which", lambda _: "docker")
+    monkeypatch.setattr(up, "run_cli", lambda argv, **kw:
+                        (0, "container-id") if argv[-1] == configured else (1, "No such container"))
     monkeypatch.setattr(up, "data_dir", lambda: tmp_path / "client-data")
     fake = types.ModuleType("pseudolife_memory.docker_backup_restore")
 
@@ -33,6 +36,28 @@ def test_backup_command_detects_docker_without_a_clone(tmp_path, monkeypatch, ca
     backup_cli.run_backup()
     assert called and called[0]["out"] == tmp_path
     assert "dump.sql.gz" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("selector,value", [
+    ("--container", "pg"), ("--daemon-container", "daemon"),
+    ("--db", "bank"), ("--user", "role"), ("--db-port", "5433"),
+])
+def test_explicit_docker_selectors_do_not_fall_back_to_file_mode(tmp_path, monkeypatch, selector, value):
+    from pseudolife_memory import docker_backup_restore as module
+    seen = []
+    class Bank:
+        def __init__(self, **kwargs):
+            seen.append(kwargs)
+            raise up.UpdateError("Docker unavailable; start Docker and retry", 2)
+    monkeypatch.setattr(module, "DockerBank", Bank)
+    monkeypatch.setattr(up, "run_cli", lambda *a, **kw: pytest.fail("explicit selectors do not need auto-detection"))
+    monkeypatch.setattr(backup_cli, "perform_backup", lambda *a, **kw: pytest.fail("explicit Docker must not fall back"))
+    monkeypatch.setattr(up, "data_dir", lambda: tmp_path / "client-data")
+    monkeypatch.setattr(sys, "argv", ["pseudolife-mcp", "backup", "--data-dir", str(tmp_path), selector, value])
+    with pytest.raises(SystemExit) as exc:
+        backup_cli.run_backup()
+    assert exc.value.code == 2
+    assert len(seen) == 1
 
 
 def test_restore_command_dispatches_without_a_clone(monkeypatch):

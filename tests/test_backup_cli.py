@@ -28,6 +28,45 @@ from pseudolife_memory import backup_cli
 from pseudolife_memory.storage import embedded_pg as ep
 
 
+@pytest.mark.parametrize("location", ["environment", "cwd", "explicit"])
+def test_file_mode_backup_works_with_docker_installed_but_stopped(tmp_path, monkeypatch, capsys, location):
+    import sys
+    from pseudolife_memory import update_cli as up
+    bank = tmp_path / "data"
+    bank.mkdir()
+    (bank / "config.yaml").write_bytes(b"storage: files\n")
+    backups = bank / "backups"
+    backups.mkdir()
+    expired = backups / "pseudolife_lite_state-20200101-000000.tar.gz"
+    expired.write_bytes(b"old state")
+    _age(expired, 30)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("PSEUDOLIFE_MCP_DATABASE_URL", raising=False)
+    monkeypatch.delenv("PSEUDOLIFE_MCP_DATA_DIR", raising=False)
+    if location == "environment":
+        monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(bank))
+    monkeypatch.setattr(ep, "available", lambda: False)
+    monkeypatch.setattr(up, "which", lambda _: "docker")
+    def stopped(*args, **kwargs):
+        if location == "explicit":
+            pytest.fail("an explicit file-mode data directory must not probe Docker")
+        return 1, "Docker engine is stopped"
+    monkeypatch.setattr(up, "run_cli", stopped)
+    argv = ["pseudolife-mcp", "backup"]
+    if location == "explicit":
+        argv += ["--data-dir", str(bank)]
+    monkeypatch.setattr(sys, "argv", argv)
+    backup_cli.run_backup()
+    output = capsys.readouterr()
+    assert "file-mode state archived only" in output.out
+    assert output.err == ""
+    assert not expired.exists()
+    archives = list(backups.glob("pseudolife_lite_state-*.tar.gz"))
+    assert len(archives) == 1
+    with tarfile.open(archives[0]) as archive:
+        assert archive.extractfile("config.yaml").read() == b"storage: files\n"
+
+
 def _age(path: Path, days: float) -> None:
     old = time.time() - days * 86400
     os.utime(path, (old, old))
