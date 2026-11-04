@@ -148,6 +148,8 @@ def main() -> None:
         options = options[:options.index("--")]
     offline = (any(flag in options for flag in ("-h", "--help"))
                or mode == "lease" and "--no-board" in options
+               or mode == "lease" and bool(options)
+               and options[0] in {"break", "conductor", "delegate", "designate"}
                or mode == "doctor" and "--disposable-proof" in options)
     if mode in {"lease", "doctor"} and not offline:
         import os

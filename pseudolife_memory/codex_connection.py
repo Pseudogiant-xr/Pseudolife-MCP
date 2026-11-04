@@ -511,6 +511,10 @@ def host_command_environment(environ) -> dict[str, str]:
     result = {URL_KEY: url}
     if token_file:
         result[TOKEN_FILE_KEY] = token_file
+    else:
+        # Explicitly tokenless: doctor must not borrow another client's
+        # bearer while retaining this connection's origin.
+        result[TOKEN_KEY] = ""
     return result
 
 

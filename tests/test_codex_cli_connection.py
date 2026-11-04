@@ -123,6 +123,8 @@ def test_unsafe_connection_refuses_without_traceback_or_running_command(connecti
     ["lease", "--help"], ["doctor", "-h"],
     ["lease", "run", "fixture", "--no-board", "--", "echo", "fixture"],
     ["doctor", "--disposable-proof"],
+    ["lease", "break", "fixture"], ["lease", "conductor", "fixture", "agent"],
+    ["lease", "delegate", "fixture", "agent"], ["lease", "designate", "fixture", "agent"],
 ])
 def test_offline_commands_bypass_saved_connection(connection, monkeypatch, arguments):
     monkeypatch.setenv("PSEUDOLIFE_MCP_TOKEN", "other-bearer")
@@ -147,3 +149,22 @@ def test_child_no_board_flag_does_not_disable_host_discovery(connection, monkeyp
     with pytest.raises(SystemExit) as result:
         cli.main()
     assert result.value.code == 2
+
+
+def test_tokenless_managed_origin_does_not_borrow_another_registration_bearer(connection, monkeypatch):
+    home, _ = connection
+    codex_connection._private_json(home / "pseudolife" / "connection.json",
+        codex_connection._connection_values("https://memory.example.com", None))
+    monkeypatch.setattr(doctor_cli, "_registration_env_blocks", lambda env: iter([
+        ("other registration", {"PSEUDOLIFE_MCP_TOKEN": "other-bearer",
+                                "PSEUDOLIFE_MCP_DAEMON_URL": "https://other.example.com"})]))
+    seen = []
+
+    def command():
+        overrides, _ = doctor_cli.registration_credentials(os.environ)
+        seen.append("PSEUDOLIFE_MCP_TOKEN" in overrides)
+
+    monkeypatch.setattr(doctor_cli, "run_doctor", command)
+    monkeypatch.setattr(sys, "argv", ["pseudolife-mcp", "doctor"])
+    cli.main()
+    assert seen == [False]

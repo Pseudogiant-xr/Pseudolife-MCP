@@ -224,6 +224,28 @@ fn missing_managed_state_preserves_the_ordinary_connection_path() {
 }
 
 #[test]
+fn tokenless_selection_is_explicit_and_operators_ignore_bad_managed_state() {
+    let fixture = Fixture::new();
+    fixture.connection("");
+    let found = discover(&fixture.env(), "doctor", &[]).unwrap();
+    assert!(
+        found
+            .additions()
+            .contains(&(TOKEN_KEY.into(), String::new()))
+    );
+    std::fs::remove_file(codex::connection_path(&fixture.0)).unwrap();
+    private_file(&codex::connection_path(&fixture.0), b"malformed");
+    for action in ["break", "conductor", "delegate", "designate"] {
+        assert!(
+            discover(&fixture.env(), "lease", &[action, "fixture"])
+                .unwrap()
+                .additions()
+                .is_empty()
+        );
+    }
+}
+
+#[test]
 fn managed_state_must_decode_and_name_a_valid_daemon_origin() {
     for value in [
         serde_json::json!({"daemon_url": "not-base64", "token_file": ""}),

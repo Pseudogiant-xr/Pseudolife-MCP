@@ -48,6 +48,13 @@ fn discover_from(
 fn selected(mode: &str, arguments: &[String]) -> bool {
     let flags = || arguments.iter().take_while(|value| value.as_str() != "--");
     matches!(mode, "lease" | "doctor")
+        && !(mode == "lease"
+            && arguments.first().is_some_and(|action| {
+                matches!(
+                    action.as_str(),
+                    "break" | "conductor" | "delegate" | "designate"
+                )
+            }))
         && !flags().any(|value| matches!(value.as_str(), "--help" | "-h"))
         && !(mode == "lease" && flags().any(|value| value == "--no-board"))
         && !(mode == "doctor" && flags().any(|value| value == "--disposable-proof"))
@@ -94,6 +101,8 @@ fn from_lookup(lookup: impl Fn(&str) -> Option<OsString>) -> Result<Environment,
         }
     } else if !token_file.is_empty() {
         additions.push((FILE_KEY.to_owned(), token_file));
+    } else {
+        additions.push((TOKEN_KEY.to_owned(), String::new()));
     }
     Ok(Environment(additions))
 }
