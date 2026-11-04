@@ -39,6 +39,36 @@ def test_shared_conversation_host_has_no_session_mailbox():
     assert result["wake"]["state"] == "unsupported"
 
 
+@pytest.mark.parametrize("host", ["generic", "claude-code"])
+def test_stop_hook_is_a_wake_path_without_optional_push(host):
+    result = doctor_cli.coordination_snapshot(
+        {"status": "ok", "coordination": {"wake_enabled": False}}, {"state": "on"},
+        {"claude_code": {"registered": True, "stop_hook": "on"}}, host, None)
+    advice = " ".join(result["next"])
+    assert result["wake"]["state"] == "configured"
+    assert "Claude Code wakes via the plugin Stop hook" in advice
+    assert "optional push" in advice and "wake_enabled" in advice
+    assert "no verified idle wake path" not in advice
+    assert result["delivery"] == "unverified"
+
+
+def test_disabled_stop_hook_has_no_configured_wake_path():
+    result = doctor_cli.coordination_snapshot(
+        {"status": "ok"}, {"state": "on"},
+        {"claude_code": {"registered": True, "stop_hook": "off (plugin disabled)"}},
+        "claude-code", None)
+    assert result["wake"]["state"] == "unavailable"
+    assert "no configured idle wake path" in " ".join(result["next"])
+
+
+def test_generic_doctor_can_report_the_codex_path():
+    result = doctor_cli.coordination_snapshot(
+        {"status": "ok"}, {"state": "on"},
+        {"codex": {"registered": True, "doorbell": "on"}}, "generic", None)
+    assert result["wake"]["state"] == "configured"
+    assert "Codex wakes via the doorbell" in " ".join(result["next"])
+
+
 @pytest.mark.parametrize("status,body,expected", [
     (200, {"agents": [], "credential": "fixture-secret"}, "authenticated"),
     (401, {"error": "unauthorized", "hint": "fixture-secret"}, "unauthorized"),
