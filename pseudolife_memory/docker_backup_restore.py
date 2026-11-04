@@ -129,7 +129,6 @@ class DockerBank:
         self.running = self.inspect(self.daemon)
         pg = self.inspect(self.pg)
         env = dict(v.split("=", 1) for v in self.running.get("Config", {}).get("Env", []) if "=" in v)
-        pg_env = dict(v.split("=", 1) for v in pg.get("Config", {}).get("Env", []) if "=" in v)
         source = {}
         if env.get("PSEUDOLIFE_MCP_DATABASE_URL"):
             from psycopg.conninfo import conninfo_to_dict
@@ -138,7 +137,11 @@ class DockerBank:
             except Exception:  # driver errors may include the credential-bearing URL
                 raise up.UpdateError("cannot read the daemon's database configuration; restore its original "
                                      "PSEUDOLIFE_MCP_DATABASE_URL and retry. Nothing was restored", 2) from None
-        if source.get("host") and container is None:
+        if (source.get("service") or env.get("PGSERVICE")) and not (container and db and user):
+            raise up.UpdateError("the daemon's libpq service profile cannot be resolved here; name the actual "
+                                 "target with --container <postgres> --db <database> --user <role>. Nothing was restored", 2)
+        source_host = source.get("hostaddr") or env.get("PGHOSTADDR") or source.get("host") or env.get("PGHOST")
+        if source_host and container is None:
             networks = pg.get("NetworkSettings", {}).get("Networks", {})
             shared = set(self.running.get("NetworkSettings", {}).get("Networks", {})) & set(networks)
             names = set()
@@ -147,11 +150,19 @@ class DockerBank:
                 names.update((self.pg, (pg.get("Name") or "").lstrip("/"), pg.get("Config", {}).get("Hostname")))
                 names.update(network.get("Aliases") or [])
                 names.add(network.get("IPAddress"))
-            if source["host"] not in names:
+            if source_host not in names:
                 raise up.UpdateError("the daemon's database host cannot be matched to the default PostgreSQL "
                                      "container; name its actual database container with --container. Nothing was restored", 2)
-        self.user = user or source.get("user") or pg_env.get("POSTGRES_USER") or "postgres"
-        self.db = db or source.get("dbname") or pg_env.get("POSTGRES_DB") or self.user
+        # Container initialization variables do not describe libpq's current
+        # connection. In particular, an omitted dbname defaults to its user.
+        connection_user = source.get("user") or env.get("PGUSER")
+        connection_db = source.get("dbname") or env.get("PGDATABASE") or connection_user
+        if not env.get("PSEUDOLIFE_MCP_DATABASE_URL"):
+            connection_user = connection_db = None
+        self.user, self.db = user or connection_user, db or connection_db
+        if not self.user or not self.db:
+            raise up.UpdateError("the daemon's database defaults cannot be identified safely; name its actual "
+                                 "bank with --db <database> --user <role>. Nothing was restored", 2)
         self.image = self.running.get("Image")
         if not self.image or not any(m.get("Destination") == "/data" for m in self.running.get("Mounts", [])):
             raise up.UpdateError("the daemon has no reusable /data mount or local image; restore its Docker "
@@ -254,7 +265,12 @@ class DockerBank:
     def wait_ready(self):
         for attempt in range(30):
             health = up.fetch_json(self.daemon_url.rstrip("/") + "/health", timeout=3)
-            if health and health.get("status") == "ok":
+            # v0.20.0 first released the readiness contract (2026-10-20
+            # changelog entry). Earlier releases can attest only liveness;
+            # a present ready:false is never overridden by that compatibility.
+            legacy = (health and "ready" not in health and up.plain_release(health.get("version"))
+                      and up.version_key(health["version"]) < (0, 20, 0))
+            if health and health.get("status") == "ok" and (health.get("ready") is True or legacy):
                 return
             if attempt < 29:
                 up.sleep(1.5)
@@ -280,6 +296,21 @@ class DockerBank:
         if any((parent / ".git").exists() for parent in (safety_dir, *safety_dir.parents)):
             raise up.UpdateError(f"the safety backup directory {safety_dir} is inside a checkout; choose "
                                  "--safety-dir <directory outside a checkout>. Nothing was restored", 2)
+        for mount in self.running.get("Mounts", []):
+            destination = mount.get("Destination", "")
+            if destination != "/data" and not destination.startswith("/data/"):
+                continue
+            source_path = mount.get("Source")
+            if not source_path:
+                continue
+            if os.name == "nt":
+                mapped = re.fullmatch(r"/(?:run/desktop/mnt/host|host_mnt)/([A-Za-z])/(.*)", source_path)
+                if mapped:
+                    source_path = mapped[1] + ":/" + mapped[2]
+            source_path = Path(source_path)
+            if source_path.is_absolute() and safety_dir.is_relative_to(source_path.resolve()):
+                raise up.UpdateError("the safety backup would be inside the state mount being replaced; choose "
+                                     "--safety-dir <directory outside the state mount>. Nothing was restored", 2)
         was_running = self.running.get("State", {}).get("Running", False)
         destructive = False
         safety = None
