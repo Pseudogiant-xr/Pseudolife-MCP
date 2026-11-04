@@ -332,7 +332,7 @@
       "lock-resolve": "83bcc6b654896c6d",
       "test": "ac414107d3d9c71d",
       "test-lite-linux": "44e2a8f2c01baeab",
-      "test-lite-windows": "0e3d38b7bd3bfdc3",
+      "test-lite-windows": "6dc2546e86629d8a",
       "test-lite-macos": "c4a0ad0c70bb205a",
       "frontend": "b1b6a1a1278f2e60"
     },
@@ -436,6 +436,11 @@
         "job": "test-lite-windows",
         "fingerprint": "0e3d38b7bd3bfdc3",
         "reason": "Adds the 33 migration tests to the existing PostgreSQL-backed step (9.15 seconds in the native Windows targeted run on 2026-11-03). No new job, setup step or shard; retain the measured lane baseline within unchanged limits pending the next batch measurement."
+      },
+      {
+        "job": "test-lite-windows",
+        "fingerprint": "6dc2546e86629d8a",
+        "reason": "Adds three bounded extractor picker, cutover and autostart-reference test files to the existing Python step. The targeted selection is under one minute, within the existing 6.1 runner-minute total headroom; no jobs, shards, setup steps or limits change pending the next batch measurement."
       }
     ]
   }
