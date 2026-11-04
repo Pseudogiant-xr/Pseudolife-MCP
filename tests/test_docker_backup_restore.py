@@ -227,6 +227,20 @@ def test_database_port_follows_runtime_connection_and_explicit_override(docker_b
         assert command[command.index("-p") + 1] == str(expected)
 
 
+@pytest.mark.parametrize("runtime_port,expected", [(None, 5432), ("6543", 6543)])
+def test_postgres_client_environment_does_not_override_daemon_port(docker_bank, runtime_port, expected):
+    from pseudolife_memory.docker_backup_restore import DockerBank
+    _bank, world = docker_bank
+    world.pg["Config"]["Env"].append("PGPORT=7654")
+    world.daemon["Config"]["Env"] = ["PSEUDOLIFE_MCP_DATABASE_URL=postgresql://custom_role@db/custom_bank"]
+    if runtime_port is not None:
+        world.daemon["Config"]["Env"].append("PGPORT=" + runtime_port)
+    bank = DockerBank(log=lambda _: None)
+    assert bank.database_exists()
+    command = next(c for c in reversed(world.calls) if "psql" in c)
+    assert command[command.index("-p") + 1] == str(expected)
+
+
 @pytest.mark.parametrize("port", [0, -1, 65536])
 def test_invalid_database_port_refuses_before_writing(docker_bank, port):
     from pseudolife_memory.docker_backup_restore import DockerBank

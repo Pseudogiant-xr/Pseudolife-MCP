@@ -164,10 +164,9 @@ class DockerBank:
         if not self.user or not self.db:
             raise up.UpdateError("the daemon's database defaults cannot be identified safely; name its actual "
                                  "bank with --db <database> --user <role>. Nothing was restored", 2)
-        pg_env = dict(v.split("=", 1) for v in pg.get("Config", {}).get("Env", []) if "=" in v)
         try:
             self.db_port = int(db_port if db_port is not None else
-                               source.get("port") or env.get("PGPORT") or pg_env.get("PGPORT") or "5432")
+                               source.get("port") or env.get("PGPORT") or "5432")
             if not 1 <= self.db_port <= 65535:
                 raise ValueError("port range")
         except (ValueError, TypeError) as exc:
