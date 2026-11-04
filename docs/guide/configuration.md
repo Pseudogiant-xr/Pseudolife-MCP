@@ -1202,7 +1202,10 @@ once passkeys are in place. It never renames a valid name, since every
 passkey bound to it would stop working.
 It reads and writes the daemon's config and the bank from the daemon's own
 environment (inside the container on the Docker tier), so it needs no
-bearer token.
+bearer token. `--container <name>` picks the daemon container when the
+host runs more than one; every step (inspection, config, keys, restart)
+then uses only that container, and a name it cannot read is refused
+rather than replaced by another daemon.
 
 By hand, the same steps: serve the Console over HTTPS as above; set the
 name in the daemon's config file (these keys are refused through `POST
@@ -3124,6 +3127,9 @@ every variant.
 - **No HyDE / no reflection** — both rely on an LLM callback. Claude *is*
   the LLM, so the natural way to reflect is for Claude to call
   `memory_store` with a self-composed summary.
+- **Lesson search returns `memory.lessons.top_k` lessons** (default `5`)
+  when a `memory_lesson_search` call omits `top_k`, so a Console change
+  applies to the next search; an explicit positive `top_k` is used as given.
 - **Auto-outcome inference on** (`memory.lessons.infer_outcomes = true`) —
   a session episode that closes with entries but zero `memory_outcome`
   calls gets up to `memory.lessons.infer_outcomes_max_signals` (default
@@ -4068,7 +4074,7 @@ installer and the session notices print.
 | `--reinstall` | recreate the daemon at the version it already runs, and install the shim runtime again when the current one is already that release (without it the shim step reports `current`, unless one of that runtime's installed requirements is outside the range its own `pseudolife-mcp` declares, as an mcp 2.1 runtime left by a 0.18.1 update is: then it installs again and says why); with `--clients-only`, install the release even over a checkout-built shim runtime of the same version |
 | `--allow-downgrade` | with `--tag`, allow a release older than the one the daemon runs (refused otherwise: the bank's schema may be newer than that release knows) |
 | `--env-file <path>` | the compose env file, when the one the container was created with is gone (without it the recreate would reset the Postgres password, the volume names and the bearer, so it stops instead) |
-| `--no-backup`, `--rollback-tag`, `--keep-rollbacks`, `--force-rollback-tag`, `--health-retries`, `--health-delay-ms`, `--no-cache-prune`, `--json` | the checkout deploy's knobs, same meaning |
+| `--no-backup`, `--rollback-tag`, `--keep-rollbacks`, `--force-rollback-tag`, `--health-retries`, `--health-delay-ms`, `--no-cache-prune`, `--json` | the checkout deploy's knobs, same meaning; the Python updater keeps every rollback tag (it cannot prove which project an older tag belongs to) and says it skipped retention, even with `--keep-rollbacks 0` |
 
 Until maintainer passkeys are set up on a daemon that requires a bearer, a
 Docker-tier update (release or checkout, not `--clients-only`) ends with
