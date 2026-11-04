@@ -258,7 +258,9 @@ def run_backup() -> None:
         sys.exit(exc.exit_code if isinstance(exc, up.UpdateError) else 1)
     data_dir = args.data_dir or _default_data_dir(os.environ)
     if not data_dir.exists():
-        print(f"data dir {data_dir} does not exist — nothing to back up.",
+        print(f"data dir {data_dir} does not exist — nothing to back up. "
+              "If this is a Docker install, Docker or its bank containers may be unavailable; "
+              "start Docker and retry, or pass --container <postgres>.",
               file=sys.stderr)
         sys.exit(1)
     try:

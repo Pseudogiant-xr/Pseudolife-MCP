@@ -67,6 +67,29 @@ def test_file_mode_backup_works_with_docker_installed_but_stopped(tmp_path, monk
         assert archive.extractfile("config.yaml").read() == b"storage: files\n"
 
 
+@pytest.mark.parametrize("lite_available", [False, True])
+def test_missing_bank_with_stopped_docker_names_the_recovery(tmp_path, monkeypatch, capsys, lite_available):
+    import sys
+    from pseudolife_memory import update_cli as up
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("PSEUDOLIFE_MCP_DATABASE_URL", raising=False)
+    monkeypatch.delenv("PSEUDOLIFE_MCP_DATA_DIR", raising=False)
+    monkeypatch.setattr(ep, "available", lambda: lite_available)
+    monkeypatch.setattr(ep, "default_lite_data_dir", lambda: tmp_path / "absent-lite")
+    monkeypatch.setattr(up, "which", lambda _: "docker")
+    monkeypatch.setattr(up, "run_cli", lambda *a, **kw: (1, "Docker engine is stopped"))
+    monkeypatch.setattr(sys, "argv", ["pseudolife-mcp", "backup"])
+    with pytest.raises(SystemExit) as exc:
+        backup_cli.run_backup()
+    assert exc.value.code == 1
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert "does not exist — nothing to back up" in output.err
+    assert "start Docker and retry" in output.err
+    assert "--container <postgres>" in output.err
+    assert list(tmp_path.iterdir()) == []
+
+
 def _age(path: Path, days: float) -> None:
     old = time.time() - days * 86400
     os.utime(path, (old, old))
