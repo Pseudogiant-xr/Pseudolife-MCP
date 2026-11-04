@@ -45,7 +45,8 @@ JUDGE_ROOTS = {
 }
 JUDGES = ("wait-mail-tests", "lease-headers", "cli-argv", "phase1-judges", "phase2-dispatch", "cli-process")
 # These rows need database seeders or the packaged PostgreSQL fixture.
-FULL_RUNTIME_ROWS = ("transfer", "test_login", "audit", "backup", "migrate_flat")
+POSTGRES_ROWS = ("lease", "lease_operator", "transfer", "test_login", "maintainer", "invite",
+                 "audit", "backup", "migrate_flat")
 
 
 def import_graph(sources: dict[str, str]) -> dict[str, set[str]]:
@@ -212,7 +213,7 @@ def main(argv=None) -> int:
         output.write(f"enabled={str(bool(value[platform] or value['judges'])).lower()}\n")
         output.write(f"golden={str(bool(value[platform])).lower()}\n")
         output.write(f"judges={str(bool(value['judges'])).lower()}\n")
-        output.write(f"full_runtime={str(bool(value['judges']) or bool(set(value[platform]) & set(FULL_RUNTIME_ROWS))).lower()}\n")
+        output.write(f"full_runtime={str(bool(value['judges']) or bool(set(value[platform]) & set(POSTGRES_ROWS))).lower()}\n")
         output.write(f"test_login={str('test_login' in value[platform]).lower()}\n")
     print(json.dumps(value))
     return 0

@@ -451,6 +451,7 @@ jobs:
           & $python -m pip install --no-compile "setuptools>=68" wheel httpx
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           if ($env:PRECHECK_FULL_RUNTIME -ceq 'true') {
+            # Database-backed rows use the existing parity seeders and their dependencies.
             & $python -m pip install --no-compile --index-url https://download.pytorch.org/whl/cpu "torch==2.13.0"
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
             & $python -m pip install --no-compile -e ".[dev,lite]" "mcp==2.2.0"
