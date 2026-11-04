@@ -243,14 +243,15 @@ def test_a_venvs_symlinked_interpreter_is_probed_and_chosen_by_its_own_path(
     ``/usr/bin/python3.13`` on the Debian 13 box (2026-09-29) and skipped
     it; had it passed, the unit would have named the system interpreter."""
     base = _touch_path_python(tmp_path / "base-bin", "python3.13")
-    monkeypatch.setenv("PIPX_HOME", str(tmp_path / "pipx"))
-    pipx_venv = _symlink_python(tmp_path / "pipx" / "venvs" / "pseudolife-mcp", base)
-    asked = _stub_probe(monkeypatch, {pipx_venv})
+    # Use the helper's own venv: Windows deliberately excludes pipx's venv
+    # even when it imports, and hosted Windows can create these symlinks.
+    shim_venv = _symlink_python(isolated["venv_dir"], base)
+    asked = _stub_probe(monkeypatch, {shim_venv})
     code, out, err = _run(capsys, "--repo", isolated["repo"], "--venv-dir", isolated["venv_dir"],
                           "--no-create")
     assert code == 0, err
-    assert Path(out.strip()) == _abs(pipx_venv)
-    assert asked == [_abs(pipx_venv)]
+    assert Path(out.strip()) == _abs(shim_venv)
+    assert asked == [_abs(shim_venv)]
 
 
 def test_two_venvs_on_one_base_interpreter_are_both_tried(
@@ -260,14 +261,13 @@ def test_two_venvs_on_one_base_interpreter_are_both_tried(
     de-duplicating by link target dropped all but the first."""
     base = _touch_path_python(tmp_path / "base-bin", "python3.13")
     repo_venv = _symlink_python(isolated["repo"] / ".venv", base)
-    monkeypatch.setenv("PIPX_HOME", str(tmp_path / "pipx"))
-    pipx_venv = _symlink_python(tmp_path / "pipx" / "venvs" / "pseudolife-mcp", base)
-    asked = _stub_probe(monkeypatch, {pipx_venv})
+    shim_venv = _symlink_python(isolated["venv_dir"], base)
+    asked = _stub_probe(monkeypatch, {shim_venv})
     code, out, err = _run(capsys, "--repo", isolated["repo"], "--venv-dir", isolated["venv_dir"],
                           "--no-create")
     assert code == 0, err
-    assert Path(out.strip()) == _abs(pipx_venv)
-    assert asked == [_abs(repo_venv), _abs(pipx_venv)]
+    assert Path(out.strip()) == _abs(shim_venv)
+    assert asked == [_abs(repo_venv), _abs(shim_venv)]
 
 
 # -- the last resort: a venv of its own -------------------------------------------------
