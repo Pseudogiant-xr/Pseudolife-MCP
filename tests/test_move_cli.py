@@ -956,6 +956,67 @@ def test_release_token_transfer_can_retain_only_restored_stored_principals(tmp_p
     assert any(c.remote and "--allow-auth-change" in c.remote for c in world.calls)
 
 
+@pytest.mark.parametrize("stored_only", [False, True])
+@pytest.mark.parametrize("authorized", [False, True])
+def test_move_release_caller_composes_with_the_real_updater_guard(tmp_path, monkeypatch, stored_only, authorized):
+    from contextlib import redirect_stdout, redirect_stderr
+    from pseudolife_memory import update_cli as up
+    from tests.test_update_cli import World as UpdateWorld
+
+    if stored_only:
+        monkeypatch.setattr(sys.modules[__name__], "SOURCE_ENV", [line for line in SOURCE_ENV
+                            if not line.startswith(("PSEUDOLIFE_MCP_TOKEN=", "PSEUDOLIFE_MCP_TOKENS="))])
+    world = World(checkout=False)
+    world.release_cli = True
+    world.target_image = "ghcr.io/pseudogiant-xr/pseudolife-daemon:0.22.0"
+    env_file, compose = tmp_path / "stack.env", tmp_path / "stack.yml"
+    compose.write_text("services: {}\n", encoding="utf-8")
+    world.release_env_file = str(env_file)
+    update = UpdateWorld(tmp_path)
+    update.container = {"id": "sha256:running", "ref": world.target_image, "env": TARGET_ENV,
+                        "labels": {"com.docker.compose.project.config_files": str(compose),
+                                   "com.docker.compose.project.working_dir": str(tmp_path),
+                                   "com.docker.compose.project.environment_file": str(env_file)}}
+    update.health = [{"status": "ok", "version": "0.22.0", "schema": 59}]
+    update.images[world.target_image] = "sha256:running"
+    run_cli = update.run_cli
+
+    def external(argv, **kw):
+        if "config" in argv and "--format" in argv:
+            environment = move_cli._env_of({"Config": {"Env": SOURCE_ENV}})
+            return 0, json.dumps({"services": {up.DAEMON_SERVICE: {"environment": environment}}})
+        return run_cli(argv, **kw)
+
+    monkeypatch.setattr(up, "run_cli", external)
+    monkeypatch.setattr(up, "fetch_json", update.fetch_json)
+    monkeypatch.setattr(up, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(up, "data_dir", lambda: tmp_path / "updater")
+    monkeypatch.setattr(up, "which", lambda _name: "fake-docker")
+    monkeypatch.setattr(up.Update, "backup", lambda self, _repo: None)  # backup effects have their own integration tests
+    remote = world.remote
+
+    def invoke_updater(command, stdin):
+        if " update --reinstall " in command:
+            env_file.write_text(world.dotenv, encoding="utf-8")
+            arguments = shlex.split(command)
+            arguments = arguments[arguments.index("update") + 1:]
+            if not authorized:
+                arguments.remove("--allow-auth-change")
+            output = io.StringIO()
+            with redirect_stdout(output), redirect_stderr(output):
+                code = up.main(arguments)
+            if code:
+                return code, b"", b"the actual updater refused the transfer"
+        return remote(command, stdin)
+
+    world.remote = invoke_updater
+    assert run_move(world, tmp_path) == (0 if authorized else 1)
+    recreated = any(" up " in command for command in update.docker_calls())
+    assert recreated is authorized
+    assert world.source_running is not authorized
+    assert not world.overlap
+
+
 def test_explicit_release_mode_ignores_an_unrelated_bare_clone(tmp_path):
     world = World()
     world.release_cli = True
