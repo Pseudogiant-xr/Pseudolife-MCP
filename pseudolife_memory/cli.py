@@ -143,7 +143,13 @@ def _print_version() -> None:
 
 def main() -> None:
     mode = sys.argv[1] if len(sys.argv) > 1 else "shim"
-    if mode in {"lease", "doctor"}:
+    options = sys.argv[2:]
+    if "--" in options:
+        options = options[:options.index("--")]
+    offline = (any(flag in options for flag in ("-h", "--help"))
+               or mode == "lease" and "--no-board" in options
+               or mode == "doctor" and "--disposable-proof" in options)
+    if mode in {"lease", "doctor"} and not offline:
         import os
         from pseudolife_memory.codex_connection import SetupError, host_command_environment
         try:

@@ -117,3 +117,33 @@ def test_unsafe_connection_refuses_without_traceback_or_running_command(connecti
         cli.main()
     assert result.value.code == 2 and not called
     assert "unsafe or malformed" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("arguments", [
+    ["lease", "--help"], ["doctor", "-h"],
+    ["lease", "run", "fixture", "--no-board", "--", "echo", "fixture"],
+    ["doctor", "--disposable-proof"],
+])
+def test_offline_commands_bypass_saved_connection(connection, monkeypatch, arguments):
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOKEN", "other-bearer")
+    called = []
+    monkeypatch.setattr(lease_cli, "main", lambda args: called.append(True) or 0)
+    monkeypatch.setattr(doctor_cli, "run_doctor", lambda: called.append(True))
+    monkeypatch.setattr(sys, "argv", ["pseudolife-mcp", *arguments])
+    if arguments[0] == "lease":
+        with pytest.raises(SystemExit) as result:
+            cli.main()
+        assert result.value.code == 0
+    else:
+        cli.main()
+    assert called == [True]
+    assert "PSEUDOLIFE_MCP_DAEMON_URL" not in os.environ
+
+
+def test_child_no_board_flag_does_not_disable_host_discovery(connection, monkeypatch):
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOKEN", "other-bearer")
+    monkeypatch.setattr(sys, "argv", ["pseudolife-mcp", "lease", "run", "fixture",
+                                      "--", "child", "--no-board"])
+    with pytest.raises(SystemExit) as result:
+        cli.main()
+    assert result.value.code == 2
