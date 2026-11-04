@@ -277,7 +277,7 @@ class World:
                 if self.bank_appears_at is not None and self.clock.now - self.started_at < self.bank_appears_at:
                     bank = None
             ready = (self.clock.now - self.started_at >= self.target_readiness_delay) if self.target_restored else self.target_ready
-            return {"status": "ok", "ready": ready, "schema": self.target_schema, "auth": True, "bank": bank}
+            return {"status": "ok", "ready": ready, "schema": self.target_schema, "auth": self.target_auth, "bank": bank}
         if url == TARGET_URL + "/api/stats":
             return {"entries": 2}
         return None
@@ -1067,6 +1067,17 @@ def test_clone_free_no_keep_tokens_requires_auth_and_names_the_reconnect_token_f
     world.connect_exit = 4
     assert run_move(world, tmp_path, keep_tokens=False, as_json=True) == 5
     assert "--token-file <target-token-file>" in json.loads(capsys.readouterr().out)["error"]
+
+
+def test_resumed_no_keep_move_never_commits_an_unauthenticated_target(tmp_path):
+    world = World(checkout=False, fail=(lambda c: c.remote == "docker start pseudolife-mcp-daemon",))
+    world.release_cli = True
+    assert run_move(world, tmp_path, keep_tokens=False) == 1
+    world.fail = ()
+    world.target_auth = False
+    assert run_move(world, tmp_path, keep_tokens=False, resume=True) == 1
+    assert world.source_running and not world.target_running and not world.moved
+    assert "/data/move.json" in world.data_files
 
 
 def test_clone_free_resume_retains_its_original_archive_and_target_configuration(tmp_path):

@@ -1018,7 +1018,7 @@ class Mover:
                 raise self.refuse("the selected target database does not match the daemon's different bank: "
                                   "correct its original database configuration and retry move --dry-run")
             self.target_version = target_health.get("version")
-            if self.release_target and not o.keep_tokens and target_health.get("auth") is not True:
+            if not o.keep_tokens and target_health.get("auth") is not True:
                 raise self.refuse("--no-keep-tokens needs an authenticated target: configure its bearer token "
                                   "in the existing stack and retry")
         self.check_target_bank()
@@ -1961,6 +1961,9 @@ class Mover:
                 healthy = True
                 bank = health.get("bank")
                 if isinstance(bank, str) and bank:
+                    if health.get("auth") is not True:
+                        raise MoveError("the restored target does not report auth: true; restore its bearer "
+                                        "configuration in the original stack before retrying move --resume")
                     return bank
                 if token and (last_nudge is None or self.clock() - last_nudge >= self.o.nudge_every):
                     self.runner.get_json(f"{self.target_url}/api/stats", token=token, timeout=60.0)
