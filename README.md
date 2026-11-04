@@ -213,7 +213,10 @@ health-checked services, and backup/rollback tooling. Requires Docker
 (with the compose v2 and buildx plugins) and
 at least one MCP-capable coding agent — Claude Code, Codex, and Gemini CLI
 are wired end-to-end; anything else gets paste-ready config
-([provider matrix](docs/guide/providers.md)). One command from clone to
+([provider matrix](docs/guide/providers.md)). For Portainer, Dockge, Komodo
+or a plain compose folder, use the
+[supported external-stack path](docs/guide/install-and-move.md#running-under-portainer-or-another-stack-manager);
+never hand-flatten the source compose. One command from clone to
 first memory:
 
 ```bash
@@ -281,8 +284,8 @@ append` always writes the block from `examples/CLAUDE.memory.md` into
 `~/.claude/CLAUDE.md` / `~/.codex/AGENTS.md` / `~/.gemini/GEMINI.md`
 (useful for subagent visibility even with hooks).
 Idempotent — re-run any time; `--extractor <mode>` switches extractor
-setups. Non-interactive example:
-`ops/install.sh --extractor sidecar --client codex --codex-hook-trust yes`.
+setups. See [unattended installation](#unattended-install) for explicit
+extractor, client and trust choices.
 Without explicit hook approval, unattended setup does not grant trust; use
 `--codex-hooks skip --instructions append` for instructions only. Explicit
 `--instructions skip` prevents fallback edits.
@@ -321,6 +324,35 @@ at a terminal, defaulting to no, and probes again once the rule is added; an una
 changes no firewall unless given `--firewall-rule yes`, and prints the
 command instead. `ops/install.ps1` has no equivalent: the check and the
 flag are Linux-only.
+
+### Unattended install
+
+For an agent or script, pass the extractor and client explicitly:
+
+```bash
+ops/install.sh --extractor sidecar --client codex --codex-hook-trust yes </dev/null
+# Windows (pwsh 7+), with stdin redirected by the caller:
+# ops/install.ps1 -Extractor sidecar -Client codex -CodexHookTrust yes
+```
+
+No terminal on stdin selects unattended behavior. A fresh local install
+requires `--extractor` / `-Extractor`; a client-only install has no
+extractor choice. Pass `--client` / `-Client` to avoid assuming Claude Code.
+For an existing remote bank, use `--client-only --daemon-url <url>` with
+`--token-file <existing-path>` or `--pairing-code <code>` (PowerShell:
+`-ClientOnly`, `-DaemonUrl`, `-TokenFile`, `-PairingCode`). To create a new
+private token file, use `--token-file <new-path> --read-token` and supply
+the token through stdin; PowerShell uses `-TokenFile <new-path> -ReadToken`
+with the same stdin requirement. A pseudoterminal is still interactive;
+redirect stdin when the agent cannot answer prompts.
+
+Unattended runs keep existing legacy hooks. Codex hooks receive no trust
+without `--codex-hook-trust yes` / `-CodexHookTrust yes`; choose
+`--codex-hooks skip --instructions append` for standing instructions.
+An `ask` firewall rule or client-update schedule is skipped with the
+finishing command. On Linux, `--firewall-rule yes` authorizes that rule;
+client-only `--client-update-schedule yes|HH:MM` opts into its timer.
+The Console is not opened; the summary prints `pseudolife-mcp console`.
 
 Image sizes, the Windows WSL2 memory cap, and what the installer automates:
 [the containerized install](#install--containerized-any-os) below.
@@ -541,7 +573,14 @@ knowledge graph walkable via `memory_graph` and multi-hop `memory_recall`
 ## Install — containerized (any OS)
 
 What [the durable tier](#durable-tier--docker-recommended-for-a-long-lived-bank)
-installer above does, by hand. The whole stack — Postgres **and** the memory daemon — runs in Docker.
+installer above does, by hand. Prefer the installer: `pseudolife-mcp update`
+and `pseudolife-mcp move` need its project `pseudolife-mcp`, persistent
+`ops/.env` and unmodified compose files. Keep that checkout and env file
+available; copying or flattening YAML loses the deployment context those
+commands need. For a stack manager, use the
+[supported external-stack path](docs/guide/install-and-move.md#running-under-portainer-or-another-stack-manager).
+
+The whole stack — Postgres **and** the memory daemon — runs in Docker.
 No host Python, no torch install, no version skew; the daemon image bakes
 in CPU-only torch and the embedding weights — `Qwen/Qwen3-Embedding-0.6B`
 (the default retrieval backbone since schema v25) plus `all-MiniLM-L6-v2`
@@ -603,6 +642,10 @@ can use this daemon too, through a client-only install that runs just the
 shim. Exposing the daemon (Tailscale Serve, a LAN publish or a reverse
 proxy), per-machine tokens and board admission:
 [Sharing one bank across machines](docs/guide/remote-bank.md).
+
+To relocate the bank itself, install the destination first, then run
+[`pseudolife-mcp move`](docs/guide/remote-bank.md#moving-a-bank) on its current
+host; start with `--dry-run` instead of manually copying volumes.
 
 **Host-process install (Windows, for GPU / dev):** run Postgres in Docker
 but the daemon on host Python — for hacking on the daemon or running the
