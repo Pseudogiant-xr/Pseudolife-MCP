@@ -117,6 +117,7 @@ def test_board_mixed_chain_is_counted_without_inventing_http_cases():
 def test_runner_attempts_all_three_and_keeps_failure_report(tmp_path, monkeypatch):
     import importlib
 
+    monkeypatch.delenv("RUNNER_ENVIRONMENT", raising=False)
     monkeypatch.syspath_prepend(str(evidence.HARNESS))
     daemons = importlib.import_module("daemons")
     monkeypatch.setenv("PSEUDOLIFE_EMBEDDING_CPU_DTYPE", "bf16")
@@ -166,6 +167,7 @@ def test_tokenless_woke_is_compared_as_a_served_body(monkeypatch):
 
 
 def test_smoke_cells_cannot_be_published_as_full_nightly_evidence(tmp_path, monkeypatch):
+    monkeypatch.delenv("RUNNER_ENVIRONMENT", raising=False)
     binary = tmp_path / "daemon"
     binary.write_bytes(b"candidate")
     selected = []

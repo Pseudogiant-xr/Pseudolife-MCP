@@ -397,7 +397,7 @@
       "lock-resolve": "8a6a510bef8d635b",
       "test": "bb217dd816ccb0b8",
       "test-lite-linux": "a1c2bb60ed678398",
-      "test-lite-windows": "77c0c3b6cb8725a7",
+      "test-lite-windows": "cb35dc3e3af3fd64",
       "test-lite-macos": "c9eb0018bdc7b158",
       "frontend": "1917ccf176734abe"
     },
@@ -541,6 +541,16 @@
         "job": "frontend",
         "fingerprint": "1917ccf176734abe",
         "reason": "Only skips repeated schedule coverage after an exact-SHA successful push; budgeted events execute the same steps."
+      },
+      {
+        "job": "test-lite-windows",
+        "fingerprint": "7a0a0b4ce51f8771",
+        "reason": "Combines eight fixture-only Claude profile cases with six mocked codec cases and one short PowerShell Unicode round-trip in the existing Python step. No new jobs, shards or dependency setup; retain the measured lane baseline within unchanged limits pending the next batch measurement."
+      },
+      {
+        "job": "test-lite-windows",
+        "fingerprint": "cb35dc3e3af3fd64",
+        "reason": "Merge master 159ecdcd: retain its reviewed lane selections and the branch scheduled-push dedupe; budgeted event steps are identical to master. Only derived metadata conflicted."
       }
     ]
   }
