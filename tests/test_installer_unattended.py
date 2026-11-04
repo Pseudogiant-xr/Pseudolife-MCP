@@ -103,3 +103,13 @@ def test_ps_unattended_extractor_default_needs_no_login(tmp_path):
                                     + block + '\n"MODE=$Extractor"\n')
     assert proc.returncode == 0, _output(proc)
     assert "MODE=sidecar" in _output(proc)
+
+
+def test_ps_interactive_enter_uses_the_same_sidecar_default(tmp_path):
+    source = text("install.ps1")
+    block = source[source.index("# -- 3. extractor choice"):source.index('$claudeShimMode =')]
+    proc = _PowerShell(tmp_path).run("$Extractor=''\n$ClientOnly=$false\n$interactive=$true\n"
+                                    "function Read-Host { '' }\nfunction Assert-ExtractorArgs { }\n"
+                                    + block + '\n"MODE=$Extractor"\n')
+    assert proc.returncode == 0, _output(proc)
+    assert "MODE=sidecar" in _output(proc)

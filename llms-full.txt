@@ -565,32 +565,45 @@ flag are Linux-only.
 
 ### Unattended install
 
-For an agent or script, pass the extractor and client explicitly:
+For an agent or script, select unattended mode explicitly:
 
 ```bash
-ops/install.sh --extractor sidecar --client codex --codex-hook-trust yes </dev/null
-# Windows (pwsh 7+), with stdin redirected by the caller:
-# ops/install.ps1 -Extractor sidecar -Client codex -CodexHookTrust yes
+ops/install.sh --yes
+# Windows (pwsh 7+):
+# ops/install.ps1 -Yes
 ```
 
-No terminal on stdin selects unattended behavior. A fresh local install
-requires `--extractor` / `-Extractor`; a client-only install has no
-extractor choice. Pass `--client` / `-Client` to avoid assuming Claude Code.
+`--yes` / `-Yes`, `PSEUDOLIFE_UNATTENDED=1`, and no terminal on stdin all
+select the same no-prompt behavior. A pseudo-terminal does not identify an
+agent: set that environment variable or pass the flag when no person can
+answer. The header says "Unattended install", and each default choice is
+reported. These options take documented defaults; they do not grant consent
+to optional firewall, exposure, hook trust or scheduled jobs.
+
+A fresh local install uses the CPU sidecar by default; override it with
+`--extractor` / `-Extractor`. A client-only install has no extractor choice.
+Omitted `--client` / `-Client` selects installed Claude, Codex and Gemini
+CLIs, or `generic` when none are found. Explicit client flags override this.
 For an existing remote bank, use `--client-only --daemon-url <url>` with
 `--token-file <existing-path>` or `--pairing-code <code>` (PowerShell:
 `-ClientOnly`, `-DaemonUrl`, `-TokenFile`, `-PairingCode`). To create a new
 private token file, use `--token-file <new-path> --read-token` and supply
 the token through stdin; PowerShell uses `-TokenFile <new-path> -ReadToken`
-with the same stdin requirement. A pseudoterminal is still interactive;
-redirect stdin when the agent cannot answer prompts.
+with the same stdin requirement. An unattended run refuses terminal token
+input instead of waiting for it.
 
 Unattended runs keep existing legacy hooks. Codex hooks receive no trust
 without `--codex-hook-trust yes` / `-CodexHookTrust yes`; choose
 `--codex-hooks skip --instructions append` for standing instructions.
+Gemini and generic clients take their standing-instruction prompt's Enter
+default (append to `~/.gemini/GEMINI.md` or `~/AGENTS.md`); use
+`--instructions skip` / `-Instructions skip` to skip that choice.
 An `ask` firewall rule or client-update schedule is skipped with the
 finishing command. On Linux, `--firewall-rule yes` authorizes that rule;
 client-only `--client-update-schedule yes|HH:MM` opts into its timer.
 The Console is not opened; the summary prints `pseudolife-mcp console`.
+Guided tunnel setup is skipped with its finishing command, even with
+`--tunnel` / `-Tunnel`, because it needs a person.
 
 Image sizes, the Windows WSL2 memory cap, and what the installer automates:
 [the containerized install](#install--containerized-any-os) below.

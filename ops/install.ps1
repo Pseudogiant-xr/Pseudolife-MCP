@@ -1059,7 +1059,8 @@ if (-not $Extractor -and -not $ClientOnly) {
             switch (Read-Host "Choose 1-7 (Enter = 3, sidecar)") {
                 "1" { $Extractor = "claude-only" }
                 "2" { $Extractor = "claude-fallback" }
-                { $_ -in "", "3" } { $Extractor = "sidecar" }
+                "" { $Extractor = "sidecar" }
+                "3" { $Extractor = "sidecar" }
                 "4" { $Extractor = "openai-fallback" }
                 "5" { $Extractor = "openai-only" }
                 "6" { $Extractor = "endpoint" }
