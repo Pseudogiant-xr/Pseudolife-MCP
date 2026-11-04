@@ -1,0 +1,44 @@
+# Optional CPU sidecar: requires a checkout and a local image build.
+# Add to docker-compose.stack.yml only when explicitly choosing the sidecar.
+# In the shared env file set PSEUDOLIFE_DREAM_BASE_URL=http://pseudolife-extractor:8081/v1
+# and PSEUDOLIFE_DREAM_MODEL=extractor. Keep EXTRACTOR_MODE=primary.
+# Build from this checkout; the extractor image is not published on GHCR.
+services:
+  pseudolife-extractor:
+    build:
+      context: ..
+      dockerfile: ops/Dockerfile.extractor
+    image: pseudolife-extractor:gemma4-e4b
+    container_name: pseudolife-mcp-extractor
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    expose:
+    - '8081'
+    healthcheck:
+      test:
+      - CMD
+      - curl
+      - -f
+      - http://localhost:8081/health
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
+    command:
+    - --model
+    - /models/extractor.gguf
+    - --host
+    - 0.0.0.0
+    - --port
+    - '8081'
+    - --ctx-size
+    - '8192'
+    - --jinja
+    - --parallel
+    - '1'
+    - --sleep-idle-seconds
+    - ${PSEUDOLIFE_EXTRACTOR_SLEEP_IDLE_SECONDS:-300}
