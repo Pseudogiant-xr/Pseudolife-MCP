@@ -29,7 +29,7 @@
     "docs/guide/install-and-move.md": "78fc0654076a3761d58af5a2d6d0766958e7b23d0b96f5c4566371be1428fbf2",
     "docs/guide/memory-model.md": "6e295c317f53ad8558e3a3b1d6cd8ea74e01401eb6d8cce82b9143c5b087ed5f",
     "docs/guide/providers.md": "755967b36f1b4fe65a189b925a9df8f7c0244025270746fc9cc002966d793d16",
-    "docs/guide/remote-bank.md": "97d476e7f8cc6afa08d1815bebd157a820913f1dcedf241fcac6d072a09fb059",
+    "docs/guide/remote-bank.md": "1bbe1fb315df5ab9d08e93c70c23d2160890b6cc024e210ff5679f6a0de7d847",
     "docs/guide/retrieval.md": "ec6fe4a43bd6c6661a1977a706214db52367facb03400b0713f14fa14f5affa3",
     "docs/guide/security-posture.md": "5996f4cef7908476b81cf9957a95bc762a1d02bcfafa24f66ba691a22d1f0505",
     "docs/guide/tunnels.md": "eb85217617f58fffa18d729464a1e9d0b847285d07c8bde3bea001d3b6402a3a",
@@ -415,7 +415,7 @@
     "rust/shim/src/cli/lease/operator/secrets.rs": "7156f1498e15f7fd9417f42ceb0de45834ea28d5deda02da8d1010a90a707b34",
     "rust/shim/src/cli/lease/operator/store.rs": "1ce77b9a2f4446565e9a88765520d57da65a8d2f12ff1dccf91ffdb68f6545a9",
     "rust/shim/src/cli/lease/operator/store/conductor.rs": "95b0795ea6e0cde4980656c067854206a396f79574d6cbe3397db8d8912604ec",
-    "rust/shim/src/cli/lease/run.rs": "e9bbb4483073133380737b84bd3517aa100a6b60f58c03bbee415e397e39e8fb",
+    "rust/shim/src/cli/lease/run.rs": "c5f84b3b6b89538fa7ae231a8b3d5063250e0e3c8304a88f632b9e1f4ccd8935",
     "rust/shim/src/cli/lease/sigint.rs": "ff7d18768305ff0560a508ad5956f06f4875403efe7c161710277633d41e9430",
     "rust/shim/src/cli/lease/view.rs": "ceeeea9ee6bfcfb2394235cf3b32c8b2032f1fd88365c4de64ca1339a37c7921",
     "rust/shim/src/cli/maintainer/bank.rs": "154ce1a717be2f0efdac512d35a4aace55ff08aa541c225a0f954dead81c0a4a",
@@ -434,7 +434,7 @@
     "rust/shim/src/cli/maintainer/sqlstate.rs": "93c917253bd8692f6eb8bdad923f808545f77b1e3cb3e33c5790f9b179d2fdb1",
     "rust/shim/src/cli/maintainer/top_help.txt": "206d1f9cb021ff363cafb643157eeedbf9a5dfe2d744dd9578e7594acfa0dc12",
     "rust/shim/src/cli/migrate_flat.rs": "1e9bfbee60968a41c38a0b25677399ce059a6fa1d3872af5f7352c649f467cf4",
-    "rust/shim/src/cli/move_cli.rs": "e11c7d488e244b1a496c29d1fc4a79f6e0337c474b2f6c7aeaec50274feac4b5",
+    "rust/shim/src/cli/move_cli.rs": "e17f2d278dfe567b81222425d1084a30030d13783ce0dcf63ec4ae3245f9bd7f",
     "rust/shim/src/cli/pairing/invite.rs": "9569382a53fd55c325483b42d6a80fbe676d6ec04a57754b59db1f72545bd0e8",
     "rust/shim/src/cli/pairing/invite_db.rs": "589c07235d9e68047cef04f42d252366b29a021f4a76920dec4fe7aa430417b9",
     "rust/shim/src/cli/pairing/invite_help.txt": "b5bdd61622278b0de84f4720b91b6864142ebe6ebc4601c23dc2f2da057fd6da",
@@ -1806,7 +1806,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/remote-bank.md:846",
+          "location": "docs/guide/remote-bank.md:874",
           "shape": {
             "argv_source": "connect <daemon-url> --read-code",
             "channel": "argv",
@@ -2179,7 +2179,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/remote-bank.md:758",
+          "location": "docs/guide/remote-bank.md:781",
           "shape": {
             "argv_source": "connect",
             "channel": "argv",
@@ -3488,7 +3488,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/remote-bank.md:845",
+          "location": "docs/guide/remote-bank.md:873",
           "shape": {
             "argv_source": "invite <name>",
             "channel": "argv",
@@ -4734,7 +4734,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/lease/run.rs:448",
+          "location": "rust/shim/src/cli/lease/run.rs:456",
           "shape": {
             "argv_source": "lease run {} -- COMMAND\",",
             "channel": "argv",
@@ -4887,7 +4887,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/remote-bank.md:783",
+          "location": "docs/guide/remote-bank.md:809",
           "shape": {
             "argv_source": "move --to <target> --resume",
             "channel": "argv",
@@ -5003,7 +5003,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/move_cli.rs:45",
+          "location": "rust/shim/src/cli/move_cli.rs:47",
           "shape": {
             "argv_source": "move : error: the following arguments are required: --to\\n\";",
             "channel": "argv",
@@ -5048,7 +5048,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/remote-bank.md:663",
+          "location": "docs/guide/remote-bank.md:670",
           "shape": {
             "argv_source": "move --to root@box --dry-run   # the plan; changes nothing",
             "channel": "argv",
@@ -5066,9 +5066,9 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/remote-bank.md:664",
+          "location": "docs/guide/remote-bank.md:671",
           "shape": {
-            "argv_source": "move --to root@box             # asks once, then moves",
+            "argv_source": "move --to root@box             # confirms the move and any new exposure",
             "channel": "argv",
             "complete": true,
             "omitted_optional": null,
@@ -24956,6 +24956,19 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
+          "location": "docs/guide/remote-bank.md:667",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "documented",
           "location": "docs/runbooks/docker-disk-retention.md:262",
           "shape": {
             "channel": "environment",
@@ -26835,7 +26848,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/remote-bank.md:872",
+          "location": "docs/guide/remote-bank.md:900",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -30957,7 +30970,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/lease/run.rs:364",
+          "location": "rust/shim/src/cli/lease/run.rs:372",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -30969,7 +30982,7 @@
         },
         {
           "evidence": "static",
-          "location": "rust/shim/src/cli/lease/run.rs:369",
+          "location": "rust/shim/src/cli/lease/run.rs:377",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -36593,7 +36606,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/remote-bank.md:736",
+          "location": "docs/guide/remote-bank.md:759",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -37356,7 +37369,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/remote-bank.md:735",
+          "location": "docs/guide/remote-bank.md:758",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -39340,7 +39353,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/remote-bank.md:735",
+          "location": "docs/guide/remote-bank.md:758",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -42108,7 +42121,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/remote-bank.md:736",
+          "location": "docs/guide/remote-bank.md:759",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -44122,6 +44135,19 @@
           "dynamic": "unresolved",
           "evidence": "documented",
           "location": "docs/guide/install-and-move.md:41",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "documented",
+          "location": "docs/guide/remote-bank.md:667",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -69425,20 +69451,6 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "docs/guide/remote-bank.md:711",
-      "method": null,
-      "name": "/health",
-      "shape": {
-        "channel": "body",
-        "complete": false,
-        "expression": "Request helper, URL suffix or body requires resolution at this location.",
-        "parameters": {}
-      }
-    },
-    {
-      "dynamic": "unresolved",
-      "evidence": "unverified",
-      "kind": "route",
       "location": "docs/guide/remote-bank.md:72",
       "method": null,
       "name": "/mcp",
@@ -69453,7 +69465,21 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "docs/guide/remote-bank.md:746",
+      "location": "docs/guide/remote-bank.md:731",
+      "method": null,
+      "name": "/health",
+      "shape": {
+        "channel": "body",
+        "complete": false,
+        "expression": "Request helper, URL suffix or body requires resolution at this location.",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "unverified",
+      "kind": "route",
+      "location": "docs/guide/remote-bank.md:769",
       "method": null,
       "name": "/health",
       "shape": {
@@ -69481,7 +69507,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "docs/guide/remote-bank.md:860",
+      "location": "docs/guide/remote-bank.md:888",
       "method": null,
       "name": "/health",
       "shape": {
@@ -79392,6 +79418,18 @@
     },
     {
       "dynamic": "unresolved",
+      "location": "docs/guide/remote-bank.md:667",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_BANK_VOLUME"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/remote-bank.md:667",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_STATE_VOLUME"
+    },
+    {
+      "dynamic": "unresolved",
       "location": "docs/guide/remote-bank.md:68",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
@@ -79416,49 +79454,49 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/remote-bank.md:711",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:route:/health"
-    },
-    {
-      "dynamic": "unresolved",
       "location": "docs/guide/remote-bank.md:72",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/mcp"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/remote-bank.md:735",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/guide/remote-bank.md:735",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/guide/remote-bank.md:736",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_TIER_MAP"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/guide/remote-bank.md:736",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_TOOLSET"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/guide/remote-bank.md:746",
+      "location": "docs/guide/remote-bank.md:731",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/remote-bank.md:783",
+      "location": "docs/guide/remote-bank.md:758",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/remote-bank.md:758",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/remote-bank.md:759",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TIER_MAP"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/remote-bank.md:759",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOOLSET"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/remote-bank.md:769",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/health"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/remote-bank.md:809",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:move"
     },
@@ -79475,25 +79513,25 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/remote-bank.md:845",
+      "location": "docs/guide/remote-bank.md:873",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:invite"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/remote-bank.md:846",
+      "location": "docs/guide/remote-bank.md:874",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:connect"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/remote-bank.md:860",
+      "location": "docs/guide/remote-bank.md:888",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/remote-bank.md:872",
+      "location": "docs/guide/remote-bank.md:900",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_DAEMON_MEM_LIMIT"
     },
@@ -96608,13 +96646,13 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/lease/run.rs:364",
+      "location": "rust/shim/src/cli/lease/run.rs:372",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_LEASES_HELD"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/lease/run.rs:448",
+      "location": "rust/shim/src/cli/lease/run.rs:456",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:lease"
     },
@@ -97016,7 +97054,7 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/move_cli.rs:45",
+      "location": "rust/shim/src/cli/move_cli.rs:47",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:move"
     },
