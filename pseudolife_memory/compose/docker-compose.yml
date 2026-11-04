@@ -1,3 +1,7 @@
+# Normally run by ops/install.sh (Windows: ops/install.ps1); do not copy or
+# hand-flatten this file. For stack managers use ops/docker-compose.stack.yml
+# and docs/guide/install-and-move.md. Retain the installer's ops/.env.
+#
 # Pseudolife-MCP full stack: Postgres substrate + the memory daemon + the
 # extractor sidecar. The compose PROJECT is named `pseudolife-mcp` (below) so it
 # shows up clearly in Docker Desktop instead of as the folder name ("ops").
@@ -5,8 +9,8 @@
 #   First time on a fresh machine (creates the two persistent volumes):
 #     docker volume create pseudolife-mcp-bank
 #     docker volume create pseudolife-mcp-state
-#   Then, every time:
-#     docker compose -f ops/docker-compose.yml up -d --build   # start / rebuild
+#   Contributor start / rebuild (ordinary installs use the installer):
+#     docker compose -f ops/docker-compose.yml up -d --build
 #     docker compose -f ops/docker-compose.yml stop|start      # cycle, data safe
 #
 # ── EXISTING INSTALL (volumes created before the rename) ──────────────────────

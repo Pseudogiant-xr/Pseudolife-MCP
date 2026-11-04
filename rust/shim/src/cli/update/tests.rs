@@ -27,6 +27,32 @@ fn failed_health_endpoint_hint_uses_only_valid_loopback_publications() {
     }
 }
 
+#[test]
+fn native_update_client_release_never_guesses_when_endpoint_has_no_version() {
+    for health in [
+        None,
+        Some(json!({"status":"ok"})),
+        Some(json!({"version":""})),
+    ] {
+        for tag in [None, Some("0.16.0")] {
+            let error = client_release_target(health.as_ref(), tag).unwrap_err();
+            assert_eq!(error.exit_code, 2);
+            assert!(error.message.contains("--daemon-url"));
+        }
+    }
+    let health = json!({"version":"0.15.1"});
+    assert_eq!(
+        client_release_target(Some(&health), None).unwrap(),
+        "0.15.1"
+    );
+    let checkout = json!({"version":"0.15.1+checkout"});
+    assert!(client_release_target(Some(&checkout), None).is_err());
+    assert_eq!(
+        client_release_target(Some(&checkout), Some("0.15.1")).unwrap(),
+        "0.15.1"
+    );
+}
+
 fn verify_bank_identity(config: &Value, running: &Value) -> Result<()> {
     engine::verify_bank_identity_with(config, running, |name| {
         Some(json!([

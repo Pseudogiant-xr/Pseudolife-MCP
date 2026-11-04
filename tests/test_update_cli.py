@@ -790,6 +790,7 @@ def _checkout(world: World, tmp_path: Path, *, repo: bool = True, dirty: int = 0
     (root / "ops").mkdir(parents=True)
     (root / "ops" / "docker-compose.yml").write_text(f"image: pseudolife-daemon:{version}\n", encoding="utf-8", newline="\n")
     (root / "ops" / ".env.example").write_text("# PSEUDOLIFE_MCP_TOKEN=\n", encoding="utf-8", newline="\n")
+    (root / "ops" / ".env").write_text("# isolated installed checkout\n", encoding="utf-8", newline="\n")
     (root / "README.md").write_text("sandbox\n", encoding="utf-8", newline="\n")
     (root / "pyproject.toml").write_text("[project]\nname='x'\n", encoding="utf-8", newline="\n")
     # as in the repository: the scaffolded ops/.env is gitignored, so it
@@ -826,6 +827,45 @@ def test_plain_checkout_update_with_null_daemon_labels(world, clients, tmp_path)
     assert argv[-5:] == ["up", "-d", "--no-deps", "--build", "pseudolife-daemon"]
 
 
+@pytest.mark.parametrize("token_variable", ["PSEUDOLIFE_MCP_TOKEN", "PSEUDOLIFE_MCP_TOKENS"])
+def test_checkout_missing_env_refuses_before_resetting_credentials(world, clients, tmp_path, monkeypatch, capsys,
+                                                                 token_variable):
+    root, _ = _checkout(world, tmp_path, repo=False)
+    env_file = root / "ops" / ".env"
+    env_file.unlink()
+    original = world.run_cli
+    monkeypatch.setattr(up, "tree_state", lambda _: {"sha": "a" * 40, "dirty": "false", "lines": [], "error": ""})
+
+    def inspect_env(argv, **kw):
+        if "{{json .Config.Env}}" in argv:
+            return 0, json.dumps([f"{token_variable}=fixture-secret", "PSEUDOLIFE_MCP_DATABASE_URL=postgresql://owner:fixture-password@db/bank"])
+        return original(argv, **kw)
+
+    monkeypatch.setattr(up, "run_cli", inspect_env)
+    assert _run(["--checkout", str(root), "--all"]) == 2
+    captured = capsys.readouterr()
+    assert str(env_file) in captured.err and "restore" in captured.err.lower() and "Nothing was changed" in captured.err
+    assert token_variable in captured.err and "PSEUDOLIFE_MCP_DATABASE_URL" in captured.err
+    assert "fixture-secret" not in captured.err and "fixture-password" not in captured.err
+    assert not env_file.exists() and _compose_call(world)[0] is None and clients == []
+    assert not any(c.startswith(("tag ", "exec ", "cp ", "builder ")) for c in world.docker_calls())
+
+
+@pytest.mark.parametrize("before,after,expected", [(True, False, 1), (False, True, 1), (True, None, 1), (True, True, 0)])
+def test_checkout_compares_auth_before_and_after(world, clients, tmp_path, monkeypatch, capsys, before, after, expected):
+    root, _ = _checkout(world, tmp_path, repo=False)
+    monkeypatch.setattr(up, "tree_state", lambda _: {"sha": "a" * 40, "dirty": "false", "lines": [], "error": ""})
+    world.health = [{"status": "ok", "version": "0.1.0", "auth": before},
+                    {"status": "ok", "version": "0.1.0", "auth": after}]
+    assert _run(["--checkout", str(root), "--no-backup", "--no-cache-prune", "--all"]) == expected
+    if expected:
+        err = capsys.readouterr().err
+        assert "authentication" in err and str(root / "ops" / ".env") in err and "roll back" in err
+        assert clients == []
+    else:
+        assert len(clients) == 1
+
+
 def _project_guard_checkout(world, tmp_path, monkeypatch, project="pseudolife-mcp"):
     root, _ = _checkout(world, tmp_path, repo=False)
     monkeypatch.setattr(up, "tree_state", lambda _: {"sha": "a" * 40, "dirty": "false", "lines": [], "error": ""})
@@ -842,6 +882,7 @@ def _project_guard_checkout(world, tmp_path, monkeypatch, project="pseudolife-mc
 
 def test_checkout_refuses_foreign_project_before_backup_or_env_write(world, clients, tmp_path, capsys, monkeypatch):
     root = _project_guard_checkout(world, tmp_path, monkeypatch)
+    (root / "ops" / ".env").unlink()
     world.container["labels"] = {"com.docker.compose.project": "external-stack"}
     assert _run(["--checkout", str(root)]) == 2
     err = capsys.readouterr().err
@@ -874,6 +915,7 @@ def test_checkout_accepts_its_resolved_custom_project(world, tmp_path, monkeypat
 @pytest.mark.parametrize("code,output", [(1, "Cannot connect to the Docker daemon"), (0, "not JSON")])
 def test_checkout_project_inspection_failure_refuses_before_mutation(world, tmp_path, monkeypatch, capsys, code, output):
     root, _ = _checkout(world, tmp_path, repo=False)
+    (root / "ops" / ".env").unlink()
     monkeypatch.setattr(up, "tree_state", lambda _: {"sha": "a" * 40, "dirty": "false", "lines": [], "error": ""})
     original = world.run_cli
 
@@ -908,7 +950,7 @@ def test_a_clean_checkout_is_built_with_its_commit_stamp(world, clients, tmp_pat
     assert env["PSEUDOLIFE_BUILD_TIME"].endswith("Z") and "T" in env["PSEUDOLIFE_BUILD_TIME"]
     assert "PSEUDOLIFE_BUILD_GIT_SHA" not in os.environ      # the caller's environment is left alone
     assert "tag pseudolife-daemon:0.1.0 pseudolife-daemon:0.1.0-unittest" in world.docker_calls()
-    assert (root / "ops" / ".env").is_file()                # scaffolded from the example
+    assert (root / "ops" / ".env").is_file()                # retained from the installer
     assert clients == []                                    # no --all
 
 
@@ -1297,12 +1339,14 @@ def test_a_client_only_machine_updates_its_clients_to_the_daemons_release(world,
     assert not any(c[1:4] == ["-m", "pip", "install"] for c in world.calls)
 
 
-def test_a_client_only_machine_takes_the_newest_release_when_the_daemon_is_silent(world, clients, monkeypatch):
+@pytest.mark.parametrize("flags", [[], ["--clients-only"], ["--clients-only", "--tag", "0.16.0"]])
+@pytest.mark.parametrize("health", [None, {"status": "ok"}, {"status": "ok", "version": ""}])
+def test_a_client_only_machine_never_guesses_release_when_daemon_url_is_stale(world, clients, monkeypatch, capsys, flags, health):
     _on_a_shim_runtime(monkeypatch)
-    world.health = []
+    world.health = [health]
     world.pypi = "0.16.0"
-    assert _run(["--clients-only"]) == 0
-    assert clients[0]["source"] == "pseudolife-mcp==0.16.0" and clients[0]["daemon_digest"] is None
+    assert _run(flags) == 2
+    assert clients == [] and "--daemon-url" in capsys.readouterr().err
 
 
 def test_a_client_machine_whose_docker_this_user_cannot_use_still_updates_its_clients(world, clients, monkeypatch,

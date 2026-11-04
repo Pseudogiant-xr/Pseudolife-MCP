@@ -69,7 +69,7 @@ PAGES: list[tuple[str, str]] = [
     ("docs/guide/remote-bank.md",
      "One daemon, many machines: exposing the daemon over a tailnet, a LAN "
      "or a proxy; per-machine principals; board admission; client-only "
-     "installs"),
+     "installs; relocating the bank with pseudolife-mcp move"),
     ("docs/guide/tunnels.md",
      "Guided ChatGPT Secure MCP Tunnel setup: private keys, resumable account "
      "steps, read-only cloud verification, updates and optional autostart"),
