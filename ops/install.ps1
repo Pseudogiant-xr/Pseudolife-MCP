@@ -33,6 +33,10 @@
 # -ClaudeLegacyHooks ask|remove|keep: with the plugin installed, remove the
 #   hooks an earlier install wrote to ~/.claude/settings.json (default: ask -
 #   prompts; unattended runs keep them).
+# -Yes: no prompts; take documented defaults, not broad consent.
+# PSEUDOLIFE_UNATTENDED=1 is the explicit agent-under-pty signal; redirected
+# stdin also enables it. Omitted -Client detects installed CLIs (else generic);
+# omitted -Extractor uses sidecar, the local CPU default.
 # -NoToken (switch): open-loopback install - mint no bearer token, so the
 #   agent board stays off.
 # -TestLogin (switch): also give the test suite its own Postgres login, which
@@ -128,6 +132,7 @@ param(
     # ~/.claude/settings.json; ask prompts, and unattended runs keep them.
     [ValidateSet("ask", "remove", "keep")]
     [string]$ClaudeLegacyHooks = "ask",
+    [switch]$Yes,
     [switch]$NoArt,
     # Open-loopback install: mint no bearer token, so the agent board stays off.
     [switch]$NoToken,
@@ -158,7 +163,12 @@ $LegacyOverrideMarker = "# pseudolife-mcp install: managed override (sonnet-only
 $LegacyShimOverrideMarker = "# pseudolife-mcp install: managed override (shim-only extractor) — do not edit; installer rewrites/removes this file"
 $EnvBegin = "# >>> pseudolife-mcp install (managed block — installer rewrites between markers) >>>"
 $EnvEnd = "# <<< pseudolife-mcp install <<<"
-$interactive = [Environment]::UserInteractive -and -not [Console]::IsInputRedirected
+# >>> unattended mode >>>
+$interactive = ([Environment]::UserInteractive -and -not [Console]::IsInputRedirected) -and -not $Yes -and $env:PSEUDOLIFE_UNATTENDED -ne '1'
+if (-not $interactive) {
+    Write-Host "Unattended install: no prompts; documented defaults apply (explicit flags override)."
+}
+# <<< unattended mode <<<
 # >>> client update schedule flag >>>
 if ("$ClientUpdateSchedule" -notmatch '^(ask|yes|no|([01]?[0-9]|2[0-3]):[0-5][0-9])$') {
     Write-Host "invalid -ClientUpdateSchedule '$ClientUpdateSchedule' (ask|yes|no, or a time of day as HH:MM)"
@@ -613,7 +623,10 @@ function Get-BankReply($reply) {
 }
 function Invoke-BankLocationQuestion {
     if ($script:DaemonUrl -or $script:ClientOnly -or $env:PSEUDOLIFE_MCP_DAEMON_URL) { return }
-    if (-not $interactive) { return }
+    if (-not $interactive) {
+        Write-Host "Unattended default: bank on this machine (local Docker)."
+        return
+    }
     if (-not $script:TokenFile -and -not $script:ReadToken -and -not $script:PairingCode) {
         Show-BankLocationQuestion
         $remote = $false
@@ -819,7 +832,15 @@ if (-not $ClientOnly -and "$ClientUpdateSchedule" -notin "", "ask", "no") {
 # -- 1. provider selection (before preflight, so it checks what you picked) ------
 if (-not $Client) {
     if (-not $interactive) {
-        $Client = "claude"
+        $found = @()
+        foreach ($candidate in @("claude", "codex", "gemini")) {
+            if ((Get-Command $candidate -ErrorAction SilentlyContinue) -or
+                ($candidate -eq "codex" -and (Get-ChildItem "$env:LOCALAPPDATA/OpenAI/Codex/bin/*/codex.exe" -ErrorAction SilentlyContinue))) {
+                $found += $candidate
+            }
+        }
+        $Client = if ($found) { $found -join "," } else { "generic" }
+        Write-Host "Unattended default: clients=$Client (installed CLIs; generic when none are found)."
     } else {
         Write-Host ""
         Write-Host "Which coding agents should this install wire up?"
@@ -933,6 +954,9 @@ function Invoke-ClientOnlyPreflight {
         if (Test-Path -LiteralPath $script:TokenFile) {
             throw "client-only install: -ReadToken creates the token file, and it already exists: $($script:TokenFile). Drop -ReadToken to use it, or remove it first"
         }
+        if (-not $interactive -and -not [Console]::IsInputRedirected) {
+            throw "Unattended -ReadToken needs redirected stdin; pipe the credential, or use -TokenFile with an existing file. Nothing changed."
+        }
         # Read unechoed (or from piped input) and handed to the helper on
         # stdin: the token never reaches an argument list or the output.
         $tokenValue = if ([Console]::IsInputRedirected) {
@@ -1019,34 +1043,36 @@ if ($ClientOnly) {
 # A client-only install has none: the remote daemon runs its own extractor.
 if (-not $Extractor -and -not $ClientOnly) {
     if (-not $interactive) {
-        throw "Non-interactive run: -Extractor $($extractorModes -join '|') is required."
-    }
-    Write-Host ""
-    Write-Host "Which dream extractor should consolidate memories?"
-    Write-Host "  1) claude-only       - lightest: Claude CLI shim only; sidecar never built (~11.8 GB lighter; needs logged-in Max-plan CLI; dreams pause when the shim is down)"
-    Write-Host "  2) claude-fallback   - Claude CLI shim primary, sidecar auto-fallback (Max-plan CLI plus the ~11.8 GB image)"
-    Write-Host "  3) sidecar           - bundled local CPU model (no Claude plan needed, works for everyone; ~11.8 GB image)"
-    Write-Host "  4) openai-fallback   - Codex CLI (ChatGPT-plan) shim primary, sidecar auto-fallback (ladder-measured at parity with the Claude ceiling - see docs/guide/dreaming.md)"
-    Write-Host "  5) openai-only       - Codex CLI shim only; sidecar never built (ladder-measured; dreams pause when the shim is down)"
-    Write-Host "  6) endpoint          - any OpenAI-compatible server you name (LM Studio, Ollama, vLLM, a hosted API); sidecar never built"
-    Write-Host "  7) endpoint-fallback - that server primary, sidecar auto-fallback (~11.8 GB image)"
-    while (-not $Extractor) {
-        switch (Read-Host "Choose 1-7") {
-            "1" { $Extractor = "claude-only" }
-            "2" { $Extractor = "claude-fallback" }
-            "3" { $Extractor = "sidecar" }
-            "4" { $Extractor = "openai-fallback" }
-            "5" { $Extractor = "openai-only" }
-            "6" { $Extractor = "endpoint" }
-            "7" { $Extractor = "endpoint-fallback" }
-            default { Write-Host "  please answer 1-7" }
+        $Extractor = "sidecar"
+        Write-Host "Unattended default: extractor=sidecar (local CPU; no CLI login required)."
+    } else {
+        Write-Host ""
+        Write-Host "Which dream extractor should consolidate memories?"
+        Write-Host "  1) claude-only       - lightest: Claude CLI shim only; sidecar never built (~11.8 GB lighter; needs logged-in Max-plan CLI; dreams pause when the shim is down)"
+        Write-Host "  2) claude-fallback   - Claude CLI shim primary, sidecar auto-fallback (Max-plan CLI plus the ~11.8 GB image)"
+        Write-Host "  3) sidecar           - bundled local CPU model (no Claude plan needed, works for everyone; ~11.8 GB image)"
+        Write-Host "  4) openai-fallback   - Codex CLI (ChatGPT-plan) shim primary, sidecar auto-fallback (ladder-measured at parity with the Claude ceiling - see docs/guide/dreaming.md)"
+        Write-Host "  5) openai-only       - Codex CLI shim only; sidecar never built (ladder-measured; dreams pause when the shim is down)"
+        Write-Host "  6) endpoint          - any OpenAI-compatible server you name (LM Studio, Ollama, vLLM, a hosted API); sidecar never built"
+        Write-Host "  7) endpoint-fallback - that server primary, sidecar auto-fallback (~11.8 GB image)"
+        while (-not $Extractor) {
+            switch (Read-Host "Choose 1-7 (Enter = 3, sidecar)") {
+                "1" { $Extractor = "claude-only" }
+                "2" { $Extractor = "claude-fallback" }
+                { $_ -in "", "3" } { $Extractor = "sidecar" }
+                "4" { $Extractor = "openai-fallback" }
+                "5" { $Extractor = "openai-only" }
+                "6" { $Extractor = "endpoint" }
+                "7" { $Extractor = "endpoint-fallback" }
+                default { Write-Host "  please answer 1-7" }
+            }
         }
-    }
-    if ($Extractor -in "endpoint", "endpoint-fallback") {
-        while (-not $ExtractorUrl) {
-            $ExtractorUrl = (Read-Host "The server's OpenAI-compatible base URL (e.g. http://127.0.0.1:1234/v1)").TrimEnd("/")
+        if ($Extractor -in "endpoint", "endpoint-fallback") {
+            while (-not $ExtractorUrl) {
+                $ExtractorUrl = (Read-Host "The server's OpenAI-compatible base URL (e.g. http://127.0.0.1:1234/v1)").TrimEnd("/")
+            }
+            while (-not $Model) { $Model = Read-Host "The model name that server serves" }
         }
-        while (-not $Model) { $Model = Read-Host "The model name that server serves" }
     }
     Assert-ExtractorArgs
 }
@@ -1136,7 +1162,7 @@ if ($claudeShimMode -and -not $Model) {
     } else {
         $Model = "claude-opus-5-5"
     }
-    Step "Dreamer model: $Model"
+    Step "Dreamer model: $Model$(if (-not $interactive) { ' (unattended default)' })"
 }
 # GPT menu: no 'recommended' — extraction quality is unmeasured for all of
 # them (the ladder's terra rung exists to measure it); Terra is only the
@@ -1164,7 +1190,7 @@ if ($codexShimMode -and -not $Model) {
     } else {
         $Model = "gpt-5.6-terra"
     }
-    Step "Dreamer model: $Model"
+    Step "Dreamer model: $Model$(if (-not $interactive) { ' (unattended default)' })"
 }
 
 # -- 4. volumes (respect names overridden in an existing ops/.env) --------------
@@ -2308,7 +2334,8 @@ foreach ($selectedClient in $clients) {
                     $yn = Read-Host "Gemini CLI has no hook system - append the standing memory block to $instructionPath? [Y/n]"
                     $choice = if ($yn -in "n", "N", "no", "NO") { "skip" } else { "append" }
                 } else {
-                    $choice = "skip"
+                    $choice = "append"
+                    Write-Host "Unattended default: Gemini standing instructions=append ($instructionPath)."
                 }
             }
             "generic" {
@@ -2324,7 +2351,9 @@ foreach ($selectedClient in $clients) {
                         $choice = "append"
                     }
                 } else {
-                    $choice = "skip"
+                    $instructionPath = Join-Path $env:USERPROFILE "AGENTS.md"
+                    $choice = "append"
+                    Write-Host "Unattended default: generic standing instructions=append ($instructionPath)."
                 }
             }
         }
@@ -3448,7 +3477,9 @@ function Invoke-ClientUpdateScheduleOffer {
 # <<< client update schedule offer <<<
 if ($ClientOnly) { Invoke-ClientUpdateScheduleOffer }
 Write-UpdateLine -ShimPath $script:shimInstallPath -ClientOnly:([bool]$ClientOnly) -PairingHintUrl "$script:pairingHintUrl" -Scheduled:($script:clientScheduleState -eq "scheduled")
-if ($Tunnel) {
+if ($Tunnel -and -not $interactive) {
+    Write-Host "Unattended: guided tunnel setup skipped; run pseudolife-mcp tunnel setup when a person can complete it."
+} elseif ($Tunnel) {
     if (-not $script:shimInstallPath) {
         throw "Secure MCP Tunnel setup needs the installed shim; repair its installation, then run pseudolife-mcp tunnel setup."
     }
