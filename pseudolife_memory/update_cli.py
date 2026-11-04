@@ -830,7 +830,8 @@ class Update:
         if code != 0 or not state.is_file() or state.stat().st_size == 0:
             self.warn(f"the state volume could not be archived ({_last_line(out)}); the bank dump {dump.name} is complete")
         self.step(f"backup: {dump}" + (f" + {state.name}" if state.is_file() else "")
-                  + f"; restore with ops/restore.* -BackupFile / --backup-file {dump}")
+                  + f"; restore with pseudolife-mcp restore --backup-file {dump}"
+                  + (f" --state-archive {state}" if state.is_file() else ""))
         rotated = _rotate_backups(out_dir, keep_days=7, keep={dump.name} | ({state.name} if state.is_file() else set()))
         if rotated:
             self.step(f"rotated {len(rotated)} backup file(s) older than 7 days")
@@ -957,7 +958,7 @@ class Update:
                   else "the backup taken above")
         return [head,
                 f"      so after rolling back the image, restore {source} with",
-                "      ops/restore.ps1 -Apply -BackupFile <dump> (ops/restore.sh --apply --backup-file <dump>)."]
+                "      pseudolife-mcp restore --backup-file <dump> --state-archive <state.tgz>."]
 
     def prune_cache(self, checkout: Path | None) -> None:
         if self.o.no_cache_prune:
