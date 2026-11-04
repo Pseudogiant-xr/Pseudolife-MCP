@@ -148,9 +148,16 @@ def test_prechecks_are_ordinary_pr_only_and_keep_python_dependencies_isolated():
     assert jobs["rust"]["timeout-minutes"] == "${{ github.event_name == 'pull_request' && needs.scope.outputs.full == 'false' && 90 || 60 }}"
     runtime = steps["Install the selected PR precheck dependencies"]
     assert "venv --system-site-packages" in runtime["run"] and "GITHUB_ENV" not in runtime["run"]
-    replay = steps["Replay touched PR goldens and frozen judges"]
+    replay = steps["Replay touched PR goldens"]
     assert replay["env"]["PRECHECK_PYTHON"] == "${{ steps.precheck_runtime.outputs.python }}"
-    assert runtime["if"] == replay["if"] == "steps.precheck.outputs.enabled == 'true'"
+    assert runtime["if"] == "steps.precheck.outputs.enabled == 'true'"
+    assert replay["if"] == "steps.precheck.outputs.golden == 'true'"
+    assert not replay.get("continue-on-error", False)
+    probes = steps["Probe PR frozen judges for item-11 diagnostics"]
+    assert probes["continue-on-error"] is True
+    assert "!cancelled()" in probes["if"] and "precheck_runtime.outcome == 'success'" in probes["if"]
+    assert "--only goldens" in replay["run"] and "--only judges" in probes["run"]
+    assert "--publish" in steps["Summarize PR goldens and report-only frozen probes"]["run"]
     ordered = [step.get("name") for step in jobs["rust"]["steps"]]
     assert ordered.index(replay["name"]) < ordered.index("Nextest")
     assert not any("precheck" in name for name in jobs)
@@ -161,3 +168,13 @@ def test_precheck_data_tests_join_the_native_windows_lite_selection():
     jobs = yaml.safe_load((precheck.ROOT / ".github/workflows/ci.yml").read_text())["jobs"]
     scripts = "\n".join(step.get("run", "") for step in jobs["test-lite-windows"]["steps"])
     assert "rust/ci/test_pr_precheck.py" in scripts and "rust/ci/test_pr_precheck_run.py" in scripts
+
+
+def test_probe_only_selection_does_not_require_golden_setup(tmp_path, monkeypatch):
+    value = {"schema": 1, "linux": [], "windows": [], "judges": ["cli-argv"]}
+    monkeypatch.setattr(precheck, "select", lambda files: value)
+    monkeypatch.setattr(precheck, "changed_files", lambda: [])
+    output = tmp_path / "output"
+    assert precheck.main(["--github-output", str(output)]) == 0
+    fields = dict(line.split("=", 1) for line in output.read_text().splitlines())
+    assert fields["enabled"] == "true" and fields["golden"] == "false" and fields["judges"] == "true"

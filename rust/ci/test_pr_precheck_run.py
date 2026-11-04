@@ -162,3 +162,72 @@ def test_real_bank_exit_differences_retain_the_actual_protocol_era(tmp_path):
     receipt = tmp_path / "phase1.json"
     receipt.write_text(json.dumps({"differences": differences}))
     assert replay.case_ids("phase1-judges", receipt) == ([f"era:{ERAS[0]}"], [])
+
+
+def test_goldens_and_diagnostic_probes_run_as_separate_steps(tmp_path, monkeypatch):
+    mock_summary_replace(monkeypatch)
+    calls = []
+    def execute(phase, *args, **kwargs):
+        calls.append(phase)
+        return {"phase": phase, "exit_code": int(phase == "cli-argv"), "seconds": 0,
+                "failed_cases": ["argv-case"] if phase == "cli-argv" else [], "diagnostic_errors": []}
+    monkeypatch.setattr(replay, "execute", execute)
+    value = plan(judges=["cli-argv"])
+    public = tmp_path / "public"
+    assert replay.run(value, Path("candidate"), tmp_path / "golden-private", public / "goldens", only="goldens") == 0
+    assert calls == ["golden/doctor"]
+    assert replay.run(value, Path("candidate"), tmp_path / "judge-private", public / "judges", only="judges") == 1
+    assert calls == ["golden/doctor", "oracle-setup", "lease-check", "cli-argv"]
+    target = tmp_path / "job-summary"
+    replay.publish(value, public, target)
+    report = json.loads((public / "report.json").read_text())
+    assert [group["gating"] for group in report["groups"]] == [True, False]
+    markdown = target.read_text()
+    assert "report only" in markdown and "cli-argv" in markdown and "argv-case" in markdown
+
+
+def test_golden_failure_remains_fatal_in_the_required_group(tmp_path, monkeypatch):
+    mock_summary_replace(monkeypatch)
+    monkeypatch.setattr(replay, "execute", lambda phase, *args, **kwargs: {
+        "phase": phase, "exit_code": 3, "seconds": 0, "failed_cases": ["doctor/case"], "diagnostic_errors": []})
+    assert replay.run(plan(judges=["cli-argv"]), Path("candidate"), tmp_path / "private",
+                      tmp_path / "public", only="goldens") == 1
+    summary = json.loads((tmp_path / "public/summary.json").read_text())
+    assert [row["phase"] for row in summary["phases"]] == ["golden/doctor"]
+
+
+def test_unavailable_probe_is_reported_without_private_details(tmp_path):
+    value = plan(linux=[], windows=[], judges=["cli-argv"])
+    target = tmp_path / "job-summary"
+    replay.publish(value, tmp_path / "public", target)
+    report = json.loads((tmp_path / "public/report.json").read_text())
+    assert report["groups"][0]["gating"] is False
+    assert report["groups"][0]["phases"][0]["exit_code"] is None
+    assert "not run" in target.read_text()
+
+
+def test_invalid_probe_records_are_not_presented_as_case_identifiers(tmp_path):
+    public = tmp_path / "public"
+    (public / "judges").mkdir(parents=True)
+    (public / "judges/summary.json").write_text(json.dumps({"schema": 1, "phases": [
+        {"phase": "cli-argv", "exit_code": "private-invalid-value", "seconds": 0,
+         "failed_cases": "not-a-list", "diagnostic_errors": []}]}))
+    target = tmp_path / "job-summary"
+    replay.publish(plan(linux=[], windows=[], judges=["cli-argv"]), public, target)
+    assert "private-invalid-value" not in target.read_text()
+    assert "not run" in target.read_text()
+
+
+def test_published_ids_are_exact_in_json_and_safe_in_markdown(tmp_path):
+    public = tmp_path / "public"
+    (public / "judges").mkdir(parents=True)
+    case = "case|<id>`"
+    (public / "judges/summary.json").write_text(json.dumps({"schema": 1, "phases": [
+        {"phase": "cli-argv", "exit_code": 1, "seconds": 0, "failed_cases": [case],
+         "diagnostic_errors": [], "raw": "private stream omitted"}]}))
+    target = tmp_path / "job-summary"
+    replay.publish(plan(linux=[], windows=[], judges=["cli-argv"]), public, target)
+    report = (public / "report.json").read_text()
+    assert json.loads(report)["groups"][0]["phases"][0]["failed_cases"] == [case]
+    assert "private stream omitted" not in report
+    assert "case\\|&lt;id&gt;&#96;" in target.read_text()

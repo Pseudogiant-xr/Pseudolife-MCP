@@ -429,6 +429,7 @@ jobs:
           exit $LASTEXITCODE
       - name: Reuse the parity Python wheel cache for selected PR prechecks
         if: steps.precheck.outputs.enabled == 'true'
+        continue-on-error: ${{ steps.precheck.outputs.golden != 'true' }}
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -437,6 +438,7 @@ jobs:
       - name: Install the selected PR precheck dependencies
         id: precheck_runtime
         if: steps.precheck.outputs.enabled == 'true'
+        continue-on-error: ${{ steps.precheck.outputs.golden != 'true' }}
         working-directory: .
         shell: pwsh
         env:
@@ -458,15 +460,17 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           "python=$python" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
       - name: Build the selected PR precheck candidate
+        id: precheck_candidate
         if: steps.precheck.outputs.enabled == 'true'
+        continue-on-error: ${{ steps.precheck.outputs.golden != 'true' }}
         run: cargo build --locked -p pseudolife-stdio -j 4
       - name: Build the selected Linux test_login fixture image
         if: runner.os == 'Linux' && steps.precheck.outputs.test_login == 'true'
         working-directory: .
         timeout-minutes: 5
         run: docker build -t pseudolife-pg:18 -f ops/Dockerfile.pg ops
-      - name: Replay touched PR goldens and frozen judges
-        if: steps.precheck.outputs.enabled == 'true'
+      - name: Replay touched PR goldens
+        if: steps.precheck.outputs.golden == 'true'
         working-directory: .
         timeout-minutes: 35
         shell: pwsh
@@ -479,14 +483,38 @@ jobs:
             $env:LC_ALL = 'en_US.UTF-8'
           }
           $binary = if ($IsWindows) { 'pseudolife-stdio.exe' } else { 'pseudolife-stdio' }
-          & $env:PRECHECK_PYTHON rust/ci/pr_precheck_run.py --plan-json $env:PRECHECK_PLAN --candidate (Join-Path 'rust/target/debug' $binary) --private (Join-Path $env:RUNNER_TEMP 'pr-precheck-private') --public (Join-Path $env:RUNNER_TEMP 'pr-precheck-public')
+          & $env:PRECHECK_PYTHON rust/ci/pr_precheck_run.py --only goldens --plan-json $env:PRECHECK_PLAN --candidate (Join-Path 'rust/target/debug' $binary) --private (Join-Path $env:RUNNER_TEMP 'pr-precheck-goldens-private') --public (Join-Path $env:RUNNER_TEMP 'pr-precheck-public/goldens')
+          exit $LASTEXITCODE
+      - name: Probe PR frozen judges for item-11 diagnostics
+        if: ${{ !cancelled() && steps.precheck.outputs.judges == 'true' && steps.precheck_runtime.outcome == 'success' && steps.precheck_candidate.outcome == 'success' }}
+        continue-on-error: true
+        working-directory: .
+        timeout-minutes: 20
+        shell: pwsh
+        env:
+          PRECHECK_PLAN: ${{ steps.precheck.outputs.precheck }}
+          PRECHECK_PYTHON: ${{ steps.precheck_runtime.outputs.python }}
+        run: |
+          $binary = if ($IsWindows) { 'pseudolife-stdio.exe' } else { 'pseudolife-stdio' }
+          & $env:PRECHECK_PYTHON rust/ci/pr_precheck_run.py --only judges --plan-json $env:PRECHECK_PLAN --candidate (Join-Path 'rust/target/debug' $binary) --private (Join-Path $env:RUNNER_TEMP 'pr-precheck-judges-private') --public (Join-Path $env:RUNNER_TEMP 'pr-precheck-public/judges')
+          exit $LASTEXITCODE
+      - name: Summarize PR goldens and report-only frozen probes
+        if: always() && steps.precheck.outputs.enabled == 'true'
+        continue-on-error: ${{ steps.precheck.outputs.golden != 'true' }}
+        working-directory: .
+        shell: pwsh
+        env:
+          PRECHECK_PLAN: ${{ steps.precheck.outputs.precheck }}
+        run: |
+          python rust/ci/pr_precheck_run.py --publish --plan-json $env:PRECHECK_PLAN --public (Join-Path $env:RUNNER_TEMP 'pr-precheck-public') --job-summary $env:GITHUB_STEP_SUMMARY
           exit $LASTEXITCODE
       - name: Retain ordinary PR parity precheck case IDs
         if: always() && steps.precheck.outputs.enabled == 'true'
+        continue-on-error: ${{ steps.precheck.outputs.golden != 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: pr-parity-precheck-${{ runner.os }}
-          path: ${{ runner.temp }}/pr-precheck-public/*.json
+          path: ${{ runner.temp }}/pr-precheck-public/**/*.json
           if-no-files-found: warn
       - name: Nextest
         run: cargo nextest run --locked --all-targets -j 4

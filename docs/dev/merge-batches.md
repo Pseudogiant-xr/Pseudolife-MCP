@@ -41,13 +41,14 @@ Each change waits for hosted CI once, on its batch:
   the daemon it already built for PDF provisioning; Python dependencies
   remain in a separate runtime and reuse the existing wheel cache.
 
-  Covered frozen judge groups use the existing merge-base oracle and source
-  pins. Independent comparisons continue after failures and retain their
+  Covered frozen judge groups are report-only probes using the existing
+  merge-base oracle and source pins. Independent comparisons continue after failures and retain their
   actual failed case IDs; setup/resource failures leave unrun phases
-  visible. The `pr-parity-precheck-<OS>` artifact contains the safe summary,
-  with raw logs and captures kept outside that upload. A failed precheck
-  fails `Rust` and its `Parity` gate; an intentional difference still needs
-  the maintainer's item-11 decision. Batches retain their existing parity
+  visible. The job summary and `pr-parity-precheck-<OS>` artifact contain each
+  available failed identifier with its phase,
+  with raw logs and captures kept outside that upload. Golden replay failures
+  fail `Rust` and its `Parity` gate; frozen probe failures leave those checks
+  unaffected and inform the maintainer's item-11 decision. Batches retain their existing parity
   matrix and do not repeat this ordinary-PR path.
 - **A pull request that edits CI or dependency inputs**
   (`.github/workflows/`, `pyproject.toml`, a lock file, the Rust toolchain

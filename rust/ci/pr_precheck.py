@@ -216,6 +216,7 @@ def main(argv=None) -> int:
     with options.github_output.open("a", encoding="utf-8") as output:
         output.write(f"precheck={json.dumps(value, separators=(',', ':'))}\n")
         output.write(f"enabled={str(bool(value[platform] or value['judges'])).lower()}\n")
+        output.write(f"golden={str(bool(value[platform])).lower()}\n")
         output.write(f"judges={str(bool(value['judges'])).lower()}\n")
         output.write(f"full_runtime={str(bool(value['judges']) or bool(set(value[platform]) & set(FULL_RUNTIME_ROWS))).lower()}\n")
         output.write(f"test_login={str('test_login' in value[platform]).lower()}\n")

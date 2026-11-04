@@ -483,7 +483,7 @@ def test_shards_cover_both_systems_and_build_once():
     uploads = [step for step in rust_steps if step.get("uses") == "actions/upload-artifact@v4"]
     assert len(uploads) == 1
     assert uploads[0]["name"] == "Retain ordinary PR parity precheck case IDs"
-    assert uploads[0]["with"]["path"] == "${{ runner.temp }}/pr-precheck-public/*.json"
+    assert uploads[0]["with"]["path"] == "${{ runner.temp }}/pr-precheck-public/**/*.json"
     assert uploads[0]["if"] == "always() && steps.precheck.outputs.enabled == 'true'"
     fixtures = jobs["fixtures"]
     assert fixtures["strategy"]["matrix"]["os"] == SYSTEMS

@@ -4,8 +4,10 @@ from __future__ import annotations
 import argparse
 from contextlib import contextmanager
 from datetime import datetime, timezone
+import html
 import io
 import json
+import math
 import os
 from pathlib import Path
 import subprocess
@@ -187,7 +189,56 @@ def write_summary(directory: Path, records: list[dict]) -> None:
     temporary.replace(directory / "summary.json")
 
 
-def run(plan: dict, candidate: Path, private: Path, public: Path) -> int:
+def publish(plan: dict, public: Path, job_summary: Path | None) -> None:
+    """Present required golden results separately from informational probes."""
+    platform = "windows" if os.name == "nt" else "linux"
+    groups = []
+    for name, wanted, gating in (("goldens", plan[platform], True), ("judges", plan["judges"], False)):
+        if not wanted:
+            continue
+        try:
+            value = json.loads((public / name / "summary.json").read_text(encoding="utf-8"))
+            if (not isinstance(value, dict) or type(value.get("schema")) is not int or value["schema"] != 1
+                    or not isinstance(value.get("phases"), list)):
+                raise ValueError("invalid summary")
+            phases = [{key: row[key] for key in ("phase", "exit_code", "seconds", "failed_cases", "diagnostic_errors")}
+                      for row in value["phases"]]
+            for row in phases:
+                if (not isinstance(row["phase"], str) or row["exit_code"] is not None and type(row["exit_code"]) is not int
+                        or row["seconds"] is not None and (type(row["seconds"]) not in (int, float) or not math.isfinite(row["seconds"]))
+                        or any(not isinstance(row[key], list) or any(not isinstance(item, str) for item in row[key])
+                               for key in ("failed_cases", "diagnostic_errors"))):
+                    raise ValueError("invalid phase record")
+        except (OSError, ValueError, KeyError, TypeError, OverflowError):
+            phases = [{"phase": name, "exit_code": None, "seconds": None, "failed_cases": [],
+                       "diagnostic_errors": ["precheck did not produce a summary; inspect its setup steps"]}]
+        groups.append({"name": name, "gating": gating, "phases": phases})
+    public.mkdir(parents=True, exist_ok=True)
+    (public / "report.json").write_text(json.dumps({"schema": 1, "groups": groups}, indent=2) + "\n", encoding="utf-8")
+    if job_summary is None:
+        return
+    safe = lambda value: html.escape(str(value)).replace("`", "&#96;").replace("|", "\\|").replace("\r", " ").replace("\n", " ")
+    lines = ["## PR parity prechecks", ""]
+    for group in groups:
+        lines += ["### Golden replay (required)" if group["gating"] else "### Frozen merge-base probes (report only)",
+                  "", "| Phase | Result | Case/node/era ID |", "| --- | --- | --- |"]
+        for row in group["phases"]:
+            code = row["exit_code"]
+            result = "not run" if code is None else ("passed" if code == 0 else f"exit {code}")
+            ids = row["failed_cases"] or (["unavailable"] if code != 0 else ["none"])
+            lines += [f"| {safe(row['phase'])} | {result} | {safe(case)} |" for case in ids]
+        lines.append("")
+    with job_summary.open("a", encoding="utf-8") as output:
+        output.write("\n".join(lines) + "\n")
+
+
+def run(plan: dict, candidate: Path, private: Path, public: Path, only="all") -> int:
+    if only == "goldens":
+        plan = {**plan, "judges": []}
+    elif only == "judges":
+        plan = {**plan, "linux": [], "windows": []}
+    elif only != "all":
+        raise ValueError("unknown precheck group")
     private.mkdir(parents=True, exist_ok=False)
     platform = "windows" if os.name == "nt" else "linux"
     fixture_rows = [row for row in plan[platform] if recorded_actions(row) or row == "test_login"]
@@ -266,16 +317,24 @@ def run(plan: dict, candidate: Path, private: Path, public: Path) -> int:
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--plan-json", required=True)
-    parser.add_argument("--candidate", type=Path, required=True)
-    parser.add_argument("--private", type=Path, required=True)
+    parser.add_argument("--candidate", type=Path)
+    parser.add_argument("--private", type=Path)
     parser.add_argument("--public", type=Path, required=True)
+    parser.add_argument("--only", choices=("all", "goldens", "judges"), default="all")
+    parser.add_argument("--publish", action="store_true")
+    parser.add_argument("--job-summary", type=Path)
     options = parser.parse_args(argv)
     try:
         plan = plan_value(options.plan_json)
     except (ValueError, TypeError) as error:
         parser.error(str(error))
+    if options.publish:
+        publish(plan, options.public.resolve(), options.job_summary)
+        return 0
+    if options.candidate is None or options.private is None:
+        parser.error("execution requires --candidate and --private")
     candidate = options.candidate.resolve(strict=True)
-    return run(plan, candidate, options.private.resolve(), options.public.resolve())
+    return run(plan, candidate, options.private.resolve(), options.public.resolve(), options.only)
 
 
 if __name__ == "__main__":
