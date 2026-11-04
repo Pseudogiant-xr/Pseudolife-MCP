@@ -6934,8 +6934,7 @@ class MemoryService(DreamOps, MaintainerOps):
             resume: bool = True) -> tuple[str, str | None] | None:
         """Identity tier 2 (spec 2026-07-18): match ``handle`` (a daemon-minted
         episode id or an unambiguous prefix, >=8 chars) against an OPEN root
-        episode. The board's exact session key also anchors an open root;
-        only the request's own header key may lazily create a missing root.
+        episode. The board's exact session key also anchors an open root.
         A daemon-minted handle also matches a reaped episode (within
         ``PSEUDOLIFE_HANDLE_RESUME_SECONDS``, its own window, far longer
         than the session-key one), which is reopened, or a swept-empty one,
@@ -6951,7 +6950,7 @@ class MemoryService(DreamOps, MaintainerOps):
         if not handle or len(handle) < 8 or self._cms is None:
             return None
         # The board advertises the host session key as its episode. Accept
-        # that exact key too, including hookless clients' first write. Never
+        # that exact key too. Never
         # resume a closed root through this alias: only a daemon handle has
         # the existing explicit resume contract below.
         roots = [e for e in self._cms.episodes.episodes.values()
@@ -6963,11 +6962,6 @@ class MemoryService(DreamOps, MaintainerOps):
             root = opened[0]
             self._episode_touches[root.id] = time.time()
             return (root.id, root.session_key)
-        _, header_session, _ = resolve_writer_detailed(self._writer_id)
-        if resume and handle == header_session:
-            root_id = self._ensure_session_episode(header_session)
-            if root_id is not None:
-                return (root_id, header_session)
         matches = [e for e in self._cms.episodes.episodes.values()
                    if e.parent_id is None and e.ended_at is None
                    and e.id.startswith(handle)]

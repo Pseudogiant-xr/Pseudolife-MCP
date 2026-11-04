@@ -33,19 +33,18 @@ def test_board_session_id_resolves_open_root(pg_service, operation):
     assert "episode_warning" not in result
 
 
-def test_first_outcome_can_use_own_board_id_before_any_hook(pg_service):
+def test_pruned_closed_board_alias_is_refused_even_with_own_header(pg_service):
+    root = pg_service.episode_start_session(SESSION, "Empty session")
+    pg_service.episode_end_session(SESSION, run_dream=False)
+    assert pg_service._cms.episodes.get(root["id"]) is None
     token = set_writer_context("codex", SESSION)
     try:
-        result = pg_service.record_outcome(task="first outcome", outcome="success",
-                                           episode=SESSION)
+        result = pg_service.set_session_title("Must stay closed", episode=SESSION)
     finally:
         reset_writer_context(token)
-    assert "episode_warning" not in result
-    root = next(e for e in pg_service._cms.episodes.episodes.values()
-                if e.session_key == SESSION and e.parent_id is None)
-    signal = next(s for s in pg_service._storage.pending_signals(limit=100)
-                  if s["task"] == "first outcome")
-    assert signal["episode_id"] == root.id
+    assert result == {"ok": False, "reason": "unknown or closed episode handle"}
+    assert not any(e.session_key == SESSION
+                   for e in pg_service._cms.episodes.episodes.values())
 
 
 def test_closed_board_alias_is_refused_without_reopening(pg_service):
