@@ -31,6 +31,9 @@ SUMMARY = (
 # page without updating this list fails CI rather than shipping a stale
 # index.
 PAGES: list[tuple[str, str]] = [
+    ("docs/guide/install-and-move.md",
+     "Installer and lite pip setup, pseudolife-mcp move, and the supported "
+     "compose file for external stack managers; never hand-write a compose file"),
     ("README.md",
      "Overview, quickstart, tool reference, and operations — start here"),
     ("docs/guide/memory-model.md",
