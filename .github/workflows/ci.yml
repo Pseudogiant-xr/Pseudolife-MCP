@@ -616,6 +616,8 @@ jobs:
           tests/test_child_python.py
           tests/test_installer_client_update_schedule.py
           tests/test_installer_resources.py
+          rust/ci/test_pr_precheck.py
+          rust/ci/test_pr_precheck_run.py
           tests/test_tunnel_profiles.py
           tests/test_tunnel_service.py
           tests/test_tunnel_cli.py

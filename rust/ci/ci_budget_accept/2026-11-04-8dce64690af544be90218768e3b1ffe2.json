@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "parity-checks",
+  "before": "648ae185c33efaa8",
+  "fingerprint": "f9992b6fb90cf59d",
+  "reason": "Exclude only the new ordinary-PR precheck files from the batch harness import scan. The parent/current transitive import sets and routing for all tracked paths are equal; suites, OS coverage, case commands and full-matrix costs are unchanged. The helper-source digest changes, not the batch work."
+}

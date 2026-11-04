@@ -265,7 +265,9 @@ jobs:
     # Nextest 9.6, no-default 7.4 and override builds 11.9 min, while master
     # run 41699732205 at the same code took 11.8, 8.7 and 15.9 min and was
     # cancelled at the 45-minute limit inside the override builds.
-    timeout-minutes: 60
+    # Ordinary PRs may also replay touched goldens and frozen judges before
+    # batching; batches keep their existing separate parity jobs.
+    timeout-minutes: ${{ github.event_name == 'pull_request' && needs.scope.outputs.full == 'false' && 90 || 60 }}
     defaults:
       run:
         working-directory: rust
@@ -296,6 +298,14 @@ jobs:
           "PSEUDOLIFE_MCP_PYTHON=$selectedPython" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Install the Python SDK fixture dependency
         run: python -m pip install "mcp==2.2.0"
+      - name: Select ordinary PR parity prechecks
+        id: precheck
+        if: github.event_name == 'pull_request' && needs.scope.outputs.full == 'false'
+        working-directory: .
+        shell: pwsh
+        run: |
+          python rust/ci/pr_precheck.py --github-output $env:GITHUB_OUTPUT
+          exit $LASTEXITCODE
       - name: Check generated daemon schema
         working-directory: .
         shell: pwsh
@@ -417,6 +427,67 @@ jobs:
           $env:PSEUDOLIFE_DAEMON_PDFIUM_DIR = $root
           cargo run --locked -p pseudolife-daemon -j 4 -- provision pdfium
           exit $LASTEXITCODE
+      - name: Reuse the parity Python wheel cache for selected PR prechecks
+        if: steps.precheck.outputs.enabled == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install the selected PR precheck dependencies
+        id: precheck_runtime
+        if: steps.precheck.outputs.enabled == 'true'
+        working-directory: .
+        shell: pwsh
+        env:
+          PRECHECK_FULL_RUNTIME: ${{ steps.precheck.outputs.full_runtime }}
+        run: |
+          $runtime = Join-Path $env:RUNNER_TEMP 'pr-precheck-runtime'
+          python -m venv --system-site-packages $runtime
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $python = Join-Path $runtime $(if ($IsWindows) { 'Scripts/python.exe' } else { 'bin/python' })
+          & $python -m pip install --no-compile "setuptools>=68" wheel httpx
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ($env:PRECHECK_FULL_RUNTIME -ceq 'true') {
+            & $python -m pip install --no-compile --index-url https://download.pytorch.org/whl/cpu "torch==2.13.0"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            & $python -m pip install --no-compile -e ".[dev,lite]" "mcp==2.2.0"
+          } else {
+            & $python -m pip install --no-deps --no-compile -e .
+          }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "python=$python" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+      - name: Build the selected PR precheck candidate
+        if: steps.precheck.outputs.enabled == 'true'
+        run: cargo build --locked -p pseudolife-stdio -j 4
+      - name: Build the selected Linux test_login fixture image
+        if: runner.os == 'Linux' && steps.precheck.outputs.test_login == 'true'
+        working-directory: .
+        timeout-minutes: 5
+        run: docker build -t pseudolife-pg:18 -f ops/Dockerfile.pg ops
+      - name: Replay touched PR goldens and frozen judges
+        if: steps.precheck.outputs.enabled == 'true'
+        working-directory: .
+        timeout-minutes: 35
+        shell: pwsh
+        env:
+          PRECHECK_PLAN: ${{ steps.precheck.outputs.precheck }}
+          PRECHECK_PYTHON: ${{ steps.precheck_runtime.outputs.python }}
+        run: |
+          if ($IsLinux) {
+            $env:LANG = 'en_US.UTF-8'
+            $env:LC_ALL = 'en_US.UTF-8'
+          }
+          $binary = if ($IsWindows) { 'pseudolife-stdio.exe' } else { 'pseudolife-stdio' }
+          & $env:PRECHECK_PYTHON rust/ci/pr_precheck_run.py --plan-json $env:PRECHECK_PLAN --candidate (Join-Path 'rust/target/debug' $binary) --private (Join-Path $env:RUNNER_TEMP 'pr-precheck-private') --public (Join-Path $env:RUNNER_TEMP 'pr-precheck-public')
+          exit $LASTEXITCODE
+      - name: Retain ordinary PR parity precheck case IDs
+        if: always() && steps.precheck.outputs.enabled == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr-parity-precheck-${{ runner.os }}
+          path: ${{ runner.temp }}/pr-precheck-public/*.json
+          if-no-files-found: warn
       - name: Nextest
         run: cargo nextest run --locked --all-targets -j 4
       - name: Codex setup Python and Rust planning parity

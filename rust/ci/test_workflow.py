@@ -480,7 +480,11 @@ def test_shards_cover_both_systems_and_build_once():
                     ("--locked", "-p", "pseudolife-daemon", "--features", "mutants"), ("--release",))
     # The fixtures job builds the bind fixture with the override step's
     # command; the Rust job keeps building it as part of that check.
-    assert not any(step.get("uses") == "actions/upload-artifact@v4" for step in rust_steps)
+    uploads = [step for step in rust_steps if step.get("uses") == "actions/upload-artifact@v4"]
+    assert len(uploads) == 1
+    assert uploads[0]["name"] == "Retain ordinary PR parity precheck case IDs"
+    assert uploads[0]["with"]["path"] == "${{ runner.temp }}/pr-precheck-public/*.json"
+    assert uploads[0]["if"] == "always() && steps.precheck.outputs.enabled == 'true'"
     fixtures = jobs["fixtures"]
     assert fixtures["strategy"]["matrix"]["os"] == SYSTEMS
     assert fixtures["strategy"]["fail-fast"] is False
@@ -1536,8 +1540,15 @@ def test_rust_job_fits_a_cold_cache_and_bounds_the_override_builds():
     # Hosted windows 2026-10-13: a cold-cache run took 23.9 minutes; on
     # 2026-10-15 three cold runs were cancelled at 25 inside this step. A
     # cancelled run saves no cache, so the next run on that image is cold too.
-    assert job["timeout-minutes"] >= 45
-    assert 0 < override["timeout-minutes"] < job["timeout-minutes"]
+    from ci_budget import Evaluator, condition_text
+    class TimeoutContext(Evaluator):
+        def lookup(self, path):
+            return full if path == ["needs", "scope", "outputs", "full"] else super().lookup(path)
+    for event, full in (("pull_request", "false"), ("pull_request", "true"),
+                        ("pull_request", ""), ("push", "true"), ("schedule", "true")):
+        timeout = TimeoutContext(event, ["scope"], set()).run(condition_text(job["timeout-minutes"]))
+        assert timeout >= 45
+        assert 0 < override["timeout-minutes"] < timeout
 
 
 # --- self-hosted comparison lane (docs/specs/2026-10-19-self-hosted-parity-lane.md) ---

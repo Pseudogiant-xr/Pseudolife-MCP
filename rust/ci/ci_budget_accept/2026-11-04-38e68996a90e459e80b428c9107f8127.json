@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "rust",
+  "before": "7590eb3bcb1d8a02",
+  "fingerprint": "827d076340fe7a48",
+  "reason": "Existing batch commands and the 60-minute batch timeout are unchanged. Ordinary PRs now replay touched goldens and frozen judges before Nextest in the existing Rust jobs, sharing debug dependencies and pip wheels with an isolated Python runtime. New PR-path cost must be re-measured on two hosted runs before readiness; run 41856236024 doctor case elapsed sums were 0.32 Linux and 1.22 Windows minutes, excluding row startup and job setup."
+}
