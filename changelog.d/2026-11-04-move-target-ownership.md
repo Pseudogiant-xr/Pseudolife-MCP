@@ -1,0 +1,2 @@
+### Fixed (2026-11-04 — Refuse unrelated move target stacks before restoring)
+- `pseudolife-mcp move` checks both target containers' compose project, services and owning checkout before changing either host, and explains how to select the owning checkout or prepare fresh target volumes. A bare clone beside a stack managed elsewhere can no longer pass preflight and replace its bank before the target deploy fails.
