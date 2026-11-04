@@ -1,3 +1,0 @@
-### Added (2026-11-02 — Start and remove a read-only Rust companion)
-- Checkout `update --engine rust --shadow` starts Rust beside Python on loopback port 8766, with the same bank and a SELECT-only role. It saves a database password once in the host env file, preserving existing file access permissions and making new files private, waits for model provisioning, and verifies read-only health plus an authenticated bank read. An unchanged healthy companion is left running on rerun.
-- `update --engine python --shadow --checkout <repo>` removes only the companion, retaining its model cache and password for reuse. Missing support or unsafe configuration refuses before changes; a failed or interrupted startup removes the companion and leaves Python running.

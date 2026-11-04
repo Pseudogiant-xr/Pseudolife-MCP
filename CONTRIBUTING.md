@@ -201,8 +201,11 @@ A pull request that touches `rust/` and changes nothing else except
 changes no Python, so CI skips the four Python suite lanes for it and runs
 a `guards` job instead (the tracked-tree and release-doc guards); the Rust
 workflow is that PR's gate. The master push that merges it, and a nightly
-run, still run the full suite. The Rust port under `rust/` is experimental
-and nothing installs it; see [rust/README.md](rust/README.md).
+run, still run the full suite. The Rust port under `rust/` is experimental:
+only an opt-in checkout-mode `pseudolife-mcp update --engine rust` installs
+it (beside the Python daemon with `--shadow`; see
+[docs/dev/run-rust-beside-python.md](docs/dev/run-rust-beside-python.md)),
+and [rust/README.md](rust/README.md) has the rest.
 
 A docs-only change can skip the full run locally. That means Markdown
 anywhere, `llms.txt` / `llms-full.txt`, and non-code files under `docs/`

@@ -409,6 +409,12 @@ deep-hop entities still present in the result
 graph than the live audit's, so the two byte counts aren't comparable
 to each other, only each to its own before/after.
 
+**Defaults for omitted arguments.** A `memory_recall` call (MCP or REST)
+that leaves out `hops` or `top_k` uses `memory.recall.default_hops`
+(default 3) and `memory.recall.default_top_k` (default 5), so a Console
+change applies to the next call; the Console's Recall page sends its own
+hop count. Explicit values are used as given.
+
 **Search fan-out caps (2026-09-04).** The output caps above bound what
 comes *back*; these bound what the walk *spends*. Each hop re-queried every
 newly discovered entity by name, so on a star-shaped graph one hub's ring

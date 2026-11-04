@@ -584,7 +584,9 @@ overwrite. Set `memory.cortex.protect_provenance: false` in `config.yaml`
 to disable and restore pure newer-wins — for scalar-vs-scalar conflicts;
 the aggregate conversion guard's contender parking (see [Conversion
 rules](#conversion-rules) above) applies regardless of this setting, since
-protecting a stated total isn't a provenance-tier concern.
+protecting a stated total isn't a provenance-tier concern. A Console change
+to `protect_provenance` or `memory.cortex.supersede_confidence_margin`
+applies to the next fact write, without a daemon restart.
 
 ## World knowledge — the world cortex (schema v9)
 
