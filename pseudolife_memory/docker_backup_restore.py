@@ -235,9 +235,23 @@ class DockerBank:
         # relocated PGDATA and tablespaces, without requiring a database role
         # that can read superuser-only data_directory settings.
         postgres = self.inspect(self.pg)
-        paths = sorted({"/", *(m["Destination"] for m in postgres.get("Mounts", [])
-                               if m.get("RW", True) and m.get("Destination", "").startswith("/"))})
-        for path in paths:
+        paths = {"/"}
+        for mount in postgres.get("Mounts", []):
+            path = mount.get("Destination", "")
+            if not mount.get("RW", True) or not path.startswith("/"):
+                continue
+            if path in ("/run/postgresql", "/var/run/postgresql"):
+                code, output = self.command(
+                    "exec", self.pg, "sh", "-c",
+                    r'test -d "$1" && find -H "$1" -mindepth 1 -maxdepth 1 ! -type s ! \( -type f -name ".s.PGSQL.*.lock" \) -print -quit',
+                    "_", path, check=False, timeout=60)
+                if code:
+                    raise up.UpdateError("cannot inspect the PostgreSQL socket mount; make find work in the "
+                                         "selected PostgreSQL container and retry. Nothing was restored", 2)
+                if not output.strip():
+                    continue  # Sockets and their lock files receive no restore payload.
+            paths.add(path)
+        for path in sorted(paths):
             disk_space.container(self.docker, self.pg, path)
         if state:
             paths = sorted({"/data", *(m["Destination"] for m in self.running.get("Mounts", [])

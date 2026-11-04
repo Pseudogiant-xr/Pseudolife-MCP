@@ -197,6 +197,32 @@ def test_restore_checks_separate_destination_mounts_before_stop(docker_bank, tmp
     assert not any(call[0] == "stop" or "DROP DATABASE" in str(call) for call in world.calls)
 
 
+@pytest.mark.parametrize("contains_bank_data", [False, True])
+def test_socket_only_tmpfs_is_not_a_restore_destination(docker_bank, tmp_path, monkeypatch, contains_bank_data):
+    bank, world = docker_bank
+    socket = "/var/run/postgresql"
+    world.pg["Mounts"] = [
+        {"Type": "volume", "Destination": "/legacy-data", "RW": True},
+        {"Type": "volume", "Destination": "/tablespaces", "RW": True},
+        {"Type": "tmpfs", "Destination": socket, "RW": True}]
+    original = world.run
+
+    def run(argv, **kw):
+        if "df" in argv and argv[-1] == socket:
+            return 0, "tmpfs 65536 1 65535 1% /var/run/postgresql\n"
+        if argv[1:2] == ["exec"] and any("find " in str(value) for value in argv):
+            return 0, "bank-data\n" if contains_bank_data else ""
+        return original(argv, **kw)
+
+    monkeypatch.setattr(up, "run_cli", run)
+    if contains_bank_data:
+        with pytest.raises(up.UpdateError, match="8 GiB"):
+            bank._restore_space(tmp_path / "safety", state=False)
+    else:
+        bank._restore_space(tmp_path / "safety", state=False)
+    assert not any(call[0] in ("stop", "create", "cp") for call in world.calls)
+
+
 @pytest.mark.parametrize("phase", ["backup", "staging", "state-staging"])
 def test_restore_rechecks_space_after_safety_backup_and_staging(docker_bank, tmp_path, monkeypatch, phase):
     from pseudolife_memory import disk_space

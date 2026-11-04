@@ -40,8 +40,13 @@ impl Update {
         require(available(&output)?, &format!("{name}:{path}"))
     }
 
-    pub fn disk_storage(&mut self, daemon: &str, pg: &str, image: Option<&str>) -> Result<()> {
-        for name in [pg, daemon] {
+    pub fn disk_storage(
+        &mut self,
+        daemon: &str,
+        pg: Option<&str>,
+        image: Option<&str>,
+    ) -> Result<()> {
+        for name in pg.into_iter().chain(std::iter::once(daemon)) {
             let (code, output) = self.docker_call(&["exec", name, "df", "-Pk", "/"]);
             if code == 0 {
                 return require(available(&output)?, "Docker storage");
@@ -102,7 +107,7 @@ impl Update {
     pub fn disk_backup(&mut self, directory: &Path, pg: &str, daemon: &str) -> Result<()> {
         host(directory)?;
         self.disk_container(pg, "/tmp")?;
-        self.disk_storage(daemon, pg, None)?;
+        self.disk_storage(daemon, Some(pg), None)?;
         // A stopped daemon cannot write its state archive; keep the existing
         // SQL-only recovery path and its explicit missing-state warning.
         let (code, state) = self.docker_call(&["inspect", "-f", "{{.State.Running}}", daemon]);
