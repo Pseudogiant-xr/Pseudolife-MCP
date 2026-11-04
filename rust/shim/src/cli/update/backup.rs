@@ -7,6 +7,127 @@ use std::{
     time::{Duration, SystemTime},
 };
 
+const CONNECTION_FIX: &str = "cannot resolve the daemon's backup connection; set PSEUDOLIFE_MCP_DATABASE_URL in its container environment to an explicit PostgreSQL host, user and database on this project's PostgreSQL container (without a service indirection), then retry; nothing was deployed";
+
+fn connection_fix(daemon: &Value) -> String {
+    for key in ["PGSERVICE", "PGHOSTADDR"] {
+        if daemon["Config"]["Env"].as_array().is_some_and(|env| {
+            env.iter().any(|item| {
+                item.as_str()
+                    .and_then(|s| s.strip_prefix(&format!("{key}=")))
+                    .is_some_and(|value| !value.is_empty())
+            })
+        }) {
+            return format!(
+                "cannot resolve the daemon's backup connection; unset {key} in its container environment and retry; nothing was deployed"
+            );
+        }
+    }
+    CONNECTION_FIX.into()
+}
+
+fn connection_parts(daemon: &Value, postgres: &Value) -> Option<(String, String)> {
+    let mut env = BTreeMap::new();
+    for item in daemon["Config"]["Env"].as_array()? {
+        let (key, value) = item.as_str()?.split_once('=')?;
+        if env.insert(key, value).is_some() {
+            return None;
+        }
+    }
+    let get = |key| env.get(key).copied().filter(|v| !v.is_empty());
+    if get("PGSERVICE").is_some() || get("PGHOSTADDR").is_some() {
+        return None;
+    }
+    let raw = get("PSEUDOLIFE_MCP_DATABASE_URL")?;
+    let quote = |value: &str| format!("'{}'", value.replace('\\', "\\\\").replace('\'', "\\'"));
+    // Resolve ambient defaults before the URI parser inserts its own 5432.
+    // The shared parser understands the daemon's TLS options and rejects
+    // opaque service/hostaddr indirections without printing the DSN.
+    let normalized = if raw.starts_with("postgresql://") || raw.starts_with("postgres://") {
+        let (base, query) = raw.split_once('?').unwrap_or((raw, ""));
+        let authority = base
+            .split_once("://")?
+            .1
+            .split('/')
+            .next()?
+            .rsplit('@')
+            .next()?;
+        let explicit_port = if authority.starts_with('[') {
+            authority.split_once(']')?.1.starts_with(':')
+        } else {
+            authority.contains(':')
+        };
+        let origin = base.parse::<tokio_postgres::Config>().ok()?;
+        let encode = |value: &str| {
+            percent_encoding::utf8_percent_encode(value, percent_encoding::NON_ALPHANUMERIC)
+                .to_string()
+        };
+        let mut defaults = vec![];
+        if !explicit_port {
+            defaults.push(format!("port={}", encode(get("PGPORT").unwrap_or("5432"))));
+        }
+        if origin.get_hosts().is_empty()
+            && let Some(host) = get("PGHOST")
+        {
+            defaults.push(format!("host={}", encode(host)));
+        }
+        defaults.push(query.into());
+        format!("{base}?{}", defaults.join("&"))
+    } else {
+        format!(
+            "host={} port={} {raw}",
+            quote(get("PGHOST").unwrap_or("")),
+            quote(get("PGPORT").unwrap_or("5432"))
+        )
+    };
+    let parsed = crate::pg::Dsn::parse_with_connection_options(&normalized).ok()?;
+    let config = parsed.config();
+    let host = match config.get_hosts() {
+        [] => get("PGHOST")?,
+        [tokio_postgres::config::Host::Tcp(host)] => host,
+        _ => return None,
+    };
+    let port = match config.get_ports() {
+        [] => get("PGPORT").unwrap_or("5432"),
+        [5432] => "5432",
+        _ => return None,
+    };
+    let user = config
+        .get_user()
+        .filter(|v| !v.is_empty())
+        .or_else(|| get("PGUSER"))?;
+    // POSTGRES_DB/USER initialize a cluster; they are not libpq defaults.
+    let db = config
+        .get_dbname()
+        .filter(|v| !v.is_empty())
+        .or_else(|| get("PGDATABASE"))
+        .unwrap_or(user);
+    if port != "5432"
+        || db.contains('=')
+        || db.contains("://")
+        || user.chars().chain(db.chars()).any(|c| c < ' ')
+    {
+        return None;
+    }
+    let daemon_networks = daemon["NetworkSettings"]["Networks"].as_object()?;
+    let pg_networks = postgres["NetworkSettings"]["Networks"].as_object()?;
+    let found = pg_networks
+        .iter()
+        .filter(|(name, _)| daemon_networks.contains_key(*name))
+        .any(|(_, network)| {
+            postgres["Name"]
+                .as_str()
+                .is_some_and(|n| n.trim_start_matches('/') == host)
+                || network["IPAddress"].as_str() == Some(host)
+                || ["Aliases", "DNSNames"].iter().any(|key| {
+                    network[key]
+                        .as_array()
+                        .is_some_and(|names| names.iter().any(|name| name.as_str() == Some(host)))
+                })
+        });
+    found.then(|| (user.to_owned(), db.to_owned()))
+}
+
 pub(super) fn dump_complete(path: &Path) -> bool {
     fn check(path: &Path) -> std::io::Result<bool> {
         let mut stream = BufReader::new(MultiGzDecoder::new(File::open(path)?));
@@ -35,6 +156,7 @@ pub(super) fn dump_complete(path: &Path) -> bool {
     }
     check(path).unwrap_or(false)
 }
+
 fn state_complete(path: &Path) -> bool {
     fn check(path: &Path) -> std::io::Result<()> {
         let mut decoder = MultiGzDecoder::new(File::open(path)?);
@@ -227,22 +349,16 @@ impl Update {
             }
             return self.verify_backup(&directory, &before);
         }
-        self.builtin_backup(
-            PG_CONTAINER,
-            DAEMON_CONTAINER,
-            "pseudolife",
-            "pseudolife_memory",
-            &data_dir().join("backups"),
-        )
+        self.builtin_backup(PG_CONTAINER, DAEMON_CONTAINER, &data_dir().join("backups"))
     }
-    pub fn builtin_backup(
-        &mut self,
-        pg: &str,
-        daemon: &str,
-        user: &str,
-        db: &str,
-        directory: &Path,
-    ) -> Result<Value> {
+    pub fn builtin_backup(&mut self, pg: &str, daemon: &str, directory: &Path) -> Result<Value> {
+        // Runtime container settings remain available when the daemon is stopped.
+        // The caller's Compose initialization settings cannot identify its bank.
+        let running =
+            engine::inspect(self, daemon).map_err(|_| UpdateError::usage(CONNECTION_FIX))?;
+        let postgres = engine::inspect(self, pg).map_err(|_| UpdateError::usage(CONNECTION_FIX))?;
+        let (user, db) = connection_parts(&running, &postgres)
+            .ok_or_else(|| UpdateError::usage(connection_fix(&running)))?;
         fs::create_dir_all(directory)?;
         let stamp = stamp();
         let dump = directory.join(format!("pseudolife_memory-{stamp}.sql.gz"));
@@ -261,7 +377,7 @@ impl Update {
         self.step("backing up the bank (pg_dump in the container + state volume tar)...");
         let remote = format!("/tmp/pl_backup-{stamp}.sql.gz");
         let sql = format!(
-            "pg_dump -U \"$1\" -d \"$2\" -Z9 > {}",
+            "unset PGHOSTADDR PGSERVICE PGSERVICEFILE; pg_dump -h /var/run/postgresql -p 5432 -U \"$1\" -d \"$2\" -Z9 > {}",
             seams::quote(&remote)
         );
         let (code, _) = self.command(
@@ -278,8 +394,8 @@ impl Update {
                 "-c",
                 &sql,
                 "sh",
-                user,
-                db,
+                &user,
+                &db,
             ]
             .iter()
             .map(|s| s.to_string())
@@ -557,6 +673,151 @@ impl Update {
         };
         if code != 0 {
             self.warn("build-cache retention failed (deploy already succeeded)");
+        }
+    }
+}
+
+#[cfg(test)]
+mod connection_tests {
+    use super::*;
+
+    fn fixture(dsn: &str, extra: &[&str]) -> (Value, Value) {
+        let mut env = vec![format!("PSEUDOLIFE_MCP_DATABASE_URL={dsn}")];
+        env.extend(extra.iter().map(|v| v.to_string()));
+        (
+            json!({"Config":{"Env":env}, "State":{"Running":false},
+            "NetworkSettings":{"Networks":{"bank":{}}}}),
+            json!({"Name":"/fixture-pg", "Config":{"Env":["POSTGRES_USER=wrong","POSTGRES_DB=wrong"]},
+            "NetworkSettings":{"Networks":{"bank":{"Aliases":["pseudolife-pg"]}}}}),
+        )
+    }
+
+    #[test]
+    fn backup_connection_uses_runtime_authority_and_libpq_defaults() {
+        for (dsn, extra, user, db) in [
+            (
+                "postgresql://custom@pseudolife-pg/bank?port=5432",
+                vec!["PGPORT=9999"],
+                "custom",
+                "bank",
+            ),
+            (
+                "user=custom dbname=bank",
+                vec!["PGHOST=pseudolife-pg"],
+                "custom",
+                "bank",
+            ),
+            (
+                "postgresql://custom@/bank",
+                vec!["PGHOST=pseudolife-pg"],
+                "custom",
+                "bank",
+            ),
+            (
+                "postgresql://custom@pseudolife-pg:5432/bank",
+                vec!["PGPORT=9999"],
+                "custom",
+                "bank",
+            ),
+            (
+                "postgresql://custom@pseudolife-pg/bank?sslmode=verify-full&sslrootcert=/fixture/root.pem",
+                vec![],
+                "custom",
+                "bank",
+            ),
+            (
+                "host=pseudolife-pg user=custom dbname=bank sslmode=verify-full sslrootcert=/fixture/root.pem",
+                vec![],
+                "custom",
+                "bank",
+            ),
+            (
+                "postgresql://custom:fixture@pseudolife-pg/custom_bank",
+                vec![],
+                "custom",
+                "custom_bank",
+            ),
+            (
+                "postgresql://pseudolife:fixture@pseudolife-pg/pseudolife_memory",
+                vec![],
+                "pseudolife",
+                "pseudolife_memory",
+            ),
+            (
+                "postgresql://custom:fixture@pseudolife-pg",
+                vec![],
+                "custom",
+                "custom",
+            ),
+            (
+                "postgresql://custom:fixture@pseudolife-pg",
+                vec!["PGDATABASE=runtime_bank"],
+                "custom",
+                "runtime_bank",
+            ),
+            (
+                "host=pseudolife-pg user=custom dbname='bank with spaces' password=fixture",
+                vec![],
+                "custom",
+                "bank with spaces",
+            ),
+            (
+                "postgresql://pseudolife-pg",
+                vec!["PGUSER=runtime_user"],
+                "runtime_user",
+                "runtime_user",
+            ),
+            (
+                "postgresql://custom:fixture@pseudolife-pg/wrong?dbname=actual",
+                vec![],
+                "custom",
+                "actual",
+            ),
+        ] {
+            let (daemon, pg) = fixture(dsn, &extra);
+            assert_eq!(
+                connection_parts(&daemon, &pg),
+                Some((user.into(), db.into()))
+            );
+        }
+    }
+
+    #[test]
+    fn backup_connection_refuses_opaque_or_foreign_targets() {
+        for (dsn, extra) in [
+            ("", vec![]),
+            ("service=opaque", vec![]),
+            (
+                "host=pseudolife-pg hostaddr=10.0.0.2 user=custom dbname=bank",
+                vec![],
+            ),
+            (
+                "postgresql://custom@pseudolife-pg/bank?hostaddr=10.0.0.2",
+                vec![],
+            ),
+            ("invalid fixture", vec![]),
+            ("postgresql://custom@elsewhere/bank", vec![]),
+            (
+                "postgresql://custom@pseudolife-pg/bank",
+                vec!["PGSERVICE=opaque"],
+            ),
+            (
+                "postgresql://custom@pseudolife-pg/bank",
+                vec!["PGHOSTADDR=10.0.0.1"],
+            ),
+            ("postgresql://pseudolife-pg/bank", vec![]),
+            (
+                "host=pseudolife-pg user=custom dbname='host=elsewhere'",
+                vec![],
+            ),
+            ("postgresql://custom@pseudolife-pg:9999/bank", vec![]),
+            (
+                "postgresql://custom@pseudolife-pg/bank",
+                vec!["PGPORT=9999"],
+            ),
+        ] {
+            let (daemon, pg) = fixture(dsn, &extra);
+            assert!(connection_parts(&daemon, &pg).is_none());
         }
     }
 }

@@ -367,7 +367,7 @@ bank ("dev machines homelab"), never in the tree.
   replace, or timeouts (a harness `run.py` scenario included), or changes
   how such a test's own code uses them, merges only after 20
   clean hosted `windows-latest` runs of that test** (the Rust workflow's
-  `mode=stress` dispatch; a test that only mocks them is exempt), because the VM admits what the runner then
+  `mode=stress` dispatch; a test that only mocks them is exempt; one replacement per iteration is allowed only when jobs API history proves setup failed before the test step, with every attempt and cause recorded and any test or later failure still failing the loop), because the VM admits what the runner then
   fails (#835: 0 of 525 on the VM, 3 of 5 hosted).
 - **Windows-sensitive Rust changes** (`cfg(windows)` / `windows-sys`,
   process spawn/wait/kill, sockets or named pipes, file locks or atomic
