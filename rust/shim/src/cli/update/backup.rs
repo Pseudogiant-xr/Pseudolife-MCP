@@ -157,9 +157,16 @@ pub(super) fn dump_complete(path: &Path) -> bool {
     check(path).unwrap_or(false)
 }
 fn own_backup_file(path: &Path) -> Result<()> {
+    own_backup_file_with(path, |source, target| fs::rename(source, target))
+}
+fn own_backup_file_with(
+    path: &Path,
+    replace: impl FnOnce(&Path, &Path) -> std::io::Result<()>,
+) -> Result<()> {
     // A privileged Docker wrapper may own its copy. Stream it into a new
     // operator-owned file before accepting the backup or moving a rollback tag.
     let owned = path.with_extension(format!("owned-{}", uuid::Uuid::new_v4().simple()));
+    let mut complete = false;
     let result = (|| -> std::io::Result<()> {
         let mut options = fs::OpenOptions::new();
         options.write(true).create_new(true);
@@ -172,13 +179,19 @@ fn own_backup_file(path: &Path) -> Result<()> {
         std::io::copy(&mut File::open(path)?, &mut output)?;
         output.sync_all()?;
         drop(output);
-        fs::remove_file(path)?;
-        fs::rename(&owned, path)
+        complete = true;
+        replace(&owned, path)
     })();
     if result.is_err() {
+        if complete {
+            return Err(UpdateError::usage(format!(
+                "cannot replace the operator-owned backup; the complete copy is retained at {}; repair access to the backup file and directory and retry; nothing was deployed",
+                owned.display()
+            )));
+        }
         let _ = fs::remove_file(&owned);
         return Err(UpdateError::usage(
-            "cannot save an operator-owned backup; repair access to the backup directory and retry; nothing was deployed",
+            "cannot save an operator-owned backup; repair access to the backup file and directory and retry; nothing was deployed",
         ));
     }
     Ok(())
@@ -295,6 +308,13 @@ pub(super) fn rotate(directory: &Path, keep: &BTreeSet<String>) -> Vec<PathBuf> 
     removed
 }
 impl Update {
+    fn rotate_after_backup(&self, directory: &Path, keep: &BTreeSet<String>) -> Vec<PathBuf> {
+        if self.stopped_handover {
+            vec![]
+        } else {
+            rotate(directory, keep)
+        }
+    }
     pub fn set_rollback_scope(&mut self, config: &Value, running: &Value) -> Result<()> {
         use sha2::{Digest, Sha256};
         let project = config["name"].as_str().filter(|s| !s.is_empty());
@@ -604,7 +624,7 @@ impl Update {
         ]
         .into_iter()
         .collect();
-        let removed = rotate(directory, &keep);
+        let removed = self.rotate_after_backup(directory, &keep);
         if !removed.is_empty() {
             self.step(format!(
                 "rotated {} backup file(s) older than 7 days",
@@ -965,5 +985,59 @@ mod connection_tests {
             let (daemon, pg) = fixture(dsn, &extra);
             assert!(connection_parts(&daemon, &pg).is_none());
         }
+    }
+}
+
+#[cfg(test)]
+mod handover_review_tests {
+    use super::*;
+    #[test]
+    fn review_failed_backup_replace_retains_both_complete_copies() {
+        let directory =
+            std::env::temp_dir().join(format!("pseudolife-backup-copy-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&directory).unwrap();
+        let path = directory.join("fixture.sql.gz.part");
+        fs::write(&path, b"complete fixture backup").unwrap();
+        let mut replacement = None;
+        let result = own_backup_file_with(&path, |source, _| {
+            replacement = Some(source.to_owned());
+            Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied))
+        });
+        let original = fs::read(&path).ok();
+        let copied = fs::read(replacement.unwrap()).ok();
+        fs::remove_dir_all(&directory).unwrap();
+        assert!(result.is_err());
+        assert_eq!(
+            original.as_deref(),
+            Some(b"complete fixture backup".as_slice())
+        );
+        assert_eq!(copied, original);
+    }
+
+    #[test]
+    fn review_stopped_handover_never_rotates_older_backups() {
+        let directory =
+            std::env::temp_dir().join(format!("pseudolife-backup-retain-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&directory).unwrap();
+        for stamp in 1..=4 {
+            for (prefix, suffix) in [("pseudolife_memory", "sql.gz"), ("pseudolife_state", "tgz")] {
+                let path = directory.join(format!("{prefix}-20000101-00000{stamp}.{suffix}"));
+                let file = File::create(path).unwrap();
+                file.set_times(fs::FileTimes::new().set_modified(SystemTime::UNIX_EPOCH))
+                    .unwrap();
+            }
+        }
+        let mut update = Update::new(Options::default());
+        update.stopped_handover = true;
+        let removed = update.rotate_after_backup(&directory, &BTreeSet::new());
+        let remaining = fs::read_dir(&directory).unwrap().count();
+        update.stopped_handover = false;
+        let ordinary_removed = update
+            .rotate_after_backup(&directory, &BTreeSet::new())
+            .len();
+        fs::remove_dir_all(&directory).unwrap();
+        assert!(removed.is_empty());
+        assert_eq!(remaining, 8);
+        assert_eq!(ordinary_removed, 2);
     }
 }

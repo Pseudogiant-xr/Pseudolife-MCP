@@ -407,6 +407,11 @@ fn verify_compose_bearers(configured: &Value, running: &Value, allow_change: boo
 }
 
 pub(super) fn verify_bank_identity(u: &Update, config: &Value, running: &Value) -> Result<()> {
+    if u.o.allow_auth_change && u.o.checkout.is_some() && running["State"]["Running"] != false {
+        return Err(UpdateError::usage(
+            "checkout --allow-auth-change requires a stopped daemon; stop the target daemon after restoring it, then retry; nothing was changed",
+        ));
+    }
     verify_compose_bearers(
         &config["services"][DAEMON_SERVICE]["environment"],
         &running["Config"]["Env"],
@@ -631,13 +636,25 @@ pub(super) fn require_imported_with(
     Ok(())
 }
 pub(super) fn sql(u: &Update, pg: &str, user: &str, db: &str, query: &str) -> Result<String> {
-    let database = if u.o.allow_auth_change && u.o.checkout.is_some() {
+    let args = sql_args(u, pg, user, db, query);
+    let borrowed: Vec<_> = args.iter().map(String::as_str).collect();
+    let (code, out) = u.docker_call(&borrowed);
+    if code == 0 {
+        Ok(out.trim().into())
+    } else {
+        Err(UpdateError::usage(
+            "cannot check the bank schema; start the project's PostgreSQL and retry; nothing was changed",
+        ))
+    }
+}
+fn sql_args(u: &Update, pg: &str, user: &str, db: &str, query: &str) -> Vec<String> {
+    let database = if u.stopped_handover {
         format!("dbname='{}'", db.replace('\\', "\\\\").replace('\'', "\\'"))
     } else {
         db.to_owned()
     };
     let mut args = vec!["exec", pg];
-    if u.o.allow_auth_change && u.o.checkout.is_some() {
+    if u.stopped_handover {
         args.extend([
             "env",
             "-u",
@@ -649,18 +666,11 @@ pub(super) fn sql(u: &Update, pg: &str, user: &str, db: &str, query: &str) -> Re
         ]);
     }
     args.extend(["psql", "-X", "-v", "ON_ERROR_STOP=1"]);
-    if u.o.allow_auth_change && u.o.checkout.is_some() {
+    if u.stopped_handover {
         args.extend(["-h", "/var/run/postgresql", "-p", "5432"]);
     }
     args.extend(["-U", user, "-d", &database, "-Atc", query]);
-    let (code, out) = u.docker_call(&args);
-    if code == 0 {
-        Ok(out.trim().into())
-    } else {
-        Err(UpdateError::usage(
-            "cannot check the bank schema; start the project's PostgreSQL and retry; nothing was changed",
-        ))
-    }
+    args.into_iter().map(str::to_owned).collect()
 }
 pub(super) fn container(
     u: &Update,
@@ -957,6 +967,7 @@ pub(super) fn deploy(u: &mut Update, repo: &Path) -> Result<()> {
     }
     let stopped_handover =
         u.o.allow_auth_change && u.o.checkout.is_some() && running["State"]["Running"] == false;
+    u.stopped_handover = stopped_handover;
     if running["State"]["Running"] != true && !stopped_handover {
         return Err(UpdateError::usage(
             "the current daemon must be running for the backup and rollback tag; start it and retry",
@@ -1201,6 +1212,46 @@ mod bearer_source_tests {
 #[cfg(test)]
 mod stopped_handover_tests {
     use super::*;
+
+    #[test]
+    fn review_running_checkout_cannot_drop_a_bearer_subset() {
+        let config = json!({"services":{DAEMON_SERVICE:{"environment":{
+            "PSEUDOLIFE_MCP_DATABASE_URL":"fixture", "PSEUDOLIFE_MCP_TOKEN":"fixture-a",
+            "PSEUDOLIFE_MCP_TOKENS":"fixture-a:owner"},
+            "volumes":[{"type":"volume","source":"state","target":"/data"}]}},
+            "volumes":{"state":{"name":"fixture-state"}}});
+        let mut running = json!({"State":{"Running":true},"Config":{"Env":[
+            "PSEUDOLIFE_MCP_DATABASE_URL=fixture", "PSEUDOLIFE_MCP_TOKEN=fixture-a",
+            "PSEUDOLIFE_MCP_TOKENS=fixture-a:owner,fixture-b:peer"]},
+            "Mounts":[{"Type":"volume","Name":"fixture-state","Destination":"/data","RW":true}]});
+        let update = Update::new(Options {
+            allow_auth_change: true,
+            checkout: Some(PathBuf::from("fixture")),
+            ..Options::default()
+        });
+        let refused = verify_bank_identity(&update, &config, &running).unwrap_err();
+        assert!(refused.message.contains("stopped"));
+        running["State"]["Running"] = json!(false);
+        assert!(verify_bank_identity(&update, &config, &running).is_ok());
+    }
+
+    #[test]
+    fn review_sql_socket_scope_requires_the_validated_stopped_handover() {
+        let mut update = Update::new(Options {
+            allow_auth_change: true,
+            checkout: Some(PathBuf::from("fixture")),
+            ..Options::default()
+        });
+        let ordinary = sql_args(&update, "pg", "role", "bank", "SELECT 1");
+        update.stopped_handover = true;
+        let stopped = sql_args(&update, "pg", "role", "bank", "SELECT 1");
+        assert!(!ordinary.iter().any(|arg| arg == "env" || arg == "-h"));
+        assert!(
+            stopped
+                .windows(2)
+                .any(|pair| pair == ["-h", "/var/run/postgresql"])
+        );
+    }
 
     fn running(config: &Value) -> Value {
         let environment = config["services"][DAEMON_SERVICE]["environment"]

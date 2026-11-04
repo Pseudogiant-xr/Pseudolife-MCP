@@ -255,6 +255,9 @@ class EngineUpdate:
             _validated_engine_selection(self.running_labels)
         self.stopped_handover = (self.o.allow_auth_change and self.o.checkout is not None
                                 and self.running.get("State", {}).get("Running") is False)
+        if self.o.allow_auth_change and self.o.checkout is not None and not self.stopped_handover:
+            raise up.UpdateError(f"checkout --allow-auth-change requires a stopped daemon; run docker stop {self.daemon} "
+                                 "after restoring the target, then retry. Nothing was changed", 2)
         if not self.running.get("State", {}).get("Running") and not self.stopped_handover:
             raise up.UpdateError("the current daemon must be running for the backup and rollback tag; start it and retry", 2)
         daemon_env = config["services"][up.DAEMON_SERVICE].get("environment", {})

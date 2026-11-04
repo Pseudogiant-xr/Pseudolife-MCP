@@ -1329,6 +1329,26 @@ def test_stopped_checkout_handover_backs_up_exact_image_and_retains_selection(en
     assert not any(call[1:3] == ["exec", "fixture-daemon"] for call in calls)
 
 
+@pytest.mark.parametrize("engine", ["python", "rust"])
+def test_running_checkout_refuses_even_a_subset_bearer_handover(engine_host, monkeypatch, engine):
+    from pseudolife_memory import update_engine as eng
+    s = engine_host
+    update, override, _ = _stopped_handover(s, monkeypatch, engine=engine)
+    update._selected_engine = engine
+    s["running"]["State"]["Running"] = True
+    s["running"]["Config"]["Env"] = [
+        "PSEUDOLIFE_MCP_TOKEN=fixture-carried",
+        "PSEUDOLIFE_MCP_TOKENS=fixture-carried:owner,fixture-removed:peer",
+        "PSEUDOLIFE_MCP_DATABASE_URL=postgresql://fixture:fixture@pseudolife-pg:5432/fixture"]
+    s["config"]["services"][up.DAEMON_SERVICE]["environment"]["PSEUDOLIFE_MCP_TOKENS"] = "fixture-carried:owner"
+    before = (s["repo"] / "ops/.env").read_bytes(), override.read_bytes()
+    with pytest.raises(up.UpdateError, match="stopped"):
+        eng.deploy_engine(update, s["repo"])
+    assert ((s["repo"] / "ops/.env").read_bytes(), override.read_bytes()) == before
+    assert not any(call[1:2] == ["tag"] or "build" in call or "up" in call or "backup.ps1" in " ".join(call)
+                   or "backup.sh" in " ".join(call) or call == ["complete-stopped-backup"] for call in s["calls"])
+
+
 def test_stopped_checkout_handover_uses_runtime_bank_not_cluster_initialization(engine_host, monkeypatch):
     from psycopg.conninfo import conninfo_to_dict
     from pseudolife_memory import update_engine as eng
