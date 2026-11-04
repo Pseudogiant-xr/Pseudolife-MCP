@@ -413,7 +413,7 @@
     "rust/shim/src/cli/lease/operator/secrets.rs": "7156f1498e15f7fd9417f42ceb0de45834ea28d5deda02da8d1010a90a707b34",
     "rust/shim/src/cli/lease/operator/store.rs": "1ce77b9a2f4446565e9a88765520d57da65a8d2f12ff1dccf91ffdb68f6545a9",
     "rust/shim/src/cli/lease/operator/store/conductor.rs": "95b0795ea6e0cde4980656c067854206a396f79574d6cbe3397db8d8912604ec",
-    "rust/shim/src/cli/lease/run.rs": "d876cb9a430f134e9eb59610464aaf6c6df072722589c11ed7662f88adff8d3d",
+    "rust/shim/src/cli/lease/run.rs": "e2421393dc36d100a9862ba2ae5035f3ea71bca038cd74d905cf4a55387a52a9",
     "rust/shim/src/cli/lease/sigint.rs": "ff7d18768305ff0560a508ad5956f06f4875403efe7c161710277633d41e9430",
     "rust/shim/src/cli/lease/view.rs": "435af8605c7e466a27cd6f15d180b22bf9c680680c0bd51f4ace2398d40ea4e9",
     "rust/shim/src/cli/maintainer/bank.rs": "154ce1a717be2f0efdac512d35a4aace55ff08aa541c225a0f954dead81c0a4a",
@@ -464,7 +464,7 @@
     "rust/shim/src/cli/tunnel/mod.rs": "f9f34b10a03029a0ddac8bad7e67508c486462c26c53dd87c2629cad93e68617",
     "rust/shim/src/cli/tunnel/store.rs": "9839c22f9264a23017a4529f5651fb2cf01b75e090c16d218547fe8d7bbf5f9b",
     "rust/shim/src/cli/tunnel/syntax.rs": "bafbf6307fdd29df5be69c3c4f42296284480e3cef37f92147b36101c38353de",
-    "rust/shim/src/cli/update/backup.rs": "2874f8d59d659ef35e1e594c1c0ad0094b44cefae5b1c42d40a7d81ea70e7104",
+    "rust/shim/src/cli/update/backup.rs": "1cbf3a343eac75f76a92193e0445efe223b0d0c078e4a0a6f6d962bae3b7a3f7",
     "rust/shim/src/cli/update/clients/codex.rs": "2b2b7d2ce6fd5f40575b96a4d00e9121dbe96edbe88545adb0911ce6590fe603",
     "rust/shim/src/cli/update/clients/command.rs": "7732745be9741ebc2bb3d88bb696370f9063dda07804ded45f3b9a330da2fd92",
     "rust/shim/src/cli/update/clients/mod.rs": "0bb467eaf3ac79f80e89c38ec52d48855e55b5b3c0006dbfe1d96fd39ae2567a",
@@ -473,7 +473,7 @@
     "rust/shim/src/cli/update/engine.rs": "ce2a1639087d3be15f3d4d2e428eed4c1d192d4a45f8d365e91dba4f954bb949",
     "rust/shim/src/cli/update/mod.rs": "db8810e352b0e574fa0631f4bb47af5a3b9b9975c742ead32fbacd84cd9f4ea7",
     "rust/shim/src/cli/update/options.rs": "1fa41aa989c0ebd1706889bb58d83a68dcec4f6a9bb134c44c13c9d6445edbf0",
-    "rust/shim/src/cli/update/release.rs": "24cebaea2256563c5b2b7d403f79755f3696aab1ed6e54c13e93155b1b4df0fa",
+    "rust/shim/src/cli/update/release.rs": "85cd30f4434736e89f6930ad4b665df13eaedc462f653744b322239d6eb8f1e4",
     "rust/shim/src/cli/update/seams.rs": "da8b4ae1a6df9e9c97af062b5bf337a8ecc0b7bcf2354c52ce1a9d339817cf66",
     "rust/shim/src/cli/update/shadow.rs": "be4da00a9b8cc9e593a0be00ce364ace769d2e59767a65802e11426445c80aa3",
     "rust/shim/src/cli/update/signals.rs": "f0c47d95a459ab923b34f0c0ebcd84c62db54a75d8fb592b4b2fdcce69866f93",
@@ -4732,7 +4732,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/lease/run.rs:438",
+          "location": "rust/shim/src/cli/lease/run.rs:446",
           "shape": {
             "argv_source": "lease run {} -- COMMAND\",",
             "channel": "argv",
@@ -30890,7 +30890,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/lease/run.rs:354",
+          "location": "rust/shim/src/cli/lease/run.rs:362",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -30902,7 +30902,7 @@
         },
         {
           "evidence": "static",
-          "location": "rust/shim/src/cli/lease/run.rs:359",
+          "location": "rust/shim/src/cli/lease/run.rs:367",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -33889,6 +33889,32 @@
           "dynamic": "unresolved",
           "evidence": "static",
           "location": "rust/shim/src/cli/transfer/import.rs:533",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/update/backup.rs:10",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/update/backup.rs:41",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -96428,13 +96454,13 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/lease/run.rs:354",
+      "location": "rust/shim/src/cli/lease/run.rs:362",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_LEASES_HELD"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/lease/run.rs:438",
+      "location": "rust/shim/src/cli/lease/run.rs:446",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:lease"
     },
@@ -97329,6 +97355,18 @@
       "location": "rust/shim/src/cli/tunnel/mod.rs:448",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DAEMON_URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/update/backup.rs:10",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_DATABASE_URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/update/backup.rs:41",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_DATABASE_URL"
     },
     {
       "dynamic": "unresolved",
