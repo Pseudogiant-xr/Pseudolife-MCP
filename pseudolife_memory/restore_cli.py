@@ -20,6 +20,7 @@ def main(argv=None) -> int:
     parser.add_argument("--db", help="database name (default: the running daemon's configuration)")
     parser.add_argument("--user", help="database role (default: the running daemon's configuration)")
     parser.add_argument("--daemon-url", help="health endpoint (default: the daemon's published port)")
+    parser.add_argument("--safety-dir", type=Path, help="safety backup directory outside any checkout (default: per-user backups)")
     args = parser.parse_args(argv)
     try:
         if not up._dump_complete(args.backup_file):
@@ -35,7 +36,8 @@ def main(argv=None) -> int:
         with up.UpdateLock():
             bank = DockerBank(container=args.container, daemon_container=args.daemon_container, db=args.db, user=args.user,
                               daemon_url=args.daemon_url)
-            bank.restore(args.backup_file, state_archive=args.state_archive, leave_stopped=args.leave_stopped)
+            bank.restore(args.backup_file, state_archive=args.state_archive, leave_stopped=args.leave_stopped,
+                         safety_dir=args.safety_dir)
         return 0
     except (up.UpdateError, OSError) as exc:
         print(f"restore failed: {exc}", file=sys.stderr)

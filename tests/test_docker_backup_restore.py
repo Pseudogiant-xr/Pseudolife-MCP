@@ -465,3 +465,17 @@ def test_readiness_uses_targets_nondefault_published_port(docker_bank, tmp_path,
     monkeypatch.setattr(up, "fetch_json", lambda url, **kwargs: seen.append(url) or {"status": "ok"})
     assert bank.restore(_input_dump(tmp_path))["left_stopped"] is False
     assert seen == ["http://127.0.0.1:18765/health"]
+
+
+def test_safety_directory_follows_links_before_checking_clone_ancestry(docker_bank, tmp_path, monkeypatch):
+    bank, world = docker_bank
+    original = Path.resolve
+    default = tmp_path / "home" / ".pseudolife-mcp" / "backups"
+    linked = tmp_path / "clone" / "data" / "backups"
+    monkeypatch.setattr(Path, "resolve", lambda self, *a, **kw: linked if self == default else original(self, *a, **kw))
+    with pytest.raises(up.UpdateError, match="--safety-dir"):
+        bank.restore(_input_dump(tmp_path), leave_stopped=True)
+    assert ["stop", up.DAEMON_CONTAINER] not in world.calls
+    outside = tmp_path / "outside-safety"
+    result = bank.restore(_input_dump(tmp_path), leave_stopped=True, safety_dir=outside)
+    assert result["safety_dump"].is_relative_to(outside)

@@ -261,7 +261,8 @@ class DockerBank:
         raise up.UpdateError(f"the restored daemon did not become ready at {self.daemon_url}; "
                              f"check docker logs {self.daemon} and the --daemon-url setting")
 
-    def restore(self, backup_file: Path, *, state_archive: Path | None = None, leave_stopped=False) -> dict:
+    def restore(self, backup_file: Path, *, state_archive: Path | None = None, leave_stopped=False,
+                safety_dir: Path | None = None) -> dict:
         backup_file = Path(backup_file).resolve()
         if not up._dump_complete(backup_file):
             raise up.UpdateError("the backup is unreadable or incomplete; use a complete .sql.gz bank dump. "
@@ -275,10 +276,10 @@ class DockerBank:
         exists = self.database_exists()
         # The safety pair deliberately ignores PSEUDOLIFE_MCP_DATA_DIR: a
         # checkout's ./data is not a durable recovery location.
-        safety_dir = up.home() / ".pseudolife-mcp" / "backups"
+        safety_dir = (Path(safety_dir) if safety_dir else up.home() / ".pseudolife-mcp" / "backups").resolve()
         if any((parent / ".git").exists() for parent in (safety_dir, *safety_dir.parents)):
-            raise up.UpdateError("the per-user safety backup directory is inside a checkout; move the checkout "
-                                 "out of ~/.pseudolife-mcp before restoring. Nothing was restored", 2)
+            raise up.UpdateError(f"the safety backup directory {safety_dir} is inside a checkout; choose "
+                                 "--safety-dir <directory outside a checkout>. Nothing was restored", 2)
         was_running = self.running.get("State", {}).get("Running", False)
         destructive = False
         safety = None
@@ -333,7 +334,7 @@ class DockerBank:
                 if recovery_state:
                     argv += ["--state-archive", str(recovery_state)]
                 argv += ["--container", self.pg, "--daemon-container", self.daemon, "--db", self.db,
-                         "--user", self.user, "--yes"]
+                         "--user", self.user, "--safety-dir", str(safety_dir), "--yes"]
                 if leave_stopped:
                     argv.append("--leave-stopped")
                 if self.daemon_url:
