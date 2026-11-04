@@ -1111,6 +1111,11 @@ class Mover:
         if not isinstance(self.target_version, str) or not re.fullmatch(r"v?\d+\.\d+\.\d+(?:[a-zA-Z0-9.+-]*)", self.target_version):
             raise self.refuse("the target reports no release version to redeploy safely: pass --no-keep-tokens "
                               "to retain its current container, or start/update the target and retry")
+        result = self.ssh(self.target_cli("update --help"), timeout=60)
+        if not result.ok or "--allow-auth-change" not in result.text:
+            raise self.refuse("the target updater lacks explicit bearer-transfer support: install the same CLI "
+                              "release as this command (python3 -m pip install --upgrade pseudolife-mcp), "
+                              "then retry, or pass --no-keep-tokens to retain its existing environment")
         request = {"compose_files": list(self.o.target_compose_files), "env_file": self.o.target_env_file,
                    "version": self.target_version, "carried": self.carried(),
                    "database_url": _env_of(self.target_container).get("PSEUDOLIFE_MCP_DATABASE_URL"),
@@ -2007,9 +2012,8 @@ class Mover:
             command = f"docker start {DAEMON}"
         elif self.release_target:
             arguments = (f"update --reinstall --daemon-only --tag {shlex.quote(self.target_version)} "
-                         f"--daemon-url {shlex.quote(self.target_local_url)}")
-            if self.o.target_env_file:
-                arguments += f" --env-file {rq(self.o.target_env_file)}"
+                         f"--daemon-url {shlex.quote(self.target_local_url)} --allow-auth-change "
+                         f"--env-file {rq(self.target_env_file)}")
             for path in self.o.target_compose_files:
                 arguments += f" --compose-file {rq(path)}"
             command = self.target_cli(arguments)

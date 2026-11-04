@@ -203,6 +203,7 @@ class World:
         self.connect_reply = connect_reply
         self.checkout = checkout
         self.release_cli = False
+        self.auth_change_cli = True
         self.release_plan_error = None
         self.release_env_file = "/srv/stack.env"
         self.target_auth = True
@@ -367,6 +368,8 @@ class World:
         if cmd == "python3 -m pseudolife_memory.cli restore --help":
             return ((0, b"--backup-file --state-archive --leave-stopped", b"") if self.release_cli
                     else (2, b"", b"restore is unavailable"))
+        if cmd == "python3 -m pseudolife_memory.cli update --help":
+            return 0, b"--allow-auth-change" if self.auth_change_cli else b"--reinstall", b""
         if cmd.startswith("python3 -c") and "move artifact locations" in cmd:
             import posixpath
             request = json.loads(stdin)
@@ -919,6 +922,38 @@ def test_a_clone_free_stack_target_moves_with_the_installed_restore_cli(tmp_path
     assert not any(c.remote and "bash ops/restore.sh" in c.remote for c in world.calls)
     assert any(c.remote and " restore " in c.remote and "--leave-stopped" in c.remote for c in world.calls)
     assert not world.source_running and world.target_running and not world.overlap
+    update = [c for c in world.calls if c.remote and " update --reinstall " in c.remote]
+    if keep_tokens:
+        arguments = shlex.split(update[0].remote)
+        assert "--allow-auth-change" in arguments
+        assert arguments[arguments.index("--env-file") + 1] == world.release_env_file
+    else:
+        assert not update
+
+
+@pytest.mark.parametrize("keep_tokens, code", [(True, 4), (False, 0)])
+def test_release_token_transfer_requires_the_explicit_updater_contract(tmp_path, capsys, keep_tokens, code):
+    world = World(checkout=False)
+    world.release_cli = True
+    world.auth_change_cli = False
+    world.target_image = "ghcr.io/pseudogiant-xr/pseudolife-daemon:0.22.0"
+    assert run_move(world, tmp_path, keep_tokens=keep_tokens) == code
+    if keep_tokens:
+        assert mutating_calls(world) == []
+        error = capsys.readouterr().err
+        assert "pip install --upgrade pseudolife-mcp" in error and "--no-keep-tokens" in error
+
+
+def test_release_token_transfer_can_retain_only_restored_stored_principals(tmp_path, monkeypatch):
+    monkeypatch.setattr(sys.modules[__name__], "SOURCE_ENV", [line for line in SOURCE_ENV
+                        if not line.startswith(("PSEUDOLIFE_MCP_TOKEN=", "PSEUDOLIFE_MCP_TOKENS="))])
+    world = World(checkout=False)
+    world.release_cli = True
+    world.target_image = "ghcr.io/pseudogiant-xr/pseudolife-daemon:0.22.0"
+    assert run_move(world, tmp_path) == 0
+    assert not any(line.startswith(("PSEUDOLIFE_MCP_TOKEN=", "PSEUDOLIFE_MCP_TOKENS="))
+                   and line.split("=", 1)[1] for line in world.target_live_env)
+    assert any(c.remote and "--allow-auth-change" in c.remote for c in world.calls)
 
 
 def test_explicit_release_mode_ignores_an_unrelated_bare_clone(tmp_path):
