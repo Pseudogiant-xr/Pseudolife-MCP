@@ -677,8 +677,7 @@ class Update:
         """A shim runtime on a machine with no daemon container: the daemon
         runs elsewhere, so ``update`` and ``--clients-only`` move this
         machine's clients (a new shim runtime, the plugin cache, the Codex
-        step) to the daemon's release, or to the newest release when the
-        daemon does not answer; ``--daemon-only`` has nothing to act on."""
+        step) to the daemon's release; ``--daemon-only`` has nothing to act on."""
         from urllib.parse import urlsplit
         host = urlsplit(self.o.daemon_url).hostname or self.o.daemon_url
         if self.o.daemon_only:
@@ -686,17 +685,18 @@ class Update:
                               f"run pseudolife-mcp update on {host}, where it runs. Nothing was changed", 2)
         health = self.daemon_health()
         daemon_version = (health or {}).get("version")
+        if not isinstance(daemon_version, str) or not daemon_version:
+            raise UpdateError("the configured daemon did not report its release on /health; retry with "
+                              "--daemon-url http(s)://<host>:<port> for the running daemon. Nothing was changed", 2)
         if isinstance(daemon_version, str) and daemon_version and not plain_release(daemon_version) and not self.o.tag:
             raise UpdateError(f"the daemon at {self.o.daemon_url} reports the version {daemon_version[:64]!r} on /health, "
                               f"which is not a plain release number (N.N.N), so it is not installed as one. Name the "
                               f"release with --tag <version>. Nothing was changed", 2)
         daemon_version = daemon_version if plain_release(daemon_version) else None
-        target = self.o.tag or daemon_version or self.target_version()
+        target = self.o.tag or daemon_version
         self.report.mode = "clients"
         self.report.current, self.report.target = daemon_version, target
         self.refuse_downgrade(daemon_version, target)
-        if daemon_version is None:
-            self.warn(f"the daemon at {self.o.daemon_url} did not answer; installing the newest release, {target}")
         self.refuse_checkout_shadow(target)
         self.step(f"the daemon runs on {host}; updating this machine's clients to {target}")
         self.clients(None, f"pseudolife-mcp=={target}", health)
