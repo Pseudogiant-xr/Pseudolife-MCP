@@ -642,6 +642,28 @@ def run_gate(needs, event):
     return run_verdict(needs, event)
 
 
+@pytest.mark.parametrize("event", ["schedule", "push", "pull_request", "merge_group", "workflow_dispatch"])
+@pytest.mark.parametrize("output", ["true", "false", "", None])
+def test_only_verified_schedules_reuse_push_coverage(event, output):
+    needs = {name: {"result": "success"} for name in GATE_NEEDS}
+    needs["scope"]["outputs"] = {"push_passed": output}
+    for name in ("rust", "parity-checks"):
+        needs[name]["result"] = "skipped"
+    assert run_gate(needs, event).returncode == (0 if event == "schedule" and output == "true" else 1)
+
+
+@pytest.mark.parametrize("dependency", GATE_NEEDS)
+@pytest.mark.parametrize("result", ["failure", "cancelled", "skipped"])
+def test_reused_push_cannot_hide_a_nightly_failure(dependency, result):
+    needs = {name: {"result": "success"} for name in GATE_NEEDS}
+    needs["scope"]["outputs"] = {"push_passed": "true"}
+    for name in ("rust", "parity-checks"):
+        needs[name]["result"] = "skipped"
+    needs[dependency]["result"] = result
+    allowed = dependency in ("rust", "parity-checks") and result == "skipped"
+    assert run_gate(needs, "schedule").returncode == (0 if allowed else 1)
+
+
 @pytest.mark.parametrize("dependency", GATE_NEEDS)
 @pytest.mark.parametrize("event", ["pull_request", "merge_group", "push", "schedule",
                                    "workflow_dispatch"])
@@ -1033,7 +1055,8 @@ def test_scope_gates_every_heavy_job_and_fails_safe():
                                 "full": "${{ steps.scope.outputs.full }}",
                                 "parity": "${{ steps.parity.outputs.parity }}",
                                 "parity_selfhosted": "${{ steps.parity.outputs.selfhosted }}",
-                                "batch_passed": "${{ steps.batch.outputs.passed }}"}
+                                "batch_passed": "${{ steps.batch.outputs.passed }}",
+                                "push_passed": "${{ steps.push.outputs.passed }}"}
     checkout = next(s for s in scope["steps"] if s.get("uses") == "actions/checkout@v4")
     assert checkout["with"]["fetch-depth"] == 2
     gated = ("${{ !cancelled() && (github.event_name != 'workflow_dispatch' || %s) "
@@ -1050,7 +1073,10 @@ def test_scope_gates_every_heavy_job_and_fails_safe():
                               " && !contains(fromJSON(needs.scope.outputs.batch_passed || '[]'), "
                               "'Rust daemon / disposable image')")):
         assert jobs[name]["needs"] == "scope", name
-        assert jobs[name]["if"] == gated % (mode, full), name
+        expected = gated % (mode, full)
+        if name in ("rust", "daemon-image"):
+            expected = expected.replace("${{ !cancelled() && ", "${{ !cancelled() && needs.scope.outputs.push_passed != 'true' && ")
+        assert jobs[name]["if"] == expected, name
     # Parity checks and source mutants inherit the skip through their needs.
     # Their success checks name rust and candidate: the implicit success()
     # would also cover scope. Parity checks need scope for their matrix, so a

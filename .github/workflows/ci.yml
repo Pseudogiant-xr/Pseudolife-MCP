@@ -118,6 +118,7 @@ jobs:
     outputs:
       python: ${{ steps.scope.outputs.python }}
       batch_passed: ${{ steps.batch.outputs.passed }}
+      push_passed: ${{ steps.push.outputs.passed }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -131,6 +132,17 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: python3 ops/ci_batch_passed.py --workflow .github/workflows/ci.yml --github-output "$GITHUB_OUTPUT"
+
+      # A successful push on this exact SHA already covered the ordinary
+      # lanes. Keep nightly-only evidence and its build prerequisites.
+      # Empty output or an API failure runs every lane as before.
+      - name: Check whether this workflow passed on the same master push
+        id: push
+        if: github.event_name == 'schedule' && github.ref == 'refs/heads/master'
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 -m ops.ci_push_passed --workflow .github/workflows/ci.yml --github-output "$GITHUB_OUTPUT"
 
       - name: Classify the change
         id: scope
@@ -238,7 +250,7 @@ jobs:
     # The Python must be the image's (tests/test_check_lock_resolves.py pins
     # it to the FROM line).
     needs: scope
-    if: ${{ !cancelled() && !contains(fromJSON(needs.scope.outputs.batch_passed || '[]'), 'lock-resolve') }}
+    if: ${{ !cancelled() && needs.scope.outputs.push_passed != 'true' && !contains(fromJSON(needs.scope.outputs.batch_passed || '[]'), 'lock-resolve') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -255,7 +267,7 @@ jobs:
     needs: scope
     # Fail-safe: run unless scope affirmatively says skip, so a failed or
     # empty scope runs the suite instead of skipping it.
-    if: ${{ !cancelled() && needs.scope.outputs.python != 'false' && !contains(fromJSON(needs.scope.outputs.batch_passed || '[]'), 'test') }}
+    if: ${{ !cancelled() && needs.scope.outputs.push_passed != 'true' && needs.scope.outputs.python != 'false' && !contains(fromJSON(needs.scope.outputs.batch_passed || '[]'), 'test') }}
     runs-on: ubuntu-latest
     # v25 roughly doubled suite wall time (real Qwen3-0.6B CPU embeds
     # replaced MiniLM's ONNX path: 238s -> ~437s locally), and a cold
@@ -388,7 +400,7 @@ jobs:
     needs: scope
     # Fail-safe: run unless scope affirmatively says skip, so a failed or
     # empty scope runs the suite instead of skipping it.
-    if: ${{ !cancelled() && needs.scope.outputs.python != 'false' && !contains(fromJSON(needs.scope.outputs.batch_passed || '[]'), 'test-lite-linux') }}
+    if: ${{ !cancelled() && needs.scope.outputs.push_passed != 'true' && needs.scope.outputs.python != 'false' && !contains(fromJSON(needs.scope.outputs.batch_passed || '[]'), 'test-lite-linux') }}
     runs-on: ubuntu-latest
     timeout-minutes: 50
 
@@ -480,7 +492,7 @@ jobs:
     needs: scope
     # Fail-safe: run unless scope affirmatively says skip, so a failed or
     # empty scope runs the suite instead of skipping it.
-    if: ${{ !cancelled() && needs.scope.outputs.python != 'false' && !contains(fromJSON(needs.scope.outputs.batch_passed || '[]'), 'test-lite-windows') }}
+    if: ${{ !cancelled() && needs.scope.outputs.push_passed != 'true' && needs.scope.outputs.python != 'false' && !contains(fromJSON(needs.scope.outputs.batch_passed || '[]'), 'test-lite-windows') }}
     runs-on: windows-latest
     # Needs no embedding model (torch installs as a core dep but never loads
     # weights here). Measured 2026-10-20 on the maintainer's Windows host,
@@ -656,7 +668,7 @@ jobs:
     needs: scope
     # Fail-safe: run unless scope affirmatively says skip, so a failed or
     # empty scope runs the suite instead of skipping it.
-    if: ${{ !cancelled() && needs.scope.outputs.python != 'false' && !contains(fromJSON(needs.scope.outputs.batch_passed || '[]'), 'test-lite-macos') }}
+    if: ${{ !cancelled() && needs.scope.outputs.push_passed != 'true' && needs.scope.outputs.python != 'false' && !contains(fromJSON(needs.scope.outputs.batch_passed || '[]'), 'test-lite-macos') }}
     runs-on: macos-latest
     # Curated like the Windows lane: the hook and installer surface needs no
     # embedding model, so this is minutes, not the full suite.
@@ -846,10 +858,10 @@ jobs:
           if-no-files-found: warn
 
   frontend:
-    # Never scoped by the diff; skipped only on a master push whose merged
-    # batch passed it on the same tree, and run when scope fails.
+    # Never scoped by the diff; skips a same-tree batch pass on push or a
+    # same-SHA successful push on schedule, and runs when scope fails.
     needs: scope
-    if: ${{ !cancelled() && !contains(fromJSON(needs.scope.outputs.batch_passed || '[]'), 'frontend') }}
+    if: ${{ !cancelled() && needs.scope.outputs.push_passed != 'true' && !contains(fromJSON(needs.scope.outputs.batch_passed || '[]'), 'frontend') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
 

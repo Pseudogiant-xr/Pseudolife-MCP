@@ -131,6 +131,7 @@ jobs:
       parity: ${{ steps.parity.outputs.parity }}
       parity_selfhosted: ${{ steps.parity.outputs.selfhosted }}
       batch_passed: ${{ steps.batch.outputs.passed }}
+      push_passed: ${{ steps.push.outputs.passed }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -151,6 +152,17 @@ jobs:
       # still decides `rust`. Every other event, a pull request whose head
       # ref Actions did not supply, and an empty or unreadable diff run
       # everything.
+      # A successful push on this exact SHA already covered the ordinary
+      # lanes. Keep nightly-only evidence and its build prerequisites.
+      # Empty output or an API failure runs every lane as before.
+      - name: Check whether this workflow passed on the same master push
+        id: push
+        if: github.event_name == 'schedule' && github.ref == 'refs/heads/master'
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 -m ops.ci_push_passed --workflow .github/workflows/rust.yml --github-output "$GITHUB_OUTPUT"
+
       - name: Classify the change
         id: scope
         shell: pwsh
@@ -225,7 +237,7 @@ jobs:
     # a wait-mail capture or a stress loop needs no Rust or parity job, and
     # a stress loop takes only scope and candidate.
     needs: scope
-    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.mode == 'ci') && needs.scope.outputs.rust != 'false' }}
+    if: ${{ !cancelled() && needs.scope.outputs.push_passed != 'true' && (github.event_name != 'workflow_dispatch' || inputs.mode == 'ci') && needs.scope.outputs.rust != 'false' }}
     name: Rust / ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -662,7 +674,7 @@ jobs:
     # this job and the Parity gate fail rather than skip. The shards read
     # nothing from the Rust job (see fixtures), so they start beside it; the
     # Parity gate still needs it, and a Rust failure still fails the gate.
-    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.mode == 'ci') && needs.candidate.result == 'success' && needs.candidate-harness.result == 'success' && needs.fixtures.result == 'success' }}
+    if: ${{ !cancelled() && needs.scope.outputs.push_passed != 'true' && (github.event_name != 'workflow_dispatch' || inputs.mode == 'ci') && needs.candidate.result == 'success' && needs.candidate-harness.result == 'success' && needs.fixtures.result == 'success' }}
     name: Parity checks / ${{ matrix.os }} / ${{ matrix.suite }}
     needs: [scope, candidate, candidate-harness, fixtures]
     strategy:
@@ -1777,7 +1789,7 @@ jobs:
     needs: scope
     # A master push skips it when its merged batch passed it on the same
     # tree: the batch's base-to-head image inputs are the push's.
-    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.mode == 'ci') && needs.scope.outputs.rust != 'false' && !contains(fromJSON(needs.scope.outputs.batch_passed || '[]'), 'Rust daemon / disposable image') }}
+    if: ${{ !cancelled() && needs.scope.outputs.push_passed != 'true' && (github.event_name != 'workflow_dispatch' || inputs.mode == 'ci') && needs.scope.outputs.rust != 'false' && !contains(fromJSON(needs.scope.outputs.batch_passed || '[]'), 'Rust daemon / disposable image') }}
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
@@ -1854,7 +1866,8 @@ jobs:
           retention-days: 30
   parity:
     # Only a PR, a merge group or a master push may skip the CLI source
-    # matrix. The nightly (and ordinary manual CI) require its success, never
+    # matrix, except a nightly reusing a successful push on the exact SHA.
+    # Nightly-only source mutants still must pass. Manual CI requires success, never
     # a skip or failure. A PR or merge group that scope classified as
     # documentation-only skips the Rust, candidate and parity jobs, and a PR
     # scope marked not full (any branch but integrate/*) skips the candidate
@@ -1885,8 +1898,9 @@ jobs:
           $results = ConvertFrom-Json $env:GATE_RESULTS -AsHashtable
           $docsOnly = ($env:GATE_EVENT -ceq 'pull_request' -or $env:GATE_EVENT -ceq 'merge_group') -and $results['scope'].result -ceq 'success' -and $results['scope'].outputs.rust -ceq 'false'
           $fastPr = $env:GATE_EVENT -ceq 'pull_request' -and $results['scope'].result -ceq 'success' -and $results['scope'].outputs.full -ceq 'false'
+          $pushPassed = $env:GATE_EVENT -ceq 'schedule' -and $results['scope'].result -ceq 'success' -and $results['scope'].outputs.push_passed -ceq 'true'
           foreach ($job in @('rust', 'candidate', 'parity-checks')) {
-            $skipChosen = $docsOnly -or ($fastPr -and $job -cne 'rust')
+            $skipChosen = $docsOnly -or ($fastPr -and $job -cne 'rust') -or ($pushPassed -and $job -cne 'candidate')
             if ($results[$job].result -cne 'success' -and -not ($skipChosen -and $results[$job].result -ceq 'skipped')) {
               Write-Error "$job did not succeed"
               exit 1

@@ -156,14 +156,14 @@
       }
     },
     "fingerprints": {
-      "scope": "42b22137f81048ce",
-      "rust": "8c868dd3971a8c76",
+      "scope": "d23643b742a21a7f",
+      "rust": "33fe61909b0b90e2",
       "fixtures": "defc5e07c5ac3f94",
       "candidate": "d71c5590ce6f866a",
       "candidate-harness": "43b859ee9d5fd738",
-      "parity-checks": "3d8e223dcbc15bc0",
-      "daemon-image": "5c93764cb0f0bab7",
-      "parity": "aa4ba434de948ea6"
+      "parity-checks": "ab282b9140895f8a",
+      "daemon-image": "31a69053363f366c",
+      "parity": "4b13f8c55b6e3de3"
     },
     "accepted": [
       {
@@ -280,6 +280,31 @@
         "job": "rust",
         "fingerprint": "8c868dd3971a8c76",
         "reason": "Slow-runner headroom only: Rust job timeout-minutes 45 -> 60. No steps, commands, jobs or shards change. Warm hosted Windows at the same code: batch run 41691166042 passed (Nextest 9.6, no-default 7.4, override builds 11.9 min); master run 41699732205 took 11.8, 8.7 and 15.9 min and was cancelled at 45 min inside the override builds. Measured costs retained."
+      },
+      {
+        "job": "scope",
+        "fingerprint": "d23643b742a21a7f",
+        "reason": "Adds a schedule-only API read; pull-request, merge-group and push steps and budgets are unchanged."
+      },
+      {
+        "job": "rust",
+        "fingerprint": "33fe61909b0b90e2",
+        "reason": "Only skips repeated schedule coverage after an exact-SHA successful push; budgeted events execute the same steps."
+      },
+      {
+        "job": "parity-checks",
+        "fingerprint": "ab282b9140895f8a",
+        "reason": "Only skips repeated schedule coverage after an exact-SHA successful push; budgeted events execute the same steps."
+      },
+      {
+        "job": "daemon-image",
+        "fingerprint": "31a69053363f366c",
+        "reason": "Only skips repeated schedule coverage after an exact-SHA successful push; budgeted events execute the same steps."
+      },
+      {
+        "job": "parity",
+        "fingerprint": "4b13f8c55b6e3de3",
+        "reason": "Only skips repeated schedule coverage after an exact-SHA successful push; budgeted events execute the same steps."
       }
     ]
   },
@@ -327,14 +352,14 @@
       }
     },
     "fingerprints": {
-      "scope": "3954688b694461a6",
+      "scope": "53f970c03bdfbd83",
       "guards": "92b7929dcce188df",
-      "lock-resolve": "83bcc6b654896c6d",
-      "test": "ac414107d3d9c71d",
-      "test-lite-linux": "44e2a8f2c01baeab",
-      "test-lite-windows": "fdd232a6fa8ee551",
-      "test-lite-macos": "c4a0ad0c70bb205a",
-      "frontend": "b1b6a1a1278f2e60"
+      "lock-resolve": "8a6a510bef8d635b",
+      "test": "bb217dd816ccb0b8",
+      "test-lite-linux": "a1c2bb60ed678398",
+      "test-lite-windows": "77c0c3b6cb8725a7",
+      "test-lite-macos": "c9eb0018bdc7b158",
+      "frontend": "1917ccf176734abe"
     },
     "accepted": [
       {
@@ -441,6 +466,41 @@
         "job": "test-lite-windows",
         "fingerprint": "fdd232a6fa8ee551",
         "reason": "Adds eight fixture-only Claude profile notice cases to the existing Python step. They take seconds in targeted runs, add no jobs, shards or dependency setup, and retain the measured baseline within unchanged limits pending the next batch measurement."
+      },
+      {
+        "job": "scope",
+        "fingerprint": "53f970c03bdfbd83",
+        "reason": "Adds a schedule-only API read; pull-request, merge-group and push steps and budgets are unchanged."
+      },
+      {
+        "job": "lock-resolve",
+        "fingerprint": "8a6a510bef8d635b",
+        "reason": "Only skips repeated schedule coverage after an exact-SHA successful push; budgeted events execute the same steps."
+      },
+      {
+        "job": "test",
+        "fingerprint": "bb217dd816ccb0b8",
+        "reason": "Only skips repeated schedule coverage after an exact-SHA successful push; budgeted events execute the same steps."
+      },
+      {
+        "job": "test-lite-linux",
+        "fingerprint": "a1c2bb60ed678398",
+        "reason": "Only skips repeated schedule coverage after an exact-SHA successful push; budgeted events execute the same steps."
+      },
+      {
+        "job": "test-lite-windows",
+        "fingerprint": "77c0c3b6cb8725a7",
+        "reason": "Only skips repeated schedule coverage after an exact-SHA successful push; budgeted events execute the same steps."
+      },
+      {
+        "job": "test-lite-macos",
+        "fingerprint": "c9eb0018bdc7b158",
+        "reason": "Only skips repeated schedule coverage after an exact-SHA successful push; budgeted events execute the same steps."
+      },
+      {
+        "job": "frontend",
+        "fingerprint": "1917ccf176734abe",
+        "reason": "Only skips repeated schedule coverage after an exact-SHA successful push; budgeted events execute the same steps."
       }
     ]
   }
