@@ -19,6 +19,26 @@ def containers(dsn="postgresql://custom:fixture@pseudolife-pg/custom_bank", **en
     }
 
 
+@pytest.mark.parametrize("dsn,env,expected", [
+    ("host=external-db hostaddr='' user=owner dbname=bank", {"PGHOSTADDR": "10.0.0.2"}, None),
+    ("host='' user=owner dbname=bank", {"PGHOST": "pseudolife-pg"}, None),
+    ("host=pseudolife-pg user='' dbname=bank", {"PGUSER": "ambient"}, ("runtime_user", "bank", 5432)),
+    ("host=pseudolife-pg user=owner dbname=''", {"PGDATABASE": "ambient"}, ("owner", "owner", 5432)),
+    ("host=pseudolife-pg user=owner dbname=bank port=''", {"PGPORT": "6543"}, ("owner", "bank", 5432)),
+    ("host=pseudolife-pg user=owner dbname=bank service=''", {"PGSERVICE": "opaque"}, ("owner", "bank", 5432)),
+])
+def test_present_empty_dsn_fields_override_the_daemon_environment(dsn, env, expected):
+    config = containers(dsn, **env)
+    daemon, postgres = config[up.DAEMON_CONTAINER], config[up.PG_CONTAINER]
+    daemon["Config"]["User"] = "runtime_user"
+    postgres["NetworkSettings"]["Networks"]["bank"]["IPAddress"] = "10.0.0.2"
+    if expected is None:
+        with pytest.raises((ValueError, up.UpdateError)):
+            up._backup_connection_details(daemon, postgres)
+    else:
+        assert up._backup_connection_details(daemon, postgres) == expected
+
+
 def fake_backup(monkeypatch, tmp_path, config, *, dump_rc=0, tar_rc=0):
     calls = []
 
