@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+import re
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -53,3 +54,16 @@ def test_llms_txt_shape() -> None:
     text = (REPO / "llms.txt").read_text(encoding="utf-8")
     assert text.startswith("# Pseudolife-MCP\n")
     assert text.count("](https://raw.githubusercontent.com/") >= len(gen.PAGES)
+
+
+def test_unattended_token_input_always_names_its_output_file() -> None:
+    readme = (REPO / "README.md").read_text(encoding="utf-8")
+    section = readme.split("### Unattended install\n", 1)[1].split("\nImage sizes", 1)[0]
+    examples = re.findall(r"(?<!`)`([^`\n]+)`(?!`)", section)
+    for read_flag, file_flag in (("--read-token", "--token-file"), ("-ReadToken", "-TokenFile")):
+        mentions = [example for example in examples if read_flag in example]
+        assert mentions, f"document {read_flag} in the unattended section"
+        assert all(file_flag in example for example in mentions), (
+            f"{read_flag} requires {file_flag} in the same example"
+        )
+    assert "stdin" in section
