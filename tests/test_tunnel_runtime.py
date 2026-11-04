@@ -181,10 +181,14 @@ def test_unregistered_launch_reaps_inspectable_descendant(tmp_path, monkeypatch)
     import time
     store, profile = _ready_profile(tmp_path)
     marker = tmp_path / 'descendant.pid'
-    script = ('import signal, subprocess, sys, time; from pathlib import Path; '
+    # The pid is written to a temporary name and renamed into place: a plain
+    # write_text creates the marker before its content, and the poll below
+    # read it empty (int('') ValueError) in a WSL full-suite run on 2026-11-04.
+    script = ('import os, signal, subprocess, sys, time; from pathlib import Path; '
               "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)']); "
               'signal.signal(signal.SIGTERM, lambda *args: (child.terminate(), child.wait(), sys.exit(0))); '
-              'Path(sys.argv[1]).write_text(str(child.pid)); time.sleep(60)')
+              "Path(sys.argv[1] + '.tmp').write_text(str(child.pid)); "
+              "os.replace(sys.argv[1] + '.tmp', sys.argv[1]); time.sleep(60)")
     real_popen = subprocess.Popen
     real_identity = runtime._process_identity
     children = []
