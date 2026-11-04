@@ -332,7 +332,7 @@
       "lock-resolve": "83bcc6b654896c6d",
       "test": "ac414107d3d9c71d",
       "test-lite-linux": "44e2a8f2c01baeab",
-      "test-lite-windows": "ea0ed09500aa4a66",
+      "test-lite-windows": "40f503540d2b0f92",
       "test-lite-macos": "c4a0ad0c70bb205a",
       "frontend": "b1b6a1a1278f2e60"
     },
@@ -441,6 +441,11 @@
         "job": "test-lite-windows",
         "fingerprint": "ea0ed09500aa4a66",
         "reason": "Adds mocked move consent and rollback cases to the existing pytest process; no new job, setup, subprocess, socket, timeout or parallelism is introduced."
+      },
+      {
+        "job": "test-lite-windows",
+        "fingerprint": "40f503540d2b0f92",
+        "reason": "Composes the reviewed S2 Docker restore file and S3 mocked move selectors in the existing pytest step. No new job, setup, shard, or parallelism; both components use fake external effects in these checks."
       }
     ]
   }
