@@ -1656,6 +1656,7 @@ def test_a_restore_that_failed_before_touching_the_bank_is_not_gated(tmp_path):
     world = World(fail=("bash ops/restore.sh",))
     assert run_move(world, tmp_path) == 1
     assert not any(c.remote and "cat > /data/move.json" in c.remote for c in world.calls)
+    assert world.target_running and world.source_running
 
 
 def test_a_restore_that_failed_after_dropping_the_bank_is_gated(tmp_path):
@@ -1668,6 +1669,26 @@ def test_a_dropped_ssh_during_the_restore_counts_as_a_replaced_bank(tmp_path):
     world = World(fail255=("bash ops/restore.sh",))
     assert run_move(world, tmp_path) == 1
     assert "/data/move.json" in world.data_files
+
+
+@pytest.mark.parametrize("code", [124, 143, -15])
+def test_an_unobserved_restore_outcome_never_restarts_a_second_bank_copy(tmp_path, code):
+    world = World()
+    remote = world.remote
+
+    def interrupted_restore(command, stdin):
+        if "bash ops/restore.sh" in command:
+            world.target_running = False
+            world.target_restored = True
+            world.data_files = {}
+            return code, b"", b"restore outcome was not captured"
+        return remote(command, stdin)
+
+    world.remote = interrupted_restore
+    assert run_move(world, tmp_path) == 1
+    assert world.source_running and not world.target_running
+    assert "/data/move.json" in world.data_files
+    assert not world.overlap
 
 
 # ── the manual rollback lists only what is needed ───────────────────────────

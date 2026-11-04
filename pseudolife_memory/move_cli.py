@@ -1385,7 +1385,10 @@ class Mover:
                           f"{rq(dump)} --state-archive {rq(state)} --db {shlex.quote(self.target_db)} "
                           f"--user {shlex.quote(self.target_user)}", timeout=_TIMEOUT_LONG)
         if not result.ok:
-            if RESTORE_BOUNDARY not in result.text:
+            # A timeout or killed transport may discard stdout after DROP.
+            # Only a completed, ordinary command failure can prove the
+            # boundary was never reached; unknown outcomes stay gated.
+            if 0 < result.code < 128 and result.code != 124 and RESTORE_BOUNDARY not in result.text:
                 self.mark(target_restored=False)
             raise MoveError(f"ops/restore.sh on the target failed ({result.why()})"
                             + ("" if self.target_restored else "; the target's own bank was not touched"))
