@@ -268,7 +268,7 @@ def test_a_rollback_across_a_schema_change_names_the_restore(world, clients, tmp
     note = f"The new daemon's schema is v{after}, the previous one's v{before}"
     assert (note in out) is moved
     assert ("restore the backup taken above" in out) is moved
-    assert ("ops/restore.ps1 -Apply -BackupFile <dump>" in out) is moved
+    assert ("pseudolife-mcp restore --backup-file <dump>" in out) is moved
 
 
 def test_a_checkout_deploy_that_moves_the_schema_names_the_restore(world, clients, tmp_path, capsys):
@@ -281,7 +281,7 @@ def test_a_checkout_deploy_that_moves_the_schema_names_the_restore(world, client
     assert "The new daemon's schema is v50, the previous one's v49" in out
     # --no-backup: the note never points at a backup this run did not take
     assert "this run took none: --no-backup" in out and "taken above" not in out
-    assert "ops/restore.sh --apply --backup-file <dump>" in out
+    assert "pseudolife-mcp restore --backup-file <dump>" in out
 
 
 def test_an_unhealthy_deploy_names_the_restore_in_case_the_schema_moved(world, clients, tmp_path, capsys):
