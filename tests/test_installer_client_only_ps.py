@@ -88,6 +88,8 @@ class _PowerShell:
             stdin_text: str | None = None) -> subprocess.CompletedProcess[str]:
         prelude = (
             "$ErrorActionPreference = 'Stop'\n"
+            # Match the Python pipe codec even on a legacy Windows console.
+            "[Console]::InputEncoding = [Console]::OutputEncoding = $OutputEncoding = [System.Text.UTF8Encoding]::new($false)\n"
             # Plain text on every OS, and an uncaught error as one plain line
             # (exit 1, as pwsh gives it): see _output.
             "if ($PSStyle) { $PSStyle.OutputRendering = 'PlainText' }\n"
@@ -120,7 +122,40 @@ class _PowerShell:
             "stdin": subprocess.DEVNULL}
         return subprocess.run(
             [self.pwsh, "-NoProfile", "-NonInteractive", "-File", str(script)],
-            capture_output=True, text=True, timeout=120, env=env, check=False, **stdin)
+            capture_output=True, text=True, encoding="utf-8", timeout=120, env=env, check=False, **stdin)
+
+
+@pytest.mark.parametrize("direction", ["input", "output", "ascii"])
+def test_powershell_fragment_transport_is_utf8_with_a_cp1252_parent(tmp_path, monkeypatch, direction):
+    ps = object.__new__(_PowerShell)
+    ps.pwsh, ps.tmp, ps.env = "fixture-pwsh", tmp_path, {}
+    payload = "memory ready" if direction == "ascii" else "memory ─ café"
+    stdin = payload if direction == "input" else "ASCII input"
+    body = "# memory ─ café\n"
+
+    def cp1252_transport(argv, **kwargs):
+        assert kwargs["text"] is True
+        assert Path(argv[-1]).read_bytes().decode("utf-8").replace("\r\n", "\n").endswith(body)
+        codec = kwargs.get("encoding") or "cp1252"
+        assert kwargs["input"].encode(codec).decode("utf-8") == stdin
+        return subprocess.CompletedProcess(argv, 0, payload.encode("utf-8").decode(codec), "")
+
+    monkeypatch.setattr(subprocess, "run", cp1252_transport)
+    result = ps.run(body, stdin_text=stdin)
+    assert result.returncode == 0
+    assert result.stdout == payload
+
+
+def test_powershell_fixture_roundtrips_unicode_stdio(tmp_path):
+    ps = _PowerShell(tmp_path)
+    payload = "memory ─ café"
+    result = ps.run(
+        f"$value = [Console]::ReadLine()\n"
+        f"if ($value -ne '{payload}') {{ throw 'UTF-8 stdin mismatch' }}\n"
+        f"Write-Output '{payload}'\n",
+        stdin_text=payload + "\n")
+    assert result.returncode == 0, _output(result)
+    assert result.stdout.strip() == payload
 
 
 # -- flags and what they imply --------------------------------------------------

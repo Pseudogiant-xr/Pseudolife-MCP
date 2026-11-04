@@ -358,7 +358,7 @@ def test_the_bundled_compose_files_are_used_when_the_projects_are_gone(world, cl
     """Compose files gone: the bundled copies. The env file gone too: stop,
     since recreating without it resets the Postgres password, the volume
     names and the bearer; --env-file names a replacement."""
-    _project(world, tmp_path, files_exist=False)
+    _project(world, tmp_path, files_exist=False, checkout=True)
     assert _run(["--health-delay-ms", "1"]) == 2
     assert "no longer exist" in capsys.readouterr().err and not any(c.startswith("pull") for c in world.docker_calls())
     env_file = tmp_path / "kept.env"
@@ -371,6 +371,102 @@ def test_the_bundled_compose_files_are_used_when_the_projects_are_gone(world, cl
     assert f"--env-file {env_file}" in compose
     assert (bundled / "docker-compose.yml").read_bytes() == (ROOT / "ops" / "docker-compose.yml").read_bytes()
     assert "bundled" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("project", ["external-stack", "pseudolife-mcp"])
+@pytest.mark.parametrize("explicit_env", [False, True])
+def test_missing_manager_compose_refuses_before_mutation(world, clients, tmp_path, capsys, project, explicit_env):
+    """Portainer CE labels its container-only compose path on the daemon;
+    --env-file cannot turn that stack into the bundled installer's layout."""
+    _project(world, tmp_path)
+    manager_dir = tmp_path / "manager-data" / "compose" / "1"
+    world.container["labels"] = {
+        "com.docker.compose.project": project,
+        "com.docker.compose.project.config_files": str(manager_dir / "docker-compose.yml"),
+        "com.docker.compose.project.working_dir": str(manager_dir),
+    }
+    env_file = tmp_path / "saved.env"
+    env_file.write_text("POSTGRES_PASSWORD=fixture\n", encoding="utf-8")
+    args = ["--tag", "0.15.0", "--reinstall", "--daemon-only"]
+    if explicit_env:
+        args += ["--env-file", str(env_file)]
+    assert _run(args) == 2
+    err = capsys.readouterr().err
+    assert project in err and "Portainer" in err and "Editor" in err
+    assert "--compose-file <stack.yml> --env-file <stack.env>" in err and "Nothing was changed" in err
+    assert not any(c.startswith(("pull ", "tag ", "compose ", "exec ", "cp ", "rmi ")) for c in world.docker_calls())
+    assert not (tmp_path / "data" / "compose").exists() and clients == []
+
+
+def test_exported_manager_stack_files_keep_the_project_and_settings(world, clients, tmp_path):
+    _project(world, tmp_path)
+    world.container["labels"] = {
+        "com.docker.compose.project": "external-stack",
+        "com.docker.compose.project.config_files": "/data/compose/1/docker-compose.yml",
+        "com.docker.compose.project.environment_file": "/data/compose/1/stack.env",
+        "com.docker.compose.project.working_dir": "/data/compose/1",
+    }
+    exported = tmp_path / "stack.yml"
+    exported.write_text("services: {}\n", encoding="utf-8")
+    extra = tmp_path / "overlay.yml"
+    extra.write_text("services: {}\n", encoding="utf-8")
+    env_file = tmp_path / "stack.env"
+    env_file.write_text("POSTGRES_PASSWORD=fixture\nPSEUDOLIFE_BANK_VOLUME=old_pgdata\n", encoding="utf-8")
+    assert _run(["--tag", "0.15.0", "--reinstall", "--daemon-only", "--compose-file", str(exported),
+                 "--compose-file", str(extra), "--env-file", str(env_file)]) == 0
+    argv, env = _compose_call(world)
+    assert argv[2:4] == ["-p", "external-stack"]
+    assert str(exported) in argv and str(extra) in argv and str(env_file) in argv
+    assert argv.index(str(exported)) < argv.index(str(extra))
+    assert "/data/compose/1/docker-compose.yml" not in argv
+    assert env["PSEUDOLIFE_IMAGE_TAG"] == "0.15.0"
+
+
+def test_a_missing_explicit_stack_file_refuses_before_pull(world, tmp_path, capsys):
+    _project(world, tmp_path)
+    assert _run(["--compose-file", str(tmp_path / "absent.yml")]) == 2
+    assert "--compose-file" in capsys.readouterr().err
+    assert not any(c.startswith("pull ") for c in world.docker_calls())
+
+
+@pytest.mark.parametrize("env_state", ["present", "missing", "partial"])
+def test_exported_stack_retains_labelled_env_authority(world, tmp_path, capsys, env_state):
+    project = _project(world, tmp_path)
+    env_file = project / ".env"
+    if env_state == "missing":
+        env_file.unlink()
+    elif env_state == "partial":
+        world.container["labels"]["com.docker.compose.project.environment_file"] += "," + str(project / "missing.env")
+    exported = tmp_path / "stack.yml"
+    exported.write_text("services: {}\n", encoding="utf-8")
+    update = up.Update(up.Options(compose_files=[exported]))
+    if env_state == "present":
+        context = update.compose_context()
+        assert context["env_file"] == [env_file]
+        assert str(env_file) in context["args"]
+        assert context["args"][2:4] == ["--project-directory", str(project)]
+    else:
+        with pytest.raises(up.UpdateError, match="--env-file"):
+            update.compose_context()
+
+
+def test_exported_stack_keeps_original_relative_resource_directory(world, tmp_path):
+    project = _project(world, tmp_path)
+    exported = tmp_path / "exported.yml"
+    exported.write_text("services:\n  pseudolife-daemon:\n    volumes: [./state:/data]\n", encoding="utf-8")
+    update = up.Update(up.Options(compose_files=[exported], env_file=project / ".env"))
+    args = update.compose_context()["args"]
+    assert args[args.index("--project-directory") + 1] == str(project)
+
+
+def test_a_foreign_projects_host_accessible_compose_is_kept(world, clients, tmp_path):
+    project = _project(world, tmp_path)
+    world.container["labels"]["com.docker.compose.project"] = "external-stack"
+    world.health = [{"status": "ok", "version": "0.15.0"}, {"status": "ok", "version": "0.15.1"}]
+    assert _run(["--daemon-only"]) == 0
+    argv, _ = _compose_call(world)
+    assert argv[2:4] == ["-p", "external-stack"]
+    assert str(project / "docker-compose.yml") in argv
 
 
 def test_the_env_file_falls_back_to_the_working_directorys(world, clients, tmp_path):
@@ -685,6 +781,78 @@ def test_plain_checkout_update_with_null_daemon_labels(world, clients, tmp_path)
     assert _run(["--checkout", str(root), "--no-backup", "--no-cache-prune"]) == 0
     argv, _ = _compose_call(world)
     assert argv[-5:] == ["up", "-d", "--no-deps", "--build", "pseudolife-daemon"]
+
+
+def _project_guard_checkout(world, tmp_path, monkeypatch, project="pseudolife-mcp"):
+    root, _ = _checkout(world, tmp_path, repo=False)
+    monkeypatch.setattr(up, "tree_state", lambda _: {"sha": "a" * 40, "dirty": "false", "lines": [], "error": ""})
+    original = world.run_cli
+
+    def compose_config(argv, **kw):
+        if argv[1:2] == ["compose"] and "config" in argv:
+            return 0, json.dumps({"name": project})
+        return original(argv, **kw)
+
+    monkeypatch.setattr(up, "run_cli", compose_config)
+    return root
+
+
+def test_checkout_refuses_foreign_project_before_backup_or_env_write(world, clients, tmp_path, capsys, monkeypatch):
+    root = _project_guard_checkout(world, tmp_path, monkeypatch)
+    world.container["labels"] = {"com.docker.compose.project": "external-stack"}
+    assert _run(["--checkout", str(root)]) == 2
+    err = capsys.readouterr().err
+    assert "external-stack" in err and " down" not in err
+    assert "pseudolife-mcp update" in err and "release mode" in err and "Nothing was changed" in err
+    assert "down -v" not in err
+    assert not (root / "ops" / ".env").exists()
+    assert not any(c.startswith(("tag ", "exec ", "cp ", "builder ", "rmi ")) or " up " in c
+                   for c in world.docker_calls())
+    assert clients == []
+
+
+def test_checkout_accepts_installer_project_from_another_checkout_path(world, clients, tmp_path, monkeypatch):
+    root = _project_guard_checkout(world, tmp_path, monkeypatch)
+    (root / "ops" / ".env").write_text("PSEUDOLIFE_BANK_VOLUME=ops_pseudolife_pgdata\n"
+                                       "PSEUDOLIFE_STATE_VOLUME=ops_pseudolife_data\n", encoding="utf-8")
+    world.container["labels"] = {"com.docker.compose.project": "pseudolife-mcp"}
+    assert _run(["--checkout", str(root), "--no-backup", "--no-cache-prune"]) == 0
+    assert _compose_call(world)[0] is not None
+
+
+def test_checkout_accepts_its_resolved_custom_project(world, tmp_path, monkeypatch):
+    root = _project_guard_checkout(world, tmp_path, monkeypatch, project="custom-stack")
+    world.container["labels"] = {"com.docker.compose.project": "custom-stack"}
+    monkeypatch.setenv("COMPOSE_PROJECT_NAME", "custom-stack")
+    assert _run(["--checkout", str(root), "--no-backup", "--no-cache-prune"]) == 0
+    assert _compose_call(world)[0] is not None
+
+
+@pytest.mark.parametrize("code,output", [(1, "Cannot connect to the Docker daemon"), (0, "not JSON")])
+def test_checkout_project_inspection_failure_refuses_before_mutation(world, tmp_path, monkeypatch, capsys, code, output):
+    root, _ = _checkout(world, tmp_path, repo=False)
+    monkeypatch.setattr(up, "tree_state", lambda _: {"sha": "a" * 40, "dirty": "false", "lines": [], "error": ""})
+    original = world.run_cli
+
+    def failed_inspect(argv, **kw):
+        if "{{json .Config.Labels}}" in argv:
+            return code, output
+        return original(argv, **kw)
+
+    monkeypatch.setattr(up, "run_cli", failed_inspect)
+    assert _run(["--checkout", str(root)]) == 2
+    assert "Docker" in capsys.readouterr().err
+    assert not (root / "ops" / ".env").exists()
+    assert _compose_call(world)[0] is None
+    assert not any(c.startswith(("tag ", "exec ", "cp ", "builder ")) for c in world.docker_calls())
+
+
+def test_checkout_with_proven_absent_daemon_is_not_blocked_by_project_guard(world, tmp_path, monkeypatch):
+    root, _ = _checkout(world, tmp_path, repo=False)
+    monkeypatch.setattr(up, "tree_state", lambda _: {"sha": "a" * 40, "dirty": "false", "lines": [], "error": ""})
+    world.container = None
+    assert _run(["--checkout", str(root), "--no-backup", "--no-cache-prune"]) == 0
+    assert _compose_call(world)[0] is not None
 
 
 def test_a_clean_checkout_is_built_with_its_commit_stamp(world, clients, tmp_path):

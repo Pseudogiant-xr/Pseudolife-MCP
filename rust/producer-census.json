@@ -26,6 +26,7 @@
     "docs/guide/coordination-recovery.md": "04425509736ec7e40beb4bc46e7810d32ee0a68d791a969b77876c945ab5cb79",
     "docs/guide/dreaming.md": "64c92fa9d4a2eb224f3d5e72e6f03cfe81219c959f15914ea745464db93ec249",
     "docs/guide/episodes.md": "547f36bb2469f3ae352107374ba63ebbeecb3929be344730af9c7501d8802f49",
+    "docs/guide/install-and-move.md": "8a3adbba77bee36c1e1447496c03cc9f7ec4af071bf0c60a29a2e21d905df757",
     "docs/guide/memory-model.md": "6e295c317f53ad8558e3a3b1d6cd8ea74e01401eb6d8cce82b9143c5b087ed5f",
     "docs/guide/providers.md": "755967b36f1b4fe65a189b925a9df8f7c0244025270746fc9cc002966d793d16",
     "docs/guide/remote-bank.md": "97d476e7f8cc6afa08d1815bebd157a820913f1dcedf241fcac6d072a09fb059",
@@ -238,8 +239,10 @@
     "ops/docker-compose.rust-ghcr.yml": "909d2f6066466d3650a89bd99e9ec2ca089af94ad831a78268d2ca6b74180b96",
     "ops/docker-compose.rust-shadow.yml": "0863cfdbfd60102526aa910d0db89d03ea82e97b3991ca7055211f575ad78030",
     "ops/docker-compose.rust.yml": "29b3590c58a8cd7a13a581d0e0488e48b2f934ad10844b4bf7b0b2eed4670ce0",
+    "ops/docker-compose.stack-extractor.yml": "2af67c750ef93efe2528d7936ff2a8e5d3bd97c6d27721f41467ad79a1126091",
+    "ops/docker-compose.stack.yml": "7afb522a29a8fe3afbfff23708327affb0e4566d560c39c9b414fecde061c389",
     "ops/docker-compose.yml": "7cabdd7438423bb1b0613f7e44af76b295695f842355a8d681e9ace5f8480791",
-    "ops/gen_llms_txt.py": "de91c3fc65ea1960cb1dd25c913cf8bf7dfef6302454468fcd03e42a9bbb2803",
+    "ops/gen_llms_txt.py": "325d0ab0f29782204a975cc58d798b39c3d4f1971f37b06dfeb40cd7257fee88",
     "ops/install-autostart.ps1": "453da0472d4b9566f6774aca6128b531341a2ef91e79d44f980e0b571a22671b",
     "ops/install-backup-task.ps1": "5fa15b92ff18a616d3165436cc283ea32c3790590e6e4b969ca22461ae85830f",
     "ops/install-cache-retention.ps1": "5d56fb78696529456a075eba16537459331ecacd0a88053d560173b9c6634173",
@@ -2111,6 +2114,17 @@
         },
         {
           "evidence": "documented",
+          "location": "docs/guide/install-and-move.md:124",
+          "shape": {
+            "argv_source": "connect http://127.0.0.1:8765 \\",
+            "channel": "argv",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {}
+          }
+        },
+        {
+          "evidence": "documented",
           "location": "docs/guide/remote-bank.md:225",
           "shape": {
             "argv_source": "connect http://100.64.0.2:8765 --code 7K3Q-M9XA-2PDF   # pair, then re-point every client",
@@ -2557,6 +2571,17 @@
         {
           "evidence": "documented",
           "location": "docs/guide/dreaming.md:747",
+          "shape": {
+            "argv_source": "doctor",
+            "channel": "argv",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {}
+          }
+        },
+        {
+          "evidence": "documented",
+          "location": "docs/guide/install-and-move.md:157",
           "shape": {
             "argv_source": "doctor",
             "channel": "argv",
@@ -4042,6 +4067,17 @@
         },
         {
           "evidence": "documented",
+          "location": "docs/guide/install-and-move.md:76",
+          "shape": {
+            "argv_source": "invite",
+            "channel": "argv",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {}
+          }
+        },
+        {
+          "evidence": "documented",
           "location": "docs/guide/remote-bank.md:214",
           "shape": {
             "argv_source": "invite laptop            # prints a code such as 7K3Q-M9XA-2PDF",
@@ -4919,6 +4955,19 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
+          "location": "ops/gen_llms_txt.py:35",
+          "shape": {
+            "argv_source": "move , and the supported \"",
+            "channel": "argv",
+            "complete": false,
+            "expression": ", and the supported \"",
+            "omitted_optional": null,
+            "parameters": {}
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
           "location": "rust/shim/src/cli/move_cli.rs:16",
           "shape": {
             "argv_source": "move [-h] --to SSH-TARGET [--target-checkout PATH]\\n\",",
@@ -4952,6 +5001,17 @@
         {
           "evidence": "documented",
           "location": "docs/guide/coordination-recovery.md:66",
+          "shape": {
+            "argv_source": "move",
+            "channel": "argv",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {}
+          }
+        },
+        {
+          "evidence": "documented",
+          "location": "docs/guide/install-and-move.md:7",
           "shape": {
             "argv_source": "move",
             "channel": "argv",
@@ -6533,6 +6593,23 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
+          "location": "docs/guide/install-and-move.md:166",
+          "shape": {
+            "argv_source": "update --env-file \"$HOME/pseudolife-stack/.env\"",
+            "channel": "argv",
+            "complete": false,
+            "expression": "--env-file \"$HOME/pseudolife-stack/.env\"",
+            "omitted_optional": null,
+            "parameters": {
+              "--env-file": {
+                "expression": "\"$HOME/pseudolife-stack/.env\""
+              }
+            }
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "documented",
           "location": "docs/guide/remote-bank.md:524",
           "shape": {
             "argv_source": "update --schedule 04:30 --daemon-url <url>",
@@ -7585,6 +7662,21 @@
             "complete": true,
             "omitted_optional": null,
             "parameters": {}
+          }
+        },
+        {
+          "evidence": "documented",
+          "location": "docs/guide/install-and-move.md:182",
+          "shape": {
+            "argv_source": "update --clients-only",
+            "channel": "argv",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "--clients-only": {
+                "literal": true
+              }
+            }
           }
         },
         {
@@ -24800,6 +24892,19 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
+          "location": "docs/guide/install-and-move.md:41",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "documented",
           "location": "docs/runbooks/docker-disk-retention.md:262",
           "shape": {
             "channel": "environment",
@@ -24835,6 +24940,19 @@
             "parameters": {}
           },
           "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "ops/docker-compose.stack.yml:94",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "-pseudolife-mcp-bank}",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "assignment-candidate"
         },
         {
           "dynamic": "unresolved",
@@ -26640,6 +26758,32 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
+          "location": "ops/docker-compose.stack.yml:50",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "-6g}",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "assignment-candidate"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "ops/docker-compose.stack.yml:51",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "-6g}",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "assignment-candidate"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
           "location": "ops/docker-compose.yml:128",
           "shape": {
             "channel": "environment",
@@ -27214,6 +27358,19 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
+          "location": "docs/guide/install-and-move.md:134",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "documented",
           "location": "docs/specs/2026-06-15-pluggable-dream-extractor-design.md:96",
           "shape": {
             "channel": "environment",
@@ -27275,6 +27432,19 @@
             "parameters": {}
           },
           "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "ops/docker-compose.stack.yml:74",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "${PSEUDOLIFE_DREAM_API_KEY:-}",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "assignment-candidate"
         },
         {
           "dynamic": "unresolved",
@@ -27458,6 +27628,45 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
+          "location": "docs/guide/install-and-move.md:132",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "documented",
+          "location": "docs/guide/install-and-move.md:142",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "documented",
+          "location": "docs/guide/install-and-move.md:149",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "documented",
           "location": "docs/specs/2026-06-15-pluggable-dream-extractor-design.md:95",
           "shape": {
             "channel": "environment",
@@ -27614,6 +27823,32 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
+          "location": "ops/docker-compose.stack.yml:6",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "ops/docker-compose.stack.yml:72",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "${PSEUDOLIFE_DREAM_BASE_URL:-}",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "assignment-candidate"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
           "location": "ops/docker-compose.yml:208",
           "shape": {
             "channel": "environment",
@@ -27739,6 +27974,21 @@
             "parameters": {
               "value": {
                 "literal": "http://host.docker.internal:1234/v1"
+              }
+            }
+          },
+          "usage": "assignment-example"
+        },
+        {
+          "evidence": "documented",
+          "location": "ops/docker-compose.stack-extractor.yml:3",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "http://pseudolife-extractor:8081/v1"
               }
             }
           },
@@ -27994,6 +28244,19 @@
             "parameters": {}
           },
           "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "ops/docker-compose.stack.yml:80",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "${PSEUDOLIFE_DREAM_EXTRACTOR_MODE:-primary}",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "assignment-candidate"
         },
         {
           "dynamic": "unresolved",
@@ -28300,6 +28563,19 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
+          "location": "ops/docker-compose.stack.yml:79",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "${PSEUDOLIFE_DREAM_FALLBACK_API_KEY:-}",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "assignment-candidate"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
           "location": "ops/docker-compose.yml:226",
           "shape": {
             "channel": "environment",
@@ -28447,6 +28723,19 @@
             "parameters": {}
           },
           "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "ops/docker-compose.stack.yml:77",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "${PSEUDOLIFE_DREAM_FALLBACK_BASE_URL:-}",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "assignment-candidate"
         },
         {
           "dynamic": "unresolved",
@@ -28719,6 +29008,19 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
+          "location": "ops/docker-compose.stack.yml:78",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "${PSEUDOLIFE_DREAM_FALLBACK_MODEL:-}",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "assignment-candidate"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
           "location": "ops/docker-compose.yml:222",
           "shape": {
             "channel": "environment",
@@ -28961,6 +29263,19 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
+          "location": "ops/docker-compose.stack.yml:76",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "${PSEUDOLIFE_DREAM_MAX_TOKENS:-2048}",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "assignment-candidate"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
           "location": "ops/docker-compose.yml:215",
           "shape": {
             "channel": "environment",
@@ -29026,6 +29341,32 @@
           "dynamic": "unresolved",
           "evidence": "documented",
           "location": "docs/guide/dreaming.md:355",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "documented",
+          "location": "docs/guide/install-and-move.md:133",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "documented",
+          "location": "docs/guide/install-and-move.md:144",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -29155,6 +29496,19 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
+          "location": "ops/docker-compose.stack.yml:73",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "${PSEUDOLIFE_DREAM_MODEL:-extractor}",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "assignment-candidate"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
           "location": "ops/docker-compose.yml:209",
           "shape": {
             "channel": "environment",
@@ -29205,6 +29559,21 @@
             "parameters": {
               "value": {
                 "literal": "qwen2.5:7b"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "documented",
+          "location": "docs/guide/install-and-move.md:150",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "extractor"
               }
             }
           },
@@ -29265,6 +29634,21 @@
             "parameters": {
               "value": {
                 "literal": "my-model"
+              }
+            }
+          },
+          "usage": "assignment-example"
+        },
+        {
+          "evidence": "documented",
+          "location": "ops/docker-compose.stack-extractor.yml:4",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "extractor."
               }
             }
           },
@@ -29498,6 +29882,19 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
+          "location": "ops/docker-compose.stack.yml:75",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "${PSEUDOLIFE_DREAM_TIMEOUT_SECONDS:-480}",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "assignment-candidate"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
           "location": "ops/docker-compose.yml:214",
           "shape": {
             "channel": "environment",
@@ -29614,6 +30011,19 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
+          "location": "ops/docker-compose.stack.yml:71",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "${PSEUDOLIFE_EMBEDDING_CPU_DTYPE:-}",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "assignment-candidate"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
           "location": "ops/docker-compose.yml:200",
           "shape": {
             "channel": "environment",
@@ -29644,6 +30054,19 @@
             "parameters": {}
           },
           "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "ops/docker-compose.stack-extractor.yml:44",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "-300}",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "assignment-candidate"
         },
         {
           "dynamic": "unresolved",
@@ -29735,6 +30158,32 @@
         },
         {
           "dynamic": "unresolved",
+          "evidence": "documented",
+          "location": "docs/guide/install-and-move.md:180",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "documented",
+          "location": "docs/guide/install-and-move.md:186",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
           "evidence": "static",
           "location": "docs/atlas/atlas.json:1281",
           "shape": {
@@ -29788,6 +30237,19 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
+          "location": "ops/docker-compose.stack.yml:37",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "-latest}",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "assignment-candidate"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
           "location": "rust/shim/src/cli/update/release.rs:362",
           "shape": {
             "channel": "environment",
@@ -29810,6 +30272,21 @@
             "parameters": {}
           },
           "usage": "assignment-candidate"
+        },
+        {
+          "evidence": "documented",
+          "location": "docs/guide/install-and-move.md:67",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "expression": "{sys.argv[1]"
+              }
+            }
+          },
+          "usage": "assignment"
         },
         {
           "evidence": "documented",
@@ -30096,6 +30573,19 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
+          "location": "ops/docker-compose.stack.yml:81",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "${PSEUDOLIFE_JUDGE_API_KEY:-}",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "assignment-candidate"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
           "location": "ops/docker-compose.yml:232",
           "shape": {
             "channel": "environment",
@@ -30139,6 +30629,19 @@
             "parameters": {}
           },
           "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "ops/docker-compose.stack.yml:82",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "${PSEUDOLIFE_JUDGE_SECOND_API_KEY:-}",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "assignment-candidate"
         },
         {
           "dynamic": "unresolved",
@@ -30537,6 +31040,19 @@
             "parameters": {}
           },
           "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "ops/docker-compose.stack.yml:84",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "${PSEUDOLIFE_MALLOC_TRIM_SECONDS:-}",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "assignment-candidate"
         },
         {
           "dynamic": "unresolved",
@@ -32686,6 +33202,19 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
+          "location": "ops/docker-compose.stack.yml:56",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "postgresql://pseudolife:${POSTGRES_PASSWORD:-pseudolife}@pseudolife-pg:5432/pseudolife_memory",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "assignment-candidate"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
           "location": "ops/docker-compose.yml:153",
           "shape": {
             "channel": "environment",
@@ -33928,6 +34457,19 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
+          "location": "ops/docker-compose.stack.yml:59",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "/data",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "assignment-candidate"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
           "location": "ops/docker-compose.yml:156",
           "shape": {
             "channel": "environment",
@@ -34326,6 +34868,19 @@
           "dynamic": "unresolved",
           "evidence": "static",
           "location": "ops/docker-compose.rust-shadow.yml:26",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "0.0.0.0",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "assignment-candidate"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "ops/docker-compose.stack.yml:57",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -35513,6 +36068,19 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
+          "location": "ops/docker-compose.stack.yml:58",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "'8765'",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "assignment-candidate"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
           "location": "ops/docker-compose.yml:155",
           "shape": {
             "channel": "environment",
@@ -35788,6 +36356,19 @@
           "dynamic": "unresolved",
           "evidence": "documented",
           "location": "docs/guide/configuration.md:23",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "documented",
+          "location": "docs/guide/install-and-move.md:79",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -36087,6 +36668,19 @@
             "parameters": {}
           },
           "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "ops/docker-compose.stack.yml:66",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "${PSEUDOLIFE_MCP_TIER_MAP:-}",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "assignment-candidate"
         },
         {
           "dynamic": "unresolved",
@@ -36991,6 +37585,19 @@
             "channel": "environment",
             "complete": false,
             "expression": "${W3J_RUST_TOKEN:?Set a disposable W3J_RUST_TOKEN}",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "assignment-candidate"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "ops/docker-compose.stack.yml:62",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "${PSEUDOLIFE_MCP_TOKEN:-}",
             "omitted_optional": null,
             "parameters": {}
           },
@@ -38193,6 +38800,21 @@
           "usage": "reference"
         },
         {
+          "evidence": "documented",
+          "location": "docs/guide/install-and-move.md:66",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "expression": "{token"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
           "evidence": "static",
           "location": "ops/install-autostart.ps1:32",
           "shape": {
@@ -38429,6 +39051,19 @@
           "dynamic": "unresolved",
           "evidence": "documented",
           "location": "docs/guide/configuration.md:4532",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "documented",
+          "location": "docs/guide/install-and-move.md:79",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -38694,6 +39329,19 @@
           "dynamic": "unresolved",
           "evidence": "static",
           "location": "ops/docker-compose.rust-shadow.yml:32",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "${PSEUDOLIFE_MCP_TOKENS:-}",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "assignment-candidate"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "ops/docker-compose.stack.yml:63",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -41721,6 +42369,19 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
+          "location": "ops/docker-compose.stack.yml:65",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "${PSEUDOLIFE_MCP_TOOLSET:-core}",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "assignment-candidate"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
           "location": "ops/docker-compose.yml:179",
           "shape": {
             "channel": "environment",
@@ -42071,6 +42732,19 @@
             "channel": "environment",
             "complete": false,
             "expression": "\"1\"",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "assignment-candidate"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "ops/docker-compose.stack.yml:61",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "'1'",
             "omitted_optional": null,
             "parameters": {}
           },
@@ -43279,6 +43953,19 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
+          "location": "docs/guide/install-and-move.md:41",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "documented",
           "location": "docs/runbooks/docker-disk-retention.md:262",
           "shape": {
             "channel": "environment",
@@ -43288,6 +43975,19 @@
             "parameters": {}
           },
           "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "ops/docker-compose.stack.yml:97",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "-pseudolife-mcp-state}",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "assignment-candidate"
         },
         {
           "dynamic": "unresolved",
@@ -45390,6 +46090,19 @@
             "parameters": {}
           },
           "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "ops/docker-compose.stack.yml:64",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "${PSEUDOLIFE_WRITER_ID:-mcp-client}",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "assignment-candidate"
         },
         {
           "dynamic": "unresolved",
@@ -65518,6 +66231,20 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
+      "location": "ops/docker-compose.stack.yml:83",
+      "name": "PSEUDOLIFE_JUDGE_THIRD_API_KEY",
+      "shape": {
+        "channel": "environment",
+        "complete": false,
+        "expression": "${PSEUDOLIFE_JUDGE_THIRD_API_KEY:-}",
+        "parameters": {}
+      },
+      "usage": "assignment-candidate"
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "environment",
       "location": "ops/docker-compose.yml:234",
       "name": "PSEUDOLIFE_JUDGE_THIRD_API_KEY",
       "shape": {
@@ -68205,6 +68932,48 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
+      "location": "docs/guide/install-and-move.md:100",
+      "method": null,
+      "name": "/health",
+      "shape": {
+        "channel": "body",
+        "complete": false,
+        "expression": "Request helper, URL suffix or body requires resolution at this location.",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "unverified",
+      "kind": "route",
+      "location": "docs/guide/install-and-move.md:182",
+      "method": null,
+      "name": "/health",
+      "shape": {
+        "channel": "body",
+        "complete": false,
+        "expression": "Request helper, URL suffix or body requires resolution at this location.",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "unverified",
+      "kind": "route",
+      "location": "docs/guide/install-and-move.md:93",
+      "method": null,
+      "name": "/health",
+      "shape": {
+        "channel": "body",
+        "complete": false,
+        "expression": "Request helper, URL suffix or body requires resolution at this location.",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "unverified",
+      "kind": "route",
       "location": "docs/guide/memory-model.md:695",
       "method": null,
       "name": "/health",
@@ -70226,6 +70995,20 @@
       "evidence": "unverified",
       "kind": "route",
       "location": "ops/Dockerfile.daemon:155",
+      "method": null,
+      "name": "/health",
+      "shape": {
+        "channel": "body",
+        "complete": false,
+        "expression": "Request helper, URL suffix or body requires resolution at this location.",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "unverified",
+      "kind": "route",
+      "location": "ops/docker-compose.stack-extractor.yml:26",
       "method": null,
       "name": "/health",
       "shape": {
@@ -77600,6 +78383,112 @@
       "location": "docs/guide/episodes.md:92",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_SESSION_IDLE_SECONDS"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/install-and-move.md:100",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/health"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/install-and-move.md:132",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_DREAM_BASE_URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/install-and-move.md:133",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_DREAM_MODEL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/install-and-move.md:134",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_DREAM_API_KEY"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/install-and-move.md:142",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_DREAM_BASE_URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/install-and-move.md:144",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_DREAM_MODEL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/install-and-move.md:149",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_DREAM_BASE_URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/install-and-move.md:166",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "cli:update"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/install-and-move.md:180",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_IMAGE_TAG"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/install-and-move.md:182",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/health"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/install-and-move.md:186",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_IMAGE_TAG"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/install-and-move.md:30",
+      "reason": "request target supplied dynamically or external"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/install-and-move.md:41",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_BANK_VOLUME"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/install-and-move.md:41",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_STATE_VOLUME"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/install-and-move.md:79",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TIER_MAP"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/install-and-move.md:79",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/install-and-move.md:93",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/health"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/install-and-move.md:93",
+      "reason": "request target supplied dynamically or external"
     },
     {
       "dynamic": "unresolved",
@@ -88671,6 +89560,198 @@
     },
     {
       "dynamic": "unresolved",
+      "location": "ops/docker-compose.stack-extractor.yml:26",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/health"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.stack-extractor.yml:44",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_EXTRACTOR_SLEEP_IDLE_SECONDS"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.stack.yml:37",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_IMAGE_TAG"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.stack.yml:50",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_DAEMON_MEM_LIMIT"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.stack.yml:51",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_DAEMON_MEM_LIMIT"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.stack.yml:56",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_DATABASE_URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.stack.yml:57",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_HOST"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.stack.yml:58",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_PORT"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.stack.yml:59",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_DATA_DIR"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.stack.yml:6",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_DREAM_BASE_URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.stack.yml:61",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TRUST_BIND"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.stack.yml:62",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.stack.yml:63",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.stack.yml:64",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_WRITER_ID"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.stack.yml:65",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOOLSET"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.stack.yml:66",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TIER_MAP"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.stack.yml:71",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_EMBEDDING_CPU_DTYPE"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.stack.yml:72",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_DREAM_BASE_URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.stack.yml:73",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_DREAM_MODEL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.stack.yml:74",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_DREAM_API_KEY"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.stack.yml:75",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_DREAM_TIMEOUT_SECONDS"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.stack.yml:76",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_DREAM_MAX_TOKENS"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.stack.yml:77",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_DREAM_FALLBACK_BASE_URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.stack.yml:78",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_DREAM_FALLBACK_MODEL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.stack.yml:79",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_DREAM_FALLBACK_API_KEY"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.stack.yml:80",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_DREAM_EXTRACTOR_MODE"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.stack.yml:81",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_JUDGE_API_KEY"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.stack.yml:82",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_JUDGE_SECOND_API_KEY"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.stack.yml:83",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:environment:PSEUDOLIFE_JUDGE_THIRD_API_KEY"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.stack.yml:84",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MALLOC_TRIM_SECONDS"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.stack.yml:94",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_BANK_VOLUME"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.stack.yml:97",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_STATE_VOLUME"
+    },
+    {
+      "dynamic": "unresolved",
       "location": "ops/docker-compose.yml:125",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:EmbeddingConfig"
@@ -88920,6 +90001,12 @@
       "location": "ops/docker-compose.yml:94",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_BUILD_TIME"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/gen_llms_txt.py:35",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "cli:move"
     },
     {
       "dynamic": "unresolved",
