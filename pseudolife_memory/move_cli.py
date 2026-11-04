@@ -89,6 +89,7 @@ like the other client modes.
 from __future__ import annotations
 
 import argparse
+import ast
 from dataclasses import dataclass
 import gzip
 import hashlib
@@ -605,6 +606,18 @@ def _meta_fingerprint(value: str) -> str | None:
     return hashlib.sha256(identity.encode("utf-8")).hexdigest()[:16] if isinstance(identity, str) else None
 
 
+def _schema_version(source: str) -> int | None:
+    try:
+        tree = ast.parse(source)
+        for node in tree.body:
+            if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "SCHEMA_META_VERSION" for t in node.targets):
+                value = ast.literal_eval(node.value)
+                return value if type(value) is int and value > 0 else None
+    except (SyntaxError, ValueError, TypeError):
+        pass
+    return None
+
+
 def _env_of(container: dict) -> dict[str, str]:
     env = {}
     for item in ((container.get("Config") or {}).get("Env") or []):
@@ -708,6 +721,9 @@ class Mover:
         self.release_target = options.target_release
         self.target_env_file: str | None = None
         self.target_version: str | None = None
+        self.target_schema: int | None = None
+        self.target_head: str | None = None
+        self.committed = False
         self.target_port = 8765
         self.target_local_url = SOURCE_URL
         self.phase_code = EXIT_REFUSED     # what an ssh failure exits with before the source stops
@@ -910,6 +926,8 @@ class Mover:
                               "null): it is older than this command, or has not loaded its bank identity yet. "
                               "Update the daemon, or make one memory call through it, then retry")
         self.source_bank, self.source_schema = bank, health.get("schema")
+        if type(self.source_schema) is not int or self.source_schema <= 0:
+            raise self.refuse("the source reports no usable schema version: update the source daemon and retry")
         self.source_auth = health.get("auth")
         if o.keep_tokens and self.source_auth is not True:
             raise self.refuse("the source daemon runs without a bearer token (auth: false): carrying its "
@@ -1004,6 +1022,7 @@ class Mover:
                 raise self.refuse(f"the target daemon is still warming up: wait for {self.target_local_url}/health "
                                   "to report ready: true, then retry")
             schema = target_health.get("schema")
+            self.target_schema = schema
             if isinstance(self.source_schema, int) and (not isinstance(schema, int) or schema < self.source_schema):
                 update = ("pseudolife-mcp update --daemon-only" if self.release_target else "git pull, then ops/update.sh")
                 raise self.refuse(f"the target daemon's schema ({schema}) is older than the source's "
@@ -1022,6 +1041,7 @@ class Mover:
                 raise self.refuse("--no-keep-tokens needs an authenticated target: configure its bearer token "
                                   "in the existing stack and retry")
         self.check_target_bank()
+        self.check_deploy_schema()
         self.check_artifact_location()
         if self.release_target and o.keep_tokens:
             self.check_release_deployment()
@@ -1150,6 +1170,46 @@ class Mover:
             raise self.refuse("the target artifact or safety directory is inside a bank mount or checkout: "
                               "use --target-release --target-work-dir <directory outside bank mounts and checkouts>, "
                               "or configure /data as a dedicated state mount before retrying")
+
+    def check_deploy_schema(self) -> None:
+        refuse = self.refuse if not self.recording else MoveError
+        if not self.release_target:
+            result = self.ssh(f"git -C {rq(self.checkout)} rev-parse HEAD", timeout=60)
+            head = result.text.strip() if result.ok else ""
+            if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", head):
+                raise refuse("the target checkout HEAD cannot be read: restore a valid git checkout with git on PATH, "
+                             "or select --target-release")
+            if self.target_head is not None and self.target_head != head:
+                raise refuse("the target checkout changed during this move: restore the planned HEAD, or retry "
+                             "move --resume after reviewing the updated target")
+            result = self.ssh(f"git -C {rq(self.checkout)} status --porcelain", timeout=60)
+            if not result.ok or result.text.strip():
+                raise refuse("the target checkout has uncommitted changes or cannot be inspected: commit or stash "
+                             "them before retrying move")
+            result = self.ssh(f"git -C {rq(self.checkout)} show {head}:pseudolife_memory/storage/schema.py", timeout=60)
+            schema = _schema_version(result.text) if result.ok else None
+            self.target_head = head
+        else:
+            schema = self.target_schema
+            if self.o.resume:
+                record = self.resume_record or {}
+                image = self.target_container.get("Image") or self.target_image
+                schema = record.get("target_schema") if record.get("target_image") == image else None
+                if type(schema) is not int:
+                    result = self.ssh(f"docker cp {DAEMON}:/app/pseudolife_memory/storage/schema.py -", timeout=60)
+                    try:
+                        with tarfile.open(fileobj=io.BytesIO(result.out), mode="r:*") as archive:
+                            files = [m for m in archive if m.isfile()]
+                            schema = _schema_version(archive.extractfile(files[0]).read().decode("utf-8")) if result.ok and len(files) == 1 else None
+                    except (OSError, ValueError, UnicodeError, tarfile.TarError):
+                        schema = None
+        if type(schema) is not int or schema < self.source_schema:
+            raise refuse(f"the target deployment schema ({schema}) is unreadable or older than the source's "
+                         f"({self.source_schema}): update the target checkout/image to a compatible version "
+                         "before retrying move --resume" if self.o.resume else
+                         f"the target deployment schema ({schema}) is unreadable or older than the source's "
+                         f"({self.source_schema}): update the target checkout/image before retrying move")
+        self.target_schema = schema
 
     def check_postgres_versions(self) -> None:
         """A plain-format dump restores into the same or a newer PostgreSQL
@@ -1482,6 +1542,8 @@ class Mover:
             record = {"move_id": self.move_id, "target": self.o.target, "checkout": self.checkout,
                       "target_mode": "release" if self.release_target else "checkout",
                       "target_version": self.target_version,
+                      "target_schema": self.target_schema, "target_head": self.target_head,
+                      "committed": self.committed,
                       "target_image": self.target_container.get("Image") or self.target_image,
                       "target_env_file": self.target_env_file,
                       "target_work_dir": self.o.target_work_dir,
@@ -1494,6 +1556,7 @@ class Mover:
                       "target_exposure_receipt": self.exposure_receipt if self.expose_pending or self.exposed_now
                                                  else None,
                       "target_exposure_attempt": self.expose_attempt,
+                      "follow_ups": self.follow_ups, "error": self.data.get("error"),
                       "manual_rollback": self.manual_rollback()}
             temporary = self.local_dir / "record.json.tmp"
             temporary.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
@@ -1548,7 +1611,9 @@ class Mover:
                 self.restore_target()
                 self.carry_identities()
                 self.start_target()
-            except BaseException as exc:  # noqa: BLE001 - every failure here, a signal included, rolls back
+            except BaseException as exc:  # noqa: BLE001 - signals obey the same commit boundary as failures
+                if self.committed:
+                    return self.after_commit_failure(exc)
                 reason = str(exc) if isinstance(exc, (MoveError, MoveInterrupted)) and str(exc) else \
                     f"{type(exc).__name__}: {str(exc)[:300]}"
                 ignored = self._set_signals(signal.SIG_IGN)
@@ -1570,20 +1635,61 @@ class Mover:
                 raise MoveError(f"{reason}. The rollback is INCOMPLETE: {left}. See the rollback steps, and the move "
                                 f"record {self.local_dir / 'record.json'}, and finish it by hand with the commands "
                                 f"listed there", EXIT_INCOMPLETE) from None
+            self.write_record("moved")
+            self.finish_target()
+            code = self.repoint()
+            self.final_report()
+            if self.follow_ups:
+                commands = "; ".join(item["command"] for item in self.follow_ups)
+                message = f"the bank moved, but follow-ups need doing: {commands}"
+                self.data["error"] = f"{self.data['error']}; {message}" if self.data.get("error") else message
+                if not self.o.as_json:
+                    print(f"move: {message}", file=sys.stderr, flush=True)
+                code = EXIT_PARTIAL
+            self.write_record("complete" if code == EXIT_OK else "moved_follow_ups")
+            return code
+        except BaseException as exc:
+            if not self.committed:
+                raise
+            return self.after_commit_failure(exc)
         finally:
             self._restore_signals(previous)
-        self.write_record("moved")
-        self.finish_target()
-        code = self.repoint()
-        self.final_report()
-        if self.follow_ups:
-            commands = "; ".join(item["command"] for item in self.follow_ups)
-            message = f"the bank moved, but follow-ups need doing: {commands}"
-            self.data["error"] = f"{self.data['error']}; {message}" if self.data.get("error") else message
+
+    def after_commit_failure(self, error: BaseException) -> int:
+        """The live target stays canonical; persist every unfinished action."""
+        ignored = self._set_signals(signal.SIG_IGN)
+        try:
+            reason = str(error) if isinstance(error, (MoveError, MoveInterrupted)) else type(error).__name__
+            pending = []
+            if self.target_policy_paused:
+                pending.append(("restore the target restart policy", self.ssh_line(f"docker update --restart={shlex.quote(self.target_policy)} {DAEMON}")))
+            if self.target_timer_paused:
+                pending.append(("resume target unattended update", self.ssh_line("systemctl --user enable --now pseudolife-update.timer")))
+            if self.marker_written:
+                pending.append(("remove the resume marker", self.ssh_line(f"rm -f {rq(self.marker_path)}")))
+            if self.data.get("connect") is None or self.data["connect"].get("exit") not in (0, 3):
+                credentials = " --token-file <target-token-file>" if not self.o.keep_tokens else ""
+                pending.append(("re-point this machine's clients", f"pseudolife-mcp connect {self.target_url}{credentials} --yes"))
+            known = {item["command"] for item in self.follow_ups}
+            for what, command in pending:
+                if command not in known:
+                    self.follow_ups.append({"what": what, "command": command, "why": reason})
+            self.data["error"] = f"the bank moved; finalization stopped ({reason}). Finish the follow-ups in {self.local_dir / 'record.json'}"
+            self.write_record("moved_follow_ups")
+            try:
+                self.final_report()
+            except Exception as report_error:
+                self.data["report"] = {"follow_ups": self.follow_ups, "rollback": self.manual_rollback()}
+                self.warn(f"the final report could not be rendered ({type(report_error).__name__}); use the move record")
             if not self.o.as_json:
-                print(f"move: {message}", file=sys.stderr, flush=True)
-            code = EXIT_PARTIAL
-        return code
+                print(f"move: {self.data['error']}", file=sys.stderr, flush=True)
+            return EXIT_PARTIAL
+        finally:
+            self._restore_signals(ignored)
+
+    def ssh_line(self, command: str) -> str:
+        argv = ["ssh", self.o.target, command]
+        return subprocess.list2cmdline(argv) if self.platform.startswith("win") else shlex.join(argv)
 
     def settle_exposure(self) -> bool:
         """Only a remote creation result establishes ownership; intent cannot."""
@@ -1996,6 +2102,7 @@ class Mover:
                             "interpolate from the original environment file and retry")
 
     def start_target(self) -> None:
+        self.check_deploy_schema()
         if self.gate_written:
             result = self.ssh(f"docker run --rm --entrypoint rm --volumes-from {DAEMON} "
                               f"{shlex.quote(self.target_image)} -f {MARKER}", timeout=300)
@@ -2043,6 +2150,7 @@ class Mover:
         result = self.local([self.docker, "cp", str(moved), f"{DAEMON}:{MOVED}"], timeout=120)
         if not result.ok:
             raise MoveError(f"could not write {MOVED} into the stopped source container ({result.why()})")
+        self.mark(committed=True)
         # The commit point: the target serves the bank and both checks
         # passed, and the source now refuses to start. Nothing after this
         # line rolls back (finish_target).
@@ -2072,9 +2180,10 @@ class Mover:
             if ok:
                 self.mark(**{flag: False})
                 continue
-            self.follow_ups.append({"what": what, "command": f"ssh {self.o.target} {command}", "why": why[:300]})
+            line = self.ssh_line(command)
+            self.follow_ups.append({"what": what, "command": line, "why": why[:300]})
             self.warn(f"the bank moved, but this follow-up failed: {what} ({why[:200]}); run: "
-                      f"ssh {self.o.target} {command}")
+                      f"{line}")
 
     # -- rollback ----------------------------------------------------------
     def rollback(self) -> bool:

@@ -332,8 +332,8 @@
       "lock-resolve": "83bcc6b654896c6d",
       "test": "ac414107d3d9c71d",
       "test-lite-linux": "44e2a8f2c01baeab",
-      "test-lite-windows": "40f503540d2b0f92",
-      "test-lite-macos": "c4a0ad0c70bb205a",
+      "test-lite-windows": "22c2566a848419ff",
+      "test-lite-macos": "5ced77a48cb6e58f",
       "frontend": "b1b6a1a1278f2e60"
     },
     "accepted": [
@@ -446,6 +446,16 @@
         "job": "test-lite-windows",
         "fingerprint": "40f503540d2b0f92",
         "reason": "Composes the reviewed S2 Docker restore file and S3 mocked move selectors in the existing pytest step. No new job, setup, shard, or parallelism; both components use fake external effects in these checks."
+      },
+      {
+        "job": "test-lite-windows",
+        "fingerprint": "22c2566a848419ff",
+        "reason": "Adds three mocked move signal-boundary cases with no child processes; native targeted move selection remains about five seconds and the existing measured job budget holds."
+      },
+      {
+        "job": "test-lite-macos",
+        "fingerprint": "5ced77a48cb6e58f",
+        "reason": "Adds four mocked move signal-boundary cases without process or network effects; they take less than one second locally and retain the measured macOS lane cost."
       }
     ]
   }
