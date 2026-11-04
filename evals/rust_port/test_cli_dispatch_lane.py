@@ -267,6 +267,15 @@ def test_help_source_matches_pinned_python_literal_bytes():
     assert (root / "rust/shim/src/cli_help.txt").read_bytes() == pinned_usage()
 
 
+def test_native_help_contract_pins_match_python_wire_bytes():
+    root = Path(__file__).resolve().parents[2]
+    contract = (root / "rust/shim/tests/cli_dispatch_contract.rs").read_text(encoding="utf-8")
+    pins = set(re.findall(r'"([0-9a-f]{64})"', contract))
+    usage = pinned_usage()
+    assert pins == {hashlib.sha256(usage).hexdigest(),
+                    hashlib.sha256(usage.replace(b"\n", b"\r\n")).hexdigest()}
+
+
 def test_help_asset_stays_canonical_in_autocrlf_checkout(tmp_path):
     root = Path(__file__).resolve().parents[2]
     source = tmp_path / "source"
