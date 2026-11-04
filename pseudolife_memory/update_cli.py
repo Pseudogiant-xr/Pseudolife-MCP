@@ -1360,12 +1360,60 @@ class Update:
             raise UpdateError("daemon recreate failed" + (f" ({_last_line(out)})" if out.strip() else "")
                               + "\nto roll back:\n" + "\n".join(self.rollback_lines))
         health = self.wait_health(expect_version=target)
+        self.image_pin_hint(context, target)
         if not self.o.daemon_only:
             self.clients(None, f"pseudolife-mcp=={target}", health)
         else:
             self.hooks_changed_note(previous_digest, health)
         self.console_notes(health)
         # No cache prune: nothing was built.
+
+    def image_pin_hint(self, context: dict, target: str) -> None:
+        """Compare the manager's persistent image with the release just
+        deployed, excluding the overlay and tag used only by this update."""
+        files = context["original_files"]
+        if not files:
+            return
+        args = []
+        values = iter(context["args"])
+        for value in values:
+            if value == "-f":
+                path = next(values)
+                if path in files:
+                    args += [value, path]
+            else:
+                args.append(value)
+        env = compose_environment(context["env_file"])
+        env.pop("PSEUDOLIFE_IMAGE_TAG", None)
+
+        def image(*extra):
+            code, output = run_cli([self.docker, "compose", *args, "config", *extra, "--format", "json"],
+                                    env=env, timeout=60, stdout_only=True)
+            try:
+                return json.loads(output)["services"][DAEMON_SERVICE]["image"] if code == 0 else None
+            except (ValueError, KeyError, TypeError):
+                return None
+
+        configured = image()
+        if not isinstance(configured, str) or "@" in configured:
+            return
+        old = configured.rsplit(":", 1)[-1] if isinstance(configured, str) else ""
+        before, after = version_key(old), version_key(target)
+        if not plain_release(old) or not before or not after or before >= after:
+            return
+        raw = image("--no-interpolate")
+        tag_variable = (re.escape(GHCR_IMAGE) +
+                        r":\$(?:PSEUDOLIFE_IMAGE_TAG|\{PSEUDOLIFE_IMAGE_TAG(?:(?::-|-|:\?|\?)[^}]*)?\})")
+        if isinstance(raw, str) and re.fullmatch(tag_variable, raw):
+            fix = f"set PSEUDOLIFE_IMAGE_TAG={target} in the stack's persistent environment"
+            if context["env_file"]:
+                fix += " (the manager's environment, or " + str(context["env_file"][-1]) + " for Compose)"
+        else:
+            fix = f"set services.{DAEMON_SERVICE}.image: {GHCR_IMAGE}:{target} in {files[-1]}"
+        when = ("if the next manager redeploy omits the updater overlay" if context["image_pin_overlay_masked"]
+                else "before the next manager redeploy")
+        self.warn(f"a saved compose configuration still pins {old}; {when}, {fix} "
+                  "to keep the deployed release after any schema upgrade")
 
     def console_notes(self, health: dict | None) -> None:
         """After a healthy deploy, two lines a user may need and nothing
@@ -1518,8 +1566,17 @@ class Update:
             # their original meaning even when the YAML was exported elsewhere.
             args += ["--project-directory", working_dir]
         args += self._compose_args(files, env_files)
+        original = existing
+        # An earlier update can leave its cached overlay in Compose's labels.
+        # Preserve the package's complete base/overlay pair for ordinary
+        # release installs. Legacy ownership is otherwise unclear,
+        # so that hint is conditional on the manager omitting this overlay.
+        cached = data_dir() / "compose"
+        if not any(p.resolve() == (cached / "docker-compose.yml").resolve() for p in existing):
+            original = [p for p in existing if p.resolve() != (cached / "docker-compose.ghcr.yml").resolve()]
         return {"args": args, "env_file": env_files, "checkout": checkout,
-                "files": [str(p) for p in files], "project": project}
+                "files": [str(p) for p in files], "project": project, "original_files": [str(p) for p in original],
+                "image_pin_overlay_masked": len(original) != len(existing)}
 
     def _bundled(self, name: str) -> Path:
         target = data_dir() / "compose" / name

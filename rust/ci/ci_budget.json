@@ -332,7 +332,7 @@
       "lock-resolve": "83bcc6b654896c6d",
       "test": "ac414107d3d9c71d",
       "test-lite-linux": "44e2a8f2c01baeab",
-      "test-lite-windows": "d0ebc44de922485c",
+      "test-lite-windows": "eb6c54810cb910f6",
       "test-lite-macos": "c4a0ad0c70bb205a",
       "frontend": "b1b6a1a1278f2e60"
     },
@@ -439,6 +439,16 @@
       },
       {
         "job": "test-lite-windows",
+        "fingerprint": "8b52f3592654f7f6",
+        "reason": "Adds six mocked codec cases and one short PowerShell Unicode round-trip to the existing Python step. No new jobs, shards or dependency setup; retain the measured lane baseline within unchanged limits pending the next batch measurement."
+      },
+      {
+        "job": "test-lite-windows",
+        "fingerprint": "39f9b5bdf29bb2fd",
+        "reason": "Combine locale-safe shared fixtures with bounded installer ownership coverage in the existing Windows lane; no new job or setup step."
+      },
+      {
+        "job": "test-lite-windows",
         "fingerprint": "fdd232a6fa8ee551",
         "reason": "Adds eight fixture-only Claude profile notice cases to the existing Python step. They take seconds in targeted runs, add no jobs, shards or dependency setup, and retain the measured baseline within unchanged limits pending the next batch measurement."
       },
@@ -454,8 +464,18 @@
       },
       {
         "job": "test-lite-windows",
+        "fingerprint": "7fbfb546bd825bd1",
+        "reason": "Retain installer ownership tests with the upstream UTF-8 fixture and Claude profile coverage in the existing Windows step; no new job, setup step or retry."
+      },
+      {
+        "job": "test-lite-windows",
         "fingerprint": "d0ebc44de922485c",
         "reason": "Combines the existing mocked Docker backup and restore coverage with the merged profile and codec cases in the same Windows Python step; no new jobs, setup steps or dependencies, and existing measured limits remain unchanged."
+      },
+      {
+        "job": "test-lite-windows",
+        "fingerprint": "eb6c54810cb910f6",
+        "reason": "Combine the existing mocked Docker backup/restore cases with the merged installer resource and Codex discovery coverage in the same Windows step; retain measured limits, jobs, shards, setup and dependencies unchanged."
       }
     ]
   }
