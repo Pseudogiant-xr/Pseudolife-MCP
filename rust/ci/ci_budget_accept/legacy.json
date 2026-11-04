@@ -1,0 +1,402 @@
+{
+  "schema": 1,
+  "legacy": true,
+  "accepted": [
+    {
+      "workflow": "rust.yml",
+      "job": "rust",
+      "fingerprint": "a04c4b10cfbb5b6a",
+      "reason": "The PDFium provisioning step drops --bin pseudolife-daemon now that the package sets default-run; cargo builds and runs the same binary, so the job's cost is unchanged."
+    },
+    {
+      "workflow": "rust.yml",
+      "job": "rust",
+      "fingerprint": "7e31d77eff2ceb0b",
+      "reason": "Drops the -k deselect of the deleted census currency test; the same tests run, so its minutes are unchanged"
+    },
+    {
+      "workflow": "rust.yml",
+      "job": "scope",
+      "fingerprint": "96dd91911ecc126e",
+      "reason": "Classification only: a regenerated producer census beside docs keeps a docs-only diff docs-only; same steps, same minutes"
+    },
+    {
+      "workflow": "rust.yml",
+      "job": "parity-checks",
+      "fingerprint": "76658076fa1ea57e",
+      "reason": "adds one self-hosted-only step (the free-disk check moved out of the lease gate); it is skipped on hosted runners, so no hosted minutes change"
+    },
+    {
+      "workflow": "rust.yml",
+      "job": "scope",
+      "fingerprint": "d10e8ec27d84d0e9",
+      "reason": "2026-10-29: the classify step drops the CI-input regex match; no new step, command or fetch, so its minutes hold"
+    },
+    {
+      "workflow": "rust.yml",
+      "job": "rust",
+      "fingerprint": "59cc6066e4ac1f82",
+      "reason": "adds rust/daemon/harness/test_pgdisposable_slices.py to the existing harness pytest step: no new job, shard or setup step; the file runs 50 tests in 1.45s on a Windows desktop (2026-10-29), so the measured minutes hold"
+    },
+    {
+      "workflow": "rust.yml",
+      "job": "parity-checks",
+      "fingerprint": "06054831b8e7b5d2",
+      "reason": "#1013 adds one pytest file (test_config_knobs_golden.py, about 5 s on Windows: it imports the service module) to the existing Offline W2-D search harness regressions step; no new job, shard or setup"
+    },
+    {
+      "workflow": "rust.yml",
+      "job": "parity",
+      "fingerprint": "aa4ba434de948ea6",
+      "reason": "Adds a run: exit 1 step that runs only when a needed job was cancelled, and skips the verdict step then; the gate runs one of two trivial steps, so its minutes are unchanged"
+    },
+    {
+      "workflow": "rust.yml",
+      "job": "scope",
+      "fingerprint": "1fb3a6e5a5dc0082",
+      "reason": "2026-11-02: the docs rule also counts the port's three unread plan pages (parity_scope.RUST_PLAN_DOCS) as docs; the same single classify step runs, so its minutes are unchanged"
+    },
+    {
+      "workflow": "rust.yml",
+      "job": "scope",
+      "fingerprint": "42b22137f81048ce",
+      "reason": "The body-evidence-only dispatch skips scope; its steps and cost for pull requests, batches and pushes are unchanged."
+    },
+    {
+      "workflow": "rust.yml",
+      "job": "candidate",
+      "fingerprint": "d71c5590ce6f866a",
+      "reason": "Explicit ci/stress dispatch allowlist excludes the nightly body-evidence mode; build steps and budgeted-event cost are unchanged."
+    },
+    {
+      "workflow": "rust.yml",
+      "job": "candidate-harness",
+      "fingerprint": "43b859ee9d5fd738",
+      "reason": "Explicit ci/stress dispatch allowlist excludes the nightly body-evidence mode; build steps and budgeted-event cost are unchanged."
+    },
+    {
+      "workflow": "rust.yml",
+      "job": "daemon-image",
+      "fingerprint": "77d7667c1679a414",
+      "reason": "Moves the same Qwen download from image build to explicit pre-start provisioning; a checksum-keyed model cache avoids repeated downloads. The small reranker download and native checksum verification fit the existing cold-build allowance. Re-measure the batch if hosted timing disagrees."
+    },
+    {
+      "workflow": "rust.yml",
+      "job": "daemon-image",
+      "fingerprint": "b52520e079f13dc1",
+      "reason": "Reuses the built daemon, already-pulled PostgreSQL image and provisioned model cache; adds one small psycopg wheel and a short cold-restart smoke with no new job, image build or model download. Keep the existing cold-build allowance and re-measure if the batch timing disagrees."
+    },
+    {
+      "workflow": "rust.yml",
+      "job": "daemon-image",
+      "fingerprint": "5c93764cb0f0bab7",
+      "reason": "Adds one network-disabled CLI version invocation to the existing image job; no new job or dependency setup. The shim shares the daemon dependency build; retain current budget pending batch measurement."
+    },
+    {
+      "workflow": "rust.yml",
+      "job": "rust",
+      "fingerprint": "7e5f6fc858dd1367",
+      "reason": "The existing Rust job runs setup planning parity after Nextest; the harness reuses the same workspace all-targets feature-unified artifacts, with no new job, matrix row, dependency installation or limit increase. The additional 22 disposable planning cases complete in seconds. Existing R1 workflow changes and their accepted costs are retained."
+    },
+    {
+      "workflow": "rust.yml",
+      "job": "parity-checks",
+      "fingerprint": "fc8882ae92b7f9bb",
+      "reason": "Integrate the bounded R1 recovery, setup, transport, config and stats checks into the existing W1-C shards after the installer workflow merge; no new jobs, shards, dependency installation or setup steps, and budget limits remain unchanged. Re-measure the combined steps from the next integration batch."
+    },
+    {
+      "workflow": "rust.yml",
+      "job": "rust",
+      "fingerprint": "1eaa006de0ab0f43",
+      "reason": "adds one hosted-Linux step removing unused preinstalled SDKs (a few seconds to under a minute of rm -rf) so the default and no-default-features builds fit the runner disk; Windows and self-hosted skip it"
+    },
+    {
+      "workflow": "rust.yml",
+      "job": "parity-checks",
+      "fingerprint": "398ff9a598c5f63e",
+      "reason": "Merge forward after #1208 while retaining the existing R4 CLI selections and their approved cost allowance. Preserves master R1 recovery/setup/transport/config/stats registration and adds the update golden/live row and transaction/wrapper acceptance within existing CLI steps. No new PR job, shard, dependency installation or build. Windows stress run 41425900902 at afe57bbf measured the selected transactions at 122.69s median and wrappers at 46.72s across 20 successful runs; earlier complete Windows dev VM files took 204.55s and 49.64s before later regressions. The conductor approved a bounded addition of eight minutes per CLI shard: retained baseline 384.2 plus sixteen = 400.2 within the unchanged 410 limit, pending batch/master remeasurement. CLI step timeout is 15 minutes; job limit remains 35. Existing master acceptance records remain valid for other steps. update-0 adds two nightly/manual-only source jobs outside the PR budget."
+    },
+    {
+      "workflow": "rust.yml",
+      "job": "parity-checks",
+      "fingerprint": "398ff9a598c5f63e",
+      "reason": "Adds migrate_flat live, record and golden checks to the existing h5-backup shard and PostgreSQL setup. The 32-case Linux run at 66b7b064 took 68.7 seconds across those three stages; no gated job or shard is added. Retain the measured baseline within unchanged limits pending batch remeasurement. Its single source mutant gets one additional nightly/manual shard per OS and remains excluded from PR and batch events."
+    },
+    {
+      "workflow": "rust.yml",
+      "job": "parity-checks",
+      "fingerprint": "398ff9a598c5f63e",
+      "reason": "The migrate_flat row stays in existing h5-backup selection; this unchanged job fingerprint makes the acceptance a cost annotation, not a new selection gate. The 34-case Windows run at 1f9e646e measured 77.93s live, 40.93s record and 30.51s golden (149.37s total); Linux previously measured 68.7s for 32 cases, and the new 34-case Linux capture took 27.97s. No gated job, setup or shard is added. This fits the existing bounded per-shard allowance and unchanged workflow limits; retain the baseline pending batch measurement. Its source mutant remains nightly/manual only."
+    },
+    {
+      "workflow": "rust.yml",
+      "job": "parity-checks",
+      "fingerprint": "3d8e223dcbc15bc0",
+      "reason": "Issue #1211: Windows judges step deadline 15 -> 20 minutes plus eight Stopwatch/Write-Host phase timings; no jobs, setup, commands or cases added. Paired Windows VM totals at a461bac9 and batch 8b63e007 were 584.6s and 541.3s; hosted step 554s at master, 901s timeout then 519s pass at unchanged batch head (runs 41627644757 and 41630214341). Existing measured job costs and budget limits retained; slow-runner headroom only."
+    },
+    {
+      "workflow": "rust.yml",
+      "job": "rust",
+      "fingerprint": "8c868dd3971a8c76",
+      "reason": "Slow-runner headroom only: Rust job timeout-minutes 45 -> 60. No steps, commands, jobs or shards change. Warm hosted Windows at the same code: batch run 41691166042 passed (Nextest 9.6, no-default 7.4, override builds 11.9 min); master run 41699732205 took 11.8, 8.7 and 15.9 min and was cancelled at 45 min inside the override builds. Measured costs retained."
+    },
+    {
+      "workflow": "rust.yml",
+      "job": "scope",
+      "fingerprint": "d23643b742a21a7f",
+      "reason": "Adds a schedule-only API read; pull-request, merge-group and push steps and budgets are unchanged."
+    },
+    {
+      "workflow": "rust.yml",
+      "job": "rust",
+      "fingerprint": "33fe61909b0b90e2",
+      "reason": "Only skips repeated schedule coverage after an exact-SHA successful push; budgeted events execute the same steps."
+    },
+    {
+      "workflow": "rust.yml",
+      "job": "parity-checks",
+      "fingerprint": "ab282b9140895f8a",
+      "reason": "Only skips repeated schedule coverage after an exact-SHA successful push; budgeted events execute the same steps."
+    },
+    {
+      "workflow": "rust.yml",
+      "job": "daemon-image",
+      "fingerprint": "31a69053363f366c",
+      "reason": "Only skips repeated schedule coverage after an exact-SHA successful push; budgeted events execute the same steps."
+    },
+    {
+      "workflow": "rust.yml",
+      "job": "parity",
+      "fingerprint": "4b13f8c55b6e3de3",
+      "reason": "Only skips repeated schedule coverage after an exact-SHA successful push; budgeted events execute the same steps."
+    },
+    {
+      "workflow": "rust.yml",
+      "job": "scope",
+      "fingerprint": "702c44bef393994a",
+      "reason": "Adds manual-CI-only frozen-base binding and admission checks; PR, merge-group, push and scheduled execution costs and case selections are unchanged."
+    },
+    {
+      "workflow": "rust.yml",
+      "job": "rust",
+      "fingerprint": "7590eb3bcb1d8a02",
+      "reason": "Adds manual-CI-only frozen-base binding and admission checks; PR, merge-group, push and scheduled execution costs and case selections are unchanged."
+    },
+    {
+      "workflow": "rust.yml",
+      "job": "fixtures",
+      "fingerprint": "2c17c5dbf6eed90d",
+      "reason": "Adds manual-CI-only frozen-base binding and admission checks; PR, merge-group, push and scheduled execution costs and case selections are unchanged."
+    },
+    {
+      "workflow": "rust.yml",
+      "job": "candidate",
+      "fingerprint": "0930d9d93aaa182c",
+      "reason": "Adds manual-CI-only frozen-base binding and admission checks; PR, merge-group, push and scheduled execution costs and case selections are unchanged."
+    },
+    {
+      "workflow": "rust.yml",
+      "job": "candidate-harness",
+      "fingerprint": "bd0fa77d268d561a",
+      "reason": "Adds manual-CI-only frozen-base binding and admission checks; PR, merge-group, push and scheduled execution costs and case selections are unchanged."
+    },
+    {
+      "workflow": "rust.yml",
+      "job": "parity-checks",
+      "fingerprint": "4cbb211eb8ea7eaa",
+      "reason": "Adds manual-CI-only frozen-base binding and admission checks; PR, merge-group, push and scheduled execution costs and case selections are unchanged."
+    },
+    {
+      "workflow": "rust.yml",
+      "job": "daemon-image",
+      "fingerprint": "028fd79f06c19794",
+      "reason": "Adds manual-CI-only frozen-base binding and admission checks; PR, merge-group, push and scheduled execution costs and case selections are unchanged."
+    },
+    {
+      "workflow": "rust.yml",
+      "job": "parity-checks",
+      "fingerprint": "9b57a9a883e0be80",
+      "reason": "Successful judge commands and case selectors are identical. Native failures are accumulated across comparison phases; setup and resource gates remain fatal. Adds only a standard-library receipt summary, no jobs or shards; hosted after-cost measurement remains pending."
+    },
+    {
+      "workflow": "ci.yml",
+      "job": "test-lite-windows",
+      "fingerprint": "01f3aa5029dd38ce",
+      "reason": "adds tests/test_runner_cleanup.py (15 cases, under 1 s locally); no new setup or step"
+    },
+    {
+      "workflow": "ci.yml",
+      "job": "test-lite-windows",
+      "fingerprint": "01f3aa5029dd38ce",
+      "reason": "adds tests/test_runner_cleanup.py (19 cases, under 1 s locally); no new setup or step"
+    },
+    {
+      "workflow": "ci.yml",
+      "job": "test-lite-windows",
+      "fingerprint": "01f3aa5029dd38ce",
+      "reason": "adds tests/test_runner_cleanup.py (22 cases, under 1 s locally); no new setup or step"
+    },
+    {
+      "workflow": "ci.yml",
+      "job": "test-lite-windows",
+      "fingerprint": "01f3aa5029dd38ce",
+      "reason": "adds tests/test_runner_cleanup.py (23 cases, under 1 s locally); no new setup or step"
+    },
+    {
+      "workflow": "ci.yml",
+      "job": "scope",
+      "fingerprint": "3954688b694461a6",
+      "reason": "2026-10-29: the classify step drops the CI-input grep; no new step, command or fetch, so its minutes hold"
+    },
+    {
+      "workflow": "ci.yml",
+      "job": "test-lite-windows",
+      "fingerprint": "931a46f2dd7a6c48",
+      "reason": "adds tests/test_prune_worktrees.py and tests/test_ops_install_worktree_retention.py to the one pytest step, beside tests/test_runner_cleanup.py from master: no new job, shard or setup step; about +1 minute of test time (both files ran in 57s natively on Windows 2026-10-27), keeping runner minutes near 62 of the 67 limit; re-measure from the next batch run"
+    },
+    {
+      "workflow": "ci.yml",
+      "job": "test-lite-macos",
+      "fingerprint": "2abde9b5cf74fc3d",
+      "reason": "adds tests/test_prune_worktrees.py to the one pytest step: no new job, shard or setup step; about +1 minute of test time (the file ran in 52s natively on Windows 2026-10-27), keeping runner minutes near 62 of the 67 limit; re-measure from the next batch run"
+    },
+    {
+      "workflow": "ci.yml",
+      "job": "test-lite-windows",
+      "fingerprint": "4c14277e515e1711",
+      "reason": "adds tests/test_selfhosted_windows_scripts.py (9 cases, about 4 s locally) to the one pytest step beside master's runner-cleanup and worktree-retention files; no new setup or step"
+    },
+    {
+      "workflow": "ci.yml",
+      "job": "test-lite-windows",
+      "fingerprint": "b628a0135e33c187",
+      "reason": "adds tests/test_unattended_update.py (49 cases, under 1 s on Windows locally, all scheduler and Docker calls faked); no new setup or step"
+    },
+    {
+      "workflow": "ci.yml",
+      "job": "test-lite-windows",
+      "fingerprint": "e3f25bec895919f9",
+      "reason": "renames tests/test_delegate_watch.py to tests/test_conductor_watch.py with the same tests; the lane runs the same cases, so its measured minutes still hold"
+    },
+    {
+      "workflow": "ci.yml",
+      "job": "test-lite-macos",
+      "fingerprint": "a47359a37a210714",
+      "reason": "renames tests/test_delegate_watch.py to tests/test_conductor_watch.py with the same tests; the lane runs the same cases, so its measured minutes still hold"
+    },
+    {
+      "workflow": "ci.yml",
+      "job": "test-lite-windows",
+      "fingerprint": "6e7e01bfd190bb0c",
+      "reason": "adds tests/test_installer_client_update_schedule.py (107 cases, 52 s natively on Windows 2026-11-01: Git Bash and pwsh subprocesses running extracted installer blocks with stub commands) to the one pytest step: no new job, shard or setup step; re-measure from the next batch run"
+    },
+    {
+      "workflow": "ci.yml",
+      "job": "test-lite-macos",
+      "fingerprint": "d096d17d3377ee89",
+      "reason": "adds tests/test_installer_client_update_schedule.py (107 cases, 52 s natively on Windows 2026-11-01, where each bash and pwsh subprocess starts slower than on macOS) to the one pytest step: no new job, shard or setup step; re-measure from the next batch run"
+    },
+    {
+      "workflow": "ci.yml",
+      "job": "test-lite-windows",
+      "fingerprint": "bcfe230f76563a56",
+      "reason": "Adds tests/test_update_engine.py (86 tests) to the existing pytest step: the 20 successful windows-latest runs in 41337404983 at c6078ec2 measured 10.235s median (6.41-16.05s), an estimated +0.17 runner-minutes. No new job, shard or setup step; accept this bounded addition within the unchanged budget limits. The recorded full-lane baseline is retained pending full-job remeasurement from the next batch run."
+    },
+    {
+      "workflow": "ci.yml",
+      "job": "test-lite-windows",
+      "fingerprint": "3bb6d833f0724f2e",
+      "reason": "Add four stub-only Claude batch prompt regressions; the native Windows targeted run took 0.12 seconds, with no dependencies, jobs or shards added."
+    },
+    {
+      "workflow": "ci.yml",
+      "job": "test-lite-windows",
+      "fingerprint": "174f440964ff7254",
+      "reason": "adds tests/test_child_python.py, a few seconds of interpreter spawns"
+    },
+    {
+      "workflow": "ci.yml",
+      "job": "test-lite-macos",
+      "fingerprint": "c4a0ad0c70bb205a",
+      "reason": "adds tests/test_child_python.py, a few seconds of interpreter spawns"
+    },
+    {
+      "workflow": "ci.yml",
+      "job": "test-lite-windows",
+      "fingerprint": "0cf37dff07f5dab1",
+      "reason": "adds one test_suite_lock node (the ops/wsl-suite.ps1 marker-forwarding check, one short pwsh spawn), seconds against the lane's measured minutes"
+    },
+    {
+      "workflow": "ci.yml",
+      "job": "test-lite-macos",
+      "fingerprint": "c4a0ad0c70bb205a",
+      "reason": "adds one test_suite_lock node (the ops/wsl-suite.ps1 marker-forwarding check, one short pwsh spawn), seconds against the lane's measured minutes"
+    },
+    {
+      "workflow": "ci.yml",
+      "job": "test-lite-windows",
+      "fingerprint": "0e3d38b7bd3bfdc3",
+      "reason": "Adds the 33 migration tests to the existing PostgreSQL-backed step (9.15 seconds in the native Windows targeted run on 2026-11-03). No new job, setup step or shard; retain the measured lane baseline within unchanged limits pending the next batch measurement."
+    },
+    {
+      "workflow": "ci.yml",
+      "job": "test-lite-windows",
+      "fingerprint": "fdd232a6fa8ee551",
+      "reason": "Adds eight fixture-only Claude profile notice cases to the existing Python step. They take seconds in targeted runs, add no jobs, shards or dependency setup, and retain the measured baseline within unchanged limits pending the next batch measurement."
+    },
+    {
+      "workflow": "ci.yml",
+      "job": "scope",
+      "fingerprint": "53f970c03bdfbd83",
+      "reason": "Adds a schedule-only API read; pull-request, merge-group and push steps and budgets are unchanged."
+    },
+    {
+      "workflow": "ci.yml",
+      "job": "lock-resolve",
+      "fingerprint": "8a6a510bef8d635b",
+      "reason": "Only skips repeated schedule coverage after an exact-SHA successful push; budgeted events execute the same steps."
+    },
+    {
+      "workflow": "ci.yml",
+      "job": "test",
+      "fingerprint": "bb217dd816ccb0b8",
+      "reason": "Only skips repeated schedule coverage after an exact-SHA successful push; budgeted events execute the same steps."
+    },
+    {
+      "workflow": "ci.yml",
+      "job": "test-lite-linux",
+      "fingerprint": "a1c2bb60ed678398",
+      "reason": "Only skips repeated schedule coverage after an exact-SHA successful push; budgeted events execute the same steps."
+    },
+    {
+      "workflow": "ci.yml",
+      "job": "test-lite-windows",
+      "fingerprint": "77c0c3b6cb8725a7",
+      "reason": "Only skips repeated schedule coverage after an exact-SHA successful push; budgeted events execute the same steps."
+    },
+    {
+      "workflow": "ci.yml",
+      "job": "test-lite-macos",
+      "fingerprint": "c9eb0018bdc7b158",
+      "reason": "Only skips repeated schedule coverage after an exact-SHA successful push; budgeted events execute the same steps."
+    },
+    {
+      "workflow": "ci.yml",
+      "job": "frontend",
+      "fingerprint": "1917ccf176734abe",
+      "reason": "Only skips repeated schedule coverage after an exact-SHA successful push; budgeted events execute the same steps."
+    },
+    {
+      "workflow": "ci.yml",
+      "job": "test-lite-windows",
+      "fingerprint": "7a0a0b4ce51f8771",
+      "reason": "Combines eight fixture-only Claude profile cases with six mocked codec cases and one short PowerShell Unicode round-trip in the existing Python step. No new jobs, shards or dependency setup; retain the measured lane baseline within unchanged limits pending the next batch measurement."
+    },
+    {
+      "workflow": "ci.yml",
+      "job": "test-lite-windows",
+      "fingerprint": "cb35dc3e3af3fd64",
+      "reason": "Merge master 159ecdcd: retain its reviewed lane selections and the branch scheduled-push dedupe; budgeted event steps are identical to master. Only derived metadata conflicted."
+    }
+  ]
+}
