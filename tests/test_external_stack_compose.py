@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -26,6 +27,12 @@ def expected_stack():
     for service in expected["services"].values():
         del service["build"]
     ghcr = load(ROOT / "ops/docker-compose.ghcr.yml")
+    # Image replacement is the only supported overlay difference. A new
+    # runtime override must be accounted for here rather than silently lost.
+    assert set(ghcr) == {"services"}, "unhandled GHCR overlay top-level settings"
+    assert set(ghcr["services"]) == set(expected["services"]), "unhandled GHCR overlay services"
+    for service in ghcr["services"].values():
+        assert set(service) == {"image"}, "unhandled GHCR overlay runtime settings"
     expected["services"]["pseudolife-pg"]["image"] = ghcr["services"]["pseudolife-pg"]["image"]
     daemon = expected["services"][DAEMON]
     daemon["image"] = ghcr["services"][DAEMON]["image"]
@@ -71,6 +78,20 @@ def test_opt_in_sidecar_accounts_for_the_remaining_upstream_service():
     sidecar = load(SIDECAR)
     assert sidecar == {"services": {EXTRACTOR: base["services"][EXTRACTOR]}}
     assert set(load(STACK)["services"]) | set(sidecar["services"]) == set(base["services"])
+
+
+def test_ghcr_runtime_additions_are_not_silently_ignored(monkeypatch):
+    original = load
+
+    def with_extra_setting(path):
+        document = original(path)
+        if path.name == "docker-compose.ghcr.yml":
+            document["services"][DAEMON]["environment"] = {"NEW_RUNTIME_SETTING": "fixture"}
+        return document
+
+    monkeypatch.setitem(expected_stack.__globals__, "load", with_extra_setting)
+    with pytest.raises(AssertionError, match="GHCR overlay"):
+        expected_stack()
 
 
 def test_release_updater_recognises_stack_and_preserves_env(tmp_path, monkeypatch):
