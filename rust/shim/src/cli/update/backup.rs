@@ -43,6 +43,9 @@ fn connection_parts(daemon: &Value, postgres: &Value) -> Option<(String, String)
     let config = get("PSEUDOLIFE_MCP_DATABASE_URL")?
         .parse::<tokio_postgres::Config>()
         .ok()?;
+    if !config.get_hostaddrs().is_empty() {
+        return None;
+    }
     let host = match config.get_hosts() {
         [] => get("PGHOST")?,
         [tokio_postgres::config::Host::Tcp(host)] => host,
@@ -137,6 +140,24 @@ mod connection_tests {
     fn backup_connection_uses_runtime_authority_and_libpq_defaults() {
         for (dsn, extra, user, db) in [
             (
+                "postgresql://custom@pseudolife-pg:5432/bank",
+                vec!["PGPORT=9999"],
+                "custom",
+                "bank",
+            ),
+            (
+                "postgresql://custom@pseudolife-pg/bank?sslmode=verify-full&sslrootcert=/fixture/root.pem",
+                vec![],
+                "custom",
+                "bank",
+            ),
+            (
+                "host=pseudolife-pg user=custom dbname=bank sslmode=verify-full sslrootcert=/fixture/root.pem",
+                vec![],
+                "custom",
+                "bank",
+            ),
+            (
                 "postgresql://custom:fixture@pseudolife-pg/custom_bank",
                 vec![],
                 "custom",
@@ -216,6 +237,10 @@ mod connection_tests {
                 vec![],
             ),
             ("postgresql://custom@pseudolife-pg:9999/bank", vec![]),
+            (
+                "postgresql://custom@pseudolife-pg/bank",
+                vec!["PGPORT=9999"],
+            ),
         ] {
             let (daemon, pg) = fixture(dsn, &extra);
             assert!(connection_parts(&daemon, &pg).is_none());

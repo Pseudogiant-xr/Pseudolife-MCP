@@ -48,6 +48,9 @@ def fake_backup(monkeypatch, tmp_path, config, *, dump_rc=0, tar_rc=0):
     ("host=pseudolife-pg user=custom dbname='bank with spaces' password=fixture", {}, ("custom", "bank with spaces")),
     ("postgresql://pseudolife-pg", {"PGUSER": "runtime_user"}, ("runtime_user", "runtime_user")),
     ("postgresql://custom:fixture@pseudolife-pg/wrong?dbname=actual", {}, ("custom", "actual")),
+    ("postgresql://custom@pseudolife-pg:5432/bank", {"PGPORT": "9999"}, ("custom", "bank")),
+    ("postgresql://custom@pseudolife-pg/bank?sslmode=verify-full&sslrootcert=/fixture/root.pem", {}, ("custom", "bank")),
+    ("host=pseudolife-pg user=custom dbname=bank sslmode=verify-full sslrootcert=/fixture/root.pem", {}, ("custom", "bank")),
 ])
 def test_builtin_backup_uses_daemon_connection(monkeypatch, tmp_path, dsn, env, expected):
     calls = fake_backup(monkeypatch, tmp_path, containers(dsn, **env))
@@ -67,6 +70,7 @@ def test_builtin_backup_uses_daemon_connection(monkeypatch, tmp_path, dsn, env, 
     ("postgresql://pseudolife-pg/bank", {}),
     ("host=pseudolife-pg user=custom dbname='host=elsewhere'", {}),
     ("postgresql://custom@pseudolife-pg:9999/bank", {}),
+    ("postgresql://custom@pseudolife-pg/bank", {"PGPORT": "9999"}),
 ])
 def test_opaque_backup_connection_refuses_before_writing(monkeypatch, tmp_path, dsn, env):
     calls = fake_backup(monkeypatch, tmp_path, containers(dsn, **env))
