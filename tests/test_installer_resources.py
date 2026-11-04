@@ -219,10 +219,11 @@ def test_ps_volume_creation_consumes_resolved_names_and_stops_on_failure(tmp_pat
         "$ClientOnly=$false\n$envFile='fixture.env'\n"
         "function Get-InstallerPython { 'volume_helper' }\n"
         "function volume_helper { 'custom-bank'; 'custom-state'; $global:LASTEXITCODE=0 }\n"
-        + ps.stub_function("docker", "$global:LASTEXITCODE=1") + block + "\n'CONTINUED'\n")
+        + ps.stub_function("docker", "if ($args[1] -eq 'ls') { $global:LASTEXITCODE=0 } else { $global:LASTEXITCODE=1 }")
+        + block + "\n'CONTINUED'\n")
     assert proc.returncode != 0
-    assert "Could not create bank volume custom-bank" in _output(proc)
-    assert ps.logged() == ["docker|volume create custom-bank"]
+    assert "Could not create volume custom-bank" in _output(proc)
+    assert ps.logged() == ["docker|volume ls --format {{.Name}}", "docker|volume create custom-bank"]
     assert "CONTINUED" not in _output(proc)
 
 

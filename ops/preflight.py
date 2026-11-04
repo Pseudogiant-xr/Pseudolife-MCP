@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 import re
 import socket
@@ -16,11 +17,13 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from ops import preflight_lite
+from pseudolife_memory.principals import env_auth  # noqa: E402
 
 PROJECT = "pseudolife-mcp"
 BEGIN = "# >>> pseudolife-mcp install (managed block — installer rewrites between markers) >>>"
 END = "# <<< pseudolife-mcp install <<<"
-FIELDS = ("PSEUDOLIFE_BANK_VOLUME", "PSEUDOLIFE_STATE_VOLUME", "POSTGRES_PASSWORD")
+FIELDS = ("PSEUDOLIFE_BANK_VOLUME", "PSEUDOLIFE_STATE_VOLUME", "POSTGRES_PASSWORD",
+          "PSEUDOLIFE_MCP_TOKEN", "PSEUDOLIFE_MCP_TOKENS")
 
 
 class Refusal(Exception):
@@ -87,6 +90,65 @@ def volume_names(values: dict[str, str]) -> tuple[str, str]:
     return names
 
 
+def host_path(value: str) -> Path:
+    # A checkout used through WSL and native Windows is still one checkout.
+    if os.name == "nt":
+        match = re.fullmatch(r"/(?:mnt/)?([A-Za-z])/(.*)", value)
+        if match:
+            value = match[1] + ":/" + match[2]
+    elif os.environ.get("WSL_DISTRO_NAME"):
+        match = re.fullmatch(r"([A-Za-z]):[\\/](.*)", value)
+        if match:
+            value = "/mnt/" + match[1].lower() + "/" + match[2].replace("\\", "/")
+    return Path(value).expanduser()
+
+
+def same_path(first: Path, second: Path) -> bool:
+    try:
+        return first.samefile(second)
+    except OSError:
+        return os.path.normcase(str(first.resolve())) == os.path.normcase(str(second.resolve()))
+
+
+def authentication(values: dict[str, str]) -> tuple[dict[str, str], str | None, bool]:
+    mapping, singular = env_auth(values)
+    # Keep a malformed nonempty map distinct from an open configuration: the
+    # daemon fails closed when no entry survives parsing.
+    malformed = bool(values.get("PSEUDOLIFE_MCP_TOKENS")) and not mapping
+    return mapping, singular, malformed
+
+
+def check_daemon_authority(container: dict, env_file: Path, values: dict[str, str]) -> None:
+    labels = container.get("Config", {}).get("Labels") or {}
+    working = labels.get("com.docker.compose.project.working_dir")
+    labelled_env = labels.get("com.docker.compose.project.environment_file")
+    origin_matches = False
+    if labelled_env:
+        original_env = host_path(labelled_env)
+        if not original_env.is_file() and "," in labelled_env:
+            originals = [host_path(value) for value in labelled_env.split(",") if value]
+            if len(originals) > 1 and all(path.is_file() for path in originals):
+                raise Refusal("This stack uses multiple environment files; maintain it with pseudolife-mcp update, which retains that Compose context, instead of this single-env-file installer. Nothing changed.")
+        if not original_env.is_file():
+            raise Refusal(f"The recorded install configuration ({original_env}) is missing; restore it with its original checkout before rerunning. Nothing changed.")
+        if not same_path(original_env, env_file):
+            raise Refusal(f"This stack uses a different install directory ({original_env.parent}); rerun the installer from that directory with its original ops/.env. Nothing changed.")
+        origin_matches = True
+        if working and not host_path(working).is_dir():
+            print("WARN The recorded Compose working directory is unavailable; keep the original ops/.env and use this checkout's installer to refresh the configuration paths.", file=sys.stderr)
+    elif working:
+        original = host_path(working)
+        if not original.is_dir():
+            raise Refusal(f"The recorded install directory ({original}) is missing; restore that checkout and its original ops/.env before rerunning. Nothing changed.")
+        if not same_path(original, env_file.parent):
+            raise Refusal(f"This stack uses a different install directory ({original}); rerun the installer from that checkout with its original ops/.env. Nothing changed.")
+        origin_matches = True
+    existing = dict(value.split("=", 1) for value in container.get("Config", {}).get("Env", []) if "=" in value)
+    live, requested = authentication(existing), authentication(values)
+    if live != requested and (not origin_matches or not any(requested)):
+        raise Refusal("This configuration does not retain the existing daemon authentication; restore the original ops/.env instead of minting replacement credentials, then rerun. Nothing changed.")
+
+
 def check(env_file: Path) -> None:
     ids = docker("ps", "-a", "--format", "{{.ID}}").split()
     containers = json.loads(docker("inspect", *ids)) if ids else []
@@ -101,6 +163,8 @@ def check(env_file: Path) -> None:
             raise Refusal(f"Container {name} belongs to another stack (Compose project: {project or 'unlabelled'}). "
                           "Use that stack's own compose file to update it; for clients only, rerun with "
                           "--client-only --daemon-url <url> (PowerShell: -ClientOnly -DaemonUrl <url>). Nothing changed.")
+        if name == "pseudolife-mcp-daemon" and ours:
+            check_daemon_authority(c, env_file, values)
         mounted = {m.get("Name") for m in c.get("Mounts", []) if m.get("Type") == "volume"}
         if mounted.intersection(selected.values()) and not ours:
             raise Refusal("The selected bank/state volume is attached to another stack. "

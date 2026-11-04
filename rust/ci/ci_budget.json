@@ -332,7 +332,7 @@
       "lock-resolve": "83bcc6b654896c6d",
       "test": "ac414107d3d9c71d",
       "test-lite-linux": "44e2a8f2c01baeab",
-      "test-lite-windows": "c4cc54dc61795f9d",
+      "test-lite-windows": "1d4ea9cb6c340947",
       "test-lite-macos": "27de32b3bc9e0128",
       "frontend": "b1b6a1a1278f2e60"
     },
@@ -449,21 +449,6 @@
       },
       {
         "job": "test-lite-windows",
-        "fingerprint": "e319b9ae1454170d",
-        "reason": "Add bounded read-only lite-bank preflight coverage to the existing Windows installer lane; no new job or setup step."
-      },
-      {
-        "job": "test-lite-windows",
-        "fingerprint": "e319b9ae1454170d",
-        "reason": "Retain bounded read-only lite-bank tests in the existing Windows lane; no new job or setup step."
-      },
-      {
-        "job": "test-lite-macos",
-        "fingerprint": "27de32b3bc9e0128",
-        "reason": "Exercise platform data-directory detection in the existing macOS lite lane; no new job or setup step."
-      },
-      {
-        "job": "test-lite-windows",
         "fingerprint": "fdd232a6fa8ee551",
         "reason": "Adds eight fixture-only Claude profile notice cases to the existing Python step. They take seconds in targeted runs, add no jobs, shards or dependency setup, and retain the measured baseline within unchanged limits pending the next batch measurement."
       },
@@ -479,8 +464,83 @@
       },
       {
         "job": "test-lite-windows",
+        "fingerprint": "987e397aa179f20a",
+        "reason": "Forwards the reviewed move exposure consent and rollback selectors into the existing Windows pytest step; mocked external effects add no setup or process stress and retain measured lane cost."
+      },
+      {
+        "job": "test-lite-windows",
+        "fingerprint": "528e63bb05e8956b",
+        "reason": "Combine locale-safe shared fixture transport with bounded unattended installer coverage in the existing Windows lane; no new job or setup step."
+      },
+      {
+        "job": "test-lite-windows",
+        "fingerprint": "7c3eb46156f5ec89",
+        "reason": "Mechanically combine the existing UTF-8 transport, unattended installer and Claude profile cases in the same Windows pytest step; no new job, setup step or retry."
+      },
+      {
+        "job": "test-lite-windows",
+        "fingerprint": "8e651040e7514ef0",
+        "reason": "Combine the existing unattended installer selection with the reviewed move exposure and ownership coverage after forwarding master; no new job, setup step or retry."
+      },
+      {
+        "job": "test-lite-windows",
+        "fingerprint": "8ffc934b59e52400",
+        "reason": "Add bounded recorded-choice, Compose rerun and runtime-reuse regressions to the existing Windows installer lane; no new job or setup step."
+      },
+      {
+        "job": "test-lite-windows",
+        "fingerprint": "8985a4f4238fee41",
+        "reason": "Retain the existing rerun/runtime tests together with the merged installer UTF-8 and Claude profile coverage in one Windows step; no new job, setup step or retry."
+      },
+      {
+        "job": "test-lite-windows",
+        "fingerprint": "c1904d8d06b14663",
+        "reason": "Retain recorded-choice and runtime-reuse cases alongside the merged move exposure and ownership selection in the existing Windows step; no new job, setup step or retry."
+      },
+      {
+        "job": "test-lite-windows",
+        "fingerprint": "2ecebc7617992401",
+        "reason": "Add bounded original-checkout credential and epilogue coverage to the existing Windows installer lane; no new job or setup step."
+      },
+      {
+        "job": "test-lite-windows",
+        "fingerprint": "cf1d8050c3b9d6d3",
+        "reason": "Retain clone-authority and epilogue coverage with the merged installer UTF-8 and Claude profile cases in the existing Windows step; no new job, setup step or retry."
+      },
+      {
+        "job": "test-lite-windows",
+        "fingerprint": "a69d1a01583503f2",
+        "reason": "Stack clone-authority coverage on the validated unattended and rerun selections plus the reviewed move exposure cases; no new job, setup step or retry."
+      },
+      {
+        "job": "test-lite-windows",
+        "fingerprint": "e319b9ae1454170d",
+        "reason": "Add bounded read-only lite-bank preflight coverage to the existing Windows installer lane; no new job or setup step."
+      },
+      {
+        "job": "test-lite-windows",
+        "fingerprint": "e319b9ae1454170d",
+        "reason": "Retain bounded read-only lite-bank tests in the existing Windows lane; no new job or setup step."
+      },
+      {
+        "job": "test-lite-macos",
+        "fingerprint": "27de32b3bc9e0128",
+        "reason": "Exercise platform data-directory detection in the existing macOS lite lane; no new job or setup step."
+      },
+      {
+        "job": "test-lite-windows",
         "fingerprint": "c4cc54dc61795f9d",
         "reason": "Retain lite-bank detection with the merged installer UTF-8 and Claude profile cases in the existing Windows step; macOS selection and accepted fingerprint are unchanged. No new job, setup step or retry."
+      },
+      {
+        "job": "test-lite-windows",
+        "fingerprint": "1d4ea9cb6c340947",
+        "reason": "Retain lite-bank detection with every validated installer layer and the reviewed move exposure selection in the same Windows step; no new job, setup step or retry."
+      },
+      {
+        "job": "test-lite-macos",
+        "fingerprint": "27de32b3bc9e0128",
+        "reason": "Retain the existing lite-bank platform-path cases after forwarding the installer stack; no change to the macOS selection, setup or job count."
       }
     ]
   }
