@@ -191,7 +191,7 @@ class DockerBank:
             self.daemon_url = f"http://{host}:{bindings[0]['HostPort']}"
 
     def command(self, *args, check=True, timeout=3600):
-        code, output = up.run_cli([self.docker, *args], timeout=timeout, stdout_only=True)
+        code, output = up.run_cli([self.docker, *args], timeout=timeout, stdout_only=True, stderr_on_failure=True)
         if check and code:
             # Docker/psql diagnostics can include private data or resolved URLs.
             raise up.UpdateError(f"Docker {args[0]} failed for the backup/restore; check the containers "
@@ -210,9 +210,16 @@ class DockerBank:
     def psql(self, database: str, *args):
         # The container is the target authority. Inherited libpq address or
         # service settings must never redirect a backup or destructive query.
-        return self.command("exec", self.pg, "env", "-u", "PGHOSTADDR", "-u", "PGSERVICE", "-u", "PGSERVICEFILE",
-                            "psql", "-X", "-h", "/var/run/postgresql", "-p", str(self.db_port),
-                            "-U", self.user, "-d", self._database_arg(database), *args)
+        code, output = self.command("exec", self.pg, "env", "-u", "PGHOSTADDR", "-u", "PGSERVICE", "-u", "PGSERVICEFILE",
+                                    "psql", "-X", "-h", "/var/run/postgresql", "-p", str(self.db_port),
+                                    "-U", self.user, "-d", self._database_arg(database), *args, check=False)
+        if code:
+            reason = output.lower()
+            if code == 2 and "socket" in reason and ("no such file" in reason or "connection refused" in reason):
+                raise up.UpdateError(f"PostgreSQL's local socket is unavailable on port {self.db_port}; "
+                                     "name the selected container's server port with --db-port <port> and retry", 2)
+            raise up.UpdateError(f"PostgreSQL failed inside {self.pg}; check docker logs {self.pg} before retrying")
+        return code, output
 
     def inspect(self, container):
         _, output = self.command("inspect", container, timeout=60)

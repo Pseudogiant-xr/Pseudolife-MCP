@@ -104,6 +104,7 @@ def docker_bank(tmp_path, monkeypatch):
     from pseudolife_memory import docker_backup_restore as module
     from pseudolife_memory.docker_backup_restore import DockerBank
     world = DockerWorld()
+    world.original_run_cli = up.run_cli
     monkeypatch.setattr(up, "run_cli", world.run)
     monkeypatch.setattr(module, "copy_from_container", lambda docker, source, target: world.run([docker, "cp", source, str(target)]))
     monkeypatch.setattr(up, "home", lambda: tmp_path / "home")
@@ -156,6 +157,49 @@ def test_restore_treats_a_conninfo_shaped_database_name_as_a_literal(docker_bank
     assert selected == {"dbname": bank.db}
     drop = next(c[-1] for c in world.calls if "DROP DATABASE" in " ".join(c))
     assert '"host=elsewhere"' in drop
+
+
+@pytest.mark.parametrize("name", ["bank with spaces", "bank-name", "bank'quote"])
+def test_restore_keeps_legitimate_literal_database_names(docker_bank, tmp_path, name):
+    from psycopg.conninfo import conninfo_to_dict
+    bank, world = docker_bank
+    bank.db = name
+    bank.restore(_input_dump(tmp_path), leave_stopped=True)
+    replay = next(c for c in world.calls if "psql" in c and "-f" in c)
+    assert conninfo_to_dict(replay[replay.index("-d") + 1]) == {"dbname": name}
+
+
+def test_missing_postgres_socket_names_the_database_port_fix(docker_bank, monkeypatch):
+    bank, world = docker_bank
+    original = world.run
+
+    def missing_socket(argv, **kwargs):
+        if "psql" in argv:
+            return 2, "psql: connection to server on socket failed: No such file or directory"
+        return original(argv, **kwargs)
+
+    monkeypatch.setattr(up, "run_cli", missing_socket)
+    with pytest.raises(up.UpdateError, match="--db-port"):
+        bank.database_exists()
+
+
+def test_missing_socket_advice_reads_real_command_stderr(docker_bank, monkeypatch):
+    import subprocess
+    bank, world = docker_bank
+    monkeypatch.setattr(up, "run_cli", world.original_run_cli)
+    monkeypatch.setattr(subprocess, "run", lambda argv, **kwargs: subprocess.CompletedProcess(
+        argv, 2, stdout="", stderr="psql: connection to server on socket failed: No such file or directory"))
+    with pytest.raises(up.UpdateError, match="--db-port"):
+        bank.database_exists()
+
+
+def test_successful_postgres_queries_keep_stderr_out_of_data(docker_bank, monkeypatch):
+    import subprocess
+    bank, world = docker_bank
+    monkeypatch.setattr(up, "run_cli", world.original_run_cli)
+    monkeypatch.setattr(subprocess, "run", lambda argv, **kwargs: subprocess.CompletedProcess(
+        argv, 0, stdout="t\n", stderr="a server warning\n"))
+    assert bank.database_exists()
 
 
 def test_restore_binds_every_postgres_client_to_the_selected_local_container(docker_bank, tmp_path):
