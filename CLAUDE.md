@@ -90,6 +90,12 @@ the memory bank; procedures belong in a skill or doc this file points to.
    and raises a limit only with its reason (`rust/ci/test_ci_budget.py`
    enforces both), because every job shares the account's 20 hosted slots
    (`docs/dev/ci-budget.md`).
+10. **A Python behaviour change that a Rust parity row covers changes the
+    native implementation in the same PR**, with those rows run locally,
+    because the Parity gate compares the two and otherwise fails the batch.
+    A change to `cli.py`'s usage text also fails the judges' five
+    `cli_dispatch` help cases by construction (their oracle is merge-base
+    Python): the PR says so, and the maintainer approves it for that batch.
 
 ## Install and update experience
 
@@ -352,9 +358,11 @@ bank ("dev machines homelab"), never in the tree.
   without a VM attempt only when a deflake PR or issue already names it or
   the VM is busy (say so), on the current merge ref, and name the deflake
   in the PR or merge comment.
-- **A PR adding a test that runs on `windows-latest` and rests on process
+- **A PR adding a test, or changing what one spawns, waits on or times,
+  that runs on `windows-latest` and rests on real process
   spawn/wait/kill, sockets or named pipes, file locks or atomic replace, or
-  timeouts (a harness `run.py` scenario included) merges only after 20
+  timeouts (a harness `run.py` scenario included; a test that only mocks
+  them is exempt) merges only after 20
   clean hosted `windows-latest` runs of that test** (the Rust workflow's
   `mode=stress` dispatch), because the VM admits what the runner then
   fails (#835: 0 of 525 on the VM, 3 of 5 hosted).
@@ -430,7 +438,9 @@ prove are yours.
   process tree. Verify its findings against the code and record both reviews in the PR (or
   commit body), each finding labelled by source with its verdict; a
   missing, signed-out or failed Codex run is recorded as a single-reviewer
-  pass.
+  pass. A PR that Codex itself authored meets both passes with one fresh
+  `gpt-6.1-sol` reviewer, since a second same-model review adds cost but
+  no independence.
 - **Those two rules bind only the session that owns the PR** (the main
   thread opening or forwarding it; for an outside contributor's PR, the
   maintainer's session that takes it up). A reviewer of
