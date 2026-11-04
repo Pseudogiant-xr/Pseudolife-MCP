@@ -107,7 +107,8 @@ def engine_host(tmp_path, monkeypatch):
              "health": {"status": "ok", "version": "0.21.0", "schema": 58},
              "running": {"Image": "sha256:validated-python", "State": {"Running": True},
                          "Mounts": [{"Destination": "/data", "Name": "fixture-state"}],
-                         "Config": {"Image": "python:old", "Labels": {}}}}
+                         "Config": {"Image": "python:old", "Labels": {},
+                                    "Env": ["PSEUDOLIFE_MCP_TOKEN=fixture-bearer"]}}}
     config = {"services": {"pseudolife-pg": {"environment": {"POSTGRES_USER": "fixture", "POSTGRES_DB": "fixture"}},
                             up.DAEMON_SERVICE: {"environment": {"PSEUDOLIFE_MCP_TOKEN": "fixture-bearer"},
                                                 "volumes": [{"type": "volume", "source": "state", "target": "/data"}],
@@ -289,7 +290,8 @@ def shadow_host(engine_host, monkeypatch):
     dsn = "postgresql://fixture:fixture@pseudolife-pg:5432/fixture"
     main = s["config"]["services"][up.DAEMON_SERVICE]
     main["environment"]["PSEUDOLIFE_MCP_DATABASE_URL"] = dsn
-    s["running"]["Config"]["Env"] = ["PSEUDOLIFE_MCP_DATABASE_URL=" + dsn]
+    s["running"]["Config"]["Env"] = ["PSEUDOLIFE_MCP_DATABASE_URL=" + dsn,
+                                     "PSEUDOLIFE_MCP_TOKEN=fixture-bearer"]
     shadow = s["config"]["services"][eng.SHADOW_SERVICE]
     shadow.update(image="fixture-rust:checkout", build={"args": {"GIT_SHA": "a" * 40}},
                   volumes=[{"type": "volume", "source": "state", "target": "/data", "read_only": True}],
@@ -624,7 +626,8 @@ def test_changed_host_identity_refuses_before_backup(engine_host, changed):
     from pseudolife_memory import update_engine as eng
     s = engine_host
     if changed == "bank":
-        s["running"]["Config"]["Env"] = ["PSEUDOLIFE_MCP_DATABASE_URL=postgresql://different-bank"]
+        s["running"]["Config"]["Env"] = ["PSEUDOLIFE_MCP_DATABASE_URL=postgresql://different-bank",
+                                         "PSEUDOLIFE_MCP_TOKEN=fixture-bearer"]
     elif changed == "state":
         s["running"]["Mounts"][0]["Name"] = "different-state"
     else:
@@ -713,6 +716,7 @@ def test_colon_bearer_and_running_version_are_preserved(engine_host, monkeypatch
     from pseudolife_memory import update_engine as eng
     s = engine_host
     s["config"]["services"][up.DAEMON_SERVICE]["environment"] = {"PSEUDOLIFE_MCP_TOKENS": "fixture:colon:reader"}
+    s["running"]["Config"]["Env"] = ["PSEUDOLIFE_MCP_TOKENS=fixture:colon:reader"]
     seen = []
     monkeypatch.setattr(eng, "authenticated_read", lambda url, token: seen.append(token) or True)
     update = s["update"]()
@@ -856,6 +860,7 @@ def test_mapped_bearer_matches_daemon_whitespace_and_malformed_entries(engine_ho
     s = engine_host
     env = {"PSEUDOLIFE_MCP_TOKENS": raw}
     s["config"]["services"][up.DAEMON_SERVICE]["environment"] = env
+    s["running"]["Config"]["Env"] = ["PSEUDOLIFE_MCP_TOKENS=" + raw]
     tokens, _ = env_auth(env)
     assert expected in tokens and presented_bearer("Bearer " + expected) == expected
     seen = []
@@ -1127,6 +1132,7 @@ def test_printed_rollback_preserves_http_auth(engine_host, monkeypatch, credenti
     s = engine_host
     value = "fixture-auth" + (":reader" if credential.endswith("TOKENS") else "")
     s["config"]["services"][up.DAEMON_SERVICE]["environment"] = {credential: value}
+    s["running"]["Config"]["Env"] = [credential + "=" + value]
     monkeypatch.delenv("PSEUDOLIFE_MCP_TOKEN", raising=False)
     monkeypatch.delenv("PSEUDOLIFE_MCP_TOKENS", raising=False)
     monkeypatch.setenv(credential, value if source != "env-file" else "wrong-inherited-value")

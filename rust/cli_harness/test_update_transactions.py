@@ -434,7 +434,8 @@ def host(tmp_path, failure="", mode="release"):
              "running": {"Id": "fixture-daemon", "Image": "sha256:validated", "State": {"Running": True},
                          "Mounts": [{"Destination": "/data", "Name": "fixture-state", "Type": "volume", "RW": True}],
                          "Config": {"Image": "pseudolife-daemon:0.21.0", "Labels": None,
-                                    "Env": ["PSEUDOLIFE_MCP_DATABASE_URL=postgresql://fixture:fixture@pseudolife-pg:5432/fixture"]}}}
+                                    "Env": ["PSEUDOLIFE_MCP_DATABASE_URL=postgresql://fixture:fixture@pseudolife-pg:5432/fixture",
+                                            "PSEUDOLIFE_MCP_TOKEN=fixture-bearer"]}}}
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):
@@ -922,6 +923,8 @@ def test_plain_update_accepts_tokenless_host_and_scaffolded_env(tmp_path, mode):
     with host(tmp_path, mode=mode) as (repo, env, state_path):
         state = json.loads(state_path.read_text())
         state["config"]["services"][SERVICE]["environment"].pop("PSEUDOLIFE_MCP_TOKEN")
+        state["running"]["Config"]["Env"] = [entry for entry in state["running"]["Config"]["Env"]
+                                             if not entry.startswith("PSEUDOLIFE_MCP_TOKEN=")]
         state_path.write_text(json.dumps(state))
         if mode == "checkout":
             (repo / "ops/.env").unlink()
@@ -1127,6 +1130,8 @@ def test_plain_release_after_python_activation_does_not_require_bearer(tmp_path)
         labels.update({"org.pseudolife.engine": "python", "org.pseudolife.release": "0.21.0",
                        "org.pseudolife.activation": "accepted-fixture"})
         state["config"]["services"][SERVICE]["environment"].pop("PSEUDOLIFE_MCP_TOKEN")
+        state["running"]["Config"]["Env"] = [entry for entry in state["running"]["Config"]["Env"]
+                                             if not entry.startswith("PSEUDOLIFE_MCP_TOKEN=")]
         state_path.write_text(json.dumps(state))
         accepted = Path(env["PSEUDOLIFE_MCP_DATA_DIR"]) / "update-engine/docker-compose.release-accepted.json"
         accepted.parent.mkdir(parents=True)

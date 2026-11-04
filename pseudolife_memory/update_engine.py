@@ -244,7 +244,12 @@ class EngineUpdate:
         if not self.running.get("State", {}).get("Running"):
             raise up.UpdateError("the current daemon must be running for the backup and rollback tag; start it and retry", 2)
         daemon_env = config["services"][up.DAEMON_SERVICE].get("environment", {})
-        running_env = dict(item.split("=", 1) for item in self.running["Config"].get("Env", []) if "=" in item)
+        entries = self.running["Config"].get("Env")
+        if not isinstance(entries, list) or not all(isinstance(item, str) and "=" in item for item in entries):
+            raise up.UpdateError("cannot verify the daemon's Compose bearer settings; restore the original compose "
+                                 "and env files, then retry. Nothing was changed", 2)
+        running_env = dict(item.split("=", 1) for item in entries)
+        up.verify_compose_bearers(daemon_env, running_env)
         if running_env.get("PSEUDOLIFE_MCP_DATABASE_URL") != daemon_env.get("PSEUDOLIFE_MCP_DATABASE_URL"):
             raise up.UpdateError("the host Compose configuration names a different bank from the running daemon; restore its original env file before switching; nothing was changed", 2)
         data_mount = next((v for v in config["services"][up.DAEMON_SERVICE].get("volumes", []) if v.get("target") == "/data"), None)
