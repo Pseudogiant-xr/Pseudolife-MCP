@@ -687,6 +687,31 @@ def test_plain_checkout_update_with_null_daemon_labels(world, clients, tmp_path)
     assert argv[-5:] == ["up", "-d", "--no-deps", "--build", "pseudolife-daemon"]
 
 
+def test_checkout_refuses_foreign_project_before_backup_or_env_write(world, clients, tmp_path, capsys, monkeypatch):
+    root, _ = _checkout(world, tmp_path, repo=False)
+    monkeypatch.setattr(up, "tree_state", lambda _: {"sha": "a" * 40, "dirty": "false", "lines": [], "error": ""})
+    world.container["labels"] = {"com.docker.compose.project": "external-stack"}
+    assert _run(["--checkout", str(root)]) == 2
+    err = capsys.readouterr().err
+    assert "external-stack" in err and "docker compose -p external-stack down" in err
+    assert "pseudolife-mcp update" in err and "release mode" in err and "Nothing was changed" in err
+    assert "down -v" not in err
+    assert not (root / "ops" / ".env").exists()
+    assert not any(c.startswith(("tag ", "exec ", "cp ", "builder ", "rmi ")) or " up " in c
+                   for c in world.docker_calls())
+    assert clients == []
+
+
+def test_checkout_accepts_installer_project_from_another_checkout_path(world, clients, tmp_path, monkeypatch):
+    root, _ = _checkout(world, tmp_path, repo=False)
+    monkeypatch.setattr(up, "tree_state", lambda _: {"sha": "a" * 40, "dirty": "false", "lines": [], "error": ""})
+    (root / "ops" / ".env").write_text("PSEUDOLIFE_BANK_VOLUME=ops_pseudolife_pgdata\n"
+                                       "PSEUDOLIFE_STATE_VOLUME=ops_pseudolife_data\n", encoding="utf-8")
+    world.container["labels"] = {"com.docker.compose.project": "pseudolife-mcp"}
+    assert _run(["--checkout", str(root), "--no-backup", "--no-cache-prune"]) == 0
+    assert _compose_call(world)[0] is not None
+
+
 def test_a_clean_checkout_is_built_with_its_commit_stamp(world, clients, tmp_path):
     root, sha = _checkout(world, tmp_path)
     assert _run(["--checkout", str(root), "--no-backup", "--no-cache-prune", "--rollback-tag", "unittest"]) == 0

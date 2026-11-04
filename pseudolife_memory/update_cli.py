@@ -568,9 +568,14 @@ class Update:
         # Held from before the daemon's version is read until the run ends,
         # so an unattended run (or a second terminal) cannot interleave.
         with UpdateLock():
+            if self.o.checkout is not None and (self.o.allow_dirty or
+                    tree_state(Path(self.o.checkout).resolve())["dirty"] == "false"):
+                self.refuse_foreign_checkout_project()
             from pseudolife_memory.update_engine import selected_checkout, deploy_engine
             engine_checkout = selected_checkout(self)
             if engine_checkout is not None:
+                if self.o.checkout is None:
+                    self.refuse_foreign_checkout_project()
                 self.report.mode = "checkout"
                 deploy_engine(self, engine_checkout)
             elif self.o.checkout is not None:
@@ -1007,6 +1012,23 @@ class Update:
             self.step(text)
 
     # -- docker: checkout mode ---------------------------------------------
+    def refuse_foreign_checkout_project(self) -> None:
+        """A checkout builds the installer's project, never another stack
+        that happens to use the same container names. Check before even
+        scaffolding its env file, backing up or tagging a rollback."""
+        code, out = run_cli([self.docker, "inspect", "-f", "{{json .Config.Labels}}", DAEMON_CONTAINER],
+                            timeout=60, stdout_only=True)
+        try:
+            labels = (json.loads(out) or {}) if code == 0 else {}
+        except ValueError:
+            labels = {}
+        project = labels.get("com.docker.compose.project")
+        if project and project != "pseudolife-mcp":
+            raise UpdateError(f"the running daemon belongs to compose project {project!r}, while checkout mode "
+                              "deploys pseudolife-mcp. From that project's compose directory, run "
+                              f"`docker compose -p {project} down` (keep its volumes) before a checkout deploy, "
+                              "or use release mode: `pseudolife-mcp update`. Nothing was changed", 2)
+
     def deploy_checkout(self) -> None:
         repo = Path(self.o.checkout).resolve()
         compose_file = repo / "ops" / "docker-compose.yml"

@@ -42,6 +42,17 @@ def test_shadow_requires_explicit_rust(capsys):
     assert "--engine rust" in capsys.readouterr().err
 
 
+@pytest.mark.parametrize("engine,shadow", [("rust", False), ("rust", True), ("python", False)])
+def test_engine_checkout_refuses_foreign_project_before_mutation(engine_host, capsys, engine, shadow):
+    state = engine_host
+    state["running"]["Config"]["Labels"] = {"com.docker.compose.project": "external-stack"}
+    update = state["update"](engine, shadow=shadow)
+    assert update.run() == 2
+    assert "docker compose -p external-stack down" in capsys.readouterr().err
+    assert not any("backup." in " ".join(c) or c[1:2] == ["tag"] or "build" in c or "up" in c
+                   for c in state["calls"])
+
+
 def test_d2_preflight_rejects_old_schema_and_pending_import():
     from pseudolife_memory.update_engine import require_imported_bank
     for schema, pending in ((56, False), (58, True), (None, False)):
