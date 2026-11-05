@@ -332,7 +332,7 @@
       "lock-resolve": "83bcc6b654896c6d",
       "test": "ac414107d3d9c71d",
       "test-lite-linux": "44e2a8f2c01baeab",
-      "test-lite-windows": "1d4ea9cb6c340947",
+      "test-lite-windows": "a73db89ce5759326",
       "test-lite-macos": "27de32b3bc9e0128",
       "frontend": "b1b6a1a1278f2e60"
     },
@@ -469,6 +469,11 @@
       },
       {
         "job": "test-lite-windows",
+        "fingerprint": "b2bceebaefd33725",
+        "reason": "Retain upstream move-consent/rollback, installer-ownership, UTF-8 and profile selectors plus the previously validated bounded autostart files in the existing Windows step. Mocked move effects require no extra setup or process stress; no jobs, shards, retries or budget limits are added."
+      },
+      {
+        "job": "test-lite-windows",
         "fingerprint": "528e63bb05e8956b",
         "reason": "Combine locale-safe shared fixture transport with bounded unattended installer coverage in the existing Windows lane; no new job or setup step."
       },
@@ -481,6 +486,11 @@
         "job": "test-lite-windows",
         "fingerprint": "8e651040e7514ef0",
         "reason": "Combine the existing unattended installer selection with the reviewed move exposure and ownership coverage after forwarding master; no new job, setup step or retry."
+      },
+      {
+        "job": "test-lite-windows",
+        "fingerprint": "c768d5c6971c67aa",
+        "reason": "Combine the existing unattended installer selection with the landed autostart/runtime cases in the same Windows step after forwarding batch-9 master; no new job, setup step or retry."
       },
       {
         "job": "test-lite-windows",
@@ -499,6 +509,11 @@
       },
       {
         "job": "test-lite-windows",
+        "fingerprint": "74b2b75b2326bea1",
+        "reason": "Retain runtime-reuse and rerun selectors with the landed shim Python, cutover and autostart-reference cases in the existing Windows step; no new job, setup step or retry."
+      },
+      {
+        "job": "test-lite-windows",
         "fingerprint": "2ecebc7617992401",
         "reason": "Add bounded original-checkout credential and epilogue coverage to the existing Windows installer lane; no new job or setup step."
       },
@@ -511,6 +526,11 @@
         "job": "test-lite-windows",
         "fingerprint": "a69d1a01583503f2",
         "reason": "Stack clone-authority coverage on the validated unattended and rerun selections plus the reviewed move exposure cases; no new job, setup step or retry."
+      },
+      {
+        "job": "test-lite-windows",
+        "fingerprint": "408c1e1960801667",
+        "reason": "Retain clone-authority coverage alongside the forwarded installer/autostart/runtime selections in the existing Windows step; no new job, setup step or retry."
       },
       {
         "job": "test-lite-windows",
@@ -541,6 +561,16 @@
         "job": "test-lite-macos",
         "fingerprint": "27de32b3bc9e0128",
         "reason": "Retain the existing lite-bank platform-path cases after forwarding the installer stack; no change to the macOS selection, setup or job count."
+      },
+      {
+        "job": "test-lite-windows",
+        "fingerprint": "a73db89ce5759326",
+        "reason": "Retain the complete installer stack and lite cases with the landed runtime/autostart coverage in the existing Windows step; no new job, setup step or retry."
+      },
+      {
+        "job": "test-lite-macos",
+        "fingerprint": "27de32b3bc9e0128",
+        "reason": "Retain the unchanged lite-bank macOS test selection after forwarding batch-9 master; no new case, setup step or job."
       }
     ]
   }

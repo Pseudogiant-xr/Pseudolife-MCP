@@ -51,8 +51,8 @@ def test_an_unreadable_or_empty_pull_request_diff_runs_every_suite(files):
     (["tests/test_shim.py", "tests/conftest.py"], set()),
     # One command's shim code reaches its rows and the judges.
     (["rust/shim/src/cli/doctor/mod.rs"], {"w1c-doctor", "judges"}),
-    (["rust/shim/src/cli/update/engine.rs"], {"judges"}),
-    (["rust/shim/src/cli/backup/mod.rs"], {"h5-backup", "judges"}),
+    (["rust/shim/src/cli/update/engine.rs"], {"w1c-doctor", "judges"}),
+    (["rust/shim/src/cli/backup/mod.rs"], {"h5-backup", "w1c-doctor", "judges"}),
     (["rust/shim/src/cli/transfer/mod.rs"], {"w1c-pairing", "judges"}),
     # Helpers other commands import reach the whole binary (Codex review:
     # tunnel uses hook_json, board_audit uses lease).
@@ -294,6 +294,20 @@ def test_a_mapped_shim_entry_reaches_only_its_rows(entry):
         owner = entry_of(path)
         assert owner in SHIM_COMMANDS, (entry, str(path.relative_to(ROOT)))
         assert set(SHIM_COMMANDS[owner]) <= set(SHIM_COMMANDS[entry]), (entry, str(path.relative_to(ROOT)))
+
+
+@pytest.mark.parametrize("path, doctor", [
+    ("update/clients/codex.rs", True),
+    ("update/engine.rs", True),
+    ("backup/mod.rs", True),
+    ("backup_help.txt", True),
+    ("maintainer/mod.rs", True),
+    ("doctor/mod.rs", True),
+    ("connect/mod.rs", False),
+])
+def test_runtime_hook_trust_dependencies_select_doctor(path, doctor):
+    suites, _ = select("pull_request", ["rust/shim/src/cli/" + path])
+    assert ("w1c-doctor" in suites) is doctor
 
 
 @pytest.mark.parametrize("entry, user", [("hook_json.rs", "tunnel"), ("lease", "board_audit"),
