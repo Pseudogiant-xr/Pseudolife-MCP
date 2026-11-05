@@ -45,6 +45,7 @@ const DEFERRED_MODES: &[&str] = &[
     "tunnel",
     "move",
     "backup",
+    "restore",
     "export",
     "import",
     "maintainer",
