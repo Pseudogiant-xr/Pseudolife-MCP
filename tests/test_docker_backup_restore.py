@@ -219,6 +219,45 @@ def test_small_system_temp_does_not_refuse_ample_backup_destination(docker_bank,
     assert small not in measured
 
 
+def test_backup_does_not_reapply_initial_floor_after_its_own_dump(tmp_path, monkeypatch):
+    from pseudolife_memory import disk_space, docker_backup_restore as module
+    world = DockerWorld()
+    monkeypatch.setattr(up, "which", lambda _: "docker")
+    monkeypatch.setattr(up, "run_cli", world.run)
+    free = {"bytes": 9 * 1024**3}
+    measured = []
+
+    def usage(path):
+        measured.append(free["bytes"])
+        return types.SimpleNamespace(free=free["bytes"])
+
+    def docker_tar(argv, *, stdout, **kwargs):
+        payload = (gzip.compress(b"-- PostgreSQL database dump complete\n")
+                   if argv[-2].startswith(world.pg_name + ":") else _state_bytes())
+        with tarfile.open(fileobj=stdout, mode="w") as archive:
+            entry = tarfile.TarInfo("artifact")
+            entry.size = len(payload)
+            archive.addfile(entry, io.BytesIO(payload))
+        return types.SimpleNamespace(returncode=0)
+
+    original_copy = module.copy_from_container
+
+    def copy(docker, source, target):
+        original_copy(docker, source, target)
+        if source.startswith(world.pg_name + ":"):
+            # A successful 1.5 GiB dump leaves 7.5 GiB for the small state
+            # archive; that does not invalidate admission at 9 GiB.
+            free["bytes"] = 15 * 1024**3 // 2
+
+    monkeypatch.setattr(disk_space.shutil, "disk_usage", usage)
+    monkeypatch.setattr(module.subprocess, "run", docker_tar)
+    monkeypatch.setattr(module, "copy_from_container", copy)
+    bank = module.DockerBank(log=lambda _: None)
+    result = bank.backup(out=tmp_path / "destination")
+    assert result["dump"].is_file() and result["state"].is_file()
+    assert measured == [9 * 1024**3]
+
+
 @pytest.mark.parametrize("location", ["/var/lib/postgresql/legacy", "/data", "/data/nested", None])
 def test_restore_checks_separate_destination_mounts_before_stop(docker_bank, tmp_path, monkeypatch, location):
     bank, world = docker_bank
@@ -527,7 +566,8 @@ def test_unsafe_state_refuses_before_stopping(docker_bank, tmp_path, name):
 
 
 def test_backup_copy_creates_host_owned_file_instead_of_extracting_container_ownership(tmp_path, monkeypatch):
-    from pseudolife_memory import docker_backup_restore as module
+    from pseudolife_memory import disk_space, docker_backup_restore as module
+    monkeypatch.setattr(disk_space.shutil, "disk_usage", lambda _: types.SimpleNamespace(free=disk_space.MIN_FREE))
 
     def docker_tar(argv, *, stdout, **kwargs):
         assert argv[-1] == "-"
@@ -547,7 +587,8 @@ def test_backup_copy_creates_host_owned_file_instead_of_extracting_container_own
 
 @pytest.mark.parametrize("outcome", ["success", "failure", "interrupt"])
 def test_backup_stages_on_destination_and_closes_stream(tmp_path, monkeypatch, outcome):
-    from pseudolife_memory import docker_backup_restore as module
+    from pseudolife_memory import disk_space, docker_backup_restore as module
+    monkeypatch.setattr(disk_space.shutil, "disk_usage", lambda _: types.SimpleNamespace(free=disk_space.MIN_FREE))
     temporary_file = module.tempfile.TemporaryFile
     streams = []
     target = tmp_path / "destination" / "dump.part"

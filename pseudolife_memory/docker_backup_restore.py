@@ -99,8 +99,6 @@ def _shell_command(argv) -> str:
 def copy_from_container(docker: str, source: str, target: Path) -> None:
     """Read Docker's tar stream ourselves: a sudo Docker CLI otherwise
     creates root-owned host files that this user's backup cannot protect."""
-    from pseudolife_memory import disk_space
-    disk_space.host(target.parent)
     try:
         with tempfile.TemporaryFile(dir=target.parent) as stream:
             proc = subprocess.run([docker, "cp", source, "-"], stdout=stream, stderr=subprocess.PIPE,

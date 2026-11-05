@@ -1,2 +1,2 @@
 ### Fixed (2026-11-06 — Stage Docker backups on the selected destination filesystem)
-- Clone-free Docker backup and restore stage their host tar streams next to the selected backup destination. A small system temporary filesystem no longer causes a false disk-space refusal; the actual destination must still meet the free-space floor, and staging files are closed and removed on success, failure or interruption.
+- Clone-free Docker backup and restore stage their host tar streams next to the selected backup destination. The free-space floor is checked before backup writes, so a small system temporary filesystem or space consumed by the admitted dump no longer causes a false refusal. Staging files are closed and removed on success, failure or interruption.
