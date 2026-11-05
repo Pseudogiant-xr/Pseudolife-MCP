@@ -3,16 +3,19 @@
 
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
-use std::sync::RwLock;
+use std::sync::{Arc, RwLock};
 use tokio_postgres::Client;
 
+/// The loaded inputs are shared (`Arc`), so the read-only shadow's
+/// incremental refresh can build a successor that replaces only the tables
+/// that changed.
 pub struct StartupState {
-    pub episodes: Vec<Value>,
+    pub episodes: Arc<Vec<Value>>,
     pub current_episode: Option<String>,
-    pub cortex: Vec<Value>,
-    pub world: Vec<Value>,
-    pub lessons: Vec<Value>,
-    pub metadata: Value,
+    pub cortex: Arc<Vec<Value>>,
+    pub world: Arc<Vec<Value>>,
+    pub lessons: Arc<Vec<Value>>,
+    pub metadata: Arc<Value>,
     clock: RwLock<StartupClock>,
 }
 
@@ -23,6 +26,29 @@ pub struct StartupClock {
 }
 
 impl StartupState {
+    /// A state over loaded inputs whose clock reseed is still pending.
+    pub fn from_parts(
+        episodes: Arc<Vec<Value>>,
+        current_episode: Option<String>,
+        cortex: Arc<Vec<Value>>,
+        world: Arc<Vec<Value>>,
+        lessons: Arc<Vec<Value>>,
+        metadata: Arc<Value>,
+    ) -> StartupState {
+        StartupState {
+            episodes,
+            current_episode,
+            cortex,
+            world,
+            lessons,
+            metadata,
+            clock: RwLock::new(StartupClock {
+                hlc_highwater: (0, 0),
+                hlc_reseed_pending: true,
+            }),
+        }
+    }
+
     /// Read the input stamp and its readiness flag together before ticking.
     pub fn clock_state(&self) -> StartupClock {
         *self.clock.read().expect("startup clock lock")
@@ -42,7 +68,10 @@ impl StartupState {
         })
         .await?;
         let durable: Value = row.map(|row| row.get(0)).unwrap_or(Value::Null);
-        let hlc_highwater = highwater(&[&self.cortex, &self.world, &self.lessons], &durable)?;
+        let hlc_highwater = highwater(
+            &[&self.cortex[..], &self.world[..], &self.lessons[..]],
+            &durable,
+        )?;
         *self.clock.write().expect("startup clock lock") = StartupClock {
             hlc_highwater,
             hlc_reseed_pending: false,
@@ -54,12 +83,12 @@ impl StartupState {
     #[cfg(test)]
     pub fn for_test(hlc_reseed_pending: bool) -> StartupState {
         StartupState {
-            episodes: Vec::new(),
+            episodes: Arc::default(),
             current_episode: None,
-            cortex: Vec::new(),
-            world: Vec::new(),
-            lessons: Vec::new(),
-            metadata: Value::Null,
+            cortex: Arc::default(),
+            world: Arc::default(),
+            lessons: Arc::default(),
+            metadata: Arc::new(Value::Null),
             clock: RwLock::new(StartupClock {
                 hlc_highwater: (0, 0),
                 hlc_reseed_pending,
@@ -70,9 +99,9 @@ impl StartupState {
     #[allow(dead_code)] // Read/write slices adopt this snapshot at their seam.
     pub fn dump(&self) -> Value {
         let clock = self.clock_state();
-        json!({"episodes": self.episodes, "current_episode": self.current_episode,
-               "cortex": self.cortex, "world": self.world, "lessons": self.lessons,
-               "metadata": self.metadata,
+        json!({"episodes": *self.episodes, "current_episode": self.current_episode,
+               "cortex": *self.cortex, "world": *self.world, "lessons": *self.lessons,
+               "metadata": *self.metadata,
                "hlc_highwater": [clock.hlc_highwater.0, clock.hlc_highwater.1],
                "hlc_reseed_pending": clock.hlc_reseed_pending})
     }
@@ -132,7 +161,7 @@ fn number_or_zero(value: &Value) -> Result<f64> {
         .context("invalid startup timestamp or cursor")
 }
 
-fn identity_metadata(raw: &Value) -> Result<Value> {
+pub(crate) fn identity_metadata(raw: &Value) -> Result<Value> {
     let pointer = &raw["active_session_pointer"];
     let active = match pointer
         .get("session_id")
@@ -285,18 +314,12 @@ async fn canonical_rows(client: &Client, table: &str) -> Result<Vec<Value>> {
     Ok(values)
 }
 
-/// Required stores load into locals. Any error drops the entire candidate;
-/// callers attach the loaded snapshot to Ready before its late clock reseed.
-pub async fn hydrate(
-    client: &Client,
-    raw_metadata: Value,
-    mut stale_dims: Vec<usize>,
-    dim: usize,
-) -> Result<StartupState> {
+/// The `episodes` rows in start order, and the open episode the newest
+/// unended one names.
+pub(crate) async fn episode_rows(client: &Client) -> Result<(Vec<Value>, Option<String>)> {
     let rows = crate::txn::with_client(client, |client| {
         client.query(
-            "SELECT to_jsonb(e) FROM (SELECT id, title, hint, started_at, ended_at, \
-                closed_by_new_start, session_key, parent_id FROM episodes) e ORDER BY started_at",
+            "SELECT to_jsonb(e) FROM (SELECT id, title, hint, started_at, ended_at,                 closed_by_new_start, session_key, parent_id FROM episodes) e ORDER BY started_at",
             &[],
         )
     })
@@ -323,43 +346,75 @@ pub async fn hydrate(
         .find(|e| e["ended_at"].is_null())
         .and_then(|e| e["id"].as_str())
         .map(String::from);
-    let cortex = canonical_rows(client, "facts")
+    Ok((episodes, current_episode))
+}
+
+/// The cortex's canonical `facts` rows.
+pub(crate) async fn cortex_rows(client: &Client) -> Result<Vec<Value>> {
+    canonical_rows(client, "facts")
         .await
-        .context("cortex hydration failed")?;
-    // service.py checks entries and Cortex here, before world/lesson loads.
-    // NULL Cortex vectors are permitted; every non-null vector must fit.
-    if !crate::mutants::active("startup-skip-cortex-dims") {
-        stale_dims.extend(cortex.iter().filter_map(|row| {
+        .context("cortex hydration failed")
+}
+
+/// The lengths of the non-null cortex vectors that do not fit `dim`
+/// (NULL cortex vectors are permitted).
+pub(crate) fn stale_cortex_dims(cortex: &[Value], dim: usize) -> Vec<usize> {
+    if crate::mutants::active("startup-skip-cortex-dims") {
+        return Vec::new();
+    }
+    cortex
+        .iter()
+        .filter_map(|row| {
             row["embedding"]
                 .as_array()
                 .map(Vec::len)
                 .filter(|length| *length != dim)
-        }));
+        })
+        .collect()
+}
+
+/// The world cortex's canonical `world_facts` rows.
+pub(crate) async fn world_rows(client: &Client) -> Result<Vec<Value>> {
+    if crate::mutants::active("startup-skip-world") {
+        return Ok(vec![]);
     }
-    crate::bank::refuse_stale_dims(stale_dims)?;
-    let world = if crate::mutants::active("startup-skip-world") {
-        vec![]
-    } else {
-        canonical_rows(client, "world_facts")
-            .await
-            .context("world cortex hydration failed")?
-    };
-    let lessons = canonical_rows(client, "lessons")
+    canonical_rows(client, "world_facts")
         .await
-        .context("lesson hydration failed")?;
+        .context("world cortex hydration failed")
+}
+
+/// The lesson store's canonical `lessons` rows.
+pub(crate) async fn lesson_rows(client: &Client) -> Result<Vec<Value>> {
+    canonical_rows(client, "lessons")
+        .await
+        .context("lesson hydration failed")
+}
+
+/// Required stores load into locals. Any error drops the entire candidate;
+/// callers attach the loaded snapshot to Ready before its late clock reseed.
+pub async fn hydrate(
+    client: &Client,
+    raw_metadata: Value,
+    mut stale_dims: Vec<usize>,
+    dim: usize,
+) -> Result<StartupState> {
+    let (episodes, current_episode) = episode_rows(client).await?;
+    let cortex = cortex_rows(client).await?;
+    // service.py checks entries and Cortex here, before world/lesson loads.
+    // NULL Cortex vectors are permitted; every non-null vector must fit.
+    stale_dims.extend(stale_cortex_dims(&cortex, dim));
+    crate::bank::refuse_stale_dims(stale_dims)?;
+    let world = world_rows(client).await?;
+    let lessons = lesson_rows(client).await?;
     let metadata = identity_metadata(&raw_metadata)?;
-    Ok(StartupState {
-        episodes,
+    Ok(StartupState::from_parts(
+        Arc::new(episodes),
         current_episode,
-        cortex,
-        world,
-        lessons,
-        metadata,
-        clock: RwLock::new(StartupClock {
-            hlc_highwater: (0, 0),
-            hlc_reseed_pending: true,
-        }),
-    })
+        Arc::new(cortex),
+        Arc::new(world),
+        Arc::new(lessons),
+        Arc::new(metadata),
+    ))
 }
 
 pub async fn candidate(

@@ -639,6 +639,29 @@ pub fn py_strip(s: &str) -> &str {
     s.trim_matches(|c: char| c.is_whitespace() || ('\u{1c}'..='\u{1f}').contains(&c))
 }
 
+/// The tables the read-only shadow's resident stores are built from, in the
+/// order [`Storage::shadow_marker`] reports them.
+pub const SHADOW_TABLES: [&str; 7] = [
+    "entries",
+    "facts",
+    "world_facts",
+    "lessons",
+    "episodes",
+    "cms_counters",
+    "meta",
+];
+
+/// The `meta` keys the resident stores read; other meta never invalidates them.
+pub const SHADOW_META_KEYS: [&str; 7] = [
+    "active_session_pointer",
+    "episode_tombstones",
+    "deferred_empty_roots",
+    "cortex_supersession_log",
+    "cortex_dream_cursor",
+    "coordination_hlc_highwater",
+    "bank_id",
+];
+
 impl Storage {
     /// A shadow never acquires the writer lock, seeds rows or advances the
     /// lease epoch. The session default also blocks any missed SQL mutation.
@@ -690,20 +713,18 @@ impl Storage {
     /// hashes plus row count detect inserts, in-place updates and deletions,
     /// including an older transaction committing after a newer transaction.
     /// Retrieval logs and unrelated meta do not invalidate resident stores.
+    /// One `(count, hash, hash)` row per [`SHADOW_TABLES`] entry, in that
+    /// order, so a caller can tell which stores' inputs changed.
     pub async fn shadow_marker(&self) -> Result<Vec<(i64, String, String)>, String> {
-        let tables = [
-            "entries",
-            "facts",
-            "world_facts",
-            "lessons",
-            "episodes",
-            "cms_counters",
-            "meta",
-        ];
-        let parts: Vec<String> = tables.iter().enumerate().map(|(index, table)| {
+        let keys = SHADOW_META_KEYS
+            .iter()
+            .map(|key| format!("'{key}'"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let parts: Vec<String> = SHADOW_TABLES.iter().enumerate().map(|(index, table)| {
             let filter = if *table == "meta" {
-                " WHERE key IN ('active_session_pointer', 'episode_tombstones', 'deferred_empty_roots', 'cortex_supersession_log', 'cortex_dream_cursor', 'coordination_hlc_highwater', 'bank_id')"
-            } else { "" };
+                format!(" WHERE key IN ({keys})")
+            } else { String::new() };
             format!("SELECT {index}, count(*)::bigint, coalesce(sum(hashtextextended(ctid::text || ':' || xmin::text, 0)::numeric),0)::text, coalesce(sum(hashtextextended(ctid::text || ':' || xmin::text, 1)::numeric),0)::text FROM public.{table}{filter}")
         }).collect();
         self.client

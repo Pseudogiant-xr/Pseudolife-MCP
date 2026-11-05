@@ -137,6 +137,139 @@ async fn hydrate_inner(
     .await
 }
 
+/// The `entries` columns hydration reads, in the order [`entry_from_row`]
+/// expects them.
+pub(crate) const ENTRY_COLUMNS: &str = "id, band, text, embedding::real[], surprise::text, ts, \
+     access_count, source, superseded_at, superseded_by_text, episode_id, episode_title, tags, \
+     slots, authority, distortion_tolerance, reinforcements, last_logical_turn, dream_state";
+
+/// One hydrated `entries` row before band seating.
+pub(crate) struct Hydrated {
+    pub entry: Entry,
+    /// The L2-normalized matrix row, or the stored vector's length when it
+    /// does not fit the embedder (the caller refuses the bank).
+    pub row: Result<Vec<f32>, usize>,
+    /// The `ts` column as stored, before a zero is replaced by the clock.
+    pub stored_ts: f64,
+}
+
+/// The per-row construction hydration uses, over a row selected with
+/// [`ENTRY_COLUMNS`] (extra trailing columns are ignored). `seated` is
+/// whether the caller seats rows by band capacity afterwards (every
+/// configured hydration); without it a band the preset lacks becomes the
+/// first band here.
+pub(crate) fn entry_from_row(
+    r: &tokio_postgres::Row,
+    bands: &[String],
+    seated: bool,
+    dim: usize,
+) -> Result<Hydrated> {
+    // A NULL vector fails hydration (torch.as_tensor(None) in Python):
+    // an ordinary error, recorded as not_ready.
+    let Some(mut emb) = r.try_get::<_, Option<Vec<f32>>>(3)? else {
+        anyhow::bail!("entry {} has no embedding", r.get::<_, i64>(0));
+    };
+    let original_embedding = emb.clone();
+    let row = if emb.len() == dim {
+        normalize(&mut emb);
+        Ok(emb)
+    } else {
+        Err(emb.len())
+    };
+    let tags: Option<Value> = r.get(12);
+    let slots: Option<Value> = r.get(13);
+    let surprise_value = r
+        .try_get::<_, Option<String>>(4)?
+        .unwrap_or_else(|| "0".into())
+        .parse::<f64>()?;
+    let stored_ts = r.get::<_, Option<f64>>(5).unwrap_or(0.0);
+    let entry = Entry {
+        id: r.get(0),
+        seq: crate::episodes::next_seq(),
+        cues: std::sync::OnceLock::new(),
+        embedding: original_embedding,
+        stored_band: r.get(1),
+        // Hydration seats a row whose band left the preset in the first
+        // band and reconciles its stamp (storage/sync.py:116-145). Python
+        // also writes the new stamp back; the read-only spike does not.
+        band: {
+            let b: String = r.get(1);
+            if seated || bands.contains(&b) {
+                b
+            } else {
+                bands[0].clone()
+            }
+        },
+        text: r.get(2),
+        surprise: surprise_value as f32,
+        surprise_value,
+        ts: {
+            // MemoryEntry.__post_init__ replaces zero before retention seating.
+            if stored_ts == 0.0 && !crate::mutants::active("startup-keep-zero-timestamp") {
+                load_clock()?
+            } else {
+                stored_ts
+            }
+        },
+        access_count: AtomicI64::new(r.get::<_, Option<i32>>(6).unwrap_or(0) as i64),
+        reinforcements: r.try_get(16)?,
+        last_logical_turn: r.try_get(17)?,
+        dream_state: r.try_get(18)?,
+        source: r.get::<_, Option<String>>(7).unwrap_or_default(),
+        superseded_at: r.get(8),
+        superseded_by_text: r.get(9),
+        episode_id: r.get(10),
+        episode_title: r.get(11),
+        tags: match tags {
+            Some(Value::Array(a)) => {
+                if crate::mutants::active("startup-drop-non-string-tags") {
+                    a.into_iter().filter(Value::is_string).collect()
+                } else {
+                    a
+                }
+            }
+            _ => Vec::new(),
+        },
+        slots: match slots {
+            Some(Value::Array(a)) => a,
+            _ => Vec::new(),
+        },
+        authority: r.get(14),
+        distortion_tolerance: r.get(15),
+    };
+    Ok(Hydrated {
+        entry,
+        row,
+        stored_ts,
+    })
+}
+
+/// Whether configured seating would move any entry out of its stored band:
+/// only when a band, with what spills into it, is over capacity. Without a
+/// move the seated order and bands depend on the stored bands and ids alone,
+/// never on the retention scores (access counts, reinforcements).
+pub(crate) fn seating_moves(entries: &[Entry], bands: &[StartupBandSpec]) -> bool {
+    if crate::mutants::active("startup-skip-seating") {
+        return false;
+    }
+    let mut counts = vec![0usize; bands.len()];
+    for entry in entries {
+        let band = bands
+            .iter()
+            .rposition(|b| b.name == entry.stored_band)
+            .unwrap_or(0);
+        counts[band] += 1;
+    }
+    let mut spill = 0;
+    for depth in 0..bands.len().saturating_sub(1) {
+        spill = (counts[depth] + spill).saturating_sub(bands[depth].max_entries);
+        if spill > 0 {
+            return true;
+        }
+    }
+    false
+}
+
 // The caller owns the shared writer lock; every relocation uses this borrowed
 // client directly so another statement cannot inherit its pending transaction.
 async fn hydrate_locked(
@@ -156,10 +289,7 @@ async fn hydrate_locked(
         .get(0);
     let rows = client
         .query(
-            "SELECT id, band, text, embedding::real[], surprise::text, ts, access_count, source, \
-             superseded_at, superseded_by_text, episode_id, episode_title, tags, slots, \
-             authority, distortion_tolerance, reinforcements, last_logical_turn, dream_state \
-             FROM entries ORDER BY id",
+            &format!("SELECT {ENTRY_COLUMNS} FROM entries ORDER BY id"),
             &[],
         )
         .await?;
@@ -167,83 +297,18 @@ async fn hydrate_locked(
     let mut matrix = Vec::with_capacity(rows.len() * dim);
     let mut stale: Vec<usize> = Vec::new();
     for r in rows {
-        // A NULL vector fails hydration (torch.as_tensor(None) in Python):
-        // an ordinary error, recorded as not_ready.
-        let Some(mut emb) = r.try_get::<_, Option<Vec<f32>>>(3)? else {
-            anyhow::bail!("entry {} has no embedding", r.get::<_, i64>(0));
-        };
-        let original_embedding = emb.clone();
-        if emb.len() == dim {
-            normalize(&mut emb);
-            matrix.extend_from_slice(&emb);
-        } else {
-            // Seated and stamped like any row, then refused after the
-            // write-back (`_refuse_on_stale_hydrated_dims` runs after
-            // `hydrate_cms`).
-            stale.push(emb.len());
-            matrix.extend(std::iter::repeat_n(0.0, dim));
+        let hydrated = entry_from_row(&r, bands, memory.is_some(), dim)?;
+        match hydrated.row {
+            Ok(row) => matrix.extend_from_slice(&row),
+            Err(length) => {
+                // Seated and stamped like any row, then refused after the
+                // write-back (`_refuse_on_stale_hydrated_dims` runs after
+                // `hydrate_cms`).
+                stale.push(length);
+                matrix.extend(std::iter::repeat_n(0.0, dim));
+            }
         }
-        let tags: Option<Value> = r.get(12);
-        let slots: Option<Value> = r.get(13);
-        let surprise_value = r
-            .try_get::<_, Option<String>>(4)?
-            .unwrap_or_else(|| "0".into())
-            .parse::<f64>()?;
-        entries.push(Entry {
-            id: r.get(0),
-            seq: crate::episodes::next_seq(),
-            cues: std::sync::OnceLock::new(),
-            embedding: original_embedding,
-            stored_band: r.get(1),
-            // Hydration seats a row whose band left the preset in the first
-            // band and reconciles its stamp (storage/sync.py:116-145). Python
-            // also writes the new stamp back; the read-only spike does not.
-            band: {
-                let b: String = r.get(1);
-                if memory.is_some() || bands.contains(&b) {
-                    b
-                } else {
-                    bands[0].clone()
-                }
-            },
-            text: r.get(2),
-            surprise: surprise_value as f32,
-            surprise_value,
-            ts: {
-                let timestamp = r.get::<_, Option<f64>>(5).unwrap_or(0.0);
-                // MemoryEntry.__post_init__ replaces zero before retention seating.
-                if timestamp == 0.0 && !crate::mutants::active("startup-keep-zero-timestamp") {
-                    load_clock()?
-                } else {
-                    timestamp
-                }
-            },
-            access_count: AtomicI64::new(r.get::<_, Option<i32>>(6).unwrap_or(0) as i64),
-            reinforcements: r.try_get(16)?,
-            last_logical_turn: r.try_get(17)?,
-            dream_state: r.try_get(18)?,
-            source: r.get::<_, Option<String>>(7).unwrap_or_default(),
-            superseded_at: r.get(8),
-            superseded_by_text: r.get(9),
-            episode_id: r.get(10),
-            episode_title: r.get(11),
-            tags: match tags {
-                Some(Value::Array(a)) => {
-                    if crate::mutants::active("startup-drop-non-string-tags") {
-                        a.into_iter().filter(Value::is_string).collect()
-                    } else {
-                        a
-                    }
-                }
-                _ => Vec::new(),
-            },
-            slots: match slots {
-                Some(Value::Array(a)) => a,
-                _ => Vec::new(),
-            },
-            authority: r.get(14),
-            distortion_tolerance: r.get(15),
-        });
+        entries.push(hydrated.entry);
     }
     if let Some(memory) = memory {
         let now = load_clock()?;

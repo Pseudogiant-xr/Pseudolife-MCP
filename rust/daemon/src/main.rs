@@ -79,6 +79,7 @@ mod session_hook;
 mod session_register;
 mod session_title;
 mod set_members;
+mod shadow;
 mod slots;
 mod startup;
 mod static_files;

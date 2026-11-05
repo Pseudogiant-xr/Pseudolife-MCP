@@ -116,7 +116,8 @@ struct Inner {
     storage: Option<Arc<Storage>>,
     embedder: Option<Arc<Embedder>>,
     ready: Option<Arc<Ready>>,
-    shadow_marker: Option<Vec<(i64, String, String)>>,
+    /// Read-only only: what the resident stores were built from.
+    shadow: Option<crate::shadow::ShadowState>,
     shadow_probed_at: Option<Instant>,
     failures: u32,
     backoff_s: f64,
@@ -429,6 +430,9 @@ impl Service {
         // concurrent refreshes: waiters reuse the first published snapshot.
         // Keep the pre-hydration marker so a commit during hydration causes
         // the next request to refresh instead of blessing a mixed snapshot.
+        // A changed marker first tries the incremental refresh, which reloads
+        // only the stores whose tables changed (`shadow.rs`); anything it
+        // cannot do exactly rebuilds every store below, as a cold start does.
         let shadow_marker = if self.config.read_only
             && (reprobe
                 || inner.ready.is_none()
@@ -440,12 +444,29 @@ impl Service {
             let marker = storage.shadow_marker().await?;
             inner.shadow_probed_at = Some(Instant::now());
             eprintln!("read-only shadow: resident state probed");
-            if inner.shadow_marker.as_ref() != Some(&marker) {
-                inner.ready = None;
+            if inner.shadow.as_ref().map(|s| &s.marker) != Some(&marker) {
+                let refreshed = match inner.ready.clone() {
+                    Some(ready) if inner.shadow.is_some() => {
+                        match self.shadow_refresh(&mut inner, &ready, &marker).await {
+                            Ok(refreshed) => refreshed,
+                            Err(error) => {
+                                eprintln!(
+                                    "read-only shadow: incremental refresh failed ({error}); \
+                                     rebuilding every store"
+                                );
+                                false
+                            }
+                        }
+                    }
+                    _ => false,
+                };
+                if !refreshed {
+                    inner.ready = None;
+                }
             }
             Some(marker)
         } else {
-            inner.shadow_marker.clone()
+            inner.shadow.as_ref().map(|s| s.marker.clone())
         };
         if let Some(r) = &inner.ready {
             if crate::mutants::active("startup-clock-reloads")
@@ -470,6 +491,8 @@ impl Service {
             }
         }
         self.refuse_while_backing_off(&inner)?;
+        // The recorded state describes the resident stores this replaces.
+        inner.shadow = None;
         let storage = self.ensure_storage(&mut inner).await?;
         crate::migrate_flat_config::require_config_finalized(
             storage.client(),
@@ -500,6 +523,13 @@ impl Service {
         }
         let embedder = inner.embedder.clone().expect("embedder built above");
         let candidate = async {
+            // Read-only: the row versions and meta the next incremental
+            // refresh compares against, read before the stores they describe.
+            let shadow_inputs = if self.config.read_only {
+                Some(crate::shadow::preread(storage.client()).await?)
+            } else {
+                None
+            };
             let (bank, startup) = crate::startup::candidate(
                 storage.client(),
                 &self.config.memory,
@@ -520,11 +550,11 @@ impl Service {
                 .map_err(|e| anyhow::anyhow!("counters row read failed: {e}"))?;
             let mut write = write;
             self.load_counters(&mut write, counters.as_ref());
-            Ok::<_, anyhow::Error>((bank, startup, write, cortex, world, lessons))
+            Ok::<_, anyhow::Error>((bank, startup, write, cortex, world, lessons, shadow_inputs))
         }
         .await;
         match candidate {
-            Ok((bank, startup, write, cortex, world, lessons)) => {
+            Ok((bank, startup, write, cortex, world, lessons, shadow_inputs)) => {
                 inner.failures = 0;
                 inner.backoff_s = 0.0;
                 inner.retry_at = None;
@@ -532,6 +562,9 @@ impl Service {
                     s.init_refusal = None;
                     s.not_ready = None;
                 });
+                let shadow = shadow_marker
+                    .zip(shadow_inputs)
+                    .map(|(marker, inputs)| crate::shadow::ShadowState::new(marker, inputs, &bank));
                 let ready = Arc::new(Ready {
                     storage,
                     embedder,
@@ -562,7 +595,7 @@ impl Service {
                     s.startup = Some(startup);
                     s.ready = Some(published);
                 });
-                inner.shadow_marker = shadow_marker;
+                inner.shadow = shadow;
                 if self.config.read_only {
                     eprintln!("read-only shadow: resident state refreshed");
                 }
@@ -593,6 +626,152 @@ impl Service {
                 Err(reason)
             }
         }
+    }
+
+    /// The read-only shadow's incremental refresh (`shadow.rs`), installed
+    /// as a successor of `ready`: the stores whose tables did not change are
+    /// shared with it, the bank is patched in place unless it had to be
+    /// rebuilt, and each changed store is replaced. `Ok(false)` asks for the
+    /// full rebuild.
+    ///
+    /// A replaced store's old copy lives on only while the published
+    /// snapshot and requests already in flight hold the previous `Ready`, so
+    /// the peak is that store's old and new copy, not every store's.
+    async fn shadow_refresh(
+        &self,
+        inner: &mut Inner,
+        ready: &Arc<Ready>,
+        marker: &crate::shadow::Marker,
+    ) -> Result<bool, String> {
+        let Some(state) = inner.shadow.as_ref() else {
+            return Ok(false);
+        };
+        let outcome = crate::shadow::refresh(
+            ready.storage.client(),
+            &self.config.memory,
+            ready.embedder.embedding_dim(),
+            state,
+            marker,
+            &ready.bank,
+        )
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+        let mut refresh = match outcome {
+            crate::shadow::Outcome::Full(reason) => {
+                eprintln!("read-only shadow: rebuilding every store ({reason})");
+                return Ok(false);
+            }
+            crate::shadow::Outcome::Partial(refresh) => *refresh,
+        };
+        let summary = refresh.summary();
+        let old = &ready.startup;
+        let startup = if refresh.startup_changed() {
+            let (episodes, current_episode) = match refresh.episodes.take() {
+                Some((rows, current)) => (Arc::new(rows), current),
+                None => (old.episodes.clone(), old.current_episode.clone()),
+            };
+            let cortex_rows = match &mut refresh.cortex {
+                Some((_, rows)) => Arc::new(std::mem::take(rows)),
+                None => old.cortex.clone(),
+            };
+            let world_rows = match &mut refresh.world {
+                Some((_, rows)) => Arc::new(std::mem::take(rows)),
+                None => old.world.clone(),
+            };
+            let lesson_rows = match &mut refresh.lessons {
+                Some((_, rows)) => Arc::new(std::mem::take(rows)),
+                None => old.lessons.clone(),
+            };
+            let metadata = refresh
+                .metadata
+                .take()
+                .map_or_else(|| old.metadata.clone(), Arc::new);
+            // Pending: the clock is reseeded before this state is published.
+            Arc::new(StartupState::from_parts(
+                episodes,
+                current_episode,
+                cortex_rows,
+                world_rows,
+                lesson_rows,
+                metadata,
+            ))
+        } else {
+            old.clone()
+        };
+        // Everything fallible precedes the in-place bank patch.
+        let write = match refresh.counters.take() {
+            Some(row) => {
+                let mut write =
+                    crate::episodes::from_startup(&startup).map_err(|e| format!("{e:#}"))?;
+                self.load_counters(&mut write, row.as_ref());
+                Arc::new(tokio::sync::Mutex::new(write))
+            }
+            None => ready.write.clone(),
+        };
+        let cortex = match refresh.cortex.take() {
+            Some((mut store, _)) => {
+                store.configure(&self.config.memory.cortex, &startup.metadata);
+                Arc::new(crate::stores::cortex::SharedCortex::new(store))
+            }
+            None => {
+                if refresh.cortex_meta {
+                    ready
+                        .cortex
+                        .write(|c| c.configure(&self.config.memory.cortex, &startup.metadata));
+                }
+                ready.cortex.clone()
+            }
+        };
+        let world = match refresh.world.take() {
+            Some((store, _)) => Arc::new(crate::stores::world::SharedWorld::new(store)),
+            None => ready.world.clone(),
+        };
+        let lessons = match refresh.lessons.take() {
+            Some((store, _)) => Arc::new(crate::stores::lessons::SharedLessons::new(store)),
+            None => ready.lessons.clone(),
+        };
+        let bank = match refresh.bank.take() {
+            Some(bank) => Arc::new(std::sync::RwLock::new(bank)),
+            None => {
+                refresh.apply_bank(&ready.bank);
+                ready.bank.clone()
+            }
+        };
+        let fresh = Arc::new(Ready {
+            storage: ready.storage.clone(),
+            embedder: ready.embedder.clone(),
+            bank,
+            write,
+            writes: self.writes.clone(),
+            startup: startup.clone(),
+            cortex,
+            world,
+            lessons,
+            hlc: self.hlc.clone(),
+            // As a rebuild does: the dream's acknowledgement state is read
+            // again when first needed.
+            dream: Arc::new(tokio::sync::Mutex::new(Default::default())),
+            dream_run: self.dream_run.clone(),
+        });
+        inner.failures = 0;
+        inner.backoff_s = 0.0;
+        inner.retry_at = None;
+        self.update(|s| {
+            s.init_refusal = None;
+            s.not_ready = None;
+        });
+        inner.shadow = Some(refresh.state);
+        inner.ready = Some(fresh.clone());
+        // A changed startup state is published by the ready path once its
+        // clock is reseeded, as a cold start's is: `ready` never leads it.
+        if !startup.clock_state().hlc_reseed_pending {
+            self.update(|s| {
+                s.startup = Some(startup);
+                s.ready = Some(fresh);
+            });
+        }
+        eprintln!("read-only shadow: resident state refreshed ({summary})");
+        Ok(true)
     }
 
     /// `_ensure_init`'s first step, `storage.verify_writer_session()`: a
