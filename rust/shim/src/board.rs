@@ -101,6 +101,7 @@ impl Options {
         let session_state_root = configured_root.is_some();
         let state_root = configured_root.map(expanded).unwrap_or_else(|| {
             env("CODEX_HOME")
+                .filter(|value| !value.is_empty())
                 .map(expanded)
                 .unwrap_or_else(|| home.join(".codex"))
                 .join("pseudolife/agents")

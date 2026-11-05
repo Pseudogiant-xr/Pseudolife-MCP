@@ -215,8 +215,16 @@ pub(crate) fn python_home_with(
         lookup("HOMEPATH")
             .map(|path| PathBuf::from(lookup("HOMEDRIVE").unwrap_or_default()).join(path))
     });
+    // POSIX expanduser turns an explicitly empty HOME into "/" (as
+    // `doorbell_seen::posix_home` does), never a working-directory path.
     #[cfg(unix)]
-    let home = lookup("HOME").map(PathBuf::from);
+    let home = lookup("HOME").map(|value| {
+        if value.is_empty() {
+            PathBuf::from("/")
+        } else {
+            PathBuf::from(value)
+        }
+    });
     home.or_else(dirs::home_dir).unwrap_or_default()
 }
 
@@ -613,5 +621,51 @@ mod fable125_home_controls {
         )
         .unwrap();
         assert_eq!(unchanged, Path::new("relative/token"));
+    }
+}
+
+#[cfg(test)]
+mod python_home_tests {
+    use super::python_home_with;
+    use std::{collections::HashMap, ffi::OsString, path::PathBuf};
+
+    fn home(vars: &[(&str, &str)]) -> PathBuf {
+        let vars: HashMap<_, _> = vars.iter().copied().collect();
+        python_home_with(|key| vars.get(key).map(OsString::from))
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_home_follows_ntpath_expanduser() {
+        assert_eq!(home(&[("USERPROFILE", "C:/p")]), PathBuf::from("C:/p"));
+        assert_eq!(
+            home(&[
+                ("USERPROFILE", "C:/p"),
+                ("HOMEDRIVE", "D:"),
+                ("HOMEPATH", "/u")
+            ]),
+            PathBuf::from("C:/p")
+        );
+        assert_eq!(
+            home(&[("HOMEDRIVE", "D:"), ("HOMEPATH", "/u")]),
+            PathBuf::from("D:/u")
+        );
+        // HOME is not what Python reads on Windows.
+        assert_eq!(
+            home(&[("HOME", "C:/h"), ("USERPROFILE", "C:/p")]),
+            PathBuf::from("C:/p")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn posix_home_follows_posixpath_expanduser() {
+        assert_eq!(home(&[("HOME", "/h")]), PathBuf::from("/h"));
+        assert_eq!(home(&[("HOME", "")]), PathBuf::from("/"));
+        // USERPROFILE is not what Python reads on POSIX.
+        assert_eq!(
+            home(&[("HOME", "/h"), ("USERPROFILE", "/p")]),
+            PathBuf::from("/h")
+        );
     }
 }

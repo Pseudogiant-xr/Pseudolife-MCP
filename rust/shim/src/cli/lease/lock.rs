@@ -8,8 +8,8 @@ use std::{
 pub fn directory() -> PathBuf {
     directory_with(|key| std::env::var_os(key))
 }
-/// `PSEUDOLIFE_LEASE_LOCK_DIR`, else `~/.pseudolife-mcp/locks` with the home
-/// Python's `os_lock.lock_dir` uses (`Path.home()`, which honours
+/// `PSEUDOLIFE_LEASE_LOCK_DIR`, else `~/.pseudolife-mcp/locks` under the same
+/// home as Python's `os_lock.lock_dir` (`Path.home()`, which honours
 /// `USERPROFILE` on Windows).
 fn directory_with(mut lookup: impl FnMut(&str) -> Option<std::ffi::OsString>) -> PathBuf {
     let path = lookup("PSEUDOLIFE_LEASE_LOCK_DIR")
