@@ -1088,6 +1088,13 @@ def test_proactor_abort_maps_only_the_oracles_exact_closing_block():
     assert compare.diff(obs(stderr=line + PROACTOR_ABORT + b"more\r\n"), obs(stderr=line), rule)
     assert compare.diff(obs(stderr=line + PROACTOR_ABORT * 2), obs(stderr=line), rule)
     assert compare.diff(obs(stderr=b"x" + PROACTOR_ABORT), obs(stderr=b"x"), rule)
+    # The two header lines are required: the native side matching the
+    # residue a looser rule would leave still differs.
+    header, body = PROACTOR_ABORT.split(b"\r\n", 2)[:2], PROACTOR_ABORT.split(b"\r\n", 2)[2]
+    other = b"Task exception was never retrieved\r\n"
+    assert compare.diff(obs(stderr=line + other + body), obs(stderr=line + other), rule)
+    assert compare.diff(obs(stderr=line + body), obs(stderr=line), rule)
+    assert header[0] == b"Error on reading from the event loop self pipe"
 
 
 def test_oracle_rules_skip_the_native_observation():

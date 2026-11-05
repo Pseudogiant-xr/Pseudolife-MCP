@@ -78,20 +78,30 @@ def test_a_candidate_printing_the_block_still_differs():
     assert proactor_abort_evidence(left, right, policy) == []
 
 
-@pytest.mark.parametrize('stderr', [
-    ABORT.replace(b'995', b'10054'),                                   # another Winsock error
-    ABORT.replace(b'OSError: [WinError 995]', b'OSError: [WinError 64]'),
-    ABORT.replace(b'_loop_self_reading', b'_loop_reading'),            # another proactor reader
-    ABORT.replace(b'running=True closed=False', b'running=False closed=True'),
-    ABORT.replace(b'in _poll\r\n', b'in _poll\r\n  File "x.py", line 1, in extra\r\n    pass\r\n'),
-    ABORT + b'later output\r\n',                                       # not the closing block
-    ABORT[:-2],                                                        # truncated last line
-    ABORT * 2,                                                         # only one block is dropped
-    b'Task exception was never retrieved\r\n' + ABORT.split(b'\r\n', 2)[2],  # another asyncio message
-    b'prefix ' + ABORT,                                                # not at a line start
+_HEADER = b'Error on reading from the event loop self pipe\r\nloop: <ProactorEventLoop running=True closed=False debug=False>\r\n'
+_BODY = ABORT[len(_HEADER):]
+assert _HEADER + _BODY == ABORT
+
+
+# Each candidate is what a looser rule would leave of the oracle's stderr, so
+# the case fails only while the named part of the pattern holds.
+@pytest.mark.parametrize('stderr, candidate', [
+    (ABORT.replace(b'995', b'10054'), b''),                            # another Winsock error
+    (ABORT.replace(b'OSError: [WinError 995]', b'OSError: [WinError 64]'), b''),
+    (ABORT.replace(b'_loop_self_reading', b'_loop_reading'), b''),     # another proactor reader
+    (ABORT.replace(b'in _poll\r\n', b'in _poll\r\n  File "x.py", line 1, in extra\r\n    pass\r\n'), b''),
+    (ABORT + b'later output\r\n', b''),                                # not the closing block
+    (ABORT + b'later output\r\n', b'later output\r\n'),                # anchored at the end
+    (ABORT[:-2], b''),                                                 # truncated last line
+    (b'prefix ' + ABORT, b'prefix '),                                  # not at a line start
+    # The two header lines are required: another asyncio message or loop state.
+    (b'Task exception was never retrieved\r\n' + _BODY, b'Task exception was never retrieved\r\n'),
+    (_HEADER.replace(b'running=True closed=False', b'running=False closed=True') + _BODY,
+     _HEADER.replace(b'running=True closed=False', b'running=False closed=True')),
+    (_BODY, b''),
 ])
-def test_any_other_traceback_is_still_a_difference(stderr):
-    left, right = transcript(stderr), transcript(b'', arm='candidate')
+def test_any_other_traceback_is_still_a_difference(stderr, candidate):
+    left, right = transcript(stderr), transcript(candidate, arm='candidate')
     policy = StdioPolicy(oracle_proactor_abort=True)
     assert [row['path'] for row in judge_with_evidence(left, right, policy)] == ['/stderr']
     assert proactor_abort_evidence(left, right, policy) == []
