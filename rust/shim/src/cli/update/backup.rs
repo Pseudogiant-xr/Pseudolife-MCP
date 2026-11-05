@@ -283,7 +283,46 @@ pub(super) fn dump_complete(path: &Path) -> bool {
     }
     check(path).unwrap_or(false)
 }
-
+fn own_backup_file(path: &Path) -> Result<()> {
+    own_backup_file_with(path, |source, target| fs::rename(source, target))
+}
+fn own_backup_file_with(
+    path: &Path,
+    replace: impl FnOnce(&Path, &Path) -> std::io::Result<()>,
+) -> Result<()> {
+    // A privileged Docker wrapper may own its copy. Stream it into a new
+    // operator-owned file before accepting the backup or moving a rollback tag.
+    let owned = path.with_extension(format!("owned-{}", uuid::Uuid::new_v4().simple()));
+    let mut complete = false;
+    let result = (|| -> std::io::Result<()> {
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut output = options.open(&owned)?;
+        std::io::copy(&mut File::open(path)?, &mut output)?;
+        output.sync_all()?;
+        drop(output);
+        complete = true;
+        replace(&owned, path)
+    })();
+    if result.is_err() {
+        if complete {
+            return Err(UpdateError::usage(format!(
+                "cannot replace the operator-owned backup; the complete copy is retained at {}; repair access to the backup file and directory and retry; nothing was deployed",
+                owned.display()
+            )));
+        }
+        let _ = fs::remove_file(&owned);
+        return Err(UpdateError::usage(
+            "cannot save an operator-owned backup; repair access to the backup file and directory and retry; nothing was deployed",
+        ));
+    }
+    Ok(())
+}
 fn state_complete(path: &Path) -> bool {
     fn check(path: &Path) -> std::io::Result<()> {
         let mut decoder = MultiGzDecoder::new(File::open(path)?);
@@ -396,6 +435,13 @@ pub(super) fn rotate(directory: &Path, keep: &BTreeSet<String>) -> Vec<PathBuf> 
     removed
 }
 impl Update {
+    fn rotate_after_backup(&self, directory: &Path, keep: &BTreeSet<String>) -> Vec<PathBuf> {
+        if self.stopped_handover {
+            vec![]
+        } else {
+            rotate(directory, keep)
+        }
+    }
     pub fn set_rollback_scope(&mut self, config: &Value, running: &Value) -> Result<()> {
         use sha2::{Digest, Sha256};
         let project = config["name"].as_str().filter(|s| !s.is_empty());
@@ -428,7 +474,57 @@ impl Update {
         )
     }
     fn requires_state_backup(&self) -> bool {
-        self.o.engine.is_some() || self.selected_engine == "rust"
+        self.o.engine.is_some() || self.selected_engine == "rust" || self.o.allow_auth_change
+    }
+    pub(super) fn with_state_helper<T>(
+        &self,
+        daemon: &str,
+        image: &str,
+        script: &str,
+        action: impl FnOnce(&str) -> Result<T>,
+    ) -> Result<T> {
+        // A unique owned name permits cleanup even if create times out before
+        // returning its ID. Inherited mounts remain read-only and offline.
+        let helper = format!("pseudolife-update-state-{}", uuid::Uuid::new_v4().simple());
+        let args = [
+            "create",
+            "--name",
+            &helper,
+            "--network",
+            "none",
+            "--user",
+            "0",
+            "--volumes-from",
+            &format!("{daemon}:ro"),
+            "--entrypoint",
+            "sh",
+            image,
+            "-c",
+            &format!(
+                "timeout --kill-after=5s 3500s sh -c {}",
+                seams::quote(script)
+            ),
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect::<Vec<_>>();
+        let (code, _) = self.command(&args, None, 60, false);
+        let result = if code == 0 {
+            action(&helper)
+        } else {
+            Err(UpdateError::usage(
+                "cannot create the stopped daemon's state helper; restore its local image and retry; nothing was deployed",
+            ))
+        };
+        let cleanup = self
+            .command(&["rm".into(), "-f".into(), helper], None, 120, false)
+            .0;
+        if code == 0 && cleanup != 0 {
+            return Err(UpdateError::usage(
+                "cannot remove the owned state helper; remove the pseudolife-update-state helper container before retrying; nothing was deployed",
+            ));
+        }
+        result
     }
     fn verify_backup(
         &mut self,
@@ -551,6 +647,9 @@ impl Update {
             false,
         );
         self.docker_call(&["exec", pg, "rm", "-f", &remote]);
+        if code == 0 && self.o.allow_auth_change && self.o.checkout.is_some() {
+            own_backup_file(&part)?;
+        }
         if code != 0 || !dump_complete(&part) {
             return Err(UpdateError::new(
                 "the backup is INCOMPLETE ('PostgreSQL database dump complete' missing or gzip damaged); fix the dump or use --no-backup for a plain update; nothing was deployed",
@@ -558,36 +657,78 @@ impl Update {
         }
         fs::rename(&part, &dump)?;
         let remote = format!("/tmp/pl_state-{stamp}.tgz");
-        let (code, _) = self.command(
-            &[
-                "exec".into(),
-                daemon.into(),
-                "timeout".into(),
-                "--kill-after=5s".into(),
-                "3500s".into(),
-                "sh".into(),
-                "-c".into(),
-                format!("tar czf {remote} -C /data ."),
-            ],
-            None,
-            3600,
-            false,
-        );
-        let copied = code == 0
-            && self
-                .command(
-                    &[
-                        "cp".into(),
-                        format!("{daemon}:{remote}"),
-                        state.to_string_lossy().into_owned(),
-                    ],
-                    None,
-                    3600,
-                    false,
-                )
-                .0
-                == 0;
-        self.docker_call(&["exec", daemon, "rm", "-f", &remote]);
+        let copied = if self.o.allow_auth_change && self.o.checkout.is_some() {
+            let running = engine::inspect(self, daemon)?;
+            let image = running["Image"].as_str().filter(|image| !image.is_empty())
+                .ok_or_else(|| UpdateError::usage("cannot identify the stopped image; restore its local image before retrying; nothing was deployed"))?;
+            self.with_state_helper(
+                daemon,
+                image,
+                &format!("tar czf {remote} -C /data ."),
+                |helper| {
+                    if self
+                        .command(
+                            &["start".into(), "-a".into(), helper.into()],
+                            None,
+                            3600,
+                            false,
+                        )
+                        .0
+                        != 0
+                    {
+                        return Ok(false);
+                    }
+                    Ok(self
+                        .command(
+                            &[
+                                "cp".into(),
+                                format!("{helper}:{remote}"),
+                                state.to_string_lossy().into_owned(),
+                            ],
+                            None,
+                            3600,
+                            false,
+                        )
+                        .0
+                        == 0)
+                },
+            )?
+        } else {
+            let (code, _) = self.command(
+                &[
+                    "exec".into(),
+                    daemon.into(),
+                    "timeout".into(),
+                    "--kill-after=5s".into(),
+                    "3500s".into(),
+                    "sh".into(),
+                    "-c".into(),
+                    format!("tar czf {remote} -C /data ."),
+                ],
+                None,
+                3600,
+                false,
+            );
+            let copied = code == 0
+                && self
+                    .command(
+                        &[
+                            "cp".into(),
+                            format!("{daemon}:{remote}"),
+                            state.to_string_lossy().into_owned(),
+                        ],
+                        None,
+                        3600,
+                        false,
+                    )
+                    .0
+                    == 0;
+            self.docker_call(&["exec", daemon, "rm", "-f", &remote]);
+            copied
+        };
+        if copied && self.o.allow_auth_change && self.o.checkout.is_some() {
+            own_backup_file(&state)?;
+        }
         let state_ok = copied && state_complete(&state);
         if !state_ok {
             if self.requires_state_backup() {
@@ -613,7 +754,7 @@ impl Update {
         ]
         .into_iter()
         .collect();
-        let removed = rotate(directory, &keep);
+        let removed = self.rotate_after_backup(directory, &keep);
         if !removed.is_empty() {
             self.step(format!(
                 "rotated {} backup file(s) older than 7 days",
@@ -804,6 +945,31 @@ impl Update {
         if code != 0 {
             self.warn("build-cache retention failed (deploy already succeeded)");
         }
+    }
+}
+
+#[cfg(all(test, unix))]
+mod stopped_backup_ownership_tests {
+    use super::*;
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+    #[test]
+    fn stopped_backup_copy_is_private_and_owned_by_the_operator() {
+        let directory =
+            std::env::temp_dir().join(format!("pseudolife-backup-owner-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&directory).unwrap();
+        let path = directory.join("fixture.sql.gz.part");
+        fs::write(&path, b"fixture backup").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+        let original = fs::metadata(&path).unwrap().ino();
+        own_backup_file(&path).unwrap();
+        let accepted = fs::metadata(&path).unwrap();
+        assert_ne!(accepted.ino(), original);
+        assert_eq!(accepted.uid(), fs::metadata(&directory).unwrap().uid());
+        assert_eq!(accepted.permissions().mode() & 0o777, 0o600);
+        assert_eq!(fs::read(&path).unwrap(), b"fixture backup");
+        assert_eq!(fs::read_dir(&directory).unwrap().count(), 1);
+        fs::remove_dir_all(directory).unwrap();
     }
 }
 
@@ -1174,5 +1340,59 @@ mod connection_tests {
             }
             assert!(connection_details(&daemon, &pg).is_none());
         }
+    }
+}
+
+#[cfg(test)]
+mod handover_review_tests {
+    use super::*;
+    #[test]
+    fn review_failed_backup_replace_retains_both_complete_copies() {
+        let directory =
+            std::env::temp_dir().join(format!("pseudolife-backup-copy-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&directory).unwrap();
+        let path = directory.join("fixture.sql.gz.part");
+        fs::write(&path, b"complete fixture backup").unwrap();
+        let mut replacement = None;
+        let result = own_backup_file_with(&path, |source, _| {
+            replacement = Some(source.to_owned());
+            Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied))
+        });
+        let original = fs::read(&path).ok();
+        let copied = fs::read(replacement.unwrap()).ok();
+        fs::remove_dir_all(&directory).unwrap();
+        assert!(result.is_err());
+        assert_eq!(
+            original.as_deref(),
+            Some(b"complete fixture backup".as_slice())
+        );
+        assert_eq!(copied, original);
+    }
+
+    #[test]
+    fn review_stopped_handover_never_rotates_older_backups() {
+        let directory =
+            std::env::temp_dir().join(format!("pseudolife-backup-retain-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&directory).unwrap();
+        for stamp in 1..=4 {
+            for (prefix, suffix) in [("pseudolife_memory", "sql.gz"), ("pseudolife_state", "tgz")] {
+                let path = directory.join(format!("{prefix}-20000101-00000{stamp}.{suffix}"));
+                let file = File::create(path).unwrap();
+                file.set_times(fs::FileTimes::new().set_modified(SystemTime::UNIX_EPOCH))
+                    .unwrap();
+            }
+        }
+        let mut update = Update::new(Options::default());
+        update.stopped_handover = true;
+        let removed = update.rotate_after_backup(&directory, &BTreeSet::new());
+        let remaining = fs::read_dir(&directory).unwrap().count();
+        update.stopped_handover = false;
+        let ordinary_removed = update
+            .rotate_after_backup(&directory, &BTreeSet::new())
+            .len();
+        fs::remove_dir_all(&directory).unwrap();
+        assert!(removed.is_empty());
+        assert_eq!(remaining, 8);
+        assert_eq!(ordinary_removed, 2);
     }
 }

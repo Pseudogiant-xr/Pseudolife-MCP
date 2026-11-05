@@ -405,6 +405,9 @@ impl Update {
         let (code, out) = self.command(&config_args, Some(&env), 60, false);
         let config:Value=serde_json::from_str(&out).ok().filter(|_:&Value|code==0).ok_or_else(||UpdateError::usage("cannot resolve the Compose project; check its files and env file, then retry; nothing was changed"))?;
         engine::verify_bank_identity(self, &config, &context.running)?;
+        if self.o.allow_auth_change {
+            self.step("using the explicitly requested daemon bearer settings from --env-file");
+        }
         self.set_rollback_scope(&config, &context.running)?;
         self.maintainer_context = Some((context.args.clone(), env.clone()));
         let token = if activating {
@@ -716,10 +719,6 @@ impl Update {
             ));
         }
         let env_file = repo.join("ops/.env");
-        if !env_file.is_file() && repo.join("ops/.env.example").is_file() {
-            seams::write_atomic(&env_file, &fs::read(repo.join("ops/.env.example"))?)?;
-            self.step("scaffolded ops/.env from ops/.env.example (all values commented)");
-        }
         let compose = compose_args(
             &[file.clone(), repo.join("ops/docker-compose.override.yml")],
             std::slice::from_ref(&env_file),
