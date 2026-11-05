@@ -170,15 +170,22 @@ and step metadata, never log output, and verifies the PR head SHA, workflow
 path, pull-request event and latest run attempt. Similarly named checks
 and results from another head or workflow cannot satisfy the checkpoint.
 Each replay must be completed with a passing or skipped conclusion;
-a skip after failed setup is red, and cancellation before replay leaves
-it pending. Remaining Rust steps and other CI may still be running.
+a skip after a prerequisite failure waits for the job's verdict, since
+report-only setup steps can fail under `continue-on-error` when no goldens
+are selected on that OS. A passing job satisfies that skip; a failing job
+is red. Cancellation before replay leaves it pending. Remaining Rust
+steps and other CI may still be running.
 
 The frozen batch base's early-replay selector determines whether any
 changed file reaches snapshot rows, using the net merge-tree diff against
 that base just as CI does. Runtime edits already present on master do not
 turn a remaining docs-only or test-only diff into a replay requirement.
 Conflicting heads follow the existing merge/drop path rather than wait for
-replay evidence that GitHub cannot produce. A diff reaching none satisfies
+replay evidence that GitHub cannot produce: budget-only conflicts retain
+the existing normalization and use the batch's replay, and other conflicts
+are dropped. Documentation accompanied only by the generated
+`rust/producer-census.json` follows CI's docs-only skip; census alone or
+alongside runtime edits still requires replay. A diff reaching none satisfies
 admission immediately, without Actions metadata: documentation and pure
 test-only changes do not wait. Tests imported by a runtime harness are
 runtime inputs and retain their replay requirement. The selector code
@@ -186,7 +193,11 @@ comes from the frozen base and reads checkout files as text; it never
 imports a member's Python code. Unknown inputs select conservatively.
 
 Pending, red or unreadable required replay evidence leaves the PR out
-without removing its label. `open` checks the selected members again
+without removing its label. A hand-cancelled run needs a push or a rerun of
+the Rust workflow. A completed run missing the exact step needs a head
+containing it (merge master forward and push), or a rerun if that head
+already defines the step. Unreadable metadata names gh's cause and can be
+retried once that cause is fixed. `open` checks the selected members again
 before publishing; a newly pending or red replay refuses publication,
 and a changed head needing replay requires a fresh build. Plans created
 before this checkpoint also need rebuilding. The snapshot checkpoint

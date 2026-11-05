@@ -135,6 +135,7 @@ def test_step_identity_is_exact_and_unambiguous(integrate, actions, change):
 @pytest.mark.parametrize("prerequisite,state", [("failure", "failing"), ("cancelled", "pending")])
 def test_skipped_after_failed_or_cancelled_setup_is_not_a_pass(integrate, actions, prerequisite, state):
     rollup, jobs, _, _ = actions
+    jobs["1"].update(status="completed", conclusion=prerequisite)
     jobs["1"]["steps"][0]["conclusion"] = prerequisite
     jobs["1"]["steps"][1]["conclusion"] = "skipped"
     assert integrate._snapshot_state(SHA, rollup, True)[0] == state
@@ -142,14 +143,70 @@ def test_skipped_after_failed_or_cancelled_setup_is_not_a_pass(integrate, action
 
 def test_api_failure_is_unverified(integrate, actions, monkeypatch):
     def unavailable(*args):
-        raise integrate.Refusal("API unavailable")
+        raise integrate.Refusal("HTTP 403: Resource not accessible by integration\nsecond line")
     monkeypatch.setattr(integrate, "gh", unavailable)
-    assert integrate._snapshot_state(SHA, actions[0], True)[0] == "unverified"
+    state, why = integrate._snapshot_state(SHA, actions[0], True)
+    assert state == "unverified"
+    assert "HTTP 403: Resource not accessible by integration" in why
+    assert "second line" not in why
+
+
+@pytest.mark.parametrize("missing", [False, True])
+def test_hand_cancelled_replay_names_push_or_rerun(integrate, actions, missing):
+    rollup, jobs, _, _ = actions
+    jobs["1"].update(status="completed", conclusion="cancelled")
+    if missing:
+        jobs["1"]["steps"].pop(1)
+    else:
+        jobs["1"]["steps"][1]["conclusion"] = "cancelled"
+    state, why = integrate._snapshot_state(SHA, rollup, True)
+    assert state == "pending"
+    assert "cancelled" in why and "push" in why and "rerun" in why
+
+
+def test_pre_replay_workflow_names_push_or_rerun(integrate, actions):
+    rollup, jobs, _, _ = actions
+    jobs["1"].update(status="completed", conclusion="success")
+    jobs["1"]["steps"].pop(1)
+    state, why = integrate._snapshot_state(SHA, rollup, True)
+    assert state == "pending"
+    assert "absent" in why and "push" in why and "rerun" in why
+
+
+def test_cancel_after_successful_replay_keeps_the_checkpoint(integrate, actions):
+    rollup, jobs, _, _ = actions
+    jobs["1"].update(status="completed", conclusion="cancelled")
+    assert integrate._snapshot_state(SHA, rollup, True) == ("satisfied", "")
+
+
+def test_active_replay_waits_without_suggesting_a_restart(integrate, actions):
+    rollup, jobs, _, _ = actions
+    jobs["1"]["steps"][1].update(status="in_progress", conclusion=None)
+    state, why = integrate._snapshot_state(SHA, rollup, True)
+    assert state == "pending"
+    assert "rerun" not in why
+
+
+@pytest.mark.parametrize("conclusion,state", [
+    ("success", "satisfied"), (None, "pending"),
+    ("failure", "failing"), ("cancelled", "pending"),
+])
+def test_skipped_replay_uses_job_verdict_for_tolerated_setup_failure(integrate, actions, conclusion, state):
+    rollup, jobs, _, _ = actions
+    jobs["1"].update(status="completed" if conclusion else "in_progress", conclusion=conclusion)
+    jobs["1"]["steps"][0]["conclusion"] = "failure"
+    jobs["1"]["steps"][1]["conclusion"] = "skipped"
+    assert integrate._snapshot_state(SHA, rollup, True)[0] == state
 
 
 @pytest.mark.parametrize("files,required", [
     (["docs/guide.md"], False), (["tests/test_feature.py"], False),
     (["docs/guide.md", "tests/test_feature.py", "changelog.d/note.md"], False),
+    (["docs/guide.md", "rust/producer-census.json"], False),
+    (["rust/CUTOVER.md", "rust/producer-census.json"], False),
+    (["rust/producer-census.json"], True),
+    (["docs/guide.md", "rust/producer-census.json.bak"], True),
+    (["docs/guide.md", "rust/producer-census.json", "pseudolife_memory/doctor_cli.py"], True),
     (["pseudolife_memory/doctor_cli.py"], True), (["rust/shim/src/main.rs"], True),
     (["tests/test_runtime_seed.py"], True),
 ])
@@ -178,6 +235,9 @@ def test_requirement_uses_frozen_selector_without_importing_member_code(
                         SimpleNamespace(returncode=0, stdout="merged-tree\n"))
     monkeypatch.setattr(integrate, "_fetch_head", lambda number: SHA)
     assert integrate._snapshot_requirement(member(integrate), "base") == (required, "")
+    value = member(integrate)
+    value.snapshot, value.snapshot_why = integrate._snapshot_state(SHA, [], required)
+    assert (integrate._not_ready(value) is None) is (not required)
     assert not marker.exists()
 
 
@@ -187,6 +247,17 @@ def test_head_moves_during_requirement_read(integrate, monkeypatch):
     required, why = integrate._snapshot_requirement(member(integrate), "base")
     assert required is None
     assert "head moved" in why
+
+
+def test_requirement_read_keeps_gh_cause(integrate, monkeypatch):
+    monkeypatch.setattr(integrate, "_has_snapshot_selector", lambda base: True)
+    def unavailable(number):
+        raise integrate.Refusal("HTTP 404: pull head not found\nsecond line")
+    monkeypatch.setattr(integrate, "_fetch_head", unavailable)
+    required, why = integrate._snapshot_requirement(member(integrate), "base")
+    assert required is None
+    assert "HTTP 404: pull head not found" in why
+    assert "second line" not in why
 
 
 @pytest.mark.parametrize("conclusion,refuses", [("success", False), (None, True), ("failure", True)])
@@ -254,6 +325,7 @@ def test_open_admits_no_row_member_without_checks(integrate, monkeypatch):
 @pytest.mark.parametrize("remainder,master_value,budget_conflict", [
     ("README.md", "new\n", False), ("tests/test_feature.py", "new\n", False),
     ("README.md", "conflicting master edit\n", False), ("README.md", "old\n", True),
+    ("README.md", "old\n", False), ("README.md", "old\n", "semantic"),
 ])
 def test_already_landed_runtime_edit_does_not_stall_no_row_merge(
         integrate, monkeypatch, tmp_path, remainder, master_value, budget_conflict):
@@ -276,22 +348,28 @@ def test_already_landed_runtime_edit_does_not_stall_no_row_merge(
         write(path, (ROOT / path).read_text(encoding="utf-8"))
     write("pseudolife_memory/doctor_cli.py", "old\n")
     write(remainder, "old\n")
+    def budget(version):
+        return json.dumps({"rust.yml": {"jobs": {"rust": {"minutes":
+                          version + 1 if budget_conflict == "semantic" else 1}},
+                          "fingerprints": {"rust": str(version)}}}) + "\n"
     if budget_conflict:
-        write(integrate.CI_BUDGET, '{"value": 0}\n')
+        write(integrate.CI_BUDGET_CODE, (ROOT / integrate.CI_BUDGET_CODE).read_text(encoding="utf-8"))
+        write(integrate.CI_BUDGET, budget(0))
     git("add", ".")
     git("commit", "-qm", "base")
     git("checkout", "-qb", "feature")
     write("pseudolife_memory/doctor_cli.py", "new\n")
     write(remainder, "new\n")
     if budget_conflict:
-        write(integrate.CI_BUDGET, '{"value": 1}\n')
+        write(integrate.CI_BUDGET, budget(1))
     git("add", ".")
     git("commit", "-qm", "feature")
     sha = git("rev-parse", "HEAD")
     git("checkout", "-q", "master")
     write("pseudolife_memory/doctor_cli.py", master_value)
+    write("docs/master-note.md", "independent master edit\n")
     if budget_conflict:
-        write(integrate.CI_BUDGET, '{"value": 2}\n')
+        write(integrate.CI_BUDGET, budget(2))
     git("add", ".")
     git("commit", "-qm", "land runtime edit independently")
     base = git("rev-parse", "HEAD")
@@ -302,13 +380,34 @@ def test_already_landed_runtime_edit_does_not_stall_no_row_merge(
     assert "pseudolife_memory/doctor_cli.py" in integrate._changed(sha, base)
     required, why = integrate._snapshot_requirement(value, base)
     if budget_conflict:
+        assert required is False
+        assert "budget" in why
+        value.snapshot_required = required
+        value.snapshot, value.snapshot_why = integrate._snapshot_state(sha, [], required)
+        assert integrate._not_ready(value) is None
+        assert integrate._merge_tree(base, sha) == (False, [integrate.CI_BUDGET])
+        # Member cost evidence has independent tests. Exercise admission
+        # through the actual Git merge and frozen budget normalizer here.
+        monkeypatch.setattr(integrate, "_budget_member_evidence", lambda *args: [])
+        plan = integrate.Plan("integrate/2026-11-06-batch-1", base)
+        integrate._merge_members(plan, [value])
+        if budget_conflict == "semantic":
+            assert not plan.merged and len(plan.dropped) == 1
+            assert "conflicts" in plan.dropped[0].reason
+        else:
+            assert plan.merged == [value] and not plan.dropped
+            assert json.loads((tmp_path / integrate.CI_BUDGET).read_text()) == {
+                "rust.yml": {"jobs": {"rust": {"minutes": 1}}}}
+            assert (tmp_path / "pseudolife_memory/doctor_cli.py").read_text() == "new\n"
+        return
+    if master_value == "old\n":
         assert (required, why) == (True, "")
         assert integrate._snapshot_state(sha, [], required)[0] == "pending"
-        assert integrate._merge_tree(base, sha) == (False, [integrate.CI_BUDGET])
+        assert integrate._merge_tree(base, sha)[0] is True
         return
     if master_value != "new\n":
         assert required is False
-        assert "conflicting-member drop" in why
+        assert "conflict handling" in why
         assert integrate._merge_tree(base, sha) == (False, ["pseudolife_memory/doctor_cli.py"])
         return
     assert (required, why) == (False, "")

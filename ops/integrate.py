@@ -268,7 +268,10 @@ exec(compile(data['scope'], scope.__file__, 'exec'), scope.__dict__)
 selector = types.ModuleType('snapshot_selector')
 selector.__file__ = str(root / 'rust/ci/pr_precheck.py')
 exec(compile(data['selector'], selector.__file__, 'exec'), selector.__dict__)
-print(json.dumps(any(selector.rows_for(path, {}) for path in data['files'])))
+files = data['files']
+docs_only = any(scope.is_docs(path) for path in files) and all(
+    scope.is_docs(path) or path == 'rust/producer-census.json' for path in files)
+print(json.dumps(not docs_only and any(selector.rows_for(path, {}) for path in files)))
 """
 
 
@@ -286,14 +289,12 @@ def _snapshot_requirement(member: Member, base: str) -> tuple[bool | None, str]:
             return None, "the PR head moved while snapshot admission was read; retry build"
         merged = git("merge-tree", "--write-tree", "--name-only", "--no-messages",
                      base, member.sha, check=False)
-        conflicted = [line for line in merged.stdout.splitlines()[1:] if line]
-        if merged.returncode == 1 and conflicted != [CI_BUDGET]:
+        if merged.returncode == 1:
             # Keep conflicts on the existing merge/drop path, rather than
             # waiting for CI that GitHub cannot run on a conflicting PR.
-            return False, "snapshot admission deferred to the conflicting-member drop"
-        # A budget-only conflict can be normalized and merged later, so
-        # its remaining runtime inputs still require replay admission.
-        if merged.returncode not in (0, 1) or not merged.stdout.strip():
+            # Budget-only conflicts retain normalization and batch CI.
+            return False, "snapshot admission deferred to conflict handling (budget normalization or drop)"
+        if merged.returncode != 0 or not merged.stdout.strip():
             raise ValueError("the PR merge tree could not be read")
         tree = merged.stdout.splitlines()[0]
         # CI diffs its synthetic PR merge against the base parent. A
@@ -312,7 +313,7 @@ def _snapshot_requirement(member: Member, base: str) -> tuple[bool | None, str]:
             raise ValueError("snapshot input selector returned no boolean")
         return required, ""
     except (Refusal, OSError, ValueError) as exc:
-        return None, f"snapshot inputs could not be read ({type(exc).__name__}); retry build"
+        return None, _unread("snapshot inputs", exc) + "; retry build"
 
 
 def _snapshot_state(sha: str, rollup: list[dict] | None,
@@ -352,26 +353,41 @@ def _snapshot_state(sha: str, rollup: list[dict] | None,
             steps = meta.get("steps", []) if meta else []
             matches = [step for step in steps if step.get("name") == SNAPSHOT_STEP]
             if len(matches) != 1:
-                waiting.append(name)
+                if meta and _check_state(meta) == CANCELLED:
+                    waiting.append(f"{name} was cancelled before replay; push a new commit or rerun the Rust workflow")
+                elif meta and meta.get("status") == "completed":
+                    waiting.append(f"{name}: exact replay step absent or ambiguous; push a head containing "
+                                   "the step (merge master forward if needed), or rerun the Rust workflow")
+                else:
+                    waiting.append(name)
                 continue
             step = matches[0]
             conclusion = str(step.get("conclusion") or "").upper()
             if conclusion in FAILED:
                 return "failing", f"{name}: {SNAPSHOT_STEP} is red on the PR head"
             if step.get("status") != "completed" or conclusion not in PASSING:
-                waiting.append(name)
+                if conclusion == CANCELLED or _check_state(meta) == CANCELLED:
+                    waiting.append(f"{name} was cancelled before replay finished; push a new commit or rerun the Rust workflow")
+                else:
+                    waiting.append(name)
                 continue
             if conclusion == "SKIPPED":
                 prior = [s for s in steps if int(s["number"]) < int(step["number"])]
-                if any(str(s.get("conclusion") or "").upper() in FAILED for s in prior):
-                    return "failing", f"{name}: snapshot replay skipped after a failed prerequisite"
-                if any(str(s.get("conclusion") or "").upper() == CANCELLED for s in prior):
-                    waiting.append(name)
+                if (_check_state(meta) == CANCELLED
+                        or any(_check_state(s) == CANCELLED for s in prior)):
+                    waiting.append(f"{name} was cancelled before replay; push a new commit or rerun the Rust workflow")
+                elif any(_check_state(s) in FAILED for s in prior):
+                    # continue-on-error prerequisites can fail legitimately
+                    # when this OS has no goldens. The job's verdict decides.
+                    if _check_state(meta) in FAILED:
+                        return "failing", f"{name}: snapshot replay skipped in a failed job"
+                    if meta.get("status") != "completed" or _check_state(meta) not in PASSING:
+                        waiting.append(name)
         if waiting:
             return "pending", "own-head snapshot replay is pending: " + ", ".join(waiting)
         return "satisfied", ""
     except (Refusal, KeyError, TypeError, ValueError) as exc:
-        return "unverified", f"snapshot job metadata could not be read ({type(exc).__name__}); retry build/open"
+        return "unverified", _unread("snapshot job metadata", exc) + "; retry build/open"
 
 
 def _check_state(check: dict) -> str:
