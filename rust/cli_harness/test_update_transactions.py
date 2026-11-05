@@ -775,7 +775,9 @@ def test_native_checkout_scopes_backup_and_rollback_to_its_compose_project(tmp_p
             assert [backup[backup.index(flag) + 1] for flag in flags] == ["fixture-pg", "fixture-daemon", "fixture", "fixture"]
         else:
             backup = next(args for args in calls if args[:1] == ["exec"] and any("pg_dump" in part for part in args))
-            assert backup[1] == "fixture-pg" and backup[-2:] == ["fixture", "fixture"]
+            from psycopg.conninfo import conninfo_to_dict
+            assert backup[1] == "fixture-pg" and backup[-3:-1] == ["5432", "fixture"]
+            assert conninfo_to_dict(backup[-1]) == {"dbname": "fixture"}
         assert stages(state) == ["backup", "tag", "up"]
         report = json.loads(result.stdout)
         assert report["clients"] is None

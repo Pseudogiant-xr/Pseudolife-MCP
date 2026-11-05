@@ -101,6 +101,11 @@ def test_every_listed_file_and_test_exists():
             assert tests <= top_level_tests(path), (path, tests - top_level_tests(path))
 
 
+def test_docker_restore_safety_runs_in_required_windows_lane():
+    files, _, _ = selection(lane_argv(REQUIRED))
+    assert "tests/test_docker_backup_restore.py" in files
+
+
 def listed_files():
     return {path for files, named, _ in lanes() for path in files | set(named)}
 
