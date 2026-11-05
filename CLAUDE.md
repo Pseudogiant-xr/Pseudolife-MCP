@@ -231,6 +231,7 @@ current merge ref, except as the `merge-forward` skill allows):
   pass carried under the review-fix rule counts); run the overlap's tests
   (plus doc guards if docs overlap). A hand-resolved code conflict always
   requires one.
+- Batch admission requires the own-head early snapshot replay checkpoint described in `docs/dev/merge-batches.md`, so unfinished or red replays stay out.
 - **An integration batch** (`integrate/<date>-batch-N` from `python
   ops/integrate.py build`, over `ready-to-batch` PRs with their review,
   their own local targeted validation and own-head CI that has not

@@ -108,8 +108,9 @@ Each change waits for hosted CI once, on its batch:
 
 A pull request is ready when it has its reviews and its own local targeted
 validation (the touched and dependent tests, recorded in its body), and CI
-on its head is not failing. It does not wait for green CI of its own: the
-batch's CI is its CI, so pending or absent checks are fine. Mark it with
+on its head is not failing. Its selected early snapshot replay must also
+have finished without a failure, as described below. Other pending or
+absent checks are fine, since the batch's CI is its CI. Mark it with
 the `ready-to-batch` label:
 
 ```bash
@@ -120,11 +121,11 @@ The label is the claim that the reviews are done; only someone with triage
 or write access can apply it. The script does not check reviews, since
 this repository records them in the pull request body rather than as
 GitHub approvals, but `status` shows the review decision. It does check
-CI, only for a known failure: a labelled pull request whose current head
+CI for a known failure: a labelled pull request whose current head
 has a failing check sits the batch out without a comment and keeps its
 label, and joins a later batch once a rerun of the failed job passes or a
-push replaces that head. Pending, cancelled,
-green or no checks all admit it: a run cancelled by hand or by a
+push replaces that head. Subject to the snapshot checkpoint below, pending,
+cancelled, green or no checks admit it: a run cancelled by hand or by a
 re-trigger gave no verdict. GitHub also reports a job that ran past its
 `timeout-minutes` as cancelled, so the script reads the annotations of
 the latest attempt of each cancelled job: the runner's timeout message
@@ -160,7 +161,34 @@ gate failure is failing, and a run, job or step list it cannot read is
 `unverified`, naming the read that failed. `merge` still counts a
 cancelled or failed check on the batch itself as red.
 
-Why not wait for green on the member's own head: on 2026-10-20/21 four
+### Own-head snapshot checkpoint
+
+`status` and `build` read the exact `Replay touched PR goldens` step in
+both `Rust / ubuntu-latest` and `Rust / windows-latest` jobs from
+`.github/workflows/rust.yml`. The collector uses structured Actions job
+and step metadata, never log output, and verifies the PR head SHA, workflow
+path, pull-request event and latest run attempt. Similarly named checks
+and results from another head or workflow cannot satisfy the checkpoint.
+Each replay must be completed with a passing or skipped conclusion;
+a skip after failed setup is red, and cancellation before replay leaves
+it pending. Remaining Rust steps and other CI may still be running.
+
+The frozen batch base's early-replay selector determines whether any
+changed file reaches snapshot rows. A diff reaching none satisfies
+admission immediately, without Actions metadata: documentation and pure
+test-only changes do not wait. Tests imported by a runtime harness are
+runtime inputs and retain their replay requirement. The selector code
+comes from the frozen base and reads checkout files as text; it never
+imports a member's Python code. Unknown inputs select conservatively.
+
+Pending, red or unreadable required replay evidence leaves the PR out
+without removing its label. `open` checks the selected members again
+before publishing; a newly pending or red replay refuses publication,
+and a changed head needing replay requires a fresh build. Plans created
+before this checkpoint also need rebuilding. The snapshot checkpoint
+does not replace the batch's full parity gate.
+
+Why not wait for all green CI on the member's own head: on 2026-10-20/21 four
 things held batches up (#877 broke only against a newer master; an
 h5-background harness race, fixed by #883; a stale producer census; #875's
 dependency lock that could not resolve), and green CI on the member's own
