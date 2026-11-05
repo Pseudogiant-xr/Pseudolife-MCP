@@ -830,6 +830,14 @@ jobs:
         if: runner.environment == 'self-hosted'
         shell: pwsh
         run: |
+          # 2026-11-06: all three Linux workers had 65.9 GiB free on the
+          # work disk, but /tmp was an empty 4.9 GiB tmpfs. Use the job's
+          # disk-backed directory, which the runner empties between jobs.
+          if ($env:RUNNER_OS -eq 'Linux') {
+            $temporary = Join-Path $env:RUNNER_TEMP 'parity-tmp'
+            New-Item -ItemType Directory -Path $temporary -Force | Out-Null
+            "TMPDIR=$temporary" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          }
           $freeGb = [math]::Floor([IO.DriveInfo]::new($env:GITHUB_WORKSPACE).AvailableFreeSpace / 1GB)
           $facts = "$freeGb GB free on the runner's work drive (floor $env:PARITY_MIN_FREE_GB GB)"
           Write-Output $facts
