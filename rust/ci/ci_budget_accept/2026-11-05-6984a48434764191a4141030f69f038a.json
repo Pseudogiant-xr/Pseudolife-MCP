@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "parity-checks",
+  "before": "f2b04181d39682b4",
+  "fingerprint": "ede7566a71876da8",
+  "reason": "Only the Daemon security admission parity step's timeout-minutes changes, to an expression that yields 20 on self-hosted Windows and 10 elsewhere; on hosted runners (the only ones this budget prices) the value, commands, cases and shard selection are unchanged, so hosted cost is unchanged."
+}
