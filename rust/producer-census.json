@@ -10,9 +10,9 @@
     "docs/atlas/atlas.html": "a6b4c8f505d05c9c176fc7eb24b72e47b186c0c8e172ce61ac07cdf5e4cc94cb",
     "docs/atlas/atlas.json": "05d285cb962e1b0af874654423070101f14d095ab9fe0831900d4f19824d8a19",
     "docs/cortex-mcp-spec.md": "43fba1fe5e5cd3710f59d7e99b414f7b78ea15eaa70b620b23716f3fae308d32",
-    "docs/dev/ci-budget.md": "21fed3dc7ba96010612ab32bb8335927d12c67150a5dbd019411f8dbaf931ba3",
+    "docs/dev/ci-budget.md": "b45c84aba95c5ab70a27b104571ec5f7cc71de9edd4de4ea8cf4d83a3526de56",
     "docs/dev/dev-machines.md": "802349bb1973a19f1e9a93db4195a54fdf5e8c1c3b7a79554c4a6e5e855ba6f9",
-    "docs/dev/merge-batches.md": "5ca26a343b58ab26302bd85ae51347486e2f5107a83399a5913eb3354a20cb80",
+    "docs/dev/merge-batches.md": "cda4ee1e89e059702a92af03ac573fdfc791f62e35131ca9bf7ba0872fc60eab",
     "docs/dev/native-client-updates.md": "dc0847090e9696348569d1f0a9c063f34f57c2c61f9b4a97600db76367c1e21e",
     "docs/dev/native-runtimes.md": "6972b4d5028dc1f88eee51ffb656603b810dcd4b1588edf0bb912d9e65ad4056",
     "docs/dev/release-assets.md": "3fb0c549c0252024d5278ad158fe93398f349f913844ff3e65bc88bd9eff7235",
@@ -229,6 +229,7 @@
     "ops/batch_timeline.py": "dc8140968be897f9db79287355f41eb5ab6a017b0a6372c0927dacbc210968be",
     "ops/check_lock_resolves.py": "5fd39ee5a66b551c3a12404981a203ce6b9f28ae75681511c89f0b22904e97a5",
     "ops/ci_batch_passed.py": "51f906f48a83659604757ad1160f6a6dc33cc74386884f0270ced5c93e5696a8",
+    "ops/ci_push_passed.py": "cf8515a2e3a914c71931987525228b7ef5215fe255a56fc2ea8db1b2d15f2f9d",
     "ops/ci_tests.sh": "b7707384934379e136176a09460b89a9555998a4c966cf78e8f56a90fd1bff32",
     "ops/client_credentials.py": "19a32a636e5a9d9d9e3bb254cab0199e46d7571312f5e9fb4430ccd5567fe7c1",
     "ops/compact-docker-vhdx.ps1": "3aa564ef7824cec3f08b785322df2bc65e4fafed6339926bb21299c56bcc6257",
@@ -255,7 +256,7 @@
     "ops/install-worktree-retention.ps1": "1ff8d9a77f2cca9a19e38c89d85959a2d4ce03400e73eda3b8c79f1dabf52d29",
     "ops/install.ps1": "646fb649ee9e92c4e36770e3c5fb7a199f85779136f8921e24bbe5d39ad97ba4",
     "ops/install.sh": "0aca810ec7ead447fb135fb171d8697f92e356fdcd8ee4adb7249ef5b4c338f9",
-    "ops/integrate.py": "d40dbb28b1f4f78dd60fae5df67a22adfd32fb61a68294f43f1f2ba7bae23b9f",
+    "ops/integrate.py": "4ff4628995595647057ca7f5aead426d3280dff19f7b0c2c6fa6ae0fa2fb8dc0",
     "ops/measure_reverify_population.py": "413ff8baa0e0b25b8a727b6bead248df753d4d26e7c697aa6a0542b68715cfa5",
     "ops/migrate-pg18.ps1": "a2a8bd96ab754249395a9d42b26bfd8e6b5ecf8d6da1cd72383ebf745c0acde8",
     "ops/migrate_drop_age.py": "bad14579affef14699a3e1898afd4ba6326944f5db1e9b5c0486ee2b23153eac",
@@ -377,7 +378,7 @@
     "rust/shim/src/cli/doctor/agent.rs": "2224a43cdb6c5f0130865952dabd369f231f622ae49423c957c7c41f1a4b3b06",
     "rust/shim/src/cli/doctor/clients.rs": "842a00bb3b6250fed833b86f67c833b53cb67d3210009c2ed5295556e8faa52f",
     "rust/shim/src/cli/doctor/handshake.rs": "54c580f0063e838fab86da2c716894648a425a213697d444509aa100d12a53a0",
-    "rust/shim/src/cli/doctor/mod.rs": "cba86e1139b79d8f5e4f7650b0c90f6376735df313e9e9651a1263ee749b9996",
+    "rust/shim/src/cli/doctor/mod.rs": "d9e49d756cb3c9dda4174415c1a5f71d53db82760fb1e3c61be0ec9c0a04c546",
     "rust/shim/src/cli/doctor/probes.rs": "4f2d543a3453281f5720fb63834269e49e1192750a4dbde37bf46ca66790b161",
     "rust/shim/src/cli/doctor/proof.rs": "863892be59f52cd4140579a4869a214c86331a29bbfcf56263d19349f8dcfbb7",
     "rust/shim/src/cli/doctor/proof_diagnostics.rs": "211bdb9072a840db3aade9033735b3de03e74ac1cae5c880a66e82232004d9f9",
@@ -6965,7 +6966,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/mod.rs:654",
+          "location": "rust/shim/src/cli/doctor/mod.rs:666",
           "shape": {
             "argv_source": "update --clients-only --tag {daemon_version} (the daemon's release as a new shim runtime beside the running one; from a checkout: python ops/update_clients.py --only shim; no session has to close), or update the daemon with pseudolife-mcp update; then start a new session and retry.\"",
             "channel": "argv",
@@ -32320,7 +32321,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/mod.rs:438",
+          "location": "rust/shim/src/cli/doctor/mod.rs:450",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -38510,7 +38511,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/mod.rs:442",
+          "location": "rust/shim/src/cli/doctor/mod.rs:454",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -38523,7 +38524,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/mod.rs:445",
+          "location": "rust/shim/src/cli/doctor/mod.rs:457",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -41364,7 +41365,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/mod.rs:441",
+          "location": "rust/shim/src/cli/doctor/mod.rs:453",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -41377,7 +41378,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/mod.rs:444",
+          "location": "rust/shim/src/cli/doctor/mod.rs:456",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -45209,7 +45210,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/dev/merge-batches.md:312",
+          "location": "docs/dev/merge-batches.md:333",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -45239,7 +45240,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/integrate.py:1260",
+          "location": "ops/integrate.py:1499",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -65181,7 +65182,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "cli",
-      "location": "rust/shim/src/cli/doctor/mod.rs:675",
+      "location": "rust/shim/src/cli/doctor/mod.rs:687",
       "name": "mcp",
       "shape": {
         "argv_source": "mcp ; reinstall there if stale, then retry.\"",
@@ -75214,7 +75215,7 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/dev/merge-batches.md:362",
+      "location": "docs/dev/merge-batches.md:383",
       "reason": "forwarded parameters"
     },
     {
@@ -96021,43 +96022,43 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/mod.rs:438",
+      "location": "rust/shim/src/cli/doctor/mod.rs:450",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DAEMON_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/mod.rs:441",
+      "location": "rust/shim/src/cli/doctor/mod.rs:453",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/mod.rs:442",
+      "location": "rust/shim/src/cli/doctor/mod.rs:454",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/mod.rs:444",
+      "location": "rust/shim/src/cli/doctor/mod.rs:456",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/mod.rs:445",
+      "location": "rust/shim/src/cli/doctor/mod.rs:457",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/mod.rs:654",
+      "location": "rust/shim/src/cli/doctor/mod.rs:666",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:update"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/mod.rs:675",
+      "location": "rust/shim/src/cli/doctor/mod.rs:687",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:cli:mcp"
     },

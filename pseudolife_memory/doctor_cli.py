@@ -627,10 +627,15 @@ def coordination_snapshot(health, board, wake, host, registration, *, tools_pres
     auth = "admitted" if board.get("state") == "on" else board.get("state", "unknown")
     if not reachable:
         auth = "offline"
-    selected = wake.get("codex" if host == "codex" else "claude_code", {})
-    configured = selected.get("doorbell" if host == "codex" else "stop_hook")
+    paths = []
+    if host in ("generic", "claude-code") and wake.get("claude_code", {}).get("stop_hook") == "on":
+        paths.append("Claude Code wakes via the plugin Stop hook; wake_enabled controls only the optional push path.")
+    if host in ("generic", "codex") and wake.get("codex", {}).get("doorbell") == "on":
+        paths.append("Codex wakes via the doorbell.")
     wake_state = "unsupported" if host in ("generic", "claude-desktop") else (
-        "configured" if configured == "on" else "unavailable")
+        "configured" if paths else "unavailable")
+    if host == "generic" and paths:
+        wake_state = "configured"
     result = {"daemon": "reachable" if reachable else "offline",
               "health": "ok" if isinstance(health, dict) and health.get("status") == "ok" else "not_verified",
               "authentication": auth,
@@ -653,9 +658,12 @@ def coordination_snapshot(health, board, wake, host, registration, *, tools_pres
         result["next"].append("Start or reconnect the client, make a memory call, then use --agent-state with its private saved instance file to check registration.")
     if host == "claude-desktop":
         result["next"].append("Claude Desktop shares its MCP process across conversations; use a supported session host for a mailbox.")
-    elif wake_state == "unsupported":
-        result["next"].append("This host has no verified idle wake path; pull mail on the next turn.")
+    elif host == "generic" and not paths:
+        result["next"].append("No host selected and no configured wake path detected; use --host claude-code or --host codex to diagnose that client's wake setup.")
+    elif wake_state == "unavailable":
+        result["next"].append("This host has no configured idle wake path; check its stop_hook or doorbell reason above and enable that client's plugin or wake setting, or pull mail on the next turn.")
     else:
+        result["next"].extend(paths)
         result["next"].append("Configured wake is not delivery evidence; verify enqueue, hint/ring, receive and explicit ack in a disposable bank.")
     result["transport"]["mailbox_pull"] = "authenticated" if registration == "authenticated" else "not_verified"
     return result
