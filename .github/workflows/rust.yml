@@ -1223,7 +1223,13 @@ jobs:
           if-no-files-found: warn
       - name: Daemon security admission parity
         if: matrix.suite == 'cli-live'
-        timeout-minutes: 10
+        # About forty harness rows. Hosted windows-latest 2026-11-01..04:
+        # 313-470 s. The self-hosted Windows workers: 444, 483 and 585 s
+        # passing, and 602/603 s cut off by ten minutes with every finished
+        # mutant caught (runs 41436144681, 41623700371), at 12-16 s a row
+        # while both self-hosted lanes shared the host. Twenty is about twice
+        # their slowest pass; hosted keeps ten.
+        timeout-minutes: ${{ runner.environment == 'self-hosted' && runner.os == 'Windows' && 20 || 10 }}
         shell: pwsh
         env:
           PL_HARNESS_SLICE: http
@@ -1751,6 +1757,12 @@ jobs:
       PARITY_ARTIFACT_PREFIX: self-hosted-
       PARITY_YIELD_MINUTES: '60'
       PARITY_MIN_FREE_GB: '8'
+      # The judges' pinned process tests (evals/rust_port/phase1.py, 240 s
+      # by default): the Windows workers took 129-149 s against hosted's
+      # 95-114 s and once ran past 240 s on a shared host (2026-11-03). 480
+      # is twice the old limit, about three times their slowest pass; empty
+      # keeps the default.
+      PARITY_PROCESS_TEST_TIMEOUT: ${{ matrix.runner == 'windows' && '480' || '' }}
     steps: *parity_steps
 
   body-evidence:
