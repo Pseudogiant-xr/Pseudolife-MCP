@@ -139,7 +139,8 @@ def test_overlay_preserves_persistent_data_and_separates_shadow():
 
 
 def _render_compose(text, env):
-    """Compose's ${NAME}, ${NAME:-default} and ${NAME:?message} interpolation."""
+    """Parse, then apply Compose's ${NAME}, ${NAME:-default} and
+    ${NAME:?message} interpolation to string values, as Compose does."""
     import re
     import yaml
 
@@ -150,7 +151,18 @@ def _render_compose(text, env):
         if op == ":?":
             raise KeyError(name)
         return rest if op == ":-" else ""
-    return yaml.safe_load(re.sub(r"\$\{([A-Z0-9_]+)(:-|:\?)?([^}]*)\}", value, text))
+
+    def walk(node):
+        if isinstance(node, dict):
+            return {k: walk(v) for k, v in node.items()}
+        if isinstance(node, list):
+            return [walk(v) for v in node]
+        if isinstance(node, str):
+            # Forms this helper does not implement must not appear.
+            assert "$$" not in node and not re.search(r"\$\{[A-Za-z0-9_]+(-|\?|\+|:\+)", node), node
+            return re.sub(r"\$\{([A-Za-z0-9_]+)(:-|:\?)?([^}]*)\}", value, node)
+        return node
+    return walk(yaml.safe_load(text))
 
 
 @pytest.mark.parametrize("host_env", [
