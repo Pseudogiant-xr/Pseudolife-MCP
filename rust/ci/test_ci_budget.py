@@ -573,3 +573,95 @@ def test_a_job_unresolved_at_the_merge_base_is_never_credited(monkeypatch):
     monkeypatch.setattr(ci_budget, "merge_base", lambda base, head: "fork-point")
     run = {"event": "pull_request", "head_sha": "head", "pull_requests": [{"base": {"sha": "base"}}]}
     assert ci_budget.executed_definitions("rust.yml", run) == {"rust": "r"}
+
+
+def profile_measurement(tmp_path, monkeypatch, **run_changes):
+    path = tmp_path / "ci_budget.json"
+    original = budget()
+    baseline, reasons = ci_budget.fingerprint_path(), ci_budget.acceptance_directory()
+    path.write_text(json.dumps(original), encoding="utf-8")
+    monkeypatch.setattr(ci_budget, "BUDGET", path)
+    monkeypatch.setattr(ci_budget, "fingerprint_path", lambda: baseline)
+    monkeypatch.setattr(ci_budget, "acceptance_directory", lambda: reasons)
+    monkeypatch.setattr(ci_budget, "stale_definitions", lambda *args: {})
+    monkeypatch.setattr(ci_budget, "measure", lambda runs: {
+        "Rust / ubuntu-latest": {"1": 50.0, "2": 54.0},
+        "Rust / windows-latest": {"1": 62.0, "2": 74.0}})
+    run = {"event": "pull_request", "head_branch": "feature/prechecks", "status": "completed",
+           "conclusion": "success", "path": ".github/workflows/rust.yml", **run_changes}
+    monkeypatch.setattr(ci_budget, "fetch_run", lambda run_id: run)
+    return path, original
+
+
+def test_ordinary_pr_measurement_preserves_batch_prices_and_limits(tmp_path, monkeypatch):
+    path, original = profile_measurement(tmp_path, monkeypatch)
+    baseline = ci_budget.fingerprint_path().read_bytes()
+    assert ci_budget.main(["measure", "--workflow", "rust.yml", "--profile", "ordinary-pr",
+                           "--reason", "Broad precheck profile", "1", "2"]) == 0
+    result = json.loads(path.read_text())
+    profile = result["rust.yml"].pop("profiles")["ordinary_pr"]
+    original["rust.yml"].pop("profiles", None)
+    assert result == original
+    assert ci_budget.fingerprint_path().read_bytes() == baseline
+    assert profile == {"measured_on": [1, 2], "why": "Broad precheck profile", "jobs": {
+        "Rust / ubuntu-latest": {"minutes": 52.0}, "Rust / windows-latest": {"minutes": 68.0}}}
+
+
+@pytest.mark.parametrize("change", [{"event": "workflow_dispatch"}, {"head_branch": "integrate/batch"},
+                                   {"conclusion": "failure"}, {"status": "in_progress"},
+                                   {"path": ".github/workflows/ci.yml"}])
+def test_ordinary_pr_profile_rejects_other_execution_modes(tmp_path, monkeypatch, capsys, change):
+    path, original = profile_measurement(tmp_path, monkeypatch, **change)
+    with pytest.raises(SystemExit):
+        ci_budget.main(["measure", "--workflow", "rust.yml", "--profile", "ordinary-pr",
+                        "--reason", "Broad precheck profile", "1", "2"])
+    assert json.loads(path.read_text()) == original
+    assert "not a successful ordinary PR of this workflow" in capsys.readouterr().err
+
+
+def test_profile_does_not_price_a_job_from_one_current_sample():
+    workflow, _ = rust()
+    with pytest.raises(ValueError, match="two successful current-definition"):
+        ci_budget.profile_jobs(workflow, {"Rust / ubuntu-latest": {"1": 50, "2": 60}}, {"rust": ["2"]})
+
+
+@pytest.mark.parametrize("bad", [True, -1, float("nan"), float("inf")])
+def test_profile_rejects_invalid_prices(bad):
+    entry = budget()
+    entry["rust.yml"]["profiles"] = {"ordinary_pr": {
+        "measured_on": [1, 2], "why": "Measured", "jobs": {"Rust / ubuntu-latest": {"minutes": bad}}}}
+    workflow, raw = rust()
+    assert any("ordinary_pr" in error for error in check(workflow, raw, entry))
+
+
+def test_profile_does_not_relax_the_batch_critical_path_guard():
+    entry = budget()
+    entry["rust.yml"]["profiles"] = {"ordinary_pr": {
+        "measured_on": [1, 2], "why": "PR-only replay", "jobs": {
+            "Rust / ubuntu-latest": {"minutes": 100}, "Rust / windows-latest": {"minutes": 100}}}}
+    workflow, raw = rust()
+    for target in (workflow, raw):
+        target["jobs"]["candidate"]["needs"] = ["scope", "rust"]
+    assert any("slowest chain of needs" in error for error in check(workflow, raw, entry))
+
+
+@pytest.mark.parametrize("change", [{"measured_on": [1]}, {"measured_on": [1, 1]},
+                                   {"measured_on": [True, 2]}, {"why": ""},
+                                   {"jobs": {}}, {"jobs": {"unknown": {"minutes": 1}}}])
+def test_profile_requires_usable_measurement_metadata(change):
+    entry = budget()
+    entry["rust.yml"]["profiles"] = {"ordinary_pr": {
+        "measured_on": [1, 2], "why": "Measured", "jobs": {"Scope": {"minutes": 0.2}}, **change}}
+    workflow, raw = rust()
+    assert any("ordinary_pr" in error for error in check(workflow, raw, entry))
+
+
+def test_profile_prices_remain_authored_data_in_a_budget_merge():
+    before = budget()
+    ours, theirs = copy.deepcopy(before), copy.deepcopy(before)
+    ours["rust.yml"]["profiles"] = {"ordinary_pr": {
+        "measured_on": [1, 2], "why": "PR-only replay", "jobs": {"Scope": {"minutes": 0.2}}}}
+    theirs["rust.yml"]["jobs"]["Scope"]["minutes"] = 0.3
+    merged = ci_budget.merge_budget_data(before, ours, theirs)
+    assert merged["rust.yml"]["profiles"] == ours["rust.yml"]["profiles"]
+    assert merged["rust.yml"]["jobs"]["Scope"] == {"minutes": 0.3}

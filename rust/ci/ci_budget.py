@@ -748,6 +748,36 @@ def estimates(entry: dict) -> list[str]:
     return sorted(name for name, job in entry["jobs"].items() if "estimate" in job)
 
 
+def profile_problems(name: str, entry: dict, reachable: list[str]) -> list[str]:
+    """Separate observations never replace the full-run prices or limits."""
+    profiles = entry.get("profiles", {})
+    if not isinstance(profiles, dict) or set(profiles) - {"ordinary_pr"}:
+        return [f"{name}: invalid measured profiles"]
+    found = []
+    for label, profile in profiles.items():
+        prefix = f"{name}: profile {label}"
+        if not isinstance(profile, dict) or set(profile) != {"measured_on", "jobs", "why"}:
+            found.append(f"{prefix} has invalid fields")
+            continue
+        runs = profile["measured_on"]
+        if (not isinstance(runs, list) or len(runs) < 2
+                or any(type(run) is not int or run <= 0 for run in runs)
+                or len(set(runs)) != len(runs)):
+            found.append(f"{prefix} needs distinct measured run IDs")
+        if not isinstance(profile["why"], str) or not profile["why"].strip():
+            found.append(f"{prefix} needs a measurement reason")
+        jobs = profile["jobs"]
+        if not isinstance(jobs, dict) or not jobs:
+            found.append(f"{prefix} has no measured jobs")
+            continue
+        for job, value in jobs.items():
+            minutes = value.get("minutes") if isinstance(value, dict) else None
+            if (job not in reachable or not isinstance(value, dict) or set(value) != {"minutes"}
+                    or type(minutes) not in (int, float) or not math.isfinite(minutes) or minutes < 0):
+                found.append(f"{prefix} has an invalid job measurement: {job}")
+    return found
+
+
 def problems(name: str, workflow: dict, budget: dict, raw: dict | None = None) -> list[str]:
     """Everything that makes ``workflow`` disagree with its budget entry.
     ``raw`` is the unresolved workflow, whose matrix expressions still name
@@ -759,7 +789,7 @@ def problems(name: str, workflow: dict, budget: dict, raw: dict | None = None) -
                        if not isinstance(value.get("minutes"), (int, float)) or isinstance(value.get("minutes"), bool))
     if malformed:
         return [f"{name}: budget entries without numeric minutes: {malformed}"]
-    found = []
+    found = profile_problems(name, entry, reachable)
     duplicates = sorted({job for job in reachable if reachable.count(job) > 1})
     if duplicates:
         found.append(f"{name}: job names repeat: {duplicates}")
@@ -936,6 +966,23 @@ def remeasure(entry: dict, workflow: dict, samples: dict[str, dict[str, float]],
     return missing
 
 
+def profile_jobs(workflow: dict, samples: dict[str, dict[str, float]],
+                 stale: dict[str, list[str]]) -> dict:
+    """Price only observed jobs, requiring two current samples for each."""
+    jobs = {}
+    for job_id in pull_request_reachable(workflow):
+        for name in expand(job_id, workflow["jobs"][job_id]):
+            if name not in samples:
+                continue
+            fresh = [minutes for run, minutes in samples[name].items() if run not in stale.get(job_id, [])]
+            if len(fresh) < 2:
+                raise ValueError(f"{name} needs two successful current-definition samples")
+            jobs[name] = {"minutes": round(statistics.median(fresh), 1)}
+    if not jobs:
+        raise ValueError("profile has no successful current-definition jobs")
+    return jobs
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     commands = parser.add_subparsers(dest="command", required=True)
@@ -943,6 +990,8 @@ def main(argv: list[str] | None = None) -> int:
     check.add_argument("--workflow", action="append")
     update = commands.add_parser("measure", help="rewrite a workflow's measured minutes from hosted runs")
     update.add_argument("--workflow", required=True)
+    update.add_argument("--profile", choices=("batch", "ordinary-pr"), default="batch")
+    update.add_argument("--reason", help="required for a separate ordinary-PR measurement profile")
     update.add_argument("runs", nargs="+")
     estimate = commands.add_parser("estimate", help="enter a job no hosted run can measure yet")
     estimate.add_argument("--workflow", required=True)
@@ -1004,6 +1053,16 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if len(options.runs) < 2:
         parser.error("measure takes two or more runs: one hosted run is too noisy to budget on")
+    if options.profile == "ordinary-pr":
+        if not options.reason or not options.reason.strip():
+            parser.error("ordinary-PR profile needs --reason describing the measured selection")
+        for run_id in options.runs:
+            run = fetch_run(run_id)
+            if (run.get("event") != "pull_request" or run.get("status") != "completed"
+                    or run.get("conclusion") != "success" or not run.get("head_branch")
+                    or run["head_branch"].casefold().startswith("integrate/")
+                    or run.get("path", "").split("@", 1)[0] != f".github/workflows/{options.workflow}"):
+                parser.error(f"ordinary-PR profile run {run_id} is not a successful ordinary PR of this workflow")
     workflow = load(options.workflow)
     reachable = reachable_names(workflow)
     raw = load(options.workflow, resolved=False)
@@ -1020,6 +1079,22 @@ def main(argv: list[str] | None = None) -> int:
         recorded, _ = recorded_definitions(options.workflow, entry)
     except (OSError, ValueError) as error:
         parser.error(str(error))
+    if options.profile == "ordinary-pr":
+        try:
+            profile = {"measured_on": [int(run) for run in options.runs], "why": options.reason.strip(),
+                       "jobs": profile_jobs(workflow, measure(options.runs), stale)}
+            candidate = dict(entry, profiles={**entry.get("profiles", {}), "ordinary_pr": profile})
+            errors = profile_problems(options.workflow, candidate, reachable)
+            if errors:
+                raise ValueError("; ".join(errors))
+        except ValueError as error:
+            parser.error(str(error))
+        entry["profiles"] = candidate["profiles"]
+        BUDGET.write_text(json.dumps(budget, indent=2) + "\n", encoding="utf-8")
+        minutes = sum(job["minutes"] for job in profile["jobs"].values())
+        print(f"{options.workflow}: ordinary-PR profile records {len(profile['jobs'])} jobs, "
+              f"{minutes:.1f} runner-minutes; full-batch prices and limits unchanged")
+        return 0
     measured = copy.deepcopy(entry)
     measured["fingerprints"] = approved
     missing = remeasure(measured, workflow, measure(options.runs), stale, current)

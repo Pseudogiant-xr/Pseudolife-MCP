@@ -150,6 +150,35 @@
         "minutes": 22.6,
         "estimate": "Conservative sum of the two successful former jobs in run 41856662940 (10.37 + 12.22 minutes), before any shared-setup discount; coordinated branch proof and later two-run remeasurement pending."
       }
+    },
+    "profiles": {
+      "ordinary_pr": {
+        "measured_on": [
+          41925000221,
+          41933884256
+        ],
+        "why": "Broad ordinary-PR sample: all 20 golden rows and six report-only frozen groups on both OSes; phase selections match across both runs. Batch commands and prices are unchanged; host caches and inherited master changes vary.",
+        "jobs": {
+          "Scope": {
+            "minutes": 0.2
+          },
+          "Rust / ubuntu-latest": {
+            "minutes": 54.1
+          },
+          "Rust / windows-latest": {
+            "minutes": 68.2
+          },
+          "Rust daemon / disposable image": {
+            "minutes": 9.1
+          },
+          "Parity / ubuntu-latest": {
+            "minutes": 0.2
+          },
+          "Parity / windows-latest": {
+            "minutes": 0.1
+          }
+        }
+      }
     }
   },
   "ci.yml": {
