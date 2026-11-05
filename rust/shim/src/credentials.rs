@@ -200,6 +200,26 @@ pub(crate) fn absolute_expanded(path: &Path) -> io::Result<PathBuf> {
     Ok(clean)
 }
 
+/// The directory Python's `Path.home()` names, read through `lookup`:
+/// `USERPROFILE`, else `HOMEDRIVE` + `HOMEPATH`, on Windows, and `HOME`
+/// elsewhere, falling back to the OS profile only when none is set. The
+/// plugin hooks (`$HOME`), the Python shim and [`expand_user`] all honour
+/// `USERPROFILE`; `dirs::home_dir()` alone does not on Windows, so a native
+/// session whose profile variable pointed elsewhere wrote its board digest
+/// and lease locks where nothing else looks (found 2026-11-06).
+pub(crate) fn python_home_with(
+    mut lookup: impl FnMut(&str) -> Option<std::ffi::OsString>,
+) -> PathBuf {
+    #[cfg(windows)]
+    let home = lookup("USERPROFILE").map(PathBuf::from).or_else(|| {
+        lookup("HOMEPATH")
+            .map(|path| PathBuf::from(lookup("HOMEDRIVE").unwrap_or_default()).join(path))
+    });
+    #[cfg(unix)]
+    let home = lookup("HOME").map(PathBuf::from);
+    home.or_else(dirs::home_dir).unwrap_or_default()
+}
+
 pub(crate) fn expand_user(path: &Path) -> io::Result<PathBuf> {
     #[cfg(windows)]
     let home = std::env::var_os("USERPROFILE")

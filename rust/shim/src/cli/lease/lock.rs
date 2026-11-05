@@ -6,13 +6,17 @@ use std::{
 };
 
 pub fn directory() -> PathBuf {
-    let path = std::env::var_os("PSEUDOLIFE_LEASE_LOCK_DIR")
+    directory_with(|key| std::env::var_os(key))
+}
+/// `PSEUDOLIFE_LEASE_LOCK_DIR`, else `~/.pseudolife-mcp/locks` with the home
+/// Python's `os_lock.lock_dir` uses (`Path.home()`, which honours
+/// `USERPROFILE` on Windows).
+fn directory_with(mut lookup: impl FnMut(&str) -> Option<std::ffi::OsString>) -> PathBuf {
+    let path = lookup("PSEUDOLIFE_LEASE_LOCK_DIR")
         .filter(|s| !s.is_empty())
         .map(PathBuf::from)
         .unwrap_or_else(|| {
-            dirs::home_dir()
-                .unwrap_or_default()
-                .join(".pseudolife-mcp/locks")
+            crate::credentials::python_home_with(&mut lookup).join(".pseudolife-mcp/locks")
         });
     path.components().collect()
 }
@@ -265,3 +269,23 @@ mod tests {
 #[cfg(all(test, windows))]
 #[path = "lock_release_tests.rs"]
 mod release_tests;
+
+#[cfg(test)]
+mod home_tests {
+    use super::*;
+
+    #[test]
+    fn lock_directory_follows_the_profile_variable_python_reads() {
+        let home = std::env::temp_dir().join("pseudolife-home-fixture");
+        let profile = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
+        let found = directory_with(|key| (key == profile).then(|| home.clone().into_os_string()));
+        let want: PathBuf = home.join(".pseudolife-mcp/locks").components().collect();
+        assert_eq!(found, want);
+        let explicit = std::env::temp_dir().join("pseudolife-locks-fixture");
+        let found = directory_with(|key| match key {
+            "PSEUDOLIFE_LEASE_LOCK_DIR" => Some(explicit.clone().into_os_string()),
+            _ => Some(home.clone().into_os_string()),
+        });
+        assert_eq!(found, explicit.components().collect::<PathBuf>());
+    }
+}
