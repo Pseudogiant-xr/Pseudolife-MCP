@@ -138,7 +138,8 @@ def test_without_a_terminal_nothing_is_asked(bash, tmp_path):
     proc = _ask_sh(_Shell(bash, tmp_path), None)
     assert proc.returncode == 0, proc.stderr
     assert QUESTION not in proc.stdout + proc.stderr
-    assert proc.stdout.startswith("BANK=local\nCLIENT_ONLY=\n")
+    assert proc.stdout.startswith("Unattended default: bank on this machine (local Docker).\n"
+                                  "BANK=local\nCLIENT_ONLY=\n")
 
 
 @pytest.mark.parametrize("kwargs", [
@@ -385,7 +386,8 @@ def test_ps_without_a_terminal_nothing_is_asked(tmp_path):
     proc = _ask_ps(_PowerShell(tmp_path), None)
     assert proc.returncode == 0, _output(proc)
     assert QUESTION not in _output(proc)
-    assert _lines(proc)[:2] == ["BANK=local", "CLIENT_ONLY=False"]
+    assert _lines(proc)[:3] == ["Unattended default: bank on this machine (local Docker).",
+                              "BANK=local", "CLIENT_ONLY=False"]
 
 
 @pytest.mark.parametrize("kwargs", [

@@ -27,6 +27,10 @@
 #   both = claude,codex      all = claude,codex,gemini
 #
 # Other flags:
+#   --yes                         no prompts; take documented defaults (not broad consent)
+#   PSEUDOLIFE_UNATTENDED=1        the same explicit signal for agents under a pty
+#                                  (also enabled when stdin is not a terminal)
+#   Omitted --client detects installed CLIs; omitted --extractor uses sidecar.
 #   --codex-hooks auto|manual|plugin|skip  hook owner (default: auto)
 #   --codex-hook-trust ask|yes|no     approve PseudoLife hooks and the memory_message
 #                                    tool (default: ask)
@@ -150,6 +154,7 @@ AGENTS_FILE=""
 SHIM_PORT=0
 TRANSPORT=shim
 NO_ART=""
+YES=""
 NO_TOKEN=""
 TUNNEL=""
 TEST_LOGIN=""
@@ -182,6 +187,7 @@ while [ $# -gt 0 ]; do
         --agents-file) AGENTS_FILE="$2"; shift 2 ;;
         --shim-port) SHIM_PORT="$2"; shift 2 ;;
         --transport) TRANSPORT="$2"; shift 2 ;;
+        --yes) YES=1; shift ;;
         --no-art) NO_ART=1; shift ;;
         --no-token) NO_TOKEN=1; shift ;;
         --tunnel) TUNNEL=1; shift ;;
@@ -196,6 +202,15 @@ while [ $# -gt 0 ]; do
         *) echo "unknown argument: $1" >&2; usage ;;
     esac
 done
+# >>> unattended mode >>>
+# A pty cannot tell a person from an agent. Agents explicitly opt out of
+# questions with --yes or PSEUDOLIFE_UNATTENDED=1; redirected stdin also does.
+INSTALLER_UNATTENDED=""
+if [ -n "$YES" ] || [ "${PSEUDOLIFE_UNATTENDED:-}" = 1 ] || [ ! -t 0 ]; then
+    INSTALLER_UNATTENDED=1
+    echo "Unattended install: no prompts; documented defaults apply (explicit flags override)."
+fi
+# <<< unattended mode <<<
 # >>> extractor modes >>>
 # The dream extractor modes, named for the extractor family, and the models
 # the CLI shim modes offer. tests/test_extractor_model_lists.py keeps these
@@ -366,7 +381,7 @@ ENV_END="# <<< pseudolife-mcp install <<<"
 # TERM not dumb, and no --no-art. Escapes are generated (\033), never raw
 # ESC bytes — the tracked-tree control-byte guard bans those.
 art_ok() {
-    [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-}" != "dumb" ] \
+    [ -z "${INSTALLER_UNATTENDED:-}" ] && [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-}" != "dumb" ] \
         && [ -z "$NO_ART" ]
 }
 step() {
@@ -653,7 +668,7 @@ Where does the memory bank live?
 PL_BANK_LOCATION
 }
 bank_can_ask() {  # status 0 when there is a terminal to ask on
-    [ -t 0 ]
+    [ -z "${INSTALLER_UNATTENDED:-}" ] && [ -t 0 ]
 }
 bank_read() {  # $1 = the prompt; sets BANK_REPLY; fails at end of input
     printf '%s' "$1"
@@ -673,7 +688,10 @@ choose_bank_location() {
     if [ -n "$DAEMON_URL" ] || [ -n "$CLIENT_ONLY" ] || [ -n "${PSEUDOLIFE_MCP_DAEMON_URL:-}" ]; then
         return 0
     fi
-    bank_can_ask || return 0
+    if ! bank_can_ask; then
+        echo "Unattended default: bank on this machine (local Docker)."
+        return 0
+    fi
     if [ -z "$TOKEN_FILE" ] && [ -z "$READ_TOKEN" ] && [ -z "${PAIRING_CODE:-}" ]; then
         show_bank_location_question
         while :; do
@@ -875,8 +893,15 @@ esac
 
 # ── 1. provider selection (before preflight, so it checks what you picked) ─
 if [ -z "$CLIENT" ]; then
-    if [ ! -t 0 ]; then
-        CLIENT=claude
+    if { [ -n "${INSTALLER_UNATTENDED:-}" ] || [ ! -t 0 ]; }; then
+        CLIENT=""
+        for detected_client in claude codex gemini; do
+            if command -v "$detected_client" >/dev/null 2>&1; then
+                CLIENT="${CLIENT:+$CLIENT,}$detected_client"
+            fi
+        done
+        CLIENT="${CLIENT:-generic}"
+        echo "Unattended default: clients=$CLIENT (installed CLIs; generic when none are found)."
     else
         echo ""
         echo "Which coding agents should this install wire up?"
@@ -915,7 +940,7 @@ fi
 CLIENTS="$(normalize_clients "$CLIENT")"
 CLIENT_LIST="$(printf '%s' "$CLIENTS" | tr ' ' ',')"
 step "Providers: $CLIENTS"
-if [ -t 0 ] && [ -t 1 ]; then
+if [ -z "${INSTALLER_UNATTENDED:-}" ] && [ -t 0 ] && [ -t 1 ]; then
     echo ""
     echo "What each agent gets:"
     echo ""
@@ -996,12 +1021,16 @@ client_only_preflight() {
             echo "client-only install: --read-token creates the token file, and it already exists: $TOKEN_FILE. Drop --read-token to use it, or remove it first" >&2
             exit 1
         fi
+        if [ -n "${INSTALLER_UNATTENDED:-}" ] && [ -t 0 ]; then
+            echo "Unattended --read-token needs redirected stdin; pipe the credential, or use --token-file with an existing file. Nothing changed." >&2
+            exit 2
+        fi
         # Read unechoed, and handed to the helper on stdin through a shell
         # builtin: the token never reaches an argument list or the output.
-        [ ! -t 0 ] || printf "Paste the daemon's bearer token, or a pairing code from pseudolife-mcp invite (not shown), then Enter: " >&2
+        { [ -n "${INSTALLER_UNATTENDED:-}" ] || [ ! -t 0 ]; } || printf "Paste the daemon's bearer token, or a pairing code from pseudolife-mcp invite (not shown), then Enter: " >&2
         token_value=""
         IFS= read -rs token_value || true
-        [ ! -t 0 ] || echo "" >&2
+        { [ -n "${INSTALLER_UNATTENDED:-}" ] || [ ! -t 0 ]; } || echo "" >&2
         if printf '%s\n' "$token_value" | is_pairing_code; then
             PAIRING_CODE="$token_value"
             token_value=""
@@ -1083,44 +1112,53 @@ fi
 # ── 3. extractor choice (explicit, no default) ─────────────────────────────
 # A client-only install has none: the remote daemon runs its own extractor.
 if [ -z "$EXTRACTOR" ] && [ -z "$CLIENT_ONLY" ]; then
-    if [ ! -t 0 ]; then
-        echo "Non-interactive run: --extractor $(printf '%s' "$EXTRACTOR_MODES" | tr ' ' '|') is required." >&2
-        exit 2
-    fi
-    echo ""
-    echo "Which dream extractor should consolidate memories?"
-    echo "  1) claude-only       — lightest: Claude CLI shim only; sidecar never built (~11.8 GB lighter; needs logged-in Max-plan CLI; dreams pause when the shim is down)"
-    echo "  2) claude-fallback   — Claude CLI shim primary, sidecar auto-fallback (Max-plan CLI plus the ~11.8 GB image)"
-    echo "  3) sidecar           — bundled local CPU model (no Claude plan needed, works for everyone; ~11.8 GB image)"
-    echo "  4) openai-fallback   — Codex CLI (ChatGPT-plan) shim primary, sidecar auto-fallback (ladder-measured at parity with the Claude ceiling — see docs/guide/dreaming.md)"
-    echo "  5) openai-only       — Codex CLI shim only; sidecar never built (ladder-measured; dreams pause when the shim is down)"
-    echo "  6) endpoint          — any OpenAI-compatible server you name (LM Studio, Ollama, vLLM, a hosted API); sidecar never built"
-    echo "  7) endpoint-fallback — that server primary, sidecar auto-fallback (~11.8 GB image)"
-    while [ -z "$EXTRACTOR" ]; do
-        printf "Choose 1-7: "
-        read -r choice
-        case "$choice" in
-            1) EXTRACTOR=claude-only ;;
-            2) EXTRACTOR=claude-fallback ;;
-            3) EXTRACTOR=sidecar ;;
-            4) EXTRACTOR=openai-fallback ;;
-            5) EXTRACTOR=openai-only ;;
-            6) EXTRACTOR=endpoint ;;
-            7) EXTRACTOR=endpoint-fallback ;;
-            *) echo "  please answer 1-7" ;;
-        esac
-    done
-    case "$EXTRACTOR" in endpoint|endpoint-fallback)
-        while [ -z "$EXTRACTOR_URL" ]; do
-            printf "The server's OpenAI-compatible base URL (e.g. http://127.0.0.1:1234/v1): "
-            read -r EXTRACTOR_URL
-            EXTRACTOR_URL="${EXTRACTOR_URL%/}"
+    if { [ -n "${INSTALLER_UNATTENDED:-}" ] || [ ! -t 0 ]; }; then
+        if [ -f "${env_file:-}" ] && awk -v b="$ENV_BEGIN" -v e="$ENV_END" '
+            { sub(/\r$/, "") }
+            $0 == b { inside=1; next } $0 == e { inside=0; next }
+            inside && /^PSEUDOLIFE_DREAM_BASE_URL=.+/ { found=1 }
+            END { exit !found }' "$env_file"; then
+            echo "Existing extractor settings are recorded in ops/.env. Repeat this run with --extractor <original-mode> (and --extractor-url/--model for an endpoint). Nothing changed." >&2
+            exit 2
+        fi
+        EXTRACTOR=sidecar
+        echo "Unattended default: extractor=sidecar (local CPU; no CLI login required)."
+    else
+        echo ""
+        echo "Which dream extractor should consolidate memories?"
+        echo "  1) claude-only       — lightest: Claude CLI shim only; sidecar never built (~11.8 GB lighter; needs logged-in Max-plan CLI; dreams pause when the shim is down)"
+        echo "  2) claude-fallback   — Claude CLI shim primary, sidecar auto-fallback (Max-plan CLI plus the ~11.8 GB image)"
+        echo "  3) sidecar           — bundled local CPU model (no Claude plan needed, works for everyone; ~11.8 GB image)"
+        echo "  4) openai-fallback   — Codex CLI (ChatGPT-plan) shim primary, sidecar auto-fallback (ladder-measured at parity with the Claude ceiling — see docs/guide/dreaming.md)"
+        echo "  5) openai-only       — Codex CLI shim only; sidecar never built (ladder-measured; dreams pause when the shim is down)"
+        echo "  6) endpoint          — any OpenAI-compatible server you name (LM Studio, Ollama, vLLM, a hosted API); sidecar never built"
+        echo "  7) endpoint-fallback — that server primary, sidecar auto-fallback (~11.8 GB image)"
+        while [ -z "$EXTRACTOR" ]; do
+            printf "Choose 1-7 (Enter = 3, sidecar): "
+            read -r choice
+            case "$choice" in
+                1) EXTRACTOR=claude-only ;;
+                2) EXTRACTOR=claude-fallback ;;
+                ""|3) EXTRACTOR=sidecar ;;
+                4) EXTRACTOR=openai-fallback ;;
+                5) EXTRACTOR=openai-only ;;
+                6) EXTRACTOR=endpoint ;;
+                7) EXTRACTOR=endpoint-fallback ;;
+                *) echo "  please answer 1-7" ;;
+            esac
         done
-        while [ -z "$MODEL" ]; do
-            printf "The model name that server serves: "
-            read -r MODEL
-        done ;;
-    esac
+        case "$EXTRACTOR" in endpoint|endpoint-fallback)
+            while [ -z "$EXTRACTOR_URL" ]; do
+                printf "The server's OpenAI-compatible base URL (e.g. http://127.0.0.1:1234/v1): "
+                read -r EXTRACTOR_URL
+                EXTRACTOR_URL="${EXTRACTOR_URL%/}"
+            done
+            while [ -z "$MODEL" ]; do
+                printf "The model name that server serves: "
+                read -r MODEL
+            done ;;
+        esac
+    fi
     check_extractor_args
 fi
 [ -n "$CLIENT_ONLY" ] || step "Extractor mode: $EXTRACTOR"
@@ -1178,7 +1216,7 @@ case "$EXTRACTOR" in endpoint|endpoint-fallback) endpoint_preflight ;; esac
 # claude-* names, so this is only the launch default — switchable later from
 # the Console's Extractor panel without a reinstall.
 if [ -n "$claude_shim_mode" ] && [ -z "$MODEL" ]; then
-    if [ -t 0 ]; then
+    if [ -z "${INSTALLER_UNATTENDED:-}" ] && [ -t 0 ]; then
         echo ""
         echo "Which Claude model should extract memories (the 'dreamer')?"
         echo "  1) claude-opus-5-5   — recommended: clears the extraction-ladder gate with no regression against claude-opus-5 (evals/results/ladder-opus55-paired-verdict-threshold.json, 2026-09-28); the 2026-08-02 judged comparison that chose Opus over Sonnet (best measured extraction quality) ran on claude-opus-5"
@@ -1207,14 +1245,14 @@ if [ -n "$claude_shim_mode" ] && [ -z "$MODEL" ]; then
     else
         MODEL=claude-opus-5-5
     fi
-    step "Dreamer model: $MODEL"
+    step "Dreamer model: $MODEL${INSTALLER_UNATTENDED:+ (unattended default)}"
 fi
 # GPT menu: no 'recommended' — extraction quality is unmeasured for all of
 # them (the ladder's terra rung exists to measure it); Terra is only the
 # shim's balanced default. The GPT-6 ids were accepted by the Codex CLI on
 # 2026-09-29; no ladder run has measured them.
 if [ -n "$codex_shim_mode" ] && [ -z "$MODEL" ]; then
-    if [ -t 0 ]; then
+    if [ -z "${INSTALLER_UNATTENDED:-}" ] && [ -t 0 ]; then
         echo ""
         echo "Which GPT model should extract memories (the 'dreamer')?"
         echo "  1) gpt-5.6-terra — balanced default (extraction quality unmeasured)"
@@ -1237,7 +1275,7 @@ if [ -n "$codex_shim_mode" ] && [ -z "$MODEL" ]; then
     else
         MODEL=gpt-5.6-terra
     fi
-    step "Dreamer model: $MODEL"
+    step "Dreamer model: $MODEL${INSTALLER_UNATTENDED:+ (unattended default)}"
 fi
 
 # ── 3c. ops/.env line endings ──────────────────────────────────────────────
@@ -1581,7 +1619,7 @@ install_claude_plugin
 LEGACY_CLAUDE=""
 LEGACY_CLAUDE_BACKUP=""
 claude_legacy_answer() {  # prints the reply; fails when there is no terminal
-    [ -t 0 ] || return 1
+    [ -z "${INSTALLER_UNATTENDED:-}" ] && [ -t 0 ] || return 1
     printf 'Remove them from ~/.claude/settings.json (a timestamped backup is taken first)? [y/N] ' >&2
     read -r legacy_reply || legacy_reply=""
     printf '%s' "$legacy_reply"
@@ -2196,7 +2234,7 @@ print(r.get("daemon_url") or "")
             if [ -z "$CODEX_CREDENTIAL_BOOTSTRAP_FAILED" ]; then
                 setup_args=("$repo/ops/setup-codex-hooks.py" --source "$CODEX_HOOKS"
                     --trust "$CODEX_HOOK_TRUST" --instructions "$instruction_choice")
-                if ! [ -t 0 ]; then setup_args+=(--non-interactive); fi
+                if { [ -n "${INSTALLER_UNATTENDED:-}" ] || [ ! -t 0 ]; }; then setup_args+=(--non-interactive); fi
                 setup_exit=0
                 if [ -n "$CODEX_CONNECTION_CONFIGURED" ]; then
                     if [ -n "$CODEX_CREDENTIAL_FILE" ]; then
@@ -2350,17 +2388,18 @@ for selected_client in $CLIENTS; do
                 # this block; the summary names the file to append it to.
                 choice=skip ;;
             gemini)
-                if [ -t 0 ]; then
+                if [ -z "${INSTALLER_UNATTENDED:-}" ] && [ -t 0 ]; then
                     printf 'Gemini CLI has no hook system - append the standing memory block to %s? [Y/n] ' "$instruction_path"
                     read -r yn
                     case "$yn" in n|N|no|NO) choice=skip ;; *) choice=append ;; esac
                 else
-                    choice=skip
+                    choice=append
+                    echo "Unattended default: Gemini standing instructions=append ($instruction_path)."
                 fi ;;
             generic)
                 if [ -n "$AGENTS_FILE" ]; then
                     choice=append
-                elif [ -t 0 ]; then
+                elif [ -z "${INSTALLER_UNATTENDED:-}" ] && [ -t 0 ]; then
                     printf 'Append the standing memory block to which file? (Enter = %s, "-" to skip) ' "$HOME/AGENTS.md"
                     read -r answer
                     if [ "$answer" = "-" ]; then
@@ -2370,7 +2409,9 @@ for selected_client in $CLIENTS; do
                         choice=append
                     fi
                 else
-                    choice=skip
+                    instruction_path="$HOME/AGENTS.md"
+                    choice=append
+                    echo "Unattended default: generic standing instructions=append ($instruction_path)."
                 fi ;;
         esac
     fi
@@ -3113,7 +3154,7 @@ firewall_rule_wanted() {
     esac
     # The prompt goes to stderr, which stays the terminal when stdout is
     # captured; with no terminal on either side nothing is asked.
-    if [ ! -t 0 ] || [ ! -t 2 ]; then
+    if { [ -n "${INSTALLER_UNATTENDED:-}" ] || [ ! -t 0 ]; } || [ ! -t 2 ]; then
         echo "  Not added (no terminal to ask on): run the command above, or re-run with --firewall-rule yes."
         return 1
     fi
@@ -3168,7 +3209,7 @@ shim_container_probe() {
         # Without a terminal on both sides sudo must not ask for a password
         # (it could still prompt on /dev/tty and wait): -n fails instead.
         sudo_ask=-n
-        if [ -t 0 ] && [ -t 2 ]; then sudo_ask=""; fi
+        if [ -z "${INSTALLER_UNATTENDED:-}" ] && [ -t 0 ] && [ -t 2 ]; then sudo_ask=""; fi
         if sudo ${sudo_ask:+"$sudo_ask"} ufw allow from "$subnet" to "$bridge" port "$SHIM_PORT" proto tcp comment 'pseudolife dream shim'; then
             if container_reaches_shim "$probe_url"; then
                 ENDPOINT_CONTAINER=reachable
@@ -3635,7 +3676,9 @@ offer_client_update_schedule() {
 # <<< client update schedule offer <<<
 if [ -n "$CLIENT_ONLY" ]; then offer_client_update_schedule; fi
 print_update_line
-if [ -n "$TUNNEL" ]; then
+if [ -n "$TUNNEL" ] && [ -n "${INSTALLER_UNATTENDED:-}" ]; then
+    echo "Unattended: guided tunnel setup skipped; run pseudolife-mcp tunnel setup when a person can complete it."
+elif [ -n "$TUNNEL" ]; then
     if [ -z "${SHIM_PATH:-}" ]; then
         echo "Secure MCP Tunnel setup needs the installed shim; repair its installation, then run pseudolife-mcp tunnel setup." >&2
         exit 2
