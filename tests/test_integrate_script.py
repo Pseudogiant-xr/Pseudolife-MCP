@@ -356,6 +356,55 @@ def _publish(world) -> int:
     return code if code else _open(world)
 
 
+def test_old_builder_plan_opens_with_the_new_batch_script(world):
+    # The replay selector landed before admission. The old builder knows
+    # neither snapshot fields nor the new opener carried by this member.
+    world.advance_master({
+        "ops/integrate.py": "from dataclasses import dataclass\n@dataclass\nclass Member:\n    number: int\n",
+        "rust/ci/pr_precheck.py": (ROOT / "rust/ci/pr_precheck.py").read_text(encoding="utf-8"),
+        "rust/ci/parity_scope.py": (ROOT / "rust/ci/parity_scope.py").read_text(encoding="utf-8"),
+    })
+    base = _git(world.work, "rev-parse", "HEAD")
+    script = (ROOT / "ops/integrate.py").read_text(encoding="utf-8")
+    sha = world.pr(10, {"ops/integrate.py": script})
+    checks = []
+    for index, os in enumerate(("ubuntu-latest", "windows-latest"), 1):
+        name = f"Rust / {os}"
+        checks.append({"name": name, "status": "IN_PROGRESS", "detailsUrl":
+                       f"https://github.example/actions/runs/9/job/{index}"})
+        world.gh.actions_jobs[str(index)] = {
+            "name": name, "head_sha": sha, "run_id": 9, "run_attempt": 1,
+            "status": "in_progress", "conclusion": None,
+            "steps": [{"name": "Replay touched PR goldens", "number": 1,
+                       "status": "completed", "conclusion": "success"}],
+        }
+    world.gh.runs["9"] = {"head_sha": sha, "event": "pull_request",
+                          "path": ".github/workflows/rust.yml", "run_attempt": 1}
+    world.gh.add(10, sha, statusCheckRollup=checks)
+    assert integrate._fetch_head(10) == sha
+    branch = f"integrate/{DATE}-batch-1"
+    _git(world.work, "switch", "-qc", branch)
+    _git(world.work, "merge", "--no-ff", "--no-edit", sha)
+    plan = integrate.Plan(branch, base, head=_git(world.work, "rev-parse", "HEAD"),
+                          rust_check="not needed", merged=[integrate.Member(
+                              10, "admission bootstrap", sha, "https://github.example/pr/10", "NONE", "pending")])
+    raw = integrate.asdict(plan)
+    for field in ("snapshot_required", "snapshot", "snapshot_why"):
+        raw["merged"][0].pop(field)
+    path = integrate.Plan.path(branch)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    assert integrate.Plan.load(branch).merged[0].snapshot_required is None
+    assert integrate._has_snapshot_selector(base)
+    assert (world.work / "ops/integrate.py").read_text(encoding="utf-8") == script
+
+    assert _open(world) == 0
+    saved = integrate.Plan.load(branch)
+    assert saved.merged[0].snapshot_required is True
+    assert saved.merged[0].snapshot == "satisfied"
+    assert _git(world.origin, "rev-parse", branch) == plan.head
+
+
 def _second_parents(origin: Path, branch: str) -> list[str]:
     """The heads merged into `branch`, in merge order (origin is bare)."""
     log = _git(origin, "log", "--first-parent", "--format=%P", f"master..{branch}")
