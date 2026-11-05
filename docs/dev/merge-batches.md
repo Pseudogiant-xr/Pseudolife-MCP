@@ -199,9 +199,13 @@ containing it (merge master forward and push), or a rerun if that head
 already defines the step. Unreadable metadata names gh's cause and can be
 retried once that cause is fixed. `open` checks the selected members again
 before publishing; a newly pending or red replay refuses publication,
-and a changed head needing replay requires a fresh build. Plans created
-before this checkpoint also need rebuilding. The snapshot checkpoint
-does not replace the batch's full parity gate.
+and a changed head needing replay requires a fresh build. When the batch
+carries the first admission-aware opener but its base's builder predates
+admission, `open` computes the missing admission data for each held member
+and saves it only after publication succeeds. Required replay still must
+pass that check; bootstrap does not waive it. A plan missing admission
+fields from an already admission-aware base still needs rebuilding. The
+snapshot checkpoint does not replace the batch's full parity gate.
 
 Why not wait for all green CI on the member's own head: on 2026-10-20/21 four
 things held batches up (#877 broke only against a newer master; an

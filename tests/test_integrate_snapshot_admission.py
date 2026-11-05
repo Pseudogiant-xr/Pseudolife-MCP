@@ -315,6 +315,7 @@ def test_open_refuses_moved_required_head_or_pre_guard_plan(integrate, monkeypat
     value = member(integrate)
     value.snapshot_required = None if old_plan else True
     monkeypatch.setattr(integrate, "_has_snapshot_selector", lambda base: True)
+    monkeypatch.setattr(integrate, "_base_has_snapshot_admission", lambda base: True)
     monkeypatch.setattr(integrate, "gh", lambda *args: json.dumps({
         "headRefOid": "b" * 40 if moved else SHA, "statusCheckRollup": []}))
     plan = integrate.Plan("integrate/2026-11-06-batch-1", "base", merged=[value])
@@ -329,6 +330,82 @@ def test_open_admits_no_row_member_without_checks(integrate, monkeypatch):
         "headRefOid": SHA, "statusCheckRollup": []}))
     plan = integrate.Plan("integrate/2026-11-06-batch-1", "base", merged=[value])
     integrate._refuse_red_members(plan)
+
+
+@pytest.mark.parametrize("source,aware", [
+    ("# snapshot_required is not a field\nclass Member:\n    number: int\n", False),
+    ("class Other:\n    snapshot_required: bool\nclass Member:\n    number: int\n", False),
+    ("class Member:\n    snapshot_required: bool | None = None\n", True),
+])
+def test_base_builder_capability_uses_the_member_schema(integrate, monkeypatch, source, aware):
+    def out(*args):
+        assert args == ("show", "base:ops/integrate.py")
+        return source
+    monkeypatch.setattr(integrate, "_out", out)
+    assert integrate._base_has_snapshot_admission("base") is aware
+
+
+@pytest.mark.parametrize("phase,required,admitted", [
+    ("success", True, True), (None, True, False), ("failure", True, False),
+    ("wrong head", True, False), ("success", False, True), ("success", None, False),
+])
+def test_bootstrap_rechecks_admission_instead_of_bypassing_it(
+        integrate, actions, monkeypatch, phase, required, admitted):
+    rollup, jobs, _, calls = actions
+    if phase == "wrong head":
+        jobs["1"]["head_sha"] = "b" * 40
+    else:
+        jobs["1"]["steps"][1].update(conclusion=phase,
+                                      status="completed" if phase else "in_progress")
+    api = integrate.gh
+    monkeypatch.setattr(integrate, "gh", lambda *args: json.dumps({
+        "headRefOid": SHA, "statusCheckRollup": rollup}) if args[:2] == ("pr", "view") else api(*args))
+    monkeypatch.setattr(integrate, "_has_snapshot_selector", lambda base: True)
+    monkeypatch.setattr(integrate, "_base_has_snapshot_admission", lambda base: False)
+    computed = []
+    def requirement(value, base):
+        computed.append((value.number, base))
+        return required, "selector unavailable" if required is None else ""
+    monkeypatch.setattr(integrate, "_snapshot_requirement", requirement)
+    value = member(integrate)
+    value.snapshot_required = None
+    plan = integrate.Plan("integrate/2026-11-06-batch-1", "base", merged=[value])
+    if admitted:
+        integrate._refuse_red_members(plan)
+        assert value.snapshot_required is required
+        assert value.snapshot == ("satisfied" if required else "not required")
+    else:
+        with pytest.raises(integrate.Refusal):
+            integrate._refuse_red_members(plan)
+    assert computed == [(123, "base")]
+    if required is False:
+        assert not calls
+
+
+def test_bootstrap_computes_each_member(integrate, actions, monkeypatch):
+    rollup, _, _, _ = actions
+    values = [member(integrate), member(integrate)]
+    values[1].number, values[1].sha = 124, "c" * 40
+    for value in values:
+        value.snapshot_required = None
+    api = integrate.gh
+    def gh(*args):
+        if args[:2] == ("pr", "view"):
+            value = next(value for value in values if value.number == int(args[2]))
+            return json.dumps({"headRefOid": value.sha, "statusCheckRollup": rollup})
+        return api(*args)
+    monkeypatch.setattr(integrate, "gh", gh)
+    monkeypatch.setattr(integrate, "_has_snapshot_selector", lambda base: True)
+    monkeypatch.setattr(integrate, "_base_has_snapshot_admission", lambda base: False)
+    computed = []
+    def requirement(value, base):
+        computed.append(value.number)
+        return value.number == 123, ""
+    monkeypatch.setattr(integrate, "_snapshot_requirement", requirement)
+    plan = integrate.Plan("integrate/2026-11-06-batch-1", "base", merged=values)
+    integrate._refuse_red_members(plan)
+    assert computed == [123, 124]
+    assert [value.snapshot_required for value in values] == [True, False]
 
 
 @pytest.mark.parametrize("remainder,master_value,budget_conflict", [

@@ -43,6 +43,7 @@ is an admin bypass, so this is the check GitHub does not make. Needs git
 from __future__ import annotations
 
 import argparse
+import ast
 import copy
 import datetime as dt
 import functools
@@ -279,6 +280,20 @@ def _has_snapshot_selector(base: str) -> bool:
     # A pre-feature base has no checkpoint to require. A failed Git read
     # raises instead of being mistaken for an absent selector.
     return bool(_out("ls-tree", base, "--", SNAPSHOT_SELECTOR))
+
+
+@functools.lru_cache(maxsize=None)
+def _base_has_snapshot_admission(base: str) -> bool:
+    """Read the frozen builder's Member schema without executing its code."""
+    try:
+        tree = ast.parse(_out("show", f"{base}:ops/integrate.py"))
+    except (Refusal, SyntaxError) as exc:
+        raise Refusal(_unread("the base builder's admission schema", exc)
+                      + "; fix that read and retry open") from None
+    return any(isinstance(node, ast.ClassDef) and node.name == "Member" and any(
+        isinstance(field, ast.AnnAssign) and isinstance(field.target, ast.Name)
+        and field.target.id == "snapshot_required" for field in node.body)
+        for node in tree.body)
 
 
 def _snapshot_requirement(member: Member, base: str) -> tuple[bool | None, str]:
@@ -1721,7 +1736,13 @@ def _refuse_red_members(plan: Plan) -> None:
     A moved head with required snapshot evidence needs a fresh build."""
     for m in plan.merged:
         if m.snapshot_required is None and _has_snapshot_selector(plan.base_sha):
-            raise Refusal("the plan predates snapshot admission; rebuild the batch")
+            if _base_has_snapshot_admission(plan.base_sha):
+                raise Refusal("the plan lacks the base builder's snapshot admission; rebuild the batch")
+            # The batch can carry the first admission-aware opener while
+            # its master's builder still writes plans without these fields.
+            m.snapshot_required, why = _snapshot_requirement(m, plan.base_sha)
+            if m.snapshot_required is None:
+                raise Refusal(f"#{m.number}: {why}; nothing was opened, fix the cause and retry open")
         view = json.loads(gh("pr", "view", str(m.number), "--json",
                              "headRefOid,statusCheckRollup"))
         if view["headRefOid"] != m.sha:
@@ -1740,6 +1761,7 @@ def _refuse_red_members(plan: Plan) -> None:
                           "branch and build again (it sits out while its head is red)")
         state, why = _snapshot_state(m.sha, view.get("statusCheckRollup"),
                                      m.snapshot_required if m.snapshot_required is not None else False)
+        m.snapshot, m.snapshot_why = state, why
         if state in ("failing", "pending", "unverified"):
             raise Refusal(f"#{m.number}: {why}; nothing was opened, retry once the exact replay passes")
 
