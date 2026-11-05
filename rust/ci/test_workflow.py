@@ -8,6 +8,7 @@ import re
 from pathlib import Path
 import shlex
 import subprocess
+import sys
 
 import pytest
 import yaml
@@ -1709,6 +1710,7 @@ def test_selfhosted_disk_check_names_a_full_disk_before_the_lease(tmp_path, floo
     assert disk["name"] == DISK_STEP
     summary = tmp_path / "summary.md"
     env = dict(os.environ, GITHUB_WORKSPACE=str(tmp_path), GITHUB_STEP_SUMMARY=str(summary),
+               RUNNER_TEMP=str(tmp_path), GITHUB_ENV=str(tmp_path / "environment"),
                **workflow()["jobs"]["parity-selfhosted"]["env"])
     env["PARITY_MIN_FREE_GB"] = floor
     result = subprocess.run(["pwsh", "-NoProfile", "-NonInteractive", "-Command",
@@ -1720,6 +1722,41 @@ def test_selfhosted_disk_check_names_a_full_disk_before_the_lease(tmp_path, floo
     if not accepted:
         assert "so the shard did not run" in result.stderr + result.stdout
         assert '"Disk use"' in result.stderr + result.stdout
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux-only temporary-directory adapter")
+@pytest.mark.parametrize("system", ["Linux", "Windows"])
+def test_selfhosted_linux_temp_files_use_the_job_work_drive(tmp_path, system):
+    import os
+
+    disk = workflow()["jobs"]["parity-checks"]["steps"][0]
+    original = tmp_path / "original temp"
+    original.mkdir()
+    job = tmp_path / "job temp"
+    job.mkdir()
+    environment = tmp_path / "environment"
+    env = dict(os.environ, GITHUB_WORKSPACE=str(tmp_path),
+               GITHUB_STEP_SUMMARY=str(tmp_path / "summary.md"), GITHUB_ENV=str(environment),
+               RUNNER_OS=system, RUNNER_TEMP=str(job), TMPDIR=str(original),
+               PARITY_MIN_FREE_GB="0")
+    result = subprocess.run(["pwsh", "-NoProfile", "-NonInteractive", "-Command",
+                             "$ErrorActionPreference = 'stop'\n" + disk["run"]],
+                            env=env, capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    exported = dict(line.split("=", 1) for line in environment.read_text(encoding="utf-8").splitlines()
+                    if "=" in line) if environment.exists() else {}
+    if system == "Linux":
+        assert exported.get("TMPDIR") == str(job / "parity-tmp")
+        assert (job / "parity-tmp").is_dir()
+    else:
+        assert "TMPDIR" not in exported
+        assert not (job / "parity-tmp").exists()
+    # Follow GITHUB_ENV into the next process, as the runner does: changing
+    # only PowerShell's current environment would leave pytest on /tmp.
+    child = subprocess.run([sys.executable, "-c", "import tempfile; print(tempfile.gettempdir())"],
+                           env={**env, **exported}, capture_output=True, text=True, check=True)
+    expected = job / "parity-tmp" if system == "Linux" else original
+    assert Path(child.stdout.strip()).resolve() == expected.resolve()
 
 
 # --- the required gate holds only deterministic Windows work ---

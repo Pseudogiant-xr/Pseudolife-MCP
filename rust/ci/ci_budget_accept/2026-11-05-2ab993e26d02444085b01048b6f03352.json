@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "parity-checks",
+  "before": "9cdaac0db2aadcfb",
+  "fingerprint": "f2b04181d39682b4",
+  "reason": "Only the existing self-hosted disk step changes: Linux exports TMPDIR under RUNNER_TEMP before tests. That step is skipped on hosted runners, so hosted jobs, commands, dependencies and measured cost are unchanged."
+}
