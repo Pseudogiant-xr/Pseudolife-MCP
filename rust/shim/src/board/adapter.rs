@@ -675,22 +675,26 @@ impl Adapter {
         // attempt still has queued there.
         let watermark = match &config.digest {
             Some(path) => {
-                let files = [path.clone(), path.with_extension("seen")];
+                let (digest, seen) = (path.clone(), path.with_extension("seen"));
                 state::offload(path, move || {
-                    Ok(files
-                        .iter()
-                        .filter_map(|path| state::read(path, 16384).ok())
-                        .filter_map(|bytes| {
-                            String::from_utf8_lossy(&bytes)
-                                .lines()
-                                .next()
-                                .unwrap_or("")
-                                .trim()
-                                .parse::<u64>()
-                                .ok()
-                        })
-                        .max()
-                        .unwrap_or(0))
+                    // `.seen` may be the hooks' (see `state::open_marker`).
+                    Ok([
+                        state::read(&digest, 16384),
+                        state::read_marker(&seen, 16384),
+                    ]
+                    .into_iter()
+                    .filter_map(Result::ok)
+                    .filter_map(|bytes| {
+                        String::from_utf8_lossy(&bytes)
+                            .lines()
+                            .next()
+                            .unwrap_or("")
+                            .trim()
+                            .parse::<u64>()
+                            .ok()
+                    })
+                    .max()
+                    .unwrap_or(0))
                 })
                 .await
                 .unwrap_or(0)
@@ -830,7 +834,7 @@ impl Adapter {
         let mailbox = self.mailbox.lock().await;
         let mut delivered = mailbox.delivered;
         if let Some(path) = &self.config.digest
-            && let Ok(bytes) = state::read(&path.with_extension("seen"), 128)
+            && let Ok(bytes) = state::read_marker(&path.with_extension("seen"), 128)
             && let Ok(seen) = String::from_utf8_lossy(&bytes).trim().parse::<u64>()
         {
             delivered = delivered.max(seen);
@@ -1205,7 +1209,7 @@ impl Adapter {
                         target.with_extension("agent"),
                         target.with_extension("reprint"),
                     ] {
-                        if let Ok(opened) = state::open_with_write(&marker, true) {
+                        if let Ok(opened) = state::open_marker(&marker, true) {
                             let _ = opened.file.set_times(
                                 std::fs::FileTimes::new()
                                     .set_modified(std::time::SystemTime::now()),
@@ -1283,7 +1287,7 @@ impl Adapter {
                 .config
                 .digest
                 .as_ref()
-                .and_then(|path| state::read(&path.with_extension("seen"), 128).ok())
+                .and_then(|path| state::read_marker(&path.with_extension("seen"), 128).ok())
                 .and_then(|bytes| String::from_utf8_lossy(&bytes).trim().parse::<u64>().ok())
                 .unwrap_or(0);
             if seen >= *watermark {
@@ -1389,7 +1393,7 @@ impl Adapter {
         }
         let mut active_child = false;
         if let Some(path) = &self.config.digest {
-            if let Ok(seen) = state::read(&path.with_extension("seen"), 128)
+            if let Ok(seen) = state::read_marker(&path.with_extension("seen"), 128)
                 && let Ok(seen) = String::from_utf8_lossy(&seen).trim().parse::<u64>()
             {
                 mailbox.delivered = mailbox.delivered.max(seen);
@@ -1430,13 +1434,13 @@ impl Adapter {
                 // Like `wait-mail`'s mark_seen, never lower a mark a hook
                 // has already raised.
                 drop(state::offload(path, move || {
-                    let marked = state::read(&seen, 128).ok().and_then(|bytes| {
+                    let marked = state::read_marker(&seen, 128).ok().and_then(|bytes| {
                         String::from_utf8_lossy(&bytes).trim().parse::<u64>().ok()
                     });
                     if marked.is_some_and(|marked| marked >= delivered) {
                         return Ok(());
                     }
-                    state::atomic_write(&seen, format!("{delivered}\n").as_bytes(), None)
+                    state::atomic_write_marker(&seen, format!("{delivered}\n").as_bytes())
                 }));
             }
             return Some(mailbox.digest.clone());

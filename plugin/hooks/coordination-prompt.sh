@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 # Local, change-only coordination alert. Never calls the daemon.
+# Every file this hook writes beside the digest is private (0600), as the
+# shim's own state is: the native shim refuses markers others can write.
+umask 077
 INPUT=$(cat 2>/dev/null)
 # The payload also carries the user's prompt, which may quote the literal
 # "session_id" — and Codex serialises the prompt field before session_id.

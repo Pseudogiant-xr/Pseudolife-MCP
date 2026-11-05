@@ -1695,3 +1695,46 @@ def test_exits_when_claude_code_is_gone_on_windows(tmp_path):
         parent.wait()
     code, out, err = _finish(process, timeout=_constant("PARENT_CHECK") + DEADLINE)
     assert (code, out, err) == (0, "", "")
+
+
+# --- marker modes -----------------------------------------------------------
+
+def _start_under_umask(env, mask, payload=None):
+    """_start, but with the umask a user's shell may hand the hook."""
+    process = subprocess.Popen([bash_exe(), "-c", f'umask {mask:03o}; exec bash "$0"', str(HOOK)],
+                               stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                               env=env, encoding="utf-8")
+    process.stdin.write(payload or _payload())
+    process.stdin.close()
+    STARTED.append(process)
+    return process
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
+@pytest.mark.parametrize("mask", [0o022, 0o002])
+def test_markers_written_by_a_wake_are_private_under_any_umask(tmp_path, mask):
+    """The native shim refuses digest markers others can write (found
+    2026-11-06: under umask 022/002 the hook wrote .wake, .wake-armed and
+    .seen 0644/0664, so the native shim never saw the armed listener and the
+    wake never fired). Every file the hook writes is owner-only."""
+    _digest(tmp_path, 3, BODY)
+    code, out, err = _finish(_start_under_umask(_env(tmp_path, wait=3540), mask))
+    assert code == 2 and _woke(err)
+    digests = tmp_path / "digests"
+    for name in (f"{_key()}.wake", f"{_key()}.seen", f"{_key()}.wakes", "ledger.log"):
+        assert (digests / name).stat().st_mode & 0o777 == 0o600, name
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
+def test_the_armed_listener_record_is_private_under_a_permissive_umask(tmp_path):
+    _digest(tmp_path, 3, BODY)
+    _seen(tmp_path, 3)
+    process = _start_under_umask(_env(tmp_path, wait=3540), 0o022)
+    lease = tmp_path / "digests" / f"{_key()}.wake"
+    assert _wait_until(lambda: lease.exists() and lease.read_text().strip())
+    armed = lease.with_name(f"{_key()}.{lease.read_text().strip()}.wake-armed")
+    assert _wait_until(lambda: armed.exists())
+    assert armed.stat().st_mode & 0o777 == 0o600
+    assert lease.stat().st_mode & 0o777 == 0o600
+    (tmp_path / "digests" / f"{_key()}.txt").unlink()
+    assert _finish(process)[0] == 0

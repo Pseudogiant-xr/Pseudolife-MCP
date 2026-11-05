@@ -93,6 +93,9 @@
 # background Bash task cannot hold past two hours (the Bash tool stops one
 # at its own timeout: 30 minutes by default). PSEUDOLIFE_AGENT_WAKE_HOOK_WAIT
 # shortens the wait, never lengthens it.
+# Every file this hook writes beside the digest is private (0600), as the
+# shim's own state is: the native shim refuses markers others can write.
+umask 077
 MAX_WAIT=1209540
 # Matches the board's 60 s listener lease ceiling; renew every poll so a
 # killed watcher is no longer advertised as armed after one minute.
