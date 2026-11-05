@@ -629,6 +629,9 @@ jobs:
           tests/test_move_cli.py::test_yes_alone_never_consents_to_a_persistent_target_serve
           tests/test_move_cli.py::test_interactive_yes_requires_an_explicit_expose_flag
           tests/test_move_cli.py::test_interactive_move_asks_separately_for_persistent_exposure
+          tests/test_move_cli.py::test_postcommit_signal_records_followups_without_rollback
+          tests/test_move_cli.py::test_signal_after_confirmed_moved_marker_never_rolls_back_the_commit
+          tests/test_move_cli.py::test_signal_between_confirmed_marker_and_commit_record_is_deferred
           tests/test_installer_reruns.py
           tests/test_shim_runtime_reuse.py
           tests/test_installer_unattended.py
@@ -736,7 +739,7 @@ jobs:
         # older checkout.
         env:
           PSEUDOLIFE_SUITE_LOCK: "off"
-        run: python -m pytest tests/test_conductor_watch.py tests/test_wait_mail_cli.py tests/test_hooks_digest.py tests/test_stop_wake_hook.py tests/test_hook_glob_ranges.py tests/test_coordination_turn_digest.py tests/test_coordination_adapter.py tests/test_coordination_credentials.py tests/test_codex_doorbell.py tests/test_lease_cli.py tests/test_suite_lock.py tests/test_memory_changes_hook.py tests/test_client_install_ux.py tests/test_codex_hooks.py tests/test_subagent_board_guard.py tests/test_codex_hook_setup_edges.py tests/test_installer_lite.py tests/test_installer_legacy_hooks.py tests/test_installer_client_update_schedule.py tests/test_plugin_packaging.py tests/test_embedded_pg.py tests/test_tunnel_bridge.py tests/test_tunnel_cli.py tests/test_tunnel_profiles.py tests/test_tunnel_runtime.py tests/test_tunnel_service.py tests/test_prune_worktrees.py tests/test_child_python.py -q -rs
+        run: python -m pytest tests/test_conductor_watch.py tests/test_wait_mail_cli.py tests/test_hooks_digest.py tests/test_stop_wake_hook.py tests/test_hook_glob_ranges.py tests/test_coordination_turn_digest.py tests/test_coordination_adapter.py tests/test_coordination_credentials.py tests/test_codex_doorbell.py tests/test_lease_cli.py tests/test_suite_lock.py tests/test_memory_changes_hook.py tests/test_client_install_ux.py tests/test_codex_hooks.py tests/test_subagent_board_guard.py tests/test_codex_hook_setup_edges.py tests/test_installer_lite.py tests/test_installer_legacy_hooks.py tests/test_installer_client_update_schedule.py tests/test_plugin_packaging.py tests/test_embedded_pg.py tests/test_tunnel_bridge.py tests/test_tunnel_cli.py tests/test_tunnel_profiles.py tests/test_tunnel_runtime.py tests/test_tunnel_service.py tests/test_prune_worktrees.py tests/test_child_python.py tests/test_move_cli.py::test_signal_during_target_expose_undoes_serve tests/test_move_cli.py::test_postcommit_signal_records_followups_without_rollback tests/test_move_cli.py::test_signal_after_confirmed_moved_marker_never_rolls_back_the_commit tests/test_move_cli.py::test_signal_between_confirmed_marker_and_commit_record_is_deferred -q -rs
 
   test-windows-nightly:
     # Not a merge gate, and never run for a pull request or merge group: the

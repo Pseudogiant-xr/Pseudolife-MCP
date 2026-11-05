@@ -171,6 +171,11 @@ class World:
         self.clock = Clock()
         self.source_running = True
         self.source_ready = True
+        self.source_schema = 52
+        self.checkout_schema = 52
+        self.checkout_head = "c" * 40
+        self.checkout_dirty = False
+        self.rust_image = False
         self.target_ready = True
         self.target_readiness_delay = 0.0
         self.source_healthy = source_healthy
@@ -270,7 +275,7 @@ class World:
         if url == LOCAL + "/health":
             if not (self.source_running and self.source_healthy):
                 return None
-            return {"status": "ok", "ready": self.source_ready, "schema": 52, "auth": True, "bank": self.source_bank, "version": "0.15.0"}
+            return {"status": "ok", "ready": self.source_ready, "schema": self.source_schema, "auth": True, "bank": self.source_bank, "version": "0.15.0"}
         if url == TARGET_URL + "/health":
             if not self.target_running or self._matches(self.fail, Call(["GET", url], None)):
                 return None
@@ -363,6 +368,19 @@ class World:
 
     def remote(self, cmd, stdin):
         remote_dir = None
+        if cmd.startswith("git -C "):
+            if cmd.endswith("rev-parse HEAD"):
+                return 0, (self.checkout_head + "\n").encode(), b""
+            if cmd.endswith("status --porcelain"):
+                return 0, b" M file\n" if self.checkout_dirty else b"", b""
+            if " show " in cmd and cmd.endswith(":pseudolife_memory/storage/schema.py"):
+                return 0, f"SCHEMA_META_VERSION = {self.checkout_schema}\n".encode(), b""
+        if cmd == "docker cp pseudolife-mcp-daemon:/app/pseudolife_memory/storage/schema.py -":
+            if self.rust_image:
+                return 1, b"", b"no Python source in Rust image"
+            return 0, _tar({"schema.py": f"SCHEMA_META_VERSION = {self.target_schema}\n".encode()}), b""
+        if cmd == "docker cp pseudolife-mcp-daemon:/app/pseudolife-schema.rs -" and self.rust_image:
+            return 0, _tar({"pseudolife-schema.rs": f"pub const SCHEMA_META_VERSION: i64 = {self.target_schema};\n".encode()}), b""
         if "ops/update.py --checkout-handover-capability" in cmd:
             return 0, b"pseudolife-mcp checkout-handover-v1\n" if self.checkout_handover else b"unsupported\n", b""
         if "move checkout bearer preflight" in cmd:
@@ -679,7 +697,10 @@ MUTATING = ("docker stop", "docker start", "docker run", "docker update", "docke
 
 
 def mutating_calls(world):
-    return [call for call in world.calls if any(word in call.text for word in MUTATING)]
+    def reads_container_file(call):
+        argv = shlex.split(call.remote) if call.remote else call.argv
+        return len(argv) == 4 and argv[:2] == ["docker", "cp"] and ":" in argv[2] and argv[3] == "-"
+    return [call for call in world.calls if not reads_container_file(call) and any(word in call.text for word in MUTATING)]
 
 
 # ── the whole move ───────────────────────────────────────────────────────────
@@ -2458,6 +2479,131 @@ def test_resume_takes_over_this_moves_half_restored_bank(tmp_path, capsys):
 
 
 # ── pieces ───────────────────────────────────────────────────────────────────
+
+def test_target_checkout_schema_is_verified_before_any_change(tmp_path):
+    world = World()
+    world.checkout_schema = 40
+    assert run_move(world, tmp_path) == 4
+    assert mutating_calls(world) == []
+
+
+def test_resume_checks_the_schema_of_the_checkout_it_will_deploy(tmp_path):
+    world = World(fail=("python3 ops/update.py --allow-auth-change",))
+    assert run_move(world, tmp_path) == 1
+    world.fail = ()
+    world.checkout_schema = 40
+    before = len(world.calls)
+    assert run_move(world, tmp_path, resume=True) == 4
+    assert not any(word in call.text for call in world.calls[before:] for word in MUTATING)
+
+
+def test_newer_checkout_schema_is_valid_and_dirty_checkout_refuses(tmp_path):
+    world = World()
+    world.checkout_schema = 59
+    assert run_move(world, tmp_path) == 0
+    other = World()
+    other.checkout_dirty = True
+    assert run_move(other, tmp_path) == 4
+    assert mutating_calls(other) == []
+
+
+def test_checkout_change_during_move_keeps_the_restored_copy_gated(tmp_path):
+    world = World(hooks={"cat > " + CHECKOUT + "/data/move-": lambda w, c: setattr(w, "checkout_head", "d" * 40)})
+    assert run_move(world, tmp_path) == 1
+    assert world.source_running and not world.target_running
+    assert "/data/move.json" in world.data_files
+    assert first(world, "python3 ops/update.py --allow-auth-change") == -1
+
+
+def test_release_resume_checks_a_changed_images_schema(tmp_path):
+    world = World(checkout=False, fail=(lambda c: c.remote == "docker start pseudolife-mcp-daemon",))
+    world.release_cli = True
+    assert run_move(world, tmp_path, keep_tokens=False) == 1
+    world.fail = ()
+    world.target_image = "local-image:older-schema"
+    world.target_schema = 40
+    before = len(world.calls)
+    assert run_move(world, tmp_path, keep_tokens=False, resume=True) == 4
+    world.calls = world.calls[before:]
+    assert mutating_calls(world) == []
+
+
+def test_release_resume_supports_a_compatible_changed_rust_image(tmp_path):
+    world = World(checkout=False, fail=(lambda c: c.remote == "docker start pseudolife-mcp-daemon",))
+    world.release_cli = True
+    assert run_move(world, tmp_path, keep_tokens=False) == 1
+    world.fail = ()
+    world.target_image = "local-rust-image:compatible-schema"
+    world.target_schema = 59
+    world.rust_image = True
+    assert run_move(world, tmp_path, keep_tokens=False, resume=True) == 0
+
+
+def test_rust_image_ships_the_schema_constant_compiled_into_its_daemon():
+    root = Path(__file__).resolve().parents[1]
+    assert "COPY rust/daemon/src/storage/schema_meta.rs /app/pseudolife-schema.rs" in (root / "ops/Dockerfile.daemon-rust").read_text()
+    version = (root / "rust/daemon/src/storage/schema_meta.rs").read_text()
+    assert move_cli._schema_version(version, rust=True) == move_cli._schema_version((root / "pseudolife_memory/storage/schema.py").read_text())
+
+
+@pytest.mark.parametrize("value, expected", [("59", 59), ("True", None), ("None", None), ("unknown()", None)])
+def test_schema_probe_reads_literals_without_executing_target_code(value, expected):
+    assert move_cli._schema_version("SCHEMA_META_VERSION = " + value) == expected
+
+
+@pytest.mark.parametrize("stage", ["systemctl --user enable", "connect"])
+def test_postcommit_signal_records_followups_without_rollback(tmp_path, stage):
+    previous = signal.getsignal(signal.SIGTERM)
+    def interrupted(world, call):
+        if stage == "connect" and "connect" not in call.argv:
+            return
+        handler = signal.getsignal(signal.SIGTERM)
+        assert callable(handler), "the move restored default handlers before finalization"
+        handler(signal.SIGTERM, None)
+
+    world = World(hooks={stage: interrupted})
+    move = mover(world, tmp_path)
+    assert move.run() == 5
+    assert not world.source_running and world.fenced and world.moved and world.target_running
+    assert move.data["rollback"] == []
+    record = json.loads((move.local_dir / "record.json").read_text())
+    assert record["committed"] and record["follow_ups"]
+    assert "SIGTERM" in record["error"]
+    assert signal.getsignal(signal.SIGTERM) == previous
+
+
+def test_signal_after_confirmed_moved_marker_never_rolls_back_the_commit(tmp_path):
+    world = World()
+    move = mover(world, tmp_path)
+    step = move.step
+
+    def interrupted(line):
+        if line.startswith("wrote /data/moved.json"):
+            raise move_cli.MoveInterrupted("interrupted after commit")
+        step(line)
+
+    move.step = interrupted
+    assert move.run() == 5
+    assert world.target_running and world.fenced and world.moved and not world.source_running
+    assert move.data["rollback"] == []
+
+
+@pytest.mark.parametrize("sig", [signal.SIGTERM, signal.SIGINT])
+def test_signal_between_confirmed_marker_and_commit_record_is_deferred(tmp_path, sig):
+    world = World()
+    move = mover(world, tmp_path)
+    mark = move.mark
+
+    def interrupted(**flags):
+        if flags.get("committed"):
+            signal.getsignal(sig)(sig, None)
+        mark(**flags)
+
+    move.mark = interrupted
+    assert move.run() == 5
+    assert world.target_running and world.fenced and world.moved and not world.source_running
+    assert move.data["rollback"] == []
+    assert json.loads((move.local_dir / "record.json").read_text())["committed"]
 
 @pytest.mark.parametrize("text, expected", [
     (json.dumps({"exposed": True, "url": TARGET_URL}), ("exposed", TARGET_URL)),

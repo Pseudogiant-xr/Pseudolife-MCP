@@ -12453,8 +12453,10 @@ and start a new move without `--resume`.
 
 **Run it under `tmux`, `screen` or `nohup`.** A move takes as long as a
 dump, a copy and a restore of the whole bank. On Linux and macOS a closed
-terminal (SIGHUP), a SIGTERM or Ctrl-C rolls it back, and the rollback
-itself ignores Ctrl-C. On Windows, Ctrl-C and Ctrl-Break roll it back (each
+terminal (SIGHUP), a SIGTERM or Ctrl-C rolls it back before the commit point;
+after that point it keeps the target live and records unfinished follow-ups
+with exit 5. The rollback itself ignores Ctrl-C. On Windows, Ctrl-C and
+Ctrl-Break use the same commit boundary (each
 rollback step runs in its own process group, so a second Ctrl-C cannot kill
 one), but a closed console window or a dropped ssh session to the source
 ends the process with no rollback at all. Every step's progress, with the
@@ -12477,8 +12479,10 @@ The order:
 1. **Preflight, nothing changed.** The source is healthy and reports its
    bank fingerprint; ssh works; the target deployment is validated; the target
    daemon is healthy, at the source's schema or newer, serving a different
-   bank, and its bank has no user data in any schema table. Episodes,
-   lessons, world facts, graph data, documents, principals and board state
+   bank, and its bank has no user data in any schema table. The target
+   checkout must be clean, and its committed HEAD must support the source's
+   schema; resume checks this too, or checks the clone-free target image.
+   Episodes, lessons, world facts, graph data, documents, principals and board state
    all count; only specific fresh-bank seed rows are exempt. `move` never
    merges into or overwrites a used bank: back up and remove that bank,
    choose fresh volume names, or use export/import to merge knowledge.
@@ -12527,8 +12531,9 @@ The order:
    reading the token from stdin, never rewritten). `--no-keep-tokens` skips
    this step, and the report lists every environment principal to invite
    again.
-9. **Start the target once.** `/data/move.json` is lifted and
-   The owning checkout's `ops/update.py` stopped handover, or an installed same-version
+9. **Start the target once.** The deployment schema and checkout HEAD are
+   checked again before `/data/move.json` is lifted. The owning checkout's
+   `ops/update.py` stopped handover, or an installed same-version
    `update --reinstall --daemon-only`, recreates the daemon with carried
    identities. Under `--no-keep-tokens`, a clone-free target uses `docker start`
    with its existing configuration. Its `/health` `bank` fingerprint
