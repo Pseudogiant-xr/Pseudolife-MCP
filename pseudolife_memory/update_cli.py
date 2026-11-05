@@ -268,6 +268,7 @@ class Options:
     no_cache_prune: bool = False
     force_rollback_tag: bool = False
     allow_dirty: bool = False
+    allow_auth_change: bool = False
     health_retries: int = 30
     health_delay_ms: int = 1500
     all_clients: bool = False          # checkout mode: also the client side (-All)
@@ -412,6 +413,24 @@ def compose_environment(env_file, extra: dict | None = None) -> dict:
     return env
 
 
+def verify_compose_bearers(configured: dict, running: dict, *, allow_change=False) -> None:
+    """Compare credential sources internally; never put their values in errors."""
+    from pseudolife_memory.principals import parse_token_map
+
+    def identity(env):
+        raw = env.get("PSEUDOLIFE_MCP_TOKENS") or ""
+        mapped = parse_token_map(raw)
+        # Preserve the startup refusal for a wholly malformed map too.
+        invalid = raw if raw.strip() and not mapped else ""
+        return env.get("PSEUDOLIFE_MCP_TOKEN") or "", mapped, invalid
+
+    expected = identity(configured)
+    if expected != identity(running) and (not allow_change or expected[2]):
+        raise UpdateError("the Compose configuration would change the running daemon's bearer settings. "
+                          "Restore its original bearer settings in the project's env file "
+                          "(release mode: --env-file <original-file>), then retry. Nothing was changed", 2)
+
+
 def tree_state(repo: Path) -> dict:
     """``{"sha", "dirty", "lines", "error"}`` of a checkout: ``dirty`` is
     ``"true"``, ``"false"`` or ``"unknown"`` (git could not report; ``error``
@@ -513,6 +532,19 @@ class Update:
         return self.report.exit_code
 
     def _run(self) -> None:
+        checkout_handover = (self.o.checkout is not None and self.o.env_file is not None
+                             and Path(self.o.env_file).resolve() == (Path(self.o.checkout) / "ops/.env").resolve()
+                             and not self.o.tag and not self.o.reinstall and not self.o.allow_downgrade
+                             and not self.o.no_backup)
+        release_handover = self.o.checkout is None and self.o.tag and self.o.reinstall
+        if self.o.allow_auth_change and (not (checkout_handover or release_handover) or self.o.engine or self.o.shadow
+                or self.o.clients_only or self.o.all_clients or self.o.unattended or self.o.schedule
+                or self.o.unschedule or self.o.check
+                or not self.o.daemon_only or not _env_file_sets_credentials(self.o.env_file)):
+            raise UpdateError("--allow-auth-change requires an attended release recreation with "
+                              "--env-file <bearer file>, --tag, --reinstall and --daemon-only, or "
+                              "--checkout <repo> --daemon-only --env-file <repo>/ops/.env with bearer declarations. "
+                              "Nothing was changed", 2)
         if self.o.shadow and (not self.o.engine or self.o.checkout is None):
             raise UpdateError("--shadow requires --engine rust --checkout <repo> to start, or --engine python --checkout <repo> to remove; nothing was changed", 2)
         if self.o.engine == "rust" and self.o.checkout is None:
@@ -522,7 +554,8 @@ class Update:
         if self.o.checkout is not None:
             for name, value in (("--clients-only", self.o.clients_only), ("--tag", self.o.tag),
                                 ("--reinstall", self.o.reinstall), ("--allow-downgrade", self.o.allow_downgrade),
-                                ("--env-file", self.o.env_file), ("--compose-file", self.o.compose_files)):
+                                ("--env-file", self.o.env_file if not self.o.allow_auth_change else None),
+                                ("--compose-file", self.o.compose_files)):
                 if value:
                     raise UpdateError(f"{name} is a release-mode option; a checkout deploy builds what the tree "
                                       f"holds (for the clients alone: python ops/update_clients.py)", 2)
@@ -787,12 +820,27 @@ class Update:
                   f"(`pseudolife-mcp serve`) and start new sessions to run it")
 
     # -- docker: shared steps ------------------------------------------------
+    def preflight_disk(self, directory: Path, *, temporary=False) -> None:
+        from pseudolife_memory import disk_space
+        disk_space.host(directory)
+        image, _ = self.running_image()
+        disk_space.docker_storage(self.docker, [PG_CONTAINER, DAEMON_CONTAINER], image, self.warn)
+        if temporary:
+            disk_space.container(self.docker, PG_CONTAINER)
+            code, state = run_cli([self.docker, "inspect", "-f", "{{.State.Running}}", DAEMON_CONTAINER],
+                                  timeout=60, stdout_only=True)
+            # Ordinary backups already permit a stopped daemon and retain a
+            # complete SQL dump with an explicit missing-state warning.
+            if code != 0 or state.strip() != "false":
+                disk_space.container(self.docker, DAEMON_CONTAINER)
+
     def backup(self, checkout: Path | None) -> None:
         if self.o.no_backup:
             self.warn("skipping backup (--no-backup)")
             return
         script = self._checkout_script(checkout, "backup")
         if script is not None:
+            self.preflight_disk(checkout / "data" / "backups", temporary=True)
             self.step(f"backing up the bank ({script.name})...")
             code, _ = run_cli(self._script_argv(script), timeout=3600, stream=not self.o.as_json)
             if code != 0:
@@ -815,6 +863,7 @@ class Update:
         from psycopg.conninfo import make_conninfo
         selector = make_conninfo(dbname=database)
         out_dir = data_dir() / "backups"
+        self.preflight_disk(out_dir, temporary=True)
         out_dir.mkdir(parents=True, exist_ok=True)
         stamp = _stamp()
         dump = out_dir / f"pseudolife_memory-{stamp}.sql.gz"
@@ -886,6 +935,29 @@ class Update:
         image_id, ref = out.strip().splitlines()[-1].split("|", 1)
         return image_id.strip() or None, ref.strip() or None
 
+    def verify_compose_authentication(self, compose: list[str], env: dict) -> None:
+        code, out = run_cli([self.docker, "inspect", "-f", "{{json .Config.Env}}", DAEMON_CONTAINER],
+                            timeout=60, stdout_only=True)
+        if code != 0 and ("no such object" in out.lower() or "no such container" in out.lower()):
+            return  # A proven first deploy has no daemon credentials to preserve.
+        try:
+            entries = json.loads(out) if code == 0 else None
+            if not isinstance(entries, list) or not all(isinstance(item, str) and "=" in item for item in entries):
+                raise ValueError("environment")
+            running = dict(item.split("=", 1) for item in entries)
+            code, out = run_cli([self.docker, "compose", *compose, "config", "--format", "json"],
+                                env=env, timeout=60, stdout_only=True)
+            configured = json.loads(out)["services"][DAEMON_SERVICE].get("environment", {}) if code == 0 else None
+            if not isinstance(configured, dict) or not all(value is None or isinstance(value, str)
+                                                         for value in configured.values()):
+                raise ValueError("environment")
+        except (ValueError, KeyError, TypeError, AttributeError) as exc:
+            raise UpdateError("cannot verify the daemon's Compose bearer settings; restore the original compose "
+                              "and env files, then retry. Nothing was changed", 2) from exc
+        verify_compose_bearers(configured, running, allow_change=self.o.allow_auth_change)
+        if self.o.allow_auth_change:
+            self.step("using the explicitly requested daemon bearer settings from --env-file")
+
     def tag_rollback(self, image_tag: str, running_id: str | None, tag_id: str | None,
                      source: str | None = None, rollback: str | None = None,
                      rollback_lines: list[str] | None = None) -> str:
@@ -920,7 +992,7 @@ class Update:
                                    "      Pick the newest surviving rollback tag and redeploy it:",
                                    f"      docker image ls {repository}",
                                    f"      docker tag <that tag> {image_tag}",
-                                   f"      docker compose {self._compose_display()} up -d --no-deps {DAEMON_SERVICE}"]
+                                   f"      {self._rollback_compose_command(f'docker compose {self._compose_display()} up -d --no-deps {DAEMON_SERVICE}', powershell=os.name == 'nt')}"]
             return "kept"
         code, out = run_cli([self.docker, "tag", source or image_tag, rollback], timeout=120)
         if code != 0:
@@ -931,8 +1003,15 @@ class Update:
             self.warn(f"--force-rollback-tag: tagged {image_tag} even though the running daemon deployed a different image")
         self.rollback_lines = rollback_lines or [
             f"      docker tag {rollback} {image_tag}",
-            f"      docker compose {self._compose_display()} up -d --no-deps {DAEMON_SERVICE}"]
+            f"      {self._rollback_compose_command(f'docker compose {self._compose_display()} up -d --no-deps {DAEMON_SERVICE}', powershell=os.name == 'nt')}"]
         return "tagged"
+
+    def _rollback_compose_command(self, command: str, powershell: bool = False) -> str:
+        if not getattr(self, "_compose_clear_bearers", False):
+            return command
+        clear = ("Remove-Item Env:PSEUDOLIFE_MCP_TOKEN,Env:PSEUDOLIFE_MCP_TOKENS -ErrorAction SilentlyContinue; "
+                 if powershell else "env -u PSEUDOLIFE_MCP_TOKEN -u PSEUDOLIFE_MCP_TOKENS ")
+        return clear + command
 
     def prune_rollbacks(self, checkout: Path | None, repository: str) -> None:
         # Older checkout scripts scan host-wide tags without project evidence.
@@ -1149,13 +1228,18 @@ class Update:
                               f"password, token and volume settings with defaults.{source} Restore {env_file} "
                               "from the original install's environment before retrying. Nothing was changed", 2)
         compose = self._compose_args([compose_file, repo / "ops" / "docker-compose.override.yml"], env_file)
+        self.preflight_disk(repo)
+        environment = compose_environment(env_file, stamp)
+        self.verify_compose_authentication(compose, environment)
         self._compose_shown = compose
+        self._compose_clear_bearers = _env_file_sets_credentials(env_file)
         before = self.daemon_health() or {}
         self.auth_before = before.get("auth") if type(before.get("auth")) is bool else None
         self.credential_env_file = env_file
         previous_digest = before.get("hooks_digest")
         self.schema_before = before.get("schema")
         self.backup(repo)
+        self.preflight_disk(repo)
         image_tag = _compose_image_tag(compose_file)
         if not image_tag:
             raise UpdateError(f"could not find the {DAEMON_SERVICE} image tag in {compose_file}")
@@ -1179,7 +1263,7 @@ class Update:
                               f"{tree['dirty']} -> {now['dirty']}); nothing was built. Re-run the deploy")
         self.step(f"build stamp: commit {tree['sha']}, dirty={tree['dirty']}")
         code, out = run_cli([self.docker, "compose", *compose, "up", "-d", "--no-deps", "--build", DAEMON_SERVICE],
-                            timeout=7200, env=compose_environment(env_file, stamp), stream=not self.o.as_json)
+                            timeout=7200, env=environment, stream=not self.o.as_json)
         if code != 0:
             raise UpdateError("daemon rebuild failed" + (f" ({_last_line(out)})" if out.strip() else ""))
         health = self.wait_health()
@@ -1324,7 +1408,11 @@ class Update:
         context = self.compose_context()
         compose = context["args"]
         self._compose_shown = compose
+        environment = compose_environment(context["env_file"], {"PSEUDOLIFE_IMAGE_TAG": target})
+        self.verify_compose_authentication(compose, environment)
+        self._compose_clear_bearers = _env_file_sets_credentials(context["env_file"])
         image = f"{GHCR_IMAGE}:{target}"
+        self.preflight_disk(data_dir())
         self.step(f"pulling {image}...")
         code, out = run_cli([self.docker, "pull", image], timeout=7200, stream=not self.o.as_json)
         if code != 0:
@@ -1347,14 +1435,16 @@ class Update:
         rollback_tag = f"{current or 'previous'}-{suffix}"
         rollback = f"{GHCR_IMAGE}:{rollback_tag}"
         shown = self._compose_display()
-        lines = [f"      PSEUDOLIFE_IMAGE_TAG={rollback_tag} docker compose {shown} up -d --no-deps {DAEMON_SERVICE}",
-                 f"      (PowerShell: $env:PSEUDOLIFE_IMAGE_TAG='{rollback_tag}'; docker compose {shown} up -d --no-deps {DAEMON_SERVICE})"]
+        posix = f"PSEUDOLIFE_IMAGE_TAG={rollback_tag} docker compose {shown} up -d --no-deps {DAEMON_SERVICE}"
+        powershell = f"$env:PSEUDOLIFE_IMAGE_TAG='{rollback_tag}'; docker compose {shown} up -d --no-deps {DAEMON_SERVICE}"
+        lines = [f"      {self._rollback_compose_command(posix)}",
+                 f"      (PowerShell: {self._rollback_compose_command(powershell, powershell=True)})"]
         self.tag_rollback(ref or GHCR_IMAGE, None, running_id, source=running_id, rollback=rollback,
                           rollback_lines=lines)
         self.prune_rollbacks(context["checkout"], GHCR_IMAGE)
         self.step(f"recreating the daemon container on {image} (Postgres + extractor untouched)...")
         code, out = run_cli([self.docker, "compose", *compose, "up", "-d", "--no-deps", DAEMON_SERVICE],
-                            timeout=3600, env=compose_environment(context["env_file"], {"PSEUDOLIFE_IMAGE_TAG": target}),
+                            timeout=3600, env=environment,
                             stream=not self.o.as_json)
         if code != 0:
             raise UpdateError("daemon recreate failed" + (f" ({_last_line(out)})" if out.strip() else "")
@@ -1808,6 +1898,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--force-rollback-tag", action="store_true",
                         help="tag the rollback even when the version tag is not the running daemon's image")
     parser.add_argument("--allow-dirty", action="store_true", help="checkout mode: deploy an uncommitted tree (stamped dirty)")
+    parser.add_argument("--allow-auth-change", action="store_true", help="apply declared bearer settings during an attended daemon-only recreation (release: --tag --reinstall; checkout: --env-file <repo>/ops/.env)")
     parser.add_argument("--health-retries", type=int, default=30)
     parser.add_argument("--health-delay-ms", type=int, default=1500)
     parser.add_argument("--all", action="store_true", help="checkout mode: also move the client side (shim, plugin, Codex)")
@@ -1832,6 +1923,7 @@ def options_from_args(args) -> Options:
                    rollback_suffix=args.rollback_tag, no_backup=args.no_backup, keep_rollbacks=args.keep_rollbacks,
                    keep_cache_hours=args.keep_cache_hours, no_cache_prune=args.no_cache_prune,
                    force_rollback_tag=args.force_rollback_tag, allow_dirty=args.allow_dirty,
+                   allow_auth_change=args.allow_auth_change,
                    health_retries=args.health_retries, health_delay_ms=args.health_delay_ms,
                    all_clients=args.all, no_test_login=args.no_test_login,
                    clients_only=args.clients_only, daemon_only=args.daemon_only,
@@ -1845,6 +1937,19 @@ def options_from_args(args) -> Options:
 
 
 def main(argv: list[str] | None = None) -> int:
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    probe = arguments == ["--checkout-handover-capability"] or (
+        len(arguments) == 3 and arguments[0] == "--checkout" and arguments[2] == "--checkout-handover-capability")
+    if probe:
+        try:
+            from pseudolife_memory.docker_backup_restore import DockerBank
+            if not callable(getattr(DockerBank, "psql", None)):
+                raise ImportError
+        except ImportError:
+            print("checkout handover needs the current stopped-backup backend; upgrade this updater before moving", file=sys.stderr)
+            return 2
+        print("pseudolife-mcp checkout-handover-v1")
+        return 0
     args = build_parser().parse_args(argv)
     if args.clients_only and args.daemon_only:
         print("--clients-only and --daemon-only exclude each other", file=sys.stderr)

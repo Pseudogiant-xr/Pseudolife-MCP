@@ -19,6 +19,55 @@ def test_engine_flags_reach_options():
     assert options.engine == "rust" and options.shadow
 
 
+@pytest.mark.parametrize("engine,shadow,location", [
+    (engine, shadow, location)
+    for engine, shadow in [("python", False), ("rust", False), ("rust", True)]
+    for location in (["host", "storage"] if shadow else ["host", "storage", "pg-tmp", "daemon-tmp"])
+])
+def test_disk_floor_precedes_engine_backup_build_and_shadow_changes(shadow_host, monkeypatch, engine, shadow, location):
+    from types import SimpleNamespace
+    from pseudolife_memory import disk_space, update_engine as eng
+    s = shadow_host
+    original_env = (s["repo"] / "ops/.env").read_bytes()
+    if location == "host":
+        monkeypatch.setattr(disk_space.shutil, "disk_usage", lambda _: SimpleNamespace(free=disk_space.MIN_FREE - 1))
+    else:
+        original = up.run_cli
+        def run(argv, **kw):
+            target = "fixture-pg" if location == "pg-tmp" else "fixture-daemon"
+            if "df" in argv and (location == "storage" or (argv[2] == target and argv[-1] == "/tmp")):
+                return 0, "overlay 99999999 1 1 99% /\n"
+            return original(argv, **kw)
+        monkeypatch.setattr(up, "run_cli", run)
+    with pytest.raises(up.UpdateError, match="8 GiB"):
+        eng.deploy_engine(s["update"](engine, shadow=shadow), s["repo"])
+    assert (s["repo"] / "ops/.env").read_bytes() == original_env
+    assert not any("build" in c or "up" in c or c[1:2] == ["tag"] or any("backup." in str(v) for v in c) for c in s["calls"])
+
+
+@pytest.mark.parametrize("engine", ["python", "rust", "stopped"])
+def test_engine_rechecks_space_after_backup(engine_host, monkeypatch, engine):
+    from types import SimpleNamespace
+    from pseudolife_memory import disk_space, update_engine as eng
+    s = engine_host
+    if engine == "stopped":
+        update, _, _ = _stopped_handover(s, monkeypatch)
+        update._selected_engine = "python"
+    else:
+        update = s["update"](engine)
+    state = {"backed_up": False}
+    def backup(self):
+        state["backed_up"] = True
+        self.backup_paths = {}
+    monkeypatch.setattr(eng.EngineUpdate, "backup", backup)
+    monkeypatch.setattr(disk_space.shutil, "disk_usage", lambda _: SimpleNamespace(
+        free=disk_space.MIN_FREE - int(state["backed_up"])))
+    with pytest.raises(up.UpdateError, match="8 GiB"):
+        eng.deploy_engine(update, s["repo"])
+    assert state["backed_up"]
+    assert not any("build" in c or "up" in c or c[1:2] == ["tag"] for c in s["calls"])
+
+
 def test_release_rust_refuses_before_docker(monkeypatch, capsys):
     monkeypatch.setattr(up, "run_cli", lambda *a, **kw: pytest.fail("refusal must precede Docker"))
     assert up.main(["--engine", "rust"]) == 2
@@ -107,7 +156,8 @@ def engine_host(tmp_path, monkeypatch):
              "health": {"status": "ok", "version": "0.21.0", "schema": 58},
              "running": {"Image": "sha256:validated-python", "State": {"Running": True},
                          "Mounts": [{"Destination": "/data", "Name": "fixture-state"}],
-                         "Config": {"Image": "python:old", "Labels": {}}}}
+                         "Config": {"Image": "python:old", "Labels": {},
+                                    "Env": ["PSEUDOLIFE_MCP_TOKEN=fixture-bearer"]}}}
     config = {"services": {"pseudolife-pg": {"environment": {"POSTGRES_USER": "fixture", "POSTGRES_DB": "fixture"}},
                             up.DAEMON_SERVICE: {"environment": {"PSEUDOLIFE_MCP_TOKEN": "fixture-bearer"},
                                                 "volumes": [{"type": "volume", "source": "state", "target": "/data"}],
@@ -119,6 +169,8 @@ def engine_host(tmp_path, monkeypatch):
     def run(argv, **kwargs):
         argv = list(map(str, argv))
         state["calls"].append(argv)
+        if "df" in argv:
+            return 0, "Filesystem 1024-blocks Used Available Capacity Mounted on\noverlay 99999999 1 99999998 1% /\n"
         if argv[:2] == ["docker", "compose"]:
             if "config" in argv:
                 return 0, json.dumps(config)
@@ -289,7 +341,8 @@ def shadow_host(engine_host, monkeypatch):
     dsn = "postgresql://fixture:fixture@pseudolife-pg:5432/fixture"
     main = s["config"]["services"][up.DAEMON_SERVICE]
     main["environment"]["PSEUDOLIFE_MCP_DATABASE_URL"] = dsn
-    s["running"]["Config"]["Env"] = ["PSEUDOLIFE_MCP_DATABASE_URL=" + dsn]
+    s["running"]["Config"]["Env"] = ["PSEUDOLIFE_MCP_DATABASE_URL=" + dsn,
+                                     "PSEUDOLIFE_MCP_TOKEN=fixture-bearer"]
     shadow = s["config"]["services"][eng.SHADOW_SERVICE]
     shadow.update(image="fixture-rust:checkout", build={"args": {"GIT_SHA": "a" * 40}},
                   volumes=[{"type": "volume", "source": "state", "target": "/data", "read_only": True}],
@@ -624,7 +677,8 @@ def test_changed_host_identity_refuses_before_backup(engine_host, changed):
     from pseudolife_memory import update_engine as eng
     s = engine_host
     if changed == "bank":
-        s["running"]["Config"]["Env"] = ["PSEUDOLIFE_MCP_DATABASE_URL=postgresql://different-bank"]
+        s["running"]["Config"]["Env"] = ["PSEUDOLIFE_MCP_DATABASE_URL=postgresql://different-bank",
+                                         "PSEUDOLIFE_MCP_TOKEN=fixture-bearer"]
     elif changed == "state":
         s["running"]["Mounts"][0]["Name"] = "different-state"
     else:
@@ -713,6 +767,7 @@ def test_colon_bearer_and_running_version_are_preserved(engine_host, monkeypatch
     from pseudolife_memory import update_engine as eng
     s = engine_host
     s["config"]["services"][up.DAEMON_SERVICE]["environment"] = {"PSEUDOLIFE_MCP_TOKENS": "fixture:colon:reader"}
+    s["running"]["Config"]["Env"] = ["PSEUDOLIFE_MCP_TOKENS=fixture:colon:reader"]
     seen = []
     monkeypatch.setattr(eng, "authenticated_read", lambda url, token: seen.append(token) or True)
     update = s["update"]()
@@ -856,6 +911,7 @@ def test_mapped_bearer_matches_daemon_whitespace_and_malformed_entries(engine_ho
     s = engine_host
     env = {"PSEUDOLIFE_MCP_TOKENS": raw}
     s["config"]["services"][up.DAEMON_SERVICE]["environment"] = env
+    s["running"]["Config"]["Env"] = ["PSEUDOLIFE_MCP_TOKENS=" + raw]
     tokens, _ = env_auth(env)
     assert expected in tokens and presented_bearer("Bearer " + expected) == expected
     seen = []
@@ -1127,6 +1183,7 @@ def test_printed_rollback_preserves_http_auth(engine_host, monkeypatch, credenti
     s = engine_host
     value = "fixture-auth" + (":reader" if credential.endswith("TOKENS") else "")
     s["config"]["services"][up.DAEMON_SERVICE]["environment"] = {credential: value}
+    s["running"]["Config"]["Env"] = [credential + "=" + value]
     monkeypatch.delenv("PSEUDOLIFE_MCP_TOKEN", raising=False)
     monkeypatch.delenv("PSEUDOLIFE_MCP_TOKENS", raising=False)
     monkeypatch.setenv(credential, value if source != "env-file" else "wrong-inherited-value")
@@ -1177,3 +1234,268 @@ def test_printed_rollback_preserves_http_auth(engine_host, monkeypatch, credenti
     assert call(app, "POST", "/mcp")[0] == 401
     # 501 is the mounted MCP stub: authentication allowed it through.
     assert call(app, "POST", "/mcp", headers=[(b"authorization", b"Bearer fixture-auth")])[0] == 501
+
+def test_stopped_checkout_handover_accepts_only_its_explicit_env_file(engine_host, monkeypatch):
+    s = engine_host
+    (s['repo'] / 'ops/.env').write_text('PSEUDOLIFE_MCP_TOKEN=fixture-carried\n')
+    update = s['update'](None, allow_auth_change=True, daemon_only=True,
+                         env_file=s['repo'] / 'ops/.env')
+    monkeypatch.setattr(up.Update, 'detect_tier', lambda self: (_ for _ in ()).throw(RuntimeError('validated checkout handover')))
+    with pytest.raises(RuntimeError, match='validated checkout handover'):
+        update._run()
+
+@pytest.mark.parametrize("invalid", ["env-file", "no-backup", "engine", "shadow", "all-clients", "unattended", "schedule", "check", "tag", "reinstall", "no-declarations"])
+def test_checkout_handover_rejects_ambiguous_authority_before_discovery(engine_host, monkeypatch, invalid):
+    s = engine_host
+    env = s["repo"] / "ops/.env"
+    env.write_text("PSEUDOLIFE_MCP_TOKEN=fixture-carried\n")
+    options = dict(allow_auth_change=True, daemon_only=True, env_file=env)
+    if invalid == "env-file":
+        other = s["repo"] / "ops/other.env"
+        other.write_text(env.read_text())
+        options["env_file"] = other
+    elif invalid == "no-declarations":
+        env.write_text("# no declared bearer settings\n")
+    elif invalid == "engine":
+        options["engine"] = "python"
+    else:
+        options[invalid.replace("-", "_")] = "07:05" if invalid == "schedule" else "0.21.0" if invalid == "tag" else True
+    engine = options.pop("engine", None)
+    monkeypatch.setattr(up.Update, "detect_tier", lambda self: pytest.fail("must refuse before discovery"))
+    with pytest.raises(up.UpdateError, match="--allow-auth-change requires"):
+        s["update"](engine, **options)._run()
+    assert not s["calls"]
+
+
+@pytest.mark.parametrize("checkout", [False, True])
+def test_checkout_handover_capability_is_exact_and_read_only(monkeypatch, capsys, checkout, tmp_path):
+    monkeypatch.setattr(up.Update, "detect_tier", lambda _: pytest.fail("capability probe must not inspect Docker"))
+    args = ["--checkout", str(tmp_path)] if checkout else []
+    assert up.main([*args, "--checkout-handover-capability"]) == 0
+    assert capsys.readouterr().out == "pseudolife-mcp checkout-handover-v1\n"
+
+
+def _stopped_handover(s, monkeypatch, *, engine="python", stored=False):
+    """Track the stopped-backup dependency through the existing Docker seam."""
+    from contextlib import contextmanager
+    from types import SimpleNamespace
+    import sys
+    from pseudolife_memory import update_engine as eng
+    from pseudolife_memory.principals import secret_sha256
+    s["running"]["State"]["Running"] = False
+    s["running"]["NetworkSettings"] = {"Networks": {"handover": {}}}
+    s["running"]["Config"]["Env"].append("PSEUDOLIFE_MCP_DATABASE_URL=postgresql://fixture:fixture@pseudolife-pg:5432/fixture")
+    s["config"]["services"][up.DAEMON_SERVICE]["environment"].update(
+        PSEUDOLIFE_MCP_TOKEN="" if stored else "fixture-carried",
+        PSEUDOLIFE_MCP_TOKENS="",
+        PSEUDOLIFE_MCP_DATABASE_URL="postgresql://fixture:fixture@pseudolife-pg:5432/fixture")
+    s["config"]["volumes"]["state"]["name"] = "legacy_state_volume"
+    s["running"]["Mounts"][0]["Name"] = "legacy_state_volume"
+    env = s["repo"] / "ops/.env"
+    env.write_text("PSEUDOLIFE_MCP_TOKEN=" + ("" if stored else "fixture-carried") + "\nPSEUDOLIFE_MCP_TOKENS=\n")
+    override = s["repo"] / "ops/docker-compose.override.yml"
+    override.write_text("# retained custom host configuration\n")
+    shadow = s["repo"] / "data/update-engine/docker-compose.shadow.json"
+    shadow.parent.mkdir(parents=True)
+    shadow.write_text("fixture-shadow\n")
+    if engine == "rust":
+        labels = {eng.ENGINE_LABEL: "rust", eng.CHECKOUT_LABEL: str(s["repo"]), eng.ACTIVATION_LABEL: "accepted"}
+        s["running"]["Config"]["Labels"] = labels
+        eng._write_overlay(s["repo"] / eng.SELECTION, {"image": "fixture-rust:accepted", "labels": labels})
+    old_run = up.run_cli
+
+    def run(argv, **kw):
+        if list(argv)[1:3] == ["image", "inspect"] and argv[-1] == s["running"]["Image"]:
+            s["calls"].append(list(argv))
+            return 0, s["running"]["Image"]
+        if list(argv)[1:2] == ["inspect"] and argv[-1] == "fixture-pg":
+            s["calls"].append(list(argv))
+            return 0, json.dumps([{"State": {"Running": True}, "Name": "/fixture-pg",
+                                  "Config": {"Env": ["POSTGRES_USER=initial", "POSTGRES_DB=initial"]},
+                                  "NetworkSettings": {"Networks": {"handover": {"Aliases": ["pseudolife-pg"]}}}}])
+        if "psql" in argv and "token_hash" in argv[-1]:
+            s["calls"].append(list(argv))
+            return 0, secret_sha256("fixture-stored")
+        return old_run(argv, **kw)
+
+    class StoppedBank:
+        def __init__(self, **kw):
+            assert kw["container"] == "fixture-pg" and kw["daemon_container"] == "fixture-daemon"
+            s["stopped_bank_selectors"] = kw
+        @contextmanager
+        def helper(self, script):
+            s["calls"].append(["docker", "create", "--network", "none", "--volumes-from", "fixture-daemon:ro", s["running"]["Image"], script])
+            try:
+                yield "owned-helper"
+            finally:
+                s["calls"].append(["docker", "rm", "-f", "owned-helper"])
+        def command(self, *args, **kw):
+            s["calls"].append(["docker", *args])
+            return (1 if s["fail"] == "probe" else 0), ("58" if engine == "rust" else "SCHEMA_META_VERSION = 58\n")
+        def backup(self, *, out, keep_days):
+            assert keep_days is None
+            s["calls"].append(["complete-stopped-backup"])
+            if s["fail"] == "backup":
+                raise up.UpdateError("fixture backup failed")
+            out.mkdir(parents=True, exist_ok=True)
+            dump, state = out / "fixture.sql.gz", out / "fixture.tgz"
+            dump.write_bytes(gzip.compress(b"-- PostgreSQL database dump complete\n"))
+            with tarfile.open(state, "w:gz") as archive:
+                member = tarfile.TarInfo("config.yaml")
+                member.size = 2
+                archive.addfile(member, io.BytesIO(b"{}"))
+            return {"dump": dump, "state": state}
+
+    monkeypatch.setattr(up, "run_cli", run)
+    monkeypatch.setitem(sys.modules, "pseudolife_memory.docker_backup_restore", SimpleNamespace(DockerBank=StoppedBank))
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOKEN", "fixture-stored" if stored else "fixture-host-must-not-win")
+    monkeypatch.delenv("PSEUDOLIFE_MCP_TOKEN_FILE", raising=False)
+    update = s["update"](None, allow_auth_change=True, daemon_only=True, env_file=env)
+    return update, override, shadow
+
+
+@pytest.mark.parametrize("engine,stored", [("python", False), ("rust", False), ("python", True), ("rust", True)])
+def test_stopped_checkout_handover_backs_up_exact_image_and_retains_selection(engine_host, monkeypatch, engine, stored):
+    from pseudolife_memory import update_engine as eng
+    s = engine_host
+    update, override, shadow = _stopped_handover(s, monkeypatch, engine=engine, stored=stored)
+    checked = []
+    monkeypatch.setattr(eng, "authenticated_read", lambda url, token: checked.append(token == ("fixture-stored" if stored else "fixture-carried")) or True)
+    repo = eng.selected_checkout(update)
+    assert repo == s["repo"]
+    eng.deploy_engine(update, repo)
+    calls = s["calls"]
+    backup = next(i for i, call in enumerate(calls) if call == ["complete-stopped-backup"])
+    tag = next(i for i, call in enumerate(calls) if call[1:2] == ["tag"])
+    build = next(i for i, call in enumerate(calls) if "build" in call)
+    assert backup < tag < build
+    assert calls[tag][2] == "sha256:validated-python"
+    assert checked == [True]  # Only the mandatory post-recreate authenticated gate.
+    assert override.read_text() == "# retained custom host configuration\n"
+    assert shadow.read_text() == "fixture-shadow\n"
+    assert all("ghcr.io" not in " ".join(call) for call in calls)
+    assert not (s["repo"] / "data/update-engine/docker-compose.engine-candidate.json").exists()
+    selected = eng._selection(s["repo"], eng.SELECTION if engine == "rust" else eng.PYTHON_ACCEPTED)
+    assert selected["labels"][eng.ENGINE_LABEL] == engine
+    assert any(call[1:2] == ["rm"] and call[-1] == "owned-helper" for call in calls)
+    assert not any(call[1:3] == ["exec", "fixture-daemon"] for call in calls)
+
+
+@pytest.mark.parametrize("engine", ["python", "rust"])
+def test_running_checkout_refuses_even_a_subset_bearer_handover(engine_host, monkeypatch, engine):
+    from pseudolife_memory import update_engine as eng
+    s = engine_host
+    update, override, _ = _stopped_handover(s, monkeypatch, engine=engine)
+    update._selected_engine = engine
+    s["running"]["State"]["Running"] = True
+    s["running"]["Config"]["Env"] = [
+        "PSEUDOLIFE_MCP_TOKEN=fixture-carried",
+        "PSEUDOLIFE_MCP_TOKENS=fixture-carried:owner,fixture-removed:peer",
+        "PSEUDOLIFE_MCP_DATABASE_URL=postgresql://fixture:fixture@pseudolife-pg:5432/fixture"]
+    s["config"]["services"][up.DAEMON_SERVICE]["environment"]["PSEUDOLIFE_MCP_TOKENS"] = "fixture-carried:owner"
+    before = (s["repo"] / "ops/.env").read_bytes(), override.read_bytes()
+    with pytest.raises(up.UpdateError, match="stopped"):
+        eng.deploy_engine(update, s["repo"])
+    assert ((s["repo"] / "ops/.env").read_bytes(), override.read_bytes()) == before
+    assert not any(call[1:2] == ["tag"] or "build" in call or "up" in call or "backup.ps1" in " ".join(call)
+                   or "backup.sh" in " ".join(call) or call == ["complete-stopped-backup"] for call in s["calls"])
+
+
+def test_stopped_checkout_handover_uses_runtime_bank_not_cluster_initialization(engine_host, monkeypatch):
+    from psycopg.conninfo import conninfo_to_dict
+    from pseudolife_memory import update_engine as eng
+    s = engine_host
+    update, _, _ = _stopped_handover(s, monkeypatch)
+    uri = "postgresql://actual_role:fixture@pseudolife-pg:5432/actual_bank"
+    s["running"]["Config"]["Env"][-1] = "PSEUDOLIFE_MCP_DATABASE_URL=" + uri
+    s["config"]["services"][up.DAEMON_SERVICE]["environment"]["PSEUDOLIFE_MCP_DATABASE_URL"] = uri
+    update._selected_engine = "python"
+    eng.deploy_engine(update, s["repo"])
+    queries = [call for call in s["calls"] if "psql" in call]
+    assert queries and all(call[call.index("-U") + 1] == "actual_role" for call in queries)
+    assert all(conninfo_to_dict(call[call.index("-d") + 1]) == {"dbname": "actual_bank"} for call in queries)
+    assert all(call[call.index("-h") + 1] == "/var/run/postgresql" for call in queries)
+
+
+@pytest.mark.parametrize("port", [5432, 6543])
+def test_stopped_handover_retains_runtime_port_and_literal_database(engine_host, monkeypatch, port):
+    from psycopg.conninfo import make_conninfo, conninfo_to_dict
+    from pseudolife_memory import update_engine as eng
+    s = engine_host
+    update, _, _ = _stopped_handover(s, monkeypatch)
+    database = "host=elsewhere bank'quote"
+    source = make_conninfo(host="pseudolife-pg", port=port, user="actual_role", dbname=database)
+    s["running"]["Config"]["Env"][-1] = "PSEUDOLIFE_MCP_DATABASE_URL=" + source
+    s["config"]["services"][up.DAEMON_SERVICE]["environment"]["PSEUDOLIFE_MCP_DATABASE_URL"] = source
+    update._selected_engine = "python"
+    eng.deploy_engine(update, s["repo"])
+    queries = [call for call in s["calls"] if "psql" in call]
+    assert queries and all(call[call.index("-p") + 1] == str(port) for call in queries)
+    assert all(conninfo_to_dict(call[call.index("-d") + 1]) == {"dbname": database} for call in queries)
+    assert s["stopped_bank_selectors"]["db_port"] == port
+    assert s["stopped_bank_selectors"]["db"] == database
+
+
+def test_stopped_checkout_handover_refuses_aliases_on_unshared_networks(engine_host, monkeypatch):
+    from pseudolife_memory import update_engine as eng
+    s = engine_host
+    update, _, _ = _stopped_handover(s, monkeypatch)
+    s["running"]["NetworkSettings"] = {"Networks": {"unrelated": {}}}
+    update._selected_engine = "python"
+    with pytest.raises(up.UpdateError):
+        eng.deploy_engine(update, s["repo"])
+    assert not any(call[1:2] == ["tag"] or "build" in call or "up" in call for call in s["calls"])
+
+
+@pytest.mark.parametrize("failure", ["backup", "probe"])
+def test_stopped_checkout_handover_failure_precedes_tag_build(engine_host, monkeypatch, failure):
+    from pseudolife_memory import update_engine as eng
+    s = engine_host
+    update, _, _ = _stopped_handover(s, monkeypatch)
+    s["fail"] = failure
+    update._selected_engine = "python"
+    with pytest.raises(up.UpdateError):
+        eng.deploy_engine(update, s["repo"])
+    assert not any(call[1:2] == ["tag"] or "build" in call or "up" in call for call in s["calls"])
+    assert any(call[1:2] == ["rm"] for call in s["calls"])
+
+
+def test_stopped_checkout_without_authorization_still_refuses(engine_host):
+    from pseudolife_memory import update_engine as eng
+    s = engine_host
+    s["running"]["State"]["Running"] = False
+    with pytest.raises(up.UpdateError, match="must be running"):
+        eng.deploy_engine(s["update"](), s["repo"])
+    assert not any(call[1:2] == ["tag"] or "build" in call or "up" in call for call in s["calls"])
+
+@pytest.mark.parametrize("failure", ["database", "image", "schema", "stored-bearer", "dependency", "invalid-map", "post-read"])
+def test_stopped_checkout_handover_requires_every_precondition(engine_host, monkeypatch, failure):
+    import sys
+    from pseudolife_memory import update_engine as eng
+    s = engine_host
+    update, _, _ = _stopped_handover(s, monkeypatch, stored=failure == "stored-bearer")
+    update._selected_engine = "python"
+    if failure == "database":
+        s["config"]["services"][up.DAEMON_SERVICE]["environment"]["PSEUDOLIFE_MCP_DATABASE_URL"] = "postgresql://fixture:fixture@external-pg:5432/fixture"
+        s["running"]["Config"]["Env"][-1] = "PSEUDOLIFE_MCP_DATABASE_URL=postgresql://fixture:fixture@external-pg:5432/fixture"
+    elif failure == "image":
+        old = up.run_cli
+        monkeypatch.setattr(up, "run_cli", lambda argv, **kw: (1, "") if argv[1:3] == ["image", "inspect"] else old(argv, **kw))
+    elif failure == "schema":
+        s["schema"] = "59"
+    elif failure == "stored-bearer":
+        monkeypatch.setenv("PSEUDOLIFE_MCP_TOKEN", "fixture-unrelated")
+    elif failure == "dependency":
+        monkeypatch.setitem(sys.modules, "pseudolife_memory.docker_backup_restore", None)
+    elif failure == "invalid-map":
+        s["config"]["services"][up.DAEMON_SERVICE]["environment"]["PSEUDOLIFE_MCP_TOKENS"] = "malformed"
+    else:
+        monkeypatch.setattr(eng, "authenticated_read", lambda *args: False)
+    with pytest.raises(up.UpdateError):
+        eng.deploy_engine(update, s["repo"])
+    if failure != "post-read":
+        assert not any(call[1:2] == ["tag"] or "build" in call or "up" in call for call in s["calls"])
+    else:
+        assert update.report.rollback["state"] == "tagged"
+        assert not (s["repo"] / eng.PYTHON_ACCEPTED).exists()
+        assert not (s["repo"] / "data/update-engine/docker-compose.engine-candidate.json").exists()

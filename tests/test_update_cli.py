@@ -83,6 +83,8 @@ class World:
                     return 1, "Error: No such object"
                 if "Labels" in fmt:
                     return 0, json.dumps(self.container.get("labels", {})) + "\n"
+                if "Config.Env" in fmt:
+                    return 0, json.dumps(self.container.get("env", [])) + "\n"
                 if "{{.Image}}|{{.Config.Image}}" in fmt:
                     return 0, f"{self.container['id']}|{self.container['ref']}\n"
                 if "{{.Image}}" in fmt:
@@ -115,9 +117,13 @@ class World:
         if a[:1] == ["ps"]:
             return 0, ("c1\n" if self.container else "")
         if a[:1] == ["compose"]:
+            if "config" in a:
+                return 0, json.dumps({"name": "pseudolife-mcp", "services": {up.DAEMON_SERVICE: {"environment": {}}}})
             return self.compose_rc, "" if self.compose_rc == 0 else "error: build failed"
         if a[:1] == ["builder"]:
             return 0, ""
+        if a[:1] == ["exec"] and "df" in a:
+            return 0, "Filesystem 1024-blocks Used Available Capacity Mounted on\noverlay 99999999 1 99999998 1% /\n"
         if a[:1] == ["exec"] and "pg_dump" in " ".join(a):
             return self.dump_rc, "" if self.dump_rc == 0 else "pg_dump: error: connection failed"
         if a[:1] == ["exec"] and "tar czf" in " ".join(a):
@@ -222,6 +228,96 @@ def _run(argv: list[str], capsys=None) -> int:
 
 # ── release mode ────────────────────────────────────────────────────────────
 
+@pytest.mark.parametrize("mode", ["release", "checkout", "backup"])
+def test_low_host_disk_refuses_before_pull_build_or_backup(world, clients, tmp_path, monkeypatch, capsys, mode):
+    from types import SimpleNamespace
+    if mode == "checkout":
+        root, _ = _checkout(world, tmp_path)
+        original_env = (root / "ops/.env").read_bytes()
+        args = ["--checkout", str(root), "--no-backup", "--no-cache-prune"]
+    else:
+        _project(world, tmp_path)
+        args = []
+    monkeypatch.setattr(up.shutil, "disk_usage", lambda _: SimpleNamespace(free=8 * 1024**3 - 1))
+    if mode == "backup":
+        with pytest.raises(up.UpdateError, match="8 GiB"):
+            up.Update(up.Options()).builtin_backup()
+    else:
+        assert _run(args) == 2
+        assert "8 GiB" in capsys.readouterr().err
+    assert not any(c.startswith(("pull ", "tag ")) or "pg_dump" in c or " up " in c
+                   for c in world.docker_calls())
+    assert not (tmp_path / "data" / "backups").exists()
+    if mode == "checkout":
+        assert (root / "ops/.env").read_bytes() == original_env
+
+
+def test_low_docker_storage_refuses_before_pull(world, clients, tmp_path, monkeypatch, capsys):
+    _project(world, tmp_path)
+    original = world.run_cli
+
+    def low_disk(argv, **kwargs):
+        if "df" in argv:
+            return 0, "Filesystem 1024-blocks Used Available Capacity Mounted on\noverlay 99999999 99999999 1 100% /\n"
+        return original(argv, **kwargs)
+
+    monkeypatch.setattr(up, "run_cli", low_disk)
+    assert _run(["--no-backup"]) == 2
+    assert "8 GiB" in capsys.readouterr().err
+    assert not any(c.startswith(("pull ", "tag ")) or " up " in c for c in world.docker_calls())
+
+
+def test_checkout_rechecks_space_consumed_by_backup(world, clients, tmp_path, monkeypatch, capsys):
+    from types import SimpleNamespace
+    from pseudolife_memory import disk_space
+    root, _ = _checkout(world, tmp_path)
+    state = {"backed_up": False}
+    monkeypatch.setattr(up.Update, "backup", lambda *a: state.update(backed_up=True))
+    monkeypatch.setattr(disk_space.shutil, "disk_usage", lambda _: SimpleNamespace(
+        free=disk_space.MIN_FREE - int(state["backed_up"])))
+    assert _run(["--checkout", str(root), "--no-cache-prune"]) == 2
+    assert state["backed_up"] and "8 GiB" in capsys.readouterr().err
+    assert not any(c.startswith("tag ") or " up " in c for c in world.docker_calls())
+
+
+def test_the_exact_host_disk_floor_allows_a_release_recreation(world, clients, tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from pseudolife_memory import disk_space
+    _project(world, tmp_path)
+    monkeypatch.setattr(disk_space.shutil, "disk_usage", lambda _: SimpleNamespace(free=disk_space.MIN_FREE))
+    assert _run(["--tag", "0.15.0", "--reinstall", "--daemon-only", "--no-backup"]) == 0
+
+
+@pytest.mark.parametrize("response", ["enough", "low", "malformed"])
+def test_docker_disk_probe_uses_and_removes_only_its_named_readonly_helper(monkeypatch, response):
+    from pseudolife_memory import disk_space
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        if argv[1] == "exec":
+            return 1, "container is not running"
+        if argv[1] == "create":
+            return 0, up.DAEMON_CONTAINER  # stdout must never select the cleanup target
+        if argv[1] == "start":
+            available = str(disk_space.MIN_FREE // 1024) if response == "enough" else "1"
+            return 0, (f"overlay 99999999 1 {available} 1% /\n" if response != "malformed" else "invalid")
+        return 0, ""
+
+    monkeypatch.setattr(up, "run_cli", run)
+    if response == "enough":
+        disk_space.docker_storage("fake-docker", ["fixture-pg", up.DAEMON_CONTAINER], "sha256:fixture")
+    else:
+        with pytest.raises(up.UpdateError):
+            disk_space.docker_storage("fake-docker", ["fixture-pg", up.DAEMON_CONTAINER], "sha256:fixture")
+    create = next(call for call in calls if call[1] == "create")
+    helper = create[create.index("--name") + 1]
+    assert helper.startswith("pseudolife-diskcheck-") and "--read-only" in create
+    assert create[create.index("--network") + 1] == "none"
+    assert calls[-1] == ["fake-docker", "rm", "-f", "-v", helper]
+    assert "--volumes-from" not in create
+
+
 def test_a_release_update_pulls_backs_up_tags_recreates_and_moves_the_clients(world, clients, tmp_path, capsys):
     project = _project(world, tmp_path)
     world.health = [{"status": "ok", "version": "0.15.0"}, None, {"status": "ok", "version": "0.15.1", "schema": 50,
@@ -232,7 +328,7 @@ def test_a_release_update_pulls_backs_up_tags_recreates_and_moves_the_clients(wo
     pull = calls.index(f"pull {up.GHCR_IMAGE}:0.15.1")
     dump = next(i for i, c in enumerate(calls) if "pg_dump" in c)
     tag = next(i for i, c in enumerate(calls) if c.startswith("tag "))
-    compose = next(i for i, c in enumerate(calls) if c.startswith("compose "))
+    compose = next(i for i, c in enumerate(calls) if c.startswith("compose ") and " up " in c)
     assert pull < dump < tag < compose, calls
     assert calls[tag].startswith(f"tag sha256:running {up.GHCR_IMAGE}:0.15.0-pre-update-")
     assert calls[compose].endswith("up -d --no-deps pseudolife-daemon") and "--build" not in calls[compose]
@@ -269,11 +365,13 @@ def test_release_update_warns_once_about_older_persistent_image_pin(world, clien
     (project / ".env").write_text("PSEUDOLIFE_IMAGE_TAG=0.15.0\n", encoding="utf-8")
     world.health = [{"status": "ok", "version": "0.15.0"}, {"status": "ok", "version": "0.15.1"}]
     original = world.run_cli
-    config_envs = []
+    config_checks = []
 
     def config(argv, **kw):
         if argv[1:2] == ["compose"] and "config" in argv:
-            config_envs.append(kw.get("env"))
+            env = kw.get("env") or {}
+            config_checks.append((tuple(argv), "PSEUDOLIFE_IMAGE_TAG" in env,
+                                  env.get("PSEUDOLIFE_IMAGE_TAG")))
             configured = image if "--no-interpolate" in argv else up.GHCR_IMAGE + ":0.15.0"
             return 0, json.dumps({"services": {up.DAEMON_SERVICE: {"image": configured}}})
         return original(argv, **kw)
@@ -288,7 +386,16 @@ def test_release_update_warns_once_about_older_persistent_image_pin(world, clien
         assert "PSEUDOLIFE_IMAGE_TAG=0.15.1" in message
     else:
         assert str(project / "docker-compose.yml") in message and f"image: {up.GHCR_IMAGE}:0.15.1" in message
-    assert config_envs and "PSEUDOLIFE_IMAGE_TAG" not in config_envs[0]
+    raw_args = next(argv for argv, _, _ in config_checks if "--no-interpolate" in argv)
+    resolved_args = tuple(value for value in raw_args if value != "--no-interpolate")
+    pin_queries = [(present, value) for argv, present, value in config_checks
+                   if argv in (raw_args, resolved_args)]
+    assert pin_queries == [(False, None), (False, None)]
+    # The earlier authentication check resolves the deployment overlay, whose
+    # image tag deliberately differs from the manager's persistent view.
+    deployment_queries = [(present, value) for argv, present, value in config_checks
+                          if argv not in (raw_args, resolved_args)]
+    assert deployment_queries == [(True, "0.15.1")]
 
 
 @pytest.mark.parametrize("pin", ["0.15.1", "latest", "sha256:fixture"])
@@ -437,7 +544,7 @@ def test_a_pinned_tag_wins_over_pypi_and_a_failed_pull_changes_nothing(world, cl
     assert _run(["--tag", "0.16.0"]) == 1
     calls = world.docker_calls()
     assert f"pull {up.GHCR_IMAGE}:0.16.0" in calls
-    assert not any(c.startswith(("tag", "compose", "exec")) for c in calls)
+    assert not any(c.startswith("tag") or " up " in c or "pg_dump" in c or "tar czf" in c for c in calls)
     assert "nothing was changed" in capsys.readouterr().err
 
 
@@ -626,7 +733,7 @@ def test_an_incomplete_dump_stops_the_update_before_the_daemon_moves(world, clie
     world.dump_complete = False
     assert _run([]) == 1
     calls = world.docker_calls()
-    assert any(c.startswith("pull") for c in calls) and not any(c.startswith(("tag", "compose")) for c in calls)
+    assert any(c.startswith("pull") for c in calls) and not any(c.startswith("tag") or " up " in c for c in calls)
     err = capsys.readouterr().err
     assert "INCOMPLETE" in err and ".part" in err
     part = list((tmp_path / "data" / "backups").glob("*.part"))
@@ -638,7 +745,7 @@ def test_a_failed_pg_dump_stops_the_update(world, clients, tmp_path, capsys):
     world.dump_rc = 1
     assert _run([]) == 1
     assert "pg_dump failed" in capsys.readouterr().err
-    assert not any(c.startswith("compose") for c in world.docker_calls())
+    assert not any(" up " in c for c in world.docker_calls())
 
 
 def test_an_unhealthy_release_deploy_prints_the_rollback_and_exits_1(world, clients, tmp_path, capsys):
@@ -910,7 +1017,7 @@ def _checkout(world: World, tmp_path: Path, *, repo: bool = True, dirty: int = 0
     (root / "ops" / ".env").write_text("# isolated installed checkout\n", encoding="utf-8", newline="\n")
     (root / "README.md").write_text("sandbox\n", encoding="utf-8", newline="\n")
     (root / "pyproject.toml").write_text("[project]\nname='x'\n", encoding="utf-8", newline="\n")
-    # as in the repository: the scaffolded ops/.env is gitignored, so it
+    # as in the repository: the installed ops/.env is gitignored, so it
     # never makes a clean tree dirty between the guard and the build
     (root / ".gitignore").write_text("ops/.env\n", encoding="utf-8", newline="\n")
     sha = ""
@@ -990,7 +1097,7 @@ def _project_guard_checkout(world, tmp_path, monkeypatch, project="pseudolife-mc
 
     def compose_config(argv, **kw):
         if argv[1:2] == ["compose"] and "config" in argv:
-            return 0, json.dumps({"name": project})
+            return 0, json.dumps({"name": project, "services": {up.DAEMON_SERVICE: {"environment": {}}}})
         return original(argv, **kw)
 
     monkeypatch.setattr(up, "run_cli", compose_config)
@@ -1201,6 +1308,178 @@ def test_an_unhealthy_deploy_never_prunes_the_cache_and_a_prune_failure_is_not_f
 
 
 # ── credentials never leak into the build ───────────────────────────────────
+
+@pytest.mark.parametrize("checkout", [False, True], ids=["release", "checkout"])
+@pytest.mark.parametrize("source", ["attended", "scheduled"])
+def test_a_different_compose_bearer_refuses_before_any_deploy_work(world, clients, tmp_path,
+                                                                 monkeypatch, capsys, checkout, source):
+    if checkout:
+        root, _ = _checkout(world, tmp_path)
+        original_env = (root / "ops/.env").read_bytes()
+        argv = ["--checkout", str(root), "--no-cache-prune"]
+    else:
+        _project(world, tmp_path)
+        argv = []
+    if source == "attended":
+        monkeypatch.setenv("PSEUDOLIFE_MCP_TOKEN", "fixture-client-only")
+        configured = {"PSEUDOLIFE_MCP_TOKEN": "fixture-client-only"}
+    else:
+        monkeypatch.delenv("PSEUDOLIFE_MCP_TOKEN", raising=False)
+        monkeypatch.setenv("PSEUDOLIFE_MCP_TOKEN_FILE", str(tmp_path / "client.token"))
+        configured = {"PSEUDOLIFE_MCP_TOKEN": ""}
+    original = world.run_cli
+
+    def metadata(argv, **kw):
+        if "{{json .Config.Env}}" in argv:
+            return 0, json.dumps(["PSEUDOLIFE_MCP_TOKEN=fixture-daemon-only"])
+        if "config" in argv and "--format" in argv:
+            return 0, json.dumps({"services": {up.DAEMON_SERVICE: {"environment": configured}}})
+        return original(argv, **kw)
+
+    monkeypatch.setattr(up, "run_cli", metadata)
+    assert _run(argv) == 2
+    error = capsys.readouterr().err
+    assert "--env-file" in error and "bearer" in error and "Nothing was changed" in error
+    assert "fixture-client-only" not in error and "fixture-daemon-only" not in error
+    assert not any(c.startswith(("pull ", "tag ")) or "pg_dump" in c or " up " in c
+                   for c in world.docker_calls())
+    assert clients == []
+    if checkout:
+        assert (root / "ops/.env").read_bytes() == original_env
+
+
+@pytest.mark.parametrize("configured,running", [
+    ({}, []),
+    ({"PSEUDOLIFE_MCP_TOKEN": "fixture-daemon"}, ["PSEUDOLIFE_MCP_TOKEN=fixture-daemon"]),
+    ({"PSEUDOLIFE_MCP_TOKENS": "fixture-b:second, fixture-a:FIRST"},
+     ["PSEUDOLIFE_MCP_TOKENS=fixture-a:first,fixture-b:second"]),
+])
+def test_matching_compose_bearers_preserve_literal_and_tokenless_stacks(world, clients, tmp_path,
+                                                                      monkeypatch, configured, running):
+    _project(world, tmp_path)
+    original = world.run_cli
+
+    def metadata(argv, **kw):
+        if "{{json .Config.Env}}" in argv:
+            return 0, json.dumps(running)
+        if "config" in argv and "--format" in argv:
+            return 0, json.dumps({"services": {up.DAEMON_SERVICE: {"environment": configured}}})
+        return original(argv, **kw)
+
+    monkeypatch.setattr(up, "run_cli", metadata)
+    world.health += [{"status": "ok", "version": "0.15.1"}]
+    assert _run(["--health-delay-ms", "1"]) == 0
+    assert any(" up " in c for c in world.docker_calls())
+
+
+def test_release_rollback_keeps_env_file_authentication_ahead_of_client_bearers(world, clients, tmp_path,
+                                                                            monkeypatch, capsys):
+    project = _project(world, tmp_path)
+    (project / ".env").write_text("PSEUDOLIFE_MCP_TOKEN=fixture-daemon\n", encoding="utf-8")
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOKEN", "fixture-client")
+    world.health += [{"status": "ok", "version": "0.15.1"}]
+    assert _run(["--daemon-only", "--health-delay-ms", "1"]) == 0
+    out = capsys.readouterr().out
+    assert "env -u PSEUDOLIFE_MCP_TOKEN -u PSEUDOLIFE_MCP_TOKENS PSEUDOLIFE_IMAGE_TAG=" in out
+    assert "Remove-Item Env:PSEUDOLIFE_MCP_TOKEN,Env:PSEUDOLIFE_MCP_TOKENS -ErrorAction SilentlyContinue;" in out
+    assert "fixture-client" not in out and "fixture-daemon" not in out
+
+
+def test_kept_checkout_rollback_keeps_env_file_authentication_ahead_of_client_bearers(world, tmp_path, monkeypatch):
+    root, _ = _checkout(world, tmp_path)
+    (root / "ops/.env").write_text("PSEUDOLIFE_MCP_TOKEN=fixture-daemon\n", encoding="utf-8")
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOKEN", "fixture-client")
+    update = up.Update(up.Options(checkout=root), log=lambda _: None, warn=lambda _: None)
+    update._compose_shown = update._compose_args([root / "ops/docker-compose.yml"], root / "ops/.env")
+    update._compose_clear_bearers = True
+    assert update.tag_rollback("pseudolife-daemon:0.1.0", "sha256:running", "sha256:stale") == "kept"
+    command = next(line for line in update.rollback_lines if "docker compose" in line)
+    assert ("Remove-Item Env:PSEUDOLIFE_MCP_TOKEN,Env:PSEUDOLIFE_MCP_TOKENS" in command if os.name == "nt"
+            else "env -u PSEUDOLIFE_MCP_TOKEN -u PSEUDOLIFE_MCP_TOKENS docker compose" in command)
+
+
+@pytest.mark.parametrize("carried", ["fixture-carried", ""], ids=["environment-bearer", "stored-principals-only"])
+def test_explicit_attended_recreation_can_transfer_the_declared_bearer_source(world, clients, tmp_path,
+                                                                            monkeypatch, carried):
+    project = _project(world, tmp_path)
+    source = project / ".env"
+    source.write_text(f"PSEUDOLIFE_MCP_TOKEN={carried}\nPSEUDOLIFE_MCP_TOKENS=\n", encoding="utf-8")
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOKEN", "fixture-client")
+    original = world.run_cli
+
+    def metadata(argv, **kw):
+        if "{{json .Config.Env}}" in argv:
+            return 0, json.dumps(["PSEUDOLIFE_MCP_TOKEN=fixture-target-before-move"])
+        if "config" in argv and "--format" in argv:
+            assert "PSEUDOLIFE_MCP_TOKEN" not in kw["env"]
+            return 0, json.dumps({"services": {up.DAEMON_SERVICE: {"environment": {
+                "PSEUDOLIFE_MCP_TOKEN": carried, "PSEUDOLIFE_MCP_TOKENS": ""}}}})
+        return original(argv, **kw)
+
+    monkeypatch.setattr(up, "run_cli", metadata)
+    assert _run(["--allow-auth-change", "--env-file", str(source), "--reinstall", "--daemon-only",
+                 "--tag", "0.15.0", "--health-delay-ms", "1"]) == 0
+    assert any(" up " in c for c in world.docker_calls()) and clients == []
+
+
+@pytest.mark.parametrize("invalid", ["env-file", "tag", "reinstall", "daemon-only", "no-declarations",
+                                     "unattended", "clients-only", "check", "schedule", "checkout", "engine"])
+def test_auth_transfer_requires_explicit_attended_recreation_before_discovery(world, tmp_path, capsys, invalid):
+    source = tmp_path / "source.env"
+    source.write_text("# no bearer settings\n" if invalid == "no-declarations" else "PSEUDOLIFE_MCP_TOKEN=fixture\n")
+    args = ["--allow-auth-change", "--env-file", str(source), "--tag", "0.15.0", "--reinstall", "--daemon-only"]
+    if invalid in ("env-file", "tag", "reinstall", "daemon-only"):
+        offset = args.index("--" + invalid)
+        del args[offset:offset + (2 if invalid in ("env-file", "tag") else 1)]
+    elif invalid != "no-declarations":
+        args += {"schedule": ["--schedule", "07:05"], "checkout": ["--checkout", str(tmp_path)],
+                 "engine": ["--engine", "python"]}.get(invalid, ["--" + invalid])
+    assert _run(args) == 2
+    error = capsys.readouterr().err
+    assert ("--clients-only and --daemon-only exclude" in error if invalid == "clients-only"
+            else "--allow-auth-change requires" in error)
+    assert world.calls == []
+
+
+def test_explicit_auth_transfer_still_refuses_a_wholly_invalid_map():
+    with pytest.raises(up.UpdateError):
+        up.verify_compose_bearers({"PSEUDOLIFE_MCP_TOKENS": "invalid-map"},
+                                  {"PSEUDOLIFE_MCP_TOKEN": "fixture-original"}, allow_change=True)
+
+
+@pytest.mark.parametrize("installed", [False, True])
+def test_checkout_recreation_uses_the_credential_source_that_passed_preflight(world, clients, tmp_path, monkeypatch, installed):
+    root, _ = _checkout(world, tmp_path)
+    original_env = (root / "ops/.env").read_bytes()
+    if not installed:
+        (root / "ops/.env").unlink()
+    credentials = tmp_path / "daemon.env"
+    credentials.write_text("PSEUDOLIFE_MCP_TOKEN=fixture-daemon\n", encoding="utf-8")
+    monkeypatch.setenv("COMPOSE_ENV_FILES", str(credentials))
+    monkeypatch.delenv("PSEUDOLIFE_MCP_TOKEN", raising=False)
+    original = world.run_cli
+    checked = []
+
+    def metadata(argv, **kw):
+        if "{{json .Config.Env}}" in argv:
+            return 0, json.dumps(["PSEUDOLIFE_MCP_TOKEN=fixture-daemon"])
+        if argv[1:2] == ["compose"] and "config" in argv:
+            checked.append((list(argv[2:argv.index("config")]), dict(kw["env"])))
+            return 0, json.dumps({"services": {up.DAEMON_SERVICE: {"environment": {
+                "PSEUDOLIFE_MCP_TOKEN": "fixture-daemon"}}}})
+        return original(argv, **kw)
+
+    monkeypatch.setattr(up, "run_cli", metadata)
+    result = _run(["--checkout", str(root), "--no-backup", "--no-cache-prune"])
+    if not installed:
+        assert result == 2 and not checked and _compose_call(world) == (None, None)
+        assert not (root / "ops/.env").exists()
+        return
+    assert result == 0
+    recreated, environment = _compose_call(world)
+    assert checked == [(recreated[2:recreated.index("up")], environment)]
+    assert (root / "ops/.env").read_bytes() == original_env
+
 
 @pytest.mark.parametrize("file_keys,cleared", [
     ("PSEUDOLIFE_MCP_TOKEN=\nPSEUDOLIFE_MCP_TOKENS=fixture:replacement\n", True),

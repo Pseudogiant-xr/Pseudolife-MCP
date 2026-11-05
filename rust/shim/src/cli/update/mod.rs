@@ -1,6 +1,7 @@
 //! Native, opt-in host update transactions. Python remains the differential oracle.
 mod backup;
 pub(super) mod clients;
+mod disk;
 mod engine;
 mod options;
 mod release;
@@ -99,6 +100,8 @@ pub(crate) struct Update {
     pub selected_engine: String,
     pub maintainer_context: Option<(Vec<String>, Environment)>,
     pub rollback_scope: Option<String>,
+    pub stopped_handover: bool,
+    pub handover_port: u16,
 }
 
 fn output(text: &str, stderr: bool) -> std::io::Result<()> {
@@ -191,6 +194,8 @@ impl Update {
             selected_engine: "python".into(),
             maintainer_context: None,
             rollback_scope: None,
+            stopped_handover: false,
+            handover_port: 5432,
         }
     }
     pub fn step(&mut self, text: impl Into<String>) {
@@ -701,6 +706,17 @@ fn ask(question: &str) -> bool {
 }
 
 pub(crate) fn run(arguments: Vec<OsString>) -> u8 {
+    if arguments == [OsString::from("--checkout-handover-capability")]
+        || (arguments.len() == 3
+            && arguments[0] == "--checkout"
+            && arguments[2] == "--checkout-handover-capability")
+    {
+        return if output("pseudolife-mcp checkout-handover-v1\n", false).is_ok() {
+            0
+        } else {
+            120
+        };
+    }
     // Wrapper capability probe: exact, read-only and absent from deferred CLIs.
     if arguments == [OsString::from("--native-capability")] {
         return if output("pseudolife-mcp native-update-v1\n", false).is_ok() {
@@ -748,7 +764,7 @@ pub(crate) fn run(arguments: Vec<OsString>) -> u8 {
         return run_cli(&argv, None, 14400, true).0.clamp(0, 255) as u8;
     }
     if arguments.iter().any(|s| s == "--help" || s == "-h") {
-        return if output("usage: pseudolife-mcp update [--checkout REPO] [--tag VERSION] [--engine python|rust] [--shadow]\n       [--all | --daemon-only | --clients-only] [--check] [--reinstall] [--allow-downgrade]\n       [--no-backup] [--rollback-tag SUFFIX] [--force-rollback-tag] [--allow-dirty]\n       [--keep-rollbacks N] [--keep-cache-hours N] [--no-cache-prune] [--no-test-login]\n       [--env-file PATH] [--daemon-url URL] [--health-retries N] [--health-delay-ms N]\n       [--unattended | --schedule HH:MM | --unschedule] [--allow-no-bearer] [--result-file PATH] [--json]\n       [--python-runtime INTERPRETER] (explicit legacy/lite updater)\n",false).is_ok(){0}else{120};
+        return if output("usage: pseudolife-mcp update [--checkout REPO] [--tag VERSION] [--engine python|rust] [--shadow]\n       [--all | --daemon-only | --clients-only] [--check] [--reinstall] [--allow-downgrade]\n       [--no-backup] [--rollback-tag SUFFIX] [--force-rollback-tag] [--allow-dirty]\n       [--keep-rollbacks N] [--keep-cache-hours N] [--no-cache-prune] [--no-test-login]\n       [--env-file PATH] [--allow-auth-change] [--daemon-url URL] [--health-retries N] [--health-delay-ms N]\n       [--unattended | --schedule HH:MM | --unschedule] [--allow-no-bearer] [--result-file PATH] [--json]\n       [--python-runtime INTERPRETER] (explicit legacy/lite updater)\n",false).is_ok(){0}else{120};
     }
     match Options::parse(arguments) {
         Ok(o) => Update::new(o).run(),

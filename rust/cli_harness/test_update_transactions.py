@@ -281,11 +281,12 @@ if a[:1]==["inspect"]:
   f=a[a.index("-f")+1]
   if "State.Running" in f:
    if a[-1]=="missing-daemon":code=1;out="No such container"
-   else:out="false" if s.get("deployed") and s["failure"]=="recreated_stopped" else "true"
+   else:out=("false" if s["failure"]=="recreated_stopped" else "true") if s.get("deployed") else str(s["running"].get("State",{}).get("Running",True)).lower()
   elif "State.Status" in f:
    out={"recreated_stopped":"exited","recreated_restarting":"restarting"}.get(s["failure"],"running") if s.get("deployed") else "running"
   elif "index .Config.Labels" in f: out=s.get("setup_engine","python")
   elif "Labels" in f: out=json.dumps(s["running"]["Config"]["Labels"])
+  elif "Config.Env" in f: out=json.dumps(s["running"]["Config"]["Env"])
   elif "|" in f: out=s["running"]["Image"]+"|"+s["running"]["Config"]["Image"]
   elif f=="{{json .}}":out=json.dumps(s["running"])
   else: out=s["running"]["Id"]
@@ -329,7 +330,8 @@ elif a[:1]==["compose"]:
    s["running"]["Image"]="sha256:replacement"
    s["running"]["Id"]=s.get("replacement_id",s["running"]["Id"])
 elif a[:1]==["exec"]:
- if "--host-state" in a or "pseudolife_memory.maintainer_setup" in a:
+ if "df" in a: out="Filesystem 1024-blocks Used Available Capacity Mounted on\noverlay 99999999 1 99999998 1% /"
+ elif "--host-state" in a or "pseudolife_memory.maintainer_setup" in a:
   out=s.get("setup_reply",json.dumps({"problem":None,"keys":[{"state":"active"}]}))
  elif "psql" in a:
   if "cms_counters" in a[-1]:out="f" if s["failure"]=="pending_import" else "t"
@@ -347,6 +349,41 @@ p.write_text(json.dumps(s))
 print(out)
 raise SystemExit(code)
 '''
+
+
+@pytest.mark.parametrize("path", ["/", "/tmp"])
+def test_fixture_df_emits_one_terminated_filesystem_record(tmp_path, monkeypatch, capsys, path):
+    state_path = tmp_path / "fixture-state.json"
+    state_path.write_text(json.dumps({"calls": []}))
+    args = ["exec", "fixture-pg", "df", "-Pk", path]
+    monkeypatch.setenv("UPDATE_FIXTURE_STATE", str(state_path))
+    monkeypatch.setattr(sys, "argv", ["docker", *args])
+    with pytest.raises(SystemExit) as stopped:
+        exec(compile(DOCKER, "fixture-docker", "exec"), {})
+    assert stopped.value.code == 0
+    assert capsys.readouterr().out == (
+        "Filesystem 1024-blocks Used Available Capacity Mounted on\n"
+        "overlay 99999999 1 99999998 1% /\n"
+    )
+    assert json.loads(state_path.read_text())["calls"] == [args]
+
+
+@pytest.mark.parametrize("running,deployed,failure,expected", [
+    (True, False, "", "true"), (False, False, "", "false"),
+    (False, True, "", "true"), (True, True, "recreated_stopped", "false"),
+])
+def test_fixture_running_format_preserves_pre_recreate_state(tmp_path, monkeypatch, capsys, running, deployed, failure, expected):
+    state_path = tmp_path / "fixture-state.json"
+    state_path.write_text(json.dumps({"calls": [], "running": {"State": {"Running": running}},
+                                      "deployed": deployed, "failure": failure}))
+    args = ["inspect", "-f", "{{.State.Running}}", "fixture-daemon"]
+    monkeypatch.setenv("UPDATE_FIXTURE_STATE", str(state_path))
+    monkeypatch.setattr(sys, "argv", ["docker", *args])
+    with pytest.raises(SystemExit) as stopped:
+        exec(compile(DOCKER, "fixture-docker", "exec"), {})
+    assert stopped.value.code == 0
+    assert capsys.readouterr().out == expected + "\n"
+
 
 BACKUP = r'''
 import gzip,io,json,os,pathlib,sys,tarfile
@@ -436,7 +473,8 @@ def host(tmp_path, failure="", mode="release"):
                          "NetworkSettings": {"Networks": {"fixture": {"Aliases": ["pseudolife-pg"]}}},
                          "Mounts": [{"Destination": "/data", "Name": "fixture-state", "Type": "volume", "RW": True}],
                          "Config": {"Image": "pseudolife-daemon:0.21.0", "Labels": None,
-                                    "Env": ["PSEUDOLIFE_MCP_DATABASE_URL=postgresql://fixture:fixture@pseudolife-pg:5432/fixture"]}}}
+                                    "Env": ["PSEUDOLIFE_MCP_DATABASE_URL=postgresql://fixture:fixture@pseudolife-pg:5432/fixture",
+                                            "PSEUDOLIFE_MCP_TOKEN=fixture-bearer"]}}}
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):
@@ -929,6 +967,8 @@ def test_plain_update_accepts_tokenless_host_and_scaffolded_env(tmp_path, mode):
     with host(tmp_path, mode=mode) as (repo, env, state_path):
         state = json.loads(state_path.read_text())
         state["config"]["services"][SERVICE]["environment"].pop("PSEUDOLIFE_MCP_TOKEN")
+        state["running"]["Config"]["Env"] = [entry for entry in state["running"]["Config"]["Env"]
+                                             if not entry.startswith("PSEUDOLIFE_MCP_TOKEN=")]
         state_path.write_text(json.dumps(state))
         if mode == "checkout":
             (repo / "ops/.env").unlink()
@@ -938,6 +978,8 @@ def test_plain_update_accepts_tokenless_host_and_scaffolded_env(tmp_path, mode):
         result = run_arm(repo, env, binary, [*args, "--json", "--health-retries", "1"])
         assert result.returncode == 0, result.stdout + result.stderr
         assert stages(json.loads(state_path.read_text()))[-2:] == ["tag", "up"]
+        if mode == "checkout":
+            assert not (repo / "ops/.env").exists()
 
 
 def test_plain_release_can_recover_an_unhealthy_daemon(tmp_path):
@@ -1134,6 +1176,8 @@ def test_plain_release_after_python_activation_does_not_require_bearer(tmp_path)
         labels.update({"org.pseudolife.engine": "python", "org.pseudolife.release": "0.21.0",
                        "org.pseudolife.activation": "accepted-fixture"})
         state["config"]["services"][SERVICE]["environment"].pop("PSEUDOLIFE_MCP_TOKEN")
+        state["running"]["Config"]["Env"] = [entry for entry in state["running"]["Config"]["Env"]
+                                             if not entry.startswith("PSEUDOLIFE_MCP_TOKEN=")]
         state_path.write_text(json.dumps(state))
         accepted = Path(env["PSEUDOLIFE_MCP_DATA_DIR"]) / "update-engine/docker-compose.release-accepted.json"
         accepted.parent.mkdir(parents=True)

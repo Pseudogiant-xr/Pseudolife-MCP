@@ -1,0 +1,5 @@
+### Fixed (2026-11-04 — Restart restored checkout banks safely)
+
+- Explicit daemon-only checkout handovers can apply carried bearer settings after restoring and stopping a bank, while retaining the selected engine, complete bank and state backups, rollback image identity, and authenticated health verification.
+- Native handovers retain libpq database defaults and TLS configuration, and can replace accepted engine overlays written by the Python updater.
+- Checkout credential handovers require a stopped daemon, retain older backups, and preserve both complete copies if a private backup replacement fails.
