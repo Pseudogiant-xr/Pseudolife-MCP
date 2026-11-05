@@ -205,8 +205,8 @@ fn reference(repo: Option<&Path>, daemon_digest: Option<&str>) -> Option<PathBuf
     let path = PathBuf::from(record["installPath"].as_str()?).join("hooks");
     (digest(&path, SCRIPTS).as_deref() == daemon_digest && daemon_digest.is_some()).then_some(path)
 }
-fn unapproved(manifest: &Value, config: &toml::Value) -> Option<usize> {
-    let mut count = 0;
+fn handler_keys(manifest: &Value) -> Option<Vec<String>> {
+    let mut keys = Vec::new();
     for (event, groups) in manifest.get("hooks")?.as_object()? {
         let event = event
             .chars()
@@ -221,22 +221,122 @@ fn unapproved(manifest: &Value, config: &toml::Value) -> Option<usize> {
         for (g, group) in groups.as_array()?.iter().enumerate() {
             for (h, _) in group["hooks"].as_array()?.iter().enumerate() {
                 let key = format!("{PLUGIN}:hooks/hooks.json:{event}:{g}:{h}");
+                keys.push(key);
+            }
+        }
+    }
+    Some(keys)
+}
+
+fn unapproved(manifest: &Value, config: &toml::Value) -> Option<usize> {
+    Some(
+        handler_keys(manifest)?
+            .into_iter()
+            .filter(|key| {
                 let state = config
                     .get("hooks")
                     .and_then(|v| v.get("state"))
-                    .and_then(|v| v.get(&key));
-                if !state.is_some_and(|v| {
+                    .and_then(|v| v.get(key));
+                !state.is_some_and(|v| {
                     v.get("trusted_hash")
                         .and_then(toml::Value::as_str)
                         .is_some_and(|s| !s.is_empty())
                         || v.get("enabled").and_then(toml::Value::as_bool) == Some(false)
-                }) {
-                    count += 1;
-                }
-            }
+                })
+            })
+            .count(),
+    )
+}
+
+fn runtime_status(result: &Value, expected: &[String]) -> &'static str {
+    let Some(entries) = result["data"].as_array() else {
+        return "unknown";
+    };
+    if entries.len() != 1
+        || entries[0]["errors"]
+            .as_array()
+            .is_none_or(|v| !v.is_empty())
+    {
+        return "unknown";
+    }
+    let Some(hooks) = entries[0]["hooks"].as_array() else {
+        return "unknown";
+    };
+    let mut own = BTreeMap::new();
+    let prefix = format!("{PLUGIN}:");
+    for hook in hooks {
+        let Some(key) = hook["key"].as_str().filter(|key| !key.is_empty()) else {
+            return "unknown";
+        };
+        if !key.starts_with(&prefix) {
+            continue;
+        }
+        if !expected.iter().any(|expected| expected == key) || own.insert(key, hook).is_some() {
+            return "unknown";
         }
     }
-    Some(count)
+    if expected.is_empty() || own.len() != expected.len() {
+        return "not-loaded";
+    }
+    if own.values().any(|h| {
+        h["enabled"] == true && matches!(h["trustStatus"].as_str(), Some("modified" | "untrusted"))
+    }) {
+        return "needs-approval";
+    }
+    if own.values().any(|h| h["enabled"] == false) {
+        return "disabled";
+    }
+    if own
+        .values()
+        .all(|h| h["enabled"] == true && h["trustStatus"] == "trusted")
+    {
+        "current"
+    } else {
+        "unknown"
+    }
+}
+
+pub fn runtime_hook_line(trust: &str, file_state: &str) -> String {
+    let recovery = match trust {
+        "current" => return "current".into(),
+        "needs-approval" => {
+            "Run python ops/setup-codex-hooks.py --source plugin --trust ask, then start a new session."
+        }
+        "disabled" => {
+            "If you want these hooks enabled, enable the Pseudolife handlers in Codex /hooks, then start a new session."
+        }
+        "not-loaded" => {
+            "Check that the Pseudolife plugin is installed and enabled in Codex's plugin manager, then start a new session."
+        }
+        _ => return file_state.into(),
+    };
+    format!("{trust}: {recovery}")
+}
+
+pub async fn runtime_hook_status() -> &'static str {
+    use crate::setup::codex::{Client, Rpc};
+    let home = registrations::codex_home();
+    let Some(executable) = codex_executable(&home) else {
+        return "unknown";
+    };
+    let Some(expected) = normalized_file(&plugin_hooks(&home).join("hooks.json"))
+        .ok()
+        .and_then(|v| manifest(&v))
+        .and_then(|v| handler_keys(&v))
+    else {
+        return "unknown";
+    };
+    let Ok(cwd) = std::env::current_dir() else {
+        return "unknown";
+    };
+    let Ok(mut client) = Client::open(&executable, &home, &cwd).await else {
+        return "unknown";
+    };
+    let result = client.rpc("hooks/list", json!({"cwds":[cwd]})).await;
+    client.close().await;
+    result
+        .map(|v| runtime_status(&v, &expected))
+        .unwrap_or("unknown")
 }
 
 pub fn check_codex_hooks(repo: Option<&Path>, daemon_digest: Option<&str>, refresh: bool) -> Value {
@@ -650,4 +750,63 @@ pub fn codex_reapproval_text(report: Option<&Value>) -> String {
     format!(
         "Codex: its hook copy needs approval ({changed}); until then unapproved memory and coordination handlers do not run.\n  1. Update the plugin in Codex's plugin manager, or run codex plugin marketplace upgrade pseudolife-mcp.\n  2. In Codex run /hooks and approve the PseudoLife handlers.\n  3. Verify: pseudolife-mcp doctor reports codex_hooks = current."
     )
+}
+
+#[cfg(test)]
+mod runtime_trust_tests {
+    use super::*;
+    #[test]
+    fn runtime_verdict_distinguishes_trust_disabled_and_foreign_handlers() {
+        let key = format!("{PLUGIN}:hooks/hooks.json:session_start:0:0");
+        let expected = vec![key.clone()];
+        for (trust, enabled, answer) in [
+            ("modified", true, "needs-approval"),
+            ("untrusted", true, "needs-approval"),
+            ("trusted", true, "current"),
+            ("trusted", false, "disabled"),
+            ("future-state", true, "unknown"),
+        ] {
+            let value = json!({"data":[{"errors":[],"hooks":[{"key":key,"enabled":enabled,"trustStatus":trust},
+                {"key":"other-plugin:session_start:0:0","enabled":true,"trustStatus":"modified"}]}]});
+            assert_eq!(runtime_status(&value, &expected), answer);
+        }
+        for added in [
+            key.clone(),
+            format!("{PLUGIN}:hooks/hooks.json:session_start:99:0"),
+        ] {
+            let value = json!({"data":[{"errors":[],"hooks":[
+                {"key":key,"enabled":true,"trustStatus":"trusted"},
+                {"key":added,"enabled":true,"trustStatus":"modified"}]}]});
+            assert_eq!(runtime_status(&value, &expected), "unknown");
+        }
+        assert_eq!(
+            runtime_status(&json!({"data":[{"errors":[],"hooks":[]}]}), &expected),
+            "not-loaded"
+        );
+        assert_eq!(
+            runtime_status(
+                &json!({"data":[{"errors":["fixture"],"hooks":[]}]}),
+                &expected
+            ),
+            "unknown"
+        );
+    }
+    #[test]
+    fn recovery_matches_the_runtime_cause_and_unknown_preserves_file_verdict() {
+        assert_eq!(runtime_hook_line("unknown", "current"), "current");
+        assert_eq!(
+            runtime_hook_line("unknown", "needs-approval"),
+            "needs-approval"
+        );
+        assert_eq!(runtime_hook_line("current", "needs-approval"), "current");
+        assert_eq!(
+            runtime_hook_line("disabled", "current"),
+            "disabled: If you want these hooks enabled, enable the Pseudolife handlers in Codex /hooks, then start a new session."
+        );
+        assert_eq!(
+            runtime_hook_line("not-loaded", "current"),
+            "not-loaded: Check that the Pseudolife plugin is installed and enabled in Codex's plugin manager, then start a new session."
+        );
+        assert!(runtime_hook_line("needs-approval", "current").contains("--trust ask"));
+    }
 }

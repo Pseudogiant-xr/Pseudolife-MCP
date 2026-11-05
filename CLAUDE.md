@@ -245,8 +245,10 @@ current merge ref, except as the `merge-forward` skill allows):
   is fixed inside a batch (a conflicting member, or the culprit a red
   batch's local bisection finds, is dropped with a comment) except the
   one generated commit `build` adds to regenerate
-  `rust/producer-census.json`, which no PR regenerates itself because
-  master moving staled every PR that did (maintainer, 2026-10-27), and the
+  `rust/producer-census.json` and CI budget fingerprints, which no PR
+  regenerates itself because master moving staled every PR that did
+  (reviewed cost reasons and authored budget conflicts:
+  `docs/dev/ci-budget.md`), and the
   maintainer or the delegated session merges it with a merge commit, never
   squash, so GitHub marks its members merged (the command: item 4).
   Procedure:

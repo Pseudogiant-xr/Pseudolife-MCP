@@ -77,34 +77,19 @@ else
     fail "docker buildx plugin missing - the image build needs BuildKit for its RUN --mount caches" "$fix"
 fi
 
-# ── ports 8765 (daemon) / 5433 (postgres): free, or held by our own stack ──
-# Warn-only: a taken port turns into a cryptic "port is already allocated" at
-# compose up; held-by-us means an existing install (idempotent re-run is fine).
-port_listening() { # $1 = port; rc 0 = listening, 1 = free, 2 = cannot tell
-    if command -v ss >/dev/null 2>&1; then
-        ss -ltn 2>/dev/null | grep -qE "[:.]$1([[:space:]]|$)"
-    elif command -v lsof >/dev/null 2>&1; then
-        lsof -iTCP:"$1" -sTCP:LISTEN >/dev/null 2>&1
-    else
-        return 2
-    fi
-}
-running="$(docker ps --format '{{.Names}}' 2>/dev/null || true)"
-for spec in "8765 daemon pseudolife-mcp-daemon" "5433 postgres pseudolife-mcp-postgres"; do
-    set -- $spec
-    port="$1"; svc="$2"; cont="$3"
-    if printf '%s\n' "$running" | grep -qx "$cont"; then
-        ok "port $port held by $cont (existing install)"
-    else
-        port_listening "$port" && rc=0 || rc=$?
-        if [ "$rc" -eq 0 ]; then
-            warn "port $port is already in use (needed for the $svc)" \
-                 "free the port (e.g. a native Postgres on 5433), then re-run — compose up will otherwise fail with 'port is already allocated'"
-        elif [ "$rc" -eq 1 ]; then
-            ok "port $port free ($svc)"
-        fi
+# ── ports, volumes and Compose ownership: fail before any installer writes ──
+preflight_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+resource_python=""
+for candidate in python3 python; do
+    if command -v "$candidate" >/dev/null 2>&1 && "$candidate" -c 'import sys; sys.exit(sys.version_info < (3, 10))' >/dev/null 2>&1; then
+        resource_python="$candidate"; break
     fi
 done
+if [ -z "$resource_python" ]; then
+    fail "Python >= 3.10 is needed to verify Docker ownership safely" "install Python 3.10 or newer, then rerun ops/preflight.sh"
+    exit 1
+fi
+"$resource_python" "$preflight_dir/preflight.py" --env-file "$preflight_dir/.env" || exit 1
 
 # ── git ────────────────────────────────────────────────────────────────────
 if command -v git >/dev/null 2>&1; then

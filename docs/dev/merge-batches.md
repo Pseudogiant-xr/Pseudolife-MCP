@@ -227,12 +227,14 @@ request that committed a regenerated census went stale whenever master
 changed any of those files, and had to merge master forward and regenerate
 before a batch would take it (#960 and #974 three times each on
 2026-10-26). So no pull request regenerates it. After merging the members,
-`build` runs the batch head's census script and, when the census changed,
-commits it as the batch's one generated commit (`Regenerate the producer
-census for this batch`), touching only that file; no member is edited.
-This is the one exception to "nothing is fixed inside a batch"
-(maintainer, 2026-10-27). The batch pull request names that commit under
-`## Producer census` and lists any trusted manual shape the new census
+`build` runs the batch head's census script and refreshes CI budget
+fingerprints from workflow definitions parsed as data. Changed generated
+files share the batch's one generated commit (`Regenerate producer census
+and CI metadata for this batch`); no member code is edited. This extends
+the derived-data exception to "nothing is fixed inside a batch"
+(maintainer, 2026-10-27; CI metadata extended 2026-11-05). The batch pull
+request names that commit under `## Generated CI metadata` and lists any
+trusted manual shape the new census
 withdrew because a member changed its source (`manual_drift`), since no
 member's own diff shows it; review those and refresh their fingerprints in
 a follow-up pull request (`rust/producer-census.md`).
@@ -260,7 +262,26 @@ environment Python and git need to start, without tokens such as
 `GH_TOKEN`. The list of inputs is read from master's copy of the script and
 the drift from the committed census files, parsed as data, so no member
 code runs inside `ops/integrate.py` itself. With no census on master
-nothing is regenerated.
+no census is regenerated.
+
+CI lane reasons live in independent `rust/ci/ci_budget_accept/*.json`
+fragments, written by `python rust/ci/ci_budget.py accept`. Authors leave
+`rust/ci/ci_budget_fingerprints.json` unchanged. Before merging a member,
+`build` checks that each changed job has a reason binding its prior
+baseline and current definition; regenerating fingerprints cannot supply
+that reason. The reader and legacy parity resolver come from the frozen
+master commit, never a member's executable code. Scope helper source from
+members is hashed as data. After merging, `build` derives the combined
+baseline without changing authored minutes or limits.
+
+Branches using the former shared budget format can still join: verified
+legacy approvals are retained in an inert `imported-<head>.json` archive.
+If only the old shared fingerprint/history fields conflict, `build`
+merges the authored budget data and regenerates the derived fields. A
+conflicting measured cost, limit or other authored value still drops the
+member. A legacy branch changing the parity resolver must first merge
+master and use acceptance fragments, since its resolver is not executed
+inside the batch controller.
 
 Neither the full suite nor the Rust harness run compiles Rust, so two
 members that each compile alone can break the batch together: on

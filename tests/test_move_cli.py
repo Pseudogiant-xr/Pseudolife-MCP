@@ -217,6 +217,8 @@ class World:
         self.target_respawns = target_respawns     # a remote update.sh that keeps going brings it back
         self.restore_fails_after_drop = restore_fails_after_drop
         self.target_live_env = list(TARGET_ENV)
+        self.target_daemon_exists = True
+        self.target_postgres_exists = True
         self.target_labels = compose_labels("pseudolife-daemon")
         self.postgres_labels = compose_labels("pseudolife-pg")
         self.overlap = False   # ever a running target beside a running source on the moved bank
@@ -356,13 +358,21 @@ class World:
                 return 0, "".join(f"{hit}\n" for hit in self.grep_hits).encode(), b""
             return 1, b"", b""
         if cmd.startswith("docker inspect --type container pseudolife-mcp-daemon"):
+            if not self.target_daemon_exists:
+                return 1, b"", b"No such container"
             return 0, json.dumps([{"Config": {"Env": self.target_live_env, "Image": "pseudolife-daemon:0.15.0",
                                               "Labels": self.target_labels},
                                    "State": {"Running": self.target_running},
                                    "HostConfig": {"RestartPolicy": _policy(self.target_policy)}}]).encode(), b""
         if cmd == "docker inspect --type container pseudolife-mcp-postgres":
+            if not self.target_postgres_exists:
+                return 1, b"", b"No such container"
             return 0, json.dumps([{"Config": {"Labels": self.postgres_labels},
                                    "State": {"Running": self.target_pg_running == "true"}}]).encode(), b""
+        if cmd.startswith("docker ps -a --filter"):
+            name = move_cli.DAEMON if move_cli.DAEMON in cmd else move_cli.POSTGRES
+            exists = self.target_daemon_exists if name == move_cli.DAEMON else self.target_postgres_exists
+            return 0, (name + "\n").encode() if exists else b"", b""
         if cmd.startswith("python3 -c") and "realpath" in cmd:
             import posixpath
             # The target's home and paths are POSIX, even in a Windows test run.
@@ -396,11 +406,28 @@ class World:
         if "expose status" in cmd:
             body = {"exposed": True, "url": TARGET_URL} if self.exposed else {"exposed": False, "url": None}
             return 0, json.dumps(body).encode(), b""
+        if cmd == "tailscale ip -4":
+            return 0, b"100.64.0.9\n", b""
+        if cmd.startswith("cat ") and cmd.endswith("/expose.json"):
+            data = self.files.get(shlex.split(cmd)[-1])
+            return (0, data, b"") if data is not None else (1, b"", b"no receipt")
         if "expose tailscale" in cmd:
+            request = json.loads(stdin)
             if self.expose_exit:
+                if self.expose_exit == 5:
+                    self.exposed = True  # serve applied, verification failed
+                self.files[request["receipt"]] = json.dumps({"move_id": request["move_id"], "attempt": request["attempt"],
+                    "ownership": "absent" if self.expose_exit in (2, 4) else "unknown"}).encode()
                 return self.expose_exit, b"", b"expose: run sudo tailscale set --operator=$USER"
+            was_exposed = self.exposed
             self.exposed = True
-            return 0, json.dumps({"exposed": True, "url": TARGET_URL}).encode(), b""
+            self.files[request["receipt"]] = json.dumps({"move_id": request["move_id"], "attempt": request["attempt"],
+                "ownership": "borrowed" if was_exposed else "owned"}).encode()
+            return 0, json.dumps({"state": "already_exposed" if was_exposed else "exposed",
+                                   "url": TARGET_URL}).encode(), b""
+        if "expose off" in cmd:
+            self.exposed = False
+            return 0, json.dumps({"state": "removed"}).encode(), b""
         if cmd.startswith("mkdir -p"):
             return 0, b"", b""
         if cmd.startswith("cat > "):
@@ -770,6 +797,53 @@ def test_new_target_tables_are_protected_without_a_client_update(tmp_path):
     assert mutating_calls(world) == []
 
 
+def test_foreign_stack_without_a_checkout_never_suggests_the_installer(tmp_path, capsys):
+    world = World(checkout=False)
+    world.target_labels = compose_labels("pseudolife-daemon", project="foreign-stack")
+    world.postgres_labels = compose_labels("pseudolife-pg", project="foreign-stack")
+    assert run_move(world, tmp_path, as_json=True) == 4
+    error = json.loads(capsys.readouterr().out)["error"]
+    assert move_cli.INSTALL_LINE not in error
+    assert "remove its containers" in error and "retain its volumes" in error
+    assert mutating_calls(world) == []
+
+
+@pytest.mark.parametrize("postgres_exists", [False, True])
+def test_only_a_target_without_existing_containers_gets_the_install_line(tmp_path, capsys, postgres_exists):
+    world = World(checkout=False)
+    world.target_daemon_exists = False
+    world.target_postgres_exists = postgres_exists
+    world.postgres_labels = compose_labels("pseudolife-pg", project="foreign-stack")
+    assert run_move(world, tmp_path, as_json=True) == 4
+    error = json.loads(capsys.readouterr().out)["error"]
+    assert (move_cli.INSTALL_LINE in error) is not postgres_exists
+    assert mutating_calls(world) == []
+
+
+def test_no_target_tailscale_names_explicit_url_as_the_fix(tmp_path, capsys):
+    world = World(exposed=False, expose_exit=4)
+    assert run_move(world, tmp_path, as_json=True, expose_target=True) == 4
+    error = json.loads(capsys.readouterr().out)["error"]
+    assert "--target-url" in error
+    assert world.source_running and not world.fenced
+
+
+@pytest.mark.parametrize("malformed", [False, True])
+def test_docker_inspection_failure_never_suggests_installation(tmp_path, capsys, malformed):
+    world = World(checkout=False)
+    if malformed:
+        remote = world.remote
+        world.remote = lambda cmd, stdin: ((0, b"not JSON", b"") if cmd.startswith("docker inspect --type")
+                                           else remote(cmd, stdin))
+    else:
+        world.fail = (lambda c: c.remote is not None and c.remote.startswith(("docker inspect", "docker ps -a")),)
+    assert run_move(world, tmp_path, as_json=True) == 4
+    error = json.loads(capsys.readouterr().out)["error"]
+    assert move_cli.INSTALL_LINE not in error
+    assert "Docker" in error and "docker ps -a" in error
+    assert mutating_calls(world) == []
+
+
 def test_target_write_after_preflight_is_preserved_and_refused(tmp_path):
     def late_write(world, call):
         world.target_rows["episodes"] = 1
@@ -1024,15 +1098,15 @@ def test_usage_errors_exit_2(capsys):
 
 def test_an_unexposed_target_is_exposed_before_the_source_stops(tmp_path):
     world = World(exposed=False)
-    assert run_move(world, tmp_path) == 0
-    expose = index(world, lambda c: c.remote is not None and "expose tailscale --yes" in c.remote)
+    assert run_move(world, tmp_path, expose_target=True) == 0
+    expose = index(world, lambda c: c.remote is not None and "expose tailscale" in c.remote)
     stop = index(world, local_is("docker", "stop"))
     assert -1 < expose < stop
 
 
 def test_an_expose_refusal_stops_before_the_source_is_touched(tmp_path, capsys):
     world = World(exposed=False, expose_exit=4)
-    code = run_move(world, tmp_path, as_json=True)
+    code = run_move(world, tmp_path, as_json=True, expose_target=True)
     report = json.loads(capsys.readouterr().out)
     assert code == 4 and "operator" in report["error"]
     assert world.source_running and index(world, local_is("docker", "stop")) == -1
@@ -1051,6 +1125,179 @@ def test_an_explicit_target_url_skips_the_exposure_read(tmp_path):
 
 
 # ── failures in steps 4-9 roll back, in order ────────────────────────────────
+
+def test_yes_alone_never_consents_to_a_persistent_target_serve(tmp_path, capsys):
+    world = World(exposed=False)
+    assert run_move(world, tmp_path, as_json=True) == 4
+    error = json.loads(capsys.readouterr().out)["error"]
+    assert "--expose-target" in error and "--target-url" in error
+    assert mutating_calls(world) == []
+
+
+@pytest.mark.parametrize("failure, code", [(f"GET {TARGET_URL}/health", 4), ("pg_dump", 1)])
+def test_a_new_target_expose_is_undone_on_move_failure(tmp_path, failure, code):
+    world = World(exposed=False, fail=(failure,))
+    assert run_move(world, tmp_path, expose_target=True) == code
+    assert not world.exposed
+    assert world.source_running
+
+
+def test_interactive_yes_requires_an_explicit_expose_flag(tmp_path):
+    world = World(exposed=False)
+    move = mover(world, tmp_path, interactive=True)
+    questions = []
+    move.ask = lambda question: questions.append(question) or False
+    assert move.run() == 4
+    assert questions == []
+    assert mutating_calls(world) == []
+
+
+def test_interactive_move_asks_separately_for_persistent_exposure(tmp_path):
+    world = World(exposed=False)
+    move = mover(world, tmp_path, interactive=True, yes=False)
+    questions = []
+    move.ask = lambda question: questions.append(question) or False
+    assert move.run() == 2
+    assert len(questions) == 1 and "persistent" in questions[0]
+    assert mutating_calls(world) == []
+
+
+def test_new_exposure_intent_is_recorded_before_the_remote_command(tmp_path):
+    world = World(exposed=False)
+    move = mover(world, tmp_path, expose_target=True)
+    observed = []
+    world.hooks = {"expose tailscale": lambda w, c: observed.append(
+        tuple(json.loads((move.local_dir / "record.json").read_text())["flags"][key]
+              for key in ("expose_pending", "exposed_now")))}
+    assert move.run() == 0
+    assert observed == [(True, False)] and world.exposed
+    record = json.loads((move.local_dir / "record.json").read_text())
+    assert record["flags"]["exposed_now"]
+    assert any("expose off --yes" in line for line in record["manual_rollback"])
+
+
+def test_signal_during_target_expose_undoes_serve(tmp_path):
+    def interrupted(world, call):
+        world.remote(call.remote, call.stdin)  # the remote result is durable before ssh replies
+        signal.getsignal(signal.SIGTERM)(signal.SIGTERM, None)
+
+    world = World(exposed=False, hooks={"expose tailscale": interrupted})
+    assert run_move(world, tmp_path, expose_target=True) == 4
+    assert not world.exposed and world.source_running
+    assert index(world, local_is("docker", "stop")) == -1
+
+
+def test_failed_exposure_cleanup_is_recorded_for_manual_recovery(tmp_path, capsys):
+    world = World(exposed=False, fail=(f"GET {TARGET_URL}/health", "expose off"))
+    move = mover(world, tmp_path, expose_target=True, as_json=True)
+    assert move.run() == 6
+    record = json.loads((move.local_dir / "record.json").read_text())
+    assert record["flags"]["exposed_now"] and world.source_running and world.exposed
+    assert any("expose off --yes" in line for line in record["manual_rollback"])
+    assert "expose off" in json.loads(capsys.readouterr().out)["error"]
+
+
+@pytest.mark.parametrize("already_exposed", [False, True])
+def test_rollback_keeps_preexisting_or_concurrently_created_exposure(tmp_path, already_exposed):
+    world = World(exposed=already_exposed, fail=("pg_dump",))
+    if not already_exposed:
+        world.hooks = {"expose tailscale": lambda w, c: setattr(w, "exposed", True)}
+    assert run_move(world, tmp_path, expose_target=True) == 1
+    assert world.exposed
+    assert not any(c.remote and "expose off" in c.remote for c in world.calls)
+
+
+def test_an_unattributed_expose_failure_is_left_for_safe_manual_recovery(tmp_path):
+    world = World(exposed=False, expose_exit=5)
+    move = mover(world, tmp_path, expose_target=True)
+    assert move.run() == 6
+    assert world.exposed and world.source_running
+    record = json.loads((move.local_dir / "record.json").read_text())
+    assert record["flags"]["expose_pending"] and not record["flags"]["exposed_now"]
+    assert any("expose status" in line for line in record["manual_rollback"])
+    assert not any(c.remote and "expose off" in c.remote for c in world.calls)
+
+
+def test_the_parser_accepts_explicit_exposure_consent():
+    assert move_cli._parser().parse_args(["--to", TARGET, "--expose-target"]).expose_target
+
+
+def test_failed_new_exposure_can_be_resumed_from_a_stopped_target(tmp_path):
+    world = World(exposed=False, fail=("bash ops/update.sh",))
+    remote = world.remote
+
+    def require_healthy_daemon(cmd, stdin):
+        if "expose tailscale" in cmd and not world.target_running:
+            return 4, b"", b"expose requires a healthy local daemon"
+        return remote(cmd, stdin)
+
+    world.remote = require_healthy_daemon
+    assert run_move(world, tmp_path, expose_target=True) == 1
+    assert not world.exposed and not world.target_running and world.source_running
+    world.fail = ()
+    assert run_move(world, tmp_path, resume=True, expose_target=True) == 0
+    assert world.exposed and world.target_running and not world.source_running
+
+
+def test_lost_expose_reply_never_removes_another_operators_serve(tmp_path):
+    def borrowed_before_reply(world, call):
+        world.exposed = True
+        world.remote(call.remote, call.stdin)  # the command finds an already-exposed daemon
+        world.fail255 = ("expose tailscale",)
+
+    world = World(exposed=False, hooks={"expose tailscale": borrowed_before_reply})
+    assert run_move(world, tmp_path, expose_target=True) == 4
+    assert world.exposed and world.source_running
+    assert not any(c.remote and "expose off" in c.remote for c in world.calls)
+
+
+def test_lost_reply_undoes_a_serve_attributed_to_this_move(tmp_path):
+    def created_before_reply(world, call):
+        world.remote(call.remote, call.stdin)
+        world.fail255 = ("expose tailscale",)
+
+    world = World(exposed=False, hooks={"expose tailscale": created_before_reply})
+    assert run_move(world, tmp_path, expose_target=True) == 4
+    assert not world.exposed and world.source_running
+
+
+def test_resume_never_uses_a_stale_exposure_receipt_to_remove_a_serve(tmp_path):
+    world = World(exposed=False, fail=("bash ops/update.sh",))
+    assert run_move(world, tmp_path, expose_target=True) == 1
+
+    def lost_before_wrapper_starts(world, call):
+        world.exposed = True  # another operator created it after resume preflight
+        world.fail255 = ("expose tailscale",)
+
+    world.fail = ()
+    world.hooks = {"expose tailscale": lost_before_wrapper_starts}
+    before = len(world.calls)
+    assert run_move(world, tmp_path, resume=True, expose_target=True) == 6
+    assert world.exposed and world.source_running
+    assert not any(c.remote and "expose off" in c.remote for c in world.calls[before:])
+
+
+@pytest.mark.skipif(os.name == "nt", reason="the target exposure wrapper uses POSIX flock")
+@pytest.mark.parametrize("state, ownership", [("exposed", "owned"), ("already_exposed", "borrowed")])
+def test_remote_exposure_receipt_precedes_the_reply(tmp_path, monkeypatch, state, ownership):
+    import subprocess
+
+    receipt = tmp_path / "move" / "expose.json"
+    request = {"move_id": "test-move", "attempt": "test-attempt", "receipt": str(receipt), "checkout": str(tmp_path)}
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(request)))
+    reply = json.dumps({"state": state, "url": TARGET_URL})
+    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: subprocess.CompletedProcess(a, 0, reply, ""))
+
+    class Reply(io.StringIO):
+        def write(self, text):
+            assert json.loads(receipt.read_text())["ownership"] == ownership
+            return super().write(text)
+
+    monkeypatch.setattr(sys, "stdout", Reply())
+    with pytest.raises(SystemExit) as stopped:
+        exec(move_cli._EXPOSE_TARGET, {})
+    assert stopped.value.code == 0
+    assert json.loads(receipt.read_text()) == {"move_id": "test-move", "attempt": "test-attempt", "ownership": ownership}
 
 def _env_backup(c) -> bool:
     return c.remote is not None and c.remote.startswith("cp -p") and len(c.remote.split()) == 4 \

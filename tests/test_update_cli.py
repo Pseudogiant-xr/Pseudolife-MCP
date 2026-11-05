@@ -355,6 +355,117 @@ def test_a_release_update_pulls_backs_up_tags_recreates_and_moves_the_clients(wo
     assert world.slept == [0.001]
 
 
+@pytest.mark.parametrize("kind", ["variable", "literal"])
+@pytest.mark.parametrize("as_json", [False, True])
+def test_release_update_warns_once_about_older_persistent_image_pin(world, clients, tmp_path, monkeypatch, capsys, kind, as_json):
+    project = _project(world, tmp_path)
+    image = (up.GHCR_IMAGE + ":${PSEUDOLIFE_IMAGE_TAG:-0.15.0}" if kind == "variable"
+             else up.GHCR_IMAGE + ":0.15.0")
+    (project / "docker-compose.yml").write_text("services:\n  pseudolife-daemon:\n    image: " + image + "\n", encoding="utf-8")
+    (project / ".env").write_text("PSEUDOLIFE_IMAGE_TAG=0.15.0\n", encoding="utf-8")
+    world.health = [{"status": "ok", "version": "0.15.0"}, {"status": "ok", "version": "0.15.1"}]
+    original = world.run_cli
+    config_envs = []
+
+    def config(argv, **kw):
+        if argv[1:2] == ["compose"] and "config" in argv:
+            config_envs.append(kw.get("env"))
+            configured = image if "--no-interpolate" in argv else up.GHCR_IMAGE + ":0.15.0"
+            return 0, json.dumps({"services": {up.DAEMON_SERVICE: {"image": configured}}})
+        return original(argv, **kw)
+
+    monkeypatch.setattr(up, "run_cli", config)
+    monkeypatch.setenv("PSEUDOLIFE_IMAGE_TAG", "0.15.1")
+    assert _run(["--tag", "0.15.1", "--daemon-only"] + (["--json"] if as_json else [])) == 0
+    captured = capsys.readouterr()
+    message = "\n".join(json.loads(captured.out)["steps"]) if as_json else captured.err
+    assert message.count("manager redeploy") == 1 and "0.15.0" in message and "0.15.1" in message
+    if kind == "variable":
+        assert "PSEUDOLIFE_IMAGE_TAG=0.15.1" in message
+    else:
+        assert str(project / "docker-compose.yml") in message and f"image: {up.GHCR_IMAGE}:0.15.1" in message
+    assert config_envs and "PSEUDOLIFE_IMAGE_TAG" not in config_envs[0]
+
+
+@pytest.mark.parametrize("pin", ["0.15.1", "latest", "sha256:fixture"])
+def test_release_update_does_not_warn_for_current_or_unversioned_pin(world, tmp_path, monkeypatch, capsys, pin):
+    project = _project(world, tmp_path)
+    (project / "docker-compose.yml").write_text("services:\n  pseudolife-daemon:\n    image: " + up.GHCR_IMAGE + ":" + pin + "\n", encoding="utf-8")
+    world.health = [{"status": "ok", "version": "0.15.0"}, {"status": "ok", "version": "0.15.1"}]
+    original = world.run_cli
+
+    def config(argv, **kw):
+        if argv[1:2] == ["compose"] and "config" in argv:
+            return 0, json.dumps({"services": {up.DAEMON_SERVICE: {"image": up.GHCR_IMAGE + ":" + pin}}})
+        return original(argv, **kw)
+
+    monkeypatch.setattr(up, "run_cli", config)
+    assert _run(["--tag", "0.15.1", "--daemon-only"]) == 0
+    assert "manager redeploy" not in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("expression", [up.GHCR_IMAGE + ":${PSEUDOLIFE_IMAGE_TAG:+0.15.0}",
+                                       "${PSEUDOLIFE_IMAGE_TAG}/daemon:0.15.0"])
+def test_pin_hint_uses_file_edit_when_variable_does_not_select_the_version(world, tmp_path, monkeypatch, capsys, expression):
+    project = _project(world, tmp_path)
+    (project / "docker-compose.yml").write_text("services:\n  pseudolife-daemon:\n    image: " + expression + "\n", encoding="utf-8")
+    world.health = [{"status": "ok", "version": "0.15.0"}, {"status": "ok", "version": "0.15.1"}]
+    original = world.run_cli
+
+    def config(argv, **kw):
+        if argv[1:2] == ["compose"] and "config" in argv:
+            image = expression if "--no-interpolate" in argv else up.GHCR_IMAGE + ":0.15.0"
+            return 0, json.dumps({"services": {up.DAEMON_SERVICE: {"image": image}}})
+        return original(argv, **kw)
+
+    monkeypatch.setattr(up, "run_cli", config)
+    assert _run(["--tag", "0.15.1", "--daemon-only"]) == 0
+    message = capsys.readouterr().err
+    assert f"image: {up.GHCR_IMAGE}:0.15.1" in message
+    assert "PSEUDOLIFE_IMAGE_TAG=0.15.1" not in message
+
+
+def test_real_digest_pin_does_not_look_like_an_older_numeric_tag(world, tmp_path, monkeypatch, capsys):
+    _project(world, tmp_path)
+    digest = up.GHCR_IMAGE + "@sha256:" + "0a" * 32
+    world.health = [{"status": "ok", "version": "0.15.0"}, {"status": "ok", "version": "0.15.1"}]
+    original = world.run_cli
+
+    def config(argv, **kw):
+        if argv[1:2] == ["compose"] and "config" in argv:
+            return 0, json.dumps({"services": {up.DAEMON_SERVICE: {"image": digest}}})
+        return original(argv, **kw)
+
+    monkeypatch.setattr(up, "run_cli", config)
+    assert _run(["--tag", "0.15.1", "--daemon-only"]) == 0
+    assert "manager redeploy" not in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("packaged_pair", [False, True])
+def test_previously_added_cached_overlay_does_not_hide_original_manager_pin(world, tmp_path, monkeypatch, capsys, packaged_pair):
+    project = _project(world, tmp_path)
+    cached = tmp_path / "data" / "compose"
+    cached.mkdir(parents=True)
+    overlay = cached / "docker-compose.ghcr.yml"
+    overlay.write_bytes((up.BUNDLED_COMPOSE / overlay.name).read_bytes())
+    base = cached / "docker-compose.yml" if packaged_pair else project / "docker-compose.yml"
+    base.write_text("services:\n  pseudolife-daemon:\n    image: " + up.GHCR_IMAGE + ":0.15.0\n", encoding="utf-8")
+    world.container["labels"]["com.docker.compose.project.config_files"] = f"{base},{overlay}"
+    world.health = [{"status": "ok", "version": "0.15.0"}, {"status": "ok", "version": "0.15.1"}]
+    original = world.run_cli
+
+    def config(argv, **kw):
+        if argv[1:2] == ["compose"] and "config" in argv:
+            tag = "latest" if str(overlay) in argv else "0.15.0"
+            return 0, json.dumps({"services": {up.DAEMON_SERVICE: {"image": up.GHCR_IMAGE + ":" + tag}}})
+        return original(argv, **kw)
+
+    monkeypatch.setattr(up, "run_cli", config)
+    assert _run(["--tag", "0.15.1", "--daemon-only"]) == 0
+    message = capsys.readouterr().err
+    assert ("manager redeploy" in message) is not packaged_pair
+
+
 @pytest.mark.parametrize("schemas, moved", [((56, 57), True), ((57, 57), False), ((None, 57), False)])
 def test_a_rollback_across_a_schema_change_names_the_restore(world, clients, tmp_path, capsys, schemas, moved):
     """An older daemon refuses a bank a newer build stamped, so the printed

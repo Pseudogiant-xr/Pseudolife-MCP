@@ -134,8 +134,67 @@ def test_branch_stress_freezes_master_and_rechecks_without_following_the_ref(gra
         oracle.selected_oracle("root")
 
 
-@pytest.mark.parametrize("mode", ["ci", "wait-mail", "stressful", "", None])
-def test_only_explicit_stress_can_dispatch_from_a_branch(graph, mode):
+@pytest.mark.parametrize("ref", ["refs/heads/topic", "refs/heads/Master", "refs/heads/MASTER"])
+def test_branch_ci_uses_the_run_wide_base_and_reviewed_head(graph, monkeypatch, ref):
+    selected = oracle.select("root", "workflow_dispatch", {
+        "inputs": {"mode": "ci", "frozen_head": HEAD}}, HEAD, github_ref=ref, dispatch_base=BASE)
+    assert selected["base_head"] == BASE
+    assert selected["oracle_head"] == MERGE
+    assert selected["candidate_head"] == HEAD and selected["dispatch_mode"] == "ci"
+    monkeypatch.setenv(oracle.SELECTION_ENV, json.dumps(selected))
+    original_git = oracle.git
+    def moved_master(root, *args):
+        assert "refs/remotes/origin/master^{commit}" not in args
+        return original_git(root, *args)
+    monkeypatch.setattr(oracle, "git", moved_master)
+    assert oracle.selected_oracle("root") == selected
+
+
+@pytest.mark.parametrize("frozen", [None, "", BASE, "a" * 12, "0" * 40])
+def test_branch_ci_requires_the_exact_full_reviewed_head(graph, frozen):
+    with pytest.raises(ValueError):
+        oracle.select("root", "workflow_dispatch", {"inputs": {"mode": "ci", "frozen_head": frozen}},
+                      HEAD, github_ref="refs/heads/topic", dispatch_base=BASE)
+
+
+def test_branch_ci_cannot_resolve_a_moving_master_itself(graph):
+    with pytest.raises(ValueError, match="frozen.*base"):
+        oracle.select("root", "workflow_dispatch", {"inputs": {"mode": "ci", "frozen_head": HEAD}},
+                      HEAD, github_ref="refs/heads/topic")
+
+
+def test_freeze_ci_base_reads_master_only_once_and_requires_the_reviewed_head(graph, monkeypatch):
+    calls = []
+    def git(root, *args):
+        calls.append(args)
+        return BASE if args == ("rev-parse", "FETCH_HEAD^{commit}") else ""
+    monkeypatch.setattr(oracle, "git", git)
+    event = {"inputs": {"mode": "ci", "frozen_head": HEAD}}
+    assert oracle.freeze_ci_base("root", "workflow_dispatch", event, HEAD, "refs/heads/topic") == BASE
+    assert calls == [("fetch", "--no-tags", "--depth=1", "origin", "refs/heads/master"),
+                     ("rev-parse", "FETCH_HEAD^{commit}")]
+    calls.clear()
+    assert oracle.freeze_ci_base("root", "workflow_dispatch", event, HEAD, "refs/heads/master") is None
+    assert calls == []
+
+
+@pytest.mark.parametrize("mode,frozen,ref", [
+    ("ci", None, "refs/heads/topic"), ("ci", "b" * 12, "refs/heads/topic"),
+    ("ci", BASE, "refs/heads/topic"), ("ci", HEAD, "refs/tags/topic"),
+    ("ci", HEAD, None), ("ci", HEAD, "refs/heads/"),
+    ("stress", HEAD, "refs/heads/topic"),
+])
+def test_ci_freezing_rejects_invalid_inputs_before_fetch(graph, mode, frozen, ref):
+    with pytest.raises(ValueError):
+        oracle.freeze_ci_base("root", "workflow_dispatch", {"inputs": {"mode": mode, "frozen_head": frozen}},
+                              HEAD, ref)
+    assert graph == []
+
+
+
+
+@pytest.mark.parametrize("mode", ["wait-mail", "stressful", "", None])
+def test_only_explicit_ci_or_stress_can_dispatch_from_a_branch(graph, mode):
     with pytest.raises(ValueError, match="dispatch requires refs/heads/master"):
         oracle.select("root", "workflow_dispatch", {"inputs": {"mode": mode, "frozen_head": HEAD}},
                       HEAD, github_ref="refs/heads/topic")
