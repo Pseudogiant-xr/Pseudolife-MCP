@@ -4,5 +4,5 @@
   "job": "rust",
   "before": "7590eb3bcb1d8a02",
   "fingerprint": "1bf2949883eca84e",
-  "reason": "Restore the required owned PostgreSQL fixture and parity seeder runtime for the five existing bank-backed PR golden rows; selectors and batch commands are unchanged. Retain the provisional PR-path acceptance only while draft, pending two successful hosted cost measurements before readiness."
+  "reason": "The measured ordinary-PR profile records the added replay and probe cost separately. Full-batch commands, prices and the 410 runner-minute, 34 longest-job and 33 critical-path limits are unchanged."
 }
