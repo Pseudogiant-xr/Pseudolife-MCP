@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "parity-checks",
+  "before": "648ae185c33efaa8",
+  "fingerprint": "9ddbaae60bee1866",
+  "reason": "Combine only the always-co-selected startup parts in one cli-startup shard per OS. Successful bound scripts, generators, environments and step limits match the parent; a success-only setup barrier preserves disk/lease/dependency admission, and part 2 continues after comparison failure. Both receipts are retained. New estimates cover former full job totals; other shard costs hold."
+}

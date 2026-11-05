@@ -101,6 +101,16 @@ remain reviewed edits in `ci_budget.json`.
 
 ## What keeps a run cheap
 
+Startup parity keeps its two logical parts in one `cli-startup` job per OS.
+Schema parity and both original part selectors remain; each part keeps its
+26-minute step budget and its own receipt, and the second runs after a
+comparison failure in the first. To verify the consolidation against its
+reviewed parent, run `python rust/ci/parity_case_sets.py --before <parent>`.
+The script checks both OSes and hosted/self-hosted execution, binds matrix
+values into run scripts, compares selections and environments, and refuses
+changed case generators or fixtures. CI-layout guard tests are separate
+from the unchanged runtime case generators.
+
 These came out of the 2026-10-24 pass (#922, #924), which took the batch
 Parity gate from a median 58.8 minutes to 36.7:
 

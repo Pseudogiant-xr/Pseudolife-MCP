@@ -108,10 +108,11 @@ def test_an_estimate_counts_until_it_is_measured():
     rust_entry["limits"]["runner_minutes"] += 2
     rust_entry["fingerprints"]["extra"] = ci_budget.fingerprint(workflow["jobs"]["extra"])  # as measure records
     assert check(workflow, raw, entry) == []
-    assert ci_budget.estimates(rust_entry) == ["Extra / ubuntu-latest", "Extra / windows-latest"]
+    assert ci_budget.estimates(rust_entry) == sorted([*ci_budget.estimates(budget()["rust.yml"]),
+                                                   "Extra / ubuntu-latest", "Extra / windows-latest"])
 
 
-@pytest.mark.parametrize("limit, words", [("jobs", "job count 43 is over its limit"),
+@pytest.mark.parametrize("limit, words", [("jobs", "job count 41 is over its limit"),
                                           ("runner_minutes", "runner-minutes per full run, over the limit"),
                                           ("longest_job_minutes", "limit for one job"),
                                           ("critical_path_minutes", "slowest chain of needs")])
@@ -465,8 +466,8 @@ def test_the_estimate_route_records_the_new_job_and_its_template(tmp_path, monke
                            "adds the cli-extra suite (estimated); no other shard's steps changed"]) == 0
     entry = json.loads(budget_file.read_text(encoding="utf-8"))
     assert problems("rust.yml", workflow, entry, raw) == []
-    assert ci_budget.estimates(entry["rust.yml"]) == ["Parity checks / ubuntu-latest / cli-extra",
-                                                      "Parity checks / windows-latest / cli-extra"]
+    assert ci_budget.estimates(entry["rust.yml"]) == sorted([*ci_budget.estimates(budget()["rust.yml"]),
+        "Parity checks / ubuntu-latest / cli-extra", "Parity checks / windows-latest / cli-extra"])
     with pytest.raises(SystemExit):
         ci_budget.main(["estimate", "--workflow", "rust.yml", "--job", "Not a job", "--minutes", "1",
                         "--reason", "x"])

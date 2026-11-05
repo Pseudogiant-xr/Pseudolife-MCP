@@ -1,11 +1,11 @@
 {
   "rust.yml": {
     "limits": {
-      "jobs": 43,
+      "jobs": 41,
       "runner_minutes": 410,
       "longest_job_minutes": 34,
       "critical_path_minutes": 33,
-      "why": "2026-10-24 Rust CI speed pass (#922, #924), measured on the runs below: job count at its measured 43; runner minutes (374.2) and longest job (19.7) about 10% above; critical path 28.1 with the harness build's cache cold on pull-request refs (about 22 once master has saved it), so 33, which still refuses parity waiting on the Rust job (38 or more); 2026-10-26 (#967, PDF ingest): longest job 25 -> 34. Rust / windows-latest measured 31.4 (median of runs 40209914303 and 40223580054): about 26 before this change (#965's run 40223499916, 26.1, and master push 40218426648, 24.2, had already passed the 19.7 the old limit rested on), plus about 4.6 for the PDF tests: provisioning the pinned PDFium library (1.2), pdfium-render compiled in each daemon override build (+1.7) and the Nextest steps (+0.8). 34 is the measured 31.4 plus about 8%"
+      "why": "2026-10-24 Rust CI speed pass (#922, #924), measured on the runs below: job count at its measured 43; runner minutes (374.2) and longest job (19.7) about 10% above; critical path 28.1 with the harness build's cache cold on pull-request refs (about 22 once master has saved it), so 33, which still refuses parity waiting on the Rust job (38 or more); 2026-10-26 (#967, PDF ingest): longest job 25 -> 34. Rust / windows-latest measured 31.4 (median of runs 40209914303 and 40223580054): about 26 before this change (#965's run 40223499916, 26.1, and master push 40218426648, 24.2, had already passed the 19.7 the old limit rested on), plus about 4.6 for the PDF tests: provisioning the pinned PDFium library (1.2), pdfium-render compiled in each daemon override build (+1.7) and the Nextest steps (+0.8). 34 is the measured 31.4 plus about 8% 2026-11-05: startup consolidation keeps both logical parts and schema checks in one shard per OS, reducing the physical-job ceiling from 43 to 41; other limits are unchanged."
     },
     "pip_no_compile": true,
     "needs_without_data": {
@@ -61,12 +61,6 @@
       "Parity checks / ubuntu-latest / cli-store": {
         "minutes": 6.0
       },
-      "Parity checks / ubuntu-latest / cli-daemon": {
-        "minutes": 6.1
-      },
-      "Parity checks / ubuntu-latest / cli-daemon-2": {
-        "minutes": 6.6
-      },
       "Parity checks / ubuntu-latest / cli-live": {
         "minutes": 14.2
       },
@@ -105,12 +99,6 @@
       },
       "Parity checks / windows-latest / cli-store": {
         "minutes": 11.8
-      },
-      "Parity checks / windows-latest / cli-daemon": {
-        "minutes": 9.2
-      },
-      "Parity checks / windows-latest / cli-daemon-2": {
-        "minutes": 12.3
       },
       "Parity checks / windows-latest / judges": {
         "minutes": 11.0
@@ -153,6 +141,14 @@
       },
       "Parity / windows-latest": {
         "minutes": 0.0
+      },
+      "Parity checks / ubuntu-latest / cli-startup": {
+        "minutes": 12.2,
+        "estimate": "Conservative sum of the two successful former jobs in run 41856662940 (4.38 + 7.82 minutes), before any shared-setup discount; coordinated branch proof and later two-run remeasurement pending."
+      },
+      "Parity checks / windows-latest / cli-startup": {
+        "minutes": 22.6,
+        "estimate": "Conservative sum of the two successful former jobs in run 41856662940 (10.37 + 12.22 minutes), before any shared-setup discount; coordinated branch proof and later two-run remeasurement pending."
       }
     },
     "profiles": {
