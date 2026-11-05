@@ -62,7 +62,9 @@ modes:
                  (`--check` only reports whether a newer release exists;
                  `--tag X` pins one; pip installs upgrade the package)
   backup         back up the bank: pg_dump + state archive with rotation
-                 (pip tiers; the Docker tier keeps ops/backup.ps1)
+                 (Docker and pip tiers; no checkout needed)
+  restore        replace a Docker bank from --backup-file and --state-archive,
+                 after a safety backup and one confirmation (--yes)
   migrate-flat   back up and flatten a stopped bank without dropping entries
                  (--apply --data-dir PATH; opt-in)
   export         write a portable logical export of the bank (ZIP of JSONL
