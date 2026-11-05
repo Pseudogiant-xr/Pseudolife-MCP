@@ -12,7 +12,8 @@ from .provenance import ROOT, runtime_metadata, module_command
 from .stdio_capture import require_phase1_source
 from .stdio_corpus import ERAS, observe
 from .stdio_judge import (StdioPolicy, judge_with_evidence, eof_policy, judge_sensitivity_controls,
-                          retain_stderr, verifies_frozen_capture, READINESS_WAIT_RULE, readiness_wait_evidence)
+                          retain_stderr, verifies_frozen_capture, READINESS_WAIT_RULE, readiness_wait_evidence,
+                          PROACTOR_SELF_PIPE_ABORT_RULE, proactor_abort_evidence)
 from .processes import owned_process
 from .phase1_receipts import command_identity, pytest_outcomes, candidate_identity, candidate_bindings
 from .phase1_receipts import PINNED_NODE_ID_OPTIONS
@@ -96,14 +97,16 @@ def corpus(root, command, clearance):
             cleanup["database_dropped"] = True
             print(json.dumps({"arm": name, "era": era, "frames": len(result["stdout"]),
                               "exit": result["exit_code"], "database_dropped": True}), flush=True)
-    policy = StdioPolicy(readiness_wait_notice=True)
+    policy = StdioPolicy(readiness_wait_notice=True, oracle_proactor_abort=True)
     differences = [{"era": expected["era"], **difference}
         for expected, actual in zip(arms[:2], arms[2:]) for difference in judge_with_evidence(expected, actual, policy)]
     return {"arms": arms, "differences": differences, "resource_check": resource,
-            "policy": policy.name, "named_normalizations": ["source-text-lf", READINESS_WAIT_RULE],
+            "policy": policy.name,
+            "named_normalizations": ["source-text-lf", READINESS_WAIT_RULE, PROACTOR_SELF_PIPE_ABORT_RULE],
             "normalizations_applied": [{"era": expected["era"], **event}
                 for expected, actual in zip(arms[:2], arms[2:])
-                for event in readiness_wait_evidence(expected, actual, policy)],
+                for event in (*readiness_wait_evidence(expected, actual, policy),
+                              *proactor_abort_evidence(expected, actual, policy))],
             "judge_sensitivity_controls": judge_sensitivity_controls(arms[0], policy)}
 
 
@@ -225,6 +228,9 @@ def main():
         from .stdio_faults import run as fault_run
         receipt["faults"] = fault_run(root, command)
         receipt["differences"].extend(receipt["faults"]["differences"])
+        # receipt_status checks evidence in the top-level list only.
+        receipt.setdefault("normalizations_applied", []).extend({"surface": "faults", **event}
+            for event in receipt["faults"].get("normalizations_applied", []))
     from .stdio_scenarios import run as scenario_run
     receipt["scenarios"] = scenario_run(root, command, **selected_arguments)
     receipt["differences"].extend(receipt["scenarios"]["differences"])

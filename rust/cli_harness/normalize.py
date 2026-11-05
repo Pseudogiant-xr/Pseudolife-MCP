@@ -19,6 +19,7 @@ from typing import Any, Callable
 Rule = Callable[[dict], None]
 RULES: dict[str, Rule] = {}
 RECORD_RULES: set[str] = set()  # Validated fixture inputs; output rules stay raw in goldens.
+ORACLE_RULES: set[str] = set()  # Applied to the Python oracle's observation only.
 
 
 def rule(name: str):
@@ -254,6 +255,44 @@ def python_shutdown_flush_silent(obs: dict) -> None:
     _shutdown_flush(obs, 0)
 
 
+# CPython 3.11's ProactorEventLoop logs this block when its self-pipe receive
+# completes with ERROR_OPERATION_ABORTED (WinError 995). On the self-hosted
+# Windows workers the Python shim printed it at teardown in about 2 of 90
+# shard runs (w1c-doctor's healthy-host-claude-code, 2026-10-31, run
+# 41210925170; the judges' down fault, 2026-11-02, run 41436144681); the
+# native CLI has no event loop to report it (issue #1317).
+_PROACTOR_FRAME = rb'  File "[^"\r\n]*[\\/]asyncio[\\/]%s\.py", line [0-9]+, in %s\r?\n'
+_CARETS = rb"(?: *\^+\r?\n)?"
+_ABORTED = rb"\[WinError 995\] The I/O operation has been aborted because of either a thread exit or an application request\r?\n"
+_PROACTOR_SELF_PIPE_ABORT = re.compile(
+    rb"(?:\A|(?<=\n))Error on reading from the event loop self pipe\r?\n"
+    rb"loop: <ProactorEventLoop running=True closed=False debug=False>\r?\n"
+    rb"Traceback \(most recent call last\):\r?\n"
+    + _PROACTOR_FRAME % (rb"windows_events", rb"finish_recv") + rb"    return ov\.getresult\(\)\r?\n" + _CARETS
+    + rb"OSError: " + _ABORTED + rb"\r?\n"
+    rb"During handling of the above exception, another exception occurred:\r?\n\r?\n"
+    rb"Traceback \(most recent call last\):\r?\n"
+    + _PROACTOR_FRAME % (rb"proactor_events", rb"_loop_self_reading") + rb"    f\.result\(\)  # may raise\r?\n" + _CARETS
+    + _PROACTOR_FRAME % (rb"windows_events", rb"_poll") + rb"    value = callback\(transferred, key, ov\)\r?\n" + _CARETS
+    + _PROACTOR_FRAME % (rb"windows_events", rb"finish_recv") + rb"    raise ConnectionResetError\(\*exc\.args\)\r?\n"
+    + rb"ConnectionResetError: " + _ABORTED + rb"\Z")
+
+
+@rule("python-proactor-self-pipe-abort")
+def python_proactor_self_pipe_abort(obs: dict) -> None:
+    """Oracle only (``ORACLE_RULES``): one exact closing CPython
+    ProactorEventLoop self-pipe WinError 995 block leaves the Python shim's
+    stderr. Any other traceback, a second block, later output, or the block
+    on the native side still shows as a diff."""
+    stderr = _get(obs, "stderr")
+    match = _PROACTOR_SELF_PIPE_ABORT.search(stderr)
+    if match:
+        _put(obs, "stderr", stderr[:match.start()])
+
+
+ORACLE_RULES.add("python-proactor-self-pipe-abort")
+
+
 # A PostgreSQL SCRAM verifier (a server echoing a CREATE/ALTER ROLE statement).
 # The repo is public and secret scanners flag these, so no golden keeps one:
 # the recorder writes this fixed token instead, and compare-time rules that
@@ -409,7 +448,9 @@ def daemon_tokens(obs: dict, url: str) -> None:
         request["body"] = swap(request["body"].encode()).decode()
 
 
-def apply(obs: dict, rules: tuple[str, ...], home: str | None) -> dict:
+def apply(obs: dict, rules: tuple[str, ...], home: str | None, *, oracle: bool = False) -> dict:
+    """``oracle`` marks the Python oracle's observation; rules in
+    ``ORACLE_RULES`` run on it alone."""
     out = json.loads(json.dumps(obs))
     out.setdefault("files", {})
     bank_names(out)
@@ -420,6 +461,8 @@ def apply(obs: dict, rules: tuple[str, ...], home: str | None) -> dict:
     if "requests" in out:
         wire(out)
     for name in rules:
+        if name in ORACLE_RULES and not oracle:
+            continue
         RULES[name](out)
     return out
 
