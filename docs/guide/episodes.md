@@ -128,6 +128,28 @@ reliably — without the agent having to remember:
    `POST /api/episodes/rename` and `POST /api/episodes/merge`. Set `TZ` in
    `ops/.env` for local time.
 
+### Using a board session id without hooks
+
+An exact host session id from the board is also accepted as `episode` when
+that session has an open root episode. Use the full session id, not the
+board's agent id or a session-id prefix. Unknown ids and closed-session
+aliases do not resolve; daemon-minted episode handles keep their existing
+prefix and resume behavior.
+
+If a hookless session has no episode yet, bootstrap it in that session:
+
+```python
+memory_session_title(title="My task")  # omit episode for this first call
+```
+
+Then retry with `episode="<full host session id>"`, or use the episode id
+returned by the title call. The warning is
+`No open episode matches this session id; call memory_session_title without episode, then retry.`
+A retained closed root instead says
+`This session's episode is closed; call memory_session_title without episode to start a new episode.`
+Check `episode_warning` on writes: an unresolved alias can fall back to
+normal attribution, while lifecycle calls refuse it.
+
 ### Session record
 
 An episode is not a durable record that a session happened: a root that

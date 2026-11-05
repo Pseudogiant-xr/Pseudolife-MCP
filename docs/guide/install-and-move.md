@@ -8,6 +8,22 @@ existing Docker bank, use [`pseudolife-mcp move`](remote-bank.md#moving-a-bank)
 from its current host; install the destination first and review `--dry-run`.
 Never hand-write or flatten a compose file to install or move a bank.
 
+## Installer refusals
+
+Both Docker installers check before creating volumes or rewriting
+configuration, including on `--yes` / `-Yes` runs. A refusal leaves the
+existing bank and configuration intact. Use the recovery named in its
+message, then rerun the original installer:
+
+| What preflight found | Recovery |
+|---|---|
+| A foreign container, even stopped, or a selected volume attached to another stack | Maintain it with that stack's own compose file. For clients only, use `ops/install.sh --client-only --daemon-url <url>` (Windows: `ops/install.ps1 -ClientOnly -DaemonUrl <url>`). |
+| An existing volume not recorded by this install | Restore the original `ops/.env`, including `POSTGRES_PASSWORD`, `PSEUDOLIFE_BANK_VOLUME` and `PSEUDOLIFE_STATE_VOLUME`; do not delete the volume. For pre-rename volumes, use the exact names printed by preflight. |
+| Postgres rejects `POSTGRES_PASSWORD` | Restore that setting from the original `ops/.env`. If a stopped container records a different initialization password, start the original stack with its own compose file so preflight can verify the current password. |
+| Port 8765 or 5433 belongs to another service | Stop or reconfigure that service, then rerun. The installer's own bound ports are valid on reruns. |
+| A different install directory or missing recorded origin | Rerun from the original checkout with its original `ops/.env`; restore that checkout or env file if missing. A stack using multiple env files is maintained with `pseudolife-mcp update`. |
+| The configuration no longer retains daemon authentication | Restore the original `ops/.env` instead of generating replacement credentials. |
+
 ## Running under Portainer or another stack manager
 
 Use [`ops/docker-compose.stack.yml`](../../ops/docker-compose.stack.yml)
@@ -205,16 +221,19 @@ explicit backup, previous tag and verification above. Retain the compose file an
 alongside backups; never rotate the Postgres password by editing `.env`
 alone on an existing database.
 
-For a standalone backup with today's checkout tooling:
+For a standalone backup, run on the Docker host; no checkout is needed:
 
 ```bash
-ops/backup.sh --out-dir "$HOME/pseudolife-backups"
-# Windows: ops/backup.ps1 -OutDir <backup-directory>
+pseudolife-mcp backup --out "$HOME/pseudolife-backups"
 ```
 
 Keep both the database dump and state archive, and copy them to another
-disk/host. [Backup and restore](configuration.md#backups) explains
-the paired artifacts and restore procedure. An update's automatic backup
+disk/host. To replace a bank from that pair, run
+`pseudolife-mcp restore --backup-file <dump.sql.gz> --state-archive <state.tgz>`.
+[Backup and restore](configuration.md#backups) explains
+the space checks, restore confirmation and safety backup. Checkout
+`ops/backup.*` / `ops/restore.*` remain available for mirrored backups and
+scratch restore rehearsals. An update's automatic backup
 is additional protection, not a backup schedule.
 
 The manager must preserve project `pseudolife-mcp`, service names

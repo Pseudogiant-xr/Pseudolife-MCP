@@ -353,6 +353,10 @@ settings and shim autostart records. If an older local endpoint named
 `extractor` has no record identifying its family, repeat its original
 extractor flags once; the installer preserves the configuration instead of
 guessing a CLI family from the port.
+Docker reruns also check stack ownership, recorded volumes, credentials and
+ports before changing anything; `--yes` does not bypass these refusals.
+Use the [installer recovery table](docs/guide/install-and-move.md#installer-refusals)
+when preflight stops.
 Omitted `--client` / `-Client` selects installed Claude, Codex and Gemini
 CLIs, or `generic` when none are found. Explicit client flags override this.
 For an existing remote bank, use `--client-only --daemon-url <url>` with
@@ -595,11 +599,11 @@ knowledge graph walkable via `memory_graph` and multi-hop `memory_recall`
 ## Install — containerized (any OS)
 
 What [the durable tier](#durable-tier--docker-recommended-for-a-long-lived-bank)
-installer above does, by hand. Prefer the installer: `pseudolife-mcp update`
-and `pseudolife-mcp move` need its project `pseudolife-mcp`, persistent
-`ops/.env` and unmodified compose files. Keep that checkout and env file
-available; copying or flattening YAML loses the deployment context those
-commands need. For a stack manager, use the
+installer above does, by hand. Keep an installer checkout's original
+`ops/.env` and compose files available. Release-mode installs and supported
+stack-manager installs need no checkout for updates, backup or restore;
+they retain the original compose context and environment. Copying or
+flattening YAML loses that context. For a stack manager, use the
 [supported external-stack path](docs/guide/install-and-move.md#running-under-portainer-or-another-stack-manager).
 
 The whole stack — Postgres **and** the memory daemon — runs in Docker.
@@ -717,6 +721,9 @@ or `pip install --upgrade "pseudolife-mcp[lite]==<version>"` (the `[lite]`
 extra only for a lite install). After that, `pseudolife-mcp update` exists.
 On a client-only machine (the daemon on another host), `update` and
 `--clients-only` move this machine's clients to the daemon's release.
+If that endpoint is silent or reports no version, retry with
+`pseudolife-mcp update --daemon-url https://memory.example.com` for the
+running daemon.
 
 On a Docker-tier install it pulls the pinned GHCR daemon image, backs the
 bank up (the checkout's backup script when the compose project still has
@@ -732,6 +739,13 @@ runs from wherever it was registered, so use its full path when
 `pseudolife-mcp` is not on `PATH`. On a **pip / lite** install it upgrades
 the package in the interpreter that holds it (pip, or pipx) and restarts
 nothing: it says what to restart.
+
+Docker update, backup and restore require at least **8 GiB free** on the
+filesystems their preflight checks; a low-space refusal leaves the bank
+unchanged. Update also refuses a Compose configuration that would change
+the running daemon's bearer settings: restore the original env file, or
+use the explicit [auth handover recipe](docs/guide/configuration.md#changing-daemon-bearer-settings)
+when the change is intentional.
 
 You are told when it is time: the daemon checks PyPI for the newest
 release in the background (`updates.check_releases`, on by default) and
@@ -1523,7 +1537,7 @@ points). Back it up first: `pseudolife-mcp backup` works on lite too.
 **Docker tier** — deletion is deliberate at every step:
 
 ```bash
-# 1. Optional: take a final backup first (ops/backup.ps1 or ops/backup.sh).
+# 1. Optional: take a final backup first: pseudolife-mcp backup
 # 2. Stop and remove the containers (volumes survive this).
 docker compose -f ops/docker-compose.yml down
 # 3. Remove the MCP registration.
