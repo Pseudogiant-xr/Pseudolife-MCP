@@ -1,2 +1,0 @@
-### Fixed (2026-11-04 — Make move refusals actionable)
-- Move checks existing target containers before recommending installation, so a stack managed elsewhere is directed to preserve its volumes and remove conflicting containers instead of entering an installer collision. Tailscale failures name `--target-url` for an existing reachable connection; non-empty banks name backup/removal, fresh volumes or export/import.
