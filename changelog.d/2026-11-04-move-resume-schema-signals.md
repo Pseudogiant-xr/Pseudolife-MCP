@@ -1,3 +1,0 @@
-### Fixed (2026-11-04 — Move schema checks and signal commit boundary)
-- `pseudolife-mcp move` checks the target checkout's clean, committed HEAD before changing a bank and again before starting it. Resume also checks the deployment schema, including a changed clone-free target image, and refuses with an update instruction if it cannot safely read the restored bank.
-- Signal handling stays active through target finalization and client reconnection. Once the source moved marker is confirmed, an interrupt preserves the live target and records unfinished commands with exit 5 instead of rolling the bank back.

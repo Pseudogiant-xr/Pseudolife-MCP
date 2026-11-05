@@ -6,7 +6,223 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-## [0.22.0] - 2026-11-04 — The Console signs you in by link or passkey with no token to paste, the owner's Console shows every owner session's board mail (schema v59), a lossless `migrate-flat` command flattens a stopped bank, updates stay inside their own project, and the Rust daemon can run as a read-only companion beside the Python one
+## [0.22.0] - 2026-11-05 — The Console signs you in by link or passkey with no token to paste, installs and updates finish unattended and refuse another project's stack or a lost configuration before changing anything, Docker banks back up and restore without a checkout and updates keep their credentials, `move` reaches release and stack-manager targets without a clone and undoes a failed exposure, the owner's Console shows every owner session's board mail (schema v59), a lossless `migrate-flat` command flattens a stopped bank, and the Rust daemon can run as a read-only companion beside the Python one
+
+### Performance (2026-11-05 — shared startup parity setup)
+- Run both existing startup parity parts in one physical shard per OS, retaining their selectors, step budgets and separate receipts while sharing checkout and dependency setup.
+
+### Changed (2026-11-05 — parity feedback before batching)
+- Replay touched CLI golden rows and publish report-only frozen-judge probes inside ordinary pull requests' existing Rust jobs, retaining failed identifiers in the job summary and artifact while preserving batch admission, its parity matrix and required check names.
+- Record ordinary-PR cost observations separately from full-batch prices and limits.
+
+### Fixed (2026-11-05 — Build source mutants with their embedded prompt inputs)
+- Mutant source copies include the extractor shim's external prompt files, refresh their build timestamps and remove inputs no longer in the checkout. The same source controls and cases can compile instead of failing before execution.
+
+### Fixed (2026-11-05 — Report every parity judge phase after a comparison failure)
+- Comparison failures no longer prevent later judge phases from running. Every phase retains a completion record and available failed case IDs, while setup and resource checks remain prerequisites and any failed or incomplete phase keeps the gate red.
+
+### Changed (2026-11-05 — independent CI cost approvals)
+- Store CI lane cost reasons in separate acceptance fragments and derive shared job fingerprints in integration batches after verifying each member's reasons, preserving numeric budgets and historical approvals while avoiding conflicts in generated metadata.
+
+### Added (2026-11-05 — Validate parity workflow changes on reviewed branches)
+- Manual Rust CI can bind a reviewed branch checkout to one frozen master merge base shared by every oracle consumer. A full matching checkout SHA is required, source-pin checks remain in place, and failed CI binding prevents expensive builds while the Parity gate fails closed.
+
+### Fixed (2026-11-04 — Keep stack redeploys on the updated release)
+
+- Release updates warn once when the stack's persistent configuration still
+  selects an older image. The message names the environment variable or daemon
+  image edit that keeps the new release on a later manager redeploy, rather than
+  silently reattaching an older image to the upgraded bank.
+
+### Fixed (2026-11-04 — Preserve manager-owned stacks during updates)
+
+- Release updates refuse before pulling, backing up or recreating a daemon when
+its manager's compose files are unavailable on the host. The refusal explains
+how to export the original stack and use `--compose-file` with `--env-file`,
+preserving its project, ports, volumes and settings instead of substituting
+the installer's defaults. Packaged installer layouts still support recovery
+without their original checkout.
+
+### Fixed (2026-11-04 — Refuse checkout updates on another compose project)
+
+- Checkout updates inspect the daemon's compose project before writing an
+  environment file, backing up, tagging or building. A foreign project is left
+  unchanged, with the release-mode command that updates its own configuration.
+  The check also covers engine and shadow updates and honours customized project
+  names resolved by Compose.
+
+### Fixed (2026-11-04 — Docker update endpoint advice)
+- Failed Docker update verification now names `--daemon-url` and suggests a published loopback URL when available. Version mismatches report the observed endpoint response without assuming the Compose image setting caused it. Healthy custom URLs and reverse proxies remain valid.
+
+### Fixed (2026-11-04 — Preserve checkout update credentials)
+
+- Checkout updates refuse a missing `ops/.env` before backup or deployment,
+  naming the running daemon's credential-source variables without exposing their
+  values and asking for the original environment file. Updates no longer copy
+  commented defaults over a lost configuration. The post-deploy health gate also
+  checks that the authentication mode is unchanged before moving clients.
+
+### Fixed (2026-11-04 — Preserve daemon bearer settings during updates)
+- Docker updates compare the resolved Compose bearer settings with the running daemon before pulling, backing up, tagging or building, and refuse a missing or different source with the env-file recovery command. Rollback commands preserve env-file credentials ahead of a caller's client bearer.
+- An intentional credential transfer can use `--allow-auth-change` with an explicit bearer-declaring `--env-file`, `--tag`, `--reinstall` and `--daemon-only`; scheduled and checkout updates keep the default guard.
+
+### Fixed (2026-11-04 — Update backs up the daemon's configured database)
+- Built-in update backups resolve the PostgreSQL role and database from the daemon container's runtime connection settings, including libpq's omitted-database defaults, instead of assuming the default bank or using cluster initialization settings. Opaque or foreign connection targets refuse before writing a backup or deploying, without printing credentials.
+
+### Fixed (2026-11-04 — Keep clean stress evidence after a setup-only retry)
+- Stress reports accept one replacement per iteration when the jobs API proves its earlier attempt failed before the selection step ran. They retain every attempt and cause, reject test and later failures, and require the same number of actual clean selections.
+
+### Fixed (2026-11-04 — Restart restored checkout banks safely)
+
+- Explicit daemon-only checkout handovers can apply carried bearer settings after restoring and stopping a bank, while retaining the selected engine, complete bank and state backups, rollback image identity, and authenticated health verification.
+- Native handovers retain libpq database defaults and TLS configuration, and can replace accepted engine overlays written by the Python updater.
+- Checkout credential handovers require a stopped daemon, retain older backups, and preserve both complete copies if a private backup replacement fails.
+
+### Performance (2026-11-04 — Avoid repeating successful master push coverage nightly)
+- Scheduled CI and Rust workflows skip their ordinary lanes after a successful push run of the same workflow on the exact master commit. Nightly-only evidence and its prerequisite builds still run; missing evidence or an API failure runs all lanes.
+
+### Fixed (2026-11-04 — Refuse unrelated move target stacks before restoring)
+- `pseudolife-mcp move` checks both target containers' compose project, services and owning checkout before changing either host, and explains how to select the owning checkout or prepare fresh target volumes. A bare clone beside a stack managed elsewhere can no longer pass preflight and replace its bank before the target deploy fails.
+
+### Fixed (2026-11-04 — Protect all user data on move targets)
+- `pseudolife-mcp move` counts the target database's tables from its schema catalog, including episodes, lessons, world facts, graph data, documents and board state. Only specific fresh-bank seed rows are exempt; new tables and unknown metadata are protected automatically. Move stops the target daemon and repeats the check before its safety dump and restore, restarting the original target if that check fails. Refusals explain how to preserve the existing bank, choose fresh volumes or merge knowledge with export/import.
+- The stopped target's original state volume is archived through a helper container and checked before restore; its recovery path is recorded and retained on resume.
+- A timed-out or killed restore stays stopped and gated even when its output was lost; rollback cannot restart a possibly restored second copy beside the source.
+
+### Fixed (2026-11-04 — Move schema checks and signal commit boundary)
+- `pseudolife-mcp move` checks the target checkout's clean, committed HEAD before changing a bank and again before starting it. Resume also checks the deployment schema, including a changed clone-free target image, and refuses with an update instruction if it cannot safely read the restored bank.
+- Signal handling stays active through target finalization and client reconnection. Once the source moved marker is confirmed, an interrupt preserves the live target and records unfinished commands with exit 5 instead of rolling the bank back.
+
+### Fixed (2026-11-04 — Make move refusals actionable)
+- Move checks existing target containers before recommending installation, so a stack managed elsewhere is directed to preserve its volumes and remove conflicting containers instead of entering an installer collision. Tailscale failures name `--target-url` for an existing reachable connection; non-empty banks name backup/removal, fresh volumes or export/import.
+
+### Fixed (2026-11-04 — Require consent and undo new move target exposure)
+- `pseudolife-mcp move --yes` confirms the bank move; a new persistent target Tailscale serve requires `--expose-target` or a separate interactive confirmation. Existing connections can use `--target-url`.
+- Move records exposure intent before running the remote command and records ownership on the target before returning its result. Interruption rolls back a serve attributed to this move; existing or unconfirmed serves remain untouched with explicit recovery instructions. A resumed move exposes the target after its daemon starts, and failed cleanup records the exact manual recovery command.
+
+### Added (2026-11-04 — Move banks to release-mode and stack-manager targets)
+- `pseudolife-mcp move` can restore with the target's installed CLI when no clone exists; `--target-release` selects that path beside an unrelated checkout. Original exported deployment files can be named with `--target-compose-file` and `--target-env-file`.
+- Before carrying tokens and redeploying the same published release, move validates the rendered identities, database connection, volumes and complete network bindings against the running target. `--no-keep-tokens` instead restarts its existing container without requiring host-accessible compose files. Backups, resume markers and ownership records remain outside the target state volume.
+- Intentional bearer transfers use the updater's explicit authorization and the verified original environment file, including a deliberately empty environment bearer set when stored principals authenticate the restored bank. A target CLI missing that support is refused before mutation with an upgrade instruction.
+- Checkout targets use the advertised stopped handover, retaining their selected Python or Rust engine and overlays. Stored-only sources supply an existing private bearer, checked against active source principals and passed through a temporary target token file. SQL, dumps and restore share the daemon's selected PostgreSQL port and a scoped local socket.
+- Probe-token cleanup failures preserve the updater's result, name the remaining file and are retried during rollback. Relative checkout/work paths and missing checkout bearer declarations under `--no-keep-tokens` refuse before mutation; explicit empty libpq settings retain precedence over inherited environment defaults.
+- Database selection follows libpq defaults, migration dumps use destination object ownership, and resume checks the recorded database/storage and rechecks untouched banks for new user data. Overlapping artifact locations are refused before archiving; `--target-work-dir` selects a safe location outside bank mounts and checkouts.
+
+### Fixed (2026-11-04 — Make local-only lease outcomes explicit)
+- `lease run` now ends with a clear `LOCAL LOCK ONLY` result and the command's exit code when it could not acquire a board lease, including the missing-bearer fix; it still serializes locally and preserves the command's exit status.
+
+### Fixed (2026-11-04 — Finish unattended installs without waiting for prompts)
+
+- Both installers accept `--yes` / `-Yes`, or `PSEUDOLIFE_UNATTENDED=1` under
+  an agent's pseudo-terminal, with the same conservative defaults as redirected
+  stdin. Omitted clients are detected from installed CLIs, and a fresh local
+  install defaults to the CPU sidecar. Guided setup that needs a person names
+  its follow-up command instead of waiting for input.
+
+### Fixed (2026-11-04 — Refuse installer collisions before changing anything)
+
+- Both Docker installers now refuse foreign Compose containers (including stopped
+  ones), unrecorded bank/state volumes, mismatched Postgres passwords and occupied
+  ports before creating volumes or rewriting configuration. Refusals name the
+  recovery step and preserve existing data. Recorded pre-rename volume names and
+  the installer's own bound ports remain valid on reruns; extractor removal checks
+  the Compose project and removes only the verified container ID.
+
+### Fixed (2026-11-04 — Reuse completed installer setup on reruns)
+
+- Both installers retain recorded extractor, model, client and setup choices,
+  leave unchanged managed files untouched, and skip Compose startup when the
+  checkout, configuration and running images match the last healthy deployment.
+  Stopped containers restart with existing images. Checkout shim runtimes are
+  reused only when source, interpreter, package version and dependencies match;
+  source edits, missing dependencies and incomplete runtimes still rebuild.
+
+### Fixed (2026-11-04 — Preserve lite banks when installing Docker)
+
+- Both Docker installers now refuse an initialized local lite bank before changing installer files or taking the daemon port, with the lite-to-Docker backup and restore path. Custom data directories and native Windows, macOS and Linux defaults are checked. Empty directories and binary caches remain valid fresh installs, and existing Docker installs can rerun with stopped lite files left behind.
+
+### Fixed (2026-11-04 — Keep an existing install's credential authority)
+
+- Docker installers refuse a different checkout or a lost authentication
+  configuration before minting credentials or changing the stack. Missing
+  recorded origins name the recovery step; original env-file authority remains
+  valid with packaged Compose files. The daemon-host epilogue now explains why
+  its checkout and `ops/.env` must be retained.
+
+### Added (2026-11-04 — Supported compose for external stack managers)
+
+- Provide a self-contained GHCR compose file for Portainer, Dockge, Komodo and plain Compose folders, with the installer's service identities, environment settings, external volumes and daemon hardening. Automatic extraction is unconfigured by default; the unpublished CPU sidecar is a separate opt-in build.
+- Document first credentials, client-only setup, release updates, manager redeploys and paired backups; pin every runtime option to the source-build stack with a drift guard.
+
+### Fixed (2026-11-04 — Report the configured client wake path)
+- Doctor now identifies Claude Code's Stop hook and Codex's doorbell even without `--host`, explains that `wake_enabled` controls optional push, and distinguishes a configured wake path from verified mail delivery.
+
+### Fixed (2026-11-04 — Check free space before Docker updates and backups)
+- Docker updates, clone-free backups and restore safety dumps check for at least 8 GiB free on their write filesystems before pulling, building or dumping. Low-space refusals name where to free space and preserve the daemon and existing backups.
+
+### Added (2026-11-04 — Back up and restore Docker banks without a checkout)
+
+- `pseudolife-mcp backup` detects Docker banks and saves a database dump and
+  state archive using the existing containers, including stopped daemon mounts.
+  `pseudolife-mcp restore --backup-file <dump> --state-archive <state>` asks once
+  before replacing a bank (`--yes` for unattended use), first saves a complete
+  safety pair outside any checkout, and supports `--leave-stopped` for moves.
+  It preserves an active move gate and refuses unsafe archives or incomplete
+  backups. Schema rollback guidance now names the installed restore command.
+- PostgreSQL clients stay on the selected container's local socket and treat
+  database names literally; inherited address/service settings cannot redirect
+  a restore. `--db-port` selects a non-default server port and survives recovery.
+  Automatic port selection follows the daemon's connection rather than client
+  defaults in the PostgreSQL container.
+- Explicitly empty database connection fields override inherited environment
+  values, so ambient settings cannot redirect automatic bank selection.
+- Native backup advice includes the state archive, and standalone dump failures
+  name `--db-port` when the selected PostgreSQL socket is unavailable.
+- Native backup help mirrors Docker selectors; calls using them defer to Python
+  before changing files, including abbreviated and equals forms.
+- File-mode backup still archives and rotates its state when Docker is installed
+  but stopped. Automatic Docker selection requires an existing bank container;
+  explicit Docker selectors keep their Docker refusal instead of falling back.
+- A missing local bank refuses without creating an archive and names the Docker
+  recovery command for a stopped or unavailable Docker installation.
+- Automatic backup selection now follows the same runtime connection policy in
+  standalone backup/restore and both update implementations, including daemon
+  environment defaults, non-default ports and literal database names. Automatic
+  inference requires a nonempty daemon database URL, since an absent URL selects
+  file mode even when libpq environment defaults exist. A host address must be
+  the selected PostgreSQL container's IP on a shared network.
+  Opaque service profiles require a direct daemon connection; standalone
+  backup/restore can instead deliberately override it with all four selectors:
+  `--container`, `--db`, `--user` and `--db-port`.
+
+### Fixed (2026-11-04 — diagnose Codex hooks skipped after approval changes)
+- Doctor checks the Codex runtime's hook trust before reporting matching plugin scripts as current. Hooks skipped as modified or untrusted name the existing approval command and a new-session retry, including in T3 Code; diagnosis never grants approval or changes the pinned hook definitions.
+- Disabled and unloaded hooks have their own recovery advice. Unavailable runtime verification preserves the prior file/config verdict, and the doctor parity row covers the native plugin diagnostics.
+
+### Fixed (2026-11-04 — find the remote daemon from Codex shell commands)
+- Codex and T3 Code Codex sessions running `pseudolife-mcp lease` or `doctor` discover the daemon and credential file saved by install/update/connect when the host omits the MCP server's environment. Explicit origins remain authoritative; an ambient credential must match the saved connection before its origin is selected.
+
+### Fixed (2026-11-04 — Keep client updates with the daemon's release)
+
+- Attended client updates refuse a silent or unversioned daemon endpoint,
+  naming `--daemon-url` to correct it. They no longer install the newest PyPI
+  release when a stale URL hides the daemon's version. The native updater uses
+  the same rule; reachable daemons and explicit tags on checkout builds retain
+  their existing behavior.
+
+### Fixed (2026-11-04 — Re-arm scheduled client updates after a daemon move)
+- Scheduled client update errors and schedule confirmations now show `pseudolife-mcp update --schedule HH:MM --daemon-url <new-url>` when the daemon moves, using the chosen daily time when known. Python and native clients keep custom daemon URLs and leave unreachable-daemon runs unchanged.
+
+### Fixed (2026-11-04 — Explain which Claude profile receives memory tools)
+- Both installers now name Claude Code's selected MCP configuration file and explain how to add another profile when `CLAUDE_CONFIG_DIR` selects a separate account, including when plugin and settings directories are shared.
+
+### Fixed (2026-11-04 — use board session ids as episode anchors)
+- Memory tools accept the board's exact host session id for an open session. Session-id prefixes, unknown sessions and closed-session aliases remain refused; daemon-minted episode handles retain their existing resume behavior.
+- A hookless session passing its board id before it has an episode gets the exact bootstrap command; closed aliases have a separate refusal. The Rust daemon mirrors the alias and warning behavior.
+
+### Fixed (2026-11-04 — Reuse installed shim runtimes and explain the right cutover)
+- Extractor autostart reuses a compatible managed Python runtime before building a venv and prints progress before dependency checks; explicit interpreter choices and incompatible-runtime fallbacks remain supported.
+- Claude shim autostart now detects the daemon's Compose labels and gives stack-manager instructions for external deployments, checkout instructions only for the current checkout, and neutral guidance when no deployment can be detected.
 
 ### Fixed (2026-11-04 — Windows judges timeout headroom)
 

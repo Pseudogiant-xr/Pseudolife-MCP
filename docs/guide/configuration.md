@@ -600,6 +600,11 @@ way, and a renewal that finds the lease lost warns once while the command
 continues under the OS lock. A lock held by something the board does not show
 (a `--no-board` run) delays a board holder until it is freed.
 
+When `lease run` finishes without having acquired a board lease, stderr
+ends with `lease: LOCAL LOCK ONLY: command exited <code>; board lease was not acquired for '<name>' (<reason>).`
+The exit code is still the command's own result; that closing line means
+only the local OS lock protected it, with no board queue or lease.
+
 The command inherits the terminal and the environment, plus
 `PSEUDOLIFE_LEASES_HELD` (comma-separated names, appended to any inherited
 value). Exit codes: the command's own; `75` when `--timeout` (`90`, `90s`,
@@ -1280,6 +1285,16 @@ desktop runtime probes confirmed that this metadata survives resume and changes
 on fork. Process environment variables, checkout names and titles do not select
 the mailbox. Missing or malformed metadata leaves ordinary memory available
 without attaching a mailbox.
+
+**Host commands, including T3 Code.** In a Codex session,
+`pseudolife-mcp lease` and `pseudolife-mcp doctor` can use the daemon URL
+and credential file saved by install, update or connect even when the
+host's shell does not inherit the MCP server's environment. An explicit
+`PSEUDOLIFE_MCP_DAEMON_URL` stays authoritative. If an ambient credential
+differs from that saved connection, the command refuses: set
+`PSEUDOLIFE_MCP_DAEMON_URL` to the intended daemon and retry with its
+matching credential. This does not grant Codex hook approval; see
+[hook diagnosis](#codex-hook-re-approval-on-every-update-path).
 
 Once a task's mailbox is attached, each later coordination call first
 re-checks the bank's identity with a read-only request that never
@@ -3748,6 +3763,14 @@ through one chokepoint, evaluated in strict precedence order:
 | 4 | `mcp-session-id` header | per connection | **retired** — the header names the connection (concurrent sessions share it) and the MCP 2026-07-28 revision (SEP-2567, "Sessionless") removes it from the protocol. `PSEUDOLIFE_LEGACY_TRANSPORT_SESSION=1` restores it for one release as a rollback hatch |
 | 5 | none | — | writer id + idle-gap sessionization (the reaper) — the documented floor when nothing above resolved |
 
+An exact **host session id** from the board can also anchor `episode`, but
+only while its root episode is open. Session-id prefixes, unknown ids and
+closed-session aliases do not resolve. In a hookless session, first call
+`memory_session_title(title="My task")` **without** `episode`, then retry
+with the full session id. These alias rules do not change daemon-minted
+episode handles' prefix and resume behavior; see
+[Episodes](episodes.md#using-a-board-session-id-without-hooks).
+
 **Why the header outranks the handle when both are present.** A shim
 header is infrastructure-asserted, by the host or per OS process; an `episode` handle is
 model-supplied and can be confused between two concurrent sessions'
@@ -3818,14 +3841,15 @@ any pre-v57 ChromaDB document store and counter file `weights.pt` (both kept
 on disk after their one-time import, the file as `weights.pt.imported`;
 ingested documents and the CMS counters live in the bank since v57).
 Both are declared `external` in `ops/docker-compose.yml` precisely so a
-container teardown can't take them with it. The host `data/` dir then holds
-only backups (`data/backups/` from `ops/backup.ps1` — a `pg_dump` of the
+container teardown can't take them with it. `pseudolife-mcp backup` needs
+no checkout and writes to the per-user backups directory. The checkout's
+host `data/` dir holds only backups (`data/backups/` from `ops/backup.ps1` — a `pg_dump` of the
 bank *plus* a tar of the state volume) and one-time legacy-import staging —
 *not* the live bank.
 
 To wipe the bank in this mode you must drop those volumes deliberately —
 **never `docker compose down -v` or `docker volume rm` without
-`ops/backup.ps1` first**; `stop` / `start` and `up -d --build` keep both
+`pseudolife-mcp backup` first**; `stop` / `start` and `up -d --build` keep both
 volumes.
 
 **File mode (no daemon / no Postgres — the `embedded` CLI, or unset
@@ -3915,6 +3939,57 @@ pseudolife-mcp-daemon` re-establishes it.
 
 ## Backups
 
+### Docker banks without a checkout
+
+Run on the Docker host with the installed CLI and existing bank containers;
+no source checkout or host PostgreSQL client tools are needed:
+
+```bash
+pseudolife-mcp backup
+pseudolife-mcp backup --out <backup-directory>
+```
+
+Backup detects the Docker bank, dumps through its PostgreSQL container and
+archives the daemon's `/data`, even if the daemon is stopped. It prints
+both artifact paths, by default under `~/.pseudolife-mcp/backups`. Keep the
+pair together and copy it off-disk. `--keep-days` defaults to 7; Docker
+rotation touches only this tool's own files and always keeps the newest
+three of each kind. For nonstandard names, pass `--container <postgres>`
+and `--daemon-container <daemon>`; `--db`, `--user` and `--db-port` override
+the database identity otherwise read from the daemon configuration.
+
+Restore **replaces** the existing bank:
+
+```bash
+pseudolife-mcp restore --backup-file <dump.sql.gz> --state-archive <state.tgz>
+```
+
+It asks once:
+`Restore replaces the existing bank after taking a safety backup. Continue? [y/N]`
+Use `--yes` to consent without a prompt; a noninteractive call without it
+refuses and restores nothing. Before replacement it stops the daemon and
+saves the current database and state as a safety pair outside any checkout,
+defaulting to `~/.pseudolife-mcp/backups` regardless of the data-dir setting.
+`--safety-dir <directory outside a checkout>` selects another location;
+it must also be outside the state mount being replaced. If the destination
+database is absent, only its existing state is safety-archived.
+The state archive is opt-in: omit `--state-archive` for a database-only
+restore. By default restore starts the daemon and waits for readiness;
+`--leave-stopped` keeps it stopped. A daemon without a published health
+port needs `--daemon-url <url>` or `--leave-stopped`.
+
+**Free space:** Docker update, backup and restore check for at least
+**8 GiB free** in Docker storage and the host filesystems used for backups
+and temporary staging. Restore also checks PostgreSQL's writable mounts
+and, when replacing state, the state mounts. A low-space refusal says
+`less than 8 GiB is free on <location>; free at least 8 GiB there, then retry. Nothing was changed`.
+Free space on the named filesystem and rerun the same command. These
+checks precede bank replacement; a first checkout build without a current
+container or image can only check the host and warns that Docker storage
+could not be checked.
+
+### Checkout backup scripts and rehearsals
+
 `ops\backup.ps1` (Windows) / `ops/backup.sh` (Linux/macOS) runs `pg_dump`
 inside the container into `data\backups\` with 7-day rotation, and also
 tars the daemon **state volume** (cortex snapshot, graph snapshots and any
@@ -3953,7 +4028,7 @@ with the newest good one, so it is built for sudden loss: a slow decline
 of less than the threshold per backup passes. The manifest is also
 copied into the daemon, and `/health` reports it as `last_backup` (`at`,
 `age_hours`, `rotation`). The key is absent until a backup script has
-run; the pip tiers' `pseudolife-mcp backup` does not record one yet.
+run; `pseudolife-mcp backup` does not record one yet on any tier.
 
 Deploys back up first, but nothing else backs up on a schedule. On
 Windows, register a daily run once:
@@ -3994,7 +4069,9 @@ that runs `ops/backup.sh` does the same job, but cron starts with a bare
 environment: set `PATH` (so it finds `docker`) and any
 `PSEUDOLIFE_BACKUP_MIRROR*` variables in the crontab itself.
 
-The pip tiers (lite / host-process) use `pseudolife-mcp backup` instead:
+### Pip and lite banks
+
+The pip tiers (lite / host-process) also use `pseudolife-mcp backup`:
 same shape — a `pg_dump | gzip` of the bank (`--no-owner --no-acl`, so
 the artifact restores under any role — rehearsed in the test suite
 against a role-named PostgreSQL 18; since the Docker tier's 16→18 bump
@@ -4167,10 +4244,11 @@ installer and the session notices print.
 | `pseudolife-mcp update` | Docker tier: pull `ghcr.io/pseudogiant-xr/pseudolife-daemon:<newest release on PyPI>`, back the bank up, tag the running image `…-pre-update-<stamp>`, recreate only the daemon container, wait for `/health` at that version, then the client side. Pip / lite: upgrade the package where it is installed; restart nothing. |
 | `pseudolife-mcp update --tag 0.15.1` | the same for a pinned release |
 | `pseudolife-mcp update --check` | report only: exit 0 when a newer release exists, 3 when current, 2 when PyPI or the daemon did not answer |
-| `--clients-only` / `--daemon-only` | one half: the shim runtime + plugin cache + Codex step, or the daemon. On a client-only machine (run from a shim runtime, no daemon container here) plain `update` and `--clients-only` both move the clients to the daemon's release (the newest release when it does not answer), and `--daemon-only` is refused naming the daemon's host |
+| `--clients-only` / `--daemon-only` | one half: the shim runtime + plugin cache + Codex step, or the daemon. On a client-only machine (run from a shim runtime, no daemon container here) plain `update` and `--clients-only` both move the clients to the daemon's release; a silent or unversioned endpoint is refused, and `--daemon-only` is refused naming the daemon's host |
 | `--reinstall` | recreate the daemon at the version it already runs, and install the shim runtime again when the current one is already that release (without it the shim step reports `current`, unless one of that runtime's installed requirements is outside the range its own `pseudolife-mcp` declares, as an mcp 2.1 runtime left by a 0.18.1 update is: then it installs again and says why); with `--clients-only`, install the release even over a checkout-built shim runtime of the same version |
 | `--allow-downgrade` | with `--tag`, allow a release older than the one the daemon runs (refused otherwise: the bank's schema may be newer than that release knows) |
 | `--env-file <path>` | the compose env file, when the one the container was created with is gone (without it the recreate would reset the Postgres password, the volume names and the bearer, so it stops instead) |
+| `--allow-auth-change` | explicit attended bearer handover only, with the required options [below](#changing-daemon-bearer-settings); ordinary and scheduled updates preserve the guard |
 | `--no-backup`, `--rollback-tag`, `--keep-rollbacks`, `--force-rollback-tag`, `--health-retries`, `--health-delay-ms`, `--no-cache-prune`, `--json` | the checkout deploy's knobs, same meaning; the Python updater keeps every rollback tag (it cannot prove which project an older tag belongs to) and says it skipped retention, even with `--keep-rollbacks 0` |
 
 Until maintainer passkeys are set up on a daemon that requires a bearer, a
@@ -4197,6 +4275,24 @@ rather than run, since pip cannot replace the running console script;
 pipx's `install --force` likewise, since it deletes the environment the
 command runs from.
 
+A silent endpoint or one without a release version on `/health` needs the
+running daemon's address:
+
+```bash
+pseudolife-mcp update --daemon-url https://memory.example.com
+```
+
+On the Docker host, a health-check failure also prints the loopback URL
+discovered from the daemon's published port when available; retry with
+that `--daemon-url` instead of a stale client or proxy URL.
+
+Checkout mode refuses a running daemon from a different Compose project;
+use `pseudolife-mcp update` in release mode for that running project. If
+`ops/.env` is missing, restore it from the original install's environment,
+then retry `pseudolife-mcp update --checkout <repo>`. Copying `.env.example`
+would replace the original password, bearer and volume settings with
+defaults and is deliberately refused.
+
 Where things come from: the compose files are the ones the running daemon
 container was created with (its `com.docker.compose.project.*` labels),
 plus `docker-compose.ghcr.yml` beside them; when they are gone the
@@ -4209,8 +4305,8 @@ the dump's closing marker (a killed dump is a valid gzip of a truncated
 file, so a missing marker stops the update with the `.part` artifact
 kept), plus a tar of the daemon's `/data`, both under
 `~/.pseudolife-mcp/backups` in the checkout scripts' file names (restore
-them with `ops/restore.ps1 -BackupFile <path>` / `restore.sh
---backup-file <path>`; the built-in backup keeps no manifest, row-count
+them with `pseudolife-mcp restore --backup-file <dump> --state-archive <state.tgz>`
+or the checkout's `ops/restore.*`; the built-in backup keeps no manifest, row-count
 gate or mirror, and rotates only its own files older than seven days,
 always keeping the newest three of each kind). When the compose files are
 gone AND no env file was found beside them, the update stops unless
@@ -4231,6 +4327,34 @@ plugin copy through `codex plugin marketplace upgrade` when only its scripts
 are behind. It prints approval steps only when Codex would ask again, and
 the check compares Codex's installed copy with the daemon just deployed,
 never with a checkout at some other commit.
+
+### Changing daemon bearer settings
+
+Ordinary updates compare the resolved Compose bearer settings with the
+running daemon before recreating it. A mismatch refuses with
+`the Compose configuration would change the running daemon's bearer settings.`
+Restore the original settings in the project's env file and retry
+(release mode: `pseudolife-mcp update --env-file <original-file>`).
+
+For an **intentional** bearer change, put the intended
+`PSEUDOLIFE_MCP_TOKEN` and/or `PSEUDOLIFE_MCP_TOKENS` declarations in an
+explicit env file, keeping the bank's other original settings, then run
+on the Docker host:
+
+```bash
+pseudolife-mcp update --env-file <bearer-file> --tag <version> --reinstall --daemon-only --allow-auth-change
+```
+
+The env file is authoritative over bearer variables inherited by Compose.
+This option requires an attended daemon-only recreation; it cannot be
+used with scheduled or unattended updates, client updates, checks or
+engine-selection flags. Scheduled updates keep the bearer-change guard.
+Checkout updates also keep it by default. Their explicit handover form is
+`pseudolife-mcp update --checkout <repo> --daemon-only --env-file <repo>/ops/.env --allow-auth-change`,
+with bearer declarations in that exact file. Checkout handover
+requires the restored target's daemon to be stopped;
+its refusal names `docker stop <daemon-container>` before retrying.
+An invalid bearer map is still refused.
 
 ### Being told, and the unattended client half (`updates`)
 
@@ -4486,6 +4610,16 @@ disabled is reported and offered again.
 
 ### Codex hook re-approval, on every update path
 
+`pseudolife-mcp doctor` checks Codex's runtime hook trust, including when
+run in T3 Code: matching script files alone do not prove the hooks run.
+When Codex skips a modified or untrusted handler, doctor reports
+`needs-approval`; from a checkout run
+`python ops/setup-codex-hooks.py --source plugin --trust ask`, approve the
+handlers and start a new session. A `disabled` result means enable the
+Pseudolife handlers in Codex `/hooks` if wanted. `not-loaded` means check
+the plugin is installed and enabled in Codex's plugin manager, then start
+a new session. Doctor diagnoses these states; it never approves hooks.
+
 Codex runs only hook handlers it has approved, and it approves a handler by
 its definition in `hooks.json` (the command, timeout, `async` and
 `statusMessage`), not by the script the command runs: measured on Codex
@@ -4563,7 +4697,8 @@ A daemon also refuses to start against a bank stamped by a newer build
 (or with a stamp that is not a positive integer) and leaves the stamp as
 it is, so rolling back to an older release after an upgrade that moved
 the schema means restoring the backup taken before that upgrade
-(`ops/restore.ps1 -Apply -BackupFile <dump>` or
+(`pseudolife-mcp restore --backup-file <dump> --state-archive <state.tgz>`,
+`ops/restore.ps1 -Apply -BackupFile <dump>` or
 `ops/restore.sh --apply --backup-file <dump>`); `pseudolife-mcp update`
 says so beside its printed rollback when the deploy moved the schema.
 Separately from the schema meta version, Docker-tier installs created

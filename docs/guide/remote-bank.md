@@ -676,8 +676,8 @@ BatchMode=yes` with keepalives (`ServerAliveInterval=15`,
 `ServerAliveCountMax=4`), and nothing ever types a password. A dropped
 connection (ssh's exit 255) is always a failure, never read as an answer.
 The target must be a Linux or macOS host with a POSIX login shell and
-`curl`, `python3` and `docker` on its PATH. Its checkout is
-`~/src/Pseudolife-MCP` unless `--target-checkout` names another. The URL
+`curl`, `python3` and `docker` on its PATH. For checkout targets, the default
+is `~/src/Pseudolife-MCP` unless `--target-checkout` names another. The URL
 clients will use is `--target-url`, else the target's `pseudolife-mcp
 expose status`. Creating a persistent target Tailscale serve needs separate
 consent: pass `--expose-target`, or answer its interactive y/N question when
@@ -691,8 +691,10 @@ so a lost SSH reply can be recovered safely. If ownership cannot be established,
 move leaves the forward alone and reports the receipt and status commands to
 inspect. On resume, an unexposed target is exposed after its daemon starts.
 
-**Release-mode and stack-manager targets need no clone.** When an unrelated
-checkout happens to exist, select `--target-release` explicitly. To carry the
+**Release-mode and stack-manager targets need no clone.** A bare clone beside
+a managed stack does not own its containers and is refused as a checkout
+target. Use `--target-checkout` for their owning checkout, or select
+`--target-release` explicitly to use the installed CLI. To carry the
 source's environment tokens, move validates and updates the original target
 environment file and redeploys the same published daemon release. If a manager
 keeps its files inside its own container, export its original compose file and
@@ -971,8 +973,11 @@ The daemon host does not have to be your workstation. Plan for:
 - **Extractor:** dreams need an extractor the daemon host can reach: the
   in-stack sidecar, or an extractor endpoint reachable from that host
   ([Dreaming](dreaming.md)).
-- **Backups:** `ops/backup.ps1` / `ops/backup.sh` run where the daemon runs
-  ([backups](configuration.md#backups)).
+- **Backups:** run `pseudolife-mcp backup` on the Docker host without a
+  checkout. Restore the pair with `pseudolife-mcp restore --backup-file
+  <dump.sql.gz> --state-archive <state.tgz>`; checkout `ops/backup.*` /
+  `ops/restore.*` also remain available
+  ([confirmation, safety backups and disk checks](configuration.md#backups)).
 - **Images:** pull the GHCR images or build from the checkout; the
   extractor sidecar always builds locally
   ([README — install](../../README.md#install--containerized-any-os)).
