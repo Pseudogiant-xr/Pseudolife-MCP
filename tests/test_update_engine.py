@@ -138,6 +138,59 @@ def test_overlay_preserves_persistent_data_and_separates_shadow():
     assert service["ports"] == ["127.0.0.1:${PSEUDOLIFE_SHADOW_PORT:-8766}:8765"]
 
 
+def _render_compose(text, env):
+    """Parse, then apply Compose's ${NAME}, ${NAME:-default} and
+    ${NAME:?message} interpolation to string values, as Compose does."""
+    import re
+    import yaml
+
+    def value(match):
+        name, op, rest = match.group(1), match.group(2), match.group(3) or ""
+        if env.get(name):
+            return env[name]
+        if op == ":?":
+            raise KeyError(name)
+        return rest if op == ":-" else ""
+
+    def walk(node):
+        if isinstance(node, dict):
+            return {k: walk(v) for k, v in node.items()}
+        if isinstance(node, list):
+            return [walk(v) for v in node]
+        if isinstance(node, str):
+            # Forms this helper does not implement must not appear.
+            assert "$$" not in node and not re.search(r"\$\{[A-Za-z0-9_]+(-|\?|\+|:\+)", node), node
+            return re.sub(r"\$\{([A-Za-z0-9_]+)(:-|:\?)?([^}]*)\}", value, node)
+        return node
+    return walk(yaml.safe_load(text))
+
+
+@pytest.mark.parametrize("host_env", [
+    {},
+    {"TZ": "Australia/Sydney", "PSEUDOLIFE_WRITER_ID": "host-writer", "PSEUDOLIFE_MCP_TOOLSET": "full",
+     "PSEUDOLIFE_MCP_TIER_MAP": "claude-desktop:minimal"},
+])
+def test_shadow_reads_the_writers_private_state_and_presents_its_identity(host_env):
+    # #1316: the Python writer runs as uid 10001 and leaves config.yaml 0600,
+    # which the shadow, root with every capability dropped, could not read (a
+    # crash loop). Without the writer's TZ it rendered local times in UTC.
+    import re
+    root = Path(__file__).resolve().parents[1]
+    env = dict(host_env, PSEUDOLIFE_SHADOW_DB_PASSWORD="fixture")
+    writer = _render_compose((root / "ops/docker-compose.yml").read_text(), env)["services"][up.DAEMON_SERVICE]
+    for overlay in ("ops/docker-compose.rust-shadow.yml", "pseudolife_memory/compose/docker-compose.rust-shadow.yml"):
+        shadow = _render_compose((root / overlay).read_text(), env)["services"]["pseudolife-rust-shadow"]
+        for key in ("TZ", "PSEUDOLIFE_WRITER_ID", "PSEUDOLIFE_MCP_TOOLSET", "PSEUDOLIFE_MCP_TIER_MAP"):
+            assert shadow["environment"].get(key) == writer["environment"][key], (overlay, key)
+        uid = re.search(r"useradd --uid (\d+) --gid (\d+)", (root / "ops/Dockerfile.daemon").read_text())
+        assert shadow["user"] == f"{uid.group(1)}:{uid.group(2)}", overlay
+        assert shadow["cap_drop"] == ["ALL"] and "cap_add" not in shadow, overlay
+        assert "pseudolife_data:/data:ro" in shadow["volumes"], overlay
+    # A fresh shadow model volume inherits the image directory's owner.
+    rust = (root / "ops/Dockerfile.daemon-rust").read_text()
+    assert f"chown {uid.group(1)}:{uid.group(2)} /models" in rust
+
+
 @pytest.fixture
 def engine_host(tmp_path, monkeypatch):
     from pseudolife_memory import update_engine as eng
