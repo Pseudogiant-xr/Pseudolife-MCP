@@ -188,7 +188,7 @@ def clients(monkeypatch):
     """The client side, recorded not run."""
     seen: list[dict] = []
 
-    def run_steps(steps, *, repo, source, daemon_digest=None, reinstall=False):
+    def run_steps(steps, *, repo, source, daemon_digest=None, reinstall=False, after_shim=None):
         seen.append({"steps": tuple(steps), "repo": repo, "source": source, "daemon_digest": daemon_digest,
                      "reinstall": reinstall})
         return {"shim": {"state": "installed:0.15.1", "detail": "ok"}, "plugin": {"state": "current:0.15.1", "detail": "ok"},
