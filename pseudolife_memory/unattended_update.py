@@ -186,6 +186,11 @@ def run_unattended(update) -> int:
         return write
 
     update._log, update._warn = tee("", original_log), tee("WARNING: ", original_warn)
+    # The lines of a client run handed to the runtime just installed
+    # (Update._hand_off) are already in their final form: logged as they are.
+    original_relay = getattr(update, "_relay", None)
+    if original_relay is not None:
+        update._relay = tee("", original_relay)
     try:
         return _run(update)
     except UpdateError as exc:
@@ -195,6 +200,8 @@ def run_unattended(update) -> int:
         raise
     finally:
         update._log, update._warn = original_log, original_warn
+        if original_relay is not None:
+            update._relay = original_relay
         handle.close()
 
 

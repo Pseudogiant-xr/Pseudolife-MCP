@@ -100,7 +100,7 @@ def copy_from_container(docker: str, source: str, target: Path) -> None:
     """Read Docker's tar stream ourselves: a sudo Docker CLI otherwise
     creates root-owned host files that this user's backup cannot protect."""
     try:
-        with tempfile.TemporaryFile() as stream:
+        with tempfile.TemporaryFile(dir=target.parent) as stream:
             proc = subprocess.run([docker, "cp", source, "-"], stdout=stream, stderr=subprocess.PIPE,
                                   stdin=subprocess.DEVNULL, timeout=3600, check=False)
             if proc.returncode:
@@ -227,7 +227,6 @@ class DockerBank:
     def _backup_space(self, directory: Path, *, include_database=True) -> None:
         from pseudolife_memory import disk_space
         disk_space.host(directory)
-        disk_space.host(Path(tempfile.gettempdir()))
         disk_space.docker_storage(self.docker, [self.pg, self.daemon], self.image)
         if include_database:
             disk_space.container(self.docker, self.pg)

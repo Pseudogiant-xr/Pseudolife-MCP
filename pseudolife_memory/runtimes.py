@@ -172,6 +172,11 @@ def _python(runtime: Path, windows: bool) -> Path:
     return _scripts_dir(runtime, windows) / ("python.exe" if windows else "python")
 
 
+def interpreter(runtime: Path, layout: "Layout") -> Path:
+    """The Python interpreter inside the runtime directory ``runtime``."""
+    return _python(Path(runtime), _windows(layout))
+
+
 # ── runtimes ────────────────────────────────────────────────────────────────
 
 @dataclass
