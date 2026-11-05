@@ -39,11 +39,13 @@ nothing here imports the rest of ``pseudolife_memory``.
 """
 import argparse
 import ast
+import base64
 import copy
 import json
 import os
 import re
 import shutil
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -1325,6 +1327,90 @@ def tunnel_runtimes(layout: Layout, tunnel_root: Path, alive: set | None = None)
 
 # ── removal ─────────────────────────────────────────────────────────────────
 
+def _scheduled_extractor_actions() -> list[dict] | None:
+    script = ("$ErrorActionPreference='Stop'; $names=@('Pseudolife Claude Shim',"
+              "'Pseudolife Sonnet Shim','Pseudolife Codex Shim'); "
+              "$actions=@(Get-ScheduledTask -ErrorAction Stop | "
+              "Where-Object {$_.TaskName -in $names} | ForEach-Object {$_.Actions} | "
+              "Select-Object Execute,Arguments); ConvertTo-Json -InputObject $actions -Compress")
+    try:
+        proc = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script],
+                              capture_output=True, text=True, timeout=30, check=False)
+        actions = json.loads(proc.stdout) if proc.returncode == 0 else None
+        return actions if isinstance(actions, list) else None
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return None
+
+
+def _autostart_interpreters(*, windows: bool | None = None) -> list[str] | None:
+    """Interpreters named by our extractor registrations, including stopped ones.
+
+    None means the registrations could not be read: pruning must leave them.
+    Only the shipped spawner's FileName assignment is decoded; no code runs.
+    """
+    windows = os.name == "nt" if windows is None else windows
+    found = []
+    repos = set()
+    try:
+        if windows:
+            actions = _scheduled_extractor_actions()
+            if actions is None:
+                return None
+            for action in actions:
+                found.append(action.get("Execute", ""))
+                args = action.get("Arguments", "")
+                encoded = re.search(r"(?i)(?:^|\s)-EncodedCommand\s+([A-Za-z0-9+/=]+)(?:\s|$)", args)
+                if "-encodedcommand" in args.lower() and encoded is None:
+                    return None
+                if encoded:
+                    inner = base64.b64decode(encoded[1], validate=True).decode("utf-16-le")
+                    match = re.search(r"(?m)^\$psi\.FileName = '((?:''|[^'])*)'\r?$", inner)
+                    if match:
+                        found.append(match[1].replace("''", "'"))
+                    else:
+                        return None
+                    working = re.search(r"(?m)^\$psi\.WorkingDirectory = '((?:''|[^'])*)'\r?$", inner)
+                    if working:
+                        repos.add(Path(working[1].replace("''", "'")))
+        else:
+            config = Path(os.environ.get("XDG_CONFIG_HOME") or home() / ".config")
+            for name in ("pseudolife-sonnet-shim.service", "pseudolife-codex-shim.service"):
+                unit = config / "systemd" / "user" / name
+                try:
+                    text = unit.read_text(encoding="utf-8")
+                except FileNotFoundError:
+                    continue
+                for line in text.splitlines():
+                    if line.startswith("WorkingDirectory="):
+                        repos.add(Path(line.partition("=")[2].strip().strip('"')))
+                    if line.startswith("ExecStart="):
+                        argv = shlex.split(line[len("ExecStart="):])
+                        if argv:
+                            found.append(argv[0])
+        for repo in repos:
+            try:
+                lines = (repo / "ops" / ".env").read_text(encoding="utf-8").splitlines()
+            except FileNotFoundError:
+                continue
+            values = {}
+            for line in lines:
+                match = re.match(r"^\s*(?:export\s+)?PSEUDOLIFE_(CLAUDE|CODEX)_SHIM_PYTHON\s*=(.*)$", line)
+                if match:
+                    value = match[2].strip()
+                    if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+                        inner = value[1:-1]
+                        value = inner.replace('\\"', '"').replace("\\\\", "\\") if value[0] == '"' else inner
+                    else:
+                        value = value.split(" #", 1)[0].strip()
+                    values[match[1]] = value
+            for value in filter(None, values.values()):
+                path = Path(value)
+                found.append(str(path if path.is_absolute() else repo / path))
+        return found
+    except (OSError, ValueError, UnicodeError, TypeError, AttributeError):
+        return None
+
+
 def remove_unused(layout: Layout, *, pinned: Iterable[Path] = (),
                   processes: Callable = list_processes,
                   log: Callable[[str], None] = lambda _line: None,
@@ -1363,6 +1449,16 @@ def remove_unused(layout: Layout, *, pinned: Iterable[Path] = (),
             result["error"] = (f"saved tunnel records under {tunnels} could not be read "
                                f"({type(exc).__name__}: {exc}); no runtime was removed")
             return result
+    if complete - keep:
+        interpreters = _autostart_interpreters()
+        if interpreters is None:
+            result["error"] = ("could not read extractor autostart registrations; no runtime was removed. "
+                               "Retry pruning when Task Scheduler or the user service files are readable.")
+            return result
+        for interpreter in interpreters:
+            for runtime in list_runtimes(layout):
+                if _under(interpreter, runtime.path):
+                    keep.add(os.path.normcase(str(runtime.path)))
     candidates: list[Path] = []
     try:
         for name in sorted(os.listdir(layout.root)):
