@@ -284,10 +284,25 @@ def _snapshot_requirement(member: Member, base: str) -> tuple[bool | None, str]:
             return False, ""
         if _fetch_head(member.number) != member.sha:
             return None, "the PR head moved while snapshot admission was read; retry build"
+        merged = git("merge-tree", "--write-tree", "--name-only", "--no-messages",
+                     base, member.sha, check=False)
+        conflicted = [line for line in merged.stdout.splitlines()[1:] if line]
+        if merged.returncode == 1 and conflicted != [CI_BUDGET]:
+            # Keep conflicts on the existing merge/drop path, rather than
+            # waiting for CI that GitHub cannot run on a conflicting PR.
+            return False, "snapshot admission deferred to the conflicting-member drop"
+        # A budget-only conflict can be normalized and merged later, so
+        # its remaining runtime inputs still require replay admission.
+        if merged.returncode not in (0, 1) or not merged.stdout.strip():
+            raise ValueError("the PR merge tree could not be read")
+        tree = merged.stdout.splitlines()[0]
+        # CI diffs its synthetic PR merge against the base parent. A
+        # three-dot diff would retain runtime edits already landed on base.
+        files = _out("diff", "--name-only", "--no-renames", base, tree).splitlines()
         payload = {"root": _out("rev-parse", "--show-toplevel"),
                    "selector": _out("show", f"{base}:{SNAPSHOT_SELECTOR}"),
                    "scope": _out("show", f"{base}:{CI_SCOPE_CODE}"),
-                   "files": sorted(_changed(member.sha, base))}
+                   "files": sorted(files)}
         result = _run([sys.executable, "-I", "-c", _SNAPSHOT_INPUTS],
                       input=json.dumps(payload), check=False)
         if result.returncode:

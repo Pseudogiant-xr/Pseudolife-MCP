@@ -174,7 +174,11 @@ a skip after failed setup is red, and cancellation before replay leaves
 it pending. Remaining Rust steps and other CI may still be running.
 
 The frozen batch base's early-replay selector determines whether any
-changed file reaches snapshot rows. A diff reaching none satisfies
+changed file reaches snapshot rows, using the net merge-tree diff against
+that base just as CI does. Runtime edits already present on master do not
+turn a remaining docs-only or test-only diff into a replay requirement.
+Conflicting heads follow the existing merge/drop path rather than wait for
+replay evidence that GitHub cannot produce. A diff reaching none satisfies
 admission immediately, without Actions metadata: documentation and pure
 test-only changes do not wait. Tests imported by a runtime harness are
 runtime inputs and retain their replay requirement. The selector code

@@ -5,7 +5,9 @@ import copy
 import importlib.util
 import json
 from pathlib import Path
+import subprocess
 import sys
+from types import SimpleNamespace
 
 import pytest
 import yaml
@@ -166,12 +168,15 @@ def test_requirement_uses_frozen_selector_without_importing_member_code(
             return "100644 blob selector"
         if args[0] == "rev-parse":
             return str(tmp_path)
+        if args[0] == "diff":
+            return "\n".join(files)
         assert args[0] == "show"
         return selector if args[1].endswith("pr_precheck.py") else scope
 
     monkeypatch.setattr(integrate, "_out", out)
+    monkeypatch.setattr(integrate, "git", lambda *args, **kwargs:
+                        SimpleNamespace(returncode=0, stdout="merged-tree\n"))
     monkeypatch.setattr(integrate, "_fetch_head", lambda number: SHA)
-    monkeypatch.setattr(integrate, "_changed", lambda sha, base: set(files))
     assert integrate._snapshot_requirement(member(integrate), "base") == (required, "")
     assert not marker.exists()
 
@@ -244,3 +249,69 @@ def test_open_admits_no_row_member_without_checks(integrate, monkeypatch):
         "headRefOid": SHA, "statusCheckRollup": []}))
     plan = integrate.Plan("integrate/2026-11-06-batch-1", "base", merged=[value])
     integrate._refuse_red_members(plan)
+
+
+@pytest.mark.parametrize("remainder,master_value,budget_conflict", [
+    ("README.md", "new\n", False), ("tests/test_feature.py", "new\n", False),
+    ("README.md", "conflicting master edit\n", False), ("README.md", "old\n", True),
+])
+def test_already_landed_runtime_edit_does_not_stall_no_row_merge(
+        integrate, monkeypatch, tmp_path, remainder, master_value, budget_conflict):
+    def git(*args):
+        result = subprocess.run(["git", *args], cwd=tmp_path, capture_output=True,
+                                text=True, encoding="utf-8")
+        assert result.returncode == 0, result.stderr
+        return result.stdout.strip()
+
+    def write(path, value):
+        target = tmp_path / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(value, encoding="utf-8")
+
+    git("init", "-q", "-b", "master")
+    git("config", "user.name", "Test")
+    git("config", "user.email", "test@example.com")
+    git("config", "commit.gpgsign", "false")
+    for path in ("rust/ci/pr_precheck.py", "rust/ci/parity_scope.py"):
+        write(path, (ROOT / path).read_text(encoding="utf-8"))
+    write("pseudolife_memory/doctor_cli.py", "old\n")
+    write(remainder, "old\n")
+    if budget_conflict:
+        write(integrate.CI_BUDGET, '{"value": 0}\n')
+    git("add", ".")
+    git("commit", "-qm", "base")
+    git("checkout", "-qb", "feature")
+    write("pseudolife_memory/doctor_cli.py", "new\n")
+    write(remainder, "new\n")
+    if budget_conflict:
+        write(integrate.CI_BUDGET, '{"value": 1}\n')
+    git("add", ".")
+    git("commit", "-qm", "feature")
+    sha = git("rev-parse", "HEAD")
+    git("checkout", "-q", "master")
+    write("pseudolife_memory/doctor_cli.py", master_value)
+    if budget_conflict:
+        write(integrate.CI_BUDGET, '{"value": 2}\n')
+    git("add", ".")
+    git("commit", "-qm", "land runtime edit independently")
+    base = git("rev-parse", "HEAD")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(integrate, "_fetch_head", lambda number: sha)
+    value = member(integrate)
+    value.sha = sha
+    assert "pseudolife_memory/doctor_cli.py" in integrate._changed(sha, base)
+    required, why = integrate._snapshot_requirement(value, base)
+    if budget_conflict:
+        assert (required, why) == (True, "")
+        assert integrate._snapshot_state(sha, [], required)[0] == "pending"
+        assert integrate._merge_tree(base, sha) == (False, [integrate.CI_BUDGET])
+        return
+    if master_value != "new\n":
+        assert required is False
+        assert "conflicting-member drop" in why
+        assert integrate._merge_tree(base, sha) == (False, ["pseudolife_memory/doctor_cli.py"])
+        return
+    assert (required, why) == (False, "")
+    value.snapshot_required = required
+    value.snapshot, value.snapshot_why = integrate._snapshot_state(sha, [], required)
+    assert integrate._not_ready(value) is None
