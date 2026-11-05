@@ -22,7 +22,8 @@ PROACTOR_SELF_PIPE_ABORT_RULE = "oracle-cpython-proactor-self-pipe-abort"
 # Windows workers printed it at the end of the Python shim's stderr in about 2
 # of 90 shard runs (w1c-doctor 2026-10-31, run 41210925170; judges' down
 # fault 2026-11-02, run 41436144681); the native shim has no event loop to
-# report it. Only this exact block, closing the oracle's stderr, is dropped.
+# report it (issue #1317). Only this exact block, closing the oracle's stderr,
+# is dropped.
 _PROACTOR_FRAME = rb'  File "[^"\r\n]*[\\/]asyncio[\\/]%s\.py", line [0-9]+, in %s\r?\n'
 _CARETS = rb"(?: *\^+\r?\n)?"
 _ABORTED = rb"\[WinError 995\] The I/O operation has been aborted because of either a thread exit or an application request\r?\n"
@@ -153,6 +154,10 @@ def _readiness_wait_matches(expected, actual, policy, left, right):
                Policy(ignored_values=(), source_text_paths=())):
         return False
     raw = [base64.b64decode(transcript["stderr_b64"], validate=True) for transcript in (expected, actual)]
+    if policy.oracle_proactor_abort:
+        # Each rule reads the stream the previous one left: the oracle's
+        # closing abort block goes first.
+        raw[0] = without_proactor_self_pipe_abort(raw[0])[0]
     if raw[0] == raw[1]:
         return False
     for stderr in raw:
@@ -189,8 +194,13 @@ def proactor_abort_evidence(expected, actual, policy):
     except (KeyError, TypeError, ValueError):
         return []
     remaining, dropped = without_proactor_self_pipe_abort(raw)
-    # Recorded only when dropping the block is what makes the streams equal.
-    if not dropped or remaining != candidate:
+    if not dropped:
+        return []
+    # Recorded only when the streams then agree, alone or through the
+    # readiness rule applied after it; a stderr that still differs is a
+    # difference, not an applied normalization.
+    if remaining != candidate and any(difference.get("path", "").startswith("/stderr")
+                                      for difference in _judge(expected, actual, policy)):
         return []
     return retain_stderr([{"path": "/stderr", "rule": PROACTOR_SELF_PIPE_ABORT_RULE,
                            "condition": "oracle arm only; one exact closing CPython ProactorEventLoop "

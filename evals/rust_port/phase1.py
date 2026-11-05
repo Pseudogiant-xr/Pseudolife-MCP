@@ -204,6 +204,9 @@ def main():
         from .stdio_faults import run as fault_run
         receipt["faults"] = fault_run(root, command)
         receipt["differences"].extend(receipt["faults"]["differences"])
+        # receipt_status checks evidence in the top-level list only.
+        receipt.setdefault("normalizations_applied", []).extend({"surface": "faults", **event}
+            for event in receipt["faults"].get("normalizations_applied", []))
     from .stdio_scenarios import run as scenario_run
     receipt["scenarios"] = scenario_run(root, command, **selected_arguments)
     receipt["differences"].extend(receipt["scenarios"]["differences"])

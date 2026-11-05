@@ -260,7 +260,7 @@ def python_shutdown_flush_silent(obs: dict) -> None:
 # Windows workers the Python shim printed it at teardown in about 2 of 90
 # shard runs (w1c-doctor's healthy-host-claude-code, 2026-10-31, run
 # 41210925170; the judges' down fault, 2026-11-02, run 41436144681); the
-# native CLI has no event loop to report it.
+# native CLI has no event loop to report it (issue #1317).
 _PROACTOR_FRAME = rb'  File "[^"\r\n]*[\\/]asyncio[\\/]%s\.py", line [0-9]+, in %s\r?\n'
 _CARETS = rb"(?: *\^+\r?\n)?"
 _ABORTED = rb"\[WinError 995\] The I/O operation has been aborted because of either a thread exit or an application request\r?\n"
