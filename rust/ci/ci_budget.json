@@ -332,7 +332,7 @@
       "lock-resolve": "83bcc6b654896c6d",
       "test": "ac414107d3d9c71d",
       "test-lite-linux": "44e2a8f2c01baeab",
-      "test-lite-windows": "987e397aa179f20a",
+      "test-lite-windows": "b2bceebaefd33725",
       "test-lite-macos": "c4a0ad0c70bb205a",
       "frontend": "b1b6a1a1278f2e60"
     },
@@ -466,6 +466,11 @@
         "job": "test-lite-windows",
         "fingerprint": "987e397aa179f20a",
         "reason": "Forwards the reviewed move exposure consent and rollback selectors into the existing Windows pytest step; mocked external effects add no setup or process stress and retain measured lane cost."
+      },
+      {
+        "job": "test-lite-windows",
+        "fingerprint": "b2bceebaefd33725",
+        "reason": "Retain upstream move-consent/rollback, installer-ownership, UTF-8 and profile selectors plus the previously validated bounded autostart files in the existing Windows step. Mocked move effects require no extra setup or process stress; no jobs, shards, retries or budget limits are added."
       }
     ]
   }
