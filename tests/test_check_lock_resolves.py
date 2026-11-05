@@ -155,10 +155,10 @@ def test_a_dockerfile_whose_install_moved_fails_loudly(tmp_path):
 def test_ci_runs_it_unscoped_on_the_images_python():
     jobs = yaml.safe_load((ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"))["jobs"]
     job = jobs["lock-resolve"]
-    # Never scoped by the diff: the only skip is a master push whose merged
-    # batch passed this job on the same tree, and a failed scope still runs it.
+    # Never scoped by the diff: reuse a same-tree batch on push or an exact
+    # successful push on schedule; a failed scope still runs it.
     assert job["needs"] == "scope"
-    assert job["if"] == ("${{ !cancelled() && "
+    assert job["if"] == ("${{ !cancelled() && needs.scope.outputs.push_passed != 'true' && "
                          "!contains(fromJSON(needs.scope.outputs.batch_passed || '[]'), 'lock-resolve') }}")
     assert not job.get("continue-on-error") and not any(s.get("continue-on-error") for s in job["steps"])
     assert job["runs-on"] == "ubuntu-latest"

@@ -19,8 +19,9 @@ PARITY_EVENT_GATE = """
 $results = ConvertFrom-Json $env:GATE_RESULTS -AsHashtable
 $docsOnly = ($env:GATE_EVENT -ceq 'pull_request' -or $env:GATE_EVENT -ceq 'merge_group') -and $results['scope'].result -ceq 'success' -and $results['scope'].outputs.rust -ceq 'false'
 $fastPr = $env:GATE_EVENT -ceq 'pull_request' -and $results['scope'].result -ceq 'success' -and $results['scope'].outputs.full -ceq 'false'
+$pushPassed = $env:GATE_EVENT -ceq 'schedule' -and $results['scope'].result -ceq 'success' -and $results['scope'].outputs.push_passed -ceq 'true'
 foreach ($job in @('rust', 'candidate', 'parity-checks')) {
-  $skipChosen = $docsOnly -or ($fastPr -and $job -cne 'rust')
+  $skipChosen = $docsOnly -or ($fastPr -and $job -cne 'rust') -or ($pushPassed -and $job -cne 'candidate')
   if ($results[$job].result -cne 'success' -and -not ($skipChosen -and $results[$job].result -ceq 'skipped')) {
     Write-Error "$job did not succeed"
     exit 1
@@ -141,7 +142,7 @@ def check(workflow):
     jobs = workflow["jobs"]
     parity = jobs["parity-checks"]
     ordinary_ci = "github.event_name != 'workflow_dispatch' || inputs.mode == 'ci'"
-    assert parity['if'] == (f"${{{{ !cancelled() && ({ordinary_ci}) && needs.candidate.result == 'success' "
+    assert parity['if'] == (f"${{{{ !cancelled() && needs.scope.outputs.push_passed != 'true' && ({ordinary_ci}) && needs.candidate.result == 'success' "
                             "&& needs.candidate-harness.result == 'success' "
                             "&& needs.fixtures.result == 'success' }}"), 'H5 PR event selection changed'
     matrix = parity["strategy"]["matrix"]
@@ -224,7 +225,8 @@ def check(workflow):
                      "--out-dir (Join-Path $env:RUNNER_TEMP 'h5-source')")
     oracle = next(s for s in source['steps'] if s.get('name') == 'Bind the source-control Python oracle')
     assert source['steps'].index(oracle) < source['steps'].index(invocation)
-    assert oracle['env'] == {'GITHUB_REF': '${{ github.ref }}'}
+    assert oracle['env'] == {'GITHUB_REF': '${{ github.ref }}',
+                             'PSEUDOLIFE_PORT_DISPATCH_BASE': '${{ needs.scope.outputs.oracle_base }}'}
     assert commands(oracle['run'])[0][:3] == ['python', '-m', 'evals.rust_port.oracle_selection']
     assert '--github-env' in commands(oracle['run'])[0]
 

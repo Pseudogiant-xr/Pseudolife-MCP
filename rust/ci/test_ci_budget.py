@@ -11,8 +11,14 @@ from ci_budget import BUDGET, load, problems, pull_request_reachable, reachable_
 WORKFLOWS = ("rust.yml", "ci.yml")
 
 
-def budget():
-    return json.loads(BUDGET.read_text(encoding="utf-8"))
+def budget(*, legacy=False):
+    value = json.loads(BUDGET.read_text(encoding="utf-8"))
+    # Legacy views keep the structural/measurement regression cases useful
+    # for branches created before the fragment format was introduced.
+    if legacy:
+        for name, entry in value.items():
+            entry.setdefault("fingerprints", ci_budget.fingerprints(load(name)))
+    return value
 
 
 @pytest.mark.parametrize("name", WORKFLOWS)
@@ -79,7 +85,7 @@ def test_a_measured_job_within_the_limits_passes():
     # room under the limits is accepted.
     workflow, raw = rust()
     add_job(workflow, raw, "extra", EXTRA)
-    entry = budget()
+    entry = budget(legacy=True)
     rust_entry = entry["rust.yml"]
     for os_name in ("ubuntu-latest", "windows-latest"):
         rust_entry["jobs"][f"Extra / {os_name}"] = {"minutes": 1.0}
@@ -94,7 +100,7 @@ def test_an_estimate_counts_until_it_is_measured():
     # it may enter an estimate that the batch run's measurement replaces.
     workflow, raw = rust()
     add_job(workflow, raw, "extra", EXTRA)
-    entry = budget()
+    entry = budget(legacy=True)
     rust_entry = entry["rust.yml"]
     for os_name in ("ubuntu-latest", "windows-latest"):
         rust_entry["jobs"][f"Extra / {os_name}"] = {"minutes": 1.0, "estimate": "its steps' times on run 1"}
@@ -300,7 +306,7 @@ def test_a_changed_job_needs_a_new_measurement():
 
 def test_a_changed_job_whose_cost_holds_is_accepted_with_its_reason(tmp_path, monkeypatch):
     budget_file = tmp_path / "ci_budget.json"
-    budget_file.write_text(BUDGET.read_text(encoding="utf-8"), encoding="utf-8")
+    budget_file.write_text(json.dumps(budget(legacy=True)), encoding="utf-8")
     monkeypatch.setattr(ci_budget, "BUDGET", budget_file)
     workflow, raw = rust()
     for target in (workflow, raw):
@@ -311,7 +317,8 @@ def test_a_changed_job_whose_cost_holds_is_accepted_with_its_reason(tmp_path, mo
     assert ci_budget.main(["accept", "--workflow", "rust.yml", "--job", "fixtures",
                            "--reason", "prints one line"]) == 0
     entry = json.loads(budget_file.read_text(encoding="utf-8"))
-    assert entry["rust.yml"]["accepted"][-1]["reason"] == "prints one line"
+    records, errors = ci_budget.read_acceptances()
+    assert not errors and records[-1]["reason"] == "prints one line"
     assert problems("rust.yml", workflow, entry, raw) == []
 
 
@@ -424,7 +431,7 @@ def test_remeasure_refuses_a_changed_job_it_has_no_current_run_of():
     # its old minutes and took the new fingerprint.
     workflow, _ = rust()
     workflow["jobs"]["fixtures"]["steps"].append({"run": "sleep 3600"})
-    entry = copy.deepcopy(budget()["rust.yml"])
+    entry = copy.deepcopy(budget(legacy=True)["rust.yml"])
     before = copy.deepcopy(entry)
     samples = {"Scope": {"new": 0.3}}
     missing = ci_budget.remeasure(entry, workflow, samples, {})
@@ -437,7 +444,7 @@ def test_remeasure_refuses_a_changed_job_it_has_no_current_run_of():
 
 def test_the_estimate_route_records_the_new_job_and_its_template(tmp_path, monkeypatch):
     budget_file = tmp_path / "ci_budget.json"
-    budget_file.write_text(BUDGET.read_text(encoding="utf-8"), encoding="utf-8")
+    budget_file.write_text(json.dumps(budget(legacy=True)), encoding="utf-8")
     monkeypatch.setattr(ci_budget, "BUDGET", budget_file)
     workflow, raw = rust()
     workflow["jobs"]["parity-checks"]["strategy"]["matrix"]["suite"].append("cli-extra")
@@ -536,7 +543,7 @@ def test_a_run_with_another_parity_scope_ran_other_shards(monkeypatch):
     scope_text = (ci_budget.ROOT / "rust/ci/parity_scope.py").read_text(encoding="utf-8")
     files = {".github/workflows/rust.yml": raw_text, "rust/ci/parity_scope.py": scope_text}
     monkeypatch.setattr(ci_budget, "_contents", lambda path, sha: files[path])
-    current = ci_budget.fingerprints(load("rust.yml"))
+    current = ci_budget.current_definitions("rust.yml")
     assert ci_budget.definitions_at("rust.yml", "same") == current
     files["rust/ci/parity_scope.py"] = scope_text.replace("'connect', 'maintainer'", "'connect'")
     moved = ci_budget.definitions_at("rust.yml", "moved")

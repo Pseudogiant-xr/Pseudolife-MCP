@@ -150,13 +150,28 @@ def merge_base(root, base, head):
     return commit(bases[0])
 
 
+def freeze_ci_base(root, event_name, event, checkout_head, github_ref):
+    """Resolve master once for every consumer in an explicitly reviewed CI dispatch."""
+    if event_name != "workflow_dispatch" or event.get("inputs", {}).get("mode") != "ci":
+        raise ValueError("base freezing requires an explicit CI dispatch")
+    if not isinstance(github_ref, str) or not github_ref.startswith("refs/heads/") or github_ref == "refs/heads/":
+        raise ValueError("CI dispatch requires a branch ref")
+    if commit(event["inputs"].get("frozen_head")) != commit(checkout_head):
+        raise ValueError("dispatch frozen head and checkout head differ")
+    if github_ref == "refs/heads/master":
+        return None
+    git(root, "fetch", "--no-tags", "--depth=1", "origin", "refs/heads/master")
+    return commit(git(root, "rev-parse", "FETCH_HEAD^{commit}"))
+
+
 def select(root, event_name, event, checkout_head, *, github_ref=None, dispatch_base=None):
     checkout_head = commit(checkout_head)
     release = None
-    # Keep this exact, case-sensitive ref check aligned with rust.yml's stress plan.
-    branch_stress = (event_name == "workflow_dispatch"
-                     and event.get("inputs", {}).get("mode") == "stress"
-                     and github_ref != "refs/heads/master")
+    # Keep the exact, case-sensitive ref check aligned with both scope and
+    # the stress plan. Every consumer receives the same full master SHA.
+    dispatch_mode = event.get("inputs", {}).get("mode")
+    branch_dispatch = (event_name == "workflow_dispatch" and dispatch_mode in ("ci", "stress")
+                       and github_ref != "refs/heads/master")
     if event_name == "pull_request":
         request = event["pull_request"]
         base, head = commit(request["base"]["sha"]), commit(request["head"]["sha"])
@@ -187,12 +202,16 @@ def select(root, event_name, event, checkout_head, *, github_ref=None, dispatch_
         head = oracle = checkout_head
         base = None
     elif event_name == "workflow_dispatch":
-        if branch_stress:
+        if branch_dispatch:
             if not isinstance(github_ref, str) or not github_ref.startswith("refs/heads/") \
                     or github_ref == "refs/heads/":
-                raise ValueError("stress dispatch requires a branch ref")
+                raise ValueError(f"{dispatch_mode} dispatch requires a branch ref")
             head = checkout_head
             frozen = event["inputs"].get("frozen_head")
+            if dispatch_mode == "ci":
+                commit(frozen)
+                if dispatch_base is None:
+                    raise ValueError("branch CI dispatch requires a frozen master base")
             if frozen and commit(frozen) != head:
                 raise ValueError("dispatch frozen head and checkout head differ")
             # Resolve master once, then replay receipts against that immutable
@@ -217,7 +236,7 @@ def select(root, event_name, event, checkout_head, *, github_ref=None, dispatch_
         raise ValueError("selected oracle commit unavailable")
     return {"event": event_name, "github_ref": github_ref, "checkout_head": checkout_head,
             "base_head": base, "candidate_head": head, "oracle_head": oracle,
-            **({"dispatch_mode": "stress"} if branch_stress else {}),
+            **({"dispatch_mode": dispatch_mode} if branch_dispatch else {}),
             **({"release_cut": release} if release is not None else {})}
 
 
@@ -237,7 +256,7 @@ def selected_oracle(root=ROOT):
              else {"inputs": {"frozen_head": observed["candidate_head"],
                                "mode": observed.get("dispatch_mode")}})
     dispatch_base = (commit(observed["base_head"])
-                     if name == "workflow_dispatch" and observed.get("dispatch_mode") == "stress" else None)
+                     if name == "workflow_dispatch" and observed.get("dispatch_mode") in ("ci", "stress") else None)
     checked = select(root, name, event, observed["checkout_head"], github_ref=observed.get("github_ref"),
                      dispatch_base=dispatch_base)
     if observed != checked:
@@ -265,15 +284,26 @@ def main():
     parser.add_argument("--checkout-head", default=os.environ.get("GITHUB_SHA"))
     parser.add_argument("--github-ref", default=os.environ.get("GITHUB_REF"))
     parser.add_argument("--dispatch-base", default=os.environ.get("PSEUDOLIFE_PORT_DISPATCH_BASE") or None,
-                        help="full master SHA frozen by the branch-stress plan for every iteration")
-    parser.add_argument("--out", type=Path, required=True)
+                        help="full master SHA frozen once for every branch dispatch consumer")
+    target = parser.add_mutually_exclusive_group(required=True)
+    target.add_argument("--out", type=Path)
+    target.add_argument("--freeze-ci-base", action="store_true")
+    parser.add_argument("--github-output", type=Path)
     parser.add_argument("--github-env", type=Path)
     args = parser.parse_args()
     actual = git(args.root, "rev-parse", "HEAD")
     if actual != args.checkout_head:
         raise ValueError("event checkout head and actual checkout differ")
-    selection = select(args.root, args.event_name,
-                       json.loads(args.event_path.read_text(encoding="utf-8")), actual,
+    event = json.loads(args.event_path.read_text(encoding="utf-8"))
+    if args.freeze_ci_base:
+        if args.github_output is None:
+            parser.error("--freeze-ci-base requires --github-output")
+        base = freeze_ci_base(args.root, args.event_name, event, actual, args.github_ref)
+        if base is not None:
+            with args.github_output.open("a", encoding="utf-8") as output:
+                output.write(f"oracle_base={base}\n")
+        return
+    selection = select(args.root, args.event_name, event, actual,
                        github_ref=args.github_ref, dispatch_base=args.dispatch_base)
     # PR captures deliberately use their merge base. Check the originating
     # production change too, before it can become a successor PR's oracle.
