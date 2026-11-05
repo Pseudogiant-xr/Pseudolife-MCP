@@ -232,6 +232,14 @@ process provenance. Applied events include both raw stderr captures in
 `normalizations_applied`, including in the public summary; missing evidence makes
 the receipt incomplete. The capture streams remain unchanged. Startup, fault,
 EOF and concurrent-call policies do not enable this rule.
+The fault cells and the real-bank corpus also opt into
+`oracle-cpython-proactor-self-pipe-abort`: on the oracle arm only, one exact
+block closing stderr, CPython 3.11's ProactorEventLoop report that its
+self-pipe receive completed with WinError 995, is dropped. It was seen at the
+Python shim's teardown on self-hosted Windows workers; the native shim has no
+event loop to print it. Any other traceback, a second block, later output, or
+the block on the candidate arm still fails, and each application keeps both raw
+stderr captures in `normalizations_applied`.
 `eof-observed-final-pair-orders` permits only the observed final two connection
 errors to swap; their bytes, multiplicity and all preceding frames stay exact.
 Each platform supplies its own byte oracle. Frozen Windows observations authorize

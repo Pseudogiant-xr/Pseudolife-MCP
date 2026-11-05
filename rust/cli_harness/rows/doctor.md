@@ -175,6 +175,13 @@ prior executable-directory lookup; this follow-up does not claim macOS testing.
   host's interpreter or checkout paths.
 - `doctor-context-nonce`: the context request's `uuid4().hex` nonce, only
   that span of that body.
+- `python-proactor-self-pipe-abort` (oracle only): one exact block closing the
+  Python side's stderr. CPython 3.11's ProactorEventLoop prints it when its
+  self-pipe receive completes with WinError 995 during the handshake shim's
+  teardown, which happened on a self-hosted Windows worker for
+  `healthy-host-claude-code` (run 41210925170). The native CLI has no event
+  loop to print it. Any other traceback, a second block, later output, or
+  the block on the native side is still a diff.
 - The handshake shim's cache file is compared byte for byte (the
   connect leaf's `cache.rs` writes `json.dumps`'s bytes: spaced separators,
   ASCII escapes, `url` first). Its content differs between runs only in the

@@ -1047,6 +1047,61 @@ def test_shutdown_flush_maps_only_the_exact_trailer():
                         ("python-shutdown-flush",))
 
 
+# The Python shim's teardown block from the self-hosted Windows worker
+# (w1c-doctor healthy-host-claude-code, run 41210925170, 2026-10-31).
+_LIB = rb'  File "C:\actions-runner\toolcache\Python\3.11.18\x64\Lib\asyncio' + b"\\"
+_ABORTED = (b"[WinError 995] The I/O operation has been aborted because of either a thread exit "
+            b"or an application request\r\n")
+PROACTOR_ABORT = (
+    b"Error on reading from the event loop self pipe\r\n"
+    b"loop: <ProactorEventLoop running=True closed=False debug=False>\r\n"
+    b"Traceback (most recent call last):\r\n"
+    + _LIB + b'windows_events.py", line 471, in finish_recv\r\n'
+    b"    return ov.getresult()\r\n"
+    b"           ^^^^^^^^^^^^^^\r\n"
+    b"OSError: " + _ABORTED + b"\r\n"
+    b"During handling of the above exception, another exception occurred:\r\n\r\n"
+    b"Traceback (most recent call last):\r\n"
+    + _LIB + b'proactor_events.py", line 792, in _loop_self_reading\r\n'
+    b"    f.result()  # may raise\r\n"
+    b"    ^^^^^^^^^^\r\n"
+    + _LIB + b'windows_events.py", line 854, in _poll\r\n'
+    b"    value = callback(transferred, key, ov)\r\n"
+    b"            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\r\n"
+    + _LIB + b'windows_events.py", line 475, in finish_recv\r\n'
+    b"    raise ConnectionResetError(*exc.args)\r\n"
+    b"ConnectionResetError: " + _ABORTED)
+
+
+def test_proactor_abort_maps_only_the_oracles_exact_closing_block():
+    rule = ("python-proactor-self-pipe-abort",)
+    line = b"[shim] connected\r\n"
+    assert compare.diff(obs(stderr=line + PROACTOR_ABORT), obs(stderr=line), rule) == []
+    assert compare.diff(obs(stderr=PROACTOR_ABORT), obs(), rule) == []
+    assert compare.diff(obs(stderr=line + PROACTOR_ABORT), obs(stderr=line), ())
+    # The native side printing it, another error, later output, a second
+    # block or a block not at a line start all stay diffs.
+    assert compare.diff(obs(stderr=line), obs(stderr=line + PROACTOR_ABORT), rule)
+    assert compare.diff(obs(stderr=line + PROACTOR_ABORT.replace(b"995", b"10054")), obs(stderr=line), rule)
+    assert compare.diff(obs(stderr=line + PROACTOR_ABORT.replace(b"_loop_self_reading", b"_loop_reading")),
+                        obs(stderr=line), rule)
+    assert compare.diff(obs(stderr=line + PROACTOR_ABORT + b"more\r\n"), obs(stderr=line), rule)
+    assert compare.diff(obs(stderr=line + PROACTOR_ABORT * 2), obs(stderr=line), rule)
+    assert compare.diff(obs(stderr=b"x" + PROACTOR_ABORT), obs(stderr=b"x"), rule)
+
+
+def test_oracle_rules_skip_the_native_observation():
+    native = obs(stderr=PROACTOR_ABORT)
+    rule = ("python-proactor-self-pipe-abort",)
+    assert normalize.apply(native, rule, native["home"])["stderr"] == native["stderr"]
+    assert normalize.apply(native, rule, native["home"], oracle=True)["stderr"] == b64(b"")
+
+
+def test_doctor_rows_take_the_proactor_abort_rule():
+    from cli_harness.rows import doctor
+    assert "python-proactor-self-pipe-abort" in doctor.RULES
+
+
 def test_rules_apply_to_copies_not_the_raw_observation():
     raw = obs(exit=120, stderr=b"x")
     normalize.apply(raw, ("python-shutdown-flush",), raw["home"])
