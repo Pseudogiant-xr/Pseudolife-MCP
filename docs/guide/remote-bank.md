@@ -901,8 +901,11 @@ The daemon host does not have to be your workstation. Plan for:
 - **Extractor:** dreams need an extractor the daemon host can reach: the
   in-stack sidecar, or an extractor endpoint reachable from that host
   ([Dreaming](dreaming.md)).
-- **Backups:** `ops/backup.ps1` / `ops/backup.sh` run where the daemon runs
-  ([backups](configuration.md#backups)).
+- **Backups:** run `pseudolife-mcp backup` on the Docker host without a
+  checkout. Restore the pair with `pseudolife-mcp restore --backup-file
+  <dump.sql.gz> --state-archive <state.tgz>`; checkout `ops/backup.*` /
+  `ops/restore.*` also remain available
+  ([confirmation, safety backups and disk checks](configuration.md#backups)).
 - **Images:** pull the GHCR images or build from the checkout; the
   extractor sidecar always builds locally
   ([README — install](../../README.md#install--containerized-any-os)).
