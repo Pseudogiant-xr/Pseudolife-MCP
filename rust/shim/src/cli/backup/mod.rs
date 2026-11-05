@@ -179,6 +179,14 @@ fn rotation_names_supported(bdir: &Path, include_dumps: bool) -> Option<()> {
     Some(())
 }
 
+fn missing_data_dir_message(data_dir: &str) -> String {
+    format!(
+        "data dir {data_dir} does not exist — nothing to back up. \
+         If this is a Docker install, Docker or its bank containers may be unavailable; \
+         start Docker and retry, or pass --container <postgres>.\n"
+    )
+}
+
 /// `None` defers to the dispatcher before any effect.
 pub(super) fn run(arguments: Vec<OsString>) -> Option<u8> {
     if !args::columns_supported() {
@@ -211,13 +219,7 @@ pub(super) fn run(arguments: Vec<OsString>) -> Option<u8> {
     match data_dir.try_exists() {
         Ok(true) => {}
         Ok(false) => {
-            let _ = write_stream(
-                false,
-                &format!(
-                    "data dir {} does not exist — nothing to back up.\n",
-                    data_dir.to_str()?
-                ),
-            );
+            let _ = write_stream(false, &missing_data_dir_message(data_dir.to_str()?));
             return Some(1);
         }
         Err(_) => return None,
@@ -471,6 +473,14 @@ fn rotate_before(bdir: &Path, cutoff: f64, include_dumps: bool) -> io::Result<Ve
 #[cfg(test)]
 mod glob_tests {
     use super::*;
+
+    #[test]
+    fn missing_bank_refusal_names_the_docker_recovery() {
+        let message = missing_data_dir_message("missing-bank");
+        assert!(message.starts_with("data dir missing-bank does not exist — nothing to back up."));
+        assert!(message.contains("start Docker and retry"));
+        assert!(message.contains("--container <postgres>"));
+    }
 
     #[test]
     fn clock_float_rounding_matches_python_time() {
