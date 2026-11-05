@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "test-lite-windows",
+  "before": "ad813b61a6c8650b",
+  "fingerprint": "cb94885150406836",
+  "reason": "Merge preserves every master 5fd62ac8 installer/lite case and the same two PR-precheck data-only modules. Exact workflow comparison removes only those two modules to recover master; lane price and timing-sensitive membership otherwise hold."
+}

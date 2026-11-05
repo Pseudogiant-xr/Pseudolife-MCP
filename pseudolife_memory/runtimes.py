@@ -420,6 +420,38 @@ def _source_commit(source: str, run: Callable) -> str | None:
     return head if re.fullmatch(r"[0-9a-f]{40}", head) else None
 
 
+_REUSE_PROBE = ("import mcp, httpx, anyio, pydantic, yaml, psycopg, pgvector, sys; "
+                "from importlib.metadata import version; "
+                "from pseudolife_memory.cli import main; from pseudolife_memory.shim import run_shim; "
+                "assert callable(main) and callable(run_shim); "
+                "assert version('pseudolife-mcp') == sys.argv[1]; print('ready')")
+
+
+def _checkout_fingerprint(source: str, base: str) -> str | None:
+    """Identify checkout inputs, including uncommitted package/dependency edits.
+
+    A completed runtime is immutable here. A source edit, changed interpreter,
+    changed requirements or a failed installed-dependency probe invalidates reuse;
+    a missing marker never describes a reusable runtime.
+    """
+    root = Path(source)
+    package = root / "pseudolife_memory"
+    if not package.is_dir() or not (root / "pyproject.toml").is_file():
+        return None  # release requirements and other pip sources still install anew
+    try:
+        base_stat = Path(base).stat()
+        pieces = [json.dumps([os.path.normcase(str(root.resolve())), base,
+                              base_stat.st_size, base_stat.st_mtime_ns, SHIM_REQUIREMENTS]).encode()]
+        paths = [root / "pyproject.toml", *package.rglob("*")]
+        for path in sorted(paths):
+            if path.is_file() and "__pycache__" not in path.parts and path.suffix not in (".pyc", ".pyo"):
+                pieces.extend([str(path.relative_to(root)).encode("utf-8"), path.read_bytes()])
+        # Length delimiters distinguish adjacent paths/content with common bytes.
+        return _sha256(b"".join(str(len(piece)).encode() + b":" + piece for piece in pieces))
+    except OSError:
+        return None
+
+
 def install(source: str, layout: Layout, *, python: str | None = None,
             run: Callable = run_cli, log: Callable[[str], None] = lambda _line: None) -> Runtime:
     """Install ``source`` (a checkout path or a pip requirement such as
@@ -434,6 +466,16 @@ def install(source: str, layout: Layout, *, python: str | None = None,
     :class:`RuntimeInstallError`."""
     windows = _windows(layout)
     base = base_interpreter(python)
+    fingerprint = _checkout_fingerprint(source, base)
+    previous = current_runtime(layout) if fingerprint else None
+    if previous:
+        marker = _read_json(previous.path / MARKER) or {}
+        if marker.get("source_fingerprint") == fingerprint:
+            code, output = run([str(_python(previous.path, windows)), "-I", "-c", _REUSE_PROBE, previous.version], timeout=120)
+            if code == 0 and output.strip() == "ready" and requirement_mismatches(previous, layout, run=run) == []:
+                ensure_launcher(layout, previous, run=run)
+                log(f"runtime {previous.name} unchanged (checkout and shim dependencies match)")
+                return previous
     layout.root.mkdir(parents=True, exist_ok=True)
     sequence = _next_sequence(layout)
     final = layout.root / _runtime_name(sequence)
@@ -469,6 +511,8 @@ def install(source: str, layout: Layout, *, python: str | None = None,
     marker = {"version": version, "installed_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
               "source": source, "source_commit": _source_commit(source, run),
               "base_interpreter": base}
+    if fingerprint and fingerprint == _checkout_fingerprint(source, base):
+        marker["source_fingerprint"] = fingerprint
     _write_atomic(final / MARKER, json.dumps(marker, indent=2) + "\n")
     runtime = Runtime(final, sequence, version, marker["installed_at"], source, marker["source_commit"])
     log(f"runtime {runtime.name} complete")
