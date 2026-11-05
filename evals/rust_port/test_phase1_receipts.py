@@ -95,6 +95,48 @@ def test_process_tests_binds_the_executable_and_rejects_a_zero_exit_skip(tmp_pat
     assert "private stdout" not in str(result)
 
 
+def capture_process_test_timeout(tmp_path, monkeypatch):
+    from evals.rust_port import phase1
+    nodes = ["tests/test_shim.py::test_a"]
+    monkeypatch.setattr(phase1, "selected_nodes", lambda: nodes)
+    monkeypatch.setattr(phase1, "module_command", lambda module, root, arguments: [sys.executable, "-m", module, *arguments])
+    seen = []
+
+    @contextmanager
+    def process(argv, **kwargs):
+        Path(argv[argv.index("--junitxml") + 1]).write_text(
+            '<testsuite><testcase classname="tests.test_shim" name="test_a"/></testsuite>')
+        class Child:
+            returncode = 0
+            owned_cleanup = {"process_stopped": True, "subtree_stopped": True}
+            def communicate(self, timeout):
+                seen.append(timeout)
+                return b"", b""
+        yield Child()
+
+    monkeypatch.setattr(phase1, "owned_process", process)
+    phase1.process_tests([sys.executable], tmp_path, tmp_path / "capture.log")
+    return seen
+
+
+@pytest.mark.parametrize("value, expected", [(None, 240), ("", 240), ("480", 480)])
+def test_process_test_timeout_defaults_to_240_and_takes_the_lane_override(tmp_path, monkeypatch, value, expected):
+    # The self-hosted Windows lane sets PARITY_PROCESS_TEST_TIMEOUT (rust.yml
+    # parity-selfhosted); hosted runners keep the 240 s default.
+    if value is None:
+        monkeypatch.delenv("PARITY_PROCESS_TEST_TIMEOUT", raising=False)
+    else:
+        monkeypatch.setenv("PARITY_PROCESS_TEST_TIMEOUT", value)
+    assert capture_process_test_timeout(tmp_path, monkeypatch) == [expected]
+
+
+@pytest.mark.parametrize("value", ["0", "-5", "soon", "2.5"])
+def test_an_unusable_process_test_timeout_is_refused_by_name(tmp_path, monkeypatch, value):
+    monkeypatch.setenv("PARITY_PROCESS_TEST_TIMEOUT", value)
+    with pytest.raises(ValueError, match="PARITY_PROCESS_TEST_TIMEOUT"):
+        capture_process_test_timeout(tmp_path, monkeypatch)
+
+
 def test_reuse_requires_current_instrument_and_actual_passed_outcomes():
     nodes = ["tests/test_shim.py::test_a"]
     identity = {"public_cli_module": True, "executable_sha256": "frozen"}

@@ -25,6 +25,27 @@ def selected_nodes():
     return [node for node, boundary in manifest["mapped"].items() if boundary == "stdio-shim-process"]
 
 
+# The pinned process tests' wall-time guard. Measured 2026-11-01..04 on the
+# judges shard (runs 41252993590, 41298185830, 41436144681, 41623700371,
+# 41818362386): hosted windows-latest 95-114 s, the self-hosted Windows
+# workers 129-149 s, and one worker run past 240 s (41623700371) while both
+# self-hosted lanes shared the host. PARITY_PROCESS_TEST_TIMEOUT raises it for
+# such a runner (rust.yml's parity-selfhosted sets it for Windows); hosted
+# runners keep the default.
+PROCESS_TEST_TIMEOUT = 240
+PROCESS_TEST_TIMEOUT_VARIABLE = "PARITY_PROCESS_TEST_TIMEOUT"
+
+
+def process_test_timeout(environ):
+    raw = environ.get(PROCESS_TEST_TIMEOUT_VARIABLE, "")
+    if raw == "":
+        return PROCESS_TEST_TIMEOUT
+    if not raw.isascii() or not raw.isdigit() or int(raw) <= 0:
+        raise ValueError(f"{PROCESS_TEST_TIMEOUT_VARIABLE} must be a positive whole number of seconds, "
+                         f"not {raw!r}; unset it to use {PROCESS_TEST_TIMEOUT}")
+    return int(raw)
+
+
 def process_tests(command, root, output):
     nodes = selected_nodes()
     identity = command_identity(command, root)
@@ -35,8 +56,9 @@ def process_tests(command, root, output):
             *PINNED_NODE_ID_OPTIONS, "--junitxml", str(report.resolve()), "-o", "junit_logging=no",
             "--port-stdio-json", json.dumps(command), *nodes])
     import os
+    timeout = process_test_timeout(os.environ)
     with owned_process(argv, cwd=root, env=dict(os.environ), stdin=subprocess.DEVNULL) as process:
-        stdout, stderr = process.communicate(timeout=240)
+        stdout, stderr = process.communicate(timeout=timeout)
     # Keep raw test output private. The public receipt includes only command
     # identity, selected nodes and pytest's per-node outcomes. JUnit messages
     # and captured streams stay private: they can include local paths or URLs.
