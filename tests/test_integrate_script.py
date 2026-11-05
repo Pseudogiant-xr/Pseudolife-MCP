@@ -2134,7 +2134,8 @@ def test_the_batch_regenerates_a_census_its_members_staled(world, capsys):
     assert _census_at(world.origin, branch) == _census(tool="t\n", ten="10\n")
     assert world.gh.bodies("comment") == [] and world.gh.bodies("edit") == []
     (_, create_body), = world.gh.bodies("create")
-    assert "## Producer census" in create_body and sha in create_body
+    assert "## Generated CI metadata" in create_body and sha in create_body
+    assert f"regenerated CI metadata in {sha[:12]}" in capsys.readouterr().out
     # The generated census alone is no Rust change: nothing to compile.
     assert world.cargo_calls() == []
     assert "changes nothing under `rust/`" in create_body
@@ -2180,7 +2181,7 @@ def test_a_current_census_adds_no_commit(world, capsys, files):
     assert _second_parents(world.origin, branch) == [sha10]
     assert _census_commits(world.origin, branch) == []
     (_, create_body), = world.gh.bodies("create")
-    assert "## Producer census" not in create_body
+    assert "## Generated CI metadata" not in create_body
 
 
 def test_the_census_runs_without_the_operators_credentials(world, capsys, monkeypatch):
@@ -2315,8 +2316,8 @@ def test_the_batch_lists_the_manual_shapes_its_census_withdrew(world, capsys):
     drift = json.loads(_census_at(world.origin, branch))["manual_drift"]
     assert {d["path"] for d in drift} == {"ops/tool.sh", "ops/old.sh"}
     (_, create_body), = world.gh.bodies("create")
-    census_section = create_body.split("## Producer census", 1)[1].split("\n## ", 1)[0]
-    assert "`ops/tool.sh`" in census_section and "ops/old.sh" not in census_section
+    metadata_section = create_body.split("## Generated CI metadata", 1)[1].split("\n## ", 1)[0]
+    assert "`ops/tool.sh`" in metadata_section and "ops/old.sh" not in metadata_section
 
 
 def test_withdrawn_manual_shapes_are_listed_without_a_census_commit(world, capsys):
@@ -2335,8 +2336,8 @@ def test_withdrawn_manual_shapes_are_listed_without_a_census_commit(world, capsy
     branch = f"integrate/{DATE}-batch-1"
     assert _census_commits(world.origin, branch) == []
     (_, create_body), = world.gh.bodies("create")
-    census_section = create_body.split("## Producer census", 1)[1].split("\n## ", 1)[0]
-    assert "`ops/tool.sh`" in census_section and "regenerates" not in census_section
+    metadata_section = create_body.split("## Generated CI metadata", 1)[1].split("\n## ", 1)[0]
+    assert "`ops/tool.sh`" in metadata_section and "one generated commit" not in metadata_section
 
 
 def test_a_census_failure_posts_no_path_of_this_machine(world, capsys):
@@ -2365,7 +2366,7 @@ def test_a_dry_run_shows_the_census_commit_and_leaves_nothing(world, capsys):
     assert _build("--dry-run") == 0
     out = capsys.readouterr().out
 
-    assert "## Producer census" in out
+    assert "## Generated CI metadata" in out
     assert _git(world.work, "rev-parse", "HEAD") == master
     assert _git(world.work, "status", "--porcelain") == ""
     assert _git(world.work, "branch", "--list", "integrate/*") == ""
