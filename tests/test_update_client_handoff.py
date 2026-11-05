@@ -90,14 +90,14 @@ def side(tmp_path, monkeypatch):
     monkeypatch.setattr(client_updates, "update_plugin", s.update_plugin)
     monkeypatch.setattr(client_updates, "check_codex_hooks", s.check_codex_hooks)
     monkeypatch.setattr(up, "run_cli", s.run_cli)
-    monkeypatch.setattr(up, "run_handoff", s.run_handoff, raising=False)
+    monkeypatch.setattr(up, "run_handoff", s.run_handoff)
     from pseudolife_memory import tunnel_profiles
     monkeypatch.setattr(tunnel_profiles, "default_root", lambda: tmp_path / "no-tunnels")
     monkeypatch.setattr(up, "data_dir", lambda: tmp_path / "data")
     monkeypatch.setenv("PSEUDOLIFE_SHIM_RUNTIMES", str(tmp_path / "rt"))
     monkeypatch.setenv("PSEUDOLIFE_SHIM_LAUNCHER",
                        str(tmp_path / "bin" / ("pseudolife-mcp.exe" if os.name == "nt" else "pseudolife-mcp")))
-    monkeypatch.delenv(up.HANDOFF_ENV if hasattr(up, "HANDOFF_ENV") else "PSEUDOLIFE_UPDATE_HANDOFF", raising=False)
+    monkeypatch.delenv(up.HANDOFF_ENV, raising=False)
     return s
 
 
@@ -121,13 +121,16 @@ def test_a_new_runtime_runs_the_steps_after_the_shim_with_its_own_code(side, mon
     assert len(side.handoffs) == 1
     call = side.handoffs[0]
     argv = call["argv"]
-    assert argv[0] == str(side.python) and argv[1:4] == ["-m", "pseudolife_memory.cli", "update"]
+    assert argv[0] == str(side.python) and argv[1:3] == ["-c", up._HANDOFF_BOOTSTRAP]
+    assert argv[3:5] == ["pseudolife_memory.cli", "update"]
     assert "--clients-only" in argv and argv[argv.index("--tag") + 1] == TARGET
     assert argv[argv.index("--daemon-url") + 1] == "http://10.0.0.5:8765"
     # The shim step already ran here: the child must not install a third runtime,
     # and the result file is this run's to write.
     assert "--reinstall" not in argv and "--result-file" not in argv
-    assert Path(call["cwd"]) == side.runtime
+    # The caller's working directory: a relative CLAUDE_CONFIG_DIR or
+    # CODEX_HOME must name the same place in the child (Codex review, 2026-11-06).
+    assert call["cwd"] is None
     env = call["env"]
     assert env[up.HANDOFF_ENV] == str(os.getpid())
     assert "PYTHONPATH" not in env and env["HTTPS_PROXY"] == "http://proxy.example.com:3128"
@@ -142,7 +145,7 @@ def test_a_new_runtime_runs_the_steps_after_the_shim_with_its_own_code(side, mon
     assert any("runtime 000002" in line and TARGET in line for line in update.lines)
 
 
-def test_the_child_s_codex_steps_reach_this_run_s_result_file(side, tmp_path):
+def test_the_child_s_codex_steps_become_this_run_s(side, tmp_path):
     side.child_report["codex_reapproval"] = "Codex: approve the hooks again (/hooks)"
     result = tmp_path / "out" / "update.result"
     update = _update(clients_only=True, tag=TARGET, result_file=result)
@@ -268,6 +271,8 @@ def test_a_runtime_that_cannot_start_fails_with_the_cause_and_the_fix(side, prob
     assert handoff["state"] == "failed"
     assert "000002" in handoff["detail"] and "did not start" in handoff["detail"]
     assert f"update --clients-only --tag {TARGET} --reinstall" in handoff["detail"]
+    # This working interpreter, not the launcher, which starts the runtime that just failed.
+    assert f"-m pseudolife_memory.cli update --clients-only --tag {TARGET} --reinstall" in handoff["detail"]
     if probe[1]:
         assert probe[1].split(":")[0] in handoff["detail"]
 
@@ -287,6 +292,77 @@ def test_a_child_that_exits_without_its_report_is_not_a_success(side):
     update.clients(None, SOURCE, HEALTH)
     assert update.report.ok is False and update.report.exit_code == up.CLIENT_STEP_FAILED
     assert "report" in update.report.clients["handoff"]["detail"]
+
+
+def test_a_child_that_stops_before_its_client_step_names_its_own_cause(side):
+    """Opus review, 2026-11-06: the child started (it wrote a report) but its
+    own /health read failed; that is the cause, not "did not start"."""
+    side.child_code = 2
+    side.child_report = {"steps": ["WARNING: the configured daemon did not report its release on /health"],
+                         "clients": None, "ok": False, "exit_code": 2, "codex_reapproval": ""}
+    update = _update(clients_only=True, tag=TARGET)
+    update.clients(None, SOURCE, HEALTH)
+    assert update.report.ok is False and update.report.exit_code == 2
+    detail = update.report.clients["handoff"]["detail"]
+    assert "stopped before the client steps" in detail and "/health" in detail and "--reinstall" not in detail
+
+
+def test_a_child_that_exits_zero_but_reports_a_failure_fails_the_run(side):
+    side.child_report["ok"] = False
+    update = _update(clients_only=True, tag=TARGET)
+    update.clients(None, SOURCE, HEALTH)
+    assert update.report.ok is False and update.report.exit_code == up.CLIENT_STEP_FAILED
+
+
+def test_an_older_interpreter_finding_the_runtime_current_still_hands_off(side):
+    """The "second run" case of the old two-run shape: the new runtime is
+    already there, but this process is an older install's."""
+    side.shim = {"state": f"current:{TARGET}", "detail": "already installed", "runtime": str(side.runtime),
+                 "version": TARGET}
+    update = _update(clients_only=True, tag=TARGET)
+    update.clients(None, SOURCE, HEALTH)
+    assert side.handoffs and side.in_process == ["shim"] and update.report.ok is True
+
+
+def test_a_failed_registration_move_still_hands_off_to_the_installed_runtime(side):
+    """The runtime is installed even though one registration did not move:
+    the new code retries the move rather than the old code going on."""
+    side.shim = {"state": "failed", "detail": "Codex: config.toml is read-only", "runtime": str(side.runtime),
+                 "version": TARGET}
+    update = _update(clients_only=True, tag=TARGET)
+    update.clients(None, SOURCE, HEALTH)
+    assert side.handoffs and side.in_process == ["shim"]
+    assert update.report.clients["shim"]["state"] == f"current:{TARGET}", "the child's retry is the shim result"
+    assert update.report.ok is True
+
+
+def test_a_child_that_installed_again_keeps_its_own_shim_row(side):
+    """Opus review, 2026-11-06: this run's older dependency ranges left the
+    runtime outside the release's, and the child built another one; the
+    report names the runtime the launcher now starts."""
+    side.child_report["clients"]["shim"] = {"state": f"installed:{TARGET}", "detail": "runtime 000003 installed"}
+    update = _update(clients_only=True, tag=TARGET)
+    update.clients(None, SOURCE, HEALTH)
+    assert update.report.clients["shim"]["detail"] == "runtime 000003 installed"
+
+
+def test_the_finish_hint_is_dropped_when_the_hand_off_does_the_finish(side):
+    hint = (f"runtime 000002 ({TARGET}) still has mcp 2.1.1: the pseudolife-mcp running this update installs "
+            f"an older dependency range; finish with: pseudolife-mcp update --clients-only")
+    side.shim.update(detail=f"runtime 000002 installed; {hint}; sessions keep their runtime", finish_hint=hint)
+    update = _update(clients_only=True, tag=TARGET)
+    update.clients(None, SOURCE, HEALTH)
+    shim = update.report.clients["shim"]
+    assert "finish with" not in shim["detail"] and "finish_hint" not in shim
+    assert shim["detail"] == "runtime 000002 installed; sessions keep their runtime"
+
+
+def test_the_shim_row_is_printed_once_when_the_child_cannot_start(side, monkeypatch, capsys):
+    monkeypatch.setattr(up, "run_handoff", lambda argv, **kw: (None, "OSError: gone"))
+    update = _update(clients_only=True, tag=TARGET)
+    update.clients(None, SOURCE, HEALTH)
+    out = capsys.readouterr().out
+    assert out.count(" Shim ") == 1 and out.count(" Hand-off ") == 1
 
 
 # ── the lock the child runs under ───────────────────────────────────────────
@@ -311,6 +387,57 @@ def test_the_child_runs_under_its_parent_s_update_lock(tmp_path, monkeypatch):
     free.acquire()               # nobody holds it: the child takes it itself
     assert free._lock.held
     free.release()
+
+
+# ── the real probe and bootstrap ────────────────────────────────────────────
+
+def _fake_release(root: Path, version: str, update_cli: str | None) -> Path:
+    package = root / "pseudolife_memory"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text(f"__version__ = {version!r}\n", encoding="utf-8")
+    if update_cli is not None:
+        (package / "update_cli.py").write_text(update_cli, encoding="utf-8")
+    return root
+
+
+def _probe(root: Path) -> tuple[int, str]:
+    import subprocess
+    # Not -I here: the fake release is found through the working directory.
+    # -S: no site-packages, so an editable install's import finder cannot
+    # answer pseudolife_memory.update_cli from some other tree.
+    proc = subprocess.run([sys.executable, "-S", "-c", up._HANDOFF_PROBE], cwd=root, capture_output=True, text=True,
+                          env={k: v for k, v in os.environ.items() if not k.upper().startswith("PYTHON")})
+    return proc.returncode, proc.stdout + proc.stderr
+
+
+def test_the_probe_lists_the_protocols_of_a_release_that_has_them(tmp_path):
+    root = _fake_release(tmp_path, TARGET, f"CLIENT_HANDOFF_PROTOCOLS = ({up.CLIENT_HANDOFF!r}, 'later-v2')\n")
+    assert _probe(root) == (0, f"{TARGET}\n{up.CLIENT_HANDOFF} later-v2\n")
+
+
+def test_the_probe_answers_none_for_a_release_without_an_updater(tmp_path):
+    """Codex review, 2026-11-06: a release older than update_cli itself is a
+    target that predates the hand-off, not a broken runtime."""
+    assert _probe(_fake_release(tmp_path, "0.14.0", None)) == (0, "0.14.0\n\n")
+    assert _probe(_fake_release(tmp_path / "b", "0.16.0", "X = 1\n")) == (0, "0.16.0\n\n")
+
+
+def test_the_probe_fails_for_an_updater_that_cannot_import(tmp_path):
+    code, out = _probe(_fake_release(tmp_path, TARGET, "import a_dependency_this_runtime_lacks\n"))
+    assert code != 0 and "a_dependency_this_runtime_lacks" in out
+
+
+def test_the_bootstrap_keeps_the_working_directory_off_the_import_path(tmp_path):
+    """The child runs where the caller ran (relative client paths keep their
+    meaning), yet a package in that directory never answers for the
+    runtime's own: here a shadowing calendar.py beside the stdlib one."""
+    import subprocess
+    (tmp_path / "calendar.py").write_text("print('SHADOW')\n", encoding="utf-8")
+    proc = subprocess.run([sys.executable, "-c", up._HANDOFF_BOOTSTRAP, "calendar", "2026", "1"], cwd=tmp_path,
+                          capture_output=True, text=True,
+                          env={k: v for k, v in os.environ.items() if not k.upper().startswith("PYTHON")})
+    assert proc.returncode == 0, proc.stderr
+    assert "SHADOW" not in proc.stdout and "January 2026" in proc.stdout
 
 
 # ── the real hand-off process ───────────────────────────────────────────────

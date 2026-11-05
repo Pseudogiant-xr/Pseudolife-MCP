@@ -94,9 +94,23 @@ HANDOFF_ENV = "PSEUDOLIFE_UPDATE_HANDOFF"
 HANDOFF_REPORT_ENV = "PSEUDOLIFE_UPDATE_HANDOFF_REPORT"
 # Run by the new runtime's interpreter in isolated mode (-I), so neither the
 # working directory nor PYTHONPATH can answer for it: its version, then the
-# hand-off protocols its updater accepts.
-_HANDOFF_PROBE = ("import pseudolife_memory as p, pseudolife_memory.update_cli as u; print(p.__version__); "
-                  "print(' '.join(getattr(u, 'CLIENT_HANDOFF_PROTOCOLS', ())))")
+# hand-off protocols its updater accepts. A release old enough to have no
+# update_cli at all accepts none; one whose update_cli fails to import is
+# broken, and the probe's failure says why.
+_HANDOFF_PROBE = (
+    "import importlib, importlib.util, pseudolife_memory as p\n"
+    "print(p.__version__)\n"
+    "u = importlib.import_module('pseudolife_memory.update_cli') "
+    "if importlib.util.find_spec('pseudolife_memory.update_cli') else None\n"
+    "print(' '.join(getattr(u, 'CLIENT_HANDOFF_PROTOCOLS', ())))\n")
+# How the hand-off starts a module in the new runtime: `-c` with this
+# bootstrap instead of `-m`, so the child keeps the caller's working
+# directory (a relative CLAUDE_CONFIG_DIR or CODEX_HOME still names the same
+# place) while that directory leaves the import path, where a checkout's
+# pseudolife_memory would otherwise answer for the runtime's own. Python
+# 3.10 has no -P, and -I would also drop PYTHONIOENCODING.
+_HANDOFF_BOOTSTRAP = ("import runpy, sys; del sys.path[0]; module = sys.argv.pop(1); "
+                      "runpy.run_module(module, run_name='__main__', alter_sys=True)")
 BUNDLED_COMPOSE = Path(__file__).resolve().parent / "compose"
 _DUMP_MARKER = "PostgreSQL database dump complete"
 
@@ -131,7 +145,7 @@ def run_cli(argv, *, timeout: int = 3600, cwd: str | None = None,
     return proc.returncode, (proc.stdout or "") + ((proc.stderr or "") if include_stderr else "")
 
 
-def run_handoff(argv, *, cwd: str, env: dict, relay: Callable[[str], None] | None) -> tuple[int | None, str]:
+def run_handoff(argv, *, cwd: str | None, env: dict, relay: Callable[[str], None] | None) -> tuple[int | None, str]:
     """Run the handed-off client update and return ``(exit code, error)``,
     or ``(None, why)`` when it could not be started. Its stdout and stderr
     come back through one pipe, and each line goes to ``relay`` as it
@@ -152,12 +166,27 @@ def run_handoff(argv, *, cwd: str, env: dict, relay: Callable[[str], None] | Non
             if relay is not None:
                 relay(line.rstrip("\r\n"))
         return proc.wait(), ""
-    except BaseException:
-        proc.kill()
-        proc.wait()
+    except BaseException as exc:
+        # Ctrl+C reaches the child through the shared console too: give it
+        # a moment to stop between steps before it is killed.
+        try:
+            proc.wait(timeout=10 if isinstance(exc, KeyboardInterrupt) else 0)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
         raise
     finally:
         proc.stdout.close()
+
+
+def _print_line(line: str) -> None:
+    """Print a relayed line; a character this stdout cannot encode (a log
+    file in a legacy code page) is replaced rather than stopping the run."""
+    try:
+        print(line, flush=True)
+    except UnicodeEncodeError:
+        encoding = getattr(sys.stdout, "encoding", None) or "ascii"
+        print(line.encode(encoding, "replace").decode(encoding, "replace"), flush=True)
 
 
 def _flush_output() -> None:
@@ -543,8 +572,9 @@ class Update:
         self._log = log or (lambda line: print(f"==> {line}", flush=True))
         self._warn = warn or (lambda line: print(f"WARNING: {line}", file=sys.stderr, flush=True))
         # A handed-off client run's output lines, already in their final form.
-        self._relay: Callable[[str], None] = lambda line: print(line, flush=True)
+        self._relay: Callable[[str], None] = _print_line
         self._handoff: dict | None = None
+        self._shim_printed = False
         self.docker = docker_cmd()
         self.rollback_lines: list[str] = []
         # The bank's schema version on the daemon this run replaces, when
@@ -1214,6 +1244,7 @@ class Update:
             def after_shim(shim: dict) -> dict | None:
                 return self._hand_off(shim)
         self._handoff = None
+        self._shim_printed = False
         report = client_updates.run_steps(("shim", "plugin", "codex"), repo=checkout, source=source,
                                           daemon_digest=(health or {}).get("hooks_digest"),
                                           reinstall=self.o.reinstall, after_shim=after_shim)
@@ -1237,7 +1268,9 @@ class Update:
                           + ("; the daemon update itself succeeded" if not clients_alone else ""))
             return
         if not self.o.as_json:
-            client_updates.print_ladder(report)
+            # A hand-off that failed after the shim row was printed.
+            client_updates.print_ladder({key: value for key, value in report.items()
+                                         if not (key == "shim" and self._shim_printed)})
         if not report["ok"]:
             # A failed step fails the run: the result file an unattended
             # caller reads must not say the update finished when the
@@ -1248,17 +1281,20 @@ class Update:
         self.codex_step(report.get("codex"))
 
     def _hand_off(self, shim: dict) -> dict | None:
-        """After the shim step of a release-mode client update: when it
-        installed (or found) a runtime of another version than this process,
-        run the remaining client steps with that runtime's code and return
-        the ladder they reported; ``None`` to run them here (no runtime, the
+        """After the shim step of a release-mode client update: when a
+        runtime of another version than this process is installed, run the
+        remaining client steps with that runtime's code and return the
+        ladder they reported; ``None`` to run them here (no runtime, the
         same version, a target that predates the hand-off). A runtime that
         cannot run them fails the ladder with the cause: this process's
         older code never stands in for it."""
         from pseudolife_memory import client_updates
-        kind, _, version = str(shim.get("state") or "").partition(":")
+        kind, _, state_version = str(shim.get("state") or "").partition(":")
+        version = str(shim.get("version") or state_version)
         path = shim.get("runtime")
-        if kind not in ("installed", "current") or not version or not path or version == __version__:
+        # A failed shim step that still installed the runtime (a registration
+        # that would not migrate) hands off too: the new code retries it.
+        if kind not in ("installed", "current", "failed") or not version or not path or version == __version__:
             return None
         rt = client_updates.runtimes_module()
         runtime = Path(path)
@@ -1267,11 +1303,13 @@ class Update:
         except ValueError:
             return None
         python = rt.interpreter(runtime, layout)
-        launcher = client_updates._launcher_invocation(rt.launcher_command(layout), layout.launcher)
-        retry = f"{launcher} update --clients-only --tag {version} --reinstall"
+        # This interpreter, not the launcher: the launcher starts the newest
+        # runtime, which is the one that just failed.
+        retry = (f"{client_updates._launcher_invocation(sys.executable, sys.executable)} -m pseudolife_memory.cli "
+                 f"update --clients-only --tag {version} --reinstall")
 
-        def failed(why: str) -> dict:
-            return {"shim": shim, "handoff": {"state": "failed", "detail": (
+        def failed(why: str, shown: dict) -> dict:
+            return {"shim": shown, "handoff": {"state": "failed", "detail": (
                 f"the new shim runtime {runtime.name} ({version}) did not start for the steps after the shim "
                 f"({why}), so the plugin cache, Codex hook and tunnel steps did not run; the runtime itself "
                 f"is installed. Retry, building the runtime again: {retry}")}, "ok": False}
@@ -1279,16 +1317,27 @@ class Update:
         code, out = run_cli([python, "-I", "-c", _HANDOFF_PROBE], timeout=120)
         lines = [line.strip() for line in (out or "").strip().splitlines()]
         if code != 0:
-            return failed(f"exit {code}: {_last_line(out)}" if (out or "").strip() else f"exit {code}")
+            return failed(f"exit {code}: {_last_line(out)}" if (out or "").strip() else f"exit {code}", shim)
         if not lines or lines[0] != version:
             return failed(f"its probe reported {lines[0][:64]!r}, not {version}" if lines
-                          else "its probe printed nothing")
+                          else "its probe printed nothing", shim)
         if CLIENT_HANDOFF not in (lines[1].split() if len(lines) > 1 else []):
             self.step(f"runtime {runtime.name} ({version}) predates the client hand-off, so this run's own "
                       f"code ({__version__}) finishes the client steps")
             return None
+        # The shim step's "finish with: ... update --clients-only" hint is
+        # what the hand-off now does.
+        shown = {key: value for key, value in shim.items() if key != "finish_hint"}
+        hint = shim.get("finish_hint")
+        if hint:
+            detail = str(shim.get("detail", ""))
+            for form in (f"; {hint}", f"{hint}; ", hint):    # the hint holds "; " itself: whole text only
+                if form in detail:
+                    shown["detail"] = detail.replace(form, "", 1)
+                    break
         if not self.o.as_json:
-            client_updates.print_ladder({"shim": shim})
+            client_updates.print_ladder({"shim": shown})
+            self._shim_printed = True
         self.step(f"the client steps after the shim continue in runtime {runtime.name} ({version}), the "
                   f"release just installed")
         scratch = Path(tempfile.mkdtemp(prefix="pseudolife-handoff-"))
@@ -1299,36 +1348,47 @@ class Update:
                if not key.upper().startswith("PYTHON") or key.upper() == "PYTHONUTF8"}
         env.update({"PYTHONIOENCODING": "utf-8", "PYTHONUNBUFFERED": "1",
                     HANDOFF_ENV: str(os.getpid()), HANDOFF_REPORT_ENV: str(report_file)})
-        argv = [python, "-m", "pseudolife_memory.cli", "update", "--clients-only", "--tag", version,
-                "--daemon-url", self.o.daemon_url]
+        argv = [python, "-c", _HANDOFF_BOOTSTRAP, "pseudolife_memory.cli", "update", "--clients-only",
+                "--tag", version, "--daemon-url", self.o.daemon_url]
         if self.o.allow_downgrade:
             argv.append("--allow-downgrade")
         try:
-            # The runtime directory as the working directory: `-m` puts it
-            # first on the path, and it holds no package to shadow its own.
-            code, error = run_handoff(argv, cwd=str(runtime), env=env,
-                                      relay=None if self.o.as_json else self._relay)
+            code, error = run_handoff(argv, cwd=None, env=env, relay=None if self.o.as_json else self._relay)
             if code is None:
-                return failed(error)
+                return failed(error, shown)
             try:
                 child = json.loads(report_file.read_text(encoding="utf-8"))
             except (OSError, ValueError):
                 child = None
         finally:
             shutil.rmtree(scratch, ignore_errors=True)
-        if not isinstance(child, dict) or not isinstance(child.get("clients"), dict):
-            return failed(f"it ended with exit {code} without writing its report")
+        if not isinstance(child, dict):
+            return failed(f"it ended with exit {code} without writing its report", shown)
+        steps = [str(s) for s in child.get("steps") or []]
+        codex = child.get("codex_reapproval")
+        self._handoff = {"runtime": runtime.name, "version": version, "exit_code": code or CLIENT_STEP_FAILED,
+                         "steps": steps, "codex": codex if isinstance(codex, str) else ""}
+        if not isinstance(child.get("clients"), dict):
+            # It started, then stopped before its client step (its own
+            # /health read, its tier check, the update lock): its last
+            # warning is the cause.
+            warnings = [step[len("WARNING: "):] for step in steps if step.startswith("WARNING: ")]
+            why = warnings[-1][:400] if warnings else "it gave no reason"
+            return {"shim": shown, "handoff": {"state": "failed", "detail": (
+                f"runtime {runtime.name} ({version}) started but stopped before the client steps (exit {code}): "
+                f"{why}")}, "ok": False}
+        self._handoff["exit_code"] = code
         report = dict(child["clients"])
-        if (report.get("shim") or {}).get("state") != "failed":
-            report["shim"] = shim      # the install this run did, not the child's "already installed"
+        child_shim = str((report.get("shim") or {}).get("state") or "")
+        if kind == "installed" and child_shim.startswith("current:"):
+            # The install this run did, not the child's "already installed".
+            # A child that installed again (repairing what this code's older
+            # dependency ranges left) or failed keeps its own row.
+            report["shim"] = shown
         report["handoff"] = {"state": f"handed-off:{version}",
                              "detail": f"runtime {runtime.name} ({version}) ran the steps after the shim "
                                        f"(exit {code})"}
         report["ok"] = code == 0 and bool(child.get("ok"))
-        codex = child.get("codex_reapproval")
-        self._handoff = {"runtime": runtime.name, "version": version, "exit_code": code,
-                         "steps": [str(s) for s in child.get("steps") or []],
-                         "codex": codex if isinstance(codex, str) else ""}
         return report
 
     def codex_step(self, codex: dict | None) -> None:

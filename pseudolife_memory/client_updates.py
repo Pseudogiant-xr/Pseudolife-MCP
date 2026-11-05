@@ -562,6 +562,7 @@ def update_shim(source, repo: Path | None = None, reinstall: bool = False) -> di
         return {"state": results[0]["state"], "detail": "; ".join(r["detail"] for r in results)}
     lines: list[str] = []
     rebuilt: list[str] = []
+    finish_hint = ""
     installed = None if reinstall else _installed_release(rt, layout, source, rebuilt)
     try:
         if installed is not None:
@@ -589,9 +590,11 @@ def update_shim(source, repo: Path | None = None, reinstall: bool = False) -> di
         still = (rt.requirement_mismatches(runtime, layout, run=run_cli)
                  if re.fullmatch(r"pseudolife-mcp==[0-9A-Za-z.+-]+", source) else None)
         if still:
-            detail.append(f"runtime {runtime.name} ({runtime.version}) still has {', '.join(still)}: the "
-                          f"pseudolife-mcp running this update installs an older dependency range; finish "
-                          f"with: {_launcher_invocation(rt.launcher_command(layout), layout.launcher)} update --clients-only")
+            finish_hint = (f"runtime {runtime.name} ({runtime.version}) still has {', '.join(still)}: the "
+                           f"pseudolife-mcp running this update installs an older dependency range; finish "
+                           f"with: {_launcher_invocation(rt.launcher_command(layout), layout.launcher)} update "
+                           f"--clients-only")
+            detail.append(finish_hint)
     failed = False
     for registration, kind in managed:
         if kind == "launcher":
@@ -639,9 +642,13 @@ def update_shim(source, repo: Path | None = None, reinstall: bool = False) -> di
         detail.append("sessions already running keep their runtime; new sessions start on the new one")
     state = "failed" if failed else f"{'current' if installed else 'installed'}:{runtime.version}"
     # The runtime itself, so the updater can hand the steps after this one
-    # to the code just installed (update_cli.Update._hand_off).
-    return {"state": state, "detail": "; ".join(detail + [r["detail"] for r in results]),
-            "runtime": str(runtime.path)}
+    # to the code just installed (update_cli.Update._hand_off), which also
+    # makes the finish hint moot: the hand-off is that finish.
+    result = {"state": state, "detail": "; ".join(detail + [r["detail"] for r in results]),
+              "runtime": str(runtime.path), "version": runtime.version}
+    if finish_hint:
+        result["finish_hint"] = finish_hint
+    return result
 
 
 # ── the plugin cache ────────────────────────────────────────────────────────
