@@ -27,9 +27,15 @@ ACCEPTED_BLOBS = {
         # defers `console` in the native shim).
         "bb5321f0d5344c10b802e67d79bfcf1f3fa6cce2",
         "1f9865ce14a03b6da519b04d927a5eb9cb899945",
+        # Docker backup/restore help and dispatch; the native shim mirrors
+        # the help and explicitly defers restore.
+        "63071ce01d700c17090aa0d2d51bf8a2ec984cef",
         # Codex lease/doctor connection discovery, mirrored by the native
         # CLI; help, wait-mail and episode dispatch remain unchanged.
         "e5d653f118aa8390f4e4439d0d264ff8e517f762",
+        # Combined Docker restore dispatch and Codex host connection discovery;
+        # both accepted behaviors and the mirrored native help are retained.
+        "e2e6880e1ef6e5f36050edcb2cbb27db23b5164a",
     ),
     "pseudolife_memory/wait_mail_cli.py": ("236636957e2f5affbe2eec21d9e125c35ffae5f2",),
 }

@@ -99,7 +99,9 @@ fn assert_refused(home: &Home, argument: &str) {
     assert_eq!(
         output.stderr,
         cli::native_text(&format!(
-            "data dir {argument} does not exist — nothing to back up.\n"
+            "data dir {argument} does not exist — nothing to back up. \
+             If this is a Docker install, Docker or its bank containers may be unavailable; \
+             start Docker and retry, or pass --container <postgres>.\n"
         ))
     );
     assert_eq!(home.listing(), before);
