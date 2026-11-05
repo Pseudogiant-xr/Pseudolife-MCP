@@ -550,6 +550,7 @@ impl Update {
             && let Some(script) = self.checkout_script(repo, "backup")
         {
             let directory = repo.join("data/backups");
+            self.disk_backup(&directory, PG_CONTAINER, DAEMON_CONTAINER)?;
             let before = snapshot(&directory);
             self.step(format!(
                 "backing up the bank ({})...",
@@ -582,6 +583,7 @@ impl Update {
         let postgres = engine::inspect(self, pg).map_err(|_| UpdateError::usage(CONNECTION_FIX))?;
         let (user, db, port) = connection_details(&running, &postgres)
             .ok_or_else(|| UpdateError::usage(connection_fix(&running)))?;
+        self.disk_backup(directory, pg, daemon)?;
         let port = port.to_string();
         let db = database_arg(&db);
         fs::create_dir_all(directory)?;
@@ -779,6 +781,7 @@ impl Update {
             ));
         };
         let directory = repo.join("data/backups");
+        self.disk_backup(&directory, pg, daemon)?;
         let before = snapshot(&directory);
         let flags = if script.extension().is_some_and(|s| s == "ps1") {
             ["-Container", "-DaemonContainer", "-User", "-Db", "-OutDir"]

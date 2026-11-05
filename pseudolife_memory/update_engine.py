@@ -403,6 +403,10 @@ class EngineUpdate:
         for key, value in zip(keys, (self.pg, self.daemon, self.pg_user, self.pg_db)):
             args.extend([key, value])
         directory = self.repo / "data/backups"
+        from pseudolife_memory import disk_space
+        disk_space.host(directory)
+        disk_space.container(self.u.docker, self.pg)
+        disk_space.container(self.u.docker, self.daemon)
         before = _backup_files(directory)
         args.extend(["-OutDir" if script.suffix == ".ps1" else "--out-dir", str(directory)])
         self.u.step("backing up the bank and /data before switching engines...")
@@ -432,10 +436,15 @@ class EngineUpdate:
             from pseudolife_memory.update_shadow import ShadowUpdate
             return ShadowUpdate(self).remove()
         self.preflight()
+        from pseudolife_memory import disk_space
+        disk_space.host(self.repo)
+        disk_space.docker_storage(self.u.docker, [self.pg, self.daemon], self.running.get("Image"), self.u.warn)
         if self.o.shadow:
             from pseudolife_memory.update_shadow import ShadowUpdate
             return ShadowUpdate(self).start()
         self.backup()
+        disk_space.host(self.repo)
+        disk_space.docker_storage(self.u.docker, [self.pg, self.daemon], self.running.get("Image"), self.u.warn)
         if self.stopped_handover:
             current = self.inspect(self.daemon)
             if current.get("Image") != self.running.get("Image") or current.get("State", {}).get("Running") is not False or current.get("Config") != self.running.get("Config"):

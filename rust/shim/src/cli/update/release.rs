@@ -447,6 +447,15 @@ impl Update {
             PYTHON_IMAGE
         };
         let image = format!("{repository}:{target}");
+        disk::host(&data_dir())?;
+        let pg = storage_pg(self.o.no_backup, || {
+            engine::container(self, &context.args, Some(&env), "pseudolife-pg")
+        })?;
+        self.disk_storage(
+            context.running["Id"].as_str().unwrap_or(DAEMON_CONTAINER),
+            pg.as_deref(),
+            context.running["Image"].as_str(),
+        )?;
         self.step(format!("pulling {image}..."));
         if self
             .command(&["pull".into(), image.clone()], None, 7200, true)
@@ -489,7 +498,6 @@ impl Update {
         } else {
             None
         };
-        let pg = engine::container(self, &context.args, Some(&env), "pseudolife-pg")?;
         let daemon = context.running["Id"].as_str().unwrap_or(DAEMON_CONTAINER);
         let backups = if self.o.no_backup {
             self.warn("skipping backup (--no-backup)");
@@ -506,9 +514,19 @@ impl Update {
             let db = pg_env["POSTGRES_DB"]
                 .as_str()
                 .ok_or_else(|| UpdateError::usage("cannot resolve PostgreSQL database"))?;
-            self.project_backup(repo, &pg, daemon, user, db)?
+            self.project_backup(
+                repo,
+                pg.as_deref().expect("backup discovery returns PostgreSQL"),
+                daemon,
+                user,
+                db,
+            )?
         } else {
-            self.builtin_backup(&pg, daemon, &data_dir().join("backups"))?
+            self.builtin_backup(
+                pg.as_deref().expect("backup discovery returns PostgreSQL"),
+                daemon,
+                &data_dir().join("backups"),
+            )?
         };
         if let Some(callback) = before_recreate.as_mut() {
             callback()?;
@@ -718,6 +736,7 @@ impl Update {
                 "commit, stash or remove the listed paths, or re-run with --allow-dirty to deploy this tree as it is (stamped dirty, or unknown when git cannot describe it)",
             ));
         }
+        disk::host(&repo)?;
         let env_file = repo.join("ops/.env");
         let compose = compose_args(
             &[file.clone(), repo.join("ops/docker-compose.override.yml")],
@@ -745,12 +764,16 @@ impl Update {
         let daemon = engine::container(self, &compose, Some(&env), DAEMON_SERVICE)?;
         let running = engine::inspect(self, &daemon)?;
         engine::verify_checkout_identity(self, &config, &running, &daemon)?;
+        let pg = storage_pg(self.o.no_backup, || {
+            engine::container(self, &compose, Some(&env), "pseudolife-pg")
+        })?;
+        self.disk_storage(&daemon, pg.as_deref(), running["Image"].as_str())?;
         self.set_rollback_scope(&config, &running)?;
         self.maintainer_context = Some((compose.clone(), env.clone()));
         if self.o.no_backup {
             self.backup(None)?;
         } else {
-            let pg = engine::container(self, &compose, Some(&env), "pseudolife-pg")?;
+            let pg = pg.as_deref().expect("backup discovery returns PostgreSQL");
             if self.checkout_script(&repo, "backup").is_some() {
                 let pg_env = &config["services"]["pseudolife-pg"]["environment"];
                 let user = pg_env["POSTGRES_USER"].as_str().ok_or_else(|| {
@@ -759,12 +782,14 @@ impl Update {
                 let db = pg_env["POSTGRES_DB"].as_str().ok_or_else(|| {
                     UpdateError::usage("cannot resolve the project's PostgreSQL database; set POSTGRES_DB in its Compose environment and retry; nothing was deployed")
                 })?;
-                self.project_backup(&repo, &pg, &daemon, user, db)?;
+                self.project_backup(&repo, pg, &daemon, user, db)?;
             } else {
-                self.builtin_backup(&pg, &daemon, &data_dir().join("backups"))?;
+                self.builtin_backup(pg, &daemon, &data_dir().join("backups"))?;
             }
         }
         let text = fs::read_to_string(&file)?;
+        disk::host(&repo)?;
+        self.disk_storage(&daemon, pg.as_deref(), running["Image"].as_str())?;
         let image = text
             .lines()
             .find_map(|l| {
@@ -883,5 +908,28 @@ impl Update {
         )?;
         self.prune_cache(Some(&repo));
         Ok(())
+    }
+}
+
+fn storage_pg(no_backup: bool, resolve: impl FnOnce() -> Result<String>) -> Result<Option<String>> {
+    if no_backup {
+        Ok(None)
+    } else {
+        resolve().map(Some)
+    }
+}
+
+#[cfg(test)]
+mod disk_review_tests {
+    use super::*;
+    #[test]
+    fn no_backup_storage_probe_does_not_require_project_postgres() {
+        let absent = storage_pg(true, || Err(UpdateError::usage("no project PostgreSQL")));
+        assert!(matches!(absent, Ok(None)));
+        assert!(storage_pg(false, || Err(UpdateError::usage("no project PostgreSQL"))).is_err());
+        assert_eq!(
+            storage_pg(false, || Ok("selected-pg".into())).unwrap(),
+            Some("selected-pg".into())
+        );
     }
 }

@@ -16,6 +16,7 @@ use std::{
 };
 
 pub use cli::run;
+pub(crate) use install::available_space;
 pub use install::{install_archive, install_binary, install_source, target_triple};
 pub use launch::maybe_launch;
 #[cfg(windows)]

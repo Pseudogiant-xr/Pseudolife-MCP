@@ -976,6 +976,8 @@ pub(super) fn deploy(u: &mut Update, repo: &Path) -> Result<()> {
         ));
     }
     verify_identity(u, &config, &running, &u.o.daemon_url)?;
+    disk::host(&repo)?;
+    u.disk_storage(&daemon, Some(&pg), running["Image"].as_str())?;
     u.set_rollback_scope(&config, &running)?;
     u.maintainer_context = Some((base.clone(), env.clone()));
     let pg_env = &config["services"]["pseudolife-pg"]["environment"];
@@ -1066,6 +1068,8 @@ pub(super) fn deploy(u: &mut Update, repo: &Path) -> Result<()> {
     } else {
         u.project_backup(&repo, &pg, &daemon, user, db)?
     };
+    disk::host(&repo)?;
+    u.disk_storage(&daemon, Some(&pg), running["Image"].as_str())?;
     if stopped_handover {
         let current = inspect(u, &daemon)?;
         if current["Image"] != running["Image"]
