@@ -1569,8 +1569,51 @@ def _upgrade_codex_plugin(codex_home: Path, repo: Path | None, daemon_digest: st
     return dict(after, detail=f"after codex plugin marketplace upgrade {MARKETPLACE}: {after['detail']}")
 
 
+def _codex_runtime_hook_status(codex_home: Path, manifest_dir: Path) -> str:
+    """Read Codex's own trust verdict; a saved hash alone proves nothing."""
+    from pseudolife_memory.codex_connection import codex
+
+    executable = codex_executable(codex_home)
+    if executable is None:
+        return "unknown"
+    try:
+        definition = _codex_hook_manifest((manifest_dir / "hooks.json").read_bytes())
+        manifest = json.loads(definition)["hooks"]
+        expected = {
+            f"{PLUGIN_ID}:hooks/hooks.json:{re.sub(r'(?<!^)(?=[A-Z])', '_', event).lower()}:{g}:{h}"
+            for event, groups in manifest.items() for g, group in enumerate(groups)
+            for h, _ in enumerate(group.get("hooks") or [])}
+        with codex(executable, codex_home, Path.cwd()) as client:
+            result = client.rpc("hooks/list", {"cwds": [str(Path.cwd())]})
+        entries = result.get("data", [])
+        if (len(entries) != 1 or not isinstance(entries[0].get("errors"), list)
+                or entries[0]["errors"]):
+            return "unknown"
+        hooks = entries[0].get("hooks")
+        if not isinstance(hooks, list):
+            return "unknown"
+        if any(not isinstance(h, dict) or not isinstance(h.get("key"), str)
+               or not h["key"] for h in hooks):
+            return "unknown"
+        own = [h for h in hooks if h["key"].startswith(PLUGIN_ID + ":")]
+        keys = [h["key"] for h in own]
+        if len(keys) != len(set(keys)) or set(keys) - expected:
+            return "unknown"
+        if not expected or set(keys) != expected:
+            return "not-loaded"
+        if any(h.get("enabled") is True and h.get("trustStatus") in {"modified", "untrusted"}
+               for h in own):
+            return "needs-approval"
+        if any(h.get("enabled") is False for h in own):
+            return "disabled"
+        return ("current" if all(h.get("enabled") is True and h.get("trustStatus") == "trusted"
+                                 for h in own) else "unknown")
+    except Exception:  # A runtime failure must never turn a file match into execution evidence.
+        return "unknown"
+
+
 def check_codex_hooks(repo: Path | None = None, daemon_digest: str | None = None,
-                      refresh: bool = False) -> dict:
+                      refresh: bool = False, verify_runtime: bool = False) -> dict:
     """Codex hooks come either as manual copies under ``<codex
     home>/pseudolife/hooks`` (``setup-codex-hooks.py``) or from the Codex
     plugin, whose marketplace clone Codex keeps itself. Codex approves a hook
@@ -1646,6 +1689,28 @@ def check_codex_hooks(repo: Path | None = None, daemon_digest: str | None = None
         # the raw-file refresh to remove Codex's startup warning.
         if refresh and changed:
             return _upgrade_codex_plugin(codex_home, repo, daemon_digest, changed)
+        if verify_runtime:
+            state = _codex_runtime_hook_status(codex_home, clone_hooks)
+            if state == "current":
+                return {"state": "current", "source": "plugin", "changed_files": [],
+                        "detail": "Codex's runtime enables and trusts every matching plugin handler."}
+            advice = {
+                "needs-approval": (
+                    "Codex skips enabled Pseudolife hooks whose definitions are not trusted.",
+                    "Run python ops/setup-codex-hooks.py --source plugin --trust ask, then start a new session."),
+                "disabled": (
+                    "Pseudolife hook handlers are disabled in Codex; this may be intentional.",
+                    "If you want these hooks enabled, enable the Pseudolife handlers in Codex /hooks, then start a new session."),
+                "not-loaded": (
+                    "Codex did not load the complete Pseudolife plugin hook set.",
+                    "Check that the Pseudolife plugin is installed and enabled in Codex's plugin manager, then start a new session."),
+            }
+            if state in advice:
+                detail, recovery = advice[state]
+                return {"state": state, "source": "plugin", "changed_files": [],
+                        "detail": detail, "recovery": recovery}
+            # An unavailable runtime is no evidence of lost approval. Keep
+            # the previous file/config verdict when no runtime verdict exists.
         missing = _unapproved_plugin_handlers(clone_hooks, config_text)
         if missing is None and not _plugin_definitions_match(clone_hooks, clone_hooks):
             return {"state": "unknown", "source": "plugin", "changed_files": [],
