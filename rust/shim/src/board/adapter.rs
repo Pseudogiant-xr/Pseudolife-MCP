@@ -1204,12 +1204,17 @@ impl Adapter {
                         let _ = state::private_dir(parent);
                     }
                     state::atomic_write(&target, body.as_bytes(), None)?;
-                    for marker in [
-                        target.with_extension("seen"),
-                        target.with_extension("agent"),
-                        target.with_extension("reprint"),
+                    for (marker, hook_written) in [
+                        (target.with_extension("seen"), true),
+                        (target.with_extension("agent"), false),
+                        (target.with_extension("reprint"), true),
                     ] {
-                        if let Ok(opened) = state::open_marker(&marker, true) {
+                        let opened = if hook_written {
+                            state::open_marker(&marker, true)
+                        } else {
+                            state::open_with_write(&marker, true)
+                        };
+                        if let Ok(opened) = opened {
                             let _ = opened.file.set_times(
                                 std::fs::FileTimes::new()
                                     .set_modified(std::time::SystemTime::now()),
@@ -1763,7 +1768,9 @@ fn sweep_stale(digest: &std::path::Path) {
         {
             continue;
         }
-        if let Ok(opened) = state::open(&path)
+        // Hooks wrote most of these under the user's umask; Python's
+        // `_sweep_stale_digests` deletes them by age alone.
+        if let Ok(opened) = state::open_marker(&path, false)
             && opened.file.metadata().is_ok_and(|meta| {
                 meta.modified().is_ok_and(|time| {
                     time.elapsed()

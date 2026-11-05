@@ -200,7 +200,9 @@ pub fn read(path: &Path, limit: usize) -> Result<Vec<u8>> {
 /// group- or world-writable, and is refused with one stderr line naming the
 /// path and the fix otherwise. The other checks of [`open`] hold too: no
 /// redirected ancestor, no symlink, one regular file with a single link.
-/// Windows is unchanged.
+/// Windows still applies [`open`]'s protected owner-only DACL rule, which
+/// files written by Git Bash or PowerShell do not meet, so the Windows
+/// native wake stays open (see the SHIM-HOOK-MARKERS parity row).
 pub fn open_marker(path: &Path, write: bool) -> Result<PrivateFile> {
     #[cfg(windows)]
     {
@@ -241,20 +243,29 @@ fn marker_refusal(path: &Path, own: u32, owner: u32, mode: u32) -> Option<String
     if mode & 0o022 != 0 {
         return Some(format!(
             "pseudolife-mcp: ignoring {shown}: other users can write it (mode {:04o}), so it \
-             could forge or suppress board wakes for this session. Fix: chmod 600 '{shown}'; \
-             current plugin hooks write it 0600 (update the plugin).",
+             could forge or suppress board wakes for this session. Fix: update the plugin \
+             (its hooks write these files 0600), or chmod 600 '{shown}'.",
             mode & 0o7777
         ));
     }
     None
 }
+/// One line per directory and marker kind per process: each Stop-hook run
+/// arms a fresh `<key>.<token>.wake-armed`, so a per-path set would repeat
+/// the same refusal at every turn end.
 #[cfg(unix)]
 fn report_marker_once(path: &Path, line: &str) {
-    static REPORTED: LazyLock<StdMutex<std::collections::HashSet<PathBuf>>> =
+    static REPORTED: LazyLock<StdMutex<std::collections::HashSet<(PathBuf, String)>>> =
         LazyLock::new(Default::default);
+    let kind = (
+        path.parent().map(Path::to_path_buf).unwrap_or_default(),
+        path.extension()
+            .map(|e| e.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+    );
     if REPORTED
         .lock()
-        .map(|mut seen| seen.insert(path.to_path_buf()))
+        .map(|mut seen| seen.insert(kind))
         .unwrap_or(false)
     {
         eprintln!("{line}");
@@ -526,7 +537,10 @@ mod tests {
             let line = marker_refusal(path, 1000, 1000, mode).expect("refused");
             assert!(line.contains(&path.display().to_string()), "{line}");
             assert!(line.contains(&format!("mode {shown}")), "{line}");
-            assert!(line.contains("Fix: chmod 600"), "{line}");
+            assert!(
+                line.contains("Fix: update the plugin") && line.contains("chmod 600"),
+                "{line}"
+            );
         }
         let line = marker_refusal(path, 1000, 0, 0o100600).expect("refused");
         assert!(

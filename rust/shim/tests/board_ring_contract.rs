@@ -361,11 +361,13 @@ async fn board_ring_queued_hint_write_keeps_a_higher_seen_mark() {
 }
 /// A marker as the plugin's shell hooks wrote it before they wrote 0600:
 /// `printf > tmp && mv` under the user's umask, not the shim's owner-only
-/// writer. On POSIX that is 0644 under the common umask 022.
+/// writer. On POSIX that is 0644 under the common umask 022. POSIX only:
+/// the Windows marker check is the unchanged private-state ACL rule.
+#[cfg(unix)]
 fn hook_write(home: &Home, name: &str, text: &str) {
     hook_write_mode(home, name, text, 0o644);
 }
-#[cfg_attr(not(unix), allow(unused_variables))]
+#[cfg(unix)]
 fn hook_write_mode(home: &Home, name: &str, text: &str, mode: u32) {
     let temp = home.0.join(format!("{name}.{}", std::process::id()));
     std::fs::write(&temp, text).unwrap();
@@ -376,6 +378,7 @@ fn hook_write_mode(home: &Home, name: &str, text: &str, mode: u32) {
     }
     std::fs::rename(&temp, home.0.join(name)).unwrap();
 }
+#[cfg(unix)]
 #[test]
 fn board_ring_liveness_reads_the_listener_records_the_stop_hook_writes() {
     // Found 2026-11-06 in the client/hook matrix: under the native shim the
@@ -406,6 +409,7 @@ fn board_ring_liveness_reads_the_listener_records_the_stop_hook_writes() {
         assert_eq!(liveness::armed_until_at(Some(&digest), 1000.0), 0.0);
     }
 }
+#[cfg(unix)]
 #[tokio::test]
 async fn board_ring_reads_and_raises_a_seen_mark_the_hook_wrote() {
     // The prompt and Stop hooks mark mail seen in `<key>.seen` under the
@@ -445,52 +449,22 @@ fn board_ring_liveness_refuses_listener_records_others_can_write_or_own() {
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
     let home = Home::new();
     let digest = home.0.join("task.txt");
-    hook_write(
-        &home,
-        "task.waker.wake-armed",
-        "waker
-1050
-",
-    );
+    hook_write(&home, "task.waker.wake-armed", "waker\n1050\n");
     for mode in [0o664, 0o666, 0o646] {
-        hook_write_mode(
-            &home,
-            "task.wake",
-            "waker
-",
-            mode,
-        );
+        hook_write_mode(&home, "task.wake", "waker\n", mode);
         assert_eq!(
             liveness::armed_until_at(Some(&digest), 1000.0),
             0.0,
             "{mode:o} owner file"
         );
-        hook_write(
-            &home,
-            "task.wake",
-            "waker
-",
-        );
-        hook_write_mode(
-            &home,
-            "task.waker.wake-armed",
-            "waker
-1050
-",
-            mode,
-        );
+        hook_write(&home, "task.wake", "waker\n");
+        hook_write_mode(&home, "task.waker.wake-armed", "waker\n1050\n", mode);
         assert_eq!(
             liveness::armed_until_at(Some(&digest), 1000.0),
             0.0,
             "{mode:o} record"
         );
-        hook_write(
-            &home,
-            "task.waker.wake-armed",
-            "waker
-1050
-",
-        );
+        hook_write(&home, "task.waker.wake-armed", "waker\n1050\n");
         assert_eq!(liveness::armed_until_at(Some(&digest), 1000.0), 1050.0);
     }
     // A foreign group or owner needs privilege to arrange; as root (a CI
