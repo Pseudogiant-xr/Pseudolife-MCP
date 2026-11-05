@@ -28,15 +28,28 @@ A selection is one of:
                          workspace, and also runs --no-default-features).
                          lib is reserved: an integration test target named lib
                          uses test/lib; a binary target named lib is unsupported
-                         (bin/lib is refused).
+                         (bin/lib is refused). Exact tests that need a
+                         disposable PostgreSQL match a CARGO_DATABASE_PROFILES
+                         entry: the iteration gets the checkout install and the
+                         job's PostgreSQL (plan's postgres=true), a fresh
+                         database per iteration (dropped afterwards, also on
+                         failure), the profile's flags and fixtures, and runs
+                         them with 1 test thread, since they share that database
+                         and nextest's process per test defeats their in-process
+                         lock. plan refuses an exact db_ test no profile covers
+                         and a selection mixing profiles (no profile counts as
+                         one). A whole-binary item names no exact test, so it
+                         gets no database: its db_ tests return early and count
+                         as run, which is why such tests are selected by name.
   <node id> [<node id>]  pytest node ids, run with -ra and a junit report, with
                          the parity shards' candidate binaries in the env
 
 An iteration passes only with evidence: a pytest or cargo run where every
 selected test ran and passed (a runtime skip is not evidence; nextest's
 default-excluded #[ignore] tests are not selected; a Rust test that returns early
-still counts as run, so a cargo row lists each test's seconds), or a row or scenario that
-compared at least one case.
+still counts as run, so a cargo row lists each test's seconds, and a database
+profile sets its tests' REQUIRED flag so a missing input panics instead), or a
+row or scenario that compared at least one case.
 
 Several rows, or several scenarios, share one loop: every iteration runs
 each item in turn as its own harness process, with the argv, env and
@@ -62,11 +75,13 @@ one verified setup-only retry per iteration when job history is supplied.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import re
 import subprocess
 import sys
+import tempfile
 import time
 import xml.etree.ElementTree as ElementTree
 from pathlib import Path
@@ -105,6 +120,27 @@ CARGO = re.compile(r"cargo:([a-z0-9][a-z0-9_-]{0,63})/(test/lib|(?:bin/)?[a-z0-9
 CARGO_FORM = "cargo:<package>/[bin/]<test binary>[::<test>]"
 # The Rust workspace; nextest reads rust/.config/nextest.toml from it.
 WORKSPACE = Path("rust")
+HARNESS = Path(__file__).resolve().parents[1] / "daemon" / "harness"
+# Cargo tests that need a disposable PostgreSQL, by the exact test's libtest
+# path: an item whose test is in `target` and starts with one of `prefixes`
+# gets, every iteration, a fresh database of the pgdisposable `slice`
+# (pl_cf_<slice>_..., on the job's lease_ci.py cluster) in `dsn_env`, the
+# `env` flags, the embedding fixture model at `dimension` in the fixture's
+# `env` variable when `fixture` is set, and the onnxruntime wheel's library
+# in `ort_env` when set. Adding one is one entry here.
+CARGO_DATABASE_PROFILES = {
+    # PR #1332's read-only shadow refresh tests, as startup_ci.py's
+    # shadow_refresh runs them; REQUIRED makes a missing input panic.
+    "shadow-refresh": {
+        "target": "pseudolife-daemon/bin/pseudolife-daemon",
+        "prefixes": ("shadow::tests::db_", "service::shadow_refresh_tests::db_"),
+        "slice": "pgs",
+        "dsn_env": "PL_SHADOW_REFRESH_DSN",
+        "env": {"PL_SHADOW_REFRESH_REQUIRED": "1"},
+        "fixture": {"env": "PL_SHADOW_EMBED_FIXTURE", "dimension": 1024},
+        "ort_env": "ORT_DYLIB_PATH",
+    },
+}
 
 
 def token_kind(token: str) -> str:
@@ -167,6 +203,7 @@ def parse(selection: str) -> tuple[str, list[str]]:
         if any(cargo_item(node[6:])[1] == "bin/lib" for node in nodes):
             raise ValueError("lib is reserved for library unit tests: use cargo:<package>/lib[::<test>]; "
                              "a binary target named lib cannot be selected with bin/lib")
+        database_profile([node[6:] for node in nodes])
         return "cargo", [node[6:] for node in nodes]
     if not nodes or not all(NODE.fullmatch(node) and ".." not in node for node in nodes):
         raise ValueError(f"selection {selection!r}: expected row:<row>[/<case>], scenario:<name>, "
@@ -187,6 +224,32 @@ def cargo_item(name: str) -> tuple[str, str, str | None]:
     package, _, rest = name.partition("/")
     binary, _, test = rest.partition("::")
     return package, binary, test or None
+
+
+def database_profile(names: list[str]) -> str | None:
+    """The CARGO_DATABASE_PROFILES entry a cargo selection's tests need, or
+    None; ValueError naming the fix for a db_ test no profile covers (it
+    would run without its database, return early and count as run) or for
+    items of different profiles, since one loop prepares one profile's
+    database and runs it serially."""
+    found = {}
+    for name in names:
+        package, binary, test = cargo_item(name)
+        profile = next((key for key, entry in CARGO_DATABASE_PROFILES.items()
+                        if entry["target"] == f"{package}/{binary}" and test
+                        and test.startswith(entry["prefixes"])), None)
+        if profile is None and test and test.rpartition("::")[2].startswith("db_"):
+            raise ValueError(f"cargo item {name!r} is a database test (db_) that no entry of "
+                             "CARGO_DATABASE_PROFILES in rust/ci/stress.py covers, so it would run without "
+                             "its database and its early return would count as run; add a profile naming its "
+                             "target, test prefix and DSN variable, or select another test")
+        found[name] = profile
+    profiles = dict.fromkeys(found.values())
+    if len(profiles) > 1:
+        listed = ", ".join(f"{name!r} ({profile or 'no database'})" for name, profile in found.items())
+        raise ValueError(f"cargo selection mixes database profiles: {listed}; one loop prepares one profile's "
+                         "database and runs its tests serially, so dispatch the items of each profile separately")
+    return next(iter(profiles), None)
 
 
 def cargo_binary_id(package: str, binary: str) -> str:
@@ -265,11 +328,15 @@ def command(kind: str, names: list[str], candidates: Path, scratch: Path,
         # (CARGO_BIN_EXE_pseudolife-stdio) resolve. --extract-overwrite keeps
         # the candidate binaries already in rust/target/release.
         workspace = str(WORKSPACE.resolve())
-        # --test-threads 4 is the Rust job's `cargo nextest run -j 4`.
+        # --test-threads 4 is the Rust job's `cargo nextest run -j 4`. A
+        # database profile's tests share one bank and serialize on an
+        # in-process mutex, which nextest's process per test cannot hold, so
+        # they run one at a time (as startup_ci.py runs them, --test-threads=1).
+        threads = "1" if database_profile(names) else "4"
         return ["cargo-nextest", "nextest", "run", "--archive-file", str(archive),
                 "--workspace-remap", workspace, "--extract-to", workspace, "--extract-overwrite",
                 "--profile", "stress", "--retries", "0", "--no-fail-fast", "--no-tests", "fail",
-                "--test-threads", "4", "-E", filterset(names)]
+                "--test-threads", threads, "-E", filterset(names)]
     if kind == "row":
         argv = [sys.executable, "rust/cli_harness", "--row", names[0]]
         if len(names) > 1:
@@ -291,8 +358,11 @@ def environment(kind: str, names: list[str], candidates: Path, scratch: Path) ->
     """The env the selection's lane step sets, on top of the job's."""
     if kind == "cargo":
         # The Rust job binds the selected interpreter for its Python fixtures
-        # and gives nextest no parity candidate.
-        return {"PSEUDOLIFE_MCP_PYTHON": sys.executable}
+        # and gives nextest no parity candidate. A database profile's fixed
+        # flags join it; run() adds its per-iteration database and fixture.
+        profile = database_profile(names)
+        return {"PSEUDOLIFE_MCP_PYTHON": sys.executable,
+                **(CARGO_DATABASE_PROFILES[profile]["env"] if profile else {})}
     env = {"PSEUDOLIFE_RUST_BINARY": str(binary(candidates, "pseudolife-stdio"))}
     if kind == "scenario":
         env["PL_HARNESS_SCRATCH"] = str(scratch / "harness-scratch")
@@ -438,11 +508,17 @@ def plan(options) -> int:
     except ValueError as error:
         print(f"stress: {error}; nothing was started", file=sys.stderr)
         return 2
+    # postgres=true only for a cargo selection with a database profile: the
+    # other kinds always prepare PostgreSQL (rust.yml's step condition).
+    profile = database_profile(names) if kind == "cargo" else None
     with open(options.github_output, "a", encoding="utf-8") as output:
         output.write(f"iterations={json.dumps(list(range(1, count + 1)))}\n")
         output.write(f"kind={kind}\n")
+        output.write(f"postgres={'true' if profile else 'false'}\n")
     each = f" ({len(names)} items each)" if kind in ITEM_KINDS and len(names) > 1 else ""
-    print(f"stress: {count} iterations of {options.selection.strip()}{each}")
+    database = (f"; database profile {profile}: a fresh disposable PostgreSQL each iteration, "
+                "tests run one at a time") if profile else ""
+    print(f"stress: {count} iterations of {options.selection.strip()}{each}{database}")
     return 0
 
 
@@ -472,6 +548,89 @@ def checkout_mismatch(archive_file: Path) -> str:
         return (f"the archive was built in checkout path {built}, this runner's is {here}; "
                 "its tests' compiled-in paths would not resolve")
     return ""
+
+
+def harness_import_path() -> None:
+    """Make the daemon harness's modules (pgdisposable, embedding_fixture) importable."""
+    if str(HARNESS) not in sys.path:
+        sys.path.insert(0, str(HARNESS))
+
+
+def database_slice(profile: dict):
+    """The pgdisposable namespace a profile's databases are made in, on the
+    cluster and test login lease_ci.py prepared (PSEUDOLIFE_TEST_PG_HOST_PORT
+    and PSEUDOLIFE_TEST_PG_LOGIN_FILE, from the job's GITHUB_ENV)."""
+    harness_import_path()
+    import pgdisposable
+    return pgdisposable.Slice(profile["slice"])
+
+
+@contextlib.contextmanager
+def disposable_database(profile: dict):
+    """A fresh database for one iteration, yielding its DSN, dropped
+    afterwards whatever happened (a failed create included). A drop that
+    fails is reported and leaves the verdict alone: the runner's cluster
+    ends with the job, and the tests' evidence is already judged."""
+    pg = database_slice(profile)
+    name = pg.name(pg.PREFIX + "stress_" + str(time.time_ns()))
+    try:
+        yield pg.create(name)
+    finally:
+        try:
+            pg.drop(name)
+        except Exception as error:  # cleanup only; never the iteration's verdict
+            print(f"stress: warning: could not drop disposable database {name}: {redacted(error)}",
+                  file=sys.stderr, flush=True)
+
+
+def onnx_runtime_library(capi: Path, windows: bool) -> Path | None:
+    """The onnxruntime wheel's shared library in its capi directory, or None."""
+    if windows:
+        library = capi / "onnxruntime.dll"
+        return library if library.is_file() else None
+    return next(iter(sorted(capi.glob("libonnxruntime.so.*"))), None)
+
+
+def fixture_environment(profile: dict, root: Path) -> dict:
+    """A profile's embedder inputs under root: the embedding fixture model
+    (harness/embedding_fixture.py, numpy/onnx/tokenizers) and the onnxruntime
+    wheel's library for the ort crate's ORT_DYLIB_PATH, found as the startup
+    lane's shadow fixture finds it."""
+    env = {}
+    fixture = profile.get("fixture")
+    if fixture:
+        harness_import_path()
+        from embedding_fixture import create
+        model = root / "model"
+        create(model, dimension=fixture["dimension"])
+        env[fixture["env"]] = str(model)
+    if profile.get("ort_env"):
+        import onnxruntime
+        capi = Path(onnxruntime.__file__).parent / "capi"
+        library = onnx_runtime_library(capi, os.name == "nt")
+        if library is None:
+            raise FileNotFoundError(f"no ONNX Runtime shared library in {capi}; a database iteration "
+                                    "installs onnxruntime==1.27.0 in rust.yml's checkout install step")
+        env[profile["ort_env"]] = str(library)
+    return env
+
+
+def cargo_database(profile_name: str, stack: contextlib.ExitStack) -> dict:
+    """Enter a profile's database and fixture on stack; their env for nextest.
+    The fixture lives outside the scratch directory the job uploads."""
+    profile = CARGO_DATABASE_PROFILES[profile_name]
+    env = {profile["dsn_env"]: stack.enter_context(disposable_database(profile))}
+    if profile.get("fixture") or profile.get("ort_env"):
+        root = Path(stack.enter_context(tempfile.TemporaryDirectory(prefix="pl-stress-fixture-",
+                                                                    ignore_cleanup_errors=True)))
+        env.update(fixture_environment(profile, root))
+    return env
+
+
+def redacted(error: BaseException) -> str:
+    """An error for a row or log, without any connection string's credentials."""
+    text = f"{type(error).__name__}: {error}"
+    return re.sub(r"(postgres(?:ql)?://)[^\s/@]+@", r"\1***@", text, flags=re.I)
 
 
 def run_items(options, kind: str, items: list[str]) -> int:
@@ -547,6 +706,15 @@ def run(options) -> int:
     archive_file = Path(options.archive_file).resolve() if options.archive_file else None
     argv = command(kind, names, candidates, scratch, archive_file)
     env = dict(os.environ, **environment(kind, names, candidates, scratch))
+    # A database profile's bank and fixture: entered below, released after
+    # the row is written, whatever the outcome.
+    with contextlib.ExitStack() as stack:
+        return run_once(options, kind, names, scratch, archive_file, argv, env, stack)
+
+
+def run_once(options, kind: str, names: list[str], scratch: Path, archive_file: Path | None,
+             argv: list[str], env: dict, stack: contextlib.ExitStack) -> int:
+    """One run of a one-item selection, judged and written as its row."""
     started, code, note, tests, judged = time.monotonic(), None, "", None, False
     try:
         if kind == "cargo":
@@ -555,6 +723,14 @@ def run(options) -> int:
                 code = 1
                 print(f"stress: {note}", flush=True)
                 return code
+            profile = database_profile(names)
+            if profile:
+                try:
+                    env.update(cargo_database(profile, stack))
+                except Exception as error:  # a setup that fails is this iteration's failure, in its row
+                    note, code = f"database profile {profile} setup failed: {redacted(error)}", 1
+                    print(f"stress: {note}", flush=True)
+                    return code
             # Only this iteration's report may count.
             cargo_junit(WORKSPACE).unlink(missing_ok=True)
         print("stress: " + " ".join(argv), flush=True)
