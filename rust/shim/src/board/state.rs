@@ -188,7 +188,94 @@ pub fn create(path: &Path) -> Result<PrivateFile> {
     Ok(PrivateFile { file, identity })
 }
 pub fn read(path: &Path, limit: usize) -> Result<Vec<u8>> {
-    let opened = open(path)?;
+    read_opened(open(path)?, limit)
+}
+/// Open a digest marker the plugin hooks share with the shim: `.seen`,
+/// `.wake`, `.wake-armed`, `.wait-armed` and `.reprint`. Hooks released
+/// before 0600 markers wrote them under the user's umask (0644 under the
+/// usual 022), and readable-by-others is harmless for a marker that holds a
+/// timestamp or token. What [`open`]'s owner-only rule guards against still
+/// holds: a marker another user owns or can write could forge a wake or
+/// suppress delivery, so a POSIX marker must be owned by this user and not
+/// group- or world-writable, and is refused with one stderr line naming the
+/// path and the fix otherwise. The other checks of [`open`] hold too: no
+/// redirected ancestor, no symlink, one regular file with a single link.
+/// Windows still applies [`open`]'s protected owner-only DACL rule, which
+/// files written by Git Bash or PowerShell do not meet, so the Windows
+/// native wake stays open (see the SHIM-HOOK-MARKERS parity row).
+pub fn open_marker(path: &Path, write: bool) -> Result<PrivateFile> {
+    #[cfg(windows)]
+    {
+        open_with_write(path, write)
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        crate::credentials::reject_ancestor_redirects(path).map_err(|_| "invalid_state")?;
+        let file = options(false, write)
+            .open(path)
+            .map_err(|_| "state_unavailable")?;
+        let meta = file.metadata().map_err(|_| "state_unavailable")?;
+        if !meta.is_file() || meta.nlink() != 1 {
+            return Err("invalid_state");
+        }
+        let own = rustix::process::getuid().as_raw();
+        if let Some(refusal) = marker_refusal(path, own, meta.uid(), meta.mode()) {
+            report_marker_once(path, &refusal);
+            return Err("invalid_state");
+        }
+        let identity = vec![meta.dev() as u128, meta.ino() as u128];
+        Ok(PrivateFile { file, identity })
+    }
+}
+/// Why a POSIX marker may not be trusted, as the line [`open_marker`]
+/// prints: the path, the cause and the one fix. `None` accepts it.
+#[cfg(unix)]
+fn marker_refusal(path: &Path, own: u32, owner: u32, mode: u32) -> Option<String> {
+    let shown = path.display();
+    if owner != own {
+        return Some(format!(
+            "pseudolife-mcp: ignoring {shown}: it is owned by another user, so it \
+             could forge or suppress board wakes for this session. Fix: remove it \
+             (rm '{shown}'); the plugin hooks write it again."
+        ));
+    }
+    if mode & 0o022 != 0 {
+        return Some(format!(
+            "pseudolife-mcp: ignoring {shown}: other users can write it (mode {:04o}), so it \
+             could forge or suppress board wakes for this session. Fix: update the plugin \
+             (its hooks write these files 0600), or chmod 600 '{shown}'.",
+            mode & 0o7777
+        ));
+    }
+    None
+}
+/// One line per directory and marker kind per process: each Stop-hook run
+/// arms a fresh `<key>.<token>.wake-armed`, so a per-path set would repeat
+/// the same refusal at every turn end.
+#[cfg(unix)]
+fn report_marker_once(path: &Path, line: &str) {
+    static REPORTED: LazyLock<StdMutex<std::collections::HashSet<(PathBuf, String)>>> =
+        LazyLock::new(Default::default);
+    let kind = (
+        path.parent().map(Path::to_path_buf).unwrap_or_default(),
+        path.extension()
+            .map(|e| e.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+    );
+    if REPORTED
+        .lock()
+        .map(|mut seen| seen.insert(kind))
+        .unwrap_or(false)
+    {
+        eprintln!("{line}");
+    }
+}
+/// [`read`] for a marker a hook may have written (see [`open_marker`]).
+pub fn read_marker(path: &Path, limit: usize) -> Result<Vec<u8>> {
+    read_opened(open_marker(path, false)?, limit)
+}
+fn read_opened(opened: PrivateFile, limit: usize) -> Result<Vec<u8>> {
     let mut bytes = Vec::new();
     opened
         .file
@@ -204,10 +291,15 @@ fn same(path: &Path, expected: &[u128]) -> bool {
     open(path).is_ok_and(|file| file.identity == expected)
 }
 pub fn atomic_write(path: &Path, bytes: &[u8], expected: Option<&[u128]>) -> Result<()> {
-    atomic_replace(path, bytes, expected, false)
+    atomic_replace(path, bytes, expected, false, false)
+}
+/// [`atomic_write`] over a marker a hook may have written (see
+/// [`open_marker`]); the replacement itself is owner-only.
+pub fn atomic_write_marker(path: &Path, bytes: &[u8]) -> Result<()> {
+    atomic_replace(path, bytes, None, false, true)
 }
 pub fn atomic_create(path: &Path, bytes: &[u8]) -> Result<()> {
-    atomic_replace(path, bytes, None, true)
+    atomic_replace(path, bytes, None, true, false)
 }
 pub fn exists(path: &Path) -> bool {
     fs::symlink_metadata(path).is_ok()
@@ -217,12 +309,17 @@ fn atomic_replace(
     bytes: &[u8],
     expected: Option<&[u128]>,
     exclusive: bool,
+    marker: bool,
 ) -> Result<()> {
     if exists(path) {
         if exclusive {
             return Err("reservation_changed");
         }
-        open(path)?;
+        if marker {
+            open_marker(path, false)?;
+        } else {
+            open(path)?;
+        }
     }
     let parent = path.parent().ok_or("invalid_state")?;
     let temp = parent.join(format!(".agent-state-{}", uuid::Uuid::new_v4().simple()));
@@ -423,6 +520,36 @@ mod tests {
 
     /// Writes to files named `slow-write*` take this long under test.
     pub(super) const WRITE_DELAY: Duration = Duration::from_millis(300);
+
+    #[cfg(unix)]
+    #[test]
+    fn a_marker_others_can_write_or_another_user_owns_is_refused_with_its_fix() {
+        let path = Path::new("/home/u/.pseudolife-mcp/digests/k.wake");
+        for mode in [0o100600, 0o100640, 0o100644, 0o100444] {
+            assert_eq!(marker_refusal(path, 1000, 1000, mode), None, "{mode:o}");
+        }
+        for (mode, shown) in [
+            (0o100664, "0664"),
+            (0o100666, "0666"),
+            (0o100646, "0646"),
+            (0o100620, "0620"),
+        ] {
+            let line = marker_refusal(path, 1000, 1000, mode).expect("refused");
+            assert!(line.contains(&path.display().to_string()), "{line}");
+            assert!(line.contains(&format!("mode {shown}")), "{line}");
+            assert!(
+                line.contains("Fix: update the plugin") && line.contains("chmod 600"),
+                "{line}"
+            );
+        }
+        let line = marker_refusal(path, 1000, 0, 0o100600).expect("refused");
+        assert!(
+            line.contains("owned by another user,")
+                && !line.contains("uid")
+                && line.contains("Fix: remove it"),
+            "{line}"
+        );
+    }
 
     struct Dir(PathBuf);
     impl Dir {

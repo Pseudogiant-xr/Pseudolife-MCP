@@ -37,7 +37,9 @@ pub fn armed_until_at(digest: Option<&Path>, now: f64) -> f64 {
     }
     let mut latest: f64 = 0.0;
     for path in paths {
-        let Ok(bytes) = state::read(&path, 256) else {
+        // Listener records come from the Stop hook (`.wake`, `.wake-armed`)
+        // and from `wait-mail`; the hook writes them under the user's umask.
+        let Ok(bytes) = state::read_marker(&path, 256) else {
             continue;
         };
         if !bytes.is_ascii() {
@@ -59,7 +61,7 @@ pub fn armed_until_at(digest: Option<&Path>, now: f64) -> f64 {
             continue;
         }
         if suffix == "wake-armed"
-            && !state::read(&digest.with_extension("wake"), 256).is_ok_and(|owner| {
+            && !state::read_marker(&digest.with_extension("wake"), 256).is_ok_and(|owner| {
                 owner.is_ascii() && String::from_utf8_lossy(&owner).trim() == lines[0]
             })
         {
