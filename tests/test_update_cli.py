@@ -122,6 +122,8 @@ class World:
             return self.compose_rc, "" if self.compose_rc == 0 else "error: build failed"
         if a[:1] == ["builder"]:
             return 0, ""
+        if a[:1] == ["exec"] and "df" in a:
+            return 0, "Filesystem 1024-blocks Used Available Capacity Mounted on\noverlay 99999999 1 99999998 1% /\n"
         if a[:1] == ["exec"] and "pg_dump" in " ".join(a):
             return self.dump_rc, "" if self.dump_rc == 0 else "pg_dump: error: connection failed"
         if a[:1] == ["exec"] and "tar czf" in " ".join(a):
@@ -226,6 +228,96 @@ def _run(argv: list[str], capsys=None) -> int:
 
 # ── release mode ────────────────────────────────────────────────────────────
 
+@pytest.mark.parametrize("mode", ["release", "checkout", "backup"])
+def test_low_host_disk_refuses_before_pull_build_or_backup(world, clients, tmp_path, monkeypatch, capsys, mode):
+    from types import SimpleNamespace
+    if mode == "checkout":
+        root, _ = _checkout(world, tmp_path)
+        original_env = (root / "ops/.env").read_bytes()
+        args = ["--checkout", str(root), "--no-backup", "--no-cache-prune"]
+    else:
+        _project(world, tmp_path)
+        args = []
+    monkeypatch.setattr(up.shutil, "disk_usage", lambda _: SimpleNamespace(free=8 * 1024**3 - 1))
+    if mode == "backup":
+        with pytest.raises(up.UpdateError, match="8 GiB"):
+            up.Update(up.Options()).builtin_backup()
+    else:
+        assert _run(args) == 2
+        assert "8 GiB" in capsys.readouterr().err
+    assert not any(c.startswith(("pull ", "tag ")) or "pg_dump" in c or " up " in c
+                   for c in world.docker_calls())
+    assert not (tmp_path / "data" / "backups").exists()
+    if mode == "checkout":
+        assert (root / "ops/.env").read_bytes() == original_env
+
+
+def test_low_docker_storage_refuses_before_pull(world, clients, tmp_path, monkeypatch, capsys):
+    _project(world, tmp_path)
+    original = world.run_cli
+
+    def low_disk(argv, **kwargs):
+        if "df" in argv:
+            return 0, "Filesystem 1024-blocks Used Available Capacity Mounted on\noverlay 99999999 99999999 1 100% /\n"
+        return original(argv, **kwargs)
+
+    monkeypatch.setattr(up, "run_cli", low_disk)
+    assert _run(["--no-backup"]) == 2
+    assert "8 GiB" in capsys.readouterr().err
+    assert not any(c.startswith(("pull ", "tag ")) or " up " in c for c in world.docker_calls())
+
+
+def test_checkout_rechecks_space_consumed_by_backup(world, clients, tmp_path, monkeypatch, capsys):
+    from types import SimpleNamespace
+    from pseudolife_memory import disk_space
+    root, _ = _checkout(world, tmp_path)
+    state = {"backed_up": False}
+    monkeypatch.setattr(up.Update, "backup", lambda *a: state.update(backed_up=True))
+    monkeypatch.setattr(disk_space.shutil, "disk_usage", lambda _: SimpleNamespace(
+        free=disk_space.MIN_FREE - int(state["backed_up"])))
+    assert _run(["--checkout", str(root), "--no-cache-prune"]) == 2
+    assert state["backed_up"] and "8 GiB" in capsys.readouterr().err
+    assert not any(c.startswith("tag ") or " up " in c for c in world.docker_calls())
+
+
+def test_the_exact_host_disk_floor_allows_a_release_recreation(world, clients, tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from pseudolife_memory import disk_space
+    _project(world, tmp_path)
+    monkeypatch.setattr(disk_space.shutil, "disk_usage", lambda _: SimpleNamespace(free=disk_space.MIN_FREE))
+    assert _run(["--tag", "0.15.0", "--reinstall", "--daemon-only", "--no-backup"]) == 0
+
+
+@pytest.mark.parametrize("response", ["enough", "low", "malformed"])
+def test_docker_disk_probe_uses_and_removes_only_its_named_readonly_helper(monkeypatch, response):
+    from pseudolife_memory import disk_space
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        if argv[1] == "exec":
+            return 1, "container is not running"
+        if argv[1] == "create":
+            return 0, up.DAEMON_CONTAINER  # stdout must never select the cleanup target
+        if argv[1] == "start":
+            available = str(disk_space.MIN_FREE // 1024) if response == "enough" else "1"
+            return 0, (f"overlay 99999999 1 {available} 1% /\n" if response != "malformed" else "invalid")
+        return 0, ""
+
+    monkeypatch.setattr(up, "run_cli", run)
+    if response == "enough":
+        disk_space.docker_storage("fake-docker", ["fixture-pg", up.DAEMON_CONTAINER], "sha256:fixture")
+    else:
+        with pytest.raises(up.UpdateError):
+            disk_space.docker_storage("fake-docker", ["fixture-pg", up.DAEMON_CONTAINER], "sha256:fixture")
+    create = next(call for call in calls if call[1] == "create")
+    helper = create[create.index("--name") + 1]
+    assert helper.startswith("pseudolife-diskcheck-") and "--read-only" in create
+    assert create[create.index("--network") + 1] == "none"
+    assert calls[-1] == ["fake-docker", "rm", "-f", "-v", helper]
+    assert "--volumes-from" not in create
+
+
 def test_a_release_update_pulls_backs_up_tags_recreates_and_moves_the_clients(world, clients, tmp_path, capsys):
     project = _project(world, tmp_path)
     world.health = [{"status": "ok", "version": "0.15.0"}, None, {"status": "ok", "version": "0.15.1", "schema": 50,
@@ -273,11 +365,13 @@ def test_release_update_warns_once_about_older_persistent_image_pin(world, clien
     (project / ".env").write_text("PSEUDOLIFE_IMAGE_TAG=0.15.0\n", encoding="utf-8")
     world.health = [{"status": "ok", "version": "0.15.0"}, {"status": "ok", "version": "0.15.1"}]
     original = world.run_cli
-    config_envs = []
+    config_checks = []
 
     def config(argv, **kw):
         if argv[1:2] == ["compose"] and "config" in argv:
-            config_envs.append(kw.get("env"))
+            env = kw.get("env") or {}
+            config_checks.append((tuple(argv), "PSEUDOLIFE_IMAGE_TAG" in env,
+                                  env.get("PSEUDOLIFE_IMAGE_TAG")))
             configured = image if "--no-interpolate" in argv else up.GHCR_IMAGE + ":0.15.0"
             return 0, json.dumps({"services": {up.DAEMON_SERVICE: {"image": configured}}})
         return original(argv, **kw)
@@ -292,7 +386,16 @@ def test_release_update_warns_once_about_older_persistent_image_pin(world, clien
         assert "PSEUDOLIFE_IMAGE_TAG=0.15.1" in message
     else:
         assert str(project / "docker-compose.yml") in message and f"image: {up.GHCR_IMAGE}:0.15.1" in message
-    assert config_envs and "PSEUDOLIFE_IMAGE_TAG" not in config_envs[0]
+    raw_args = next(argv for argv, _, _ in config_checks if "--no-interpolate" in argv)
+    resolved_args = tuple(value for value in raw_args if value != "--no-interpolate")
+    pin_queries = [(present, value) for argv, present, value in config_checks
+                   if argv in (raw_args, resolved_args)]
+    assert pin_queries == [(False, None), (False, None)]
+    # The earlier authentication check resolves the deployment overlay, whose
+    # image tag deliberately differs from the manager's persistent view.
+    deployment_queries = [(present, value) for argv, present, value in config_checks
+                          if argv not in (raw_args, resolved_args)]
+    assert deployment_queries == [(True, "0.15.1")]
 
 
 @pytest.mark.parametrize("pin", ["0.15.1", "latest", "sha256:fixture"])
@@ -441,7 +544,7 @@ def test_a_pinned_tag_wins_over_pypi_and_a_failed_pull_changes_nothing(world, cl
     assert _run(["--tag", "0.16.0"]) == 1
     calls = world.docker_calls()
     assert f"pull {up.GHCR_IMAGE}:0.16.0" in calls
-    assert not any(c.startswith(("tag", "exec")) or " up " in c for c in calls)
+    assert not any(c.startswith("tag") or " up " in c or "pg_dump" in c or "tar czf" in c for c in calls)
     assert "nothing was changed" in capsys.readouterr().err
 
 
