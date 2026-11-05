@@ -62,8 +62,7 @@ pub(super) type Overrides = Vec<(String, String)>;
 /// `registration_credentials(os.environ)`: the overrides to apply and the
 /// credential source label.
 pub(super) fn registration_credentials(env: &Env) -> Res<(Overrides, Option<String>)> {
-    if env.truthy("PSEUDOLIFE_MCP_TOKEN")?.is_some()
-        || env.var("PSEUDOLIFE_MCP_TOKEN_FILE")?.is_some()
+    if env.var("PSEUDOLIFE_MCP_TOKEN")?.is_some() || env.var("PSEUDOLIFE_MCP_TOKEN_FILE")?.is_some()
     {
         return Ok((Vec::new(), Some("environment".into())));
     }

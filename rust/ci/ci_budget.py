@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import copy
 import fnmatch
 import hashlib
 import itertools
@@ -30,8 +31,9 @@ import re
 import statistics
 import subprocess
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
+import uuid
 
 ROOT = Path(__file__).resolve().parents[2]
 BUDGET = ROOT / "rust/ci/ci_budget.json"
@@ -481,6 +483,219 @@ def fingerprints(workflow: dict) -> dict[str, str]:
     return {job_id: fingerprint(workflow["jobs"][job_id]) for job_id in pull_request_reachable(workflow)}
 
 
+# Generated baselines and independently mergeable author reasons. Numeric
+# budgets remain in ci_budget.json; accepting a lane never rewrites them.
+def fingerprint_path() -> Path:
+    return BUDGET.with_name("ci_budget_fingerprints.json")
+
+
+def acceptance_directory() -> Path:
+    return BUDGET.parent / "ci_budget_accept"
+
+
+def scope_matrix(job: dict) -> bool:
+    """Whether matrix expressions read the parity scope outputs, not merely
+    quote their names in a string or refer to another object's needs field."""
+    def reads(value):
+        if isinstance(value, dict):
+            return any(reads(item) for item in value.values())
+        if isinstance(value, list):
+            return any(reads(item) for item in value)
+        if not isinstance(value, str):
+            return False
+        expressions, cursor = [], 0
+        while (start := value.find("${{", cursor)) >= 0:
+            end, quoted = start + 3, False
+            while end < len(value):
+                if value[end] == "'":
+                    if quoted and value[end:end + 2] == "''":
+                        end += 2
+                        continue
+                    quoted = not quoted
+                if not quoted and value[end:end + 2] == "}}":
+                    expressions.append(value[start + 3:end])
+                    cursor = end + 2
+                    break
+                end += 1
+            else:
+                return True
+        for expression in expressions:
+            try:
+                parts = tokens(expression)
+            except ValueError:
+                return True  # An unreadable matrix expression cannot establish independence.
+            for index, (kind, word) in enumerate(parts):
+                if kind != "name" or word.lower() != "needs" or index and parts[index - 1][1] == ".":
+                    continue
+                path, cursor = ["needs"], index + 1
+                while cursor < len(parts):
+                    if parts[cursor][1] == "." and cursor + 1 < len(parts) and parts[cursor + 1][0] == "name":
+                        path.append(parts[cursor + 1][1].lower())
+                        cursor += 2
+                    elif (parts[cursor][1] == "[" and cursor + 2 < len(parts)
+                          and parts[cursor + 1][0] == "string" and parts[cursor + 2][1] == "]"):
+                        path.append(parts[cursor + 1][1][1:-1].replace("''", "'").lower())
+                        cursor += 3
+                    elif parts[cursor][1] == "[" and path in (["needs"], ["needs", "scope"], ["needs", "scope", "outputs"]):
+                        return True
+                    else:
+                        break
+                if path[:3] == ["needs", "scope", "outputs"] and len(path) > 3 and path[3] in ("parity", "parity_selfhosted"):
+                    return True
+        return False
+    return reads((job.get("strategy") or {}).get("matrix"))
+
+
+def definition_fingerprints(name: str, raw: dict, scope_source: str | None = None) -> dict[str, str]:
+    """Derive job identities from YAML and helper source as data only.
+
+    The raw matrix plus its scope helper's digest binds exactly the same
+    definitions without executing a member's resolver inside integrate.py.
+    """
+    result = {}
+    for job_id in pull_request_reachable(raw):
+        job = raw["jobs"][job_id]
+        if name == "rust.yml" and scope_matrix(job):
+            if scope_source is None:
+                result[job_id] = UNRESOLVED
+                continue
+            source = scope_source.replace("\r\n", "\n")
+            job = {"definition": job, "parity_scope_sha256": hashlib.sha256(source.encode("utf-8")).hexdigest()}
+        result[job_id] = fingerprint(job)
+    return result
+
+
+def current_definitions(name: str, raw: dict | None = None) -> dict[str, str]:
+    source = (ROOT / "rust/ci/parity_scope.py").read_text(encoding="utf-8") if name == "rust.yml" else None
+    return definition_fingerprints(name, raw if raw is not None else load(name, resolved=False), source)
+
+
+def parse_fingerprint_baseline(document) -> dict:
+    if (not isinstance(document, dict) or type(document.get("schema")) is not int or document["schema"] != 1
+            or not isinstance(document.get("workflows"), dict)):
+        raise ValueError("invalid generated fingerprint baseline")
+    for name, jobs in document["workflows"].items():
+        if not isinstance(name, str) or not isinstance(jobs, dict) or any(
+                not isinstance(job, str) or not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{16}", value)
+                for job, value in jobs.items()):
+            raise ValueError("invalid generated fingerprint baseline")
+    return document["workflows"]
+
+
+def read_fingerprint_baseline() -> dict:
+    try:
+        return parse_fingerprint_baseline(json.loads(fingerprint_path().read_text(encoding="utf-8-sig")))
+    except (OSError, ValueError) as error:
+        raise ValueError("generated fingerprint baseline is unavailable or malformed") from error
+
+
+def parse_acceptance(record, *, legacy=False) -> dict:
+    if not isinstance(record, dict) or not isinstance(record.get("workflow"), str) or not isinstance(record.get("job"), str):
+        raise ValueError("acceptance must name its workflow and job")
+    if not isinstance(record.get("reason"), str) or not record["reason"].strip():
+        raise ValueError("acceptance needs a nonempty reason")
+    value = record.get("fingerprint")
+    if ("fingerprint" not in record or value is None and legacy or value is not None and (
+            not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{16}", value))):
+        raise ValueError("acceptance needs a definition fingerprint")
+    if not legacy and ("before" not in record or record["before"] is not None and (
+            not isinstance(record["before"], str) or not re.fullmatch(r"[0-9a-f]{16}", record["before"]))):
+        raise ValueError("acceptance needs its baseline fingerprint")
+    if not legacy and record["before"] is None and value is None:
+        raise ValueError("acceptance must identify an existing or new definition")
+    return {**record, "legacy": legacy}
+
+
+def read_acceptances() -> tuple[list[dict], list[str]]:
+    records, errors = [], []
+    for path in sorted(acceptance_directory().glob("*.json")):
+        try:
+            document = json.loads(path.read_text(encoding="utf-8-sig"))
+            records.extend(parse_acceptance_document(document))
+        except (OSError, ValueError, TypeError) as error:
+            errors.append(f"{path.name}: invalid CI budget acceptance ({type(error).__name__})")
+    return records, errors
+
+
+def parse_acceptance_document(document) -> list[dict]:
+    if (not isinstance(document, dict) or type(document.get("schema")) is not int or document["schema"] != 1
+            or "legacy" in document and type(document["legacy"]) is not bool):
+        raise ValueError("invalid acceptance schema")
+    if document.get("legacy") is True:
+        if not isinstance(document.get("accepted"), list):
+            raise ValueError("invalid legacy acceptance history")
+        return [parse_acceptance(row, legacy=True) for row in document["accepted"]]
+    return [parse_acceptance(document)]
+
+
+def approval_reason(records: list[dict], name: str, job: str, before, current: str | None) -> str | None:
+    return next((row["reason"] for row in records if not row.get("legacy") and row.get("workflow") == name
+                 and row.get("job") == job and row.get("before") == before and row.get("fingerprint") == current
+                 and isinstance(row.get("reason"), str) and row["reason"].strip()), None)
+
+
+def write_acceptance(name: str, job: str, before, current: str | None, reason: str) -> Path:
+    document = {"schema": 1, "workflow": name, "job": job, "before": before,
+                "fingerprint": current, "reason": reason.strip()}
+    parse_acceptance(document)
+    directory = acceptance_directory()
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"{datetime.now(timezone.utc):%Y-%m-%d}-{uuid.uuid4().hex}.json"
+    with path.open("x", encoding="utf-8", newline="\n") as output:
+        output.write(json.dumps(document, indent=2) + "\n")
+    return path
+
+
+def recorded_definitions(name: str, entry: dict) -> tuple[dict, bool]:
+    if "fingerprints" in entry:
+        if not isinstance(entry["fingerprints"], dict):
+            raise ValueError("malformed legacy fingerprints")
+        return entry["fingerprints"], True
+    baseline = read_fingerprint_baseline()
+    if name not in baseline:
+        raise ValueError(f"{name} has no generated fingerprint baseline")
+    return baseline[name], False
+
+
+def approved_definitions(name: str, workflow: dict, entry: dict, raw: dict,
+                         records: list[dict]) -> tuple[dict, dict]:
+    recorded, legacy = recorded_definitions(name, entry)
+    current = current_definitions(name, raw)
+    comparable = fingerprints(workflow) if legacy else current
+    approved = {job: value for job, value in current.items() if value != UNRESOLVED and (
+        recorded.get(job) == comparable.get(job) or approval_reason(records, name, job, recorded.get(job), value))}
+    return current, approved
+
+
+def budget_data(document: dict) -> dict:
+    if not isinstance(document, dict) or any(not isinstance(entry, dict) for entry in document.values()):
+        raise ValueError("malformed authored CI budget data")
+    return {name: {key: copy.deepcopy(value) for key, value in entry.items() if key not in ("fingerprints", "accepted")}
+            for name, entry in document.items()}
+
+
+def merge_budget_data(base: dict, ours: dict, theirs: dict) -> dict:
+    """Merge authored data only; incompatible prices/limits still conflict."""
+    missing = object()
+    def merge(before, left, right, path=()):
+        if left == right:
+            return copy.deepcopy(left) if left is not missing else missing
+        if left == before:
+            return copy.deepcopy(right) if right is not missing else missing
+        if right == before:
+            return copy.deepcopy(left) if left is not missing else missing
+        if isinstance(left, dict) and isinstance(right, dict):
+            old = before if isinstance(before, dict) else {}
+            result = {}
+            for key in dict.fromkeys([*old, *left, *right]):
+                value = merge(old.get(key, missing), left.get(key, missing), right.get(key, missing), (*path, key))
+                if value is not missing:
+                    result[key] = value
+            return result
+        raise ValueError("semantic CI budget conflict: " + ".".join(path))
+    return merge(budget_data(base), budget_data(ours), budget_data(theirs))
+
+
 def unexplained_raises(base: dict, current: dict) -> list[str]:
     """Each limit ``current`` raises over ``base`` (the budget on master)
     whose workflow's ``why`` is empty or unchanged: a raise names its
@@ -518,14 +733,13 @@ def definitions_at(name: str, sha: str) -> dict[str, str]:
     fills are UNRESOLVED, since their shards may have run other rows."""
     import yaml
     raw = yaml.safe_load(_contents(f".github/workflows/{name}", sha))
+    source = _contents("rust/ci/parity_scope.py", sha) if name == "rust.yml" else None
+    found = definition_fingerprints(name, raw, source)
     if name != "rust.yml":
-        return fingerprints(raw)
-    sys.path.insert(0, str(ROOT / "rust/ci"))
-    from parity_scope import resolve
-    found = fingerprints(resolve(json.loads(json.dumps(raw))))
+        return found
     local = (ROOT / "rust/ci/parity_scope.py").read_text(encoding="utf-8")
-    if _contents("rust/ci/parity_scope.py", sha).replace("\r\n", "\n") != local.replace("\r\n", "\n"):
-        found = {job: UNRESOLVED if SCOPE_RESOLVED in json.dumps(raw["jobs"][job]) else value
+    if source.replace("\r\n", "\n") != local.replace("\r\n", "\n"):
+        found = {job: UNRESOLVED if scope_matrix(raw["jobs"][job]) else value
                  for job, value in found.items()}
     return found
 
@@ -558,9 +772,15 @@ def problems(name: str, workflow: dict, budget: dict, raw: dict | None = None) -
                      f"--workflow {name} <run> <run>), or enter an estimate (docs/dev/ci-budget.md)")
     if removed:
         found.append(f"{name}: budgeted jobs the workflow no longer has: {removed}; re-measure")
-    recorded = entry.get("fingerprints", {})
-    for job_id, current in fingerprints(workflow).items():
-        if recorded.get(job_id) != current:
+    records, acceptance_errors = read_acceptances()
+    found.extend(acceptance_errors)
+    try:
+        current, approved = approved_definitions(name, workflow, entry, raw, records)
+    except (OSError, ValueError) as error:
+        found.append(f"{name}: fingerprint state unavailable ({error})")
+        current, approved = fingerprints(workflow), {}
+    for job_id in current:
+        if job_id not in approved:
             found.append(f"{name}: job {job_id} changed since its minutes were measured, so they may no "
                          f"longer hold. Re-measure it (python rust/ci/ci_budget.py measure --workflow {name} "
                          "<run> <run>), or record why its cost is unchanged: python rust/ci/ci_budget.py accept "
@@ -692,13 +912,13 @@ def measure(run_ids: list[str]) -> dict[str, dict[str, float]]:
 
 
 def remeasure(entry: dict, workflow: dict, samples: dict[str, dict[str, float]],
-              stale: dict[str, list[str]]) -> list[str]:
+              stale: dict[str, list[str]], current: dict[str, str] | None = None) -> list[str]:
     """Rewrite ``entry``'s minutes from ``samples``: each job's median over
     the runs that ran its current definition. A job with no such sample
     keeps its earlier minutes only if its definition is unchanged since
     they were taken. Returns the jobs left with neither (nothing changes
     then)."""
-    current = fingerprints(workflow)
+    current = fingerprints(workflow) if current is None else current
     jobs, missing = {}, []
     for job_id in pull_request_reachable(workflow):
         for name in expand(job_id, workflow["jobs"][job_id]):
@@ -766,29 +986,55 @@ def main(argv: list[str] | None = None) -> int:
     if options.command == "accept":
         if not options.reason.strip():
             parser.error("--reason must say why the job's cost is unchanged")
-        current = fingerprints(load(options.workflow))
-        if options.job not in current:
-            parser.error(f"{options.job} is not a job a pull request starts in {options.workflow}")
-        entry = budget[options.workflow]
-        entry.setdefault("fingerprints", {})[options.job] = current[options.job]
-        entry.setdefault("accepted", []).append(
-            {"job": options.job, "fingerprint": current[options.job], "reason": options.reason.strip()})
-        BUDGET.write_text(json.dumps(budget, indent=2) + "\n", encoding="utf-8")
-        print(f"{options.workflow}: {options.job} accepted as unchanged in cost: {options.reason.strip()}")
+        try:
+            recorded, _ = recorded_definitions(options.workflow, budget[options.workflow])
+            try:
+                raw = load(options.workflow, resolved=False)
+            except FileNotFoundError:
+                current = {}
+            else:
+                current = current_definitions(options.workflow, raw)
+            if options.job not in current and options.job not in recorded:
+                parser.error(f"{options.job} is not a current or recorded job in {options.workflow}")
+            path = write_acceptance(options.workflow, options.job, recorded.get(options.job), current.get(options.job), options.reason)
+        except (KeyError, OSError, ValueError) as error:
+            parser.error(str(error))
+        print(f"{options.workflow}: {options.job} accepted as unchanged in cost: {options.reason.strip()} "
+              f"(ci_budget_accept/{path.name})")
         return 0
     if len(options.runs) < 2:
         parser.error("measure takes two or more runs: one hosted run is too noisy to budget on")
     workflow = load(options.workflow)
     reachable = reachable_names(workflow)
-    stale = stale_definitions(options.workflow, options.runs, fingerprints(workflow))
+    raw = load(options.workflow, resolved=False)
+    current = current_definitions(options.workflow, raw)
+    stale = stale_definitions(options.workflow, options.runs, current)
     for job_id, runs in sorted(stale.items()):
         print(f"{job_id}: runs {runs} ran an older definition; their times for it are left out")
     entry = budget[options.workflow]
-    missing = remeasure(entry, workflow, measure(options.runs), stale)
+    records, errors = read_acceptances()
+    if errors:
+        parser.error("; ".join(errors))
+    try:
+        _, approved = approved_definitions(options.workflow, workflow, entry, raw, records)
+        recorded, _ = recorded_definitions(options.workflow, entry)
+    except (OSError, ValueError) as error:
+        parser.error(str(error))
+    measured = copy.deepcopy(entry)
+    measured["fingerprints"] = approved
+    missing = remeasure(measured, workflow, measure(options.runs), stale, current)
     if missing:
         print(f"no successful run of the current definition of {missing} in these runs, and no earlier "
               "measurement of it holds; add a run that has one", file=sys.stderr)
         return 1
+    for job, value in current.items():
+        if job not in approved:
+            write_acceptance(options.workflow, job, recorded.get(job), value,
+                             f"Re-measured from hosted runs {', '.join(options.runs)}")
+    for job in recorded.keys() - current.keys():
+        write_acceptance(options.workflow, job, recorded[job], None,
+                         f"Job retired; re-measured from hosted runs {', '.join(options.runs)}")
+    entry["jobs"] = measured["jobs"]
     entry["measured_on"] = [int(run) for run in options.runs]
     BUDGET.write_text(json.dumps(budget, indent=2) + "\n", encoding="utf-8")
     total = sum(job["minutes"] for job in entry["jobs"].values())

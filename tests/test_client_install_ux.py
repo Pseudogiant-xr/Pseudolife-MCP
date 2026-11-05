@@ -794,7 +794,9 @@ def test_install_sh_update_line_names_the_launcher_until_path_finds_it(tmp_path:
     assert re.search(r'"[^"]*launcher dir/pseudolife-mcp" update \(--check', off), off
     assert "to PATH" in off and "ops/update.sh --all" in off
     on = _update_line_bash(tmp_path, on_path=True, client_only=False)
-    assert "no checkout needed: pseudolife-mcp update (--check" in on and "to PATH" not in on
+    assert "one command: pseudolife-mcp update (--check" in on and "to PATH" not in on
+    assert "Keep this checkout" in on and "ops/.env" in on
+    assert "no checkout needed" not in on
 
 
 def test_install_sh_update_line_on_a_client_only_install_moves_the_clients(tmp_path: Path) -> None:
@@ -832,7 +834,9 @@ def test_install_ps1_update_line_names_the_launcher_until_path_finds_it(tmp_path
     assert re.search(r"launcher dir[\\/]pseudolife-mcp(\.exe)?\"? update \(--check", off), off
     assert "to PATH" in off and "update.ps1 -All" in off
     on = _update_line_ps1(tmp_path, on_path=True, client_only=False)
-    assert "no checkout needed: pseudolife-mcp update (--check" in on and "to PATH" not in on
+    assert "one command: pseudolife-mcp update (--check" in on and "to PATH" not in on
+    assert "Keep this checkout" in on and "ops/.env" in on
+    assert "no checkout needed" not in on
 
 
 def test_install_ps1_update_line_on_a_client_only_install_moves_the_clients(tmp_path: Path) -> None:

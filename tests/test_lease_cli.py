@@ -569,13 +569,17 @@ def test_an_unusable_board_falls_back_to_the_local_lock(
     assert os_lock.probe(lease_env / "lease-gpu.lock") is False
 
 
-def test_without_a_token_the_board_is_never_contacted(lease_env, tmp_path, lease_without_token, capsys):
+@pytest.mark.parametrize("exit_code", [0, 7])
+def test_without_a_token_the_board_is_never_contacted(lease_env, tmp_path, lease_without_token, capsys, exit_code):
     daemon = FakeDaemon()
-    command, marker = _command(tmp_path)
-    assert _run(["run", "gpu", "--", *command], daemon) == 0
+    command, marker = _command(tmp_path, exit_code=exit_code)
+    assert _run(["run", "gpu", "--", *command], daemon) == exit_code
     assert marker.exists()
     assert daemon.calls == []
-    assert "PSEUDOLIFE_MCP_TOKEN" in capsys.readouterr().err
+    final = capsys.readouterr().err.splitlines()[-1]
+    assert final.startswith(f"lease: LOCAL LOCK ONLY: command exited {exit_code};")
+    assert "board lease was not acquired" in final
+    assert "PSEUDOLIFE_MCP_TOKEN_FILE" in final
 
 
 def test_an_unusable_token_file_skips_the_board(lease_env, tmp_path, monkeypatch, capsys):

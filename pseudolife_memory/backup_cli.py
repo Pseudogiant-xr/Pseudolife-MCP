@@ -201,6 +201,20 @@ def _default_data_dir(environ: Mapping[str, str]) -> Path:
     return Path.cwd() / "data"
 
 
+def _docker_bank_configured() -> bool:
+    """Require an existing bank container, rather than a Docker executable."""
+    from pseudolife_memory import update_cli as up
+    docker = up.docker_cmd()
+    if docker == "docker" and not up.which(docker):
+        return False
+    for container in (up.DAEMON_CONTAINER, up.PG_CONTAINER):
+        code, identity = up.run_cli([docker, "inspect", "-f", "{{.Id}}", container],
+                                    timeout=10, stdout_only=True)
+        if code == 0 and identity.strip():
+            return True
+    return False
+
+
 def run_backup() -> None:
     parser = argparse.ArgumentParser(
         prog="pseudolife-mcp backup",
@@ -227,8 +241,9 @@ def run_backup() -> None:
     args = parser.parse_args(sys.argv[2:])
     from pseudolife_memory import update_cli as up
     try:
-        docker = bool(args.container or args.daemon_container or args.db_port is not None) or (
-            args.data_dir is None and up.Update(up.Options()).detect_tier() == "docker")
+        docker = any(value is not None for value in
+                     (args.container, args.daemon_container, args.db, args.user, args.db_port)) or (
+            args.data_dir is None and _docker_bank_configured())
         if docker:
             from pseudolife_memory.docker_backup_restore import DockerBank
             with up.UpdateLock():
@@ -243,7 +258,9 @@ def run_backup() -> None:
         sys.exit(exc.exit_code if isinstance(exc, up.UpdateError) else 1)
     data_dir = args.data_dir or _default_data_dir(os.environ)
     if not data_dir.exists():
-        print(f"data dir {data_dir} does not exist — nothing to back up.",
+        print(f"data dir {data_dir} does not exist — nothing to back up. "
+              "If this is a Docker install, Docker or its bank containers may be unavailable; "
+              "start Docker and retry, or pass --container <postgres>.",
               file=sys.stderr)
         sys.exit(1)
     try:

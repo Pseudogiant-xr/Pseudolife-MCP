@@ -118,6 +118,7 @@ jobs:
     outputs:
       python: ${{ steps.scope.outputs.python }}
       batch_passed: ${{ steps.batch.outputs.passed }}
+      push_passed: ${{ steps.push.outputs.passed }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -131,6 +132,17 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: python3 ops/ci_batch_passed.py --workflow .github/workflows/ci.yml --github-output "$GITHUB_OUTPUT"
+
+      # A successful push on this exact SHA already covered the ordinary
+      # lanes. Keep nightly-only evidence and its build prerequisites.
+      # Empty output or an API failure runs every lane as before.
+      - name: Check whether this workflow passed on the same master push
+        id: push
+        if: github.event_name == 'schedule' && github.ref == 'refs/heads/master'
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 -m ops.ci_push_passed --workflow .github/workflows/ci.yml --github-output "$GITHUB_OUTPUT"
 
       - name: Classify the change
         id: scope
@@ -238,7 +250,7 @@ jobs:
     # The Python must be the image's (tests/test_check_lock_resolves.py pins
     # it to the FROM line).
     needs: scope
-    if: ${{ !cancelled() && !contains(fromJSON(needs.scope.outputs.batch_passed || '[]'), 'lock-resolve') }}
+    if: ${{ !cancelled() && needs.scope.outputs.push_passed != 'true' && !contains(fromJSON(needs.scope.outputs.batch_passed || '[]'), 'lock-resolve') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -255,7 +267,7 @@ jobs:
     needs: scope
     # Fail-safe: run unless scope affirmatively says skip, so a failed or
     # empty scope runs the suite instead of skipping it.
-    if: ${{ !cancelled() && needs.scope.outputs.python != 'false' && !contains(fromJSON(needs.scope.outputs.batch_passed || '[]'), 'test') }}
+    if: ${{ !cancelled() && needs.scope.outputs.push_passed != 'true' && needs.scope.outputs.python != 'false' && !contains(fromJSON(needs.scope.outputs.batch_passed || '[]'), 'test') }}
     runs-on: ubuntu-latest
     # v25 roughly doubled suite wall time (real Qwen3-0.6B CPU embeds
     # replaced MiniLM's ONNX path: 238s -> ~437s locally), and a cold
@@ -388,7 +400,7 @@ jobs:
     needs: scope
     # Fail-safe: run unless scope affirmatively says skip, so a failed or
     # empty scope runs the suite instead of skipping it.
-    if: ${{ !cancelled() && needs.scope.outputs.python != 'false' && !contains(fromJSON(needs.scope.outputs.batch_passed || '[]'), 'test-lite-linux') }}
+    if: ${{ !cancelled() && needs.scope.outputs.push_passed != 'true' && needs.scope.outputs.python != 'false' && !contains(fromJSON(needs.scope.outputs.batch_passed || '[]'), 'test-lite-linux') }}
     runs-on: ubuntu-latest
     timeout-minutes: 50
 
@@ -480,7 +492,7 @@ jobs:
     needs: scope
     # Fail-safe: run unless scope affirmatively says skip, so a failed or
     # empty scope runs the suite instead of skipping it.
-    if: ${{ !cancelled() && needs.scope.outputs.python != 'false' && !contains(fromJSON(needs.scope.outputs.batch_passed || '[]'), 'test-lite-windows') }}
+    if: ${{ !cancelled() && needs.scope.outputs.push_passed != 'true' && needs.scope.outputs.python != 'false' && !contains(fromJSON(needs.scope.outputs.batch_passed || '[]'), 'test-lite-windows') }}
     runs-on: windows-latest
     # Needs no embedding model (torch installs as a core dep but never loads
     # weights here). Measured 2026-10-20 on the maintainer's Windows host,
@@ -592,6 +604,9 @@ jobs:
           tests/test_installer_client_only.py::test_shell_fragment_transport_is_utf8_with_a_cp1252_parent
           tests/test_installer_client_only_ps.py::test_powershell_fragment_transport_is_utf8_with_a_cp1252_parent
           tests/test_installer_client_only_ps.py::test_powershell_fixture_roundtrips_unicode_stdio
+          tests/test_shim_python.py
+          tests/test_shim_cutover.py
+          tests/test_shim_autostart_refs.py
           tests/test_unattended_update.py
           tests/test_update_engine.py
           tests/test_tool_annotations.py::test_all_tools_have_conservative_approval_hints
@@ -617,7 +632,13 @@ jobs:
           tests/test_move_cli.py::test_postcommit_signal_records_followups_without_rollback
           tests/test_move_cli.py::test_signal_after_confirmed_moved_marker_never_rolls_back_the_commit
           tests/test_move_cli.py::test_signal_between_confirmed_marker_and_commit_record_is_deferred
+          tests/test_installer_reruns.py
+          tests/test_shim_runtime_reuse.py
+          tests/test_installer_unattended.py
           tests/test_installer_client_update_schedule.py
+          tests/test_installer_resources.py
+          tests/test_installer_clone_authority.py
+          tests/test_installer_lite.py
           tests/test_tunnel_profiles.py
           tests/test_tunnel_service.py
           tests/test_tunnel_cli.py
@@ -674,7 +695,7 @@ jobs:
     needs: scope
     # Fail-safe: run unless scope affirmatively says skip, so a failed or
     # empty scope runs the suite instead of skipping it.
-    if: ${{ !cancelled() && needs.scope.outputs.python != 'false' && !contains(fromJSON(needs.scope.outputs.batch_passed || '[]'), 'test-lite-macos') }}
+    if: ${{ !cancelled() && needs.scope.outputs.push_passed != 'true' && needs.scope.outputs.python != 'false' && !contains(fromJSON(needs.scope.outputs.batch_passed || '[]'), 'test-lite-macos') }}
     runs-on: macos-latest
     # Curated like the Windows lane: the hook and installer surface needs no
     # embedding model, so this is minutes, not the full suite.
@@ -716,7 +737,7 @@ jobs:
         # older checkout.
         env:
           PSEUDOLIFE_SUITE_LOCK: "off"
-        run: python -m pytest tests/test_conductor_watch.py tests/test_wait_mail_cli.py tests/test_hooks_digest.py tests/test_stop_wake_hook.py tests/test_hook_glob_ranges.py tests/test_coordination_turn_digest.py tests/test_coordination_adapter.py tests/test_coordination_credentials.py tests/test_codex_doorbell.py tests/test_lease_cli.py tests/test_suite_lock.py tests/test_memory_changes_hook.py tests/test_client_install_ux.py tests/test_codex_hooks.py tests/test_subagent_board_guard.py tests/test_codex_hook_setup_edges.py tests/test_installer_legacy_hooks.py tests/test_installer_client_update_schedule.py tests/test_plugin_packaging.py tests/test_embedded_pg.py tests/test_tunnel_bridge.py tests/test_tunnel_cli.py tests/test_tunnel_profiles.py tests/test_tunnel_runtime.py tests/test_tunnel_service.py tests/test_prune_worktrees.py tests/test_child_python.py tests/test_move_cli.py::test_signal_during_target_expose_undoes_serve tests/test_move_cli.py::test_postcommit_signal_records_followups_without_rollback tests/test_move_cli.py::test_signal_after_confirmed_moved_marker_never_rolls_back_the_commit tests/test_move_cli.py::test_signal_between_confirmed_marker_and_commit_record_is_deferred -q -rs
+        run: python -m pytest tests/test_conductor_watch.py tests/test_wait_mail_cli.py tests/test_hooks_digest.py tests/test_stop_wake_hook.py tests/test_hook_glob_ranges.py tests/test_coordination_turn_digest.py tests/test_coordination_adapter.py tests/test_coordination_credentials.py tests/test_codex_doorbell.py tests/test_lease_cli.py tests/test_suite_lock.py tests/test_memory_changes_hook.py tests/test_client_install_ux.py tests/test_codex_hooks.py tests/test_subagent_board_guard.py tests/test_codex_hook_setup_edges.py tests/test_installer_lite.py tests/test_installer_legacy_hooks.py tests/test_installer_client_update_schedule.py tests/test_plugin_packaging.py tests/test_embedded_pg.py tests/test_tunnel_bridge.py tests/test_tunnel_cli.py tests/test_tunnel_profiles.py tests/test_tunnel_runtime.py tests/test_tunnel_service.py tests/test_prune_worktrees.py tests/test_child_python.py tests/test_move_cli.py::test_signal_during_target_expose_undoes_serve tests/test_move_cli.py::test_postcommit_signal_records_followups_without_rollback tests/test_move_cli.py::test_signal_after_confirmed_moved_marker_never_rolls_back_the_commit tests/test_move_cli.py::test_signal_between_confirmed_marker_and_commit_record_is_deferred -q -rs
 
   test-windows-nightly:
     # Not a merge gate, and never run for a pull request or merge group: the
@@ -864,10 +885,10 @@ jobs:
           if-no-files-found: warn
 
   frontend:
-    # Never scoped by the diff; skipped only on a master push whose merged
-    # batch passed it on the same tree, and run when scope fails.
+    # Never scoped by the diff; skips a same-tree batch pass on push or a
+    # same-SHA successful push on schedule, and runs when scope fails.
     needs: scope
-    if: ${{ !cancelled() && !contains(fromJSON(needs.scope.outputs.batch_passed || '[]'), 'frontend') }}
+    if: ${{ !cancelled() && needs.scope.outputs.push_passed != 'true' && !contains(fromJSON(needs.scope.outputs.batch_passed || '[]'), 'frontend') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
