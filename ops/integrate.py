@@ -373,8 +373,7 @@ def _snapshot_state(sha: str, rollup: list[dict] | None,
                 continue
             if conclusion == "SKIPPED":
                 prior = [s for s in steps if int(s["number"]) < int(step["number"])]
-                if (_check_state(meta) == CANCELLED
-                        or any(_check_state(s) == CANCELLED for s in prior)):
+                if any(_check_state(s) == CANCELLED for s in prior):
                     waiting.append(f"{name} was cancelled before replay; push a new commit or rerun the Rust workflow")
                 elif any(_check_state(s) in FAILED for s in prior):
                     # continue-on-error prerequisites can fail legitimately

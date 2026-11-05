@@ -179,6 +179,15 @@ def test_cancel_after_successful_replay_keeps_the_checkpoint(integrate, actions)
     assert integrate._snapshot_state(SHA, rollup, True) == ("satisfied", "")
 
 
+@pytest.mark.parametrize("prerequisite,state", [("success", "satisfied"), ("cancelled", "pending")])
+def test_cancel_after_skipped_replay_uses_step_level_states(integrate, actions, prerequisite, state):
+    rollup, jobs, _, _ = actions
+    jobs["1"].update(status="completed", conclusion="cancelled")
+    jobs["1"]["steps"][0]["conclusion"] = prerequisite
+    jobs["1"]["steps"][1]["conclusion"] = "skipped"
+    assert integrate._snapshot_state(SHA, rollup, True)[0] == state
+
+
 def test_active_replay_waits_without_suggesting_a_restart(integrate, actions):
     rollup, jobs, _, _ = actions
     jobs["1"]["steps"][1].update(status="in_progress", conclusion=None)
