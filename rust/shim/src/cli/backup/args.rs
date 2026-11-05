@@ -15,6 +15,13 @@ pub(super) enum Parsed {
     Error(String),
 }
 const OPTIONS: [&str; 4] = ["--help", "--data-dir", "--out", "--keep-days"];
+const DOCKER_OPTIONS: [&str; 5] = [
+    "--container",
+    "--daemon-container",
+    "--db",
+    "--user",
+    "--db-port",
+];
 
 pub(super) fn columns_supported() -> bool {
     let Some(value) = std::env::var("COLUMNS")
@@ -119,6 +126,12 @@ pub(super) fn parse(arguments: &[OsString]) -> Option<Parsed> {
         .collect::<Option<_>>()?;
     // argparse classifies the full argv before executing actions (including help).
     for raw in values.iter().take_while(|raw| **raw != "--") {
+        let name = raw.split_once('=').map_or(*raw, |(name, _)| name);
+        // Python owns Docker selectors, including prefixes whose ambiguity
+        // depends on its complete option set. Defer before parsing or effects.
+        if name.starts_with("--") && DOCKER_OPTIONS.iter().any(|option| option.starts_with(name)) {
+            return None;
+        }
         if let Err(message) = option(raw) {
             return Some(Parsed::Error(message));
         }
@@ -275,6 +288,11 @@ pub(super) fn usage(width: usize) -> String {
         "[--data-dir DATA_DIR]",
         "[--out OUT]",
         "[--keep-days KEEP_DAYS]",
+        "[--container CONTAINER]",
+        "[--daemon-container DAEMON_CONTAINER]",
+        "[--db DB]",
+        "[--user USER]",
+        "[--db-port DB_PORT]",
     ];
     if 7 + prog.len() + 1 + options.join(" ").len() <= width {
         format!("usage: {prog} {}\n", options.join(" "))
@@ -358,6 +376,23 @@ pub(super) fn help(width: usize) -> String {
         (
             "--keep-days KEEP_DAYS",
             "rotate this tool's own backups older than N days (default 7)",
+        ),
+        ("--container CONTAINER", "Docker PostgreSQL container"),
+        (
+            "--daemon-container DAEMON_CONTAINER",
+            "Docker daemon container",
+        ),
+        (
+            "--db DB",
+            "Docker database name (default: daemon configuration)",
+        ),
+        (
+            "--user USER",
+            "Docker database role (default: daemon configuration)",
+        ),
+        (
+            "--db-port DB_PORT",
+            "PostgreSQL port inside the Docker container (default: daemon configuration)",
         ),
     ];
     let position = 24.min(width.saturating_sub(20).max(4));
