@@ -636,6 +636,8 @@ jobs:
           tests/test_installer_resources.py
           tests/test_installer_clone_authority.py
           tests/test_installer_lite.py
+          rust/ci/test_pr_precheck.py
+          rust/ci/test_pr_precheck_run.py
           tests/test_tunnel_profiles.py
           tests/test_tunnel_service.py
           tests/test_tunnel_cli.py

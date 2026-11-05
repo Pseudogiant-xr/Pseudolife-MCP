@@ -263,8 +263,9 @@ def module_of(parts: tuple[str, ...]) -> str:
 
 # The evals.rust_port modules every parity shard runs to bind its oracle.
 ORACLE_MODULES = ("oracle_selection", "phase1_oracle", "provenance")
-# The scan's own tests name packages in strings; they import nothing.
-SCAN_EXCLUDES = ("rust/ci/test_parity_scope.py",)
+# Scope tests quote package names; ordinary-PR prechecks are not batch harnesses.
+SCAN_EXCLUDES = ("rust/ci/test_parity_scope.py", "rust/ci/pr_precheck.py", "rust/ci/pr_precheck_run.py",
+                 "rust/ci/test_pr_precheck.py", "rust/ci/test_pr_precheck_run.py")
 
 
 @functools.lru_cache(maxsize=None)

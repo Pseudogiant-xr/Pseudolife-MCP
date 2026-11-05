@@ -129,6 +129,19 @@ def test_the_import_scan_follows_test_helpers_transitively(tmp_path, monkeypatch
         parity_scope.harness_imports.cache_clear()
 
 
+def test_ordinary_pr_precheck_imports_do_not_widen_batch_routing(tmp_path, monkeypatch):
+    directory = tmp_path / "rust/ci"
+    directory.mkdir(parents=True)
+    (directory / "pr_precheck_run.py").write_text("from evals.rust_port import early_only\nfrom tests import early_seeder\n")
+    (directory / "test_pr_precheck_run.py").write_text("from evals.rust_port import early_test_only\n")
+    (directory / "batch_harness.py").write_text("from evals.rust_port import batch_helper\nfrom tests import batch_seeder\n")
+    monkeypatch.setattr(parity_scope, "ROOT", tmp_path)
+    imports = parity_scope.harness_imports.__wrapped__
+    assert "batch_helper" in imports("evals.rust_port")
+    assert not {"early_only", "early_test_only"} & imports("evals.rust_port")
+    assert "batch_seeder" in imports("tests") and "early_seeder" not in imports("tests")
+
+
 def test_the_floor_is_cli_w1a_and_eval():
     # The brief from the 2026-10-20 root-cause report: cli, h5-w1a and eval
     # on every Rust pull request; cli is now five shards (2026-10-24).
