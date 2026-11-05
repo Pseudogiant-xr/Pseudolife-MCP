@@ -1,0 +1,67 @@
+{
+  "accepted": [
+    {
+      "fingerprint": "6093ad8fe4dd3a6b",
+      "job": "test-lite-windows",
+      "reason": "Preserve runtime-reuse/rerun selections alongside the landed Docker backup/restore cases in the same Windows step; no new job, setup step or retry.",
+      "workflow": "ci.yml"
+    },
+    {
+      "fingerprint": "528e63bb05e8956b",
+      "job": "test-lite-windows",
+      "reason": "Combine locale-safe shared fixture transport with bounded unattended installer coverage in the existing Windows lane; no new job or setup step.",
+      "workflow": "ci.yml"
+    },
+    {
+      "fingerprint": "7c3eb46156f5ec89",
+      "job": "test-lite-windows",
+      "reason": "Mechanically combine the existing UTF-8 transport, unattended installer and Claude profile cases in the same Windows pytest step; no new job, setup step or retry.",
+      "workflow": "ci.yml"
+    },
+    {
+      "fingerprint": "8e651040e7514ef0",
+      "job": "test-lite-windows",
+      "reason": "Combine the existing unattended installer selection with the reviewed move exposure and ownership coverage after forwarding master; no new job, setup step or retry.",
+      "workflow": "ci.yml"
+    },
+    {
+      "fingerprint": "c768d5c6971c67aa",
+      "job": "test-lite-windows",
+      "reason": "Combine the existing unattended installer selection with the landed autostart/runtime cases in the same Windows step after forwarding batch-9 master; no new job, setup step or retry.",
+      "workflow": "ci.yml"
+    },
+    {
+      "fingerprint": "41a783a011987739",
+      "job": "test-lite-windows",
+      "reason": "Retain the existing unattended installer selection alongside the landed Docker backup/restore cases after forwarding master; no new job, setup step or retry.",
+      "workflow": "ci.yml"
+    },
+    {
+      "fingerprint": "8ffc934b59e52400",
+      "job": "test-lite-windows",
+      "reason": "Add bounded recorded-choice, Compose rerun and runtime-reuse regressions to the existing Windows installer lane; no new job or setup step.",
+      "workflow": "ci.yml"
+    },
+    {
+      "fingerprint": "8985a4f4238fee41",
+      "job": "test-lite-windows",
+      "reason": "Retain the existing rerun/runtime tests together with the merged installer UTF-8 and Claude profile coverage in one Windows step; no new job, setup step or retry.",
+      "workflow": "ci.yml"
+    },
+    {
+      "fingerprint": "c1904d8d06b14663",
+      "job": "test-lite-windows",
+      "reason": "Retain recorded-choice and runtime-reuse cases alongside the merged move exposure and ownership selection in the existing Windows step; no new job, setup step or retry.",
+      "workflow": "ci.yml"
+    },
+    {
+      "fingerprint": "74b2b75b2326bea1",
+      "job": "test-lite-windows",
+      "reason": "Retain runtime-reuse and rerun selectors with the landed shim Python, cutover and autostart-reference cases in the existing Windows step; no new job, setup step or retry.",
+      "workflow": "ci.yml"
+    }
+  ],
+  "legacy": true,
+  "schema": 1,
+  "source_head": "5c08a42bb9dd1ccceaf022099e1532712ed067a1"
+}
