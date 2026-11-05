@@ -332,7 +332,7 @@
       "lock-resolve": "83bcc6b654896c6d",
       "test": "ac414107d3d9c71d",
       "test-lite-linux": "44e2a8f2c01baeab",
-      "test-lite-windows": "74b2b75b2326bea1",
+      "test-lite-windows": "6093ad8fe4dd3a6b",
       "test-lite-macos": "c4a0ad0c70bb205a",
       "frontend": "b1b6a1a1278f2e60"
     },
@@ -454,6 +454,11 @@
       },
       {
         "job": "test-lite-windows",
+        "fingerprint": "7b21e54535e9e185",
+        "reason": "Accept the merged Windows lite lane with existing profile notice coverage and mocked Docker backup/restore coverage; no jobs, setup steps or dependencies were added and measured limits remain unchanged."
+      },
+      {
+        "job": "test-lite-windows",
         "fingerprint": "7a0a0b4ce51f8771",
         "reason": "Combines eight fixture-only Claude profile cases with six mocked codec cases and one short PowerShell Unicode round-trip in the existing Python step. No new jobs, shards or dependency setup; retain the measured lane baseline within unchanged limits pending the next batch measurement."
       },
@@ -464,13 +469,33 @@
       },
       {
         "job": "test-lite-windows",
+        "fingerprint": "d0ebc44de922485c",
+        "reason": "Combines the existing mocked Docker backup and restore coverage with the merged profile and codec cases in the same Windows Python step; no new jobs, setup steps or dependencies, and existing measured limits remain unchanged."
+      },
+      {
+        "job": "test-lite-windows",
+        "fingerprint": "eb6c54810cb910f6",
+        "reason": "Combine the existing mocked Docker backup/restore cases with the merged installer resource and Codex discovery coverage in the same Windows step; retain measured limits, jobs, shards, setup and dependencies unchanged."
+      },
+      {
+        "job": "test-lite-windows",
         "fingerprint": "987e397aa179f20a",
         "reason": "Forwards the reviewed move exposure consent and rollback selectors into the existing Windows pytest step; mocked external effects add no setup or process stress and retain measured lane cost."
       },
       {
         "job": "test-lite-windows",
+        "fingerprint": "854141c3bce5618b",
+        "reason": "Merge the existing mocked Docker backup and restore coverage with the reviewed move exposure consent and rollback selectors in the same Windows pytest step; preserve both parent acceptance records, measured costs, limits, setup and dependencies."
+      },
+      {
+        "job": "test-lite-windows",
         "fingerprint": "b2bceebaefd33725",
         "reason": "Retain upstream move-consent/rollback, installer-ownership, UTF-8 and profile selectors plus the previously validated bounded autostart files in the existing Windows step. Mocked move effects require no extra setup or process stress; no jobs, shards, retries or budget limits are added."
+      },
+      {
+        "job": "test-lite-windows",
+        "fingerprint": "30753a5a0c639e54",
+        "reason": "Combine the existing Docker backup and restore tests with the reviewed upstream shim Python, cutover and autostart selectors in the same Windows step. Retain both parent acceptance histories and all measured costs and limits; no job, shard, setup, dependency or retry is added."
       },
       {
         "job": "test-lite-windows",
@@ -494,6 +519,11 @@
       },
       {
         "job": "test-lite-windows",
+        "fingerprint": "41a783a011987739",
+        "reason": "Retain the existing unattended installer selection alongside the landed Docker backup/restore cases after forwarding master; no new job, setup step or retry."
+      },
+      {
+        "job": "test-lite-windows",
         "fingerprint": "8ffc934b59e52400",
         "reason": "Add bounded recorded-choice, Compose rerun and runtime-reuse regressions to the existing Windows installer lane; no new job or setup step."
       },
@@ -511,6 +541,11 @@
         "job": "test-lite-windows",
         "fingerprint": "74b2b75b2326bea1",
         "reason": "Retain runtime-reuse and rerun selectors with the landed shim Python, cutover and autostart-reference cases in the existing Windows step; no new job, setup step or retry."
+      },
+      {
+        "job": "test-lite-windows",
+        "fingerprint": "6093ad8fe4dd3a6b",
+        "reason": "Preserve runtime-reuse/rerun selections alongside the landed Docker backup/restore cases in the same Windows step; no new job, setup step or retry."
       }
     ]
   }

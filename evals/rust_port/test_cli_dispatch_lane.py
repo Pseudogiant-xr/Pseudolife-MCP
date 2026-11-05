@@ -212,7 +212,7 @@ def test_cli_judge_rejects_exit_stream_and_newline_changes(field, replacement):
 # A help change updates _USAGE, rust/shim/src/cli_help.txt and this pin
 # together (a content pin: a commit pin would name a commit a squash merge
 # discards).
-PINNED_USAGE_SHA256 = "f11497a658f9a2e0ea0c840420a842ea36c1334621393e2cd6e617de5d75f701"
+PINNED_USAGE_SHA256 = "5806d34185cdd94f2c83af42426d2954a6202abd10aba75d6dcfd9e53a65b0ef"
 
 
 def pinned_usage():
@@ -265,6 +265,15 @@ def test_every_python_mode_is_served_or_deferred_by_the_native_shim():
 def test_help_source_matches_pinned_python_literal_bytes():
     root = Path(__file__).resolve().parents[2]
     assert (root / "rust/shim/src/cli_help.txt").read_bytes() == pinned_usage()
+
+
+def test_native_help_contract_pins_match_python_wire_bytes():
+    root = Path(__file__).resolve().parents[2]
+    contract = (root / "rust/shim/tests/cli_dispatch_contract.rs").read_text(encoding="utf-8")
+    pins = set(re.findall(r'"([0-9a-f]{64})"', contract))
+    usage = pinned_usage()
+    assert pins == {hashlib.sha256(usage).hexdigest(),
+                    hashlib.sha256(usage.replace(b"\n", b"\r\n")).hexdigest()}
 
 
 def test_help_asset_stays_canonical_in_autocrlf_checkout(tmp_path):

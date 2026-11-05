@@ -154,10 +154,59 @@ def test_help_uses_the_terminal_when_columns_is_unusable():
             if slave is not None:
                 os.close(slave)
 
-    for columns in [None, "invalid", "0", "-1"]:
+    # Explicit widths also cover the cached 80-column help and wider wrapping.
+    for columns in [None, "invalid", "0", "-1", "80", "120"]:
         want = help_output([sys.executable, "-m", "pseudolife_memory.cli"], columns)
         assert want[0] == 0
         assert help_output([native], columns) == want
+
+
+@pytest.mark.parametrize("option", [
+    "--container", "--daemon-container", "--db", "--user", "--db-port",
+    "--c", "--daemon", "--u", "--db-p",
+    # These became ambiguous when the Docker selectors were added.
+    "--d", "--da",
+])
+@pytest.mark.parametrize("inline", [False, True])
+def test_docker_selectors_defer_before_bank_effects(tmp_path, option, inline):
+    import os
+    import subprocess
+    bank = tmp_path / "bank"
+    bank.mkdir()
+    config = bank / "config.yaml"
+    config.write_bytes(b"storage: files\n")
+    out = tmp_path / "backups"
+    selector = [f"{option}=5432"] if inline else [option, "5432"]
+    result = subprocess.run([_native_backup(), "backup", "--data-dir", str(bank),
+                             "--out", str(out), *selector],
+                            capture_output=True, timeout=10)
+    assert (result.returncode, result.stdout, result.stderr) == (
+        1, b"", ("pseudolife-stdio: mode 'backup' is deferred in this candidate"
+                  + os.linesep).encode(),
+    )
+    assert not out.exists()
+    assert list(bank.iterdir()) == [config]
+    assert config.read_bytes() == b"storage: files\n"
+
+
+@pytest.mark.parametrize("arguments", [
+    ["--containerized", "pg"], ["--db-port-extra=5432"], ["--unknown"],
+    ["--", "--container", "pg"], ["--out=--container", "--unknown"],
+])
+def test_unknown_options_keep_python_errors(arguments):
+    import os
+    import subprocess
+    import sys
+    env = dict(os.environ, COLUMNS="80")
+    expected = subprocess.run([sys.executable, "-m", "pseudolife_memory.cli",
+                               "backup", *arguments], env=env,
+                              capture_output=True, timeout=10)
+    actual = subprocess.run([_native_backup(), "backup", *arguments], env=env,
+                            capture_output=True, timeout=10)
+    assert expected.returncode == 2
+    assert (actual.returncode, actual.stdout, actual.stderr) == (
+        expected.returncode, expected.stdout, expected.stderr,
+    )
 
 
 def test_nss_errors_keep_numeric_ownership_and_empty_names(tmp_path):
