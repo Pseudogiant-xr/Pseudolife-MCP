@@ -108,9 +108,14 @@ _HANDOFF_PROBE = (
 # directory (a relative CLAUDE_CONFIG_DIR or CODEX_HOME still names the same
 # place) while that directory leaves the import path, where a checkout's
 # pseudolife_memory would otherwise answer for the runtime's own. Python
-# 3.10 has no -P, and -I would also drop PYTHONIOENCODING.
-_HANDOFF_BOOTSTRAP = ("import runpy, sys; del sys.path[0]; module = sys.argv.pop(1); "
-                      "runpy.run_module(module, run_name='__main__', alter_sys=True)")
+# 3.10 has no -P, and -I would also drop PYTHONIOENCODING. Only the builtin
+# sys is imported before the entry goes (a runpy.py there must not run), and
+# only the '' that -c puts first is removed.
+_HANDOFF_BOOTSTRAP = ("import sys\n"
+                      "if sys.path and sys.path[0] == '': del sys.path[0]\n"
+                      "import runpy\n"
+                      "module = sys.argv.pop(1)\n"
+                      "runpy.run_module(module, run_name='__main__', alter_sys=True)\n")
 BUNDLED_COMPOSE = Path(__file__).resolve().parent / "compose"
 _DUMP_MARKER = "PostgreSQL database dump complete"
 

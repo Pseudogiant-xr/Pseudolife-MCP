@@ -433,7 +433,12 @@ def test_the_bootstrap_keeps_the_working_directory_off_the_import_path(tmp_path)
     runtime's own: here a shadowing calendar.py beside the stdlib one."""
     import subprocess
     (tmp_path / "calendar.py").write_text("print('SHADOW')\n", encoding="utf-8")
-    proc = subprocess.run([sys.executable, "-c", up._HANDOFF_BOOTSTRAP, "calendar", "2026", "1"], cwd=tmp_path,
+    # The bootstrap's own import too (security review, 2026-11-06): runpy is
+    # imported only after the working directory left the path.
+    (tmp_path / "runpy.py").write_text("print('SHADOW')\nrun_module = None\n", encoding="utf-8")
+    # frozen_modules=off: 3.11+ freezes runpy, 3.10 (a supported runtime) does not.
+    proc = subprocess.run([sys.executable, "-X", "frozen_modules=off", "-c", up._HANDOFF_BOOTSTRAP,
+                           "calendar", "2026", "1"], cwd=tmp_path,
                           capture_output=True, text=True,
                           env={k: v for k, v in os.environ.items() if not k.upper().startswith("PYTHON")})
     assert proc.returncode == 0, proc.stderr
