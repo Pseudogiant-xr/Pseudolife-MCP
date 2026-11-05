@@ -126,11 +126,11 @@ def test_d2_preflight_rejects_old_schema_and_pending_import():
 def test_overlay_preserves_persistent_data_and_separates_shadow():
     import yaml
     root = Path(__file__).resolve().parents[1]
-    active = yaml.safe_load((root / "ops/docker-compose.rust-daemon.yml").read_text())
+    active = yaml.safe_load((root / "ops/docker-compose.rust-daemon.yml").read_text(encoding="utf-8"))
     daemon = active["services"][up.DAEMON_SERVICE]
     assert daemon["build"]["dockerfile"] == "ops/Dockerfile.daemon-rust"
     assert "tmpfs" not in daemon
-    shadow = yaml.safe_load((root / "ops/docker-compose.rust-shadow.yml").read_text())
+    shadow = yaml.safe_load((root / "ops/docker-compose.rust-shadow.yml").read_text(encoding="utf-8"))
     assert up.DAEMON_SERVICE not in shadow["services"]
     service = shadow["services"]["pseudolife-rust-shadow"]
     assert service["environment"]["PSEUDOLIFE_READ_ONLY"] == "1"
@@ -177,17 +177,17 @@ def test_shadow_reads_the_writers_private_state_and_presents_its_identity(host_e
     import re
     root = Path(__file__).resolve().parents[1]
     env = dict(host_env, PSEUDOLIFE_SHADOW_DB_PASSWORD="fixture")
-    writer = _render_compose((root / "ops/docker-compose.yml").read_text(), env)["services"][up.DAEMON_SERVICE]
+    writer = _render_compose((root / "ops/docker-compose.yml").read_text(encoding="utf-8"), env)["services"][up.DAEMON_SERVICE]
     for overlay in ("ops/docker-compose.rust-shadow.yml", "pseudolife_memory/compose/docker-compose.rust-shadow.yml"):
-        shadow = _render_compose((root / overlay).read_text(), env)["services"]["pseudolife-rust-shadow"]
+        shadow = _render_compose((root / overlay).read_text(encoding="utf-8"), env)["services"]["pseudolife-rust-shadow"]
         for key in ("TZ", "PSEUDOLIFE_WRITER_ID", "PSEUDOLIFE_MCP_TOOLSET", "PSEUDOLIFE_MCP_TIER_MAP"):
             assert shadow["environment"].get(key) == writer["environment"][key], (overlay, key)
-        uid = re.search(r"useradd --uid (\d+) --gid (\d+)", (root / "ops/Dockerfile.daemon").read_text())
+        uid = re.search(r"useradd --uid (\d+) --gid (\d+)", (root / "ops/Dockerfile.daemon").read_text(encoding="utf-8"))
         assert shadow["user"] == f"{uid.group(1)}:{uid.group(2)}", overlay
         assert shadow["cap_drop"] == ["ALL"] and "cap_add" not in shadow, overlay
         assert "pseudolife_data:/data:ro" in shadow["volumes"], overlay
     # A fresh shadow model volume inherits the image directory's owner.
-    rust = (root / "ops/Dockerfile.daemon-rust").read_text()
+    rust = (root / "ops/Dockerfile.daemon-rust").read_text(encoding="utf-8")
     assert f"chown {uid.group(1)}:{uid.group(2)} /models" in rust
 
 
