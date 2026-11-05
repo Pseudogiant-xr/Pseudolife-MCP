@@ -235,7 +235,7 @@ fn marker_refusal(path: &Path, own: u32, owner: u32, mode: u32) -> Option<String
     let shown = path.display();
     if owner != own {
         return Some(format!(
-            "pseudolife-mcp: ignoring {shown}: it is owned by another user (uid {owner}), so it \
+            "pseudolife-mcp: ignoring {shown}: it is owned by another user, so it \
              could forge or suppress board wakes for this session. Fix: remove it \
              (rm '{shown}'); the plugin hooks write it again."
         ));
@@ -544,7 +544,9 @@ mod tests {
         }
         let line = marker_refusal(path, 1000, 0, 0o100600).expect("refused");
         assert!(
-            line.contains("owned by another user (uid 0)") && line.contains("Fix: remove it"),
+            line.contains("owned by another user,")
+                && !line.contains("uid")
+                && line.contains("Fix: remove it"),
             "{line}"
         );
     }
