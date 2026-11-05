@@ -43,7 +43,9 @@ is an admin bypass, so this is the check GitHub does not make. Needs git
 from __future__ import annotations
 
 import argparse
+import copy
 import datetime as dt
+import functools
 import importlib.util
 import json
 import os
@@ -72,8 +74,13 @@ BATCH_RE = re.compile(r"^integrate/(\d{4}-\d{2}-\d{2})-batch-(\d+)$")
 MARKER_RE = r"^(<<<<<<<|>>>>>>>)( |$)"
 CENSUS = "rust/producer_census.py"
 CENSUS_JSON = "rust/producer-census.json"
+CI_BUDGET = "rust/ci/ci_budget.json"
+CI_BUDGET_CODE = "rust/ci/ci_budget.py"
+CI_SCOPE_CODE = "rust/ci/parity_scope.py"
+CI_FINGERPRINTS = "rust/ci/ci_budget_fingerprints.json"
+CI_ACCEPT = "rust/ci/ci_budget_accept"
 # The subject of the batch's one generated commit (see _regenerate_census).
-CENSUS_SUBJECT = "Regenerate the producer census for this batch"
+CENSUS_SUBJECT = "Regenerate producer census and CI metadata for this batch"
 # The Python tests under rust/ that the local full suite never collects
 # (pytest's testpaths is tests/) and that need no built Rust binary: the
 # pytest steps of rust.yml's `rust` job plus the eval parity shard's
@@ -815,6 +822,214 @@ def _release_cut_alone(plan: Plan, members: list[Member]) -> list[Member]:
     return members
 
 
+def _budget_text(rev: str, path: str) -> str | None:
+    shown = git("show", f"{rev}:{path}", check=False)
+    return shown.stdout if shown.returncode == 0 else None
+
+
+def _budget_json(rev: str, path: str):
+    text = _budget_text(rev, path)
+    return None if text is None else json.loads(text)
+
+
+def _data_module(source: str, name: str):
+    # The caller supplies master's immutable source, never member code.
+    with tempfile.TemporaryDirectory() as temporary:
+        path = Path(temporary) / f"{name}.py"
+        path.write_text(source, encoding="utf-8")
+        spec = importlib.util.spec_from_file_location(name, path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+    return module
+
+
+@functools.lru_cache(maxsize=None)
+def _budget_tools(base_sha: str):
+    """Master's budget reader/resolver, frozen by immutable commit ID."""
+    source = _budget_text(base_sha, CI_BUDGET_CODE)
+    if source is None:
+        return None
+    try:
+        module = _data_module(source, "_batch_ci_budget")
+        supported = all(hasattr(module, name) for name in (
+            "definition_fingerprints", "parse_fingerprint_baseline", "parse_acceptance_document",
+            "parse_acceptance", "approval_reason", "scope_matrix", "fingerprints", "UNRESOLVED",
+            "budget_data", "merge_budget_data"))
+        if not supported:
+            if _budget_text(base_sha, CI_FINGERPRINTS) is not None:
+                raise ValueError("master's fingerprint baseline has no compatible reader")
+            return None  # The initial format migration is bootstrapped on its own head.
+        scope = _budget_text(base_sha, CI_SCOPE_CODE)
+        resolver = _data_module(scope, "_batch_parity_scope") if scope is not None else None
+    except (Exception, SystemExit) as error:
+        raise Refusal(f"{BASE}'s CI budget reader cannot load ({type(error).__name__}); fix it on {BASE} before building") from None
+    return module, resolver, scope
+
+
+def _budget_records(rev: str, module) -> list[dict]:
+    listing = git("ls-tree", "-r", "--name-only", rev, "--", CI_ACCEPT, check=False)
+    if listing.returncode != 0:
+        raise ValueError("CI acceptance files could not be listed")
+    records = []
+    for path in listing.stdout.splitlines():
+        if path.endswith(".json"):
+            records.extend(module.parse_acceptance_document(_budget_json(rev, path)))
+    return records
+
+
+def _budget_definitions(rev: str, names, module) -> tuple[dict, dict, str | None]:
+    import yaml
+    definitions, raw = {}, {}
+    scope = _budget_text(rev, CI_SCOPE_CODE)
+    for name in names:
+        if (not isinstance(name, str) or "/" in name or "\\" in name
+                or not name.endswith((".yml", ".yaml"))):
+            raise ValueError("CI budget workflow names must be YAML basenames")
+        source = _budget_text(rev, f".github/workflows/{name}")
+        workflow = {"jobs": {}} if source is None else yaml.safe_load(source)
+        if not isinstance(workflow, dict) or not isinstance(workflow.get("jobs"), dict):
+            raise ValueError("invalid workflow data")
+        raw[name] = workflow
+        definitions[name] = module.definition_fingerprints(name, workflow, scope)
+    return definitions, raw, scope
+
+
+def _budget_member_evidence(base_sha: str, member: Member) -> list[dict]:
+    """Verify every changed lane's reason before a generated baseline can cover it."""
+    tools = _budget_tools(base_sha)
+    if tools is None:
+        return []
+    module, resolver, base_scope = tools
+    common = _out("merge-base", base_sha, member.sha)
+    # An author cannot make a changed lane look measured by regenerating this file.
+    if (_budget_text(base_sha, CI_FINGERPRINTS) is not None
+            and _budget_text(common, CI_FINGERPRINTS) != _budget_text(member.sha, CI_FINGERPRINTS)):
+        raise ValueError("PR changed generated fingerprints; restore the baseline and run ci_budget.py accept")
+    data = _budget_json(member.sha, CI_BUDGET)
+    before = _budget_json(common, CI_BUDGET)
+    names = set(data or {}) | set(before or {})
+    current, raw, scope = _budget_definitions(member.sha, names, module)
+    previous, _, _ = _budget_definitions(common, names, module)
+    records = _budget_records(member.sha, module)
+    baseline_document = _budget_json(common, CI_FINGERPRINTS)
+    baselines = module.parse_fingerprint_baseline(baseline_document) if baseline_document is not None else {}
+    imported = []
+    for name in sorted(names):
+        entry = (data or {}).get(name, {})
+        old_entry = (before or {}).get(name, {})
+        legacy = "fingerprints" in old_entry
+        if not legacy and ("fingerprints" in entry or "accepted" in entry):
+            raise ValueError("PR reintroduced legacy CI budget fields; record an acceptance fragment")
+        recorded = old_entry.get("fingerprints", {}) if legacy else baselines.get(name, {})
+        changed = {job for job in current[name].keys() | previous[name].keys()
+                   if current[name].get(job) != previous[name].get(job)}
+        legacy_actual = module.fingerprints(raw[name])
+        if legacy and name == "rust.yml" and any(module.scope_matrix(raw[name]["jobs"].get(job, {})) for job in changed):
+            if resolver is None or scope is None or scope.replace("\r\n", "\n") != (base_scope or "").replace("\r\n", "\n"):
+                raise ValueError("legacy parity resolver differs; merge master and record an acceptance fragment")
+            legacy_actual = module.fingerprints(resolver.resolve(copy.deepcopy(raw[name])))
+        for job in sorted(changed):
+            value = current[name].get(job)
+            reason = module.approval_reason(records, name, job, recorded.get(job), value)
+            if reason is None and legacy:
+                expected = legacy_actual.get(job)
+                if value is not None and (expected == module.UNRESOLVED or entry.get("fingerprints", {}).get(job) != expected):
+                    raise ValueError(f"{name}/{job} has unverified legacy cost data; run ci_budget.py accept")
+                reason = next((row.get("reason") for row in entry.get("accepted", [])
+                               if row.get("job") == job and row.get("fingerprint") == expected
+                               and isinstance(row.get("reason"), str) and row["reason"].strip()), None)
+                runs = entry.get("measured_on", [])
+                if reason is None and runs != old_entry.get("measured_on", []) and len(runs) >= 2:
+                    reason = "Re-measured from hosted runs " + ", ".join(map(str, runs))
+                if reason:
+                    imported.append({"workflow": name, "job": job,
+                                     "fingerprint": expected or previous[name].get(job), "reason": reason})
+            if reason is None:
+                raise ValueError(f"{name}/{job} changed without a reviewed cost reason; run ci_budget.py accept")
+        if legacy:
+            existing = {json.dumps(row, sort_keys=True) for row in old_entry.get("accepted", [])}
+            imported.extend({"workflow": name, **row} for row in entry.get("accepted", [])
+                            if json.dumps(row, sort_keys=True) not in existing)
+    # Historical records remain audit evidence, never fresh cost approvals.
+    unique = {json.dumps(row, sort_keys=True): row for row in imported}
+    for row in unique.values():
+        module.parse_acceptance(row, legacy=True)
+    return list(unique.values())
+
+
+def _merge_budget_conflict(base_sha: str, conflicted: list[str]) -> bool:
+    tools = _budget_tools(base_sha)
+    if tools is None or conflicted != [CI_BUDGET]:
+        return False
+    module = tools[0]
+    try:
+        stages = [json.loads(_out("show", f":{stage}:{CI_BUDGET}")) for stage in (1, 2, 3)]
+        merged = module.merge_budget_data(*stages)
+    except (ValueError, TypeError):
+        return False  # Incompatible authored prices/limits still drop the member.
+    root = Path(_out("rev-parse", "--show-toplevel")).resolve()
+    target = _metadata_target(root, CI_BUDGET)
+    target.write_text(json.dumps(merged, indent=2, allow_nan=False) + "\n", encoding="utf-8", newline="\n")
+    git("add", "--", CI_BUDGET)
+    git("commit", "--no-edit")
+    return True
+
+
+def _metadata_target(root: Path, relative: str) -> Path:
+    target = root / relative
+    try:
+        resolved = target.resolve()
+    except (OSError, RuntimeError):
+        raise Refusal("generated CI metadata path cannot be resolved; restore regular repository files before building") from None
+    if not resolved.is_relative_to(root) or resolved != target or target.is_symlink():
+        raise Refusal("generated CI metadata path is redirected; restore regular repository files before building")
+    return target
+
+
+def _regenerate_budget(plan: Plan, root: Path) -> set[str]:
+    tools = _budget_tools(plan.base_sha)
+    if tools is None:
+        return set()
+    module = tools[0]
+    data = _budget_json("HEAD", CI_BUDGET)
+    if data is None:
+        raise Refusal("the merged head removed its CI budget; restore it before building")
+    try:
+        definitions, _, _ = _budget_definitions("HEAD", data, module)
+        document = {"schema": 1, "workflows": definitions}
+        module.parse_fingerprint_baseline(document)
+        payloads = {CI_FINGERPRINTS: document}
+        authored = module.budget_data(data)
+        if authored != data:
+            payloads[CI_BUDGET] = authored
+        for member in plan.merged:
+            imported = _budget_member_evidence(plan.base_sha, member)
+            if imported:
+                path = f"{CI_ACCEPT}/imported-{member.sha}.json"
+                payloads[path] = {"schema": 1, "legacy": True, "source_head": member.sha, "accepted": imported}
+        serialized = {path: json.dumps(value, indent=2, sort_keys=True, allow_nan=False) + "\n"
+                      for path, value in payloads.items()}
+        targets = {path: _metadata_target(root, path) for path in serialized}
+    except (ValueError, TypeError, KeyError) as error:
+        raise Refusal(f"CI budget metadata cannot be derived ({error}); fix the member before building") from None
+    created = []
+    try:
+        for path, text in serialized.items():
+            target = targets[path]
+            if not target.exists():
+                created.append(target)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(text, encoding="utf-8", newline="\n")
+            git("add", "--", path)
+    except (OSError, Refusal):
+        git("reset", "-q", "--hard", "HEAD")
+        for target in created:
+            if target.is_file() and target.resolve().is_relative_to(root):
+                target.unlink()
+        raise Refusal("generated CI metadata could not be written; check the checkout's disk and permissions") from None
+    return set(serialized)
+
+
 def _merge_members(plan: Plan, members: list[Member]) -> None:
     for m in members:
         reason = _not_ready(m)
@@ -827,6 +1042,13 @@ def _merge_members(plan: Plan, members: list[Member]) -> None:
                 m, f"head moved from {m.sha[:12]} to {head[:12]} after listing; "
                    "rebuild to include it", comment=False))
             continue
+        try:
+            _budget_member_evidence(plan.base_sha, m)
+        except (ValueError, TypeError, KeyError) as error:
+            reason = f"CI budget metadata refused: {error}"
+            plan.dropped.append(Dropped(m, reason))
+            print(f"  dropped #{m.number}: {reason}")
+            continue
         # rerere off: a replayed resolution would be a conflict resolved
         # inside the batch, and would hide the conflict from --diff-filter=U.
         proc = git("-c", "rerere.enabled=false", "merge", "--no-ff", "--no-edit", "-m",
@@ -837,6 +1059,10 @@ def _merge_members(plan: Plan, members: list[Member]) -> None:
             print(f"  merged #{m.number} {m.sha[:12]} {m.title}")
             continue
         conflicted = _out("diff", "--name-only", "--diff-filter=U").splitlines()
+        if _merge_budget_conflict(plan.base_sha, conflicted):
+            plan.merged.append(m)
+            print(f"  merged #{m.number} {m.sha[:12]} after normalizing derived CI budget metadata")
+            continue
         if git("rev-parse", "-q", "--verify", "MERGE_HEAD", check=False).returncode == 0:
             git("merge", "--abort")
         if not conflicted:
@@ -945,40 +1171,54 @@ def _regenerate_census(plan: Plan) -> str | None:
     data, so no member is edited and no member ever has to regenerate it
     (#960 and #974 each went stale three times on 2026-10-26 doing so).
     Returns the script's failure, leaving HEAD as it was, or None."""
-    root = Path(_out("rev-parse", "--show-toplevel"))
-    if not (root / CENSUS).is_file():
-        return f"the batch head has no {CENSUS}"
-    proc = _census_run(root)
-    if proc.returncode != 0:
-        git("reset", "-q", "--hard", "HEAD")
-        return _census_failure(proc, root)
+    root = Path(_out("rev-parse", "--show-toplevel")).resolve()
+    census_needed = _census_inputs(plan.base_sha) is not None
+    if census_needed:
+        if not (root / CENSUS).is_file():
+            return f"the batch head has no {CENSUS}"
+        proc = _census_run(root)
+        if proc.returncode != 0:
+            git("reset", "-q", "--hard", "HEAD")
+            return _census_failure(proc, root)
     # Staged first: when a member deleted the census, the rewrite is untracked
     # and an unstaged diff would never show (or commit) it.
     if (root / CENSUS_JSON).is_file():
         git("add", "--", CENSUS_JSON)
+    census_changed = _out("diff", "--name-only", "HEAD").splitlines()
+    if any(path != CENSUS_JSON for path in census_changed):
+        git("reset", "-q", "--hard", "HEAD")
+        raise Refusal(f"`python {CENSUS}` on the batch head changed "
+                      f"{', '.join(census_changed)}, not only {CENSUS_JSON}; "
+                      "nothing was committed. Find the member that made it do so "
+                      "and leave it out of the next build")
+    try:
+        budget_paths = _regenerate_budget(plan, root)
+    except Refusal:
+        git("reset", "-q", "--hard", "HEAD")
+        raise
     changed = _out("diff", "--name-only", "HEAD").splitlines()
     if not changed:
         # A member's own census can already be current and still withdraw
         # manual shapes master's had not.
         plan.census_drift = sorted(_census_drift("HEAD") - _census_drift(plan.base_sha))
         return None
-    if changed != [CENSUS_JSON]:
+    if set(changed) - ({CENSUS_JSON} | budget_paths):
         git("reset", "-q", "--hard", "HEAD")
         raise Refusal(f"`python {CENSUS}` on the batch head changed "
-                      f"{', '.join(changed)}, not only {CENSUS_JSON}; "
+                      f"{', '.join(changed)}, outside the declared generated metadata; "
                       "nothing was committed. Find the member that made it do so "
                       "(run it on each member's head) and leave it out of the next build")
     git("commit", "-q", "-m", CENSUS_SUBJECT, "-m",
-        f"Generated by `python {CENSUS}` on the batch head, as `ops/integrate.py "
-        "build` does for every batch; no member was edited.", "--", CENSUS_JSON)
-    if _census_ci_fails(root, plan):
+        "Generated producer census and CI fingerprint metadata on the batch head; "
+        "authored budgets and reviewed reasons were preserved, and no member code was edited.", "--", *changed)
+    if census_needed and _census_ci_fails(root, plan):
         raise Refusal(f"the census `python {CENSUS}` just wrote on the batch head is "
                       "already stale by its own `--ci-check`, so the script does not "
                       f"reproduce its output: if a member changes {CENSUS}, leave it "
                       "out of the next build; otherwise fix the script on master")
     plan.census_commit = _out("rev-parse", "HEAD")
     plan.census_drift = sorted(_census_drift("HEAD") - _census_drift(plan.base_sha))
-    print(f"  regenerated the producer census in {plan.census_commit[:12]}")
+    print(f"  regenerated CI metadata in {plan.census_commit[:12]}")
     return None
 
 
@@ -1002,7 +1242,7 @@ def _remerge(plan: Plan, members: list[Member], dropped: list[Dropped],
 
 
 def _merge_batch(plan: Plan, members: list[Member]) -> None:
-    """Merge the members, then regenerate the producer census on the head
+    """Merge the members, then regenerate derived CI metadata on the head
     (see `_regenerate_census`). When the head's census script fails, the
     members whose own diff changes the census inputs leave and the rest
     merge again from the base. Nothing else is added inside a batch."""
@@ -1010,8 +1250,8 @@ def _merge_batch(plan: Plan, members: list[Member]) -> None:
     cut_drops = list(plan.dropped)
     _merge_members(plan, members)
     inputs = _census_inputs(plan.base_sha)
-    if inputs is None or not plan.merged:
-        return    # with no census on master there is nothing to keep current
+    if not plan.merged or inputs is None and _budget_tools(plan.base_sha) is None:
+        return    # master has no supported generated metadata
     drops: list[Dropped] = []
     # Each round drops at least one member, so this ends. A member a dropped
     # one had kept out (a conflict with it) merges in the next round, and is
@@ -1142,12 +1382,11 @@ def body(plan: Plan, suite: str | None = None, harness: str | None = None) -> st
         lines += ["", "## Dropped", ""]
         lines += [f"- #{d.member.number}: {d.reason}" for d in plan.dropped]
     if plan.census_commit or plan.census_drift:
-        lines += ["", "## Producer census", ""]
+        lines += ["", "## Generated CI metadata", ""]
         if plan.census_commit:
-            lines += [f"`{plan.census_commit}` regenerates `{CENSUS_JSON}` for this head "
-                      f"with `python {CENSUS}`, the batch's one generated commit: the "
-                      "census is derived data that `build` keeps current, so no member "
-                      "regenerates it and no member was edited."]
+            lines += [f"`{plan.census_commit}` refreshes derived producer-census/CI-budget metadata "
+                      "for this head in the batch's one generated commit. Authored budgets and "
+                      "reviewed acceptance reasons are preserved; no member code was edited."]
         if plan.census_drift:
             lines += [""] * bool(plan.census_commit) + [
                       "Trusted manual shapes withdrawn because a member changed "

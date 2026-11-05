@@ -43,7 +43,14 @@ fn say(text: &str) {
     out(&(text.to_owned() + "\n"), true);
 }
 pub async fn main(arguments: &[String]) -> i32 {
-    let args = match args::parse(arguments) {
+    let environment = match super::host_connection::Environment::discover("lease", arguments) {
+        Ok(environment) => environment,
+        Err(error) => {
+            crate::stderrln!("pseudolife-mcp: {error}");
+            return 2;
+        }
+    };
+    let mut args = match args::parse(arguments) {
         Ok(args) => args,
         Err(code) => {
             return if OUTPUT_FAILED.load(std::sync::atomic::Ordering::Relaxed) {
@@ -53,6 +60,7 @@ pub async fn main(arguments: &[String]) -> i32 {
             };
         }
     };
+    args.environment = environment;
     let code = match args.action.as_str() {
         "check" if !args.command.is_empty() => run::gated(args).await,
         "check" => view::check(&args).await,

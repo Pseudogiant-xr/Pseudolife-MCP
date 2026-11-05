@@ -150,11 +150,6 @@ echo "To change the model, prompt file, port or CLI later: edit the PSEUDOLIFE_C
 echo "Host-side check: curl http://$BIND_HOST:$PORT/health"
 echo "User services start at login; to start at BOOT (before login) run:"
 echo "  loginctl enable-linger $USER"
-echo "Cutover env for the daemon (ops/.env):"
-echo "  PSEUDOLIFE_DREAM_BASE_URL=http://host.docker.internal:$PORT/v1"
-echo "  PSEUDOLIFE_DREAM_MODEL=extractor"
-echo "  PSEUDOLIFE_DREAM_FALLBACK_BASE_URL=http://pseudolife-extractor:8081/v1"
-echo "  PSEUDOLIFE_DREAM_FALLBACK_MODEL=extractor"
-echo "  PSEUDOLIFE_DREAM_EXTRACTOR_MODE=auto"
-echo "Then redeploy (ops/update.sh) and verify: memory_dream(action=\"status\")"
-echo "should show fallback_url set and primary_healthy: true."
+# >>> shim cutover >>>
+"$PYTHON_EXE" "$repo/ops/shim_cutover.py" --repo "$repo" --port "$PORT"
+# <<< shim cutover <<<

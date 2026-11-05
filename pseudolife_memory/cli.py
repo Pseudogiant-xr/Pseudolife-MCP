@@ -145,6 +145,23 @@ def _print_version() -> None:
 
 def main() -> None:
     mode = sys.argv[1] if len(sys.argv) > 1 else "shim"
+    options = sys.argv[2:]
+    if "--" in options:
+        options = options[:options.index("--")]
+    offline = (any(flag in options for flag in ("-h", "--help"))
+               or mode == "lease" and "--no-board" in options
+               or mode == "lease" and bool(options)
+               and options[0] in {"break", "conductor", "delegate", "designate"}
+               or mode == "doctor" and "--disposable-proof" in options)
+    if mode in {"lease", "doctor"} and not offline:
+        import os
+        from pseudolife_memory.codex_connection import SetupError, host_command_environment
+        try:
+            additions = host_command_environment(os.environ)
+        except SetupError as error:
+            print(f"pseudolife-mcp: {error}", file=sys.stderr)
+            sys.exit(2)
+        os.environ.update(additions)
     if mode in ("help", "-h", "--help"):
         print(_USAGE, end="")
         sys.exit(0)

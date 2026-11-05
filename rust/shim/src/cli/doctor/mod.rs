@@ -94,6 +94,17 @@ fn emit(text: &str, code: u8) -> ExitCode {
 }
 
 pub(super) fn run(values: Vec<OsString>) -> Option<ExitCode> {
+    let arguments = values
+        .iter()
+        .map(|value| value.to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+    let environment = match super::host_connection::Environment::discover("doctor", &arguments) {
+        Ok(environment) => environment,
+        Err(error) => {
+            crate::stderrln!("pseudolife-mcp: {error}");
+            return Some(ExitCode::from(2));
+        }
+    };
     let args = parse(&values)?;
     if args.proof {
         if args.agent_state.is_some() {
@@ -149,7 +160,7 @@ pub(super) fn run(values: Vec<OsString>) -> Option<ExitCode> {
         .enable_all()
         .build()
         .ok()?;
-    let (report, ok) = runtime.block_on(diagnose(&args)).ok()?;
+    let (report, ok) = runtime.block_on(diagnose(&args, &environment)).ok()?;
     Some(emit(
         &(pyjson::dumps(&report) + "\n"),
         if ok { 0 } else { 1 },
@@ -302,22 +313,31 @@ fn coordination_snapshot(
     } else {
         board_state
     };
-    let selected = wake.get(if host == "codex" {
-        "codex"
-    } else {
-        "claude_code"
-    });
-    let configured = selected.and_then(|selected| {
-        selected.get(if host == "codex" {
-            "doorbell"
-        } else {
-            "stop_hook"
-        })
-    });
-    let wake_state = if host == "generic" || host == "claude-desktop" {
+    let mut paths = Vec::new();
+    if matches!(host, "generic" | "claude-code")
+        && wake
+            .get("claude_code")
+            .and_then(|client| client.get("stop_hook"))
+            .and_then(Value::as_str)
+            == Some("on")
+    {
+        paths.push("Claude Code wakes via the plugin Stop hook; wake_enabled controls only the optional push path.");
+    }
+    if matches!(host, "generic" | "codex")
+        && wake
+            .get("codex")
+            .and_then(|client| client.get("doorbell"))
+            .and_then(Value::as_str)
+            == Some("on")
+    {
+        paths.push("Codex wakes via the doorbell.");
+    }
+    let wake_state = if host == "claude-desktop" {
         "unsupported"
-    } else if configured == Some(&json!("on")) {
+    } else if !paths.is_empty() {
         "configured"
+    } else if host == "generic" {
+        "unsupported"
     } else {
         "unavailable"
     };
@@ -341,9 +361,12 @@ fn coordination_snapshot(
     }
     if host == "claude-desktop" {
         next.push("Claude Desktop shares its MCP process across conversations; use a supported session host for a mailbox.");
-    } else if wake_state == "unsupported" {
-        next.push("This host has no verified idle wake path; pull mail on the next turn.");
+    } else if host == "generic" && paths.is_empty() {
+        next.push("No host selected and no configured wake path detected; use --host claude-code or --host codex to diagnose that client's wake setup.");
+    } else if wake_state == "unavailable" {
+        next.push("This host has no configured idle wake path; check its stop_hook or doorbell reason above and enable that client's plugin or wake setting, or pull mail on the next turn.");
     } else {
+        next.extend(paths);
         next.push("Configured wake is not delivery evidence; verify enqueue, hint/ring, receive and explicit ack in a disposable bank.");
     }
     json!({
@@ -405,7 +428,10 @@ fn finalize(
     }
 }
 
-async fn diagnose(args: &Args) -> Res<(Value, bool)> {
+async fn diagnose(
+    args: &Args,
+    environment: &super::host_connection::Environment,
+) -> Res<(Value, bool)> {
     // Everything before the first request: environment and client files.
     no_proxy_environment()?;
     // Python's int() digit limit is part of what json.loads accepts.
@@ -413,6 +439,9 @@ async fn diagnose(args: &Args) -> Res<(Value, bool)> {
         return Err(Defer);
     }
     let mut env = Env::default();
+    for (key, value) in environment.additions() {
+        env.set(key, value.clone());
+    }
     let (overrides, credential_source) = clients::registration_credentials(&env)?;
     for (key, value) in overrides {
         env.set(&key, value);
@@ -576,7 +605,18 @@ async fn diagnose(args: &Args) -> Res<(Value, bool)> {
             clients::CodexHooks::Line(line) => line,
             clients::CodexHooks::Plugin => match health.get("hooks_digest") {
                 None | Some(Value::Null) => "unknown".into(),
-                Some(_) => return Err(Defer),
+                Some(digest) => {
+                    let checked =
+                        super::update::clients::check_codex_hooks(None, digest.as_str(), false);
+                    if checked["state"] != "current" && checked["state"] != "needs-approval" {
+                        return Err(Defer);
+                    }
+                    let trust = super::update::clients::runtime_hook_status().await;
+                    super::update::clients::runtime_hook_line(
+                        trust,
+                        checked["state"].as_str().unwrap_or("unknown"),
+                    )
+                }
             },
         };
         put(&mut report, "daemon_version", json!(daemon_version));
@@ -698,6 +738,46 @@ mod tests {
 
     fn report(pairs: Value) -> Map<String, Value> {
         pairs.as_object().unwrap().clone()
+    }
+
+    #[test]
+    fn coordination_reports_configured_wake_paths_without_claiming_delivery() {
+        let health = report(json!({"status": "ok", "coordination": {"wake_enabled": false}}));
+        let wake = report(json!({"claude_code": {"stop_hook": "on"}}));
+        for host in ["generic", "claude-code"] {
+            let snapshot = coordination_snapshot(Some(&health), "on", &wake, host, None, None);
+            assert_eq!(snapshot["wake"]["state"], "configured");
+            assert_eq!(snapshot["delivery"], "unverified");
+            assert!(snapshot["next"].as_array().unwrap().contains(&json!(
+                "Claude Code wakes via the plugin Stop hook; wake_enabled controls only the optional push path."
+            )));
+        }
+        let codex = report(json!({"codex": {"doorbell": "on"}}));
+        let snapshot = coordination_snapshot(Some(&health), "on", &codex, "generic", None, None);
+        assert_eq!(snapshot["wake"]["state"], "configured");
+        assert!(
+            snapshot["next"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("Codex wakes via the doorbell."))
+        );
+        let disabled = report(json!({"claude_code": {"stop_hook": "off (plugin disabled)"}}));
+        let snapshot =
+            coordination_snapshot(Some(&health), "on", &disabled, "claude-code", None, None);
+        assert_eq!(snapshot["wake"]["state"], "unavailable");
+        assert!(
+            snapshot["next"]
+                .as_array()
+                .unwrap()
+                .last()
+                .unwrap()
+                .as_str()
+                .unwrap()
+                .contains("no configured idle wake path")
+        );
+        let snapshot =
+            coordination_snapshot(Some(&health), "on", &wake, "claude-desktop", None, None);
+        assert_eq!(snapshot["wake"]["state"], "unsupported");
     }
 
     #[test]
