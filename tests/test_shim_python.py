@@ -102,6 +102,8 @@ def isolated(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> dict[str, Path]
     monkeypatch.delenv("PIPX_HOME", raising=False)
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
+    monkeypatch.setenv("PSEUDOLIFE_SHIM_RUNTIMES", str(tmp_path / "managed"))
+    monkeypatch.setenv("PSEUDOLIFE_SHIM_LAUNCHER", str(tmp_path / ("launcher.exe" if os.name == "nt" else "launcher")))
     return {"repo": repo, "bin": bin_dir, "venv_dir": tmp_path / "shim-venv"}
 
 
@@ -241,14 +243,15 @@ def test_a_venvs_symlinked_interpreter_is_probed_and_chosen_by_its_own_path(
     ``/usr/bin/python3.13`` on the Debian 13 box (2026-09-29) and skipped
     it; had it passed, the unit would have named the system interpreter."""
     base = _touch_path_python(tmp_path / "base-bin", "python3.13")
-    monkeypatch.setenv("PIPX_HOME", str(tmp_path / "pipx"))
-    pipx_venv = _symlink_python(tmp_path / "pipx" / "venvs" / "pseudolife-mcp", base)
-    asked = _stub_probe(monkeypatch, {pipx_venv})
+    # Use the helper's own venv: Windows deliberately excludes pipx's venv
+    # even when it imports, and hosted Windows can create these symlinks.
+    shim_venv = _symlink_python(isolated["venv_dir"], base)
+    asked = _stub_probe(monkeypatch, {shim_venv})
     code, out, err = _run(capsys, "--repo", isolated["repo"], "--venv-dir", isolated["venv_dir"],
                           "--no-create")
     assert code == 0, err
-    assert Path(out.strip()) == _abs(pipx_venv)
-    assert asked == [_abs(pipx_venv)]
+    assert Path(out.strip()) == _abs(shim_venv)
+    assert asked == [_abs(shim_venv)]
 
 
 def test_two_venvs_on_one_base_interpreter_are_both_tried(
@@ -258,14 +261,13 @@ def test_two_venvs_on_one_base_interpreter_are_both_tried(
     de-duplicating by link target dropped all but the first."""
     base = _touch_path_python(tmp_path / "base-bin", "python3.13")
     repo_venv = _symlink_python(isolated["repo"] / ".venv", base)
-    monkeypatch.setenv("PIPX_HOME", str(tmp_path / "pipx"))
-    pipx_venv = _symlink_python(tmp_path / "pipx" / "venvs" / "pseudolife-mcp", base)
-    asked = _stub_probe(monkeypatch, {pipx_venv})
+    shim_venv = _symlink_python(isolated["venv_dir"], base)
+    asked = _stub_probe(monkeypatch, {shim_venv})
     code, out, err = _run(capsys, "--repo", isolated["repo"], "--venv-dir", isolated["venv_dir"],
                           "--no-create")
     assert code == 0, err
-    assert Path(out.strip()) == _abs(pipx_venv)
-    assert asked == [_abs(repo_venv), _abs(pipx_venv)]
+    assert Path(out.strip()) == _abs(shim_venv)
+    assert asked == [_abs(repo_venv), _abs(shim_venv)]
 
 
 # -- the last resort: a venv of its own -------------------------------------------------
@@ -453,3 +455,30 @@ def test_the_chosen_path_is_printed_as_utf8_whatever_the_console_code_page(
     sys.stdout.flush()
     assert code == 0
     assert raw.getvalue().decode("utf-8").strip() == str(_abs(explicit))
+
+
+@pytest.mark.parametrize("compatible", [True, False])
+def test_managed_runtime_is_reused_only_if_its_dependencies_import(monkeypatch, isolated, capsys, compatible):
+    import json
+    runtime = Path(os.environ["PSEUDOLIFE_SHIM_RUNTIMES"]) / "000001"
+    managed = _touch_python(runtime)
+    console = managed.parent / ("pseudolife-mcp.exe" if os.name == "nt" else "pseudolife-mcp")
+    console.write_text("", encoding="utf-8")
+    (runtime / "runtime.json").write_text(json.dumps({"version": "0.0.0"}), encoding="utf-8")
+    fallback = _touch_path_python(isolated["bin"])
+    asked = _stub_probe(monkeypatch, {managed} if compatible else {fallback})
+    monkeypatch.setattr(shim_python, "create_venv", lambda *a: pytest.fail("unnecessary venv build"))
+    code, out, err = _run(capsys, "--repo", isolated["repo"], "--venv-dir", isolated["venv_dir"])
+    assert code == 0, err
+    assert Path(out.strip()) == _abs(managed if compatible else fallback)
+    assert _abs(managed) in asked
+
+
+def test_progress_is_emitted_before_a_potentially_slow_probe(monkeypatch, isolated):
+    explicit = _touch_python(isolated["venv_dir"])
+    messages = []
+    def probe(path, repo):
+        assert any("checking shim interpreter" in m for m in messages)
+        return True, ""
+    monkeypatch.setattr(shim_python, "probe", probe)
+    assert shim_python.choose(isolated["repo"], explicit, isolated["venv_dir"], False, messages.append) == explicit

@@ -332,7 +332,7 @@
       "lock-resolve": "83bcc6b654896c6d",
       "test": "ac414107d3d9c71d",
       "test-lite-linux": "44e2a8f2c01baeab",
-      "test-lite-windows": "8e651040e7514ef0",
+      "test-lite-windows": "c768d5c6971c67aa",
       "test-lite-macos": "c4a0ad0c70bb205a",
       "frontend": "b1b6a1a1278f2e60"
     },
@@ -469,6 +469,11 @@
       },
       {
         "job": "test-lite-windows",
+        "fingerprint": "b2bceebaefd33725",
+        "reason": "Retain upstream move-consent/rollback, installer-ownership, UTF-8 and profile selectors plus the previously validated bounded autostart files in the existing Windows step. Mocked move effects require no extra setup or process stress; no jobs, shards, retries or budget limits are added."
+      },
+      {
+        "job": "test-lite-windows",
         "fingerprint": "528e63bb05e8956b",
         "reason": "Combine locale-safe shared fixture transport with bounded unattended installer coverage in the existing Windows lane; no new job or setup step."
       },
@@ -481,6 +486,11 @@
         "job": "test-lite-windows",
         "fingerprint": "8e651040e7514ef0",
         "reason": "Combine the existing unattended installer selection with the reviewed move exposure and ownership coverage after forwarding master; no new job, setup step or retry."
+      },
+      {
+        "job": "test-lite-windows",
+        "fingerprint": "c768d5c6971c67aa",
+        "reason": "Combine the existing unattended installer selection with the landed autostart/runtime cases in the same Windows step after forwarding batch-9 master; no new job, setup step or retry."
       }
     ]
   }
