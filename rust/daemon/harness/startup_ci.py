@@ -5,7 +5,8 @@ This helper checks generated schema inputs, runs schema and startup fixture unit
 builds the native daemon test executable, and checks startup goldens and mutants.
 It does not provision PostgreSQL or load an embedding model. CI splits the cells
 over two shards with --part (startup_cases.part_cases): part 1 runs only its
-cases; part 2 runs the rest with the mutants, the clock retry and the writer guard.
+cases; part 2 runs the rest with the mutants, the clock retry, the writer guard
+and the read-only shadow's incremental-refresh database tests.
 """
 from __future__ import annotations
 
@@ -13,6 +14,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import time
@@ -21,6 +23,11 @@ from schema_ci import PACKAGE, test_artifact
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[2]
+# The read-only shadow's incremental-refresh database tests
+# (rust/daemon/src/shadow_tests.rs, `db_` prefix); they skip without a DSN,
+# so the run must report at least this many passed.
+SHADOW_DB_FILTER = "shadow::tests::db_"
+SHADOW_DB_TESTS = 9
 
 
 def writer_guard(binary: Path, env: dict, output: Path) -> int:
@@ -58,6 +65,22 @@ def writer_guard(binary: Path, env: dict, output: Path) -> int:
             cwd=REPO, env=child, capture_output=True, text=True, timeout=60)
         accepted = run.returncode == 0 and "1 passed" in run.stdout
         result["hydration_rows"] = {"exit_code": run.returncode, "accepted": accepted}
+        if not accepted:
+            print(run.stdout, end="")
+            print(run.stderr, end="", file=sys.stderr)
+    finally:
+        pg.drop(name)
+    name = pg.name(pg.PREFIX + "shadow_" + str(time.time_ns()))
+    dsn = pg.create(name)
+    try:
+        child = dict(env, PL_SHADOW_REFRESH_DSN=dsn)
+        child.pop("PSEUDOLIFE_DAEMON_MUTANT", None)
+        run = subprocess.run([str(binary), SHADOW_DB_FILTER, "--test-threads=1"],
+                             cwd=REPO, env=child, capture_output=True, text=True, timeout=180)
+        passed = re.search(r"test result: ok\. (\d+) passed", run.stdout)
+        accepted = (run.returncode == 0 and passed is not None
+                    and int(passed.group(1)) >= SHADOW_DB_TESTS)
+        result["shadow_refresh"] = {"exit_code": run.returncode, "accepted": accepted}
         if not accepted:
             print(run.stdout, end="")
             print(run.stderr, end="", file=sys.stderr)

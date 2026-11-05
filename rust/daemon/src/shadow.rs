@@ -12,18 +12,44 @@
 //! Every mutation path of the resident state this patches in place (grep
 //! for the state, not the API), and why none races it in a shadow:
 //! - `Bank.entries` / `Bank.matrix`: `Bank::push` (store, dream stages),
-//!   `Bank::remove` (store), `entries.push` in `dream/cursors.rs`, and
-//!   `bank.write()` in correction, forget, outcome, episode, routes/episodes,
-//!   dream run and dream tracking initialization. All are write tools,
-//!   refused by the read-only boundary, or dream actions, refused too.
-//! - `Entry.access_count`: the search bump, masked by `count_access &&
-//!   !read_only` (`read/search_route.rs`), and the writer's access-count
-//!   sync (`Service::save_counters`, which returns early when read-only).
+//!   `Bank::remove` (store), and `bank.write()` in correction (which builds
+//!   its re-read entry with its own copy of `bank::entry_from_row`'s row
+//!   construction), forget, outcome, episode, routes/episodes, dream run and
+//!   dream tracking initialization. All are write tools refused by the
+//!   read-only boundary, or dream actions refused there too.
+//!   (`entries.push` in `dream/cursors.rs` is the dream cursor's own
+//!   `Resident` in a test, not the bank.)
+//! - `Entry.access_count` (atomic, so a read guard suffices): the search
+//!   bump in `search.rs`, whose `count_access` is false in read-only mode
+//!   (`read/search_route.rs` `params_for`, `consolidation_tools.rs`); the
+//!   `memory_get` resident bump in `read/mcp_reads.rs`, guarded by
+//!   `!read_only`; and `Service::save_counters`, which returns early when
+//!   read-only.
 //! - `Entry.reinforcements`: outcome and dream run (write paths only).
 //! - `Entry.last_logical_turn`: hydration only.
 //!
 //! So in a shadow this refresh, under the service lock, is the only writer
 //! of the resident bank.
+//!
+//! What still rebuilds, plainly:
+//! - a multi-band bank with a band over capacity rebuilds the bank on every
+//!   telemetry change (its seating follows retention scores);
+//! - any change to an entry's `dream_state`, `superseded_at` /
+//!   `superseded_by_text`, `tags`, `episode_id` / `episode_title` or any
+//!   other non-telemetry column rebuilds the bank (a dream marks entries, so
+//!   each dream does);
+//! - additions to a multi-band bank rebuild it;
+//! - a facts, world-facts or lessons change reloads that whole store.
+//!
+//! And a cortex-meta-only change reconfigures the shared cortex in place,
+//! which copies it (`Arc::make_mut`) when a reader holds a snapshot.
+//!
+//! Conscious changes from the full rebuild:
+//! - an entry whose stored `ts` is zero keeps the clock value its hydration
+//!   gave it, where each full rebuild re-clocked it;
+//! - requests in flight on the previous `Ready` share the patched bank, so
+//!   they can see newer telemetry, and appended entries whose episode is
+//!   absent from their older episode log.
 
 use crate::bank::{Bank, Entry, Hydrated};
 use crate::config::MemoryConfig;
@@ -86,11 +112,42 @@ pub(crate) struct Inputs {
 /// them first errs only toward refetching: a row changed meanwhile carries
 /// an older version here than the one hydrated, and the next refresh
 /// fetches and compares it.
-pub(crate) async fn preread(client: &Client) -> Result<Inputs> {
+async fn preread(client: &Client) -> Result<Inputs> {
     Ok(Inputs {
         versions: entry_versions(client).await?,
         meta: meta_values(client).await?,
     })
+}
+
+/// The full rebuild's pre-read and the raw startup metadata
+/// (`startup::metadata`'s keys), both from one read of `meta`: two reads
+/// could straddle a commit, recording newer meta than the stores were
+/// built from, and no later refresh would then see the difference.
+pub(crate) async fn preread_with_metadata(client: &Client) -> Result<(Inputs, Value)> {
+    preread_then(client, async {}).await
+}
+
+/// [`preread_with_metadata`], awaiting `after_read` once both are read and
+/// before they return (a test seam: a commit there is one the hydration
+/// that follows would see).
+async fn preread_then(
+    client: &Client,
+    after_read: impl std::future::Future<Output = ()>,
+) -> Result<(Inputs, Value)> {
+    let inputs = preread(client).await?;
+    let metadata = identity_raw(&inputs.meta);
+    after_read.await;
+    Ok((inputs, metadata))
+}
+
+/// The identity keys present in `meta`, as `startup::metadata` returns them.
+fn identity_raw(meta: &BTreeMap<String, Value>) -> Value {
+    Value::Object(
+        IDENTITY_KEYS
+            .iter()
+            .filter_map(|k| meta.get(*k).map(|v| (k.to_string(), v.clone())))
+            .collect(),
+    )
 }
 
 impl ShadowState {
@@ -224,6 +281,55 @@ enum EntriesPlan {
     Rebuild(&'static str, Vec<(i64, i64)>),
 }
 
+/// Telemetry patches and appended entries for the resident bank.
+pub(crate) struct BankDelta {
+    patches: Vec<Patch>,
+    appends: Vec<(Entry, Vec<f32>)>,
+}
+
+impl BankDelta {
+    pub(crate) fn is_empty(&self) -> bool {
+        self.patches.is_empty() && self.appends.is_empty()
+    }
+
+    /// Patch the telemetry and append the new entries in place, under the
+    /// bank's write lock. That lock waits for searches holding read guards
+    /// (through the rerank, say), so the service runs this on a blocking
+    /// thread, never an async worker. Indices of existing entries never
+    /// move, so a request holding hit indices from an earlier read still
+    /// addresses the same entries.
+    pub(crate) fn apply(self, bank: &RwLock<Bank>) {
+        if self.is_empty() {
+            return;
+        }
+        let mut bank = bank.write().expect("bank lock");
+        if !self.patches.is_empty() {
+            let index: HashMap<i64, usize> = bank
+                .entries
+                .iter()
+                .enumerate()
+                .map(|(i, e)| (e.id, i))
+                .collect();
+            for patch in self.patches {
+                if let Some(&i) = index.get(&patch.id) {
+                    let entry = &mut bank.entries[i];
+                    entry
+                        .access_count
+                        .store(patch.access_count, Ordering::Relaxed);
+                    entry.reinforcements = patch.reinforcements;
+                    entry.last_logical_turn = patch.last_logical_turn;
+                }
+            }
+        }
+        let dim = bank.dim;
+        bank.entries.reserve(self.appends.len());
+        bank.matrix.reserve(self.appends.len() * dim);
+        for (entry, row) in self.appends {
+            bank.push(entry, &row);
+        }
+    }
+}
+
 /// The result of one refresh attempt.
 pub(crate) enum Outcome {
     /// Rebuild every store as a cold start does, for this reason.
@@ -232,7 +338,8 @@ pub(crate) enum Outcome {
 }
 
 /// What changed, as loaded, for the caller to install. Nothing resident has
-/// been modified yet: [`Refresh::apply_bank`] patches the bank in place.
+/// been modified yet: [`Refresh::take_bank_delta`] gives the in-place bank
+/// changes.
 pub(crate) struct Refresh {
     /// The state to record once the refresh is installed.
     pub state: ShadowState,
@@ -280,37 +387,11 @@ impl Refresh {
             || self.clock
     }
 
-    /// Patch the telemetry and append the new entries in place. Indices of
-    /// existing entries never move, so a request holding hit indices from
-    /// an earlier read still addresses the same entries.
-    pub(crate) fn apply_bank(&mut self, bank: &RwLock<Bank>) {
-        if self.patches.is_empty() && self.appends.is_empty() {
-            return;
-        }
-        let mut bank = bank.write().expect("bank lock");
-        if !self.patches.is_empty() {
-            let index: HashMap<i64, usize> = bank
-                .entries
-                .iter()
-                .enumerate()
-                .map(|(i, e)| (e.id, i))
-                .collect();
-            for patch in self.patches.drain(..) {
-                if let Some(&i) = index.get(&patch.id) {
-                    let entry = &mut bank.entries[i];
-                    entry
-                        .access_count
-                        .store(patch.access_count, Ordering::Relaxed);
-                    entry.reinforcements = patch.reinforcements;
-                    entry.last_logical_turn = patch.last_logical_turn;
-                }
-            }
-        }
-        let dim = bank.dim;
-        bank.entries.reserve(self.appends.len());
-        bank.matrix.reserve(self.appends.len() * dim);
-        for (entry, row) in self.appends.drain(..) {
-            bank.push(entry, &row);
+    /// The in-place bank changes, for [`BankDelta::apply`].
+    pub(crate) fn take_bank_delta(&mut self) -> BankDelta {
+        BankDelta {
+            patches: std::mem::take(&mut self.patches),
+            appends: std::mem::take(&mut self.appends),
         }
     }
 
@@ -336,17 +417,29 @@ impl Refresh {
 
 /// Bring the resident stores up to the bank whose marker was just probed,
 /// reading only what changed. `bank` is the resident bank the state
-/// describes; nothing resident is modified here.
+/// describes; nothing resident is modified here. `data_dir` locates the
+/// config the flat-migration check reads.
 pub(crate) async fn refresh(
     client: &Client,
     memory: &MemoryConfig,
     dim: usize,
+    data_dir: &std::path::Path,
     state: &ShadowState,
     marker: &Marker,
     bank: &RwLock<Bank>,
 ) -> Result<Outcome> {
     if marker.len() != SHADOW_TABLES.len() || state.marker.len() != SHADOW_TABLES.len() {
         return Ok(Outcome::Full("marker shape changed".into()));
+    }
+    // The full rebuild refuses a bank whose flat-band migration the loaded
+    // config does not match; every refresh keeps that check, so a
+    // migration the writer applied is refused, never served under the old
+    // band layout. The full path then records the refusal.
+    if let Err(refusal) =
+        crate::migrate_flat_config::require_config_finalized(client, data_dir, &memory.band_specs)
+            .await
+    {
+        return Ok(Outcome::Full(refusal));
     }
     let changed = |table: usize| marker[table] != state.marker[table];
     let mut out = Refresh {
@@ -376,11 +469,7 @@ pub(crate) async fn refresh(
             return Ok(Outcome::Full("bank identity changed".into()));
         }
         if IDENTITY_KEYS.iter().any(|k| differs(k)) {
-            let raw: serde_json::Map<String, Value> = IDENTITY_KEYS
-                .iter()
-                .filter_map(|k| fresh.get(*k).map(|v| (k.to_string(), v.clone())))
-                .collect();
-            out.metadata = Some(crate::startup::identity_metadata(&Value::Object(raw))?);
+            out.metadata = Some(crate::startup::identity_metadata(&identity_raw(&fresh))?);
             out.cortex_meta = differs("cortex_supersession_log") || differs("cortex_dream_cursor");
         }
         out.clock = differs("coordination_hlc_highwater");

@@ -319,7 +319,8 @@ async fn canonical_rows(client: &Client, table: &str) -> Result<Vec<Value>> {
 pub(crate) async fn episode_rows(client: &Client) -> Result<(Vec<Value>, Option<String>)> {
     let rows = crate::txn::with_client(client, |client| {
         client.query(
-            "SELECT to_jsonb(e) FROM (SELECT id, title, hint, started_at, ended_at,                 closed_by_new_start, session_key, parent_id FROM episodes) e ORDER BY started_at",
+            "SELECT to_jsonb(e) FROM (SELECT id, title, hint, started_at, ended_at, \
+                closed_by_new_start, session_key, parent_id FROM episodes) e ORDER BY started_at",
             &[],
         )
     })

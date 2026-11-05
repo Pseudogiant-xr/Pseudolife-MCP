@@ -288,7 +288,17 @@ fn capacity_warning(svc: &Service, ready: Option<&crate::service::Ready>) -> boo
     let (Some(ready), Some(last)) = (ready, svc.config.memory.band_specs.last()) else {
         return false;
     };
-    let Ok(bank) = ready.bank.read() else {
+    bank_capacity_warning(&ready.bank, last)
+}
+
+/// `/health` never waits on the bank: a writer holding or queued for its
+/// lock (a shadow refresh's patch, waiting for a long search) reads as no
+/// warning rather than stalling the probe.
+fn bank_capacity_warning(
+    bank: &std::sync::RwLock<crate::bank::Bank>,
+    last: &crate::config::StartupBandSpec,
+) -> bool {
+    let Ok(bank) = bank.try_read() else {
         return false;
     };
     let size = bank.entries.iter().filter(|e| e.band == last.name).count();
@@ -487,6 +497,34 @@ pub async fn payload(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn capacity_warning_never_waits_on_the_bank_lock() {
+        use std::sync::{Arc, RwLock};
+        let bank = Arc::new(RwLock::new(crate::bank::Bank {
+            dim: 1,
+            entries: vec![crate::bank::Entry {
+                band: "flat".into(),
+                ..Default::default()
+            }],
+            matrix: vec![0.0],
+        }));
+        let last = crate::config::StartupBandSpec {
+            name: "flat".into(),
+            max_entries: 1,
+            retention_policy: "balanced".into(),
+            update_interval: Value::from(1),
+        };
+        assert!(bank_capacity_warning(&bank, &last));
+        // A writer holds the lock (a shadow refresh's patch, say).
+        let guard = bank.write().unwrap();
+        let (send, receive) = std::sync::mpsc::channel();
+        let (held, spec) = (bank.clone(), last.clone());
+        std::thread::spawn(move || send.send(bank_capacity_warning(&held, &spec)).unwrap());
+        let warned = receive.recv_timeout(std::time::Duration::from_secs(5));
+        drop(guard);
+        assert_eq!(warned, Ok(false), "/health waited on the bank lock");
+    }
 
     #[tokio::test]
     async fn payload_reports_the_release_version_never_the_placeholder() {

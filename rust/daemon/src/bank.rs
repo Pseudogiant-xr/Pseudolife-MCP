@@ -260,14 +260,9 @@ pub(crate) fn seating_moves(entries: &[Entry], bands: &[StartupBandSpec]) -> boo
             .unwrap_or(0);
         counts[band] += 1;
     }
-    let mut spill = 0;
-    for depth in 0..bands.len().saturating_sub(1) {
-        spill = (counts[depth] + spill).saturating_sub(bands[depth].max_entries);
-        if spill > 0 {
-            return true;
-        }
-    }
-    false
+    // The first band over capacity moves entries; until one is, nothing
+    // spills into the next. The last band never spills.
+    (0..bands.len().saturating_sub(1)).any(|depth| counts[depth] > bands[depth].max_entries)
 }
 
 // The caller owns the shared writer lock; every relocation uses this borrowed
@@ -532,6 +527,54 @@ mod startup_tests {
             distortion_tolerance: None,
             ..Default::default()
         }
+    }
+
+    /// The shadow's patch guard agrees with the seating it stands in for:
+    /// `seating_moves` is true exactly when `seating_plan` moves an entry.
+    #[test]
+    fn seating_moves_is_whether_the_seating_plan_moves_anything() {
+        let names = ["a", "b", "c", "gone"];
+        let mut checked = 0;
+        for band_count in 1..=3usize {
+            for capacities in 0..27usize {
+                let bands: Vec<StartupBandSpec> = (0..band_count)
+                    .map(|depth| StartupBandSpec {
+                        name: names[depth].into(),
+                        max_entries: (capacities / 3usize.pow(depth as u32)) % 3,
+                        retention_policy: "balanced".into(),
+                        update_interval: serde_json::Value::from(1),
+                    })
+                    .collect();
+                // Up to four entries over every stored band, an unknown one
+                // (seated in the first band) included.
+                for layout in 0..(4usize.pow(4)) {
+                    for count in 0..=4usize {
+                        let entries: Vec<Entry> = (0..count)
+                            .map(|i| Entry {
+                                id: i as i64 + 1,
+                                stored_band: names[(layout / 4usize.pow(i as u32)) % 4].into(),
+                                surprise_value: 0.1 * i as f64,
+                                source: "test".into(),
+                                ..Default::default()
+                            })
+                            .collect();
+                        let moved = !seating_plan(&entries, &bands, 1000.0, 1.0).1.is_empty();
+                        assert_eq!(
+                            seating_moves(&entries, &bands),
+                            moved,
+                            "bands {:?}, stored {:?}",
+                            bands
+                                .iter()
+                                .map(|b| (&b.name, b.max_entries))
+                                .collect::<Vec<_>>(),
+                            entries.iter().map(|e| &e.stored_band).collect::<Vec<_>>()
+                        );
+                        checked += 1;
+                    }
+                }
+            }
+        }
+        assert!(checked > 10_000);
     }
 
     #[test]

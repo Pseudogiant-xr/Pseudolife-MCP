@@ -27,6 +27,10 @@ class Connection:
 
 
 def fake_run(command, *, env, **kwargs):
+    if "PL_SHADOW_REFRESH_DSN" in env:
+        assert startup_ci.SHADOW_DB_FILTER in command
+        return subprocess.CompletedProcess(
+            command, 0, f"test result: ok. {startup_ci.SHADOW_DB_TESTS} passed; 0 failed\n", "")
     if "PL_PGS_MUTATION_DSN" in env:
         return subprocess.CompletedProcess(command, 0, "1 passed\n", "")
     if env.get("PSEUDOLIFE_DAEMON_MUTANT") == "startup-skip-writer-guard":
@@ -58,9 +62,9 @@ class WriterGuard(unittest.TestCase):
             if saved is not None:
                 sys.modules["pgdisposable"] = saved
         self.assertEqual(code, 0)
-        self.assertEqual(sorted(result), ["control", "hydration_rows", "mutant"])
+        self.assertEqual(sorted(result), ["control", "hydration_rows", "mutant", "shadow_refresh"])
         self.assertTrue(all(value["accepted"] for value in result.values()), result)
-        self.assertEqual(len(created), 3)
+        self.assertEqual(len(created), 4)
 
 
 if __name__ == "__main__":

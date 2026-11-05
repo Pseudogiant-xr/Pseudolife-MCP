@@ -500,9 +500,21 @@ impl Service {
             &self.config.memory.band_specs,
         )
         .await?;
-        let metadata = crate::startup::metadata(storage.client())
-            .await
-            .map_err(|e| format!("startup metadata failed: {e}"))?;
+        // Read-only: the row versions and meta the next incremental refresh
+        // compares against, read before the stores they describe, and the
+        // startup metadata taken from that same read of meta (two reads
+        // could straddle a commit and record newer meta than was loaded).
+        let (metadata, shadow_inputs) = if self.config.read_only {
+            let (inputs, metadata) = crate::shadow::preread_with_metadata(storage.client())
+                .await
+                .map_err(|e| format!("startup metadata failed: {e:#}"))?;
+            (metadata, Some(inputs))
+        } else {
+            let metadata = crate::startup::metadata(storage.client())
+                .await
+                .map_err(|e| format!("startup metadata failed: {e}"))?;
+            (metadata, None)
+        };
         if inner.embedder.is_none() {
             // Built once and kept across failed attempts; a failure here
             // records nothing, as in Python (it is outside the abandon path).
@@ -523,13 +535,6 @@ impl Service {
         }
         let embedder = inner.embedder.clone().expect("embedder built above");
         let candidate = async {
-            // Read-only: the row versions and meta the next incremental
-            // refresh compares against, read before the stores they describe.
-            let shadow_inputs = if self.config.read_only {
-                Some(crate::shadow::preread(storage.client()).await?)
-            } else {
-                None
-            };
             let (bank, startup) = crate::startup::candidate(
                 storage.client(),
                 &self.config.memory,
@@ -650,6 +655,7 @@ impl Service {
             ready.storage.client(),
             &self.config.memory,
             ready.embedder.embedding_dim(),
+            &self.data_dir,
             state,
             marker,
             &ready.bank,
@@ -733,7 +739,15 @@ impl Service {
         let bank = match refresh.bank.take() {
             Some(bank) => Arc::new(std::sync::RwLock::new(bank)),
             None => {
-                refresh.apply_bank(&ready.bank);
+                // The bank's write lock waits for in-flight searches, so it
+                // is taken on a blocking thread, not this async worker.
+                let delta = refresh.take_bank_delta();
+                if !delta.is_empty() {
+                    let bank = ready.bank.clone();
+                    tokio::task::spawn_blocking(move || delta.apply(&bank))
+                        .await
+                        .map_err(|e| format!("bank patch failed: {e}"))?;
+                }
                 ready.bank.clone()
             }
         };

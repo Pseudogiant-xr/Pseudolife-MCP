@@ -157,6 +157,8 @@ struct Fixture {
     reader: Client,
     reader_task: tokio::task::JoinHandle<()>,
     memory: MemoryConfig,
+    /// Holds no config.yaml: a pending flat migration refuses.
+    data_dir: std::path::PathBuf,
 }
 
 struct Resident {
@@ -174,7 +176,7 @@ impl Fixture {
                  DELETE FROM lessons; DELETE FROM episodes; DELETE FROM cms_counters; \
                  DELETE FROM meta WHERE key IN ('active_session_pointer', 'episode_tombstones', \
                  'deferred_empty_roots', 'cortex_supersession_log', 'cortex_dream_cursor', \
-                 'coordination_hlc_highwater', 'bank_id')",
+                 'coordination_hlc_highwater', 'bank_id', 'flat_band_migration_v1')",
             )
             .await
             .unwrap();
@@ -193,6 +195,7 @@ impl Fixture {
             reader,
             reader_task,
             memory,
+            data_dir: std::env::temp_dir().join("pl-shadow-refresh-no-config"),
         }
     }
 
@@ -232,16 +235,31 @@ impl Fixture {
             .0
     }
 
-    /// The service's full-rebuild order: probe, pre-read, hydrate.
+    /// The service's full-rebuild order: probe, then one read of the row
+    /// versions and meta (the startup metadata included), then hydrate.
     async fn resident(&self) -> Resident {
+        self.resident_with(async {}).await.0
+    }
+
+    /// [`Fixture::resident`], running `between` after the pre-read and
+    /// before the hydration; also the startup state hydrated.
+    async fn resident_with(
+        &self,
+        between: impl std::future::Future<Output = ()>,
+    ) -> (Resident, crate::startup::StartupState) {
         let marker = self.marker().await;
-        let inputs = preread(&self.reader).await.unwrap();
-        let bank = self.rebuilt().await;
+        let (inputs, raw) = preread_then(&self.reader, between).await.unwrap();
+        let (bank, startup) = crate::startup::candidate(&self.reader, &self.memory, raw, DIM)
+            .await
+            .unwrap();
         let state = ShadowState::new(marker, inputs, &bank);
-        Resident {
-            bank: RwLock::new(bank),
-            state,
-        }
+        (
+            Resident {
+                bank: RwLock::new(bank),
+                state,
+            },
+            startup,
+        )
     }
 
     async fn refresh(&self, resident: &Resident) -> Outcome {
@@ -250,6 +268,7 @@ impl Fixture {
             &self.reader,
             &self.memory,
             DIM,
+            &self.data_dir,
             &resident.state,
             &marker,
             &resident.bank,
@@ -282,7 +301,7 @@ impl Fixture {
 fn install(resident: &mut Resident, mut refresh: Refresh) {
     match refresh.bank.take() {
         Some(bank) => *resident.bank.write().unwrap() = bank,
-        None => refresh.apply_bank(&resident.bank),
+        None => refresh.take_bank_delta().apply(&resident.bank),
     }
     resident.state = refresh.state;
 }
@@ -472,6 +491,7 @@ async fn db_commit_during_a_refresh_forces_another() {
         &fx.reader,
         &fx.memory,
         DIM,
+        &fx.data_dir,
         &resident.state,
         &probed,
         &resident.bank,
@@ -499,17 +519,8 @@ async fn db_commit_during_a_refresh_forces_another() {
     // A commit between the version read and the hydration: the bank holds
     // the newer row under an older version, so the next refresh fetches
     // and compares it instead of trusting it, and keeps the bank.
-    let marker = fx.marker().await;
-    let inputs = preread(&fx.reader).await.unwrap();
-    fx.exec(&format!(
-        "UPDATE entries SET text = 'alpha, during hydration' WHERE id = {alpha}"
-    ))
-    .await;
-    let bank = fx.rebuilt().await;
-    let mut resident = Resident {
-        state: ShadowState::new(marker, inputs, &bank),
-        bank: RwLock::new(bank),
-    };
+    let edit = format!("UPDATE entries SET text = 'alpha, during hydration' WHERE id = {alpha}");
+    let (mut resident, _) = fx.resident_with(fx.exec(&edit)).await;
     let refresh = fx.partial(&resident).await;
     assert!(refresh.bank.is_none(), "a row already resident was rebuilt");
     install(&mut resident, refresh);
@@ -599,5 +610,58 @@ async fn db_multi_band_banks_patch_only_while_seating_is_score_free() {
     );
     install(&mut resident, refresh);
     fx.assert_matches_rebuild(&resident).await;
+    fx.close().await;
+}
+
+#[tokio::test]
+async fn db_meta_commit_between_the_reads_is_refreshed() {
+    let Some(dsn) = test_dsn() else { return };
+    let _guard = DB.lock().await;
+    let fx = Fixture::open(&dsn, flat()).await;
+    fx.insert("flat", "alpha", 1).await;
+    // A meta commit after the full rebuild's meta read, before it hydrates.
+    let (resident, startup) = fx
+        .resident_with(fx.exec(
+            "INSERT INTO meta (key, value) VALUES ('cortex_dream_cursor', '12.5'), \
+             ('active_session_pointer', '{\"session_id\": \"s2\", \"ts\": 6}')",
+        ))
+        .await;
+    // The stores were built from the meta read before the commit...
+    assert_eq!(
+        startup.metadata["cortex_dream_cursor"],
+        serde_json::json!(0.0)
+    );
+    // ...so the next refresh must see the commit, cortex included.
+    let refresh = fx.partial(&resident).await;
+    let metadata = refresh
+        .metadata
+        .as_ref()
+        .expect("the meta commit was missed");
+    assert_eq!(metadata["cortex_dream_cursor"], serde_json::json!(12.5));
+    assert_eq!(metadata["active_session"], serde_json::json!(["s2", 6.0]));
+    assert!(refresh.cortex_meta, "the cortex reconfigure was missed");
+    fx.close().await;
+}
+
+#[tokio::test]
+async fn db_pending_flat_migration_refuses_the_refresh() {
+    let Some(dsn) = test_dsn() else { return };
+    let _guard = DB.lock().await;
+    let fx = Fixture::open(&dsn, flat()).await;
+    let alpha = fx.insert("flat", "alpha", 1).await;
+    let resident = fx.resident().await;
+    // migrate-flat --apply on the writer: its marker, and rows rewritten.
+    fx.exec(&format!(
+        "INSERT INTO meta (key, value) VALUES ('flat_band_migration_v1', '{{\"capacity\": 5250}}'); \
+         UPDATE entries SET access_count = 1 WHERE id = {alpha}"
+    ))
+    .await;
+    match fx.refresh(&resident).await {
+        Outcome::Full(reason) => assert!(
+            reason.contains("flat migration config finalization is pending"),
+            "{reason}"
+        ),
+        Outcome::Partial(_) => panic!("a pending flat migration was served incrementally"),
+    }
     fx.close().await;
 }
