@@ -820,12 +820,27 @@ class Update:
                   f"(`pseudolife-mcp serve`) and start new sessions to run it")
 
     # -- docker: shared steps ------------------------------------------------
+    def preflight_disk(self, directory: Path, *, temporary=False) -> None:
+        from pseudolife_memory import disk_space
+        disk_space.host(directory)
+        image, _ = self.running_image()
+        disk_space.docker_storage(self.docker, [PG_CONTAINER, DAEMON_CONTAINER], image, self.warn)
+        if temporary:
+            disk_space.container(self.docker, PG_CONTAINER)
+            code, state = run_cli([self.docker, "inspect", "-f", "{{.State.Running}}", DAEMON_CONTAINER],
+                                  timeout=60, stdout_only=True)
+            # Ordinary backups already permit a stopped daemon and retain a
+            # complete SQL dump with an explicit missing-state warning.
+            if code != 0 or state.strip() != "false":
+                disk_space.container(self.docker, DAEMON_CONTAINER)
+
     def backup(self, checkout: Path | None) -> None:
         if self.o.no_backup:
             self.warn("skipping backup (--no-backup)")
             return
         script = self._checkout_script(checkout, "backup")
         if script is not None:
+            self.preflight_disk(checkout / "data" / "backups", temporary=True)
             self.step(f"backing up the bank ({script.name})...")
             code, _ = run_cli(self._script_argv(script), timeout=3600, stream=not self.o.as_json)
             if code != 0:
@@ -848,6 +863,7 @@ class Update:
         from psycopg.conninfo import make_conninfo
         selector = make_conninfo(dbname=database)
         out_dir = data_dir() / "backups"
+        self.preflight_disk(out_dir, temporary=True)
         out_dir.mkdir(parents=True, exist_ok=True)
         stamp = _stamp()
         dump = out_dir / f"pseudolife_memory-{stamp}.sql.gz"
@@ -1212,6 +1228,7 @@ class Update:
                               f"password, token and volume settings with defaults.{source} Restore {env_file} "
                               "from the original install's environment before retrying. Nothing was changed", 2)
         compose = self._compose_args([compose_file, repo / "ops" / "docker-compose.override.yml"], env_file)
+        self.preflight_disk(repo)
         environment = compose_environment(env_file, stamp)
         self.verify_compose_authentication(compose, environment)
         self._compose_shown = compose
@@ -1222,6 +1239,7 @@ class Update:
         previous_digest = before.get("hooks_digest")
         self.schema_before = before.get("schema")
         self.backup(repo)
+        self.preflight_disk(repo)
         image_tag = _compose_image_tag(compose_file)
         if not image_tag:
             raise UpdateError(f"could not find the {DAEMON_SERVICE} image tag in {compose_file}")
@@ -1394,6 +1412,7 @@ class Update:
         self.verify_compose_authentication(compose, environment)
         self._compose_clear_bearers = _env_file_sets_credentials(context["env_file"])
         image = f"{GHCR_IMAGE}:{target}"
+        self.preflight_disk(data_dir())
         self.step(f"pulling {image}...")
         code, out = run_cli([self.docker, "pull", image], timeout=7200, stream=not self.o.as_json)
         if code != 0:
