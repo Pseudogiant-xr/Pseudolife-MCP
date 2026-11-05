@@ -167,7 +167,8 @@ def test_identical_stderr_requires_no_normalization_event():
         assert readiness_wait_evidence(left, right, policy) == []
 
 
-def test_actual_corpus_and_public_receipt_keep_raw_applied_evidence(tmp_path, monkeypatch):
+def run_phase1(tmp_path, monkeypatch, *, oracle_stderr=b'', faults=None):
+    """phase1.main over the stubbed real-bank corpus; returns (raw, public)."""
     from evals.rust_baseline import common, daemon
     from evals.rust_port import full_bank, phase1, stdio_faults, stdio_process_controls, stdio_scenarios
 
@@ -180,7 +181,7 @@ def test_actual_corpus_and_public_receipt_keep_raw_applied_evidence(tmp_path, mo
         yield None, 'http://127.0.0.1:55926', {}
 
     def observe(root, home, url, token, era, prefix, *, candidate):
-        side = transcript(RETAINED_NOTICE if candidate else b'', arm='candidate' if candidate else 'oracle')
+        side = transcript(RETAINED_NOTICE if candidate else oracle_stderr, arm='candidate' if candidate else 'oracle')
         side.update(era=era, case='real-bank', stdout=[
             {'id': 'list', 'result': {'tools': [{'description': 'contract'}]}},
             {'id': 'invalid', 'result': {'isError': True}}])
@@ -200,7 +201,7 @@ def test_actual_corpus_and_public_receipt_keep_raw_applied_evidence(tmp_path, mo
     monkeypatch.setattr(phase1, 'candidate_bindings', lambda *args: {})
     monkeypatch.setattr(phase1, 'process_tests', lambda *args: {'passed': True})
     monkeypatch.setattr(phase1, 'eof', lambda *args: {'cells': [], 'differences': []})
-    monkeypatch.setattr(stdio_faults, 'run', lambda *args: {'cells': [], 'differences': []})
+    monkeypatch.setattr(stdio_faults, 'run', lambda *args: faults or {'cells': [], 'differences': []})
     monkeypatch.setattr(stdio_scenarios, 'run', lambda *args: {
         'startup': {'cells': []}, 'concurrent': {'cells': []}, 'differences': []})
     monkeypatch.setattr(stdio_process_controls, 'run', lambda *args: {'controls': {}})
@@ -211,8 +212,12 @@ def test_actual_corpus_and_public_receipt_keep_raw_applied_evidence(tmp_path, mo
     raw, public = tmp_path / 'raw.json', tmp_path / 'public.json'
     monkeypatch.setattr(sys, 'argv', ['phase1', '--oracle-root', str(tmp_path),
                                     '--out', str(raw), '--public-out', str(public)])
-    assert phase1.main() == 0
-    receipt, summary = json.loads(raw.read_text()), json.loads(public.read_text())
+    phase1.main()
+    return json.loads(raw.read_text()), json.loads(public.read_text())
+
+
+def test_actual_corpus_and_public_receipt_keep_raw_applied_evidence(tmp_path, monkeypatch):
+    receipt, summary = run_phase1(tmp_path, monkeypatch)
     assert receipt['status'] == summary['status'] == 'passed'
     assert READINESS_WAIT_RULE in summary['named_normalizations']
     assert receipt['normalizations_applied'] == summary['normalizations_applied']
@@ -223,3 +228,36 @@ def test_actual_corpus_and_public_receipt_keep_raw_applied_evidence(tmp_path, mo
         assert left['stdout_frames_b64'] == right['stdout_frames_b64']
         assert event['stderr_evidence']['oracle']['stderr_b64'] == left['stderr_b64']
         assert event['stderr_evidence']['candidate']['stderr_b64'] == right['stderr_b64']
+
+
+def test_the_oracles_abort_block_composes_with_the_readiness_notice(tmp_path, monkeypatch):
+    # The oracle ends with only the abort block, the candidate prints only the
+    # wait notice: the abort rule runs first, then readiness, each with evidence.
+    from evals.rust_port.stdio_judge import PROACTOR_SELF_PIPE_ABORT_RULE
+    from evals.rust_port.test_proactor_abort_normalization import ABORT
+    receipt, summary = run_phase1(tmp_path, monkeypatch, oracle_stderr=ABORT)
+    assert receipt['status'] == summary['status'] == 'passed'
+    rules = [event['rule'] for event in summary['normalizations_applied']]
+    assert sorted(rules) == sorted([READINESS_WAIT_RULE, PROACTOR_SELF_PIPE_ABORT_RULE] * 2)
+    assert PROACTOR_SELF_PIPE_ABORT_RULE in summary['named_normalizations']
+
+
+def fault_event(**oracle_overrides):
+    from evals.rust_port.stdio_judge import PROACTOR_SELF_PIPE_ABORT_RULE, retain_stderr
+    left, right = transcript(b'x'), transcript(b'', arm='candidate')
+    left.update(oracle_overrides)
+    event = retain_stderr([{'path': '/stderr', 'rule': PROACTOR_SELF_PIPE_ABORT_RULE}], left, right)[0]
+    return {'era': '2025-11-25', 'case': 'down', **event}
+
+
+def test_fault_normalizations_join_the_validated_receipt_list(tmp_path, monkeypatch):
+    faults = {'cells': [], 'differences': [], 'normalizations_applied': [fault_event()]}
+    receipt, summary = run_phase1(tmp_path, monkeypatch, faults=faults)
+    assert receipt['status'] == summary['status'] == 'passed'
+    assert [event.get('surface') for event in summary['normalizations_applied']].count('faults') == 1
+
+
+def test_a_fault_normalization_without_provenance_leaves_the_receipt_incomplete(tmp_path, monkeypatch):
+    faults = {'cells': [], 'differences': [], 'normalizations_applied': [fault_event(pid=None)]}
+    receipt, _ = run_phase1(tmp_path, monkeypatch, faults=faults)
+    assert receipt['status'] == 'incomplete'

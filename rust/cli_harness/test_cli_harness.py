@@ -1047,6 +1047,68 @@ def test_shutdown_flush_maps_only_the_exact_trailer():
                         ("python-shutdown-flush",))
 
 
+# The Python shim's teardown block from the self-hosted Windows worker
+# (w1c-doctor healthy-host-claude-code, run 41210925170, 2026-10-31).
+_LIB = rb'  File "C:\actions-runner\toolcache\Python\3.11.18\x64\Lib\asyncio' + b"\\"
+_ABORTED = (b"[WinError 995] The I/O operation has been aborted because of either a thread exit "
+            b"or an application request\r\n")
+PROACTOR_ABORT = (
+    b"Error on reading from the event loop self pipe\r\n"
+    b"loop: <ProactorEventLoop running=True closed=False debug=False>\r\n"
+    b"Traceback (most recent call last):\r\n"
+    + _LIB + b'windows_events.py", line 471, in finish_recv\r\n'
+    b"    return ov.getresult()\r\n"
+    b"           ^^^^^^^^^^^^^^\r\n"
+    b"OSError: " + _ABORTED + b"\r\n"
+    b"During handling of the above exception, another exception occurred:\r\n\r\n"
+    b"Traceback (most recent call last):\r\n"
+    + _LIB + b'proactor_events.py", line 792, in _loop_self_reading\r\n'
+    b"    f.result()  # may raise\r\n"
+    b"    ^^^^^^^^^^\r\n"
+    + _LIB + b'windows_events.py", line 854, in _poll\r\n'
+    b"    value = callback(transferred, key, ov)\r\n"
+    b"            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\r\n"
+    + _LIB + b'windows_events.py", line 475, in finish_recv\r\n'
+    b"    raise ConnectionResetError(*exc.args)\r\n"
+    b"ConnectionResetError: " + _ABORTED)
+
+
+def test_proactor_abort_maps_only_the_oracles_exact_closing_block():
+    rule = ("python-proactor-self-pipe-abort",)
+    line = b"[shim] connected\r\n"
+    assert compare.diff(obs(stderr=line + PROACTOR_ABORT), obs(stderr=line), rule) == []
+    assert compare.diff(obs(stderr=PROACTOR_ABORT), obs(), rule) == []
+    assert compare.diff(obs(stderr=line + PROACTOR_ABORT), obs(stderr=line), ())
+    # The native side printing it, another error, later output, a second
+    # block or a block not at a line start all stay diffs.
+    assert compare.diff(obs(stderr=line), obs(stderr=line + PROACTOR_ABORT), rule)
+    assert compare.diff(obs(stderr=line + PROACTOR_ABORT.replace(b"995", b"10054")), obs(stderr=line), rule)
+    assert compare.diff(obs(stderr=line + PROACTOR_ABORT.replace(b"_loop_self_reading", b"_loop_reading")),
+                        obs(stderr=line), rule)
+    assert compare.diff(obs(stderr=line + PROACTOR_ABORT + b"more\r\n"), obs(stderr=line), rule)
+    assert compare.diff(obs(stderr=line + PROACTOR_ABORT * 2), obs(stderr=line), rule)
+    assert compare.diff(obs(stderr=b"x" + PROACTOR_ABORT), obs(stderr=b"x"), rule)
+    # The two header lines are required: the native side matching the
+    # residue a looser rule would leave still differs.
+    header, body = PROACTOR_ABORT.split(b"\r\n", 2)[:2], PROACTOR_ABORT.split(b"\r\n", 2)[2]
+    other = b"Task exception was never retrieved\r\n"
+    assert compare.diff(obs(stderr=line + other + body), obs(stderr=line + other), rule)
+    assert compare.diff(obs(stderr=line + body), obs(stderr=line), rule)
+    assert header[0] == b"Error on reading from the event loop self pipe"
+
+
+def test_oracle_rules_skip_the_native_observation():
+    native = obs(stderr=PROACTOR_ABORT)
+    rule = ("python-proactor-self-pipe-abort",)
+    assert normalize.apply(native, rule, native["home"])["stderr"] == native["stderr"]
+    assert normalize.apply(native, rule, native["home"], oracle=True)["stderr"] == b64(b"")
+
+
+def test_doctor_rows_take_the_proactor_abort_rule():
+    from cli_harness.rows import doctor
+    assert "python-proactor-self-pipe-abort" in doctor.RULES
+
+
 def test_rules_apply_to_copies_not_the_raw_observation():
     raw = obs(exit=120, stderr=b"x")
     normalize.apply(raw, ("python-shutdown-flush",), raw["home"])
@@ -1965,12 +2027,15 @@ def test_fixture_replies_records_and_closes_with_bounded_polling(row, monkeypatc
 
 
 @pytest.mark.skipif(core.WINDOWS, reason="POSIX special-file snapshot")
-def test_snapshot_observes_fifo_and_socket_without_opening_them(tmp_path, monkeypatch):
+@pytest.mark.parametrize("long_directory", [False, True], ids=["default", "long"])
+def test_snapshot_observes_fifo_and_socket_without_opening_them(tmp_path, monkeypatch, long_directory):
     import socket
+    if long_directory:
+        tmp_path = tmp_path / ("x" * 100)
+        tmp_path.mkdir()
+        assert len(os.fsencode(tmp_path / "socket")) > 108
     fifo = tmp_path / "fifo"
     os.mkfifo(fifo, 0o640)
-    sock = socket.socket(socket.AF_UNIX)
-    sock.bind(str(tmp_path / "socket"))
     original = Path.read_bytes
 
     def guarded(path):
@@ -1978,10 +2043,12 @@ def test_snapshot_observes_fifo_and_socket_without_opening_them(tmp_path, monkey
         return original(path)
 
     monkeypatch.setattr(Path, "read_bytes", guarded)
-    try:
+    # The snapshot observes the filesystem entry, not its address spelling.
+    # Pytest basetemp can exceed AF_UNIX's address limit on a work drive.
+    monkeypatch.chdir(tmp_path)
+    with socket.socket(socket.AF_UNIX) as sock:
+        sock.bind("socket")
         assert core.snapshot(tmp_path) == {"fifo": "fifo", "socket": "socket"}
-    finally:
-        sock.close()
 
 
 def test_home_tokens_preserve_surrogateescape_link_targets():
