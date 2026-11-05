@@ -603,6 +603,9 @@ jobs:
           tests/test_installer_client_only.py::test_shell_fragment_transport_is_utf8_with_a_cp1252_parent
           tests/test_installer_client_only_ps.py::test_powershell_fragment_transport_is_utf8_with_a_cp1252_parent
           tests/test_installer_client_only_ps.py::test_powershell_fixture_roundtrips_unicode_stdio
+          tests/test_shim_python.py
+          tests/test_shim_cutover.py
+          tests/test_shim_autostart_refs.py
           tests/test_unattended_update.py
           tests/test_update_engine.py
           tests/test_tool_annotations.py::test_all_tools_have_conservative_approval_hints
