@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "test-lite-macos",
+  "before": "488da06c8e2e3050",
+  "fingerprint": "f3e61581c78da942",
+  "reason": "Retains the six previously reviewed mocked move boundary cases alongside master installer-lite coverage; no new test logic, jobs, setup or child processes, and the measured job cost holds."
+}

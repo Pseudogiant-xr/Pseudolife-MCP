@@ -4,13 +4,15 @@
         [--target-url URL] [--expose-target] [--no-keep-tokens] [--resume]
         [--dry-run] [--yes] [--json]
 
-Run on the source host, a Docker-tier daemon. The target is a Docker-tier
-checkout host where the installer has already run (its daemon and Postgres
-containers exist), reached over key-based ssh (``ssh -o BatchMode=yes``;
-nothing ever types a password). The order:
+Run on the source host, a Docker-tier daemon. The target has an installed
+Docker bank, reached over key-based ssh (``ssh -o BatchMode=yes``). An owning
+checkout supplies restore/update, or the target's installed CLI supplies
+clone-free restore. ``--target-release`` selects the installed CLI when an
+unrelated clone exists; ``--target-compose-file`` / ``--target-env-file``
+name a stack manager's exported original deployment. The order:
 
 1. **Preflight, no changes.** The source is healthy, Docker tier and reports
-   its bank fingerprint; ssh works; the target checkout exists; the target
+   its bank fingerprint; ssh works; the target deployment is validated; the target
    daemon is healthy, its schema is at least the source's, its fingerprint
    differs, and its bank has no user data in any table, unless
    ``--resume`` names this move's half-restored bank by its marker. The
@@ -32,18 +34,20 @@ nothing ever types a password). The order:
    a manifest with per-table row counts. Any part failing is a failure.
 6. **Copy** the three files over ssh (``cat >``) and check their SHA-256 on
    the target.
-7. **Restore on the target without starting it**: the resume marker
-   (``<checkout>/data/move-<id>/marker.json`` on the target host, outside
-   the daemon's ``/data``), ``ops/restore.sh --apply --no-start
-   --backup-file ...``, then the restored bank identity (``meta``
+7. **Stop and recheck the target**, then restore without starting it. The
+   resume marker and verified original state archive stay on the target
+   host, outside the daemon's ``/data``. Restore uses the checkout's or
+   installed ``restore --yes --leave-stopped`` CLI,
+   then checks the restored bank identity (``meta``
    ``coordination_bank_id``) and row counts against the source's, and
    ``/data/move.json``, which keeps the target's daemon from starting
    outside the move.
 8. **Carry the environment identities** (``PSEUDOLIFE_MCP_TOKEN``,
    ``_TOKENS``, ``_TIER_MAP``, ``_TOOLSET``, read from the container that
-   ran) into the target's ``ops/.env`` over ssh stdin, the file backed up
+   ran) into the target's original environment file over ssh stdin, the file backed up
    first and its owner and mode kept; ``--no-keep-tokens`` skips it.
-9. **Start the target once** (``ops/update.sh``), wait (180 s, with a
+9. **Start the target once** (checkout update, same-version release update,
+   or the unchanged container under ``--no-keep-tokens``), wait (180 s, with a
    nudge a minute) for its ``/health`` bank fingerprint to equal the
    source's, check by SHA-256 that it runs with the carried values, restore
    what step 4 paused on the target, set the source's restart policy to
@@ -60,7 +64,7 @@ A failure in steps 3-9, or SIGTERM / SIGHUP / Ctrl-C, removes any target
 serve this move created, then rolls back in a fixed
 order (Ctrl-C is ignored while it runs): stop the target daemon if it was
 started (and put its ``/data/move.json`` back); restore the target's
-``ops/.env``, unattended update and restart policy; lift the database
+environment file, unattended update and restart policy; lift the database
 fence; remove the source's ``moved.json``; restore its restart policy and
 schedule; ``docker start`` the source. The target is never left running
 beside a running source: when it cannot be stopped, the source stays down.
@@ -85,6 +89,7 @@ like the other client modes.
 from __future__ import annotations
 
 import argparse
+import ast
 from dataclasses import dataclass
 import gzip
 import hashlib
@@ -100,7 +105,6 @@ import subprocess
 import sys
 import tarfile
 import time
-from urllib.parse import unquote, urlsplit
 
 DAEMON = "pseudolife-mcp-daemon"
 POSTGRES = "pseudolife-mcp-postgres"
@@ -128,6 +132,23 @@ with gzip.open(sys.argv[1], 'rb') as source, open(os.devnull, 'wb') as sink:
 with tarfile.open(sys.argv[1], 'r:gz') as archive:
     archive.getmembers()
 """
+_ARTIFACT_LOCATION = """# move artifact locations must be outside target bank mounts
+import json, os, sys
+from pathlib import Path
+request = json.load(sys.stdin)
+safe = True
+try:
+    sources = [os.path.realpath(m['Source']) for m in request['mounts'] if m.get('Source')]
+    for directory in request['directories']:
+        path = os.path.realpath(os.path.expanduser(directory))
+        if any(os.path.commonpath([path, source]) == source for source in sources):
+            safe = False
+        if request['release'] and any((p / '.git').exists() for p in (Path(path), *Path(path).parents)):
+            safe = False
+except (OSError, ValueError):
+    safe = False
+print(json.dumps({'safe': safe}))
+"""
 _EXPOSE_TARGET = """# move expose tailscale: retain ownership even if ssh loses the reply
 import fcntl, json, os, subprocess, sys
 request = json.load(sys.stdin)
@@ -151,7 +172,8 @@ with open(os.path.join(os.path.dirname(directory), '.move-expose.lock'), 'a') as
         sys.stderr.write('another move is exposing this target; retry after it finishes\\n')
         sys.exit(4)
     save('pending')
-    result = subprocess.run([sys.executable, '-m', 'pseudolife_memory.cli', 'expose', 'tailscale', '--yes', '--json'],
+    result = subprocess.run([sys.executable, '-m', 'pseudolife_memory.cli', 'expose', 'tailscale', '--yes', '--json',
+                             '--port', str(request.get('port', 8765))],
                             cwd=os.path.expanduser(request['checkout']), capture_output=True, text=True)
     try:
         reply = json.loads(result.stdout)
@@ -165,6 +187,113 @@ with open(os.path.join(os.path.dirname(directory), '.move-expose.lock'), 'a') as
     sys.stdout.write(result.stdout)
     sys.stderr.write(result.stderr)
 sys.exit(result.returncode)
+"""
+_RELEASE_PREFLIGHT = """# move release preflight: render the same deployment that update will use
+import ipaddress, json, os, subprocess, sys
+from pathlib import Path
+from pseudolife_memory import update_cli as up
+request = json.load(sys.stdin)
+try:
+    options = up.Options(as_json=True, compose_files=[Path(os.path.expanduser(p)) for p in request['compose_files']],
+                         env_file=os.path.expanduser(request['env_file']) if request['env_file'] else None)
+    update = up.Update(options)
+    update._bundled = lambda name: up.BUNDLED_COMPOSE / name  # render without materializing a cache
+    plan = update.compose_context()
+    files = plan['env_file']
+    if not files:
+        raise up.UpdateError('carrying tokens needs the original environment: pass --target-env-file <stack.env>, '
+                             'or --no-keep-tokens to retain the existing target configuration')
+    environment = up.compose_environment(files, dict(request['carried'], PSEUDOLIFE_IMAGE_TAG=request['version']))
+    result = subprocess.run([update.docker, 'compose', *plan['args'], 'config', '--format', 'json'],
+                            env=environment, capture_output=True, text=True, timeout=120)
+    if result.returncode:
+        raise up.UpdateError('cannot render the target deployment: verify the original compose and environment '
+                             'with docker compose config, then retry with --target-compose-file and --target-env-file')
+    config = json.loads(result.stdout)
+    daemon = config['services']['pseudolife-daemon']
+    live = daemon.get('environment') or {}
+    if any(str(live.get(key, '')) != value for key, value in request['carried'].items()):
+        raise up.UpdateError('the target compose file hardcodes or overrides carried identities: make those '
+                             'environment keys interpolate from the env file, or pass --no-keep-tokens')
+    if live.get('PSEUDOLIFE_MCP_DATABASE_URL') != request['database_url']:
+        raise up.UpdateError('the exported environment would change the target database connection: export '
+                             'the original stack environment and pass --target-env-file <stack.env>')
+    from psycopg.conninfo import conninfo_to_dict
+    def endpoint(values):
+        connection = conninfo_to_dict(values['PSEUDOLIFE_MCP_DATABASE_URL'])
+        setting = lambda key, env: connection.get(key, values.get(env))
+        user = setting('user', 'PGUSER')
+        database = setting('dbname', 'PGDATABASE') or user
+        return (user, database, setting('host', 'PGHOST') or '',
+                setting('hostaddr', 'PGHOSTADDR') or '',
+                setting('port', 'PGPORT') or '5432',
+                setting('password', 'PGPASSWORD'),
+                setting('service', 'PGSERVICE') or '')
+    original = dict(request.get('connection_defaults') or {}, PSEUDOLIFE_MCP_DATABASE_URL=request['database_url'])
+    if endpoint(live) != endpoint(original):
+        raise up.UpdateError('the exported libpq defaults would change the actual bank or its credentials: '
+                             'export the original environment and pass --target-env-file <stack.env>')
+    def check_volume(service, destination, actual):
+        wanted = next((v for v in config['services'][service].get('volumes', []) if v['target'] == destination), None)
+        if wanted is None:
+            raise ValueError('missing data mount')
+        source = wanted.get('source')
+        if wanted['type'] == 'volume':
+            source = config['volumes'][source].get('name', source)
+        else:
+            source = os.path.realpath(source)
+        if not any(m.get('Destination') == destination and m.get('Type') == wanted['type']
+                   and (m.get('Name') if wanted['type'] == 'volume' else os.path.realpath(m.get('Source', ''))) == source
+                   for m in actual):
+            raise ValueError('changed data mount')
+    check_volume('pseudolife-daemon', '/data', request['daemon_mounts'])
+    if request.get('host_network'):
+        ports_match = daemon.get('network_mode') == 'host'
+    else:
+        actual = {(str(ipaddress.ip_address(b.get('HostIp') or '0.0.0.0')), int(b['HostPort']), int(key.split('/')[0]), key.split('/')[1])
+                  for key, bindings in request['daemon_ports'].items() for b in bindings or []}
+        def ports(value):
+            parts = str(value).split('-')
+            first, last = int(parts[0]), int(parts[-1])
+            if len(parts) > 2 or not 1 <= first <= last <= 65535:
+                raise ValueError('invalid published port range')
+            return range(first, last + 1)
+        wanted = set()
+        for binding in daemon.get('ports', []):
+            targets, published = ports(binding['target']), ports(binding.get('published'))
+            if len(targets) != len(published):
+                raise ValueError('unfixed published port')
+            protocol = binding.get('protocol') or 'tcp'
+            for target, port in zip(targets, published):
+                if binding.get('host_ip'):
+                    addresses = {str(ipaddress.ip_address(binding['host_ip']))}
+                else:
+                    # An omitted host_ip is Docker's dual-stack wildcard;
+                    # preserve the daemon's existing enabled address families.
+                    addresses = {ip for ip, host, container, proto in actual
+                                 if host == port and container == target and proto == protocol and ip in ('0.0.0.0', '::')}
+                    addresses = addresses or {'0.0.0.0', '::'}
+                wanted.update((ip, port, target, protocol) for ip in addresses)
+        ports_match = wanted == actual
+    if not ports_match:
+        raise up.UpdateError('the exported compose file would change target network bindings: export its original '
+                             'settings and retry with --target-compose-file and --target-env-file')
+    pg_mounts = [m for m in config['services']['pseudolife-pg'].get('volumes', [])
+                 if m.get('target', '').startswith('/var/lib/postgresql')]
+    if not pg_mounts:
+        raise ValueError('missing database mount')
+    for mount in pg_mounts:
+        check_volume('pseudolife-pg', mount['target'], request['postgres_mounts'])
+    print(json.dumps({'env_file': str(files[-1]), 'project': plan['project']}))
+except up.UpdateError as error:
+    message = str(error).replace('--compose-file', '--target-compose-file').replace('--env-file', '--target-env-file')
+    print(json.dumps({'error': message}))
+    sys.exit(4)
+except Exception:
+    print(json.dumps({'error': 'the exported deployment cannot be matched to the running target data volumes; '
+                              'export its original compose/environment files, then retry with --target-compose-file '
+                              'and --target-env-file, or use --no-keep-tokens to retain its existing configuration'}))
+    sys.exit(4)
 """
 # Where a client on the target may hold a token (``grep -lsF`` reads the
 # tokens from stdin; a path that does not exist is skipped).
@@ -431,19 +560,41 @@ def merge_env(content: str, carried: dict[str, str], move_id: str) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _dsn_parts(dsn: str | None) -> tuple[str, str]:
-    """``(database, user)`` of the daemon's DSN (the compose defaults when
-    it names neither). The password is never read out of it."""
+def _dsn_parts(dsn: str | None, environment: dict[str, str] | None = None) -> tuple[str, str]:
+    """Resolve the daemon's libpq defaults; container init defaults are unrelated."""
+    environment = environment or {}
+    fix = ("set an explicit PSEUDOLIFE_MCP_DATABASE_URL with the actual bank database and role in the "
+           "daemon's original configuration, restart it, and retry move")
+    if not dsn:
+        raise MoveError(f"the daemon's database configuration is opaque: {fix}. Nothing was changed", EXIT_REFUSED)
     try:
-        parsed = urlsplit(dsn or "")
-        db = unquote(parsed.path.lstrip("/")) or "pseudolife_memory"
-        user = unquote(parsed.username or "") or "pseudolife"
-    except ValueError:
-        db, user = "pseudolife_memory", "pseudolife"
+        from psycopg.conninfo import conninfo_to_dict
+        connection = conninfo_to_dict(dsn)
+    except Exception:  # libpq errors can contain the credential-bearing input
+        raise MoveError(f"the daemon's database configuration cannot be read: {fix}. Nothing was changed",
+                        EXIT_REFUSED) from None
+    if connection.get("service", environment.get("PGSERVICE")):
+        raise MoveError("the daemon's service-file connection cannot be verified outside its container: "
+                        "replace service/PGSERVICE defaults with an explicit PSEUDOLIFE_MCP_DATABASE_URL, "
+                        "restart the original daemon, and retry. Nothing was changed",
+                        EXIT_REFUSED)
+    user = connection.get("user", environment.get("PGUSER"))
+    db = connection.get("dbname", environment.get("PGDATABASE")) or user
+    if not user or not db:
+        raise MoveError(f"the daemon's database defaults cannot be identified: {fix}. Nothing was changed", EXIT_REFUSED)
     if not (_IDENT.match(db) and _IDENT.match(user)):
         raise MoveError("the daemon's database URL names a database or user this command does not handle "
-                        "(lowercase letters, digits and underscores only); nothing was changed", EXIT_REFUSED)
+                        "(lowercase letters, digits and underscores only); use pseudolife-mcp export/import "
+                        "for this bank instead. Nothing was changed", EXIT_REFUSED)
     return db, user
+
+
+def _dsn_port(dsn: str, environment: dict) -> str:
+    from psycopg.conninfo import conninfo_to_dict
+    port = conninfo_to_dict(dsn).get("port", environment.get("PGPORT")) or "5432"
+    if not re.fullmatch(r"[0-9]+", port) or not 1 <= int(port) <= 65535:
+        raise MoveError("the daemon needs one explicit PostgreSQL port: correct its database URL or PGPORT and retry. Nothing was changed", EXIT_REFUSED)
+    return str(int(port))
 
 
 def _container(inspect_text: str) -> dict | None:
@@ -453,6 +604,29 @@ def _container(inspect_text: str) -> dict | None:
         return None
     if isinstance(data, list) and data and isinstance(data[0], dict):
         return data[0]
+    return None
+
+
+def _meta_fingerprint(value: str) -> str | None:
+    try:
+        identity = json.loads(value)
+    except ValueError:
+        return None
+    return hashlib.sha256(identity.encode("utf-8")).hexdigest()[:16] if isinstance(identity, str) else None
+
+
+def _schema_version(source: str, *, rust: bool = False) -> int | None:
+    if rust:
+        match = re.search(r"^pub const SCHEMA_META_VERSION: i64 = ([1-9][0-9]*);[ \t]*\r?$", source, re.M)
+        return int(match[1]) if match else None
+    try:
+        tree = ast.parse(source)
+        for node in tree.body:
+            if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "SCHEMA_META_VERSION" for t in node.targets):
+                value = ast.literal_eval(node.value)
+                return value if type(value) is int and value > 0 else None
+    except (SyntaxError, ValueError, TypeError):
+        pass
     return None
 
 
@@ -498,8 +672,13 @@ def _rows(text: str) -> list[list[str]]:
 class Options:
     target: str
     checkout: str = DEFAULT_CHECKOUT
+    checkout_explicit: bool = False
     target_url: str | None = None
     expose_target: bool = False
+    target_release: bool = False
+    target_env_file: str | None = None
+    target_compose_files: tuple[str, ...] = ()
+    target_work_dir: str | None = None
     keep_tokens: bool = True
     resume: bool = False
     dry_run: bool = False
@@ -529,7 +708,7 @@ class MoveInterrupted(BaseException):
 FLAGS = ("target_timer_paused", "target_policy_paused", "schedule_paused", "source_stopped", "fenced",
          "target_quiesced", "exposed_now", "expose_pending",
          "marker_written", "target_restored", "gate_written", "env_backup", "env_written", "target_started",
-         "source_policy_changed", "moved_written")
+         "source_policy_changed", "moved_written", "probe_written")
 
 
 class Mover:
@@ -551,6 +730,14 @@ class Mover:
         self.docker = update_cli.docker_cmd()
         self.move_id = _new_move_id()
         self.checkout = options.checkout.rstrip("/") or DEFAULT_CHECKOUT
+        self.release_target = options.target_release
+        self.target_env_file: str | None = None
+        self.target_version: str | None = None
+        self.target_schema: int | None = None
+        self.target_head: str | None = None
+        self.committed = False
+        self.target_port = 8765
+        self.target_local_url = SOURCE_URL
         self.phase_code = EXIT_REFUSED     # what an ssh failure exits with before the source stops
         self.recording = False
         self.in_rollback = False
@@ -563,15 +750,22 @@ class Mover:
         self.source_schema = None
         self.source_auth = None
         self.source_env: dict[str, str] = {}
+        self.probe_token: str | None = None
         self.source_image = ""
         self.source_policy = ""
         self.db, self.db_user = "pseudolife_memory", "pseudolife"
         self.target_image = ""
+        self.target_container: dict = {}
+        self.target_postgres: dict = {}
+        self.target_selection: dict = {}
+        self.target_original_meta = ""
+        self.resume_record: dict | None = None
         self.target_policy = ""
         self.target_old_tokens: list[str] = []
         self.target_registrations: list[str] | None = None
         self.target_timer_enabled = False
         self.target_db, self.target_user = "pseudolife_memory", "pseudolife"
+        self.db_port = self.target_db_port = "5432"
         self.target_url: str | None = None
         self.expose_attempt: str | None = None
         self.needs_expose = False
@@ -634,11 +828,13 @@ class Mover:
         return result
 
     def psql_local(self, sql: str, database: str) -> Result:
-        return self.local([self.docker, "exec", POSTGRES, "psql", "-v", "ON_ERROR_STOP=1", "-tA",
+        return self.local([self.docker, "exec", POSTGRES, "env", "-u", "PGHOSTADDR", "-u", "PGSERVICE", "-u", "PGSERVICEFILE",
+                           "psql", "-h", "/var/run/postgresql", "-p", self.db_port, "-v", "ON_ERROR_STOP=1", "-tA",
                            "-U", self.db_user, "-d", database, "-c", sql])
 
     def psql_remote(self, sql: str, database: str | None = None) -> Result:
-        return self.ssh(f"docker exec {POSTGRES} psql -v ON_ERROR_STOP=1 -tA -U {shlex.quote(self.target_user)} "
+        return self.ssh(f"docker exec {POSTGRES} env -u PGHOSTADDR -u PGSERVICE -u PGSERVICEFILE psql "
+                        f"-h /var/run/postgresql -p {self.target_db_port} -v ON_ERROR_STOP=1 -tA -U {shlex.quote(self.target_user)} "
                         f"-d {shlex.quote(database or self.target_db)} -c {shlex.quote(sql)}")
 
     @property
@@ -647,7 +843,10 @@ class Mover:
 
     @property
     def remote_dir(self) -> str:
-        return f"{self.checkout}/data/move-{self.move_id}"
+        if self.o.target_work_dir:
+            return f"{self.o.target_work_dir.rstrip('/')}/{self.move_id}"
+        return (f"~/.pseudolife-mcp/moves/{self.move_id}" if self.release_target
+                else f"{self.checkout}/data/move-{self.move_id}")
 
     @property
     def marker_path(self) -> str:
@@ -657,7 +856,13 @@ class Mover:
 
     @property
     def env_path(self) -> str:
-        return f"{self.checkout}/ops/.env"
+        return self.target_env_file or f"{self.checkout}/ops/.env"
+
+    def target_cli(self, arguments: str) -> str:
+        prefix = "" if self.release_target else f"cd {rq(self.checkout)} && "
+        if arguments.startswith("expose ") and self.target_port != 8765:
+            arguments += f" --port {self.target_port}"
+        return prefix + "python3 -m pseudolife_memory.cli " + arguments
 
     @property
     def exposure_receipt(self) -> str:
@@ -679,6 +884,9 @@ class Mover:
             return self.fail(EXIT_USAGE, "--to takes an ssh target such as root@box or a ~/.ssh/config alias")
         if any(ch in self.checkout for ch in "\n\r\0"):
             return self.fail(EXIT_USAGE, "--target-checkout holds a control character")
+        paths = [self.o.target_env_file or "", self.o.target_work_dir or "", *self.o.target_compose_files]
+        if any(ch in path for path in paths for ch in "\n\r\0"):
+            return self.fail(EXIT_USAGE, "target environment, compose and work directory paths must contain no control characters")
         try:
             self.preflight()
             self.show_plan()
@@ -712,6 +920,13 @@ class Mover:
             status = f" (status: {health.get('status')})" if isinstance(health, dict) else ""
             raise self.refuse(f"the source daemon at {SOURCE_URL} did not answer /health with status ok{status}; "
                               f"move runs on the daemon's own host, with the daemon healthy")
+        if health.get("ready") is False:
+            raise self.refuse(f"the source daemon is still warming up: wait for {SOURCE_URL}/health "
+                              "to report ready: true, then retry")
+        for flag, path in (("--target-checkout", self.checkout), ("--target-work-dir", o.target_work_dir)):
+            if path and not path.startswith(("/", "~/")):
+                raise self.refuse(f"{flag} must be an absolute target path or begin with ~/: "
+                                  "pass the full target directory, such as /srv/pseudolife or ~/pseudolife")
         result = self.local([self.docker, "inspect", "--type", "container", DAEMON], timeout=60)
         container = _container(result.text) if result.ok else None
         if container is None:
@@ -724,13 +939,16 @@ class Mover:
         self.source_env = {key: env[key] for key in CARRIED_KEYS if key in env}
         self.source_image = str((container.get("Config") or {}).get("Image") or "")
         self.source_policy = _restart_policy(container)
-        self.db, self.db_user = _dsn_parts(env.get("PSEUDOLIFE_MCP_DATABASE_URL"))
+        self.db, self.db_user = _dsn_parts(env.get("PSEUDOLIFE_MCP_DATABASE_URL"), env)
+        self.db_port = _dsn_port(env.get("PSEUDOLIFE_MCP_DATABASE_URL") or "", env)
         bank = health.get("bank")
         if not isinstance(bank, str) or not bank:
             raise self.refuse("the source daemon reports no bank fingerprint (/health `bank` is missing or "
                               "null): it is older than this command, or has not loaded its bank identity yet. "
                               "Update the daemon, or make one memory call through it, then retry")
         self.source_bank, self.source_schema = bank, health.get("schema")
+        if type(self.source_schema) is not int or self.source_schema <= 0:
+            raise self.refuse("the source reports no usable schema version: update the source daemon and retry")
         self.source_auth = health.get("auth")
         if o.keep_tokens and self.source_auth is not True:
             raise self.refuse("the source daemon runs without a bearer token (auth: false): carrying its "
@@ -741,6 +959,10 @@ class Mover:
         if not self.source_meta:
             raise self.refuse(f"could not read the source bank's identity (meta coordination_bank_id: "
                               f"{result.why(out=False)})")
+        if _meta_fingerprint(self.source_meta) != bank:
+            raise self.refuse("the selected source database does not match the daemon's bank fingerprint: "
+                              "correct its database configuration or restart the source daemon to refresh its "
+                              "bank identity, then retry")
         self.data["source"] = {"bank": bank, "schema": self.source_schema, "database": self.db,
                                "image": self.source_image, "restart_policy": self.source_policy}
 
@@ -761,32 +983,56 @@ class Mover:
                 self.check_target_stack({})
             raise self.refuse(f"the target has no {DAEMON} container: run the "
                               f"installer there first ({INSTALL_LINE})")
-        self.check_target_stack(target)
         co = rq(self.checkout)
         result = self.ssh(f"test -f {co}/ops/restore.sh && test -f {co}/ops/update.sh && "
                           f"test -f {co}/ops/docker-compose.yml", timeout=60)
-        if not result.ok:
-            raise self.refuse(f"no Pseudolife-MCP checkout at {self.checkout} on {o.target}: install there "
-                              f"first ({INSTALL_LINE}), or name the checkout with --target-checkout")
-        result = self.ssh(f"grep -q -- --no-start {co}/ops/restore.sh", timeout=60)
-        if not result.ok:
-            raise self.refuse(f"the target checkout's ops/restore.sh has no --no-start: update the checkout "
-                              f"on {o.target} (git pull) and retry")
+        explicit_release = self.release_target or bool(o.target_env_file or o.target_compose_files)
+        if not result.ok and not explicit_release and (o.checkout_explicit or self.checkout != DEFAULT_CHECKOUT):
+            raise self.refuse(f"no owning checkout at {self.checkout}: correct --target-checkout, or use "
+                              "--target-release to select the target's installed CLI")
+        self.release_target = self.release_target or bool(o.target_env_file or o.target_compose_files) or not result.ok
+        if self.release_target:
+            self.check_release_stack(target)
+        else:
+            self.check_target_stack(target)
+            result = self.ssh(f"grep -q -- --no-start {co}/ops/restore.sh", timeout=60)
+            if not result.ok:
+                raise self.refuse(f"the target checkout's ops/restore.sh has no --no-start: update the checkout "
+                                  f"on {o.target} (git pull) and retry")
         self.target_was_running = bool((target.get("State") or {}).get("Running"))
         self.target_image = str((target.get("Config") or {}).get("Image") or "")
+        self.target_container = target
+        bindings = ((target.get("NetworkSettings") or {}).get("Ports") or {}).get("8765/tcp") or []
+        bindings = sorted(bindings, key=lambda b: b.get("HostIp") not in ("", "0.0.0.0", "127.0.0.1"))
+        if bindings:
+            try:
+                from ipaddress import ip_address
+                port = int(bindings[0]["HostPort"])
+                address = ip_address(bindings[0].get("HostIp") or "127.0.0.1")
+                host = "127.0.0.1" if address.is_unspecified else str(address)
+                if ":" in host:
+                    host = f"[{host}]"
+                if not 1 <= port <= 65535:
+                    raise ValueError("port")
+            except (KeyError, TypeError, ValueError):
+                raise self.refuse("the target reports invalid Docker port bindings: repair its published daemon "
+                                  "port in the original stack and retry") from None
+            self.target_port, self.target_local_url = port, f"http://{host}:{port}"
         self.target_policy = _restart_policy(target)
         target_env = _env_of(target)
-        self.target_db, self.target_user = _dsn_parts(target_env.get("PSEUDOLIFE_MCP_DATABASE_URL"))
+        self.target_db, self.target_user = _dsn_parts(target_env.get("PSEUDOLIFE_MCP_DATABASE_URL"), target_env)
+        self.target_db_port = _dsn_port(target_env.get("PSEUDOLIFE_MCP_DATABASE_URL") or "", target_env)
         from pseudolife_memory.principals import parse_token_map
         self.target_old_tokens = ([target_env["PSEUDOLIFE_MCP_TOKEN"]] if target_env.get("PSEUDOLIFE_MCP_TOKEN")
                                   else []) + list(parse_token_map(target_env.get("PSEUDOLIFE_MCP_TOKENS")))
         result = self.ssh(f"docker inspect -f '{{{{.State.Running}}}}' {POSTGRES}", timeout=60)
         if not result.ok or result.text.strip() != "true":
             raise self.refuse(f"the target's {POSTGRES} container is not running: start the stack there "
-                              f"(docker compose -f ops/docker-compose.yml up -d) or run the installer")
+                              f"(docker start {POSTGRES}) and retry move --dry-run")
         self.check_postgres_versions()
+        self.target_selection = self.database_selection()
         if not o.resume:
-            result = self.ssh("curl -fsS --max-time 5 http://127.0.0.1:8765/health", timeout=60)
+            result = self.ssh(f"curl -fsS --max-time 5 {shlex.quote(self.target_local_url + '/health')}", timeout=60)
             try:
                 target_health = json.loads(result.text) if result.ok else None
             except ValueError:
@@ -794,16 +1040,48 @@ class Mover:
             if not isinstance(target_health, dict) or target_health.get("status") != "ok":
                 raise self.refuse(f"the target daemon on {o.target} did not answer /health with status ok "
                                   f"on its loopback port: start it there, or re-run its installer")
+            if target_health.get("ready") is False:
+                raise self.refuse(f"the target daemon is still warming up: wait for {self.target_local_url}/health "
+                                  "to report ready: true, then retry")
             schema = target_health.get("schema")
+            self.target_schema = schema
             if isinstance(self.source_schema, int) and (not isinstance(schema, int) or schema < self.source_schema):
+                update = ("pseudolife-mcp update --daemon-only" if self.release_target else "git pull, then ops/update.sh")
                 raise self.refuse(f"the target daemon's schema ({schema}) is older than the source's "
-                                  f"({self.source_schema}): update the target first (git pull there, then "
-                                  f"ops/update.sh)")
+                                  f"({self.source_schema}): update the target first ({update} there)")
             if target_health.get("bank") == bank:
                 raise self.refuse(f"the target daemon reports the same bank fingerprint as this one ({bank}): "
                                   f"the target already serves this bank (or a copy of it), and move never "
                                   f"runs two daemons on one bank")
+            self.target_original_meta = self.read_target_meta()
+            if (self.target_original_meta == self.source_meta or (target_health.get("bank") is not None
+                    and _meta_fingerprint(self.target_original_meta) != target_health.get("bank"))):
+                raise self.refuse("the selected target database does not match the daemon's different bank: "
+                                  "correct its original database configuration and retry move --dry-run")
+            self.target_version = target_health.get("version")
+            if not o.keep_tokens and target_health.get("auth") is not True:
+                raise self.refuse("--no-keep-tokens needs an authenticated target: configure its bearer token "
+                                  "in the existing stack and retry")
         self.check_target_bank()
+        self.check_deploy_schema()
+        self.check_artifact_location()
+        if self.release_target and o.keep_tokens:
+            self.check_release_deployment()
+        elif not self.release_target:
+            result = self.ssh(f"cd {rq(self.checkout)} && python3 ops/update.py --checkout-handover-capability", timeout=60)
+            if not result.ok or result.text.strip() != "pseudolife-mcp checkout-handover-v1":
+                raise self.refuse("the target checkout updater lacks stopped handover support: update the target checkout "
+                                  "and its CLI dependencies, then retry move --dry-run")
+            if not o.keep_tokens:
+                script = ("# move checkout bearer preflight\nimport sys\n"
+                          "from pseudolife_memory.update_cli import _env_file_sets_credentials\n"
+                          "sys.exit(0 if _env_file_sets_credentials(sys.argv[1]) else 3)")
+                result = self.ssh(f"cd {rq(self.checkout)} && python3 -c {shlex.quote(script)} {rq(self.env_path)}", timeout=60)
+                if not result.ok:
+                    raise self.refuse(f"checkout --no-keep-tokens requires {self.env_path} to declare "
+                                      "PSEUDOLIFE_MCP_TOKEN or PSEUDOLIFE_MCP_TOKENS: put the existing daemon's "
+                                      "bearer settings explicitly in that file, then retry")
+        self.check_probe_bearer()
         self.read_exposure()
         self.read_sizes()
         self.read_stored_principals()
@@ -813,6 +1091,7 @@ class Mover:
                                "needs_expose": self.needs_expose, "database": self.target_db,
                                "restart_policy": self.target_policy,
                                "unattended_update": self.target_timer_enabled}
+        self.data["target"]["mode"] = "release" if self.release_target else "checkout"
 
     def inspect_target(self, name: str) -> dict | None:
         """Only a successful exact-name listing can prove absence."""
@@ -838,8 +1117,10 @@ class Mover:
         Overlays and explicit volume names do not change ownership.
         """
         postgres = self.inspect_target(POSTGRES)
+        self.target_postgres = postgres or {}
         labels = [(c.get("Config") or {}).get("Labels") or {} for c in (daemon, postgres or {})]
-        fix = ("Retry with --target-checkout pointing to the checkout that owns both containers. "
+        fix = ("Retry with --target-checkout pointing to the checkout that owns both containers, or "
+               "--target-release to use the installed clone-free restore instead. "
                "For a stack managed elsewhere, first back up that bank, use its stack manager to "
                "remove its containers and retain its volumes (docker compose down without -v), "
                "then install a fresh target with distinct PSEUDOLIFE_BANK_VOLUME and "
@@ -864,6 +1145,118 @@ class Mover:
             raise self.refuse(f"the target's running compose stack does not use "
                               f"{self.checkout}/ops/docker-compose.yml for both containers. {fix}")
 
+    def check_release_stack(self, daemon: dict) -> None:
+        postgres = self.inspect_target(POSTGRES)
+        labels = [(c.get("Config") or {}).get("Labels") or {} for c in (daemon, postgres or {})]
+        project = labels[0].get("com.docker.compose.project")
+        if (not project or labels[1].get("com.docker.compose.project") != project
+                or labels[0].get("com.docker.compose.service") != "pseudolife-daemon"
+                or labels[1].get("com.docker.compose.service") != "pseudolife-pg"):
+            raise self.refuse("the target containers are not the daemon and Postgres of one compose stack: "
+                              "select the matching upstream stack before retrying move --dry-run")
+        self.target_postgres = postgres
+        result = self.ssh("python3 -m pseudolife_memory.cli restore --help", timeout=60)
+        if not result.ok or any(flag not in result.text for flag in ("--leave-stopped", "--container", "--db-port")):
+            raise self.refuse("the target's installed CLI lacks clone-free restore: install the same CLI "
+                              "release as this command (python3 -m pip install --upgrade pseudolife-mcp), "
+                              "then retry move --dry-run; --target-checkout can select an owning checkout")
+
+    def check_release_deployment(self) -> None:
+        if not re.match(r"^ghcr\.io/pseudogiant-xr/pseudolife-daemon(?::|@)", self.target_image):
+            raise self.refuse("the target uses a custom or checkout-built image: pass --no-keep-tokens to "
+                              "restart that container unchanged, or --target-checkout to use its owning checkout")
+        if not isinstance(self.target_version, str) or not re.fullmatch(r"v?\d+\.\d+\.\d+(?:[a-zA-Z0-9.+-]*)", self.target_version):
+            raise self.refuse("the target reports no release version to redeploy safely: pass --no-keep-tokens "
+                              "to retain its current container, or start/update the target and retry")
+        result = self.ssh(self.target_cli("update --help"), timeout=60)
+        if not result.ok or "--allow-auth-change" not in result.text:
+            raise self.refuse("the target updater lacks explicit bearer-transfer support: install the same CLI "
+                              "release as this command (python3 -m pip install --upgrade pseudolife-mcp), "
+                              "then retry, or pass --no-keep-tokens to retain its existing environment")
+        request = {"compose_files": list(self.o.target_compose_files), "env_file": self.o.target_env_file,
+                   "version": self.target_version, "carried": self.carried(),
+                   "database_url": _env_of(self.target_container).get("PSEUDOLIFE_MCP_DATABASE_URL"),
+                   "daemon_mounts": self.target_container.get("Mounts", []),
+                   "postgres_mounts": self.target_postgres.get("Mounts", []), "port": self.target_port,
+                   "daemon_ports": (self.target_container.get("NetworkSettings") or {}).get("Ports") or {},
+                   "host_network": (self.target_container.get("HostConfig") or {}).get("NetworkMode") == "host"}
+        current = _env_of(self.target_container)
+        request["connection_defaults"] = {key: current[key] for key in
+            ("PGUSER", "PGDATABASE", "PGHOST", "PGHOSTADDR", "PGPORT", "PGPASSWORD", "PGSERVICE") if key in current}
+        result = self.ssh(f"python3 -c {shlex.quote(_RELEASE_PREFLIGHT)}",
+                          stdin=json.dumps(request).encode(), timeout=180)
+        try:
+            plan = json.loads(result.text)
+        except ValueError:
+            plan = None
+        if (not result.ok or not isinstance(plan, dict) or not isinstance(plan.get("env_file"), str)
+                or not plan.get("env_file")):
+            error = plan.get("error") if isinstance(plan, dict) else None
+            raise self.refuse(error or "could not validate the installed target updater: install the same CLI "
+                              "release on the target and retry, or pass --no-keep-tokens")
+        self.target_env_file = plan["env_file"]
+
+    def check_artifact_location(self) -> None:
+        directories = [self.remote_dir]
+        if not self.release_target:
+            directories.append(f"{self.checkout}/data/backups")  # legacy restore's database safety dump
+        mounts = [m for m in self.target_container.get("Mounts", []) if m.get("Destination") == "/data"]
+        mounts += self.target_postgres.get("Mounts", [])
+        request = {"directories": directories, "mounts": mounts, "release": self.release_target}
+        result = self.ssh(f"python3 -c {shlex.quote(_ARTIFACT_LOCATION)}", stdin=json.dumps(request).encode(), timeout=60)
+        try:
+            safe = json.loads(result.text).get("safe") is True if result.ok else False
+        except (ValueError, AttributeError):
+            safe = False
+        if not safe:
+            raise self.refuse("the target artifact or safety directory is inside a bank mount or checkout: "
+                              "use --target-release --target-work-dir <directory outside bank mounts and checkouts>, "
+                              "or configure /data as a dedicated state mount before retrying")
+
+    def check_deploy_schema(self) -> None:
+        refuse = self.refuse if not self.recording else MoveError
+        if not self.release_target:
+            result = self.ssh(f"git -C {rq(self.checkout)} rev-parse HEAD", timeout=60)
+            head = result.text.strip() if result.ok else ""
+            if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", head):
+                raise refuse("the target checkout HEAD cannot be read: restore a valid git checkout with git on PATH, "
+                             "or select --target-release")
+            if self.target_head is not None and self.target_head != head:
+                raise refuse("the target checkout changed during this move: restore the planned HEAD, or retry "
+                             "move --resume after reviewing the updated target")
+            result = self.ssh(f"git -C {rq(self.checkout)} status --porcelain", timeout=60)
+            if not result.ok or result.text.strip():
+                raise refuse("the target checkout has uncommitted changes or cannot be inspected: commit or stash "
+                             "them before retrying move")
+            result = self.ssh(f"git -C {rq(self.checkout)} show {head}:pseudolife_memory/storage/schema.py", timeout=60)
+            schema = _schema_version(result.text) if result.ok else None
+            self.target_head = head
+        else:
+            schema = self.target_schema
+            if self.o.resume:
+                record = self.resume_record or {}
+                image = self.target_container.get("Image") or self.target_image
+                schema = record.get("target_schema") if record.get("target_image") == image else None
+                if type(schema) is not int:
+                    for path, rust in [("/app/pseudolife_memory/storage/schema.py", False),
+                                       ("/app/pseudolife-schema.rs", True)]:
+                        result = self.ssh(f"docker cp {DAEMON}:{path} -", timeout=60)
+                        try:
+                            with tarfile.open(fileobj=io.BytesIO(result.out), mode="r:*") as archive:
+                                files = [m for m in archive if m.isfile()]
+                                schema = _schema_version(archive.extractfile(files[0]).read().decode("utf-8"), rust=rust) if result.ok and len(files) == 1 else None
+                        except (OSError, ValueError, UnicodeError, tarfile.TarError):
+                            schema = None
+                        if type(schema) is int:
+                            break
+        if type(schema) is not int or schema < self.source_schema:
+            raise refuse(f"the target deployment schema ({schema}) is unreadable or older than the source's "
+                         f"({self.source_schema}): update the target checkout/image to a compatible version "
+                         "before retrying move --resume" if self.o.resume else
+                         f"the target deployment schema ({schema}) is unreadable or older than the source's "
+                         f"({self.source_schema}): update the target checkout/image before retrying move")
+        self.target_schema = schema
+
     def check_postgres_versions(self) -> None:
         """A plain-format dump restores into the same or a newer PostgreSQL
         major version, never an older one: pg_dump 17 and later emit
@@ -886,21 +1279,67 @@ class Mover:
         refuse = self.refuse if not self.recording else MoveError
         if self.o.resume:
             markers = self.target_markers()
+            current_meta = self.read_target_meta()
+            reasons = []
             if not markers:
-                raise self.refuse(f"--resume needs this move's marker ({self.checkout}/data/move-<id>/marker.json "
+                location = ("~/.pseudolife-mcp/moves/<id>/marker.json" if self.release_target
+                            else f"{self.checkout}/data/move-<id>/marker.json")
+                raise self.refuse(f"--resume needs this move's marker ({location} "
                                   f"on the target), and the target has none: only a bank this command left "
                                   f"half-restored can be resumed")
             for marker in markers:
                 move_id = marker.get("move_id")
-                record = self.read_record(move_id) if isinstance(move_id, str) and _MOVE_ID.match(move_id) else None
+                record = (self.resume_record if self.resume_record and self.resume_record.get("move_id") == move_id else
+                          self.read_record(move_id) if isinstance(move_id, str) and _MOVE_ID.match(move_id) else None)
                 if (record is not None and marker.get("source_bank") == self.source_bank
                         and record.get("source_bank") == self.source_bank):
+                    flags = record.get("flags") or {}
+                    touched = isinstance(flags, dict) and flags.get("target_restored") is True
+                    owned = bool(current_meta) and current_meta == self.source_meta
+                    if not self.recording and self.target_was_running and (owned or (touched and not current_meta)):
+                        reasons.append("the resumed bank is running or has an unreadable identity; stop its daemon before resuming")
+                        continue
+                    original = record.get("target_original_meta") or ""
+                    if not owned:
+                        if record.get("target_selection") != self.target_selection:
+                            reasons.append("the target database/storage differs from the recorded move, or the older record cannot prove its identity")
+                            continue
+                        if current_meta or not touched:
+                            self.check_target_empty()
                     self.move_id = move_id
                     self.data["move_id"] = move_id
+                    self.resume_record = record
+                    self.target_original_meta = original
+                    if self.release_target:
+                        image = self.target_container.get("Image") or self.target_image
+                        if self.o.keep_tokens and record.get("target_image") not in (None, image):
+                            reasons.append("the target image changed since this move began; use --no-keep-tokens to retain it")
+                            continue
+                        self.target_version = record.get("target_version")
                     return
+            if reasons:
+                raise refuse(reasons[0] + "; restore the original target database/storage selection, or choose fresh "
+                             "PSEUDOLIFE_BANK_VOLUME/PSEUDOLIFE_STATE_VOLUME names and start a new move without --resume")
             named = ", ".join(f"{m.get('move_id')!r} from bank {m.get('source_bank')!r}" for m in markers)
             raise self.refuse(f"the target's move markers name {named}, none of them a move this host started "
                               f"from this bank: --resume overwrites only this move's own half-restored bank")
+        self.check_target_empty()
+
+    def read_target_meta(self) -> str:
+        result = self.psql_remote(BANK_ID_SQL)
+        return result.text.strip() if result.ok else ""
+
+    def database_selection(self) -> dict:
+        data = _env_of(self.target_postgres).get("PGDATA") or "/var/lib/postgresql/data"
+        mounts = [m for m in self.target_postgres.get("Mounts", []) if m.get("Destination") and
+                  (data == m["Destination"] or data.startswith(m["Destination"].rstrip("/") + "/"))]
+        mount = max(mounts, key=lambda m: len(m["Destination"])) if mounts else {}
+        identity = mount.get("Name") or mount.get("Source")
+        storage = [mount.get("Destination"), mount.get("Type"), identity] if identity else [self.target_postgres.get("Id") or POSTGRES]
+        return {"database": self.target_db, "port": self.target_db_port, "storage": storage}
+
+    def check_target_empty(self) -> None:
+        refuse = self.refuse if not self.recording else MoveError
         result = self.psql_remote("SELECT coalesce(json_agg(relname ORDER BY relname), '[]'::json) "
                                   "FROM pg_class WHERE relkind IN ('r', 'p') AND relnamespace = "
                                   "'public'::regnamespace")
@@ -941,7 +1380,7 @@ class Mover:
             listed = ", ".join(f"{table} {n}" for table, n in used.items())
             markers = self.target_markers()
             hint = (f"; it carries a move marker (move {markers[0].get('move_id')}), so if this host started that "
-                    f"move, retry with --resume") if markers else (
+                    f"move, retry with --resume") if markers and not self.o.resume else (
                     "; back up and remove that bank before retrying, or install a fresh target with distinct "
                     "PSEUDOLIFE_BANK_VOLUME and PSEUDOLIFE_STATE_VOLUME names; use pseudolife-mcp export / "
                     "import to merge knowledge instead")
@@ -951,7 +1390,10 @@ class Mover:
     def target_markers(self) -> list[dict]:
         """Every move marker on the target (one JSON object per line); exit 1
         is cat's "none there"."""
-        result = self.ssh(f"cat {rq(self.checkout)}/data/move-*/marker.json 2>/dev/null", timeout=60)
+        pattern = (f"{rq(self.o.target_work_dir)}/*/marker.json" if self.o.target_work_dir else
+                   "~/.pseudolife-mcp/moves/*/marker.json" if self.release_target
+                   else f"{rq(self.checkout)}/data/move-*/marker.json")
+        result = self.ssh(f"cat {pattern} 2>/dev/null", timeout=60)
         markers = []
         for line in result.text.splitlines():
             try:
@@ -971,7 +1413,7 @@ class Mover:
             except codex_connection.SetupError:
                 raise MoveError("--target-url must be an http(s) origin such as http://100.64.0.2:8765", EXIT_USAGE)
             return
-        result = self.ssh(f"cd {rq(self.checkout)} && python3 -m pseudolife_memory.cli expose status --json",
+        result = self.ssh(self.target_cli("expose status --json"),
                           timeout=120)
         state, url = parse_expose_status(result.text if result.ok else "")
         if state == "exposed":
@@ -990,7 +1432,7 @@ class Mover:
                 if ip is None:
                     raise self.refuse("the resumed target has no readable Tailscale IPv4 address: "
                                       "pass --target-url <an existing reachable URL> and retry")
-                self.target_url = f"http://{ip}:8765"
+                self.target_url = f"http://{ip}:{self.target_port}"
         else:
             raise self.refuse(f"could not read the target's exposure (`pseudolife-mcp expose status` there: "
                               f"{result.why()}); pass --target-url <the URL clients will use>, or update the "
@@ -1060,6 +1502,9 @@ class Mover:
     # -- 2. plan and confirm -----------------------------------------------
     def show_plan(self) -> None:
         o, url = self.o, self.target_url
+        restore_tool = "pseudolife-mcp restore --yes --leave-stopped"
+        start_tool = ("docker start (existing configuration)" if self.release_target and not o.keep_tokens else
+                      "pseudolife-mcp update --reinstall (same release)" if self.release_target else "python3 ops/update.py (stopped checkout handover)")
         where = self.schedule.get("where") if isinstance(self.schedule, dict) and self.schedule_enabled else None
         pauses = []
         if self.target_timer_enabled:
@@ -1071,7 +1516,7 @@ class Mover:
         plan = [
             f"source: this host's {DAEMON} (bank {self.source_bank}, schema {self.source_schema}); database "
             f"{self.db} {_size(self.sizes['database'])}, /data {_size(self.sizes['data'])}",
-            f"target: {o.target}, checkout {self.checkout}"
+            f"target: {o.target}, " + ("installed CLI (clone-free)" if self.release_target else f"checkout {self.checkout}")
             + (f" (--resume: over move {self.move_id}'s half-restored bank)" if o.resume else ""),
             f"target URL: {url}" if url else
             "target URL: not exposed yet; step 3 needs --expose-target or separate interactive consent",
@@ -1088,20 +1533,20 @@ class Mover:
             f"still connected; the /data archive (about {_size(self.sizes['data'])}) and a manifest with "
             f"per-table row counts, under {self.local_dir}",
             f"6. copy the three files to {o.target}:{self.remote_dir} and check their SHA-256 there",
-            "7. restore on the target without starting it (ops/restore.sh --apply --no-start --backup-file "
+            f"7. restore on the target without starting it ({restore_tool} --backup-file "
             "...; it takes its own safety dump first), check the restored bank identity and row counts, and "
             f"keep the daemon from starting outside the move ({MARKER})",
             ("8. carry PSEUDOLIFE_MCP_TOKEN, PSEUDOLIFE_MCP_TOKENS, PSEUDOLIFE_MCP_TIER_MAP and "
-             "PSEUDOLIFE_MCP_TOOLSET from the source container into the target's ops/.env (backed up first; "
-             "its installer-minted token is replaced)") if o.keep_tokens else
+             f"PSEUDOLIFE_MCP_TOOLSET from the source container into {self.env_path} (backed up first; "
+             "its previous token is replaced)") if o.keep_tokens else
             "8. skipped (--no-keep-tokens): every environment principal must be invited on the target again",
-            "9. start the target once (ops/update.sh), wait up to "
+            f"9. start the target once ({start_tool}), wait up to "
             f"{int(o.health_timeout)} s for its bank fingerprint to equal this bank's, check it runs with the "
             "carried identities, restore what step 4 paused on the target, stop this daemon restarting itself, "
             f"write {MOVED} into it",
             f"10. re-point this machine's clients: pseudolife-mcp connect {url or '<target URL>'} --yes",
             "11. report: the rollback, other machines' connect lines, held leases, undelivered mail, leftovers",
-            "a failure in steps 3-9 rolls back: new target exposure removed, target stopped, its ops/.env and "
+            "a failure in steps 3-9 rolls back: new target exposure removed, target stopped, its environment file and "
             "schedule restored, the fence "
             f"lifted, {MOVED} removed, the source's restart policy and schedule restored, the source started",
             "run it under tmux, screen or nohup: a closed terminal or a kill signal rolls the move back",
@@ -1141,6 +1586,15 @@ class Mover:
         try:
             _private_dir(self.local_dir)
             record = {"move_id": self.move_id, "target": self.o.target, "checkout": self.checkout,
+                      "target_mode": "release" if self.release_target else "checkout",
+                      "target_version": self.target_version,
+                      "target_schema": self.target_schema, "target_head": self.target_head,
+                      "committed": self.committed,
+                      "target_image": self.target_container.get("Image") or self.target_image,
+                      "target_env_file": self.target_env_file,
+                      "target_work_dir": self.o.target_work_dir,
+                      "target_selection": self.target_selection,
+                      "target_original_meta": self.target_original_meta,
                       "target_url": self.target_url, "source_bank": self.source_bank, "state": state,
                       "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                       "flags": {flag: getattr(self, flag) for flag in FLAGS},
@@ -1148,6 +1602,7 @@ class Mover:
                       "target_exposure_receipt": self.exposure_receipt if self.expose_pending or self.exposed_now
                                                  else None,
                       "target_exposure_attempt": self.expose_attempt,
+                      "follow_ups": self.follow_ups, "error": self.data.get("error"),
                       "manual_rollback": self.manual_rollback()}
             temporary = self.local_dir / "record.json.tmp"
             temporary.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
@@ -1202,7 +1657,9 @@ class Mover:
                 self.restore_target()
                 self.carry_identities()
                 self.start_target()
-            except BaseException as exc:  # noqa: BLE001 - every failure here, a signal included, rolls back
+            except BaseException as exc:  # noqa: BLE001 - signals obey the same commit boundary as failures
+                if self.committed:
+                    return self.after_commit_failure(exc)
                 reason = str(exc) if isinstance(exc, (MoveError, MoveInterrupted)) and str(exc) else \
                     f"{type(exc).__name__}: {str(exc)[:300]}"
                 ignored = self._set_signals(signal.SIG_IGN)
@@ -1224,20 +1681,61 @@ class Mover:
                 raise MoveError(f"{reason}. The rollback is INCOMPLETE: {left}. See the rollback steps, and the move "
                                 f"record {self.local_dir / 'record.json'}, and finish it by hand with the commands "
                                 f"listed there", EXIT_INCOMPLETE) from None
+            self.write_record("moved")
+            self.finish_target()
+            code = self.repoint()
+            self.final_report()
+            if self.follow_ups:
+                commands = "; ".join(item["command"] for item in self.follow_ups)
+                message = f"the bank moved, but follow-ups need doing: {commands}"
+                self.data["error"] = f"{self.data['error']}; {message}" if self.data.get("error") else message
+                if not self.o.as_json:
+                    print(f"move: {message}", file=sys.stderr, flush=True)
+                code = EXIT_PARTIAL
+            self.write_record("complete" if code == EXIT_OK else "moved_follow_ups")
+            return code
+        except BaseException as exc:
+            if not self.committed:
+                raise
+            return self.after_commit_failure(exc)
         finally:
             self._restore_signals(previous)
-        self.write_record("moved")
-        self.finish_target()
-        code = self.repoint()
-        self.final_report()
-        if self.follow_ups:
-            commands = "; ".join(item["command"] for item in self.follow_ups)
-            message = f"the bank moved, but follow-ups need doing: {commands}"
-            self.data["error"] = f"{self.data['error']}; {message}" if self.data.get("error") else message
+
+    def after_commit_failure(self, error: BaseException) -> int:
+        """The live target stays canonical; persist every unfinished action."""
+        ignored = self._set_signals(signal.SIG_IGN)
+        try:
+            reason = str(error) if isinstance(error, (MoveError, MoveInterrupted)) else type(error).__name__
+            pending = []
+            if self.target_policy_paused:
+                pending.append(("restore the target restart policy", self.ssh_line(f"docker update --restart={shlex.quote(self.target_policy)} {DAEMON}")))
+            if self.target_timer_paused:
+                pending.append(("resume target unattended update", self.ssh_line("systemctl --user enable --now pseudolife-update.timer")))
+            if self.marker_written:
+                pending.append(("remove the resume marker", self.ssh_line(f"rm -f {rq(self.marker_path)}")))
+            if self.data.get("connect") is None or self.data["connect"].get("exit") not in (0, 3):
+                credentials = " --token-file <target-token-file>" if not self.o.keep_tokens else ""
+                pending.append(("re-point this machine's clients", f"pseudolife-mcp connect {self.target_url}{credentials} --yes"))
+            known = {item["command"] for item in self.follow_ups}
+            for what, command in pending:
+                if command not in known:
+                    self.follow_ups.append({"what": what, "command": command, "why": reason})
+            self.data["error"] = f"the bank moved; finalization stopped ({reason}). Finish the follow-ups in {self.local_dir / 'record.json'}"
+            self.write_record("moved_follow_ups")
+            try:
+                self.final_report()
+            except Exception as report_error:
+                self.data["report"] = {"follow_ups": self.follow_ups, "rollback": self.manual_rollback()}
+                self.warn(f"the final report could not be rendered ({type(report_error).__name__}); use the move record")
             if not self.o.as_json:
-                print(f"move: {message}", file=sys.stderr, flush=True)
-            code = EXIT_PARTIAL
-        return code
+                print(f"move: {self.data['error']}", file=sys.stderr, flush=True)
+            return EXIT_PARTIAL
+        finally:
+            self._restore_signals(ignored)
+
+    def ssh_line(self, command: str) -> str:
+        argv = ["ssh", self.o.target, command]
+        return subprocess.list2cmdline(argv) if self.platform.startswith("win") else shlex.join(argv)
 
     def settle_exposure(self) -> bool:
         """Only a remote creation result establishes ownership; intent cannot."""
@@ -1267,7 +1765,8 @@ class Mover:
             self.expose_attempt = secrets.token_hex(8)
             self.mark(expose_pending=True)
             request = {"move_id": self.move_id, "attempt": self.expose_attempt,
-                       "checkout": self.checkout, "receipt": self.exposure_receipt}
+                       "checkout": "~" if self.release_target else self.checkout, "receipt": self.exposure_receipt,
+                       "port": self.target_port}
             result = self.ssh(f"python3 -c {shlex.quote(_EXPOSE_TARGET)}",
                               stdin=json.dumps(request).encode(), timeout=300)
             if not self.settle_exposure():
@@ -1281,8 +1780,7 @@ class Mover:
                                 f"The source still runs", EXIT_REFUSED)
             state, url = parse_expose_status(result.text)
             if state != "exposed":
-                again = self.ssh(f"cd {rq(self.checkout)} && python3 -m pseudolife_memory.cli expose status "
-                                 f"--json", timeout=120)
+                again = self.ssh(self.target_cli("expose status --json"), timeout=120)
                 state, url = parse_expose_status(again.text if again.ok else "")
             if state != "exposed" or not url:
                 raise MoveError(f"`expose tailscale` on {o.target} reported no URL; check `pseudolife-mcp expose "
@@ -1293,6 +1791,9 @@ class Mover:
             self.step("--resume: the target daemon is stopped; its URL is checked once step 9 starts it")
             return
         health = self.runner.get_json(f"{self.target_url}/health", timeout=10.0)
+        if isinstance(health, dict) and health.get("ready") is False:
+            raise MoveError(f"the target at {self.target_url} is still warming up; wait for /health ready: true "
+                            "and retry. The source still runs", EXIT_REFUSED)
         if not isinstance(health, dict) or health.get("status") != "ok":
             raise MoveError(f"this host cannot reach {self.target_url}/health: the URL clients will use must "
                             f"answer from here before the source stops. Nothing in either bank was changed; "
@@ -1353,7 +1854,11 @@ class Mover:
         # a connection, lease break) are cut off before the dump.
         self.psql_local(terminate_sql(self.db), "postgres")
         self.step(f"final backup: pg_dump of {self.db} from the stopped source")
-        result = self.local([self.docker, "exec", POSTGRES, "pg_dump", "-U", self.db_user, "-d", self.db, "-Z9"],
+        # PostgreSQL object owners/grants belong to the destination role;
+        # per-bank MCP principal identities are carried in the bank itself.
+        result = self.local([self.docker, "exec", POSTGRES, "env", "-u", "PGHOSTADDR", "-u", "PGSERVICE", "-u", "PGSERVICEFILE",
+                             "pg_dump", "-h", "/var/run/postgresql", "-p", self.db_port, "--no-owner", "--no-acl",
+                             "-U", self.db_user, "-d", self.db, "-Z9"],
                             stdout_file=part, timeout=_TIMEOUT_LONG)
         if not result.ok or not part.is_file() or part.stat().st_size == 0:
             raise MoveError(f"pg_dump failed inside {POSTGRES} ({result.why()})")
@@ -1443,8 +1948,7 @@ class Mover:
         result = self.ssh(f"docker inspect -f '{{{{.State.Running}}}}' {DAEMON}", timeout=60)
         if not result.ok or result.text.strip() != "false":
             raise MoveError("the target is still running: stop it before retrying move")
-        if not self.o.resume:
-            self.check_target_bank()
+        self.check_target_bank()
         # restore.sh's safety backup uses docker exec for /data, which
         # cannot run in this quiesced daemon. Keep a verified archive of the
         # original state through a helper before restore can replace it.
@@ -1470,7 +1974,9 @@ class Mover:
         if not result.ok:
             raise MoveError(f"could not write the move marker on the target ({result.why()})")
         dump, state = f"{self.remote_dir}/{DUMP_NAME}", f"{self.remote_dir}/{STATE_NAME}"
-        self.step("restoring on the target without starting it (ops/restore.sh --apply --no-start)")
+        restore = self.target_cli("restore --yes --leave-stopped --daemon-url " + shlex.quote(self.target_local_url)
+                                  + " --safety-dir " + rq(self.remote_dir + "/safety"))
+        self.step("restoring on the target without starting it (restore --yes --leave-stopped)")
         # The bank is "restored" (gated on rollback) from the moment restore.sh
         # starts dropping it: its own safety dump comes first, and a failure
         # there leaves the target's original bank in place. restore.sh says
@@ -1480,16 +1986,16 @@ class Mover:
         # refuses to start, while an ungated clone could serve beside the
         # source.
         self.mark(target_restored=True)
-        result = self.ssh(f"cd {rq(self.checkout)} && bash ops/restore.sh --apply --no-start --backup-file "
+        result = self.ssh(f"{restore} --backup-file "
                           f"{rq(dump)} --state-archive {rq(state)} --db {shlex.quote(self.target_db)} "
-                          f"--user {shlex.quote(self.target_user)}", timeout=_TIMEOUT_LONG)
+                          f"--user {shlex.quote(self.target_user)} --container {POSTGRES} --db-port {self.target_db_port}", timeout=_TIMEOUT_LONG)
         if not result.ok:
             # A timeout or killed transport may discard stdout after DROP.
             # Only a completed, ordinary command failure can prove the
             # boundary was never reached; unknown outcomes stay gated.
             if 0 < result.code < 128 and result.code != 124 and RESTORE_BOUNDARY not in result.text:
                 self.mark(target_restored=False)
-            raise MoveError(f"ops/restore.sh on the target failed ({result.why()})"
+            raise MoveError(f"restore on the target failed ({result.why()})"
                             + ("" if self.target_restored else "; the target's own bank was not touched"))
         # Deterministic, while the target is still stopped: the restored
         # bank's identity is the source's (no daemon, no cache, no backoff).
@@ -1559,13 +2065,13 @@ class Mover:
         elif result.code == 3:
             existed, current = False, ""
         else:
-            raise MoveError(f"could not read the target's ops/.env (exit {result.code}: {result.why(out=False)})")
+            raise MoveError(f"could not read the target environment file {env} (exit {result.code}: {result.why(out=False)})")
         content = merge_env(current, self.carried(), self.move_id)
         if existed:
             backup = f"{env}.pre-move-{self.move_id}"
             result = self.ssh(f"cp -p {rq(env)} {rq(backup)}", timeout=60)
             if not result.ok:
-                raise MoveError(f"could not back up the target's ops/.env ({result.why()})")
+                raise MoveError(f"could not back up the target environment file {env} ({result.why()})")
             self.mark(env_backup=backup)
         self.mark(env_written=True)
         temporary = f"{env}.move-{self.move_id}.tmp"
@@ -1578,19 +2084,72 @@ class Mover:
             command = f"umask 077 && cat > {rq(temporary)} && mv -f {rq(temporary)} {rq(env)}"
         result = self.ssh(command, stdin=data, timeout=60)
         if not result.ok:
-            raise MoveError(f"writing the target's ops/.env failed ({result.why()})")
-        self.verify_remote(env, hashlib.sha256(data).hexdigest(), "ops/.env")
-        self.step("carried the source's environment identities into the target's ops/.env"
+            raise MoveError(f"writing the target environment file {env} failed ({result.why()})")
+        self.verify_remote(env, hashlib.sha256(data).hexdigest(), "target env file")
+        self.step(f"carried the source's environment identities into {env}"
                   + (f" (its previous copy: {self.env_backup})" if self.env_backup else ""))
 
     def _nudge_token(self) -> str | None:
         if not self.o.keep_tokens:
             return None
-        token = self.source_env.get("PSEUDOLIFE_MCP_TOKEN")
+        token = self.probe_token or self.source_env.get("PSEUDOLIFE_MCP_TOKEN")
         if not token:
             from pseudolife_memory.principals import parse_token_map
             token = next(iter(parse_token_map(self.source_env.get("PSEUDOLIFE_MCP_TOKENS"))), None)
         return token or None
+
+    def check_probe_bearer(self) -> None:
+        if not self.o.keep_tokens or self._nudge_token():
+            return
+        from pseudolife_memory.credentials import CredentialError, CredentialProvider
+        try:
+            token = CredentialProvider.from_environment().snapshot().token
+        except CredentialError:
+            token = None
+        result = self.psql_local("SELECT token_hash FROM principals WHERE revoked_at IS NULL AND token_hash IS NOT NULL", self.db)
+        if not result.ok:
+            raise self.refuse("could not read active source principal hashes: restore the source PostgreSQL "
+                              "role's access over its local socket and retry move")
+        if not token or hashlib.sha256(token.encode()).hexdigest() not in result.text.splitlines():
+            raise self.refuse("stored-principal handover needs an existing source bearer: set PSEUDOLIFE_MCP_TOKEN_FILE "
+                              "to its private token file (connect to the source first if needed), then retry")
+        self.probe_token = token
+
+    @property
+    def probe_path(self) -> str:
+        return f"{self.remote_dir}/probe-token"
+
+    def run_target_update(self, command: str) -> Result:
+        if not self.probe_token:
+            return self.ssh(command, timeout=_TIMEOUT_LONG)
+        self.mark(probe_written=True)
+        try:
+            result = self.ssh(f"umask 077 && cat > {rq(self.probe_path)} && chmod 600 {rq(self.probe_path)}", stdin=self.probe_token.encode(), timeout=60)
+            if not result.ok:
+                raise MoveError("could not stage the private carried bearer for the target updater; retry move --resume")
+            return self.ssh(command, timeout=_TIMEOUT_LONG)
+        finally:
+            previous = self._set_signals(signal.SIG_IGN)
+            try:
+                self.cleanup_probe()
+            finally:
+                self._restore_signals(previous)
+
+    def cleanup_probe(self) -> bool:
+        command = f"ssh {self.o.target} rm -f {rq(self.probe_path)}"
+        try:
+            result = self.ssh(f"rm -f {rq(self.probe_path)}", timeout=60)
+            ok = result.ok
+        except Exception:  # cleanup must never replace the updater's result
+            ok = False
+        if ok:
+            self.mark(probe_written=False)
+            self.follow_ups[:] = [item for item in self.follow_ups if item["command"] != command]
+        else:
+            self.warn(f"remove the private updater bearer file on the target: {self.probe_path}")
+            if not any(item["command"] == command for item in self.follow_ups):
+                self.follow_ups.append({"what": "remove the private updater bearer file", "command": command, "why": "cleanup failed"})
+        return ok
 
     def wait_target(self) -> str:
         """The target's ``/health`` ``bank`` once it is non-null, polled
@@ -1602,10 +2161,13 @@ class Mover:
         healthy, last_nudge = False, None
         while True:
             health = self.runner.get_json(f"{self.target_url}/health", timeout=10.0)
-            if isinstance(health, dict) and health.get("status") == "ok":
+            if isinstance(health, dict) and health.get("status") == "ok" and health.get("ready") is not False:
                 healthy = True
                 bank = health.get("bank")
                 if isinstance(bank, str) and bank:
+                    if health.get("auth") is not True:
+                        raise MoveError("the restored target does not report auth: true; restore its bearer "
+                                        "configuration in the original stack before retrying move --resume")
                     return bank
                 if token and (last_nudge is None or self.clock() - last_nudge >= self.o.nudge_every):
                     self.runner.get_json(f"{self.target_url}/api/stats", token=token, timeout=60.0)
@@ -1634,9 +2196,11 @@ class Mover:
         wrong = [key for key, value in self.carried().items() if digest(live.get(key, "")) != digest(value)]
         if wrong:
             raise MoveError(f"the target daemon does not run with the carried {', '.join(wrong)} (a shell "
-                            f"variable or another env file on the target may shadow ops/.env)")
+                            f"variable or compose setting may override {self.env_path}); make those keys "
+                            "interpolate from the original environment file and retry")
 
     def start_target(self) -> None:
+        self.check_deploy_schema()
         if self.gate_written:
             result = self.ssh(f"docker run --rm --entrypoint rm --volumes-from {DAEMON} "
                               f"{shlex.quote(self.target_image)} -f {MARKER}", timeout=300)
@@ -1644,10 +2208,23 @@ class Mover:
                 raise MoveError(f"could not lift {MARKER} on the target ({result.why()})")
             self.mark(gate_written=False)
         self.mark(target_started=True)
-        self.step("starting the target once: ops/update.sh (recreates it with the carried environment)")
-        result = self.ssh(f"cd {rq(self.checkout)} && bash ops/update.sh", timeout=_TIMEOUT_LONG)
+        credential = f"PSEUDOLIFE_MCP_TOKEN_FILE={rq(self.probe_path)} " if self.probe_token else ""
+        if self.release_target and not self.o.keep_tokens:
+            command = f"docker start {DAEMON}"
+        elif self.release_target:
+            arguments = (f"update --reinstall --daemon-only --tag {shlex.quote(self.target_version)} "
+                         f"--daemon-url {shlex.quote(self.target_local_url)} --allow-auth-change "
+                         f"--env-file {rq(self.target_env_file)}")
+            for path in self.o.target_compose_files:
+                arguments += f" --compose-file {rq(path)}"
+            command = credential + self.target_cli(arguments)
+        else:
+            command = (f"cd {rq(self.checkout)} && {credential}python3 ops/update.py --allow-auth-change "
+                       f"--daemon-only --env-file {rq(self.env_path)} --daemon-url {shlex.quote(self.target_local_url)}")
+        self.step("starting the target once: " + command)
+        result = self.run_target_update(command)
         if not result.ok:
-            raise MoveError(f"ops/update.sh on the target failed ({result.why()})")
+            raise MoveError(f"starting the target failed ({result.why()})")
         if self.o.resume and self.needs_expose:
             self.expose_and_reach(after_start=True)
         bank = self.wait_target()
@@ -1667,9 +2244,20 @@ class Mover:
                                      "moved_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())},
                                     indent=2) + "\n", encoding="utf-8")
         self.mark(moved_written=True)
-        result = self.local([self.docker, "cp", str(moved), f"{DAEMON}:{MOVED}"], timeout=120)
-        if not result.ok:
-            raise MoveError(f"could not write {MOVED} into the stopped source container ({result.why()})")
+        # A successful copy confirms the commit. Defer signals until that
+        # result and its in-memory/durable flags agree; rollback is still
+        # safe if the copy fails, but must never undo a confirmed move.
+        pending = []
+        previous = self._set_signals(lambda signum, _frame: pending.append(signum))
+        try:
+            result = self.local([self.docker, "cp", str(moved), f"{DAEMON}:{MOVED}"], timeout=120)
+            if not result.ok:
+                raise MoveError(f"could not write {MOVED} into the stopped source container ({result.why()})")
+            self.mark(committed=True)
+        finally:
+            self._restore_signals(previous)
+        if pending:
+            self._handle_kill(pending[0], None)
         # The commit point: the target serves the bank and both checks
         # passed, and the source now refuses to start. Nothing after this
         # line rolls back (finish_target).
@@ -1699,9 +2287,10 @@ class Mover:
             if ok:
                 self.mark(**{flag: False})
                 continue
-            self.follow_ups.append({"what": what, "command": f"ssh {self.o.target} {command}", "why": why[:300]})
+            line = self.ssh_line(command)
+            self.follow_ups.append({"what": what, "command": line, "why": why[:300]})
             self.warn(f"the bank moved, but this follow-up failed: {what} ({why[:200]}); run: "
-                      f"ssh {self.o.target} {command}")
+                      f"{line}")
 
     # -- rollback ----------------------------------------------------------
     def rollback(self) -> bool:
@@ -1720,6 +2309,9 @@ class Mover:
 
         self.say("==> rolling back")
         complete, can_start, gate_missing = True, True, False
+        if self.probe_written:
+            complete = attempt("remove the private updater bearer file",
+                               lambda: Result(0 if self.cleanup_probe() else 1))
         if self.expose_pending:
             def resolve_exposure():
                 if self.settle_exposure():
@@ -1727,11 +2319,10 @@ class Mover:
                 return Result(1, err=(f"ownership unknown: inspect {self.exposure_receipt} and run "
                                       f"pseudolife-mcp expose status on {self.o.target}; "
                                       "no unowned serve was removed").encode())
-            complete = attempt("resolve the target exposure ownership", resolve_exposure)
+            complete = attempt("resolve the target exposure ownership", resolve_exposure) and complete
         if self.exposed_now:
             if attempt("undo the target expose (pseudolife-mcp expose off --yes)",
-                       lambda: self.ssh(f"cd {rq(self.checkout)} && python3 -m pseudolife_memory.cli "
-                                        "expose off --yes --json", timeout=300)):
+                       lambda: self.ssh(self.target_cli("expose off --yes --json"), timeout=300)):
                 self.mark(exposed_now=False)
             else:
                 complete = False
@@ -1771,10 +2362,10 @@ class Mover:
                 return blocked("the target daemon is still running after three stops")
         if self.env_written:
             if self.env_backup:
-                ok = attempt("restore the target's ops/.env",
+                ok = attempt(f"restore the target environment file ({self.env_path})",
                              lambda: self.ssh(f"cp -p {rq(self.env_backup)} {rq(self.env_path)}", timeout=60))
             else:
-                ok = attempt("remove the target's ops/.env this move wrote",
+                ok = attempt(f"remove the target environment file this move wrote ({self.env_path})",
                              lambda: self.ssh(f"rm -f {rq(self.env_path)}", timeout=60))
             if ok:
                 self.mark(env_written=False)
@@ -1860,6 +2451,8 @@ class Mover:
         SQL in double quotes with none inside, so it reads the same in sh,
         cmd.exe and PowerShell."""
         t, lines = self.o.target, []
+        if self.probe_written:
+            lines.append(f"ssh {t} rm -f {rq(self.probe_path)}")
         if self.target_started:
             lines.append(f"ssh {t} docker stop {DAEMON}")
         if self.target_restored and not self.gate_written:
@@ -1873,7 +2466,8 @@ class Mover:
         if self.target_policy_paused:
             lines.append(f"ssh {t} docker update --restart={self.target_policy} {DAEMON}")
         if self.fenced:
-            lines.append(f'docker exec {POSTGRES} psql -U {self.db_user} -d postgres -c "{fence_sql(self.db, True)}"')
+            lines.append(f'docker exec {POSTGRES} env -u PGHOSTADDR -u PGSERVICE -u PGSERVICEFILE psql '
+                         f'-h /var/run/postgresql -p {self.db_port} -U {self.db_user} -d postgres -c "{fence_sql(self.db, True)}"')
         if self.moved_written:
             lines.append(f"docker run --rm --entrypoint rm --volumes-from {DAEMON} {self.source_image} -f {MOVED}")
         if self.source_policy_changed:
@@ -1887,10 +2481,10 @@ class Mover:
         if self.moved_written:
             lines.append(f"pseudolife-mcp connect {SOURCE_URL} --yes")
         if self.exposed_now:
-            lines.append(f'ssh {t} "cd {rq(self.checkout)} && python3 -m pseudolife_memory.cli expose off --yes"')
+            lines.append(f'ssh {t} "{self.target_cli("expose off --yes")}"')
         elif self.expose_pending:
             lines.append(f"ssh {t} cat {rq(self.exposure_receipt)}")
-            lines.append(f'ssh {t} "cd {rq(self.checkout)} && python3 -m pseudolife_memory.cli expose status --json"')
+            lines.append(f'ssh {t} "{self.target_cli("expose status --json")}"')
         return lines
 
     # -- 10. re-point --------------------------------------------------------
@@ -1917,8 +2511,10 @@ class Mover:
         if result.code == 3:
             self.step("connect found no client registration on this machine to re-point")
             return EXIT_OK
+        credentials = " --token-file <target-token-file>" if not self.o.keep_tokens else ""
         self.data["error"] = (f"the bank moved, but re-pointing this machine's clients failed (connect exit "
-                              f"{result.code}: {error or result.why()}); rerun: pseudolife-mcp connect {url} --yes")
+                              f"{result.code}: {error or result.why()}); rerun: pseudolife-mcp connect {url}"
+                              f"{credentials} --yes")
         if not self.o.as_json:
             print(f"move: {self.data['error']}", file=sys.stderr, flush=True)
         return EXIT_PARTIAL
@@ -1964,8 +2560,9 @@ class Mover:
             using = (f"; these files on {o.target} held it and need re-pointing there (move did not rewrite them): "
                      f"{', '.join(self.target_registrations)}" if self.target_registrations else
                      ("; no client file on the target held it" if self.target_registrations is not None else ""))
-            notes.append(f"the target's own token, minted by its installer, was replaced by the source's"
-                         + (f" (its previous ops/.env: {self.env_backup})" if self.env_backup else "") + using
+            origin = "previous environment token" if self.release_target else "own token, minted by its installer,"
+            notes.append(f"the target's {origin} was replaced by the source's"
+                         + (f" (its previous environment file: {self.env_backup})" if self.env_backup else "") + using
                          + f". Re-point a client there with pseudolife-mcp connect {url} --token-file "
                            f"<a file holding one of the carried tokens>")
         if not self.target_timer_enabled:
@@ -2068,7 +2665,7 @@ def _restart_policy(container: dict) -> str:
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="pseudolife-mcp move",
-        description="Move this host's Docker-tier bank to another Docker-tier checkout host over key-based "
+        description="Move this host's Docker-tier bank to another Docker host with an owning checkout or installed CLI over key-based "
                     "ssh: preflight, final backup from the stopped source, database fence, restore and "
                     "verify on the target, start it once, re-point this machine's clients. A failure rolls "
                     "back. Exit codes: 0 moved, 1 failed and rolled back, 2 usage or not confirmed, 4 refused "
@@ -2076,7 +2673,7 @@ def _parser() -> argparse.ArgumentParser:
                     "finish. Run it under tmux, screen or nohup.")
     parser.add_argument("--to", required=True, metavar="SSH-TARGET",
                         help="the target host as ssh takes it (root@box, or a ~/.ssh/config alias)")
-    parser.add_argument("--target-checkout", default=DEFAULT_CHECKOUT, metavar="PATH",
+    parser.add_argument("--target-checkout", default=None, metavar="PATH",
                         help=f"the checkout on the target (default {DEFAULT_CHECKOUT})")
     parser.add_argument("--target-url", default=None, metavar="URL",
                         help="the URL clients will use for the target (default: its `expose status`)")
@@ -2087,6 +2684,12 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--dry-run", action="store_true", help="show the plan; change nothing")
     parser.add_argument("--expose-target", action="store_true",
                         help="consent to creating a persistent Tailscale serve on the target if needed")
+    parser.add_argument("--target-release", action="store_true",
+                        help="use the target's installed CLI even when an unrelated checkout exists")
+    parser.add_argument("--target-env-file", help="original stack environment on the target (clone-free mode)")
+    parser.add_argument("--target-compose-file", action="append", default=[],
+                        help="original exported target compose file; repeat for overlays (clone-free mode)")
+    parser.add_argument("--target-work-dir", help="target artifact directory outside bank mounts and checkouts")
     parser.add_argument("--yes", action="store_true", help="confirm the bank move (exposure needs --expose-target)")
     parser.add_argument("--json", action="store_true", help="one JSON report on stdout")
     return parser
@@ -2105,8 +2708,12 @@ def main(argv: list[str] | None = None) -> int:
             print("move: --target-url must be an http(s) origin such as http://100.64.0.2:8765 (no path, "
                   "query or credentials)", file=sys.stderr)
             return EXIT_USAGE
-    options = Options(target=args.to, checkout=args.target_checkout, target_url=args.target_url,
+    options = Options(target=args.to, checkout=args.target_checkout or DEFAULT_CHECKOUT,
+                      checkout_explicit=args.target_checkout is not None, target_url=args.target_url,
                       expose_target=args.expose_target,
+                      target_release=args.target_release, target_env_file=args.target_env_file,
+                      target_compose_files=tuple(args.target_compose_file),
+                      target_work_dir=args.target_work_dir,
                       keep_tokens=not args.no_keep_tokens, resume=args.resume, dry_run=args.dry_run,
                       yes=args.yes, as_json=args.json)
     if not args.to or args.to.startswith("-") or any(ch.isspace() for ch in args.to):

@@ -28,7 +28,7 @@ def receipt_paths(checkout: Path, temporary: Path, platform: str) -> dict:
 
 
 def failed_cases(phase: str, payload: dict) -> list[str]:
-    """Read explicit failed case/node IDs, excluding successful negative controls."""
+    """Read explicit case/node or protocol-era IDs, excluding passing controls."""
     if not isinstance(payload, dict):
         raise ValueError("receipt must be an object")
     failed = set()
@@ -37,9 +37,13 @@ def failed_cases(phase: str, payload: dict) -> list[str]:
         if isinstance(value, str) and value:
             failed.add(value)
 
-    def differences(rows):
+    def differences(rows, eras=False):
         for row in rows:
-            add(row.get("case"))
+            case = row.get("case")
+            add(case)
+            # The real-bank producer retains its protocol era but omits case.
+            if eras and (not isinstance(case, str) or not case) and isinstance(row.get("era"), str) and row["era"]:
+                add("era:" + row["era"])
 
     def outcomes(result):
         for row in result.get("outcomes", []):
@@ -60,7 +64,7 @@ def failed_cases(phase: str, payload: dict) -> list[str]:
             if row["differences"]:
                 add(row["case"].get("id"))
     elif phase == "phase1-judges":
-        differences(payload["differences"])
+        differences(payload["differences"], eras=True)
         outcomes(payload.get("process_tests", {}))
         for name, control in payload.get("judge_sensitivity_controls", {}).items():
             if control.get("rejected") is False:

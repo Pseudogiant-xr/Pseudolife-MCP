@@ -129,11 +129,34 @@ def test_the_import_scan_follows_test_helpers_transitively(tmp_path, monkeypatch
         parity_scope.harness_imports.cache_clear()
 
 
+def test_ordinary_pr_precheck_imports_do_not_widen_batch_routing(tmp_path, monkeypatch):
+    directory = tmp_path / "rust/ci"
+    directory.mkdir(parents=True)
+    (directory / "pr_precheck_run.py").write_text("from evals.rust_port import early_only\nfrom tests import early_seeder\n")
+    (directory / "test_pr_precheck_run.py").write_text("from evals.rust_port import early_test_only\n")
+    (directory / "batch_harness.py").write_text("from evals.rust_port import batch_helper\nfrom tests import batch_seeder\n")
+    monkeypatch.setattr(parity_scope, "ROOT", tmp_path)
+    imports = parity_scope.harness_imports.__wrapped__
+    assert "batch_helper" in imports("evals.rust_port")
+    assert not {"early_only", "early_test_only"} & imports("evals.rust_port")
+    assert "batch_seeder" in imports("tests") and "early_seeder" not in imports("tests")
+
+
 def test_the_floor_is_cli_w1a_and_eval():
     # The brief from the 2026-10-20 root-cause report: cli, h5-w1a and eval
     # on every Rust pull request; cli is now five shards (2026-10-24).
-    assert set(FLOOR) == {"eval", "cli", "cli-store", "cli-daemon", "cli-daemon-2", "cli-live", "h5-w1a"}
+    assert set(FLOOR) == {"eval", "cli", "cli-store", "cli-startup", "cli-live", "h5-w1a"}
     assert set(FLOOR) <= set(SUITES)
+
+
+def test_startup_parts_share_one_physical_suite_on_each_os():
+    assert "cli-startup" in SUITES
+    assert not {"cli-daemon", "cli-daemon-2"} & set(SUITES)
+    values = parity_scope.pruned(SUITES, [], "workflow_dispatch")
+    pairs = {(os_name, suite) for os_name in parity_scope.SYSTEMS for suite in values["suite"]
+             if not any(rule.get("os") == os_name and rule.get("suite") == suite for rule in values["exclude"])}
+    assert len(pairs) == 29
+    assert {(os_name, "cli-startup") for os_name in parity_scope.SYSTEMS} <= pairs
 
 
 @pytest.mark.parametrize("files", DOCS_ONLY_CHANGES)
@@ -348,11 +371,11 @@ def test_the_output_is_one_line_of_json(tmp_path, monkeypatch, capsys):
     lines = output.read_text(encoding="utf-8").splitlines()
     assert len(lines) == 2 and lines[0].startswith("parity=") and lines[1].startswith("selfhosted=")
     values = json.loads(lines[0].removeprefix("parity="))
-    assert values["suite"] == ["eval", "cli", "cli-store", "cli-daemon", "cli-daemon-2", "cli-live",
+    assert values["suite"] == ["eval", "cli", "cli-store", "cli-startup", "cli-live",
                                "w1c-doctor", "h5-w1a"]
     printed = capsys.readouterr().out
     assert "rust/cli_harness/rows/doctor.py -> w1c-doctor" in printed
-    assert "running 8 of 18 suites" in printed
+    assert "running 7 of 17 suites" in printed
 
 
 @pytest.mark.parametrize("event, files", [("push", ["rust/cli_harness/rows/doctor.py"]),

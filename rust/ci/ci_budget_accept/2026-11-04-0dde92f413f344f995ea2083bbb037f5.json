@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "rust",
+  "before": "7590eb3bcb1d8a02",
+  "fingerprint": "06ca475df4f3743a",
+  "reason": "Keep PR golden failures fatal while running frozen merge-base probes in a separate report-only step; publish phase/case identifiers in the job summary and safe artifact. Existing batch commands, gates and timeout remain unchanged. Successful PR work has the same case selections plus a small summary process; two hosted cost measurements remain required before readiness."
+}

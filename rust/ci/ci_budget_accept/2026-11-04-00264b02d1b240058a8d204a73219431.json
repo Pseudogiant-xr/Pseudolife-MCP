@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "rust",
+  "before": "7590eb3bcb1d8a02",
+  "fingerprint": "93c26f94ad5e367e",
+  "reason": "Artifact publication is non-fatal while golden replay remains fatal; mapped shim command probes now match the batch judge routing. The successful broad CI-change profile and batch commands are unchanged. Final PR-path costs still require two hosted measurements before readiness."
+}

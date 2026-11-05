@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "parity-checks",
+  "before": "48d7661a32443383",
+  "fingerprint": "9cdaac0db2aadcfb",
+  "reason": "Combined master batch-9 routing and the startup consolidation retain the same per-OS script selections: 31 to 29 hosted shards, unchanged part budgets and receipts. The frozen hosted bundle proof passed both OSes; other shard prices and batch limits hold."
+}

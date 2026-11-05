@@ -15,7 +15,8 @@ Each change waits for hosted CI once, on its batch:
 - **An ordinary pull request** (any head branch but `integrate/*`) runs the
   fast lanes only. In `ci.yml`: `scope`, `guards`, `lock-resolve` and
   `frontend`; the `test` job and the lite OS lanes are skipped. In
-  `rust.yml`: `Scope`, the `Rust` job (format, clippy, builds, nextest),
+  `rust.yml`: `Scope`, the `Rust` job (format, clippy, builds, nextest and
+  the selected early parity replay described below),
   the disposable-image check and the `Parity` gate; the candidate, harness
   candidate and fixtures builds and the parity matrix are skipped. Both `scope` jobs decide this from
   `github.head_ref` (an absent one runs everything), whatever the pull
@@ -26,6 +27,31 @@ Each change waits for hosted CI once, on its batch:
   jobs only on a pull request its `scope` marked not full; the `Rust` job
   must still pass. A newer push to an ordinary pull request cancels its
   in-flight runs of both workflows.
+
+  Ordinary Rust jobs also replay CLI rows reached by the PR's diff before
+  batching. Python ownership follows command modules and their static
+  first-party imports; Rust command ownership uses the existing parity
+  map, and unknown runtime inputs select conservatively. Ubuntu runs each
+  selected row; Windows runs rows whose recorded observations or case sets
+  differ, ignoring only recording clocks and arm metadata. The H5 rows use
+  their existing record-then-golden action definitions and an owned
+  PostgreSQL fixture, rather than replaying unused historical captures.
+  Lease, lease-operator, transfer, maintainer and invite also use that
+  owned fixture for their existing database-backed cases.
+  Other rows compare with the committed goldens, so stale records fail on
+  the PR before Nextest. The native candidate shares the Rust job's debug dependencies and
+  the daemon it already built for PDF provisioning; Python dependencies
+  remain in a separate runtime and reuse the existing wheel cache.
+
+  Covered frozen judge groups are report-only probes using the existing
+  merge-base oracle and source pins. Independent comparisons continue after failures and retain their
+  actual failed case IDs; setup/resource failures leave unrun phases
+  visible. The job summary and `pr-parity-precheck-<OS>` artifact contain each
+  available failed identifier with its phase,
+  with raw logs and captures kept outside that upload. Golden replay failures
+  fail `Rust` and its `Parity` gate; frozen probe failures leave those checks
+  unaffected and inform the maintainer's item-11 decision. Batches retain their existing parity
+  matrix and do not repeat this ordinary-PR path.
 - **A pull request that edits CI or dependency inputs**
   (`.github/workflows/`, `pyproject.toml`, a lock file, the Rust toolchain
   pin) is ordinary too, since 2026-10-29 (maintainer: only batches spend
