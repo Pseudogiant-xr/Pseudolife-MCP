@@ -470,16 +470,17 @@
     "rust/shim/src/cli/tunnel/mod.rs": "f9f34b10a03029a0ddac8bad7e67508c486462c26c53dd87c2629cad93e68617",
     "rust/shim/src/cli/tunnel/store.rs": "9839c22f9264a23017a4529f5651fb2cf01b75e090c16d218547fe8d7bbf5f9b",
     "rust/shim/src/cli/tunnel/syntax.rs": "bafbf6307fdd29df5be69c3c4f42296284480e3cef37f92147b36101c38353de",
-    "rust/shim/src/cli/update/backup.rs": "91c68ab7e010f094fba9332a9f098a94e7237e77d08893c43c0ef2aa23933b18",
+    "rust/shim/src/cli/update/backup.rs": "64ae4a4a4ed4acc73efd2f68d2276443efa2cd74b7a34fd827f26c452e53dcdc",
     "rust/shim/src/cli/update/clients/codex.rs": "28801087b029d73f293f7118b88547b94b9f3c09daefd1ecd7681b5eda6edfea",
     "rust/shim/src/cli/update/clients/command.rs": "7732745be9741ebc2bb3d88bb696370f9063dda07804ded45f3b9a330da2fd92",
     "rust/shim/src/cli/update/clients/mod.rs": "d55cc1e2de11fabeb9330f8dd5d84570f2709d61862a6e4a7c36e92a71881a11",
     "rust/shim/src/cli/update/clients/plugin.rs": "1fe97238c132861daf024e5aae55b43f8629ec8d48c6c4b1488e6a3bf6702fad",
     "rust/shim/src/cli/update/clients/tests.rs": "81faa98fc3643307298e943f61436cb5d9ec11ad7005dd476123ef2577b8f5c8",
-    "rust/shim/src/cli/update/engine.rs": "ce2a1639087d3be15f3d4d2e428eed4c1d192d4a45f8d365e91dba4f954bb949",
-    "rust/shim/src/cli/update/mod.rs": "71937fc9790b6c4a5985454f42564d0f9651da9cd57450b9375476b31b2fb918",
-    "rust/shim/src/cli/update/options.rs": "1fa41aa989c0ebd1706889bb58d83a68dcec4f6a9bb134c44c13c9d6445edbf0",
-    "rust/shim/src/cli/update/release.rs": "c38d23e2324198a32566502f1d2a6c39fe3ae146270337723be0b91097c010f3",
+    "rust/shim/src/cli/update/disk.rs": "8b2ce5c111c5d8e99cb9f7a0546fcb37e24542dd44f93126e466fae005d07b9f",
+    "rust/shim/src/cli/update/engine.rs": "51b784e48aa2483b9cef37f1a757af33eef8d9149dc1f7d788def3dc6ae05ad3",
+    "rust/shim/src/cli/update/mod.rs": "21dee95d3cd673ee379bdf2508913ff9986a515836240d8aa18bd24ee240b605",
+    "rust/shim/src/cli/update/options.rs": "45f14fad8b3f93db914605e6e88f60987c62ddb175d6deedb1775e678c0ab9e9",
+    "rust/shim/src/cli/update/release.rs": "155ae5d0468a4147cee51eea2502a458ef59dbd2aef78fe3b7d97ff193ca7d22",
     "rust/shim/src/cli/update/seams.rs": "da8b4ae1a6df9e9c97af062b5bf337a8ecc0b7bcf2354c52ce1a9d339817cf66",
     "rust/shim/src/cli/update/shadow.rs": "be4da00a9b8cc9e593a0be00ce364ace769d2e59767a65802e11426445c80aa3",
     "rust/shim/src/cli/update/signals.rs": "f0c47d95a459ab923b34f0c0ebcd84c62db54a75d8fb592b4b2fdcce69866f93",
@@ -523,9 +524,9 @@
     "rust/shim/src/recovery.rs": "51d7b040f8000e61e5cb22dbea7e7a0c1db8cd5d6481e0445fa670c93db7c201",
     "rust/shim/src/runtime/cli.rs": "8c4f4c77c25ecb84cbb7f6a56c52470b99a3ee0edd1e4c74ba050287cc5a42d1",
     "rust/shim/src/runtime/config_file.rs": "8cf5d22ab787e35022d0963ff5d1b5391f39902684239506ac21c55f33b9d483",
-    "rust/shim/src/runtime/install.rs": "2e4c19aa230930e48cb3b5adcdffde43d2f30fe0e7e60c63b379301ab452416f",
+    "rust/shim/src/runtime/install.rs": "12afd72108aa477ff79523fc5f3d5df9ecdcd9ff586326f78f4498225451d8e1",
     "rust/shim/src/runtime/launch.rs": "4eafe4550c5c62ee0d85bcdf2e1d857e3a31d3ce2ff3e4d41bfd36bca08e3e6f",
-    "rust/shim/src/runtime/mod.rs": "4e7fc10e8806e6f8e0ac5b8a67837eecc3ac6912e1ac8d1774c60c6b58127c40",
+    "rust/shim/src/runtime/mod.rs": "2e5e53133d253b3010cdccafc225407e076c75124f6a1fd2db69117edd0c901f",
     "rust/shim/src/runtime/prune.rs": "a14949c0134ed3f13f39e49f93e8e9a6a88eac381f5695e5bbc28b891dad56fe",
     "rust/shim/src/runtime/registrations.rs": "d0aa2332a324ec9661714d19d0e2a7598d652bc0377bc22cff96d087d4f27c75",
     "rust/shim/src/runtime/tests.rs": "a962387106d836c8e1c39a435f24ceef0fcd95aca83503b013a825521a1c3ccb",
@@ -7190,7 +7191,20 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/mod.rs:162",
+          "location": "rust/shim/src/cli/update/engine.rs:904",
+          "shape": {
+            "argv_source": "update --schema-version\"",
+            "channel": "argv",
+            "complete": false,
+            "expression": "--schema-version\"",
+            "omitted_optional": null,
+            "parameters": {}
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/update/mod.rs:165",
           "shape": {
             "argv_source": "update is running (pid {holder}); nothing was changed. Run this again when it has finished\"",
             "channel": "argv",
@@ -7203,7 +7217,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/mod.rs:310",
+          "location": "rust/shim/src/cli/update/mod.rs:315",
           "shape": {
             "argv_source": "update )\"",
             "channel": "argv",
@@ -7216,7 +7230,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/mod.rs:531",
+          "location": "rust/shim/src/cli/update/mod.rs:536",
           "shape": {
             "argv_source": "update where it runs. Nothing was changed\",",
             "channel": "argv",
@@ -7229,7 +7243,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/mod.rs:591",
+          "location": "rust/shim/src/cli/update/mod.rs:596",
           "shape": {
             "argv_source": "update --clients-only --tag <this version> (from a checkout: ops/update.ps1 -All or ops/update.sh --all) for the shim, plugin cache and Codex re-approval steps\");",
             "channel": "argv",
@@ -7252,7 +7266,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/mod.rs:737",
+          "location": "rust/shim/src/cli/update/mod.rs:753",
           "shape": {
             "argv": [
               {
@@ -7270,16 +7284,19 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/mod.rs:751",
+          "location": "rust/shim/src/cli/update/mod.rs:767",
           "shape": {
-            "argv_source": "update [--checkout REPO] [--tag VERSION] [--engine python|rust] [--shadow]\\n       [--all | --daemon-only | --clients-only] [--check] [--reinstall] [--allow-downgrade]\\n       [--no-backup] [--rollback-tag SUFFIX] [--force-rollback-tag] [--allow-dirty]\\n       [--keep-rollbacks N] [--keep-cache-hours N] [--no-cache-prune] [--no-test-login]\\n       [--env-file PATH] [--daemon-url URL] [--health-retries N] [--health-delay-ms N]\\n       [--unattended | --schedule HH:MM | --unschedule] [--allow-no-bearer] [--result-file PATH] [--json]\\n       [--python-runtime INTERPRETER] (explicit legacy/lite updater)\\n\",false).is_ok(){0}else{120};",
+            "argv_source": "update [--checkout REPO] [--tag VERSION] [--engine python|rust] [--shadow]\\n       [--all | --daemon-only | --clients-only] [--check] [--reinstall] [--allow-downgrade]\\n       [--no-backup] [--rollback-tag SUFFIX] [--force-rollback-tag] [--allow-dirty]\\n       [--keep-rollbacks N] [--keep-cache-hours N] [--no-cache-prune] [--no-test-login]\\n       [--env-file PATH] [--allow-auth-change] [--daemon-url URL] [--health-retries N] [--health-delay-ms N]\\n       [--unattended | --schedule HH:MM | --unschedule] [--allow-no-bearer] [--result-file PATH] [--json]\\n       [--python-runtime INTERPRETER] (explicit legacy/lite updater)\\n\",false).is_ok(){0}else{120};",
             "channel": "argv",
             "complete": false,
-            "expression": "[--checkout REPO] [--tag VERSION] [--engine python|rust] [--shadow]\\n       [--all | --daemon-only | --clients-only] [--check] [--reinstall] [--allow-downgrade]\\n       [--no-backup] [--rollback-tag SUFFIX] [--force-rollback-tag] [--allow-dirty]\\n       [--keep-rollbacks N] [--keep-cache-hours N] [--no-cache-prune] [--no-test-login]\\n       [--env-file PATH] [--daemon-url URL] [--health-retries N] [--health-delay-ms N]\\n       [--unattended | --schedule HH:MM | --unschedule] [--allow-no-bearer] [--result-file PATH] [--json]\\n       [--python-runtime INTERPRETER] (explicit legacy/lite updater)\\n\",false).is_ok(){0}else{120};",
+            "expression": "[--checkout REPO] [--tag VERSION] [--engine python|rust] [--shadow]\\n       [--all | --daemon-only | --clients-only] [--check] [--reinstall] [--allow-downgrade]\\n       [--no-backup] [--rollback-tag SUFFIX] [--force-rollback-tag] [--allow-dirty]\\n       [--keep-rollbacks N] [--keep-cache-hours N] [--no-cache-prune] [--no-test-login]\\n       [--env-file PATH] [--allow-auth-change] [--daemon-url URL] [--health-retries N] [--health-delay-ms N]\\n       [--unattended | --schedule HH:MM | --unschedule] [--allow-no-bearer] [--result-file PATH] [--json]\\n       [--python-runtime INTERPRETER] (explicit legacy/lite updater)\\n\",false).is_ok(){0}else{120};",
             "omitted_optional": null,
             "parameters": {
               "--all": {
                 "literal": true
+              },
+              "--allow-auth-change": {
+                "expression": "[--daemon-url"
               },
               "--check": {
                 "literal": true
@@ -7292,9 +7309,6 @@
               },
               "--daemon-only": {
                 "literal": true
-              },
-              "--daemon-url": {
-                "expression": "URL]"
               },
               "--engine": {
                 "expression": "python|rust]"
@@ -7350,7 +7364,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/options.rs:178",
+          "location": "rust/shim/src/cli/update/options.rs:215",
           "shape": {
             "argv_source": "update --clients-only)\"",
             "channel": "argv",
@@ -7485,7 +7499,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/runtime/mod.rs:401",
+          "location": "rust/shim/src/runtime/mod.rs:402",
           "shape": {
             "argv_source": "update --clients-only\")}))",
             "channel": "argv",
@@ -25452,7 +25466,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/engine.rs:143",
+          "location": "rust/shim/src/cli/update/engine.rs:173",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -25542,7 +25556,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/engine.rs:142",
+          "location": "rust/shim/src/cli/update/engine.rs:172",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -25670,7 +25684,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/engine.rs:145",
+          "location": "rust/shim/src/cli/update/engine.rs:175",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -27598,7 +27612,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/mod.rs:185",
+          "location": "rust/shim/src/cli/update/mod.rs:188",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -30599,7 +30613,7 @@
         },
         {
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/engine.rs:649",
+          "location": "rust/shim/src/cli/update/engine.rs:756",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -30614,7 +30628,7 @@
         },
         {
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/engine.rs:651",
+          "location": "rust/shim/src/cli/update/engine.rs:758",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -32620,7 +32634,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/options.rs:66",
+          "location": "rust/shim/src/cli/update/options.rs:68",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -34276,7 +34290,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/engine.rs:344",
+          "location": "rust/shim/src/cli/update/engine.rs:436",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -34289,7 +34303,33 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/engine.rs:348",
+          "location": "rust/shim/src/cli/update/engine.rs:440",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "\"))",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "assignment-candidate"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/update/engine.rs:820",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/update/engine.rs:826",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -39046,7 +39086,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/engine.rs:171",
+          "location": "rust/shim/src/cli/update/engine.rs:1012",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -39059,7 +39099,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/engine.rs:187",
+          "location": "rust/shim/src/cli/update/engine.rs:1015",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -39072,7 +39112,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/engine.rs:686",
+          "location": "rust/shim/src/cli/update/engine.rs:201",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -39085,7 +39125,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/engine.rs:690",
+          "location": "rust/shim/src/cli/update/engine.rs:217",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -39098,7 +39138,46 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/engine.rs:694",
+          "location": "rust/shim/src/cli/update/engine.rs:379",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/update/engine.rs:793",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/update/engine.rs:797",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/update/engine.rs:801",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -40235,7 +40314,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/engine.rs:176",
+          "location": "rust/shim/src/cli/update/engine.rs:1007",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -40248,7 +40327,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/engine.rs:686",
+          "location": "rust/shim/src/cli/update/engine.rs:206",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -40261,7 +40340,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/engine.rs:690",
+          "location": "rust/shim/src/cli/update/engine.rs:380",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -40274,7 +40353,33 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/engine.rs:694",
+          "location": "rust/shim/src/cli/update/engine.rs:793",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/update/engine.rs:797",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/update/engine.rs:801",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -41810,6 +41915,19 @@
           "dynamic": "unresolved",
           "evidence": "static",
           "location": "rust/shim/src/cli/tunnel/mod.rs:423",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/update/engine.rs:858",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -44113,7 +44231,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/runtime/mod.rs:59",
+          "location": "rust/shim/src/runtime/mod.rs:60",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -44126,7 +44244,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/runtime/mod.rs:63",
+          "location": "rust/shim/src/runtime/mod.rs:64",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -44139,7 +44257,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/runtime/mod.rs:77",
+          "location": "rust/shim/src/runtime/mod.rs:78",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -44363,7 +44481,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/runtime/mod.rs:58",
+          "location": "rust/shim/src/runtime/mod.rs:59",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -44376,7 +44494,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/runtime/mod.rs:63",
+          "location": "rust/shim/src/runtime/mod.rs:64",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -44449,7 +44567,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/runtime/mod.rs:60",
+          "location": "rust/shim/src/runtime/mod.rs:61",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -46043,7 +46161,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/mod.rs:629",
+          "location": "rust/shim/src/cli/update/mod.rs:634",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -46056,7 +46174,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/mod.rs:639",
+          "location": "rust/shim/src/cli/update/mod.rs:644",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -46069,7 +46187,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/mod.rs:668",
+          "location": "rust/shim/src/cli/update/mod.rs:673",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -66059,7 +66177,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "cli",
-      "location": "rust/shim/src/cli/update/mod.rs:442",
+      "location": "rust/shim/src/cli/update/mod.rs:447",
       "name": "maintainer",
       "shape": {
         "argv_source": "maintainer setup --container <name>\");",
@@ -66077,7 +66195,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "cli",
-      "location": "rust/shim/src/cli/update/mod.rs:585",
+      "location": "rust/shim/src/cli/update/mod.rs:590",
       "name": "restore",
       "shape": {
         "argv_source": "restore --backup-file <dump> --state-archive <state.tgz> --yes. (Omit --state-archive only if no state archive was taken.)\".into()]",
@@ -66098,7 +66216,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "cli",
-      "location": "rust/shim/src/cli/update/mod.rs:618",
+      "location": "rust/shim/src/cli/update/mod.rs:623",
       "name": "test-login",
       "shape": {
         "argv_source": "test-login create --container <project-postgres>\");",
@@ -66116,7 +66234,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "cli",
-      "location": "rust/shim/src/cli/update/mod.rs:622",
+      "location": "rust/shim/src/cli/update/mod.rs:627",
       "name": "test-login",
       "shape": {
         "argv_source": "test-login create --container <project-postgres>\");",
@@ -66134,7 +66252,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "cli",
-      "location": "rust/shim/src/cli/update/mod.rs:668",
+      "location": "rust/shim/src/cli/update/mod.rs:673",
       "name": "test-login",
       "shape": {
         "argv_source": "test-login create\");",
@@ -66148,7 +66266,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "cli",
-      "location": "rust/shim/src/cli/update/mod.rs:685",
+      "location": "rust/shim/src/cli/update/mod.rs:690",
       "name": "test-login",
       "shape": {
         "argv_source": "test-login create --container {}\", seams::quote(&pg)));",
@@ -66166,7 +66284,21 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "cli",
-      "location": "rust/shim/src/cli/update/mod.rs:706",
+      "location": "rust/shim/src/cli/update/mod.rs:714",
+      "name": "checkout-handover-v",
+      "shape": {
+        "argv_source": "checkout-handover-v 1\\n\", false).is_ok() {",
+        "channel": "argv",
+        "complete": false,
+        "expression": "1\\n\", false).is_ok() {",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "cli",
+      "location": "rust/shim/src/cli/update/mod.rs:722",
       "name": "native-update-v",
       "shape": {
         "argv_source": "native-update-v 1\\n\", false).is_ok() {",
@@ -68071,7 +68203,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "rust/shim/src/cli/update/mod.rs:611",
+      "location": "rust/shim/src/cli/update/mod.rs:616",
       "name": "PSEUDOLIFE_TEST_PG_LOGIN_FILE",
       "shape": {
         "channel": "environment",
@@ -72330,7 +72462,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "rust/shim/src/cli/update/engine.rs:767",
+      "location": "rust/shim/src/cli/update/engine.rs:1038",
       "method": null,
       "name": "/health",
       "shape": {
@@ -72344,7 +72476,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "rust/shim/src/cli/update/mod.rs:235",
+      "location": "rust/shim/src/cli/update/mod.rs:240",
       "method": null,
       "name": "/health",
       "shape": {
@@ -72358,7 +72490,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "rust/shim/src/cli/update/mod.rs:306",
+      "location": "rust/shim/src/cli/update/mod.rs:311",
       "method": null,
       "name": "/health",
       "shape": {
@@ -72372,7 +72504,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "rust/shim/src/cli/update/mod.rs:38",
+      "location": "rust/shim/src/cli/update/mod.rs:39",
       "method": null,
       "name": "/health",
       "shape": {
@@ -72386,7 +72518,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "rust/shim/src/cli/update/release.rs:631",
+      "location": "rust/shim/src/cli/update/release.rs:652",
       "method": null,
       "name": "/health",
       "shape": {
@@ -98698,229 +98830,289 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/engine.rs:142",
+      "location": "rust/shim/src/cli/update/engine.rs:1007",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/update/engine.rs:1012",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/update/engine.rs:1015",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/update/engine.rs:1038",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/health"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/update/engine.rs:172",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_BUILD_GIT_SHA"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/engine.rs:143",
+      "location": "rust/shim/src/cli/update/engine.rs:173",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_BUILD_DIRTY"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/engine.rs:145",
+      "location": "rust/shim/src/cli/update/engine.rs:175",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_BUILD_TIME"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/engine.rs:171",
+      "location": "rust/shim/src/cli/update/engine.rs:201",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/engine.rs:176",
+      "location": "rust/shim/src/cli/update/engine.rs:206",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/engine.rs:187",
+      "location": "rust/shim/src/cli/update/engine.rs:217",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/engine.rs:344",
+      "location": "rust/shim/src/cli/update/engine.rs:379",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/update/engine.rs:380",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/update/engine.rs:436",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DATABASE_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/engine.rs:348",
+      "location": "rust/shim/src/cli/update/engine.rs:440",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DATABASE_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/engine.rs:686",
+      "location": "rust/shim/src/cli/update/engine.rs:793",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/engine.rs:686",
+      "location": "rust/shim/src/cli/update/engine.rs:793",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/engine.rs:690",
+      "location": "rust/shim/src/cli/update/engine.rs:797",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/engine.rs:690",
+      "location": "rust/shim/src/cli/update/engine.rs:797",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/engine.rs:694",
+      "location": "rust/shim/src/cli/update/engine.rs:801",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/engine.rs:694",
+      "location": "rust/shim/src/cli/update/engine.rs:801",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/engine.rs:767",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:route:/health"
+      "location": "rust/shim/src/cli/update/engine.rs:820",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_DATABASE_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/mod.rs:162",
+      "location": "rust/shim/src/cli/update/engine.rs:826",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_DATABASE_URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/update/engine.rs:858",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/update/engine.rs:904",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:update"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/mod.rs:185",
+      "location": "rust/shim/src/cli/update/mod.rs:165",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "cli:update"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/update/mod.rs:188",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_DOCKER"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/mod.rs:235",
+      "location": "rust/shim/src/cli/update/mod.rs:240",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/mod.rs:306",
+      "location": "rust/shim/src/cli/update/mod.rs:311",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/mod.rs:310",
+      "location": "rust/shim/src/cli/update/mod.rs:315",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:update"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/mod.rs:38",
+      "location": "rust/shim/src/cli/update/mod.rs:39",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/mod.rs:442",
+      "location": "rust/shim/src/cli/update/mod.rs:447",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:cli:maintainer"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/mod.rs:531",
+      "location": "rust/shim/src/cli/update/mod.rs:536",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:update"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/mod.rs:585",
+      "location": "rust/shim/src/cli/update/mod.rs:590",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:cli:restore"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/mod.rs:591",
+      "location": "rust/shim/src/cli/update/mod.rs:596",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:update"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/mod.rs:611",
+      "location": "rust/shim/src/cli/update/mod.rs:616",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_TEST_PG_LOGIN_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/mod.rs:618",
+      "location": "rust/shim/src/cli/update/mod.rs:623",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:cli:test-login"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/mod.rs:622",
+      "location": "rust/shim/src/cli/update/mod.rs:627",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:cli:test-login"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/mod.rs:629",
+      "location": "rust/shim/src/cli/update/mod.rs:634",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_TEST_PG_HOST_PORT"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/mod.rs:639",
+      "location": "rust/shim/src/cli/update/mod.rs:644",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_TEST_PG_HOST_PORT"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/mod.rs:668",
+      "location": "rust/shim/src/cli/update/mod.rs:673",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_TEST_PG_HOST_PORT"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/mod.rs:668",
+      "location": "rust/shim/src/cli/update/mod.rs:673",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:cli:test-login"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/mod.rs:685",
+      "location": "rust/shim/src/cli/update/mod.rs:690",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:cli:test-login"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/mod.rs:706",
+      "location": "rust/shim/src/cli/update/mod.rs:714",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:cli:checkout-handover-v"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/update/mod.rs:722",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:cli:native-update-v"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/mod.rs:737",
+      "location": "rust/shim/src/cli/update/mod.rs:753",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:update"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/mod.rs:751",
+      "location": "rust/shim/src/cli/update/mod.rs:767",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:update"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/options.rs:178",
+      "location": "rust/shim/src/cli/update/options.rs:215",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:update"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/options.rs:66",
+      "location": "rust/shim/src/cli/update/options.rs:68",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DAEMON_URL"
     },
@@ -98944,7 +99136,7 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/release.rs:631",
+      "location": "rust/shim/src/cli/update/release.rs:652",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
@@ -99722,43 +99914,43 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/runtime/mod.rs:401",
+      "location": "rust/shim/src/runtime/mod.rs:402",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:update"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/runtime/mod.rs:58",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_SHIM_RUNTIMES"
-    },
-    {
-      "dynamic": "unresolved",
       "location": "rust/shim/src/runtime/mod.rs:59",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_SHIM_LAUNCHER"
+      "surface": "environment:PSEUDOLIFE_SHIM_RUNTIMES"
     },
     {
       "dynamic": "unresolved",
       "location": "rust/shim/src/runtime/mod.rs:60",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_SHIM_LAUNCHER"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/runtime/mod.rs:61",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_SHIM_USER_BIN"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/runtime/mod.rs:63",
+      "location": "rust/shim/src/runtime/mod.rs:64",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_SHIM_LAUNCHER"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/runtime/mod.rs:63",
+      "location": "rust/shim/src/runtime/mod.rs:64",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_SHIM_RUNTIMES"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/runtime/mod.rs:77",
+      "location": "rust/shim/src/runtime/mod.rs:78",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_SHIM_LAUNCHER"
     },
