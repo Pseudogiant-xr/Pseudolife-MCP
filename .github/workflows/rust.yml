@@ -1759,7 +1759,8 @@ jobs:
       PARITY_MIN_FREE_GB: '8'
       # The judges' pinned process tests (evals/rust_port/phase1.py, 240 s
       # by default): the Windows workers took 129-149 s against hosted's
-      # 95-114 s and once ran past 240 s on a shared host (2026-11-03). Empty
+      # 95-114 s and once ran past 240 s on a shared host (2026-11-03). 480
+      # is twice the old limit, about three times their slowest pass; empty
       # keeps the default.
       PARITY_PROCESS_TEST_TIMEOUT: ${{ matrix.runner == 'windows' && '480' || '' }}
     steps: *parity_steps

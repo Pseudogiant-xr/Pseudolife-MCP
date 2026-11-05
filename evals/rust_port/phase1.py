@@ -34,15 +34,17 @@ def selected_nodes():
 # runners keep the default.
 PROCESS_TEST_TIMEOUT = 240
 PROCESS_TEST_TIMEOUT_VARIABLE = "PARITY_PROCESS_TEST_TIMEOUT"
+# An hour: past any judges step budget, so a larger value is a typo.
+PROCESS_TEST_TIMEOUT_MAX = 3600
 
 
 def process_test_timeout(environ):
     raw = environ.get(PROCESS_TEST_TIMEOUT_VARIABLE, "")
     if raw == "":
         return PROCESS_TEST_TIMEOUT
-    if not raw.isascii() or not raw.isdigit() or int(raw) <= 0:
-        raise ValueError(f"{PROCESS_TEST_TIMEOUT_VARIABLE} must be a positive whole number of seconds, "
-                         f"not {raw!r}; unset it to use {PROCESS_TEST_TIMEOUT}")
+    if not raw.isascii() or not raw.isdigit() or not 0 < int(raw) <= PROCESS_TEST_TIMEOUT_MAX:
+        raise ValueError(f"{PROCESS_TEST_TIMEOUT_VARIABLE} must be a whole number of seconds from 1 to "
+                         f"{PROCESS_TEST_TIMEOUT_MAX}, not {raw!r}; unset it to use {PROCESS_TEST_TIMEOUT}")
     return int(raw)
 
 

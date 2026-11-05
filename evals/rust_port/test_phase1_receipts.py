@@ -130,7 +130,7 @@ def test_process_test_timeout_defaults_to_240_and_takes_the_lane_override(tmp_pa
     assert capture_process_test_timeout(tmp_path, monkeypatch) == [expected]
 
 
-@pytest.mark.parametrize("value", ["0", "-5", "soon", "2.5"])
+@pytest.mark.parametrize("value", ["0", "-5", "soon", "2.5", " 480", "٤٨٠", "3601", "9" * 30])
 def test_an_unusable_process_test_timeout_is_refused_by_name(tmp_path, monkeypatch, value):
     monkeypatch.setenv("PARITY_PROCESS_TEST_TIMEOUT", value)
     with pytest.raises(ValueError, match="PARITY_PROCESS_TEST_TIMEOUT"):
