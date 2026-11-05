@@ -286,6 +286,8 @@ fn dream_tracking_error(svc: &Service, ready: Option<&crate::service::Ready>) ->
 /// `capacity_warning` from the ready service's resident bank.
 fn capacity_warning(svc: &Service, ready: Option<&crate::service::Ready>) -> bool {
     let (Some(ready), Some(last)) = (ready, svc.config.memory.band_specs.last()) else {
+        // As `dream_tracking_error`: no ready service, nothing to stand in.
+        *svc.health_capacity.lock().expect("health capacity lock") = None;
         return false;
     };
     bank_capacity_warning(&ready.bank, last, &svc.health_capacity)
@@ -294,24 +296,28 @@ fn capacity_warning(svc: &Service, ready: Option<&crate::service::Ready>) -> boo
 /// `/health` never waits on the bank: while a writer holds or is queued for
 /// its lock (a store, a shadow refresh's patch waiting for a long search),
 /// the last value read from this same bank is served, so the flag neither
-/// stalls the probe nor flickers; with none yet, no warning.
+/// stalls the probe nor flickers; with none yet, no warning. The cache holds
+/// a `Weak`, so a replaced bank's allocation cannot be reused at the same
+/// address and mistaken for the new bank.
 fn bank_capacity_warning(
     bank: &std::sync::Arc<std::sync::RwLock<crate::bank::Bank>>,
     last: &crate::config::StartupBandSpec,
-    cache: &std::sync::Mutex<Option<(usize, bool)>>,
+    cache: &std::sync::Mutex<Option<CapacityCache>>,
 ) -> bool {
-    let source = std::sync::Arc::as_ptr(bank) as usize;
-    let Ok(bank) = bank.try_read() else {
-        return match *cache.lock().expect("health capacity lock") {
-            Some((from, warned)) if from == source => warned,
+    let Ok(guard) = bank.try_read() else {
+        return match &*cache.lock().expect("health capacity lock") {
+            Some((from, warned)) if std::sync::Weak::ptr_eq(from, &Arc::downgrade(bank)) => *warned,
             _ => false,
         };
     };
-    let size = bank.entries.iter().filter(|e| e.band == last.name).count();
+    let size = guard.entries.iter().filter(|e| e.band == last.name).count();
     let warned = capacity_flag(size, last.max_entries);
-    *cache.lock().expect("health capacity lock") = Some((source, warned));
+    *cache.lock().expect("health capacity lock") = Some((Arc::downgrade(bank), warned));
     warned
 }
+
+/// The last capacity flag `/health` read, and the bank it was read from.
+pub(crate) type CapacityCache = (std::sync::Weak<std::sync::RwLock<crate::bank::Bank>>, bool);
 
 /// `_warn_near_memory_limit`: at most once per `MEMORY_WARNING_INTERVAL`.
 fn warn_near_memory_limit(memory: &Value) {

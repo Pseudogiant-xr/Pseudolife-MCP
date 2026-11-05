@@ -187,7 +187,7 @@ pub struct Service {
     >,
     /// `/health`'s last `capacity_warning` and the bank it was read from
     /// (its address), for a read that finds the bank's lock held.
-    pub(crate) health_capacity: std::sync::Mutex<Option<(usize, bool)>>,
+    pub(crate) health_capacity: std::sync::Mutex<Option<crate::health::CapacityCache>>,
 }
 
 impl Service {

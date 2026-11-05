@@ -3,7 +3,8 @@
 The caller supplies the test-login environment and may set CARGO_TARGET_DIR.
 This helper checks generated schema inputs, runs schema and startup fixture unit tests,
 builds the native daemon test executable, and checks startup goldens and mutants.
-It does not provision PostgreSQL or load an embedding model. CI splits the cells
+It does not provision PostgreSQL; part 2 builds the small embedding fixture
+models the clock retry and the shadow tests load. CI splits the cells
 over two shards with --part (startup_cases.part_cases): part 1 runs only its
 cases; part 2 runs the rest with the mutants, the clock retry, the writer guard
 and the read-only shadow's incremental-refresh database tests.
