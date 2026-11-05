@@ -365,11 +365,13 @@ def test_release_update_warns_once_about_older_persistent_image_pin(world, clien
     (project / ".env").write_text("PSEUDOLIFE_IMAGE_TAG=0.15.0\n", encoding="utf-8")
     world.health = [{"status": "ok", "version": "0.15.0"}, {"status": "ok", "version": "0.15.1"}]
     original = world.run_cli
-    config_envs = []
+    config_checks = []
 
     def config(argv, **kw):
         if argv[1:2] == ["compose"] and "config" in argv:
-            config_envs.append(kw.get("env"))
+            env = kw.get("env") or {}
+            config_checks.append((tuple(argv), "PSEUDOLIFE_IMAGE_TAG" in env,
+                                  env.get("PSEUDOLIFE_IMAGE_TAG")))
             configured = image if "--no-interpolate" in argv else up.GHCR_IMAGE + ":0.15.0"
             return 0, json.dumps({"services": {up.DAEMON_SERVICE: {"image": configured}}})
         return original(argv, **kw)
@@ -384,7 +386,16 @@ def test_release_update_warns_once_about_older_persistent_image_pin(world, clien
         assert "PSEUDOLIFE_IMAGE_TAG=0.15.1" in message
     else:
         assert str(project / "docker-compose.yml") in message and f"image: {up.GHCR_IMAGE}:0.15.1" in message
-    assert config_envs and "PSEUDOLIFE_IMAGE_TAG" not in config_envs[0]
+    raw_args = next(argv for argv, _, _ in config_checks if "--no-interpolate" in argv)
+    resolved_args = tuple(value for value in raw_args if value != "--no-interpolate")
+    pin_queries = [(present, value) for argv, present, value in config_checks
+                   if argv in (raw_args, resolved_args)]
+    assert pin_queries == [(False, None), (False, None)]
+    # The earlier authentication check resolves the deployment overlay, whose
+    # image tag deliberately differs from the manager's persistent view.
+    deployment_queries = [(present, value) for argv, present, value in config_checks
+                          if argv not in (raw_args, resolved_args)]
+    assert deployment_queries == [(True, "0.15.1")]
 
 
 @pytest.mark.parametrize("pin", ["0.15.1", "latest", "sha256:fixture"])
