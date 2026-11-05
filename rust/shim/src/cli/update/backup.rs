@@ -9,6 +9,20 @@ use std::{
 
 const CONNECTION_FIX: &str = "cannot resolve the daemon's backup connection; set a direct PSEUDOLIFE_MCP_DATABASE_URL in its container environment naming the host, port, user and database on the selected PostgreSQL container's shared network, without PGSERVICE/service or an unmatched PGHOSTADDR/hostaddr, then retry; nothing was deployed";
 
+fn restore_advice(dump: &Path, state: Option<&Path>) -> String {
+    let mut command = format!(
+        "pseudolife-mcp restore --backup-file {}",
+        seams::quote(&dump.to_string_lossy())
+    );
+    if let Some(state) = state {
+        command.push_str(&format!(
+            " --state-archive {}",
+            seams::quote(&state.to_string_lossy())
+        ));
+    }
+    command
+}
+
 fn connection_fix(_daemon: &Value) -> String {
     CONNECTION_FIX.into()
 }
@@ -725,14 +739,14 @@ impl Update {
             self.warn("state archive could not be made; continuing with the complete SQL dump (the daemon may be stopped)");
         }
         self.step(format!(
-            "backup: {}{}; restore with pseudolife-mcp restore --backup-file {}",
+            "backup: {}{}; restore with {}",
             dump.display(),
             if state_ok {
                 format!(" + {}", state.file_name().unwrap().to_string_lossy())
             } else {
                 String::new()
             },
-            dump.display()
+            restore_advice(&dump, state_ok.then_some(state.as_path()))
         ));
         let keep = [
             dump.file_name().unwrap().to_string_lossy().into_owned(),
@@ -962,6 +976,23 @@ mod stopped_backup_ownership_tests {
 #[cfg(test)]
 mod connection_tests {
     use super::*;
+
+    #[test]
+    fn restore_advice_keeps_the_complete_state_pair() {
+        let dump = Path::new("backup dir/bank.sql.gz");
+        let state = Path::new("backup dir/state.tgz");
+        let advice = restore_advice(dump, Some(state));
+        assert!(advice.contains("--state-archive"));
+        assert!(advice.contains(&seams::quote(&state.to_string_lossy())));
+    }
+
+    #[test]
+    fn restore_advice_without_state_keeps_a_quoted_dump() {
+        let dump = Path::new("backup dir/bank.sql.gz");
+        let advice = restore_advice(dump, None);
+        assert!(advice.contains(&seams::quote(&dump.to_string_lossy())));
+        assert!(!advice.contains("--state-archive"));
+    }
 
     #[test]
     fn explicit_empty_address_does_not_inherit_a_different_server() {

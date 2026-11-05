@@ -1,6 +1,6 @@
 //! Native, opt-in host update transactions. Python remains the differential oracle.
 mod backup;
-mod clients;
+pub(super) mod clients;
 mod engine;
 mod options;
 mod release;

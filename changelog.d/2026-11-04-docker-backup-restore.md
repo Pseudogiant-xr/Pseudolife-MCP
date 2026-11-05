@@ -14,6 +14,15 @@
   defaults in the PostgreSQL container.
 - Explicitly empty database connection fields override inherited environment
   values, so ambient settings cannot redirect automatic bank selection.
+- Native backup advice includes the state archive, and standalone dump failures
+  name `--db-port` when the selected PostgreSQL socket is unavailable.
+- Native backup help mirrors Docker selectors; calls using them defer to Python
+  before changing files, including abbreviated and equals forms.
+- File-mode backup still archives and rotates its state when Docker is installed
+  but stopped. Automatic Docker selection requires an existing bank container;
+  explicit Docker selectors keep their Docker refusal instead of falling back.
+- A missing local bank refuses without creating an archive and names the Docker
+  recovery command for a stopped or unavailable Docker installation.
 - Automatic backup selection now follows the same runtime connection policy in
   standalone backup/restore and both update implementations, including daemon
   environment defaults, non-default ports and literal database names. Automatic

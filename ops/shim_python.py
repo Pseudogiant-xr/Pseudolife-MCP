@@ -18,14 +18,15 @@ the checkout on the path (the unit's own shape):
 1. ``--python``, alone: the operator named it, so it is verified and
    refused, never replaced (a bare name is looked up on PATH);
 2. the checkout's ``.venv``;
-3. pipx's ``pseudolife-mcp`` venv (the installer's shim install), except on
+3. the installer's complete managed runtimes, newest first;
+4. pipx's ``pseudolife-mcp`` venv (the installer's shim install), except on
    Windows, where ``ops/install.ps1`` treats anything running from that
    venv as a session holding the MCP shim;
-4. a venv this helper made on an earlier run (``--venv-dir``, default
+5. a venv this helper made on an earlier run (``--venv-dir``, default
    ``~/.pseudolife-mcp/shim-venv``);
-5. ``python3`` / ``python`` on PATH (``pip install --user <checkout>``, the
+6. ``python3`` / ``python`` on PATH (``pip install --user <checkout>``, the
    installer's shim install without pipx, lands there);
-6. a new venv at ``--venv-dir`` with the checkout installed into it. The
+7. a new venv at ``--venv-dir`` with the checkout installed into it. The
    shim never runs a model, so torch is taken from PyTorch's CPU wheel index
    first (a fraction of the default build's size); ``--no-create`` refuses
    at this point instead.
@@ -45,6 +46,10 @@ import shutil
 import subprocess
 import sys
 from typing import Callable
+
+# Use the checkout's stdlib-only runtime reader even before package install.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from pseudolife_memory import runtimes
 
 # What the shims import, the way they import it (repo root first on the path).
 PROBE_IMPORT = "pseudolife_memory.memory.dream"
@@ -129,6 +134,8 @@ def candidates(repo: Path, venv_dir: Path, log: Log | None = None) -> list[tuple
         found.append((spelled, label))
 
     add(venv_python(repo / ".venv"), "the checkout's .venv")
+    for runtime in reversed(runtimes.list_runtimes(runtimes.default_layout())):
+        add(venv_python(runtime.path), f"managed shim runtime {runtime.name}")
     home = pipx_home()
     if home is not None:
         pipx_venv = venv_python(home / "venvs" / "pseudolife-mcp")
@@ -205,6 +212,7 @@ def choose(repo: Path, explicit: Path | None, venv_dir: Path, allow_create: bool
             log(f"{explicit}: not found (named with --python)")
             log(_fix(repo, venv_dir))
             return None
+        log(f"checking shim interpreter {explicit} (named with --python)...")
         ok, why = probe(explicit, repo)
         if ok:
             log(f"shim interpreter: {explicit} (named with --python; imports {PROBE_IMPORT})")
@@ -213,6 +221,7 @@ def choose(repo: Path, explicit: Path | None, venv_dir: Path, allow_create: bool
         log(_fix(repo, venv_dir))
         return None
     for path, label in candidates(repo, venv_dir, log):
+        log(f"checking shim interpreter {path} ({label})...")
         ok, why = probe(path, repo)
         if ok:
             log(f"shim interpreter: {path} ({label}; imports {PROBE_IMPORT})")
@@ -263,7 +272,7 @@ def main(argv: list[str] | None = None) -> int:
         explicit = Path(os.path.abspath(named))
 
     def log(message: str) -> None:
-        print(message, file=sys.stderr)
+        print(message, file=sys.stderr, flush=True)
 
     chosen = choose(repo, explicit, venv_dir, not args.no_create, log)
     if chosen is None:

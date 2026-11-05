@@ -1,0 +1,157 @@
+{
+  "accepted": [
+    {
+      "fingerprint": "27de32b3bc9e0128",
+      "job": "test-lite-macos",
+      "reason": "Exercise platform data-directory detection in the existing macOS lite lane; no new job or setup step.",
+      "workflow": "ci.yml"
+    },
+    {
+      "fingerprint": "cd44b55a55d8cd58",
+      "job": "test-lite-windows",
+      "reason": "Preserve the full installer/lite selections alongside the landed Docker backup/restore cases in the existing Windows step; no new job, setup step or retry.",
+      "workflow": "ci.yml"
+    },
+    {
+      "fingerprint": "528e63bb05e8956b",
+      "job": "test-lite-windows",
+      "reason": "Combine locale-safe shared fixture transport with bounded unattended installer coverage in the existing Windows lane; no new job or setup step.",
+      "workflow": "ci.yml"
+    },
+    {
+      "fingerprint": "7c3eb46156f5ec89",
+      "job": "test-lite-windows",
+      "reason": "Mechanically combine the existing UTF-8 transport, unattended installer and Claude profile cases in the same Windows pytest step; no new job, setup step or retry.",
+      "workflow": "ci.yml"
+    },
+    {
+      "fingerprint": "8e651040e7514ef0",
+      "job": "test-lite-windows",
+      "reason": "Combine the existing unattended installer selection with the reviewed move exposure and ownership coverage after forwarding master; no new job, setup step or retry.",
+      "workflow": "ci.yml"
+    },
+    {
+      "fingerprint": "c768d5c6971c67aa",
+      "job": "test-lite-windows",
+      "reason": "Combine the existing unattended installer selection with the landed autostart/runtime cases in the same Windows step after forwarding batch-9 master; no new job, setup step or retry.",
+      "workflow": "ci.yml"
+    },
+    {
+      "fingerprint": "41a783a011987739",
+      "job": "test-lite-windows",
+      "reason": "Retain the existing unattended installer selection alongside the landed Docker backup/restore cases after forwarding master; no new job, setup step or retry.",
+      "workflow": "ci.yml"
+    },
+    {
+      "fingerprint": "8ffc934b59e52400",
+      "job": "test-lite-windows",
+      "reason": "Add bounded recorded-choice, Compose rerun and runtime-reuse regressions to the existing Windows installer lane; no new job or setup step.",
+      "workflow": "ci.yml"
+    },
+    {
+      "fingerprint": "8985a4f4238fee41",
+      "job": "test-lite-windows",
+      "reason": "Retain the existing rerun/runtime tests together with the merged installer UTF-8 and Claude profile coverage in one Windows step; no new job, setup step or retry.",
+      "workflow": "ci.yml"
+    },
+    {
+      "fingerprint": "c1904d8d06b14663",
+      "job": "test-lite-windows",
+      "reason": "Retain recorded-choice and runtime-reuse cases alongside the merged move exposure and ownership selection in the existing Windows step; no new job, setup step or retry.",
+      "workflow": "ci.yml"
+    },
+    {
+      "fingerprint": "74b2b75b2326bea1",
+      "job": "test-lite-windows",
+      "reason": "Retain runtime-reuse and rerun selectors with the landed shim Python, cutover and autostart-reference cases in the existing Windows step; no new job, setup step or retry.",
+      "workflow": "ci.yml"
+    },
+    {
+      "fingerprint": "6093ad8fe4dd3a6b",
+      "job": "test-lite-windows",
+      "reason": "Preserve runtime-reuse/rerun selections alongside the landed Docker backup/restore cases in the same Windows step; no new job, setup step or retry.",
+      "workflow": "ci.yml"
+    },
+    {
+      "fingerprint": "2ecebc7617992401",
+      "job": "test-lite-windows",
+      "reason": "Add bounded original-checkout credential and epilogue coverage to the existing Windows installer lane; no new job or setup step.",
+      "workflow": "ci.yml"
+    },
+    {
+      "fingerprint": "cf1d8050c3b9d6d3",
+      "job": "test-lite-windows",
+      "reason": "Retain clone-authority and epilogue coverage with the merged installer UTF-8 and Claude profile cases in the existing Windows step; no new job, setup step or retry.",
+      "workflow": "ci.yml"
+    },
+    {
+      "fingerprint": "a69d1a01583503f2",
+      "job": "test-lite-windows",
+      "reason": "Stack clone-authority coverage on the validated unattended and rerun selections plus the reviewed move exposure cases; no new job, setup step or retry.",
+      "workflow": "ci.yml"
+    },
+    {
+      "fingerprint": "408c1e1960801667",
+      "job": "test-lite-windows",
+      "reason": "Retain clone-authority coverage alongside the forwarded installer/autostart/runtime selections in the existing Windows step; no new job, setup step or retry.",
+      "workflow": "ci.yml"
+    },
+    {
+      "fingerprint": "6ff087e37871f810",
+      "job": "test-lite-windows",
+      "reason": "Preserve clone-authority and existing installer coverage alongside the landed Docker backup/restore cases; no new job, setup step or retry.",
+      "workflow": "ci.yml"
+    },
+    {
+      "fingerprint": "e319b9ae1454170d",
+      "job": "test-lite-windows",
+      "reason": "Add bounded read-only lite-bank preflight coverage to the existing Windows installer lane; no new job or setup step.",
+      "workflow": "ci.yml"
+    },
+    {
+      "fingerprint": "e319b9ae1454170d",
+      "job": "test-lite-windows",
+      "reason": "Retain bounded read-only lite-bank tests in the existing Windows lane; no new job or setup step.",
+      "workflow": "ci.yml"
+    },
+    {
+      "fingerprint": "c4cc54dc61795f9d",
+      "job": "test-lite-windows",
+      "reason": "Retain lite-bank detection with the merged installer UTF-8 and Claude profile cases in the existing Windows step; macOS selection and accepted fingerprint are unchanged. No new job, setup step or retry.",
+      "workflow": "ci.yml"
+    },
+    {
+      "fingerprint": "1d4ea9cb6c340947",
+      "job": "test-lite-windows",
+      "reason": "Retain lite-bank detection with every validated installer layer and the reviewed move exposure selection in the same Windows step; no new job, setup step or retry.",
+      "workflow": "ci.yml"
+    },
+    {
+      "fingerprint": "27de32b3bc9e0128",
+      "job": "test-lite-macos",
+      "reason": "Retain the existing lite-bank platform-path cases after forwarding the installer stack; no change to the macOS selection, setup or job count.",
+      "workflow": "ci.yml"
+    },
+    {
+      "fingerprint": "a73db89ce5759326",
+      "job": "test-lite-windows",
+      "reason": "Retain the complete installer stack and lite cases with the landed runtime/autostart coverage in the existing Windows step; no new job, setup step or retry.",
+      "workflow": "ci.yml"
+    },
+    {
+      "fingerprint": "27de32b3bc9e0128",
+      "job": "test-lite-macos",
+      "reason": "Retain the unchanged lite-bank macOS test selection after forwarding batch-9 master; no new case, setup step or job.",
+      "workflow": "ci.yml"
+    },
+    {
+      "fingerprint": "27de32b3bc9e0128",
+      "job": "test-lite-macos",
+      "reason": "Retain the unchanged lite-bank macOS selection after forwarding the backup/restore batch; no new case, setup step or job.",
+      "workflow": "ci.yml"
+    }
+  ],
+  "legacy": true,
+  "schema": 1,
+  "source_head": "2f2fdb118e3fcbeace837727d4863a2cdd1017c3"
+}

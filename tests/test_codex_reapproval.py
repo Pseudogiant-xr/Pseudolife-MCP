@@ -226,10 +226,10 @@ def test_doctor_reports_the_codex_hooks_line(monkeypatch, capsys):
 
     monkeypatch.setattr(doctor_cli, "_board_probe", lambda timeout: {"state": "disabled", "line": "off - test"})
     monkeypatch.setattr(uc, "check_codex_hooks",
-                        lambda repo, daemon_digest=None: {"state": "stale", "changed_files": ["session-start.sh"]})
+                        lambda repo, daemon_digest=None, **kwargs: {"state": "stale", "changed_files": ["session-start.sh"]})
     _, report = _run_doctor(monkeypatch, capsys, {"status": "ok", "version": __version__, "hooks_digest": "d" * 64})
     assert report["codex_hooks"] == "stale (changed: session-start.sh)"
-    monkeypatch.setattr(uc, "check_codex_hooks", lambda repo, daemon_digest=None: {"state": "current"})
+    monkeypatch.setattr(uc, "check_codex_hooks", lambda repo, daemon_digest=None, **kwargs: {"state": "current"})
     _, report = _run_doctor(monkeypatch, capsys, {"status": "ok", "version": __version__})
     assert report["codex_hooks"] == "current"
 

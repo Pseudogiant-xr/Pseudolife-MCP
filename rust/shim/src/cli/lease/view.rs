@@ -375,7 +375,7 @@ pub(super) async fn verdict(args: &Args, gated: bool) -> Verdict {
     let local = local_state(name);
     let mut report = json!({"available":false,"reason":Value::Null,"holder":Value::Null,"expected_end":Value::Null,"stale":false,"queued":0,"queue":json!([])});
     let mut reason = None;
-    match board::connect(false) {
+    match board::connect(false, &args.environment) {
         Err(e) if e.fatal_input => return Verdict::Failed(e.report()),
         Err(e) => reason = Some(e.text),
         Ok(client) => match client.leases(Some(name)).await {
@@ -533,7 +533,7 @@ pub async fn list(args: &Args) -> i32 {
     let mut reason = None;
     let mut leases = vec![];
     let mut truncated = false;
-    match board::connect(false) {
+    match board::connect(false, &args.environment) {
         Err(e) if e.fatal_input => return e.report(),
         Err(e) => reason = Some(e.text),
         Ok(client) => {
