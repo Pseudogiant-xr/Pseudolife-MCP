@@ -158,12 +158,14 @@ DAEMON = ("cli", "cli-store", "cli-daemon", "cli-daemon-2", "cli-live", "eval", 
 # fails if another command starts using a mapped entry.
 SHIM_COMMANDS = {
     # The conservative import scan also sees update's private backup module.
-    # Include that row rather than exempting the match from the coverage guard.
-    "backup": ("backup", "migrate_flat", "update"), "backup_help.txt": ("backup", "migrate_flat", "update"),
+    # Doctor shares update's Codex hook checks; its dependencies inherit that row.
+    "backup": ("backup", "migrate_flat", "update", "doctor"),
+    "backup_help.txt": ("backup", "migrate_flat", "update", "doctor"),
     "board_audit": ("audit", "coordination_recovery"),
     "migrate_flat.rs": ("migrate_flat",),
-    "update": ("update",),
-    "connect": ("connect",), "doctor": ("doctor",), "maintainer": ("maintainer", "maintainer_setup", "update"),
+    "update": ("update", "doctor"),
+    "connect": ("connect",), "doctor": ("doctor",),
+    "maintainer": ("maintainer", "maintainer_setup", "update", "doctor"),
     "coordination_recovery": ("coordination_recovery",),
     "move_cli.rs": ("move",), "test_login": ("test_login",),
     "transfer": ("transfer",), "transfer.rs": ("transfer",), "tunnel": ("tunnel",),

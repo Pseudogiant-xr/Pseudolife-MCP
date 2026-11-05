@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "parity-checks",
+  "before": "48d7661a32443383",
+  "fingerprint": "eeff98eaaa8ef69c",
+  "reason": "Forward inherits master batch-9 routing. Excluding the same four PR-only helper/test files leaves batch selections unchanged across 4870 paths and both import closures; no shard command, case or price changes."
+}

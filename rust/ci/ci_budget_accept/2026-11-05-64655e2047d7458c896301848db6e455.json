@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "test-lite-windows",
+  "before": "8a83ae5aa6d68420",
+  "fingerprint": "e72026666bb12e3b",
+  "reason": "Forward inherits the current master Windows lite cases and retains the same two precheck data-only modules; no new timing-sensitive cases are added. The measured lite price is retained for the combined definition."
+}

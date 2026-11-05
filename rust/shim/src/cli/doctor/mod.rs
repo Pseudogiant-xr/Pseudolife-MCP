@@ -593,7 +593,18 @@ async fn diagnose(
             clients::CodexHooks::Line(line) => line,
             clients::CodexHooks::Plugin => match health.get("hooks_digest") {
                 None | Some(Value::Null) => "unknown".into(),
-                Some(_) => return Err(Defer),
+                Some(digest) => {
+                    let checked =
+                        super::update::clients::check_codex_hooks(None, digest.as_str(), false);
+                    if checked["state"] != "current" && checked["state"] != "needs-approval" {
+                        return Err(Defer);
+                    }
+                    let trust = super::update::clients::runtime_hook_status().await;
+                    super::update::clients::runtime_hook_line(
+                        trust,
+                        checked["state"].as_str().unwrap_or("unknown"),
+                    )
+                }
             },
         };
         put(&mut report, "daemon_version", json!(daemon_version));

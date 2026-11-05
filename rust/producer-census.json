@@ -250,8 +250,8 @@
     "ops/install-codex-shim-autostart.sh": "9dc2b88c6725b57a203389563593da286caa59507e4c95905e7eeff00cb39d7f",
     "ops/install-hook.ps1": "5e5fcf3bc35b2a3ed5d8d32016af472ef4a3ff203b94fb5dcb68d4809688b5ef",
     "ops/install-hook.sh": "c5942d45d9fff70b854ee2e97531fc7b594450df59b00f2a2bbcea33fadaea7c",
-    "ops/install-shim-autostart.ps1": "44e117d39cb4f384a4ce3c2dc23d2af3b4b599f462219d63a31487de5a0ec2aa",
-    "ops/install-shim-autostart.sh": "a6ff60a60c644f6bd9e67b404f4ae7e2ec3f69c2c5d56253ad3b85277d9e8c30",
+    "ops/install-shim-autostart.ps1": "a848c625b423f5171ce09bb8d724b688a8236901b13eabb77e595c380bd08e67",
+    "ops/install-shim-autostart.sh": "5f53566884de9d70b098748991fcc50a5d3131b670a8c050218b272ce1332b13",
     "ops/install-worktree-retention.ps1": "1ff8d9a77f2cca9a19e38c89d85959a2d4ce03400e73eda3b8c79f1dabf52d29",
     "ops/install.ps1": "646fb649ee9e92c4e36770e3c5fb7a199f85779136f8921e24bbe5d39ad97ba4",
     "ops/install.sh": "0aca810ec7ead447fb135fb171d8697f92e356fdcd8ee4adb7249ef5b4c338f9",
@@ -290,7 +290,8 @@
     "ops/setup-codex-coordination.py": "7d2f4d6e0bbbdc098046d2f488a626a397a0bdc933f8ba22a32c3d90c16a02e3",
     "ops/setup-codex-hooks.py": "42f141d432d428b5034a72dfdb19fccc8487aa782b3d69ae9e8bf218fa8093f5",
     "ops/shim_autostart.py": "3f159a5be7c73c8070da787322abf79701404a1b273b990c691cb51872a25ec3",
-    "ops/shim_python.py": "599b057c0f09fa0b4c44e6ea2d8bc7a65e828297e44780af8291d13213856e81",
+    "ops/shim_cutover.py": "8dd7c95e3e49bbba5400218f368eb6b46e8b30adc7bfd109574bf55847fe9b40",
+    "ops/shim_python.py": "87d96c8f470278059f89818910cc2eaf11126cac439c1caea9c190a39f88de54",
     "ops/shim_runtime.py": "57953837cdabe25e5919697261a92ddacca12f7de5e4ca01eaaa1e6f9b55e4e3",
     "ops/update.ps1": "99ae1a7a361e534129dfbbccbd5925b78afc8c4248723934f5f85531f9798c7c",
     "ops/update.py": "aee4bccb5fab8308967992c2b159ee5f290ee492ee978c003d39956bd3ad4ddd",
@@ -376,7 +377,7 @@
     "rust/shim/src/cli/doctor/agent.rs": "2224a43cdb6c5f0130865952dabd369f231f622ae49423c957c7c41f1a4b3b06",
     "rust/shim/src/cli/doctor/clients.rs": "842a00bb3b6250fed833b86f67c833b53cb67d3210009c2ed5295556e8faa52f",
     "rust/shim/src/cli/doctor/handshake.rs": "54c580f0063e838fab86da2c716894648a425a213697d444509aa100d12a53a0",
-    "rust/shim/src/cli/doctor/mod.rs": "5e16173acde4f270513a167e6a730ec85883d8b02425a904032e26a82cdbe811",
+    "rust/shim/src/cli/doctor/mod.rs": "cba86e1139b79d8f5e4f7650b0c90f6376735df313e9e9651a1263ee749b9996",
     "rust/shim/src/cli/doctor/probes.rs": "4f2d543a3453281f5720fb63834269e49e1192750a4dbde37bf46ca66790b161",
     "rust/shim/src/cli/doctor/proof.rs": "863892be59f52cd4140579a4869a214c86331a29bbfcf56263d19349f8dcfbb7",
     "rust/shim/src/cli/doctor/proof_diagnostics.rs": "211bdb9072a840db3aade9033735b3de03e74ac1cae5c880a66e82232004d9f9",
@@ -467,13 +468,13 @@
     "rust/shim/src/cli/tunnel/store.rs": "9839c22f9264a23017a4529f5651fb2cf01b75e090c16d218547fe8d7bbf5f9b",
     "rust/shim/src/cli/tunnel/syntax.rs": "bafbf6307fdd29df5be69c3c4f42296284480e3cef37f92147b36101c38353de",
     "rust/shim/src/cli/update/backup.rs": "1cbf3a343eac75f76a92193e0445efe223b0d0c078e4a0a6f6d962bae3b7a3f7",
-    "rust/shim/src/cli/update/clients/codex.rs": "2b2b7d2ce6fd5f40575b96a4d00e9121dbe96edbe88545adb0911ce6590fe603",
+    "rust/shim/src/cli/update/clients/codex.rs": "28801087b029d73f293f7118b88547b94b9f3c09daefd1ecd7681b5eda6edfea",
     "rust/shim/src/cli/update/clients/command.rs": "7732745be9741ebc2bb3d88bb696370f9063dda07804ded45f3b9a330da2fd92",
-    "rust/shim/src/cli/update/clients/mod.rs": "0bb467eaf3ac79f80e89c38ec52d48855e55b5b3c0006dbfe1d96fd39ae2567a",
+    "rust/shim/src/cli/update/clients/mod.rs": "d55cc1e2de11fabeb9330f8dd5d84570f2709d61862a6e4a7c36e92a71881a11",
     "rust/shim/src/cli/update/clients/plugin.rs": "1fe97238c132861daf024e5aae55b43f8629ec8d48c6c4b1488e6a3bf6702fad",
     "rust/shim/src/cli/update/clients/tests.rs": "81faa98fc3643307298e943f61436cb5d9ec11ad7005dd476123ef2577b8f5c8",
     "rust/shim/src/cli/update/engine.rs": "ce2a1639087d3be15f3d4d2e428eed4c1d192d4a45f8d365e91dba4f954bb949",
-    "rust/shim/src/cli/update/mod.rs": "db8810e352b0e574fa0631f4bb47af5a3b9b9975c742ead32fbacd84cd9f4ea7",
+    "rust/shim/src/cli/update/mod.rs": "0f68e7e808084ec8375932ec5518dc93032d624fd39caf16f9777bd232165271",
     "rust/shim/src/cli/update/options.rs": "1fa41aa989c0ebd1706889bb58d83a68dcec4f6a9bb134c44c13c9d6445edbf0",
     "rust/shim/src/cli/update/release.rs": "c38d23e2324198a32566502f1d2a6c39fe3ae146270337723be0b91097c010f3",
     "rust/shim/src/cli/update/seams.rs": "da8b4ae1a6df9e9c97af062b5bf337a8ecc0b7bcf2354c52ce1a9d339817cf66",
@@ -2418,7 +2419,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/clients/codex.rs:638",
+          "location": "rust/shim/src/cli/update/clients/codex.rs:738",
           "shape": {
             "argv_source": "doctor reports the manual hook bundle present.\".into();",
             "channel": "argv",
@@ -2431,7 +2432,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/clients/codex.rs:651",
+          "location": "rust/shim/src/cli/update/clients/codex.rs:751",
           "shape": {
             "argv_source": "doctor reports codex_hooks = current.\"",
             "channel": "argv",
@@ -6908,6 +6909,36 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
+          "location": "ops/shim_cutover.py:32",
+          "shape": {
+            "argv_source": "update \"",
+            "channel": "argv",
+            "complete": false,
+            "expression": "\"",
+            "omitted_optional": null,
+            "parameters": {}
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "ops/shim_cutover.py:35",
+          "shape": {
+            "argv_source": "update --checkout \"{repo}\"'",
+            "channel": "argv",
+            "complete": false,
+            "expression": "--checkout \"{repo}\"'",
+            "omitted_optional": null,
+            "parameters": {
+              "--checkout": {
+                "expression": "\"{repo}\"'"
+              }
+            }
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
           "location": "ops/update.py:7",
           "shape": {
             "argv_source": "update `` runs from an installed package. This script runs",
@@ -6934,7 +6965,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/mod.rs:643",
+          "location": "rust/shim/src/cli/doctor/mod.rs:654",
           "shape": {
             "argv_source": "update --clients-only --tag {daemon_version} (the daemon's release as a new shim runtime beside the running one; from a checkout: python ops/update_clients.py --only shim; no session has to close), or update the daemon with pseudolife-mcp update; then start a new session and retry.\"",
             "channel": "argv",
@@ -26025,7 +26056,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/clients/codex.rs:340",
+          "location": "rust/shim/src/cli/update/clients/codex.rs:440",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -26430,7 +26461,7 @@
         },
         {
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/clients/codex.rs:539",
+          "location": "rust/shim/src/cli/update/clients/codex.rs:639",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -27388,6 +27419,19 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
+          "location": "ops/shim_cutover.py:15",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
           "location": "rust/shim/src/cli/maintainer/setup/system.rs:160",
           "shape": {
             "channel": "environment",
@@ -28139,38 +28183,8 @@
           "usage": "assignment-example"
         },
         {
-          "evidence": "documented",
-          "location": "ops/install-shim-autostart.ps1:299",
-          "shape": {
-            "channel": "environment",
-            "complete": true,
-            "omitted_optional": null,
-            "parameters": {
-              "value": {
-                "expression": "http://host.docker.internal:$Port/v1"
-              }
-            }
-          },
-          "usage": "assignment-example"
-        },
-        {
           "evidence": "static",
           "location": "ops/install-codex-shim-autostart.sh:147",
-          "shape": {
-            "channel": "environment",
-            "complete": true,
-            "omitted_optional": null,
-            "parameters": {
-              "value": {
-                "expression": "http://host.docker.internal:$PORT/v1"
-              }
-            }
-          },
-          "usage": "assignment"
-        },
-        {
-          "evidence": "static",
-          "location": "ops/install-shim-autostart.sh:154",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -28268,6 +28282,21 @@
             "parameters": {
               "value": {
                 "expression": "$(extractor_container_url"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "ops/shim_cutover.py:44",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "expression": "http://host.docker.internal:{port"
               }
             }
           },
@@ -28491,38 +28520,8 @@
           "usage": "assignment-example"
         },
         {
-          "evidence": "documented",
-          "location": "ops/install-shim-autostart.ps1:303",
-          "shape": {
-            "channel": "environment",
-            "complete": true,
-            "omitted_optional": null,
-            "parameters": {
-              "value": {
-                "literal": "auto"
-              }
-            }
-          },
-          "usage": "assignment-example"
-        },
-        {
           "evidence": "static",
           "location": "ops/install-codex-shim-autostart.sh:151",
-          "shape": {
-            "channel": "environment",
-            "complete": true,
-            "omitted_optional": null,
-            "parameters": {
-              "value": {
-                "literal": "auto"
-              }
-            }
-          },
-          "usage": "assignment"
-        },
-        {
-          "evidence": "static",
-          "location": "ops/install-shim-autostart.sh:158",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -28650,6 +28649,21 @@
             "parameters": {
               "value": {
                 "literal": "primary"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "ops/shim_cutover.py:48",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "auto"
               }
             }
           },
@@ -28970,38 +28984,8 @@
           "usage": "assignment-example"
         },
         {
-          "evidence": "documented",
-          "location": "ops/install-shim-autostart.ps1:301",
-          "shape": {
-            "channel": "environment",
-            "complete": true,
-            "omitted_optional": null,
-            "parameters": {
-              "value": {
-                "literal": "http://pseudolife-extractor:8081/v1"
-              }
-            }
-          },
-          "usage": "assignment-example"
-        },
-        {
           "evidence": "static",
           "location": "ops/install-codex-shim-autostart.sh:149",
-          "shape": {
-            "channel": "environment",
-            "complete": true,
-            "omitted_optional": null,
-            "parameters": {
-              "value": {
-                "literal": "http://pseudolife-extractor:8081/v1"
-              }
-            }
-          },
-          "usage": "assignment"
-        },
-        {
-          "evidence": "static",
-          "location": "ops/install-shim-autostart.sh:156",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -29062,6 +29046,21 @@
         {
           "evidence": "static",
           "location": "ops/install.sh:1320",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "http://pseudolife-extractor:8081/v1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "ops/shim_cutover.py:46",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -29251,38 +29250,8 @@
           "usage": "assignment-example"
         },
         {
-          "evidence": "documented",
-          "location": "ops/install-shim-autostart.ps1:302",
-          "shape": {
-            "channel": "environment",
-            "complete": true,
-            "omitted_optional": null,
-            "parameters": {
-              "value": {
-                "literal": "extractor"
-              }
-            }
-          },
-          "usage": "assignment-example"
-        },
-        {
           "evidence": "static",
           "location": "ops/install-codex-shim-autostart.sh:150",
-          "shape": {
-            "channel": "environment",
-            "complete": true,
-            "omitted_optional": null,
-            "parameters": {
-              "value": {
-                "literal": "extractor"
-              }
-            }
-          },
-          "usage": "assignment"
-        },
-        {
-          "evidence": "static",
-          "location": "ops/install-shim-autostart.sh:157",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -29343,6 +29312,21 @@
         {
           "evidence": "static",
           "location": "ops/install.sh:1321",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "extractor"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "ops/shim_cutover.py:47",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -29799,38 +29783,8 @@
           "usage": "assignment-example"
         },
         {
-          "evidence": "documented",
-          "location": "ops/install-shim-autostart.ps1:300",
-          "shape": {
-            "channel": "environment",
-            "complete": true,
-            "omitted_optional": null,
-            "parameters": {
-              "value": {
-                "literal": "extractor"
-              }
-            }
-          },
-          "usage": "assignment-example"
-        },
-        {
           "evidence": "static",
           "location": "ops/install-codex-shim-autostart.sh:148",
-          "shape": {
-            "channel": "environment",
-            "complete": true,
-            "omitted_optional": null,
-            "parameters": {
-              "value": {
-                "literal": "extractor"
-              }
-            }
-          },
-          "usage": "assignment"
-        },
-        {
-          "evidence": "static",
-          "location": "ops/install-shim-autostart.sh:155",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -29928,6 +29882,21 @@
             "parameters": {
               "value": {
                 "expression": "$MODEL"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "ops/shim_cutover.py:45",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "extractor"
               }
             }
           },
@@ -55415,22 +55384,6 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-shim-autostart.sh:159",
-          "shape": {
-            "channel": "parameters",
-            "complete": false,
-            "expression": "action=\\\"status\\\")\"",
-            "omitted_optional": null,
-            "parameters": {
-              "action": {
-                "expression": "\\\"status\\\")\""
-              }
-            }
-          }
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "static",
           "location": "ops/install.ps1:3277",
           "shape": {
             "channel": "parameters",
@@ -56614,6 +56567,27 @@
         {
           "evidence": "documented",
           "location": "plugin/commands/memory-status.md:37",
+          "shape": {
+            "channel": "parameters",
+            "complete": true,
+            "omitted_optional": [
+              "apply",
+              "commit_token",
+              "cursor",
+              "limit",
+              "run_id",
+              "snippets"
+            ],
+            "parameters": {
+              "action": {
+                "literal": "status"
+              }
+            }
+          }
+        },
+        {
+          "evidence": "static",
+          "location": "ops/shim_cutover.py:50",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -65207,7 +65181,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "cli",
-      "location": "rust/shim/src/cli/doctor/mod.rs:664",
+      "location": "rust/shim/src/cli/doctor/mod.rs:675",
       "name": "mcp",
       "shape": {
         "argv_source": "mcp ; reinstall there if stale, then retry.\"",
@@ -90617,12 +90591,6 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-shim-autostart.sh:159",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "tool:memory_dream"
-    },
-    {
-      "dynamic": "unresolved",
       "location": "ops/install.ps1:1075",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_DREAM_API_KEY"
@@ -93337,6 +93305,24 @@
     },
     {
       "dynamic": "unresolved",
+      "location": "ops/shim_cutover.py:15",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_DOCKER"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/shim_cutover.py:32",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "cli:update"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/shim_cutover.py:35",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "cli:update"
+    },
+    {
+      "dynamic": "unresolved",
       "location": "ops/update.ps1:129",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:cli:native-update-v"
@@ -96026,13 +96012,13 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/mod.rs:643",
+      "location": "rust/shim/src/cli/doctor/mod.rs:654",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:update"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/mod.rs:664",
+      "location": "rust/shim/src/cli/doctor/mod.rs:675",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:cli:mcp"
     },
@@ -97562,19 +97548,19 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/clients/codex.rs:340",
+      "location": "rust/shim/src/cli/update/clients/codex.rs:440",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_CODEX_BIN"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/clients/codex.rs:638",
+      "location": "rust/shim/src/cli/update/clients/codex.rs:738",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:doctor"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/clients/codex.rs:651",
+      "location": "rust/shim/src/cli/update/clients/codex.rs:751",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:doctor"
     },
