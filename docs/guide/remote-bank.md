@@ -655,16 +655,15 @@ ones), 4 verification refused, 5 applied but the post-apply check failed.
 
 ## Moving a bank
 
-`pseudolife-mcp move` moves a Docker-tier bank to another host where the
-installer has already run from a checkout (its daemon and Postgres
-containers exist), with no lost writes. Run it on the bank's current host:
+`pseudolife-mcp move` moves a Docker-tier bank to another host with an
+installed Docker bank (its daemon and Postgres containers exist), with no
+lost writes. Run it on the bank's current host.
 
-**Install the destination first**, then run the move on the source. The
-destination checkout must own both running containers' compose project;
-use `--target-checkout` to name that checkout. For an existing stack managed
-elsewhere, back up its bank and remove its containers while retaining its
-volumes before installing a fresh target with distinct
-`PSEUDOLIFE_BANK_VOLUME` and `PSEUDOLIFE_STATE_VOLUME` names.
+**Install the destination first**, using the installer or your stack manager,
+then run the move on the source. An owning checkout supplies restore/update;
+without one, move uses the target's installed CLI and needs its clone-free
+`restore --leave-stopped` command. Install the same CLI release as the source
+on that host. Both target containers must belong to the same compose stack.
 
 ```bash
 pseudolife-mcp move --to root@box --dry-run   # the plan; changes nothing
@@ -692,6 +691,66 @@ so a lost SSH reply can be recovered safely. If ownership cannot be established,
 move leaves the forward alone and reports the receipt and status commands to
 inspect. On resume, an unexposed target is exposed after its daemon starts.
 
+**Release-mode and stack-manager targets need no clone.** When an unrelated
+checkout happens to exist, select `--target-release` explicitly. To carry the
+source's environment tokens, move validates and updates the original target
+environment file and redeploys the same published daemon release. If a manager
+keeps its files inside its own container, export its original compose file and
+environment onto the target host first (Portainer: **Stacks > your stack >
+Editor**), then name those paths:
+
+```bash
+pseudolife-mcp move --to root@box --target-release \
+  --target-compose-file /srv/stack.yml --target-env-file /srv/stack.env \
+  --target-url http://100.64.0.9:8765 --dry-run
+```
+
+Repeat `--target-compose-file` for overlays, in their original order. These
+are paths on the target. Omit them when the existing compose labels identify
+readable original files. Preflight renders the deployment and checks the
+carried identities, database connection, data volumes and complete network bindings before either
+bank changes. Hardcoded tokens must interpolate from the original environment
+file to be carried. A stack manager's next redeploy must use that updated file;
+synchronize its saved environment before redeploying.
+
+Alternatively, `--no-keep-tokens` restores the bank and starts the target's
+existing container with its current image and environment, without a compose
+redeploy. This also supports custom-built images and targets whose original
+compose files are unavailable. Environment principals then need target
+credentials again; if this machine's client reconnect fails, use
+`pseudolife-mcp connect <target-url> --token-file <target-token-file> --yes`.
+
+Move resolves the daemon's actual libpq database/user defaults, including
+`PGDATABASE` and `PGUSER`; opaque service-only configuration must be made
+explicit before moving. The selected source database must match its `/health`
+bank fingerprint. Migration dumps omit source PostgreSQL object ownership and
+grants, so restored objects belong to the target database role; bank principals
+and their MCP identities travel with the data.
+
+Target artifacts and safety backups must stay outside mounted bank directories
+and, for installed-CLI restore, outside checkouts. `--target-work-dir <directory>`
+selects another target artifact root when a custom bind mount overlaps the
+default location. Per-attempt restore safety pairs are kept under its `safety`
+directory. `--target-checkout` and `--target-work-dir` must be absolute target
+paths or begin with `~/`. A checkout target must advertise stopped handover support from its
+own `ops/update.py`; update that checkout and its CLI dependencies if preflight
+names this requirement. For a source authenticated only by stored principals,
+set `PSEUDOLIFE_MCP_TOKEN_FILE` to an existing private source token file. Move
+checks the candidate against active source principals before changing anything,
+sends it through ssh stdin to a private temporary target file for the updater's
+authenticated read, and removes that file after the attempt. It never recovers
+plaintext from the database. Under checkout `--no-keep-tokens`, the target's
+`ops/.env` must explicitly declare its existing `PSEUDOLIFE_MCP_TOKEN` or
+`PSEUDOLIFE_MCP_TOKENS` setting. Empty declarations remain valid for stored
+principals. Repeat the original target-mode, file and work-directory flags when
+using `--resume`.
+
+A resume marker is bound to the selected database/storage, rather than granting
+permission over any bank on that host. An untouched original bank is checked
+for new user data again; an owned half-restored source bank can be retried.
+If an older record cannot prove the selection, use fresh target volume names
+and start a new move without `--resume`.
+
 **Run it under `tmux`, `screen` or `nohup`.** A move takes as long as a
 dump, a copy and a restore of the whole bank. On Linux and macOS a closed
 terminal (SIGHUP), a SIGTERM or Ctrl-C rolls it back, and the rollback
@@ -716,7 +775,7 @@ dump restores only forward, and preflight refuses an older target.
 The order:
 
 1. **Preflight, nothing changed.** The source is healthy and reports its
-   bank fingerprint; ssh works; the target checkout exists; the target
+   bank fingerprint; ssh works; the target deployment is validated; the target
    daemon is healthy, at the source's schema or newer, serving a different
    bank, and its bank has no user data in any schema table. Episodes,
    lessons, world facts, graph data, documents, principals and board state
@@ -748,8 +807,10 @@ The order:
    volume is archived through a helper container and verified; the archive
    path is in the move record and report. A resume marker is
    written beside the copies (`<checkout>/data/move-<move id>/marker.json`,
-   outside the daemon's `/data`), then `ops/restore.sh --apply --no-start
-   --backup-file <the dump> --state-archive <the archive>` (it takes the
+   or `~/.pseudolife-mcp/moves/<move id>/marker.json` without a clone),
+   outside the daemon's `/data`. Restore uses the checkout's or installed
+   `pseudolife-mcp restore --yes --leave-stopped` CLI, with the
+   dump and state archive (it takes the
    target's own safety dump first). The restored bank's identity (`meta`
    `coordination_bank_id`) and row counts must match the source's. Then
    `/data/move.json` is written: a daemon refuses to start while it is
@@ -757,7 +818,8 @@ The order:
 8. **Carry the identities.** The source container's
    `PSEUDOLIFE_MCP_TOKEN`, `PSEUDOLIFE_MCP_TOKENS`,
    `PSEUDOLIFE_MCP_TIER_MAP` and `PSEUDOLIFE_MCP_TOOLSET` are written into
-   the target's `ops/.env` (backed up beside itself first, its owner and
+   the target's original environment file (`ops/.env` for a checkout;
+   backed up beside itself first, its owner and
    mode kept), over ssh stdin, never on a command line, so no client
    anywhere needs a new token. Invited machines need nothing: they are in
    the bank. The target's own installer-minted token is replaced; the
@@ -766,7 +828,10 @@ The order:
    this step, and the report lists every environment principal to invite
    again.
 9. **Start the target once.** `/data/move.json` is lifted and
-   `ops/update.sh` recreates the daemon. Its `/health` `bank` fingerprint
+   The owning checkout's `ops/update.py` stopped handover, or an installed same-version
+   `update --reinstall --daemon-only`, recreates the daemon with carried
+   identities. Under `--no-keep-tokens`, a clone-free target uses `docker start`
+   with its existing configuration. Its `/health` `bank` fingerprint
    must equal the source's within 180 s (a cold daemon reports null until
    it has read its bank identity, so the move nudges it with one
    authenticated read a minute), and `docker inspect` must show it runs
@@ -792,7 +857,7 @@ The order:
 **Rollback.** A failure in steps 3 to 9 removes any target serve this move
 created, then undoes, in this order: the target
 daemon is stopped if it was started (and its `/data/move.json` put back),
-the target's `ops/.env`, unattended update and restart policy are restored,
+the target's original environment file, unattended update and restart policy are restored,
 the database fence is lifted, the source's `moved.json` is removed, its
 restart policy and paused schedule are restored, and the source daemon is
 started again. If the target bank was never replaced, its original daemon
@@ -813,8 +878,8 @@ marker names another move.
 **A target left gated.** While `/data/move.json` is there the target's
 daemon refuses to start, and the bank under it is a clone of the source's.
 To abandon the move there, restore the target's own pre-move safety dump
-(the one `ops/restore.sh` took first, in its `data/backups`) with
-`ops/restore.sh --apply --backup-file <that dump> --state-archive
+(under the move artifact directory's `safety` directory) with
+`pseudolife-mcp restore --yes --leave-stopped --backup-file <that dump> --state-archive
 <checkout>/data/move-<move id>/target-original-state.tgz`, which replaces
 `/data`, gate included. The move record's `target_state_backup` names this
 verified pre-move archive; a resumed move retains the original. Remove the gate by
