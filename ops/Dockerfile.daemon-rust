@@ -32,6 +32,8 @@ USER root
 WORKDIR /app
 COPY --from=builder /pseudolife-daemon /usr/local/bin/pseudolife-daemon
 COPY --from=builder /pseudolife-mcp /usr/local/bin/pseudolife-mcp
+# Offline move/resume compatibility checks read the constant compiled above.
+COPY rust/daemon/src/storage/schema_meta.rs /app/pseudolife-schema.rs
 COPY --from=runtime-inputs /opt/ort /opt/ort
 COPY --from=builder /opt/pdfium /opt/pdfium
 COPY plugin/hooks /app/plugin/hooks

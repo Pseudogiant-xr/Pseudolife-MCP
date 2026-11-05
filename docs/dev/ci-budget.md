@@ -60,6 +60,18 @@ keeps a job out of the budget.
    changed definition; review and commit that fragment with the change.
    `accept` leaves measured minutes, limits and the shared baseline alone.
 
+   Ordinary PRs can execute additional steps in an existing job that a
+   full batch does not execute, such as early golden replay. Record those
+   costs separately with `measure --workflow rust.yml --profile ordinary-pr
+   --reason "<the selected work>" <run> <run>`. Both runs must be successful
+   ordinary pull requests of that workflow; each recorded job needs two
+   successful samples of its current definition. The command writes
+   `profiles.ordinary_pr` with the observed job medians, run IDs and reason.
+   These observations describe the selected PR work, not every possible PR.
+   They do not replace full-batch prices or relax the four full-run limits
+   or the structural critical-path guard. Review both costs when deciding
+   whether earlier PR feedback is worth its runner use.
+
    A change that adds a parity shard without editing a workflow (a new
    suite in `rust/ci/parity_scope.py`) starts no parity job on its own pull
    request. Enter each new job with `ci_budget.py estimate --workflow rust.yml
@@ -88,6 +100,16 @@ a new lane change. Numeric prices, estimates, limits and their reasons
 remain reviewed edits in `ci_budget.json`.
 
 ## What keeps a run cheap
+
+Startup parity keeps its two logical parts in one `cli-startup` job per OS.
+Schema parity and both original part selectors remain; each part keeps its
+26-minute step budget and its own receipt, and the second runs after a
+comparison failure in the first. To verify the consolidation against its
+reviewed parent, run `python rust/ci/parity_case_sets.py --before <parent>`.
+The script checks both OSes and hosted/self-hosted execution, binds matrix
+values into run scripts, compares selections and environments, and refuses
+changed case generators or fixtures. CI-layout guard tests are separate
+from the unchanged runtime case generators.
 
 These came out of the 2026-10-24 pass (#922, #924), which took the batch
 Parity gate from a median 58.8 minutes to 36.7:

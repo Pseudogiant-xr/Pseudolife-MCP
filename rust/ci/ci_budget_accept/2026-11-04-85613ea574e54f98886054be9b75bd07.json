@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "test-lite-windows",
+  "before": "b10573665bd7eb11",
+  "fingerprint": "12c9aa039d40bbc7",
+  "reason": "Adds only two data-only precheck modules to Windows lite CI. Their combined 81-case selection with the existing summary tests took 1.51 seconds, below the budget's 0.1-minute measurement precision; no new lane or process-sensitive test is added."
+}

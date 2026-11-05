@@ -20,7 +20,11 @@ const BAD_URL: &str = "move: --target-url must be an http(s) origin such as \
 const BAD_CHECKOUT: &str = "move: --target-checkout holds a control character\n";
 const USAGE: &str = "usage: pseudolife-mcp move [-h] --to SSH-TARGET [--target-checkout PATH]
                            [--target-url URL] [--no-keep-tokens] [--resume]
-                           [--dry-run] [--expose-target] [--yes] [--json]
+                           [--dry-run] [--expose-target] [--target-release]
+                           [--target-env-file TARGET_ENV_FILE]
+                           [--target-compose-file TARGET_COMPOSE_FILE]
+                           [--target-work-dir TARGET_WORK_DIR] [--yes]
+                           [--json]
 ";
 
 struct Home(PathBuf);

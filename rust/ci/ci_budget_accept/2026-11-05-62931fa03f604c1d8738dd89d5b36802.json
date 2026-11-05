@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "test-lite-windows",
+  "before": "ad813b61a6c8650b",
+  "fingerprint": "1c02104323d29396",
+  "reason": "Retains the five previously reviewed mocked move signal-boundary cases alongside the current master installer selection; no new test logic, jobs, setup or child processes, and the measured job cost holds."
+}
