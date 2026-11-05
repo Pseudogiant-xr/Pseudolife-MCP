@@ -188,10 +188,16 @@ them in this order (first done 2026-07-16, v0.8.0; GHCR images added
    Missing opt-in assets are a failed native publication, not permission
    to enable a fallback or change the default engine; keep installation
    and update readiness as release prerequisites.
-6. **Deploy, then run the client step twice.** `pseudolife-mcp update
-   --clients-only` runs the updater of the runtime it was launched from —
-   the *previous* release's. That run installs the new runtime, but any
-   client-step behaviour new in this release only runs on a second
-   `--clients-only` from the new runtime (2026-10-05: 0.17.0's
-   plugin-marketplace HTTPS move did nothing on the first run). Verify the
-   release's own client-side changes after the second run, not the first.
+6. **Deploy, then run the client step once.** `pseudolife-mcp update
+   --clients-only` starts the updater of the runtime it was launched from,
+   which is the *previous* release's. From the first release that carries
+   the client hand-off (`CLIENT_HANDOFF` in
+   `pseudolife_memory/update_cli.py`) onwards, that updater installs the new
+   runtime and then hands the plugin, Codex and tunnel steps to it, so one
+   run applies this release's client-step changes; its output says "the
+   client steps after the shim continue in runtime …". When the release
+   being replaced predates the hand-off (the hand-off release itself is the
+   last such case), run `--clients-only` a second time from the new runtime
+   (2026-10-05: 0.17.0's plugin-marketplace HTTPS move did nothing on the
+   first run). Verify the release's own client-side changes after the run
+   that printed the hand-off line, or after the second run.

@@ -54,6 +54,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.parse
@@ -75,6 +76,46 @@ PYPI_JSON = "https://pypi.org/pypi/pseudolife-mcp/json"
 # failed after the daemon side succeeded; distinct from 1 (the daemon
 # update failed), 2 (could not run) and 3 (nothing to do).
 CLIENT_STEP_FAILED = 5
+# The client-step hand-off. A release-mode client update used to run every
+# step after the shim with the code of the release it was replacing, so a
+# step new in the target release (0.17.0's marketplace move to HTTPS) ran
+# only on a second `update --clients-only`. Now the run that installs a new
+# shim runtime hands the later steps to that runtime: it runs `<runtime
+# python> -m pseudolife_memory.cli update --clients-only --tag <its version>`
+# with HANDOFF_ENV naming this process (which holds the update lock for it,
+# and which stops the child handing off again) and HANDOFF_REPORT_ENV naming
+# the file the child writes its report to. Environment variables, not
+# options: the command line stays what users type, and a target release that
+# predates the hand-off is never started this way (its probe does not list
+# CLIENT_HANDOFF), so it never sees them.
+CLIENT_HANDOFF = "client-handoff-v1"
+CLIENT_HANDOFF_PROTOCOLS = (CLIENT_HANDOFF,)
+HANDOFF_ENV = "PSEUDOLIFE_UPDATE_HANDOFF"
+HANDOFF_REPORT_ENV = "PSEUDOLIFE_UPDATE_HANDOFF_REPORT"
+# Run by the new runtime's interpreter in isolated mode (-I), so neither the
+# working directory nor PYTHONPATH can answer for it: its version, then the
+# hand-off protocols its updater accepts. A release old enough to have no
+# update_cli at all accepts none; one whose update_cli fails to import is
+# broken, and the probe's failure says why.
+_HANDOFF_PROBE = (
+    "import importlib, importlib.util, pseudolife_memory as p\n"
+    "print(p.__version__)\n"
+    "u = importlib.import_module('pseudolife_memory.update_cli') "
+    "if importlib.util.find_spec('pseudolife_memory.update_cli') else None\n"
+    "print(' '.join(getattr(u, 'CLIENT_HANDOFF_PROTOCOLS', ())))\n")
+# How the hand-off starts a module in the new runtime: `-c` with this
+# bootstrap instead of `-m`, so the child keeps the caller's working
+# directory (a relative CLAUDE_CONFIG_DIR or CODEX_HOME still names the same
+# place) while that directory leaves the import path, where a checkout's
+# pseudolife_memory would otherwise answer for the runtime's own. Python
+# 3.10 has no -P, and -I would also drop PYTHONIOENCODING. Only the builtin
+# sys is imported before the entry goes (a runpy.py there must not run), and
+# only the '' that -c puts first is removed.
+_HANDOFF_BOOTSTRAP = ("import sys\n"
+                      "if sys.path and sys.path[0] == '': del sys.path[0]\n"
+                      "import runpy\n"
+                      "module = sys.argv.pop(1)\n"
+                      "runpy.run_module(module, run_name='__main__', alter_sys=True)\n")
 BUNDLED_COMPOSE = Path(__file__).resolve().parent / "compose"
 _DUMP_MARKER = "PostgreSQL database dump complete"
 
@@ -107,6 +148,50 @@ def run_cli(argv, *, timeout: int = 3600, cwd: str | None = None,
         return 1, f"{type(exc).__name__}: {exc}"
     include_stderr = not stdout_only or (stderr_on_failure and proc.returncode != 0)
     return proc.returncode, (proc.stdout or "") + ((proc.stderr or "") if include_stderr else "")
+
+
+def run_handoff(argv, *, cwd: str | None, env: dict, relay: Callable[[str], None] | None) -> tuple[int | None, str]:
+    """Run the handed-off client update and return ``(exit code, error)``,
+    or ``(None, why)`` when it could not be started. Its stdout and stderr
+    come back through one pipe, and each line goes to ``relay`` as it
+    arrives (the child's step lines and ladder in the child's own words; an
+    unattended run tees them into its log), or is dropped when ``relay`` is
+    None (``--json``: the child's report file is the result). No timeout of
+    its own: every external command inside the child carries one. stdin is
+    closed, as for every other command the update runs."""
+    _flush_output()
+    try:
+        proc = subprocess.Popen([str(a) for a in argv], cwd=cwd, env=env, stdin=subprocess.DEVNULL,
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                                encoding="utf-8", errors="replace")
+    except OSError as exc:
+        return None, f"{type(exc).__name__}: {exc}"
+    try:
+        for line in proc.stdout:
+            if relay is not None:
+                relay(line.rstrip("\r\n"))
+        return proc.wait(), ""
+    except BaseException as exc:
+        # Ctrl+C reaches the child through the shared console too: give it
+        # a moment to stop between steps before it is killed.
+        try:
+            proc.wait(timeout=10 if isinstance(exc, KeyboardInterrupt) else 0)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+        raise
+    finally:
+        proc.stdout.close()
+
+
+def _print_line(line: str) -> None:
+    """Print a relayed line; a character this stdout cannot encode (a log
+    file in a legacy code page) is replaced rather than stopping the run."""
+    try:
+        print(line, flush=True)
+    except UnicodeEncodeError:
+        encoding = getattr(sys.stdout, "encoding", None) or "ascii"
+        print(line.encode(encoding, "replace").decode(encoding, "replace"), flush=True)
 
 
 def _flush_output() -> None:
@@ -287,6 +372,11 @@ class Options:
     unschedule: bool = False           # remove it
     as_json: bool = False
     daemon_url: str = DEFAULT_DAEMON_URL
+    # Set only by main(), from HANDOFF_ENV / HANDOFF_REPORT_ENV: the updater
+    # with this pid handed this run its client steps and holds the update
+    # lock for it; the report goes to this file.
+    handoff_from: str | None = None
+    handoff_report: Path | None = None
 
 
 @dataclass
@@ -336,19 +426,26 @@ class UpdateLock:
     back. The OS drops the lock when the holder exits or dies; the pid
     beside it only names the holder in the refusal."""
 
-    def __init__(self):
+    def __init__(self, borrow_from: str | None = None):
         from pseudolife_memory.os_lock import OsLock
 
         self.directory = data_dir()
         self._lock = OsLock(self.directory / LOCK_NAME)
+        # A handed-off client run: the updater with this pid holds the lock
+        # for it and waits for it, so that holder is not a refusal.
+        self.borrow_from = borrow_from
 
     def acquire(self) -> None:
-        """Take the lock, or raise ``UpdateBusy`` naming the holder's pid."""
+        """Take the lock, or raise ``UpdateBusy`` naming the holder's pid.
+        Held by ``borrow_from`` (the updater that handed this run its client
+        steps), the run goes ahead under that hold without taking it."""
         if not self._lock.acquire():
             try:
                 pid = (self.directory / LOCK_HOLDER_NAME).read_text(encoding="utf-8").strip()
             except OSError:
                 pid = ""
+            if self.borrow_from and pid.isdigit() and pid == self.borrow_from:
+                return
             raise UpdateBusy(pid if pid.isdigit() else "unknown")
         try:
             (self.directory / LOCK_HOLDER_NAME).write_text(f"{os.getpid()}\n", encoding="utf-8")
@@ -479,6 +576,10 @@ class Update:
         # a step line is read while the step runs, not when the run exits.
         self._log = log or (lambda line: print(f"==> {line}", flush=True))
         self._warn = warn or (lambda line: print(f"WARNING: {line}", file=sys.stderr, flush=True))
+        # A handed-off client run's output lines, already in their final form.
+        self._relay: Callable[[str], None] = _print_line
+        self._handoff: dict | None = None
+        self._shim_printed = False
         self.docker = docker_cmd()
         self.rollback_lines: list[str] = []
         # The bank's schema version on the daemon this run replaces, when
@@ -527,6 +628,14 @@ class Update:
                         codex.unlink()
                 except OSError as exc:
                     self.warn(f"could not write the result file {self.o.result_file}: {exc}")
+            if self.o.handoff_report is not None:
+                # What the updater that handed this run its client steps reads
+                # back as its own result (Update._hand_off).
+                try:
+                    Path(self.o.handoff_report).write_text(json.dumps(self.report.__dict__, default=str),
+                                                           encoding="utf-8")
+                except OSError as exc:
+                    self.warn(f"could not write the hand-off report {self.o.handoff_report}: {exc}")
         if self.o.as_json:
             print(json.dumps(self.report.__dict__, indent=2, default=str))
         return self.report.exit_code
@@ -595,7 +704,7 @@ class Update:
             # No daemon container here and no daemon in this runtime: the
             # daemon runs on another host (a client-only install).
             self.report.tier = "client"
-            with UpdateLock():
+            with UpdateLock(self.o.handoff_from):
                 self.update_client_machine()
             return
         if tier == "pip":
@@ -606,7 +715,7 @@ class Update:
             return
         # Held from before the daemon's version is read until the run ends,
         # so an unattended run (or a second terminal) cannot interleave.
-        with UpdateLock():
+        with UpdateLock(self.o.handoff_from):
             if self.o.checkout is not None and (self.o.allow_dirty or (self.o.shadow and self.o.engine == "python") or
                     tree_state(Path(self.o.checkout).resolve())["dirty"] == "false"):
                 self.refuse_foreign_checkout_project()
@@ -1126,13 +1235,47 @@ class Update:
         compose project still has one, so the Codex check compares with the
         daemon that was just deployed, not with a checkout at some commit."""
         from pseudolife_memory import client_updates
-        self.step("updating the client side (shim, plugin cache, Codex hooks)...")
+        if self.o.handoff_from:
+            self.step(f"continuing the client side with {__version__}'s own code (shim check, plugin cache, "
+                      f"Codex hooks)...")
+        else:
+            self.step("updating the client side (shim, plugin cache, Codex hooks)...")
+        # A release installs a runtime of other code than this process, and
+        # the steps after the shim are that runtime's to run. A checkout
+        # deploy runs the checkout's own code already, and a handed-off run
+        # never hands off again.
+        after_shim = None
+        if checkout is None and not self.o.handoff_from:
+            def after_shim(shim: dict) -> dict | None:
+                return self._hand_off(shim)
+        self._handoff = None
+        self._shim_printed = False
         report = client_updates.run_steps(("shim", "plugin", "codex"), repo=checkout, source=source,
                                           daemon_digest=(health or {}).get("hooks_digest"),
-                                          reinstall=self.o.reinstall)
+                                          reinstall=self.o.reinstall, after_shim=after_shim)
         self.report.clients = report
+        handoff = self._handoff
+        if handoff is not None:
+            # The child printed its own ladder and Codex steps, and its
+            # result is this run's.
+            self.report.steps.extend(handoff["steps"])
+            if handoff["codex"]:
+                self.report.codex_reapproval = handoff["codex"]
+            if not report["ok"]:
+                self.report.ok = False
+                # After a daemon deploy the run's code says the client half
+                # failed (5); a clients-only run carries the child's own code.
+                clients_alone = self.o.clients_only or self.report.tier == "client"
+                self.report.exit_code = (handoff["exit_code"] if clients_alone and handoff["exit_code"]
+                                         else CLIENT_STEP_FAILED)
+                self.warn(f"the client steps in runtime {handoff['runtime']} ({handoff['version']}) ended "
+                          f"with exit {handoff['exit_code']} (see above)"
+                          + ("; the daemon update itself succeeded" if not clients_alone else ""))
+            return
         if not self.o.as_json:
-            client_updates.print_ladder(report)
+            # A hand-off that failed after the shim row was printed.
+            client_updates.print_ladder({key: value for key, value in report.items()
+                                         if not (key == "shim" and self._shim_printed)})
         if not report["ok"]:
             # A failed step fails the run: the result file an unattended
             # caller reads must not say the update finished when the
@@ -1141,6 +1284,117 @@ class Update:
             self.report.ok = False
             self.report.exit_code = CLIENT_STEP_FAILED
         self.codex_step(report.get("codex"))
+
+    def _hand_off(self, shim: dict) -> dict | None:
+        """After the shim step of a release-mode client update: when a
+        runtime of another version than this process is installed, run the
+        remaining client steps with that runtime's code and return the
+        ladder they reported; ``None`` to run them here (no runtime, the
+        same version, a target that predates the hand-off). A runtime that
+        cannot run them fails the ladder with the cause: this process's
+        older code never stands in for it."""
+        from pseudolife_memory import client_updates
+        kind, _, state_version = str(shim.get("state") or "").partition(":")
+        version = str(shim.get("version") or state_version)
+        path = shim.get("runtime")
+        # A failed shim step that still installed the runtime (a registration
+        # that would not migrate) hands off too: the new code retries it.
+        if kind not in ("installed", "current", "failed") or not version or not path or version == __version__:
+            return None
+        rt = client_updates.runtimes_module()
+        runtime = Path(path)
+        try:
+            layout = rt.default_layout(client_updates.client_env())
+        except ValueError:
+            return None
+        python = rt.interpreter(runtime, layout)
+        # This interpreter, not the launcher: the launcher starts the newest
+        # runtime, which is the one that just failed.
+        retry = (f"{client_updates._launcher_invocation(sys.executable, sys.executable)} -m pseudolife_memory.cli "
+                 f"update --clients-only --tag {version} --reinstall")
+
+        def failed(why: str, shown: dict) -> dict:
+            return {"shim": shown, "handoff": {"state": "failed", "detail": (
+                f"the new shim runtime {runtime.name} ({version}) did not start for the steps after the shim "
+                f"({why}), so the plugin cache, Codex hook and tunnel steps did not run; the runtime itself "
+                f"is installed. Retry, building the runtime again: {retry}")}, "ok": False}
+
+        code, out = run_cli([python, "-I", "-c", _HANDOFF_PROBE], timeout=120)
+        lines = [line.strip() for line in (out or "").strip().splitlines()]
+        if code != 0:
+            return failed(f"exit {code}: {_last_line(out)}" if (out or "").strip() else f"exit {code}", shim)
+        if not lines or lines[0] != version:
+            return failed(f"its probe reported {lines[0][:64]!r}, not {version}" if lines
+                          else "its probe printed nothing", shim)
+        if CLIENT_HANDOFF not in (lines[1].split() if len(lines) > 1 else []):
+            self.step(f"runtime {runtime.name} ({version}) predates the client hand-off, so this run's own "
+                      f"code ({__version__}) finishes the client steps")
+            return None
+        # The shim step's "finish with: ... update --clients-only" hint is
+        # what the hand-off now does.
+        shown = {key: value for key, value in shim.items() if key != "finish_hint"}
+        hint = shim.get("finish_hint")
+        if hint:
+            detail = str(shim.get("detail", ""))
+            for form in (f"; {hint}", f"{hint}; ", hint):    # the hint holds "; " itself: whole text only
+                if form in detail:
+                    shown["detail"] = detail.replace(form, "", 1)
+                    break
+        if not self.o.as_json:
+            client_updates.print_ladder({"shim": shown})
+            self._shim_printed = True
+        self.step(f"the client steps after the shim continue in runtime {runtime.name} ({version}), the "
+                  f"release just installed")
+        scratch = Path(tempfile.mkdtemp(prefix="pseudolife-handoff-"))
+        report_file = scratch / "report.json"
+        # No PYTHONPATH or PYTHONHOME: a checkout on the path would answer
+        # for the runtime's package. The rest (proxies, PSEUDOLIFE_*) stays.
+        env = {key: value for key, value in os.environ.items()
+               if not key.upper().startswith("PYTHON") or key.upper() == "PYTHONUTF8"}
+        env.update({"PYTHONIOENCODING": "utf-8", "PYTHONUNBUFFERED": "1",
+                    HANDOFF_ENV: str(os.getpid()), HANDOFF_REPORT_ENV: str(report_file)})
+        argv = [python, "-c", _HANDOFF_BOOTSTRAP, "pseudolife_memory.cli", "update", "--clients-only",
+                "--tag", version, "--daemon-url", self.o.daemon_url]
+        if self.o.allow_downgrade:
+            argv.append("--allow-downgrade")
+        try:
+            code, error = run_handoff(argv, cwd=None, env=env, relay=None if self.o.as_json else self._relay)
+            if code is None:
+                return failed(error, shown)
+            try:
+                child = json.loads(report_file.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                child = None
+        finally:
+            shutil.rmtree(scratch, ignore_errors=True)
+        if not isinstance(child, dict):
+            return failed(f"it ended with exit {code} without writing its report", shown)
+        steps = [str(s) for s in child.get("steps") or []]
+        codex = child.get("codex_reapproval")
+        self._handoff = {"runtime": runtime.name, "version": version, "exit_code": code or CLIENT_STEP_FAILED,
+                         "steps": steps, "codex": codex if isinstance(codex, str) else ""}
+        if not isinstance(child.get("clients"), dict):
+            # It started, then stopped before its client step (its own
+            # /health read, its tier check, the update lock): its last
+            # warning is the cause.
+            warnings = [step[len("WARNING: "):] for step in steps if step.startswith("WARNING: ")]
+            why = warnings[-1][:400] if warnings else "it gave no reason"
+            return {"shim": shown, "handoff": {"state": "failed", "detail": (
+                f"runtime {runtime.name} ({version}) started but stopped before the client steps (exit {code}): "
+                f"{why}")}, "ok": False}
+        self._handoff["exit_code"] = code
+        report = dict(child["clients"])
+        child_shim = str((report.get("shim") or {}).get("state") or "")
+        if kind == "installed" and child_shim.startswith("current:"):
+            # The install this run did, not the child's "already installed".
+            # A child that installed again (repairing what this code's older
+            # dependency ranges left) or failed keeps its own row.
+            report["shim"] = shown
+        report["handoff"] = {"state": f"handed-off:{version}",
+                             "detail": f"runtime {runtime.name} ({version}) ran the steps after the shim "
+                                       f"(exit {code})"}
+        report["ok"] = code == 0 and bool(child.get("ok"))
+        return report
 
     def codex_step(self, codex: dict | None) -> None:
         """What only the user can do: approve hooks Codex would ask about
@@ -1950,11 +2204,19 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         print("pseudolife-mcp checkout-handover-v1")
         return 0
+    # Read once and removed, so nothing this run starts (pip, claude, a
+    # tunnel refresh) inherits them.
+    handoff_from = os.environ.pop(HANDOFF_ENV, None)
+    handoff_report = os.environ.pop(HANDOFF_REPORT_ENV, None)
     args = build_parser().parse_args(argv)
     if args.clients_only and args.daemon_only:
         print("--clients-only and --daemon-only exclude each other", file=sys.stderr)
         return 2
-    return Update(options_from_args(args)).run()
+    options = options_from_args(args)
+    if handoff_from and handoff_from.isdigit():
+        options.handoff_from = handoff_from
+        options.handoff_report = Path(handoff_report) if handoff_report else None
+    return Update(options).run()
 
 
 if __name__ == "__main__":
