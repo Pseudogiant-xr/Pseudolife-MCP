@@ -288,21 +288,29 @@ fn capacity_warning(svc: &Service, ready: Option<&crate::service::Ready>) -> boo
     let (Some(ready), Some(last)) = (ready, svc.config.memory.band_specs.last()) else {
         return false;
     };
-    bank_capacity_warning(&ready.bank, last)
+    bank_capacity_warning(&ready.bank, last, &svc.health_capacity)
 }
 
-/// `/health` never waits on the bank: a writer holding or queued for its
-/// lock (a shadow refresh's patch, waiting for a long search) reads as no
-/// warning rather than stalling the probe.
+/// `/health` never waits on the bank: while a writer holds or is queued for
+/// its lock (a store, a shadow refresh's patch waiting for a long search),
+/// the last value read from this same bank is served, so the flag neither
+/// stalls the probe nor flickers; with none yet, no warning.
 fn bank_capacity_warning(
-    bank: &std::sync::RwLock<crate::bank::Bank>,
+    bank: &std::sync::Arc<std::sync::RwLock<crate::bank::Bank>>,
     last: &crate::config::StartupBandSpec,
+    cache: &std::sync::Mutex<Option<(usize, bool)>>,
 ) -> bool {
+    let source = std::sync::Arc::as_ptr(bank) as usize;
     let Ok(bank) = bank.try_read() else {
-        return false;
+        return match *cache.lock().expect("health capacity lock") {
+            Some((from, warned)) if from == source => warned,
+            _ => false,
+        };
     };
     let size = bank.entries.iter().filter(|e| e.band == last.name).count();
-    capacity_flag(size, last.max_entries)
+    let warned = capacity_flag(size, last.max_entries);
+    *cache.lock().expect("health capacity lock") = Some((source, warned));
+    warned
 }
 
 /// `_warn_near_memory_limit`: at most once per `MEMORY_WARNING_INTERVAL`.
@@ -515,15 +523,30 @@ mod tests {
             retention_policy: "balanced".into(),
             update_interval: Value::from(1),
         };
-        assert!(bank_capacity_warning(&bank, &last));
-        // A writer holds the lock (a shadow refresh's patch, say).
+        let cache = Arc::new(std::sync::Mutex::new(None));
+        assert!(bank_capacity_warning(&bank, &last, &cache));
+        // A writer holds the lock (a store, or a shadow refresh's patch).
         let guard = bank.write().unwrap();
-        let (send, receive) = std::sync::mpsc::channel();
-        let (held, spec) = (bank.clone(), last.clone());
-        std::thread::spawn(move || send.send(bank_capacity_warning(&held, &spec)).unwrap());
-        let warned = receive.recv_timeout(std::time::Duration::from_secs(5));
-        drop(guard);
-        assert_eq!(warned, Ok(false), "/health waited on the bank lock");
+        let read_held = |bank: &Arc<RwLock<crate::bank::Bank>>| {
+            let (send, receive) = std::sync::mpsc::channel();
+            let (held, spec, cache) = (bank.clone(), last.clone(), cache.clone());
+            std::thread::spawn(move || {
+                send.send(bank_capacity_warning(&held, &spec, &cache))
+                    .unwrap()
+            });
+            receive.recv_timeout(std::time::Duration::from_secs(5))
+        };
+        // The last value read from this bank: neither a wait nor a flicker.
+        assert_eq!(read_held(&bank), Ok(true), "/health waited or flickered");
+        // Another bank (a newer ready service) has no value yet.
+        let other = Arc::new(RwLock::new(crate::bank::Bank {
+            dim: 1,
+            entries: Vec::new(),
+            matrix: Vec::new(),
+        }));
+        let other_guard = other.write().unwrap();
+        assert_eq!(read_held(&other), Ok(false));
+        drop((guard, other_guard));
     }
 
     #[tokio::test]

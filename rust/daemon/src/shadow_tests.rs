@@ -123,14 +123,24 @@ fn seating_moves_only_when_a_band_overflows() {
 
 // ---- database: a disposable bank named by PL_SHADOW_REFRESH_DSN ----------
 
-/// One test at a time: they share the disposable bank and its lease.
-static DB: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+/// One test at a time: they share the disposable bank and its lease (the
+/// service-level tests in `service_shadow_tests.rs` too).
+pub(crate) static DB: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
-fn test_dsn() -> Option<String> {
+/// Set by the CI step that supplies the database: a skipped test would
+/// count as passed, so with it set every database test runs or panics.
+pub(crate) fn required() -> bool {
+    std::env::var_os("PL_SHADOW_REFRESH_REQUIRED").is_some_and(|v| v == "1")
+}
+
+pub(crate) fn test_dsn() -> Option<String> {
     let dsn = std::env::var("PL_SHADOW_REFRESH_DSN")
         .ok()
         .filter(|d| !d.is_empty());
     match &dsn {
+        None if required() => {
+            panic!("PL_SHADOW_REFRESH_REQUIRED=1 but PL_SHADOW_REFRESH_DSN is unset or empty")
+        }
         None => eprintln!("PL_SHADOW_REFRESH_DSN unset: skipping database test"),
         Some(dsn) => assert!(
             crate::storage::parse_dsn(dsn)
@@ -143,11 +153,18 @@ fn test_dsn() -> Option<String> {
     dsn
 }
 
-fn vector(k: usize) -> String {
+pub(crate) fn vector(k: usize) -> String {
     let mut v = vec!["0"; DIM];
     v[k] = "1";
     format!("[{}]", v.join(","))
 }
+
+/// Empties every table the resident stores read.
+pub(crate) const CLEAR: &str = "DELETE FROM entries; DELETE FROM facts; DELETE FROM world_facts; \
+     DELETE FROM lessons; DELETE FROM episodes; DELETE FROM cms_counters; \
+     DELETE FROM meta WHERE key IN ('active_session_pointer', 'episode_tombstones', \
+     'deferred_empty_roots', 'cortex_supersession_log', 'cortex_dream_cursor', \
+     'coordination_hlc_highwater', 'bank_id', 'flat_band_migration_v1')";
 
 /// The writer session that seeds and mutates the bank, and a read-only
 /// session that reads it as the shadow does (so hydration never writes a
@@ -169,17 +186,7 @@ struct Resident {
 impl Fixture {
     async fn open(dsn: &str, memory: MemoryConfig) -> Fixture {
         let writer = Storage::open(dsn).await.unwrap();
-        writer
-            .client()
-            .batch_execute(
-                "DELETE FROM entries; DELETE FROM facts; DELETE FROM world_facts; \
-                 DELETE FROM lessons; DELETE FROM episodes; DELETE FROM cms_counters; \
-                 DELETE FROM meta WHERE key IN ('active_session_pointer', 'episode_tombstones', \
-                 'deferred_empty_roots', 'cortex_supersession_log', 'cortex_dream_cursor', \
-                 'coordination_hlc_highwater', 'bank_id', 'flat_band_migration_v1')",
-            )
-            .await
-            .unwrap();
+        writer.client().batch_execute(CLEAR).await.unwrap();
         let (reader, reader_task) = crate::storage::connect(
             &crate::storage::parse_dsn(dsn).unwrap(),
             Duration::from_secs(10),

@@ -113,11 +113,20 @@ pub(crate) struct Inputs {
 /// an older version here than the one hydrated, and the next refresh
 /// fetches and compares it.
 async fn preread(client: &Client) -> Result<Inputs> {
+    #[cfg(test)]
+    if PREREAD_FAULT.load(std::sync::atomic::Ordering::SeqCst) {
+        anyhow::bail!("injected pre-read fault");
+    }
     Ok(Inputs {
         versions: entry_versions(client).await?,
         meta: meta_values(client).await?,
     })
 }
+
+/// Test seam: the next pre-reads fail while set.
+#[cfg(test)]
+pub(crate) static PREREAD_FAULT: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
 
 /// The full rebuild's pre-read and the raw startup metadata
 /// (`startup::metadata`'s keys), both from one read of `meta`: two reads
@@ -664,4 +673,4 @@ fn entry_from(r: &tokio_postgres::Row, memory: &MemoryConfig, dim: usize) -> Res
 
 #[cfg(test)]
 #[path = "shadow_tests.rs"]
-mod tests;
+pub(crate) mod tests;

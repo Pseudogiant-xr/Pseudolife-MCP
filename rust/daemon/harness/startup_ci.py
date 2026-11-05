@@ -17,17 +17,68 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import tempfile
 import time
 
 from schema_ci import PACKAGE, test_artifact
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[2]
-# The read-only shadow's incremental-refresh database tests
-# (rust/daemon/src/shadow_tests.rs, `db_` prefix); they skip without a DSN,
-# so the run must report at least this many passed.
-SHADOW_DB_FILTER = "shadow::tests::db_"
-SHADOW_DB_TESTS = 9
+# The read-only shadow's incremental-refresh database tests: the store
+# level (rust/daemon/src/shadow_tests.rs) and through Service::init
+# (rust/daemon/src/service_shadow_tests.rs), `db_` prefix. With
+# PL_SHADOW_REFRESH_REQUIRED=1 a test whose inputs are missing panics
+# instead of skipping, and the run must still report this many passed.
+SHADOW_DB_FILTERS = ("shadow::tests::db_", "service::shadow_refresh_tests::db_")
+SHADOW_DB_TESTS = 12
+# 2026-11-06, Windows workstation: the twelve took about 6 s in a debug
+# build. Hosted Windows runners are several times slower and each test
+# opens its own session; 600 s bounds a hang while leaving the part-2
+# step (26 minutes, about 13 used by the cells) its margin.
+SHADOW_TIMEOUT_S = 600
+
+
+def shadow_fixture(root: Path) -> dict:
+    """The embedder the service-level tests load: the tiny ONNX fixture at
+    the bank's 1024 dimensions, and ONNX Runtime from its Python wheel."""
+    from embedding_fixture import create
+    import onnxruntime
+    model = root / "model"
+    create(model, dimension=1024)
+    capi = Path(onnxruntime.__file__).parent / "capi"
+    runtime = capi / "onnxruntime.dll" if os.name == "nt" else next(capi.glob("libonnxruntime.so.*"))
+    return {"PL_SHADOW_EMBED_FIXTURE": str(model), "ORT_DYLIB_PATH": str(runtime)}
+
+
+def shadow_refresh(binary: Path, env: dict, pg) -> dict:
+    """Run the shadow refresh database tests on their own disposable bank."""
+    name = pg.name(pg.PREFIX + "shadow_" + str(time.time_ns()))
+    dsn = pg.create(name)
+    try:
+        with tempfile.TemporaryDirectory(prefix="pl-pgs-shadow-") as scratch:
+            child = dict(env, PL_SHADOW_REFRESH_DSN=dsn, PL_SHADOW_REFRESH_REQUIRED="1",
+                         **shadow_fixture(Path(scratch)))
+            child.pop("PSEUDOLIFE_DAEMON_MUTANT", None)
+            try:
+                run = subprocess.run([str(binary), *SHADOW_DB_FILTERS, "--test-threads=1"],
+                                     cwd=REPO, env=child, capture_output=True, text=True,
+                                     timeout=SHADOW_TIMEOUT_S)
+            except subprocess.TimeoutExpired as expired:
+                for stream, sink in ((expired.stdout, sys.stdout), (expired.stderr, sys.stderr)):
+                    if stream:
+                        print(stream if isinstance(stream, str) else stream.decode(errors="replace"),
+                              end="", file=sink)
+                print(f"shadow refresh tests timed out after {SHADOW_TIMEOUT_S} s", file=sys.stderr)
+                return {"exit_code": None, "timed_out": True, "accepted": False}
+            passed = re.search(r"test result: ok\. (\d+) passed", run.stdout)
+            accepted = (run.returncode == 0 and passed is not None
+                        and int(passed.group(1)) >= SHADOW_DB_TESTS)
+            if not accepted:
+                print(run.stdout, end="")
+                print(run.stderr, end="", file=sys.stderr)
+            return {"exit_code": run.returncode, "accepted": accepted}
+    finally:
+        pg.drop(name)
 
 
 def writer_guard(binary: Path, env: dict, output: Path) -> int:
@@ -70,22 +121,7 @@ def writer_guard(binary: Path, env: dict, output: Path) -> int:
             print(run.stderr, end="", file=sys.stderr)
     finally:
         pg.drop(name)
-    name = pg.name(pg.PREFIX + "shadow_" + str(time.time_ns()))
-    dsn = pg.create(name)
-    try:
-        child = dict(env, PL_SHADOW_REFRESH_DSN=dsn)
-        child.pop("PSEUDOLIFE_DAEMON_MUTANT", None)
-        run = subprocess.run([str(binary), SHADOW_DB_FILTER, "--test-threads=1"],
-                             cwd=REPO, env=child, capture_output=True, text=True, timeout=180)
-        passed = re.search(r"test result: ok\. (\d+) passed", run.stdout)
-        accepted = (run.returncode == 0 and passed is not None
-                    and int(passed.group(1)) >= SHADOW_DB_TESTS)
-        result["shadow_refresh"] = {"exit_code": run.returncode, "accepted": accepted}
-        if not accepted:
-            print(run.stdout, end="")
-            print(run.stderr, end="", file=sys.stderr)
-    finally:
-        pg.drop(name)
+    result["shadow_refresh"] = shadow_refresh(binary, env, pg)
     output.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     print(f"writer guard: {'0 diffs / mutant caught' if all(v['accepted'] for v in result.values()) else 'FAIL'}", flush=True)
     return int(not all(value["accepted"] for value in result.values()))
