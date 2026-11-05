@@ -40,7 +40,8 @@ HERE = Path(__file__).resolve().parent
 RUST = HERE.parents[1]
 CARGO_VERSION = re.search(r'(?m)^version = "([^"]+)"',
                           (RUST / "shim" / "Cargo.toml").read_text(encoding="utf-8")).group(1)
-RULES = ("doctor-runtime-identity", "doctor-context-nonce", "shim-handshake-cache-name")
+RULES = ("doctor-runtime-identity", "doctor-context-nonce", "shim-handshake-cache-name",
+         "python-proactor-self-pipe-abort")
 
 
 def oracle_python() -> str:

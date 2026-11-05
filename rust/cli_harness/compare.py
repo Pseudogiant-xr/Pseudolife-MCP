@@ -37,7 +37,7 @@ def _equal(a, b) -> bool:
 
 def diff(python: dict, rust: dict, rules: tuple[str, ...]) -> list[str]:
     """Differences after each side's own normalization; empty means equal."""
-    a = normalize.apply(python, rules, python.get("home"))
+    a = normalize.apply(python, rules, python.get("home"), oracle=True)
     b = normalize.apply(rust, rules, rust.get("home"))
     out: list[str] = []
     for side, observation in (("python", a), ("rust", b)):
