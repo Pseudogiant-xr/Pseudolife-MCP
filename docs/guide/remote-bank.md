@@ -666,6 +666,10 @@ elsewhere, back up its bank and remove its containers while retaining its
 volumes before installing a fresh target with distinct
 `PSEUDOLIFE_BANK_VOLUME` and `PSEUDOLIFE_STATE_VOLUME` names.
 
+A bare clone beside a managed stack does not own its containers and is
+refused as a checkout target; `--target-checkout` must name their owning
+checkout.
+
 ```bash
 pseudolife-mcp move --to root@box --dry-run   # the plan; changes nothing
 pseudolife-mcp move --to root@box             # confirms the move and any new exposure
@@ -677,8 +681,8 @@ BatchMode=yes` with keepalives (`ServerAliveInterval=15`,
 `ServerAliveCountMax=4`), and nothing ever types a password. A dropped
 connection (ssh's exit 255) is always a failure, never read as an answer.
 The target must be a Linux or macOS host with a POSIX login shell and
-`curl`, `python3` and `docker` on its PATH. Its checkout is
-`~/src/Pseudolife-MCP` unless `--target-checkout` names another. The URL
+`curl`, `python3` and `docker` on its PATH. For checkout targets, the default
+is `~/src/Pseudolife-MCP` unless `--target-checkout` names another. The URL
 clients will use is `--target-url`, else the target's `pseudolife-mcp
 expose status`. Creating a persistent target Tailscale serve needs separate
 consent: pass `--expose-target`, or answer its interactive y/N question when
