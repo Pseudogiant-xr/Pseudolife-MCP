@@ -1432,7 +1432,8 @@ def test_every_database_profile_names_its_setup():
         "prefixes": ("shadow::tests::db_", "service::shadow_refresh_tests::db_"),
         "slice": "pgs",
         "dsn_env": "PL_SHADOW_REFRESH_DSN",
-        "env": {"PL_SHADOW_REFRESH_REQUIRED": "1"},
+        "env": {"PL_SHADOW_REFRESH_REQUIRED": "1", "CUDA_VISIBLE_DEVICES": "-1",
+                "HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1"},
         "fixture": {"env": "PL_SHADOW_EMBED_FIXTURE", "dimension": 1024},
         "ort_env": "ORT_DYLIB_PATH",
     }
@@ -1450,7 +1451,31 @@ def test_a_database_selection_runs_serially_with_its_required_flag(tmp_path, mon
     assert argv[argv.index("-E") + 1] == stress.filterset(SHADOW_SERVICE)
     env = stress.environment("cargo", SHADOW_SERVICE, tmp_path / "bin", tmp_path)
     # Required: a missing setup panics, so it fails the iteration instead of skipping.
-    assert env == {"PSEUDOLIFE_MCP_PYTHON": sys.executable, "PL_SHADOW_REFRESH_REQUIRED": "1"}
+    assert env == {"PSEUDOLIFE_MCP_PYTHON": sys.executable, "PL_SHADOW_REFRESH_REQUIRED": "1",
+                   "CUDA_VISIBLE_DEVICES": "-1", "HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1"}
+
+
+@pytest.mark.parametrize("names, warned", [
+    ([DAEMON_BIN], True),
+    ([f"{DAEMON_BIN}::{SHUTDOWN}"], False),
+    (["pseudolife-stdio/board_retry_contract"], False),
+])
+def test_plan_warns_that_a_whole_binary_skips_its_database_tests(tmp_path, capsys, names, warned):
+    # A whole-binary item gets no database: its db_ tests return early and
+    # count as run, so the dispatcher is told to name them.
+    assert stress.main(["plan", "--selection", cargo_selection(names), "--iterations", "20",
+                        "--github-output", str(tmp_path / "out")]) == 0
+    out = capsys.readouterr().out
+    assert ("warning:" in out and "name them as exact tests" in out) is warned
+
+
+@pytest.mark.parametrize("text", [
+    "connection to postgresql://login:secret@127.0.0.1:5433/pl_cf_x failed",
+    "connection failed: host=127.0.0.1 user=login password=secret dbname=pl_cf_x",
+    "bad conninfo password = 'secret' port=5433",
+])
+def test_a_setup_error_never_carries_the_password(text):
+    assert "secret" not in stress.redacted(RuntimeError(text))
 
 
 class FakeSlice:
@@ -1466,6 +1491,9 @@ class FakeSlice:
         self.events.append(("create", name))
         if "create" in self.fail:
             raise RuntimeError("could not connect")
+        if "login" in self.fail:
+            # pgdisposable's login check exits rather than raising.
+            raise SystemExit("test login file is missing")
         return f"postgresql://login:secret@127.0.0.1:5433/{name}"
 
     def drop(self, name):
@@ -1552,6 +1580,7 @@ def test_a_database_iteration_that_cannot_start_nextest_still_drops_its_bank(tmp
 
 @pytest.mark.parametrize("fail, fixture, expected", [
     ({"create"}, None, ["create", "drop"]),
+    ({"login"}, None, ["create", "drop"]),
     (None, ModuleNotFoundError("No module named 'onnx'"), ["create", "fixture", "drop"]),
 ])
 def test_a_database_setup_failure_is_a_failed_row_and_drops_the_bank(tmp_path, monkeypatch, fail, fixture,

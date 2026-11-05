@@ -136,7 +136,9 @@ CARGO_DATABASE_PROFILES = {
         "prefixes": ("shadow::tests::db_", "service::shadow_refresh_tests::db_"),
         "slice": "pgs",
         "dsn_env": "PL_SHADOW_REFRESH_DSN",
-        "env": {"PL_SHADOW_REFRESH_REQUIRED": "1"},
+        # startup_ci.py's daemon test environment: no GPU, no model hub.
+        "env": {"PL_SHADOW_REFRESH_REQUIRED": "1", "CUDA_VISIBLE_DEVICES": "-1",
+                "HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1"},
         "fixture": {"env": "PL_SHADOW_EMBED_FIXTURE", "dimension": 1024},
         "ort_env": "ORT_DYLIB_PATH",
     },
@@ -224,6 +226,19 @@ def cargo_item(name: str) -> tuple[str, str, str | None]:
     package, _, rest = name.partition("/")
     binary, _, test = rest.partition("::")
     return package, binary, test or None
+
+
+def whole_binary_database_targets(names: list[str]) -> list[str]:
+    """Whole-binary cargo items whose binary holds a profile's database
+    tests: those tests get no database there, return early and count as
+    run, so plan warns the dispatcher to name them instead."""
+    targets = {entry["target"] for entry in CARGO_DATABASE_PROFILES.values()}
+    found = []
+    for name in names:
+        package, binary, test = cargo_item(name)
+        if test is None and f"{package}/{binary}" in targets:
+            found.append(name)
+    return found
 
 
 def database_profile(names: list[str]) -> str | None:
@@ -519,6 +534,11 @@ def plan(options) -> int:
     database = (f"; database profile {profile}: a fresh disposable PostgreSQL each iteration, "
                 "tests run one at a time") if profile else ""
     print(f"stress: {count} iterations of {options.selection.strip()}{each}{database}")
+    if kind == "cargo":
+        for name in whole_binary_database_targets(names):
+            print(f"stress: warning: {name!r} selects a whole binary that holds database tests; they get no "
+                  "database there and their early return counts as run, so name them as exact tests to "
+                  "stress them")
     return 0
 
 
@@ -630,7 +650,10 @@ def cargo_database(profile_name: str, stack: contextlib.ExitStack) -> dict:
 def redacted(error: BaseException) -> str:
     """An error for a row or log, without any connection string's credentials."""
     text = f"{type(error).__name__}: {error}"
-    return re.sub(r"(postgres(?:ql)?://)[^\s/@]+@", r"\1***@", text, flags=re.I)
+    text = re.sub(r"(postgres(?:ql)?://)[^\s/@]+@", r"\1***@", text, flags=re.I)
+    # Key/value conninfo, as rust/cli_harness/lease_ci.py's diagnostic redacts it.
+    return re.sub(r"(?i)(password|passfile)(?:\s*[=:]\s*|\s+)(?:'[^']*'|\"[^\"]*\"|[^\s,)]+)",
+                  r"\1=***", text)
 
 
 def run_items(options, kind: str, items: list[str]) -> int:
@@ -727,7 +750,8 @@ def run_once(options, kind: str, names: list[str], scratch: Path, archive_file: 
             if profile:
                 try:
                     env.update(cargo_database(profile, stack))
-                except Exception as error:  # a setup that fails is this iteration's failure, in its row
+                # pgdisposable's login and slice checks exit with SystemExit.
+                except (Exception, SystemExit) as error:  # a failed setup is this iteration's failure, in its row
                     note, code = f"database profile {profile} setup failed: {redacted(error)}", 1
                     print(f"stress: {note}", flush=True)
                     return code
