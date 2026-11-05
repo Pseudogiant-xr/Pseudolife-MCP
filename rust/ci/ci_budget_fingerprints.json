@@ -7,7 +7,7 @@
       "fixtures": "2c17c5dbf6eed90d",
       "candidate": "0930d9d93aaa182c",
       "candidate-harness": "bd0fa77d268d561a",
-      "parity-checks": "648ae185c33efaa8",
+      "parity-checks": "48d7661a32443383",
       "daemon-image": "028fd79f06c19794",
       "parity": "4b13f8c55b6e3de3"
     },
@@ -17,7 +17,7 @@
       "lock-resolve": "8a6a510bef8d635b",
       "test": "bb217dd816ccb0b8",
       "test-lite-linux": "a1c2bb60ed678398",
-      "test-lite-windows": "731d6fea7bc2e679",
+      "test-lite-windows": "8a83ae5aa6d68420",
       "test-lite-macos": "c9eb0018bdc7b158",
       "frontend": "1917ccf176734abe"
     }

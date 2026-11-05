@@ -563,6 +563,72 @@ def mkdir(rel: str):
     return lambda arm: (arm.home / rel).mkdir(parents=True, exist_ok=True)
 
 
+PLUGIN_ID = "pseudolife-memory@pseudolife-mcp"
+PLUGIN_HOOKS = ".codex/plugins/cache/pseudolife-mcp/pseudolife-memory/local/hooks"
+PLUGIN_KEY = PLUGIN_ID + ":hooks/hooks.json:session_start:0:0"
+
+
+def plugin_hook_fixture(state: str):
+    """A matching hook copy and a stdio-only Codex protocol fixture.
+
+    The oracle's Python interpreter carries the fixture on both arms;
+    `app-server` is a script in the disposable cwd, never a real Codex turn.
+    """
+    def step(arm):
+        from pseudolife_memory.plugin_hooks import HOOK_SCRIPTS
+
+        directory = arm.home / PLUGIN_HOOKS
+        directory.mkdir(parents=True)
+        for name in HOOK_SCRIPTS:
+            (directory / name).write_bytes(b"# fixture hook\n")
+        manifest = {"hooks": {"SessionStart": [{"hooks": [
+            {"type": "command", "command": "fixture-hook-not-executed"}]}]}}
+        (directory / "hooks.json").write_text(json.dumps(manifest), encoding="utf-8")
+        write(".codex/config.toml", (
+            f'[plugins."{PLUGIN_ID}"]\nenabled = true\n'
+            f'[hooks.state."{PLUGIN_KEY}"]\ntrusted_hash = "sha256:{"0" * 64}"\n'))(arm)
+        if state == "unavailable":
+            return
+        hooks = ([] if state == "not-loaded" else [{
+            "key": PLUGIN_KEY, "enabled": state != "disabled",
+            "trustStatus": "modified" if state == "modified" else "trusted"}])
+        result = {"data": [{"errors": [], "hooks": hooks}]}
+        script = '''import json, sys
+for line in sys.stdin:
+    request = json.loads(line)
+    method = request.get("method")
+    with open("codex-runtime-requests.txt", "a", encoding="utf-8", newline="\\n") as log:
+        log.write(method + "\\n")
+    if "id" in request:
+        result = RESULT if method == "hooks/list" else {}
+        print(json.dumps({"id": request["id"], "result": result}), flush=True)
+'''.replace("RESULT", repr(result))
+        write("cwd/app-server", script)(arm)
+    return step
+
+
+def matching_plugin_health(daemon):
+    from pseudolife_memory.plugin_hooks import hooks_digest
+
+    return Route(200, health(daemon.version, hooks_digest=hooks_digest(daemon.home / PLUGIN_HOOKS)))
+
+
+def observe_plugin_runtime(state: str):
+    def after(arm, obs):
+        bind_identity(arm, obs)
+        report = json.loads(normalize._get(obs, "stdout"))
+        expected = {"trusted": "current", "modified": "needs-approval:",
+                    "disabled": "disabled:", "not-loaded": "not-loaded:", "unavailable": "current"}
+        if not report.get("codex_hooks", "").startswith(expected[state]):
+            raise RuntimeError(f"{arm.name}: {state} hook fixture did not reach its diagnostic")
+        log = arm.cwd / "codex-runtime-requests.txt"
+        methods = log.read_text(encoding="utf-8").splitlines() if log.exists() else []
+        want = [] if state == "unavailable" else ["initialize", "initialized", "hooks/list"]
+        if methods != want:
+            raise RuntimeError(f"{arm.name}: unexpected hook fixture RPC sequence {methods}")
+    return after
+
+
 def token_file(rel: str, token: str = "fixture-token"):
     def step(arm):
         from pseudolife_memory.credentials import _write_token_file  # noqa: PLC0415 (oracle)
@@ -1071,6 +1137,14 @@ def cases() -> list[Case]:
     add(case("codex-hooks-plugin-no-digest", steps=[write(
         ".codex/config.toml", '[plugins."pseudolife-memory@pseudolife-mcp"]\nenabled = true\n')],
         routes=ok))
+    for state in ("trusted", "modified", "disabled", "not-loaded", "unavailable"):
+        item = case("codex-hooks-plugin-matching-" + state, ["--host", "codex"],
+                    steps=[plugin_hook_fixture(state)],
+                    env={} if state == "unavailable" else {"PSEUDOLIFE_CODEX_BIN": oracle_python()},
+                    routes={"/health": matching_plugin_health})
+        item.real_programs = ("python",)
+        item.after = observe_plugin_runtime(state)
+        add(item)
 
     # Which `pseudolife-mcp` a terminal runs.
     launcher_name = "pseudolife-mcp.exe" if core.WINDOWS else "pseudolife-mcp"
