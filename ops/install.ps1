@@ -3493,7 +3493,8 @@ function Write-UpdateLine([string]$ShimPath, [switch]$ClientOnly, [string]$Pairi
             Write-Host "If another machine uses this same token, rotating it breaks both and neither can be revoked alone: give each machine its own with pseudolife-mcp invite <name> on the daemon's host and $updCmd connect $PairingHintUrl --read-code here. A machine paired with invite, or given a token no other machine uses, already has its own: nothing to do."
         }
     } else {
-        Write-Host "Update later with one command, no checkout needed: $updCmd update (--check reports whether a newer release exists)$updPath; from this checkout, ops\update.ps1 -All does the same after a git pull."
+        Write-Host "Update later with one command: $updCmd update (--check reports whether a newer release exists)$updPath; from this checkout, ops\update.ps1 -All does the same after a git pull."
+        Write-Host "Keep this checkout: ops/.env is this install's configuration and credential source, and extractor autostart may reference its files."
     }
 }
 # <<< update line <<<
