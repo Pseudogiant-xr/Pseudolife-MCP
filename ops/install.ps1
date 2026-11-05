@@ -1168,6 +1168,7 @@ if ($codexShimMode -and -not $Model) {
 }
 
 # -- 4. volumes (respect names overridden in an existing ops/.env) --------------
+# >>> volumes >>>
 function Get-EnvValue($name) {
     if (Test-Path $envFile) {
         $line = Get-Content $envFile | Where-Object { $_ -match "^$name=" } | Select-Object -Last 1
@@ -1175,13 +1176,18 @@ function Get-EnvValue($name) {
     }
     return $null
 }
-$bankVol = (Get-EnvValue "PSEUDOLIFE_BANK_VOLUME"); if (-not $bankVol) { $bankVol = "pseudolife-mcp-bank" }
-$stateVol = (Get-EnvValue "PSEUDOLIFE_STATE_VOLUME"); if (-not $stateVol) { $stateVol = "pseudolife-mcp-state" }
 if (-not $ClientOnly) {
+    $volumePython = Get-InstallerPython
+    $resolvedVolumes = @(& $volumePython (Join-Path $repo "ops/preflight.py") --env-file $envFile --volume-names)
+    if ($LASTEXITCODE -ne 0 -or $resolvedVolumes.Count -ne 2) { throw "Could not resolve Docker volumes; check ops/.env with ops/preflight.ps1 and rerun." }
+    $bankVol, $stateVol = $resolvedVolumes
     docker volume create $bankVol | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Could not create bank volume $bankVol; fix Docker access and rerun." }
     docker volume create $stateVol | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Could not create state volume $stateVol; fix Docker access and rerun." }
     Step "Volumes ready: $bankVol, $stateVol"
 }
+# <<< volumes <<<
 
 # -- 5. managed env block --------------------------------------------------------
 # >>> extractor env >>>
@@ -1350,9 +1356,11 @@ if ($ClientOnly) {
     }
     # Remove a leftover running extractor container (container only - it has
     # no volumes; the image is kept for an easy switch back).
-    $names = docker ps -a --format '{{.Names}}'
-    if ($names -contains "pseudolife-mcp-extractor") {
-        docker rm -f pseudolife-mcp-extractor | Out-Null
+    $extractorOwner = docker inspect -f '{{.Id}} {{index .Config.Labels "com.docker.compose.project"}}' pseudolife-mcp-extractor 2>$null
+    if ($LASTEXITCODE -eq 0 -and "$extractorOwner" -match '^([a-f0-9]+) pseudolife-mcp$') {
+        # Remove the verified ID, never a name another stack could acquire.
+        docker rm -f $Matches[1] | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Could not remove this install's extractor; check docker info and rerun." }
         Step "Removed the running extractor container"
     }
 } elseif (InstallerOwnsOverride) {
@@ -1363,7 +1371,7 @@ if ($ClientOnly) {
 
 # -- 7. bring the stack up --------------------------------------------------------
 if (-not $ClientOnly) {
-    $compose = @("--env-file", $envFile, "-f", $composeFile)
+    $compose = @("-p", "pseudolife-mcp", "--env-file", $envFile, "-f", $composeFile)
     if (Test-Path $overrideFile) { $compose += @("-f", $overrideFile) }
     Step "docker compose up -d --build (first build downloads images - grab a coffee)..."
     docker compose @compose up -d --build
@@ -2926,6 +2934,16 @@ foreach ($selectedClient in $clients) {
 }
 
 # -- 12. health -----------------------------------------------------------------------
+# >>> claude profile scope >>>
+if ($mcpState["claude"] -and $mcpState["claude"] -notin "skipped", "failed") {
+    $profileHome = if ($env:CLAUDE_CONFIG_DIR) { $env:CLAUDE_CONFIG_DIR } else { $env:USERPROFILE }
+    Write-Host "Claude Code user-profile MCP destination: $(Join-Path $profileHome '.claude.json')"
+    Write-Host "Project/local registrations may take precedence over this user-scope file."
+    Write-Host "MCP registration is per-profile; shared plugins or settings do not share memory tools."
+    Write-Host "To add another profile, rerun this installer with CLAUDE_CONFIG_DIR set to that profile's directory; remove Env:CLAUDE_CONFIG_DIR for the default profile."
+}
+# <<< claude profile scope <<<
+
 # >>> endpoint container probe >>>
 # A server named on this machine's loopback is written as host.docker.internal
 # (the extractor env block). Docker Desktop routes that name to this

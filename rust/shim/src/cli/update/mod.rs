@@ -1,6 +1,6 @@
 //! Native, opt-in host update transactions. Python remains the differential oracle.
 mod backup;
-mod clients;
+pub(super) mod clients;
 mod engine;
 mod options;
 mod release;
@@ -30,6 +30,19 @@ pub(crate) const PG_CONTAINER: &str = "pseudolife-mcp-postgres";
 pub(crate) const DAEMON_SERVICE: &str = "pseudolife-daemon";
 pub(crate) const PYPI_JSON: &str = "https://pypi.org/pypi/pseudolife-mcp/json";
 pub(crate) type Result<T> = std::result::Result<T, UpdateError>;
+
+fn client_release_target(health: Option<&Value>, tag: Option<&str>) -> Result<String> {
+    let current = health
+        .and_then(|h| h["version"].as_str())
+        .filter(|version| !version.is_empty())
+        .ok_or_else(|| UpdateError::usage("the configured daemon did not report its release on /health; retry with --daemon-url http(s)://<host>:<port> for the running daemon. Nothing was changed"))?;
+    if !plain_release(current) && tag.is_none() {
+        return Err(UpdateError::usage(
+            "the daemon reports a version which is not a plain release number (N.N.N); name the release with --tag <version>. Nothing was changed",
+        ));
+    }
+    Ok(tag.unwrap_or(current).to_owned())
+}
 
 #[derive(Debug)]
 pub(crate) struct UpdateError {
@@ -520,19 +533,8 @@ impl Update {
             )));
         }
         let health = self.daemon_health();
+        let target = client_release_target(health.as_ref(), self.o.tag.as_deref())?;
         let current = health.as_ref().and_then(|h| h["version"].as_str());
-        if current.is_some_and(|v| !plain_release(v)) && self.o.tag.is_none() {
-            return Err(UpdateError::usage(
-                "the daemon reports a version which is not a plain release number (N.N.N); name the release with --tag <version>. Nothing was changed",
-            ));
-        }
-        let target = self
-            .o
-            .tag
-            .clone()
-            .or_else(|| current.filter(|v| plain_release(v)).map(str::to_owned))
-            .map(Ok)
-            .unwrap_or_else(|| self.target_version())?;
         self.refuse_downgrade(current, &target)?;
         self.refuse_checkout_shadow(&target)?;
         self.report.mode = "clients".into();
