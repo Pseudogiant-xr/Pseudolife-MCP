@@ -1965,12 +1965,15 @@ def test_fixture_replies_records_and_closes_with_bounded_polling(row, monkeypatc
 
 
 @pytest.mark.skipif(core.WINDOWS, reason="POSIX special-file snapshot")
-def test_snapshot_observes_fifo_and_socket_without_opening_them(tmp_path, monkeypatch):
+@pytest.mark.parametrize("long_directory", [False, True], ids=["default", "long"])
+def test_snapshot_observes_fifo_and_socket_without_opening_them(tmp_path, monkeypatch, long_directory):
     import socket
+    if long_directory:
+        tmp_path = tmp_path / ("x" * 100)
+        tmp_path.mkdir()
+        assert len(os.fsencode(tmp_path / "socket")) > 108
     fifo = tmp_path / "fifo"
     os.mkfifo(fifo, 0o640)
-    sock = socket.socket(socket.AF_UNIX)
-    sock.bind(str(tmp_path / "socket"))
     original = Path.read_bytes
 
     def guarded(path):
@@ -1978,10 +1981,12 @@ def test_snapshot_observes_fifo_and_socket_without_opening_them(tmp_path, monkey
         return original(path)
 
     monkeypatch.setattr(Path, "read_bytes", guarded)
-    try:
+    # The snapshot observes the filesystem entry, not its address spelling.
+    # Pytest basetemp can exceed AF_UNIX's address limit on a work drive.
+    monkeypatch.chdir(tmp_path)
+    with socket.socket(socket.AF_UNIX) as sock:
+        sock.bind("socket")
         assert core.snapshot(tmp_path) == {"fifo": "fifo", "socket": "socket"}
-    finally:
-        sock.close()
 
 
 def test_home_tokens_preserve_surrogateescape_link_targets():
