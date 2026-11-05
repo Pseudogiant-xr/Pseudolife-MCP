@@ -638,7 +638,10 @@ def update_shim(source, repo: Path | None = None, reinstall: bool = False) -> di
     if installed is None:
         detail.append("sessions already running keep their runtime; new sessions start on the new one")
     state = "failed" if failed else f"{'current' if installed else 'installed'}:{runtime.version}"
-    return {"state": state, "detail": "; ".join(detail + [r["detail"] for r in results])}
+    # The runtime itself, so the updater can hand the steps after this one
+    # to the code just installed (update_cli.Update._hand_off).
+    return {"state": state, "detail": "; ".join(detail + [r["detail"] for r in results]),
+            "runtime": str(runtime.path)}
 
 
 # ── the plugin cache ────────────────────────────────────────────────────────
@@ -1874,13 +1877,21 @@ def update_tunnels(shim: dict | None) -> dict | None:
 
 
 def run_steps(steps, *, repo: Path | None, source: str, daemon_digest: str | None = None,
-              reinstall: bool = False) -> dict:
+              reinstall: bool = False, after_shim=None) -> dict:
     """The client-side ladder as a report: ``shim``, ``plugin``, ``codex``
     (those in ``steps``), ``autostart`` when a checkout is known, and
-    ``ok``. ``reinstall`` installs a release the shim already runs."""
+    ``ok``. ``reinstall`` installs a release the shim already runs.
+
+    ``after_shim`` is called with the shim step's result; when it returns a
+    report, that report is the ladder's and no later step runs here (the
+    release updater hands them to the runtime just installed)."""
     report: dict = {}
     if "shim" in steps:
         report["shim"] = update_shim(source, repo, reinstall)
+        if after_shim is not None:
+            taken = after_shim(report["shim"])
+            if taken is not None:
+                return taken
     if "plugin" in steps:
         report["plugin"] = update_plugin(repo)
     if "codex" in steps:
@@ -1901,7 +1912,8 @@ def run_steps(steps, *, repo: Path | None, source: str, daemon_digest: str | Non
 
 
 def print_ladder(report: dict) -> None:
-    labels = {"shim": "Shim", "plugin": "Plugin", "codex": "Codex hooks", "autostart": "Extractor autostart", "tunnel": "Secure tunnel"}
+    labels = {"shim": "Shim", "handoff": "Hand-off", "plugin": "Plugin", "codex": "Codex hooks",
+              "autostart": "Extractor autostart", "tunnel": "Secure tunnel"}
     for key, label in labels.items():
         if key in report and not (key == "autostart" and report[key]["state"] == "none"):
             result = report[key]
