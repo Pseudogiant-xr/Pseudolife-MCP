@@ -61,7 +61,9 @@ The update builds `ops/Dockerfile.daemon-rust` from this checkout, applies the
 SELECT-only `pseudolife_shadow` role to this project's PostgreSQL, saves its
 random password in this checkout's `ops/.env`, and starts only
 `pseudolife-rust-shadow`. Its `/data` mount is read-only; models have a separate
-persistent cache. First-start model provisioning may take 30 minutes; let the
+persistent cache. It runs as the Python writer's daemon user (uid 10001) with
+every capability dropped, so it reads the writer's private `config.yaml`, and it
+takes the writer's `TZ`, writer id and toolset settings. First-start model provisioning may take 30 minutes; let the
 updater finish its readiness gate.
 
 Successful output includes `read-only Rust shadow answers at
