@@ -157,11 +157,14 @@ def test_low_disk_refuses_docker_backup_and_restore_before_artifacts_or_stop(doc
     from pseudolife_memory import docker_backup_restore as module
     bank, world = docker_bank
     monkeypatch.setattr(module.shutil, "disk_usage", lambda _: types.SimpleNamespace(free=8 * 1024**3 - 1))
-    with pytest.raises(up.UpdateError, match="8 GiB"):
+    with pytest.raises(up.UpdateError, match="8 GiB") as exc:
         if action == "backup":
             bank.backup(out=tmp_path / "artifacts")
         else:
             bank.restore(_input_dump(tmp_path), leave_stopped=True, safety_dir=tmp_path / "safety")
+    destination = tmp_path / ("artifacts" if action == "backup" else "safety")
+    assert str(destination.resolve()) in str(exc.value)
+    assert "free at least 8 GiB there" in str(exc.value)
     assert not any(c[0] in ("stop", "create", "cp") or "pg_dump" in " ".join(c) for c in world.calls)
     assert not (tmp_path / "artifacts").exists() and not (tmp_path / "safety").exists()
 
@@ -191,6 +194,29 @@ def test_the_exact_disk_floor_allows_a_clone_free_backup(docker_bank, tmp_path, 
     monkeypatch.setattr(disk_space.shutil, "disk_usage", lambda _: types.SimpleNamespace(free=disk_space.MIN_FREE))
     result = bank.backup(out=tmp_path / "artifacts")
     assert result["dump"].is_file() and result["state"].is_file()
+
+
+@pytest.mark.parametrize("action", ["backup", "restore"])
+def test_small_system_temp_does_not_refuse_ample_backup_destination(docker_bank, tmp_path, monkeypatch, action):
+    from pseudolife_memory import disk_space, docker_backup_restore as module
+    bank, _world = docker_bank
+    small = tmp_path / "small-temp"
+    small.mkdir()
+    measured = []
+
+    def usage(path):
+        measured.append(Path(path))
+        return types.SimpleNamespace(free=1 if Path(path) == small else disk_space.MIN_FREE)
+
+    monkeypatch.setattr(module.tempfile, "gettempdir", lambda: str(small))
+    monkeypatch.setattr(disk_space.shutil, "disk_usage", usage)
+    if action == "backup":
+        result = bank.backup(out=tmp_path / "destination")
+        assert result["dump"].is_file() and result["state"].is_file()
+    else:
+        result = bank.restore(_input_dump(tmp_path), leave_stopped=True, safety_dir=tmp_path / "destination")
+        assert result["safety_dump"].is_file() and result["safety_state"].is_file()
+    assert small not in measured
 
 
 @pytest.mark.parametrize("location", ["/var/lib/postgresql/legacy", "/data", "/data/nested", None])
@@ -517,6 +543,43 @@ def test_backup_copy_creates_host_owned_file_instead_of_extracting_container_own
     target = tmp_path / "dump.part"
     module.copy_from_container("docker", "pg:/tmp/dump", target)
     assert target.read_bytes() == b"payload"
+
+
+@pytest.mark.parametrize("outcome", ["success", "failure", "interrupt"])
+def test_backup_stages_on_destination_and_closes_stream(tmp_path, monkeypatch, outcome):
+    from pseudolife_memory import docker_backup_restore as module
+    temporary_file = module.tempfile.TemporaryFile
+    streams = []
+    target = tmp_path / "destination" / "dump.part"
+    target.parent.mkdir()
+
+    def stage(*args, **kwargs):
+        assert Path(kwargs["dir"]) == target.parent
+        stream = temporary_file(*args, **kwargs)
+        streams.append(stream)
+        return stream
+
+    def docker_tar(argv, *, stdout, **kwargs):
+        if outcome == "interrupt":
+            raise KeyboardInterrupt
+        with tarfile.open(fileobj=stdout, mode="w") as archive:
+            entry = tarfile.TarInfo("dump")
+            entry.size = 7
+            archive.addfile(entry, io.BytesIO(b"payload"))
+        return types.SimpleNamespace(returncode=int(outcome == "failure"))
+
+    monkeypatch.setattr(module.tempfile, "TemporaryFile", stage)
+    monkeypatch.setattr(module.subprocess, "run", docker_tar)
+    if outcome == "success":
+        module.copy_from_container("docker", "pg:/tmp/dump", target)
+        assert target.read_bytes() == b"payload"
+    else:
+        error = KeyboardInterrupt if outcome == "interrupt" else up.UpdateError
+        with pytest.raises(error):
+            module.copy_from_container("docker", "pg:/tmp/dump", target)
+        assert not target.exists()
+    assert streams and all(stream.closed for stream in streams)
+    assert list(target.parent.iterdir()) == ([target] if outcome == "success" else [])
 
 
 def test_unknown_database_host_requires_all_explicit_selectors(docker_bank):
