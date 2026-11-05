@@ -21,6 +21,8 @@ def guard(monkeypatch, tmp_path):
     spec = importlib.util.spec_from_file_location("installer_resources", ROOT / "ops/preflight.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    # Model Docker resources independently of any lite bank on the host.
+    monkeypatch.setattr(module.preflight_lite, "data_dirs", lambda: [tmp_path / "fixture-lite"])
     containers, volumes, busy, calls = [], [], set(), []
 
     def docker_run(argv, **kwargs):
@@ -60,6 +62,21 @@ def guard(monkeypatch, tmp_path):
     env = tmp_path / "ops/.env"
     env.parent.mkdir()
     return module, env, containers, volumes, busy, calls
+
+
+def test_resource_fixture_is_independent_of_a_host_lite_bank(monkeypatch, tmp_path, request):
+    host_bank = tmp_path / "host-lite"
+    cluster = host_bank / "embedded_pg"
+    cluster.mkdir(parents=True)
+    marker = cluster / "PG_VERSION"
+    marker.write_text("18\n", encoding="utf-8")
+    monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(host_bank))
+
+    module, env, *_ = request.getfixturevalue("guard")
+    module.check(env)
+
+    assert marker.read_text(encoding="utf-8") == "18\n"
+    assert not env.exists()
 
 
 def container(name="daemon", *, project="pseudolife-mcp", running=True,
