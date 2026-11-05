@@ -629,6 +629,8 @@ jobs:
           tests/test_move_cli.py::test_yes_alone_never_consents_to_a_persistent_target_serve
           tests/test_move_cli.py::test_interactive_yes_requires_an_explicit_expose_flag
           tests/test_move_cli.py::test_interactive_move_asks_separately_for_persistent_exposure
+          tests/test_installer_reruns.py
+          tests/test_shim_runtime_reuse.py
           tests/test_installer_unattended.py
           tests/test_installer_client_update_schedule.py
           tests/test_installer_resources.py
