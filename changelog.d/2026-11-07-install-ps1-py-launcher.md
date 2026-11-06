@@ -1,0 +1,2 @@
+### Fixed (2026-11-07 — the Windows installer finds a Python reached only through the py launcher)
+- `ops/install.ps1` probed the `py` launcher with `- 3` instead of `-3`: a PowerShell if-expression unrolled the one-item argument array into a string, which splatted as characters. On a host whose only Python is `py`, the installer's helper probe and its Codex setup probe never found it (an interactive run could also wait on the console). Both probes now pass `-3`.

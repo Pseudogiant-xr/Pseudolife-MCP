@@ -633,6 +633,7 @@ jobs:
           tests/test_move_cli.py::test_signal_after_confirmed_moved_marker_never_rolls_back_the_commit
           tests/test_move_cli.py::test_signal_between_confirmed_marker_and_commit_record_is_deferred
           tests/test_installer_reruns.py
+          tests/test_installer_py_launcher_ps.py
           tests/test_shim_runtime_reuse.py
           tests/test_installer_unattended.py
           tests/test_installer_client_update_schedule.py
