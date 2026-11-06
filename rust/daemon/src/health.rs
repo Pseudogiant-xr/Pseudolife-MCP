@@ -286,14 +286,38 @@ fn dream_tracking_error(svc: &Service, ready: Option<&crate::service::Ready>) ->
 /// `capacity_warning` from the ready service's resident bank.
 fn capacity_warning(svc: &Service, ready: Option<&crate::service::Ready>) -> bool {
     let (Some(ready), Some(last)) = (ready, svc.config.memory.band_specs.last()) else {
+        // As `dream_tracking_error`: no ready service, nothing to stand in.
+        *svc.health_capacity.lock().expect("health capacity lock") = None;
         return false;
     };
-    let Ok(bank) = ready.bank.read() else {
-        return false;
-    };
-    let size = bank.entries.iter().filter(|e| e.band == last.name).count();
-    capacity_flag(size, last.max_entries)
+    bank_capacity_warning(&ready.bank, last, &svc.health_capacity)
 }
+
+/// `/health` never waits on the bank: while a writer holds or is queued for
+/// its lock (a store, a shadow refresh's patch waiting for a long search),
+/// the last value read from this same bank is served, so the flag neither
+/// stalls the probe nor flickers; with none yet, no warning. The cache holds
+/// a `Weak`, so a replaced bank's allocation cannot be reused at the same
+/// address and mistaken for the new bank.
+fn bank_capacity_warning(
+    bank: &std::sync::Arc<std::sync::RwLock<crate::bank::Bank>>,
+    last: &crate::config::StartupBandSpec,
+    cache: &std::sync::Mutex<Option<CapacityCache>>,
+) -> bool {
+    let Ok(guard) = bank.try_read() else {
+        return match &*cache.lock().expect("health capacity lock") {
+            Some((from, warned)) if std::sync::Weak::ptr_eq(from, &Arc::downgrade(bank)) => *warned,
+            _ => false,
+        };
+    };
+    let size = guard.entries.iter().filter(|e| e.band == last.name).count();
+    let warned = capacity_flag(size, last.max_entries);
+    *cache.lock().expect("health capacity lock") = Some((Arc::downgrade(bank), warned));
+    warned
+}
+
+/// The last capacity flag `/health` read, and the bank it was read from.
+pub(crate) type CapacityCache = (std::sync::Weak<std::sync::RwLock<crate::bank::Bank>>, bool);
 
 /// `_warn_near_memory_limit`: at most once per `MEMORY_WARNING_INTERVAL`.
 fn warn_near_memory_limit(memory: &Value) {
@@ -487,6 +511,49 @@ pub async fn payload(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn capacity_warning_never_waits_on_the_bank_lock() {
+        use std::sync::{Arc, RwLock};
+        let bank = Arc::new(RwLock::new(crate::bank::Bank {
+            dim: 1,
+            entries: vec![crate::bank::Entry {
+                band: "flat".into(),
+                ..Default::default()
+            }],
+            matrix: vec![0.0],
+        }));
+        let last = crate::config::StartupBandSpec {
+            name: "flat".into(),
+            max_entries: 1,
+            retention_policy: "balanced".into(),
+            update_interval: Value::from(1),
+        };
+        let cache = Arc::new(std::sync::Mutex::new(None));
+        assert!(bank_capacity_warning(&bank, &last, &cache));
+        // A writer holds the lock (a store, or a shadow refresh's patch).
+        let guard = bank.write().unwrap();
+        let read_held = |bank: &Arc<RwLock<crate::bank::Bank>>| {
+            let (send, receive) = std::sync::mpsc::channel();
+            let (held, spec, cache) = (bank.clone(), last.clone(), cache.clone());
+            std::thread::spawn(move || {
+                send.send(bank_capacity_warning(&held, &spec, &cache))
+                    .unwrap()
+            });
+            receive.recv_timeout(std::time::Duration::from_secs(5))
+        };
+        // The last value read from this bank: neither a wait nor a flicker.
+        assert_eq!(read_held(&bank), Ok(true), "/health waited or flickered");
+        // Another bank (a newer ready service) has no value yet.
+        let other = Arc::new(RwLock::new(crate::bank::Bank {
+            dim: 1,
+            entries: Vec::new(),
+            matrix: Vec::new(),
+        }));
+        let other_guard = other.write().unwrap();
+        assert_eq!(read_held(&other), Ok(false));
+        drop((guard, other_guard));
+    }
 
     #[tokio::test]
     async fn payload_reports_the_release_version_never_the_placeholder() {
