@@ -281,7 +281,8 @@ class CommitCutProxy:
                         if len(buf) < 1 + n:
                             break
                         msg, buf = buf[:1 + n], buf[1 + n:]
-                        if conn.cut_pending and msg[:1] in (b"C", b"E"):
+                        if (conn.cut_pending and self.mode == "lost-reply"
+                                and msg[:1] in (b"C", b"E")):
                             if msg[:1] == b"C":
                                 tag = msg[5:].rstrip(b"\0").decode("utf-8", "replace")
                             else:
@@ -1073,7 +1074,8 @@ def verdict(r: dict) -> dict:
         return {"valid": False, "why": "the cut came after the answer: another transaction"}
     if rollback and r["committed"]:
         return {"valid": False, "why": "the bank holds the operation's effect after its "
-                                       "COMMIT was dropped: the cut was another transaction"}
+                                       "COMMIT was dropped: it landed anyway (a daemon retry "
+                                       "on a fresh connection, or another transaction)"}
     if not rollback and not r["committed"]:
         return {"valid": False, "why": "the cut transaction is not the operation's: "
                                        "the bank lacks its effect"}
@@ -1223,7 +1225,10 @@ def smoke() -> int:
                     landed = c.execute("SELECT count(*) FROM smoke WHERE id = %s",
                                        (row,)).fetchone()[0]
                 print(f"{mode}: the armed row is {'in' if landed else 'not in'} the bank")
-                ok &= (failed is not None and bool(proxy.events)
+                tag = proxy.events[0]["server_tag"] if proxy.events else ""
+                ok &= (failed is not None
+                       and (tag == ROLLBACK_TAG if mode == "rollback"
+                            else tag.startswith("COMMIT"))
                        and bool(landed) == (mode == "lost-reply"))
                 with psycopg.connect(pdsn, autocommit=True) as c:
                     with c.transaction():
@@ -1307,7 +1312,7 @@ def main() -> int:
                             raise RuntimeError(f"{gb:.2f} GB free, below the floor")
             except Exception as exc:  # noqa: BLE001
                 results.append({"case": name, "engine": "-", "variant": "-",
-                                "about": case["about"],
+                                "fault_mode": a.fault, "about": case["about"],
                                 "marker": case["marker"],
                                 "harness_error": f"{type(exc).__name__}: {exc}",
                                 "verdict": {"valid": False,
