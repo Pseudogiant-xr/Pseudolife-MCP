@@ -984,7 +984,11 @@ mod tests {
             crate::bank::normalize_query(&mut v);
             let sim = dot(&v, &v);
             off_one += usize::from(sim != 1.0);
-            assert_eq!(surprise_from(sim), 0.0, "seed {seed}: self-similarity {sim}");
+            assert_eq!(
+                surprise_from(sim),
+                0.0,
+                "seed {seed}: self-similarity {sim}"
+            );
         }
         assert!(off_one > 0, "no vector misses 1.0: the test would not bite");
         assert!((surprise_from(0.9999) - 1e-4).abs() < 1e-7);
