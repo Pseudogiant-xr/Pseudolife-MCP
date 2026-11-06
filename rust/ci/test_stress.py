@@ -622,7 +622,9 @@ def test_an_all_skipped_pytest_iteration_fails(tmp_path, monkeypatch):
 def test_plan_lists_the_iterations_and_the_kind(tmp_path, selection, kind):
     output = tmp_path / "out"
     assert stress.main(["plan", "--selection", selection, "--iterations", "3", "--github-output", str(output)]) == 0
-    assert output.read_text(encoding="utf-8") == f"iterations=[1, 2, 3]\nkind={kind}\n"
+    # Only a cargo selection with a database profile says postgres=true; the
+    # other kinds always get PostgreSQL (the workflow's step condition).
+    assert output.read_text(encoding="utf-8") == f"iterations=[1, 2, 3]\nkind={kind}\npostgres=false\n"
 
 
 @pytest.mark.parametrize("selection, count", [("-k x", "20"), ("row:hook", "0")])
@@ -721,6 +723,7 @@ def test_stress_jobs_run_only_in_stress_mode_and_reuse_the_candidate():
     assert plan["if"] == "github.event_name == 'workflow_dispatch' && inputs.mode == 'stress'"
     assert plan["outputs"] == {"iterations": "${{ steps.plan.outputs.iterations }}",
                                "kind": "${{ steps.plan.outputs.kind }}",
+                               "postgres": "${{ steps.plan.outputs.postgres }}",
                                "oracle_base": "${{ steps.oracle.outputs.oracle_base }}"}
     assert loop["needs"] == ["stress-plan", "candidate", "candidate-harness", "stress-build"]
     assert loop["if"] == ("${{ !cancelled() && needs.stress-plan.result == 'success' "
@@ -842,9 +845,10 @@ def test_a_cargo_iteration_gets_the_rust_jobs_setup_and_not_the_parity_lanes():
     assert loop["env"] == {"STRESS_SELECTION": "${{ inputs.selection }}",
                            "STRESS_KIND": "${{ needs.stress-plan.outputs.kind }}"}
     # The Rust job runs nextest with no PostgreSQL and only the Python SDK
-    # fixture dependency; a cargo iteration matches it.
+    # fixture dependency; a cargo iteration matches it, except a selection
+    # with a database profile (stress.CARGO_DATABASE_PROFILES).
     for name in ("Install checkout and test dependencies", "Prepare disposable PostgreSQL"):
-        assert step_named(loop, name)["if"] == "env.STRESS_KIND != 'cargo'", name
+        assert step_named(loop, name)["if"] == CARGO_POSTGRES, name
     rust = raw_workflow()["jobs"]["rust"]
     # The Rust job also exports the selected oracle's package metadata, which
     # cli_version_contract reads (Codex review of 50ca4be5). It binds only
@@ -977,7 +981,8 @@ def test_plan_refuses_rows_mixed_with_scenarios(tmp_path, capsys):
 def test_plan_accepts_several_rows_or_scenarios_as_one_loop(tmp_path, capsys, selection, kind):
     output = tmp_path / "out"
     assert stress.main(["plan", "--selection", selection, "--iterations", "20", "--github-output", str(output)]) == 0
-    assert output.read_text(encoding="utf-8") == f"iterations={json.dumps(list(range(1, 21)))}\nkind={kind}\n"
+    assert output.read_text(encoding="utf-8") == (
+        f"iterations={json.dumps(list(range(1, 21)))}\nkind={kind}\npostgres=false\n")
     assert "2 items" in capsys.readouterr().out
 
 
@@ -1349,3 +1354,297 @@ def test_a_single_item_report_is_unchanged(tmp_path):
         "| Iteration | Attempt | Outcome | Seconds | Image | CPUs | Note |\n"
         "| --- | --- | --- | --- | --- | --- | --- |\n"
         "| 1 | 1 | pass | 12.5 | win25 1 | 4 |  |\n")
+
+
+# ---- cargo selections whose tests need a disposable PostgreSQL ------------
+
+SHADOW_SERVICE = [f"{DAEMON_BIN}::service::shadow_refresh_tests::db_{name}" for name in (
+    "dropped_request_cannot_let_two_refreshes_overlap", "failed_preread_records_not_ready_and_backs_off",
+    "meta_commit_during_service_init_is_refreshed")]
+SHADOW_STORE = f"{DAEMON_BIN}::shadow::tests::db_added_entry_is_appended_and_searchable"
+DAEMON_SUITE = "pseudolife-daemon::bin/pseudolife-daemon"
+CARGO_POSTGRES = "env.STRESS_KIND != 'cargo' || needs.stress-plan.outputs.postgres == 'true'"
+
+
+def cargo_selection(names):
+    return " ".join(f"cargo:{name}" for name in names)
+
+
+@pytest.mark.parametrize("names, profile", [
+    (SHADOW_SERVICE, "shadow-refresh"),
+    ([SHADOW_STORE, *SHADOW_SERVICE], "shadow-refresh"),
+    # Near misses: not a db_ test, or no exact test at all, need no database.
+    ([f"{DAEMON_BIN}::shadow::tests::planner_patches_only_what_changed"], None),
+    ([f"{DAEMON_BIN}::{SHUTDOWN}"], None),
+    ([DAEMON_BIN], None),
+    (["pseudolife-stdio/board_retry_contract"], None),
+])
+def test_a_cargo_selection_names_the_database_profile_its_tests_need(names, profile):
+    assert stress.parse(cargo_selection(names)) == ("cargo", names)
+    assert stress.database_profile(names) == profile
+
+
+@pytest.mark.parametrize("names, profile", [(SHADOW_SERVICE, "true"), ([f"{DAEMON_BIN}::{SHUTDOWN}"], "false")])
+def test_plan_says_whether_a_cargo_selection_needs_postgres(tmp_path, capsys, names, profile):
+    output = tmp_path / "out"
+    assert stress.main(["plan", "--selection", cargo_selection(names), "--iterations", "20",
+                        "--github-output", str(output)]) == 0
+    assert output.read_text(encoding="utf-8") == (
+        f"iterations={json.dumps(list(range(1, 21)))}\nkind=cargo\npostgres={profile}\n")
+    if profile == "true":
+        assert "shadow-refresh" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("item", [
+    # A db_ test no profile covers would run without its database: it
+    # skips (returns early) and would count as run.
+    f"{DAEMON_BIN}::bank::startup_tests::db_seating_recovers_an_abandoned_writer_transaction",
+    # A profile's prefix in another target is not that profile's test.
+    "pseudolife-stdio/bin/pseudolife-stdio::shadow::tests::db_added_entry_is_appended_and_searchable",
+    "pseudolife-daemon/lib::service::shadow_refresh_tests::db_meta_commit_during_service_init_is_refreshed",
+])
+def test_plan_refuses_a_database_test_no_profile_covers(tmp_path, capsys, item):
+    with pytest.raises(ValueError, match="CARGO_DATABASE_PROFILES"):
+        stress.parse(f"cargo:{item}")
+    output = tmp_path / "out"
+    assert stress.main(["plan", "--selection", f"cargo:{item}", "--iterations", "20",
+                        "--github-output", str(output)]) == 2
+    assert not output.exists()
+    error = capsys.readouterr().err
+    assert "nothing was started" in error and "rust/ci/stress.py" in error and item in error
+
+
+@pytest.mark.parametrize("other", [f"{DAEMON_BIN}::{SHUTDOWN}", DAEMON_BIN, "pseudolife-stdio/board_retry_contract"])
+def test_plan_refuses_database_tests_mixed_with_tests_of_another_profile(tmp_path, capsys, other):
+    # One loop prepares one profile's database and runs its tests serially:
+    # anything else would run under that setup, not its own lane's.
+    selection = cargo_selection([SHADOW_SERVICE[0], other])
+    with pytest.raises(ValueError, match="dispatch .* separately"):
+        stress.parse(selection)
+    assert stress.main(["plan", "--selection", selection, "--iterations", "20",
+                        "--github-output", str(tmp_path / "out")]) == 2
+    assert other in capsys.readouterr().err
+
+
+def test_every_database_profile_names_its_setup():
+    assert stress.CARGO_DATABASE_PROFILES["shadow-refresh"] == {
+        "target": DAEMON_BIN,
+        "prefixes": ("shadow::tests::db_", "service::shadow_refresh_tests::db_"),
+        "slice": "pgs",
+        "dsn_env": "PL_SHADOW_REFRESH_DSN",
+        "env": {"PL_SHADOW_REFRESH_REQUIRED": "1", "CUDA_VISIBLE_DEVICES": "-1",
+                "HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1"},
+        "fixture": {"env": "PL_SHADOW_EMBED_FIXTURE", "dimension": 1024},
+        "ort_env": "ORT_DYLIB_PATH",
+    }
+    for name, profile in stress.CARGO_DATABASE_PROFILES.items():
+        assert stress.NAME.fullmatch(name) and stress.CARGO.fullmatch(f"cargo:{profile['target']}"), name
+        assert all(prefix.rpartition("::")[2].startswith("db_") for prefix in profile["prefixes"]), name
+
+
+def test_a_database_selection_runs_serially_with_its_required_flag(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    argv = stress.command("cargo", SHADOW_SERVICE, tmp_path / "bin", tmp_path / "scratch", tmp_path / "a.tar.zst")
+    # nextest runs each test in its own process, so the tests' in-process
+    # database mutex cannot keep them off one another's shared bank.
+    assert argv[argv.index("--test-threads") + 1] == "1"
+    assert argv[argv.index("-E") + 1] == stress.filterset(SHADOW_SERVICE)
+    env = stress.environment("cargo", SHADOW_SERVICE, tmp_path / "bin", tmp_path)
+    # Required: a missing setup panics, so it fails the iteration instead of skipping.
+    assert env == {"PSEUDOLIFE_MCP_PYTHON": sys.executable, "PL_SHADOW_REFRESH_REQUIRED": "1",
+                   "CUDA_VISIBLE_DEVICES": "-1", "HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1"}
+
+
+@pytest.mark.parametrize("names, warned", [
+    ([DAEMON_BIN], True),
+    ([f"{DAEMON_BIN}::{SHUTDOWN}"], False),
+    (["pseudolife-stdio/board_retry_contract"], False),
+])
+def test_plan_warns_that_a_whole_binary_skips_its_database_tests(tmp_path, capsys, names, warned):
+    # A whole-binary item gets no database: its db_ tests return early and
+    # count as run, so the dispatcher is told to name them.
+    assert stress.main(["plan", "--selection", cargo_selection(names), "--iterations", "20",
+                        "--github-output", str(tmp_path / "out")]) == 0
+    out = capsys.readouterr().out
+    assert ("warning:" in out and "name them as exact tests" in out) is warned
+
+
+@pytest.mark.parametrize("text", [
+    "connection to postgresql://login:secret@127.0.0.1:5433/pl_cf_x failed",
+    "connection failed: host=127.0.0.1 user=login password=secret dbname=pl_cf_x",
+    "bad conninfo password = 'secret' port=5433",
+])
+def test_a_setup_error_never_carries_the_password(text):
+    assert "secret" not in stress.redacted(RuntimeError(text))
+
+
+class FakeSlice:
+    """pgdisposable.Slice's create/drop, recorded."""
+
+    def __init__(self, slice_id, events, fail=None):
+        self.PREFIX, self.events, self.fail = f"pl_cf_{slice_id}_", events, fail or set()
+
+    def name(self, label):
+        return label + "_run"
+
+    def create(self, name):
+        self.events.append(("create", name))
+        if "create" in self.fail:
+            raise RuntimeError("could not connect")
+        if "login" in self.fail:
+            # pgdisposable's login check exits rather than raising.
+            raise SystemExit("test login file is missing")
+        return f"postgresql://login:secret@127.0.0.1:5433/{name}"
+
+    def drop(self, name):
+        self.events.append(("drop", name))
+        if "drop" in self.fail:
+            raise RuntimeError("drop refused")
+
+
+def database_run(tmp_path, monkeypatch, events, nextest, fail=None, fixture=None):
+    """Run the shadow Service selection once through stress.main with a fake
+    slice, fixture and nextest; returns (exit code, row, nextest calls)."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(stress, "database_slice", lambda profile: FakeSlice(profile["slice"], events, fail))
+
+    def fake_fixture(profile, root):
+        events.append(("fixture", root))
+        if fixture:
+            raise fixture
+        return {"PL_SHADOW_EMBED_FIXTURE": str(root / "model"), "ORT_DYLIB_PATH": str(root / "onnxruntime.dll")}
+    monkeypatch.setattr(stress, "fixture_environment", fake_fixture)
+    calls = []
+
+    def run(argv, env):
+        calls.append((argv, env))
+        events.append(("nextest", None))
+        return nextest(argv, env)
+    monkeypatch.setattr(stress.subprocess, "run", run)
+    out = tmp_path / "stress" / "stress-row-1.json"
+    code = stress.main(["run", "--selection", cargo_selection(SHADOW_SERVICE), "--iteration", "1",
+                        "--candidates", "rust/target/release", "--archive-file", str(built_here(tmp_path)),
+                        "--out", str(out)])
+    return code, json.loads(out.read_text(encoding="utf-8")), calls
+
+
+def nextest_passes(argv, env):
+    junit = stress.cargo_junit(Path("rust"))
+    junit.parent.mkdir(parents=True, exist_ok=True)
+    junit.write_text(nextest_junit({DAEMON_SUITE: [(name.partition("::")[2], "") for name in SHADOW_SERVICE]}),
+                     encoding="utf-8")
+    return SimpleNamespace(returncode=0)
+
+
+def test_a_database_iteration_gets_a_fresh_bank_fixture_and_runtime(tmp_path, monkeypatch):
+    events = []
+    code, row, calls = database_run(tmp_path, monkeypatch, events, nextest_passes)
+    assert code == 0 and row["outcome"] == "pass"
+    assert set(row["tests"]) == {f"{DAEMON_SUITE}::{name.partition('::')[2]}" for name in SHADOW_SERVICE}
+    (argv, env), = calls
+    name = events[0][1]
+    # The tests assert the bank is a disposable pl_cf_ database.
+    assert name.startswith("pl_cf_pgs_stress_")
+    assert env["PL_SHADOW_REFRESH_DSN"] == f"postgresql://login:secret@127.0.0.1:5433/{name}"
+    assert env["PL_SHADOW_REFRESH_REQUIRED"] == "1"
+    fixture_root = events[1][1]
+    assert env["PL_SHADOW_EMBED_FIXTURE"] == str(fixture_root / "model")
+    assert env["ORT_DYLIB_PATH"] == str(fixture_root / "onnxruntime.dll")
+    # The fixture is not written into the scratch directory the job uploads.
+    assert (tmp_path / "stress").resolve() not in Path(fixture_root).resolve().parents
+    assert argv[argv.index("--test-threads") + 1] == "1"
+    assert [event for event, _ in events] == ["create", "fixture", "nextest", "drop"]
+    assert events[-1] == ("drop", name)
+    # The DSN carries the test login's password: it never reaches the row.
+    assert "secret" not in json.dumps(row)
+
+
+def test_a_failed_database_iteration_still_drops_its_bank(tmp_path, monkeypatch):
+    events = []
+    code, row, _ = database_run(tmp_path, monkeypatch, events, lambda argv, env: SimpleNamespace(returncode=100))
+    assert code == 100 and row["outcome"] == "fail"
+    assert [event for event, _ in events] == ["create", "fixture", "nextest", "drop"]
+
+
+def test_a_database_iteration_that_cannot_start_nextest_still_drops_its_bank(tmp_path, monkeypatch):
+    events = []
+
+    def missing(argv, env):
+        raise FileNotFoundError(argv[0])
+    with pytest.raises(FileNotFoundError):
+        database_run(tmp_path, monkeypatch, events, missing)
+    assert [event for event, _ in events] == ["create", "fixture", "nextest", "drop"]
+    row = json.loads((tmp_path / "stress" / "stress-row-1.json").read_text(encoding="utf-8"))
+    assert row["outcome"] == "fail"
+
+
+@pytest.mark.parametrize("fail, fixture, expected", [
+    ({"create"}, None, ["create", "drop"]),
+    ({"login"}, None, ["create", "drop"]),
+    (None, ModuleNotFoundError("No module named 'onnx'"), ["create", "fixture", "drop"]),
+])
+def test_a_database_setup_failure_is_a_failed_row_and_drops_the_bank(tmp_path, monkeypatch, fail, fixture,
+                                                                      expected):
+    events = []
+    code, row, calls = database_run(tmp_path, monkeypatch, events, nextest_passes, fail, fixture)
+    assert code == 1 and row["outcome"] == "fail" and not calls
+    assert [event for event, _ in events] == expected
+    assert row["note"].startswith("database profile shadow-refresh setup failed: ")
+    assert "secret" not in json.dumps(row)
+
+
+def test_a_drop_that_fails_is_reported_but_leaves_the_evidence_alone(tmp_path, monkeypatch, capsys):
+    # The runner's embedded cluster ends with the job; the tests' verdict stands.
+    events = []
+    code, row, _ = database_run(tmp_path, monkeypatch, events, nextest_passes, {"drop"})
+    assert code == 0 and row["outcome"] == "pass"
+    assert "could not drop" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("windows, library", [(True, "onnxruntime.dll"), (False, "libonnxruntime.so.1.27.0")])
+def test_the_onnx_runtime_library_is_the_wheels_own(tmp_path, windows, library):
+    # The wheel ships its shared library in onnxruntime/capi, as the
+    # startup lane's shadow fixture finds it.
+    (tmp_path / library).write_bytes(b"")
+    (tmp_path / "onnxruntime_pybind11_state.pyd").write_bytes(b"")
+    assert stress.onnx_runtime_library(tmp_path, windows) == tmp_path / library
+
+
+def test_the_fixture_is_the_embedding_fixture_and_the_wheels_onnx_runtime(tmp_path, monkeypatch):
+    capi = tmp_path / "site" / "onnxruntime" / "capi"
+    capi.mkdir(parents=True)
+    library = capi / ("onnxruntime.dll" if os.name == "nt" else "libonnxruntime.so.1.27.0")
+    library.write_bytes(b"")
+    created = []
+    monkeypatch.setitem(sys.modules, "onnxruntime", SimpleNamespace(__file__=str(capi.parent / "__init__.py")))
+    monkeypatch.setitem(sys.modules, "embedding_fixture",
+                        SimpleNamespace(create=lambda path, dimension: created.append((path, dimension))))
+    env = stress.fixture_environment(stress.CARGO_DATABASE_PROFILES["shadow-refresh"], tmp_path / "fixture")
+    assert created == [(tmp_path / "fixture" / "model", 1024)]
+    assert env == {"PL_SHADOW_EMBED_FIXTURE": str(tmp_path / "fixture" / "model"), "ORT_DYLIB_PATH": str(library)}
+
+
+def test_a_missing_onnx_runtime_library_is_named(tmp_path, monkeypatch):
+    capi = tmp_path / "onnxruntime" / "capi"
+    capi.mkdir(parents=True)
+    monkeypatch.setitem(sys.modules, "onnxruntime", SimpleNamespace(__file__=str(capi.parent / "__init__.py")))
+    monkeypatch.setitem(sys.modules, "embedding_fixture", SimpleNamespace(create=lambda path, dimension: None))
+    with pytest.raises(FileNotFoundError, match="onnxruntime==1.27.0"):
+        stress.fixture_environment(stress.CARGO_DATABASE_PROFILES["shadow-refresh"], tmp_path)
+
+
+def test_a_database_selection_gets_postgres_and_the_fixture_dependencies():
+    jobs = raw_workflow()["jobs"]
+    assert jobs["stress-plan"]["outputs"]["postgres"] == "${{ steps.plan.outputs.postgres }}"
+    loop = jobs["stress"]
+    install = step_named(loop, "Install checkout and test dependencies")
+    prepare = step_named(loop, "Prepare disposable PostgreSQL")
+    # lease_ci.py and pgdisposable import the checkout (pg0, psycopg); the
+    # checkout install also brings the fixture's numpy, onnx and tokenizers
+    # and the wheel whose library ORT_DYLIB_PATH names.
+    assert install["if"] == prepare["if"] == CARGO_POSTGRES
+    assert '-e ".[dev,lite]"' in install["run"]
+    assert '"onnx==1.22.0"' in install["run"] and '"onnxruntime==1.27.0"' in install["run"]
+    assert "python rust/cli_harness/lease_ci.py" in prepare["run"]
+    names = [step.get("name") for step in loop["steps"]]
+    assert names.index(install["name"]) < names.index(prepare["name"]) < names.index("Run the selection once")
