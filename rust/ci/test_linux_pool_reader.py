@@ -11,7 +11,7 @@ import linux_pool as pool
 
 
 CONTEXT = dict(event="push", ref="refs/heads/master", head_ref="",
-               head_repository="", repository="owner/repo")
+               head_repository="", repository=pool.REPOSITORY)
 
 
 def test_reader_uses_only_the_selected_variable_and_refuses_redirects(monkeypatch):
@@ -80,3 +80,61 @@ def test_live_healthy_choice_and_missing_token(monkeypatch):
                         "self-hosted" if name == pool.POOL_VARIABLE else frame)
     assert pool.live_choice(CONTEXT, "")["selfhosted_suites"] == []
     assert pool.live_choice(CONTEXT, "fixture-status-token")["selfhosted_suites"] == [pool.SUITE]
+
+
+@pytest.mark.parametrize("error", [TimeoutError("fixture-status-token"),
+    OSError("fixture-status-token"), ValueError("fixture-status-token")])
+def test_transport_errors_fail_to_hosted_without_logging_credentials(monkeypatch, error):
+    class Reader:
+        def open(self, request, timeout):
+            raise error
+    monkeypatch.setattr(pool.urllib.request, "build_opener", lambda *a: Reader())
+    result = pool.live_choice(CONTEXT, "fixture-status-token")
+    assert result["selfhosted_suites"] == []
+    assert "fixture-status-token" not in result["reason"]
+
+
+@pytest.mark.parametrize("token", ["fixture\ninjected", "fixture\tinjected", "fixtureé"])
+def test_invalid_reader_token_is_a_hosted_fallback(monkeypatch, token):
+    monkeypatch.setattr(pool.urllib.request, "build_opener", lambda *a: pytest.fail("invalid credential reached transport"))
+    result = pool.live_choice(CONTEXT, token)
+    assert result["selfhosted_suites"] == []
+    assert token not in result["reason"]
+
+
+@pytest.mark.parametrize("payload", ["not json", "null", "[]", "{}", '{"value":123}'])
+def test_invalid_variable_response_falls_back(monkeypatch, payload):
+    class Reader:
+        def open(self, request, timeout):
+            return nullcontext(io.StringIO(payload))
+    monkeypatch.setattr(pool.urllib.request, "build_opener", lambda *a: Reader())
+    assert pool.live_choice(CONTEXT, "fixture-status-token")["selfhosted_suites"] == []
+
+
+def test_health_read_failure_after_enabled_switch_is_hosted(monkeypatch):
+    calls = []
+    def read(repository, name, token):
+        calls.append(name)
+        if name == pool.HEALTH_VARIABLE:
+            raise pool.ReadError("availability read failed (HTTP 503)")
+        return "self-hosted"
+    monkeypatch.setattr(pool, "fetch_variable", read)
+    assert pool.live_choice(CONTEXT, "fixture-status-token")["selfhosted_suites"] == []
+    assert calls == [pool.POOL_VARIABLE, pool.HEALTH_VARIABLE]
+
+
+def test_actual_planner_entrypoint_works_before_the_secret_exists(tmp_path, monkeypatch, capsys):
+    event = tmp_path / "event.json"
+    event.write_text("{}")
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_EVENT_PATH", str(event))
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "push")
+    monkeypatch.setenv("GITHUB_REF", "refs/heads/master")
+    monkeypatch.setenv("GITHUB_REPOSITORY", pool.REPOSITORY)
+    monkeypatch.delenv("PARITY_VARS_READ_TOKEN", raising=False)
+    monkeypatch.setattr(pool, "fetch_variable", lambda *a: pytest.fail("missing secret must not request variables"))
+    import sys
+    monkeypatch.setattr(sys, "argv", ["linux_pool.py", "--github-output", str(output)])
+    assert pool.main() == 0
+    assert output.read_text().splitlines() == ["selfhosted_suites=[]", "linux_pool=hosted"]
+    assert json.loads(capsys.readouterr().out)["selfhosted_suites"] == []

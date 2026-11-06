@@ -16,6 +16,70 @@ same day the Windows dev VM moved to the NVMe pool, its C: was grown to
 runner is online but stays out of the nightly list until a dispatched
 trial passes on it ("Trying a new machine").
 
+## Optional Linux batch pool (2026-11-06)
+
+The maintainer approved Linux promotion after five consecutive complete
+clean comparison lanes. Windows promotion is separate. The original
+scheduled and dispatched comparison lane remains unchanged.
+
+The batch pool moves only `cli-startup` on Linux. It uses the existing
+`parity-checks` job, steps, artifacts and verdict, so `test`,
+`Parity / ubuntu-latest` and `Parity / windows-latest` retain their names
+and meaning. The selected shard is required wherever it was required on
+hosted; the comparison lane remains non-gating.
+
+Only a master push or a same-repository `integrate/*` pull request is
+eligible. Fork pull requests, other PR branches, merge groups, schedules
+and dispatches use hosted for the required matrix. No new trigger is
+added. The hosted `parity-pool` planner waits for candidate and fixture
+builds, then exposes `PARITY_VARS_READ_TOKEN` to its one reader step. The
+secret is a fine-grained token for this repository with only Variables:
+read. It never reaches the parity shards. Missing credentials and failed
+reads are normal hosted fallbacks, including before the secret exists.
+
+`PARITY_BATCH_LINUX_POOL` is the one routing switch: only `self-hosted`
+enables the pool; unset, `hosted` and every other value use hosted.
+The reader fetches it live, then fetches `PARITY_LINUX_HEALTH`. Repository
+`vars` context values are captured too early for this decision. The health
+value contains only schema version, observation time and aggregate Linux
+online/idle counts. It must be at most 180 seconds old, at most 30 seconds
+ahead, and report at least three online workers with all of them idle.
+Malformed or missing fields use hosted. One selected job leaves two
+workers spare; busy or offline capacity starts no batch job there.
+
+On the controller, install the publisher using the existing account that
+owns its `gh` login:
+
+```sh
+sudo bash ops/selfhosted/setup-linux-pool-health.sh --account <controller-account>
+```
+
+This installs a root-owned standard-library script and a separate
+one-minute systemd timer. It reads that account's existing credential
+without replacing or copying it. It changes only `PARITY_LINUX_HEALTH`,
+never the routing switch or `PARITY_SELFHOSTED_RUNNERS`. An API failure
+does not refresh the observation; the reader then falls back as it ages.
+Rerunning the installer updates only this publisher's files and units.
+No runner, container, firewall or existing orchestrator service is changed.
+
+The two completed shared comparison runs, 42114883218 and 42133608663,
+measured Linux `cli-startup` at 9.70 and 11.98 minutes hosted, versus 10.95
+and 12.13 minutes self-hosted. Thus the median hosted allocation removed
+is 10.84 runner-minutes, and the self-hosted shard median is 11.54 minutes.
+The new planner is budgeted at an estimated 0.5 hosted minute, pending two
+enabled-run measurements: about 10.34 hosted runner-minutes saved when
+offloaded, or 0.5 added on fallback. The shard itself is about 0.70 minute
+slower self-hosted in these observations; whole-workflow wall time after
+routing is not yet measured. The budget keeps the full hosted fallback
+and adds one planner slot, with all other limits unchanged.
+
+This is a decision-point fallback. A worker disappearing after selection
+can still leave a queued or failed shard, and simultaneous planners can
+observe the same spare capacity. Disable the switch and rerun the planner
+and its dependent jobs as described in
+[batch recovery](../dev/merge-batches.md#linux-pool-recovery). A failed-jobs-only
+rerun would reuse the previous successful planner's choice.
+
 ## Problem
 
 The Rust workflow's parity shards wait a long time for hosted runners. Most

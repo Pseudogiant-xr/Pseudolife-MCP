@@ -432,6 +432,18 @@ def cache_savers(workflow: dict) -> dict[tuple[str, str], list[str]]:
         for combo in combinations(job):
             runs_on = EXPRESSION.sub(lambda m: str(combo.get(m.group(1).removeprefix("matrix."), "?"))
                                      if m.group(1).startswith("matrix.") else "?", str(job.get("runs-on", "?")))
+            if EXPRESSION.fullmatch(str(job.get("runs-on", ""))):
+                try:
+                    # A conditional pool selector is still known for the
+                    # suites that cannot move. Keep uncertain paths unknown.
+                    labels = [
+                        Evaluator(event, needs_of(job), set(), combo).run(condition_text(job["runs-on"]))
+                        for event in (*BUDGET_EVENTS, "schedule", "workflow_dispatch")
+                    ]
+                    if all(isinstance(label, str) for label in labels) and len(set(labels)) == 1:
+                        runs_on = labels[0]
+                except ValueError:
+                    pass
             for step in job.get("steps", []):
                 if not str(step.get("uses", "")).startswith("Swatinem/rust-cache"):
                     continue
@@ -456,6 +468,12 @@ def cache_savers(workflow: dict) -> dict[tuple[str, str], list[str]]:
                                      if m.group(1).startswith("matrix.") else "?", "-".join(filter(None, parts)))
                 label = f"{job_id} {combo}" if combo else job_id
                 savers.setdefault((key, runner_os(runs_on)), []).append(label)
+    # Unknown platforms may overlap any known platform with the same key.
+    for (key, platform), owners in list(savers.items()):
+        if platform == "?":
+            for known_key, known_platform in list(savers):
+                if known_key == key and known_platform != "?":
+                    savers[(known_key, known_platform)].extend(owners)
     return savers
 
 

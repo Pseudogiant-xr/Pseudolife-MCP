@@ -474,7 +474,7 @@ def test_shards_cover_both_systems_and_build_once():
         assert not jobs[name].get("continue-on-error", False)
     assert jobs["rust"]["name"] == "Rust / ${{ matrix.os }}"
     assert jobs["parity"]["name"] == "Parity / ${{ matrix.os }}"
-    assert jobs["parity-checks"]["needs"] == ["scope", "candidate", "candidate-harness", "fixtures"]
+    assert jobs["parity-checks"]["needs"] == ["scope", "candidate", "candidate-harness", "fixtures", "parity-pool"]
     rust_steps = jobs["rust"]["steps"]
     override = commands(next(step["run"] for step in rust_steps
                              if step.get("name") == "Daemon override build configurations"))
@@ -1093,7 +1093,7 @@ def test_scope_gates_every_heavy_job_and_fails_safe():
     # would also cover scope. Parity checks need scope for their matrix, so a
     # failed scope fails them (and the gate) instead of skipping them.
     # The shards read nothing from the Rust job; the gate still needs it.
-    assert jobs["parity-checks"]["needs"] == ["scope", "candidate", "candidate-harness", "fixtures"]
+    assert jobs["parity-checks"]["needs"] == ["scope", "candidate", "candidate-harness", "fixtures", "parity-pool"]
     assert jobs["parity-checks"]["if"].startswith("${{ !cancelled() && ")
     assert jobs["parity-checks"]["if"].endswith(
         "&& needs.candidate.result == 'success' && needs.candidate-harness.result == 'success' "
@@ -1603,7 +1603,8 @@ def test_selfhosted_lane_runs_the_hosted_shards_unchanged():
     assert lane["strategy"]["matrix"]["runner"] == (
         "${{ fromJSON(inputs.selfhosted_runners || vars.PARITY_SELFHOSTED_RUNNERS || '[\"off\"]') }}")
     assert lane["strategy"]["fail-fast"] is False
-    assert lane["needs"] == hosted["needs"] == ["scope", "candidate", "candidate-harness", "fixtures"]
+    assert lane["needs"] == ["scope", "candidate", "candidate-harness", "fixtures"]
+    assert hosted["needs"] == [*lane["needs"], "parity-pool"]
     # Only the maintainer's registered runners: one label per machine.
     assert lane["runs-on"] == ["self-hosted", "pseudolife-parity-${{ matrix.runner }}"]
     assert lane["timeout-minutes"] >= 210 + int(lane["env"]["PARITY_YIELD_MINUTES"])

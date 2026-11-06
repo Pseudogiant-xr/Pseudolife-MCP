@@ -5,24 +5,56 @@ import argparse
 import json
 from pathlib import Path
 import re
+import subprocess
 import sys
 import time
+import urllib.error
+import urllib.request
 
 # Installed beside this script in a root-owned directory; -I keeps an
 # unrelated working directory and user site packages out of the import.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from runner_watch import ApiError, REPOSITORY, github  # noqa: E402
+from runner_watch import ApiError, REPOSITORY  # noqa: E402
 
 VARIABLE = "PARITY_LINUX_HEALTH"
 LABEL = "pseudolife-parity-linux"
 
 
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, request, fp, code, message, headers, new_url):
+        return None
+
+
+def github(token: str):
+    opener = urllib.request.build_opener(NoRedirect())
+
+    def call(method, path, body=None):
+        request = urllib.request.Request(
+            "https://api.github.com" + path, method=method,
+            data=None if body is None else json.dumps(body).encode("utf-8"),
+            headers={"Authorization": "Bearer " + token, "Accept": "application/vnd.github+json",
+                     "X-GitHub-Api-Version": "2022-11-28"})
+        try:
+            with opener.open(request, timeout=30) as response:
+                raw = response.read()
+                return response.status, json.loads(raw) if raw else None
+        except urllib.error.HTTPError as error:
+            if error.code == 404 and method == "GET":
+                return 404, None
+            raise ApiError("GitHub availability request failed") from None
+        except (OSError, ValueError):
+            raise ApiError("GitHub availability request failed") from None
+
+    return call
+
+
 def sample(call, repository: str, now: float | None = None) -> dict:
+    observed_at = time.time() if now is None else now
     online = idle = 0
     seen = set()
     page = 1
     while True:
-        status, listing = call("GET", f"/repos/{repository}/actions/runners?per_page=100&page={page}", None)
+        status, listing = call("GET", f"/repos/{repository}/actions/runners?per_page=30&page={page}", None)
         if status != 200 or not isinstance(listing, dict) or not isinstance(listing.get("runners"), list):
             raise ApiError("cannot verify Linux runner availability")
         for runner in listing["runners"]:
@@ -37,10 +69,10 @@ def sample(call, repository: str, now: float | None = None) -> dict:
             if runner.get("status") == "online":
                 online += 1
                 idle += runner.get("busy") is False
-        if len(listing["runners"]) < 100:
+        if len(listing["runners"]) < 30:
             break
         page += 1
-    return {"schema": 1, "observed_at": time.time() if now is None else now,
+    return {"schema": 1, "observed_at": observed_at,
             "online": online, "idle": idle}
 
 
@@ -62,7 +94,9 @@ def publish(call, repository: str, frame: dict) -> None:
 
 def main(argv=None, call=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--token-file", type=Path, required=call is None)
+    credentials = parser.add_mutually_exclusive_group(required=call is None)
+    credentials.add_argument("--token-file", type=Path)
+    credentials.add_argument("--gh-auth", action="store_true", help="read this account's existing gh credential")
     parser.add_argument("--repository", default=REPOSITORY)
     parser.add_argument("--dry-run", action="store_true", help="sample only; change no variable")
     args = parser.parse_args(argv)
@@ -71,14 +105,19 @@ def main(argv=None, call=None) -> int:
         parser.error("--repository must name owner/repository")
     try:
         if call is None:
-            token = args.token_file.read_text(encoding="utf-8").strip()
+            if args.gh_auth:
+                credential = subprocess.run(["gh", "auth", "token"], capture_output=True,
+                                            text=True, timeout=10, check=True)
+                token = credential.stdout.strip()
+            else:
+                token = args.token_file.read_text(encoding="utf-8").strip()
             if not token or any(ord(c) < 33 or ord(c) > 126 for c in token):
                 raise ApiError("token file must contain one GitHub token; replace it and retry")
             call = github(token)
         frame = sample(call, args.repository)
         if not args.dry_run:
             publish(call, args.repository, frame)
-    except (OSError, ApiError):
+    except (OSError, ApiError, subprocess.SubprocessError):
         print("linux_pool_health: availability could not be verified or published; "
               "check the token file and GitHub connectivity, then retry", file=sys.stderr)
         return 1

@@ -7,23 +7,25 @@ import linux_pool as pool
 
 
 def decision(**changes):
-    values = dict(event="pull_request", ref="refs/pull/123/merge", head_ref="integrate/example",
-                  head_repository="owner/repo", repository="owner/repo", pool="self-hosted",
+    values = dict(event="push", ref="refs/heads/master", head_ref="",
+                  head_repository=pool.REPOSITORY, repository=pool.REPOSITORY, pool="self-hosted",
                   health=json.dumps(dict(schema=1, observed_at=1000, online=3, idle=3)), now=1000)
     values.update(changes)
     return pool.select(**values)
 
 
 @pytest.mark.parametrize("changes", [
-    {}, {"event": "push", "ref": "refs/heads/master"},
+    {}, {"event": "pull_request", "ref": "refs/pull/123/merge", "head_ref": "integrate/example"},
 ])
 def test_only_the_measured_linux_shard_is_offloaded(changes):
     assert decision(**changes)["selfhosted_suites"] == [pool.SUITE]
 
 
 @pytest.mark.parametrize("changes", [
-    {"head_repository": "fork/repo"}, {"head_repository": ""}, {"head_repository": None},
-    {"head_ref": "feature/example"}, {"head_ref": "Integrate/example"},
+    {"event": "pull_request", "head_repository": "fork/repo"},
+    {"event": "push", "ref": "refs/heads/integrate/example"},
+    {"repository": "fork/repo"},
+    {"event": "pull_request", "head_ref": "feature/example"},
     {"event": "pull_request_target"}, {"event": "merge_group"},
     {"event": "push", "ref": "refs/heads/feature"},
     {"event": "push", "ref": "refs/tags/master"},

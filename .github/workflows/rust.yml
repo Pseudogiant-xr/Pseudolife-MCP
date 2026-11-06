@@ -776,6 +776,28 @@ jobs:
             rust/target/release/dream-contract.exe
           if-no-files-found: error
 
+  parity-pool:
+    # Read availability after the artifact builds, so a queued early scope
+    # job cannot spend an old heartbeat. A planner failure keeps hosted.
+    name: Parity / Linux pool plan
+    needs: [scope, candidate, candidate-harness, fixtures]
+    if: ${{ !cancelled() && needs.candidate.result == 'success' && needs.candidate-harness.result == 'success' && needs.fixtures.result == 'success' && (github.repository == 'Pseudogiant-xr/Pseudolife-MCP' && ((github.event_name == 'push' && github.ref == 'refs/heads/master') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.head_ref, 'integrate/') && needs.scope.outputs.full == 'true'))) }}
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 5
+    outputs:
+      linux_pool: ${{ steps.pool.outputs.linux_pool }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Choose the Linux runner pool
+        id: pool
+        if: github.repository == 'Pseudogiant-xr/Pseudolife-MCP' && ((github.event_name == 'push' && github.ref == 'refs/heads/master') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.head_ref, 'integrate/') && needs.scope.outputs.full == 'true'))
+        env:
+          PARITY_VARS_READ_TOKEN: ${{ secrets.PARITY_VARS_READ_TOKEN }}
+        run: python3 rust/ci/linux_pool.py --github-output "$GITHUB_OUTPUT"
+
   parity-checks:
     # Explicit: the implicit success() would also check scope. Scope is a
     # direct need for the matrix; if it failed, the matrix cannot expand, so
@@ -784,7 +806,7 @@ jobs:
     # Parity gate still needs it, and a Rust failure still fails the gate.
     if: ${{ !cancelled() && needs.scope.outputs.push_passed != 'true' && (github.event_name != 'workflow_dispatch' || inputs.mode == 'ci') && needs.candidate.result == 'success' && needs.candidate-harness.result == 'success' && needs.fixtures.result == 'success' }}
     name: Parity checks / ${{ matrix.os }} / ${{ matrix.suite }}
-    needs: [scope, candidate, candidate-harness, fixtures]
+    needs: [scope, candidate, candidate-harness, fixtures, parity-pool]
     strategy:
       fail-fast: false
       matrix:
@@ -812,7 +834,9 @@ jobs:
         # the pairs its merged batch passed on the same tree.
         exclude: ${{ fromJSON(needs.scope.outputs.parity).exclude }}
         include: ${{ fromJSON(needs.scope.outputs.parity).include }}
-    runs-on: ${{ matrix.os }}
+    # Only one measured Linux shard may move; event checks also reject a
+    # forged planner output on an untrusted event. Windows stays hosted.
+    runs-on: ${{ github.repository == 'Pseudogiant-xr/Pseudolife-MCP' && ((github.event_name == 'push' && github.ref == 'refs/heads/master') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.head_ref, 'integrate/') && needs.scope.outputs.full == 'true')) && matrix.os == 'ubuntu-latest' && matrix.suite == 'cli-startup' && needs.parity-pool.outputs.linux_pool == 'self-hosted' && fromJSON('["self-hosted","pseudolife-parity-linux"]') || matrix.os }}
     # Every cli and W1-C shard names its own budget beside its measurement
     # in the include list; eval and judges keep the 210-minute fallback.
     timeout-minutes: ${{ matrix.job_timeout || 210 }}
@@ -820,6 +844,8 @@ jobs:
       # Artifact names must be unique within a run; parity-selfhosted sets
       # its own prefix so both lanes can upload the same outcomes.
       PARITY_ARTIFACT_PREFIX: ''
+      PARITY_YIELD_MINUTES: '0'
+      PARITY_MIN_FREE_GB: '8'
     steps: &parity_steps
       # Self-hosted only: CLAUDE.md "Disk space" keeps heavy work off a drive
       # with under 8 GB free. A step of its own, so a full disk is named as

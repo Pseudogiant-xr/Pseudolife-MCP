@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "parity-pool",
+  "before": null,
+  "fingerprint": "aedac257afa549fb",
+  "reason": "One late hosted planner for same-repository integrate/* pull requests and master pushes only; no trigger changes. Estimate 0.5 min for checkout and two read-only variable requests. Missing secret, failed read, stale heartbeat or disabled switch keeps the full hosted matrix."
+}

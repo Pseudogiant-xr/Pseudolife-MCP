@@ -19,6 +19,7 @@ MAX_AGE_SECONDS = 180
 MAX_AHEAD_SECONDS = 30
 MIN_IDLE = 3
 SUITE = "cli-startup"
+REPOSITORY = "Pseudogiant-xr/Pseudolife-MCP"
 
 
 class ReadError(Exception):
@@ -36,6 +37,8 @@ def fetch_variable(repository: str, name: str, token: str) -> str | None:
         raise ReadError("invalid repository identifier")
     if name not in {POOL_VARIABLE, HEALTH_VARIABLE}:
         raise ReadError("unknown pool variable")
+    if not token or any(ord(c) < 33 or ord(c) > 126 for c in token):
+        raise ReadError("reader credential is missing or invalid")
     request = urllib.request.Request(
         f"https://api.github.com/repos/{repository}/actions/variables/{name}",
         headers={"Authorization": "Bearer " + token, "Accept": "application/vnd.github+json",
@@ -55,10 +58,12 @@ def fetch_variable(repository: str, name: str, token: str) -> str | None:
 
 
 def eligible(event: str, ref: str, head_ref: str, head_repository: str, repository: str) -> bool:
+    if repository.casefold() != REPOSITORY.casefold():
+        return False
     if event == "push":
         return ref == "refs/heads/master"
     return (event == "pull_request" and head_ref.startswith("integrate/")
-            and bool(repository) and isinstance(head_repository, str)
+            and isinstance(head_repository, str)
             and head_repository.casefold() == repository.casefold())
 
 
@@ -101,10 +106,11 @@ def main() -> int:
     context = dict(event=os.environ.get("GITHUB_EVENT_NAME", ""), ref=os.environ.get("GITHUB_REF", ""),
                    head_ref=os.environ.get("GITHUB_HEAD_REF", ""), head_repository=head_repository,
                    repository=os.environ.get("GITHUB_REPOSITORY", ""))
-    result = live_choice(context, os.environ.get("PARITY_LINUX_STATUS_TOKEN", ""))
+    result = live_choice(context, os.environ.get("PARITY_VARS_READ_TOKEN", ""))
     if args.github_output:
         with args.github_output.open("a", encoding="utf-8") as stream:
             stream.write("selfhosted_suites=" + json.dumps(result["selfhosted_suites"]) + "\n")
+            stream.write("linux_pool=" + ("self-hosted" if result["selfhosted_suites"] else "hosted") + "\n")
     print(json.dumps(result))
     return 0
 
@@ -114,7 +120,7 @@ def live_choice(context: dict, token: str) -> dict:
     if not eligible(**context):
         return fallback("event is not a same-repository batch or master push")
     if not token:
-        return fallback("PARITY_LINUX_STATUS_TOKEN is missing; using hosted")
+        return fallback("PARITY_VARS_READ_TOKEN is missing; using hosted")
     try:
         value = fetch_variable(context["repository"], POOL_VARIABLE, token)
         health = fetch_variable(context["repository"], HEALTH_VARIABLE, token) if value == "self-hosted" else ""
