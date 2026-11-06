@@ -676,6 +676,14 @@ async fn db_dead_writer_session_reconnects_without_a_handover() {
 async fn db_reconnect_failing_after_the_lease_is_retried_once() {
     let Some(dsn) = test_dsn() else { return };
     let _guard = DB.lock().await;
+    // A panic below must not leave injected failures for the next test.
+    struct ResetInjection;
+    impl Drop for ResetInjection {
+        fn drop(&mut self) {
+            INJECT_EPOCH_READ_FAILURES.store(0, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+    let _reset = ResetInjection;
     let s = Storage::open(&dsn).await.expect("open");
     let e1 = s.lease_epoch();
     kill_writer(&s, &dsn).await;
