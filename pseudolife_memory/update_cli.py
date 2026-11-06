@@ -1922,10 +1922,10 @@ class Update:
         files = existing + ([overlay] if overlay not in existing else [])
         rust_path = None
         if engine == "rust" or rust_overlay:
-            beside = overlay.with_name(RUST_RELEASE_OVERLAY)
-            # The bundled copy is refreshed from this package; a checkout's is its own.
-            rust_path = (beside if beside.is_file() and overlay.parent != data_dir() / "compose"
-                         else self._bundled(RUST_RELEASE_OVERLAY))
+            # Always this package's copy: a checkout's ops/ is at whatever
+            # release it was cloned from, whose overlay may predate the model
+            # volume (the native updater likewise takes the release's own).
+            rust_path = self._bundled(RUST_RELEASE_OVERLAY)
             if engine == "rust":
                 files.append(rust_path)
         args = ["-p", project]

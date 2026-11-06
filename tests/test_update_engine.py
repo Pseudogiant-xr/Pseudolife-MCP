@@ -98,11 +98,19 @@ def test_release_compose_context_drops_engine_overlays_left_by_earlier_runs(tmp_
     stale = [tmp_path / "update-engine/docker-compose.engine-candidate-0123.json",
              tmp_path / "update-engine/docker-compose.rollback-20261107-000000-ab.json",
              tmp_path / "ops/docker-compose.rust-ghcr.yml"]
+    monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(tmp_path / "data"))
     ops = _release_labels(tmp_path, monkeypatch, stale)
     context = up.Update(up.Options(), log=lambda s: None).compose_context(engine=engine)
     files = [context["args"][i + 1] for i, a in enumerate(context["args"]) if a == "-f"]
     assert files[:2] == [str(ops / "docker-compose.yml"), str(ops / "docker-compose.ghcr.yml")]
-    assert files[2:] == ([str(ops / "docker-compose.rust-ghcr.yml")] if engine == "rust" else [])
+    # The deploy takes this package's Rust overlay, never the clone's (it may
+    # be older, without the model volume); a rollback takes the running one.
+    bundled = tmp_path / "data/compose/docker-compose.rust-ghcr.yml"
+    assert files[2:] == ([str(bundled)] if engine == "rust" else [])
+    if engine == "rust":
+        assert bundled.read_bytes() == (up.BUNDLED_COMPOSE / "docker-compose.rust-ghcr.yml").read_bytes()
+        assert "pseudolife_rust_models" in bundled.read_text(encoding="utf-8")
+        assert context["rust_overlay"] == str(ops / "docker-compose.rust-ghcr.yml")
 
 
 def test_release_rust_host_stays_on_the_release_path(tmp_path, monkeypatch):
