@@ -13,7 +13,6 @@ import pytest
 from tests.test_installer_client_only import ROOT
 from tests.test_installer_client_only_ps import _PowerShell, _output
 
-pytestmark = pytest.mark.skipif(os.name != "nt", reason="the py launcher probe is Windows-only")
 
 
 def _fake_py(tmp_path):
@@ -34,6 +33,7 @@ def _isolated_path(bin_dir):
     return f"{bin_dir}{os.pathsep}{system}"
 
 
+@pytest.mark.skipif(os.name != "nt", reason="the py launcher probe is Windows-only")
 def test_installer_python_probe_passes_minus_3_to_py_as_one_argument(tmp_path):
     import json
     source = (ROOT / "ops/install.ps1").read_text(encoding="utf-8")
@@ -50,9 +50,20 @@ def test_installer_python_probe_passes_minus_3_to_py_as_one_argument(tmp_path):
     assert f"FOUND:{sys.executable}" in output
 
 
-def test_every_py_probe_in_the_installer_builds_its_arguments_by_assignment():
-    # The Codex setup probe repeats the pattern; neither may use the
-    # if-expression form, which unrolls the one-item array.
-    source = (ROOT / "ops/install.ps1").read_text(encoding="utf-8")
+@pytest.mark.parametrize("script,probes", [("install.ps1", 2), ("preflight.ps1", 2), ("update.ps1", 1)])
+def test_every_py_probe_builds_its_arguments_by_assignment(script, probes):
+    # No ops script may use the if-expression form, which unrolls the
+    # one-item array (preflight runs on every install; update.ps1 would run
+    # `py - 3 update.py`, an empty script that exits 0).
+    source = (ROOT / "ops" / script).read_text(encoding="utf-8")
     assert '$probeArgs = if ($candidate -eq "py")' not in source
-    assert source.count('if ($candidate -eq "py") { $probeArgs = @("-3") }') == 2
+    assert source.count('if ($candidate -eq "py") { $probeArgs = @("-3") }') == probes
+
+
+def test_no_ops_script_splats_a_one_item_array_from_an_if_expression():
+    import re
+    pattern = re.compile(r"=\s*if\s*\(.*\)\s*\{\s*@\(\s*\"[^\",]*\"\s*\)\s*\}")
+    offenders = [f"{path.name}:{number}" for path in sorted((ROOT / "ops").glob("*.ps1"))
+                 for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1)
+                 if pattern.search(line)]
+    assert not offenders
