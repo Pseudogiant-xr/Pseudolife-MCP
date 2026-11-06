@@ -375,7 +375,10 @@ impl Update {
                 .as_ref()
                 .and_then(|v| v["hooks_digest"].as_str().map(str::to_owned))
         });
-        self.schema_before = before.as_ref().and_then(|v| v["schema"].as_i64());
+        if !self.after_import {
+            // The import legs report against the schema the update started from.
+            self.schema_before = before.as_ref().and_then(|v| v["schema"].as_i64());
+        }
         self.report.current = current.clone();
         self.refuse_downgrade(current.as_deref(), &target)?;
         if current.as_deref().is_some_and(|v| !safe_tag(v)) {
@@ -456,12 +459,18 @@ impl Update {
             )?;
             let host_rust = context.running["Config"]["Labels"][engine::ENGINE_LABEL] == "rust";
             if let Some(schema) = pending {
-                if host_rust || self.after_import {
-                    return Err(UpdateError::usage(if self.after_import {
-                        "the Python daemon did not import memory_state/weights.pt into cms_counters; the host stays on it. Check docker logs pseudolife-mcp-daemon for the import warning, then retry update --engine rust"
-                    } else {
-                        "Rust activation requires schema v57 or later and imported counters: run update --engine python, let the Python daemon import memory_state/weights.pt into cms_counters, then retry; nothing was changed"
-                    }));
+                if self.after_import {
+                    // The Python leg already changed the host: a failure, not a refusal.
+                    return Err(UpdateError::new(
+                        "the Python daemon did not import memory_state/weights.pt into cms_counters, so the host stays on Python at the target. If its log (docker logs pseudolife-mcp-daemon) says the counters cannot be read, the file is unreadable: move memory_state/weights.pt aside (the counters then restart from zero), then retry update --engine rust",
+                    ));
+                }
+                // Only a readable schema below v57, or a pending import, takes the
+                // import leg: an unreadable one would fail the Python daemon too.
+                if host_rust || schema < 0 {
+                    return Err(UpdateError::usage(
+                        "Rust activation requires schema v57 or later and imported counters: run update --engine python, let the Python daemon import memory_state/weights.pt into cms_counters, then retry; nothing was changed",
+                    ));
                 }
                 // G2-K: the Rust daemon never reads weights.pt. The Python
                 // daemon at the target imports it at startup, so update to that
@@ -475,12 +484,46 @@ impl Update {
                 self.step(format!(
                     "this bank ({shown}) still keeps its CMS counters in memory_state/weights.pt: moving to the Python daemon {target} first, which imports them, then to the Rust daemon"
                 ));
+                // The Rust image must exist before the Python leg changes anything.
+                let rust_image = format!("{RUST_IMAGE}:{target}");
+                self.step(format!("pulling {rust_image}..."));
+                if self
+                    .command(&["pull".into(), rust_image.clone()], None, 7200, true)
+                    .0
+                    != 0
+                {
+                    return Err(UpdateError::new(format!(
+                        "docker pull {rust_image} failed; nothing was changed. Is a Rust daemon image published for {target}? Use --engine python to stay on the Python daemon"
+                    )));
+                }
                 self.after_import = true;
                 let requested = self.o.engine.replace("python".into());
+                // A Python daemon already at the target must still restart to import.
+                let reinstall = std::mem::replace(&mut self.o.reinstall, true);
+                // Both legs tag a Python image of the same version: keep them apart.
+                let suffix = self.o.rollback_suffix.clone();
+                if !suffix.is_empty() {
+                    self.o.rollback_suffix = format!("{suffix}-pre-import");
+                }
                 let first = self.deploy_release(current.clone(), before_recreate, previous.clone());
+                self.o.reinstall = reinstall;
+                self.o.rollback_suffix = suffix;
+                if let Err(error) = first {
+                    self.o.engine = requested;
+                    return Err(error);
+                }
+                // Leg 2 is Rust at this target, whatever chose it, without asking
+                // the release index again.
+                let before_import = self.report.rollback.clone();
+                self.o.engine = Some("rust".into());
+                let tag = self.o.tag.replace(target.clone());
+                let second = self.deploy_release(Some(target.clone()), None, previous);
                 self.o.engine = requested;
-                first?;
-                return self.deploy_release(Some(target.clone()), None, previous);
+                self.o.tag = tag;
+                if self.report.rollback.is_object() {
+                    self.report.rollback["before_import"] = before_import;
+                }
+                return second;
             }
             // Refuse a misplaced model directory before the pull.
             model_volumes(&config)?;

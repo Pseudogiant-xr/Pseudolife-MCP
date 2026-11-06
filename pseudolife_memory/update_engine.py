@@ -549,7 +549,10 @@ class ReleaseEngineUpdate:
             pg = self.project_container(compose, environment, "pseudolife-pg")
             pending = self.import_pending(pg, user, db, daemon)
             labels_now = (running.get("Config") or {}).get("Labels") or {}
-            if pending is not None and labels_now.get(ENGINE_LABEL) != "rust" and not self.after_import:
+            # Only a readable schema below v57, or a pending import, takes the
+            # import leg: an unreadable one would fail the Python daemon too.
+            if (pending is not None and pending >= 0 and labels_now.get(ENGINE_LABEL) != "rust"
+                    and not self.after_import):
                 # G2-K: the Rust daemon never reads weights.pt. The Python
                 # daemon at the target imports it at startup, so update to that
                 # first (its own backup, rollback tag and gate), then move on.
@@ -557,16 +560,37 @@ class ReleaseEngineUpdate:
                 shown = f"v{pending}" if pending >= 0 else "an unreadable schema"
                 u.step(f"this bank ({shown}) still keeps its CMS counters in memory_state/weights.pt: moving to the "
                        f"Python daemon {self.target} first, which imports them, then to the Rust daemon")
+                # The Rust image must exist before the Python leg changes anything.
+                rust_image = f"{RUST_IMAGE}:{self.target}"
+                u.step(f"pulling {rust_image}...")
+                code, out = self.command(["pull", rust_image], timeout=7200, stream=not o.as_json)
+                if code:
+                    raise up.UpdateError(f"docker pull {rust_image} failed" + (f" ({up._last_line(out)})" if out.strip() else "")
+                                         + f"; nothing was changed. Is a Rust daemon image published for {self.target}? "
+                                         "Use --engine python to stay on the Python daemon")
                 self.started = True
-                ReleaseEngineUpdate(u, self.target, self.current, self.previous_digest, "python").run(before_recreate)
+                saved_suffix = o.rollback_suffix
+                if saved_suffix:
+                    # Both legs tag a Python image of the same version: keep them apart.
+                    o.rollback_suffix = f"{saved_suffix}-pre-import"
+                try:
+                    ReleaseEngineUpdate(u, self.target, self.current, self.previous_digest, "python").run(before_recreate)
+                finally:
+                    o.rollback_suffix = saved_suffix
+                # The original image's rollback stays in the report beside the second leg's.
+                before_import = dict(u.report.rollback or {})
                 follow = ReleaseEngineUpdate(u, self.target, self.target, self.previous_digest, "rust")
                 follow.after_import = True
-                return follow.run(None)
+                try:
+                    return follow.run(None)
+                finally:
+                    if isinstance(u.report.rollback, dict):
+                        u.report.rollback["before_import"] = before_import
             if pending is not None:
-                raise up.UpdateError("the Python daemon did not import memory_state/weights.pt into cms_counters; "
-                                     "the host stays on it. Check docker logs pseudolife-mcp-daemon for the import "
-                                     "warning, then retry update --engine rust" if self.after_import else
-                                     "Rust activation requires schema v57 or later and imported counters: run update "
+                if self.after_import:
+                    # The Python leg already changed the host: a failure, not a refusal.
+                    raise up.UpdateError("the Python daemon did not import memory_state/weights.pt into cms_counters, so the host stays on Python at the target. If its log (docker logs pseudolife-mcp-daemon) says the counters cannot be read, the file is unreadable: move memory_state/weights.pt aside (the counters then restart from zero), then retry update --engine rust", 1)
+                raise up.UpdateError("Rust activation requires schema v57 or later and imported counters: run update "
                                      "--engine python, let the Python daemon import memory_state/weights.pt into "
                                      "cms_counters, then retry; nothing was changed", 2)
             model_volumes(config)  # refuse a misplaced model directory before the pull
