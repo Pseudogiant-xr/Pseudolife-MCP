@@ -29,6 +29,12 @@ PR #1133 adds the native Codex bootstrap authority boundary and records the
 closed no-spawn planning difference.
 Native registration recovery adds the open rollback-ownership row below.
 
+The read-only shadow's peer `last_reported_at` row
+(`read-only-shadow/peer-last-reported-at-in-a-read-only.md`) is a no-caller
+disposition: the maintainer decided on 2026-11-07 (#1343) to declare it
+rather than persist the writer's in-memory episode touches. Writer mode is
+unaffected.
+
 The entry totals per D7 bucket are derived from the entry files, never
 committed here: `python rust/daemon/split_divergences.py --counts` prints them.
 
