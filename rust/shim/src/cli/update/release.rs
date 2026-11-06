@@ -942,11 +942,12 @@ fn running_config(running: &Value) -> Value {
     json!({"services": {DAEMON_SERVICE: {"environment": env}}})
 }
 
-/// `(source, target, Compose volume key)` mounts covering the models
-/// directory, or None when the daemon names its own ONNX model directory.
-fn model_volumes(
-    config: &Value,
-) -> Result<Option<(String, Vec<(String, String, Option<String>)>)>> {
+/// `(source, target, Compose volume key)`: one mount holding the models.
+type ModelMount = (String, String, Option<String>);
+
+/// The models directory and the mounts covering it, or None when the daemon
+/// names its own ONNX model directory.
+fn model_volumes(config: &Value) -> Result<Option<(String, Vec<ModelMount>)>> {
     let service = &config["services"][DAEMON_SERVICE];
     let env = &service["environment"];
     if env["PSEUDOLIFE_DAEMON_ONNX_DIR"]
