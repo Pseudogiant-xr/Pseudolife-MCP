@@ -334,6 +334,9 @@ GENERIC = re.compile(r"^session - \d{4}-\d{2}-\d{2} \d{2}:\d{2}$")
 # detached from its connection, so only the shutdown drain can observe it.
 MUTANTS = ["store-tags-raw", "store-skip-session-episode", "store-no-hint", "store-surprise-raw",
            "mcp-store-no-session",
+           # A band's retention_policy: caught by the store-capacity-*-heavy
+           # scenarios.
+           "store-evict-balanced-only",
            # /health's subsystem keys: caught by the health-* scenarios.
            "health-no-stall", "health-no-capacity-warning",
            # The counters row: caught by the counters-* scenarios.
@@ -788,6 +791,37 @@ SCENARIOS: dict[str, dict] = {
             store("Another thinking trace about indexes.", source="llm_thinking"),
             store("A second user statement about lunch.", source="user"),
         ],
+    },
+    # A band's retention_policy chooses the capacity victim
+    # (`MIRASBand._evict_one`, `retention.py`). With no reads every
+    # access_count is 0, so recency_heavy ranks by source weight alone (the
+    # first-stored agent entry goes first) while balanced and surprise_heavy
+    # weigh the surprise by 0.1 and 1.0. The balanced control runs the same
+    # stores under the default policy.
+    **{
+        f"store-capacity-{name}": {
+            "config": "memory:\n  miras:\n    preset: custom\n    bands:\n      - name: flat\n"
+                      f"        max_entries: 3\n{policy}",
+            "seed": [],
+            "ops": [
+                # Stored into an empty bank: surprise 1.0.
+                store("The deploy pipeline for the billing service runs at midnight."),
+                # A user paraphrase: low surprise, but the user source weighs 1.5.
+                store("The billing service deploy pipeline runs at midnight every day.",
+                      source="user"),
+                store("Penguins huddle together to survive the Antarctic winter."),
+                # At capacity from here: each store evicts the band's lowest score.
+                store("A sourdough starter needs feeding twice a day."),
+                store("Glaciers carve U-shaped valleys as they retreat."),
+                store("The billing deploy pipeline is scheduled for midnight.", source="user"),
+                store("Octopuses have three hearts and blue blood."),
+            ],
+        }
+        for name, policy in (
+            ("recency-heavy", "        retention_policy: recency_heavy\n"),
+            ("surprise-heavy", "        retention_policy: surprise_heavy\n"),
+            ("balanced-control", ""),
+        )
     },
     # A bank seeded by Python: a registered session, a closed root, an open
     # root, the active-session pointer, and a tombstone.

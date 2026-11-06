@@ -416,6 +416,20 @@ impl std::fmt::Display for StaleDims {
 impl std::error::Error for StaleDims {}
 
 fn retention_score(entry: &Entry, policy: &str, now: f64, boost: f64) -> f64 {
+    retention_score_as(entry, policy, entry.superseded_at.is_some(), now, boost)
+}
+
+/// `RetentionPolicy.source_weighted_score` under the band's named policy
+/// (`protocols.py:84-103`, `retention.py:37-71`), with the entry's
+/// retirement given: a correction chooses its victim with its targets
+/// already retired.
+pub(crate) fn retention_score_as(
+    entry: &Entry,
+    policy: &str,
+    superseded: bool,
+    now: f64,
+    boost: f64,
+) -> f64 {
     let age = (now - entry.ts).max(1.0);
     let base = match policy {
         "balanced" => {
@@ -437,11 +451,7 @@ fn retention_score(entry: &Entry, policy: &str, now: f64, boost: f64) -> f64 {
         _ => 1.0,
     };
     let score = (base + 1.0) * weight + boost * f64::from(entry.reinforcements).ln_1p();
-    if entry.superseded_at.is_some() {
-        score * 0.05
-    } else {
-        score
-    }
+    if superseded { score * 0.05 } else { score }
 }
 
 #[cfg(test)]

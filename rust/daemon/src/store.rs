@@ -2,7 +2,7 @@
 //! `ContinuumMemorySystem._store`.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::atomic::AtomicI64;
 
 use serde_json::{Map, Value, json};
 
@@ -150,27 +150,18 @@ fn dot(a: &[f32], b: &[f32]) -> f32 {
 
 /// `RetentionPolicy.source_weighted_score` under `balanced`
 /// (`protocols.py:84-103`, `retention.py:37-47`).
+#[cfg(test)]
 fn retention_score(e: &Entry, now: f64, boost: f64) -> f64 {
-    retention_score_as(e, e.superseded_at.is_some(), now, boost)
+    retention_score_as(e, "balanced", e.superseded_at.is_some(), now, boost)
 }
 
-/// [`retention_score`] with the entry's retirement given: a correction
-/// chooses its eviction victim with its targets already retired.
-fn retention_score_as(e: &Entry, superseded: bool, now: f64, boost: f64) -> f64 {
-    let age = (now - e.ts).max(1.0);
-    let balanced = e.access_count.load(Ordering::Relaxed) as f64 / age + e.surprise_value * 0.1;
-    let weight = match e.source.as_str() {
-        "user_msg" | "user" => 1.5,
-        "system" => 10.0,
-        "tool_call" => 0.5,
-        "llm_thinking" => 0.2,
-        _ => 1.0,
-    };
-    let mut score = (balanced + 1.0) * weight + boost * (e.reinforcements as f64).ln_1p();
-    if superseded {
-        score *= 0.05;
+/// The source-weighted retention score under the band's named policy
+/// (`crate::bank::retention_score_as`).
+fn retention_score_as(e: &Entry, policy: &str, superseded: bool, now: f64, boost: f64) -> f64 {
+    if crate::mutants::active("store-evict-balanced-only") {
+        return crate::bank::retention_score_as(e, "balanced", superseded, now, boost);
     }
-    score
+    crate::bank::retention_score_as(e, policy, superseded, now, boost)
 }
 
 /// The CMS half of the scan: per-band surprise, the coreference-aware slots
@@ -402,23 +393,38 @@ pub(crate) fn first_band_victim(
     cfg: &MemoryConfig,
     retiring: &[i64],
 ) -> Option<usize> {
+    let bank = ready.bank.read().expect("bank lock");
+    victim_in(&bank, cfg, retiring, episodes::now)
+}
+
+/// [`first_band_victim`] over a bank already read; `now` is read once, only
+/// when the band is at capacity.
+fn victim_in(
+    bank: &Bank,
+    cfg: &MemoryConfig,
+    retiring: &[i64],
+    now: impl FnOnce() -> f64,
+) -> Option<usize> {
     let band0 = &cfg.bands[0];
     let cap = cfg
         .band_specs
         .first()
         .map(|b| b.max_entries as i64)
         .unwrap_or(i64::MAX);
-    let bank = ready.bank.read().expect("bank lock");
+    let policy = cfg
+        .band_specs
+        .first()
+        .map_or("balanced", |b| b.retention_policy.as_str());
     let held: Vec<usize> = (0..bank.entries.len())
         .filter(|&i| bank.entries[i].band == *band0)
         .collect();
     let score = |i: usize, t: f64| {
         let e = &bank.entries[i];
         let superseded = e.superseded_at.is_some() || retiring.contains(&e.id);
-        retention_score_as(e, superseded, t, cfg.retention_boost)
+        retention_score_as(e, policy, superseded, t, cfg.retention_boost)
     };
     (held.len() as i64 >= cap && !held.is_empty()).then(|| {
-        let t = episodes::now();
+        let t = now();
         let mut worst = held[0];
         let mut worst_score = score(worst, t);
         for &i in &held[1..] {
@@ -945,5 +951,84 @@ mod tests {
         // ((4/50 + 0.05) + 1) * 1.5 + 1.0 * log1p(3)
         let want = (4.0 / 50.0 + 0.05 + 1.0) * 1.5 + 3f64.ln_1p();
         assert!((retention_score(&e, 150.0, 1.0) - want).abs() < 1e-12);
+    }
+
+    /// The capacity victim follows the first band's configured
+    /// `retention_policy` (`MIRASBand._evict_one`): at capacity two, the
+    /// read-often entry goes under `balanced` and the unread novel one under
+    /// `recency_heavy`; below capacity nothing is chosen.
+    #[test]
+    fn capacity_victim_follows_the_configured_band_policy() {
+        let now = 100_000.0;
+        let bank = Bank {
+            dim: 0,
+            entries: vec![
+                Entry {
+                    band: "flat".into(),
+                    ts: now - 2.0 * 3600.0,
+                    access_count: AtomicI64::new(6),
+                    ..Default::default()
+                },
+                Entry {
+                    band: "flat".into(),
+                    ts: now - 10.0,
+                    surprise_value: 0.9,
+                    ..Default::default()
+                },
+            ],
+            matrix: vec![],
+        };
+        let with = |policy: &str, cap: usize| {
+            let mut cfg = MemoryConfig::default();
+            assert_eq!(cfg.bands, ["flat"]);
+            cfg.band_specs[0].retention_policy = policy.into();
+            cfg.band_specs[0].max_entries = cap;
+            cfg.retention_boost = 0.0;
+            victim_in(&bank, &cfg, &[], || now)
+        };
+        assert_eq!(with("balanced", 2), Some(0));
+        assert_eq!(with("surprise_heavy", 2), Some(0));
+        assert_eq!(with("recency_heavy", 2), Some(1));
+        assert_eq!(with("recency_heavy", 3), None);
+    }
+
+    /// The scorer itself under each named policy (`retention.py`): two
+    /// entries that `recency_heavy` ranks against `balanced` and
+    /// `surprise_heavy`, and the gap the surprise weight makes.
+    #[test]
+    fn eviction_follows_the_band_retention_policy() {
+        let now = 100_000.0;
+        // Old, much read, unsurprising.
+        let read_often = Entry {
+            ts: now - 2.0 * 3600.0,
+            surprise_value: 0.0,
+            access_count: AtomicI64::new(6),
+            ..Default::default()
+        };
+        // New, unread, novel.
+        let novel = Entry {
+            ts: now - 10.0,
+            surprise_value: 0.9,
+            access_count: AtomicI64::new(0),
+            ..Default::default()
+        };
+        let lower = |policy: &str| {
+            let a = retention_score_as(&read_often, policy, false, now, 0.0);
+            let b = retention_score_as(&novel, policy, false, now, 0.0);
+            if a < b { "read_often" } else { "novel" }
+        };
+        // balanced: 6/7200 + 0 < 0/10 + 0.09.
+        assert_eq!(lower("balanced"), "read_often");
+        // recency_heavy: 6 * (1 + 2^-2) > 0 * (1 + 2^-(10/3600)).
+        assert_eq!(lower("recency_heavy"), "novel");
+        // surprise_heavy: 6/7200 + 0 < 0/10 + 0.9.
+        assert_eq!(lower("surprise_heavy"), "read_often");
+        // The two scores differ under surprise_heavy by the full surprise.
+        let gap = |policy: &str| {
+            retention_score_as(&novel, policy, false, now, 0.0)
+                - retention_score_as(&read_often, policy, false, now, 0.0)
+        };
+        assert!((gap("surprise_heavy") - (0.9 - 6.0 / 7200.0)).abs() < 1e-12);
+        assert!((gap("balanced") - (0.09 - 6.0 / 7200.0)).abs() < 1e-12);
     }
 }

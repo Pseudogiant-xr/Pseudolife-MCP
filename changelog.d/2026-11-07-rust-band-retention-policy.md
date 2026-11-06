@@ -1,0 +1,2 @@
+### Fixed (2026-11-07 — Rust daemon evicts by a custom band's own retention policy)
+- A `preset: custom` band configured with `retention_policy: recency_heavy` or `surprise_heavy` was evicted at capacity as if it were `balanced` by the Rust daemon, so it dropped different memories than the Python daemon. Store and digest eviction now score victims with the first band's configured policy, as the Python daemon does and as the Rust daemon's startup seating already did.
