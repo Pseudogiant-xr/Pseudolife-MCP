@@ -426,9 +426,18 @@ impl Update {
             match attempt {
                 Err(error) if !self.release_started => {
                     self.defaulted_engine = false;
+                    // The cause only: the refusal's own advice (--engine python)
+                    // would opt the host out of the default for good.
+                    let first = error.message.lines().next().unwrap_or("");
+                    let reason = first
+                        .split(';')
+                        .next()
+                        .unwrap_or("")
+                        .split(": run ")
+                        .next()
+                        .unwrap_or("");
                     self.warn(format!(
-                        "not moving to the {choice} daemon: {}",
-                        error.message.lines().next().unwrap_or("")
+                        "not moving to the {choice} daemon this time: {reason}"
                     ));
                     self.step(format!("staying on the {selected} daemon for this update"));
                     if current.as_deref() == Some(&target) && !self.o.reinstall {
@@ -457,8 +466,11 @@ impl Update {
             before,
             before_recreate,
         );
-        if result.is_ok() && self.o.engine.as_deref() == Some("python") {
-            engine::record_choice("python")?;
+        if result.is_ok()
+            && self.o.engine.as_deref() == Some("python")
+            && engine::record_choice("python").is_err()
+        {
+            self.warn("the switch succeeded, but the Python choice could not be recorded; a later update may move this host to the default engine");
         }
         result
     }
@@ -616,7 +628,6 @@ impl Update {
             // health gate. The running daemon keeps serving meanwhile.
             self.provision_models(&image, &config)?;
         }
-        self.release_started = true;
         let backups = if self.o.no_backup {
             self.warn("skipping backup (--no-backup)");
             json!({})
@@ -646,6 +657,9 @@ impl Update {
                 &data_dir().join("backups"),
             )?
         };
+        // A backup changes nothing on the host: a refused one still lets a
+        // defaulted move fall back to the ordinary update.
+        self.release_started = true;
         if let Some(callback) = before_recreate.as_mut() {
             callback()?;
         }
@@ -1188,7 +1202,12 @@ impl Update {
                 .is_some_and(|s| !s.is_empty())
             || !matches!(engine::selection(&engine::release_accepted()), Ok(None))
             || engine::recorded_choice().is_some();
-        if chosen || self.o.unattended || self.o.no_backup || DEFAULT_ENGINE == selected {
+        if chosen
+            || self.o.unattended
+            || self.o.no_backup
+            || self.o.allow_auth_change
+            || DEFAULT_ENGINE == selected
+        {
             return (selected.to_owned(), false);
         }
         let image = format!("{RUST_IMAGE}:{target}");

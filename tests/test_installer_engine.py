@@ -196,7 +196,7 @@ def test_a_defaulted_rust_install_falls_back_to_python_when_rust_is_unavailable(
     module, state, repo = helper
     state["fail"] = failure
     assert module.prepare(repo, "rust", default=True) == []
-    assert "Python daemon instead" in capsys.readouterr().err
+    assert "this install uses the Python daemon" in capsys.readouterr().err
     assert not module.overlay_path().exists()
 
 

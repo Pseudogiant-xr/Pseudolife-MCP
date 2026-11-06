@@ -1677,7 +1677,10 @@ class Update:
                 if not (defaulted and getattr(exc, "before_change", False)):
                     raise
                 # The default never blocks an ordinary update: stay on Python.
-                self.warn(f"not moving to the {choice} daemon: {str(exc).splitlines()[0]}")
+                # The cause only: the refusal's own advice (--engine python)
+                # would opt the host out of the default for good.
+                reason = str(exc).splitlines()[0].split(";")[0].split(": run ")[0]
+                self.warn(f"not moving to the {choice} daemon this time: {reason}")
                 self.step(f"staying on the {selected} daemon for this update")
                 if current == target and not self.o.reinstall:
                     self.step(f"the daemon already runs {target}; nothing to do")

@@ -271,7 +271,8 @@ def release_engine_choice(update, target: str | None = None) -> tuple[str, str, 
         return selected, update.o.engine, False
     chosen = (selected == "rust" or bool(labels.get(ACTIVATION_LABEL))
               or recorded_release_engine() is not None or recorded_choice() is not None)
-    if (chosen or update.o.unattended or update.o.no_backup or DEFAULT_ENGINE == selected
+    if (chosen or update.o.unattended or update.o.no_backup or update.o.allow_auth_change
+            or DEFAULT_ENGINE == selected
             or target is None):
         return selected, selected, False
     if not rust_image_published(update, target):
@@ -397,7 +398,11 @@ def deploy_release_engine(update, target: str, current: str | None, previous_dig
         exc.before_change = not engine.started
         raise
     if choice == "python":
-        record_choice("python")
+        try:
+            record_choice("python")
+        except OSError as exc:
+            update.warn(f"the switch succeeded, but the Python choice could not be recorded ({exc}); "
+                        "a later update may move this host to the default engine")
 
 
 class ReleaseEngineUpdate:
@@ -639,8 +644,10 @@ class ReleaseEngineUpdate:
                                  f"update to a release at schema v{bank} or later; nothing was changed", 2)
         if self.engine == "rust":
             self.provision_models(image, config)
-        self.started = True
+        # A backup changes nothing on the host: a refused one still lets a
+        # defaulted move fall back to the ordinary update.
         self.backup(context["checkout"])
+        self.started = True
         if before_recreate is not None:
             before_recreate()
         running_id, _ref = u.running_image()

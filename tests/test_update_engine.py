@@ -249,6 +249,7 @@ def test_engine_selection_never_moves_the_clients(monkeypatch):
     ("unchosen", "rust"), ("unpublished", "python"), ("chose-python", "python"), ("unattended", "python"),
     ("explicit-python", "python"), ("runs-rust", "rust"), ("no-backup", "python"),
     ("activation-label", "python"), ("recorded-choice", "python"), ("unreadable-record", "python"),
+    ("allow-auth-change", "python"),
 ])
 def test_default_engine_moves_only_an_unchosen_attended_host(tmp_path, monkeypatch, case, expected):
     from pseudolife_memory import update_engine as eng
@@ -271,7 +272,7 @@ def test_default_engine_moves_only_an_unchosen_attended_host(tmp_path, monkeypat
         return 0, json.dumps(labels)
     monkeypatch.setattr(up, "run_cli", run)
     options = up.Options(unattended=case == "unattended", engine="python" if case == "explicit-python" else None,
-                         no_backup=case == "no-backup")
+                         no_backup=case == "no-backup", allow_auth_change=case == "allow-auth-change")
     update = up.Update(options, log=lambda s: None)
     assert eng.release_engine_choice(update, "0.23.0")[1] == expected
 

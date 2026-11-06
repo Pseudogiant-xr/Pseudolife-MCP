@@ -1335,7 +1335,10 @@ if (-not $ClientOnly) {
         if ($Engine) { $composeEngine = $Engine }
         # An existing bank moves only through update's checks, which its own
         # default does on the next attended update.
-        elseif ($bankExisted) { $composeEngine = 'python' }
+        elseif ($bankExisted) {
+            $composeEngine = 'python'
+            Step "Daemon engine: python for this existing bank; the next attended pseudolife-mcp update moves it to Rust after its checks"
+        }
         elseif ($rustBearer) { $composeEngine = 'rust'; $engineDefaulted = $true }
         else { $composeEngine = 'python'; Step "Daemon engine: python (no bearer token for the default Rust daemon)" }
         # An existing bank reaches Rust only through update, which checks its

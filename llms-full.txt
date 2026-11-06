@@ -27,8 +27,10 @@ image or its models cannot be downloaded, or when the bank already exists
 (the next attended `pseudolife-mcp update` moves that bank, after its own
 checks). `ops/install.sh --engine python` (Windows: `ops/install.ps1
 -Engine python`) chooses Python and records that choice, so later updates
-keep it. `--engine rust` names Rust explicitly: in the cases above it
-refuses, names `--engine python`, and starts nothing.
+keep it. `--engine rust` names Rust explicitly: without a bearer, image or
+models it refuses, names `--engine python`, and starts nothing; for a bank
+that already exists it installs on Python and then switches through update
+(below).
 
 A rerun keeps the engine already installed, also after `docker compose
 down`. A Rust daemon stays on the release it was installed or last updated

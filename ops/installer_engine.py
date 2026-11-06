@@ -190,7 +190,11 @@ def preflight_disk() -> None:
 def provision(image: str) -> None:
     preflight_disk()
     print(f"Pulling the Rust daemon image {image}...", file=sys.stderr)
-    if docker("pull", image, capture=False, timeout=7200).returncode:
+    try:
+        pulled = docker("pull", image, capture=False, timeout=7200).returncode == 0
+    except Refusal:
+        pulled = False  # a pull that timed out: Rust is unavailable here, not Docker
+    if not pulled:
         raise Unavailable(f"Cannot pull {image}: this release may not publish a Rust daemon image. Rerun with "
                       "--engine python (-Engine python) to install the Python daemon. Nothing was started.")
     volume = f"{PROJECT}_{MODELS_VOLUME}"
@@ -246,7 +250,9 @@ def prepare(repo: Path, engine: str, default: bool = False) -> list[Path]:
             raise
         # The default engine falls back to Python; an explicit --engine rust
         # refuses. Low disk or an unreachable Docker refuse either way.
-        print(f"{exc} The installer uses the Python daemon instead.", file=sys.stderr)
+        cause = str(exc).split(";")[0].split(". Rerun")[0].split(". Nothing")[0].rstrip(".")
+        print(f"{cause}. The default Rust daemon is unavailable, so this install uses the Python daemon.",
+              file=sys.stderr)
         return []
     return [write_overlay({"image": image, "labels": {eng.ENGINE_LABEL: "rust", eng.ACTIVATION_LABEL: secrets.token_hex(16),
                                                       eng.RELEASE_LABEL: version}})]

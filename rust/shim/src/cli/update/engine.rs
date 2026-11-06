@@ -16,7 +16,13 @@ pub(super) fn choice_path() -> PathBuf {
     data_dir().join("update-engine/engine-choice.json")
 }
 pub(super) fn recorded_choice() -> Option<String> {
-    let bytes = fs::read(choice_path()).ok()?;
+    // Only a missing file means "no choice": an unreadable one (permissions,
+    // a Windows sharing violation) still keeps the host's choice.
+    let bytes = match fs::read(choice_path()) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(_) => return Some("unknown".to_owned()),
+    };
     let value: Value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
     Some(match value["engine"].as_str() {
         Some(engine @ ("python" | "rust")) => engine.to_owned(),
