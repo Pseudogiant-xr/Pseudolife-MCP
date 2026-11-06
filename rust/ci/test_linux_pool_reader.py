@@ -165,3 +165,28 @@ def test_unexpected_planner_errors_exit_successfully_with_hosted_output(tmp_path
     assert output.read_text().splitlines() == ["selfhosted_suites=[]", "linux_pool=hosted", "windows_suites=[]"]
     captured = capsys.readouterr()
     assert "fixture-reader-token" not in captured.out + captured.err
+
+
+def test_linux_lines_are_written_before_any_windows_read(tmp_path, monkeypatch):
+    # A slow Windows read that outlives the step must not cost the Linux route.
+    event = tmp_path / "event.json"
+    event.write_text("{}")
+    output = tmp_path / "output"
+    for key, value in {"GITHUB_EVENT_PATH": str(event), "GITHUB_EVENT_NAME": "push",
+                       "GITHUB_REF": "refs/heads/master", "GITHUB_REPOSITORY": pool.REPOSITORY,
+                       "PARITY_VARS_READ_TOKEN": "fixture-reader-token"}.items():
+        monkeypatch.setenv(key, value)
+    seen_at_windows_read = []
+
+    def read(repository, name, token):
+        if name.startswith("PARITY_BATCH_WINDOWS") or name == "PARITY_WINDOWS_HEALTH":
+            seen_at_windows_read.append(output.read_text().splitlines())
+            raise pool.ReadError("availability read failed (timeout)")
+        return "hosted"
+
+    monkeypatch.setattr(pool, "fetch_variable", read)
+    import sys
+    monkeypatch.setattr(sys, "argv", ["linux_pool.py", "--github-output", str(output)])
+    assert pool.main() == 0
+    assert seen_at_windows_read == [["selfhosted_suites=[]", "linux_pool=hosted"]]
+    assert output.read_text().splitlines()[-1] == "windows_suites=[]"

@@ -116,6 +116,13 @@ def main() -> int:
         # The planner is an optimization. Do not turn an unexpected reader
         # or parser error into a red check that prevents a hosted batch.
         result = {"selfhosted_suites": [], "reason": "availability could not be verified; using hosted"}
+    # Linux's choice is written before the Windows reads start, so a slow or
+    # killed Windows read can only leave windows_suites unset (hosted).
+    if args.github_output:
+        with args.github_output.open("a", encoding="utf-8") as stream:
+            stream.write("selfhosted_suites=" + json.dumps(result["selfhosted_suites"]) + "\n")
+            stream.write("linux_pool=" + ("self-hosted" if result["selfhosted_suites"] else "hosted") + "\n")
+    print(json.dumps(result), flush=True)
     try:
         # Each pool decides alone: a Windows failure never moves Linux.
         import windows_pool
@@ -124,10 +131,7 @@ def main() -> int:
         windows = {"windows_suites": [], "reason": "availability could not be verified; using hosted"}
     if args.github_output:
         with args.github_output.open("a", encoding="utf-8") as stream:
-            stream.write("selfhosted_suites=" + json.dumps(result["selfhosted_suites"]) + "\n")
-            stream.write("linux_pool=" + ("self-hosted" if result["selfhosted_suites"] else "hosted") + "\n")
             stream.write("windows_suites=" + json.dumps(windows["windows_suites"]) + "\n")
-    print(json.dumps(result))
     print(json.dumps(windows))
     return 0
 
