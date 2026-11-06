@@ -963,7 +963,7 @@ if [ -n "$ENGINE" ] && [ -n "$CLIENT_ONLY" ]; then
 fi
 # Rust needs a bearer: --no-token mints none, and neither does --transport
 # http unless ops/.env already sets one.
-if [ "$ENGINE" = rust ] && { [ -n "$NO_TOKEN" ] || { [ "$TRANSPORT" = http ] \
+if [ "$ENGINE" = rust ] && { [ -n "$NO_TOKEN" ] || { [ "$TRANSPORT" = http ] && [ -z "${PSEUDOLIFE_MCP_TOKEN:-}${PSEUDOLIFE_MCP_TOKENS:-}" ] \
         && ! { [ -f "$env_file" ] && grep -Eq '^PSEUDOLIFE_MCP_TOKENS?=[^[:space:]]' "$env_file"; }; }; }; then
     echo "--engine rust needs the daemon's bearer token: pseudolife-mcp update verifies the Rust daemon with an authenticated read, and this install would mint none (--no-token, or --transport http with no token in ops/.env). Drop that option or use --engine python. Nothing was changed." >&2
     exit 2
@@ -3525,7 +3525,7 @@ if [ -z "$CLIENT_ONLY" ]; then
     step "Healthy: http://127.0.0.1:8765/health (Console: http://127.0.0.1:8765/ui/)"
     if [ "${COMPOSE_ENGINE:-python}" = rust ]; then
         # Recorded only now, as update records its own after its health gate.
-        engine_status="$(engine_helper accept --env-file "$env_file")" || exit 1
+        engine_status="$(engine_helper accept)" || exit 1
         [ "$engine_status" != accepted ] || step "Rust daemon selection recorded; pseudolife-mcp update keeps it"
     fi
     endpoint_container_probe
@@ -3733,8 +3733,8 @@ if [ -n "${SWITCH_ENGINE:-}" ]; then
     switch_version="$( { curl -fsS --max-time 3 http://127.0.0.1:8765/health 2>/dev/null || true; } \
         | sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
     switch_args=(update --engine "$SWITCH_ENGINE" --daemon-only)
-    if [ "$INSTALLED_ENGINE" = rust-checkout ]; then switch_args+=(--checkout "$repo")
-    elif [ -n "$switch_version" ]; then switch_args+=(--tag "$switch_version")
+    # (A checkout-mode Rust host never gets here: stage 4b refuses it.)
+    if [ -n "$switch_version" ]; then switch_args+=(--tag "$switch_version")
     else
         # Without --tag, update would move to the newest release instead.
         echo "The installed daemon was kept: its version could not be read from http://127.0.0.1:8765/health, so the switch to $SWITCH_ENGINE did not run. Run: pseudolife-mcp update --engine $SWITCH_ENGINE --daemon-only --tag <the daemon's version>" >&2

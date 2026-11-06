@@ -896,7 +896,7 @@ if ($Engine -and $ClientOnly) {
 }
 # Rust needs a bearer: -NoToken mints none, and neither does -Transport http
 # unless ops/.env already sets one.
-$envHasToken = (Test-Path $envFile) -and [bool](Select-String -LiteralPath $envFile -Pattern '^PSEUDOLIFE_MCP_TOKENS?=\S' -Quiet)
+$envHasToken = [bool]"$env:PSEUDOLIFE_MCP_TOKEN$env:PSEUDOLIFE_MCP_TOKENS" -or ((Test-Path $envFile) -and [bool](Select-String -LiteralPath $envFile -Pattern '^PSEUDOLIFE_MCP_TOKENS?=\S' -Quiet))
 if ($Engine -eq 'rust' -and ($NoToken -or ($Transport -eq 'http' -and -not $envHasToken))) {
     [Console]::Error.WriteLine("-Engine rust needs the daemon's bearer token: pseudolife-mcp update verifies the Rust daemon with an authenticated read, and this install would mint none (-NoToken, or -Transport http with no token in ops/.env). Drop that option or use -Engine python. Nothing was changed.")
     exit 2
@@ -3328,7 +3328,7 @@ if (-not $ClientOnly) {
     Step "Healthy: http://127.0.0.1:8765/health (Console: http://127.0.0.1:8765/ui/)"
     if ($composeEngine -eq 'rust') {
         # Recorded only now, as update records its own after its health gate.
-        $engineStatus = "$(Invoke-EngineHelper accept --env-file $envFile)".Trim()
+        $engineStatus = "$(Invoke-EngineHelper accept)".Trim()
         if ($LASTEXITCODE -ne 0) { exit 1 }
         if ($engineStatus -eq 'accepted') { Step "Rust daemon selection recorded; pseudolife-mcp update keeps it" }
     }
@@ -3557,8 +3557,8 @@ if ($switchEngine) {
     $switchVersion = $null
     try { $switchVersion = (Invoke-RestMethod -Uri "http://127.0.0.1:8765/health" -TimeoutSec 3).version } catch { }
     $switchArgs = @('update', '--engine', $switchEngine, '--daemon-only')
-    if ($installedEngine -eq 'rust-checkout') { $switchArgs += @('--checkout', $repo) }
-    elseif ($switchVersion) { $switchArgs += @('--tag', "$switchVersion") }
+    # (A checkout-mode Rust host never gets here: stage 4b refuses it.)
+    if ($switchVersion) { $switchArgs += @('--tag', "$switchVersion") }
     else {
         # Without --tag, update would move to the newest release instead.
         [Console]::Error.WriteLine("The installed daemon was kept: its version could not be read from http://127.0.0.1:8765/health, so the switch to $switchEngine did not run. Run: pseudolife-mcp update --engine $switchEngine --daemon-only --tag <the daemon's version>")

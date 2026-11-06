@@ -101,8 +101,13 @@ def detect(repo: Path | None = None) -> str:
         # `docker compose down` removes the container, not the selection. A
         # checkout-mode selection made after it supersedes it.
         release = accepted_release()
-        stamp = eng.release_accepted().stat().st_mtime_ns if release else -1
-        newest, choice = stamp, "rust" if release else "none"
+        try:
+            # A release-mode switch back to Python leaves a python record: it counts too.
+            recorded = eng._selection(up.data_dir(), eng.RELEASE_ACCEPTED)
+        except up.UpdateError:
+            recorded = None
+        stamp = eng.release_accepted().stat().st_mtime_ns if recorded else -1
+        newest, choice = stamp, "rust" if release else "python" if recorded else "none"
         for name, engine in ((eng.PYTHON_ACCEPTED, "python"), (eng.SELECTION, "rust-checkout")):
             path = repo / name if repo else None
             if path and path.is_file() and path.stat().st_mtime_ns > newest:
@@ -245,18 +250,22 @@ def image_schema(image: str) -> int | None:
     return int(text) if result.returncode == 0 and text.isdigit() else None
 
 
-def bearer(env_file: Path | None) -> str:
-    """The daemon's bearer from the install's env file, as Compose passes it."""
+def bearer() -> str:
+    """The bearer the running daemon was started with: its container
+    environment is what Compose resolved, from ops/.env, the caller's
+    environment or interpolation alike. Never printed."""
     from pseudolife_memory.principals import parse_token_map
-    values = {}
-    for line in (env_file.read_text(encoding="utf-8").splitlines() if env_file and env_file.is_file() else []):
-        key, sep, value = line.strip().partition("=")
-        if sep and key in ("PSEUDOLIFE_MCP_TOKEN", "PSEUDOLIFE_MCP_TOKENS"):
-            values[key] = value.strip().strip('"').strip("'")
-    return values.get("PSEUDOLIFE_MCP_TOKEN") or next(iter(parse_token_map(values.get("PSEUDOLIFE_MCP_TOKENS"))), "")
+    result = docker("inspect", "-f", "{{json .Config.Env}}", up.DAEMON_CONTAINER)
+    try:
+        entries = json.loads(result.stdout.strip() or "[]") if result.returncode == 0 else []
+    except ValueError:
+        entries = []
+    values = dict(item.split("=", 1) for item in entries if isinstance(item, str) and "=" in item)
+    return (values.get("PSEUDOLIFE_MCP_TOKEN")
+            or next(iter(parse_token_map(values.get("PSEUDOLIFE_MCP_TOKENS"))), ""))
 
 
-def accept(url: str = up.DEFAULT_DAEMON_URL, env_file: Path | None = None) -> str:
+def accept(url: str = up.DEFAULT_DAEMON_URL) -> str:
     found = labels() or {}
     if not overlay_path().is_file() or found.get(eng.ENGINE_LABEL) != "rust" or not found.get(eng.RELEASE_LABEL):
         return "not-applicable"
@@ -266,14 +275,31 @@ def accept(url: str = up.DEFAULT_DAEMON_URL, env_file: Path | None = None) -> st
     if service["labels"].get(eng.ACTIVATION_LABEL) != found.get(eng.ACTIVATION_LABEL):
         raise Refusal("The running daemon is not the one this install started; rerun the installer. "
                       "The Rust selection was not recorded.")
+    unrecorded = " The Rust selection was not recorded."
     state = health(url) or {}
-    if (state.get("status") != "ok" or state.get("ready") is not True or state.get("counters_import_required")
-            or state.get("version") != service["labels"].get(eng.RELEASE_LABEL)
-            or state.get("schema") != image_schema(service["image"])
-            or not eng.authenticated_read(url, bearer(env_file))):
-        raise Refusal("The Rust daemon is not ready at its release and schema, reports counters still to import, or "
-                      "refused an authenticated bank read; check docker logs pseudolife-mcp-daemon and rerun. "
-                      "The Rust selection was not recorded.")
+    release = service["labels"].get(eng.RELEASE_LABEL)
+    if state.get("status") != "ok" or state.get("ready") is not True:
+        raise Refusal("The Rust daemon is not ready yet; check docker logs pseudolife-mcp-daemon and rerun." + unrecorded)
+    if state.get("version") != release:
+        raise Refusal(f"The daemon reports version {state.get('version')}, not the {release} this install started; "
+                      "check docker compose ps for the daemon's image and rerun." + unrecorded)
+    if state.get("counters_import_required"):
+        raise Refusal("The Rust daemon reports counters still to import from memory_state/weights.pt; install with "
+                      "--engine python, then switch with pseudolife-mcp update --engine rust." + unrecorded)
+    schema = image_schema(service["image"])
+    if schema is None or state.get("schema") != schema:
+        raise Refusal(f"The daemon reports schema {state.get('schema')}, and the image's own schema could not be read "
+                      f"or differs ({schema}); check docker logs pseudolife-mcp-daemon and rerun." + unrecorded)
+    token = bearer()
+    if not token or "\r" in token or "\n" in token:
+        # update verifies a Rust daemon with an authenticated read: without a
+        # bearer the host could never be updated.
+        raise Refusal("The Rust daemon runs without a bearer token, so pseudolife-mcp update could not verify it; "
+                      "rerun the installer without --no-token (its token step names any failure), or use "
+                      "--engine python." + unrecorded)
+    if not eng.authenticated_read(url, token):
+        raise Refusal("The Rust daemon refused an authenticated bank read with its own bearer; check docker logs "
+                      "pseudolife-mcp-daemon and rerun." + unrecorded)
     eng._write_overlay(eng.release_accepted(), service)
     return "accepted"
 
@@ -283,7 +309,6 @@ def main(argv=None) -> int:
     parser.add_argument("action", choices=("detect", "prepare", "accept"))
     parser.add_argument("--repo", type=Path)
     parser.add_argument("--engine", choices=("python", "rust", "rust-checkout"))
-    parser.add_argument("--env-file", type=Path)
     args = parser.parse_args(argv)
     try:
         if args.action == "detect":
@@ -294,7 +319,7 @@ def main(argv=None) -> int:
             for path in prepare(args.repo, args.engine):
                 print(path)
         else:
-            print(accept(env_file=args.env_file))
+            print(accept())
         return 0
     except (Refusal, OSError, ValueError, KeyError) as error:
         print(str(error) if isinstance(error, Refusal) else
