@@ -56,7 +56,8 @@
 #   --engine rust|python             the Docker daemon: rust pulls the release's
 #                                    published Rust image; a rerun keeps the
 #                                    engine installed (default for a new
-#                                    install: python); naming the other engine
+#                                    install: rust, or python without a bearer
+#                                    or a published image); naming the other engine
 #                                    switches it through pseudolife-mcp update
 #   --tunnel                         enter optional guided ChatGPT Secure MCP
 #                                    Tunnel setup after local installation
@@ -1403,7 +1404,7 @@ fi
 # ── 4b. daemon engine ──────────────────────────────────────────────────────
 # >>> daemon engine >>>
 # The engine already installed is kept; a new install takes --engine (default
-# python). Naming the other engine on an existing bank switches it after the
+# rust since G2, python without a bearer or an available Rust image). Naming the other engine on an existing bank switches it after the
 # install through pseudolife-mcp update (backup, rollback tag, health gate).
 # Rust pulls the release's image and provisions its models into their own
 # volume here, before any container starts, so a refusal starts nothing.
@@ -1419,6 +1420,10 @@ if [ -z "$CLIENT_ONLY" ]; then
         none)
             # Rust is the default since G2; without a bearer the default stays Python.
             if [ -n "$ENGINE" ]; then COMPOSE_ENGINE="$ENGINE"
+            elif [ -n "${BANK_EXISTED:-}" ]; then
+                # An existing bank moves only through update's checks, which its
+                # own default does on the next attended update.
+                COMPOSE_ENGINE=python
             elif [ -n "$RUST_BEARER" ]; then COMPOSE_ENGINE=rust; ENGINE_DEFAULTED=1
             else COMPOSE_ENGINE=python; step "Daemon engine: python (no bearer token for the default Rust daemon)"; fi
             # An existing bank reaches Rust only through update, which checks
@@ -3540,6 +3545,9 @@ if [ -z "$CLIENT_ONLY" ]; then
         # Recorded only now, as update records its own after its health gate.
         engine_status="$(engine_helper accept)" || exit 1
         [ "$engine_status" != accepted ] || step "Rust daemon selection recorded; pseudolife-mcp update keeps it"
+    elif [ "${ENGINE:-}" = python ]; then
+        # Kept by later updates too: the G2 default never moves a chosen host.
+        engine_helper choose --engine python >/dev/null || exit 1
     fi
     endpoint_container_probe
     shim_container_probe

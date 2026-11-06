@@ -98,6 +98,10 @@ pub(crate) struct Update {
     pub rollback_lines: Vec<String>,
     pub schema_before: Option<i64>,
     pub selected_engine: String,
+    /// The G2 default moved an unchosen host to another engine this run.
+    pub defaulted_engine: bool,
+    /// The release deploy began its backup: the host changes from here.
+    pub release_started: bool,
     pub maintainer_context: Option<(Vec<String>, Environment)>,
     pub rollback_scope: Option<String>,
     pub stopped_handover: bool,
@@ -192,6 +196,8 @@ impl Update {
             rollback_lines: vec![],
             schema_before: None,
             selected_engine: "python".into(),
+            defaulted_engine: false,
+            release_started: false,
             maintainer_context: None,
             rollback_scope: None,
             stopped_handover: false,

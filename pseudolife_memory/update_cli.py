@@ -1659,16 +1659,29 @@ class Update:
             self.clients(None, f"pseudolife-mcp=={target}", self.daemon_health())
             return
         from pseudolife_memory import update_engine
-        selected, choice = update_engine.release_engine_choice(self, target)
+        selected, choice, defaulted = update_engine.release_engine_choice(self, target)
         if current == target and not self.o.reinstall and choice == selected:
+            if self.o.engine == "python":
+                # An explicit choice is kept even when there is nothing to deploy.
+                update_engine.record_choice("python")
             self.step(f"the daemon already runs {target}; nothing to do (--reinstall to recreate it anyway, "
                       f"--clients-only for the shim and plugin)")
             return
         if self.o.engine or choice == "rust":
             # Engine selection, and every update of a Rust host, record an
             # accepted activation so the next update can verify it.
-            update_engine.deploy_release_engine(self, target, current, previous_digest, before_recreate, choice)
-            return
+            try:
+                update_engine.deploy_release_engine(self, target, current, previous_digest, before_recreate, choice)
+                return
+            except UpdateError as exc:
+                if not (defaulted and getattr(exc, "before_change", False)):
+                    raise
+                # The default never blocks an ordinary update: stay on Python.
+                self.warn(f"not moving to the {choice} daemon: {str(exc).splitlines()[0]}")
+                self.step(f"staying on the {selected} daemon for this update")
+                if current == target and not self.o.reinstall:
+                    self.step(f"the daemon already runs {target}; nothing to do")
+                    return
         context = self.compose_context()
         compose = context["args"]
         self._compose_shown = compose

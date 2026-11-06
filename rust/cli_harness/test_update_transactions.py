@@ -1126,7 +1126,60 @@ def test_release_default_moves_only_an_unchosen_attended_host_to_rust(tmp_path, 
             assert pulled == ["ghcr.io/pseudogiant-xr/pseudolife-daemon:0.21.1"]
             assert (_labels(state_path) or {}).get("org.pseudolife.engine", "python") == "python"
             if case == "unpublished":
-                assert "publishes no rust daemon image" in result.stdout
+                assert "could not confirm a published rust daemon image" in result.stdout
+
+
+@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+@pytest.mark.parametrize("case", ["tokenless", "no-backup"])
+def test_release_default_never_blocks_an_ordinary_update(tmp_path, native, case):
+    binary = _native_binary()
+    if native and not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path) as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        state["rust_published"] = True
+        if case == "tokenless":
+            # A --no-token install: the Rust move refuses before any change.
+            state["config"]["services"][SERVICE]["environment"].pop("PSEUDOLIFE_MCP_TOKEN")
+            state["running"]["Config"]["Env"] = [e for e in state["running"]["Config"]["Env"]
+                                                 if not e.startswith("PSEUDOLIFE_MCP_TOKEN=")]
+        state_path.write_text(json.dumps(state))
+        args = ["--tag", "0.21.1", "--daemon-only", "--json", "--health-retries", "1", "--rollback-tag", "pre-ordinary"]
+        if case == "no-backup":
+            args.append("--no-backup")
+        result = run_arm(repo, env, binary if native else None, args)
+        assert result.returncode == 0, result.stdout + result.stderr
+        state = json.loads(state_path.read_text())
+        pulled = [a[-1] for a in state["calls"] if a[:1] == ["pull"]]
+        assert pulled[-1] == "ghcr.io/pseudogiant-xr/pseudolife-daemon:0.21.1", pulled
+        assert (_labels(state_path) or {}).get("org.pseudolife.engine", "python") == "python"
+        if case == "tokenless":
+            assert "not moving to the rust daemon" in result.stdout
+
+
+@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+def test_an_explicit_python_choice_with_nothing_to_deploy_is_kept(tmp_path, native):
+    binary = _native_binary()
+    if native and not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path) as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        state["rust_published"] = True
+        state["target_version"] = "0.21.0"  # already at the target: nothing to deploy
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary if native else None,
+                         ["--engine", "python", "--tag", "0.21.0", "--daemon-only", "--json"])
+        assert result.returncode == 0, result.stdout + result.stderr
+        choice = Path(env["PSEUDOLIFE_MCP_DATA_DIR"]) / "update-engine/engine-choice.json"
+        assert json.loads(choice.read_text())["engine"] == "python"
+        state = json.loads(state_path.read_text())
+        state["target_version"] = "0.21.1"
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary if native else None,
+                         ["--tag", "0.21.1", "--daemon-only", "--json", "--health-retries", "1", "--rollback-tag", "pre-kept"])
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "default since G2" not in result.stdout
+        assert (_labels(state_path) or {}).get("org.pseudolife.engine", "python") == "python"
 
 
 @pytest.mark.parametrize("native_first", [True, False], ids=["native-first", "python-first"])

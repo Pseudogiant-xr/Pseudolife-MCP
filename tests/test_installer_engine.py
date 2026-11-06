@@ -200,6 +200,26 @@ def test_a_defaulted_rust_install_falls_back_to_python_when_rust_is_unavailable(
     assert not module.overlay_path().exists()
 
 
+def test_the_default_falls_back_only_when_rust_is_unavailable(helper, monkeypatch):
+    module, state, repo = helper
+
+    def low_disk():
+        raise module.Refusal("less than 8 GiB is free. Nothing was started.")
+    monkeypatch.setattr(module, "preflight_disk", low_disk)
+    with pytest.raises(module.Refusal, match="8 GiB"):
+        module.prepare(repo, "rust", default=True)
+
+
+def test_an_explicit_python_install_records_its_choice(helper, capsys):
+    module, state, repo = helper
+    assert module.main(["choose", "--engine", "python"]) == 0
+    assert eng.recorded_choice() == "python"
+    assert module.main(["choose", "--engine", "rust"]) == 1
+    for script, call in (("install.sh", "engine_helper choose --engine python"),
+                         ("install.ps1", "Invoke-EngineHelper choose --engine python")):
+        assert call in (ROOT / "ops" / script).read_text(encoding="utf-8"), script
+
+
 def test_accept_refuses_a_container_this_install_did_not_start(helper):
     module, state, repo = helper
     module.prepare(repo, "rust")
@@ -267,6 +287,8 @@ def _stage(script, start, end):
 @pytest.mark.parametrize("installed,flag,bank,compose_engine,switch", [
     # Rust is the default for a new install since G2.
     ("none", "", "", "rust", ""), ("none", "rust", "", "rust", ""),
+    # A defaulted install over an existing bank stays Python: update's default moves it later.
+    ("none", "", "1", "python", ""),
     # An existing bank with no daemon reaches Rust through update's checks.
     ("none", "rust", "1", "python", "rust"),
     ("python", "", "1", "python", ""), ("python", "rust", "1", "python", "rust"),

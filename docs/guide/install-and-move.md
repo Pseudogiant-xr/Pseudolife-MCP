@@ -11,16 +11,18 @@ Never hand-write or flatten a compose file to install or move a bank.
 ## Daemon engine
 
 A new Docker install runs the Rust daemon, from the image the checkout's
-release publishes; `ops/install.sh --engine python` (Windows:
-`ops/install.ps1 -Engine python`) installs the Python daemon instead. With
-no `--engine`, an install that would have no bearer token (`--no-token`),
-or whose release publishes no Rust image, takes the Python daemon and says
-why. `--engine rust` names Rust explicitly. It checks free disk space, pulls that image and downloads the
-pinned models into their own volume before any container starts. If the
-release publishes no Rust image, the installer stops there, names
-`--engine python`, and starts nothing. The selection is recorded once the
-daemon reports ready at that release. Rust needs the bearer token, so
-`--no-token` refuses `--engine rust`.
+release publishes: it checks free disk space, pulls that image and
+downloads the pinned models into their own volume before any container
+starts, and records the selection once the daemon reports ready at that
+release. With no `--engine`, the install takes the Python daemon instead,
+saying why, when it would have no bearer token (`--no-token`, or
+`--transport http` with no token set), when the release publishes no Rust
+image or its models cannot be downloaded, or when the bank already exists
+(the next attended `pseudolife-mcp update` moves that bank, after its own
+checks). `ops/install.sh --engine python` (Windows: `ops/install.ps1
+-Engine python`) chooses Python and records that choice, so later updates
+keep it. `--engine rust` names Rust explicitly: in the cases above it
+refuses, names `--engine python`, and starts nothing.
 
 A rerun keeps the engine already installed, also after `docker compose
 down`. A Rust daemon stays on the release it was installed or last updated
@@ -31,8 +33,10 @@ engine and then switches through `pseudolife-mcp update --engine <engine>`.
 That update backs up the bank, tags a rollback, and accepts the new daemon
 only after it passes its health check; if it fails, it prints the commands
 that restore the previous one. The first rerun after such a switch
-recreates the daemon once to match. A Rust daemon selected by checkout-mode `update --checkout` is left to that command: the installer refuses and names it. `--engine` applies only to a Docker
-install, so a client-only install refuses it.
+recreates the daemon once to match. A Rust daemon selected by checkout-mode
+`update --checkout` is left to that command: the installer refuses and
+names it. `--engine` applies only to a Docker install, so a client-only
+install refuses it.
 
 ## Installer refusals
 

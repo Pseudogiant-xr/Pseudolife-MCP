@@ -216,12 +216,37 @@ def host_labels(update) -> dict:
 DEFAULT_ENGINE = "rust"
 
 
+CHOICE = "update-engine/engine-choice.json"
+
+
 def recorded_release_engine() -> str | None:
     try:
         selected = _selection(up.data_dir(), RELEASE_ACCEPTED)
     except up.UpdateError:
-        return None
+        # An unreadable record is still a record: never treat it as "unchosen".
+        return "unknown"
     return selected["labels"][ENGINE_LABEL] if selected else None
+
+
+def recorded_choice() -> str | None:
+    """An explicit engine choice that left no activation (installer
+    `--engine python`, or `update --engine python` with nothing to deploy)."""
+    path = up.data_dir() / CHOICE
+    if not path.exists():
+        return None
+    try:
+        engine = json.loads(path.read_text(encoding="utf-8")).get("engine")
+    except (OSError, ValueError, AttributeError):
+        return "unknown"
+    return engine if engine in ("python", "rust") else "unknown"
+
+
+def record_choice(engine: str) -> None:
+    path = up.data_dir() / CHOICE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(json.dumps({"engine": engine}) + "\n", encoding="utf-8")
+    temporary.replace(path)
 
 
 def rust_image_published(update, target: str) -> bool:
@@ -230,24 +255,32 @@ def rust_image_published(update, target: str) -> bool:
     return code == 0
 
 
-def release_engine_choice(update, target: str | None = None) -> tuple[str, str]:
-    """``(selected, choice)``: the engine the host runs and the one this run deploys.
+def release_engine_choice(update, target: str | None = None) -> tuple[str, str, bool]:
+    """``(selected, choice, defaulted)``: the engine the host runs, the one this
+    run deploys, and whether that is the G2 default rather than a choice.
 
-    An unchosen host moves to the default engine on an attended update when
-    the target release publishes it; unattended runs never change engines.
+    An unchosen host moves to the default engine only on an attended update
+    with a backup, when the target release publishes its image; the update
+    falls back to Python if the move refuses before any change. A host chose
+    when it runs Rust, carries an activation label (either updater's engine
+    path), or recorded an accepted selection or an explicit choice.
     """
-    selected = "rust" if host_labels(update).get(ENGINE_LABEL) == "rust" else "python"
+    labels = host_labels(update)
+    selected = "rust" if labels.get(ENGINE_LABEL) == "rust" else "python"
     if update.o.engine:
-        return selected, update.o.engine
-    chosen = selected == "rust" or recorded_release_engine() is not None
-    if chosen or update.o.unattended or DEFAULT_ENGINE == selected or target is None:
-        return selected, selected
+        return selected, update.o.engine, False
+    chosen = (selected == "rust" or bool(labels.get(ACTIVATION_LABEL))
+              or recorded_release_engine() is not None or recorded_choice() is not None)
+    if (chosen or update.o.unattended or update.o.no_backup or DEFAULT_ENGINE == selected
+            or target is None):
+        return selected, selected, False
     if not rust_image_published(update, target):
-        update.step(f"release {target} publishes no {DEFAULT_ENGINE} daemon image; this host stays on {selected}")
-        return selected, selected
+        update.step(f"could not confirm a published {DEFAULT_ENGINE} daemon image for {target} "
+                    f"(docker manifest inspect); this host stays on {selected}")
+        return selected, selected, False
     update.step(f"moving this host to the {DEFAULT_ENGINE} daemon, the default since G2 (keep {selected} with "
                 f"--engine {selected})")
-    return selected, DEFAULT_ENGINE
+    return selected, DEFAULT_ENGINE, True
 
 
 def release_accepted() -> Path:
@@ -355,7 +388,16 @@ def ensure_project_volume(command, config: dict, key: str) -> None:
 
 def deploy_release_engine(update, target: str, current: str | None, previous_digest: str | None,
                           before_recreate, choice: str) -> None:
-    ReleaseEngineUpdate(update, target, current, previous_digest, choice).run(before_recreate)
+    engine = ReleaseEngineUpdate(update, target, current, previous_digest, choice)
+    try:
+        engine.run(before_recreate)
+    except up.UpdateError as exc:
+        # Before the backup nothing on the host has changed: a defaulted move
+        # can still fall back to the ordinary update.
+        exc.before_change = not engine.started
+        raise
+    if choice == "python":
+        record_choice("python")
 
 
 class ReleaseEngineUpdate:
@@ -372,6 +414,7 @@ class ReleaseEngineUpdate:
         self.u, self.o = update, update.o
         self.target, self.current, self.previous_digest = target, current, previous_digest
         self.engine = choice
+        self.started = False  # True once the backup begins: the host changes from here
         self.host_engine = "rust" if host_labels(update).get(ENGINE_LABEL) == "rust" else "python"
 
     def command(self, args, **kw):
@@ -596,6 +639,7 @@ class ReleaseEngineUpdate:
                                  f"update to a release at schema v{bank} or later; nothing was changed", 2)
         if self.engine == "rust":
             self.provision_models(image, config)
+        self.started = True
         self.backup(context["checkout"])
         if before_recreate is not None:
             before_recreate()

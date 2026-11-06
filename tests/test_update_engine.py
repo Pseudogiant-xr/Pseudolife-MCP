@@ -121,9 +121,9 @@ def test_release_rust_host_stays_on_the_release_path(tmp_path, monkeypatch):
     monkeypatch.setattr(up, "run_cli", lambda argv, **kw: (0, json.dumps(labels)))
     update = up.Update(up.Options(tag="0.23.0", reinstall=True), log=lambda s: None)
     assert eng.selected_checkout(update) is None
-    assert eng.release_engine_choice(update) == ("rust", "rust")
+    assert eng.release_engine_choice(update)[:2] == ("rust", "rust")
     update.o.engine = "python"
-    assert eng.release_engine_choice(update) == ("rust", "python")
+    assert eng.release_engine_choice(update)[:2] == ("rust", "python")
 
 
 def _release_config(env=None, volumes=None):
@@ -247,21 +247,31 @@ def test_engine_selection_never_moves_the_clients(monkeypatch):
 
 @pytest.mark.parametrize("case,expected", [
     ("unchosen", "rust"), ("unpublished", "python"), ("chose-python", "python"), ("unattended", "python"),
-    ("explicit-python", "python"), ("runs-rust", "rust"),
+    ("explicit-python", "python"), ("runs-rust", "rust"), ("no-backup", "python"),
+    ("activation-label", "python"), ("recorded-choice", "python"), ("unreadable-record", "python"),
 ])
 def test_default_engine_moves_only_an_unchosen_attended_host(tmp_path, monkeypatch, case, expected):
     from pseudolife_memory import update_engine as eng
     monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(tmp_path))
     labels = {eng.ENGINE_LABEL: "rust", eng.RELEASE_LABEL: "0.23.0"} if case == "runs-rust" else {}
+    if case == "activation-label":
+        # A checkout-mode `--engine python` leaves its activation on the container.
+        labels = {eng.ENGINE_LABEL: "python", eng.ACTIVATION_LABEL: "a", eng.CHECKOUT_LABEL: str(tmp_path)}
     if case == "chose-python":
         eng._write_overlay(tmp_path / eng.RELEASE_ACCEPTED, {"image": "py", "labels": {eng.ENGINE_LABEL: "python"}})
+    if case == "recorded-choice":
+        eng.record_choice("python")
+    if case == "unreadable-record":
+        (tmp_path / eng.RELEASE_ACCEPTED).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / eng.RELEASE_ACCEPTED).write_text("{not json")
 
     def run(argv, **kw):
         if argv[1:3] == ["manifest", "inspect"]:
             return (1, "") if case == "unpublished" else (0, "{}")
         return 0, json.dumps(labels)
     monkeypatch.setattr(up, "run_cli", run)
-    options = up.Options(unattended=case == "unattended", engine="python" if case == "explicit-python" else None)
+    options = up.Options(unattended=case == "unattended", engine="python" if case == "explicit-python" else None,
+                         no_backup=case == "no-backup")
     update = up.Update(options, log=lambda s: None)
     assert eng.release_engine_choice(update, "0.23.0")[1] == expected
 

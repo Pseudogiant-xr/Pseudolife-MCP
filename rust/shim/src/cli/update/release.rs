@@ -347,7 +347,7 @@ impl Update {
     pub fn deploy_release(
         &mut self,
         current: Option<String>,
-        mut before_recreate: Option<&mut dyn FnMut() -> Result<()>>,
+        before_recreate: Option<&mut dyn FnMut() -> Result<()>>,
         previous_digest: Option<String>,
     ) -> Result<()> {
         if !self.o.clients_only && engine::selected_checkout(self)?.is_some() {
@@ -394,17 +394,87 @@ impl Update {
         } else {
             "python"
         };
-        let choice = match self.o.engine.clone() {
-            Some(engine) => engine,
-            None => self.default_choice(selected, &target),
+        let (choice, defaulted) = match self.o.engine.clone() {
+            Some(engine) => (engine, false),
+            None => self.default_choice(selected, &labels, &target),
         };
         // Engine selection, and every update of a Rust host, records an
         // accepted activation so the next update can verify it.
         let activating = self.o.engine.is_some() || choice == "rust";
         if current.as_deref() == Some(&target) && !self.o.reinstall && choice == selected {
+            if self.o.engine.as_deref() == Some("python") {
+                // An explicit choice is kept even when there is nothing to deploy.
+                engine::record_choice("python")?;
+            }
             self.step(format!("the daemon already runs {target}; nothing to do (--reinstall to recreate it anyway, --clients-only for the shim and plugin)"));
             return Ok(());
         }
+        if defaulted {
+            // The default never blocks an ordinary update: a move that refuses
+            // before the backup falls back to the host's own engine.
+            self.defaulted_engine = true;
+            self.release_started = false;
+            let attempt = self.deploy_release_as(
+                &choice,
+                activating,
+                &target,
+                current.clone(),
+                previous.clone(),
+                before.clone(),
+                None,
+            );
+            match attempt {
+                Err(error) if !self.release_started => {
+                    self.defaulted_engine = false;
+                    self.warn(format!(
+                        "not moving to the {choice} daemon: {}",
+                        error.message.lines().next().unwrap_or("")
+                    ));
+                    self.step(format!("staying on the {selected} daemon for this update"));
+                    if current.as_deref() == Some(&target) && !self.o.reinstall {
+                        self.step(format!("the daemon already runs {target}; nothing to do"));
+                        return Ok(());
+                    }
+                    return self.deploy_release_as(
+                        selected,
+                        false,
+                        &target,
+                        current,
+                        previous,
+                        before,
+                        before_recreate,
+                    );
+                }
+                other => return other,
+            }
+        }
+        let result = self.deploy_release_as(
+            &choice,
+            activating,
+            &target,
+            current,
+            previous,
+            before,
+            before_recreate,
+        );
+        if result.is_ok() && self.o.engine.as_deref() == Some("python") {
+            engine::record_choice("python")?;
+        }
+        result
+    }
+    #[allow(clippy::too_many_arguments)]
+    fn deploy_release_as(
+        &mut self,
+        choice: &str,
+        activating: bool,
+        target: &str,
+        current: Option<String>,
+        previous: Option<String>,
+        before: Option<Value>,
+        mut before_recreate: Option<&mut dyn FnMut() -> Result<()>>,
+    ) -> Result<()> {
+        let choice = choice.to_owned();
+        let target = target.to_owned();
         let context = self.release_context(&target, &choice)?;
         let env = compose_environment(
             &context.env_files,
@@ -546,6 +616,7 @@ impl Update {
             // health gate. The running daemon keeps serving meanwhile.
             self.provision_models(&image, &config)?;
         }
+        self.release_started = true;
         let backups = if self.o.no_backup {
             self.warn("skipping backup (--no-backup)");
             json!({})
@@ -1106,26 +1177,31 @@ pub(super) const DEFAULT_ENGINE: &str = "rust";
 impl Update {
     /// An unchosen host moves to the default engine on an attended update when
     /// the target release publishes it; unattended runs never change engines.
-    fn default_choice(&mut self, selected: &str, target: &str) -> String {
+    /// `(choice, defaulted)`. A host chose when it runs Rust, carries an
+    /// activation label, or recorded an accepted selection or an explicit
+    /// choice (an unreadable record counts as chosen). The default applies
+    /// only on an attended update with a backup.
+    fn default_choice(&mut self, selected: &str, labels: &Value, target: &str) -> (String, bool) {
         let chosen = selected == "rust"
-            || engine::selection(&engine::release_accepted())
-                .ok()
-                .flatten()
-                .is_some();
-        if chosen || self.o.unattended || DEFAULT_ENGINE == selected {
-            return selected.to_owned();
+            || labels[engine::ACTIVATION_LABEL]
+                .as_str()
+                .is_some_and(|s| !s.is_empty())
+            || !matches!(engine::selection(&engine::release_accepted()), Ok(None))
+            || engine::recorded_choice().is_some();
+        if chosen || self.o.unattended || self.o.no_backup || DEFAULT_ENGINE == selected {
+            return (selected.to_owned(), false);
         }
         let image = format!("{RUST_IMAGE}:{target}");
         if self.docker_call(&["manifest", "inspect", &image]).0 != 0 {
             self.step(format!(
-                "release {target} publishes no {DEFAULT_ENGINE} daemon image; this host stays on {selected}"
+                "could not confirm a published {DEFAULT_ENGINE} daemon image for {target} (docker manifest inspect); this host stays on {selected}"
             ));
-            return selected.to_owned();
+            return (selected.to_owned(), false);
         }
         self.step(format!(
             "moving this host to the {DEFAULT_ENGINE} daemon, the default since G2 (keep {selected} with --engine {selected})"
         ));
-        DEFAULT_ENGINE.to_owned()
+        (DEFAULT_ENGINE.to_owned(), true)
     }
     /// Install the pinned models into the daemon's model volume before backup.
     fn provision_models(&mut self, image: &str, config: &Value) -> Result<()> {

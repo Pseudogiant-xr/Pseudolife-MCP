@@ -41,7 +41,7 @@
 #   agent board stays off.
 # -Engine rust|python: the Docker daemon. rust pulls the release's published
 #   Rust image; a rerun keeps the engine installed (default for a new
-#   install: python); naming the other engine switches it through
+#   install: rust, or python without a bearer or a published image); naming the other engine switches it through
 #   pseudolife-mcp update.
 # -TestLogin (switch): also give the test suite its own Postgres login, which
 #   cannot open the bank (`pseudolife-mcp test-login create`): for
@@ -1315,7 +1315,7 @@ if (-not $ClientOnly) {
 # -- 4b. daemon engine -----------------------------------------------------------
 # >>> daemon engine >>>
 # The engine already installed is kept; a new install takes -Engine (default
-# python). Naming the other engine on an existing bank switches it after the
+# rust since G2, python without a bearer or an available Rust image). Naming the other engine on an existing bank switches it after the
 # install through pseudolife-mcp update (backup, rollback tag, health gate).
 # Rust pulls the release's image and provisions its models into their own
 # volume here, before any container starts, so a refusal starts nothing.
@@ -1333,6 +1333,9 @@ if (-not $ClientOnly) {
     if ($installedEngine -eq 'none') {
         # Rust is the default since G2; without a bearer the default stays Python.
         if ($Engine) { $composeEngine = $Engine }
+        # An existing bank moves only through update's checks, which its own
+        # default does on the next attended update.
+        elseif ($bankExisted) { $composeEngine = 'python' }
         elseif ($rustBearer) { $composeEngine = 'rust'; $engineDefaulted = $true }
         else { $composeEngine = 'python'; Step "Daemon engine: python (no bearer token for the default Rust daemon)" }
         # An existing bank reaches Rust only through update, which checks its
@@ -3342,6 +3345,10 @@ if (-not $ClientOnly) {
         $engineStatus = "$(Invoke-EngineHelper accept)".Trim()
         if ($LASTEXITCODE -ne 0) { exit 1 }
         if ($engineStatus -eq 'accepted') { Step "Rust daemon selection recorded; pseudolife-mcp update keeps it" }
+    } elseif ($Engine -eq 'python') {
+        # Kept by later updates too: the G2 default never moves a chosen host.
+        Invoke-EngineHelper choose --engine python | Out-Null
+        if ($LASTEXITCODE -ne 0) { exit 1 }
     }
     Invoke-EndpointContainerProbe
     if ($TestLogin) { Invoke-TestLoginSetup }

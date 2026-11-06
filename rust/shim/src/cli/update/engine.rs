@@ -9,6 +9,28 @@ pub(super) const RELEASE_LABEL: &str = "org.pseudolife.release";
 pub(super) fn release_accepted() -> PathBuf {
     data_dir().join("update-engine/docker-compose.release-accepted.json")
 }
+/// An explicit engine choice that left no activation (installer
+/// `--engine python`, or `update --engine python` with nothing to deploy),
+/// shared with the Python updater's `update-engine/engine-choice.json`.
+pub(super) fn choice_path() -> PathBuf {
+    data_dir().join("update-engine/engine-choice.json")
+}
+pub(super) fn recorded_choice() -> Option<String> {
+    let bytes = fs::read(choice_path()).ok()?;
+    let value: Value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
+    Some(match value["engine"].as_str() {
+        Some(engine @ ("python" | "rust")) => engine.to_owned(),
+        _ => "unknown".to_owned(),
+    })
+}
+pub(super) fn record_choice(engine: &str) -> Result<()> {
+    let path = choice_path();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    seams::write_atomic(&path, format!("{{\"engine\": \"{engine}\"}}\n").as_bytes())?;
+    Ok(())
+}
 pub(super) fn selection(path: &Path) -> Result<Option<Value>> {
     match fs::read(path) {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
