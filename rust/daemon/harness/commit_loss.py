@@ -932,10 +932,14 @@ def run_engine(name: str, case: dict, engine: str, binary: Path | None, template
         proxy.arm(case["marker"])
         t0 = time.monotonic()
         answer = mcp.call(tool_name, args, headers)
-        proxy.fired.wait(5)
+        answered_at = time.time()
+        # The intended cut always precedes the answer (the answer only comes
+        # once the reply is lost): disarm at once, so no later transaction
+        # (a background write) can be cut in its place.
         proxy.disarm()
         result["a_answer"] = {"tool": tool_name, "isError": answer["isError"],
-                              "value": answer["value"], "wall_s": round(time.monotonic() - t0, 3)}
+                              "value": answer["value"], "wall_s": round(time.monotonic() - t0, 3),
+                              "at": answered_at}
         result["fault"] = {"fired": bool(proxy.events), "events": proxy.events}
         time.sleep(1.0)
         result["c_db"] = db_truth(case, dsn)
@@ -1033,6 +1037,16 @@ def verdict(r: dict) -> dict:
         return {"valid": False, "why": r["harness_error"]}
     if not r["fault"]["fired"] or not r["fault"]["events"][0]["server_tag"].startswith("COMMIT"):
         return {"valid": False, "why": "the proxy never cut a committed COMMIT"}
+    if r["fault"]["events"][0]["at"] > r["a_answer"].get("at", float("inf")):
+        return {"valid": False, "why": "the cut came after the answer: another transaction"}
+    if not r["committed"]:
+        return {"valid": False, "why": "the cut transaction is not the operation's: "
+                                       "the bank lacks its effect"}
+    # A surface the probes cannot see at baseline would read as matching
+    # whatever the daemon serves later: invalid, never excluded.
+    if r["baseline"]["mismatches"]:
+        return {"valid": False,
+                "why": "baseline mismatch: " + "; ".join(r["baseline"]["mismatches"])}
     # A surface that could not be observed is no evidence either way: a probe
     # error anywhere makes the run invalid, never a baseline exclusion.
     probe_errors = [m for key in ("baseline", "b", "d", "e") for m in r[key]["mismatches"]
@@ -1272,6 +1286,11 @@ def main() -> int:
                                   ensure_ascii=False, default=str), encoding="utf-8")
         rep.write_text(report(results, meta), encoding="utf-8")
         print(f"results: {out}\nreport: {rep}", flush=True)
+    # A run that proved nothing is not a pass.
+    invalid = [r for r in results if not (r.get("verdict") or {}).get("valid")]
+    if invalid:
+        print(f"{len(invalid)} invalid run(s)", flush=True)
+        return 1
     return 0
 
 
