@@ -3250,7 +3250,9 @@ mod tests {
             let msg = refusal(&format!("memory:\n  miras:\n    preset: {preset}\n"))
                 .unwrap_or_else(|| panic!("{preset} started"));
             assert!(
-                msg.contains(&format!("memory.miras.preset \"{preset}\" configures 8 bands")),
+                msg.contains(&format!(
+                    "memory.miras.preset \"{preset}\" configures 8 bands"
+                )),
                 "{msg}"
             );
             assert!(

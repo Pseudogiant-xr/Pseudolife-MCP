@@ -266,10 +266,7 @@ pub fn rank_traced(
             }
             continue;
         }
-        let (boost, half_life) = if n == 1
-            || p.disable_recency_boost
-            || !p.recency_boost_enabled
-        {
+        let (boost, half_life) = if n == 1 || p.disable_recency_boost || !p.recency_boost_enabled {
             (0.0, f64::INFINITY)
         } else {
             let frac = depth as f64 / (n - 1) as f64;
