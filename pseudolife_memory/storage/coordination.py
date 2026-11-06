@@ -307,15 +307,16 @@ FALLBACK_CLAUDE = (
 # runs no Stop hook (Claude Code 2.1.318 runs StopFailure instead), so only
 # that case leaves the open session without a listener.
 FALLBACK_CLAUDE_REARMING = (
-    "Mail is queued: the session is open but its Stop-hook listener is down, which "
-    "usually means it is working in a turn (often one an earlier ring started, since "
-    "each ring uses the listener until the turn ends). Its next Pseudolife tool result "
-    "shows the mail, and the queued ring fires when that turn ends: no resend needed. "
-    "Only a turn that ended on an API or sign-in error, or an interrupt, skips that "
-    "re-arm; if last_activity stays old, reach it through its host (the board cannot "
-    "tell which): a T3 Code thread takes a thread send, a Claude Desktop Code-tab "
-    "session its host's session send_message, and a Claude Code CLI session the "
-    "maintainer typing into its window.")
+    "Mail is queued: the session is open but not listening, which usually means it is "
+    "working in a turn (often one an earlier ring started, since each ring ends the "
+    "Stop-hook watcher until the turn ends). Its next Pseudolife tool result shows the "
+    "mail, and with the plugin's Stop hook the queued ring fires when that turn ends: no "
+    "resend needed. An interrupted turn, an error-ended one under a plugin older than "
+    "its StopFailure re-arm, or a session listening only through a wait-mail that has "
+    "ended re-arms nothing until its next turn: if last_activity stays old, reach it "
+    "through its host (the board cannot tell which): a T3 Code thread takes a thread "
+    "send, a Claude Desktop Code-tab session its host's session send_message, and a "
+    "Claude Code CLI session the maintainer typing into its window.")
 # What a role grant tells the maintainer or operator when the holder has no
 # live wake path now (maintainer requirement 2026-10-05: the conductor above
 # all must be reachable). Keyed by ``_listener_path``'s reasons.
@@ -2702,9 +2703,11 @@ class CoordinationStore:
     @classmethod
     def reachability(cls, agent, now, *, role=None):
         """Whether maintainer mail rings ``agent`` (an agent row, or None for
-        a holder with no board row) now: ``reachable`` and the no-path
-        ``reason`` a send would carry, plus, given ``role``, the ``warning``
-        a grant shows when it is not."""
+        a holder with no board row) now: ``reachable`` and the listener-path
+        ``reason`` (``_listener_path``'s; a send's receipt refines an
+        attached Claude row's ``listener_expired`` to ``listener_rearming``,
+        ``_no_path``), plus, given ``role``, the ``warning`` a grant shows
+        when it is not."""
         reason = "wake_disabled" if agent is None else cls._listener_path(agent, now)
         out = {"reachable": reason is None, "reason": reason}
         if role is not None and reason is not None:

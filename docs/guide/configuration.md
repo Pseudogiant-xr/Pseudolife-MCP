@@ -2509,7 +2509,7 @@ and the other ways to reach that client in `fallback_paths`:
 
 | Recipient | Listener the ring needs | `fallback_paths` |
 | --- | --- | --- |
-| Claude Code (CLI, Desktop Code tab, or a T3 Code thread) | the Stop hook's watcher, armed at every turn end (a failed turn's included) while the session stays open, or a background `wait-mail` | `t3_thread_send` (only a T3 Code thread: a thread send from its parent or the maintainer starts a turn), `claude_desktop_send_message` (only a Desktop Code-tab session: the host's session `send_message` starts a turn without the board), `maintainer_types`; the board cannot tell these hosts apart |
+| Claude Code (CLI, Desktop Code tab, or a T3 Code thread) | the Stop hook's watcher, armed at every turn end (a failed turn's included, not an interrupted one's) while the session stays open, or a background `wait-mail` | `t3_thread_send` (only a T3 Code thread: a thread send from its parent or the maintainer starts a turn), `claude_desktop_send_message` (only a Desktop Code-tab session: the host's session `send_message` starts a turn without the board), `maintainer_types`; the board cannot tell these hosts apart |
 | Codex CLI or desktop | the [Codex doorbell](#codex-doorbell), which serves CLI and desktop threads alike | `codex_doorbell` (it re-arms at the thread's next Pseudolife call), `maintainer_types` |
 
 `capabilities.codex` on a Codex row is the optional

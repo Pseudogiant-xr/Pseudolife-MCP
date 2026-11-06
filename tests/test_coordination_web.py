@@ -945,3 +945,21 @@ def test_conductor_lookups_in_flight_are_bounded(monkeypatch):
     monkeypatch.setattr(threading.Thread, "start", refuse)
     assert ask("d" * 32) == []
     assert refused and service._conductor_inflight == {}
+
+
+@pytest.mark.parametrize("module, name, rust_file", [
+    ("pseudolife_memory.storage.coordination", "FALLBACK_CLAUDE", "wake.rs"),
+    ("pseudolife_memory.storage.coordination", "FALLBACK_CLAUDE_REARMING", "wake.rs"),
+    ("pseudolife_memory.storage.coordination", "FALLBACK_CODEX", "wake.rs"),
+    ("pseudolife_memory.coordination", "PARK_GATE_MESSAGE", "http.rs"),
+    ("pseudolife_memory.coordination", "PARK_GATE_RUNG_MESSAGE", "http.rs"),
+])
+def test_the_rust_daemon_carries_the_same_wake_texts(module, name, rust_file):
+    """The receipts' fallbacks and the park gate's block texts are served by
+    both daemons; agents act on them literally, so they match byte for byte."""
+    import importlib
+    from pathlib import Path
+    from tests.test_coordination_receive_ack import _rust_str_const
+    source = (Path(__file__).resolve().parents[1] / "rust" / "daemon" / "src" / "board"
+              / rust_file).read_text(encoding="utf-8")
+    assert _rust_str_const(source, name) == getattr(importlib.import_module(module), name)

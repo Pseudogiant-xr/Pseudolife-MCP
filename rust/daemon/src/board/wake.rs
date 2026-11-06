@@ -43,15 +43,16 @@ pub const FALLBACK_CLAUDE: &str = "Mail is queued for receive on the session's n
 /// `FALLBACK_CLAUDE_REARMING`: an attached Claude session whose Stop-hook
 /// listener is down, usually mid-turn after a ring used it (see
 /// `storage/coordination.py`).
-pub const FALLBACK_CLAUDE_REARMING: &str = "Mail is queued: the session is open but its Stop-hook listener is down, which \
-     usually means it is working in a turn (often one an earlier ring started, since \
-     each ring uses the listener until the turn ends). Its next Pseudolife tool result \
-     shows the mail, and the queued ring fires when that turn ends: no resend needed. \
-     Only a turn that ended on an API or sign-in error, or an interrupt, skips that \
-     re-arm; if last_activity stays old, reach it through its host (the board cannot \
-     tell which): a T3 Code thread takes a thread send, a Claude Desktop Code-tab \
-     session its host's session send_message, and a Claude Code CLI session the \
-     maintainer typing into its window.";
+pub const FALLBACK_CLAUDE_REARMING: &str = "Mail is queued: the session is open but not listening, which usually means it is \
+     working in a turn (often one an earlier ring started, since each ring ends the \
+     Stop-hook watcher until the turn ends). Its next Pseudolife tool result shows the \
+     mail, and with the plugin's Stop hook the queued ring fires when that turn ends: no \
+     resend needed. An interrupted turn, an error-ended one under a plugin older than \
+     its StopFailure re-arm, or a session listening only through a wait-mail that has \
+     ended re-arms nothing until its next turn: if last_activity stays old, reach it \
+     through its host (the board cannot tell which): a T3 Code thread takes a thread \
+     send, a Claude Desktop Code-tab session its host's session send_message, and a \
+     Claude Code CLI session the maintainer typing into its window.";
 pub const FALLBACK_PATHS_CODEX: [&str; 2] = ["codex_doorbell", "maintainer_types"];
 pub const FALLBACK_PATHS_CLAUDE: [&str; 3] = [
     "t3_thread_send",
@@ -741,6 +742,94 @@ pub async fn serve_wake(c: &impl GenericClient, agent_id: &str, now: f64) -> Res
         }
     }
     Ok(offer)
+}
+
+#[cfg(test)]
+mod no_path_tests {
+    use super::*;
+
+    fn row(attached: bool, capabilities: Value) -> AgentRow {
+        AgentRow {
+            agent_id: "a".repeat(32),
+            principal: "alice".into(),
+            credential_hash: Some("h".into()),
+            label: String::new(),
+            project: String::new(),
+            task: String::new(),
+            status: String::new(),
+            episode: String::new(),
+            capabilities,
+            wake_enabled: false,
+            created_at: 900.0,
+            last_activity: 950.0,
+            lifecycle: "attached".into(),
+            next_sequence: 0,
+            attachment_id: attached.then(|| "listener".to_string()),
+            generation: 1,
+            lease_until: attached.then_some(1060.0),
+            status_expires_at: None,
+            children: json!([]),
+            park_reason: None,
+            park_needs: String::new(),
+            park_clear_by: String::new(),
+            park_resume: String::new(),
+            park_expires: None,
+            park_set_at: None,
+            parent_agent_id: None,
+            parent_thread: None,
+            name: String::new(),
+            name_source: String::new(),
+            name_set_at: None,
+            harness_name: String::new(),
+        }
+    }
+
+    /// `test_an_attached_claude_session_whose_ring_used_its_listener_is_rearming`:
+    /// an attached Claude row whose listener is down reads
+    /// `listener_rearming`; a detached one, or a Codex thread, keeps
+    /// `listener_expired` and its client's fallback.
+    #[test]
+    fn an_attached_claude_session_without_a_listener_is_rearming() {
+        let claude = json!({"ring": true, "ring_armed_until": 0});
+        let open = row(true, claude.clone());
+        assert_eq!(listener_path(&open, 1000.0), Some("listener_expired"));
+        let m = no_path(&open, "listener_expired", 1000.0);
+        assert_eq!(m["decision"], json!("no_path"));
+        assert_eq!(m["reason"], json!("listener_rearming"));
+        assert_eq!(m["queued"], json!(true));
+        assert_eq!(m["fallback"], json!(FALLBACK_CLAUDE_REARMING));
+        assert_eq!(
+            m["fallback_paths"],
+            json!([
+                "t3_thread_send",
+                "claude_desktop_send_message",
+                "maintainer_types"
+            ])
+        );
+        let gone = no_path(&row(false, claude), "listener_expired", 1000.0);
+        assert_eq!(
+            (&gone["reason"], &gone["fallback"]),
+            (&json!("listener_expired"), &json!(FALLBACK_CLAUDE))
+        );
+        let codex = no_path(
+            &row(
+                true,
+                json!({"codex": false, "ring": true, "ring_armed_until": 0}),
+            ),
+            "listener_expired",
+            1000.0,
+        );
+        assert_eq!(
+            (&codex["reason"], &codex["fallback"]),
+            (&json!("listener_expired"), &json!(FALLBACK_CODEX))
+        );
+        let unknown = no_path(
+            &row(true, json!({"ring": true})),
+            "listener_unknown",
+            1000.0,
+        );
+        assert_eq!(unknown["reason"], json!("listener_unknown"));
+    }
 }
 
 #[cfg(test)]
