@@ -123,5 +123,28 @@ class WriterGuard(unittest.TestCase):
         self.assertEqual(len(created), 4)
 
 
+class StressProfileMatchesStartupCi(unittest.TestCase):
+    """rust/ci/stress.py's shadow-refresh profile must give the tests what
+    startup CI gives them. A renamed variable would make every stressed test
+    return early, and an early return counts as run (#1333)."""
+
+    def test_the_stress_profile_runs_and_feeds_the_tests_startup_ci_runs(self):
+        sys.path.insert(0, str(HERE.parents[1] / "ci"))
+        import stress
+        profile = stress.CARGO_DATABASE_PROFILES["shadow-refresh"]
+        self.assertEqual(tuple(profile["prefixes"]), startup_ci.SHADOW_DB_FILTERS)
+        self.assertEqual(profile["fixture"]["dimension"], 1024)
+        rust = HERE.parent / "src"
+        sources = "".join((rust / name).read_text(encoding="utf-8")
+                          for name in ("shadow_tests.rs", "service_shadow_tests.rs"))
+        harness = (HERE / "startup_ci.py").read_text(encoding="utf-8")
+        flags = [name for name in profile["env"] if name.startswith("PL_SHADOW_")]
+        self.assertEqual(flags, ["PL_SHADOW_REFRESH_REQUIRED"])
+        for name in (profile["dsn_env"], *flags, profile["fixture"]["env"], profile["ort_env"]):
+            # Read by the Rust tests and set by startup CI under the same name.
+            self.assertIn(f'"{name}"', sources, name)
+            self.assertIn(name, harness, name)
+
+
 if __name__ == "__main__":
     unittest.main()
