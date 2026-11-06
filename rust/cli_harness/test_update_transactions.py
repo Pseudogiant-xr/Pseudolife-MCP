@@ -328,6 +328,7 @@ elif a[:1]==["compose"]:
     try:
      service=json.loads(pathlib.Path(path).read_text())["services"]["pseudolife-daemon"]
      if "labels" in service:s["running"]["Config"]["Labels"]={**(s["running"]["Config"]["Labels"] or {}),**service["labels"]}
+     if service.get("labels",{}).get("org.pseudolife.engine")=="python" and not s.get("import_stuck"):s["imported"]=True
     except (OSError,ValueError,KeyError):pass
    s["running"]["Image"]="sha256:replacement"
    s["running"]["Id"]=s.get("replacement_id",s["running"]["Id"])
@@ -336,9 +337,9 @@ elif a[:1]==["exec"]:
  elif "--host-state" in a or "pseudolife_memory.maintainer_setup" in a:
   out=s.get("setup_reply",json.dumps({"problem":None,"keys":[{"state":"active"}]}))
  elif "psql" in a:
-  if "cms_counters" in a[-1]:out="f" if s["failure"]=="pending_import" else "t"
-  else:out="56" if s["failure"]=="old_schema" else "unreadable" if s["failure"]=="unreadable_schema" else "58"
- elif any("test ! -e /data/memory_state/weights.pt" in v for v in a):code=int(s["failure"] in ("pending_import","imported_weights"))
+  if "cms_counters" in a[-1]:out="f" if s["failure"]=="pending_import" and not s.get("imported") else "t"
+  else:out="56" if s["failure"]=="old_schema" and not s.get("imported") else "unreadable" if s["failure"]=="unreadable_schema" else "58"
+ elif any("test ! -e /data/memory_state/weights.pt" in v for v in a):code=int(s["failure"] in ("pending_import","imported_weights") and not s.get("imported"))
  elif any("pg_dump" in v for v in a):code=int(s["failure"]=="backup")
  elif any("tar czf" in v for v in a):code=int(s["failure"]=="missing_state")
 elif a[:1]==["cp"]:
@@ -1093,6 +1094,47 @@ def test_rust_host_keeps_its_daemon_when_a_release_has_no_rust_image(tmp_path, n
         state = json.loads(state_path.read_text())
         assert stages({"calls": state["calls"][before:]}) == ["pull"]
         assert _labels(state_path)["org.pseudolife.engine"] == "rust"
+
+
+@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+@pytest.mark.parametrize("failure", ["pending_import", "old_schema"])
+def test_release_rust_imports_legacy_counters_on_python_first(tmp_path, native, failure):
+    # G2-K: the Rust daemon never reads memory_state/weights.pt. Update first
+    # moves to the Python daemon at the target, whose startup imports it.
+    binary = _native_binary()
+    if native and not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path, failure) as (repo, env, state_path):
+        result = run_arm(repo, env, binary if native else None,
+                         ["--engine", "rust", "--tag", "0.21.1", "--daemon-only", "--json", "--health-retries", "1",
+                          "--rollback-tag", "pre-import"])
+        assert result.returncode == 0, result.stdout + result.stderr
+        state = json.loads(state_path.read_text())
+        assert stages(state) == ["pull", "backup", "tag", "up", "pull", "backup", "tag", "up"]
+        pulled = [a[-1] for a in state["calls"] if a[:1] == ["pull"]]
+        assert pulled == ["ghcr.io/pseudogiant-xr/pseudolife-daemon:0.21.1",
+                          "ghcr.io/pseudogiant-xr/pseudolife-daemon-rust:0.21.1"]
+        assert "moving to the Python daemon 0.21.1 first" in result.stdout
+        assert _labels(state_path)["org.pseudolife.engine"] == "rust"
+
+
+@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+def test_release_rust_stops_on_python_when_the_import_does_not_happen(tmp_path, native):
+    binary = _native_binary()
+    if native and not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path, "pending_import") as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        state["import_stuck"] = True
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary if native else None,
+                         ["--engine", "rust", "--tag", "0.21.1", "--daemon-only", "--json", "--health-retries", "1",
+                          "--rollback-tag", "pre-stuck"])
+        assert result.returncode == 2, result.stdout + result.stderr
+        assert "did not import memory_state/weights.pt" in result.stdout
+        state = json.loads(state_path.read_text())
+        assert stages(state) == ["pull", "backup", "tag", "up"]
+        assert _labels(state_path)["org.pseudolife.engine"] == "python"
 
 
 @pytest.mark.parametrize("native_first", [True, False], ids=["native-first", "python-first"])

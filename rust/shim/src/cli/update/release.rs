@@ -447,13 +447,41 @@ impl Update {
             let db = pg_env["POSTGRES_DB"]
                 .as_str()
                 .ok_or_else(|| UpdateError::usage("cannot resolve PostgreSQL database"))?;
-            engine::require_imported_with(
+            let pending = engine::import_pending(
                 self,
                 &pg,
                 user,
                 db,
                 context.running["Id"].as_str().unwrap_or(DAEMON_CONTAINER),
             )?;
+            let host_rust = context.running["Config"]["Labels"][engine::ENGINE_LABEL] == "rust";
+            if let Some(schema) = pending {
+                if host_rust || self.after_import {
+                    return Err(UpdateError::usage(if self.after_import {
+                        "the Python daemon did not import memory_state/weights.pt into cms_counters; the host stays on it. Check docker logs pseudolife-mcp-daemon for the import warning, then retry update --engine rust"
+                    } else {
+                        "Rust activation requires schema v57 or later and imported counters: run update --engine python, let the Python daemon import memory_state/weights.pt into cms_counters, then retry; nothing was changed"
+                    }));
+                }
+                // G2-K: the Rust daemon never reads weights.pt. The Python
+                // daemon at the target imports it at startup, so update to that
+                // first (its own backup, rollback tag and gate), then move on.
+                model_volumes(&config)?;
+                let shown = if schema >= 0 {
+                    format!("v{schema}")
+                } else {
+                    "an unreadable schema".into()
+                };
+                self.step(format!(
+                    "this bank ({shown}) still keeps its CMS counters in memory_state/weights.pt: moving to the Python daemon {target} first, which imports them, then to the Rust daemon"
+                ));
+                self.after_import = true;
+                let requested = self.o.engine.replace("python".into());
+                let first = self.deploy_release(current.clone(), before_recreate, previous.clone());
+                self.o.engine = requested;
+                first?;
+                return self.deploy_release(Some(target.clone()), None, previous);
+            }
             // Refuse a misplaced model directory before the pull.
             model_volumes(&config)?;
         }

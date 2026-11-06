@@ -340,6 +340,8 @@ class ReleaseEngineUpdate:
         self.target, self.current, self.previous_digest = target, current, previous_digest
         self.engine = choice
         self.host_engine = "rust" if host_labels(update).get(ENGINE_LABEL) == "rust" else "python"
+        self.started = False  # True once the host changes (the backup, or the import leg)
+        self.after_import = False  # the Python leg that imports weights.pt already ran
 
     def command(self, args, **kw):
         return up.run_cli([self.u.docker, *args], stdout_only=not kw.get("stream", False), **kw)
@@ -422,7 +424,9 @@ class ReleaseEngineUpdate:
             raise up.UpdateError("the state volume backup is missing or incomplete; the bank dump is retained; fix the "
                                  "backup error and retry; nothing was deployed") from exc
 
-    def require_imported(self, pg, user, db, daemon):
+    def import_pending(self, pg, user, db, daemon) -> int | None:
+        """The bank's schema when its CMS counters still await the import
+        from memory_state/weights.pt (D2), else None."""
         raw = self.sql(pg, user, db, "SELECT value::text FROM meta WHERE key = 'schema_version'")
         try:
             schema = int(raw.strip('"'))
@@ -433,7 +437,10 @@ class ReleaseEngineUpdate:
             pending = (self.sql(pg, user, db, "SELECT EXISTS (SELECT 1 FROM cms_counters WHERE id = 1)") != "t"
                        and self.command(["exec", daemon, "sh", "-c", "test ! -e /data/memory_state/weights.pt && "
                                          "test ! -e /data/memory_state/weights.pt.bak"], timeout=60)[0] != 0)
-        if type(schema) is not int or schema < 57 or pending:
+        return (schema if type(schema) is int else -1) if (type(schema) is not int or schema < 57 or pending) else None
+
+    def require_imported(self, pg, user, db, daemon):
+        if self.import_pending(pg, user, db, daemon) is not None:
             raise up.UpdateError("Rust activation requires schema v57 or later and imported counters: run update "
                                  "--engine python, let the Python daemon import memory_state/weights.pt into "
                                  "cms_counters, then retry; nothing was changed", 2)
@@ -540,7 +547,28 @@ class ReleaseEngineUpdate:
                 raise up.UpdateError("cannot resolve the project's PostgreSQL user and database; set POSTGRES_USER and "
                                      "POSTGRES_DB in its Compose environment and retry; nothing was changed", 2)
             pg = self.project_container(compose, environment, "pseudolife-pg")
-            self.require_imported(pg, user, db, daemon)
+            pending = self.import_pending(pg, user, db, daemon)
+            labels_now = (running.get("Config") or {}).get("Labels") or {}
+            if pending is not None and labels_now.get(ENGINE_LABEL) != "rust" and not self.after_import:
+                # G2-K: the Rust daemon never reads weights.pt. The Python
+                # daemon at the target imports it at startup, so update to that
+                # first (its own backup, rollback tag and gate), then move on.
+                model_volumes(config)  # refuse a misplaced model directory before anything moves
+                shown = f"v{pending}" if pending >= 0 else "an unreadable schema"
+                u.step(f"this bank ({shown}) still keeps its CMS counters in memory_state/weights.pt: moving to the "
+                       f"Python daemon {self.target} first, which imports them, then to the Rust daemon")
+                self.started = True
+                ReleaseEngineUpdate(u, self.target, self.current, self.previous_digest, "python").run(before_recreate)
+                follow = ReleaseEngineUpdate(u, self.target, self.target, self.previous_digest, "rust")
+                follow.after_import = True
+                return follow.run(None)
+            if pending is not None:
+                raise up.UpdateError("the Python daemon did not import memory_state/weights.pt into cms_counters; "
+                                     "the host stays on it. Check docker logs pseudolife-mcp-daemon for the import "
+                                     "warning, then retry update --engine rust" if self.after_import else
+                                     "Rust activation requires schema v57 or later and imported counters: run update "
+                                     "--engine python, let the Python daemon import memory_state/weights.pt into "
+                                     "cms_counters, then retry; nothing was changed", 2)
             model_volumes(config)  # refuse a misplaced model directory before the pull
         image = f"{RUST_IMAGE if self.engine == 'rust' else up.GHCR_IMAGE}:{self.target}"
         u.preflight_disk(up.data_dir())
