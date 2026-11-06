@@ -961,8 +961,11 @@ if [ -n "$ENGINE" ] && [ -n "$CLIENT_ONLY" ]; then
     echo "--engine selects this host's Docker daemon, and a client-only install runs none; drop --engine, or run the installer on the daemon's host. Nothing was changed." >&2
     exit 2
 fi
-if [ "$ENGINE" = rust ] && [ -n "$NO_TOKEN" ]; then
-    echo "--engine rust needs the daemon's bearer token: pseudolife-mcp update verifies the Rust daemon with an authenticated read, so a --no-token host could not be updated. Drop --no-token or use --engine python. Nothing was changed." >&2
+# Rust needs a bearer: --no-token mints none, and neither does --transport
+# http unless ops/.env already sets one.
+if [ "$ENGINE" = rust ] && { [ -n "$NO_TOKEN" ] || { [ "$TRANSPORT" = http ] \
+        && ! { [ -f "$env_file" ] && grep -Eq '^PSEUDOLIFE_MCP_TOKENS?=[^[:space:]]' "$env_file"; }; }; }; then
+    echo "--engine rust needs the daemon's bearer token: pseudolife-mcp update verifies the Rust daemon with an authenticated read, and this install would mint none (--no-token, or --transport http with no token in ops/.env). Drop that option or use --engine python. Nothing was changed." >&2
     exit 2
 fi
 # <<< engine flag <<<
@@ -1414,7 +1417,7 @@ COMPOSE_ENGINE=""
 SWITCH_ENGINE=""
 engine_files=()
 if [ -z "$CLIENT_ONLY" ]; then
-    INSTALLED_ENGINE="$(engine_helper detect)" || exit 1
+    INSTALLED_ENGINE="$(engine_helper detect --repo "$repo")" || exit 1
     case "$INSTALLED_ENGINE" in
         none)
             COMPOSE_ENGINE="${ENGINE:-python}"

@@ -894,8 +894,11 @@ if ($Engine -and $ClientOnly) {
     [Console]::Error.WriteLine("-Engine selects this host's Docker daemon, and a client-only install runs none; drop -Engine, or run the installer on the daemon's host. Nothing was changed.")
     exit 2
 }
-if ($Engine -eq 'rust' -and $NoToken) {
-    [Console]::Error.WriteLine("-Engine rust needs the daemon's bearer token: pseudolife-mcp update verifies the Rust daemon with an authenticated read, so a -NoToken host could not be updated. Drop -NoToken or use -Engine python. Nothing was changed.")
+# Rust needs a bearer: -NoToken mints none, and neither does -Transport http
+# unless ops/.env already sets one.
+$envHasToken = (Test-Path $envFile) -and [bool](Select-String -LiteralPath $envFile -Pattern '^PSEUDOLIFE_MCP_TOKENS?=\S' -Quiet)
+if ($Engine -eq 'rust' -and ($NoToken -or ($Transport -eq 'http' -and -not $envHasToken))) {
+    [Console]::Error.WriteLine("-Engine rust needs the daemon's bearer token: pseudolife-mcp update verifies the Rust daemon with an authenticated read, and this install would mint none (-NoToken, or -Transport http with no token in ops/.env). Drop that option or use -Engine python. Nothing was changed.")
     exit 2
 }
 # <<< engine flag <<<
@@ -1332,7 +1335,7 @@ $composeEngine = ""
 $switchEngine = ""
 $engineFiles = @()
 if (-not $ClientOnly) {
-    $installedEngine = "$(Invoke-EngineHelper detect)".Trim()
+    $installedEngine = "$(Invoke-EngineHelper detect --repo $repo)".Trim()
     if ($LASTEXITCODE -ne 0) { exit 1 }
     if ($installedEngine -eq 'none') {
         $composeEngine = if ($Engine) { $Engine } else { 'python' }

@@ -105,6 +105,22 @@ def test_a_removed_container_keeps_the_accepted_rust_selection(helper):
     assert not any(c[0] in ("pull", "run") for c in state["calls"][calls:])
 
 
+def test_a_later_checkout_selection_supersedes_a_removed_release_selection(helper):
+    import os as _os
+    module, state, repo = helper
+    module.prepare(repo, "rust")
+    _started(module, state)
+    module.accept()
+    state["labels"] = None  # docker compose down after a checkout-mode switch back
+    accepted = repo / eng.PYTHON_ACCEPTED
+    accepted.parent.mkdir(parents=True, exist_ok=True)
+    accepted.write_text("{}")
+    later = eng.release_accepted().stat().st_mtime_ns + 1_000_000_000
+    _os.utime(accepted, ns=(later, later))
+    assert module.detect(repo) == "python"
+    assert module.detect() == "rust"
+
+
 def test_an_unaccepted_rust_daemon_is_redone_only_for_this_checkouts_release(helper):
     module, state, repo = helper
     module.prepare(repo, "rust")
@@ -280,14 +296,18 @@ def test_compose_and_planner_carry_the_engine_overlays(tmp_path, script):
 
 
 @pytest.mark.parametrize("script", ["install.sh", "install.ps1"])
-@pytest.mark.parametrize("case", ["client-only", "no-token", "allowed"])
+@pytest.mark.parametrize("case", ["client-only", "no-token", "http-without-token", "allowed", "http-with-token"])
 def test_engine_flag_refusals(tmp_path, script, case):
     client, token = case == "client-only", case == "no-token"
+    http = case.startswith("http")
+    env = tmp_path / "fixture.env"
+    env.write_text("PSEUDOLIFE_MCP_TOKEN=fixture\n" if case == "http-with-token" else "# no token\n")
     if script.endswith(".ps1"):
         stage = _stage(script, "# >>> engine flag >>>", "# <<< engine flag <<<")
         ps = _PowerShell(tmp_path)
         # PowerShell's ValidateSet lets "Rust" through: the block lowercases it.
         proc = ps.run(f"$ClientOnly=${str(client).lower()}\n$NoToken=${str(token).lower()}\n$Engine='Rust'\n"
+                      f"$Transport='{'http' if http else 'shim'}'\n$envFile='{env}'\n"
                       + stage + "Write-Output \"ENGINE:$Engine\"\n")
         output = _output(proc)
     else:
@@ -295,10 +315,12 @@ def test_engine_flag_refusals(tmp_path, script, case):
         if not variants:
             pytest.skip("Bash unavailable")
         stage = _stage(script, "# >>> engine flag >>>", "# <<< engine flag <<<")
-        proc = _Shell(variants[0], tmp_path).run(f"CLIENT_ONLY='{'1' if client else ''}'\nNO_TOKEN='{'1' if token else ''}'\n"
-                                                 "ENGINE=rust\n" + stage + 'echo "ENGINE:$ENGINE"\n')
+        shell = _Shell(variants[0], tmp_path)
+        proc = shell.run(f"CLIENT_ONLY='{'1' if client else ''}'\nNO_TOKEN='{'1' if token else ''}'\n"
+                         f"TRANSPORT={'http' if http else 'shim'}\nenv_file='{shell.path(env)}'\n"
+                         "ENGINE=rust\n" + stage + 'echo "ENGINE:$ENGINE"\n')
         output = proc.stdout + proc.stderr
-    if case == "allowed":
+    if case in ("allowed", "http-with-token"):
         assert proc.returncode == 0, output
         assert "ENGINE:rust" in output
     else:

@@ -95,11 +95,20 @@ def accepted_release() -> dict | None:
     return None
 
 
-def detect() -> str:
+def detect(repo: Path | None = None) -> str:
     found = labels()
     if found is None:
-        # `docker compose down` removes the container, not the selection.
-        return "rust" if accepted_release() else "none"
+        # `docker compose down` removes the container, not the selection. A
+        # checkout-mode selection made after it supersedes it.
+        release = accepted_release()
+        if not release:
+            return "none"
+        stamp = eng.release_accepted().stat().st_mtime_ns
+        for name, engine in ((eng.PYTHON_ACCEPTED, "python"), (eng.SELECTION, "rust-checkout")):
+            path = repo / name if repo else None
+            if path and path.is_file() and path.stat().st_mtime_ns > stamp:
+                return engine
+        return "rust"
     if found.get(eng.ENGINE_LABEL) != "rust":
         return "python"
     if found.get(eng.CHECKOUT_LABEL) and not found.get(eng.RELEASE_LABEL):
@@ -261,7 +270,7 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     try:
         if args.action == "detect":
-            print(detect())
+            print(detect(args.repo))
         elif args.action == "prepare":
             if not args.repo or not args.engine:
                 raise Refusal("prepare needs --repo and --engine.")
