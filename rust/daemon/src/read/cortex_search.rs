@@ -602,7 +602,7 @@ fn is_apos(c: char) -> bool {
     c == '\'' || c == '\u{2019}'
 }
 
-/// `_scope_bounded` (`service.py:622`), over byte offsets of `q`.
+/// `_scope_bounded` (`service.py:632`), over byte offsets of `q`.
 fn scope_bounded(q: &str, i: usize, j: usize) -> bool {
     let mut back = q[..i].chars().rev();
     if let Some(before) = back.next() {
