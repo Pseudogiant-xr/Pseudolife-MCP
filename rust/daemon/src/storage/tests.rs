@@ -767,6 +767,11 @@ async fn set_stamp(c: &Client, stamp: &str) {
 async fn db_reconnect_refuses_a_bank_restamped_while_disconnected() {
     let Some(dsn) = test_dsn() else { return };
     let _guard = DB.lock().await;
+    Storage::open(&dsn)
+        .await
+        .expect("stamp the bank")
+        .close()
+        .await;
     let (c, t) = side_client(&dsn).await;
     let current = meta_text(&c, "schema_version").await.expect("stamped");
     for (stamp, refusal) in [
@@ -776,7 +781,7 @@ async fn db_reconnect_refuses_a_bank_restamped_while_disconnected() {
         ),
         ("\"57\"".to_string(), "must be a positive integer"),
     ] {
-        let s = Storage::open(&dsn).await.expect("open");
+        let mut s = Storage::open(&dsn).await.expect("open");
         let e1 = s.lease_epoch();
         kill_writer(&s, &dsn).await;
         set_stamp(&c, &stamp).await;
@@ -800,18 +805,41 @@ async fn db_reconnect_refuses_a_bank_restamped_while_disconnected() {
         let started = Instant::now();
         assert_eq!(s.verify_writer_session().await.err(), Some(refused));
         assert!(started.elapsed() < Duration::from_millis(1500));
+        // Past the window with the server unreachable, the refusal stands:
+        // an outage must not hand the resident copy back to callers.
+        tokio::time::sleep(LEASE_RETRY).await;
+        let reachable = std::mem::replace(
+            &mut s.base,
+            parse_dsn("postgresql://nobody@127.0.0.1:1/pl_cf_w1a_none").unwrap(),
+        );
+        let held = s.verify_writer_session().await.err();
+        assert!(
+            held.as_deref().is_some_and(|m| m.contains(refusal)),
+            "{held:?}"
+        );
+        assert_eq!(
+            s.verify_writer_session().await.err(),
+            held,
+            "inside the reconnect window"
+        );
+        s.base = reachable;
         // Restored to a stamp this build serves: ping stops reporting it,
-        // and the next reconnect after the window serves.
+        // and the next reconnect takes the bank back but makes the owner
+        // re-read it first (a restore may have kept this lease epoch).
         set_stamp(&c, &current).await;
         s.ping().await.expect("ping after the restore");
-        tokio::time::sleep(LEASE_RETRY).await;
+        tokio::time::sleep(RECONNECT_RETRY).await;
         let fresh = s
             .verify_writer_session()
             .await
             .expect("verify after the window")
             .expect("replaced");
         assert_eq!(fresh.lease_epoch(), e1 + 1);
-        assert_eq!(fresh.resident_invalidated(), None, "no other writer ran");
+        let reread = "this bank carried a schema stamp this build refused while this process was disconnected; it opens again, but its resident copy may be stale, so nothing is served or saved until it re-reads the bank";
+        assert_eq!(fresh.resident_invalidated().as_deref(), Some(reread));
+        assert_eq!(fresh.ping().await, Err(reread.to_string()));
+        fresh.acknowledge_rehydration();
+        fresh.ping().await.expect("ping after the re-read");
         drop(s);
         fresh.close().await;
     }

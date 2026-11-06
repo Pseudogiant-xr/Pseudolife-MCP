@@ -934,7 +934,16 @@ impl Storage {
                 // already failing, the server is unreachable; with the
                 // session still open, `self.conn` keeps it (nothing to heal).
                 Err(e) if operational(&e) => {
-                    let failing = self.session.lock().unwrap().reconnect_error.is_some();
+                    let (failing, refused) = {
+                        let state = self.session.lock().unwrap();
+                        (
+                            state.reconnect_error.is_some(),
+                            state.schema_refused.clone(),
+                        )
+                    };
+                    if failing && let Some(refused) = refused {
+                        return Err(refused);
+                    }
                     if failing || !self.client.is_closed() {
                         return Ok(None);
                     }
@@ -965,10 +974,25 @@ impl Storage {
             if state.reconnect_error.is_some()
                 && state.reconnect_retry_at.is_some_and(|at| now < at)
             {
-                return Ok(None);
+                return state.schema_refused.clone().map_or(Ok(None), Err);
             }
         }
         eprintln!("postgres connection lost; reconnecting");
+        // `_raise_schema_refusal`: an unreachable server never hands the
+        // resident copy back while a reconnect's schema refusal stands.
+        match self.reopen_and_record().await {
+            Ok(None) => self
+                .session
+                .lock()
+                .unwrap()
+                .schema_refused
+                .clone()
+                .map_or(Ok(None), Err),
+            other => other,
+        }
+    }
+
+    async fn reopen_and_record(&self) -> Result<Option<Storage>, String> {
         match self.reopen().await {
             Ok(fresh) => Ok(Some(fresh)),
             Err(Reopen::LeaseHeld(m)) => {
@@ -995,6 +1019,7 @@ impl Storage {
             }
             Err(Reopen::SchemaRefused(m)) => {
                 let mut state = self.session.lock().unwrap();
+                state.reconnect_error = None;
                 state.schema_refused = Some(m.clone());
                 state.schema_retry_at = Some(Instant::now() + LEASE_RETRY);
                 Err(m)
@@ -1057,16 +1082,28 @@ impl Storage {
         };
         let moved =
             found != Some(self.lease_epoch) && !crate::mutants::active("writer-epoch-unchecked");
-        let handed_over = moved.then(|| {
-            format!(
+        // A refused stamp means another build wrote the bank, and a
+        // restore since may have kept this process's lease epoch, so the
+        // resident copy is re-read either way.
+        let restamped = self.session.lock().unwrap().schema_refused.is_some();
+        let handed_over = if moved {
+            Some(format!(
                 "another writer held this bank while this process was \
                  disconnected (lease epoch {} -> {}); its resident copy may \
                  be stale, so nothing is served or saved until it re-reads \
                  the bank",
                 self.lease_epoch,
                 py_epoch(found)
-            )
-        });
+            ))
+        } else {
+            restamped.then(|| {
+                "this bank carried a schema stamp this build refused while this \
+                 process was disconnected; it opens again, but its resident copy \
+                 may be stale, so nothing is served or saved until it re-reads \
+                 the bank"
+                    .to_string()
+            })
+        };
         if let Some(m) = &handed_over {
             eprintln!("{m}");
         }

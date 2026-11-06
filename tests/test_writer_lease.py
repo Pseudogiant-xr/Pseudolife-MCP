@@ -21,7 +21,8 @@ import time
 import psycopg
 import pytest
 
-from pseudolife_memory.storage.postgres import PostgresStorage
+from pseudolife_memory.storage.postgres import (
+    BankChangedHands, BankSchemaRefused, PostgresStorage)
 from pseudolife_memory.storage.schema import SCHEMA_META_VERSION
 from tests.pg_fixtures import pg_conn, pg_url  # noqa: F401
 
@@ -254,14 +255,35 @@ def test_reconnect_refuses_a_bank_restamped_while_disconnected(
             first.meta_set("schema-probe", "older writer")
         assert _client_backends(pg_conn) <= before
 
+        # Past the window with the server unreachable, the refusal stands:
+        # an outage must not hand the resident copy back to callers.
+        reachable = first.dsn
+        first.dsn = "postgresql://nobody@127.0.0.1:1/pl_unreachable"
+        first._schema_retry_at = 0.0  # noqa: SLF001 — skip the retry window
+        with pytest.raises(BankSchemaRefused, match=refusal):
+            first.verify_writer_session()
+        first.dsn = reachable
+        first._reconnect_retry_at = 0.0  # noqa: SLF001
+
         # Once the bank is restored to a stamp this build serves, the probe
-        # stops reporting it and the next reconnect after the window serves.
+        # stops reporting the stamp, and the next reconnect takes the bank
+        # back but makes the owner re-read it before anything is served: a
+        # restore may have kept this process's lease epoch.
         pg_conn.execute(
             "UPDATE meta SET value = %s::jsonb WHERE key = 'schema_version'",
             (current,))
         pg_conn.commit()
         assert first.ping() is True
-        first._schema_retry_at = 0.0  # noqa: SLF001 — skip the retry window
+        with pytest.raises(BankChangedHands) as reread:
+            first.meta_set("schema-probe", "after restore")
+        # The Rust daemon's text (storage/tests.rs pins the same literal).
+        assert str(reread.value) == (
+            "this bank carried a schema stamp this build refused while this "
+            "process was disconnected; it opens again, but its resident copy "
+            "may be stale, so nothing is served or saved until it re-reads "
+            "the bank")
+        assert _meta_value(pg_conn, "schema-probe") is None
+        first.acknowledge_rehydration()
         first.meta_set("schema-probe", "after restore")
         assert _meta_value(pg_conn, "schema-probe") == '"after restore"'
     finally:

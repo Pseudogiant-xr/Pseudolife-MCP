@@ -342,9 +342,11 @@ class BankSchemaRefused(RuntimeError):
     The same refusal a start gives (``schema._schema_version_refusal``).
     The refused session is closed, so the newer build can hold the lease;
     nothing was written. Calls inside ``_LEASE_RETRY_SECONDS`` are refused
-    from the cached text, later ones reconnect and check again, and
-    :meth:`PostgresStorage.ping` re-reads the stamp, so a bank restored to
-    a stamp this build serves is picked up again."""
+    from the cached text, later ones reconnect and check again; the refusal
+    stands through an unreachable server and clears only when a reconnect
+    reads a stamp this build serves, which then flags the resident copy for
+    a re-read (:class:`BankChangedHands`). :meth:`PostgresStorage.ping`
+    re-reads the stamp, so ``/health`` follows a restore at once."""
 
 
 class BankChangedHands(RuntimeError):
@@ -423,6 +425,10 @@ class PostgresStorage:
     # changes for a bank. Class-level defaults: no I/O until asked.
     _bank_id: str | None = None
     _bank_id_retry_at = 0.0
+    # A reconnect's schema refusal (BankSchemaRefused), set per instance;
+    # class-level so a probe built without __init__ reads "none".
+    _schema_refused: str | None = None
+    _schema_retry_at = 0.0
 
     def __init__(self, dsn: str, *, writer_lease: bool = True) -> None:
         """Connect, take the bank's writer lease, and ensure the schema.
@@ -562,7 +568,10 @@ class PostgresStorage:
         An unreachable server is tolerated: nothing else can write a bank
         this process cannot reach either (short of a network partition), so
         the resident copy stays servable, while every storage call still
-        fails on its own. Raises only if another writer holds the lease.
+        fails on its own. Raises if another writer holds the lease, and
+        while a reconnect's schema refusal stands (:class:`BankSchemaRefused`):
+        that one is kept through an unreachable server, since the bank last
+        seen was one this build must not serve from its resident copy.
         """
         if not self._writer_lease or self._pinned():
             return
@@ -578,12 +587,21 @@ class PostgresStorage:
                 return
             except psycopg.OperationalError:
                 if self._reconnect_error:
+                    self._raise_schema_refusal()
                     return  # the reconnect itself failed: unreachable
             self.conn  # noqa: B018 — the session died unnoticed; replace it
         except BankChangedHands:
             return  # flagged: the owner re-reads the bank next
         except psycopg.OperationalError:
+            self._raise_schema_refusal()
             return  # unreachable; retried after _RECONNECT_RETRY_SECONDS
+
+    def _raise_schema_refusal(self) -> None:
+        """Keep a reconnect's schema refusal in force while the server is
+        unreachable: it clears only when a reconnect reads a stamp this
+        build may serve."""
+        if self._schema_refused:
+            raise BankSchemaRefused(self._schema_refused)
 
     @staticmethod
     def _probe_session(conn: psycopg.Connection) -> None:
@@ -729,7 +747,6 @@ class PostgresStorage:
                         time.monotonic() + _LEASE_RETRY_SECONDS)
                     logger.error("after reconnecting: %s", refusal)
                     raise BankSchemaRefused(refusal)
-                self._schema_refused = None
                 register_vector(conn)
                 if self._writer_lease:
                     found = self._read_lease_epoch(conn)
@@ -742,6 +759,20 @@ class PostgresStorage:
             self._conn = conn
             self._lease_lost = None
             self._session_ok_at = time.monotonic()  # fresh, epoch-checked
+            # A refused stamp means another build wrote the bank, and a
+            # restore since may have kept this process's lease epoch, so the
+            # resident copy is re-read either way.
+            restamped = self._schema_refused is not None
+            self._schema_refused = None
+            if handed_over is None and restamped:
+                self._bank_id = None
+                self._bank_id_retry_at = 0.0
+                self.resident_invalidated = (
+                    "this bank carried a schema stamp this build refused while "
+                    "this process was disconnected; it opens again, but its "
+                    "resident copy may be stale, so nothing is served or saved "
+                    "until it re-reads the bank")
+                logger.warning("%s", self.resident_invalidated)
             if handed_over is not None:
                 # Another writer may have restored a different bank here:
                 # the cached bank id goes with the resident copy.
