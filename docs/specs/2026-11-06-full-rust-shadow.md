@@ -1,7 +1,8 @@
 # Full Rust shadow on real data
 
-**Status:** design, 2026-11-06. Research only: nothing here is built,
-deployed or authorized. It answers the maintainer's question of 2026-11-06:
+**Status:** design, 2026-11-06. The maintainer decided all of §6 the same
+day; nothing here is built or deployed yet, and each phase lands as its own
+reviewed PR. It answers the maintainer's question of 2026-11-06:
 "I want to run the rust daemon in shadow mode as well if possible. How can
 we work out the best way to test the complete rust version using real data
 while the actual tool you use is the known working python version?"
@@ -27,7 +28,7 @@ live bank taken at a quiet moment, re-seeding from that dump each night.
 3. [Candidate architectures](#3-candidate-architectures)
 4. [Recommended design](#4-recommended-design)
 5. [Phased plan](#5-phased-plan)
-6. [Decisions the maintainer needs to make](#6-decisions-the-maintainer-needs-to-make)
+6. [Maintainer decisions (2026-11-06)](#6-maintainer-decisions-2026-11-06)
 7. [Risks and what this does not test](#7-risks-and-what-this-does-not-test)
 
 ## 1. What the straw-man got right and wrong
@@ -42,7 +43,7 @@ The conductor's straw-man (seven points), checked against master `3f328d44`:
 | 4 | Record Python's extractor responses and replay them to Rust. | **Holds.** Python persists no raw extractor output today, but the Rust extractor takes any OpenAI-compatible URL and the harness already has a stub server to build on. **A gap:** both engines fire a dream at every session close whatever `memory.dream.enabled` says, so a mirror cannot hold its dreams back for the replayer to drive (§2.3; issue #1315). |
 | 5 | Disable Rust's outbound side effects on the mirror. | **Mostly already true.** The Rust daemon pushes nothing to sessions (wakes, mail and doorbells are rows that clients poll). Its only outbound calls are the extractor and judges, the release check, and model provisioning in the container entry point. Each has a switch, and an internal-only Docker network blocks all three (§2.3). |
 | 6 | Test native clients and hooks separately, on one opt-in machine pointed at Python. | **Holds.** The mirror replays hook **routes** (the daemon side). The client side (the native shim, plugin hooks, launchers) is the existing CLI harness's and B11's job. |
-| 7 | Exit on N consecutive clean days, or every difference classified. | **Holds** once "clean" is defined per surface (§4.8). N is the maintainer's (§6). |
+| 7 | Exit on N consecutive clean days, or every difference classified. | **Holds** once "clean" is defined per surface (§4.8). The maintainer set it at 7 consecutive clean days with an exact-hash prompt hit rate of at least 95% (§6, Q8). |
 
 ## 2. Verified facts
 
@@ -171,7 +172,7 @@ The **nightly body-evidence job** (`.github/workflows/rust.yml:10-11`, `:1756-18
 | Dream entry tokens, the commit-signing secret, Console sessions, maintainer nonces, pairing codes | `secrets` (`py/memory/cms.py:2425`, `py/storage/postgres.py:1513-1520`) | `getrandom` (`rs/dream/cursors.rs:235`, `rs/console_sessions.rs:351`, `rs/maintainer_ops.rs:400`) | compare the decoded payload without its signature (as `w2e.py` does for `commit_token`); exclude the secrets |
 | Wall-clock times (`ts`, `tx_time`, `created_at`, ...) | `time.time()`; no public path takes a time (`py/service.py:4045` has `now=`, which only internal callers pass) | `SystemTime::now()` in `rs/episodes.rs:29-34` and some ten other modules; no seam outside unit tests | `w2e.CLOCK`'s null-or-not rule for new rows; ordered tokens where order matters. A continuous replay keeps Rust's clock within seconds of Python's; a batch replay does not (§3). |
 | HLC | seeded from the largest stored stamp at start (`py/service.py:1755-1782`) | `Ready::tick_hlc`, wall-clock based | compare the **order** of stamps within a slot, never their values |
-| Embedding precision | `embedding.cpu_dtype: auto` uses **bf16** on CPUs with native bf16, else fp32 (`py/memory/embedding.py:43-91`); measured bf16 against fp32: top-8 overlap 0.994, max score delta 0.0058 (`py/utils/config.py:55-68`, figures at `:65-66`) | fp32 only; bf16 is refused at start (`rs/embed.rs:100-115`); against Python fp32: max abs 5.886e-7, min cosine 0.99999999999 (`rust/CUTOVER.md:60`) | With Python on fp32, `w2e.py`'s tolerance file (max abs 1e-5, min cosine 0.9999999) holds. With Python on bf16, vectors differ about 10⁴ times more, and so can the store-time decisions that depend on them (deduplication, surprise, band routing). Then a declared tolerance is not enough: the diff must class those decisions as precision-caused (decision Q6). |
+| Embedding precision | `embedding.cpu_dtype: auto` uses **bf16** on CPUs with native bf16, else fp32 (`py/memory/embedding.py:43-91`); measured bf16 against fp32: top-8 overlap 0.994, max score delta 0.0058 (`py/utils/config.py:55-68`, figures at `:65-66`) | fp32 only; bf16 is refused at start (`rs/embed.rs:100-115`); against Python fp32: max abs 5.886e-7, min cosine 0.99999999999 (`rust/CUTOVER.md:60`) | **Live Python already runs fp32:** G1 (2026-11-06) found that the daemon box's CPU has no native bf16, so `auto` resolves to fp32 there. `w2e.py`'s tolerance file (max abs 1e-5, min cosine 0.9999999) therefore holds. Were live Python ever moved to a bf16 CPU, vectors would differ about 10⁴ times more and store-time decisions could differ too (deduplication, surprise, band routing); the mirror would then need a precision class, which this plan does not include. |
 | LLM output | temperature 0, but not guaranteed identical between calls (`py/memory/dream.py:1258`) | the same client contract | replaying recorded responses removes it (§4.6) |
 | Tables written on each engine's own timer | `cms_counters`, `principal_activity`, `rejected_bearers` | the same | already excluded from row diffs (`dbstate.UNPORTED_ROWS`); compared at fixed points |
 
@@ -180,16 +181,19 @@ The **nightly body-evidence job** (`.github/workflows/rust.yml:10-11`, `:1756-18
 The maintainer's brief gives the box as 8 cores, 12 GB RAM and about 30 GB
 free disk. This design did not log in to measure it.
 
-- **Live Python daemon:** capped at 6 GB with no swap (`ops/docker-compose.yml:143-144`). Measured at 3.1-3.3 GiB anon at rest and 4.48 GB later on an fp32 embedder in 2026-09; bf16 lowers the steady state by about 1.4 GB (`ops/docker-compose.yml:117-133`). PostgreSQL has no cap.
-- **Rust daemon:** the repository documents no RSS figure for the serving daemon. Its floor is the fp32 Qwen3 export: about 2.38 GB of external weights (`rs/model_provision.rs:61-80`), plus the 91 MB reranker and ONNX Runtime. The shadow overlay caps it at 6 GB (`ops/docker-compose.rust-shadow.yml:18-19`). G1 step 1's disposable rehearsal (2026-11-06, recorded in the memory bank) measured the read-only Rust daemon at **about 4 GiB steady**.
+- **Live Python daemon:** capped at 6 GB with no swap (`ops/docker-compose.yml:143-144`). Measured at 3.1-3.3 GiB anon at rest and 4.48 GB later on an fp32 embedder in 2026-09 (`ops/docker-compose.yml:117-133`); on the box it runs fp32 (§2.5). PostgreSQL has no cap.
+- **Rust daemon:** the repository documents no RSS figure for the serving daemon. Its floor is the fp32 Qwen3 export: about 2.38 GB of external weights (`rs/model_provision.rs:61-80`), plus the 91 MB reranker and ONNX Runtime. The shadow overlay caps it at 6 GB (`ops/docker-compose.rust-shadow.yml:18-19`). Measured on 2026-11-06 during G1 (recorded in the memory bank): **about 3.9 GiB steady, and about 4.2 GiB peak under write load** with #1332's incremental read-only refresh. Before #1332, the read-only companion grew to about 7 GiB beside an active writer and was OOM-killed at its 6 GiB cap (#1322).
 - **Extractor sidecar:** the base compose file's `pseudolife-extractor` has no memory cap and holds about 7 GB once it wakes (`ops/docker-compose.yml:255-300`). A 2026-10-27 status note says the box's stack does not run it, since its dreams use the CLI shims. Confirm that before sizing anything.
-- **Arithmetic:** live Python about 4.5 GB, plus PostgreSQL and the OS about 1.5 GB, plus the companion at about 4 GiB, comes to about 10 GB. A mirror (about 4 GiB plus its own PostgreSQL) does **not** fit beside the companion in 12 GB, and a second Python daemon as a control arm fits only with both Rust daemons stopped.
+- **Arithmetic at today's 12 GB:** live Python about 4.5 GB, plus PostgreSQL and the OS about 1.5 GB, plus the companion at its 4.2 GiB peak, comes to about 10.5 GB. A mirror (4.2 GiB peak plus about 0.5 GB for its own PostgreSQL) does **not** fit beside it.
+- **Arithmetic at 16 GB** (the maintainer's planned upgrade, Q2): the same sum plus the mirror comes to about 15 GB at both Rust daemons' peaks (about 14.5 GB steady). That fits, with about 1 GB to spare. Since the caps add up to more than RAM (6 GB live plus each Rust daemon's cap), the margin rests on measured use and on the OOM order below, not on the caps.
+- **Control arm:** a second Python daemon (about 4.5 GB) fits only with both Rust daemons stopped, which is where the maintainer placed it (Q1).
 - **OOM behaviour:** container caps do not decide what an out-of-memory host kills. The kernel's OOM killer picks by score, which tracks resident memory, so it would most likely kill the live Python daemon. The mirror's containers therefore set `oom_score_adj: 1000`, which makes them the kernel's first choice.
 - **Disk:** the mirror needs the clone, a scratch restore of the next seed dump for the diff, the journal and a models volume (about 2.5 GB, or shared with the companion's). The bank's dump size was not measured here; Phase 1 records it.
 
-So: **one Rust daemon fits on the box at a time.** The mirror alternates
-with the companion (or runs on a dev box, decision Q1), and a Python control
-arm runs only in a window with both Rust daemons stopped.
+So: **until the box has 16 GB, one Rust daemon runs at a time**, and the
+mirror alternates with the companion. **Once the upgrade is confirmed, they
+run side by side** (Q2). The Python control arm always runs in a window with
+both Rust daemons stopped (Q1).
 
 ## 3. Candidate architectures
 
@@ -199,14 +203,15 @@ arm runs only in a window with both Rust daemons stopped.
 | Risk to the working Python tool | Low. A default-off journal; when on, one boolean check plus a non-blocking enqueue per call, and a bounded queue that drops (and marks a gap) rather than blocks. Python never connects to Rust. | **High.** The proxy sits in every session's path: MCP streaming sessions, 30-second board long-polls, hook timeouts and Host/Origin checks. Its outage is Python's outage, which breaks "Python never depends on Rust". | None at request time (it uses the same journal), but a second Python daemon on the box competes for memory with the live one. |
 | Fidelity | High for writes, reads and the board. Between re-seeds, Rust's clock stays within seconds of Python's, so idle timers, lease TTLs, message expiry and recency behave as they did live. The exception is the catch-up after each nightly re-seed, which replays the records since the cut in compressed time. It also exercises Rust as a long-running process (memory growth, reconnects). The weak points are concurrency reordering and Python's 30-second autosave state (§4.5). | Highest arrival fidelity (real concurrency), but the mirror's state still drifts after the first divergence unless it is re-seeded, and the proxy must not forward credentials Rust cannot validate. | The best **differential**, because both engines see identical input and identical compressed time, which gives a true control arm. The worst **behavioural** fidelity: time is compressed, so leases expire, sessions reap and recency ranks differently than they did live. |
 | Build cost | About 8 PRs over Phases 1-5 (§5): roughly 2,500-4,000 lines, mostly harness. | About 3-4 PRs plus ops changes on the live path; the Python change is zero, but the live compose and port mapping change. | About 6-7 PRs (shares the journal and replay server with A). |
-| Privacy | Everything stays on the daemon box. | On the box. | Needs a second Python daemon, so in practice a dev box: real bank data leaves the daemon box (decision Q1). |
-| Resources | One Rust daemon (about 4 GiB) in the companion's place, one small PostgreSQL, 2-3× the bank size on disk plus the journal. | One Rust daemon plus the proxy. | A Python and a Rust daemon for about an hour a night, plus three restored copies. |
+| Privacy | Everything stays on the daemon box. | On the box. | Needs a second Python daemon every night. Moving it to a dev box would take real bank data off the daemon box, which the maintainer ruled out (Q1). |
+| Resources | One Rust daemon (about 3.9 GiB steady, 4.2 GiB peak), alternating with the companion until the box has 16 GB and beside it afterwards; one small PostgreSQL; 2-3× the bank size on disk plus the journal. | One Rust daemon plus the proxy. | A Python and a Rust daemon for about an hour a night, plus three restored copies. |
 
 **Recommendation: A**, with C's control arm run occasionally to calibrate
 the replay itself (§4.8). B is rejected on risk: it is the only design that
 puts new code in front of every session. A gives the whole-daemon coverage
 the maintainer asked for, keeps every byte of real data on the box, and fits
-the box's memory by taking the companion's slot. Phase 1 below delivers part of A's value with **no Python
+the box's memory: in the companion's slot until the box has 16 GB, and
+beside it afterwards. Phase 1 below delivers part of A's value with **no Python
 change at all**, by deriving the day's writes from consecutive backups.
 
 ## 4. Recommended design
@@ -231,7 +236,7 @@ change at all**, by deriving the day's writes from consecutive backups.
 
 ### 4.2 Isolation
 
-- **Containers:** the mirror runs in its own Compose project with two containers: a PostgreSQL 18 with its own volume, and the Rust daemon. Both join a network with `internal: true`, so there is no route out. Both set `oom_score_adj: 1000` and are capped so that the live cap, live PostgreSQL's measured use and the mirror's caps leave at least 1 GB free. The live PostgreSQL has no cap, so its use is measured rather than assumed. The overlay carries the fixes #1316 found in the companion's overlay: the 0600 `config.yaml` under `cap_drop: ALL`, a missing `TZ` (64 differences) and a missing `PSEUDOLIFE_WRITER_ID`.
+- **Containers:** the mirror runs in its own Compose project with two containers: a PostgreSQL 18 with its own volume, and the Rust daemon. Both join a network with `internal: true`, so there is no route out. Both set `oom_score_adj: 1000`. The mirror daemon is capped at about 4.5 GiB, above its measured 4.2 GiB peak. The live PostgreSQL has no cap, so its use is measured rather than assumed, and the 1 GB margin in §2.6 is checked against measured use before the mirror starts. The overlay carries the fixes #1316 found in the companion's overlay: the 0600 `config.yaml` under `cap_drop: ALL`, a missing `TZ` (64 differences) and a missing `PSEUDOLIFE_WRITER_ID`.
 - **DSN:** the mirror's DSN names only its own PostgreSQL. The mirror's PostgreSQL holds no role on the live cluster, and the live cluster holds no role for the mirror. A check in the seed tool, from Phase 1, refuses a DSN whose host is the live PostgreSQL service or the live port; on the box `127.0.0.1:5433`, the harness's default bench port, *is* the live bank (`ops/docker-compose.yml:70`, `rust/daemon/harness/pgdisposable.py:30`). Seeding opens `data/backups/*.sql.gz` read-only and never rotates, holds or deletes anything there.
 - **Ports:** the mirror publishes only loopback ports, on a third port (proposed 8767), and the replayer is its only client.
 - **Credentials:** after restore, the seed step rewrites or clears every credential table listed in §2.1.
@@ -258,7 +263,8 @@ change at all**, by deriving the day's writes from consecutive backups.
 - **Never recorded:** the `Authorization` header, `X-PL-Agent-Key`, any credential in a result, pairing codes, and the bodies of `/api/pair`, `/api/console/*`, maintainer signed actions and `POST /api/config`. Each of those leaves a marker naming the route and time, with no body; the nightly re-seed brings their effects in.
 - **Background markers:** the dream sweep tick (and which stages ran), each `dream_run_auto` start and end with its trigger, cursor and pulled entry ids, each reaper close, and each extractor or judge exchange (request body and response content, §4.6). These are the only changes in Python's background code, behind the same switch.
 - **Reads are journalled too:** search, get, fact_get, lesson_search and recall all write state (§2.2). The record carries the query and the served ids, not full response bodies, which keeps the journal small and holds less copied data.
-- **Under D10:** this adds no tool, route, hook or CLI mode, but it is new behaviour in the live daemon. Decision Q3 asks the maintainer to confirm that D10 allows it.
+- **Under D10:** this adds no tool, route, hook or CLI mode, but it is new behaviour in the live daemon. The maintainer decided that D10 allows it, default off (Q3). Switching it on in the live deploy happens only after it has merged and been reviewed, and needs the maintainer's own go at that time.
+- **Retention (Q4):** 8 days, on its own volume, excluded from backups and their off-disk mirror. The replayer deletes a day's files once the nightly diff that covers them is done and they are older than 8 days.
 
 ### 4.4 The replayer
 
@@ -295,7 +301,7 @@ What the cut cannot capture:
 - a day with no quiet moment. It is reported as unaligned rather than diffed.
 
 Taking the dump reads the live bank with the owner role, as the nightly
-backup does, and needs the maintainer's agreement (Q1).
+backup does. The maintainer allowed it on the daemon box (Q1).
 
 ### 4.6 Dreams and deep dreams
 
@@ -306,7 +312,7 @@ backup does, and needs the maintainer's agreement (Q1).
   - A hit found only by content is a prompt-presentation difference.
   - A miss is answered with HTTP 500, and the report shows the nearest recorded prompt beside Rust's. A miss is not harmless: after three failures, the Rust dream quarantines the batch's failing entries and commits (`rs/dream/run.rs:41`, `:2085-2117`). So the first miss of the day ends that day's dream comparison, and the mirror's dream state is left out of that night's diff.
 - **Comparison:** for each Python dream marker the report compares the pulled entry ids, the claims, the `dream_run_slots` outcomes, the contenders and the cursor advance. A mismatch in pulled ids is classed as a race when a client store arrived during Python's dream; otherwise it is a difference.
-- **No second LLM bill and no live second extractor.** That choice is decision Q5.
+- **No second LLM bill and no live second extractor.** The maintainer chose replay (Q5).
 - **Deep dreams:** the same path covers the manual graph pass and the judges, since their calls are recorded the same way. Option B's deterministic graph-insight algorithm (CUTOVER 2026-10-19) is compared structurally, as its declared divergence requires, never row by row.
 
 ### 4.7 Console, hooks and board
@@ -321,10 +327,11 @@ backup does, and needs the maintainer's agreement (Q1).
   - no untriaged per-request difference;
   - no untriaged state-diff row;
   - no gap marker;
-  - an exact-hash hit rate on recorded prompts at or above a stated threshold;
+  - an exact-hash hit rate on recorded prompts of at least 95% (Q8);
   - no mirror restart, OOM or `not_ready` episode.
+- **Exit (Q8):** 7 consecutive clean days. Only then does the evidence go to the maintainer for the G2+ soak decision, which stays theirs.
 - **Classifying a difference:** each one is classed the way `shadow_compare.py` already does: `known_declared_divergence` (it must name a file under `rust/daemon/divergences/`), `new_bug` (a fix PR or issue) or `comparator_noise`. Two classes are added: `seed-window` and `race`.
-- **Calibrating with a control arm:** once, and after any change to the replayer, replay one day's journal into a **Python** mirror on a clone of the same seed, in a window with both Rust daemons stopped (or on a dev box, if Q1 allows). Python-against-Python differences are the replay's own noise floor. A class of difference that shows up there cannot count against Rust.
+- **Calibrating with a control arm:** once, and after any change to the replayer, replay one day's journal into a **Python** mirror on a clone of the same seed, on the daemon box, in a window with both Rust daemons stopped (Q1). Python-against-Python differences are the replay's own noise floor. A class of difference that shows up there cannot count against Rust.
 - **Privacy of reports:** reports hold bank text. They stay in the mirror's private directory on the box, like the companion's (`docs/dev/run-rust-beside-python.md:111`). Only counts and classes are published, never row content.
 
 ## 5. Phased plan
@@ -335,9 +342,9 @@ touched in Phase 3, behind a default-off switch.
 
 | Phase | PRs (rough size) | Delivers | Touches Python? |
 |---|---|---|---|
-| **1. Backup-delta replay (about a week, if 1b stays this narrow)** | **1a** (about 450 lines): a mirror Compose overlay and `harness/mirror/seed.py`. The overlay has its own PostgreSQL and a Rust writer on an `internal: true` network, with caps, `oom_score_adj`, pre-seeded models, port 8767 and the #1316 fixes. `seed.py` restores a backup under an admitted slice name, rewrites every credential (§4.2), refuses a live DSN and gates on health. **1b** (about 500 lines): `harness/mirror/derive.py` turns the difference between backups N and N+1 into ordered calls, for the families whose rows read like requests: stores from new `entries`, outcomes from `outcome_signals`, board actions from `coordination_events`, and session starts and ends from `episodes` and `client_sessions`. `replay.py` and `diff.py` run those calls into the mirror and compare it with N+1 for those families only. Cortex, graph, dream state and telemetry are left out, because they are not replayed and the mirror's dream cursor can move on its own (§2.3). | The first Rust writes on real data, with a family-by-family state diff on the box, and measured numbers: Rust RSS under write load, dump and restore size and time, daily write counts per family. Not covered yet: deduplicated and refused stores, cortex and graph writes, reads and dreams. | **No.** It reads backups only. The mirror takes the companion's slot while it runs (§2.6). |
-| **2. Rust mirror mode** | **2a** (about 300 lines, Rust): `PSEUDOLIFE_MIRROR=1`, a Rust-only mode like `PSEUDOLIFE_READ_ONLY`. It is a writer that starts no reaper, dream, deep-dream or judge tick, fires no session-end dream, sends no stall notice and runs no release check. It refuses any non-loopback extractor or judge URL, reports `mirror: true` in `/health`, and serves a loopback-only, mirror-only control route that runs one sweep or one dream on request. It closes issue #1315 for the mirror case. **2b** (about 150 lines): the same live-DSN refusal as 1a's, moved into the daemon itself when mirror mode is on. | A mirror whose every autonomous action is driven by the replayer, so its dream cursor never moves on its own. | No |
-| **3. Python journal** | **3a** (about 400 lines with tests): the four seams with `begin` records and the in-flight counter, the bounded queue, the writer thread with `tick` records, scrubbing of arguments and results (with a test that a registration's credential never reaches the journal), gap markers and the background markers, behind `PSEUDOLIFE_SHADOW_JOURNAL`; a separate journal volume in the compose file; an overhead test (switch off: one branch; switch on: one enqueue) and a test that a full queue or a failing disk never fails a request. | A complete record of what Python served, ready to replay, while switched off by default. Switching it on in the live deploy is the maintainer's click (Q3). | **Yes**, behind a switch, off by default. |
+| **1. Backup-delta replay (about a week, if 1b stays this narrow)** | **1a** (about 450 lines): a mirror Compose overlay and `harness/mirror/seed.py`. The overlay has its own PostgreSQL and a Rust writer on an `internal: true` network, with caps, `oom_score_adj`, pre-seeded models, port 8767 and the #1316 fixes. `seed.py` restores a backup under an admitted slice name, rewrites every credential (§4.2), refuses a live DSN and gates on health. **1b** (about 500 lines): `harness/mirror/derive.py` turns the difference between backups N and N+1 into ordered calls, for the families whose rows read like requests: stores from new `entries`, outcomes from `outcome_signals`, board actions from `coordination_events`, and session starts and ends from `episodes` and `client_sessions`. `replay.py` and `diff.py` run those calls into the mirror and compare it with N+1 for those families only. Cortex, graph, dream state and telemetry are left out, because they are not replayed and the mirror's dream cursor can move on its own (§2.3). | The first Rust writes on real data, with a family-by-family state diff on the box, and measured numbers: Rust RSS under write load, dump and restore size and time, daily write counts per family. Not covered yet: deduplicated and refused stores, cortex and graph writes, reads and dreams. | **No.** It reads backups only. Until the box's 16 GB is confirmed, the mirror takes the companion's slot while it runs (§2.6, Q2). |
+| **2. Rust mirror mode** | **2a** (about 300 lines, Rust): `PSEUDOLIFE_MIRROR=1`, a declared Rust-only feature like `PSEUDOLIFE_READ_ONLY` (Q7), with its own divergence file. It is a writer that starts no reaper, dream, deep-dream or judge tick, fires no session-end dream, sends no stall notice and runs no release check. It refuses any non-loopback extractor or judge URL, reports `mirror: true` in `/health`, and serves a loopback-only, mirror-only control route that runs one sweep or one dream on request. It closes issue #1315 for the mirror case. **2b** (about 150 lines): the same live-DSN refusal as 1a's, moved into the daemon itself when mirror mode is on. | A mirror whose every autonomous action is driven by the replayer, so its dream cursor never moves on its own. | No |
+| **3. Python journal** | **3a** (about 400 lines with tests): the four seams with `begin` records and the in-flight counter, the bounded queue, the writer thread with `tick` records, scrubbing of arguments and results (with a test that a registration's credential never reaches the journal), gap markers and the background markers, behind `PSEUDOLIFE_SHADOW_JOURNAL`; a separate journal volume in the compose file; an overhead test (switch off: one branch; switch on: one enqueue) and a test that a full queue or a failing disk never fails a request. | A complete record of what Python served, ready to replay, while switched off by default. Switching it on in the live deploy needs the maintainer's own go after merge and review (Q3). | **Yes**, behind a switch, off by default. |
 | **4. Continuous replayer** | **4a** (about 800 lines): tailing, the translation table, per-request comparison with `w2e.py`'s normalizers, marker-driven reaps and sweeps, and the quiet-point cut, dump, diff and re-seed of §4.5. **4b** (about 200 lines): the daily report and a private ledger (one line per day, totals by class), following the body-evidence report's shape. | Whole-daemon coverage of writes, reads, the board, the Console and the hook routes on live traffic, per request and per day. | No |
 | **5. Dream replay** | **5a** (about 300 lines): extractor and judge recording in Python (part of the journal, same switch). **5b** (about 400 lines): the replay-server mode of `stub_extractor.py` and the per-dream comparison. | Dreams, deep dreams and judges compared on real data with no second LLM bill. | Yes: recording only, behind the same switch. |
 | **6. Calibration and exit** | One control-arm run (Python mirror, §4.8) and the exit ledger. | The replay's noise floor, and the evidence the maintainer reads before deciding on the G2+ soak. | No |
@@ -352,16 +359,21 @@ Native clients and hooks on an opt-in machine pointed at Python (straw-man
 - The measured Rust RSS and bank size are recorded.
 - Python's container identity and `/health` are unchanged, checked the same way the companion's rehearsal checks them.
 
-## 6. Decisions the maintainer needs to make
+## 6. Maintainer decisions (2026-11-06)
 
-1. **Q1. Where the mirror and its clones live.** On the daemon box (recommended: the backups are already there and nothing leaves it), or on a Linux dev box? A dev box means copying a backup of the real bank, and in later phases the journal, off the daemon box. That is a privacy decision. It also breaks the rule that dev machines test only against their own test PostgreSQL, which would need an explicit exception. On the box: may the nightly restores, and from Phase 4 the quiet-point dump of the live bank (taken with the owner role, as the backup is), run there? The control arm (§4.8) needs about 4 GB: allow it on a dev box, or run it on the box in a window with both Rust daemons stopped?
-2. **Q2. Companion or mirror, when.** At about 4 GiB each, the two Rust daemons do not fit on the box together (§2.6). Should the mirror take the companion's slot once its read comparisons have converged, should they alternate (for example the companion by day and the mirror's catch-up at night), or should the mirror run on a dev box (Q1)?
-3. **Q3. The Python journal.** Does D10's soft freeze allow a default-off internal journal in the live daemon (no new tool, route, hook or CLI mode)? If so, approve switching it on in the live deploy after Phase 3 merges.
-4. **Q4. Journal retention (a default to confirm or veto).** It holds the same text as the bank. Proposed: 8 days (one more than the backup rotation), on its own volume, excluded from backups and their off-disk mirror, deleted by the replayer after the nightly diff that covers it. A different window, or included in backups?
-5. **Q5. Dreams.** Replay Python's recorded extractor and judge responses (recommended: deterministic and no extra cost), or run a live second extractor for the mirror (a second bill, and its non-identical outputs make the comparison noisy)?
-6. **Q6. Precision.** If the live Python daemon runs bf16 (`embedding.cpu_dtype: auto` on a bf16 CPU), then store-time decisions can differ for precision reasons alone. Pin live Python to fp32 (about 1.4 GB more memory, which affects Q2), or accept a declared bf16 class in the mirror's diff, as the companion does for scores?
-7. **Q7. Rust mirror mode.** Accept `PSEUDOLIFE_MIRROR=1` and its mirror-only control route as a declared Rust-only surface, like `PSEUDOLIFE_READ_ONLY`, refused outside mirror mode?
-8. **Q8. Exit criteria (a default to confirm or veto).** How many consecutive clean days (proposed: 14, with every class of difference closed by a fix or a divergence file), and what minimum prompt hit rate, before you consider the G2+ soak with Rust as the live writer?
+The maintainer decided every question this spec raised on 2026-11-06,
+relayed by the conductor. The sections above already reflect each answer.
+
+| # | Question | Decision | Changes |
+|---|---|---|---|
+| Q1 | Where the mirror, its clones and the control arm live. | **The daemon box only.** No backup, journal or report leaves it. Nightly restores and the Phase 4 quiet-point dump with the owner role are allowed there. The control arm runs there too, in a window with both Rust daemons stopped. | §3 (C ruled out), §4.5, §4.8 |
+| Q2 | Companion and mirror: together, alternating, or elsewhere. | **The maintainer will raise the box to 16 GB RAM, and then the two run side by side.** Until that change is confirmed, they alternate. | §2.6, §3, Phase 1 |
+| Q3 | Whether D10 allows a default-off Python journal, and switching it on live. | **Allowed, default off.** Switching it on in the live deploy happens only after merge and review, and needs the maintainer's own go at that time. | §4.3, Phase 3 |
+| Q4 | Journal retention. | **8 days, on its own volume, excluded from backups** (and so from their off-disk mirror). | §4.3 |
+| Q5 | Dreams: recorded answers or a live second extractor. | **Replay recorded extractor and judge answers.** | §4.6, Phase 5 |
+| Q6 | Precision, if live Python ran bf16. | **Moot, dropped.** G1 (2026-11-06) found the box's CPU has no native bf16, so live Python's `auto` already runs fp32. | §2.5 |
+| Q7 | `PSEUDOLIFE_MIRROR=1` and its mirror-only control route. | **Accepted as a declared Rust-only feature**, like `PSEUDOLIFE_READ_ONLY`, refused outside mirror mode. | Phase 2 |
+| Q8 | Exit criteria before the G2+ soak is considered. | **7 consecutive clean days, with an exact-hash prompt hit rate of at least 95%.** | §1, §4.8 |
 
 ## 7. Risks and what this does not test
 
