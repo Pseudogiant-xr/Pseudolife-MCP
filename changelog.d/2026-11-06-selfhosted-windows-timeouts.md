@@ -1,2 +1,0 @@
-### Fixed (2026-11-06 — Give self-hosted Windows parity shards measured timeout margins)
-- On the self-hosted Windows lane, the daemon security admission step may run 20 minutes instead of 10. The judges' pinned process tests may run 480 seconds instead of 240, set through the new `PARITY_PROCESS_TEST_TIMEOUT`. The Windows workers ran both past their old limits while both self-hosted lanes shared the host, with every finished check passing. Hosted runners keep 10 minutes and 240 seconds.
