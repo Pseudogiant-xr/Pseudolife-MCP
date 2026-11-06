@@ -18,6 +18,11 @@ tracked tree:
 
 Never copy the live `ops/.env`, and never pass a live token to the mirror.
 
+The mirror builds nothing. It runs the images that are already present:
+the live stack's `pseudolife-pg:18`, and the read-only companion's Rust
+image and provisioned model volume. Start the companion once first (see
+`docs/dev/run-rust-beside-python.md`).
+
 ```sh
 C="docker compose -p pseudolife-mirror --env-file mirror.env -f ops/docker-compose.rust-mirror.yml"
 $C up -d mirror-pg

@@ -65,9 +65,12 @@ class FakeDocker(seed.Docker):
     """Records every docker call; answers psql with canned server facts."""
 
     def __init__(self, tmp: Path, *, production=False, project=seed.MIRROR_PROJECT,
-                 daemon=False, free=100 * 1024 ** 3, ports=None):
+                 daemon=False, free=100 * 1024 ** 3, ports=None, name=None,
+                 production_after_restore=False, rewrite_fails=False):
         self.calls, self.production, self.project = [], production, project
         self.daemon, self.free, self.ports, self.tmp = daemon, free, ports or {}, tmp
+        self.name, self.production_after_restore = name, production_after_restore
+        self.rewrite_fails = rewrite_fails
 
     def run(self, args, input=None, redact=""):
         self.calls.append((args, input))
@@ -75,19 +78,26 @@ class FakeDocker(seed.Docker):
             service = args[-1].rsplit("=", 1)[1]
             return "" if service == "mirror-daemon" and not self.daemon else f"id-{service}\n"
         if args[0] == "inspect":
-            return json.dumps([{"Name": "/" + args[1], "Config": {"Labels": {
+            return json.dumps([{"Name": "/" + (self.name or args[1]), "Config": {"Labels": {
                 "com.docker.compose.project": self.project}}, "NetworkSettings": {"Ports": self.ports}}])
         if args[0] == "info":
             return str(self.tmp)
         if args[0] == "exec" and input and b"current_database(), EXISTS" in input:
-            return f"{args[args.index('-d') + 1]}|{'t' if self.production else 'f'}\n"
+            database = args[args.index("-d") + 1]
+            live = self.production or (self.production_after_restore and database == seed.RESTORE_DB)
+            return f"{database}|{'t' if live else 'f'}\n"
+        if args[0] == "exec" and input and b"mirror_live_values" in input and self.rewrite_fails:
+            raise SystemExit("docker exec failed (exit 3): mirror credential rewrite left a live credential")
         if args[0] == "exec" and input and b"pg_database_size" in input:
             return "284000000|59\n"
         return ""
 
     def changed(self) -> bool:
-        return any(a[0] == "exec" and (a[2] == "sh" or (i and b"current_database(), EXISTS" not in i))
+        return any(a[0] == "exec" and (a[2] == "bash" or (i and b"current_database(), EXISTS" not in i))
                    for a, i in self.calls)
+
+    def statements(self) -> list[str]:
+        return [(i or b"").decode() for a, i in self.calls if a[0] == "exec" and i]
 
 
 def backups(tmp: Path, complete=True) -> Path:
@@ -103,6 +113,7 @@ def backups(tmp: Path, complete=True) -> Path:
 @pytest.mark.parametrize("case,match", [
     ({"production": True}, "live bank's PostgreSQL"),
     ({"project": seed.LIVE_PROJECT}, "not the mirror's"),
+    ({"name": "pseudolife-mcp-postgres"}, "not the mirror's"),
     ({"ports": {"5432/tcp": [{"HostIp": "127.0.0.1", "HostPort": "5433"}]}}, "live port"),
     ({"daemon": True}, "daemon is running"),
     ({"free": 7 * 1024 ** 3}, "below the 8 GiB floor"),
@@ -123,7 +134,21 @@ def test_seed_refuses_an_incomplete_dump_and_a_live_dsn(tmp_path, monkeypatch):
         seed.seed(docker, backups(tmp_path, complete=False), SECRET)
     with pytest.raises(seed.Refused, match="live PostgreSQL"):
         seed.seed(docker, tmp_path, SECRET, dsn="postgresql://p@127.0.0.1:5433/pl_cf_mir_seed")
+    with pytest.raises(seed.Refused, match="at least 32"):
+        seed.seed(docker, tmp_path, "short")
     assert not docker.changed()
+
+
+@pytest.mark.parametrize("case,match", [({"production_after_restore": True}, "live bank's PostgreSQL"),
+                                        ({"rewrite_fails": True}, "left a live credential")])
+def test_a_failure_after_the_restore_drops_it_and_leaves_no_seed(tmp_path, monkeypatch, case, match):
+    monkeypatch.setattr(seed.shutil, "disk_usage", lambda p: type("U", (), {"free": 10 ** 12}))
+    docker = FakeDocker(tmp_path, **case)
+    with pytest.raises(SystemExit, match=match):
+        seed.seed(docker, backups(tmp_path), SECRET)
+    done = docker.statements()
+    assert done[-1] == f"DROP DATABASE IF EXISTS {seed.RESTORE_DB} WITH (FORCE);\n"
+    assert not any("RENAME" in s or "TEMPLATE" in s for s in done)
 
 
 def test_seed_restores_rewrites_then_clones(tmp_path, monkeypatch):
@@ -133,12 +158,15 @@ def test_seed_restores_rewrites_then_clones(tmp_path, monkeypatch):
     assert record["backup"] == "pseudolife_memory-20261106-031701.sql.gz"
     assert record["schema_version"] == "59" and record["database_bytes"] == 284000000
     execs = [(a, i) for a, i in docker.calls if a[0] == "exec"]
-    restore = next(a for a, _ in execs if a[2] == "sh")
+    restore = next(a for a, _ in execs if a[2] == "bash")
     # Positional arguments only: the backup name never reaches the script text.
-    assert restore[-3:] == ["sh", record["backup"], seed.SEED_DB] and "$1" in restore[4]
-    order = [("restore" if a[2] == "sh" else (i or b"").decode()) for a, i in execs]
+    assert restore[-3:] == ["bash", record["backup"], seed.RESTORE_DB] and "$1" in restore[6]
+    assert restore[3:5] == ["-o", "pipefail"]
+    order = [("restore" if a[2] == "bash" else (i or b"").decode()) for a, i in execs]
     rewrite = next(n for n, s in enumerate(order) if "mirror_live_values" in s)
-    assert order.index("restore") < rewrite < next(n for n, s in enumerate(order) if "TEMPLATE" in s)
+    renamed = next(n for n, s in enumerate(order) if "RENAME TO" in s)
+    assert order.index("restore") < rewrite < renamed
+    assert f"RENAME TO {seed.SEED_DB}" in order[renamed] and f"TEMPLATE {seed.SEED_DB}" in order[renamed]
     assert all(SECRET not in " ".join(a) for a, _ in docker.calls)  # stdin only, never argv
 
 
@@ -148,6 +176,16 @@ def test_errors_never_echo_the_secret(monkeypatch):
     with pytest.raises(SystemExit) as e:
         seed.Docker().psql("cid", "pl_cf_mir_seed", "SELECT 1", redact=SECRET)
     assert SECRET not in str(e.value) and "<secret>" in str(e.value)
+
+
+def test_health_refuses_a_mirror_serving_without_a_bearer(tmp_path, monkeypatch):
+    docker = FakeDocker(tmp_path, daemon=True)
+    real = docker.run
+    monkeypatch.setattr(docker, "run", lambda args, input=None, redact="": json.dumps(
+        {"status": "ok", "ready": True, "auth": False, "schema": 59})
+        if args[0] == "exec" and "curl" in args else real(args, input, redact))
+    with pytest.raises(seed.Refused, match="without a bearer"):
+        seed.health(docker, 5)
 
 
 def test_tokens_env_maps_replay_tokens_to_live_names_only():
@@ -160,7 +198,8 @@ def test_tokens_env_maps_replay_tokens_to_live_names_only():
 
 def test_mirror_config_turns_every_outbound_path_off_and_keeps_the_rest():
     live = {"memory": {"miras": {"preset": "flat"}, "dream": {"extractor_base_url": "http://h:1/v1",
-            "fallback_base_url": "http://h:2/v1", "extractor_model": "m"},
+            "fallback_base_url": "http://h:2/v1", "extractor_model": "m",
+            "extractor_api_key": "k1", "fallback_api_key": "k2"},
             "deep_dream": {"judge_url": "http://h:3", "judge_third_url": "http://h:4"}}}
     cfg = seed.mirror_config(live)
     dream, deep = cfg["memory"]["dream"], cfg["memory"]["deep_dream"]
@@ -168,6 +207,7 @@ def test_mirror_config_turns_every_outbound_path_off_and_keeps_the_rest():
     assert deep["judge_url"] == deep["judge_third_url"] == "" and not deep["judges_enabled"]
     assert not deep["auto_tick"] and not dream["stall_notice"] and not cfg["updates"]["check_releases"]
     assert cfg["memory"]["miras"] == {"preset": "flat"} and dream["extractor_model"] == "m"
+    assert not any(k.endswith("api_key") for k in dream)
     assert live["memory"]["dream"]["extractor_base_url"] == "http://h:1/v1"  # not mutated
 
 
@@ -178,6 +218,7 @@ def test_overlay_has_no_route_out_and_no_live_credentials():
     assert doc["networks"] == {"mirror": {"internal": True}}
     for name, svc in doc["services"].items():
         assert "ports" not in svc and "network_mode" not in svc, name
+        assert "build" not in svc and svc["pull_policy"] == "never", name  # never retags live images
         assert svc["networks"] == ["mirror"] and svc["oom_score_adj"] == 1000, name
         assert svc["mem_limit"] and svc["memswap_limit"] == svc["mem_limit"], name
     pg, daemon = doc["services"]["mirror-pg"], doc["services"]["mirror-daemon"]
@@ -186,7 +227,8 @@ def test_overlay_has_no_route_out_and_no_live_credentials():
     env = daemon["environment"]
     for key in ("TZ", "PSEUDOLIFE_WRITER_ID", "PSEUDOLIFE_MCP_TOOLSET"):
         assert key in env
-    assert "MIRROR_TOKENS" in env["PSEUDOLIFE_MCP_TOKENS"] and "MIRROR_TOKEN" in env["PSEUDOLIFE_MCP_TOKEN"]
+    assert env["PSEUDOLIFE_MCP_TOKENS"] == "${PSEUDOLIFE_MIRROR_TOKENS:-}"  # mirror-pg starts first
+    assert env["PSEUDOLIFE_MCP_TOKEN"] == "${PSEUDOLIFE_MIRROR_TOKEN:-}"
     assert "PSEUDOLIFE_MCP_TOKEN" not in re.sub(r"PSEUDOLIFE_MCP_TOKENS?:", "", text)
     assert env["PSEUDOLIFE_RELEASE_CHECK"] == "0" and float(env["PSEUDOLIFE_SESSION_IDLE_SECONDS"]) > 1e7
     dsn = re.sub(r"\$\{[^}]*\}", "pw", env["PSEUDOLIFE_MCP_DATABASE_URL"])
@@ -217,11 +259,14 @@ def throwaway_pg():
                           "-e", "POSTGRES_DB=pl_cf_mir_seed", image],
                          check=True, capture_output=True, text=True).stdout.strip()
     try:
+        # Over TCP: the image's first-start server listens on its socket only.
         for _ in range(60):
-            if subprocess.run(["docker", "exec", cid, "pg_isready", "-U", "pseudolife", "-d",
-                               "pl_cf_mir_seed"], capture_output=True).returncode == 0:
+            if subprocess.run(["docker", "exec", cid, "pg_isready", "-h", "127.0.0.1", "-U",
+                               "pseudolife", "-d", "pl_cf_mir_seed"], capture_output=True).returncode == 0:
                 break
             time.sleep(1)
+        else:
+            raise RuntimeError("the throwaway PostgreSQL did not become ready in 60 s")
         from pseudolife_memory.storage.schema import SCHEMA_SQL
         seed.Docker().psql(cid, "pl_cf_mir_seed", "CREATE EXTENSION IF NOT EXISTS vector;\n" + SCHEMA_SQL)
         yield cid
@@ -253,6 +298,10 @@ INSERT INTO maintainer_passkeys (credential_id, public_key, alg, label, enrolled
   VALUES ('cred', '\\x00', -7, 'key', 'maintainer', 'active', 1);
 INSERT INTO maintainer_bootstrap (code_hash, expires_at) VALUES ('{"7" * 64}', 9e9);
 INSERT INTO maintainer_nonces (nonce, expires_at) VALUES ('n1', 9e9);
+INSERT INTO principals (principal, token_hash, created_at, revoked_at) VALUES ('revoked-box', '{"6" * 64}', 1, 2);
+TRUNCATE client_sessions;
+INSERT INTO client_sessions (session_key, registered_via, principal, started_at)
+  VALUES ('k1', 'hook', 'revoked-box', 1), ('k2', 'hook', 'codex', 1), ('k3', 'hook', NULL, 1);
 """)
 
 
@@ -266,7 +315,11 @@ def test_credential_rewrite_leaves_no_live_value(throwaway_pg):
 
     assert _rows(cid, "SELECT principal, token_hash, code_hash, code_expires_at, paired_code_hash "
                  "FROM principals ORDER BY 1") == [
-        ["paired-laptop", hashed("principal", "paired-laptop"), "", "", ""], ["pending", "", "", "", ""]]
+        ["paired-laptop", hashed("principal", "paired-laptop"), "", "", ""], ["pending", "", "", "", ""],
+        ["revoked-box", hashed("principal", "revoked-box"), "", "", ""]]
+    # Environment bearers only for names with no stored row: a revoked
+    # machine stays revoked in the mirror.
+    assert _rows(cid, seed.TOKEN_PRINCIPALS_SQL) == [["claude-code"], ["codex"]]
     assert _rows(cid, "SELECT agent_id, credential_hash FROM coordination_agents ORDER BY 1") == [
         ["1" * 32, hashed("agent", "1" * 32)], ["2" * 32, ""]]
     meta = dict(_rows(cid, "SELECT key, value #>> '{}' FROM meta WHERE key LIKE '%secret_v1'"))

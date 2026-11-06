@@ -10,10 +10,11 @@ with the standard library and the docker CLI (``config`` also needs PyYAML):
     seed.py config --backups data/backups --backup NAME --out DIR/config.yaml
     seed.py health [--timeout 1800]
 
-``seed`` restores one backup into ``pl_cf_mir_seed`` inside the mirror's
-PostgreSQL container, rewrites every credential to replay-only values derived
-from the mirror secret, and clones it as ``pl_cf_mir_bank``, the mirror
-daemon's database. Backups are only read: nothing in the backup directory is
+``seed`` restores one backup into ``pl_cf_mir_restore`` inside the mirror's
+PostgreSQL container and rewrites every credential to replay-only values
+derived from the mirror secret. Only then is it renamed ``pl_cf_mir_seed``
+and cloned as ``pl_cf_mir_bank``, the mirror daemon's database; a failure
+on the way drops it. Backups are only read: nothing in the backup directory is
 written, rotated or deleted (the container mounts it read-only).
 
 Refusals, each before any statement that changes anything:
@@ -50,6 +51,10 @@ LIVE_PORTS = {5433}
 PRODUCTION_DB = "pseudolife_memory"
 MIRROR_DB = re.compile(r"pl_cf_mir_[a-z0-9_]{1,40}")
 SEED_DB, BANK_DB = "pl_cf_mir_seed", "pl_cf_mir_bank"
+# Restored and rewritten here, renamed to SEED_DB only once no live
+# credential is left: a failed rewrite must not leave a cloneable bank
+# holding live secrets.
+RESTORE_DB = "pl_cf_mir_restore"
 DEFAULT_DSN = f"postgresql://pseudolife@mirror-pg:5432/{SEED_DB}"
 BACKUP_NAME = re.compile(r"pseudolife_memory-(\d{8}-\d{6})\.sql\.gz")
 DUMP_COMPLETE = b"-- PostgreSQL database dump complete"
@@ -158,8 +163,7 @@ TOKEN_PRINCIPALS_SQL = """
 SELECT DISTINCT principal FROM (
   SELECT principal FROM coordination_agents
   UNION SELECT principal FROM client_sessions WHERE principal IS NOT NULL) seen
-WHERE principal <> '' AND principal NOT IN (
-  SELECT principal FROM principals WHERE token_hash IS NOT NULL AND revoked_at IS NULL)
+WHERE principal <> '' AND principal NOT IN (SELECT principal FROM principals)
 ORDER BY 1
 """
 
@@ -167,7 +171,9 @@ ORDER BY 1
 def tokens_env(secret: str, principals: list[str]) -> str:
     """The mirror daemon's bearer map: replay-only tokens under the names the
     live environment map served (they sign sessions and board agents but
-    have no stored row), never the live values (spec §4.2)."""
+    have no stored row), never the live values (spec §4.2). A name with any
+    stored row, revoked ones included, stays stored: an environment bearer
+    would shadow its revocation and grant operator rights it never had."""
     names = [p for p in principals if p and p not in RESERVED_PRINCIPALS and "," not in p]
     pairs = ",".join(f"{replay_token(secret, 'principal', p)}:{p}" for p in names)
     return (f"PSEUDOLIFE_MIRROR_TOKENS={pairs}\n"
@@ -186,6 +192,9 @@ def mirror_config(live: dict) -> dict:
     deep.update(auto_tick=False, judges_enabled=False)
     for key in [k for k in deep if k.endswith("_url")]:
         deep[key] = ""
+    for section in (dream, deep):  # no live API key reaches the mirror
+        for key in [k for k in section if k.endswith("api_key")]:
+            del section[key]
     cfg.setdefault("updates", {})["check_releases"] = False
     return cfg
 
@@ -288,22 +297,31 @@ def seed(docker: Docker, backups: Path, secret: str, backup: str | None = None,
     docker.psql(cid, "pl_cf_mir_home", f"""
 DROP DATABASE IF EXISTS {BANK_DB} WITH (FORCE);
 DROP DATABASE IF EXISTS {SEED_DB} WITH (FORCE);
-CREATE DATABASE {SEED_DB};
+DROP DATABASE IF EXISTS {RESTORE_DB} WITH (FORCE);
+CREATE DATABASE {RESTORE_DB};
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'pseudolife_shadow') THEN
     CREATE ROLE pseudolife_shadow NOLOGIN;  -- the dump's GRANTs name it
   END IF;
 END $$;
 """)
+    try:
+        started = time.monotonic()
+        # Positional arguments, never interpolated: the name passed BACKUP_NAME.
+        # pipefail: a gunzip failure fails the restore, not only psql's.
+        docker.run(["exec", cid, "bash", "-o", "pipefail", "-c",
+                    'gunzip -c "/backups/$1" | psql -X -q -v ON_ERROR_STOP=1 '
+                    '--single-transaction -U pseudolife -d "$2" > /dev/null',
+                    "bash", path.name, RESTORE_DB])
+        record["restore_seconds"] = round(time.monotonic() - started, 1)
+        refuse_live_server(server_facts(docker, cid, RESTORE_DB))
+        docker.psql(cid, RESTORE_DB, credential_sql(secret), redact=secret)
+    except BaseException:
+        docker.psql(cid, "pl_cf_mir_home", f"DROP DATABASE IF EXISTS {RESTORE_DB} WITH (FORCE);\n")
+        raise
     started = time.monotonic()
-    # Positional arguments, never interpolated: the name passed BACKUP_NAME.
-    docker.run(["exec", cid, "sh", "-c", 'gunzip -c "/backups/$1" | psql -X -q -v ON_ERROR_STOP=1 '
-                '--single-transaction -U pseudolife -d "$2" > /dev/null', "sh", path.name, SEED_DB])
-    record["restore_seconds"] = round(time.monotonic() - started, 1)
-    refuse_live_server(server_facts(docker, cid, SEED_DB))
-    docker.psql(cid, SEED_DB, credential_sql(secret), redact=secret)
-    started = time.monotonic()
-    docker.psql(cid, "pl_cf_mir_home", f"CREATE DATABASE {BANK_DB} TEMPLATE {SEED_DB};\n")
+    docker.psql(cid, "pl_cf_mir_home", f"ALTER DATABASE {RESTORE_DB} RENAME TO {SEED_DB};\n"
+                f"CREATE DATABASE {BANK_DB} TEMPLATE {SEED_DB};\n")
     record["clone_seconds"] = round(time.monotonic() - started, 1)
     sizes = docker.psql(cid, SEED_DB, "SELECT pg_database_size(current_database()), "
                         "(SELECT value #>> '{}' FROM meta WHERE key = 'schema_version');\n").strip()
@@ -326,6 +344,9 @@ def health(docker: Docker, timeout: float, expect_schema: str | None = None) -> 
                 last = str(e)[:200]
             else:
                 schema = str(body.get("schema", ""))
+                if body.get("ready") is True and body.get("auth") is False:
+                    raise Refused("the mirror daemon serves without a bearer: start it with the "
+                                  "tokens file from `seed.py tokens` (--env-file).")
                 if body.get("status") == "ok" and body.get("ready") is True \
                         and not body.get("read_only") and not body.get("counters_import_required") \
                         and (expect_schema is None or schema == expect_schema):

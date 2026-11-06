@@ -31,10 +31,10 @@ x-logging: &default-logging
 
 services:
   mirror-pg:
+    # Images only, never built here: a build would retag the live stack's
+    # pseudolife-pg:18 or the companion's Rust image from this checkout.
     image: ${PSEUDOLIFE_MIRROR_PG_IMAGE:-pseudolife-pg:18}
-    build:
-      context: .
-      dockerfile: Dockerfile.pg
+    pull_policy: never
     restart: unless-stopped
     logging: *default-logging
     environment:
@@ -50,7 +50,8 @@ services:
     memswap_limit: ${PSEUDOLIFE_MIRROR_PG_MEM_LIMIT:-2g}
     oom_score_adj: 1000
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U pseudolife -d pl_cf_mir_home"]
+      # Over TCP: the image's first-start server listens only on its socket.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U pseudolife -d pl_cf_mir_home"]
       interval: 5s
       timeout: 5s
       retries: 30
@@ -58,14 +59,7 @@ services:
 
   mirror-daemon:
     image: ${PSEUDOLIFE_RUST_IMAGE:-pseudolife-daemon-rust:checkout}
-    build:
-      context: ..
-      dockerfile: ops/Dockerfile.daemon-rust
-      args:
-        GIT_SHA: ${PSEUDOLIFE_BUILD_GIT_SHA:-unknown}
-        GIT_DIRTY: ${PSEUDOLIFE_BUILD_DIRTY:-unknown}
-        BUILD_TIME: ${PSEUDOLIFE_BUILD_TIME:-unknown}
-        BUILD_SOURCE: checkout
+    pull_policy: never
     restart: unless-stopped
     logging: *default-logging
     # The writer's daemon user, which the image gives /models (#1316).
@@ -83,8 +77,10 @@ services:
       PSEUDOLIFE_DAEMON_MODELS_DIR: /models
       PSEUDOLIFE_MCP_TRUST_BIND: "1"
       # Replay-only bearers from `seed.py tokens`, never the live values.
+      # Optional here so mirror-pg can start before seeding writes them;
+      # `seed.py health` refuses a daemon that came up without them.
       PSEUDOLIFE_MCP_TOKEN: ${PSEUDOLIFE_MIRROR_TOKEN:-}
-      PSEUDOLIFE_MCP_TOKENS: ${PSEUDOLIFE_MIRROR_TOKENS:?Run seed.py tokens and pass its file with --env-file}
+      PSEUDOLIFE_MCP_TOKENS: ${PSEUDOLIFE_MIRROR_TOKENS:-}
       CUDA_VISIBLE_DEVICES: "-1"
       # The live writer's values (#1316: a missing TZ made 64 differences).
       TZ: ${TZ:-UTC}
@@ -98,8 +94,9 @@ services:
     volumes:
       # Owned by uid 10001; holds the config.yaml `seed.py config` writes.
       - ${PSEUDOLIFE_MIRROR_DATA:?Set the mirror daemon's data directory}:/data
-      # The companion's provisioned models, read-only: the entry point finds
-      # them present and downloads nothing (it could not: no route out).
+      # The read-only companion's provisioned models (it must have started
+      # once), read-only: the entry point finds them present and downloads
+      # nothing. A Rust image pinning other models fails its start here.
       - mirror_models:/models:ro
     depends_on:
       mirror-pg:
