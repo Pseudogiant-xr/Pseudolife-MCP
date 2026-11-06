@@ -17,9 +17,10 @@
       "daemon-image": "028fd79f06c19794",
       "fixtures": "2c17c5dbf6eed90d",
       "parity": "4b13f8c55b6e3de3",
-      "parity-checks": "ede7566a71876da8",
+      "parity-checks": "228bd3c4cc28e240",
+      "parity-pool": "815e4a55323c1ac8",
       "rust": "1bf2949883eca84e",
-      "scope": "702c44bef393994a"
+      "scope": "1be8245c7953029b"
     }
   }
 }
