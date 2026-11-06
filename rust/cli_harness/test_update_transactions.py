@@ -1002,6 +1002,39 @@ def test_checkout_switch_back_to_python_leaves_the_rust_model_volume(tmp_path, n
         assert state["running"]["Config"]["Labels"]["org.pseudolife.engine"] == "python"
 
 
+@pytest.mark.parametrize("target", ["rust", "python"])
+def test_native_checkout_still_refuses_an_undeclared_mount_beside_the_rust_model_volume(tmp_path, target):
+    """The overlay supplies only the /models volume: a running Rust daemon's
+    other mount that no Compose file declares is still a dropped mount, on a
+    rerun and on a switch to Python, and nothing changes."""
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("native binary build is owned by the parent; set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path, "", "engine") as (repo, env, state_path):
+        common = ["--checkout", str(repo), "--no-test-login", "--no-cache-prune", "--json",
+                  "--health-retries", "1", "--health-delay-ms", "0"]
+        first = run_arm(repo, env, binary, [*common, "--engine", "rust", "--rollback-tag", "pre-rust"])
+        assert first.returncode == 0, first.stdout + first.stderr
+        state = json.loads(state_path.read_text())
+        assert any(m["Destination"] == "/models" for m in state["running"]["Mounts"])
+        state["running"]["Mounts"].append({"Destination": "/srv/x", "Source": str(tmp_path / "extra"),
+                                           "Type": "bind", "RW": True})
+        state_path.write_text(json.dumps(state))
+        selection = repo / "data/update-engine/docker-compose.engine.json"
+        accepted = selection.read_bytes()
+        before = len(state["calls"])
+        images = dict(state["images"])
+        second = run_arm(repo, env, binary, [*common, "--engine", target, "--rollback-tag", "pre-second"])
+        assert second.returncode == 2, second.stdout + second.stderr
+        assert "the Compose configuration drops a daemon mount" in second.stdout
+        assert "nothing was changed" in second.stdout
+        after = json.loads(state_path.read_text())
+        assert stages({"calls": after["calls"][before:]}) == []
+        assert after["images"] == images
+        assert selection.read_bytes() == accepted
+        assert not (repo / "data/update-engine/docker-compose.python-accepted.json").exists()
+
+
 @pytest.mark.parametrize("models", ["volume", "legacy"])
 def test_rust_to_rust_rollback_keeps_the_model_directory_the_daemon_ran_with(tmp_path, models):
     """Both updaters print the same restore command for a failed Rust-to-Rust
