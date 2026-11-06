@@ -1846,6 +1846,9 @@ class Update:
             except (ValueError, IndexError):
                 labels = {}
         from pseudolife_memory.update_engine import RUST_RELEASE_OVERLAY, transient_overlay
+        labelled = [Path(p) for p in (labels.get("com.docker.compose.project.config_files") or "").split(",") if p]
+        # The Rust overlay the running daemon was created with, for a rollback to it.
+        running_rust = next((p for p in labelled if p.name == RUST_RELEASE_OVERLAY and p.is_file()), None)
         # Engine overlays are this updater's own: each run supplies its own.
         config_files = [Path(p) for p in (labels.get("com.docker.compose.project.config_files") or "").split(",")
                         if p and not transient_overlay(Path(p))]
@@ -1940,7 +1943,7 @@ class Update:
         return {"args": args, "env_file": env_files, "checkout": checkout,
                 "files": [str(p) for p in files], "project": project, "original_files": [str(p) for p in original],
                 "image_pin_overlay_masked": len(original) != len(existing),
-                "rust_overlay": str(rust_path) if rust_path else None}
+                "rust_overlay": str(running_rust or rust_path) if rust_path else None}
 
     def _bundled(self, name: str) -> Path:
         target = data_dir() / "compose" / name

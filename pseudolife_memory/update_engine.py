@@ -249,10 +249,22 @@ def rollback_commands(base: list[str], env_file, overlay: Path, accepted: Path, 
             + f"; else echo '{fix}' >&2; false; fi"]
 
 
-def model_volumes(config: dict) -> tuple[str, list[tuple[str, str | None]]] | None:
-    """``(models dir, [(--mount spec, compose volume key or None)])`` for the
-    mounts covering the daemon's models directory; None when the daemon
-    names its own ONNX model directory."""
+def _mount_spec(fields) -> str:
+    """A ``docker run --mount`` value: Docker parses it as CSV, so a field
+    holding a comma or quote is quoted, with its quotes doubled."""
+    out = []
+    for key, value in fields:
+        field = f"{key}={value}"
+        out.append('"' + field.replace('"', '""') + '"' if any(c in field for c in ',"\n\r') else field)
+    return ",".join(out)
+
+
+def model_volumes(config: dict) -> tuple[str, list[tuple[str, str, str | None]]] | None:
+    """``(models dir, [(docker run flag, value, compose volume key or None)])``
+    for the mounts covering the daemon's models directory; None when the
+    daemon names its own ONNX model directory. A named volume uses
+    ``--mount`` (it keeps a subpath); a bind uses ``-v``, which creates a
+    missing host path as Compose does."""
     service = config["services"][up.DAEMON_SERVICE]
     env = service.get("environment", {}) or {}
     if env.get("PSEUDOLIFE_DAEMON_ONNX_DIR"):
@@ -266,11 +278,11 @@ def model_volumes(config: dict) -> tuple[str, list[tuple[str, str | None]]] | No
             continue
         if volume.get("type") == "volume":
             name = (config.get("volumes", {}).get(source) or {}).get("name") or source
-            spec = f"type=volume,src={name},dst={target}"
+            fields = [("type", "volume"), ("src", name), ("dst", target)]
             subpath = (volume.get("volume") or {}).get("subpath")
-            mounts.append((spec + (f",volume-subpath={subpath}" if subpath else ""), source))
+            mounts.append(("--mount", _mount_spec(fields + ([("volume-subpath", subpath)] if subpath else [])), source))
         elif volume.get("type") == "bind":
-            mounts.append((f"type=bind,src={source},dst={target}", None))
+            mounts.append(("-v", f"{source}:{target}", None))
     if not mounts:
         raise up.UpdateError(f"the Rust daemon's model directory {models_dir} is on no persistent volume of this "
                              "project; restore the release Compose files and retry; nothing was changed", 2)
@@ -441,13 +453,13 @@ class ReleaseEngineUpdate:
             self.u.step("the daemon names its own ONNX model directory; leaving model provisioning to it")
             return
         models_dir, mounts = plan
-        for _spec, key in mounts:
+        for _flag, _value, key in mounts:
             if key is not None:
                 ensure_project_volume(self.command, config, key)
         self.u.step(f"provisioning the Rust daemon's pinned models into {models_dir} (a first activation downloads them)...")
         args = ["run", "--rm", "-e", f"PSEUDOLIFE_DAEMON_MODELS_DIR={models_dir}"]
-        for spec, _key in mounts:
-            args += ["--mount", spec]
+        for flag, value, _key in mounts:
+            args += [flag, value]
         code, out = self.command([*args, "--entrypoint", "pseudolife-daemon", image, "provision", "models", "--if-missing"],
                                  timeout=3600, stream=not self.o.as_json)
         if code:
@@ -519,7 +531,7 @@ class ReleaseEngineUpdate:
             pg = self.project_container(compose, environment, "pseudolife-pg")
             self.require_imported(pg, user, db, daemon)
             model_volumes(config)  # refuse a misplaced model directory before the pull
-        image =f"{RUST_IMAGE if self.engine == 'rust' else up.GHCR_IMAGE}:{self.target}"
+        image = f"{RUST_IMAGE if self.engine == 'rust' else up.GHCR_IMAGE}:{self.target}"
         u.preflight_disk(up.data_dir())
         u.step(f"pulling {image}...")
         code, out = self.command(["pull", image], timeout=7200, stream=not o.as_json)
@@ -534,6 +546,10 @@ class ReleaseEngineUpdate:
                         "publishes its Rust daemon image, or move to it on Python with --engine python")
             raise up.UpdateError(f"docker pull {image} failed" + (f" ({up._last_line(out)})" if out.strip() else "") + hint)
         schema = self.probe_schema(image)
+        bank = before.get("schema")
+        if type(bank) is int and bank > schema:
+            raise up.UpdateError(f"the bank is at schema v{bank}, newer than {image}'s v{schema}, which would refuse it; "
+                                 f"update to a release at schema v{bank} or later; nothing was changed", 2)
         if self.engine == "rust":
             self.provision_models(image, config)
         self.backup(context["checkout"])

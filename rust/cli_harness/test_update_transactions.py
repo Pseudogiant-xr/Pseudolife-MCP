@@ -502,7 +502,7 @@ def host(tmp_path, failure="", mode="release"):
                 deployed = current["deployed"]
                 body = json.dumps({"status": "error" if deployed and failure == "health" or not deployed and failure == "stopped" else "ok",
                                    "version": "wrong" if deployed and failure == "version" else current.get("target_version", "0.21.1") if deployed else "0.21.0",
-                                   "schema": 59 if deployed and failure == "schema" else 58,
+                                   "schema": (59 if failure == "schema" else 58) if deployed else current.get("running_schema", 58),
                                    "auth": True, "persist_errors": 0,
                                    "updates": {"unattended_daemon": True}}).encode()
             else:
@@ -1037,6 +1037,28 @@ def test_release_rust_models_go_to_their_own_volume_outside_the_backed_up_state(
         assert "type=volume,src=fixture-project_pseudolife_rust_models,dst=/models" in provision
         assert "PSEUDOLIFE_DAEMON_MODELS_DIR=/models" in provision
         assert not any(v.endswith("dst=/data") for v in provision)
+
+
+@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+@pytest.mark.parametrize("case", ["misplaced_models", "newer_bank"])
+def test_release_rust_refuses_before_pulling_or_backing_up(tmp_path, native, case):
+    binary = _native_binary()
+    if native and not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path) as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        if case == "misplaced_models":
+            state["config"]["services"][SERVICE]["environment"]["PSEUDOLIFE_DAEMON_MODELS_DIR"] = "/models"
+        else:
+            # The running daemon reports v59; the image's probe says 58.
+            state["running_schema"] = 59
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary if native else None,
+                         ["--engine", "rust", "--tag", "0.21.1", "--json", "--health-retries", "1"])
+        assert result.returncode == 2, result.stdout + result.stderr
+        state = json.loads(state_path.read_text())
+        assert stages(state) == ([] if case == "misplaced_models" else ["pull"])
+        assert ("no persistent volume" if case == "misplaced_models" else "newer than") in result.stdout
 
 
 @pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])

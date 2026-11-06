@@ -122,6 +122,8 @@ struct Context {
     env_files: Vec<PathBuf>,
     checkout: Option<PathBuf>,
     running: Value,
+    /// The Rust overlay the running daemon was created with, if still present.
+    running_rust: Option<PathBuf>,
 }
 
 pub(super) fn compose_root() -> PathBuf {
@@ -281,6 +283,13 @@ impl Update {
             ));
         }
         let existing = list("com.docker.compose.project.config_files");
+        let running_rust = existing
+            .iter()
+            .find(|p| {
+                p.file_name().and_then(|n| n.to_str()) == Some("docker-compose.rust-ghcr.yml")
+                    && p.is_file()
+            })
+            .cloned();
         let project_dir = working.or_else(|| {
             existing.first().and_then(|p| p.parent()).map(Path::to_owned)
         }).ok_or_else(|| UpdateError::usage(
@@ -332,6 +341,7 @@ impl Update {
             env_files,
             checkout,
             running,
+            running_rust,
         })
     }
     pub fn deploy_release(
@@ -516,6 +526,13 @@ impl Update {
         } else {
             None
         };
+        if let (Some(image_schema), Some(bank)) = (schema, self.schema_before)
+            && bank > image_schema
+        {
+            return Err(UpdateError::usage(format!(
+                "the bank is at schema v{bank}, newer than {image}'s v{image_schema}, which would refuse it; update to a release at schema v{bank} or later; nothing was changed"
+            )));
+        }
         let daemon = context.running["Id"].as_str().unwrap_or(DAEMON_CONTAINER);
         if choice == "rust" {
             // A first start would otherwise download the models inside the
@@ -589,14 +606,14 @@ impl Update {
         let mut restore_args = context.args.clone();
         if old_engine == "rust" && choice != "rust" {
             // The restored Rust daemon needs its overlay's model volume again.
-            restore_args.extend([
-                "-f".into(),
+            // Prefer the overlay the running daemon was created with: an older
+            // target release's overlay may lack the model volume.
+            let overlay = context.running_rust.clone().unwrap_or_else(|| {
                 compose_root()
                     .join(&target)
                     .join("docker-compose.rust-ghcr.yml")
-                    .to_string_lossy()
-                    .into_owned(),
-            ]);
+            });
+            restore_args.extend(["-f".into(), overlay.to_string_lossy().into_owned()]);
         }
         self.rollback_lines = engine::rollback_commands(
             &restore_args,
@@ -958,8 +975,27 @@ fn running_config(running: &Value) -> Value {
     json!({"services": {DAEMON_SERVICE: {"environment": env}}})
 }
 
-/// `(--mount spec, Compose volume key)`: one mount holding the models.
-type ModelMount = (String, Option<String>);
+/// `(docker run flag, value, Compose volume key)`: one mount holding the
+/// models. A named volume uses `--mount` (it keeps a subpath); a bind uses
+/// `-v`, which creates a missing host path as Compose does.
+type ModelMount = (String, String, Option<String>);
+
+/// A `docker run --mount` value. Docker parses it as CSV, so a field holding
+/// a comma or quote is quoted, with its quotes doubled.
+fn mount_spec(fields: &[(&str, &str)]) -> String {
+    fields
+        .iter()
+        .map(|(key, value)| {
+            let field = format!("{key}={value}");
+            if field.contains([',', '"', '\n', '\r']) {
+                format!("\"{}\"", field.replace('"', "\"\""))
+            } else {
+                field
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(",")
+}
 
 /// The models directory and the mounts covering it, or None when the daemon
 /// names its own ONNX model directory.
@@ -993,16 +1029,21 @@ fn model_volumes(config: &Value) -> Result<Option<(String, Vec<ModelMount>)>> {
         match volume["type"].as_str() {
             Some("volume") => {
                 let name = config["volumes"][source]["name"].as_str().unwrap_or(source);
-                let mut spec = format!("type=volume,src={name},dst={target}");
+                let mut fields = vec![("type", "volume"), ("src", name), ("dst", target)];
                 if let Some(subpath) = volume["volume"]["subpath"]
                     .as_str()
                     .filter(|s| !s.is_empty())
                 {
-                    spec.push_str(&format!(",volume-subpath={subpath}"));
+                    fields.push(("volume-subpath", subpath));
                 }
-                mounts.push((spec, Some(source.to_owned())));
+                mounts.push((
+                    "--mount".to_owned(),
+                    mount_spec(&fields),
+                    Some(source.to_owned()),
+                ));
             }
-            Some("bind") => mounts.push((format!("type=bind,src={source},dst={target}"), None)),
+            // `-v` creates a missing host path, as Compose does for a bind.
+            Some("bind") => mounts.push(("-v".to_owned(), format!("{source}:{target}"), None)),
             _ => {}
         }
     }
@@ -1019,7 +1060,7 @@ fn model_volumes(config: &Value) -> Result<Option<(String, Vec<ModelMount>)>> {
 fn volume_create_args(config: &Value, key: &str) -> Result<Vec<String>> {
     let definition = &config["volumes"][key];
     let name = definition["name"].as_str().unwrap_or(key);
-    if definition["external"] == true {
+    if !definition["external"].is_null() && definition["external"] != false {
         return Err(UpdateError::usage(format!(
             "the external model volume {name} does not exist; create it as the project expects, then retry; nothing was deployed"
         )));
@@ -1060,7 +1101,7 @@ impl Update {
             );
             return Ok(());
         };
-        for (_, key) in &mounts {
+        for (_, _, key) in &mounts {
             let Some(key) = key else { continue };
             let name = config["volumes"][key.as_str()]["name"]
                 .as_str()
@@ -1092,8 +1133,8 @@ impl Update {
             "-e".into(),
             format!("PSEUDOLIFE_DAEMON_MODELS_DIR={models}"),
         ];
-        for (spec, _) in &mounts {
-            args.extend(["--mount".into(), spec.clone()]);
+        for (flag, value, _) in &mounts {
+            args.extend([flag.clone(), value.clone()]);
         }
         args.extend(
             [
@@ -1147,6 +1188,7 @@ mod disk_review_tests {
         assert_eq!(
             mounts,
             vec![(
+                "--mount".to_owned(),
                 "type=volume,src=fixture_pseudolife_rust_models,dst=/models".to_owned(),
                 Some("pseudolife_rust_models".to_owned())
             )]
@@ -1155,7 +1197,7 @@ mod disk_review_tests {
             .unwrap()
             .unwrap();
         assert_eq!(
-            (dir.as_str(), mounts[0].0.as_str()),
+            (dir.as_str(), mounts[0].1.as_str()),
             ("/data/models", "type=volume,src=fixture-state,dst=/data")
         );
         let nested = json!({"type": "volume", "source": "pseudolife_rust_models", "target": "/models",
@@ -1166,7 +1208,7 @@ mod disk_review_tests {
         ))
         .unwrap()
         .unwrap();
-        assert!(mounts[0].0.ends_with(",volume-subpath=cache"));
+        assert!(mounts[0].1.ends_with(",volume-subpath=cache"));
         assert!(
             model_volumes(&daemon(
                 json!({"PSEUDOLIFE_DAEMON_ONNX_DIR": "/opt/models"}),
@@ -1181,6 +1223,36 @@ mod disk_review_tests {
                 json!([])
             ))
             .is_err()
+        );
+    }
+    #[test]
+    fn a_comma_in_a_model_subpath_is_quoted_and_a_bind_keeps_v() {
+        let nested = json!({"type": "volume", "source": "pseudolife_rust_models", "target": "/models",
+                            "volume": {"subpath": "a,\"b\""}});
+        let (_, mounts) = model_volumes(&daemon(
+            json!({"PSEUDOLIFE_DAEMON_MODELS_DIR": "/models"}),
+            json!([nested]),
+        ))
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            mounts[0].1,
+            "type=volume,src=fixture_pseudolife_rust_models,dst=/models,\"volume-subpath=a,\"\"b\"\"\""
+        );
+        let bind = json!({"type": "bind", "source": "/srv/models,cache", "target": "/models"});
+        let (_, mounts) = model_volumes(&daemon(
+            json!({"PSEUDOLIFE_DAEMON_MODELS_DIR": "/models"}),
+            json!([bind]),
+        ))
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            mounts,
+            vec![(
+                "-v".to_owned(),
+                "/srv/models,cache:/models".to_owned(),
+                None
+            )]
         );
     }
     #[test]

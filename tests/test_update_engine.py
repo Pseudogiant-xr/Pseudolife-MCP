@@ -140,15 +140,35 @@ def test_release_engine_models_volume_and_overrides():
     data = {"type": "volume", "source": "state", "target": "/data"}
     models = {"type": "volume", "source": "models", "target": "/models"}
     assert eng.model_volumes(_release_config({"PSEUDOLIFE_DAEMON_MODELS_DIR": "/models"}, [data, models])) == \
-        ("/models", [("type=volume,src=fixture_models,dst=/models", "models")])
+        ("/models", [("--mount", "type=volume,src=fixture_models,dst=/models", "models")])
     assert eng.model_volumes(_release_config(volumes=[data])) == \
-        ("/data/models", [("type=volume,src=fixture-state,dst=/data", "state")])
+        ("/data/models", [("--mount", "type=volume,src=fixture-state,dst=/data", "state")])
     nested = {**models, "volume": {"subpath": "cache"}}
-    assert eng.model_volumes(_release_config({"PSEUDOLIFE_DAEMON_MODELS_DIR": "/models"}, [nested]))[1][0][0] \
+    assert eng.model_volumes(_release_config({"PSEUDOLIFE_DAEMON_MODELS_DIR": "/models"}, [nested]))[1][0][1] \
         .endswith(",volume-subpath=cache")
+    bind = {"type": "bind", "source": "/srv/models", "target": "/models"}
+    assert eng.model_volumes(_release_config({"PSEUDOLIFE_DAEMON_MODELS_DIR": "/models"}, [bind]))[1] == \
+        [("-v", "/srv/models:/models", None)]
     assert eng.model_volumes(_release_config({"PSEUDOLIFE_DAEMON_ONNX_DIR": "/opt/onnx"})) is None
     with pytest.raises(up.UpdateError, match="no persistent volume"):
         eng.model_volumes(_release_config({"PSEUDOLIFE_DAEMON_MODELS_DIR": "/models"}, [data]))
+
+
+def test_a_comma_in_a_model_volume_subpath_is_quoted_for_docker_mount_csv():
+    import csv
+    from pseudolife_memory import update_engine as eng
+    nested = {"type": "volume", "source": "models", "target": "/models", "volume": {"subpath": 'a,"b"'}}
+    spec = eng.model_volumes(_release_config({"PSEUDOLIFE_DAEMON_MODELS_DIR": "/models"}, [nested]))[1][0][1]
+    # Parsed as Docker parses --mount: one CSV record of key=value fields.
+    assert next(csv.reader([spec])) == ["type=volume", "src=fixture_models", "dst=/models", 'volume-subpath=a,"b"']
+
+
+def test_an_open_running_daemon_is_read_with_the_configured_bearer():
+    from pseudolife_memory import update_engine as eng
+    update = up.Update(up.Options(daemon_url="http://127.0.0.1:18765"), log=lambda s: None)
+    release = eng.ReleaseEngineUpdate(update, "0.23.0", "0.22.1", None, "rust")
+    running = {"Mounts": [{"Destination": "/data", "Name": "fixture-state"}], "Config": {"Env": ["PATH=/bin"]}}
+    assert release.verify_project(_release_config(), running) == ("new-bearer", "new-bearer")
 
 
 def test_model_volume_is_created_with_its_driver_or_must_exist_when_external():
