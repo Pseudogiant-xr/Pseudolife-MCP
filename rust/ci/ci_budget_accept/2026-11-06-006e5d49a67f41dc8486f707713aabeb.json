@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "parity-checks",
+  "before": "ede7566a71876da8",
+  "fingerprint": "228bd3c4cc28e240",
+  "reason": "Only the runs-on expression's batch-ref test changed (exact-case scope output instead of startsWith); steps, matrix and runners are unchanged."
+}

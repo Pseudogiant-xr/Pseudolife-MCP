@@ -1,11 +1,11 @@
 {
   "rust.yml": {
     "limits": {
-      "jobs": 41,
+      "jobs": 42,
       "runner_minutes": 410,
       "longest_job_minutes": 34,
       "critical_path_minutes": 33,
-      "why": "2026-10-24 Rust CI speed pass (#922, #924), measured on the runs below: job count at its measured 43; runner minutes (374.2) and longest job (19.7) about 10% above; critical path 28.1 with the harness build's cache cold on pull-request refs (about 22 once master has saved it), so 33, which still refuses parity waiting on the Rust job (38 or more); 2026-10-26 (#967, PDF ingest): longest job 25 -> 34. Rust / windows-latest measured 31.4 (median of runs 40209914303 and 40223580054): about 26 before this change (#965's run 40223499916, 26.1, and master push 40218426648, 24.2, had already passed the 19.7 the old limit rested on), plus about 4.6 for the PDF tests: provisioning the pinned PDFium library (1.2), pdfium-render compiled in each daemon override build (+1.7) and the Nextest steps (+0.8). 34 is the measured 31.4 plus about 8% 2026-11-05: startup consolidation keeps both logical parts and schema checks in one shard per OS, reducing the physical-job ceiling from 43 to 41; other limits are unchanged."
+      "why": "2026-10-24 Rust CI speed pass (#922, #924), measured on the runs below: job count at its measured 43; runner minutes (374.2) and longest job (19.7) about 10% above; critical path 28.1 with the harness build's cache cold on pull-request refs (about 22 once master has saved it), so 33, which still refuses parity waiting on the Rust job (38 or more); 2026-10-26 (#967, PDF ingest): longest job 25 -> 34. Rust / windows-latest measured 31.4 (median of runs 40209914303 and 40223580054): about 26 before this change (#965's run 40223499916, 26.1, and master push 40218426648, 24.2, had already passed the 19.7 the old limit rested on), plus about 4.6 for the PDF tests: provisioning the pinned PDFium library (1.2), pdfium-render compiled in each daemon override build (+1.7) and the Nextest steps (+0.8). 34 is the measured 31.4 plus about 8% 2026-11-05: startup consolidation keeps both logical parts and schema checks in one shard per OS, reducing the physical-job ceiling from 43 to 41; other limits are unchanged. 2026-11-06: one late hosted Linux-pool planner adds one brief job (0.5 min estimated) before the parity burst. The fallback ceiling stays fully hosted; enabling one measured Linux cli-startup shard removes its hosted allocation. Other limits are unchanged."
     },
     "pip_no_compile": true,
     "needs_without_data": {
@@ -17,6 +17,9 @@
       },
       "stress-report": {
         "stress-plan": "reports only a loop that was planned"
+      },
+      "parity-pool": {
+        "*": "Read live runner availability only after every candidate and fixture build has finished; an earlier scope snapshot can be stale before shard dispatch."
       }
     },
     "measured_on": [
@@ -149,6 +152,10 @@
       "Parity checks / windows-latest / cli-startup": {
         "minutes": 22.6,
         "estimate": "Conservative sum of the two successful former jobs in run 41856662940 (10.37 + 12.22 minutes), before any shared-setup discount; coordinated branch proof and later two-run remeasurement pending."
+      },
+      "Parity / Linux pool plan": {
+        "minutes": 0.5,
+        "estimate": "One late hosted checkout plus two standard-library variable GETs, with no build or install. Estimate 0.5 min versus Scope 0.2 min in the budget; remeasure from the first two enabled master or batch runs. The routed Linux cli-startup shard measured hosted 9.70 and 11.98 min in runs 42114883218 and 42133608663; its self-hosted twins took 10.95 and 12.13 min."
       }
     },
     "profiles": {

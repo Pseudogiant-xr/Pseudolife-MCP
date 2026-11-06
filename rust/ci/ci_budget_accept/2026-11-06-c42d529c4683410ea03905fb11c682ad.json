@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "parity-checks",
+  "before": "ede7566a71876da8",
+  "fingerprint": "fedc2dc50fc68ef8",
+  "reason": "Keep every parity step, case selection, artifact and required verdict. Only the measured Linux cli-startup job may use one of three idle self-hosted workers; Windows and every other suite remain hosted. Full hosted fallback costs are preserved, with the late planner separately budgeted at 0.5 min and existing cache keys unchanged."
+}

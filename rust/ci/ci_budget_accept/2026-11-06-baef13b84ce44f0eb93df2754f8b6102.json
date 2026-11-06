@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "parity-pool",
+  "before": null,
+  "fingerprint": "815e4a55323c1ac8",
+  "reason": "Checkout now names the base or pushed commit instead of the merge ref, at the same default depth of one; the reader and its timeouts are unchanged."
+}
