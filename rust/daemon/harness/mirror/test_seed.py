@@ -234,7 +234,7 @@ def test_overlay_has_no_route_out_and_no_live_credentials():
     assert guard[:2] == ["sh", "-c"] and guard[2].startswith('[ -n "$$PSEUDOLIFE_MCP_TOKENS" ] || {')
     assert "exit 64" in guard[2] and guard[2].endswith('exec /usr/local/bin/provision-daemon-models "$$@"')
     assert daemon["command"] == ["pseudolife-daemon"]
-    assert "PSEUDOLIFE_MCP_TOKEN" not in re.sub(r"PSEUDOLIFE_MCP_TOKENS?:", "", text)
+    assert "${PSEUDOLIFE_MCP_TOKEN" not in text  # the live bearers are never interpolated
     assert env["PSEUDOLIFE_RELEASE_CHECK"] == "0" and float(env["PSEUDOLIFE_SESSION_IDLE_SECONDS"]) > 1e7
     dsn = re.sub(r"\$\{[^}]*\}", "pw", env["PSEUDOLIFE_MCP_DATABASE_URL"])
     assert seed.refuse_live_dsn(dsn)[2] == seed.BANK_DB
