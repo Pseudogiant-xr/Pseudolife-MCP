@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "rust",
+  "before": "1bf2949883eca84e",
+  "fingerprint": "a8a995e1d5380291",
+  "reason": "Adds rust/daemon/harness/mirror/test_forced.py (13 offline cases, 0.07 s on a Windows workstation, 2026-11-07) and test_base_delta.py (one offline case; its database case skips without the disposable-bank login, as on hosted runners) to the board-harness pytest step. The 3-minute timeout holds."
+}

@@ -6,6 +6,14 @@ every row of every table, ordered by its primary key (or by every column
 when a table has none). ``diff`` compares two dumps after the declared
 normalizers, which replace nondeterministic values by rule, never by hand:
 
+* With ``PL_HARNESS_BASE_DATABASE`` (a restored real bank every disposable
+  database copies, ``pgdisposable.base_database``), a table's dump holds
+  only the rows the base does not hold, byte for byte (``md5(row::text)``),
+  and ``base_missing`` counts and digests the base rows that are gone
+  (deleted or rewritten). A whole real bank per step would not fit in
+  memory: on a 284 MB bank two full dumps took the harness past 9.6 GiB
+  (daemon box, 2026-11-07). Base rows are identical on both sides by
+  construction, so the comparison loses nothing but their display.
 * ``NONDETERMINISTIC`` names ``(table, column)`` pairs whose values are
   wall-clock times or random identifiers. A rule ``"clock"`` keeps only
   null-or-not (two inserts may share a clock tick on one side and not the
@@ -14,7 +22,10 @@ normalizers, which replace nondeterministic values by rule, never by hand:
 """
 from __future__ import annotations
 
+import hashlib
 import json
+from collections import Counter
+import os
 import time as clock
 import uuid
 from datetime import date, datetime, time
@@ -134,6 +145,34 @@ def _order_columns(conn, schema: str, table: str) -> list[str]:
     return [r[0] for r in cols]
 
 
+_BASE_HASHES: dict[str, dict[str, Counter]] = {}
+
+
+def _base_hashes(dsn: str) -> dict[str, Counter] | None:
+    """Every base table's row hashes, read once per process (the base never
+    changes while a run copies it), or None without a base."""
+    base = os.environ.get("PL_HARNESS_BASE_DATABASE")
+    if not base:
+        return None
+    if base not in _BASE_HASHES:
+        from pseudolife_memory.storage.schema import refuse_production_database
+        refuse_production_database(base)
+        out = {}
+        with psycopg.connect(psycopg.conninfo.make_conninfo(dsn, dbname=base), autocommit=True) as conn:
+            for schema, table in _tables(conn):
+                out[f"{schema}.{table}"] = Counter(r[0] for r in conn.execute(
+                    sql.SQL("SELECT md5(t::text) FROM {} t").format(sql.Identifier(schema, table))))
+        _BASE_HASHES[base] = out
+    return _BASE_HASHES[base]
+
+
+def _base_missing(known: Counter, present: Counter) -> dict:
+    """The base rows gone, counted as a multiset (a table without a key may
+    hold the same row twice)."""
+    gone = sorted((known - present).elements())
+    return {"count": len(gone), "digest": hashlib.sha256("".join(gone).encode()).hexdigest()}
+
+
 class _Busy(Exception):
     """A dump attempt gave way to a concurrent lock holder; retry it."""
 
@@ -165,6 +204,7 @@ def dump(dsn: str, timeout: float = 60.0) -> dict:
 
 def _dump_once(dsn: str) -> dict:
     out: dict = {"catalog": {}, "rows": {}}
+    base = _base_hashes(dsn)
     with psycopg.connect(dsn, autocommit=True) as conn:
         tables = _tables(conn)
     with psycopg.connect(dsn) as conn:
@@ -190,11 +230,32 @@ def _dump_once(dsn: str) -> dict:
             select = ", ".join(
                 f'"{c}"::text' if t == "USER-DEFINED" else f'"{c}"' for c, t in cols)
             ordering = ", ".join(f'"{c}"::text' for c in order) or "1"
-            rows = [] if schema == "public" and table in UNPORTED_ROWS else conn.execute(
-                f'SELECT {select} FROM "{schema}"."{table}" ORDER BY {ordering}').fetchall()
-            out["rows"][f"{schema}.{table}"] = {
+            key = f"{schema}.{table}"
+            extra = {}
+            if schema == "public" and table in UNPORTED_ROWS:
+                rows = []
+            elif base is not None and key in base:
+                known = base[key]
+                present = Counter(r[0] for r in conn.execute(
+                    f'SELECT md5(t::text) FROM "{schema}"."{table}" t'))
+                extra["base_missing"] = _base_missing(known, present)
+                # New rows, plus the extra copies of a row the base holds fewer times.
+                surplus = present - known
+                fetched = conn.execute(
+                    f'SELECT md5(t::text), {select} FROM "{schema}"."{table}" t '
+                    f'WHERE md5(t::text) = ANY(%s) ORDER BY {ordering}', (list(surplus),)).fetchall()
+                rows, owed = [], Counter(surplus)
+                for row in fetched:
+                    if owed[row[0]] > 0:
+                        owed[row[0]] -= 1
+                        rows.append(row[1:])
+            else:
+                rows = conn.execute(
+                    f'SELECT {select} FROM "{schema}"."{table}" ORDER BY {ordering}').fetchall()
+            out["rows"][key] = {
                 "columns": [c for c, _ in cols],
                 "rows": [_plain(list(r)) for r in rows],
+                **extra,
             }
     return out
 

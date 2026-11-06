@@ -350,7 +350,7 @@ jobs:
         # The mirror seed's database cases start a throwaway PostgreSQL on a
         # Linux engine and skip elsewhere.
         timeout-minutes: 3
-        run: python -m pytest -q rust/daemon/harness/board/test_norm.py rust/daemon/harness/board/test_run.py rust/daemon/harness/test_pgdisposable_slices.py rust/daemon/harness/mirror/test_seed.py
+        run: python -m pytest -q rust/daemon/harness/board/test_norm.py rust/daemon/harness/board/test_run.py rust/daemon/harness/test_pgdisposable_slices.py rust/daemon/harness/mirror/test_seed.py rust/daemon/harness/mirror/test_forced.py rust/daemon/harness/mirror/test_base_delta.py
       - name: Bind the event-selected Python oracle
         shell: pwsh
         working-directory: .
