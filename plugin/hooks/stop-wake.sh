@@ -72,6 +72,17 @@
 # judges its standing record. Claude Code fires SubagentStop too, and there
 # the entry does nothing.
 #
+# With the argument stop-failure (the plugin's StopFailure entry) the script
+# arms the same wait after a turn that ended on an API or sign-in error,
+# which runs StopFailure and never Stop (Claude Code 2.1.318, measured
+# 2026-11-07): without it such a turn left the session with no listener
+# until a later turn ended normally, and on 2026-11-07 two decisions to a T3
+# child waited 15 minutes behind a login expiry. The park gate is skipped
+# (a failed turn has nothing to park, and a block would start another turn
+# that may fail the same way), and in Codex context the mode does nothing:
+# Codex 0.167.0 skips the unknown event, leaving the other hooks' trust as it
+# was.
+#
 # After a wake fires, the hook posts one woke marker (POST
 # /api/hook/woke?agent=<id>, in the background, 2 s): the daemon logs that
 # this session's turn is starting, so wake precision can be measured from
@@ -142,7 +153,7 @@ if [ "${PSEUDOLIFE_CODEX_HOOK:-}" = 1 ] ||
     CODEX_HOOK_CONTEXT=1
 fi
 MODE="${1:-}"
-case "$MODE" in ''|subagent-stop) ;; *) OFF=1 ;; esac
+case "$MODE" in ''|subagent-stop|stop-failure) ;; *) OFF=1 ;; esac
 [ "$MODE" = subagent-stop ] && [ -z "$CODEX_HOOK_CONTEXT" ] && OFF=1
 if [ -n "$OFF" ] || { [ -z "$CODEX_HOOK_CONTEXT" ] && [ "${CLAUDECODE:-}" != "1" ]; }; then
     # Drain the payload with a builtin: a cheap exit.
@@ -171,6 +182,8 @@ if [ "${CLAUDECODE:-}" = "1" ] && [ "${CLAUDE_CODE_SESSION_ID:-}" = "$SID" ]; th
     CODEX_HOOK_CONTEXT=""
 fi
 [ -n "$CODEX_HOOK_CONTEXT" ] || [ "${CLAUDE_CODE_SESSION_ID:-}" = "$SID" ] || exit 0
+# StopFailure is Claude Code's alone: in Codex context the mode does nothing.
+[ "$MODE" = stop-failure ] && [ -n "$CODEX_HOOK_CONTEXT" ] && exit 0
 # The thread whose records the hook reads: the payload's session, or for a
 # Codex child's stop the child named by the one top-level agent_id.
 SUBJECT=$SID
@@ -430,6 +443,9 @@ woke_marker() {
 
 ACTIVE=$(printf '%s' "$INPUT" |
          grep -o '[{,][[:space:]]*"stop_hook_active"[[:space:]]*:[[:space:]]*true' | head -1)
+# A failed turn (StopFailure) is never gated: it has nothing to park, and a
+# block would start another turn that may fail the same way.
+[ "$MODE" = stop-failure ] && ACTIVE=stop-failure
 if [ -z "$ACTIVE" ] && [ -f "$AGENT" ] && [ ! -L "$AGENT" ]; then
     AGENT_ID=""
     IFS= read -r AGENT_ID < "$AGENT"

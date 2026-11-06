@@ -377,6 +377,34 @@ def test_park_gate_route_serves_the_daemons_answer(monkeypatch):
     assert status == 403
 
 
+@pytest.mark.parametrize("reason", ["rung_since_park", "not_updated_this_turn", "no_park"])
+def test_park_gate_tells_a_session_to_read_mail_that_rang_after_its_park(monkeypatch, reason):
+    """A block for mail that rang after the park says to receive it before
+    re-parking: the session may not have seen it yet, and the generic
+    "update your board status" text made a continuation re-park "waiting on
+    you" with the answer unread (2026-11-07). Other blocks keep the plain
+    park request."""
+    import threading
+    from pseudolife_memory import coordination
+
+    class Store:
+        def park_gate(self, agent, principal, *, since=None):
+            return {"gate": "block", "reason": reason}
+
+    service = _board_service()
+    service._coordination_lock = threading.Lock()
+    monkeypatch.setattr(coordination, "unavailable_reason", lambda *a, **k: None)
+    monkeypatch.setattr(coordination, "authenticated_principal", lambda *a, **k: "default")
+    monkeypatch.setattr(coordination, "_store", lambda _service: Store())
+    monkeypatch.setattr(coordination, "_ensure_tier", lambda *a, **k: None)
+    body = coordination.park_gate(service, {"authorization": "Bearer fixture-secret"},
+                                  agent="a" * 32, since="1500")
+    assert body.startswith("block\n") and body.endswith("\n")
+    reads_mail = "memory_message receive" in body
+    assert reads_mail is (reason == "rung_since_park")
+    assert "memory_agents update" in body
+
+
 def test_park_gate_is_open_where_the_board_is_not(monkeypatch):
     """The same gates as the check-in: no board, no question."""
     from pseudolife_memory.coordination import park_gate

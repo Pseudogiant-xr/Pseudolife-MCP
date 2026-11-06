@@ -36,11 +36,28 @@ pub const FALLBACK_CODEX: &str = "Mail is queued for receive on the thread's nex
      the MCP server starts). For an immediate response, the maintainer types into the \
      session's window.";
 pub const FALLBACK_CLAUDE: &str = "Mail is queued for receive on the session's next turn and rings once its Stop-hook \
-     listener re-arms at a turn end. Only if it is a Claude Desktop Code-tab session (the \
-     board cannot tell) does its host's session send_message reach it now; a Claude Code \
-     CLI session is reached by the maintainer typing into its window.";
+     listener re-arms at a turn end. Only its host reaches it sooner, and the board cannot \
+     tell which host it is: a T3 Code thread takes a thread send, a Claude Desktop Code-tab \
+     session its host's session send_message, and a Claude Code CLI session the maintainer \
+     typing into its window.";
+/// `FALLBACK_CLAUDE_REARMING`: an attached Claude session whose Stop-hook
+/// listener is down, usually mid-turn after a ring used it (see
+/// `storage/coordination.py`).
+pub const FALLBACK_CLAUDE_REARMING: &str = "Mail is queued: the session is open but its Stop-hook listener is down, which \
+     usually means it is working in a turn (often one an earlier ring started, since \
+     each ring uses the listener until the turn ends). Its next Pseudolife tool result \
+     shows the mail, and the queued ring fires when that turn ends: no resend needed. \
+     Only a turn that ended on an API or sign-in error, or an interrupt, skips that \
+     re-arm; if last_activity stays old, reach it through its host (the board cannot \
+     tell which): a T3 Code thread takes a thread send, a Claude Desktop Code-tab \
+     session its host's session send_message, and a Claude Code CLI session the \
+     maintainer typing into its window.";
 pub const FALLBACK_PATHS_CODEX: [&str; 2] = ["codex_doorbell", "maintainer_types"];
-pub const FALLBACK_PATHS_CLAUDE: [&str; 2] = ["claude_desktop_send_message", "maintainer_types"];
+pub const FALLBACK_PATHS_CLAUDE: [&str; 3] = [
+    "t3_thread_send",
+    "claude_desktop_send_message",
+    "maintainer_types",
+];
 const ATTENTION_FALLBACK: &str = "One capped bell may queue with turn state unknown; acceptance is not dispatch, reading, or native steering.";
 
 /// A standing park record.
@@ -180,21 +197,24 @@ fn count(row: &tokio_postgres::Row) -> i64 {
     row.get::<_, i64>(0)
 }
 
-fn no_path(recipient: &AgentRow, missing: &str) -> Map<String, Value> {
+/// `_no_path`: an attached Claude session whose listener is down reads
+/// `listener_rearming`; every other reason is `listener_path`'s.
+fn no_path(recipient: &AgentRow, missing: &str, now: f64) -> Map<String, Value> {
     let codex = recipient.has_capability("codex");
+    let attached = recipient.attachment_id.is_some() && recipient.lease_until.unwrap_or(0.0) > now;
+    let (missing, fallback) = if codex {
+        (missing, FALLBACK_CODEX)
+    } else if missing == "listener_expired" && attached {
+        ("listener_rearming", FALLBACK_CLAUDE_REARMING)
+    } else {
+        (missing, FALLBACK_CLAUDE)
+    };
     let mut m = Map::new();
     m.insert("decision".into(), json!("no_path"));
     m.insert("reason".into(), json!(missing));
     m.insert("queued".into(), json!(true));
     m.insert("last_activity".into(), float_value(recipient.last_activity));
-    m.insert(
-        "fallback".into(),
-        json!(if codex {
-            FALLBACK_CODEX
-        } else {
-            FALLBACK_CLAUDE
-        }),
-    );
+    m.insert("fallback".into(), json!(fallback));
     m.insert(
         "fallback_paths".into(),
         json!(if codex {
@@ -409,7 +429,7 @@ pub async fn wake_decision(
         return Ok(m);
     }
     if let Some(missing) = listener_path(recipient, now) {
-        let mut m = with_need(no_path(recipient, missing), &need);
+        let mut m = with_need(no_path(recipient, missing, now), &need);
         if done {
             m.insert("reopened".into(), json!(true));
         }
@@ -441,7 +461,7 @@ pub async fn lease_grant_wake(
     )
     .await?;
     let mut decision = if let Some(missing) = listener_path(recipient, now) {
-        no_path(recipient, missing)
+        no_path(recipient, missing, now)
     } else {
         obj_map(json!({"decision": "rung", "reason": "lease_grant", "ring_at": float_value(now)}))
     };
@@ -517,7 +537,7 @@ async fn maintainer_wake(
     )
     .await?;
     let mut m = if let Some(missing) = listener_path(recipient, now) {
-        no_path(recipient, missing)
+        no_path(recipient, missing, now)
     } else {
         let mut m = obj_map(json!({"decision": "rung", "reason": reason}));
         m.insert("ring_at".into(), float_value(now));

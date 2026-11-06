@@ -83,13 +83,19 @@ MANUAL_ROLES = {"sessionStart": ("SessionStart", "MemoryPolicy", "CoordinationSt
 # the bash script exits in Codex context): the shim links Codex's native
 # subagents to their parent instead. Async, so a Codex that skips async
 # hooks lists only the park gate's SubagentStop entry.
-PLUGIN_EVENTS = {**EVENTS, "stop": "Stop", "subagentStart": "SubagentStart",
-                 "subagentStop": "SubagentStop", "preToolUse": "PreToolUse"}
+# StopFailure is Claude Code's re-arm of the Stop watcher after a turn that
+# ended on an API or sign-in error. Codex 0.167.0 skips the unknown event (no
+# error, no listing, the other handlers' trust unchanged; probed 2026-11-07),
+# so it is optional: a Codex that one day lists it runs a no-op
+# (lifecycle.ps1 -Event StopFailure, or the script's Codex check).
+PLUGIN_EVENTS = {**EVENTS, "stop": "Stop", "stopFailure": "StopFailure",
+                 "subagentStart": "SubagentStart", "subagentStop": "SubagentStop",
+                 "preToolUse": "PreToolUse"}
 # Each optional event and how many plugin handlers it has in hooks.json
 # (tests/test_codex_hook_setup_edges.py pins this against the manifest). A
 # Codex may list none of them, or any of them; each listed one must still be
 # a distinct handler of the shipped manifest.
-OPTIONAL_PLUGIN_EVENTS = {"stop": 1, "subagentStart": 1, "subagentStop": 2, "preToolUse": 1}
+OPTIONAL_PLUGIN_EVENTS = {"stop": 1, "stopFailure": 1, "subagentStart": 1, "subagentStop": 2, "preToolUse": 1}
 # A manual bundle copies SCRIPTS; it has no Stop, PreToolUse or subagent
 # hooks, so no stop-wake.sh, subagent-board-guard.sh or subagent-board.sh.
 SCRIPTS = ("lifecycle.ps1", "session-start.sh", "user-prompt-submit.sh",
