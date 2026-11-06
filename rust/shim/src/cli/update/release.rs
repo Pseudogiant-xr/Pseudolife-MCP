@@ -389,8 +389,15 @@ impl Update {
             return Ok(());
         }
         let labels = engine::host_labels(self, DAEMON_CONTAINER);
-        let selected = labels[engine::ENGINE_LABEL].as_str().unwrap_or("python");
-        let choice = self.o.engine.clone().unwrap_or_else(|| selected.to_owned());
+        let selected = if labels[engine::ENGINE_LABEL].as_str() == Some("rust") {
+            "rust"
+        } else {
+            "python"
+        };
+        let choice = match self.o.engine.clone() {
+            Some(engine) => engine,
+            None => self.default_choice(selected, &target),
+        };
         // Engine selection, and every update of a Rust host, records an
         // accepted activation so the next update can verify it.
         let activating = self.o.engine.is_some() || choice == "rust";
@@ -1092,7 +1099,34 @@ fn volume_create_args(config: &Value, key: &str) -> Result<Vec<String>> {
     Ok(args)
 }
 
+/// The engine a Docker host that never chose one gets (G2). A host chose when
+/// it runs Rust or recorded an accepted selection (`--engine python` leaves one).
+pub(super) const DEFAULT_ENGINE: &str = "rust";
+
 impl Update {
+    /// An unchosen host moves to the default engine on an attended update when
+    /// the target release publishes it; unattended runs never change engines.
+    fn default_choice(&mut self, selected: &str, target: &str) -> String {
+        let chosen = selected == "rust"
+            || engine::selection(&engine::release_accepted())
+                .ok()
+                .flatten()
+                .is_some();
+        if chosen || self.o.unattended || DEFAULT_ENGINE == selected {
+            return selected.to_owned();
+        }
+        let image = format!("{RUST_IMAGE}:{target}");
+        if self.docker_call(&["manifest", "inspect", &image]).0 != 0 {
+            self.step(format!(
+                "release {target} publishes no {DEFAULT_ENGINE} daemon image; this host stays on {selected}"
+            ));
+            return selected.to_owned();
+        }
+        self.step(format!(
+            "moving this host to the {DEFAULT_ENGINE} daemon, the default since G2 (keep {selected} with --engine {selected})"
+        ));
+        DEFAULT_ENGINE.to_owned()
+    }
     /// Install the pinned models into the daemon's model volume before backup.
     fn provision_models(&mut self, image: &str, config: &Value) -> Result<()> {
         let Some((models, mounts)) = model_volumes(config)? else {

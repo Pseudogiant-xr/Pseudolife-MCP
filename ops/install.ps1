@@ -897,7 +897,8 @@ if ($Engine -and $ClientOnly) {
 # Rust needs a bearer: -NoToken mints none, and neither does -Transport http
 # unless ops/.env already sets one.
 $envHasToken = [bool]"$env:PSEUDOLIFE_MCP_TOKEN$env:PSEUDOLIFE_MCP_TOKENS" -or ((Test-Path $envFile) -and [bool](Select-String -LiteralPath $envFile -Pattern '^PSEUDOLIFE_MCP_TOKENS?=\S' -Quiet))
-if ($Engine -eq 'rust' -and ($NoToken -or ($Transport -eq 'http' -and -not $envHasToken))) {
+$rustBearer = -not ($NoToken -or ($Transport -eq 'http' -and -not $envHasToken))
+if ($Engine -eq 'rust' -and -not $rustBearer) {
     [Console]::Error.WriteLine("-Engine rust needs the daemon's bearer token: pseudolife-mcp update verifies the Rust daemon with an authenticated read, and this install would mint none (-NoToken, or -Transport http with no token in ops/.env). Drop that option or use -Engine python. Nothing was changed.")
     exit 2
 }
@@ -1324,12 +1325,16 @@ function Invoke-EngineHelper {
 $installedEngine = ""
 $composeEngine = ""
 $switchEngine = ""
+$engineDefaulted = $false
 $engineFiles = @()
 if (-not $ClientOnly) {
     $installedEngine = "$(Invoke-EngineHelper detect --repo $repo)".Trim()
     if ($LASTEXITCODE -ne 0) { exit 1 }
     if ($installedEngine -eq 'none') {
-        $composeEngine = if ($Engine) { $Engine } else { 'python' }
+        # Rust is the default since G2; without a bearer the default stays Python.
+        if ($Engine) { $composeEngine = $Engine }
+        elseif ($rustBearer) { $composeEngine = 'rust'; $engineDefaulted = $true }
+        else { $composeEngine = 'python'; Step "Daemon engine: python (no bearer token for the default Rust daemon)" }
         # An existing bank reaches Rust only through update, which checks its
         # schema and counters first.
         if ($composeEngine -eq 'rust' -and $bankExisted) { $composeEngine = 'python'; $switchEngine = 'rust' }
@@ -1340,8 +1345,14 @@ if (-not $ClientOnly) {
         $composeEngine = $installedEngine
         if ($Engine -and ($installedEngine -replace '-checkout$', '') -ne $Engine) { $switchEngine = $Engine }
     }
-    $engineFiles = @(Invoke-EngineHelper prepare --repo $repo --engine $composeEngine | Where-Object { $_ })
+    # Assigned, not `= if (...)`: an if-expression unrolls a one-item array to a string.
+    $defaultArgs = @()
+    if ($engineDefaulted) { $defaultArgs = @('--default') }
+    $engineFiles = @(Invoke-EngineHelper prepare --repo $repo --engine $composeEngine @defaultArgs | Where-Object { $_ })
     if ($LASTEXITCODE -ne 0) { exit 1 }
+    # A defaulted Rust install whose image or models are unavailable falls back
+    # to Python (the helper said why); an explicit -Engine rust refused above.
+    if ($composeEngine -eq 'rust' -and $engineFiles.Count -eq 0) { $composeEngine = 'python' }
     if ($switchEngine) { Step "Daemon engine: $($composeEngine -replace '-checkout$', '') for now; switching to $switchEngine after the install" }
     elseif ($installedEngine -in 'none', 'rust-unaccepted') { Step "Daemon engine: $($composeEngine -replace '-checkout$', '')" }
     else { Step "Daemon engine unchanged: $($composeEngine -replace '-checkout$', '')" }

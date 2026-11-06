@@ -214,7 +214,7 @@ def refuse_foreign_unaccepted(found: dict | None, version: str) -> None:
                       "(docker rm -f pseudolife-mcp-daemon; the bank volumes stay) and rerun. Nothing was started.")
 
 
-def prepare(repo: Path, engine: str) -> list[Path]:
+def prepare(repo: Path, engine: str, default: bool = False) -> list[Path]:
     if engine == "python":
         found = labels()
         if found and found.get(eng.ENGINE_LABEL) == "rust":
@@ -231,10 +231,17 @@ def prepare(repo: Path, engine: str) -> list[Path]:
     kept = accepted_release() if found is None else accepted(found)
     if kept is not None:
         return [write_overlay({"image": kept["image"], "labels": kept["labels"]})]
-    version = checkout_version(repo)
-    refuse_foreign_unaccepted(found, version)
-    image =f"{eng.RUST_IMAGE}:{version}"
-    provision(image)
+    try:
+        version = checkout_version(repo)
+        refuse_foreign_unaccepted(found, version)
+        image = f"{eng.RUST_IMAGE}:{version}"
+        provision(image)
+    except Refusal as exc:
+        if not default:
+            raise
+        # The default engine falls back to Python; an explicit --engine rust refuses.
+        print(f"{exc} The installer uses the Python daemon instead.", file=sys.stderr)
+        return []
     return [write_overlay({"image": image, "labels": {eng.ENGINE_LABEL: "rust", eng.ACTIVATION_LABEL: secrets.token_hex(16),
                                                       eng.RELEASE_LABEL: version}})]
 
@@ -309,6 +316,7 @@ def main(argv=None) -> int:
     parser.add_argument("action", choices=("detect", "prepare", "accept"))
     parser.add_argument("--repo", type=Path)
     parser.add_argument("--engine", choices=("python", "rust", "rust-checkout"))
+    parser.add_argument("--default", action="store_true", help="the engine was defaulted, not named: fall back to Python")
     args = parser.parse_args(argv)
     try:
         if args.action == "detect":
@@ -316,7 +324,7 @@ def main(argv=None) -> int:
         elif args.action == "prepare":
             if not args.repo or not args.engine:
                 raise Refusal("prepare needs --repo and --engine.")
-            for path in prepare(args.repo, args.engine):
+            for path in prepare(args.repo, args.engine, args.default):
                 print(path)
         else:
             print(accept())

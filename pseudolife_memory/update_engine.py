@@ -211,10 +211,43 @@ def host_labels(update) -> dict:
     return labels if isinstance(labels, dict) else {}
 
 
-def release_engine_choice(update) -> tuple[str, str]:
-    """``(selected, choice)``: the engine the host runs and the one this run deploys."""
+# The engine a Docker host that never chose one gets (G2). A host chose when
+# it runs Rust or recorded an accepted selection (`--engine python` leaves one).
+DEFAULT_ENGINE = "rust"
+
+
+def recorded_release_engine() -> str | None:
+    try:
+        selected = _selection(up.data_dir(), RELEASE_ACCEPTED)
+    except up.UpdateError:
+        return None
+    return selected["labels"][ENGINE_LABEL] if selected else None
+
+
+def rust_image_published(update, target: str) -> bool:
+    code, _ = up.run_cli([update.docker, "manifest", "inspect", f"{RUST_IMAGE}:{target}"], timeout=120,
+                         stdout_only=True)
+    return code == 0
+
+
+def release_engine_choice(update, target: str | None = None) -> tuple[str, str]:
+    """``(selected, choice)``: the engine the host runs and the one this run deploys.
+
+    An unchosen host moves to the default engine on an attended update when
+    the target release publishes it; unattended runs never change engines.
+    """
     selected = "rust" if host_labels(update).get(ENGINE_LABEL) == "rust" else "python"
-    return selected, update.o.engine or selected
+    if update.o.engine:
+        return selected, update.o.engine
+    chosen = selected == "rust" or recorded_release_engine() is not None
+    if chosen or update.o.unattended or DEFAULT_ENGINE == selected or target is None:
+        return selected, selected
+    if not rust_image_published(update, target):
+        update.step(f"release {target} publishes no {DEFAULT_ENGINE} daemon image; this host stays on {selected}")
+        return selected, selected
+    update.step(f"moving this host to the {DEFAULT_ENGINE} daemon, the default since G2 (keep {selected} with "
+                f"--engine {selected})")
+    return selected, DEFAULT_ENGINE
 
 
 def release_accepted() -> Path:

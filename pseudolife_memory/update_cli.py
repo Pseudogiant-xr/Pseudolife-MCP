@@ -1659,7 +1659,7 @@ class Update:
             self.clients(None, f"pseudolife-mcp=={target}", self.daemon_health())
             return
         from pseudolife_memory import update_engine
-        selected, choice = update_engine.release_engine_choice(self)
+        selected, choice = update_engine.release_engine_choice(self, target)
         if current == target and not self.o.reinstall and choice == selected:
             self.step(f"the daemon already runs {target}; nothing to do (--reinstall to recreate it anyway, "
                       f"--clients-only for the shim and plugin)")
@@ -2147,7 +2147,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="pseudolife-mcp update",
                                      description="update the daemon and the client side (shim, plugin cache, Codex hooks)")
     parser.add_argument("--tag", default=None, help="release version to install (default: the newest on PyPI)")
-    parser.add_argument("--engine", choices=("python", "rust"), help="Docker daemon engine: rust or python (unset keeps the engine the host runs)")
+    parser.add_argument("--engine", choices=("python", "rust"), help="Docker daemon engine: rust or python (unset keeps the host's chosen engine; a host that never "
+                             "chose moves to rust when the release publishes it)")
     parser.add_argument("--shadow", action="store_true", help="with --engine rust start read-only Rust on loopback 8766; with --engine python remove only the companion (checkout mode)")
     parser.add_argument("--result-file", default=None,
                         help="write the exit code to this file at the end (the shim's unattended client update reads it)")

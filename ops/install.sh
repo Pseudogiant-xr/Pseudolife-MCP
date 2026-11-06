@@ -963,8 +963,12 @@ if [ -n "$ENGINE" ] && [ -n "$CLIENT_ONLY" ]; then
 fi
 # Rust needs a bearer: --no-token mints none, and neither does --transport
 # http unless ops/.env already sets one.
-if [ "$ENGINE" = rust ] && { [ -n "$NO_TOKEN" ] || { [ "$TRANSPORT" = http ] && [ -z "${PSEUDOLIFE_MCP_TOKEN:-}${PSEUDOLIFE_MCP_TOKENS:-}" ] \
-        && ! { [ -f "$env_file" ] && grep -Eq '^PSEUDOLIFE_MCP_TOKENS?=[^[:space:]]' "$env_file"; }; }; }; then
+RUST_BEARER=1
+if [ -n "$NO_TOKEN" ] || { [ "$TRANSPORT" = http ] && [ -z "${PSEUDOLIFE_MCP_TOKEN:-}${PSEUDOLIFE_MCP_TOKENS:-}" ] \
+        && ! { [ -f "$env_file" ] && grep -Eq '^PSEUDOLIFE_MCP_TOKENS?=[^[:space:]]' "$env_file"; }; }; then
+    RUST_BEARER=""
+fi
+if [ "$ENGINE" = rust ] && [ -z "$RUST_BEARER" ]; then
     echo "--engine rust needs the daemon's bearer token: pseudolife-mcp update verifies the Rust daemon with an authenticated read, and this install would mint none (--no-token, or --transport http with no token in ops/.env). Drop that option or use --engine python. Nothing was changed." >&2
     exit 2
 fi
@@ -1407,12 +1411,16 @@ engine_helper() { "$(installer_python)" "$repo/ops/installer_engine.py" "$@"; }
 INSTALLED_ENGINE=""
 COMPOSE_ENGINE=""
 SWITCH_ENGINE=""
+ENGINE_DEFAULTED=""
 engine_files=()
 if [ -z "$CLIENT_ONLY" ]; then
     INSTALLED_ENGINE="$(engine_helper detect --repo "$repo")" || exit 1
     case "$INSTALLED_ENGINE" in
         none)
-            COMPOSE_ENGINE="${ENGINE:-python}"
+            # Rust is the default since G2; without a bearer the default stays Python.
+            if [ -n "$ENGINE" ]; then COMPOSE_ENGINE="$ENGINE"
+            elif [ -n "$RUST_BEARER" ]; then COMPOSE_ENGINE=rust; ENGINE_DEFAULTED=1
+            else COMPOSE_ENGINE=python; step "Daemon engine: python (no bearer token for the default Rust daemon)"; fi
             # An existing bank reaches Rust only through update, which checks
             # its schema and counters first.
             if [ "$COMPOSE_ENGINE" = rust ] && [ -n "${BANK_EXISTED:-}" ]; then
@@ -1424,10 +1432,15 @@ if [ -z "$CLIENT_ONLY" ]; then
             COMPOSE_ENGINE="$INSTALLED_ENGINE"
             if [ -n "$ENGINE" ] && [ "${INSTALLED_ENGINE%-checkout}" != "$ENGINE" ]; then SWITCH_ENGINE="$ENGINE"; fi ;;
     esac
-    engine_out="$(engine_helper prepare --repo "$repo" --engine "$COMPOSE_ENGINE")" || exit 1
+    default_args=()
+    [ -z "${ENGINE_DEFAULTED:-}" ] || default_args=(--default)
+    engine_out="$(engine_helper prepare --repo "$repo" --engine "$COMPOSE_ENGINE" ${default_args[@]+"${default_args[@]}"})" || exit 1
     while IFS= read -r engine_file; do
         [ -z "$engine_file" ] || engine_files+=("$engine_file")
     done <<< "$engine_out"
+    # A defaulted Rust install whose image or models are unavailable falls back
+    # to Python (the helper said why); an explicit --engine rust refused above.
+    if [ "$COMPOSE_ENGINE" = rust ] && [ ${#engine_files[@]} -eq 0 ]; then COMPOSE_ENGINE=python; fi
     if [ -n "$SWITCH_ENGINE" ]; then step "Daemon engine: ${COMPOSE_ENGINE%-checkout} for now; switching to $SWITCH_ENGINE after the install"
     elif [ "$INSTALLED_ENGINE" = none ] || [ "$INSTALLED_ENGINE" = rust-unaccepted ]; then step "Daemon engine: ${COMPOSE_ENGINE%-checkout}"
     else step "Daemon engine unchanged: ${COMPOSE_ENGINE%-checkout}"; fi

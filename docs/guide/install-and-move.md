@@ -10,10 +10,12 @@ Never hand-write or flatten a compose file to install or move a bank.
 
 ## Daemon engine
 
-The Docker installers run the Python daemon unless told otherwise.
-`ops/install.sh --engine rust` (Windows: `ops/install.ps1 -Engine rust`)
-installs the Rust daemon instead, from the image the checkout's release
-publishes. It checks free disk space, pulls that image and downloads the
+A new Docker install runs the Rust daemon, from the image the checkout's
+release publishes; `ops/install.sh --engine python` (Windows:
+`ops/install.ps1 -Engine python`) installs the Python daemon instead. With
+no `--engine`, an install that would have no bearer token (`--no-token`),
+or whose release publishes no Rust image, takes the Python daemon and says
+why. `--engine rust` names Rust explicitly. It checks free disk space, pulls that image and downloads the
 pinned models into their own volume before any container starts. If the
 release publishes no Rust image, the installer stops there, names
 `--engine python`, and starts nothing. The selection is recorded once the

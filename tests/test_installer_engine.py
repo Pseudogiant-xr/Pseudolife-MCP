@@ -191,6 +191,15 @@ def test_rust_refuses_before_any_container_when_the_image_or_models_are_unavaila
     assert not module.overlay_path().exists()
 
 
+@pytest.mark.parametrize("failure", ["pull", "provision"])
+def test_a_defaulted_rust_install_falls_back_to_python_when_rust_is_unavailable(helper, failure, capsys):
+    module, state, repo = helper
+    state["fail"] = failure
+    assert module.prepare(repo, "rust", default=True) == []
+    assert "Python daemon instead" in capsys.readouterr().err
+    assert not module.overlay_path().exists()
+
+
 def test_accept_refuses_a_container_this_install_did_not_start(helper):
     module, state, repo = helper
     module.prepare(repo, "rust")
@@ -256,7 +265,8 @@ def _stage(script, start, end):
 
 @pytest.mark.parametrize("script", ["install.sh", "install.ps1"])
 @pytest.mark.parametrize("installed,flag,bank,compose_engine,switch", [
-    ("none", "", "", "python", ""), ("none", "rust", "", "rust", ""),
+    # Rust is the default for a new install since G2.
+    ("none", "", "", "rust", ""), ("none", "rust", "", "rust", ""),
     # An existing bank with no daemon reaches Rust through update's checks.
     ("none", "rust", "1", "python", "rust"),
     ("python", "", "1", "python", ""), ("python", "rust", "1", "python", "rust"),
@@ -275,7 +285,8 @@ def test_engine_stage_keeps_the_installed_engine_and_defers_a_switch(tmp_path, s
                 "    $global:LASTEXITCODE = 0\n"
                 f"    if ($args[0] -eq 'detect') {{ return '{installed}' }}\n"
                 "    if ($args[4] -ne 'python') { return 'C:\\fixture\\engine.yml' }\n}\n")
-        proc = ps.run(f"$ClientOnly=$false\n$Engine='{flag}'\n$bankExisted=${'true' if bank else 'false'}\n" + stub
+        proc = ps.run(f"$ClientOnly=$false\n$Engine='{flag}'\n$rustBearer=$true\n$engineDefaulted=$false\n"
+                      f"$bankExisted=${'true' if bank else 'false'}\n" + stub
                       + stage.replace(definition, "")
                       + "Write-Output \"RESULT:$composeEngine|$switchEngine|$($engineFiles -join ',')\"\n")
         output = _output(proc)
@@ -289,7 +300,7 @@ def test_engine_stage_keeps_the_installed_engine_and_defers_a_switch(tmp_path, s
         stub = ('engine_helper() { printf "helper|%s\\n" "$*" >>"$CALL_LOG"; '
                 f'case "$1" in detect) echo {installed} ;; prepare) [ "$5" = python ] || echo /fixture/engine.yml ;; esac; }}\n'
                 'step() { echo "STEP: $*"; }\n')
-        proc = shell.run(f"CLIENT_ONLY=''\nENGINE='{flag}'\nBANK_EXISTED='{bank}'\n" + stub
+        proc = shell.run(f"CLIENT_ONLY=''\nENGINE='{flag}'\nRUST_BEARER=1\nBANK_EXISTED='{bank}'\n" + stub
                          + stage.replace(definition, "")
                          + 'echo "RESULT:$COMPOSE_ENGINE|$SWITCH_ENGINE|${engine_files[*]-}"\n')
         output = proc.stdout + proc.stderr
@@ -473,3 +484,40 @@ def test_both_installers_pass_the_helper_its_repo():
 
 def test_update_treats_the_installer_overlay_as_its_own_transient_file(tmp_path):
     assert eng.transient_overlay(up.data_dir() / "update-engine" / "docker-compose.engine-installer.yml")
+
+
+@pytest.mark.parametrize("script", ["install.sh", "install.ps1"])
+@pytest.mark.parametrize("case", ["no-bearer", "rust-unavailable"])
+def test_the_default_engine_falls_back_to_python(tmp_path, script, case):
+    bearer = case != "no-bearer"
+    if script.endswith(".ps1"):
+        stage = _stage(script, "# -- 4b. daemon engine", "# -- 4c. create volumes")
+        definition = stage[stage.index("function Invoke-EngineHelper"):stage.index("$installedEngine =")]
+        ps = _PowerShell(tmp_path)
+        stub = ("function Invoke-EngineHelper {\n"
+                f"    Add-Content -LiteralPath '{ps.calls}' -Value ('helper|' + (@($args) -join ' '))\n"
+                "    $global:LASTEXITCODE = 0\n"
+                "    if ($args[0] -eq 'detect') { return 'none' }\n}\n")
+        proc = ps.run(f"$ClientOnly=$false\n$Engine=''\n$rustBearer=${str(bearer).lower()}\n$engineDefaulted=$false\n"
+                      "$bankExisted=$false\n" + stub + stage.replace(definition, "")
+                      + "Write-Output \"RESULT:$composeEngine\"\n")
+        calls, output = ps.logged(), _output(proc)
+    else:
+        variants = _bash_variants()
+        if not variants:
+            pytest.skip("Bash unavailable")
+        stage = _stage(script, "# ── 4b. daemon engine", "# ── 4c. create volumes")
+        definition = next(line for line in stage.splitlines() if line.startswith("engine_helper()"))
+        shell = _Shell(variants[0], tmp_path)
+        # The helper's prepare prints no overlay: Rust was unavailable.
+        stub = ('engine_helper() { printf "helper|%s\\n" "$*" >>"$CALL_LOG"; '
+                'case "$1" in detect) echo none ;; esac; }\n'
+                'step() { echo "STEP: $*"; }\n')
+        proc = shell.run(f"CLIENT_ONLY=''\nENGINE=''\nRUST_BEARER='{'1' if bearer else ''}'\nBANK_EXISTED=''\n" + stub
+                         + stage.replace(definition, "") + 'echo "RESULT:$COMPOSE_ENGINE"\n')
+        calls, output = shell.logged(), proc.stdout + proc.stderr
+    assert proc.returncode == 0, output
+    assert "RESULT:python" in output
+    [prepare] = [call for call in calls if "prepare" in call]
+    # Only a defaulted Rust prepare may fall back; without a bearer it never asks for Rust.
+    assert ("--default" in prepare) == bearer and ("--engine rust" in prepare) == bearer

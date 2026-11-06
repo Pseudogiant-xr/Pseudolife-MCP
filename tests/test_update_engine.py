@@ -245,6 +245,27 @@ def test_engine_selection_never_moves_the_clients(monkeypatch):
     assert update.o.daemon_only
 
 
+@pytest.mark.parametrize("case,expected", [
+    ("unchosen", "rust"), ("unpublished", "python"), ("chose-python", "python"), ("unattended", "python"),
+    ("explicit-python", "python"), ("runs-rust", "rust"),
+])
+def test_default_engine_moves_only_an_unchosen_attended_host(tmp_path, monkeypatch, case, expected):
+    from pseudolife_memory import update_engine as eng
+    monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(tmp_path))
+    labels = {eng.ENGINE_LABEL: "rust", eng.RELEASE_LABEL: "0.23.0"} if case == "runs-rust" else {}
+    if case == "chose-python":
+        eng._write_overlay(tmp_path / eng.RELEASE_ACCEPTED, {"image": "py", "labels": {eng.ENGINE_LABEL: "python"}})
+
+    def run(argv, **kw):
+        if argv[1:3] == ["manifest", "inspect"]:
+            return (1, "") if case == "unpublished" else (0, "{}")
+        return 0, json.dumps(labels)
+    monkeypatch.setattr(up, "run_cli", run)
+    options = up.Options(unattended=case == "unattended", engine="python" if case == "explicit-python" else None)
+    update = up.Update(options, log=lambda s: None)
+    assert eng.release_engine_choice(update, "0.23.0")[1] == expected
+
+
 def test_release_rollback_commands_supply_the_rust_overlay_tag(tmp_path):
     from pseudolife_memory import update_engine as eng
     env = tmp_path / ".env"

@@ -302,6 +302,7 @@ elif a[:2]==["volume","inspect"]:
  else:out=json.dumps(s.get("volume_inspections",{}).get(a[-1],[]))
 elif a[:1]==["ps"]: out=s["running"]["Id"]
 elif a[:1]==["pull"]: code=int(s["failure"]=="pull")
+elif a[:2]==["manifest","inspect"]: code=0 if s.get("rust_published") else 1
 elif a[:1]==["run"]:
  if "provision" in a: code=int(s["failure"]=="provision")
  else: out="58" if "--schema-version" in a else "SCHEMA_META_VERSION = 58\n"
@@ -1093,6 +1094,39 @@ def test_rust_host_keeps_its_daemon_when_a_release_has_no_rust_image(tmp_path, n
         state = json.loads(state_path.read_text())
         assert stages({"calls": state["calls"][before:]}) == ["pull"]
         assert _labels(state_path)["org.pseudolife.engine"] == "rust"
+
+
+@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+@pytest.mark.parametrize("case", ["unchosen", "unpublished", "chose-python"])
+def test_release_default_moves_only_an_unchosen_attended_host_to_rust(tmp_path, native, case):
+    binary = _native_binary()
+    if native and not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path) as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        state["rust_published"] = case != "unpublished"
+        state_path.write_text(json.dumps(state))
+        if case == "chose-python":
+            # `--engine python` leaves an accepted python record: the host chose.
+            accepted = _accepted(env)
+            accepted.parent.mkdir(parents=True)
+            accepted.write_text(json.dumps({"services": {SERVICE: {"image": "py", "labels": {
+                "org.pseudolife.engine": "python", "org.pseudolife.activation": "chosen",
+                "org.pseudolife.release": "0.21.0"}}}}))
+        args = ["--tag", "0.21.1", "--daemon-only", "--json", "--health-retries", "1", "--rollback-tag", "pre-default"]
+        result =run_arm(repo, env, binary if native else None, args)
+        assert result.returncode == 0, result.stdout + result.stderr
+        state = json.loads(state_path.read_text())
+        pulled = [a[-1] for a in state["calls"] if a[:1] == ["pull"]]
+        if case == "unchosen":
+            assert pulled == ["ghcr.io/pseudogiant-xr/pseudolife-daemon-rust:0.21.1"]
+            assert _labels(state_path)["org.pseudolife.engine"] == "rust"
+            assert "default since G2" in result.stdout
+        else:
+            assert pulled == ["ghcr.io/pseudogiant-xr/pseudolife-daemon:0.21.1"]
+            assert (_labels(state_path) or {}).get("org.pseudolife.engine", "python") == "python"
+            if case == "unpublished":
+                assert "publishes no rust daemon image" in result.stdout
 
 
 @pytest.mark.parametrize("native_first", [True, False], ids=["native-first", "python-first"])
