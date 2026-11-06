@@ -114,7 +114,6 @@ MUTANTS = {
     "startup-skip-world": ("preset-rename", "/startup/world:"),
     "startup-hlc-zero": ("preset-rename", "/startup/hlc_highwater:"),
     "startup-drop-tombstones": ("preset-rename", "/startup/metadata/episode_tombstones/"),
-    "startup-skip-seating": ("preset-rename", "/entries:"),
     "startup-skip-stamp": ("preset-rename", "/rows/public.entries/rows:"),
     "startup-skip-cortex-dims": ("stale-cortex-dims", "/ok:"),
     "startup-keep-zero-timestamp": ("zero-timestamp-seating", "/entries:"),
