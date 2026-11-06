@@ -107,11 +107,6 @@
       "image": "pseudolife-daemon:0.22.1",
       "image_id": "sha256:4d43da62ac0c"
     },
-    "engine_after_failed_default_rollback": {
-      "engine_label": "python",
-      "image": "pseudolife-daemon-python:0.22.1-pre-update-20261106-165803",
-      "image_id": "sha256:4d43da62ac0c"
-    },
     "engine_after": {
       "engine_label": "rust",
       "image": "pseudolife-daemon-rust:checkout",
@@ -337,9 +332,10 @@
       }
     }
   },
-  "default_activation_gate_failures": [
+  "default_activation": [
     {
       "host": "upgrade (this run)",
+      "exit": 1,
       "updater": [
         "WARNING: the engine failed its version, schema or authenticated-read gate"
       ],
@@ -350,10 +346,26 @@
         "model provisioning phase: installing pinned artifacts; daemon readiness follows this phase",
         "downloading model.onnx (1 of 12)",
         "downloading model.onnx_data (2 of 12)"
-      ]
+      ],
+      "engine_after_failed_rollback": {
+        "engine_label": "python",
+        "image": "pseudolife-daemon-python:0.22.1-pre-update-20261106-165803",
+        "image_id": "sha256:4d43da62ac0c"
+      },
+      "health_after_failed_rollback": {
+        "status": "ok",
+        "version": "0.22.1",
+        "schema": 59,
+        "storage": "postgres",
+        "auth": true,
+        "bank": "313d9ec766827a8b",
+        "persist_errors": 0,
+        "build_git_sha": "unknown"
+      }
     },
     {
       "host": "fresh (this run)",
+      "exit": 1,
       "updater": [
         "WARNING: the engine failed its version, schema or authenticated-read gate"
       ],
@@ -364,10 +376,26 @@
         "model provisioning phase: installing pinned artifacts; daemon readiness follows this phase",
         "downloading model.onnx (1 of 12)",
         "downloading model.onnx_data (2 of 12)"
-      ]
+      ],
+      "engine_after_failed_rollback": {
+        "engine_label": "python",
+        "image": "pseudolife-daemon-python:0.22.1-pre-update-20261106-173217",
+        "image_id": "sha256:5978a78fb525"
+      },
+      "health_after_failed_rollback": {
+        "status": "ok",
+        "version": "0.22.1",
+        "schema": 59,
+        "storage": "postgres",
+        "auth": true,
+        "bank": null,
+        "persist_errors": 0,
+        "build_git_sha": "unknown"
+      }
     },
     {
       "host": "fresh (the run before, 16:40-16:49Z, harness without diagnostics)",
+      "exit": 1,
       "updater": [
         "WARNING: the engine failed its version, schema or authenticated-read gate"
       ]

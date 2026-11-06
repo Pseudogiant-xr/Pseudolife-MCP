@@ -60,8 +60,9 @@ check(no_errors(r) and {"G2 proof note one, written by Python 0.22.1",
 p3 = s["proof_3_backup_restore_rollback"]
 check(p3["bank_after_restore"] == p3["bank_at_backup"], "P3: the restored bank equals the backup-time fingerprint")
 r = p3["reads_after_restore"]
-check(no_errors(r) and not any("AFTER the backup" in t for t in texts(r)) and fact(r) == "rust",
-      "P3: the marker written after the backup is gone; the Rust-era fact is back")
+check(no_errors(r) and len(texts(r)) == 3 and "G2 proof note three, written by the Rust daemon" in texts(r)
+      and not any("AFTER the backup" in t for t in texts(r)) and fact(r) == "rust",
+      "P3: after the restore exactly the 3 backup-time notes come back, without the marker; the Rust-era fact is back")
 check(p3["engine_after_restore"]["engine_label"] == "rust", "P3: Rust serves after the restore")
 check(p3["engine_after_printed_rollback"]["image_id"] == p2["engine_before"]["image_id"]
       and p3["health_after_printed_rollback"]["version"] == "0.22.1"
@@ -75,12 +76,19 @@ check(p3["steps"].get("python-0.22.1-writes") == 0, "P3: v0.22.1 writes after th
 check(p3["bank_after_engine_python_from_master"]["entries"]["rows"] == p3["bank_at_backup"]["entries"]["rows"] + 1,
       "P3: master's Python sees v0.22.1's new entry after --engine python")
 
-for failure in s["default_activation_gate_failures"]:
-    check(any("failed its version, schema or authenticated-read gate" in line for line in failure["updater"]),
-          f"gap: the default activation failed its gate on {failure['host']}")
-    if "daemon_at_failure" in failure:
-        check(any("model provisioning phase" in line for line in failure["daemon_at_failure"]),
-              f"gap: the daemon was still provisioning models on {failure['host']}")
+# The plain `--engine rust` is observed, not required: once the activation
+# gate waits for model provisioning it passes, and that is a good run too.
+# Where it failed, the printed rollback must have restored a healthy Python.
+for record in s["default_activation"]:
+    if record.get("exit") == 0:
+        print(f"info default activation passed on {record['host']}")
+        continue
+    reason = next(iter(record.get("updater") or []), "no gate line recorded")
+    print(f"info default activation failed on {record['host']}: {reason}")
+    if "engine_after_failed_rollback" in record:
+        check(record["engine_after_failed_rollback"]["engine_label"] == "python"
+              and record["health_after_failed_rollback"]["status"] == "ok",
+              f"after the failed default activation on {record['host']}, the printed rollback restored a healthy Python daemon")
 
 print(f"\n{len(failures)} failed")
 sys.exit(1 if failures else 0)

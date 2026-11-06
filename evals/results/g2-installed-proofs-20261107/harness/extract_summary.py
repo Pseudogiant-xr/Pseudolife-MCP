@@ -72,6 +72,21 @@ def steps(mode, proof=None):
     return {r["step"]: r["exit"] for r in ledger(mode) if proof is None or r["proof"] == proof}
 
 
+def default_activation(mode, base):
+    """The plain activation's exit on this host, with the daemon's state and
+    the recovery after it when it failed."""
+    exit_code = steps(mode).get(f"{base}-default")
+    record = {"host": f"{mode} (this run)", "exit": exit_code}
+    if exit_code:
+        record |= {
+            "updater": excerpt(log(mode, f"{base}-default"), "failed its version"),
+            "daemon_at_failure": excerpt(log(mode, f"diagnose-{base}-default"), *PROVISIONING),
+            "engine_after_failed_rollback": engine(mode, f"{base}-engine-after-failed-rollback"),
+            "health_after_failed_rollback": health(mode, f"{base}-health-after-failed-rollback"),
+        }
+    return record
+
+
 PROVISIONING = ("Up ", "health:", "model provisioning", "downloading", "Recv failure", "Connection reset")
 summary = {
     "tested_head": TESTED_HEAD,
@@ -97,7 +112,6 @@ summary = {
     "proof_2_update_python_0_22_1_to_rust": {
         "steps": steps("upgrade", "P2"),
         "engine_before": engine("upgrade", "engine-python"),
-        "engine_after_failed_default_rollback": engine("upgrade", "update-to-rust-engine-after-failed-rollback"),
         "engine_after": engine("upgrade", "engine-rust"),
         "health_after": health("upgrade", "health-rust"),
         "bank_before": snap("upgrade", "snapshot-before"),
@@ -123,17 +137,12 @@ summary = {
         "engine_python_from_master": engine("upgrade", "engine-python-master"),
         "bank_after_engine_python_from_master": snap("upgrade", "snapshot-python-master"),
     },
-    "default_activation_gate_failures": [
-        {"host": "upgrade (this run)",
-         "updater": excerpt(log("upgrade", "update-to-rust-default"), "failed its version"),
-         "daemon_at_failure": excerpt(log("upgrade", "diagnose-update-to-rust-default"), *PROVISIONING)},
-        {"host": "fresh (this run)",
-         "updater": excerpt(log("fresh", "select-rust-default"), "failed its version"),
-         "daemon_at_failure": excerpt(log("fresh", "diagnose-select-rust-default"), *PROVISIONING)},
-    ],
+    # Observed, not required: how the plain `--engine rust` fared on each host.
+    "default_activation": [default_activation("upgrade", "update-to-rust"),
+                           default_activation("fresh", "select-rust")],
 }
 if EARLIER:
-    summary["default_activation_gate_failures"].append(
-        {"host": "fresh (the run before, 16:40-16:49Z, harness without diagnostics)",
+    summary["default_activation"].append(
+        {"host": "fresh (the run before, 16:40-16:49Z, harness without diagnostics)", "exit": 1,
          "updater": excerpt(log("fresh", "select-rust", EARLIER), "failed its version")})
 json.dump(summary, open(OUT, "w", encoding="utf-8", newline="\n"), indent=2)

@@ -47,9 +47,10 @@ passed only with a longer wait (`--health-retries 1300`).
 - **`summary.json`:** what each check read back, plus short excerpts of the
   log lines cited below. `harness/extract_summary.py` builds it from the raw
   logs, which stay private because they may carry generated credentials.
-- **`harness/verify.py summary.json`:** asserts the claims below (26
+- **`harness/verify.py summary.json`:** asserts the claims below (23
   checks, exit 0). On a copy tampered to keep the post-backup marker and
-  change a fingerprint, it fails both claims and exits 1.
+  change a fingerprint, it fails both claims and exits 1; an empty search
+  after the restore fails too.
 - **Harness timing:** the recorded run used the harness before
   `proof.sh`'s assertion steps and `run_proofs.sh`'s exit propagation were
   added (both after review). For that run the contract is checked by
@@ -75,7 +76,7 @@ volume are not fingerprinted.
 On a fresh host the default `python3 ops/update.py --engine rust` failed
 with "the engine failed its version, schema or authenticated-read gate".
 
-- **Frequency:** 3 times out of 3 (`default_activation_gate_failures`):
+- **Frequency:** 3 times out of 3 (`default_activation` in the summary):
   both hosts of this run, and the fresh host of the run before it.
 - **What the daemon was doing:** at the failure the container read
   `Up 43 seconds (health: starting)`, its log "model provisioning phase …
@@ -83,8 +84,11 @@ with "the engine failed its version, schema or authenticated-read gate".
 - **Why:** the gate waits 30 × 1.5 s (`update_cli` `health_retries`), while
   `ops/Dockerfile.daemon-rust` budgets up to 30 minutes for first-start
   provisioning. The read-only shadow already waits 1,920 s.
-- **Recovery:** each time, the printed rollback restored a healthy Python
-  daemon, and `--health-retries 1300` then passed.
+- **Recovery:** on both hosts of this run the printed rollback restored a
+  healthy Python daemon (asserted by `verify.py`; the run before's recovery
+  was not recorded), and `--health-retries 1300` then passed. `verify.py`
+  treats the plain activation as an observation, so a run on a fixed gate
+  where it passes is a good run.
 - **Diagnosis:** the failed gate does not say which check failed.
 - **Fix:** in progress, stacked on #1355. It provisions the models before
   the recreate and names the failing check.

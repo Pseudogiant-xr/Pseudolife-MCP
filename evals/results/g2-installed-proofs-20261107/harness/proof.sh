@@ -46,7 +46,7 @@ activate_rust() {  # activate_rust <proof> <step>: as a user would, then the doc
     cp "$P/logs/$MODE-$name-default.log" "$P/logs/$MODE-$name.log"; return 0
   fi
   diagnose "$name-default"
-  python3 /opt/proof/printed_rollback.py "$P/logs/$MODE-$name-default.log" > $P/failed-activation-rollback.sh
+  must "$proof" "$name-extract-failed-rollback" sh -c "python3 /opt/proof/printed_rollback.py '$P/logs/$MODE-$name-default.log' > '$P/failed-activation-rollback.sh' && test -s '$P/failed-activation-rollback.sh'"
   must "$proof" "$name-show-failed-rollback" cat $P/failed-activation-rollback.sh
   must "$proof" "$name-run-failed-rollback" bash -e $P/failed-activation-rollback.sh
   for i in $(seq 1 60); do health >/dev/null 2>&1 && break; sleep 5; done
@@ -88,17 +88,20 @@ if [ "$MODE" = upgrade ]; then
   must P3 list-backups ls -l /root/.pseudolife-mcp/backups
   dump=$(ls -t /root/.pseudolife-mcp/backups/pseudolife_memory-*.sql.gz | head -1)
   state=$(ls -t /root/.pseudolife-mcp/backups/pseudolife_state-*.tgz 2>/dev/null | head -1)
-  must P3 restore-under-rust pseudolife-mcp restore --backup-file "$dump" ${state:+--state-archive "$state"} --yes
+  must P3 backup-has-state-archive test -s "$state"
+  must P3 restore-under-rust pseudolife-mcp restore --backup-file "$dump" --state-archive "$state" --yes
   must P3 health-after-restore health
   must P3 engine-after-restore engine
   must P3 snapshot-after-restore snapshot
   must P3 assert-restore-equals-backup diff $P/logs/$MODE-snapshot-rust.log $P/logs/$MODE-snapshot-after-restore.log
   must P3 read-after-restore mcp memory_search '{"query":"G2 proof marker written AFTER the backup","top_k":5}' \
        memory_fact_get '{"entity":"g2-proof","attribute":"written-by"}'
-  must P3 assert-marker-gone sh -c "! grep -q 'AFTER the backup' $P/logs/$MODE-read-after-restore.log"
+  # Parse the returned entries: the search reply echoes its query, so a grep
+  # for the marker's sentence would always match.
+  must P3 assert-marker-gone python3 /opt/proof/assert_reads.py $P/logs/$MODE-read-after-restore.log --count 3 --absent "AFTER the backup" --present "note three, written by the Rust daemon" --fact rust
   # The rollback the Rust activation printed, run as printed: back to the
   # tagged Python 0.22.1 image, which must read what Rust wrote.
-  python3 /opt/proof/printed_rollback.py "$P/logs/upgrade-update-to-rust.log" > $P/printed-rollback.sh
+  must P3 extract-printed-rollback sh -c "python3 /opt/proof/printed_rollback.py '$P/logs/upgrade-update-to-rust.log' > '$P/printed-rollback.sh' && test -s '$P/printed-rollback.sh'"
   must P3 show-printed-rollback cat $P/printed-rollback.sh
   must P3 printed-rollback-to-python-0.22.1 bash -e $P/printed-rollback.sh
   for i in $(seq 1 120); do health >/dev/null 2>&1 && break; sleep 5; done

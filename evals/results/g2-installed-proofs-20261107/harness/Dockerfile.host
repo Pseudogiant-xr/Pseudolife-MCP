@@ -12,7 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin && \
     rm -rf /var/lib/apt/lists/*
 COPY claude-stub /usr/local/bin/claude
-COPY mcp_call.py proof.sh printed_rollback.py host-entrypoint.sh /opt/proof/
+COPY mcp_call.py proof.sh printed_rollback.py assert_reads.py host-entrypoint.sh /opt/proof/
 RUN chmod 755 /usr/local/bin/claude /opt/proof/proof.sh /opt/proof/host-entrypoint.sh
 VOLUME /var/lib/docker
 ENTRYPOINT ["tini", "--"]
