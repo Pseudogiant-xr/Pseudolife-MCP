@@ -847,7 +847,9 @@ pub(crate) fn text_param(v: Option<&Value>) -> Result<Option<String>, ToolError>
 fn array_kind(items: &[Value], kind: &mut Option<&'static str>) -> Result<(), ToolError> {
     let lists = items.iter().filter(|v| v.is_array()).count();
     if lists != 0 && lists != items.len() {
-        return Err(internal("a list mixing lists and scalars cannot be stored as text"));
+        return Err(internal(
+            "a list mixing lists and scalars cannot be stored as text",
+        ));
     }
     let mut width = None;
     for v in items {

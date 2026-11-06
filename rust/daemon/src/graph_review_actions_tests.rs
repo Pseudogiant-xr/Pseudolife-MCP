@@ -325,10 +325,20 @@ fn a_list_rationale_stores_postgres_array_text() {
         (json!(["", "q"]), r#"{"",q}"#),
         (json!(["NULL", "null", "Null"]), r#"{"NULL","null","Null"}"#),
         (
-            json!(["quote\"d", "back\\slash", "brace{", "comma,", "tab\tx", "nl\nx"]),
+            json!([
+                "quote\"d",
+                "back\\slash",
+                "brace{",
+                "comma,",
+                "tab\tx",
+                "nl\nx"
+            ]),
             "{\"quote\\\"d\",\"back\\\\slash\",\"brace{\",\"comma,\",\"tab\tx\",\"nl\nx\"}",
         ),
-        (json!(["\u{e9}", "\u{65e5}\u{672c}"]), "{\u{e9},\u{65e5}\u{672c}}"),
+        (
+            json!(["\u{e9}", "\u{65e5}\u{672c}"]),
+            "{\u{e9},\u{65e5}\u{672c}}",
+        ),
         (json!([" lead", "trail "]), r#"{" lead","trail "}"#),
         (json!([null, "a"]), "{NULL,a}"),
         (json!([1, 2, 3]), "{1,2,3}"),
@@ -348,7 +358,12 @@ fn a_list_rationale_stores_postgres_array_text() {
     }
     // psycopg refuses these too ("cannot dump lists of mixed types", a dict
     // it cannot adapt), so both daemons fail the call.
-    for value in [json!([1, 2.5]), json!(["a", 1]), json!([{"k": 1}]), json!([["a"], "b"])] {
+    for value in [
+        json!([1, 2.5]),
+        json!(["a", 1]),
+        json!([{"k": 1}]),
+        json!([["a"], "b"]),
+    ] {
         assert!(text_param(Some(&value)).is_err(), "{value}");
     }
 }
