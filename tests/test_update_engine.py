@@ -65,8 +65,9 @@ def test_engine_rechecks_space_after_backup(engine_host, monkeypatch, engine):
     with pytest.raises(up.UpdateError, match="8 GiB"):
         eng.deploy_engine(update, s["repo"])
     assert state["backed_up"]
-    # The build and model provisioning precede the backup; nothing after it ran.
-    assert not any("up" in c or c[1:2] == ["tag"] for c in s["calls"])
+    # The rollback tag, build and model provisioning precede the backup;
+    # nothing after it ran.
+    assert not any("up" in c for c in s["calls"])
 
 
 def test_release_rust_is_no_longer_refused_as_unpublished(monkeypatch, capsys):
@@ -386,6 +387,16 @@ def test_shadow_reads_the_writers_private_state_and_presents_its_identity(host_e
     assert f"chown {uid.group(1)}:{uid.group(2)} /models" in rust
 
 
+def _containerd_name(state, name, image_id):
+    """Point a name at an image; the ID it left becomes unresolvable when no
+    other name refers to it, as in Docker's containerd image store."""
+    previous = state["images"].get(name)
+    state["images"][name] = image_id
+    state["orphaned"].discard(image_id)
+    if previous and previous != image_id and previous not in state["images"].values():
+        state["orphaned"].add(previous)
+
+
 @pytest.fixture
 def engine_host(tmp_path, monkeypatch):
     from pseudolife_memory import update_engine as eng
@@ -401,6 +412,7 @@ def engine_host(tmp_path, monkeypatch):
         (ops / name).write_text("# fixture\n")
     (ops / ".env").write_text("# isolated host\n")
     state = {"calls": [], "schema": "58", "pending": False, "read": True, "fail": None,
+             "images": {"python:old": "sha256:validated-python"}, "orphaned": set(),
              "health": {"status": "ok", "version": "0.21.0", "schema": 58},
              "running": {"Image": "sha256:validated-python", "State": {"Running": True},
                          "Mounts": [{"Destination": "/data", "Name": "fixture-state"}],
@@ -437,6 +449,21 @@ def engine_host(tmp_path, monkeypatch):
                 state["running"]["Config"]["Labels"] = overlay["services"][up.DAEMON_SERVICE]["labels"]
             if state["fail"] in ("build", "up") and state["fail"] in argv:
                 return 1, "fixture failure"
+            if argv[-2:] == ["build", up.DAEMON_SERVICE]:
+                overlay = json.loads(Path(argv[argv.index("build") - 1]).read_text())
+                _containerd_name(state, overlay["services"][up.DAEMON_SERVICE]["image"],
+                                 f"sha256:built-{len(state['images']) + len(state['orphaned'])}")
+            if "up" in argv and argv[-1] == up.DAEMON_SERVICE:
+                name = json.loads(Path(argv[argv.index("up") - 1]).read_text())["services"][up.DAEMON_SERVICE]["image"]
+                state["running"]["Image"] = state["images"].get(name, state["running"]["Image"])
+            return 0, ""
+        if argv[1:2] == ["tag"]:
+            # The containerd image store: an ID no name refers to any more
+            # (the build moved its tag) no longer resolves.
+            source = argv[2]
+            if source in state["orphaned"] or (not source.startswith("sha256:") and source not in state["images"]):
+                return 1, f"Error response from daemon: No such image: {source}"
+            _containerd_name(state, argv[3], state["images"].get(source, source))
             return 0, ""
         if argv[1:2] == ["inspect"]:
             if "-f" in argv:
@@ -487,7 +514,7 @@ def engine_host(tmp_path, monkeypatch):
     return state
 
 
-def test_activation_orders_build_provision_backup_tag_recreate_gate_then_persists(engine_host):
+def test_activation_orders_tag_build_provision_backup_recreate_gate_then_persists(engine_host):
     from pseudolife_memory import update_engine as eng
     s = engine_host
     update = s["update"]()
@@ -498,9 +525,10 @@ def test_activation_orders_build_provision_backup_tag_recreate_gate_then_persist
     build = next(i for i, a in enumerate(calls) if "build" in a)
     provision = next(i for i, a in enumerate(calls) if a[1:2] == ["run"] and "provision" in a)
     recreate = next(i for i, a in enumerate(calls) if "up" in a)
-    # The pinned models are installed before anything changes, so a first
-    # activation never downloads them inside the health gate.
-    assert build < provision < backup < tag < recreate
+    # The rollback tag precedes the build (which may move the running image's
+    # name); the pinned models are installed before the backup and recreate,
+    # so a first activation never downloads them inside the health gate.
+    assert tag < build < provision < backup < recreate
     run = calls[provision]
     assert run[-4:] == ["pseudolife-daemon-rust:checkout", "provision", "models", "--if-missing"]
     assert run[run.index("--entrypoint") + 1] == "pseudolife-daemon"
@@ -549,11 +577,34 @@ def test_failure_never_commits_engine_selection(engine_host, failure, monkeypatc
     if failure in ("backup", "build", "provision"):
         assert str(caught.value).count("to roll back:") == 0
         assert "nothing was deployed" in str(caught.value)
-        assert not any(a[1:2] == ["tag"] for a in s["calls"])
+        assert update.report.rollback == {"tag": update.report.rollback["tag"], "state": "tagged"}
+        assert f"keeps its rollback tag {update.report.rollback['tag']}" in str(caught.value)
+        assert not any("up" in a for a in s["calls"])
     else:
         assert str(caught.value).count("to roll back:") == 1
         assert update.report.rollback["state"] == "tagged"
         assert Path(update.report.rollback["overlay"]).is_file()
+
+
+@pytest.mark.parametrize("engine", ["rust", "python"])
+def test_same_engine_rerun_tags_the_running_image_before_rebuilding_it(engine_host, engine):
+    """On Docker's containerd image store the build moves :checkout off the
+    running image, whose ID then no longer resolves for `docker tag`."""
+    from pseudolife_memory import update_engine as eng
+    s = engine_host
+    eng.deploy_engine(s["update"](engine), s["repo"])
+    running = s["running"]["Image"]
+    assert running == s["images"][f"pseudolife-daemon-{engine}:checkout"]
+    s["calls"].clear()
+    update = s["update"](engine)
+    eng.deploy_engine(update, s["repo"])
+    calls = s["calls"]
+    tag = next(i for i, a in enumerate(calls) if a[1:2] == ["tag"])
+    build = next(i for i, a in enumerate(calls) if "build" in a)
+    assert tag < build and calls[tag][2:] == [running, update.report.rollback["tag"]]
+    assert s["images"][update.report.rollback["tag"]] == running
+    assert running not in s["orphaned"]
+    assert s["running"]["Image"] != running
 
 
 def test_provisioning_failure_changes_nothing(engine_host):
@@ -567,7 +618,10 @@ def test_provisioning_failure_changes_nothing(engine_host):
     assert "could not provision the Rust daemon's models (fixture download failed)" in message
     assert "network access and disk space" in message and "nothing was deployed" in message
     assert "to roll back:" not in message
-    assert not any(any("backup." in x for x in a) or a[1:2] == ["tag"] or "up" in a for a in s["calls"])
+    # Only the rollback tag of the running image, taken before the build, remains.
+    rollback = next(a[3] for a in s["calls"] if a[1:2] == ["tag"])
+    assert message.endswith(f"; the running image keeps its rollback tag {rollback}")
+    assert not any(any("backup." in x for x in a) or "up" in a for a in s["calls"])
     assert json.dumps(s["running"], sort_keys=True) == before
     assert not (s["repo"] / eng.SELECTION).exists()
     assert not list((s["repo"] / "data/update-engine").glob("*.json"))
@@ -1129,9 +1183,9 @@ def test_state_archive_failure_stops_before_tag_even_when_backup_script_exits_ze
     from pseudolife_memory import update_engine as eng
     s = engine_host
     s["state_failed"] = True
-    with pytest.raises(up.UpdateError, match="state backup"):
+    with pytest.raises(up.UpdateError, match="state backup.*keeps its rollback tag"):
         eng.deploy_engine(s["update"](), s["repo"])
-    assert not any(a[1:2] == ["tag"] or "up" in a for a in s["calls"])
+    assert not any("up" in a for a in s["calls"])
 
 
 def test_colon_bearer_and_running_version_are_preserved(engine_host, monkeypatch):
@@ -1740,7 +1794,7 @@ def test_stopped_checkout_handover_backs_up_exact_image_and_retains_selection(en
     tag = next(i for i, call in enumerate(calls) if call[1:2] == ["tag"])
     build = next(i for i, call in enumerate(calls) if "build" in call)
     recreate = next(i for i, call in enumerate(calls) if "up" in call)
-    assert build < backup < tag < recreate
+    assert tag < build < backup < recreate
     provisions = [i for i, call in enumerate(calls) if call[1:2] == ["run"] and "provision" in call]
     assert (len(provisions) == 1 and build < provisions[0] < backup) if engine == "rust" else not provisions
     assert calls[tag][2] == "sha256:validated-python"
@@ -1830,8 +1884,9 @@ def test_stopped_checkout_handover_failure_precedes_tag_build(engine_host, monke
     update._selected_engine = "python"
     with pytest.raises(up.UpdateError):
         eng.deploy_engine(update, s["repo"])
-    # A probe failure stops in preflight; a backup failure follows only the build.
-    assert not any(call[1:2] == ["tag"] or "up" in call or ("build" in call and failure == "probe")
+    # A probe failure stops in preflight; a backup failure follows only the
+    # rollback tag and the build.
+    assert not any("up" in call or (failure == "probe" and (call[1:2] == ["tag"] or "build" in call))
                    for call in s["calls"])
     assert any(call[1:2] == ["rm"] for call in s["calls"])
 

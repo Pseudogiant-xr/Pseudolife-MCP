@@ -305,7 +305,10 @@ elif a[:1]==["pull"]: code=int(s["failure"]=="pull")
 elif a[:1]==["run"]:
  if "provision" in a: code=int(s["failure"]=="provision")
  else: out="58" if "--schema-version" in a else "SCHEMA_META_VERSION = 58\n"
-elif a[:1]==["tag"]: s["images"][a[-1]]=a[-2]
+elif a[:1]==["tag"]:
+ # The containerd image store: an ID no name refers to any more no longer resolves.
+ if a[-2] in s.setdefault("orphaned",[]):code=1;out="Error response from daemon: No such image: "+a[-2]
+ else:s["images"][a[-1]]=s["images"].get(a[-2],a[-2])
 elif a[:1]==["compose"]:
  if "config" in a:
   config=json.loads(json.dumps(s["config"]))
@@ -330,22 +333,32 @@ elif a[:1]==["compose"]:
   if s["failure"]=="ambiguous_project_daemon" and a[-1]=="pseudolife-daemon":out="first\nsecond"
   if s.get("deployed") and s["failure"]=="recreated_missing" and a[-1]=="pseudolife-daemon":out=""
  elif "build" in a and s["failure"]=="build":code=1
+ elif "build" in a:
+  # The build moves the candidate's tag; the image it left, if no other
+  # name refers to it, is no longer resolvable by ID (containerd store).
+  for path in [a[i+1] for i,v in enumerate(a[:-1]) if v=="-f"]:
+   try:name=json.loads(pathlib.Path(path).read_text())["services"]["pseudolife-daemon"]["image"]
+   except (OSError,ValueError,KeyError):continue
+   previous=s["images"].get(name);s["images"][name]="sha256:built-"+str(len(s["calls"]))
+   if previous and previous not in s["images"].values():s.setdefault("orphaned",[]).append(previous)
  elif "up" in a:
   code=int(s["failure"]=="up")
   if code==0:
    s["deployed"]=True
+   built=""
    overlays=[a[i+1] for i,v in enumerate(a[:-1]) if v=="-f"]
    for path in overlays:
     try:
      service=json.loads(pathlib.Path(path).read_text())["services"]["pseudolife-daemon"]
      if "labels" in service:s["running"]["Config"]["Labels"]={**(s["running"]["Config"]["Labels"] or {}),**service["labels"]}
+     built=s["images"].get(service.get("image"),"")
     except (OSError,ValueError,KeyError):pass
    if s.get("models_overlay"):
     mounts=[m for m in s["running"]["Mounts"] if m.get("Destination")!="/models"]
     if any(v.endswith("docker-compose.rust-ghcr.yml") for v in overlays):
      mounts.append({"Type":"volume","Name":"fixture-project_pseudolife_rust_models","Destination":"/models","RW":True})
     s["running"]["Mounts"]=mounts
-   s["running"]["Image"]="sha256:replacement"
+   s["running"]["Image"]=built if built.startswith("sha256:built-") else "sha256:replacement"
    s["running"]["Id"]=s.get("replacement_id",s["running"]["Id"])
 elif a[:1]==["exec"]:
  if "df" in a: out="Filesystem 1024-blocks Used Available Capacity Mounted on\noverlay 99999999 1 99999998 1% /"
@@ -880,9 +893,11 @@ def test_engine_activation_faults_preserve_rollback_and_retry_guard(tmp_path, na
         report = json.loads(result.stdout)
         state = json.loads(state_path.read_text())
         observed = stages(state)
-        # The build and the model provisioning precede every change.
-        expected = (["build"] if failure in ("build", "provision") else ["build", "backup"]
-                    if failure in ("backup", "incomplete") else ["build", "backup", "tag", "up"])
+        # The rollback tag precedes the build (which may move the running
+        # image's name); the build and the model provisioning precede the
+        # backup and the recreate.
+        expected = (["tag", "build"] if failure in ("build", "provision") else ["tag", "build", "backup"]
+                    if failure in ("backup", "incomplete") else ["tag", "build", "backup", "up"])
         assert observed == expected
         provisions = [i for i, a in enumerate(state["calls"]) if a[:1] == ["run"] and "provision" in a]
         if failure == "build":
@@ -900,13 +915,16 @@ def test_engine_activation_faults_preserve_rollback_and_retry_guard(tmp_path, na
             assert create < provisions[0]
             assert state["calls"][create][-1] == "fixture-project_pseudolife_rust_models"
             assert "com.docker.compose.volume=pseudolife_rust_models" in state["calls"][create]
-            later = [i for i, a in enumerate(state["calls"]) if a[:1] in (["fixture-backup"], ["tag"])
+            later = [i for i, a in enumerate(state["calls"]) if a[:1] == ["fixture-backup"]
                      or a[:1] == ["exec"] and any("pg_dump" in s for s in a)]
             assert all(provisions[0] < i for i in later)
         selection = repo / "data/update-engine/docker-compose.engine.json"
         assert selection.exists() is (not failure)
+        assert report["rollback"]["tag"] == "pseudolife-daemon-python:0.21.0-pre-fixture"
+        assert report["rollback"]["state"] == "tagged"
         if failure in ("build", "provision", "backup", "incomplete"):
             assert "nothing was deployed" in result.stdout
+            assert "the running image keeps its rollback tag pseudolife-daemon-python:0.21.0-pre-fixture" in result.stdout
             assert "to roll back:" not in result.stdout
         else:
             assert Path(report["rollback"]["overlay"]).is_file()
@@ -922,6 +940,35 @@ def test_engine_activation_faults_preserve_rollback_and_retry_guard(tmp_path, na
             assert retry.returncode == 2, retry.stdout + retry.stderr
             assert stages(json.loads(state_path.read_text())) == observed
             assert "rollback" in retry.stdout.lower()
+
+
+@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+def test_same_engine_checkout_rerun_tags_the_running_image_before_rebuilding_it(tmp_path, native):
+    """Docker's containerd image store no longer resolves an image's ID once
+    a build moved the only tag naming it: a Rust-to-Rust rerun must tag the
+    running image for rollback before it rebuilds :checkout."""
+    binary = _native_binary() if native else None
+    if native and not binary:
+        pytest.skip("native binary build is owned by the parent; set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path, "", "engine") as (repo, env, state_path):
+        args = ["--checkout", str(repo), "--engine", "rust", "--no-test-login", "--no-cache-prune", "--json",
+                "--health-retries", "1", "--health-delay-ms", "0"]
+        first = run_arm(repo, env, binary, [*args, "--rollback-tag", "pre-first"])
+        assert first.returncode == 0, first.stdout + first.stderr
+        state = json.loads(state_path.read_text())
+        running = state["running"]["Image"]
+        assert running == state["images"]["pseudolife-daemon-rust:checkout"]
+        before = len(state["calls"])
+        second = run_arm(repo, env, binary, [*args, "--rollback-tag", "pre-second"])
+        assert second.returncode == 0, second.stdout + second.stderr
+        state = json.loads(state_path.read_text())
+        calls = state["calls"][before:]
+        assert stages({"calls": calls}) == ["tag", "build", "backup", "up"]
+        tag = next(a for a in calls if a[:1] == ["tag"])
+        assert tag == ["tag", running, "pseudolife-daemon-rust:0.21.1-pre-second"]
+        assert state["images"]["pseudolife-daemon-rust:0.21.1-pre-second"] == running
+        assert running not in state["orphaned"]
+        assert state["running"]["Image"] != running
 
 
 @pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
@@ -959,7 +1006,7 @@ def test_checkout_d2_guard_is_reached_before_backup_and_accepts_imported_row(tmp
         assert sql and "schema_version" in sql[0]
         if failure == "imported_weights":
             assert any("cms_counters" in query for query in sql)
-            assert stages(state) == ["build", "backup", "tag", "up"]
+            assert stages(state) == ["tag", "build", "backup", "up"]
             assert not any("test ! -e /data/memory_state/weights.pt" in " ".join(a) for a in state["calls"])
         else:
             assert stages(state) == []
@@ -1470,7 +1517,7 @@ def test_discovered_checkout_backup_policy_uses_effective_engine(tmp_path, engin
             assert result.returncode != 0, result.stdout + result.stderr
             assert "state" in result.stdout
             # The Rust engine builds and provisions before its backup.
-            assert stages(json.loads(state_path.read_text())) == ["build", "backup"]
+            assert stages(json.loads(state_path.read_text())) == ["tag", "build", "backup"]
         else:
             assert result.returncode == 0, result.stdout + result.stderr
             assert "continuing with the complete SQL dump" in result.stdout

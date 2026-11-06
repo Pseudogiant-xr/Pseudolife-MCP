@@ -1068,6 +1068,25 @@ pub(super) fn deploy(u: &mut Update, repo: &Path) -> Result<()> {
         u.disk_container(&pg, "/tmp")?;
         u.disk_container(&daemon, "/tmp")?;
     }
+    // Tag first: rebuilding the same engine moves its :checkout tag, and
+    // Docker's containerd image store then no longer resolves the running
+    // image's ID, so it could not be tagged afterwards.
+    let old = labels[ENGINE_LABEL].as_str().unwrap_or("python");
+    let suffix = u.rollback_suffix();
+    let rollback = format!("pseudolife-daemon-{old}:{running_version}-{suffix}");
+    let id = running["Image"]
+        .as_str()
+        .ok_or_else(|| UpdateError::usage("cannot identify the running image"))?;
+    tag_validated(u, id, &rollback)?;
+    u.step(format!("tagged rollback image: {rollback}"));
+    u.report.rollback = json!({"tag":rollback,"state":"tagged"});
+    let kept = |e: UpdateError| UpdateError {
+        message: format!(
+            "{}; the running image keeps its rollback tag {rollback}",
+            e.message
+        ),
+        exit_code: e.exit_code,
+    };
     let image = format!("pseudolife-daemon-{choice}:checkout");
     let activation = uuid::Uuid::new_v4().simple().to_string();
     let service = json!({"image":image,"build":{"dockerfile":format!("ops/Dockerfile.daemon{}",if choice=="rust"{"-rust"}else{""})},"labels":{ENGINE_LABEL:choice,CHECKOUT_LABEL:repo,ACTIVATION_LABEL:activation}});
@@ -1078,63 +1097,61 @@ pub(super) fn deploy(u: &mut Update, repo: &Path) -> Result<()> {
         compose.extend(["-f".into(), rust_overlay.to_string_lossy().into_owned()]);
     }
     compose.extend(["-f".into(), candidate.to_string_lossy().into_owned()]);
-    write_overlay(&candidate, &service)?;
+    write_overlay(&candidate, &service).map_err(kept)?;
     let result = (|| -> Result<()> {
         // Build the replacement, then install its pinned models: both before
         // the backup, so a first activation's model download never runs
         // inside the health gate, and a failure leaves the daemon untouched.
-        if tree_state(&repo) != tree {
-            return Err(UpdateError::new(
-                "the checkout moved since this update started; retry from a stable checkout; nothing was deployed",
-            ));
-        }
-        u.step(format!(
-            "building the {choice} daemon (the running daemon keeps serving)..."
-        ));
-        let mut args = vec!["compose".into()];
-        args.extend(compose.clone());
-        args.extend(["build".into(), DAEMON_SERVICE.into()]);
-        if u.command(&args, Some(&env), 7200, true).0 != 0 {
-            return Err(UpdateError::new(
-                "engine build failed; the running daemon is unchanged; nothing was deployed",
-            ));
-        }
-        if choice == "rust" {
-            // The config the replacement runs with: its model directory and volume.
-            let mut args = vec!["compose".into()];
-            args.extend(compose.clone());
-            args.extend(["config".into(), "--format".into(), "json".into()]);
-            let (code, out) = u.command(&args, Some(&env), 60, false);
-            let replacement: Value = serde_json::from_str(&out).ok().filter(|_: &Value| code == 0).ok_or_else(|| {
-                UpdateError::usage("cannot resolve the Compose project; check its files and env file, then retry; nothing was changed")
-            })?;
-            u.provision_models(&image, &replacement)?;
-        }
-        let backups = if stopped_handover {
-            u.builtin_backup(&pg, &daemon, &repo.join("data/backups"))?
-        } else {
-            u.project_backup(&repo, &pg, &daemon, user, db)?
-        };
-        disk::host(&repo)?;
-        u.disk_storage(&daemon, Some(&pg), running["Image"].as_str())?;
-        if stopped_handover {
-            let current = inspect(u, &daemon)?;
-            if current["Image"] != running["Image"]
-                || current["State"]["Running"] != false
-                || current["Config"] != running["Config"]
-            {
-                return Err(UpdateError::usage(
-                    "the stopped daemon changed during backup; stop other updates and retry; nothing was deployed",
+        let prepared = (|| -> Result<Value> {
+            if tree_state(&repo) != tree {
+                return Err(UpdateError::new(
+                    "the checkout moved since this update started; retry from a stable checkout; nothing was deployed",
                 ));
             }
-        }
-        let old = labels[ENGINE_LABEL].as_str().unwrap_or("python");
-        let suffix = u.rollback_suffix();
-        let rollback = format!("pseudolife-daemon-{old}:{running_version}-{suffix}");
-        let id = running["Image"]
-            .as_str()
-            .ok_or_else(|| UpdateError::usage("cannot identify the running image"))?;
-        tag_validated(u, id, &rollback)?;
+            u.step(format!(
+                "building the {choice} daemon (the running daemon keeps serving)..."
+            ));
+            let mut args = vec!["compose".into()];
+            args.extend(compose.clone());
+            args.extend(["build".into(), DAEMON_SERVICE.into()]);
+            if u.command(&args, Some(&env), 7200, true).0 != 0 {
+                return Err(UpdateError::new(
+                    "engine build failed; the running daemon is unchanged; nothing was deployed",
+                ));
+            }
+            if choice == "rust" {
+                // The config the replacement runs with: its model directory and volume.
+                let mut args = vec!["compose".into()];
+                args.extend(compose.clone());
+                args.extend(["config".into(), "--format".into(), "json".into()]);
+                let (code, out) = u.command(&args, Some(&env), 60, false);
+                let replacement: Value = serde_json::from_str(&out).ok().filter(|_: &Value| code == 0).ok_or_else(|| {
+                UpdateError::usage("cannot resolve the Compose project; check its files and env file, then retry; nothing was changed")
+            })?;
+                u.provision_models(&image, &replacement)?;
+            }
+            let backups = if stopped_handover {
+                u.builtin_backup(&pg, &daemon, &repo.join("data/backups"))?
+            } else {
+                u.project_backup(&repo, &pg, &daemon, user, db)?
+            };
+            disk::host(&repo)?;
+            // By tag: after a same-engine rebuild the running image's ID may not resolve.
+            u.disk_storage(&daemon, Some(&pg), Some(&rollback))?;
+            if stopped_handover {
+                let current = inspect(u, &daemon)?;
+                if current["Image"] != running["Image"]
+                    || current["State"]["Running"] != false
+                    || current["Config"] != running["Config"]
+                {
+                    return Err(UpdateError::usage(
+                        "the stopped daemon changed during backup; stop other updates and retry; nothing was deployed",
+                    ));
+                }
+            }
+            Ok(backups)
+        })();
+        let backups = prepared.map_err(kept)?;
         let old_service = rollback_service(&running, &rollback, Some(&repo));
         let rollback_file = repo.join("data/update-engine").join(format!(
             "docker-compose.rollback-{}-{}.json",

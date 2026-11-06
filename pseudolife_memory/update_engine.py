@@ -961,6 +961,10 @@ class EngineUpdate:
             # The backup stages in both containers' /tmp: refuse before the build.
             disk_space.container(self.u.docker, self.pg)
             disk_space.container(self.u.docker, self.daemon)
+        # Tag first: rebuilding the same engine moves its :checkout tag, and
+        # Docker's containerd image store then no longer resolves the
+        # running image's ID, so it could not be tagged afterwards.
+        rollback = self.tag_rollback()
         image = f"pseudolife-daemon-{self.engine}:checkout"
         service = {"image": image, "build": {"dockerfile": f"ops/Dockerfile.daemon{'-rust' if self.engine == 'rust' else ''}"},
                    "labels": {ENGINE_LABEL: self.engine, CHECKOUT_LABEL: str(self.repo), ACTIVATION_LABEL: secrets.token_hex(16)}}
@@ -968,9 +972,14 @@ class EngineUpdate:
         rust_overlay = ["-f", str(self.ops / "docker-compose.rust-daemon.yml")]
         compose = [*self.base, *(rust_overlay if self.engine == "rust" else []), "-f", str(candidate)]
         try:
-            _write_overlay(candidate, service)
-            self.build(compose, image)
-            health = self.activate(compose, service, rust_overlay)
+            try:
+                _write_overlay(candidate, service)
+                self.build(compose, image)
+                self.back_up(rollback)
+            except (up.UpdateError, OSError) as exc:
+                raise up.UpdateError(f"{exc}; the running image keeps its rollback tag {rollback}",
+                                     getattr(exc, "exit_code", 1)) from exc
+            health = self.activate(compose, service, rust_overlay, rollback)
         finally:
             try:
                 candidate.unlink(missing_ok=True)
@@ -983,16 +992,8 @@ class EngineUpdate:
         self.u.checkout_post_deploy(self.repo, self.previous_digest, health)
         self.u.prune_cache(self.repo)
 
-    def activate(self, compose, service, rust_overlay):
-        """Back up, tag the running image, recreate on the built one and gate it."""
-        from pseudolife_memory import disk_space
-        self.backup()
-        disk_space.host(self.repo)
-        disk_space.docker_storage(self.u.docker, [self.pg, self.daemon], self.running.get("Image"), self.u.warn)
-        if self.stopped_handover:
-            current = self.inspect(self.daemon)
-            if current.get("Image") != self.running.get("Image") or current.get("State", {}).get("Running") is not False or current.get("Config") != self.running.get("Config"):
-                raise up.UpdateError("the stopped daemon changed during backup; stop other updates and retry; nothing was deployed", 2)
+    def tag_rollback(self):
+        """Tag the validated running image for rollback, by its ID."""
         old_engine = self.running_labels.get(ENGINE_LABEL, "python")
         suffix = self.o.rollback_suffix or f"pre-update-{up._stamp()}"
         if not re.fullmatch(r"[A-Za-z0-9_.-]+", suffix):
@@ -1007,6 +1008,25 @@ class EngineUpdate:
         code, _ = self.command(["tag", self.running["Image"], rollback], timeout=60)
         if code:
             raise up.UpdateError("could not tag the running image for rollback; nothing was deployed")
+        self.u.step(f"tagged rollback image: {rollback}")
+        self.u.report.rollback = {"tag": rollback, "state": "tagged"}
+        return rollback
+
+    def back_up(self, rollback):
+        """The backup, after the build and models, just before the recreate."""
+        from pseudolife_memory import disk_space
+        self.backup()
+        disk_space.host(self.repo)
+        # By tag: after a same-engine rebuild the running image's ID may not resolve.
+        disk_space.docker_storage(self.u.docker, [self.pg, self.daemon], rollback, self.u.warn)
+        if self.stopped_handover:
+            current = self.inspect(self.daemon)
+            if current.get("Image") != self.running.get("Image") or current.get("State", {}).get("Running") is not False or current.get("Config") != self.running.get("Config"):
+                raise up.UpdateError("the stopped daemon changed during backup; stop other updates and retry; nothing was deployed", 2)
+
+    def activate(self, compose, service, rust_overlay, rollback):
+        """Write the rollback overlay and commands, recreate on the built image and gate it."""
+        old_engine = self.running_labels.get(ENGINE_LABEL, "python")
         old_service = {"image": rollback, "build": {"dockerfile": f"ops/Dockerfile.daemon{'-rust' if old_engine == 'rust' else ''}"},
                        "labels": {ENGINE_LABEL: old_engine, CHECKOUT_LABEL: str(self.repo)}}
         activation = self.running_labels.get(ACTIVATION_LABEL)
