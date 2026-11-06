@@ -302,7 +302,9 @@ elif a[:2]==["volume","inspect"]:
  else:out=json.dumps(s.get("volume_inspections",{}).get(a[-1],[]))
 elif a[:1]==["ps"]: out=s["running"]["Id"]
 elif a[:1]==["pull"]: code=int(s["failure"]=="pull")
-elif a[:1]==["run"]: out="58" if "--schema-version" in a else "SCHEMA_META_VERSION = 58\n"
+elif a[:1]==["run"]:
+ if "provision" in a: code=int(s["failure"]=="provision")
+ else: out="58" if "--schema-version" in a else "SCHEMA_META_VERSION = 58\n"
 elif a[:1]==["tag"]: s["images"][a[-1]]=a[-2]
 elif a[:1]==["compose"]:
  if "config" in a:
@@ -909,17 +911,111 @@ def test_checkout_d2_guard_is_reached_before_backup_and_accepts_imported_row(tmp
             assert "import" in result.stdout.lower()
 
 
+def _labels(state_path):
+    return json.loads(state_path.read_text())["running"]["Config"]["Labels"]
+
+
+def _accepted(env):
+    return Path(env["PSEUDOLIFE_MCP_DATA_DIR"]) / "update-engine/docker-compose.release-accepted.json"
+
+
 @pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
-def test_release_rust_refuses_unpublished_image_before_any_effect(tmp_path, native):
+def test_release_rust_activation_keeps_and_switches_back_on_the_same_bank(tmp_path, native):
     binary = _native_binary()
     if native and not binary:
         pytest.skip("set PSEUDOLIFE_RUST_BINARY")
     with host(tmp_path) as (repo, env, state_path):
-        result = run_arm(repo, env, binary if native else None, ["--engine", "rust", "--tag", "0.21.1", "--json"])
-        assert result.returncode == 2, result.stdout + result.stderr
-        assert "not published" in result.stdout + result.stderr
-        assert "--checkout" in result.stdout + result.stderr
-        assert json.loads(state_path.read_text())["calls"] == []
+        common = ["--daemon-only", "--json", "--health-retries", "1", "--health-delay-ms", "0"]
+        result = run_arm(repo, env, binary if native else None,
+                         ["--engine", "rust", "--tag", "0.21.1", *common, "--rollback-tag", "pre-rust"])
+        assert result.returncode == 0, result.stdout + result.stderr
+        state = json.loads(state_path.read_text())
+        assert stages(state) == ["pull", "backup", "tag", "up"]
+        pull = next(a for a in state["calls"] if a[:1] == ["pull"])
+        assert pull == ["pull", "ghcr.io/pseudogiant-xr/pseudolife-daemon-rust:0.21.1"]
+        provision = next(i for i, a in enumerate(state["calls"]) if a[:1] == ["run"] and "provision" in a)
+        backup = next(i for i, a in enumerate(state["calls"]) if a[:1] == ["fixture-backup"])
+        assert provision < backup
+        assert "--volumes-from" in state["calls"][provision] and "--if-missing" in state["calls"][provision]
+        up = next(a for a in state["calls"] if a[:1] == ["compose"] and "up" in a)
+        assert any(v.endswith("docker-compose.rust-ghcr.yml") for v in up)
+        assert "--no-build" in up and "--no-deps" in up
+        tag = next(a for a in state["calls"] if a[:1] == ["tag"])
+        assert tag[-1].startswith("ghcr.io/pseudogiant-xr/pseudolife-daemon:") and tag[-1].endswith("-pre-rust")
+        labels = _labels(state_path)
+        assert labels["org.pseudolife.engine"] == "rust" and labels["org.pseudolife.release"] == "0.21.1"
+        first = labels["org.pseudolife.activation"]
+        accepted = json.loads(_accepted(env).read_text())["services"][SERVICE]["labels"]
+        assert accepted["org.pseudolife.activation"] == first
+        report = json.loads(result.stdout)
+        assert report["rollback"]["state"] == "tagged" and Path(report["rollback"]["overlay"]).is_file()
+
+        # An unset engine keeps Rust and records a fresh accepted activation.
+        result = run_arm(repo, env, binary if native else None,
+                         ["--tag", "0.21.1", "--reinstall", *common, "--rollback-tag", "pre-keep"])
+        assert result.returncode == 0, result.stdout + result.stderr
+        state = json.loads(state_path.read_text())
+        assert [a for a in state["calls"] if a[:1] == ["pull"]][-1][-1].endswith("pseudolife-daemon-rust:0.21.1")
+        assert [a for a in state["calls"] if a[:1] == ["tag"]][-1][-1].startswith("ghcr.io/pseudogiant-xr/pseudolife-daemon-rust:")
+        labels = _labels(state_path)
+        assert labels["org.pseudolife.engine"] == "rust" and labels["org.pseudolife.activation"] != first
+
+        result = run_arm(repo, env, binary if native else None,
+                         ["--engine", "python", "--tag", "0.21.1", "--reinstall", *common, "--rollback-tag", "pre-back"])
+        assert result.returncode == 0, result.stdout + result.stderr
+        state = json.loads(state_path.read_text())
+        assert [a for a in state["calls"] if a[:1] == ["pull"]][-1][-1] == "ghcr.io/pseudogiant-xr/pseudolife-daemon:0.21.1"
+        up = [a for a in state["calls"] if a[:1] == ["compose"] and "up" in a][-1]
+        assert not any(v.endswith("docker-compose.rust-ghcr.yml") for v in up)
+        assert _labels(state_path)["org.pseudolife.engine"] == "python"
+        assert json.loads(_accepted(env).read_text())["services"][SERVICE]["labels"]["org.pseudolife.engine"] == "python"
+
+
+@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+@pytest.mark.parametrize("failure", ["pull", "provision", "backup", "up", "health", "version", "read"])
+def test_release_rust_activation_faults_never_commit_the_selection(tmp_path, native, failure):
+    binary = _native_binary()
+    if native and not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path, failure) as (repo, env, state_path):
+        result = run_arm(repo, env, binary if native else None,
+                         ["--engine", "rust", "--tag", "0.21.1", "--daemon-only", "--json", "--health-retries", "1",
+                          "--health-delay-ms", "0", "--rollback-tag", "pre-fixture"])
+        assert result.returncode == 1, result.stdout + result.stderr
+        state = json.loads(state_path.read_text())
+        expected = {"pull": ["pull"], "provision": ["pull"], "backup": ["pull", "backup"]}
+        assert stages(state) == expected.get(failure, ["pull", "backup", "tag", "up"])
+        assert not _accepted(env).exists()
+        if failure == "pull":
+            assert "--engine python" in result.stdout
+        if failure in expected:
+            assert not any(a[:1] == ["tag"] for a in state["calls"])
+        else:
+            assert json.loads(result.stdout)["rollback"]["state"] == "tagged"
+            assert "rollback" in result.stdout.lower()
+        if failure in ("health", "version", "read"):
+            # The recreated container never passed its gate: a plain retry
+            # must not treat it as an accepted Rust selection.
+            retry = run_arm(repo, env, binary if native else None, ["--tag", "0.21.1", "--daemon-only", "--json"])
+            assert retry.returncode == 2, retry.stdout + retry.stderr
+            assert "rollback" in retry.stdout.lower()
+            assert stages(json.loads(state_path.read_text())) == ["pull", "backup", "tag", "up"]
+
+
+@pytest.mark.parametrize("native_first", [True, False], ids=["native-first", "python-first"])
+def test_release_rust_selection_is_shared_by_both_updaters(tmp_path, native_first):
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path) as (repo, env, state_path):
+        arms = [native_first, not native_first, native_first]
+        rounds = [["--engine", "rust"], [], ["--engine", "python"]]
+        for index, (native, extra) in enumerate(zip(arms, rounds)):
+            result = run_arm(repo, env, binary if native else None,
+                             [*extra, "--tag", "0.21.1", "--reinstall", "--daemon-only", "--json",
+                              "--health-retries", "1", "--rollback-tag", f"pre-round-{index}"])
+            assert result.returncode == 0, result.stdout + result.stderr
+            assert _labels(state_path)["org.pseudolife.engine"] == ("python" if index == 2 else "rust")
 
 
 def test_native_release_rollback_supplies_required_compose_image_tag(tmp_path):

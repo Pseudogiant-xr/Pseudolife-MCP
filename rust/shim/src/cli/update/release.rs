@@ -381,12 +381,9 @@ impl Update {
         let labels = engine::host_labels(self, DAEMON_CONTAINER);
         let selected = labels[engine::ENGINE_LABEL].as_str().unwrap_or("python");
         let choice = self.o.engine.clone().unwrap_or_else(|| selected.to_owned());
-        if choice == "rust" {
-            return Err(UpdateError::usage(
-                "Rust images are not published; use --engine rust --checkout <repo> (checkout mode); nothing was changed",
-            ));
-        }
-        let activating = self.o.engine.is_some();
+        // Engine selection, and every update of a Rust host, records an
+        // accepted activation so the next update can verify it.
+        let activating = self.o.engine.is_some() || choice == "rust";
         if current.as_deref() == Some(&target) && !self.o.reinstall && choice == selected {
             self.step(format!("the daemon already runs {target}; nothing to do (--reinstall to recreate it anyway, --clients-only for the shim and plugin)"));
             return Ok(());
@@ -462,9 +459,15 @@ impl Update {
             .0
             != 0
         {
-            return Err(UpdateError::new(format!(
-                "docker pull {image} failed; nothing was changed. Is {target} a published release?"
-            )));
+            return Err(UpdateError::new(if choice == "rust" {
+                format!(
+                    "docker pull {image} failed; nothing was changed. Is a Rust daemon image published for {target}? Use --engine python to stay on the Python daemon"
+                )
+            } else {
+                format!(
+                    "docker pull {image} failed; nothing was changed. Is {target} a published release?"
+                )
+            }));
         }
         let probe = if choice == "rust" {
             vec![
@@ -499,6 +502,31 @@ impl Update {
             None
         };
         let daemon = context.running["Id"].as_str().unwrap_or(DAEMON_CONTAINER);
+        if choice == "rust" {
+            // A first start would otherwise download the models inside the
+            // health gate. The running daemon keeps serving meanwhile.
+            self.step("provisioning the Rust daemon's pinned models into /data/models (a first activation downloads them)...");
+            let args: Vec<String> = [
+                "run",
+                "--rm",
+                "--volumes-from",
+                daemon,
+                "--entrypoint",
+                "pseudolife-daemon",
+                &image,
+                "provision",
+                "models",
+                "--if-missing",
+            ]
+            .into_iter()
+            .map(str::to_owned)
+            .collect();
+            if self.command(&args, None, 3600, true).0 != 0 {
+                return Err(UpdateError::new(
+                    "could not provision the Rust daemon's models; check this host's network access and disk space, then retry; nothing was deployed",
+                ));
+            }
+        }
         let backups = if self.o.no_backup {
             self.warn("skipping backup (--no-backup)");
             json!({})

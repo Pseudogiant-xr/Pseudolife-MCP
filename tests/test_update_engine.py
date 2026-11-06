@@ -68,10 +68,65 @@ def test_engine_rechecks_space_after_backup(engine_host, monkeypatch, engine):
     assert not any("build" in c or "up" in c or c[1:2] == ["tag"] for c in s["calls"])
 
 
-def test_release_rust_refuses_before_docker(monkeypatch, capsys):
-    monkeypatch.setattr(up, "run_cli", lambda *a, **kw: pytest.fail("refusal must precede Docker"))
+def test_release_rust_is_no_longer_refused_as_unpublished(monkeypatch, capsys):
+    # Without Docker the run stops at the tier check, not at a blanket refusal.
+    monkeypatch.setattr(up, "which", lambda name: None)
+    monkeypatch.setattr(up, "_on_shim_runtime", lambda: False)
     assert up.main(["--engine", "rust"]) == 2
-    assert "--checkout" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "not published" not in err and "Docker host" in err
+
+
+def _release_labels(tmp_path, monkeypatch, extra_files=(), labels=None):
+    ops = tmp_path / "ops"
+    ops.mkdir(exist_ok=True)
+    for name in ("docker-compose.yml", "docker-compose.ghcr.yml", "docker-compose.rust-ghcr.yml", ".env"):
+        (ops / name).write_text("# fixture\n")
+    files = [ops / "docker-compose.yml", ops / "docker-compose.ghcr.yml", *extra_files]
+    labels = {"com.docker.compose.project": "pseudolife-mcp",
+              "com.docker.compose.project.config_files": ",".join(map(str, files)),
+              "com.docker.compose.project.working_dir": str(ops),
+              "com.docker.compose.project.environment_file": str(ops / ".env"), **(labels or {})}
+    monkeypatch.setattr(up, "run_cli", lambda argv, **kw: (0, json.dumps(labels)))
+    return ops
+
+
+@pytest.mark.parametrize("engine", ["python", "rust"])
+def test_release_compose_context_drops_engine_overlays_left_by_earlier_runs(tmp_path, monkeypatch, engine):
+    # Compose labels name every -f file, including the deleted candidate and
+    # rollback overlays of an earlier engine run and the Rust release overlay.
+    stale = [tmp_path / "update-engine/docker-compose.engine-candidate-0123.json",
+             tmp_path / "update-engine/docker-compose.rollback-20261107-000000-ab.json",
+             tmp_path / "ops/docker-compose.rust-ghcr.yml"]
+    ops = _release_labels(tmp_path, monkeypatch, stale)
+    context = up.Update(up.Options(), log=lambda s: None).compose_context(engine=engine)
+    files = [context["args"][i + 1] for i, a in enumerate(context["args"]) if a == "-f"]
+    assert files[:2] == [str(ops / "docker-compose.yml"), str(ops / "docker-compose.ghcr.yml")]
+    assert files[2:] == ([str(ops / "docker-compose.rust-ghcr.yml")] if engine == "rust" else [])
+
+
+def test_release_rust_host_stays_on_the_release_path(tmp_path, monkeypatch):
+    from pseudolife_memory import update_engine as eng
+    monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(tmp_path))
+    labels = {eng.ENGINE_LABEL: "rust", eng.ACTIVATION_LABEL: "accepted", eng.RELEASE_LABEL: "0.23.0"}
+    eng._write_overlay(tmp_path / eng.RELEASE_ACCEPTED, {"image": "fixture", "labels": labels})
+    monkeypatch.setattr(up, "run_cli", lambda argv, **kw: (0, json.dumps(labels)))
+    update = up.Update(up.Options(tag="0.23.0", reinstall=True), log=lambda s: None)
+    assert eng.selected_checkout(update) is None
+    assert eng.release_engine_choice(update) == ("rust", "rust")
+    update.o.engine = "python"
+    assert eng.release_engine_choice(update) == ("rust", "python")
+
+
+def test_release_rollback_commands_supply_the_rust_overlay_tag(tmp_path):
+    from pseudolife_memory import update_engine as eng
+    env = tmp_path / ".env"
+    env.write_text("PSEUDOLIFE_MCP_TOKEN=x\n")
+    lines = eng.rollback_commands(["-p", "pseudolife-mcp", "-f", "base.yml"], [env], tmp_path / "rollback.json",
+                                  tmp_path / "accepted.json", "0.23.0")
+    assert len(lines) == 2 and "PSEUDOLIFE_MCP_TOKEN" in lines[0]
+    assert "PSEUDOLIFE_IMAGE_TAG" in lines[1] and "0.23.0" in lines[1]
+    assert "--no-build --pull never" in lines[1] and "accepted.json" in lines[1]
 
 
 def test_python_accepts_native_release_activation_and_rejects_failed_retry(tmp_path, monkeypatch):

@@ -98,6 +98,13 @@ assets nor push images. Installers and updaters must treat these assets
 as unavailable until an enabled, approved release has actually published
 them; this document defines their contract, not their availability.
 
+Release-mode `pseudolife-mcp update --engine rust` (both the Python and the
+native updater) pulls `pseudolife-daemon-rust:<target>` with
+`docker-compose.rust-ghcr.yml` applied after `docker-compose.ghcr.yml`. When
+the target release has no such image, the pull fails before any backup or
+rollback tag and the host is unchanged. On a Rust host an update without
+`--engine` keeps Rust; `--engine python` switches back on the same bank.
+
 To prove the matrix without publication, dispatch `release.yml` on the
 candidate branch. The native build and bundle jobs upload an Actions
 artifact named `native-release-complete`; all publishing jobs are skipped,

@@ -656,8 +656,6 @@ class Update:
                               "Nothing was changed", 2)
         if self.o.shadow and (not self.o.engine or self.o.checkout is None):
             raise UpdateError("--shadow requires --engine rust --checkout <repo> to start, or --engine python --checkout <repo> to remove; nothing was changed", 2)
-        if self.o.engine == "rust" and self.o.checkout is None:
-            raise UpdateError("Rust images are not published; use --engine rust --checkout <repo> (checkout mode); nothing was changed", 2)
         if (self.o.engine or self.o.shadow) and (self.o.clients_only or self.o.all_clients or self.o.unattended or self.o.schedule):
             raise UpdateError("engine selection updates only the Docker daemon; remove client/schedule options and retry", 2)
         if self.o.checkout is not None:
@@ -1655,9 +1653,16 @@ class Update:
             self.refuse_checkout_shadow(target)
             self.clients(None, f"pseudolife-mcp=={target}", self.daemon_health())
             return
-        if current == target and not self.o.reinstall:
+        from pseudolife_memory import update_engine
+        selected, choice = update_engine.release_engine_choice(self)
+        if current == target and not self.o.reinstall and choice == selected:
             self.step(f"the daemon already runs {target}; nothing to do (--reinstall to recreate it anyway, "
                       f"--clients-only for the shim and plugin)")
+            return
+        if self.o.engine or choice == "rust":
+            # Engine selection, and every update of a Rust host, record an
+            # accepted activation so the next update can verify it.
+            update_engine.deploy_release_engine(self, target, current, previous_digest, before_recreate, choice)
             return
         context = self.compose_context()
         compose = context["args"]
@@ -1824,7 +1829,7 @@ class Update:
                       "ops/update.sh --all, or python ops/update_clients.py) for the shim, the plugin cache and the "
                       "Codex re-approval steps")
 
-    def compose_context(self) -> dict:
+    def compose_context(self, engine: str = "python") -> dict:
         """The compose files and env file the running daemon container was
         created with (its labels), with the GHCR overlay added; when those
         files are gone, this package's bundled copies of the two compose
@@ -1837,7 +1842,10 @@ class Update:
                 labels = json.loads(out.strip().splitlines()[-1]) or {}
             except (ValueError, IndexError):
                 labels = {}
-        config_files = [Path(p) for p in (labels.get("com.docker.compose.project.config_files") or "").split(",") if p]
+        from pseudolife_memory.update_engine import RUST_RELEASE_OVERLAY, transient_overlay
+        # Engine overlays are this updater's own: each run supplies its own.
+        config_files = [Path(p) for p in (labels.get("com.docker.compose.project.config_files") or "").split(",")
+                        if p and not transient_overlay(Path(p))]
         working_dir = labels.get("com.docker.compose.project.working_dir")
         project = labels.get("com.docker.compose.project") or "pseudolife-mcp"
         if self.o.compose_files:
@@ -1904,6 +1912,9 @@ class Update:
         overlay = next((p.with_name("docker-compose.ghcr.yml") for p in existing
                         if p.with_name("docker-compose.ghcr.yml").is_file()), None) or self._bundled("docker-compose.ghcr.yml")
         files = existing + ([overlay] if overlay not in existing else [])
+        if engine == "rust":
+            files.append(next((p for p in (overlay.with_name(RUST_RELEASE_OVERLAY),) if p.is_file()), None)
+                         or self._bundled(RUST_RELEASE_OVERLAY))
         args = ["-p", project]
         if self.o.compose_files and working_dir:
             # Relative mounts, env_file entries and other resources retain
@@ -2122,7 +2133,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="pseudolife-mcp update",
                                      description="update the daemon and the client side (shim, plugin cache, Codex hooks)")
     parser.add_argument("--tag", default=None, help="release version to install (default: the newest on PyPI)")
-    parser.add_argument("--engine", choices=("python", "rust"), help="opt-in Docker daemon engine (Rust requires checkout mode)")
+    parser.add_argument("--engine", choices=("python", "rust"), help="Docker daemon engine: rust or python (unset keeps the engine the host runs)")
     parser.add_argument("--shadow", action="store_true", help="with --engine rust start read-only Rust on loopback 8766; with --engine python remove only the companion (checkout mode)")
     parser.add_argument("--result-file", default=None,
                         help="write the exit code to this file at the end (the shim's unattended client update reads it)")
