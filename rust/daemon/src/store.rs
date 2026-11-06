@@ -162,6 +162,9 @@ const SELF_SIMILARITY_EPSILON: f64 = 1e-5;
 /// epsilon an exact duplicate (exactly 0), else `1 - cos` capped at 1.
 fn surprise_from(max_sim: f32) -> f64 {
     let surprise = 1.0 - f64::from(max_sim);
+    if crate::mutants::active("store-surprise-unsnapped") {
+        return surprise.clamp(0.0, 1.0);
+    }
     if surprise < SELF_SIMILARITY_EPSILON {
         0.0
     } else {

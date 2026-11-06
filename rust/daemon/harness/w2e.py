@@ -334,6 +334,9 @@ GENERIC = re.compile(r"^session - \d{4}-\d{2}-\d{2} \d{2}:\d{2}$")
 # detached from its connection, so only the shutdown drain can observe it.
 MUTANTS = ["store-tags-raw", "store-skip-session-episode", "store-no-hint", "store-surprise-raw",
            "mcp-store-no-session",
+           # An exact duplicate's surprise snapped to 0: caught by
+           # store-exact-duplicates.
+           "store-surprise-unsnapped",
            # /health's subsystem keys: caught by the health-* scenarios.
            "health-no-stall", "health-no-capacity-warning",
            # The counters row: caught by the counters-* scenarios.
@@ -747,6 +750,28 @@ SCENARIOS: dict[str, dict] = {
                      [sess("sess-a")]), "abandon": True},
             store("The next store after a disconnect", [sess("sess-a")]),
         ],
+    },
+    # Exact duplicates at a positive threshold: each text's second store is
+    # filtered_meta in both daemons. Without the snap of a surprise below
+    # SELF_SIMILARITY_EPSILON to 0, an identical vector's float32
+    # self-similarity left 1 - cos a few 1e-7 either side of 0, so the reason
+    # (filtered_meta or below_surprise_threshold) and the note followed each
+    # engine's summation order.
+    "store-exact-duplicates": {
+        "config": "memory:\n  surprise_threshold: 0.05\n",
+        "seed": [],
+        "ops": [op for text in (
+            "The release pipeline publishes to PyPI with trusted publishing.",
+            "The staging server runs Debian 12 on the second rack.",
+            "Backups rotate nightly and keep fourteen days.",
+            "The Console signs in with a one-time link.",
+            "Dream extraction uses the Sonnet shim by default.",
+            "The bench database listens on a loopback port.",
+            "Search fuses dense and keyword candidates.",
+            "Each session episode gets a generic title first.",
+            "The reranker skips when the margin is wide.",
+            "Graph merges go to the review queue.",
+        ) for op in (store(text), store(text))],
     },
     # The gate on: meta filter, surprise threshold, contradiction admission.
     "store-gate": {
