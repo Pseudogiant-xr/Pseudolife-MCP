@@ -622,6 +622,15 @@ def test_fixture_backup_finds_bash_when_powershell_is_in_a_separate_directory(tm
         assert (directory / "pseudolife_state-20260101-000001.tgz").is_file()
 
 
+def _report_text(value):
+    """Every string in a JSON report, decoded, one per line."""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        value = list(value.values())
+    return "\n".join(_report_text(v) for v in value) if isinstance(value, list) else ""
+
+
 def stages(state):
     result = []
     for args in state["calls"]:
@@ -852,7 +861,7 @@ def test_checkout_discovery_never_falls_back_to_another_projects_global_daemon(t
 
 
 @pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
-@pytest.mark.parametrize("failure", ["", "backup", "incomplete", "build", "up", "health", "version", "schema", "read"])
+@pytest.mark.parametrize("failure", ["", "build", "provision", "backup", "incomplete", "up", "health", "version", "schema", "read"])
 def test_engine_activation_faults_preserve_rollback_and_retry_guard(tmp_path, native, failure):
     binary = _native_binary() if native else None
     if native and not binary:
@@ -865,13 +874,36 @@ def test_engine_activation_faults_preserve_rollback_and_retry_guard(tmp_path, na
         report = json.loads(result.stdout)
         state = json.loads(state_path.read_text())
         observed = stages(state)
-        expected = ["backup"] if failure in ("backup", "incomplete") else ["backup", "tag", "build"] if failure == "build" else ["backup", "tag", "build", "up"]
+        # The build and the model provisioning precede every change.
+        expected = (["build"] if failure in ("build", "provision") else ["build", "backup"]
+                    if failure in ("backup", "incomplete") else ["build", "backup", "tag", "up"])
         assert observed == expected
+        provisions = [i for i, a in enumerate(state["calls"]) if a[:1] == ["run"] and "provision" in a]
+        if failure == "build":
+            assert provisions == []
+        else:
+            build = next(i for i, a in enumerate(state["calls"]) if a[:1] == ["compose"] and "build" in a)
+            assert len(provisions) == 1 and build < provisions[0]
+            run = state["calls"][provisions[0]]
+            assert run[-4:] == ["pseudolife-daemon-rust:checkout", "provision", "models", "--if-missing"]
+            assert "--volumes-from" not in run
+            later = [i for i, a in enumerate(state["calls"]) if a[:1] in (["fixture-backup"], ["tag"])
+                     or a[:1] == ["exec"] and any("pg_dump" in s for s in a)]
+            assert all(provisions[0] < i for i in later)
         selection = repo / "data/update-engine/docker-compose.engine.json"
         assert selection.exists() is (not failure)
-        if failure not in ("backup", "incomplete"):
+        if failure in ("build", "provision", "backup", "incomplete"):
+            assert "nothing was deployed" in result.stdout
+            assert "to roll back:" not in result.stdout
+        else:
             assert Path(report["rollback"]["overlay"]).is_file()
             assert report["rollback"]["state"] == "tagged"
+        if failure in ("health", "version", "schema", "read"):
+            reason = {"health": '/health reported status "error" instead of "ok"',
+                      "version": 'version "wrong" instead of "0.21.1"', "schema": "schema 59 instead of 58",
+                      "read": "the authenticated bank read was refused"}[failure]
+            text = _report_text(report)
+            assert reason in text and "last of 1 checks" in text, text
         if failure in ("health", "version", "schema", "read"):
             retry = run_arm(repo, env, binary, args)
             assert retry.returncode == 2, retry.stdout + retry.stderr
@@ -914,7 +946,7 @@ def test_checkout_d2_guard_is_reached_before_backup_and_accepts_imported_row(tmp
         assert sql and "schema_version" in sql[0]
         if failure == "imported_weights":
             assert any("cms_counters" in query for query in sql)
-            assert stages(state) == ["backup", "tag", "build", "up"]
+            assert stages(state) == ["build", "backup", "tag", "up"]
             assert not any("test ! -e /data/memory_state/weights.pt" in " ".join(a) for a in state["calls"])
         else:
             assert stages(state) == []
@@ -1424,7 +1456,8 @@ def test_discovered_checkout_backup_policy_uses_effective_engine(tmp_path, engin
         if engine == "rust":
             assert result.returncode != 0, result.stdout + result.stderr
             assert "state" in result.stdout
-            assert stages(json.loads(state_path.read_text())) == ["backup"]
+            # The Rust engine builds and provisions before its backup.
+            assert stages(json.loads(state_path.read_text())) == ["build", "backup"]
         else:
             assert result.returncode == 0, result.stdout + result.stderr
             assert "continuing with the complete SQL dump" in result.stdout

@@ -65,7 +65,8 @@ def test_engine_rechecks_space_after_backup(engine_host, monkeypatch, engine):
     with pytest.raises(up.UpdateError, match="8 GiB"):
         eng.deploy_engine(update, s["repo"])
     assert state["backed_up"]
-    assert not any("build" in c or "up" in c or c[1:2] == ["tag"] for c in s["calls"])
+    # The build and model provisioning precede the backup; nothing after it ran.
+    assert not any("up" in c or c[1:2] == ["tag"] for c in s["calls"])
 
 
 def test_release_rust_is_no_longer_refused_as_unpublished(monkeypatch, capsys):
@@ -312,6 +313,18 @@ def test_overlay_preserves_persistent_data_and_separates_shadow():
     daemon = active["services"][up.DAEMON_SERVICE]
     assert daemon["build"]["dockerfile"] == "ops/Dockerfile.daemon-rust"
     assert "tmpfs" not in daemon
+    # The models are a re-downloadable cache kept out of the backed-up /data,
+    # on the same volume as the release overlay's.
+    class ComposeLoader(yaml.SafeLoader):
+        pass
+    ComposeLoader.add_constructor("!reset", lambda loader, node: None)
+    release = yaml.load((root / "ops/docker-compose.rust-ghcr.yml").read_text(encoding="utf-8"), Loader=ComposeLoader)
+    assert daemon["environment"]["PSEUDOLIFE_DAEMON_MODELS_DIR"] == "/models"
+    assert daemon["volumes"] == ["pseudolife_rust_models:/models"]
+    assert daemon["environment"]["PSEUDOLIFE_DAEMON_MODELS_DIR"] == \
+        release["services"][up.DAEMON_SERVICE]["environment"]["PSEUDOLIFE_DAEMON_MODELS_DIR"]
+    assert daemon["volumes"] == release["services"][up.DAEMON_SERVICE]["volumes"]
+    assert active["volumes"] == {"pseudolife_rust_models": {}} == release["volumes"]
     shadow = yaml.safe_load((root / "ops/docker-compose.rust-shadow.yml").read_text(encoding="utf-8"))
     assert up.DAEMON_SERVICE not in shadow["services"]
     service = shadow["services"]["pseudolife-rust-shadow"]
@@ -408,7 +421,15 @@ def engine_host(tmp_path, monkeypatch):
             return 0, "Filesystem 1024-blocks Used Available Capacity Mounted on\noverlay 99999999 1 99999998 1% /\n"
         if argv[:2] == ["docker", "compose"]:
             if "config" in argv:
-                return 0, json.dumps(config)
+                if not any(a.endswith("docker-compose.rust-daemon.yml") for a in argv):
+                    return 0, json.dumps(config)
+                # The Rust overlay's model cache, as Compose renders it.
+                rendered = json.loads(json.dumps(config))
+                daemon = rendered["services"][up.DAEMON_SERVICE]
+                daemon["environment"]["PSEUDOLIFE_DAEMON_MODELS_DIR"] = "/models"
+                daemon["volumes"].append({"type": "volume", "source": "pseudolife_rust_models", "target": "/models"})
+                rendered["volumes"]["pseudolife_rust_models"] = {"name": "fixture_pseudolife_rust_models"}
+                return 0, json.dumps(rendered)
             if "ps" in argv:
                 return 0, "fixture-daemon" if argv[-1] == up.DAEMON_SERVICE else "fixture-pg"
             if "up" in argv and argv[-1] == up.DAEMON_SERVICE:
@@ -421,6 +442,13 @@ def engine_host(tmp_path, monkeypatch):
             if "-f" in argv:
                 return 0, json.dumps(state["running"]["Config"]["Labels"])
             return 0, json.dumps([state["running"]])
+        if argv[1:3] == ["volume", "inspect"]:
+            return (0, "[{}]") if argv[-1] in state.setdefault("volumes", []) else (1, "no such volume")
+        if argv[1:3] == ["volume", "create"]:
+            state["volumes"].append(argv[-1])
+            return 0, argv[-1]
+        if argv[1:2] == ["run"] and "provision" in argv:
+            return (1, "fixture download failed") if state["fail"] == "provision" else (0, "")
         if "psql" in argv and "-Atc" in argv:
             if "FROM cms_counters" in argv[-1]:
                 return 0, "t" if state.get("counters_row") else "f"
@@ -459,7 +487,7 @@ def engine_host(tmp_path, monkeypatch):
     return state
 
 
-def test_activation_orders_backup_tag_build_recreate_gate_then_persists(engine_host):
+def test_activation_orders_build_provision_backup_tag_recreate_gate_then_persists(engine_host):
     from pseudolife_memory import update_engine as eng
     s = engine_host
     update = s["update"]()
@@ -468,8 +496,20 @@ def test_activation_orders_backup_tag_build_recreate_gate_then_persists(engine_h
     backup = next(i for i, a in enumerate(calls) if any("backup." in x for x in a))
     tag = next(i for i, a in enumerate(calls) if a[1:2] == ["tag"])
     build = next(i for i, a in enumerate(calls) if "build" in a)
+    provision = next(i for i, a in enumerate(calls) if a[1:2] == ["run"] and "provision" in a)
     recreate = next(i for i, a in enumerate(calls) if "up" in a)
-    assert backup < tag < build < recreate
+    # The pinned models are installed before anything changes, so a first
+    # activation never downloads them inside the health gate.
+    assert build < provision < backup < tag < recreate
+    run = calls[provision]
+    assert run[-4:] == ["pseudolife-daemon-rust:checkout", "provision", "models", "--if-missing"]
+    assert run[run.index("--entrypoint") + 1] == "pseudolife-daemon"
+    # The directory and volume the replacement runs with, from the Rust overlay.
+    assert "PSEUDOLIFE_DAEMON_MODELS_DIR=/models" in run
+    assert run[run.index("--mount") + 1] == "type=volume,src=fixture_pseudolife_rust_models,dst=/models"
+    assert "--volumes-from" not in run
+    create = next(i for i, a in enumerate(calls) if a[1:3] == ["volume", "create"])
+    assert create < provision and calls[create][-1] == "fixture_pseudolife_rust_models"
     assert calls[tag][2] == "sha256:validated-python"
     assert calls[recreate][-5:] == ["up", "-d", "--no-deps", "--no-build", up.DAEMON_SERVICE]
     assert calls[recreate][-1] == up.DAEMON_SERVICE
@@ -484,7 +524,7 @@ def test_activation_orders_backup_tag_build_recreate_gate_then_persists(engine_h
     assert any("--no-build" in line for line in update.rollback_lines)
 
 
-@pytest.mark.parametrize("failure", ["backup", "build", "up", "read", "version", "schema"])
+@pytest.mark.parametrize("failure", ["backup", "build", "provision", "up", "read", "version", "schema"])
 def test_failure_never_commits_engine_selection(engine_host, failure, monkeypatch):
     from pseudolife_memory import update_engine as eng
     s = engine_host
@@ -506,13 +546,93 @@ def test_failure_never_commits_engine_selection(engine_host, failure, monkeypatc
             eng.selected_checkout(retry)
     else:
         assert eng.selected_checkout(retry) is None
-    if failure == "backup":
+    if failure in ("backup", "build", "provision"):
         assert str(caught.value).count("to roll back:") == 0
+        assert "nothing was deployed" in str(caught.value)
         assert not any(a[1:2] == ["tag"] for a in s["calls"])
     else:
         assert str(caught.value).count("to roll back:") == 1
         assert update.report.rollback["state"] == "tagged"
         assert Path(update.report.rollback["overlay"]).is_file()
+
+
+def test_provisioning_failure_changes_nothing(engine_host):
+    from pseudolife_memory import update_engine as eng
+    s = engine_host
+    s["fail"] = "provision"
+    before = json.dumps(s["running"], sort_keys=True)
+    with pytest.raises(up.UpdateError) as caught:
+        eng.deploy_engine(s["update"](), s["repo"])
+    message = str(caught.value)
+    assert "could not provision the Rust daemon's models (fixture download failed)" in message
+    assert "network access and disk space" in message and "nothing was deployed" in message
+    assert "to roll back:" not in message
+    assert not any(any("backup." in x for x in a) or a[1:2] == ["tag"] or "up" in a for a in s["calls"])
+    assert json.dumps(s["running"], sort_keys=True) == before
+    assert not (s["repo"] / eng.SELECTION).exists()
+    assert not list((s["repo"] / "data/update-engine").glob("*.json"))
+
+
+def test_python_activation_never_provisions_rust_models(engine_host):
+    from pseudolife_memory import update_engine as eng
+    s = engine_host
+    eng.deploy_engine(s["update"]("python"), s["repo"])
+    assert not any(a[1:2] == ["run"] and "provision" in a for a in s["calls"])
+    assert not any(a[1:3] == ["volume", "create"] for a in s["calls"])
+    build = next(a for a in s["calls"] if "build" in a)
+    assert not any(x.endswith("docker-compose.rust-daemon.yml") for x in build)
+
+
+@pytest.mark.parametrize("change,expected", [
+    ({"health": None}, "/health did not answer"),
+    ({"status": "starting"}, '/health reported status "starting" instead of "ok"'),
+    ({"version": "0.20.0"}, 'version "0.20.0" instead of "0.21.0"'),
+    ({"schema": 57}, "schema 57 instead of 58"),
+    ({"counters_import_required": True}, "counters_import_required: the daemon has not imported its counters"),
+    ({"read": False}, "the authenticated bank read was refused"),
+])
+def test_checkout_gate_names_the_check_that_failed(engine_host, monkeypatch, change, expected):
+    from pseudolife_memory import update_engine as eng
+    s = engine_host
+    if "health" in change:
+        health = iter([dict(s["health"])])
+        monkeypatch.setattr(up, "fetch_json", lambda *a, **kw: next(health, None))
+    elif "read" in change:
+        # The running daemon passes; only the replacement's read is refused.
+        reads = iter([True, False])
+        monkeypatch.setattr(eng, "authenticated_read", lambda *a: next(reads))
+    else:
+        s["health"].update(change)
+        monkeypatch.setattr(up.Update, "daemon_health", lambda self, timeout=3.0: {"status": "ok", "version": "0.21.0", "schema": 58})
+    with pytest.raises(up.UpdateError) as caught:
+        eng.deploy_engine(s["update"](), s["repo"])
+    first = str(caught.value).splitlines()[0]
+    assert first == f"the engine failed its version, schema or authenticated-read gate: {expected} (last of 1 checks)"
+
+
+@pytest.mark.parametrize("health,read,expected", [
+    (None, True, "/health did not answer"),
+    ({"status": "error", "version": "0.22.0", "schema": 58}, True, '/health reported status "error" instead of "ok"'),
+    ({"status": "ok", "version": "0.21.0", "schema": 58}, True, 'version "0.21.0" instead of "0.22.0"'),
+    ({"status": "ok", "version": "0.22.0", "schema": None}, True, "schema null instead of 58"),
+    ({"status": "ok", "version": "0.22.0", "schema": 58, "counters_import_required": True}, True, "counters_import_required"),
+    ({"status": "ok", "version": "0.22.0", "schema": 58}, False, "the authenticated bank read was refused"),
+])
+def test_release_gate_names_the_check_that_failed(monkeypatch, health, read, expected):
+    from types import SimpleNamespace
+    from pseudolife_memory import update_engine as eng
+    gate = object.__new__(eng.ReleaseEngineUpdate)
+    gate.target = "0.22.0"
+    gate.o = SimpleNamespace(health_retries=2, health_delay_ms=0, daemon_url="http://127.0.0.1:1")
+    gate.u = SimpleNamespace(step=lambda *_: None, daemon_health=lambda: health, schema_before=58,
+                             _health_endpoint_hint=lambda: "hint", rollback_lines=[])
+    monkeypatch.setattr(eng, "authenticated_read", lambda *a: read)
+    monkeypatch.setattr(up, "sleep", lambda s: None)
+    with pytest.raises(up.UpdateError) as caught:
+        gate.gate("fixture-bearer", 58)
+    assert f"configured endpoint ({expected}" in str(caught.value)
+    assert "last of 2 checks); the client side was not moved" in str(caught.value)
+    assert "fixture-bearer" not in str(caught.value)
 
 
 @pytest.mark.parametrize("schema,pending", [("56", False), ("58", True), ("bad", False)])
@@ -528,10 +648,16 @@ def test_d2_stops_before_backup_or_image_movement(engine_host, schema, pending):
 def test_switch_back_to_python_uses_running_rust_for_rollback(engine_host):
     from pseudolife_memory import update_engine as eng
     s = engine_host
-    eng.deploy_engine(s["update"](), s["repo"])
+    first = s["update"]()
+    eng.deploy_engine(first, s["repo"])
+    # A rollback to Python needs no Rust overlay; one to Rust needs its model volume.
+    assert not any("docker-compose.rust-daemon.yml" in line for line in first.rollback_lines)
     s["running"]["Image"] = "sha256:validated-rust"
     update = s["update"]("python")
     eng.deploy_engine(update, s["repo"])
+    restore = next(line for line in update.rollback_lines if "docker compose" in line)
+    overlay = str(s["repo"] / "ops" / "docker-compose.rust-daemon.yml")
+    assert overlay in restore and restore.index(overlay) < restore.index(update.report.rollback["overlay"])
     assert eng._selection(s["repo"]) is None
     assert any(a[1:3] == ["tag", "sha256:validated-rust"] for a in s["calls"])
     assert eng.selected_checkout(s["update"](None)) is None
@@ -995,7 +1121,7 @@ def test_state_archive_failure_stops_before_tag_even_when_backup_script_exits_ze
     s["state_failed"] = True
     with pytest.raises(up.UpdateError, match="state backup"):
         eng.deploy_engine(s["update"](), s["repo"])
-    assert not any(a[1:2] == ["tag"] or "build" in a or "up" in a for a in s["calls"])
+    assert not any(a[1:2] == ["tag"] or "up" in a for a in s["calls"])
 
 
 def test_colon_bearer_and_running_version_are_preserved(engine_host, monkeypatch):
@@ -1603,7 +1729,10 @@ def test_stopped_checkout_handover_backs_up_exact_image_and_retains_selection(en
     backup = next(i for i, call in enumerate(calls) if call == ["complete-stopped-backup"])
     tag = next(i for i, call in enumerate(calls) if call[1:2] == ["tag"])
     build = next(i for i, call in enumerate(calls) if "build" in call)
-    assert backup < tag < build
+    recreate = next(i for i, call in enumerate(calls) if "up" in call)
+    assert build < backup < tag < recreate
+    provisions = [i for i, call in enumerate(calls) if call[1:2] == ["run"] and "provision" in call]
+    assert (len(provisions) == 1 and build < provisions[0] < backup) if engine == "rust" else not provisions
     assert calls[tag][2] == "sha256:validated-python"
     assert checked == [True]  # Only the mandatory post-recreate authenticated gate.
     assert override.read_text() == "# retained custom host configuration\n"
@@ -1691,7 +1820,9 @@ def test_stopped_checkout_handover_failure_precedes_tag_build(engine_host, monke
     update._selected_engine = "python"
     with pytest.raises(up.UpdateError):
         eng.deploy_engine(update, s["repo"])
-    assert not any(call[1:2] == ["tag"] or "build" in call or "up" in call for call in s["calls"])
+    # A probe failure stops in preflight; a backup failure follows only the build.
+    assert not any(call[1:2] == ["tag"] or "up" in call or ("build" in call and failure == "probe")
+                   for call in s["calls"])
     assert any(call[1:2] == ["rm"] for call in s["calls"])
 
 

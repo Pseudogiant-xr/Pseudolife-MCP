@@ -1080,3 +1080,85 @@ fn maintainer_check_and_interactive_setup_keep_the_selected_target() {
         );
     }
 }
+
+#[test]
+fn native_update_gate_names_the_check_that_failed() {
+    let ok = json!({"status":"ok","version":"0.21.0","schema":58});
+    let gate = |health: Option<&Value>, read: bool| {
+        release::gate_failure(health, Some("0.21.0"), Some(58), true, false, || read)
+    };
+    assert_eq!(gate(None, true).unwrap(), "/health did not answer");
+    assert_eq!(
+        gate(Some(&json!({"status":"starting"})), true).unwrap(),
+        "/health reported status \"starting\" instead of \"ok\""
+    );
+    let mut other = ok.clone();
+    other["version"] = json!("0.20.0");
+    assert_eq!(
+        gate(Some(&other), true).unwrap(),
+        "version \"0.20.0\" instead of \"0.21.0\""
+    );
+    let mut other = ok.clone();
+    other["schema"] = json!(57);
+    assert_eq!(gate(Some(&other), true).unwrap(), "schema 57 instead of 58");
+    other["schema"] = Value::Null;
+    assert_eq!(
+        gate(Some(&other), true).unwrap(),
+        "schema null instead of 58"
+    );
+    let mut other = ok.clone();
+    other["counters_import_required"] = json!(true);
+    assert_eq!(
+        gate(Some(&other), true).unwrap(),
+        "counters_import_required: the daemon has not imported its counters"
+    );
+    assert_eq!(
+        gate(Some(&ok), false).unwrap(),
+        "the authenticated bank read was refused"
+    );
+    assert!(gate(Some(&ok), true).is_none());
+    // The bank read is attempted only after every other check passed.
+    let mut read = false;
+    let _ = release::gate_failure(Some(&other), Some("0.21.0"), Some(58), true, false, || {
+        read = true;
+        true
+    });
+    assert!(!read);
+    // A plain update skips the counters check; a shadow also checks readiness.
+    assert!(
+        release::gate_failure(Some(&other), Some("0.21.0"), None, false, false, || true).is_none()
+    );
+    assert_eq!(
+        release::gate_failure(Some(&ok), None, None, true, true, || true).unwrap(),
+        "the shadow is not ready read-only (read_only=null, ready=null, db=null)"
+    );
+}
+
+#[test]
+fn native_update_checkout_rollback_to_rust_keeps_its_model_overlay() {
+    let base = vec!["-f".to_owned(), "ops/docker-compose.yml".to_owned()];
+    let overlay = Path::new("ops/docker-compose.rust-daemon.yml");
+    assert_eq!(
+        engine::checkout_rollback_base(&base, overlay, "python"),
+        base
+    );
+    let rust = engine::checkout_rollback_base(&base, overlay, "rust");
+    assert_eq!(rust[..2], base[..]);
+    assert_eq!(rust[2..], ["-f", "ops/docker-compose.rust-daemon.yml"]);
+    let lines = engine::rollback_commands(
+        &rust,
+        &[],
+        Path::new("rollback.json"),
+        Path::new("accepted.json"),
+        None,
+        None,
+    );
+    let restore = lines
+        .iter()
+        .find(|line| line.contains("docker compose"))
+        .unwrap();
+    assert!(
+        restore.find("docker-compose.rust-daemon.yml").unwrap()
+            < restore.find("rollback.json").unwrap()
+    );
+}
