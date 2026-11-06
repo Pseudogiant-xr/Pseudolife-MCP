@@ -936,7 +936,9 @@ def test_release_rust_activation_keeps_and_switches_back_on_the_same_bank(tmp_pa
         provision = next(i for i, a in enumerate(state["calls"]) if a[:1] == ["run"] and "provision" in a)
         backup = next(i for i, a in enumerate(state["calls"]) if a[:1] == ["fixture-backup"])
         assert provision < backup
-        assert "--volumes-from" in state["calls"][provision] and "--if-missing" in state["calls"][provision]
+        assert "fixture-state:/data" in state["calls"][provision] and "--if-missing" in state["calls"][provision]
+        assert "PSEUDOLIFE_DAEMON_MODELS_DIR=/data/models" in state["calls"][provision]
+        assert "--volumes-from" not in state["calls"][provision]
         up = next(a for a in state["calls"] if a[:1] == ["compose"] and "up" in a)
         assert any(v.endswith("docker-compose.rust-ghcr.yml") for v in up)
         assert "--no-build" in up and "--no-deps" in up
@@ -1000,6 +1002,56 @@ def test_release_rust_activation_faults_never_commit_the_selection(tmp_path, nat
             assert retry.returncode == 2, retry.stdout + retry.stderr
             assert "rollback" in retry.stdout.lower()
             assert stages(json.loads(state_path.read_text())) == ["pull", "backup", "tag", "up"]
+
+
+@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+def test_release_rust_models_go_to_their_own_volume_outside_the_backed_up_state(tmp_path, native):
+    binary = _native_binary()
+    if native and not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path) as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        daemon = state["config"]["services"][SERVICE]
+        daemon["environment"]["PSEUDOLIFE_DAEMON_MODELS_DIR"] = "/models"
+        daemon["volumes"].append({"type": "volume", "source": "pseudolife_rust_models", "target": "/models"})
+        state["config"]["volumes"]["pseudolife_rust_models"] = {"name": "fixture-project_pseudolife_rust_models"}
+        state_path.write_text(json.dumps(state))
+        # No --daemon-only: an engine change still moves no client.
+        result = run_arm(repo, env, binary if native else None,
+                         ["--engine", "rust", "--tag", "0.21.1", "--json", "--health-retries", "1",
+                          "--rollback-tag", "pre-models"])
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert json.loads(result.stdout)["clients"] is None
+        calls = json.loads(state_path.read_text())["calls"]
+        create = next(a for a in calls if a[:2] == ["volume", "create"])
+        assert create[-1] == "fixture-project_pseudolife_rust_models"
+        assert "com.docker.compose.project=fixture-project" in create
+        assert "com.docker.compose.volume=pseudolife_rust_models" in create
+        provision = next(a for a in calls if a[:1] == ["run"] and "provision" in a)
+        assert "fixture-project_pseudolife_rust_models:/models" in provision
+        assert "PSEUDOLIFE_DAEMON_MODELS_DIR=/models" in provision
+        assert not any(v.endswith(":/data") for v in provision)
+
+
+@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+def test_rust_host_keeps_its_daemon_when_a_release_has_no_rust_image(tmp_path, native):
+    binary = _native_binary()
+    if native and not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path) as (repo, env, state_path):
+        common = ["--tag", "0.21.1", "--daemon-only", "--json", "--health-retries", "1"]
+        first = run_arm(repo, env, binary if native else None, ["--engine", "rust", *common, "--rollback-tag", "pre-a"])
+        assert first.returncode == 0, first.stdout + first.stderr
+        state = json.loads(state_path.read_text())
+        state["failure"] = "pull"
+        before = len(state["calls"])
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary if native else None, [*common, "--reinstall", "--rollback-tag", "pre-b"])
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert "keeps its current Rust daemon" in result.stdout
+        state = json.loads(state_path.read_text())
+        assert stages({"calls": state["calls"][before:]}) == ["pull"]
+        assert _labels(state_path)["org.pseudolife.engine"] == "rust"
 
 
 @pytest.mark.parametrize("native_first", [True, False], ids=["native-first", "python-first"])

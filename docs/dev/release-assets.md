@@ -103,7 +103,12 @@ native updater) pulls `pseudolife-daemon-rust:<target>` with
 `docker-compose.rust-ghcr.yml` applied after `docker-compose.ghcr.yml`. When
 the target release has no such image, the pull fails before any backup or
 rollback tag and the host is unchanged. On a Rust host an update without
-`--engine` keeps Rust; `--engine python` switches back on the same bank.
+`--engine` keeps Rust, so a release published without its Rust image stops
+that host's updates at the pull (nothing changed) until the image exists;
+`--engine python` switches back on the same bank. The overlay keeps the
+pinned models in the project volume `pseudolife_rust_models` at `/models`,
+outside the `/data` volume that every backup archives; the updater
+provisions them there before its backup.
 
 To prove the matrix without publication, dispatch `release.yml` on the
 candidate branch. The native build and bundle jobs upload an Actions

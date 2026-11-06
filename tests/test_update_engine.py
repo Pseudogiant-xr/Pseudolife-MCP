@@ -118,6 +118,65 @@ def test_release_rust_host_stays_on_the_release_path(tmp_path, monkeypatch):
     assert eng.release_engine_choice(update) == ("rust", "python")
 
 
+def _release_config(env=None, volumes=None):
+    return {"name": "fixture", "services": {up.DAEMON_SERVICE: {
+        "environment": {"PSEUDOLIFE_MCP_TOKEN": "new-bearer", **(env or {})},
+        "volumes": volumes if volumes is not None else [{"type": "volume", "source": "state", "target": "/data"}],
+        "ports": [{"target": 8765, "published": "18765", "host_ip": "127.0.0.1"}]}},
+        "volumes": {"state": {"name": "fixture-state"}, "models": {"name": "fixture_models"}}}
+
+
+def test_release_engine_reads_the_running_bank_with_the_running_bearer():
+    from pseudolife_memory import update_engine as eng
+    update = up.Update(up.Options(daemon_url="http://127.0.0.1:18765"), log=lambda s: None)
+    release = eng.ReleaseEngineUpdate(update, "0.23.0", "0.22.1", None, "rust")
+    running = {"Mounts": [{"Destination": "/data", "Name": "fixture-state"}],
+               "Config": {"Env": ["PSEUDOLIFE_MCP_TOKEN=old-bearer"]}}
+    assert release.verify_project(_release_config(), running) == ("new-bearer", "old-bearer")
+
+
+def test_release_engine_models_volume_and_overrides():
+    from pseudolife_memory import update_engine as eng
+    data = {"type": "volume", "source": "state", "target": "/data"}
+    models = {"type": "volume", "source": "models", "target": "/models"}
+    assert eng.model_volumes(_release_config({"PSEUDOLIFE_DAEMON_MODELS_DIR": "/models"}, [data, models])) == \
+        ("/models", [("fixture_models", "models")])
+    assert eng.model_volumes(_release_config(volumes=[data])) == ("/data/models", [("fixture-state", "state")])
+    assert eng.model_volumes(_release_config({"PSEUDOLIFE_DAEMON_ONNX_DIR": "/opt/onnx"})) is None
+    with pytest.raises(up.UpdateError, match="no persistent volume"):
+        eng.model_volumes(_release_config({"PSEUDOLIFE_DAEMON_MODELS_DIR": "/models"}, [data]))
+
+
+@pytest.mark.parametrize("script", [True, False])
+def test_release_engine_refuses_a_backup_without_its_state_archive(tmp_path, monkeypatch, script):
+    from pseudolife_memory import update_engine as eng
+    update = up.Update(up.Options(), log=lambda s: None)
+    checkout = tmp_path / "checkout"
+    directory = checkout / "data/backups"
+    if script:
+        monkeypatch.setattr(update, "_checkout_script", lambda *a: Path("backup.sh"))
+
+        def backup(_checkout):
+            directory.mkdir(parents=True, exist_ok=True)
+            (directory / "pseudolife_memory-20260101-000001.sql.gz").write_bytes(
+                gzip.compress(b"-- PostgreSQL database dump complete\n"))
+        monkeypatch.setattr(update, "backup", backup)
+    else:
+        monkeypatch.setattr(update, "_checkout_script", lambda *a: None)
+        monkeypatch.setattr(update, "builtin_backup", lambda: {"dump": "x.sql.gz", "state": None})
+    with pytest.raises(up.UpdateError, match="state"):
+        eng.ReleaseEngineUpdate(update, "0.23.0", "0.22.1", None, "rust").backup(checkout)
+
+
+def test_engine_selection_never_moves_the_clients(monkeypatch):
+    monkeypatch.setattr(up.Update, "detect_tier", lambda self: "pip")
+    monkeypatch.setattr(up, "_on_shim_runtime", lambda: False)
+    update = up.Update(up.Options(engine="rust"), log=lambda s: None)
+    with pytest.raises(up.UpdateError, match="Docker host"):
+        update._run()
+    assert update.o.daemon_only
+
+
 def test_release_rollback_commands_supply_the_rust_overlay_tag(tmp_path):
     from pseudolife_memory import update_engine as eng
     env = tmp_path / ".env"

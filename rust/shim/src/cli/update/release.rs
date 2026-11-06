@@ -407,15 +407,20 @@ impl Update {
         }
         self.set_rollback_scope(&config, &context.running)?;
         self.maintainer_context = Some((context.args.clone(), env.clone()));
-        let token = if activating {
+        let (token, running_token) = if activating {
             engine::verify_identity(self, &config, &context.running, &self.o.daemon_url)?;
-            engine::daemon_token(&config)?
+            (
+                engine::daemon_token(&config)?,
+                engine::daemon_token(&running_config(&context.running))?,
+            )
         } else {
-            String::new()
+            (String::new(), String::new())
         };
+        // The running daemon still holds its own bearer (--allow-auth-change
+        // replaces it); the configured one is checked after recreation.
         if activating
             && (before.as_ref().is_none_or(|v| v["status"] != "ok")
-                || !seams::authenticated_read(&self.o.daemon_url, &token))
+                || !seams::authenticated_read(&self.o.daemon_url, &running_token))
         {
             return Err(UpdateError::usage(
                 "the running daemon did not pass an authenticated bank read; use the previous update's rollback commands before retrying; no rollback tag was moved",
@@ -459,15 +464,21 @@ impl Update {
             .0
             != 0
         {
-            return Err(UpdateError::new(if choice == "rust" {
-                format!(
-                    "docker pull {image} failed; nothing was changed. Is a Rust daemon image published for {target}? Use --engine python to stay on the Python daemon"
-                )
-            } else {
-                format!(
-                    "docker pull {image} failed; nothing was changed. Is {target} a published release?"
-                )
-            }));
+            return Err(UpdateError::new(
+                if choice == "rust" && self.o.engine.is_none() {
+                    format!(
+                        "docker pull {image} failed; nothing was changed: this host keeps its current Rust daemon. Retry once {target} publishes its Rust daemon image, or move to it on Python with --engine python"
+                    )
+                } else if choice == "rust" {
+                    format!(
+                        "docker pull {image} failed; nothing was changed. Is a Rust daemon image published for {target}? Use --engine python to stay on the Python daemon"
+                    )
+                } else {
+                    format!(
+                        "docker pull {image} failed; nothing was changed. Is {target} a published release?"
+                    )
+                },
+            ));
         }
         let probe = if choice == "rust" {
             vec![
@@ -505,27 +516,7 @@ impl Update {
         if choice == "rust" {
             // A first start would otherwise download the models inside the
             // health gate. The running daemon keeps serving meanwhile.
-            self.step("provisioning the Rust daemon's pinned models into /data/models (a first activation downloads them)...");
-            let args: Vec<String> = [
-                "run",
-                "--rm",
-                "--volumes-from",
-                daemon,
-                "--entrypoint",
-                "pseudolife-daemon",
-                &image,
-                "provision",
-                "models",
-                "--if-missing",
-            ]
-            .into_iter()
-            .map(str::to_owned)
-            .collect();
-            if self.command(&args, None, 3600, true).0 != 0 {
-                return Err(UpdateError::new(
-                    "could not provision the Rust daemon's models; check this host's network access and disk space, then retry; nothing was deployed",
-                ));
-            }
+            self.provision_models(&image, &config)?;
         }
         let backups = if self.o.no_backup {
             self.warn("skipping backup (--no-backup)");
@@ -939,6 +930,140 @@ impl Update {
     }
 }
 
+/// The running daemon's environment shaped as a Compose config, so its own
+/// bearer is read the same way as the configured one.
+fn running_config(running: &Value) -> Value {
+    let mut env = serde_json::Map::new();
+    for item in running["Config"]["Env"].as_array().into_iter().flatten() {
+        if let Some((key, value)) = item.as_str().and_then(|s| s.split_once('=')) {
+            env.insert(key.to_owned(), json!(value));
+        }
+    }
+    json!({"services": {DAEMON_SERVICE: {"environment": env}}})
+}
+
+/// `(source, target, Compose volume key)` mounts covering the models
+/// directory, or None when the daemon names its own ONNX model directory.
+fn model_volumes(
+    config: &Value,
+) -> Result<Option<(String, Vec<(String, String, Option<String>)>)>> {
+    let service = &config["services"][DAEMON_SERVICE];
+    let env = &service["environment"];
+    if env["PSEUDOLIFE_DAEMON_ONNX_DIR"]
+        .as_str()
+        .is_some_and(|s| !s.is_empty())
+    {
+        return Ok(None);
+    }
+    let models = env["PSEUDOLIFE_DAEMON_MODELS_DIR"]
+        .as_str()
+        .filter(|s| !s.is_empty())
+        .unwrap_or("/data/models")
+        .trim_end_matches('/')
+        .to_owned();
+    let mut mounts = Vec::new();
+    for volume in service["volumes"].as_array().into_iter().flatten() {
+        let target = volume["target"]
+            .as_str()
+            .unwrap_or("")
+            .trim_end_matches('/');
+        if target.is_empty() || !(models == target || models.starts_with(&format!("{target}/"))) {
+            continue;
+        }
+        let Some(source) = volume["source"].as_str().filter(|s| !s.is_empty()) else {
+            continue;
+        };
+        match volume["type"].as_str() {
+            Some("volume") => {
+                let name = config["volumes"][source]["name"].as_str().unwrap_or(source);
+                mounts.push((name.to_owned(), target.to_owned(), Some(source.to_owned())));
+            }
+            Some("bind") => mounts.push((source.to_owned(), target.to_owned(), None)),
+            _ => {}
+        }
+    }
+    if mounts.is_empty() {
+        return Err(UpdateError::usage(format!(
+            "the Rust daemon's model directory {models} is on no persistent volume of this project; restore the release Compose files and retry; nothing was changed"
+        )));
+    }
+    Ok(Some((models, mounts)))
+}
+
+impl Update {
+    /// Install the pinned models into the daemon's model volume before backup.
+    fn provision_models(&mut self, image: &str, config: &Value) -> Result<()> {
+        let Some((models, mounts)) = model_volumes(config)? else {
+            self.step(
+                "the daemon names its own ONNX model directory; leaving model provisioning to it",
+            );
+            return Ok(());
+        };
+        let project = config["name"].as_str().unwrap_or("pseudolife-mcp");
+        for (name, _, key) in &mounts {
+            let Some(key) = key else { continue };
+            let (code, out) = self.docker_call(&["volume", "inspect", name]);
+            let exists = code == 0
+                && serde_json::from_str::<Value>(&out)
+                    .ok()
+                    .and_then(|v| v.as_array().map(|a| !a.is_empty()))
+                    .unwrap_or(false);
+            if !exists {
+                // Created the way Compose would, so `up` adopts it quietly.
+                let project_label = format!("com.docker.compose.project={project}");
+                let volume_label = format!("com.docker.compose.volume={key}");
+                if self
+                    .docker_call(&[
+                        "volume",
+                        "create",
+                        "--label",
+                        &project_label,
+                        "--label",
+                        &volume_label,
+                        name,
+                    ])
+                    .0
+                    != 0
+                {
+                    return Err(UpdateError::new(format!(
+                        "could not create the model volume {name}; check Docker and retry; nothing was deployed"
+                    )));
+                }
+            }
+        }
+        self.step(format!(
+            "provisioning the Rust daemon's pinned models into {models} (a first activation downloads them)..."
+        ));
+        let mut args: Vec<String> = vec![
+            "run".into(),
+            "--rm".into(),
+            "-e".into(),
+            format!("PSEUDOLIFE_DAEMON_MODELS_DIR={models}"),
+        ];
+        for (name, target, _) in &mounts {
+            args.extend(["-v".into(), format!("{name}:{target}")]);
+        }
+        args.extend(
+            [
+                "--entrypoint",
+                "pseudolife-daemon",
+                image,
+                "provision",
+                "models",
+                "--if-missing",
+            ]
+            .into_iter()
+            .map(str::to_owned),
+        );
+        if self.command(&args, None, 3600, true).0 != 0 {
+            return Err(UpdateError::new(
+                "could not provision the Rust daemon's models; check this host's network access and disk space, then retry; nothing was deployed",
+            ));
+        }
+        Ok(())
+    }
+}
+
 fn storage_pg(no_backup: bool, resolve: impl FnOnce() -> Result<String>) -> Result<Option<String>> {
     if no_backup {
         Ok(None)
@@ -950,6 +1075,62 @@ fn storage_pg(no_backup: bool, resolve: impl FnOnce() -> Result<String>) -> Resu
 #[cfg(test)]
 mod disk_review_tests {
     use super::*;
+    fn daemon(env: Value, volumes: Value) -> Value {
+        json!({"name": "fixture", "services": {DAEMON_SERVICE: {"environment": env, "volumes": volumes}},
+               "volumes": {"pseudolife_data": {"name": "fixture-state"},
+                           "pseudolife_rust_models": {"name": "fixture_pseudolife_rust_models"}}})
+    }
+    #[test]
+    fn models_are_provisioned_into_the_volume_the_service_maps_there() {
+        let data = json!({"type": "volume", "source": "pseudolife_data", "target": "/data"});
+        let models =
+            json!({"type": "volume", "source": "pseudolife_rust_models", "target": "/models"});
+        let (dir, mounts) = model_volumes(&daemon(
+            json!({"PSEUDOLIFE_DAEMON_MODELS_DIR": "/models"}),
+            json!([data.clone(), models]),
+        ))
+        .unwrap()
+        .unwrap();
+        assert_eq!(dir, "/models");
+        assert_eq!(
+            mounts,
+            vec![(
+                "fixture_pseudolife_rust_models".to_owned(),
+                "/models".to_owned(),
+                Some("pseudolife_rust_models".to_owned())
+            )]
+        );
+        let (dir, mounts) = model_volumes(&daemon(json!({}), json!([data.clone()])))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            (dir.as_str(), mounts[0].0.as_str()),
+            ("/data/models", "fixture-state")
+        );
+        assert!(
+            model_volumes(&daemon(
+                json!({"PSEUDOLIFE_DAEMON_ONNX_DIR": "/opt/models"}),
+                json!([data])
+            ))
+            .unwrap()
+            .is_none()
+        );
+        assert!(
+            model_volumes(&daemon(
+                json!({"PSEUDOLIFE_DAEMON_MODELS_DIR": "/models"}),
+                json!([])
+            ))
+            .is_err()
+        );
+    }
+    #[test]
+    fn the_running_bearer_is_read_from_the_container_environment() {
+        let running = json!({"Config": {"Env": ["PATH=/bin", "PSEUDOLIFE_MCP_TOKEN=old=bearer"]}});
+        assert_eq!(
+            engine::daemon_token(&running_config(&running)).unwrap(),
+            "old=bearer"
+        );
+    }
     #[test]
     fn no_backup_storage_probe_does_not_require_project_postgres() {
         let absent = storage_pg(true, || Err(UpdateError::usage("no project PostgreSQL")));

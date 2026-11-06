@@ -658,6 +658,9 @@ class Update:
             raise UpdateError("--shadow requires --engine rust --checkout <repo> to start, or --engine python --checkout <repo> to remove; nothing was changed", 2)
         if (self.o.engine or self.o.shadow) and (self.o.clients_only or self.o.all_clients or self.o.unattended or self.o.schedule):
             raise UpdateError("engine selection updates only the Docker daemon; remove client/schedule options and retry", 2)
+        if self.o.engine:
+            # As the native updater: an engine change never moves the clients.
+            self.o.daemon_only = True
         if self.o.checkout is not None:
             for name, value in (("--clients-only", self.o.clients_only), ("--tag", self.o.tag),
                                 ("--reinstall", self.o.reinstall), ("--allow-downgrade", self.o.allow_downgrade),
@@ -1913,8 +1916,10 @@ class Update:
                         if p.with_name("docker-compose.ghcr.yml").is_file()), None) or self._bundled("docker-compose.ghcr.yml")
         files = existing + ([overlay] if overlay not in existing else [])
         if engine == "rust":
-            files.append(next((p for p in (overlay.with_name(RUST_RELEASE_OVERLAY),) if p.is_file()), None)
-                         or self._bundled(RUST_RELEASE_OVERLAY))
+            beside = overlay.with_name(RUST_RELEASE_OVERLAY)
+            # The bundled copy is refreshed from this package; a checkout's is its own.
+            files.append(beside if beside.is_file() and overlay.parent != data_dir() / "compose"
+                         else self._bundled(RUST_RELEASE_OVERLAY))
         args = ["-p", project]
         if self.o.compose_files and working_dir:
             # Relative mounts, env_file entries and other resources retain
