@@ -76,6 +76,7 @@ if [ "$MODE" = upgrade ]; then
   must P2 engine-rust engine
   must P2 rollback-tags docker images --format '{{.Repository}}:{{.Tag}} {{.ID}}' --filter reference='pseudolife-daemon*'
   must P2 snapshot-after snapshot
+  must P2 assert-bank-unchanged diff $P/logs/$MODE-snapshot-before.log $P/logs/$MODE-snapshot-after.log
   must P2 read-via-registered-shim mcp memory_search '{"query":"G2 proof note bank survive engine switch","top_k":5}' \
        memory_fact_get '{"entity":"g2-proof","attribute":"written-by"}'
   # Proof 3: backup and restore under Rust, then roll back to Python.
@@ -91,8 +92,10 @@ if [ "$MODE" = upgrade ]; then
   must P3 health-after-restore health
   must P3 engine-after-restore engine
   must P3 snapshot-after-restore snapshot
+  must P3 assert-restore-equals-backup diff $P/logs/$MODE-snapshot-rust.log $P/logs/$MODE-snapshot-after-restore.log
   must P3 read-after-restore mcp memory_search '{"query":"G2 proof marker written AFTER the backup","top_k":5}' \
        memory_fact_get '{"entity":"g2-proof","attribute":"written-by"}'
+  must P3 assert-marker-gone sh -c "! grep -q 'AFTER the backup' $P/logs/$MODE-read-after-restore.log"
   # The rollback the Rust activation printed, run as printed: back to the
   # tagged Python 0.22.1 image, which must read what Rust wrote.
   python3 /opt/proof/printed_rollback.py "$P/logs/upgrade-update-to-rust.log" > $P/printed-rollback.sh
@@ -102,6 +105,7 @@ if [ "$MODE" = upgrade ]; then
   must P3 health-python-0.22.1-after-rollback health
   must P3 engine-after-printed-rollback engine
   must P3 snapshot-after-printed-rollback snapshot
+  must P3 assert-rollback-keeps-bank diff $P/logs/$MODE-snapshot-rust.log $P/logs/$MODE-snapshot-after-printed-rollback.log
   must P3 python-0.22.1-reads-rust-writes mcp memory_search '{"query":"G2 proof note three written by the Rust daemon","top_k":5}' \
        memory_fact_get '{"entity":"g2-proof","attribute":"written-by"}'
   must P3 python-0.22.1-writes mcp memory_store '{"text":"G2 proof note four, written by Python 0.22.1 after the rollback","source":"g2-proof"}'

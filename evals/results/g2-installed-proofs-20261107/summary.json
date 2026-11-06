@@ -1,14 +1,12 @@
 {
   "tested_head": "5274b0b9269305f304f2b41ec756e408b60cac42",
   "python_release_for_upgrade": "v0.22.1",
-  "venue": "Windows host Docker Desktop 29.9.2, one disposable Docker-in-Docker host per proof (debian:bookworm + docker-ce 29.9.3, cgroup v2 nested), removed after each run; its own PostgreSQL, bank and state volumes; never the live bank",
+  "venue": "Windows host Docker Desktop 29.9.2, one disposable Docker-in-Docker host per proof (debian:bookworm, docker-ce 29.9.3, nested cgroup v2), removed after each run; its own PostgreSQL, bank and state volumes; never the live bank",
   "run_window_utc": [
     "2026-11-06T16:53:34Z",
     "2026-11-06T17:49:40Z"
   ],
-  "driver": "harness/run_proofs.sh under `pseudolife-mcp lease run full-suite`; harness/proof.sh inside each host",
-  "client_entry_point": "ops/install.sh --client claude registers the stdio shim through `claude mcp add`; a stand-in claude CLI (harness/claude-stub) records the registration and harness/mcp_call.py runs exactly that registered command and env for every read and write",
-  "known_gap": "the default `ops/update.py --engine rust` fails its health gate on every fresh host tried (3 of 3: both hosts of this run and the fresh host of the run before), because the gate waits 30 x 1.5 s while the Rust image provisions its models on first start (daemon log: 'model provisioning phase ... downloading model.onnx_data (2 of 12)' at +43 s). The proofs record that failure, run its printed rollback, then retry with --health-retries 1300; fix in progress (provision before recreate).",
+  "snapshot_scope": "entries: count and md5 over id:md5(text) per row; facts: count and one md5 over entity|attribute|value|status of every row; meta.schema_version. Two of the bank's tables; embeddings, tags, episodes, graph, counters and the /data state volume are not fingerprinted.",
   "proof_1_fresh_install": {
     "steps": {
       "clone": 0,
@@ -74,6 +72,12 @@
         "isError": false,
         "value": "rust"
       }
+    ],
+    "rerun_excerpt": [
+      "==> backing up the bank and /data before switching engines...",
+      "==> building the rust daemon; rollback image pseudolife-daemon-rust:0.22.1-pre-update-20261106-174930",
+      "==> rust health gate passed: version 0.22.1, schema 59, authenticated bank read",
+      "==> selected Rust; future updates retain this engine; rollback commands:"
     ]
   },
   "proof_2_update_python_0_22_1_to_rust": {
@@ -99,7 +103,7 @@
       "read-via-registered-shim": 0
     },
     "engine_before": {
-      "engine_label": "(none: plain install)",
+      "engine_label": null,
       "image": "pseudolife-daemon:0.22.1",
       "image_id": "sha256:4d43da62ac0c"
     },
@@ -172,6 +176,15 @@
         "isError": false,
         "value": "python-0.22.1"
       }
+    ],
+    "update_backup_excerpt": [
+      "==> backing up the bank and /data before switching engines...",
+      "Dumping pseudolife_memory from container 4198b3306ce6f8a187ce34d476f520aaff8b4035cfdb397f0c8e39b74636c185 -> /proof/repo-upgrade/data/backups/pseudolife_memory-20261106-170424.sql.gz",
+      "State volume -> /proof/repo-upgrade/data/backups/pseudolife_state-20261106-170424.tgz",
+      "Recorded in the daemon (/health last_backup)",
+      "Backup complete. Retained last 7 days in /proof/repo-upgrade/data/backups",
+      "==> building the rust daemon; rollback image pseudolife-daemon-python:0.22.1-pre-update-20261106-170638",
+      "==> rust health gate passed: version 0.22.1, schema 59, authenticated bank read"
     ]
   },
   "proof_3_backup_restore_rollback": {
@@ -212,6 +225,16 @@
         "fingerprint": "59"
       }
     },
+    "backup_excerpt": [
+      "bank dump:     /root/.pseudolife-mcp/backups/pseudolife_memory-20261106-170913-6615f3a0.sql.gz",
+      "state archive: /root/.pseudolife-mcp/backups/pseudolife_state-20261106-170913-6615f3a0.tgz"
+    ],
+    "restore_excerpt": [
+      "==> Safety-dumping the current database and state volume...",
+      "Safety backup: /root/.pseudolife-mcp/backups/pseudolife_memory-20261106-171514-c224d15b.sql.gz + /root/.pseudolife-mcp/backups/pseudolife_state-20261106-171514-c224d15b.tgz",
+      "==> Dropping + recreating pseudolife_memory...",
+      "Restore complete; daemon started."
+    ],
     "bank_after_restore": {
       "entries": {
         "rows": 3,
@@ -313,5 +336,41 @@
         "fingerprint": "59"
       }
     }
-  }
+  },
+  "default_activation_gate_failures": [
+    {
+      "host": "upgrade (this run)",
+      "updater": [
+        "WARNING: the engine failed its version, schema or authenticated-read gate"
+      ],
+      "daemon_at_failure": [
+        "pseudolife-mcp-daemon pseudolife-daemon-rust:checkout Up 43 seconds (health: starting)",
+        "pseudolife-mcp-postgres pseudolife-pg:18 Up 6 minutes (healthy)",
+        "curl: (56) Recv failure: Connection reset by peer",
+        "model provisioning phase: installing pinned artifacts; daemon readiness follows this phase",
+        "downloading model.onnx (1 of 12)",
+        "downloading model.onnx_data (2 of 12)"
+      ]
+    },
+    {
+      "host": "fresh (this run)",
+      "updater": [
+        "WARNING: the engine failed its version, schema or authenticated-read gate"
+      ],
+      "daemon_at_failure": [
+        "pseudolife-mcp-daemon pseudolife-daemon-rust:checkout Up 43 seconds (health: starting)",
+        "pseudolife-mcp-postgres pseudolife-pg:18 Up 6 minutes (healthy)",
+        "curl: (56) Recv failure: Connection reset by peer",
+        "model provisioning phase: installing pinned artifacts; daemon readiness follows this phase",
+        "downloading model.onnx (1 of 12)",
+        "downloading model.onnx_data (2 of 12)"
+      ]
+    },
+    {
+      "host": "fresh (the run before, 16:40-16:49Z, harness without diagnostics)",
+      "updater": [
+        "WARNING: the engine failed its version, schema or authenticated-read gate"
+      ]
+    }
+  ]
 }
