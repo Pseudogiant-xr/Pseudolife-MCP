@@ -2735,9 +2735,17 @@ SCENARIOS.update({
                  "rationale": [[1, 2], [3, 4]]},
                 {"src": "Lighthouse", "relation": "related-to", "dst": "Harbor Host",
                  "rationale": [True, False]},
+                # Untyped (strings, None, empty): stored whatever its shape.
+                {"src": "Buoy", "relation": "related-to", "dst": "Ocean",
+                 "rationale": [["a"], "b", None, []]},
             ]),
             review("propose", proposals=[
                 {"src": "Pier", "relation": "related-to", "dst": "Ocean", "rationale": ["a", 1]},
+            ]),
+            # Typed and ragged: PostgreSQL refuses the literal on both sides.
+            review("propose", proposals=[
+                {"src": "Jetty", "relation": "related-to", "dst": "Ocean",
+                 "rationale": [[1], [2, 3]]},
             ]),
             review(),
         ],
