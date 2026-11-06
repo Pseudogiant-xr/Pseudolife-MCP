@@ -1,0 +1,2 @@
+### Fixed (2026-11-06 — Stop a CPython teardown traceback failing Windows parity shards)
+- The judges' fault and real-bank stdio cells, and the W1-C `doctor` row, accept one exact block closing the Python oracle's stderr. CPython 3.11's ProactorEventLoop prints it when its self-pipe receive ends with WinError 995 as the Python shim shuts down; the native shim has no event loop to print it. The rule applies to the oracle arm only and keeps both raw stderr captures as evidence. Any other traceback, a second block, later output, or the block on the native side still fails.

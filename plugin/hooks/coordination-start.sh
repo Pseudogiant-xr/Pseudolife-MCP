@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Session-local digest handoff, then the board check-in when the daemon
 # serves one for this credential (one bounded request).
+# Every file this hook writes beside the digest is private (0600), as the
+# shim's own state is: the native shim refuses markers others can write.
+umask 077
 INPUT=$(cat 2>/dev/null || true)
 SID=$(printf '%s' "$INPUT" | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
 SRC=$(printf '%s' "$INPUT" | sed -n 's/.*"source"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)

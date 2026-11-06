@@ -7,6 +7,9 @@
 #
 # Runs under Git Bash on Windows and bash/sh everywhere else. curl, plus
 # native PowerShell for Windows ACL checks; no pip, node or Python needed.
+# Every file this hook writes beside the digest is private (0600), as the
+# shim's own state is: the native shim refuses markers others can write.
+umask 077
 
 private_regular() {
     local path="$1" maximum="$2" current parent meta

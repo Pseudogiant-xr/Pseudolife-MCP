@@ -1563,6 +1563,23 @@ GATE_STEP = "Yield to this machine's full suite"
 VENV_STEP = "Give the shard its own Python environment"
 
 
+def test_selfhosted_windows_gets_measured_security_and_process_test_margins():
+    # 2026-11-02/03: the Windows workers ran the security step past its ten
+    # minutes and the judges' process tests past 240 s while both self-hosted
+    # lanes shared the host; hosted Windows used at most 470 s and 114 s.
+    # Only the self-hosted Windows lane gets the wider guards.
+    jobs = workflow()["jobs"]
+    hosted, lane = jobs["parity-checks"], jobs["parity-selfhosted"]
+    security = next(step for step in hosted["steps"] if step.get("name") == "Daemon security admission parity")
+    assert security["timeout-minutes"] == (
+        "${{ runner.environment == 'self-hosted' && runner.os == 'Windows' && 20 || 10 }}")
+    assert lane["env"]["PARITY_PROCESS_TEST_TIMEOUT"] == "${{ matrix.runner == 'windows' && '480' || '' }}"
+    for name, job in jobs.items():
+        if name != "parity-selfhosted":
+            assert "PARITY_PROCESS_TEST_TIMEOUT" not in (job.get("env") or {}), name
+    assert "PARITY_PROCESS_TEST_TIMEOUT" not in WORKFLOW.read_text(encoding="utf-8").split("parity-selfhosted:", 1)[0]
+
+
 def test_selfhosted_lane_runs_the_hosted_shards_unchanged():
     text = WORKFLOW.read_text(encoding="utf-8")
     # Anchors, not a copy: a step or shard added to the hosted matrix reaches

@@ -12,11 +12,11 @@
     "docs/cortex-mcp-spec.md": "43fba1fe5e5cd3710f59d7e99b414f7b78ea15eaa70b620b23716f3fae308d32",
     "docs/dev/ci-budget.md": "98b0227042a5722f8fba310ececa9dd1dc7c6c0c118434f630308d653780fc37",
     "docs/dev/dev-machines.md": "802349bb1973a19f1e9a93db4195a54fdf5e8c1c3b7a79554c4a6e5e855ba6f9",
-    "docs/dev/merge-batches.md": "3832aab62505384ec9842bd722e718b09984c0d3e897bd61338978d7bfeb4808",
+    "docs/dev/merge-batches.md": "3ab16b1ef52c83961f648893b79e61ec16ed5aaee1c98de5c392109b4716a2bb",
     "docs/dev/native-client-updates.md": "dc0847090e9696348569d1f0a9c063f34f57c2c61f9b4a97600db76367c1e21e",
     "docs/dev/native-runtimes.md": "6972b4d5028dc1f88eee51ffb656603b810dcd4b1588edf0bb912d9e65ad4056",
     "docs/dev/release-assets.md": "3fb0c549c0252024d5278ad158fe93398f349f913844ff3e65bc88bd9eff7235",
-    "docs/dev/run-rust-beside-python.md": "da226bfdded49705ce2834771551a997c5b73f20c87d6ebb6412b6c6aaa1da54",
+    "docs/dev/run-rust-beside-python.md": "e9481d55b3c31b3c920a59e3ffd77366c60771f020ce3f93b8b15b1586012b6e",
     "docs/dev/worktree-retention.md": "23464a303672be4f546ecbf7c8e357c41c4bd2c684202e05cfebec6df78d7355",
     "docs/evidence/rust-stream-c-episode-20261009.json": "6dda143104a5b745eb322041190496caa9af3b61a219620c41633f6477d15079",
     "docs/guide/agent-isolation.md": "e8509e0c6567426a88fad7c301b0f06ac8d69d19f9724ffe9a4643ece7f7d6e4",
@@ -219,7 +219,7 @@
     "examples/hook-instructions.md": "d17b3b4173a0955f0f68c822e500a4a617dff6786fae8bc424d95906b681a0bc",
     "ops/.env.example": "60d44256635f0a131092c54104994cfa65c6e5ab93f94fd8b4f7339442185e0d",
     "ops/Dockerfile.daemon": "91924b87f19bf50e14e6764687ee13b0dc3aa2ba3edd89dba521203260e91166",
-    "ops/Dockerfile.daemon-rust": "9693905687a5481ea9661d37f1f837af88aac87b72be17f8c57588662dabcb7c",
+    "ops/Dockerfile.daemon-rust": "3ffe59cad566abc20f86a2e3220b991c7cd59bb0d6a572f1cebbb973a637d56e",
     "ops/Dockerfile.extractor": "cfd9068d7ba58aad49e00b000ca82ebe83add0e4d8ba7f75043c424243e3451d",
     "ops/Dockerfile.pg": "06308c96aaa3ceedf2fc988c1fccfe8573e4ae1836143546ce1fb7d996707201",
     "ops/assemble_changelog.py": "5462bfcb97a59e280311f0a1628e406fd3a47a45ed3ef39418e1e263b422fb38",
@@ -238,7 +238,7 @@
     "ops/docker-compose.ghcr.yml": "a64059a8d81e18ccb441bedd3510c366e90172e3d70681ce7a91e8aa58d174de",
     "ops/docker-compose.rust-daemon.yml": "035e8a3b34d6738fb16d1770719419e98d11940629a01895b57b49ffadf1647b",
     "ops/docker-compose.rust-ghcr.yml": "909d2f6066466d3650a89bd99e9ec2ca089af94ad831a78268d2ca6b74180b96",
-    "ops/docker-compose.rust-shadow.yml": "0863cfdbfd60102526aa910d0db89d03ea82e97b3991ca7055211f575ad78030",
+    "ops/docker-compose.rust-shadow.yml": "12d0a25a74101100cf7280cc6a2a94a22a1fe1a337f0aa5a59bcd860f6bb7917",
     "ops/docker-compose.rust.yml": "29b3590c58a8cd7a13a581d0e0488e48b2f934ad10844b4bf7b0b2eed4670ce0",
     "ops/docker-compose.stack-extractor.yml": "2af67c750ef93efe2528d7936ff2a8e5d3bd97c6d27721f41467ad79a1126091",
     "ops/docker-compose.stack.yml": "7afb522a29a8fe3afbfff23708327affb0e4566d560c39c9b414fecde061c389",
@@ -257,7 +257,7 @@
     "ops/install.ps1": "81277a6d10d364abf674889c1ff5ffb26eda0552940bfefcb5b39962b118aff8",
     "ops/install.sh": "b64575e1e1b71c2652fb813be1085bcf662582bac91aba591d13fae22277d66a",
     "ops/installer_state.py": "5e7a30f9138cd9e10edc1bbecc8dbad831a246ebb77e0a7d5f20f9ac26945d4a",
-    "ops/integrate.py": "4ff4628995595647057ca7f5aead426d3280dff19f7b0c2c6fa6ae0fa2fb8dc0",
+    "ops/integrate.py": "b949b821661e1a949c0d1776ff36162f1d3c687099d2b70e95bc750b3a03a507",
     "ops/measure_reverify_population.py": "413ff8baa0e0b25b8a727b6bead248df753d4d26e7c697aa6a0542b68715cfa5",
     "ops/migrate-pg18.ps1": "a2a8bd96ab754249395a9d42b26bfd8e6b5ecf8d6da1cd72383ebf745c0acde8",
     "ops/migrate_drop_age.py": "bad14579affef14699a3e1898afd4ba6326944f5db1e9b5c0486ee2b23153eac",
@@ -277,7 +277,7 @@
     "ops/pytest_retry_once.py": "213f6297068459a9296bbba26fc7e4d19fbce78b85819e61b70349b7e86b5e2a",
     "ops/register_claude_desktop.py": "a653438874cb1af0ec859083239ba35adc5e74747d3aceae055640f80ee37534",
     "ops/remote-suite.ps1": "003e04513c035f0252d7dcc5646e59ec0fe49591c84b833a4a754349553187e1",
-    "ops/requirements.lock.txt": "b077e39f2e4e50deedcd9eed7e35b0e875f9ec885d97f7111b4623b9a17b45f3",
+    "ops/requirements.lock.txt": "120385f4534f29d76985499233170b8900f705716a944e3784c6e6c28d9e4af4",
     "ops/restore.ps1": "c2301e8f41ce876eaddc2befbd10b108c101c6a6ae22d7cf8901a1db12b90795",
     "ops/restore.sh": "58d15a15a2b175bb189182bf175557f89dd37575c5a9e763a8502904055efb4f",
     "ops/restore_from_pt.py": "bceaeb79d8ff9a537ab41d2a8ac783a167cd370e75786275211ba5baa30c213e",
@@ -307,15 +307,15 @@
     "plugin/README.md": "6f84889a12b25a3621d9e527e97268660a1e68cf4d61f27f7a35580244ca36dc",
     "plugin/commands/dream.md": "e101854a5c4c47720707ec712eda1f0f345750f07d6898cbedf3adb13802d37f",
     "plugin/commands/memory-status.md": "6cf794157308880f0cc35aebea7f3d578c38d4f84440d20c6ea2df0ed1d09b20",
-    "plugin/hooks/coordination-prompt.sh": "a55728a1bd9543a1c9fa58f51f7914651a29f83f77a4b0e4b603b3e48fa09e45",
-    "plugin/hooks/coordination-start.sh": "202650d60d0cd4217eff8fd779647fc140f2c27e0a262efe307a224648b488ed",
+    "plugin/hooks/coordination-prompt.sh": "021cb09b8afdd4bf81bfdbc7321218f688bc4f1db5807ba95381b7b2d6918971",
+    "plugin/hooks/coordination-start.sh": "79e23def1ff2627cb33cc968503b17b9a659c095059c98fb311fcaa63e1f797f",
     "plugin/hooks/hooks.json": "986576c43450c4e07ca32def9c1ba19e36dc843c95c530f878861371ce0b09d9",
     "plugin/hooks/lifecycle.ps1": "1a4a342ac9a4aac07f986441eab26c77e59fe46d2456359038f2ee9d2c66a174",
-    "plugin/hooks/session-end.sh": "dd4b3363c862443c89e613887c551179f76b874a1f8098002730532c6da30463",
-    "plugin/hooks/session-start.sh": "69b4656e0e4c1e2cc8cbca9e65cfce46c30c2333f57be6145884ca26abef59e1",
-    "plugin/hooks/stop-wake.sh": "408b02f3c540ceaad1ff2483c43a8c420bd56effeff312fe7a4a44481eee9f4c",
+    "plugin/hooks/session-end.sh": "f143d3aa85d1b354497dfd9ad30b47e753638633cb5a153fda619d0b68c172c7",
+    "plugin/hooks/session-start.sh": "91c5c5c1d416f0e8e04fdb6cecda4cb2885fc6a3cd20e5340e1a2f3a2c5a71f3",
+    "plugin/hooks/stop-wake.sh": "23bf07a65f77ebdd696942a43f7b42f1ae74d517ab995a08587ac0a5cfbac22b",
     "plugin/hooks/subagent-board-guard.sh": "a0b6e32be59a744a362033af06bd3647ad0ad86b46b0ad62d8cc84331b22a2c1",
-    "plugin/hooks/subagent-board.sh": "6c62da28e230afc022d3424cf2c49449b6cf2a103daa80849871ab7e28d69b8b",
+    "plugin/hooks/subagent-board.sh": "9e365e6e195f3dcf98ff9dfb1332d1d7ba782f8bb7c69feda88114e2ba71a535",
     "plugin/hooks/user-prompt-submit.sh": "39c583c145c97e9c0fea6a9b36ea9c2e879a1bd4733a6362a493d4a194750ba9",
     "plugin/release.json": "241f1108fb256ecf50b6d1ca3906f8e71870cd69a3959a3fa1c19289a458cbf7",
     "pseudolife_memory/coordination.py": "4b133d48c60d08b24259425bc451ae55b99ba8df12122187aa142cb80dbe0622",
@@ -329,8 +329,8 @@
     "pseudolife_memory/web/static/theme.js": "f2399e3aaa94b61d639937aab791511ef83efb27276330b82324a21be9eea17e",
     "rust/contract-inventory.json": "27555edf13a3f8c27cae2c68fa0cf6e5d11f5695fe3ecb28563a6cb97f1d09cc",
     "rust/shim/src/argv.rs": "0273c36c6b105f38ec77692a9835868bf9695dd31920cdda3b98926f9dfbf5bb",
-    "rust/shim/src/board.rs": "7b0df51ab8d66cd51ca85571005b92623ff2306a4da504fc523ac23e7eaff833",
-    "rust/shim/src/board/adapter.rs": "4c1e3e2406cf3f774ddcd545acd673adc7a61554d4f50139ae4c56a3e0b2a89f",
+    "rust/shim/src/board.rs": "5adf96ad237e996dceff4411471fa29a423403569d000c6497395acb5f0d4444",
+    "rust/shim/src/board/adapter.rs": "eddfad7e6e2c695b418e4fe6ef39148804e318c52444e6b6ba4c31f1299665e7",
     "rust/shim/src/board/claim_name.rs": "b02abab0114e281ee82f1c7ec1d52e797b16afec2964ca0d88e41bd06116bab6",
     "rust/shim/src/board/claims.rs": "1a287a8dc7e0a5c73e356174ed921e216e4feb00cb07f6d939cb51f4ddc3ea2b",
     "rust/shim/src/board/delivery.rs": "9607cc730219593fa71a82f66b3f9dd505bfa80963819472c88e9c4beb0d0f25",
@@ -339,10 +339,10 @@
     "rust/shim/src/board/doorbell_posix.rs": "690504d199014803a065c0d0eb8362d486b6bb6aa09cd2cb738353affab2881e",
     "rust/shim/src/board/doorbell_windows.rs": "c1516b80d4ee895778edb9e10cb7f536b882c595dc0f756afae25fcc1927b9b3",
     "rust/shim/src/board/identity.rs": "a079e934356549286784b7d111621160f20a53e14b6196f678d3c7618c32ba9d",
-    "rust/shim/src/board/liveness.rs": "7f167b55aa3dd68377d6df05bf24374677cc31f3506c27087bbb3abca61a5b8a",
+    "rust/shim/src/board/liveness.rs": "32c8a0ebf2573c55465162a77271abd05db1c1fd67335303dc3f8b7efb6af846",
     "rust/shim/src/board/notice.rs": "d00a9bde9899eb9d9379848dc69bf19ff5cdc3222079067a6bfd80186b0d25a5",
     "rust/shim/src/board/policy.rs": "9d7af4ffc8a942ef37fa792d98235b20c310275b758fea0e163e1d2a81cccbb7",
-    "rust/shim/src/board/state.rs": "6fe5295fc79991ad8e3b6a025b604885921afa94c18fb6235a785aacd530e6a0",
+    "rust/shim/src/board/state.rs": "53fe50995b77a709bc0ac0cea94364549796eb8da2a7a4788d3d43e05b26e89d",
     "rust/shim/src/board/unicode14.rs": "0305821a91aedd6cbebec63cefcaa76cb70b96f3b77aff8589013cca073dfbbb",
     "rust/shim/src/cache.rs": "12f79ec63ebb7ef019cc7897d56bc78e2b752e3fecb327e495e6936a0fa41753",
     "rust/shim/src/cli.rs": "7413f082ea2ca688df0a9d153134b903c993b446edaa03abf52e1406d117b624",
@@ -360,7 +360,7 @@
     "rust/shim/src/cli/board_audit/metrics.rs": "846db7adcdf3444821e034d964648579dae0477ce3a50c5a7a570e53c1115a35",
     "rust/shim/src/cli/board_audit/mod.rs": "da7da9068fb1f9cf41eb80ade3a8ff11fe381aec505c2936e9dd95eab95ce332",
     "rust/shim/src/cli/board_audit/redact.rs": "0b1febf6591be379e7ad41605cf5d4b190a2eb81e480aa1ff53c2344337e142e",
-    "rust/shim/src/cli/board_audit/stats.rs": "54ef8cd8a8a3355020dd8ee24d0641e0ee3e5d622bde6d5f8b4978717998fe3f",
+    "rust/shim/src/cli/board_audit/stats.rs": "e218c9e43981c2001da2f76ef653498faffe17f9eca0170bd2bf320fe8501566",
     "rust/shim/src/cli/board_audit/testdata/stats.json": "2dbbc7c653b2f2152f2266068b0ec26b189c67810e10126f9eb5ff02f28ccad7",
     "rust/shim/src/cli/board_audit/time.rs": "980e3c801c406fa063112c420bf0fe8c676835f3cbd3cbaab19b3ed62becfbef",
     "rust/shim/src/cli/board_audit/transport.rs": "f648711999282c0e9373824826c54a05b61db4ebaf5ffe73d6a247e16f93694d",
@@ -413,7 +413,7 @@
     "rust/shim/src/cli/lease/board.rs": "ed69a24e1334cd7c558a92c74b4d95212b132d3fcc7e9b3391443291ed6be7c2",
     "rust/shim/src/cli/lease/hold.rs": "329624da0a978adcbb1508b3294151bae3d9c2f743a47f8c3085c5c37459376a",
     "rust/shim/src/cli/lease/json.rs": "962352d5b0b8ac4252728d7f8c6bee6f7082fdf75a3ae24b4cd4c202f35d521b",
-    "rust/shim/src/cli/lease/lock.rs": "3401a53b7e7fc83fcf074e822024e53cc83bae95c9db0243a480d3fa67b1c34d",
+    "rust/shim/src/cli/lease/lock.rs": "21b176d1d8ab775315a3fad95751d564710613de991c2019cdf3af012b308de5",
     "rust/shim/src/cli/lease/mod.rs": "6584af941f84d5c359cfa85237e8ecf84540b55440d43dda1de84e77c7f62719",
     "rust/shim/src/cli/lease/operator/mod.rs": "e1861059f1eac64f327d3b3bd4691a1fb77c43e2ec1f775df9459011e5bb83ea",
     "rust/shim/src/cli/lease/operator/secrets.rs": "7156f1498e15f7fd9417f42ceb0de45834ea28d5deda02da8d1010a90a707b34",
@@ -490,11 +490,11 @@
     "rust/shim/src/cli/update/unattended/tests.rs": "b79b8350dbd19bb20cc63b287e49bb93a6498f7d4e2a05931835efd5c40bd77f",
     "rust/shim/src/cli/update/windows_job.rs": "5225ea5f3668f836fb243549954fb8ab04258358ad9ab84447c4f4982e7ca377",
     "rust/shim/src/cli/version.rs": "8d866132b0855fa5603e9989746d5fdc7e8bb0ef581c76db8823aac723743b9d",
-    "rust/shim/src/cli/wait_mail.rs": "33696468c56a867c16a45fa10fdd55f1c8d7a5a6f76da1e254181980164cb0fc",
+    "rust/shim/src/cli/wait_mail.rs": "9e865d52ce431c88bd3fea266cf9c80a5a1d853ef830545708d0ca85a6f6fff9",
     "rust/shim/src/cli/wait_mail_args.rs": "e82e0e78f3377a6a981cfd5ba133578be6ac6cdc0975a550233b38cc6fb2ba4b",
     "rust/shim/src/cli/wait_mail_help.txt": "d6ee2b145e55e105a7885b653fcc88f56eabacf1c4626fd8675cd17258b8c60e",
     "rust/shim/src/cli_help.txt": "5806d34185cdd94f2c83af42426d2954a6202abd10aba75d6dcfd9e53a65b0ef",
-    "rust/shim/src/credentials.rs": "4b95a8503e2fbf896c041dfe93a14cde63e8bbb0c6b285541cd50a5be68c0a7f",
+    "rust/shim/src/credentials.rs": "0d883c63184cc74f92b304dbf066b207837f16452f61f41d2503d18ce8c7237a",
     "rust/shim/src/credentials/unix_accounts.rs": "d30f56e73eb66cb4dad5989bab84e4ccb33692b0433262f50caca02dcf58a0be",
     "rust/shim/src/daemon_url.rs": "5aabc9e4811af93f9292d84e2abc7c182884ea201284b7bbc2f722ff94d3817e",
     "rust/shim/src/errors.rs": "dc2399e44394fae5bb48ad8a36ca5d9607a86b21cd252fd69388218f68e3bc28",
@@ -567,12 +567,20 @@
       "actual_sha256": "1a4a342ac9a4aac07f986441eab26c77e59fe46d2456359038f2ee9d2c66a174"
     },
     {
+      "path": "plugin/hooks/session-end.sh",
+      "location": "plugin/hooks/session-end.sh:1",
+      "dynamic": "unresolved",
+      "reason": "Manual source fingerprint changed or source is missing; prior trusted shapes withdrawn.",
+      "expected_sha256": "dd4b3363c862443c89e613887c551179f76b874a1f8098002730532c6da30463",
+      "actual_sha256": "f143d3aa85d1b354497dfd9ad30b47e753638633cb5a153fda619d0b68c172c7"
+    },
+    {
       "path": "plugin/hooks/session-start.sh",
       "location": "plugin/hooks/session-start.sh:1",
       "dynamic": "unresolved",
       "reason": "Manual source fingerprint changed or source is missing; prior trusted shapes withdrawn.",
       "expected_sha256": "d98b867a79d74049802aee8a6457708c0c28844b11a679bb198d90b2c2d2e798",
-      "actual_sha256": "69b4656e0e4c1e2cc8cbca9e65cfce46c30c2333f57be6145884ca26abef59e1"
+      "actual_sha256": "91c5c5c1d416f0e8e04fdb6cecda4cb2885fc6a3cd20e5340e1a2f3a2c5a71f3"
     },
     {
       "path": "plugin/hooks/stop-wake.sh",
@@ -580,7 +588,15 @@
       "dynamic": "unresolved",
       "reason": "Manual source fingerprint changed or source is missing; prior trusted shapes withdrawn.",
       "expected_sha256": "15a13bde5ec2dd2de9dc5ef1c8250bf8fcd404be0f68308eb28456fa26253347",
-      "actual_sha256": "408b02f3c540ceaad1ff2483c43a8c420bd56effeff312fe7a4a44481eee9f4c"
+      "actual_sha256": "23bf07a65f77ebdd696942a43f7b42f1ae74d517ab995a08587ac0a5cfbac22b"
+    },
+    {
+      "path": "plugin/hooks/subagent-board.sh",
+      "location": "plugin/hooks/subagent-board.sh:1",
+      "dynamic": "unresolved",
+      "reason": "Manual source fingerprint changed or source is missing; prior trusted shapes withdrawn.",
+      "expected_sha256": "6c62da28e230afc022d3424cf2c49449b6cf2a103daa80849871ab7e28d69b8b",
+      "actual_sha256": "9e365e6e195f3dcf98ff9dfb1332d1d7ba782f8bb7c69feda88114e2ba71a535"
     },
     {
       "path": "rust/shim/src/board/adapter.rs",
@@ -588,7 +604,7 @@
       "dynamic": "unresolved",
       "reason": "Manual source fingerprint changed or source is missing; prior trusted shapes withdrawn.",
       "expected_sha256": "e033c719f4f32ee2a3513923481e5ef9c75617a143981ca2c814e4b6e2c4fffc",
-      "actual_sha256": "4c1e3e2406cf3f774ddcd545acd673adc7a61554d4f50139ae4c56a3e0b2a89f"
+      "actual_sha256": "eddfad7e6e2c695b418e4fe6ef39148804e318c52444e6b6ba4c31f1299665e7"
     },
     {
       "path": "rust/shim/src/cli/episode.rs",
@@ -7738,7 +7754,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/dev/run-rust-beside-python.md:119",
+          "location": "docs/dev/run-rust-beside-python.md:121",
           "shape": {
             "argv_source": "update --engine python --shadow --checkout .",
             "channel": "argv",
@@ -22209,7 +22225,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/board/adapter.rs:957",
+          "location": "rust/shim/src/board/adapter.rs:961",
           "shape": {
             "channel": "body",
             "complete": false,
@@ -22221,7 +22237,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/board/adapter.rs:971",
+          "location": "rust/shim/src/board/adapter.rs:975",
           "shape": {
             "channel": "body",
             "complete": false,
@@ -22246,7 +22262,7 @@
       "producers": [
         {
           "evidence": "static",
-          "location": "rust/shim/src/board/adapter.rs:1623",
+          "location": "rust/shim/src/board/adapter.rs:1632",
           "shape": {
             "channel": "body",
             "complete": true,
@@ -22345,7 +22361,7 @@
       "producers": [
         {
           "evidence": "static",
-          "location": "rust/shim/src/board/adapter.rs:1474",
+          "location": "rust/shim/src/board/adapter.rs:1483",
           "shape": {
             "channel": "body",
             "complete": true,
@@ -22383,7 +22399,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/board/adapter.rs:920",
+          "location": "rust/shim/src/board/adapter.rs:924",
           "shape": {
             "channel": "body",
             "complete": false,
@@ -22842,7 +22858,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/board/adapter.rs:1556",
+          "location": "rust/shim/src/board/adapter.rs:1565",
           "shape": {
             "channel": "body",
             "complete": false,
@@ -22932,7 +22948,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/board/adapter.rs:1024",
+          "location": "rust/shim/src/board/adapter.rs:1028",
           "shape": {
             "channel": "body",
             "complete": false,
@@ -22944,7 +22960,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/board/adapter.rs:1039",
+          "location": "rust/shim/src/board/adapter.rs:1043",
           "shape": {
             "channel": "body",
             "complete": false,
@@ -23678,7 +23694,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "plugin/hooks/coordination-start.sh:207",
+          "location": "plugin/hooks/coordination-start.sh:210",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -23691,7 +23707,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "plugin/hooks/coordination-start.sh:215",
+          "location": "plugin/hooks/coordination-start.sh:218",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -23704,7 +23720,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "plugin/hooks/coordination-start.sh:216",
+          "location": "plugin/hooks/coordination-start.sh:219",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -23769,7 +23785,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "plugin/hooks/stop-wake.sh:134",
+          "location": "plugin/hooks/stop-wake.sh:137",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -23834,7 +23850,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "plugin/hooks/subagent-board.sh:35",
+          "location": "plugin/hooks/subagent-board.sh:38",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -23847,7 +23863,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/board.rs:119",
+          "location": "rust/shim/src/board.rs:120",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -24179,7 +24195,7 @@
         },
         {
           "evidence": "static",
-          "location": "rust/shim/src/board.rs:430",
+          "location": "rust/shim/src/board.rs:431",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -24244,7 +24260,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/board.rs:126",
+          "location": "rust/shim/src/board.rs:127",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -24291,7 +24307,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/board.rs:128",
+          "location": "rust/shim/src/board.rs:129",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -24455,7 +24471,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/board.rs:112",
+          "location": "rust/shim/src/board.rs:113",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -24468,7 +24484,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/board.rs:282",
+          "location": "rust/shim/src/board.rs:283",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -24632,7 +24648,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/board.rs:282",
+          "location": "rust/shim/src/board.rs:283",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -24752,7 +24768,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/board.rs:129",
+          "location": "rust/shim/src/board.rs:130",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -24851,7 +24867,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/board.rs:130",
+          "location": "rust/shim/src/board.rs:131",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -24967,7 +24983,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "plugin/hooks/stop-wake.sh:133",
+          "location": "plugin/hooks/stop-wake.sh:136",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -25171,7 +25187,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "plugin/hooks/stop-wake.sh:478",
+          "location": "plugin/hooks/stop-wake.sh:481",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -25742,7 +25758,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/Dockerfile.daemon-rust:66",
+          "location": "ops/Dockerfile.daemon-rust:68",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -25832,7 +25848,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/Dockerfile.daemon-rust:65",
+          "location": "ops/Dockerfile.daemon-rust:67",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -25870,7 +25886,7 @@
       "producers": [
         {
           "evidence": "static",
-          "location": "ops/Dockerfile.daemon-rust:68",
+          "location": "ops/Dockerfile.daemon-rust:70",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -25960,7 +25976,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/Dockerfile.daemon-rust:67",
+          "location": "ops/Dockerfile.daemon-rust:69",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -26396,7 +26412,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/board.rs:134",
+          "location": "rust/shim/src/board.rs:135",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -26409,7 +26425,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/board.rs:401",
+          "location": "rust/shim/src/board.rs:402",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -26422,7 +26438,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/board.rs:404",
+          "location": "rust/shim/src/board.rs:405",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -26536,7 +26552,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/board.rs:133",
+          "location": "rust/shim/src/board.rs:134",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -26549,7 +26565,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/board.rs:424",
+          "location": "rust/shim/src/board.rs:425",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -26562,7 +26578,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/board.rs:433",
+          "location": "rust/shim/src/board.rs:434",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -26729,7 +26745,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "plugin/hooks/coordination-start.sh:293",
+          "location": "plugin/hooks/coordination-start.sh:296",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -26742,7 +26758,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "plugin/hooks/session-end.sh:185",
+          "location": "plugin/hooks/session-end.sh:188",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -26755,7 +26771,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "plugin/hooks/session-start.sh:83",
+          "location": "plugin/hooks/session-start.sh:86",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -26768,7 +26784,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "plugin/hooks/stop-wake.sh:136",
+          "location": "plugin/hooks/stop-wake.sh:139",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -26794,7 +26810,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "plugin/hooks/subagent-board.sh:36",
+          "location": "plugin/hooks/subagent-board.sh:39",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -26921,7 +26937,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/board.rs:132",
+          "location": "rust/shim/src/board.rs:133",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -26955,7 +26971,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/board.rs:131",
+          "location": "rust/shim/src/board.rs:132",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -27297,7 +27313,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/docker-compose.rust-shadow.yml:18",
+          "location": "ops/docker-compose.rust-shadow.yml:22",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -27310,7 +27326,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/docker-compose.rust-shadow.yml:19",
+          "location": "ops/docker-compose.rust-shadow.yml:23",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -27660,7 +27676,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "plugin/hooks/coordination-prompt.sh:17",
+          "location": "plugin/hooks/coordination-prompt.sh:20",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -27673,7 +27689,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "plugin/hooks/coordination-start.sh:131",
+          "location": "plugin/hooks/coordination-start.sh:134",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -27712,7 +27728,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "plugin/hooks/session-end.sh:139",
+          "location": "plugin/hooks/session-end.sh:142",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -27725,7 +27741,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "plugin/hooks/session-start.sh:179",
+          "location": "plugin/hooks/session-start.sh:182",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -27738,7 +27754,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "plugin/hooks/stop-wake.sh:187",
+          "location": "plugin/hooks/stop-wake.sh:190",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -27751,7 +27767,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "plugin/hooks/subagent-board.sh:71",
+          "location": "plugin/hooks/subagent-board.sh:74",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -27764,7 +27780,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/board.rs:108",
+          "location": "rust/shim/src/board.rs:109",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -31488,7 +31504,20 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/lease/lock.rs:9",
+          "location": "rust/shim/src/cli/lease/lock.rs:11",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/lease/lock.rs:15",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -32690,7 +32719,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "plugin/hooks/coordination-start.sh:321",
+          "location": "plugin/hooks/coordination-start.sh:324",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -32729,7 +32758,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "plugin/hooks/session-end.sh:213",
+          "location": "plugin/hooks/session-end.sh:216",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -32742,7 +32771,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "plugin/hooks/session-start.sh:111",
+          "location": "plugin/hooks/session-start.sh:114",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -32755,7 +32784,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "plugin/hooks/stop-wake.sh:321",
+          "location": "plugin/hooks/stop-wake.sh:324",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -32768,7 +32797,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "plugin/hooks/stop-wake.sh:324",
+          "location": "plugin/hooks/stop-wake.sh:327",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -32781,7 +32810,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "plugin/hooks/stop-wake.sh:363",
+          "location": "plugin/hooks/stop-wake.sh:366",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -32794,7 +32823,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "plugin/hooks/subagent-board.sh:168",
+          "location": "plugin/hooks/subagent-board.sh:171",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -33878,7 +33907,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/docker-compose.rust-shadow.yml:25",
+          "location": "ops/docker-compose.rust-shadow.yml:29",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -35213,7 +35242,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/docker-compose.rust-shadow.yml:28",
+          "location": "ops/docker-compose.rust-shadow.yml:32",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -35649,7 +35678,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/docker-compose.rust-shadow.yml:26",
+          "location": "ops/docker-compose.rust-shadow.yml:30",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -36837,7 +36866,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/docker-compose.rust-shadow.yml:27",
+          "location": "ops/docker-compose.rust-shadow.yml:31",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -37454,6 +37483,19 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
+          "location": "ops/docker-compose.rust-shadow.yml:43",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "${PSEUDOLIFE_MCP_TIER_MAP:-}",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "assignment-candidate"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
           "location": "ops/docker-compose.stack.yml:66",
           "shape": {
             "channel": "environment",
@@ -37619,7 +37661,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/dev/run-rust-beside-python.md:94",
+          "location": "docs/dev/run-rust-beside-python.md:96",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -38375,7 +38417,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/docker-compose.rust-shadow.yml:31",
+          "location": "ops/docker-compose.rust-shadow.yml:35",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -38960,7 +39002,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "plugin/hooks/coordination-start.sh:347",
+          "location": "plugin/hooks/coordination-start.sh:350",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -38986,7 +39028,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "plugin/hooks/session-end.sh:239",
+          "location": "plugin/hooks/session-end.sh:242",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -38999,7 +39041,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "plugin/hooks/session-start.sh:137",
+          "location": "plugin/hooks/session-start.sh:140",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -39012,7 +39054,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "plugin/hooks/stop-wake.sh:321",
+          "location": "plugin/hooks/stop-wake.sh:324",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -39025,7 +39067,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "plugin/hooks/stop-wake.sh:325",
+          "location": "plugin/hooks/stop-wake.sh:328",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -39038,7 +39080,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "plugin/hooks/stop-wake.sh:380",
+          "location": "plugin/hooks/stop-wake.sh:383",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -39051,7 +39093,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "plugin/hooks/subagent-board.sh:167",
+          "location": "plugin/hooks/subagent-board.sh:170",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -39064,7 +39106,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "plugin/hooks/subagent-board.sh:174",
+          "location": "plugin/hooks/subagent-board.sh:177",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -40227,7 +40269,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/docker-compose.rust-shadow.yml:32",
+          "location": "ops/docker-compose.rust-shadow.yml:36",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -41931,7 +41973,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "plugin/hooks/coordination-start.sh:322",
+          "location": "plugin/hooks/coordination-start.sh:325",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -41944,7 +41986,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "plugin/hooks/coordination-start.sh:329",
+          "location": "plugin/hooks/coordination-start.sh:332",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -41983,7 +42025,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "plugin/hooks/session-end.sh:214",
+          "location": "plugin/hooks/session-end.sh:217",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -41996,7 +42038,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "plugin/hooks/session-end.sh:221",
+          "location": "plugin/hooks/session-end.sh:224",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -42009,7 +42051,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "plugin/hooks/session-start.sh:112",
+          "location": "plugin/hooks/session-start.sh:115",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -42022,7 +42064,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "plugin/hooks/session-start.sh:119",
+          "location": "plugin/hooks/session-start.sh:122",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -42035,7 +42077,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "plugin/hooks/stop-wake.sh:322",
+          "location": "plugin/hooks/stop-wake.sh:325",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -42048,7 +42090,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "plugin/hooks/stop-wake.sh:325",
+          "location": "plugin/hooks/stop-wake.sh:328",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -42061,7 +42103,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "plugin/hooks/stop-wake.sh:364",
+          "location": "plugin/hooks/stop-wake.sh:367",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -42074,7 +42116,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "plugin/hooks/stop-wake.sh:371",
+          "location": "plugin/hooks/stop-wake.sh:374",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -42087,7 +42129,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "plugin/hooks/subagent-board.sh:167",
+          "location": "plugin/hooks/subagent-board.sh:170",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -42100,7 +42142,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "plugin/hooks/subagent-board.sh:175",
+          "location": "plugin/hooks/subagent-board.sh:178",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -42113,7 +42155,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "plugin/hooks/subagent-board.sh:176",
+          "location": "plugin/hooks/subagent-board.sh:179",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -42126,7 +42168,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "plugin/hooks/subagent-board.sh:177",
+          "location": "plugin/hooks/subagent-board.sh:180",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -43359,6 +43401,19 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
+          "location": "ops/docker-compose.rust-shadow.yml:42",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "${PSEUDOLIFE_MCP_TOOLSET:-core}",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "assignment-candidate"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
           "location": "ops/docker-compose.stack.yml:65",
           "shape": {
             "channel": "environment",
@@ -43717,7 +43772,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/docker-compose.rust-shadow.yml:30",
+          "location": "ops/docker-compose.rust-shadow.yml:34",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -43835,7 +43890,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "plugin/hooks/coordination-start.sh:249",
+          "location": "plugin/hooks/coordination-start.sh:252",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -43848,7 +43903,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "plugin/hooks/session-end.sh:32",
+          "location": "plugin/hooks/session-end.sh:35",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -43861,7 +43916,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "plugin/hooks/session-start.sh:39",
+          "location": "plugin/hooks/session-start.sh:42",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -43874,7 +43929,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "plugin/hooks/stop-wake.sh:260",
+          "location": "plugin/hooks/stop-wake.sh:263",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -43887,7 +43942,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "plugin/hooks/subagent-board.sh:136",
+          "location": "plugin/hooks/subagent-board.sh:139",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -43899,7 +43954,7 @@
         },
         {
           "evidence": "static",
-          "location": "plugin/hooks/coordination-start.sh:244",
+          "location": "plugin/hooks/coordination-start.sh:247",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -43914,7 +43969,7 @@
         },
         {
           "evidence": "static",
-          "location": "plugin/hooks/session-end.sh:27",
+          "location": "plugin/hooks/session-end.sh:30",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -43929,7 +43984,7 @@
         },
         {
           "evidence": "static",
-          "location": "plugin/hooks/session-start.sh:34",
+          "location": "plugin/hooks/session-start.sh:37",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -43944,7 +43999,7 @@
         },
         {
           "evidence": "static",
-          "location": "plugin/hooks/stop-wake.sh:255",
+          "location": "plugin/hooks/stop-wake.sh:258",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -43959,7 +44014,7 @@
         },
         {
           "evidence": "static",
-          "location": "plugin/hooks/subagent-board.sh:131",
+          "location": "plugin/hooks/subagent-board.sh:134",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -44443,7 +44498,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "plugin/hooks/coordination-prompt.sh:26",
+          "location": "plugin/hooks/coordination-prompt.sh:29",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -44469,7 +44524,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "plugin/hooks/session-start.sh:300",
+          "location": "plugin/hooks/session-start.sh:303",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -46034,7 +46089,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/dev/merge-batches.md:191",
+          "location": "docs/dev/merge-batches.md:238",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -46049,7 +46104,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/dev/merge-batches.md:359",
+          "location": "docs/dev/merge-batches.md:406",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -46079,7 +46134,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/integrate.py:1499",
+          "location": "ops/integrate.py:1661",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -47106,6 +47161,19 @@
             "parameters": {}
           },
           "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "ops/docker-compose.rust-shadow.yml:41",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "${PSEUDOLIFE_WRITER_ID:-mcp-client}",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "assignment-candidate"
         },
         {
           "dynamic": "unresolved",
@@ -48948,7 +49016,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "unverified",
-          "location": "docs/dev/run-rust-beside-python.md:89",
+          "location": "docs/dev/run-rust-beside-python.md:91",
           "method": null,
           "shape": {
             "channel": "body",
@@ -50597,7 +50665,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/board.rs:503",
+          "location": "rust/shim/src/board.rs:504",
           "shape": {
             "channel": "query",
             "complete": false,
@@ -54437,23 +54505,6 @@
       "parameter_source": "pseudolife_memory/web/api.py:1156",
       "producers": [
         {
-          "construction_source": "plugin/hooks/session-end.sh:270",
-          "evidence": "manual",
-          "location": "plugin/hooks/session-end.sh:271",
-          "resolution": "Reviewed request construction and conditional fields; guarded by whole-file source fingerprint.",
-          "shape": {
-            "channel": "body",
-            "complete": true,
-            "conditions": {},
-            "omitted_optional": [],
-            "parameters": {
-              "session_id": {
-                "expression": "${SID}"
-              }
-            }
-          }
-        },
-        {
           "dynamic": "unresolved",
           "evidence": "documented",
           "location": "docs/superpowers/plans/2026-07-18-session-identity-contract.md:373",
@@ -54629,31 +54680,6 @@
               },
               "type": {
                 "literal": "<agent_type>"
-              }
-            }
-          }
-        },
-        {
-          "evidence": "manual",
-          "location": "plugin/hooks/subagent-board.sh:186",
-          "resolution": "Reviewed request construction and conditional fields; guarded by whole-file source fingerprint.",
-          "shape": {
-            "channel": "query",
-            "complete": true,
-            "conditions": {},
-            "omitted_optional": [],
-            "parameters": {
-              "agent": {
-                "expression": "$AGENT"
-              },
-              "child": {
-                "expression": "$CHILD"
-              },
-              "event": {
-                "expression": "$EVENT"
-              },
-              "type": {
-                "expression": "$KIND"
               }
             }
           }
@@ -55251,7 +55277,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "unverified",
-          "location": "plugin/hooks/stop-wake.sh:453",
+          "location": "plugin/hooks/stop-wake.sh:456",
           "shape": {
             "channel": "parameters",
             "complete": false,
@@ -63108,7 +63134,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "unverified",
-          "location": "plugin/hooks/session-start.sh:324",
+          "location": "plugin/hooks/session-start.sh:327",
           "shape": {
             "channel": "parameters",
             "complete": false,
@@ -66171,7 +66197,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "cli",
-      "location": "plugin/hooks/coordination-prompt.sh:30",
+      "location": "plugin/hooks/coordination-prompt.sh:33",
       "name": "doorbell-prompt-seen",
       "shape": {
         "argv_source": "doorbell-prompt-seen >/dev/null 2>&1 || true",
@@ -67357,7 +67383,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/docker-compose.rust-shadow.yml:15",
+      "location": "ops/docker-compose.rust-shadow.yml:19",
       "name": "PSEUDOLIFE_SHADOW_CONFIGURATION",
       "shape": {
         "channel": "environment",
@@ -67371,7 +67397,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/docker-compose.rust-shadow.yml:24",
+      "location": "ops/docker-compose.rust-shadow.yml:28",
       "name": "PSEUDOLIFE_READ_ONLY",
       "shape": {
         "channel": "environment",
@@ -67385,7 +67411,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/docker-compose.rust-shadow.yml:25",
+      "location": "ops/docker-compose.rust-shadow.yml:29",
       "name": "PSEUDOLIFE_SHADOW_DB_NAME",
       "shape": {
         "channel": "environment",
@@ -67399,7 +67425,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/docker-compose.rust-shadow.yml:25",
+      "location": "ops/docker-compose.rust-shadow.yml:29",
       "name": "PSEUDOLIFE_SHADOW_DB_PASSWORD",
       "shape": {
         "channel": "environment",
@@ -67413,26 +67439,12 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/docker-compose.rust-shadow.yml:29",
+      "location": "ops/docker-compose.rust-shadow.yml:33",
       "name": "PSEUDOLIFE_DAEMON_MODELS_DIR",
       "shape": {
         "channel": "environment",
         "complete": false,
         "expression": "/models",
-        "parameters": {}
-      },
-      "usage": "assignment-candidate"
-    },
-    {
-      "dynamic": "unresolved",
-      "evidence": "static",
-      "kind": "environment",
-      "location": "ops/docker-compose.rust-shadow.yml:35",
-      "name": "PSEUDOLIFE_SHADOW_PORT",
-      "shape": {
-        "channel": "environment",
-        "complete": false,
-        "expression": "-8766}:8765\"",
         "parameters": {}
       },
       "usage": "assignment-candidate"
@@ -67447,6 +67459,20 @@
         "channel": "environment",
         "complete": false,
         "expression": "-pseudolife-daemon-rust:checkout}",
+        "parameters": {}
+      },
+      "usage": "assignment-candidate"
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "environment",
+      "location": "ops/docker-compose.rust-shadow.yml:45",
+      "name": "PSEUDOLIFE_SHADOW_PORT",
+      "shape": {
+        "channel": "environment",
+        "complete": false,
+        "expression": "-8766}:8765\"",
         "parameters": {}
       },
       "usage": "assignment-candidate"
@@ -69666,7 +69692,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "docs/dev/run-rust-beside-python.md:120",
+      "location": "docs/dev/run-rust-beside-python.md:122",
       "method": null,
       "name": "/health",
       "shape": {
@@ -75945,7 +75971,7 @@
       "reason": "Manual source fingerprint changed or source is missing; prior trusted shapes withdrawn."
     },
     {
-      "actual_sha256": "408b02f3c540ceaad1ff2483c43a8c420bd56effeff312fe7a4a44481eee9f4c",
+      "actual_sha256": "23bf07a65f77ebdd696942a43f7b42f1ae74d517ab995a08587ac0a5cfbac22b",
       "dynamic": "unresolved",
       "expected_sha256": "15a13bde5ec2dd2de9dc5ef1c8250bf8fcd404be0f68308eb28456fa26253347",
       "location": "plugin/hooks/stop-wake.sh:1",
@@ -75953,19 +75979,19 @@
       "reason": "Manual source fingerprint changed or source is missing; prior trusted shapes withdrawn."
     },
     {
-      "actual_sha256": "4c1e3e2406cf3f774ddcd545acd673adc7a61554d4f50139ae4c56a3e0b2a89f",
-      "dynamic": "unresolved",
-      "expected_sha256": "e033c719f4f32ee2a3513923481e5ef9c75617a143981ca2c814e4b6e2c4fffc",
-      "location": "rust/shim/src/board/adapter.rs:1",
-      "path": "rust/shim/src/board/adapter.rs",
-      "reason": "Manual source fingerprint changed or source is missing; prior trusted shapes withdrawn."
-    },
-    {
-      "actual_sha256": "69b4656e0e4c1e2cc8cbca9e65cfce46c30c2333f57be6145884ca26abef59e1",
+      "actual_sha256": "91c5c5c1d416f0e8e04fdb6cecda4cb2885fc6a3cd20e5340e1a2f3a2c5a71f3",
       "dynamic": "unresolved",
       "expected_sha256": "d98b867a79d74049802aee8a6457708c0c28844b11a679bb198d90b2c2d2e798",
       "location": "plugin/hooks/session-start.sh:1",
       "path": "plugin/hooks/session-start.sh",
+      "reason": "Manual source fingerprint changed or source is missing; prior trusted shapes withdrawn."
+    },
+    {
+      "actual_sha256": "9e365e6e195f3dcf98ff9dfb1332d1d7ba782f8bb7c69feda88114e2ba71a535",
+      "dynamic": "unresolved",
+      "expected_sha256": "6c62da28e230afc022d3424cf2c49449b6cf2a103daa80849871ab7e28d69b8b",
+      "location": "plugin/hooks/subagent-board.sh:1",
+      "path": "plugin/hooks/subagent-board.sh",
       "reason": "Manual source fingerprint changed or source is missing; prior trusted shapes withdrawn."
     },
     {
@@ -75974,6 +76000,22 @@
       "expected_sha256": "2e91f8a822f0cf79daa16276ded3430394e8606d08ab259d7ac9dbfa8022729a",
       "location": "rust/shim/src/cli/episode.rs:1",
       "path": "rust/shim/src/cli/episode.rs",
+      "reason": "Manual source fingerprint changed or source is missing; prior trusted shapes withdrawn."
+    },
+    {
+      "actual_sha256": "eddfad7e6e2c695b418e4fe6ef39148804e318c52444e6b6ba4c31f1299665e7",
+      "dynamic": "unresolved",
+      "expected_sha256": "e033c719f4f32ee2a3513923481e5ef9c75617a143981ca2c814e4b6e2c4fffc",
+      "location": "rust/shim/src/board/adapter.rs:1",
+      "path": "rust/shim/src/board/adapter.rs",
+      "reason": "Manual source fingerprint changed or source is missing; prior trusted shapes withdrawn."
+    },
+    {
+      "actual_sha256": "f143d3aa85d1b354497dfd9ad30b47e753638633cb5a153fda619d0b68c172c7",
+      "dynamic": "unresolved",
+      "expected_sha256": "dd4b3363c862443c89e613887c551179f76b874a1f8098002730532c6da30463",
+      "location": "plugin/hooks/session-end.sh:1",
+      "path": "plugin/hooks/session-end.sh",
       "reason": "Manual source fingerprint changed or source is missing; prior trusted shapes withdrawn."
     },
     {
@@ -76750,7 +76792,7 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/dev/merge-batches.md:409",
+      "location": "docs/dev/merge-batches.md:456",
       "reason": "forwarded parameters"
     },
     {
@@ -76813,13 +76855,13 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/dev/run-rust-beside-python.md:120",
+      "location": "docs/dev/run-rust-beside-python.md:122",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/dev/run-rust-beside-python.md:120",
+      "location": "docs/dev/run-rust-beside-python.md:122",
       "reason": "request target supplied dynamically or external"
     },
     {
@@ -76863,13 +76905,13 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/dev/run-rust-beside-python.md:89",
+      "location": "docs/dev/run-rust-beside-python.md:91",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:GET /api/facts"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/dev/run-rust-beside-python.md:94",
+      "location": "docs/dev/run-rust-beside-python.md:96",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
@@ -91376,99 +91418,117 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/docker-compose.rust-shadow.yml:15",
+      "location": "ops/docker-compose.rust-shadow.yml:19",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_SHADOW_CONFIGURATION"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/docker-compose.rust-shadow.yml:18",
+      "location": "ops/docker-compose.rust-shadow.yml:22",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_DAEMON_MEM_LIMIT"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/docker-compose.rust-shadow.yml:19",
+      "location": "ops/docker-compose.rust-shadow.yml:23",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_DAEMON_MEM_LIMIT"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/docker-compose.rust-shadow.yml:24",
+      "location": "ops/docker-compose.rust-shadow.yml:28",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_READ_ONLY"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/docker-compose.rust-shadow.yml:25",
+      "location": "ops/docker-compose.rust-shadow.yml:29",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DATABASE_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/docker-compose.rust-shadow.yml:25",
+      "location": "ops/docker-compose.rust-shadow.yml:29",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_SHADOW_DB_NAME"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/docker-compose.rust-shadow.yml:25",
+      "location": "ops/docker-compose.rust-shadow.yml:29",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_SHADOW_DB_PASSWORD"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/docker-compose.rust-shadow.yml:26",
+      "location": "ops/docker-compose.rust-shadow.yml:30",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_HOST"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/docker-compose.rust-shadow.yml:27",
+      "location": "ops/docker-compose.rust-shadow.yml:31",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_PORT"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/docker-compose.rust-shadow.yml:28",
+      "location": "ops/docker-compose.rust-shadow.yml:32",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DATA_DIR"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/docker-compose.rust-shadow.yml:29",
+      "location": "ops/docker-compose.rust-shadow.yml:33",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_DAEMON_MODELS_DIR"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/docker-compose.rust-shadow.yml:30",
+      "location": "ops/docker-compose.rust-shadow.yml:34",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TRUST_BIND"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/docker-compose.rust-shadow.yml:31",
+      "location": "ops/docker-compose.rust-shadow.yml:35",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/docker-compose.rust-shadow.yml:32",
+      "location": "ops/docker-compose.rust-shadow.yml:36",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/docker-compose.rust-shadow.yml:35",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:environment:PSEUDOLIFE_SHADOW_PORT"
     },
     {
       "dynamic": "unresolved",
       "location": "ops/docker-compose.rust-shadow.yml:4",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_RUST_IMAGE"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.rust-shadow.yml:41",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_WRITER_ID"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.rust-shadow.yml:42",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOOLSET"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.rust-shadow.yml:43",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TIER_MAP"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.rust-shadow.yml:45",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:environment:PSEUDOLIFE_SHADOW_PORT"
     },
     {
       "dynamic": "unresolved",
@@ -96140,90 +96200,90 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/hooks/coordination-prompt.sh:17",
+      "location": "plugin/hooks/coordination-prompt.sh:20",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_DIGEST_DIR"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/hooks/coordination-prompt.sh:26",
+      "location": "plugin/hooks/coordination-prompt.sh:29",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_SHIM_LAUNCHER"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/hooks/coordination-prompt.sh:30",
+      "location": "plugin/hooks/coordination-prompt.sh:33",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:cli:doorbell-prompt-seen"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/hooks/coordination-start.sh:131",
+      "location": "plugin/hooks/coordination-start.sh:134",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_DIGEST_DIR"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/hooks/coordination-start.sh:207",
+      "location": "plugin/hooks/coordination-start.sh:210",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_AGENT_COORDINATION"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/hooks/coordination-start.sh:215",
+      "location": "plugin/hooks/coordination-start.sh:218",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_AGENT_COORDINATION"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/hooks/coordination-start.sh:216",
+      "location": "plugin/hooks/coordination-start.sh:219",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_AGENT_COORDINATION"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/hooks/coordination-start.sh:249",
+      "location": "plugin/hooks/coordination-start.sh:252",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_PRIVATE_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/hooks/coordination-start.sh:293",
+      "location": "plugin/hooks/coordination-start.sh:296",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_CODEX_HOOK"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/hooks/coordination-start.sh:321",
+      "location": "plugin/hooks/coordination-start.sh:324",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DAEMON_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/hooks/coordination-start.sh:322",
+      "location": "plugin/hooks/coordination-start.sh:325",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/hooks/coordination-start.sh:329",
+      "location": "plugin/hooks/coordination-start.sh:332",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/hooks/coordination-start.sh:347",
+      "location": "plugin/hooks/coordination-start.sh:350",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/hooks/coordination-start.sh:387",
+      "location": "plugin/hooks/coordination-start.sh:390",
       "reason": "request target supplied dynamically or external"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/hooks/coordination-start.sh:388",
+      "location": "plugin/hooks/coordination-start.sh:391",
       "reason": "built URL"
     },
     {
@@ -96390,190 +96450,169 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/hooks/session-end.sh:139",
+      "location": "plugin/hooks/session-end.sh:142",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_DIGEST_DIR"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/hooks/session-end.sh:185",
+      "location": "plugin/hooks/session-end.sh:188",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_CODEX_HOOK"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/hooks/session-end.sh:213",
+      "location": "plugin/hooks/session-end.sh:216",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DAEMON_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/hooks/session-end.sh:214",
+      "location": "plugin/hooks/session-end.sh:217",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/hooks/session-end.sh:221",
+      "location": "plugin/hooks/session-end.sh:224",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/hooks/session-end.sh:239",
+      "location": "plugin/hooks/session-end.sh:242",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/hooks/session-end.sh:267",
+      "location": "plugin/hooks/session-end.sh:270",
       "reason": "request target supplied dynamically or external"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/hooks/session-end.sh:271",
-      "reason": "built URL",
-      "resolved_by": [
-        "route:POST /api/hook/session-end"
-      ]
+      "location": "plugin/hooks/session-end.sh:274",
+      "reason": "built URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/hooks/session-end.sh:32",
+      "location": "plugin/hooks/session-end.sh:35",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_PRIVATE_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/hooks/session-start.sh:111",
+      "location": "plugin/hooks/session-start.sh:114",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DAEMON_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/hooks/session-start.sh:112",
+      "location": "plugin/hooks/session-start.sh:115",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/hooks/session-start.sh:119",
+      "location": "plugin/hooks/session-start.sh:122",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/hooks/session-start.sh:137",
+      "location": "plugin/hooks/session-start.sh:140",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/hooks/session-start.sh:179",
+      "location": "plugin/hooks/session-start.sh:182",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_DIGEST_DIR"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/hooks/session-start.sh:222",
+      "location": "plugin/hooks/session-start.sh:225",
       "reason": "request target supplied dynamically or external"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/hooks/session-start.sh:223",
+      "location": "plugin/hooks/session-start.sh:226",
       "reason": "built URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/hooks/session-start.sh:255",
+      "location": "plugin/hooks/session-start.sh:258",
       "reason": "request target supplied dynamically or external"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/hooks/session-start.sh:256",
+      "location": "plugin/hooks/session-start.sh:259",
       "reason": "built URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/hooks/session-start.sh:300",
+      "location": "plugin/hooks/session-start.sh:303",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_SHIM_LAUNCHER"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/hooks/session-start.sh:322",
+      "location": "plugin/hooks/session-start.sh:325",
       "reason": "request target supplied dynamically or external"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/hooks/session-start.sh:323",
+      "location": "plugin/hooks/session-start.sh:326",
       "reason": "built URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/hooks/session-start.sh:324",
+      "location": "plugin/hooks/session-start.sh:327",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "tool:memory_stats"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/hooks/session-start.sh:39",
+      "location": "plugin/hooks/session-start.sh:42",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_PRIVATE_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/hooks/session-start.sh:83",
+      "location": "plugin/hooks/session-start.sh:86",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_CODEX_HOOK"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "plugin/hooks/stop-wake.sh:133",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_AGENT_WAKE_HOOK"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "plugin/hooks/stop-wake.sh:134",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_AGENT_COORDINATION"
     },
     {
       "dynamic": "unresolved",
       "location": "plugin/hooks/stop-wake.sh:136",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_AGENT_WAKE_HOOK"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "plugin/hooks/stop-wake.sh:137",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_AGENT_COORDINATION"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "plugin/hooks/stop-wake.sh:139",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_CODEX_HOOK"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/hooks/stop-wake.sh:187",
+      "location": "plugin/hooks/stop-wake.sh:190",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_DIGEST_DIR"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/hooks/stop-wake.sh:260",
+      "location": "plugin/hooks/stop-wake.sh:263",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_PRIVATE_FILE"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "plugin/hooks/stop-wake.sh:321",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_DAEMON_URL"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "plugin/hooks/stop-wake.sh:321",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "plugin/hooks/stop-wake.sh:322",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
     },
     {
       "dynamic": "unresolved",
@@ -96583,7 +96622,7 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/hooks/stop-wake.sh:325",
+      "location": "plugin/hooks/stop-wake.sh:324",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
@@ -96595,57 +96634,75 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/hooks/stop-wake.sh:363",
+      "location": "plugin/hooks/stop-wake.sh:327",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DAEMON_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/hooks/stop-wake.sh:364",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "plugin/hooks/stop-wake.sh:371",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "plugin/hooks/stop-wake.sh:380",
+      "location": "plugin/hooks/stop-wake.sh:328",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/hooks/stop-wake.sh:394",
+      "location": "plugin/hooks/stop-wake.sh:328",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "plugin/hooks/stop-wake.sh:366",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_DAEMON_URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "plugin/hooks/stop-wake.sh:367",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "plugin/hooks/stop-wake.sh:374",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "plugin/hooks/stop-wake.sh:383",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "plugin/hooks/stop-wake.sh:397",
       "reason": "request target supplied dynamically or external"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/hooks/stop-wake.sh:395",
+      "location": "plugin/hooks/stop-wake.sh:398",
       "reason": "built URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/hooks/stop-wake.sh:423",
+      "location": "plugin/hooks/stop-wake.sh:426",
       "reason": "request target supplied dynamically or external"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/hooks/stop-wake.sh:424",
+      "location": "plugin/hooks/stop-wake.sh:427",
       "reason": "built URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/hooks/stop-wake.sh:453",
+      "location": "plugin/hooks/stop-wake.sh:456",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "tool:memory_agents"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/hooks/stop-wake.sh:478",
+      "location": "plugin/hooks/stop-wake.sh:481",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_AGENT_WAKE_HOOK_WAIT"
     },
@@ -96741,80 +96798,77 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/hooks/subagent-board.sh:136",
+      "location": "plugin/hooks/subagent-board.sh:139",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_PRIVATE_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/hooks/subagent-board.sh:167",
+      "location": "plugin/hooks/subagent-board.sh:170",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/hooks/subagent-board.sh:167",
+      "location": "plugin/hooks/subagent-board.sh:170",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/hooks/subagent-board.sh:168",
+      "location": "plugin/hooks/subagent-board.sh:171",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DAEMON_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/hooks/subagent-board.sh:174",
+      "location": "plugin/hooks/subagent-board.sh:177",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/hooks/subagent-board.sh:175",
+      "location": "plugin/hooks/subagent-board.sh:178",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/hooks/subagent-board.sh:176",
+      "location": "plugin/hooks/subagent-board.sh:179",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/hooks/subagent-board.sh:177",
+      "location": "plugin/hooks/subagent-board.sh:180",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/hooks/subagent-board.sh:185",
+      "location": "plugin/hooks/subagent-board.sh:188",
       "reason": "request target supplied dynamically or external"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/hooks/subagent-board.sh:186",
-      "reason": "built URL",
-      "resolved_by": [
-        "route:POST /api/hook/subagent"
-      ]
+      "location": "plugin/hooks/subagent-board.sh:189",
+      "reason": "built URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/hooks/subagent-board.sh:35",
+      "location": "plugin/hooks/subagent-board.sh:38",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_AGENT_COORDINATION"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/hooks/subagent-board.sh:36",
+      "location": "plugin/hooks/subagent-board.sh:39",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_CODEX_HOOK"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/hooks/subagent-board.sh:71",
+      "location": "plugin/hooks/subagent-board.sh:74",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_DIGEST_DIR"
     },
@@ -96989,115 +97043,115 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/board.rs:108",
+      "location": "rust/shim/src/board.rs:109",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_DIGEST_DIR"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/board.rs:112",
+      "location": "rust/shim/src/board.rs:113",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_AGENT_STATE"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/board.rs:119",
+      "location": "rust/shim/src/board.rs:120",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_AGENT_COORDINATION"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/board.rs:126",
+      "location": "rust/shim/src/board.rs:127",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_AGENT_LABEL"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/board.rs:128",
+      "location": "rust/shim/src/board.rs:129",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_AGENT_PROJECT"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/board.rs:129",
+      "location": "rust/shim/src/board.rs:130",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_AGENT_TASK"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/board.rs:130",
+      "location": "rust/shim/src/board.rs:131",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_AGENT_WAKE"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/board.rs:131",
+      "location": "rust/shim/src/board.rs:132",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_CODEX_SERVER_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/board.rs:132",
+      "location": "rust/shim/src/board.rs:133",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_CODEX_SERVER_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/board.rs:133",
+      "location": "rust/shim/src/board.rs:134",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_CODEX_DOORBELL"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/board.rs:134",
+      "location": "rust/shim/src/board.rs:135",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_CODEX_BIN"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/board.rs:282",
+      "location": "rust/shim/src/board.rs:283",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_AGENT_STATE"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/board.rs:282",
+      "location": "rust/shim/src/board.rs:283",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_AGENT_STATE_DIR"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/board.rs:401",
+      "location": "rust/shim/src/board.rs:402",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_CODEX_BIN"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/board.rs:404",
+      "location": "rust/shim/src/board.rs:405",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_CODEX_BIN"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/board.rs:424",
+      "location": "rust/shim/src/board.rs:425",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_CODEX_DOORBELL"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/board.rs:433",
+      "location": "rust/shim/src/board.rs:434",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_CODEX_DOORBELL"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/board.rs:503",
+      "location": "rust/shim/src/board.rs:504",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:GET /api/hook/coordination-start"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/board.rs:503",
+      "location": "rust/shim/src/board.rs:504",
       "reason": "built URL"
     },
     {
@@ -97108,19 +97162,19 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/board/adapter.rs:1024",
+      "location": "rust/shim/src/board/adapter.rs:1028",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "coordination:register"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/board/adapter.rs:1039",
+      "location": "rust/shim/src/board/adapter.rs:1043",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "coordination:register"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/board/adapter.rs:1556",
+      "location": "rust/shim/src/board/adapter.rs:1565",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "coordination:receive"
     },
@@ -97167,19 +97221,19 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/board/adapter.rs:920",
+      "location": "rust/shim/src/board/adapter.rs:924",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "coordination:heartbeat"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/board/adapter.rs:957",
+      "location": "rust/shim/src/board/adapter.rs:961",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "coordination:attach"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/board/adapter.rs:971",
+      "location": "rust/shim/src/board/adapter.rs:975",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "coordination:attach"
     },
@@ -98438,7 +98492,13 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/lease/lock.rs:9",
+      "location": "rust/shim/src/cli/lease/lock.rs:11",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_LEASE_LOCK_DIR"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/lease/lock.rs:15",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_LEASE_LOCK_DIR"
     },

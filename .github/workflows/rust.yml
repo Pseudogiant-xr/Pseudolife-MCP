@@ -1223,7 +1223,13 @@ jobs:
           if-no-files-found: warn
       - name: Daemon security admission parity
         if: matrix.suite == 'cli-live'
-        timeout-minutes: 10
+        # About forty harness rows. Hosted windows-latest 2026-11-01..04:
+        # 313-470 s. The self-hosted Windows workers: 444, 483 and 585 s
+        # passing, and 602/603 s cut off by ten minutes with every finished
+        # mutant caught (runs 41436144681, 41623700371), at 12-16 s a row
+        # while both self-hosted lanes shared the host. Twenty is about twice
+        # their slowest pass; hosted keeps ten.
+        timeout-minutes: ${{ runner.environment == 'self-hosted' && runner.os == 'Windows' && 20 || 10 }}
         shell: pwsh
         env:
           PL_HARNESS_SLICE: http
@@ -1751,6 +1757,12 @@ jobs:
       PARITY_ARTIFACT_PREFIX: self-hosted-
       PARITY_YIELD_MINUTES: '60'
       PARITY_MIN_FREE_GB: '8'
+      # The judges' pinned process tests (evals/rust_port/phase1.py, 240 s
+      # by default): the Windows workers took 129-149 s against hosted's
+      # 95-114 s and once ran past 240 s on a shared host (2026-11-03). 480
+      # is twice the old limit, about three times their slowest pass; empty
+      # keeps the default.
+      PARITY_PROCESS_TEST_TIMEOUT: ${{ matrix.runner == 'windows' && '480' || '' }}
     steps: *parity_steps
 
   body-evidence:
@@ -2089,6 +2101,9 @@ jobs:
     outputs:
       iterations: ${{ steps.plan.outputs.iterations }}
       kind: ${{ steps.plan.outputs.kind }}
+      # true for a cargo selection whose tests need a disposable PostgreSQL
+      # (stress.py CARGO_DATABASE_PROFILES); the other kinds always get one.
+      postgres: ${{ steps.plan.outputs.postgres }}
       oracle_base: ${{ steps.oracle.outputs.oracle_base }}
     steps:
       - uses: actions/checkout@v4
@@ -2221,12 +2236,15 @@ jobs:
           cache-dependency-path: pyproject.toml
       # A cargo iteration gets what the Rust job's Nextest step has: the
       # Python SDK fixture dependency, no checkout install, no PostgreSQL
-      # and no event oracle.
+      # and no event oracle. A cargo selection with a database profile also
+      # gets the checkout install (lease_ci.py and pgdisposable import it;
+      # it brings the embedding fixture's numpy, onnx and tokenizers and the
+      # onnxruntime wheel whose library ORT_DYLIB_PATH names) and PostgreSQL.
       - name: Install the Python SDK fixture dependency
         if: env.STRESS_KIND == 'cargo'
         run: python -m pip install "mcp==2.2.0"
       - name: Install checkout and test dependencies
-        if: env.STRESS_KIND != 'cargo'
+        if: env.STRESS_KIND != 'cargo' || needs.stress-plan.outputs.postgres == 'true'
         timeout-minutes: 15
         shell: pwsh
         run: |
@@ -2299,7 +2317,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           "PSEUDOLIFE_PORT_ORACLE_ROOT=$oracleMetadata" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Prepare disposable PostgreSQL
-        if: env.STRESS_KIND != 'cargo'
+        if: env.STRESS_KIND != 'cargo' || needs.stress-plan.outputs.postgres == 'true'
         timeout-minutes: 10
         shell: pwsh
         env:

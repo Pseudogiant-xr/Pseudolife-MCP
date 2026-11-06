@@ -156,11 +156,9 @@ fn digest_path(session: &OsString) -> Option<PathBuf> {
         .filter(|v| !v.is_empty())
         .map(PathBuf::from)
         .unwrap_or_else(|| {
-            let variable = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
-            std::env::var_os(variable)
-                .map(PathBuf::from)
-                .or_else(dirs::home_dir)
-                .unwrap_or_default()
+            // The board's digest root (`board::Options`), as Python's
+            // `default_digest_dir` reads `Path.home()`.
+            crate::credentials::python_home_with(|key| std::env::var_os(key))
                 .join(".pseudolife-mcp")
                 .join("digests")
         });

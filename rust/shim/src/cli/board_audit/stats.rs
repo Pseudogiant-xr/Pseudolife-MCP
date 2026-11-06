@@ -38,8 +38,9 @@ pub(super) fn durations_path(args: &Stats) -> PathBuf {
         .filter(|v| !v.is_empty())
         .map(PathBuf::from)
         .unwrap_or_else(|| {
-            dirs::home_dir()
-                .unwrap_or_default()
+            // Python's writer and reader use Path.home(), which honours
+            // USERPROFILE on Windows.
+            crate::credentials::python_home_with(|key| std::env::var_os(key))
                 .join(".pseudolife-mcp")
                 .join("locks")
         });

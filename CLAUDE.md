@@ -234,7 +234,7 @@ current merge ref, except as the `merge-forward` skill allows):
 - **An integration batch** (`integrate/<date>-batch-N` from `python
   ops/integrate.py build`, over `ready-to-batch` PRs with their review,
   their own local targeted validation and own-head CI that has not
-  failed (pending or cancelled is fine, since the batch's CI is its
+  failed (other pending or cancelled CI is fine, since the batch's CI is its
   members' CI),
   built whenever none is open and one is ready, a lone PR or release cut
   as a batch of one) passes the local WSL full
@@ -253,6 +253,7 @@ current merge ref, except as the `merge-forward` skill allows):
   squash, so GitHub marks its members merged (the command: item 4).
   Procedure:
   `docs/dev/merge-batches.md`.
+  Batch admission requires the own-head early snapshot replay checkpoint described in `docs/dev/merge-batches.md`, so unfinished or red required replays stay out.
 - These suite-gate rules (the 2026-09-28 trial with its 2026-10-05
   amendments) are permanent by maintainer decision of 2026-10-19.
 

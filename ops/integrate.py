@@ -43,6 +43,7 @@ is an admin bypass, so this is the check GitHub does not make. Needs git
 from __future__ import annotations
 
 import argparse
+import ast
 import copy
 import datetime as dt
 import functools
@@ -160,6 +161,9 @@ class Member:
     labeled_at: str | None = None
     draft: bool = False
     checks_why: str = ""   # for `unverified`: the read that failed
+    snapshot_required: bool | None = None
+    snapshot: str = "not required"
+    snapshot_why: str = ""
 
 
 @dataclass
@@ -248,6 +252,156 @@ CANCELLED = "CANCELLED"
 TIMEOUT_ANNOTATION = re.compile(
     r"The job (running on runner .+ )?has exceeded the maximum execution time")
 _ACTIONS_JOB = re.compile(r"/actions/runs/\d+/job/(\d+)(?:[?#].*)?$")
+SNAPSHOT_WORKFLOW = ".github/workflows/rust.yml"
+SNAPSHOT_JOBS = ("Rust / ubuntu-latest", "Rust / windows-latest")
+SNAPSHOT_STEP = "Replay touched PR goldens"
+SNAPSHOT_SELECTOR = "rust/ci/pr_precheck.py"
+
+# Execute only the frozen base's selector code in an isolated interpreter;
+# the checkout's Python files are inputs read as text, never imported.
+_SNAPSHOT_INPUTS = """import json, pathlib, sys, types
+data = json.load(sys.stdin)
+root = pathlib.Path(data['root'])
+scope = types.ModuleType('parity_scope')
+scope.__file__ = str(root / 'rust/ci/parity_scope.py')
+sys.modules['parity_scope'] = scope
+exec(compile(data['scope'], scope.__file__, 'exec'), scope.__dict__)
+selector = types.ModuleType('snapshot_selector')
+selector.__file__ = str(root / 'rust/ci/pr_precheck.py')
+exec(compile(data['selector'], selector.__file__, 'exec'), selector.__dict__)
+files = data['files']
+docs_only = any(scope.is_docs(path) for path in files) and all(
+    scope.is_docs(path) or path == 'rust/producer-census.json' for path in files)
+print(json.dumps(not docs_only and any(selector.rows_for(path, {}) for path in files)))
+"""
+
+
+def _has_snapshot_selector(base: str) -> bool:
+    # A pre-feature base has no checkpoint to require. A failed Git read
+    # raises instead of being mistaken for an absent selector.
+    return bool(_out("ls-tree", base, "--", SNAPSHOT_SELECTOR))
+
+
+@functools.lru_cache(maxsize=None)
+def _base_has_snapshot_admission(base: str) -> bool:
+    """Read the frozen builder's Member schema without executing its code."""
+    try:
+        tree = ast.parse(_out("show", f"{base}:ops/integrate.py"))
+    except (Refusal, SyntaxError) as exc:
+        raise Refusal(_unread("the base builder's admission schema", exc)
+                      + "; fix that read and retry open") from None
+    return any(isinstance(node, ast.ClassDef) and node.name == "Member" and any(
+        isinstance(field, ast.AnnAssign) and isinstance(field.target, ast.Name)
+        and field.target.id == "snapshot_required" for field in node.body)
+        for node in tree.body)
+
+
+def _snapshot_requirement(member: Member, base: str) -> tuple[bool | None, str]:
+    try:
+        if not _has_snapshot_selector(base):
+            return False, ""
+        if _fetch_head(member.number) != member.sha:
+            return None, "the PR head moved while snapshot admission was read; retry build"
+        merged = git("merge-tree", "--write-tree", "--name-only", "--no-messages",
+                     base, member.sha, check=False)
+        if merged.returncode == 1:
+            # Keep conflicts on the existing merge/drop path, rather than
+            # waiting for CI that GitHub cannot run on a conflicting PR.
+            # Budget-only conflicts retain normalization and batch CI.
+            return False, "snapshot admission deferred to conflict handling (budget normalization or drop)"
+        if merged.returncode != 0 or not merged.stdout.strip():
+            raise ValueError("the PR merge tree could not be read")
+        tree = merged.stdout.splitlines()[0]
+        # CI diffs its synthetic PR merge against the base parent. A
+        # three-dot diff would retain runtime edits already landed on base.
+        files = _out("diff", "--name-only", "--no-renames", base, tree).splitlines()
+        payload = {"root": _out("rev-parse", "--show-toplevel"),
+                   "selector": _out("show", f"{base}:{SNAPSHOT_SELECTOR}"),
+                   "scope": _out("show", f"{base}:{CI_SCOPE_CODE}"),
+                   "files": sorted(files)}
+        result = _run([sys.executable, "-I", "-c", _SNAPSHOT_INPUTS],
+                      input=json.dumps(payload), check=False)
+        if result.returncode:
+            return None, "the frozen snapshot input selector failed; retry build after fixing its inputs"
+        required = json.loads(result.stdout)
+        if type(required) is not bool:
+            raise ValueError("snapshot input selector returned no boolean")
+        return required, ""
+    except (Refusal, OSError, ValueError) as exc:
+        return None, _unread("snapshot inputs", exc) + "; retry build"
+
+
+def _snapshot_state(sha: str, rollup: list[dict] | None,
+                    required: bool | None) -> tuple[str, str]:
+    """Read the exact Actions jobs and step, never their output text."""
+    if required is False:
+        return "not required", ""
+    if required is None:
+        return "unverified", "snapshot inputs have not been verified; rebuild the batch"
+    eligible, runs = [], {}
+    try:
+        for check in rollup or []:
+            name = check.get("name")
+            if name not in SNAPSHOT_JOBS or "context" in check:
+                continue
+            match = _ACTIONS_JOB.search(check.get("detailsUrl") or "")
+            if not match:
+                continue
+            meta = json.loads(gh("api", f"repos/{{owner}}/{{repo}}/actions/jobs/{match.group(1)}"))
+            run_id = int(meta["run_id"])
+            if run_id not in runs:
+                runs[run_id] = json.loads(gh("api", f"repos/{{owner}}/{{repo}}/actions/runs/{run_id}"))
+            run = runs[run_id]
+            if (meta.get("head_sha") != sha or run.get("head_sha") != sha
+                    or meta.get("name") != name or run.get("event") != "pull_request"
+                    or str(run.get("path", "")).split("@", 1)[0] != SNAPSHOT_WORKFLOW
+                    or int(meta["run_attempt"]) != int(run["run_attempt"])):
+                continue
+            eligible.append({"name": name, "workflowName": SNAPSHOT_WORKFLOW,
+                             "status": meta["status"], "conclusion": meta.get("conclusion"),
+                             "startedAt": meta.get("started_at"), "completedAt": meta.get("completed_at"),
+                             "snapshot_meta": meta})
+        latest = {check["name"]: check["snapshot_meta"] for check in _latest_checks(eligible)}
+        waiting = []
+        for name in SNAPSHOT_JOBS:
+            meta = latest.get(name)
+            steps = meta.get("steps", []) if meta else []
+            matches = [step for step in steps if step.get("name") == SNAPSHOT_STEP]
+            if len(matches) != 1:
+                if meta and _check_state(meta) == CANCELLED:
+                    waiting.append(f"{name} was cancelled before replay; push a new commit or rerun the Rust workflow")
+                elif meta and meta.get("status") == "completed":
+                    waiting.append(f"{name}: exact replay step absent or ambiguous; push a head containing "
+                                   "the step (merge master forward if needed), or rerun the Rust workflow")
+                else:
+                    waiting.append(name)
+                continue
+            step = matches[0]
+            conclusion = str(step.get("conclusion") or "").upper()
+            if conclusion in FAILED:
+                return "failing", f"{name}: {SNAPSHOT_STEP} is red on the PR head"
+            if step.get("status") != "completed" or conclusion not in PASSING:
+                if conclusion == CANCELLED or _check_state(meta) == CANCELLED:
+                    waiting.append(f"{name} was cancelled before replay finished; push a new commit or rerun the Rust workflow")
+                else:
+                    waiting.append(name)
+                continue
+            if conclusion == "SKIPPED":
+                prior = [s for s in steps if int(s["number"]) < int(step["number"])]
+                if any(_check_state(s) == CANCELLED for s in prior):
+                    waiting.append(f"{name} was cancelled before replay; push a new commit or rerun the Rust workflow")
+                elif any(_check_state(s) in FAILED for s in prior):
+                    # continue-on-error prerequisites can fail legitimately
+                    # when this OS has no goldens. The job's verdict decides.
+                    if _check_state(meta) in FAILED:
+                        return "failing", f"{name}: snapshot replay skipped in a failed job"
+                    if meta.get("status") != "completed" or _check_state(meta) not in PASSING:
+                        waiting.append(name)
+        if waiting:
+            return "pending", "own-head snapshot replay is pending: " + ", ".join(waiting)
+        return "satisfied", ""
+    except (Refusal, KeyError, TypeError, ValueError) as exc:
+        return "unverified", _unread("snapshot job metadata", exc) + "; retry build/open"
 
 
 def _check_state(check: dict) -> str:
@@ -663,7 +817,7 @@ def _labeled_at(number: int, label: str) -> str | None:
     return max(times) if times else None
 
 
-def ready(label: str) -> list[Member]:
+def ready(label: str, base_sha: str | None = None) -> list[Member]:
     """Open labelled pull requests on master, in label-applied order."""
     fields = "number,title,headRefOid,url,isDraft,reviewDecision,statusCheckRollup"
     rows = json.loads(gh("pr", "list", "--state", "open", "--label", label,
@@ -674,7 +828,13 @@ def ready(label: str) -> list[Member]:
         members.append(Member(number=r["number"], title=r["title"], sha=r["headRefOid"],
                               url=r["url"], review=r.get("reviewDecision") or "NONE",
                               checks=checks, draft=bool(r.get("isDraft")), checks_why=why))
-    for m in members:
+    base_sha = base_sha or _out("rev-parse", f"{REMOTE}/{BASE}")
+    for m, row in zip(members, rows):
+        if not m.draft and m.checks not in ("failing", "unverified"):
+            m.snapshot_required, why = _snapshot_requirement(m, base_sha)
+            m.snapshot, m.snapshot_why = _snapshot_state(
+                m.sha, row.get("statusCheckRollup"), m.snapshot_required)
+            m.snapshot_why = why or m.snapshot_why
         m.labeled_at = _labeled_at(m.number, label)
     # Known label times first, oldest first; the rest by number.
     return sorted(members, key=lambda m: (m.labeled_at is None, m.labeled_at or "",
@@ -769,9 +929,9 @@ def _collision(member: Member, conflicted: list[str], merged: list[Member],
 def _not_ready(m: Member) -> str | None:
     """Why a labelled pull request sits this batch out, keeping its label.
 
-    Its own CI need not be green: the batch's CI is its CI, so pending,
-    cancelled or absent checks admit it. A failing head is a known failure
-    and waits."""
+    Other CI can be pending, cancelled or absent: the batch's CI is its
+    CI. The own-head snapshot checkpoint must finish when required, and a
+    failing head is a known failure and waits."""
     if m.draft:
         return "is a draft"
     if m.checks == "failing":
@@ -781,6 +941,8 @@ def _not_ready(m: Member) -> str | None:
         why = m.checks_why or "GitHub's record of its CI could not be read"
         return (f"{why}, so a timeout or a failure is not ruled out; it joins a "
                 "batch built once that read succeeds")
+    if m.snapshot in ("pending", "failing", "unverified"):
+        return m.snapshot_why or "own-head snapshot replay has not finished successfully"
     return None
 
 
@@ -1426,7 +1588,7 @@ def build(args: argparse.Namespace) -> int:
         raise Refusal("a batch is already open: " + ", ".join(
             f"#{n} ({name})" for n, name, _, _ in open_prs)
             + "; merge or close it before building the next one")
-    members = ready(args.label)
+    members = ready(args.label, base_sha)
     waiting = [(m, _not_ready(m)) for m in members if _not_ready(m)]
     if len(members) - len(waiting) < MIN_MEMBERS:
         print(f"{len(members) - len(waiting)} of {len(members)} pull request(s) "
@@ -1570,12 +1732,22 @@ def _harness_line(args: argparse.Namespace, head: str) -> str:
 
 def _refuse_red_members(plan: Plan) -> None:
     """Refuse when a merged member's own CI turned red after `build`: a
-    known failure the batch would carry. A member whose head moved since is
-    left to its next batch; the batch holds the head that was listed."""
+    known failure the batch would carry, and recheck snapshot admission.
+    A moved head with required snapshot evidence needs a fresh build."""
     for m in plan.merged:
+        if m.snapshot_required is None and _has_snapshot_selector(plan.base_sha):
+            if _base_has_snapshot_admission(plan.base_sha):
+                raise Refusal("the plan lacks the base builder's snapshot admission; rebuild the batch")
+            # The batch can carry the first admission-aware opener while
+            # its master's builder still writes plans without these fields.
+            m.snapshot_required, why = _snapshot_requirement(m, plan.base_sha)
+            if m.snapshot_required is None:
+                raise Refusal(f"#{m.number}: {why}; nothing was opened, fix the cause and retry open")
         view = json.loads(gh("pr", "view", str(m.number), "--json",
                              "headRefOid,statusCheckRollup"))
         if view["headRefOid"] != m.sha:
+            if m.snapshot_required:
+                raise Refusal(f"#{m.number}'s head moved since snapshot admission; rebuild the batch")
             continue
         checks, why = _checks_why(view.get("statusCheckRollup"))
         if checks == "unverified":
@@ -1587,6 +1759,11 @@ def _refuse_red_members(plan: Plan) -> None:
                           "failure this batch would carry. Drop it: switch back with "
                           f"`git switch --detach {REMOTE}/{BASE}`, remove the local "
                           "branch and build again (it sits out while its head is red)")
+        state, why = _snapshot_state(m.sha, view.get("statusCheckRollup"),
+                                     m.snapshot_required if m.snapshot_required is not None else False)
+        m.snapshot, m.snapshot_why = state, why
+        if state in ("failing", "pending", "unverified"):
+            raise Refusal(f"#{m.number}: {why}; nothing was opened, retry once the exact replay passes")
 
 
 def open_(args: argparse.Namespace) -> int:

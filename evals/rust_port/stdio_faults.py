@@ -6,13 +6,16 @@ from .stdio import capture
 from .stdio_capture import initialize, modern_meta
 from .stdio_corpus import ERAS
 from .stdio_fixture import HangingFixture
-from .stdio_judge import StdioPolicy, judge_with_evidence
+from .stdio_judge import StdioPolicy, judge_with_evidence, proactor_abort_evidence, PROACTOR_SELF_PIPE_ABORT_RULE
 
 
 def run(root, command):
     from evals.rust_baseline.daemon import private_directory
     from pseudolife_memory.credentials import _write_token_file
-    cells, differences = [], []
+    cells, differences, applied = [], [], []
+    # The fault cells end the Python shim with its daemon down or refusing;
+    # its closing ProactorEventLoop abort is accepted here, with evidence.
+    policy = StdioPolicy(oracle_proactor_abort=True)
     for fault in ("down", "401", "503", "rotation", "degraded"):
         for era in ERAS:
             fixture = HangingFixture(fault)
@@ -51,7 +54,9 @@ def run(root, command):
                         result.update(arm=arm, era=era, case=fault)
                         pair.append(result)
                 differences.extend({"era": era, "case": fault, **difference}
-                                   for difference in judge_with_evidence(*pair, StdioPolicy()))
+                                   for difference in judge_with_evidence(*pair, policy))
+                applied.extend({"era": era, "case": fault, **event}
+                               for event in proactor_abort_evidence(*pair, policy))
             finally:
                 cleanup = fixture.close()
                 for result in pair:
@@ -59,4 +64,5 @@ def run(root, command):
                 cells.extend(pair)
             print(__import__("json").dumps({"fault": fault, "era": era, "observed": len(pair)}), flush=True)
     return {"cells": cells, "differences": differences,
+            "named_normalizations": [PROACTOR_SELF_PIPE_ABORT_RULE], "normalizations_applied": applied,
             "limitation": "Storage-free fault fixtures; unchanged 8-node tests cover watcher schedules and recovery assertions."}

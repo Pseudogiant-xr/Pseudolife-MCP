@@ -11,6 +11,10 @@ services:
         BUILD_TIME: ${PSEUDOLIFE_BUILD_TIME:-unknown}
         BUILD_SOURCE: checkout
     restart: unless-stopped
+    # The Python writer's daemon user (ops/Dockerfile.daemon): it owns /data
+    # and leaves config.yaml 0600, which root without capabilities cannot
+    # read (#1316). The image gives /models to the same user.
+    user: "10001:10001"
     labels:
       org.pseudolife.shadow.configuration: ${PSEUDOLIFE_SHADOW_CONFIGURATION:-}
     security_opt: [no-new-privileges:true]
@@ -31,6 +35,12 @@ services:
       PSEUDOLIFE_MCP_TOKEN: ${PSEUDOLIFE_MCP_TOKEN:-}
       PSEUDOLIFE_MCP_TOKENS: ${PSEUDOLIFE_MCP_TOKENS:-}
       CUDA_VISIBLE_DEVICES: "-1"
+      # The writer's own settings (ops/docker-compose.yml), so local times,
+      # writer identity and tool tiers read as they do from Python.
+      TZ: ${TZ:-UTC}
+      PSEUDOLIFE_WRITER_ID: ${PSEUDOLIFE_WRITER_ID:-mcp-client}
+      PSEUDOLIFE_MCP_TOOLSET: ${PSEUDOLIFE_MCP_TOOLSET:-core}
+      PSEUDOLIFE_MCP_TIER_MAP: ${PSEUDOLIFE_MCP_TIER_MAP:-}
     ports:
       - "127.0.0.1:${PSEUDOLIFE_SHADOW_PORT:-8766}:8765"
     volumes:
