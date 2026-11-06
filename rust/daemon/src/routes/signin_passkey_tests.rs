@@ -446,6 +446,8 @@ async fn a_code_body_keeps_its_one_kib_limit_and_a_passkey_body_gets_eight() {
     )
     .await;
     assert_eq!((status, out), (503, json!({"error": "signin_unavailable"})));
+    // The 413 above counted; the unreachable bank is refunded.
+    assert_eq!(app.signin_limiter.attempts(), 1);
     let (status, _, _) = call(
         &app,
         browser(
@@ -861,6 +863,9 @@ async fn db_a_key_with_no_sign_in_principal_names_the_recovery() {
             json!({"error": "passkey_signin_unavailable", "hint": unavailable_hint()})
         )
     );
+    // A key that cannot sign anyone in is the person's to fix, not a guess:
+    // refunded.
+    assert_eq!(app.signin_limiter.attempts(), 0);
     let (status, _, _) = call(
         &app,
         bearer("GET", "/api/nope", "rs59-passkey-browser-ghost", None),
