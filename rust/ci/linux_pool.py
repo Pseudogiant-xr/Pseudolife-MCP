@@ -53,7 +53,7 @@ def fetch_variable(repository: str, name: str, token: str) -> str | None:
         if error.code == 404:
             return None
         raise ReadError(f"availability read failed (HTTP {error.code})") from None
-    except (OSError, ValueError, KeyError, TypeError):
+    except (OSError, ValueError, KeyError, TypeError, OverflowError, RecursionError):
         raise ReadError("availability read failed or returned invalid data") from None
 
 
@@ -89,7 +89,7 @@ def select(*, event: str, ref: str, head_ref: str, head_repository: str,
                         reason = "fewer than three workers are idle"
                         if idle == online and idle >= MIN_IDLE:
                             return {"selfhosted_suites": [SUITE], "reason": "fresh spare Linux capacity"}
-            except (ValueError, KeyError, TypeError):
+            except (ValueError, KeyError, TypeError, OverflowError, RecursionError):
                 pass
     return {"selfhosted_suites": [], "reason": reason}
 
@@ -101,12 +101,17 @@ def main() -> int:
     try:
         payload = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text(encoding="utf-8"))
         head_repository = payload.get("pull_request", {}).get("head", {}).get("repo", {}).get("full_name", "")
-    except (OSError, ValueError, KeyError, AttributeError):
+    except Exception:
         head_repository = ""
     context = dict(event=os.environ.get("GITHUB_EVENT_NAME", ""), ref=os.environ.get("GITHUB_REF", ""),
                    head_ref=os.environ.get("GITHUB_HEAD_REF", ""), head_repository=head_repository,
                    repository=os.environ.get("GITHUB_REPOSITORY", ""))
-    result = live_choice(context, os.environ.get("PARITY_VARS_READ_TOKEN", ""))
+    try:
+        result = live_choice(context, os.environ.get("PARITY_VARS_READ_TOKEN", ""))
+    except Exception:
+        # The planner is an optimization. Do not turn an unexpected reader
+        # or parser error into a red check that prevents a hosted batch.
+        result = {"selfhosted_suites": [], "reason": "availability could not be verified; using hosted"}
     if args.github_output:
         with args.github_output.open("a", encoding="utf-8") as stream:
             stream.write("selfhosted_suites=" + json.dumps(result["selfhosted_suites"]) + "\n")

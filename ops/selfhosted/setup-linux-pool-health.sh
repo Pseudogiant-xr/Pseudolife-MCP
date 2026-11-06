@@ -13,8 +13,9 @@ account=$2
 id "$account" >/dev/null
 if [ "$(id -u "$account")" -eq 0 ]; then echo "choose an existing unprivileged controller account" >&2; exit 1; fi
 command -v python3 >/dev/null
-command -v gh >/dev/null
-if ! runuser -u "$account" -- gh auth token >/dev/null 2>&1; then
+service_path=/usr/local/bin:/usr/bin:/bin
+account_home=$(getent passwd "$account" | cut -d: -f6)
+if ! runuser -u "$account" -- env -i HOME="$account_home" USER="$account" LOGNAME="$account" PATH="$service_path" gh auth token >/dev/null 2>&1; then
   echo "the selected account's existing gh credential is unavailable; choose its owning account; nothing changed" >&2
   exit 1
 fi
@@ -32,8 +33,11 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 User=$account
+Environment="HOME=$account_home" "PATH=$service_path"
+UnsetEnvironment=GH_TOKEN GITHUB_TOKEN GH_CONFIG_DIR GH_HOST XDG_CONFIG_HOME
 WorkingDirectory=/
 ExecStart=/usr/bin/python3 -I $lib/linux_pool_health.py --gh-auth
+TimeoutStartSec=90s
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=read-only

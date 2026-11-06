@@ -22,14 +22,14 @@ def runner(identifier, *, online=True, busy=False, label=health.LABEL):
 def test_only_online_idle_linux_workers_count():
     rows = [runner(1), runner(2, busy=True), runner(3, online=False),
             runner(4, label="pseudolife-parity-windows"), runner(5, busy=None)]
-    frame = health.sample(lambda *a: (200, {"runners": rows}), "owner/repo", now=1000)
+    frame = health.sample(lambda *a: (200, {"runners": rows, "total_count": len(rows)}), "owner/repo", now=1000)
     assert frame == {"schema": 1, "observed_at": 1000, "online": 3, "idle": 1}
 
 
 def test_pages_are_deduplicated_and_do_not_publish_names():
     rows = [runner(n) for n in range(30)]
     pages = iter([rows, [runner(0), runner(30)]])
-    frame = health.sample(lambda *a: (200, {"runners": next(pages)}), "owner/repo", now=1000)
+    frame = health.sample(lambda *a: (200, {"runners": next(pages), "total_count": 32}), "owner/repo", now=1000)
     assert frame["online"] == frame["idle"] == 31
     assert set(frame) == {"schema", "observed_at", "online", "idle"}
 
@@ -63,7 +63,7 @@ def test_dry_run_does_not_create_a_variable(capsys):
     calls = []
     def call(verb, path, payload):
         calls.append((verb, path))
-        return 200, {"runners": [runner(1), runner(2), runner(3)]}
+        return 200, {"runners": [runner(1), runner(2), runner(3)], "total_count": 3}
     assert health.main(["--dry-run"], call=call) == 0
     assert len(calls) == 1 and calls[0][1].endswith("actions/runners?per_page=30&page=1")
     assert json.loads(capsys.readouterr().out)["idle"] == 3
@@ -81,7 +81,7 @@ def test_sampling_uses_start_time_so_slow_reads_cannot_refresh_old_observations(
     monkeypatch.setattr(health.time, "time", lambda: clock[0])
     def call(*args):
         clock[0] = 1190
-        return 200, {"runners": [runner(1), runner(2), runner(3)]}
+        return 200, {"runners": [runner(1), runner(2), runner(3)], "total_count": 3}
     assert health.sample(call, "owner/repo")["observed_at"] == 1000
 
 
@@ -94,7 +94,7 @@ def test_existing_gh_credential_is_read_without_logging_or_replacing_it(monkeypa
     def client(token):
         assert token == "fixture-controller-token"
         calls.append("existing credential read")
-        return lambda *a: (200, {"runners": [runner(1), runner(2), runner(3)]})
+        return lambda *a: (200, {"runners": [runner(1), runner(2), runner(3)], "total_count": 3})
     monkeypatch.setattr(health.subprocess, "run", credential)
     monkeypatch.setattr(health, "github", client)
     assert health.main(["--gh-auth", "--dry-run"]) == 0
@@ -110,7 +110,24 @@ def test_gh_auth_failure_does_not_log_credential_output(monkeypatch, capsys):
     assert health.main(["--gh-auth"]) == 1
     output = capsys.readouterr()
     assert "could not be verified" in output.err
+    assert "gh auth status" in output.err
     assert "fixture-private-output" not in output.out + output.err
+
+
+def test_pagination_stops_at_the_advertised_total():
+    calls = []
+    def call(*args):
+        calls.append(args)
+        assert len(calls) == 1, "publisher read beyond the advertised total"
+        return 200, {"total_count": 30, "runners": [runner(n) for n in range(30)]}
+    assert health.sample(call, "owner/repo", now=1000)["online"] == 30
+
+
+@pytest.mark.parametrize("total,rows", [(-1, []), (True, []), (None, []), (301, []),
+                                       (31, [runner(1)])])
+def test_unbounded_or_incomplete_rosters_are_not_published(total, rows):
+    with pytest.raises(health.ApiError):
+        health.sample(lambda *a: (200, {"total_count": total, "runners": rows}), "owner/repo", now=1000)
 
 
 def test_publisher_transport_refuses_credential_redirects(monkeypatch):
@@ -144,7 +161,7 @@ def test_installer_is_confined_to_new_health_service_and_keeps_existing_credenti
     units.mkdir()
     script = script.replace("/usr/local/lib/pseudolife-linux-pool-health", str(lib))
     script = script.replace("/etc/systemd/system", str(units))
-    assert "/etc/" not in script and "/usr/local/" not in script
+    assert "/etc/" not in script and "/usr/local/lib/" not in script
     path = home / "setup.sh"
     path.write_text(script)
     binary = tmp_path / "bin"
@@ -153,7 +170,7 @@ def test_installer_is_confined_to_new_health_service_and_keeps_existing_credenti
     for name, body in {
         "id": '#!/bin/sh\nif [ "$1" = -u ]; then if [ "$#" = 1 ]; then echo 0; else echo 1000; fi; fi\n',
         "gh": '#!/bin/sh\nexit 0\n',
-        "runuser": '#!/bin/sh\nexit 0\n',
+        "runuser": '#!/bin/sh\nshift 2\n[ "$1" = -- ] || exit 1\nshift\nexec "$@"\n',
         "systemctl": '#!/bin/sh\nprintf "%s\\n" "$*" >> "$POOL_TEST_SYSTEMCTL_LOG"\n',
     }.items():
         shim = binary / name
@@ -162,6 +179,23 @@ def test_installer_is_confined_to_new_health_service_and_keeps_existing_credenti
     import os
     monkeypatch.setenv("PATH", str(binary) + os.pathsep + os.environ["PATH"])
     monkeypatch.setenv("POOL_TEST_SYSTEMCTL_LOG", str(log))
+    account_home = tmp_path / "account-home"
+    account_home.mkdir()
+    # Replace only the disposable script's service PATH and account lookup.
+    # The real installer must run preflight and service with the same clean
+    # credential source, even if root exports a different token or gh path.
+    script = script.replace("service_path=/usr/local/bin:/usr/bin:/bin",
+                            "service_path=" + str(binary) + ":/usr/local/bin:/usr/bin:/bin")
+    getent = binary / "getent"
+    getent.write_text('#!/bin/sh\necho "fixture-controller:x:1000:1000::' + str(account_home) + ':/bin/sh"\n')
+    getent.chmod(0o755)
+    gh = binary / "gh"
+    gh.write_text('#!/bin/sh\n[ -z "$GH_TOKEN$GITHUB_TOKEN$GH_CONFIG_DIR" ] && [ "$HOME" = "' + str(account_home) + '" ]\n')
+    gh.chmod(0o755)
+    monkeypatch.setenv("GH_TOKEN", "fixture-root-override")
+    monkeypatch.setenv("GITHUB_TOKEN", "fixture-root-override")
+    monkeypatch.setenv("GH_CONFIG_DIR", str(tmp_path / "root-config"))
+    path.write_text(script)
     for _ in range(2):
         result = subprocess.run(["bash", str(path), "--account", "fixture-controller"], capture_output=True, text=True)
         assert result.returncode == 0, result.stderr
@@ -169,6 +203,8 @@ def test_installer_is_confined_to_new_health_service_and_keeps_existing_credenti
     timer = (units / "pseudolife-linux-pool-health.timer").read_text()
     assert "User=fixture-controller" in service and " --gh-auth" in service
     assert "ProtectSystem=strict" in service and "NoNewPrivileges=yes" in service
+    assert "TimeoutStartSec=90s" in service
+    assert "UnsetEnvironment=GH_TOKEN GITHUB_TOKEN GH_CONFIG_DIR GH_HOST XDG_CONFIG_HOME" in service
     assert "OnUnitInactiveSec=60s" in timer
     assert log.read_text().splitlines() == ["daemon-reload", "enable --now pseudolife-linux-pool-health.timer"] * 2
     assert set(p.name for p in lib.iterdir()) == {"linux_pool_health.py", "runner_watch.py"}

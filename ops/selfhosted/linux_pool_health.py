@@ -18,6 +18,9 @@ from runner_watch import ApiError, REPOSITORY  # noqa: E402
 
 VARIABLE = "PARITY_LINUX_HEALTH"
 LABEL = "pseudolife-parity-linux"
+# The current pool has three Linux workers plus on-demand Windows workers;
+# refuse more than 300 records rather than loop on an inconsistent listing.
+MAX_RUNNERS = 300
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -53,10 +56,18 @@ def sample(call, repository: str, now: float | None = None) -> dict:
     online = idle = 0
     seen = set()
     page = 1
+    total = None
     while True:
         status, listing = call("GET", f"/repos/{repository}/actions/runners?per_page=30&page={page}", None)
         if status != 200 or not isinstance(listing, dict) or not isinstance(listing.get("runners"), list):
             raise ApiError("cannot verify Linux runner availability")
+        advertised = listing.get("total_count")
+        if type(advertised) is not int or not 0 <= advertised <= MAX_RUNNERS:
+            raise ApiError("cannot verify a bounded runner roster")
+        if total is None:
+            total = advertised
+        if advertised != total or len(listing["runners"]) != min(30, total - (page - 1) * 30):
+            raise ApiError("runner roster changed or is incomplete; retry next interval")
         for runner in listing["runners"]:
             if not any(label.get("name") == LABEL for label in runner.get("labels", [])):
                 continue
@@ -69,7 +80,7 @@ def sample(call, repository: str, now: float | None = None) -> dict:
             if runner.get("status") == "online":
                 online += 1
                 idle += runner.get("busy") is False
-        if len(listing["runners"]) < 30:
+        if page * 30 >= total:
             break
         page += 1
     return {"schema": 1, "observed_at": observed_at,
@@ -118,8 +129,9 @@ def main(argv=None, call=None) -> int:
         if not args.dry_run:
             publish(call, args.repository, frame)
     except (OSError, ApiError, subprocess.SubprocessError):
+        credential_hint = "the account's gh auth status" if args.gh_auth else "the token file"
         print("linux_pool_health: availability could not be verified or published; "
-              "check the token file and GitHub connectivity, then retry", file=sys.stderr)
+              f"check {credential_hint} and GitHub connectivity, then retry", file=sys.stderr)
         return 1
     print(json.dumps({"variable": VARIABLE, "dry_run": args.dry_run, **frame}))
     return 0

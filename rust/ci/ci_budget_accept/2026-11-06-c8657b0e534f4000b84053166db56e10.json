@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "parity-pool",
+  "before": null,
+  "fingerprint": "c186da13a960b8c2",
+  "reason": "One late hosted planner for trusted same-repository integrate/* PRs or master pushes only. Estimate 0.5 min for checkout and two read-only variable requests. Checkout and reader failures/timeouts are tolerated at step level; a sanitized unexpected-error fallback and missing secret still select hosted without a failed optimization check. Other jobs and full hosted fallback costs are unchanged."
+}

@@ -31,7 +31,8 @@ hosted; the comparison lane remains non-gating.
 Only a master push or a same-repository `integrate/*` pull request is
 eligible. Fork pull requests, other PR branches, merge groups, schedules
 and dispatches use hosted for the required matrix. No new trigger is
-added. The hosted `parity-pool` planner waits for candidate and fixture
+added. Repeated event conditions catch planner mistakes within this workflow;
+repository write access and fork-workflow approval remain the trust boundary. The hosted `parity-pool` planner waits for candidate and fixture
 builds, then exposes `PARITY_VARS_READ_TOKEN` to its one reader step. The
 secret is a fine-grained token for this repository with only Variables:
 read. It never reaches the parity shards. Missing credentials and failed
@@ -55,7 +56,8 @@ sudo bash ops/selfhosted/setup-linux-pool-health.sh --account <controller-accoun
 ```
 
 This installs a root-owned standard-library script and a separate
-one-minute systemd timer. It reads that account's existing credential
+one-minute systemd timer with a 90-second service timeout and bounded roster
+pagination. It reads that account's existing credential
 without replacing or copying it. It changes only `PARITY_LINUX_HEALTH`,
 never the routing switch or `PARITY_SELFHOSTED_RUNNERS`. An API failure
 does not refresh the observation; the reader then falls back as it ages.
@@ -75,7 +77,9 @@ and adds one planner slot, with all other limits unchanged.
 
 This is a decision-point fallback. A worker disappearing after selection
 can still leave a queued or failed shard, and simultaneous planners can
-observe the same spare capacity. Disable the switch and rerun the planner
+observe the same spare capacity. The heartbeat does not sample disk space or
+the suite lease: the required shard still fails its disk floor or a held
+lease rather than weakening those protections. Disable the switch and rerun the planner
 and its dependent jobs as described in
 [batch recovery](../dev/merge-batches.md#linux-pool-recovery). A failed-jobs-only
 rerun would reuse the previous successful planner's choice.

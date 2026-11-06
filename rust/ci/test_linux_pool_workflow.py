@@ -1,4 +1,4 @@
-"""Exercise the real workflow guards, including forged planner outputs."""
+"""Exercise workflow event selection, including incorrect planner results."""
 import json
 from pathlib import Path
 
@@ -53,6 +53,7 @@ def context(event="push", ref="refs/heads/master", head="", head_repo=REPO, repo
     return {"github": {"event_name": event, "ref": ref, "head_ref": head,
                        "repository": repository, "event": {"pull_request": {
                            "head": {"repo": {"full_name": head_repo}}}}},
+            "steps": {"checkout": {"outcome": "success"}},
             "matrix": {"os": "ubuntu-latest", "suite": "cli-startup"},
             "needs": {**{name: {"result": "success"} for name in
                          ("candidate", "candidate-harness", "fixtures")},
@@ -126,8 +127,30 @@ def test_secret_is_confined_to_the_hosted_planner_step_and_gates_keep_their_mean
 def test_fork_regression_detects_removing_the_runner_event_guard():
     jobs = yaml.safe_load(PATH.read_text())["jobs"]
     expression = jobs["parity-checks"]["runs-on"]
-    # A forged planner output must still be blocked by the runner expression.
+    # The runner expression repeats event selection independently of the planner.
     weakened = "${{ matrix.os" + expression.split(" && matrix.os", 1)[1]
     values = context(event="pull_request", head="integrate/example", head_repo="fork/repo")
     assert evaluate(expression, values) == "ubuntu-latest"
     assert evaluate(weakened, values) == ["self-hosted", "pseudolife-parity-linux"]
+
+
+def test_planner_step_errors_cannot_create_a_red_check_that_blocks_batch_merge():
+    planner = yaml.safe_load(PATH.read_text())["jobs"]["parity-pool"]
+    assert not planner.get("continue-on-error", False)
+    checkout, pool = planner["steps"]
+    assert checkout["id"] == "checkout" and checkout["continue-on-error"] is True
+    assert pool["continue-on-error"] is True
+    assert 0 < checkout["timeout-minutes"] + pool["timeout-minutes"] < planner["timeout-minutes"]
+    values = context()
+    values["steps"]["checkout"]["outcome"] = "failure"
+    assert evaluate(pool["if"], values) is False
+
+
+def test_mixed_case_integrate_ref_stays_hosted_when_scope_classifies_it_as_ordinary():
+    jobs = yaml.safe_load(PATH.read_text())["jobs"]
+    values = context(event="pull_request", head="Integrate/example")
+    values["needs"]["scope"]["outputs"]["full"] = "false"
+    planner = jobs["parity-pool"]
+    assert evaluate(planner["if"], values) is False
+    assert evaluate(planner["steps"][1]["if"], values) is False
+    assert evaluate(jobs["parity-checks"]["runs-on"], values) == "ubuntu-latest"

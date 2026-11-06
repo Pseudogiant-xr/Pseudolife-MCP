@@ -138,3 +138,29 @@ def test_actual_planner_entrypoint_works_before_the_secret_exists(tmp_path, monk
     assert pool.main() == 0
     assert output.read_text().splitlines() == ["selfhosted_suites=[]", "linux_pool=hosted"]
     assert json.loads(capsys.readouterr().out)["selfhosted_suites"] == []
+
+
+@pytest.mark.parametrize("payload", [
+    '{"schema":1,"observed_at":' + '9' * 400 + ',"online":3,"idle":3}',
+    '[' * 5000 + ']' * 5000,
+    None,
+], ids=["oversized-integer", "deep-json", "unexpected-error"])
+def test_unexpected_planner_errors_exit_successfully_with_hosted_output(tmp_path, monkeypatch, capsys, payload):
+    event = tmp_path / "event.json"
+    event.write_text("{}")
+    output = tmp_path / "output"
+    for key, value in {"GITHUB_EVENT_PATH": str(event), "GITHUB_EVENT_NAME": "push",
+                       "GITHUB_REF": "refs/heads/master", "GITHUB_REPOSITORY": pool.REPOSITORY,
+                       "PARITY_VARS_READ_TOKEN": "fixture-reader-token"}.items():
+        monkeypatch.setenv(key, value)
+    def read(repository, name, token):
+        if payload is None:
+            raise RuntimeError("fixture-reader-token")
+        return "self-hosted" if name == pool.POOL_VARIABLE else payload
+    monkeypatch.setattr(pool, "fetch_variable", read)
+    import sys
+    monkeypatch.setattr(sys, "argv", ["linux_pool.py", "--github-output", str(output)])
+    assert pool.main() == 0
+    assert output.read_text().splitlines() == ["selfhosted_suites=[]", "linux_pool=hosted"]
+    captured = capsys.readouterr()
+    assert "fixture-reader-token" not in captured.out + captured.err
