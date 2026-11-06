@@ -254,16 +254,24 @@ async fn passkey_signin(
         app.env_principals.clone(),
         app.store.clone(),
     );
+    // The outcome's refund is the task's too: a browser that goes away
+    // after a success must not leave it counted against the budget.
+    let limiter = app.signin_limiter.clone();
     let outcome = tokio::spawn(async move {
         let outcome = passkey::complete_signin(board, env_principals, store, view, body).await;
         drop(slot);
+        if matches!(
+            outcome,
+            Signin::Session(_) | Signin::KeyUnavailable | Signin::Unavailable
+        ) {
+            limiter.refund(attempt);
+        }
         outcome
     })
     .await
     .unwrap_or(Signin::Failed);
     match outcome {
         Signin::Session(row) => {
-            app.signin_limiter.refund(attempt);
             // Published by complete_signin under the board lock.
             json_response(
                 200,
@@ -271,17 +279,11 @@ async fn passkey_signin(
                     "expires_at": row.expires_at}),
             )
         }
-        Signin::KeyUnavailable => {
-            app.signin_limiter.refund(attempt);
-            json_response(
-                409,
-                &json!({"error": "passkey_signin_unavailable", "hint": passkey::UNAVAILABLE_HINT}),
-            )
-        }
-        Signin::Unavailable => {
-            app.signin_limiter.refund(attempt);
-            signin_unavailable()
-        }
+        Signin::KeyUnavailable => json_response(
+            409,
+            &json!({"error": "passkey_signin_unavailable", "hint": passkey::UNAVAILABLE_HINT}),
+        ),
+        Signin::Unavailable => signin_unavailable(),
         Signin::Refused => refused(),
         Signin::Failed => {
             eprintln!("console passkey sign-in failed (store error)");
@@ -366,9 +368,15 @@ pub(crate) async fn passkey_challenge(
         app.board.dsn.clone(),
         app.board.config.maintainer_rp_id.clone(),
     );
+    let limiter = app.passkey_limiter.clone();
     let issued = tokio::spawn(async move {
         let issued = passkey::issue_signin_challenge(&dsn, &token_hash, &label, &rp_id).await;
         drop(slot);
+        // Any answer from the bank refunds, in the task, so a browser that
+        // goes away meanwhile is not counted as a failure.
+        if issued.is_ok() {
+            limiter.refund(attempt);
+        }
         issued
     })
     .await
@@ -380,7 +388,6 @@ pub(crate) async fn passkey_challenge(
             return signin_unavailable();
         }
     };
-    app.passkey_limiter.refund(attempt);
     match issued {
         Challenge::Issued(out) => json_response(200, &out),
         Challenge::Unbound => json_response(

@@ -942,3 +942,254 @@ async fn db_only_the_principal_a_bind_was_issued_for_can_complete_it() {
     assert_eq!(change["change"], "bind-sign-in");
     assert_eq!(change["credential_id"], json!(soft.id()));
 }
+
+// -- a browser that goes away mid-call --------------------------------------------
+//
+// Python runs these completions on an executor thread, which a client that
+// disconnects never cancels. So the transaction, the view's update and the
+// rate-limit refund must all finish in a task the request does not own.
+
+/// A connection holding `sql` (one parameter, `key`, or none) inside an
+/// open transaction, and its backend pid.
+async fn hold(
+    dsn: &str,
+    sql: &str,
+    key: Option<&str>,
+) -> (tokio_postgres::Client, tokio::task::JoinHandle<()>, i32) {
+    let (lock, lt) = crate::storage::connect(
+        &crate::storage::parse_dsn(dsn).unwrap(),
+        Duration::from_secs(10),
+    )
+    .await
+    .unwrap();
+    lock.batch_execute("BEGIN").await.unwrap();
+    match key {
+        Some(k) => lock.query(sql, &[&k]).await.unwrap(),
+        None => lock.query(sql, &[]).await.unwrap(),
+    };
+    let holder = crate::console_sessions::tests::backend_pid(&lock).await;
+    (lock, lt, holder)
+}
+
+/// Drive `request` until its database work waits behind `holder`'s lock,
+/// then drop it, as a browser that goes away mid-call does.
+async fn abandon_once_blocked(
+    app: &Arc<App>,
+    c: &tokio_postgres::Client,
+    holder: i32,
+    request: Request<Body>,
+) {
+    let mut answer = Box::pin(handle(State(app.clone()), request));
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        tokio::select! {
+            biased;
+            _ = &mut answer => panic!("answered while its row was locked"),
+            _ = tokio::time::sleep(Duration::from_millis(20)) => {}
+        }
+        if crate::console_sessions::tests::blocked_by(c, holder).await >= 1 {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the request never reached the bank"
+        );
+    }
+    drop(answer);
+}
+
+/// Poll `check` (at most 20 s) until it holds.
+async fn eventually<F, Fut>(what: &str, mut check: F)
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = bool>,
+{
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while !check().await {
+        assert!(Instant::now() < deadline, "never: {what}");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+const KEY_ROW: &str = "SELECT 1 FROM maintainer_passkeys WHERE credential_id = $1 FOR UPDATE";
+
+async fn key_column(c: &tokio_postgres::Client, id: &str, column: &str) -> Option<String> {
+    c.query_one(
+        &format!("SELECT {column} FROM maintainer_passkeys WHERE credential_id = $1"),
+        &[&id],
+    )
+    .await
+    .unwrap()
+    .get(0)
+}
+
+#[tokio::test]
+async fn db_a_passkey_sign_in_the_browser_abandons_still_signs_in_and_refunds() {
+    let _serial = DB_LOCK.lock().await;
+    let Some((dsn, c, _t)) = test_bank().await else {
+        return;
+    };
+    let mut soft = Soft::new("abandon-signin", 1);
+    seed_key(&c, &soft, Some("default")).await;
+    let browser_token = "rs59-passkey-browser-abandoned";
+    c.execute(
+        "DELETE FROM console_sessions WHERE token_hash = $1",
+        &[&sha(browser_token)],
+    )
+    .await
+    .unwrap();
+    let app = app(&dsn, true, vec![], true);
+    let (_, issued) = challenge(&app, browser_token).await;
+    let body = signed(&issued, &mut soft, ORIGIN);
+    let (lock, lt, holder) = hold(&dsn, KEY_ROW, Some(&soft.id())).await;
+    let request = browser(SESSION, Some(ORIGIN), "application/json", &body.to_string());
+    abandon_once_blocked(&app, &c, holder, request).await;
+    lock.batch_execute("COMMIT").await.unwrap();
+    drop(lock);
+    let _ = lt.await;
+    let view = app.sessions.clone().unwrap();
+    eventually(
+        "the session committed, the view holds it, the attempt is refunded",
+        || {
+            let ready = view.lookup(&sha(browser_token)).is_some()
+                && app.signin_limiter.attempts() == 0
+                && app.signin_limiter.in_flight() == 0;
+            async move { ready }
+        },
+    )
+    .await;
+    let (status, _, _) = call(&app, bearer("GET", "/api/nope", browser_token, None)).await;
+    assert_eq!(status, 404);
+}
+
+#[tokio::test]
+async fn db_a_challenge_the_browser_abandons_is_still_refunded() {
+    let _serial = DB_LOCK.lock().await;
+    let Some((dsn, c, _t)) = test_bank().await else {
+        return;
+    };
+    let soft = Soft::new("abandon-challenge", 1);
+    seed_key(&c, &soft, Some("default")).await;
+    let app = app(&dsn, true, vec![], true);
+    let (lock, lt, holder) = hold(
+        &dsn,
+        "LOCK TABLE maintainer_passkeys IN ACCESS EXCLUSIVE MODE",
+        None,
+    )
+    .await;
+    let request = browser(
+        CHALLENGE,
+        Some(ORIGIN),
+        "application/json",
+        &challenge_body("rs59-passkey-browser-challenge-abandoned"),
+    );
+    abandon_once_blocked(&app, &c, holder, request).await;
+    lock.batch_execute("COMMIT").await.unwrap();
+    drop(lock);
+    let _ = lt.await;
+    eventually(
+        "the issued challenge refunded its attempt and its slot",
+        || {
+            let ready = app.passkey_limiter.attempts() == 0 && app.passkey_limiter.in_flight() == 0;
+            async move { ready }
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn db_a_rebind_the_browser_abandons_still_signs_the_old_browsers_out() {
+    let _serial = DB_LOCK.lock().await;
+    let Some((dsn, c, _t)) = test_bank().await else {
+        return;
+    };
+    let mut soft = Soft::new("abandon-bind", 1);
+    seed_key(&c, &soft, Some("default")).await;
+    let old_browser = "rs59-passkey-browser-before-rebind";
+    c.execute(
+        "DELETE FROM console_sessions WHERE token_hash = $1",
+        &[&sha(old_browser)],
+    )
+    .await
+    .unwrap();
+    let app = app(&dsn, true, vec![], true);
+    let (_, issued) = challenge(&app, old_browser).await;
+    let (status, out) = sign_in(&app, &signed(&issued, &mut soft, ORIGIN)).await;
+    assert_eq!(status, 200, "{out}");
+    let (status, _, bind) = call(&app, bearer("POST", BIND, ALICE_TOKEN, Some("{}"))).await;
+    assert_eq!(status, 200, "{bind}");
+    let body = signed(&bind, &mut soft, ORIGIN);
+    let (lock, lt, holder) = hold(&dsn, KEY_ROW, Some(&soft.id())).await;
+    let request = bearer("POST", BIND, ALICE_TOKEN, Some(&body.to_string()));
+    abandon_once_blocked(&app, &c, holder, request).await;
+    lock.batch_execute("COMMIT").await.unwrap();
+    drop(lock);
+    let _ = lt.await;
+    let view = app.sessions.clone().unwrap();
+    let id = soft.id();
+    eventually("the rebind committed and its old browser left the view", || {
+        let c = &c;
+        let id = id.clone();
+        let gone = view.lookup(&sha(old_browser)).is_none();
+        async move { gone && key_column(c, &id, "signs_in_as").await.as_deref() == Some("alice") }
+    })
+    .await;
+    let (status, _, _) = call(&app, bearer("GET", "/api/nope", old_browser, None)).await;
+    assert_eq!(status, 401);
+}
+
+#[tokio::test]
+async fn db_a_revoke_the_browser_abandons_still_signs_the_keys_browsers_out() {
+    let _serial = DB_LOCK.lock().await;
+    let Some((dsn, c, _t)) = test_bank().await else {
+        return;
+    };
+    let mut soft = Soft::new("abandon-revoke", 1);
+    seed_key(&c, &soft, Some("default")).await;
+    let browser_token = "rs59-passkey-browser-before-revoke";
+    c.execute(
+        "DELETE FROM console_sessions WHERE token_hash = $1",
+        &[&sha(browser_token)],
+    )
+    .await
+    .unwrap();
+    let app = app(&dsn, true, vec![], true);
+    let (_, issued) = challenge(&app, browser_token).await;
+    let (status, out) = sign_in(&app, &signed(&issued, &mut soft, ORIGIN)).await;
+    assert_eq!(status, 200, "{out}");
+    let (status, _, ch) = call(
+        &app,
+        bearer(
+            "POST",
+            "/api/maintainer/challenge",
+            ENV_TOKEN,
+            Some(&json!({"purpose": "revoke-self", "credential_id": soft.id()}).to_string()),
+        ),
+    )
+    .await;
+    assert_eq!(status, 200, "{ch}");
+    let body = signed(&ch, &mut soft, ORIGIN);
+    let (lock, lt, holder) = hold(&dsn, KEY_ROW, Some(&soft.id())).await;
+    let request = bearer(
+        "POST",
+        "/api/maintainer/revoke",
+        ENV_TOKEN,
+        Some(&body.to_string()),
+    );
+    abandon_once_blocked(&app, &c, holder, request).await;
+    lock.batch_execute("COMMIT").await.unwrap();
+    drop(lock);
+    let _ = lt.await;
+    let view = app.sessions.clone().unwrap();
+    let id = soft.id();
+    eventually(
+        "the revoke committed and the key's browser left the view",
+        || {
+            let c = &c;
+            let id = id.clone();
+            let gone = view.lookup(&sha(browser_token)).is_none() && !view.has_passkey(&id);
+            async move { gone && key_column(c, &id, "state").await.as_deref() == Some("revoked") }
+        },
+    )
+    .await;
+}

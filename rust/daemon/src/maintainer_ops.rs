@@ -723,178 +723,192 @@ async fn action_route(
             .contains(&principal)
             .then(|| principal.clone());
     let view = app.sessions.clone();
-    let answer = board
-        .with_store(move |store, client| {
-            Box::pin(async move {
-                let rp = &owner.config.maintainer_rp_id;
-                let origin = &owner.config.maintainer_origin;
-                let result: Outcome<Value> = async {
-                    match path.as_str() {
-                        "/api/maintainer/enrol" => {
-                            actions::enrol(
-                                store,
-                                client,
-                                rp,
-                                origin,
-                                &principal,
-                                signs_in_as.as_deref(),
-                                &body,
-                            )
-                            .await
-                        }
-                        "/api/maintainer/cancel" => {
-                            actions::cancel(store, client, rp, origin, &principal, &body).await
-                        }
-                        "/api/maintainer/revoke" => {
-                            actions::revoke(store, client, rp, origin, &principal, &body).await
-                        }
-                        "/api/maintainer/role" => {
-                            actions::complete(
-                                store,
-                                client,
-                                rp,
-                                origin,
-                                &body,
-                                &[
-                                    "grant-conductor",
-                                    "revoke-conductor",
-                                    "assign-coordinator",
-                                    "revoke-coordinator",
-                                    "grant-delegate",
-                                    "revoke-delegate",
-                                ],
-                                |store, tx, fields, _key| {
-                                    Box::pin(async move { roles::role(store, tx, fields).await })
-                                },
-                            )
-                            .await
-                        }
-                        _ => {
-                            let purpose = if path.ends_with("/send") {
-                                "send"
-                            } else {
-                                "repudiate"
-                            };
-                            for attempt in 0..2 {
-                                let cached = owner
-                                    .maintainer_identity
-                                    .lock()
-                                    .expect("identity lock")
-                                    .clone();
-                                let identity = match cached {
-                                    Some(i) => i,
-                                    None => {
-                                        let params =
-                                            json!({"label":"maintainer","status":"maintainer"});
-                                        let row = store
-                                            .register(
-                                                client,
-                                                MAINTAINER_PRINCIPAL,
-                                                params.as_object().expect("object"),
-                                            )
-                                            .await?;
-                                        let i = (
-                                            row["agent_id"].as_str().expect("id").to_string(),
-                                            row["credential"]
-                                                .as_str()
-                                                .expect("credential")
-                                                .to_string(),
-                                        );
-                                        *owner.maintainer_identity.lock().expect("identity lock") =
-                                            Some(i.clone());
-                                        i
-                                    }
-                                };
-                                let stamp = crate::board::dispatch::stamp(
-                                    ready.as_ref().expect("mail full tier"),
-                                );
-                                let actor = principal.clone();
-                                let result = actions::complete(
+    // A task of its own, as Python's executor thread is: a client that goes
+    // away after the COMMIT was sent must not stop the view's update (a
+    // revoked key's sessions), the rings or the notice.
+    tokio::spawn(async move {
+        let answer = board
+            .with_store(move |store, client| {
+                Box::pin(async move {
+                    let rp = &owner.config.maintainer_rp_id;
+                    let origin = &owner.config.maintainer_origin;
+                    let result: Outcome<Value> = async {
+                        match path.as_str() {
+                            "/api/maintainer/enrol" => {
+                                actions::enrol(
+                                    store,
+                                    client,
+                                    rp,
+                                    origin,
+                                    &principal,
+                                    signs_in_as.as_deref(),
+                                    &body,
+                                )
+                                .await
+                            }
+                            "/api/maintainer/cancel" => {
+                                actions::cancel(store, client, rp, origin, &principal, &body).await
+                            }
+                            "/api/maintainer/revoke" => {
+                                actions::revoke(store, client, rp, origin, &principal, &body).await
+                            }
+                            "/api/maintainer/role" => {
+                                actions::complete(
                                     store,
                                     client,
                                     rp,
                                     origin,
                                     &body,
-                                    &[purpose],
-                                    move |store, tx, fields, key| {
-                                        Box::pin(async move {
-                                            if purpose == "send" {
-                                                mail::send(
-                                                    store, tx, fields, &key.proof, &identity, stamp,
-                                                )
-                                                .await
-                                            } else {
-                                                mail::repudiate(
-                                                    store, tx, fields, &key.proof, &identity,
-                                                    stamp, &actor,
-                                                )
-                                                .await
-                                            }
-                                        })
+                                    &[
+                                        "grant-conductor",
+                                        "revoke-conductor",
+                                        "assign-coordinator",
+                                        "revoke-coordinator",
+                                        "grant-delegate",
+                                        "revoke-delegate",
+                                    ],
+                                    |store, tx, fields, _key| {
+                                        Box::pin(
+                                            async move { roles::role(store, tx, fields).await },
+                                        )
                                     },
                                 )
-                                .await;
-                                match result {
-                                    Err(Refusal::Code("_identity", _)) => {
-                                        *owner.maintainer_identity.lock().expect("identity lock") =
-                                            None;
-                                        if attempt == 1 {
-                                            return Err(refuse(
-                                                "coordination_unavailable",
-                                                "identity",
-                                            ));
-                                        }
-                                    }
-                                    other => return other,
-                                }
+                                .await
                             }
-                            unreachable!()
+                            _ => {
+                                let purpose = if path.ends_with("/send") {
+                                    "send"
+                                } else {
+                                    "repudiate"
+                                };
+                                for attempt in 0..2 {
+                                    let cached = owner
+                                        .maintainer_identity
+                                        .lock()
+                                        .expect("identity lock")
+                                        .clone();
+                                    let identity = match cached {
+                                        Some(i) => i,
+                                        None => {
+                                            let params =
+                                                json!({"label":"maintainer","status":"maintainer"});
+                                            let row = store
+                                                .register(
+                                                    client,
+                                                    MAINTAINER_PRINCIPAL,
+                                                    params.as_object().expect("object"),
+                                                )
+                                                .await?;
+                                            let i = (
+                                                row["agent_id"].as_str().expect("id").to_string(),
+                                                row["credential"]
+                                                    .as_str()
+                                                    .expect("credential")
+                                                    .to_string(),
+                                            );
+                                            *owner
+                                                .maintainer_identity
+                                                .lock()
+                                                .expect("identity lock") = Some(i.clone());
+                                            i
+                                        }
+                                    };
+                                    let stamp = crate::board::dispatch::stamp(
+                                        ready.as_ref().expect("mail full tier"),
+                                    );
+                                    let actor = principal.clone();
+                                    let result = actions::complete(
+                                        store,
+                                        client,
+                                        rp,
+                                        origin,
+                                        &body,
+                                        &[purpose],
+                                        move |store, tx, fields, key| {
+                                            Box::pin(async move {
+                                                if purpose == "send" {
+                                                    mail::send(
+                                                        store, tx, fields, &key.proof, &identity,
+                                                        stamp,
+                                                    )
+                                                    .await
+                                                } else {
+                                                    mail::repudiate(
+                                                        store, tx, fields, &key.proof, &identity,
+                                                        stamp, &actor,
+                                                    )
+                                                    .await
+                                                }
+                                            })
+                                        },
+                                    )
+                                    .await;
+                                    match result {
+                                        Err(Refusal::Code("_identity", _)) => {
+                                            *owner
+                                                .maintainer_identity
+                                                .lock()
+                                                .expect("identity lock") = None;
+                                            if attempt == 1 {
+                                                return Err(refuse(
+                                                    "coordination_unavailable",
+                                                    "identity",
+                                                ));
+                                            }
+                                        }
+                                        other => return other,
+                                    }
+                                }
+                                unreachable!()
+                            }
                         }
                     }
-                }
-                .await;
-                match result {
-                    Ok(mut v) => {
-                        // A key just revoked under the coordination lock: its
-                        // Console sign-ins leave the daemon's view at once
-                        // (`_drop_key`); the rows were revoked in its
-                        // transaction.
-                        if let Some(Value::String(id)) =
-                            v.as_object_mut().and_then(|o| o.remove("_drop_key"))
-                            && let Some(view) = &view
-                        {
-                            view.drop_key(&id);
+                    .await;
+                    match result {
+                        Ok(mut v) => {
+                            // A key just revoked under the coordination lock: its
+                            // Console sign-ins leave the daemon's view at once
+                            // (`_drop_key`); the rows were revoked in its
+                            // transaction.
+                            if let Some(Value::String(id)) =
+                                v.as_object_mut().and_then(|o| o.remove("_drop_key"))
+                                && let Some(view) = &view
+                            {
+                                view.drop_key(&id);
+                            }
+                            Ok(v)
                         }
-                        Ok(v)
+                        Err(Refusal::Code(code, check)) => {
+                            eprintln!("maintainer route refused: {code} ({check})");
+                            Ok(json!({"_refused":code}))
+                        }
+                        Err(Refusal::Board(e)) => Err(e),
                     }
-                    Err(Refusal::Code(code, check)) => {
-                        eprintln!("maintainer route refused: {code} ({check})");
-                        Ok(json!({"_refused":code}))
-                    }
-                    Err(Refusal::Board(e)) => Err(e),
-                }
+                })
             })
-        })
-        .await;
-    match answer {
-        Ok(mut v) => {
-            if let Some(code) = v.get("_refused").and_then(Value::as_str) {
-                return refusal(code, None);
-            }
-            if let Some(out) = v.as_object_mut() {
-                if let Some(Value::Array(ids)) = out.remove("_notify") {
-                    for id in ids {
-                        if let Some(id) = id.as_str() {
-                            board.hub.notify(id);
+            .await;
+        match answer {
+            Ok(mut v) => {
+                if let Some(code) = v.get("_refused").and_then(Value::as_str) {
+                    return refusal(code, None);
+                }
+                if let Some(out) = v.as_object_mut() {
+                    if let Some(Value::Array(ids)) = out.remove("_notify") {
+                        for id in ids {
+                            if let Some(id) = id.as_str() {
+                                board.hub.notify(id);
+                            }
                         }
                     }
+                    if let Some(Value::String(notice)) = out.remove("_notice") {
+                        board.daemon_notice(&key_notice(&notice)).await;
+                    }
                 }
-                if let Some(Value::String(notice)) = out.remove("_notice") {
-                    board.daemon_notice(&key_notice(&notice)).await;
-                }
+                json_response(200, &v)
             }
-            json_response(200, &v)
+            Err(_) => refusal("coordination_unavailable", None),
         }
-        Err(_) => refusal("coordination_unavailable", None),
-    }
+    })
+    .await
+    .unwrap_or_else(|_| refusal("coordination_unavailable", None))
 }

@@ -352,10 +352,27 @@ pub(crate) async fn bind_route(
         Ok(p) => p,
         Err(r) => return *r,
     };
-    let board = app.board.clone();
+    // A task of its own, as Python's executor thread is: a browser that goes
+    // away after the COMMIT was sent must not stop the key's other sessions
+    // leaving the view, nor the notice.
+    let (board, view) = (app.board.clone(), app.sessions.clone());
+    tokio::spawn(bind_complete(board, view, principal, completing, body))
+        .await
+        .unwrap_or_else(|_| {
+            eprintln!("maintainer route failed (internal)");
+            refusal("coordination_unavailable", None)
+        })
+}
+
+/// `bind_route`'s board work, the view's update and the notice.
+async fn bind_complete(
+    board: Arc<Board>,
+    view: Option<Arc<SessionSnapshot>>,
+    caller: String,
+    completing: bool,
+    body: Map<String, Value>,
+) -> Response {
     let owner = board.clone();
-    let view = app.sessions.clone();
-    let caller = principal.clone();
     let answer = board
         .with_store(move |store, client| {
             Box::pin(async move {
