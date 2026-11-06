@@ -124,6 +124,10 @@ struct Context {
     running: Value,
     /// The Rust overlay the running daemon was created with, if still present.
     running_rust: Option<PathBuf>,
+    /// Compose arguments the mount identity check resolves when a Rust
+    /// daemon leaves Rust: the target project plus the Rust overlay, whose
+    /// models volume the switch drops on purpose.
+    identity_args: Option<Vec<String>>,
 }
 
 pub(super) fn compose_root() -> PathBuf {
@@ -315,6 +319,12 @@ impl Update {
             }
         }
         files.push(directory.join("docker-compose.ghcr.yml"));
+        let leaving_rust = engine != "rust" && labels[engine::ENGINE_LABEL] == "rust";
+        let identity_overlay = leaving_rust.then(|| {
+            running_rust
+                .clone()
+                .unwrap_or_else(|| directory.join("docker-compose.rust-ghcr.yml"))
+        });
         if engine == "rust" {
             files.push(directory.join("docker-compose.rust-ghcr.yml"));
         }
@@ -330,6 +340,11 @@ impl Update {
             project_dir.to_string_lossy().into_owned(),
         ]);
         args.extend(compose_args(&files, &env_files));
+        let identity_args = identity_overlay.map(|overlay| {
+            let mut identity = args.clone();
+            identity.extend(compose_args(&[overlay], &[]));
+            identity
+        });
         let checkout = [
             project_dir.clone(),
             project_dir.parent().unwrap_or(&project_dir).to_owned(),
@@ -342,6 +357,7 @@ impl Update {
             checkout,
             running,
             running_rust,
+            identity_args,
         })
     }
     pub fn deploy_release(
@@ -411,14 +427,29 @@ impl Update {
         config_args.extend(["config".into(), "--format".into(), "json".into()]);
         let (code, out) = self.command(&config_args, Some(&env), 60, false);
         let config:Value=serde_json::from_str(&out).ok().filter(|_:&Value|code==0).ok_or_else(||UpdateError::usage("cannot resolve the Compose project; check its files and env file, then retry; nothing was changed"))?;
-        engine::verify_bank_identity(self, &config, &context.running)?;
+        // Leaving Rust drops the overlay's models volume on purpose: check the
+        // running mounts against the project with that overlay, so every other
+        // mount is still held to the running daemon's.
+        let identity = match &context.identity_args {
+            Some(args) => {
+                let mut identity_args = vec!["compose".into()];
+                identity_args.extend(args.clone());
+                identity_args.extend(["config".into(), "--format".into(), "json".into()]);
+                let (code, out) = self.command(&identity_args, Some(&env), 60, false);
+                serde_json::from_str(&out).ok().filter(|_: &Value| code == 0).ok_or_else(|| {
+                    UpdateError::usage("cannot resolve the Compose project with the running Rust overlay; check its files and env file, then retry; nothing was changed")
+                })?
+            }
+            None => config.clone(),
+        };
+        engine::verify_bank_identity(self, &identity, &context.running)?;
         if self.o.allow_auth_change {
             self.step("using the explicitly requested daemon bearer settings from --env-file");
         }
         self.set_rollback_scope(&config, &context.running)?;
         self.maintainer_context = Some((context.args.clone(), env.clone()));
         let (token, running_token) = if activating {
-            engine::verify_identity(self, &config, &context.running, &self.o.daemon_url)?;
+            engine::verify_identity(self, &identity, &context.running, &self.o.daemon_url)?;
             let token = engine::daemon_token(&config)?;
             // A daemon running without a bearer (--allow-auth-change adding
             // one) answers any bearer: read it with the configured one.
