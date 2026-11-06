@@ -1033,6 +1033,16 @@ def verdict(r: dict) -> dict:
         return {"valid": False, "why": r["harness_error"]}
     if not r["fault"]["fired"] or not r["fault"]["events"][0]["server_tag"].startswith("COMMIT"):
         return {"valid": False, "why": "the proxy never cut a committed COMMIT"}
+    # A surface that could not be observed is no evidence either way: a probe
+    # error anywhere makes the run invalid, never a baseline exclusion.
+    probe_errors = [m for key in ("baseline", "b", "d", "e") for m in r[key]["mismatches"]
+                    if m.startswith("probe error:")]
+    if probe_errors:
+        return {"valid": False, "why": "a probe failed: " + "; ".join(sorted(set(probe_errors)))}
+    # The stop flush and the restart are part of the evidence: a stop that
+    # had to be forced proves neither.
+    if not r["stop"].get("clean"):
+        return {"valid": False, "why": f"the graceful stop did not complete: {r['stop']}"}
     base = set(r["baseline"]["mismatches"])
     fresh = lambda m: [x for x in m if x not in base]  # noqa: E731
     wrong_after_d = fresh(r["d"]["mismatches"])
