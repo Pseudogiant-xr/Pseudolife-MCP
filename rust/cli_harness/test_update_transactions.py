@@ -309,6 +309,11 @@ elif a[:1]==["tag"]: s["images"][a[-1]]=a[-2]
 elif a[:1]==["compose"]:
  if "config" in a:
   config=json.loads(json.dumps(s["config"]))
+  if s.get("models_overlay") and any(v.endswith("docker-compose.rust-ghcr.yml") for v in a):
+   daemon=config["services"]["pseudolife-daemon"]
+   daemon["environment"]["PSEUDOLIFE_DAEMON_MODELS_DIR"]="/models"
+   daemon["volumes"].append({"type":"volume","source":"pseudolife_rust_models","target":"/models"})
+   config["volumes"]["pseudolife_rust_models"]={"name":"fixture-project_pseudolife_rust_models"}
   if s.get("relative_mount"):
    directory=pathlib.Path(a[a.index("--project-directory")+1]) if "--project-directory" in a else pathlib.Path(a[a.index("-f")+1]).parent
    config["services"]["pseudolife-daemon"]["volumes"].append({"type":"bind","source":str(directory/"config.yaml"),"target":"/data/config.yaml","read_only":True})
@@ -329,6 +334,11 @@ elif a[:1]==["compose"]:
      service=json.loads(pathlib.Path(path).read_text())["services"]["pseudolife-daemon"]
      if "labels" in service:s["running"]["Config"]["Labels"]={**(s["running"]["Config"]["Labels"] or {}),**service["labels"]}
     except (OSError,ValueError,KeyError):pass
+   if s.get("models_overlay"):
+    mounts=[m for m in s["running"]["Mounts"] if m.get("Destination")!="/models"]
+    if any(v.endswith("docker-compose.rust-ghcr.yml") for v in overlays):
+     mounts.append({"Type":"volume","Name":"fixture-project_pseudolife_rust_models","Destination":"/models","RW":True})
+    s["running"]["Mounts"]=mounts
    s["running"]["Image"]="sha256:replacement"
    s["running"]["Id"]=s.get("replacement_id",s["running"]["Id"])
 elif a[:1]==["exec"]:
@@ -1037,6 +1047,62 @@ def test_release_rust_models_go_to_their_own_volume_outside_the_backed_up_state(
         assert "type=volume,src=fixture-project_pseudolife_rust_models,dst=/models" in provision
         assert "PSEUDOLIFE_DAEMON_MODELS_DIR=/models" in provision
         assert not any(v.endswith("dst=/data") for v in provision)
+
+
+@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+def test_release_rust_models_mount_does_not_block_a_rerun_or_a_switch_back(tmp_path, native):
+    # Once the Rust daemon runs with the overlay's /models volume, a plain
+    # Rust rerun keeps it and --engine python drops it on purpose: neither
+    # may be refused as "the Compose configuration drops a daemon mount".
+    binary = _native_binary()
+    if native and not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path) as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        state["models_overlay"] = True
+        state_path.write_text(json.dumps(state))
+        common = ["--daemon-only", "--json", "--health-retries", "1", "--health-delay-ms", "0"]
+        arm = binary if native else None
+        first = run_arm(repo, env, arm, ["--engine", "rust", "--tag", "0.21.1", *common, "--rollback-tag", "to-rust"])
+        assert first.returncode == 0, first.stdout + first.stderr
+        mounts = json.loads(state_path.read_text())["running"]["Mounts"]
+        assert any(m["Destination"] == "/models" for m in mounts)
+        rerun = run_arm(repo, env, arm, ["--engine", "rust", "--tag", "0.21.1", "--reinstall", *common,
+                                         "--rollback-tag", "rerun"])
+        assert rerun.returncode == 0, rerun.stdout + rerun.stderr
+        assert "drops a daemon mount" not in rerun.stdout + rerun.stderr
+        back = run_arm(repo, env, arm, ["--engine", "python", "--tag", "0.21.1", *common, "--rollback-tag", "to-python"])
+        assert back.returncode == 0, back.stdout + back.stderr
+        assert "drops a daemon mount" not in back.stdout + back.stderr
+        state = json.loads(state_path.read_text())
+        assert _labels(state_path)["org.pseudolife.engine"] == "python"
+        assert not any(m["Destination"] == "/models" for m in state["running"]["Mounts"])
+
+
+def test_release_native_switch_back_still_refuses_dropping_another_mount(tmp_path):
+    # Near miss for the row above: only the Rust overlay's models volume may
+    # go when leaving Rust. Native release mode checks every mount; the
+    # Python release updater checks only /data, so this row is native-only.
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path) as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        state["models_overlay"] = True
+        state_path.write_text(json.dumps(state))
+        common = ["--daemon-only", "--json", "--health-retries", "1", "--health-delay-ms", "0"]
+        first = run_arm(repo, env, binary, ["--engine", "rust", "--tag", "0.21.1", *common, "--rollback-tag", "to-rust"])
+        assert first.returncode == 0, first.stdout + first.stderr
+        state = json.loads(state_path.read_text())
+        state["running"]["Mounts"].append({"Type": "volume", "Name": "fixture-cache", "Destination": "/cache", "RW": True})
+        before = len(state["calls"])
+        state_path.write_text(json.dumps(state))
+        back = run_arm(repo, env, binary, ["--engine", "python", "--tag", "0.21.1", *common, "--rollback-tag", "to-python"])
+        assert back.returncode == 2, back.stdout + back.stderr
+        assert "drops a daemon mount" in back.stdout
+        state = json.loads(state_path.read_text())
+        assert stages({"calls": state["calls"][before:]}) == []
+        assert _labels(state_path)["org.pseudolife.engine"] == "rust"
 
 
 @pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
