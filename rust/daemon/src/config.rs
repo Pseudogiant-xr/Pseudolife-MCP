@@ -2649,15 +2649,17 @@ fn read_miras(miras: &[(Node, Node)]) -> Result<(String, Vec<String>), ConfigErr
 /// 2026-11-02): multi-band presets (`continuum` and its aliases, a `custom`
 /// list of more than one band) and every `retention_policy` but `balanced`
 /// are retired, so this daemon serves one balanced band and refuses the
-/// rest, naming the flat migration. The config itself still parses, so the
-/// config differential and `migrate-flat-config` read it unchanged.
+/// rest: a multi-band layout naming the flat migration (or the Python
+/// engine), a single band's policy naming the one setting to change. The
+/// config itself still parses, so the config differential and
+/// `migrate-flat-config` read it unchanged.
 pub fn retired_band_refusal(memory: &MemoryConfig) -> Option<String> {
-    let fix = "Flatten the bank and its config first with `pseudolife-mcp migrate-flat` \
-               (it backs up and keeps every entry), or keep the Python engine until then.";
     if memory.band_specs.len() > 1 {
         return Some(format!(
             "memory.miras.preset {:?} configures {} bands; multi-band presets are retired and \
-             this daemon serves a single band. {fix}",
+             this daemon serves a single band. Flatten the bank and its config first with \
+             `pseudolife-mcp migrate-flat` (it backs up and keeps every entry), or keep the \
+             Python engine until then.",
             memory.preset,
             memory.band_specs.len()
         ));
@@ -2666,7 +2668,7 @@ pub fn retired_band_refusal(memory: &MemoryConfig) -> Option<String> {
     (policy != "balanced").then(|| {
         format!(
             "memory.miras.bands[0].retention_policy {policy:?} is retired; this daemon evicts \
-             with balanced only. Set it to balanced or remove it. {fix}"
+             with balanced only. Set it to balanced."
         )
     })
 }
@@ -3271,7 +3273,8 @@ mod tests {
                 msg.contains(&format!("retention_policy \"{policy}\" is retired")),
                 "{msg}"
             );
-            assert!(msg.contains("`pseudolife-mcp migrate-flat`"), "{msg}");
+            assert!(msg.ends_with("Set it to balanced."), "one fix: {msg}");
+            assert!(!msg.contains("migrate-flat"), "one fix: {msg}");
         }
         // The near misses that start: the default, flat, and one balanced band.
         assert_eq!(refusal(""), None);

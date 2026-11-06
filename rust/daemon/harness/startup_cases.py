@@ -183,6 +183,10 @@ def seed(storage, case):
             "session_key": f"session-{index}",
             "parent_id": EPISODES[1] if index == 2 else None,
         })
+    # deep-overflow keeps its name and golden key: with multi-band layouts
+    # retired (R11) it seeds nine entries into the one custom band of two,
+    # so it pins how an over-capacity single band hydrates, no longer the
+    # overflow walk between bands.
     count = 0 if case == "clock-retry" else 9 if case == "deep-overflow" else 5
     for index in range(count):
         dimension = (384 if index < 2 and case in {"stale-entry-dims", "stale-combined-dims"}

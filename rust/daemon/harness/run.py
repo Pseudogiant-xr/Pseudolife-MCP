@@ -2257,25 +2257,26 @@ def run_refusals(binary: Path, root: Path, selected=None) -> list[dict]:
 # serves them until R11's Python half lands, so only the Rust side runs here
 # (declared: divergences/write-path-w2-e/presets-with-more-than-one-band.md).
 # Each row: name, config.yaml, a phrase the refusal must carry.
+MIGRATE = "`pseudolife-mcp migrate-flat`"
 RETIRED_LAYOUT_REFUSALS = [
     ("continuum preset", "memory:\n  miras:\n    preset: continuum\n",
-     'memory.miras.preset "continuum" configures 8 bands'),
+     ('memory.miras.preset "continuum" configures 8 bands', MIGRATE)),
     ("memora alias", "memory:\n  miras:\n    preset: memora\n",
-     'memory.miras.preset "memora" configures 8 bands'),
+     ('memory.miras.preset "memora" configures 8 bands', MIGRATE)),
     ("custom two bands", "memory:\n  miras:\n    preset: custom\n    bands:\n      - name: hot\n      - {max_entries: 3}\n",
-     'memory.miras.preset "custom" configures 2 bands'),
+     ('memory.miras.preset "custom" configures 2 bands', MIGRATE)),
     ("custom recency_heavy band", "memory:\n  miras:\n    preset: custom\n    bands:\n"
      "      - {name: flat, max_entries: 5, retention_policy: recency_heavy}\n",
-     'retention_policy "recency_heavy" is retired'),
+     ('retention_policy "recency_heavy" is retired', "Set it to balanced.")),
     ("custom surprise_heavy band", "memory:\n  miras:\n    preset: custom\n    bands:\n"
      "      - {name: flat, max_entries: 5, retention_policy: surprise_heavy}\n",
-     'retention_policy "surprise_heavy" is retired'),
+     ('retention_policy "surprise_heavy" is retired', "Set it to balanced.")),
 ]
 
 
 def run_retired_layout_refusals(binary: Path, root: Path) -> list[dict]:
     rows = []
-    for name, config_yaml, phrase in RETIRED_LAYOUT_REFUSALS:
+    for name, config_yaml, wants in RETIRED_LAYOUT_REFUSALS:
         home = daemons.make_home(root, "retired-layout-rust", config_yaml)
         e = daemons.base_env(home, common_env(Scenario(), f"postgresql://nobody@127.0.0.1:9/{pg.PREFIX}none"))
         d = daemons.rust_daemon(binary, home, daemons.free_port(), rust_env(e))
@@ -2286,8 +2287,7 @@ def run_retired_layout_refusals(binary: Path, root: Path) -> list[dict]:
             d.stop()
         log = d.log.read_text(encoding="utf-8", errors="replace") if d.log.exists() else ""
         diffs = [] if code == 1 else [f"exit: rust {code} (want 1)"]
-        diffs += [f"refusal lacks {want!r}" for want in (phrase, "`pseudolife-mcp migrate-flat`")
-                  if want not in log]
+        diffs += [f"refusal lacks {want!r}" for want in wants if want not in log]
         rows.append({"case": f"startup (rust, retired by R11): {name}", "python_exit": None,
                      "rust_exit": code, "diffs": diffs})
     return rows
