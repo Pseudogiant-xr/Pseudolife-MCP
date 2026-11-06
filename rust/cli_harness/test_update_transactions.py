@@ -936,7 +936,8 @@ def test_release_rust_activation_keeps_and_switches_back_on_the_same_bank(tmp_pa
         provision = next(i for i, a in enumerate(state["calls"]) if a[:1] == ["run"] and "provision" in a)
         backup = next(i for i, a in enumerate(state["calls"]) if a[:1] == ["fixture-backup"])
         assert provision < backup
-        assert "fixture-state:/data" in state["calls"][provision] and "--if-missing" in state["calls"][provision]
+        assert "type=volume,src=fixture-state,dst=/data" in state["calls"][provision]
+        assert "--if-missing" in state["calls"][provision]
         assert "PSEUDOLIFE_DAEMON_MODELS_DIR=/data/models" in state["calls"][provision]
         assert "--volumes-from" not in state["calls"][provision]
         up = next(a for a in state["calls"] if a[:1] == ["compose"] and "up" in a)
@@ -962,8 +963,10 @@ def test_release_rust_activation_keeps_and_switches_back_on_the_same_bank(tmp_pa
         labels = _labels(state_path)
         assert labels["org.pseudolife.engine"] == "rust" and labels["org.pseudolife.activation"] != first
 
+        # Without --json, so the printed rollback commands can be read.
+        plain = [arg for arg in common if arg != "--json"]
         result = run_arm(repo, env, binary if native else None,
-                         ["--engine", "python", "--tag", "0.21.1", "--reinstall", *common, "--rollback-tag", "pre-back"])
+                         ["--engine", "python", "--tag", "0.21.1", "--reinstall", *plain, "--rollback-tag", "pre-back"])
         assert result.returncode == 0, result.stdout + result.stderr
         state = json.loads(state_path.read_text())
         assert [a for a in state["calls"] if a[:1] == ["pull"]][-1][-1] == "ghcr.io/pseudogiant-xr/pseudolife-daemon:0.21.1"
@@ -971,6 +974,9 @@ def test_release_rust_activation_keeps_and_switches_back_on_the_same_bank(tmp_pa
         assert not any(v.endswith("docker-compose.rust-ghcr.yml") for v in up)
         assert _labels(state_path)["org.pseudolife.engine"] == "python"
         assert json.loads(_accepted(env).read_text())["services"][SERVICE]["labels"]["org.pseudolife.engine"] == "python"
+        # Rolling the switch back restores Rust with its model volume overlay.
+        restore = next(line for line in result.stdout.splitlines() if "--pull never" in line)
+        assert "docker-compose.rust-ghcr.yml" in restore
 
 
 @pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
@@ -1028,9 +1034,9 @@ def test_release_rust_models_go_to_their_own_volume_outside_the_backed_up_state(
         assert "com.docker.compose.project=fixture-project" in create
         assert "com.docker.compose.volume=pseudolife_rust_models" in create
         provision = next(a for a in calls if a[:1] == ["run"] and "provision" in a)
-        assert "fixture-project_pseudolife_rust_models:/models" in provision
+        assert "type=volume,src=fixture-project_pseudolife_rust_models,dst=/models" in provision
         assert "PSEUDOLIFE_DAEMON_MODELS_DIR=/models" in provision
-        assert not any(v.endswith(":/data") for v in provision)
+        assert not any(v.endswith("dst=/data") for v in provision)
 
 
 @pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])

@@ -140,11 +140,34 @@ def test_release_engine_models_volume_and_overrides():
     data = {"type": "volume", "source": "state", "target": "/data"}
     models = {"type": "volume", "source": "models", "target": "/models"}
     assert eng.model_volumes(_release_config({"PSEUDOLIFE_DAEMON_MODELS_DIR": "/models"}, [data, models])) == \
-        ("/models", [("fixture_models", "models")])
-    assert eng.model_volumes(_release_config(volumes=[data])) == ("/data/models", [("fixture-state", "state")])
+        ("/models", [("type=volume,src=fixture_models,dst=/models", "models")])
+    assert eng.model_volumes(_release_config(volumes=[data])) == \
+        ("/data/models", [("type=volume,src=fixture-state,dst=/data", "state")])
+    nested = {**models, "volume": {"subpath": "cache"}}
+    assert eng.model_volumes(_release_config({"PSEUDOLIFE_DAEMON_MODELS_DIR": "/models"}, [nested]))[1][0][0] \
+        .endswith(",volume-subpath=cache")
     assert eng.model_volumes(_release_config({"PSEUDOLIFE_DAEMON_ONNX_DIR": "/opt/onnx"})) is None
     with pytest.raises(up.UpdateError, match="no persistent volume"):
         eng.model_volumes(_release_config({"PSEUDOLIFE_DAEMON_MODELS_DIR": "/models"}, [data]))
+
+
+def test_model_volume_is_created_with_its_driver_or_must_exist_when_external():
+    from pseudolife_memory import update_engine as eng
+    calls = []
+
+    def command(args, **kw):
+        calls.append(args)
+        return (1, "") if args[:2] == ["volume", "inspect"] else (0, "")
+    config = _release_config()
+    config["volumes"]["models"] = {"name": "fixture_models", "driver": "local",
+                                   "driver_opts": {"type": "none", "o": "bind", "device": "/srv/models"}}
+    eng.ensure_project_volume(command, config, "models")
+    create = calls[-1]
+    assert create[-1] == "fixture_models" and create[create.index("--driver") + 1] == "local"
+    assert "device=/srv/models" in create and "com.docker.compose.volume=models" in create
+    config["volumes"]["models"] = {"name": "fixture_models", "external": True}
+    with pytest.raises(up.UpdateError, match="external"):
+        eng.ensure_project_volume(command, config, "models")
 
 
 @pytest.mark.parametrize("script", [True, False])

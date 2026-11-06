@@ -1832,7 +1832,7 @@ class Update:
                       "ops/update.sh --all, or python ops/update_clients.py) for the shim, the plugin cache and the "
                       "Codex re-approval steps")
 
-    def compose_context(self, engine: str = "python") -> dict:
+    def compose_context(self, engine: str = "python", rust_overlay: bool = False) -> dict:
         """The compose files and env file the running daemon container was
         created with (its labels), with the GHCR overlay added; when those
         files are gone, this package's bundled copies of the two compose
@@ -1915,11 +1915,14 @@ class Update:
         overlay = next((p.with_name("docker-compose.ghcr.yml") for p in existing
                         if p.with_name("docker-compose.ghcr.yml").is_file()), None) or self._bundled("docker-compose.ghcr.yml")
         files = existing + ([overlay] if overlay not in existing else [])
-        if engine == "rust":
+        rust_path = None
+        if engine == "rust" or rust_overlay:
             beside = overlay.with_name(RUST_RELEASE_OVERLAY)
             # The bundled copy is refreshed from this package; a checkout's is its own.
-            files.append(beside if beside.is_file() and overlay.parent != data_dir() / "compose"
+            rust_path = (beside if beside.is_file() and overlay.parent != data_dir() / "compose"
                          else self._bundled(RUST_RELEASE_OVERLAY))
+            if engine == "rust":
+                files.append(rust_path)
         args = ["-p", project]
         if self.o.compose_files and working_dir:
             # Relative mounts, env_file entries and other resources retain
@@ -1936,7 +1939,8 @@ class Update:
             original = [p for p in existing if p.resolve() != (cached / "docker-compose.ghcr.yml").resolve()]
         return {"args": args, "env_file": env_files, "checkout": checkout,
                 "files": [str(p) for p in files], "project": project, "original_files": [str(p) for p in original],
-                "image_pin_overlay_masked": len(original) != len(existing)}
+                "image_pin_overlay_masked": len(original) != len(existing),
+                "rust_overlay": str(rust_path) if rust_path else None}
 
     def _bundled(self, name: str) -> Path:
         target = data_dir() / "compose" / name

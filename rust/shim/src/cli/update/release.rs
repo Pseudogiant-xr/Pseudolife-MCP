@@ -409,10 +409,12 @@ impl Update {
         self.maintainer_context = Some((context.args.clone(), env.clone()));
         let (token, running_token) = if activating {
             engine::verify_identity(self, &config, &context.running, &self.o.daemon_url)?;
-            (
-                engine::daemon_token(&config)?,
-                engine::daemon_token(&running_config(&context.running))?,
-            )
+            let token = engine::daemon_token(&config)?;
+            // A daemon running without a bearer (--allow-auth-change adding
+            // one) answers any bearer: read it with the configured one.
+            let running = engine::daemon_token(&running_config(&context.running))
+                .unwrap_or_else(|_| token.clone());
+            (token, running)
         } else {
             (String::new(), String::new())
         };
@@ -442,6 +444,8 @@ impl Update {
                 db,
                 context.running["Id"].as_str().unwrap_or(DAEMON_CONTAINER),
             )?;
+            // Refuse a misplaced model directory before the pull.
+            model_volumes(&config)?;
         }
         let repository = if choice == "rust" {
             RUST_IMAGE
@@ -582,8 +586,20 @@ impl Update {
             uuid::Uuid::new_v4().simple()
         ));
         engine::write_overlay(&rollback_file, &old_service)?;
+        let mut restore_args = context.args.clone();
+        if old_engine == "rust" && choice != "rust" {
+            // The restored Rust daemon needs its overlay's model volume again.
+            restore_args.extend([
+                "-f".into(),
+                compose_root()
+                    .join(&target)
+                    .join("docker-compose.rust-ghcr.yml")
+                    .to_string_lossy()
+                    .into_owned(),
+            ]);
+        }
         self.rollback_lines = engine::rollback_commands(
-            &context.args,
+            &restore_args,
             &context.env_files,
             &rollback_file,
             &engine::release_accepted(),
@@ -942,8 +958,8 @@ fn running_config(running: &Value) -> Value {
     json!({"services": {DAEMON_SERVICE: {"environment": env}}})
 }
 
-/// `(source, target, Compose volume key)`: one mount holding the models.
-type ModelMount = (String, String, Option<String>);
+/// `(--mount spec, Compose volume key)`: one mount holding the models.
+type ModelMount = (String, Option<String>);
 
 /// The models directory and the mounts covering it, or None when the daemon
 /// names its own ONNX model directory.
@@ -977,9 +993,16 @@ fn model_volumes(config: &Value) -> Result<Option<(String, Vec<ModelMount>)>> {
         match volume["type"].as_str() {
             Some("volume") => {
                 let name = config["volumes"][source]["name"].as_str().unwrap_or(source);
-                mounts.push((name.to_owned(), target.to_owned(), Some(source.to_owned())));
+                let mut spec = format!("type=volume,src={name},dst={target}");
+                if let Some(subpath) = volume["volume"]["subpath"]
+                    .as_str()
+                    .filter(|s| !s.is_empty())
+                {
+                    spec.push_str(&format!(",volume-subpath={subpath}"));
+                }
+                mounts.push((spec, Some(source.to_owned())));
             }
-            Some("bind") => mounts.push((source.to_owned(), target.to_owned(), None)),
+            Some("bind") => mounts.push((format!("type=bind,src={source},dst={target}"), None)),
             _ => {}
         }
     }
@@ -991,6 +1014,43 @@ fn model_volumes(config: &Value) -> Result<Option<(String, Vec<ModelMount>)>> {
     Ok(Some((models, mounts)))
 }
 
+/// `docker volume create` arguments matching the project's definition, or
+/// an error for a missing external volume.
+fn volume_create_args(config: &Value, key: &str) -> Result<Vec<String>> {
+    let definition = &config["volumes"][key];
+    let name = definition["name"].as_str().unwrap_or(key);
+    if definition["external"] == true {
+        return Err(UpdateError::usage(format!(
+            "the external model volume {name} does not exist; create it as the project expects, then retry; nothing was deployed"
+        )));
+    }
+    let project = config["name"].as_str().unwrap_or("pseudolife-mcp");
+    let mut args: Vec<String> = vec![
+        "volume".into(),
+        "create".into(),
+        "--label".into(),
+        format!("com.docker.compose.project={project}"),
+        "--label".into(),
+        format!("com.docker.compose.volume={key}"),
+    ];
+    if let Some(driver) = definition["driver"].as_str() {
+        args.extend(["--driver".into(), driver.to_owned()]);
+    }
+    for (flag, field) in [("--opt", "driver_opts"), ("--label", "labels")] {
+        if let Some(map) = definition[field].as_object() {
+            for (option, value) in map {
+                let value = value
+                    .as_str()
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| value.to_string());
+                args.extend([flag.into(), format!("{option}={value}")]);
+            }
+        }
+    }
+    args.push(name.to_owned());
+    Ok(args)
+}
+
 impl Update {
     /// Install the pinned models into the daemon's model volume before backup.
     fn provision_models(&mut self, image: &str, config: &Value) -> Result<()> {
@@ -1000,10 +1060,13 @@ impl Update {
             );
             return Ok(());
         };
-        let project = config["name"].as_str().unwrap_or("pseudolife-mcp");
-        for (name, _, key) in &mounts {
+        for (_, key) in &mounts {
             let Some(key) = key else { continue };
-            let (code, out) = self.docker_call(&["volume", "inspect", name]);
+            let name = config["volumes"][key.as_str()]["name"]
+                .as_str()
+                .unwrap_or(key)
+                .to_owned();
+            let (code, out) = self.docker_call(&["volume", "inspect", &name]);
             let exists = code == 0
                 && serde_json::from_str::<Value>(&out)
                     .ok()
@@ -1011,21 +1074,9 @@ impl Update {
                     .unwrap_or(false);
             if !exists {
                 // Created the way Compose would, so `up` adopts it quietly.
-                let project_label = format!("com.docker.compose.project={project}");
-                let volume_label = format!("com.docker.compose.volume={key}");
-                if self
-                    .docker_call(&[
-                        "volume",
-                        "create",
-                        "--label",
-                        &project_label,
-                        "--label",
-                        &volume_label,
-                        name,
-                    ])
-                    .0
-                    != 0
-                {
+                let args = volume_create_args(config, key)?;
+                let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
+                if self.docker_call(&borrowed).0 != 0 {
                     return Err(UpdateError::new(format!(
                         "could not create the model volume {name}; check Docker and retry; nothing was deployed"
                     )));
@@ -1041,8 +1092,8 @@ impl Update {
             "-e".into(),
             format!("PSEUDOLIFE_DAEMON_MODELS_DIR={models}"),
         ];
-        for (name, target, _) in &mounts {
-            args.extend(["-v".into(), format!("{name}:{target}")]);
+        for (spec, _) in &mounts {
+            args.extend(["--mount".into(), spec.clone()]);
         }
         args.extend(
             [
@@ -1096,8 +1147,7 @@ mod disk_review_tests {
         assert_eq!(
             mounts,
             vec![(
-                "fixture_pseudolife_rust_models".to_owned(),
-                "/models".to_owned(),
+                "type=volume,src=fixture_pseudolife_rust_models,dst=/models".to_owned(),
                 Some("pseudolife_rust_models".to_owned())
             )]
         );
@@ -1106,8 +1156,17 @@ mod disk_review_tests {
             .unwrap();
         assert_eq!(
             (dir.as_str(), mounts[0].0.as_str()),
-            ("/data/models", "fixture-state")
+            ("/data/models", "type=volume,src=fixture-state,dst=/data")
         );
+        let nested = json!({"type": "volume", "source": "pseudolife_rust_models", "target": "/models",
+                            "volume": {"subpath": "cache"}});
+        let (_, mounts) = model_volumes(&daemon(
+            json!({"PSEUDOLIFE_DAEMON_MODELS_DIR": "/models"}),
+            json!([nested]),
+        ))
+        .unwrap()
+        .unwrap();
+        assert!(mounts[0].0.ends_with(",volume-subpath=cache"));
         assert!(
             model_volumes(&daemon(
                 json!({"PSEUDOLIFE_DAEMON_ONNX_DIR": "/opt/models"}),
@@ -1123,6 +1182,30 @@ mod disk_review_tests {
             ))
             .is_err()
         );
+    }
+    #[test]
+    fn a_model_volume_is_created_with_its_project_driver_and_options() {
+        let mut config = daemon(json!({}), json!([]));
+        config["volumes"]["pseudolife_rust_models"] = json!({"name": "fixture_models", "driver": "local",
+            "driver_opts": {"type": "none", "o": "bind", "device": "/srv/models"}});
+        let args = volume_create_args(&config, "pseudolife_rust_models").unwrap();
+        assert_eq!(args.last().map(String::as_str), Some("fixture_models"));
+        for expected in [
+            "com.docker.compose.project=fixture",
+            "com.docker.compose.volume=pseudolife_rust_models",
+            "local",
+            "device=/srv/models",
+            "o=bind",
+            "type=none",
+        ] {
+            assert!(
+                args.iter().any(|a| a == expected),
+                "{expected} missing from {args:?}"
+            );
+        }
+        config["volumes"]["pseudolife_rust_models"] =
+            json!({"name": "fixture_models", "external": true});
+        assert!(volume_create_args(&config, "pseudolife_rust_models").is_err());
     }
     #[test]
     fn the_running_bearer_is_read_from_the_container_environment() {

@@ -249,50 +249,57 @@ def rollback_commands(base: list[str], env_file, overlay: Path, accepted: Path, 
             + f"; else echo '{fix}' >&2; false; fi"]
 
 
-def _model_mounts(config: dict, models_dir: str) -> list[tuple[str, str, str | None]]:
-    """``(source, target, compose volume key or None)`` covering ``models_dir``."""
-    service = config["services"][up.DAEMON_SERVICE]
-    result = []
-    for volume in service.get("volumes", []) or []:
-        target = str(volume.get("target", "")).rstrip("/")
-        if not target or not (models_dir == target or models_dir.startswith(target + "/")):
-            continue
-        if volume.get("type") == "volume" and volume.get("source"):
-            key = volume["source"]
-            result.append(((config.get("volumes", {}).get(key) or {}).get("name") or key, target, key))
-        elif volume.get("type") == "bind" and volume.get("source"):
-            result.append((volume["source"], target, None))
-    return result
-
-
 def model_volumes(config: dict) -> tuple[str, list[tuple[str, str | None]]] | None:
-    """The models directory and the volumes holding it; None when the daemon names its own models."""
-    env = config["services"][up.DAEMON_SERVICE].get("environment", {}) or {}
+    """``(models dir, [(--mount spec, compose volume key or None)])`` for the
+    mounts covering the daemon's models directory; None when the daemon
+    names its own ONNX model directory."""
+    service = config["services"][up.DAEMON_SERVICE]
+    env = service.get("environment", {}) or {}
     if env.get("PSEUDOLIFE_DAEMON_ONNX_DIR"):
         return None
     models_dir = (env.get("PSEUDOLIFE_DAEMON_MODELS_DIR") or "/data/models").rstrip("/")
-    mounts = _model_mounts(config, models_dir)
+    mounts = []
+    for volume in service.get("volumes", []) or []:
+        target = str(volume.get("target", "")).rstrip("/")
+        source = volume.get("source")
+        if not source or not target or not (models_dir == target or models_dir.startswith(target + "/")):
+            continue
+        if volume.get("type") == "volume":
+            name = (config.get("volumes", {}).get(source) or {}).get("name") or source
+            spec = f"type=volume,src={name},dst={target}"
+            subpath = (volume.get("volume") or {}).get("subpath")
+            mounts.append((spec + (f",volume-subpath={subpath}" if subpath else ""), source))
+        elif volume.get("type") == "bind":
+            mounts.append((f"type=bind,src={source},dst={target}", None))
     if not mounts:
         raise up.UpdateError(f"the Rust daemon's model directory {models_dir} is on no persistent volume of this "
                              "project; restore the release Compose files and retry; nothing was changed", 2)
-    return models_dir, [(name, key) for name, _target, key in mounts]
+    return models_dir, mounts
 
 
-def model_mount_args(config: dict, models_dir: str) -> list[tuple[str, str]]:
-    return [(name, target) for name, target, _key in _model_mounts(config, models_dir)]
-
-
-def ensure_project_volume(command, config: dict, name: str, key: str) -> None:
-    """Create a project volume the way Compose would, so ``up`` adopts it without a warning."""
+def ensure_project_volume(command, config: dict, key: str) -> None:
+    """Create a project volume as Compose would (its driver, options and
+    labels), so ``up`` adopts it; an external one must already exist."""
+    definition = config.get("volumes", {}).get(key) or {}
+    name = definition.get("name") or key
     code, out = command(["volume", "inspect", name], timeout=60)
     try:
         if code == 0 and json.loads(out):
             return
     except ValueError:
         pass
-    project = config.get("name") or "pseudolife-mcp"
-    if command(["volume", "create", "--label", f"com.docker.compose.project={project}",
-                "--label", f"com.docker.compose.volume={key}", name], timeout=60)[0]:
+    if definition.get("external"):
+        raise up.UpdateError(f"the external model volume {name} does not exist; create it as the project expects, "
+                             "then retry; nothing was deployed", 2)
+    args = ["volume", "create", "--label", f"com.docker.compose.project={config.get('name') or 'pseudolife-mcp'}",
+            "--label", f"com.docker.compose.volume={key}"]
+    if definition.get("driver"):
+        args += ["--driver", str(definition["driver"])]
+    for option, value in sorted((definition.get("driver_opts") or {}).items()):
+        args += ["--opt", f"{option}={value}"]
+    for label, value in sorted((definition.get("labels") or {}).items()):
+        args += ["--label", f"{label}={value}"]
+    if command([*args, name], timeout=60)[0]:
         raise up.UpdateError(f"could not create the model volume {name}; check Docker and retry; nothing was deployed")
 
 
@@ -315,6 +322,7 @@ class ReleaseEngineUpdate:
         self.u, self.o = update, update.o
         self.target, self.current, self.previous_digest = target, current, previous_digest
         self.engine = choice
+        self.host_engine = "rust" if host_labels(update).get(ENGINE_LABEL) == "rust" else "python"
 
     def command(self, args, **kw):
         return up.run_cli([self.u.docker, *args], stdout_only=not kw.get("stream", False), **kw)
@@ -365,11 +373,14 @@ class ReleaseEngineUpdate:
 
         def bearer(env):
             token = env.get("PSEUDOLIFE_MCP_TOKEN") or next(iter(parse_token_map(env.get("PSEUDOLIFE_MCP_TOKENS"))), "")
-            if not token or "\r" in token or "\n" in token:
-                raise up.UpdateError("the engine health gate needs bearer auth; set PSEUDOLIFE_MCP_TOKEN in the host env "
-                                     "file and retry; nothing was changed", 2)
-            return token
-        return bearer(daemon_env), bearer(running_env)
+            return token if token and "\r" not in token and "\n" not in token else ""
+        token = bearer(daemon_env)
+        if not token:
+            raise up.UpdateError("the engine health gate needs bearer auth; set PSEUDOLIFE_MCP_TOKEN in the host env "
+                                 "file and retry; nothing was changed", 2)
+        # A daemon running without a bearer (--allow-auth-change adding one)
+        # answers any bearer: read it with the configured one.
+        return token, bearer(running_env) or token
 
     def backup(self, checkout):
         """The bank dump and the /data archive, both verified complete."""
@@ -430,13 +441,13 @@ class ReleaseEngineUpdate:
             self.u.step("the daemon names its own ONNX model directory; leaving model provisioning to it")
             return
         models_dir, mounts = plan
-        for name, key in mounts:
+        for _spec, key in mounts:
             if key is not None:
-                ensure_project_volume(self.command, config, name, key)
+                ensure_project_volume(self.command, config, key)
         self.u.step(f"provisioning the Rust daemon's pinned models into {models_dir} (a first activation downloads them)...")
         args = ["run", "--rm", "-e", f"PSEUDOLIFE_DAEMON_MODELS_DIR={models_dir}"]
-        for name, target in model_mount_args(config, models_dir):
-            args += ["-v", f"{name}:{target}"]
+        for spec, _key in mounts:
+            args += ["--mount", spec]
         code, out = self.command([*args, "--entrypoint", "pseudolife-daemon", image, "provision", "models", "--if-missing"],
                                  timeout=3600, stream=not self.o.as_json)
         if code:
@@ -468,7 +479,8 @@ class ReleaseEngineUpdate:
 
     def run(self, before_recreate) -> None:
         u, o = self.u, self.o
-        context = u.compose_context(engine=self.engine)
+        # A switch away from Rust still resolves the Rust overlay for its rollback.
+        context = u.compose_context(engine=self.engine, rust_overlay=self.host_engine == "rust")
         compose = context["args"]
         u._compose_shown = compose
         environment = up.compose_environment(context["env_file"], {"PSEUDOLIFE_IMAGE_TAG": self.target})
@@ -506,7 +518,8 @@ class ReleaseEngineUpdate:
                                      "POSTGRES_DB in its Compose environment and retry; nothing was changed", 2)
             pg = self.project_container(compose, environment, "pseudolife-pg")
             self.require_imported(pg, user, db, daemon)
-        image = f"{RUST_IMAGE if self.engine == 'rust' else up.GHCR_IMAGE}:{self.target}"
+            model_volumes(config)  # refuse a misplaced model directory before the pull
+        image =f"{RUST_IMAGE if self.engine == 'rust' else up.GHCR_IMAGE}:{self.target}"
         u.preflight_disk(up.data_dir())
         u.step(f"pulling {image}...")
         code, out = self.command(["pull", image], timeout=7200, stream=not o.as_json)
@@ -559,7 +572,12 @@ class ReleaseEngineUpdate:
         except OSError as exc:
             raise up.UpdateError(f"cannot write the rollback overlay in {directory}; restore write access and retry. "
                                  f"The running image is tagged {rollback}; nothing was deployed") from exc
-        u.rollback_lines = [*rollback_commands(compose, context["env_file"], rollback_file, release_accepted(), self.target),
+        restore_compose = list(compose)
+        if old_engine == "rust" and self.engine != "rust":
+            # The restored Rust daemon needs its overlay's model volume again.
+            restore_compose += ["-f", context["rust_overlay"]]
+        u.rollback_lines = [*rollback_commands(restore_compose, context["env_file"], rollback_file, release_accepted(),
+                                               self.target),
                             *u._schema_rollback_note(None)]
         u.report.rollback = {"tag": rollback, "state": "tagged", "overlay": str(rollback_file)}
         u.prune_rollbacks(context["checkout"], up.GHCR_IMAGE)
