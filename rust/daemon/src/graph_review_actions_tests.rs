@@ -363,7 +363,24 @@ fn a_list_rationale_stores_postgres_array_text() {
         json!(["a", 1]),
         json!([{"k": 1}]),
         json!([["a"], "b"]),
+        // Ragged below the first level: PostgreSQL refuses the literal
+        // ("malformed array literal"), recorded 2026-11-07.
+        json!([[[1]], [[2, 3]]]),
+        json!([[[1]], [2]]),
     ] {
         assert!(text_param(Some(&value)).is_err(), "{value}");
     }
+    // Rectangular at every depth: stored.
+    assert_eq!(
+        text_param(Some(&json!([[["a", "b"]], [["c", "d"]]])))
+            .unwrap()
+            .as_deref(),
+        Some("{{{a,b}},{{c,d}}}")
+    );
+    assert_eq!(
+        text_param(Some(&json!([[1, 2], [3, 4]])))
+            .unwrap()
+            .as_deref(),
+        Some("{{1,2},{3,4}}")
+    );
 }

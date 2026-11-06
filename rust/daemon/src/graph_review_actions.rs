@@ -842,25 +842,32 @@ pub(crate) fn text_param(v: Option<&Value>) -> Result<Option<String>, ToolError>
 
 /// psycopg's list dumper: one element type across every level (`cannot
 /// dump lists of mixed types`), a level of lists or of scalars (`None`
-/// anywhere), rectangular nesting, and no dict (`cannot adapt type 'dict'`).
+/// anywhere), rectangular nesting at every depth (every sibling sub-list
+/// has the same full shape), and no dict (`cannot adapt type 'dict'`).
+/// Returns the level's shape, outermost length first.
 #[allow(clippy::result_large_err)]
-fn array_kind(items: &[Value], kind: &mut Option<&'static str>) -> Result<(), ToolError> {
+fn array_kind(items: &[Value], kind: &mut Option<&'static str>) -> Result<Vec<usize>, ToolError> {
     let lists = items.iter().filter(|v| v.is_array()).count();
     if lists != 0 && lists != items.len() {
         return Err(internal(
             "a list mixing lists and scalars cannot be stored as text",
         ));
     }
-    let mut width = None;
+    let ragged =
+        || internal("multidimensional arrays must have array expressions with matching dimensions");
+    let mut child: Option<Vec<usize>> = None;
     for v in items {
         match v {
             Value::Array(sub) => {
-                if *width.get_or_insert(sub.len()) != sub.len() || sub.is_empty() {
-                    return Err(internal(
-                        "multidimensional arrays must have array expressions with matching dimensions",
-                    ));
+                if sub.is_empty() {
+                    return Err(ragged());
                 }
-                array_kind(sub, kind)?;
+                let shape = array_kind(sub, kind)?;
+                match &child {
+                    None => child = Some(shape),
+                    Some(first) if *first != shape => return Err(ragged()),
+                    Some(_) => {}
+                }
             }
             Value::Null => {}
             Value::Object(_) => {
@@ -880,7 +887,9 @@ fn array_kind(items: &[Value], kind: &mut Option<&'static str>) -> Result<(), To
             }
         }
     }
-    Ok(())
+    let mut shape = vec![items.len()];
+    shape.extend(child.unwrap_or_default());
+    Ok(shape)
 }
 
 /// PostgreSQL's `array_out` text for a checked list ([`array_kind`]): `{a,b}`,
