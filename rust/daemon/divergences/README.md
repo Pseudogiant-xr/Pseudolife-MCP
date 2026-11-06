@@ -21,8 +21,8 @@ the implementation or PR that removed its difference, or the maintainer
 decision that accepted it as a deliberate refusal. Existing accepted
 algorithm choices retain their behavioural bucket and named disposition.
 
-On 2026-11-07 the maintainer accepted 76 caller rows (the D7 triage of that
-date): 68 harmless ones move to "behaviour with no caller" as no caller
+On 2026-11-07 the maintainer accepted 75 caller rows (the D7 triage of that
+date): 67 harmless ones move to "behaviour with no caller" as no caller
 impact, each row saying why; 8 named refusals or substitutions (the PDFium
 refusal, the three model-boundary rows, the native updater, the Codex
 bootstrap authority, TLS and the shutdown budget) are closed by that
@@ -98,6 +98,7 @@ whose remaining item is a proof keeps that boundary visible in its entry.
 | [Presets with more than one band (`continuum` and aliases, multi-band `custom`)](write-path-w2-e/presets-with-more-than-one-band.md) | MCP `memory_store` with continuum/custom bands from `config::load` | B14b W2-E multi-band retention and promotion |
 | [File mode (`graph_requires_postgres`)](write-path-w2-e/the-graph-store-s-write-tools/file-mode-graph-requires-postgres.md) | Python CLI `serve` file-mode fallback followed by MCP graph write tools | B9 / D1 file-mode retirement, with R7 / B12 deprecation documentation |
 | [Autosave and clean-exit flush](write-path-w2-e/w2-e-first-increment-boundaries/autosave-and-clean-exit-flush.md) | Opt-in engine update on a pre-v57 bank through `pseudolife_memory/update_engine.py::require_imported_bank` | R4 / B11 installed legacy migration; D2 remains the documented Python exception |
+| [Exact-duplicate boundary](write-path-w2-e/w2-e-first-increment-boundaries/exact-duplicate-boundary.md) | MCP `memory_store` at the duplicate/surprise boundary | B14b W2-E exact admission/rejection-reason acceptance |
 | [Frozen store catalog snapshots](write-path-w2-e/w2-e-first-increment-boundaries/frozen-store-catalog-snapshots.md) | `rust/daemon/harness/w2e.py::run_golden` consumes the frozen store catalog for replay acceptance | B8 / B14b W2-E frozen-catalog acceptance |
 | [Hosted write-path execution](write-path-w2-e/w2-e-first-increment-boundaries/hosted-write-path-execution.md) | `.github/workflows/rust.yml` `body-evidence` invokes `rust/ci/body_evidence.py::run` for D6/D11 acceptance | B13 scheduled-master evidence and Windows-specific comparisons |
 | [New reaper recording's startup state](write-path-w2-e/w2-e-first-increment-boundaries/new-reaper-recording-s-startup-state.md) | `rust/daemon/harness/w2e.py::run_golden` consumes the reaper recording and `dbstate.py::dump` compares startup state | B4 / W3-H reaper-startup recording acceptance |
