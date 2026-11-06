@@ -345,6 +345,13 @@ def ensure_project_volume(command, config: dict, key: str) -> None:
         raise up.UpdateError(f"could not create the model volume {name}; check Docker and retry; nothing was deployed")
 
 
+def kept_note(message: str, rollback: str, built: str | None) -> str:
+    """A failure before the recreate: the rollback tag stays, and after a
+    successful build its tag names an image that never passed the gate."""
+    note = f"{message}; the running image keeps its rollback tag {rollback}"
+    return note + (f"; {built} now names the unvalidated build" if built else "")
+
+
 def uses_models_volume(running: dict) -> bool:
     """Whether a running Rust daemon reads its models from the overlay's
     /models (its environment names it, or a volume is mounted there),
@@ -942,6 +949,7 @@ class EngineUpdate:
         code, _ = self.command(["compose", *compose, "build", up.DAEMON_SERVICE], env=self.env, timeout=7200, stream=not self.o.as_json)
         if code:
             raise up.UpdateError("engine build failed; the running daemon is unchanged; nothing was deployed")
+        self.built = True
         if self.engine == "rust":
             # The config the replacement runs with: its model directory and volume.
             provision_models(self.u, self.command, image, self.config(compose))
@@ -971,13 +979,14 @@ class EngineUpdate:
         candidate = self.repo / "data/update-engine/docker-compose.engine-candidate.json"
         rust_overlay = ["-f", str(self.ops / "docker-compose.rust-daemon.yml")]
         compose = [*self.base, *(rust_overlay if self.engine == "rust" else []), "-f", str(candidate)]
+        self.built = False
         try:
             try:
                 _write_overlay(candidate, service)
                 self.build(compose, image)
                 self.back_up(rollback)
             except (up.UpdateError, OSError) as exc:
-                raise up.UpdateError(f"{exc}; the running image keeps its rollback tag {rollback}",
+                raise up.UpdateError(kept_note(str(exc), rollback, image if self.built else None),
                                      getattr(exc, "exit_code", 1)) from exc
             health = self.activate(compose, service, rust_overlay, rollback)
         finally:

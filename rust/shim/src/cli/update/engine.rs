@@ -975,7 +975,29 @@ pub(super) fn deploy(u: &mut Update, repo: &Path) -> Result<()> {
             "the current daemon must be running for the backup and rollback tag; start it and retry",
         ));
     }
-    verify_identity(u, &config, &running, &u.o.daemon_url)?;
+    // Check the running daemon's mounts against the configuration that holds
+    // its model volume: the checkout Rust overlay. A Rust-to-Rust update keeps
+    // that volume, and a switch back to Python only leaves the model cache.
+    let identity = if (choice == "rust" && !u.o.shadow) || labels[ENGINE_LABEL] == "rust" {
+        let mut args = vec!["compose".into()];
+        args.extend(base.clone());
+        args.extend([
+            "-f".into(),
+            ops.join("docker-compose.rust-daemon.yml")
+                .to_string_lossy()
+                .into_owned(),
+            "config".into(),
+            "--format".into(),
+            "json".into(),
+        ]);
+        let (code, out) = u.command(&args, Some(&env), 60, false);
+        serde_json::from_str(&out).ok().filter(|_: &Value| code == 0).ok_or_else(|| {
+            UpdateError::usage("cannot resolve the Compose project; check its files and env file, then retry; nothing was changed")
+        })?
+    } else {
+        config.clone()
+    };
+    verify_identity(u, &identity, &running, &u.o.daemon_url)?;
     disk::host(&repo)?;
     u.disk_storage(&daemon, Some(&pg), running["Image"].as_str())?;
     u.set_rollback_scope(&config, &running)?;
@@ -1080,14 +1102,11 @@ pub(super) fn deploy(u: &mut Update, repo: &Path) -> Result<()> {
     tag_validated(u, id, &rollback)?;
     u.step(format!("tagged rollback image: {rollback}"));
     u.report.rollback = json!({"tag":rollback,"state":"tagged"});
-    let kept = |e: UpdateError| UpdateError {
-        message: format!(
-            "{}; the running image keeps its rollback tag {rollback}",
-            e.message
-        ),
+    let image = format!("pseudolife-daemon-{choice}:checkout");
+    let kept = |e: UpdateError, built: bool| UpdateError {
+        message: kept_note(&e.message, &rollback, built.then_some(image.as_str())),
         exit_code: e.exit_code,
     };
-    let image = format!("pseudolife-daemon-{choice}:checkout");
     let activation = uuid::Uuid::new_v4().simple().to_string();
     let service = json!({"image":image,"build":{"dockerfile":format!("ops/Dockerfile.daemon{}",if choice=="rust"{"-rust"}else{""})},"labels":{ENGINE_LABEL:choice,CHECKOUT_LABEL:repo,ACTIVATION_LABEL:activation}});
     let candidate = repo.join("data/update-engine/docker-compose.engine-candidate.json");
@@ -1097,7 +1116,8 @@ pub(super) fn deploy(u: &mut Update, repo: &Path) -> Result<()> {
         compose.extend(["-f".into(), rust_overlay.to_string_lossy().into_owned()]);
     }
     compose.extend(["-f".into(), candidate.to_string_lossy().into_owned()]);
-    write_overlay(&candidate, &service).map_err(kept)?;
+    write_overlay(&candidate, &service).map_err(|e| kept(e, false))?;
+    let mut built = false;
     let result = (|| -> Result<()> {
         // Build the replacement, then install its pinned models: both before
         // the backup, so a first activation's model download never runs
@@ -1119,6 +1139,7 @@ pub(super) fn deploy(u: &mut Update, repo: &Path) -> Result<()> {
                     "engine build failed; the running daemon is unchanged; nothing was deployed",
                 ));
             }
+            built = true;
             if choice == "rust" {
                 // The config the replacement runs with: its model directory and volume.
                 let mut args = vec!["compose".into()];
@@ -1151,7 +1172,7 @@ pub(super) fn deploy(u: &mut Update, repo: &Path) -> Result<()> {
             }
             Ok(backups)
         })();
-        let backups = prepared.map_err(kept)?;
+        let backups = prepared.map_err(|e| kept(e, built))?;
         let old_service = rollback_service(&running, &rollback, Some(&repo));
         let rollback_file = repo.join("data/update-engine").join(format!(
             "docker-compose.rollback-{}-{}.json",
@@ -1213,6 +1234,16 @@ pub(super) fn deploy(u: &mut Update, repo: &Path) -> Result<()> {
         u.warn("could not remove the temporary engine overlay; the rollback instructions remain usable");
     }
     result
+}
+
+/// A failure before the recreate: the rollback tag stays, and after a
+/// successful build its tag names an image that never passed the gate.
+pub(super) fn kept_note(message: &str, rollback: &str, built: Option<&str>) -> String {
+    let note = format!("{message}; the running image keeps its rollback tag {rollback}");
+    match built {
+        Some(image) => format!("{note}; {image} now names the unvalidated build"),
+        None => note,
+    }
 }
 
 /// The Compose files a printed checkout rollback recreates the old daemon

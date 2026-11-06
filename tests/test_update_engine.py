@@ -429,6 +429,10 @@ def engine_host(tmp_path, monkeypatch):
     def run(argv, **kwargs):
         argv = list(map(str, argv))
         state["calls"].append(argv)
+        if (argv[1:2] in (["create"], ["run"]) or argv[1:3] == ["image", "inspect"]) and \
+                any(a in state["orphaned"] for a in argv):
+            # The containerd image store: an ID no name refers to any more.
+            return 1, "Error response from daemon: No such image"
         if "df" in argv:
             return 0, "Filesystem 1024-blocks Used Available Capacity Mounted on\noverlay 99999999 1 99999998 1% /\n"
         if argv[:2] == ["docker", "compose"]:
@@ -579,6 +583,9 @@ def test_failure_never_commits_engine_selection(engine_host, failure, monkeypatc
         assert "nothing was deployed" in str(caught.value)
         assert update.report.rollback == {"tag": update.report.rollback["tag"], "state": "tagged"}
         assert f"keeps its rollback tag {update.report.rollback['tag']}" in str(caught.value)
+        # Only a build that succeeded moved :checkout to an unvalidated image.
+        assert ("pseudolife-daemon-rust:checkout now names the unvalidated build" in str(caught.value)) \
+            is (failure != "build")
         assert not any("up" in a for a in s["calls"])
     else:
         assert str(caught.value).count("to roll back:") == 1
@@ -620,7 +627,8 @@ def test_provisioning_failure_changes_nothing(engine_host):
     assert "to roll back:" not in message
     # Only the rollback tag of the running image, taken before the build, remains.
     rollback = next(a[3] for a in s["calls"] if a[1:2] == ["tag"])
-    assert message.endswith(f"; the running image keeps its rollback tag {rollback}")
+    assert message.endswith(f"; the running image keeps its rollback tag {rollback}"
+                            "; pseudolife-daemon-rust:checkout now names the unvalidated build")
     assert not any(any("backup." in x for x in a) or "up" in a for a in s["calls"])
     assert json.dumps(s["running"], sort_keys=True) == before
     assert not (s["repo"] / eng.SELECTION).exists()
@@ -1747,8 +1755,16 @@ def _stopped_handover(s, monkeypatch, *, engine="python", stored=False):
         def __init__(self, **kw):
             assert kw["container"] == "fixture-pg" and kw["daemon_container"] == "fixture-daemon"
             s["stopped_bank_selectors"] = kw
+        @staticmethod
+        def require_image():
+            # DockerBank creates its helpers from the stopped daemon's image ID,
+            # which the containerd store stops resolving once no name refers to it.
+            if s["running"]["Image"] in s["orphaned"]:
+                raise up.UpdateError(f"Error response from daemon: No such image: {s['running']['Image']}")
+
         @contextmanager
         def helper(self, script):
+            self.require_image()
             s["calls"].append(["docker", "create", "--network", "none", "--volumes-from", "fixture-daemon:ro", s["running"]["Image"], script])
             try:
                 yield "owned-helper"
@@ -1759,6 +1775,7 @@ def _stopped_handover(s, monkeypatch, *, engine="python", stored=False):
             return (1 if s["fail"] == "probe" else 0), ("58" if engine == "rust" else "SCHEMA_META_VERSION = 58\n")
         def backup(self, *, out, keep_days):
             assert keep_days is None
+            self.require_image()
             s["calls"].append(["complete-stopped-backup"])
             if s["fail"] == "backup":
                 raise up.UpdateError("fixture backup failed")
@@ -1876,19 +1893,45 @@ def test_stopped_checkout_handover_refuses_aliases_on_unshared_networks(engine_h
 
 
 @pytest.mark.parametrize("failure", ["backup", "probe"])
-def test_stopped_checkout_handover_failure_precedes_tag_build(engine_host, monkeypatch, failure):
+def test_stopped_checkout_handover_failure_never_recreates(engine_host, monkeypatch, failure):
+    """A probe failure stops in preflight, before the rollback tag and the
+    build; a backup failure follows both, and neither recreates the daemon."""
     from pseudolife_memory import update_engine as eng
     s = engine_host
     update, _, _ = _stopped_handover(s, monkeypatch)
     s["fail"] = failure
     update._selected_engine = "python"
-    with pytest.raises(up.UpdateError):
+    with pytest.raises(up.UpdateError) as caught:
         eng.deploy_engine(update, s["repo"])
-    # A probe failure stops in preflight; a backup failure follows only the
-    # rollback tag and the build.
     assert not any("up" in call or (failure == "probe" and (call[1:2] == ["tag"] or "build" in call))
                    for call in s["calls"])
+    if failure == "backup":
+        assert any(call[1:2] == ["tag"] for call in s["calls"]) and any("build" in call for call in s["calls"])
+        assert str(caught.value).endswith("; pseudolife-daemon-python:checkout now names the unvalidated build")
     assert any(call[1:2] == ["rm"] for call in s["calls"])
+
+
+@pytest.mark.parametrize("engine", ["python", "rust"])
+def test_same_engine_stopped_handover_backs_up_from_the_tagged_running_image(engine_host, monkeypatch, engine):
+    """The stopped daemon runs the image :checkout named; the rebuild moves
+    that name, and the containerd store then resolves the image's ID (which
+    the stopped backup creates its helpers from) only through the rollback
+    tag taken before the build."""
+    from pseudolife_memory import update_engine as eng
+    s = engine_host
+    update, _, _ = _stopped_handover(s, monkeypatch, engine=engine)
+    update._selected_engine = engine
+    running = s["running"]["Image"]
+    # Only :checkout names the stopped daemon's image.
+    s["images"] = {f"pseudolife-daemon-{engine}:checkout": running}
+    eng.deploy_engine(update, eng.selected_checkout(update) or s["repo"])
+    calls = s["calls"]
+    tag = next(i for i, call in enumerate(calls) if call[1:2] == ["tag"])
+    build = next(i for i, call in enumerate(calls) if "build" in call)
+    backup = next(i for i, call in enumerate(calls) if call == ["complete-stopped-backup"])
+    assert tag < build < backup
+    assert s["images"][update.report.rollback["tag"]] == running and running not in s["orphaned"]
+    assert s["images"][f"pseudolife-daemon-{engine}:checkout"] != running
 
 
 def test_stopped_checkout_without_authorization_still_refuses(engine_host):
