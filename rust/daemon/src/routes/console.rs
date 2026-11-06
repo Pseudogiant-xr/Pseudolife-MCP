@@ -98,10 +98,9 @@ mod tests {
     ];
 
     /// The declared 501s: every `routes.json` registration that no family
-    /// declares served. Each is probed with no query and no body, so a
-    /// partly served route (`GET /api/agents`, whose coordination view is
-    /// served) is checked for its unserved default. Serving a route means
-    /// adding it to its family's `SERVED`.
+    /// declares served, each probed with no query and no body. Serving a
+    /// route means adding it to its family's `SERVED`; only D9's
+    /// retirements may stay unserved.
     #[tokio::test]
     async fn unserved_routes_answer_the_declared_501() {
         let table = RouteTable::get();
