@@ -342,10 +342,10 @@ async fn db_commit_unknown_reread_waits_for_the_write_in_flight() {
     );
     assert!(Arc::ptr_eq(&after, &ready), "re-read in place");
     let ids = resident_ids(&after);
-    assert!(ids.contains(&lost), "the lost commit is resident: {ids:?}");
+    assert!(ids.contains(&lost), "the lost commit is resident");
     assert!(
         ids.contains(&in_flight_id),
-        "the write in flight is resident: {ids:?}"
+        "the write in flight is resident"
     );
     shadow.assert_bank_matches(&after).await;
     assert!(!crate::txn::commit_outcome_unknown());
