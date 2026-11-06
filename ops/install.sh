@@ -211,16 +211,6 @@ while [ $# -gt 0 ]; do
         *) echo "unknown argument: $1" >&2; usage ;;
     esac
 done
-# >>> engine flag >>>
-case "$ENGINE" in
-    ""|rust|python) ;;
-    *) echo "--engine must be rust or python; nothing was changed." >&2; exit 2 ;;
-esac
-if [ -n "$ENGINE" ] && [ -n "$CLIENT_ONLY" ]; then
-    echo "--engine selects this host's Docker daemon, and a client-only install runs none; drop --engine, or run the installer on the daemon's host. Nothing was changed." >&2
-    exit 2
-fi
-# <<< engine flag <<<
 # >>> unattended mode >>>
 # A pty cannot tell a person from an agent. Agents explicitly opt out of
 # questions with --yes or PSEUDOLIFE_UNATTENDED=1; redirected stdin also does.
@@ -960,6 +950,22 @@ case "${CLIENT_UPDATE_SCHEDULE:-ask}" in ask|no) ;; *)
 esac
 # <<< client-only mode <<<
 
+# >>> engine flag >>>
+# After every client-only inference (--daemon-url, the environment, the
+# bank question), so an implied client-only install refuses it too.
+case "$ENGINE" in
+    ""|rust|python) ;;
+    *) echo "--engine must be rust or python; nothing was changed." >&2; exit 2 ;;
+esac
+if [ -n "$ENGINE" ] && [ -n "$CLIENT_ONLY" ]; then
+    echo "--engine selects this host's Docker daemon, and a client-only install runs none; drop --engine, or run the installer on the daemon's host. Nothing was changed." >&2
+    exit 2
+fi
+if [ "$ENGINE" = rust ] && [ -n "$NO_TOKEN" ]; then
+    echo "--engine rust needs the daemon's bearer token: pseudolife-mcp update verifies the Rust daemon with an authenticated read, so a --no-token host could not be updated. Drop --no-token or use --engine python. Nothing was changed." >&2
+    exit 2
+fi
+# <<< engine flag <<<
 # ── 1. provider selection (before preflight, so it checks what you picked) ─
 if [ -z "$CLIENT" ]; then
     if { [ -n "${INSTALLER_UNATTENDED:-}${INSTALLER_RERUN:-}" ] || [ ! -t 0 ]; }; then
@@ -1382,6 +1388,8 @@ if [ -z "$CLIENT_ONLY" ]; then
     state_vol="$(printf '%s\n' "$resolved_volumes" | sed -n '2p')"
     existing_volumes="$(docker volume ls --format '{{.Name}}')"
     volumes_changed=""
+    BANK_EXISTED=""
+    if printf '%s\n' "$existing_volumes" | grep -Fxq -- "$bank_vol"; then BANK_EXISTED=1; fi
     for volume in "$bank_vol" "$state_vol"; do
         if ! printf '%s\n' "$existing_volumes" | grep -Fxq -- "$volume"; then
             docker volume create "$volume" >/dev/null
@@ -1407,15 +1415,26 @@ SWITCH_ENGINE=""
 engine_files=()
 if [ -z "$CLIENT_ONLY" ]; then
     INSTALLED_ENGINE="$(engine_helper detect)" || exit 1
-    if [ "$INSTALLED_ENGINE" = none ]; then COMPOSE_ENGINE="${ENGINE:-python}"; else COMPOSE_ENGINE="$INSTALLED_ENGINE"; fi
-    if [ -n "$ENGINE" ] && [ "$INSTALLED_ENGINE" != none ] && [ "${INSTALLED_ENGINE%-checkout}" != "$ENGINE" ]; then
-        SWITCH_ENGINE="$ENGINE"
-    fi
+    case "$INSTALLED_ENGINE" in
+        none)
+            COMPOSE_ENGINE="${ENGINE:-python}"
+            # An existing bank reaches Rust only through update, which checks
+            # its schema and counters first.
+            if [ "$COMPOSE_ENGINE" = rust ] && [ -n "${BANK_EXISTED:-}" ]; then
+                COMPOSE_ENGINE=python; SWITCH_ENGINE=rust
+            fi ;;
+        # This checkout's own unfinished Rust install: redo it, or install Python.
+        rust-unaccepted) COMPOSE_ENGINE="${ENGINE:-rust}" ;;
+        *)
+            COMPOSE_ENGINE="$INSTALLED_ENGINE"
+            if [ -n "$ENGINE" ] && [ "${INSTALLED_ENGINE%-checkout}" != "$ENGINE" ]; then SWITCH_ENGINE="$ENGINE"; fi ;;
+    esac
     engine_out="$(engine_helper prepare --repo "$repo" --engine "$COMPOSE_ENGINE")" || exit 1
     while IFS= read -r engine_file; do
         [ -z "$engine_file" ] || engine_files+=("$engine_file")
     done <<< "$engine_out"
-    if [ "$INSTALLED_ENGINE" = none ]; then step "Daemon engine: ${COMPOSE_ENGINE%-checkout}"
+    if [ -n "$SWITCH_ENGINE" ]; then step "Daemon engine: ${COMPOSE_ENGINE%-checkout} for now; switching to $SWITCH_ENGINE after the install"
+    elif [ "$INSTALLED_ENGINE" = none ] || [ "$INSTALLED_ENGINE" = rust-unaccepted ]; then step "Daemon engine: ${COMPOSE_ENGINE%-checkout}"
     else step "Daemon engine unchanged: ${COMPOSE_ENGINE%-checkout}"; fi
 fi
 # <<< daemon engine <<<
@@ -3244,6 +3263,18 @@ esac
 # daemon is up, the endpoint is asked from inside its container, the only
 # place the answer means anything.
 ENDPOINT_CONTAINER=""
+container_http_probe() {  # status 0 when the daemon's container gets any HTTP answer from $1/models
+    case "${COMPOSE_ENGINE:-python}" in
+        python)
+            docker exec pseudolife-mcp-daemon python -c 'import sys, urllib.error, urllib.request
+try:
+    urllib.request.urlopen(sys.argv[1] + "/models", timeout=10)
+except urllib.error.HTTPError:
+    pass' "$1" >/dev/null 2>&1 ;;
+        # The Rust image has curl and no Python; without -f any HTTP status is 0.
+        *) docker exec pseudolife-mcp-daemon curl -s -o /dev/null --max-time 10 "$1/models" >/dev/null 2>&1 ;;
+    esac
+}
 endpoint_container_probe() {
     case "$EXTRACTOR" in endpoint|endpoint-fallback) ;; *) return 0 ;; esac
     probe_url="$(extractor_container_url "$EXTRACTOR_URL")"
@@ -3252,11 +3283,7 @@ endpoint_container_probe() {
         step "Note: on Linux, host.docker.internal is the docker bridge address, so a server listening only on 127.0.0.1 is out of the daemon container's reach."
     fi
     # Any HTTP answer counts: a 401 or 404 still means the server is there.
-    if docker exec pseudolife-mcp-daemon python -c 'import sys, urllib.error, urllib.request
-try:
-    urllib.request.urlopen(sys.argv[1] + "/models", timeout=10)
-except urllib.error.HTTPError:
-    pass' "$probe_url" >/dev/null 2>&1; then
+    if container_http_probe "$probe_url"; then
         ENDPOINT_CONTAINER=reachable
         step "The daemon's container reaches the extractor endpoint at $probe_url."
     else
@@ -3301,11 +3328,7 @@ ufw_drops_input() {  # status 0 when ufw is on and drops what no rule allows
     [ "$ufw_policy" != ACCEPT ]
 }
 container_reaches_shim() {  # any HTTP answer counts, as for the endpoint
-    docker exec pseudolife-mcp-daemon python -c 'import sys, urllib.error, urllib.request
-try:
-    urllib.request.urlopen(sys.argv[1] + "/models", timeout=10)
-except urllib.error.HTTPError:
-    pass' "$1" >/dev/null 2>&1
+    container_http_probe "$1"
 }
 # A firewall rule is a persistent change the user did not choose by running
 # the installer: asked once at a terminal, no by default, and never applied
@@ -3475,9 +3498,13 @@ if [ -z "$CLIENT_ONLY" ]; then
     # Rust verifies its provisioned models before it serves: allow it longer.
     health_tries=40
     [ "${COMPOSE_ENGINE:-python}" = python ] || health_tries=120
+    # Rust answers "ok" while it still initializes: wait for "ready": true.
+    health_ready='"status"[[:space:]]*:[[:space:]]*"ok"'
+    [ "${COMPOSE_ENGINE:-python}" = python ] || health_ready='"ready"[[:space:]]*:[[:space:]]*true'
     for _ in $(seq 1 "$health_tries"); do
-        if curl -fsS --max-time 3 http://127.0.0.1:8765/health 2>/dev/null \
-            | grep -q '"status"[[:space:]]*:[[:space:]]*"ok"'; then
+        if health_body="$(curl -fsS --max-time 3 http://127.0.0.1:8765/health 2>/dev/null)" \
+            && printf '%s' "$health_body" | grep -q '"status"[[:space:]]*:[[:space:]]*"ok"' \
+            && printf '%s' "$health_body" | grep -q "$health_ready"; then
             healthy=1; break
         fi
         sleep 1.5
@@ -3694,7 +3721,7 @@ fi
 # >>> engine switch >>>
 # After the record: the switch recreates the daemon, which the record checks.
 if [ -n "${SWITCH_ENGINE:-}" ]; then
-    switch_version="$(curl -fsS --max-time 3 http://127.0.0.1:8765/health 2>/dev/null \
+    switch_version="$( { curl -fsS --max-time 3 http://127.0.0.1:8765/health 2>/dev/null || true; } \
         | sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
     switch_args=(update --engine "$SWITCH_ENGINE" --daemon-only)
     if [ "$INSTALLED_ENGINE" = rust-checkout ]; then switch_args+=(--checkout "$repo")
@@ -3705,7 +3732,8 @@ if [ -n "${SWITCH_ENGINE:-}" ]; then
         exit 1
     fi
     step "Switching the daemon to $SWITCH_ENGINE (backup, rollback tag and health gate)..."
-    if ! "$SHIM_PATH" "${switch_args[@]}"; then
+    # Stdin closed: update's own questions take their defaults, never hang.
+    if ! "$SHIM_PATH" "${switch_args[@]}" </dev/null; then
         echo "The switch to $SWITCH_ENGINE failed; its output above says what changed and how to roll back. Retry with: $SHIM_PATH ${switch_args[*]}" >&2
         exit 1
     fi

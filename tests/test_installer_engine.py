@@ -1,5 +1,7 @@
 """Docker-tier engine selection in the installers (G2-B)."""
 import importlib.util
+import os
+import sys
 import json
 import subprocess
 
@@ -39,6 +41,9 @@ def helper(tmp_path, monkeypatch):
         return subprocess.CompletedProcess(args, code, out, err)
 
     monkeypatch.setattr(module, "docker", docker)
+    monkeypatch.setattr(module, "preflight_disk", lambda: state["calls"].append(["disk-check"]))
+    state["health"] = {"status": "ok", "ready": True, "version": "0.23.0"}
+    monkeypatch.setattr(module, "health", lambda url: state["health"])
     repo = tmp_path / "checkout"
     (repo / "ops").mkdir(parents=True)
     (repo / "pyproject.toml").write_text('[project]\nversion = "0.23.0"\n')
@@ -54,6 +59,8 @@ def test_fresh_rust_install_pulls_provisions_then_records_only_after_health(help
     module, state, repo = helper
     assert module.detect() == "none"
     [overlay] = module.prepare(repo, "rust")
+    order = [c[0] for c in state["calls"] if c[0] in ("disk-check", "pull", "run")]
+    assert order == ["disk-check", "pull", "run"]
     pull, provision = [c for c in state["calls"] if c[0] in ("pull", "run")]
     assert pull == ["pull", "ghcr.io/pseudogiant-xr/pseudolife-daemon-rust:0.23.0"]
     assert "pseudolife-mcp_pseudolife_rust_models:/models" in provision
@@ -66,10 +73,51 @@ def test_fresh_rust_install_pulls_provisions_then_records_only_after_health(help
     assert "build: !reset null" in text and '"pseudolife_rust_models:/models"' in text and '"ghcr.io/pseudogiant-xr/pseudolife-daemon-rust:0.23.0"' in text
     assert not eng.release_accepted().exists()
     _started(module, state)
-    assert module.detect() == "rust"
+    assert module.detect() == "rust-unaccepted"
     assert module.accept() == "accepted"
+    assert module.detect() == "rust"
     # update verifies the same record the installer wrote.
     assert eng._validated_engine_selection(state["labels"])["image"].endswith("-rust:0.23.0")
+
+
+def test_accept_waits_for_a_ready_daemon_at_its_release(helper):
+    module, state, repo = helper
+    module.prepare(repo, "rust")
+    _started(module, state)
+    for bad in ({"status": "ok", "ready": False, "version": "0.23.0"},
+                {"status": "ok", "ready": True, "version": "0.22.1"},
+                {"status": "ok", "ready": True, "version": "0.23.0", "counters_import_required": True}):
+        state["health"] = bad
+        with pytest.raises(module.Refusal, match="not ready"):
+            module.accept()
+        assert not eng.release_accepted().exists()
+
+
+def test_a_removed_container_keeps_the_accepted_rust_selection(helper):
+    module, state, repo = helper
+    [overlay] = module.prepare(repo, "rust")
+    _started(module, state)
+    module.accept()
+    before, calls = overlay.read_bytes(), len(state["calls"])
+    state["labels"] = None  # docker compose down
+    assert module.detect() == "rust"
+    assert module.prepare(repo, "rust") == [overlay] and overlay.read_bytes() == before
+    assert not any(c[0] in ("pull", "run") for c in state["calls"][calls:])
+
+
+def test_an_unaccepted_rust_daemon_is_redone_only_for_this_checkouts_release(helper):
+    module, state, repo = helper
+    module.prepare(repo, "rust")
+    _started(module, state)  # never accepted: its health check failed
+    assert module.detect() == "rust-unaccepted"
+    pulls = len([c for c in state["calls"] if c[0] == "pull"])
+    module.prepare(repo, "rust")
+    assert len([c for c in state["calls"] if c[0] == "pull"]) == pulls + 1
+    assert module.prepare(repo, "python") == []
+    state["labels"][eng.RELEASE_LABEL] = "0.24.0"
+    for engine in ("rust", "python"):
+        with pytest.raises(module.Refusal, match="docker rm -f pseudolife-mcp-daemon"):
+            module.prepare(repo, engine)
 
 
 def test_rerun_on_an_accepted_host_reproduces_the_overlay_without_pulling(helper):
@@ -156,12 +204,16 @@ def _stage(script, start, end):
 
 
 @pytest.mark.parametrize("script", ["install.sh", "install.ps1"])
-@pytest.mark.parametrize("installed,flag,compose_engine,switch", [
-    ("none", "", "python", ""), ("none", "rust", "rust", ""), ("python", "", "python", ""),
-    ("python", "rust", "python", "rust"), ("rust", "", "rust", ""), ("rust", "python", "rust", "python"),
-    ("rust", "rust", "rust", ""), ("rust-checkout", "python", "rust-checkout", "python"),
+@pytest.mark.parametrize("installed,flag,bank,compose_engine,switch", [
+    ("none", "", "", "python", ""), ("none", "rust", "", "rust", ""),
+    # An existing bank with no daemon reaches Rust through update's checks.
+    ("none", "rust", "1", "python", "rust"),
+    ("python", "", "1", "python", ""), ("python", "rust", "1", "python", "rust"),
+    ("rust", "", "1", "rust", ""), ("rust", "python", "1", "rust", "python"), ("rust", "rust", "1", "rust", ""),
+    ("rust-checkout", "python", "1", "rust-checkout", "python"),
+    ("rust-unaccepted", "", "1", "rust", ""), ("rust-unaccepted", "python", "1", "python", ""),
 ])
-def test_engine_stage_keeps_the_installed_engine_and_defers_a_switch(tmp_path, script, installed, flag,
+def test_engine_stage_keeps_the_installed_engine_and_defers_a_switch(tmp_path, script, installed, flag, bank,
                                                                      compose_engine, switch):
     if script.endswith(".ps1"):
         stage = _stage(script, "# -- 4b. daemon engine", "# -- 5. managed env block")
@@ -172,7 +224,7 @@ def test_engine_stage_keeps_the_installed_engine_and_defers_a_switch(tmp_path, s
                 "    $global:LASTEXITCODE = 0\n"
                 f"    if ($args[0] -eq 'detect') {{ return '{installed}' }}\n"
                 "    if ($args[4] -ne 'python') { return 'C:\\fixture\\engine.yml' }\n}\n")
-        proc = ps.run(f"$ClientOnly=$false\n$Engine='{flag}'\n$stateVol='fixture-state'\n" + stub
+        proc = ps.run(f"$ClientOnly=$false\n$Engine='{flag}'\n$bankExisted=${'true' if bank else 'false'}\n" + stub
                       + stage.replace(definition, "")
                       + "Write-Output \"RESULT:$composeEngine|$switchEngine|$($engineFiles -join ',')\"\n")
         output = _output(proc)
@@ -186,7 +238,7 @@ def test_engine_stage_keeps_the_installed_engine_and_defers_a_switch(tmp_path, s
         stub = ('engine_helper() { printf "helper|%s\\n" "$*" >>"$CALL_LOG"; '
                 f'case "$1" in detect) echo {installed} ;; prepare) [ "$5" = python ] || echo /fixture/engine.yml ;; esac; }}\n'
                 'step() { echo "STEP: $*"; }\n')
-        proc = shell.run(f"CLIENT_ONLY=''\nENGINE='{flag}'\nstate_vol=fixture-state\n" + stub
+        proc = shell.run(f"CLIENT_ONLY=''\nENGINE='{flag}'\nBANK_EXISTED='{bank}'\n" + stub
                          + stage.replace(definition, "")
                          + 'echo "RESULT:$COMPOSE_ENGINE|$SWITCH_ENGINE|${engine_files[*]-}"\n')
         output = proc.stdout + proc.stderr
@@ -195,7 +247,8 @@ def test_engine_stage_keeps_the_installed_engine_and_defers_a_switch(tmp_path, s
     engine, switched, files = result[len("RESULT:"):].split("|")
     assert (engine, switched) == (compose_engine, switch)
     assert bool(files) == (compose_engine != "python")
-    assert ("unchanged" in output) == (installed != "none")
+    assert ("unchanged" in output) == (installed not in ("none", "rust-unaccepted") and not switch)
+    assert ("switching to" in output) == bool(switch)
 
 
 @pytest.mark.parametrize("script", ["install.sh", "install.ps1"])
@@ -227,21 +280,113 @@ def test_compose_and_planner_carry_the_engine_overlays(tmp_path, script):
 
 
 @pytest.mark.parametrize("script", ["install.sh", "install.ps1"])
-def test_engine_flag_is_refused_on_a_client_only_install(tmp_path, script):
+@pytest.mark.parametrize("case", ["client-only", "no-token", "allowed"])
+def test_engine_flag_refusals(tmp_path, script, case):
+    client, token = case == "client-only", case == "no-token"
     if script.endswith(".ps1"):
         stage = _stage(script, "# >>> engine flag >>>", "# <<< engine flag <<<")
         ps = _PowerShell(tmp_path)
-        proc = ps.run("$ClientOnly=$true\n$Engine='rust'\n" + stage)
+        # PowerShell's ValidateSet lets "Rust" through: the block lowercases it.
+        proc = ps.run(f"$ClientOnly=${str(client).lower()}\n$NoToken=${str(token).lower()}\n$Engine='Rust'\n"
+                      + stage + "Write-Output \"ENGINE:$Engine\"\n")
         output = _output(proc)
     else:
         variants = _bash_variants()
         if not variants:
             pytest.skip("Bash unavailable")
         stage = _stage(script, "# >>> engine flag >>>", "# <<< engine flag <<<")
-        proc = _Shell(variants[0], tmp_path).run("CLIENT_ONLY=1\nENGINE=rust\n" + stage)
+        proc = _Shell(variants[0], tmp_path).run(f"CLIENT_ONLY='{'1' if client else ''}'\nNO_TOKEN='{'1' if token else ''}'\n"
+                                                 "ENGINE=rust\n" + stage + 'echo "ENGINE:$ENGINE"\n')
         output = proc.stdout + proc.stderr
-    assert proc.returncode == 2
-    assert "client-only" in output and "Nothing was changed" in output
+    if case == "allowed":
+        assert proc.returncode == 0, output
+        assert "ENGINE:rust" in output
+    else:
+        assert proc.returncode == 2
+        assert ("client-only" if client else "token") in output.lower()
+        assert "Nothing was changed" in output
+
+
+def test_the_engine_flag_is_checked_after_client_only_is_inferred():
+    for script, flag, first in (("install.sh", "# >>> engine flag >>>", "# ── 1. provider selection"),
+                                ("install.ps1", "# >>> engine flag >>>", "# -- 1. provider selection")):
+        source = (ROOT / "ops" / script).read_text(encoding="utf-8")
+        inferred = source.rindex("CLIENT_ONLY=1" if script.endswith(".sh") else "$script:ClientOnly = [switch]$true")
+        assert inferred < source.index(flag) < source.index(first), script
+
+
+@pytest.mark.parametrize("script", ["install.sh", "install.ps1"])
+@pytest.mark.parametrize("engine", ["python", "rust"])
+def test_the_container_probe_uses_what_the_daemon_image_has(tmp_path, script, engine):
+    # The Rust image has curl and no Python.
+    if script.endswith(".ps1"):
+        source = (ROOT / "ops" / script).read_text(encoding="utf-8")
+        start = source.index("function Invoke-EndpointContainerProbe")
+        end = source.index("\n}\n", start) + 3
+        ps = _PowerShell(tmp_path)
+        proc = ps.run(f"$composeEngine='{engine}'\n$Extractor='endpoint'\n$ExtractorUrl='http://127.0.0.1:11434/v1'\n"
+                      "function ConvertTo-ExtractorContainerUrl($u) { 'http://host.docker.internal:11434/v1' }\n"
+                      "function Test-LinuxHost { $false }\n" + ps.stub_function("docker") + source[start:end]
+                      + "Invoke-EndpointContainerProbe\n")
+        calls, output = ps.logged(), _output(proc)
+    else:
+        variants = _bash_variants()
+        if not variants:
+            pytest.skip("Bash unavailable")
+        source = (ROOT / "ops" / script).read_text(encoding="utf-8")
+        start = source.index("container_http_probe() {")
+        end = source.index("\n}\n", source.index("    esac", start)) + 3
+        shell = _Shell(variants[0], tmp_path)
+        proc = shell.run(f"COMPOSE_ENGINE={engine}\n" + source[start:end]
+                         + "container_http_probe http://host.docker.internal:11434/v1\n")
+        calls, output = shell.logged(), proc.stdout + proc.stderr
+    [probe] = [call for call in calls if call.startswith("docker|exec")]
+    assert (" curl " in probe) == (engine == "rust"), output
+    assert (" python " in probe) == (engine == "python"), output
+
+
+@pytest.mark.parametrize("script", ["install.sh", "install.ps1"])
+@pytest.mark.parametrize("installed", ["python", "rust-checkout"])
+def test_the_delegated_switch_runs_update_with_stdin_closed(tmp_path, script, installed):
+    if script.endswith(".ps1"):
+        stage = _stage(script, "# >>> engine switch >>>", "# <<< engine switch <<<")
+        ps = _PowerShell(tmp_path)
+        # A native program, as the real shim is: `$null |` closes its stdin.
+        script = tmp_path / "fake_shim.py"
+        script.write_text("import sys\nread = sys.stdin.read()\n"
+                          f"open({str(ps.calls)!r}, 'a').write('shim|' + ' '.join(sys.argv[1:]) + '|stdin=' + str(len(read)) + chr(10))\n")
+        if os.name == "nt":
+            fake = tmp_path / "fake_shim.cmd"
+            fake.write_text(f'@"{sys.executable}" "{script}" %*\r\n')
+        else:
+            fake = tmp_path / "fake_shim"
+            fake.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{script}" "$@"\n')
+            fake.chmod(0o755)
+        proc = ps.run(f"$switchEngine='rust'\n$installedEngine='{installed}'\n"
+                      f"function Install-ShimOnce {{ $true }}\n$script:shimInstallPath='{fake}'\n"
+                      "function global:Invoke-RestMethod { @{ version = '0.22.1' } }\n" + stage,
+                      stdin_text="y\n")
+        calls, output = ps.logged(), _output(proc)
+    else:
+        variants = _bash_variants()
+        if not variants:
+            pytest.skip("Bash unavailable")
+        shell = _Shell(variants[0], tmp_path)
+        fake = tmp_path / "fake_shim.sh"
+        fake.write_text('#!/bin/sh\nread -r answer || answer=EOF\nprintf "shim|%s|stdin=%s\\n" "$*" "$answer" >>"$CALL_LOG"\n')
+        fake.chmod(0o755)
+        stage = _stage(script, "# >>> engine switch >>>", "# <<< engine switch <<<")
+        proc = shell.run(f"SWITCH_ENGINE=rust\nINSTALLED_ENGINE={installed}\nrepo=/fixture/repo\n"
+                         f"SHIM_OK=1\nSHIM_PATH='{shell.path(fake)}'\nensure_shim() {{ :; }}\n"
+                         "step() { echo \"STEP: $*\"; }\n"
+                         "export FAKE_HEALTH='{\"status\":\"ok\",\"version\":\"0.22.1\"}'\n" + stage)
+        calls, output = shell.logged(), proc.stdout + proc.stderr
+    assert proc.returncode == 0, output
+    [call] = [c for c in calls if c.startswith("shim|")]
+    assert "update --engine rust --daemon-only" in call
+    assert ("--checkout" in call) == (installed == "rust-checkout")
+    assert ("--tag 0.22.1" in call) == (installed == "python")
+    assert call.endswith("stdin=EOF") or call.endswith("stdin=0"), call
 
 
 def test_update_treats_the_installer_overlay_as_its_own_transient_file(tmp_path):

@@ -170,12 +170,6 @@ $LegacyOverrideMarker = "# pseudolife-mcp install: managed override (sonnet-only
 $LegacyShimOverrideMarker = "# pseudolife-mcp install: managed override (shim-only extractor) — do not edit; installer rewrites/removes this file"
 $EnvBegin = "# >>> pseudolife-mcp install (managed block — installer rewrites between markers) >>>"
 $EnvEnd = "# <<< pseudolife-mcp install <<<"
-# >>> engine flag >>>
-if ($Engine -and $ClientOnly) {
-    [Console]::Error.WriteLine("-Engine selects this host's Docker daemon, and a client-only install runs none; drop -Engine, or run the installer on the daemon's host. Nothing was changed.")
-    exit 2
-}
-# <<< engine flag <<<
 # >>> unattended mode >>>
 $interactive = ([Environment]::UserInteractive -and -not [Console]::IsInputRedirected) -and -not $Yes -and $env:PSEUDOLIFE_UNATTENDED -ne '1'
 if (-not $interactive -or $script:installerRerun) {
@@ -891,6 +885,20 @@ if (-not $ClientOnly -and "$ClientUpdateSchedule" -notin "", "ask", "no") {
 }
 # <<< client-only mode <<<
 
+# >>> engine flag >>>
+# After every client-only inference (-DaemonUrl, the environment, the bank
+# question), so an implied client-only install refuses it too. ValidateSet
+# ignores case; the helper and update do not.
+$Engine = "$Engine".ToLowerInvariant()
+if ($Engine -and $ClientOnly) {
+    [Console]::Error.WriteLine("-Engine selects this host's Docker daemon, and a client-only install runs none; drop -Engine, or run the installer on the daemon's host. Nothing was changed.")
+    exit 2
+}
+if ($Engine -eq 'rust' -and $NoToken) {
+    [Console]::Error.WriteLine("-Engine rust needs the daemon's bearer token: pseudolife-mcp update verifies the Rust daemon with an authenticated read, so a -NoToken host could not be updated. Drop -NoToken or use -Engine python. Nothing was changed.")
+    exit 2
+}
+# <<< engine flag <<<
 # -- 1. provider selection (before preflight, so it checks what you picked) ------
 # The official Windows CLI may be installed outside PATH. Keep its forwarding
 # command in this script's scope so discovery, preflight and registration use
@@ -1296,6 +1304,7 @@ if (-not $ClientOnly) {
     $existingVolumes = @(docker volume ls --format '{{.Name}}')
     if ($LASTEXITCODE -ne 0) { throw "Could not list Docker volumes; check docker info and rerun." }
     $volumesChanged = $false
+    $bankExisted = $existingVolumes -contains $bankVol
     foreach ($volume in @($bankVol, $stateVol)) {
         if ($existingVolumes -notcontains $volume) {
             docker volume create $volume | Out-Null
@@ -1325,13 +1334,22 @@ $engineFiles = @()
 if (-not $ClientOnly) {
     $installedEngine = "$(Invoke-EngineHelper detect)".Trim()
     if ($LASTEXITCODE -ne 0) { exit 1 }
-    $composeEngine = if ($installedEngine -eq 'none') { if ($Engine) { $Engine } else { 'python' } } else { $installedEngine }
-    if ($Engine -and $installedEngine -ne 'none' -and ($installedEngine -replace '-checkout$', '') -ne $Engine) {
-        $switchEngine = $Engine
+    if ($installedEngine -eq 'none') {
+        $composeEngine = if ($Engine) { $Engine } else { 'python' }
+        # An existing bank reaches Rust only through update, which checks its
+        # schema and counters first.
+        if ($composeEngine -eq 'rust' -and $bankExisted) { $composeEngine = 'python'; $switchEngine = 'rust' }
+    } elseif ($installedEngine -eq 'rust-unaccepted') {
+        # This checkout's own unfinished Rust install: redo it, or install Python.
+        $composeEngine = if ($Engine) { $Engine } else { 'rust' }
+    } else {
+        $composeEngine = $installedEngine
+        if ($Engine -and ($installedEngine -replace '-checkout$', '') -ne $Engine) { $switchEngine = $Engine }
     }
     $engineFiles = @(Invoke-EngineHelper prepare --repo $repo --engine $composeEngine | Where-Object { $_ })
     if ($LASTEXITCODE -ne 0) { exit 1 }
-    if ($installedEngine -eq 'none') { Step "Daemon engine: $($composeEngine -replace '-checkout$', '')" }
+    if ($switchEngine) { Step "Daemon engine: $($composeEngine -replace '-checkout$', '') for now; switching to $switchEngine after the install" }
+    elseif ($installedEngine -in 'none', 'rust-unaccepted') { Step "Daemon engine: $($composeEngine -replace '-checkout$', '')" }
     else { Step "Daemon engine unchanged: $($composeEngine -replace '-checkout$', '')" }
 }
 # <<< daemon engine <<<
@@ -3162,7 +3180,14 @@ function Invoke-EndpointContainerProbe {
     # Any HTTP answer counts: a 401 or 404 still means the server is there.
     $probe = "import sys, urllib.error, urllib.request`ntry:`n    urllib.request.urlopen(sys.argv[1] + '/models', timeout=10)`nexcept urllib.error.HTTPError:`n    pass"
     $global:LASTEXITCODE = 0
-    try { docker exec pseudolife-mcp-daemon python -c $probe $probeUrl 2>&1 | Out-Null } catch { $global:LASTEXITCODE = 1 }
+    try {
+        if ($composeEngine -and $composeEngine -ne 'python') {
+            # The Rust image has curl and no Python; without -f any HTTP status is 0.
+            docker exec pseudolife-mcp-daemon curl -s -o /dev/null --max-time 10 "$probeUrl/models" 2>&1 | Out-Null
+        } else {
+            docker exec pseudolife-mcp-daemon python -c $probe $probeUrl 2>&1 | Out-Null
+        }
+    } catch { $global:LASTEXITCODE = 1 }
     if ($LASTEXITCODE -eq 0) {
         $script:endpointContainer = "reachable"
         Step "The daemon's container reaches the extractor endpoint at $probeUrl."
@@ -3281,8 +3306,10 @@ if (-not $ClientOnly) {
     for ($i = 0; $i -lt $healthTries; $i++) {
         try {
             $h = Invoke-RestMethod -Uri "http://127.0.0.1:8765/health" -TimeoutSec 3
-            if ($h.status -eq "ok") { break }
-        } catch { Start-Sleep -Milliseconds 1500 }
+            # Rust answers "ok" while it still initializes: wait for ready.
+            if ($h.status -eq "ok" -and ($composeEngine -eq 'python' -or -not $composeEngine -or $h.ready -eq $true)) { break }
+        } catch { }
+        Start-Sleep -Milliseconds 1500
         $h = $null
     }
     if (-not $h) {
@@ -3528,7 +3555,8 @@ if ($switchEngine) {
         exit 1
     }
     Step "Switching the daemon to $switchEngine (backup, rollback tag and health gate)..."
-    & $script:shimInstallPath @switchArgs
+    # Stdin closed: update's own questions take their defaults, never hang.
+    $null | & $script:shimInstallPath @switchArgs
     if ($LASTEXITCODE -ne 0) {
         [Console]::Error.WriteLine("The switch to $switchEngine failed; its output above says what changed and how to roll back. Retry with: $($script:shimInstallPath) $($switchArgs -join ' ')")
         exit 1

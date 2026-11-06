@@ -4,15 +4,18 @@ Both installers call this so the engine labels and the accepted-selection
 record keep the exact format ``pseudolife-mcp update`` verifies
 (``pseudolife_memory/update_engine.py``).
 
-- ``detect`` prints ``none``, ``python``, ``rust`` (a release-mode Rust
-  selection) or ``rust-checkout`` (one made by checkout-mode update).
+- ``detect`` prints ``none``, ``python``, ``rust`` (an accepted release-mode
+  Rust selection, also when its container was removed), ``rust-unaccepted``
+  (a Rust container whose selection was never accepted) or ``rust-checkout``
+  (one made by checkout-mode update).
 - ``prepare --engine <compose engine>`` prints the Compose overlay files the
   stack is brought up with, one per line. For Rust it writes the installer's
   daemon overlay: the accepted selection on a rerun, or a new activation of
   the checkout's release, whose image it pulls and whose pinned models it
   provisions into the project's model volume before any container starts.
-- ``accept`` records the installer's Rust activation after the health gate,
-  as update does after its own; a rerun on an accepted host changes nothing.
+- ``accept`` records the installer's Rust activation once the daemon is
+  ready at its release with its counters imported, as update records its
+  own after its gate; a rerun on an accepted host changes nothing.
 
 Progress goes to stderr; stdout carries only the machine-readable answer.
 """
@@ -80,13 +83,28 @@ def accepted(found: dict) -> dict | None:
     return None
 
 
+def accepted_release() -> dict | None:
+    """The accepted release-mode Rust selection, read without a container."""
+    try:
+        selected = eng._selection(up.data_dir(), eng.RELEASE_ACCEPTED)
+    except up.UpdateError:
+        return None
+    if (selected and selected["labels"].get(eng.ENGINE_LABEL) == "rust"
+            and selected["labels"].get(eng.RELEASE_LABEL) and selected.get("image")):
+        return selected
+    return None
+
+
 def detect() -> str:
     found = labels()
     if found is None:
-        return "none"
+        # `docker compose down` removes the container, not the selection.
+        return "rust" if accepted_release() else "none"
     if found.get(eng.ENGINE_LABEL) != "rust":
         return "python"
-    return "rust" if found.get(eng.RELEASE_LABEL) or not found.get(eng.CHECKOUT_LABEL) else "rust-checkout"
+    if found.get(eng.CHECKOUT_LABEL) and not found.get(eng.RELEASE_LABEL):
+        return "rust-checkout"
+    return "rust" if accepted(found) else "rust-unaccepted"
 
 
 def checkout_version(repo: Path) -> str:
@@ -140,7 +158,19 @@ def read_overlay() -> dict:
     return service
 
 
+def preflight_disk() -> None:
+    """The updater's 8 GiB floor, before a multi-GB pull and model download."""
+    from pseudolife_memory import disk_space
+    try:
+        disk_space.host(up.data_dir())
+        disk_space.docker_storage(up.docker_cmd(), [up.DAEMON_CONTAINER, up.PG_CONTAINER], None,
+                                  lambda text: print(f"WARNING: {text}", file=sys.stderr))
+    except up.UpdateError as exc:
+        raise Refusal(f"{exc} Nothing was started.") from None
+
+
 def provision(image: str) -> None:
+    preflight_disk()
     print(f"Pulling the Rust daemon image {image}...", file=sys.stderr)
     if docker("pull", image, capture=False, timeout=7200).returncode:
         raise Refusal(f"Cannot pull {image}: this release may not publish a Rust daemon image. Rerun with "
@@ -160,8 +190,21 @@ def provision(image: str) -> None:
                       "(or rerun with --engine python). Nothing was started.")
 
 
+def refuse_foreign_unaccepted(found: dict | None, version: str) -> None:
+    """Only this checkout's own unfinished Rust install may be redone here:
+    anything else would replace a daemon without update's safeguards."""
+    if (found and found.get(eng.ENGINE_LABEL) == "rust" and found.get(eng.RELEASE_LABEL)
+            and accepted(found) is None and found.get(eng.RELEASE_LABEL) != version):
+        raise Refusal(f"The running Rust daemon {found[eng.RELEASE_LABEL]} has no accepted selection, and this "
+                      f"checkout installs {version}; the installer will not replace it. Remove the container "
+                      "(docker rm -f pseudolife-mcp-daemon; the bank volumes stay) and rerun. Nothing was started.")
+
+
 def prepare(repo: Path, engine: str) -> list[Path]:
     if engine == "python":
+        found = labels()
+        if found and found.get(eng.ENGINE_LABEL) == "rust" and found.get(eng.RELEASE_LABEL):
+            refuse_foreign_unaccepted(found, checkout_version(repo))
         return []
     if engine == "rust-checkout":
         found = labels() or {}
@@ -175,18 +218,23 @@ def prepare(repo: Path, engine: str) -> list[Path]:
             raise Refusal("The checkout's Rust selection is missing; restore data/update-engine or switch back with "
                           "pseudolife-mcp update --engine python --checkout <repo>. Nothing was started.")
         return [repo / "ops/docker-compose.rust-daemon.yml", selection]
-    found = labels() or {}
-    kept = accepted(found) if found.get(eng.ENGINE_LABEL) == "rust" else None
+    found = labels()
+    kept = accepted_release() if found is None else accepted(found)
     if kept is not None:
         return [write_overlay({"image": kept["image"], "labels": kept["labels"]})]
     version = checkout_version(repo)
-    image = f"{eng.RUST_IMAGE}:{version}"
+    refuse_foreign_unaccepted(found, version)
+    image =f"{eng.RUST_IMAGE}:{version}"
     provision(image)
     return [write_overlay({"image": image, "labels": {eng.ENGINE_LABEL: "rust", eng.ACTIVATION_LABEL: secrets.token_hex(16),
                                                       eng.RELEASE_LABEL: version}})]
 
 
-def accept() -> str:
+def health(url: str) -> dict | None:
+    return up.fetch_json(url.rstrip("/") + "/health", timeout=3)
+
+
+def accept(url: str = up.DEFAULT_DAEMON_URL) -> str:
     found = labels() or {}
     if not overlay_path().is_file() or found.get(eng.ENGINE_LABEL) != "rust" or not found.get(eng.RELEASE_LABEL):
         return "not-applicable"
@@ -196,6 +244,11 @@ def accept() -> str:
     if service["labels"].get(eng.ACTIVATION_LABEL) != found.get(eng.ACTIVATION_LABEL):
         raise Refusal("The running daemon is not the one this install started; rerun the installer. "
                       "The Rust selection was not recorded.")
+    state = health(url) or {}
+    if (state.get("status") != "ok" or state.get("ready") is not True or state.get("counters_import_required")
+            or state.get("version") != service["labels"].get(eng.RELEASE_LABEL)):
+        raise Refusal("The Rust daemon is not ready at its release, or reports counters still to import; check "
+                      "docker logs pseudolife-mcp-daemon and rerun. The Rust selection was not recorded.")
     eng._write_overlay(eng.release_accepted(), service)
     return "accepted"
 
