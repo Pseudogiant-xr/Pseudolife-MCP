@@ -16,6 +16,38 @@ _READINESS_WAIT_NOTICE = re.compile(
         "(Docker may still be starting)...".encode("utf-8")) + rb"\r?\n")
 
 
+PROACTOR_SELF_PIPE_ABORT_RULE = "oracle-cpython-proactor-self-pipe-abort"
+# CPython 3.11's ProactorEventLoop logs this when its self-pipe receive
+# completes with ERROR_OPERATION_ABORTED (WinError 995). The self-hosted
+# Windows workers printed it at the end of the Python shim's stderr in about 2
+# of 90 shard runs (w1c-doctor 2026-10-31, run 41210925170; judges' down
+# fault 2026-11-02, run 41436144681); the native shim has no event loop to
+# report it (issue #1317). Only this exact block, closing the oracle's stderr,
+# is dropped.
+_PROACTOR_FRAME = rb'  File "[^"\r\n]*[\\/]asyncio[\\/]%s\.py", line [0-9]+, in %s\r?\n'
+_CARETS = rb"(?: *\^+\r?\n)?"
+_ABORTED = rb"\[WinError 995\] The I/O operation has been aborted because of either a thread exit or an application request\r?\n"
+_PROACTOR_SELF_PIPE_ABORT = re.compile(
+    rb"(?:\A|(?<=\n))Error on reading from the event loop self pipe\r?\n"
+    rb"loop: <ProactorEventLoop running=True closed=False debug=False>\r?\n"
+    rb"Traceback \(most recent call last\):\r?\n"
+    + _PROACTOR_FRAME % (rb"windows_events", rb"finish_recv") + rb"    return ov\.getresult\(\)\r?\n" + _CARETS
+    + rb"OSError: " + _ABORTED + rb"\r?\n"
+    rb"During handling of the above exception, another exception occurred:\r?\n\r?\n"
+    rb"Traceback \(most recent call last\):\r?\n"
+    + _PROACTOR_FRAME % (rb"proactor_events", rb"_loop_self_reading") + rb"    f\.result\(\)  # may raise\r?\n" + _CARETS
+    + _PROACTOR_FRAME % (rb"windows_events", rb"_poll") + rb"    value = callback\(transferred, key, ov\)\r?\n" + _CARETS
+    + _PROACTOR_FRAME % (rb"windows_events", rb"finish_recv") + rb"    raise ConnectionResetError\(\*exc\.args\)\r?\n"
+    + rb"ConnectionResetError: " + _ABORTED + rb"\Z")
+
+
+def without_proactor_self_pipe_abort(stderr):
+    """``stderr`` less one closing ProactorEventLoop self-pipe abort block,
+    and whether it had one."""
+    match = _PROACTOR_SELF_PIPE_ABORT.search(stderr)
+    return (stderr[:match.start()], True) if match else (stderr, False)
+
+
 def needs_stderr_evidence(difference, *, include_boundaries=True):
     path = difference.get("path", "")
     prefixes = ("/stderr", "/frames", "/exit_code") + (("/json",) if include_boundaries else ())
@@ -76,6 +108,7 @@ class StdioPolicy:
     eof_orders: tuple = ()
     non_eof_orders: tuple = ()
     readiness_wait_notice: bool = False
+    oracle_proactor_abort: bool = False
 
 
 def normalized_frame(raw, policy):
@@ -121,6 +154,10 @@ def _readiness_wait_matches(expected, actual, policy, left, right):
                Policy(ignored_values=(), source_text_paths=())):
         return False
     raw = [base64.b64decode(transcript["stderr_b64"], validate=True) for transcript in (expected, actual)]
+    if policy.oracle_proactor_abort:
+        # Each rule reads the stream the previous one left: the oracle's
+        # closing abort block goes first.
+        raw[0] = without_proactor_self_pipe_abort(raw[0])[0]
     if raw[0] == raw[1]:
         return False
     for stderr in raw:
@@ -147,10 +184,36 @@ def readiness_wait_evidence(expected, actual, policy):
                          expected, actual)
 
 
+def proactor_abort_evidence(expected, actual, policy):
+    """Retain both arms' raw stderr when the oracle-only abort rule applies."""
+    if not policy.oracle_proactor_abort:
+        return []
+    try:
+        raw = base64.b64decode(expected["stderr_b64"], validate=True)
+        candidate = base64.b64decode(actual["stderr_b64"], validate=True)
+    except (KeyError, TypeError, ValueError):
+        return []
+    remaining, dropped = without_proactor_self_pipe_abort(raw)
+    if not dropped:
+        return []
+    # Recorded only when the streams then agree, alone or through the
+    # readiness rule applied after it; a stderr that still differs is a
+    # difference, not an applied normalization.
+    if remaining != candidate and any(difference.get("path", "").startswith("/stderr")
+                                      for difference in _judge(expected, actual, policy)):
+        return []
+    return retain_stderr([{"path": "/stderr", "rule": PROACTOR_SELF_PIPE_ABORT_RULE,
+                           "condition": "oracle arm only; one exact closing CPython ProactorEventLoop "
+                                        "self-pipe WinError 995 block"}], expected, actual)
+
+
 def _judge(expected, actual, policy):
     left, right = observation(expected, policy), observation(actual, policy)
     if "boundary_error" in left:
         raise ValueError("oracle stdio transcript is malformed")
+    if policy.oracle_proactor_abort:
+        # The oracle (expected) arm only: a candidate printing it still differs.
+        left["stderr"] = without_proactor_self_pipe_abort(left["stderr"])[0]
     if _readiness_wait_matches(expected, actual, policy, left, right):
         left["stderr"] = right["stderr"] = b""
     if "boundary_error" not in right and policy.eof_orders:

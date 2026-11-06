@@ -12,7 +12,8 @@ from .provenance import ROOT, runtime_metadata, module_command
 from .stdio_capture import require_phase1_source
 from .stdio_corpus import ERAS, observe
 from .stdio_judge import (StdioPolicy, judge_with_evidence, eof_policy, judge_sensitivity_controls,
-                          retain_stderr, verifies_frozen_capture, READINESS_WAIT_RULE, readiness_wait_evidence)
+                          retain_stderr, verifies_frozen_capture, READINESS_WAIT_RULE, readiness_wait_evidence,
+                          PROACTOR_SELF_PIPE_ABORT_RULE, proactor_abort_evidence)
 from .processes import owned_process
 from .phase1_receipts import command_identity, pytest_outcomes, candidate_identity, candidate_bindings
 from .phase1_receipts import PINNED_NODE_ID_OPTIONS
@@ -25,6 +26,29 @@ def selected_nodes():
     return [node for node, boundary in manifest["mapped"].items() if boundary == "stdio-shim-process"]
 
 
+# The pinned process tests' wall-time guard. Measured 2026-11-01..04 on the
+# judges shard (runs 41252993590, 41298185830, 41436144681, 41623700371,
+# 41818362386): hosted windows-latest 95-114 s, the self-hosted Windows
+# workers 129-149 s, and one worker run past 240 s (41623700371) while both
+# self-hosted lanes shared the host. PARITY_PROCESS_TEST_TIMEOUT raises it for
+# such a runner (rust.yml's parity-selfhosted sets it for Windows); hosted
+# runners keep the default.
+PROCESS_TEST_TIMEOUT = 240
+PROCESS_TEST_TIMEOUT_VARIABLE = "PARITY_PROCESS_TEST_TIMEOUT"
+# An hour: past any judges step budget, so a larger value is a typo.
+PROCESS_TEST_TIMEOUT_MAX = 3600
+
+
+def process_test_timeout(environ):
+    raw = environ.get(PROCESS_TEST_TIMEOUT_VARIABLE, "")
+    if raw == "":
+        return PROCESS_TEST_TIMEOUT
+    if not raw.isascii() or not raw.isdigit() or not 0 < int(raw) <= PROCESS_TEST_TIMEOUT_MAX:
+        raise ValueError(f"{PROCESS_TEST_TIMEOUT_VARIABLE} must be a whole number of seconds from 1 to "
+                         f"{PROCESS_TEST_TIMEOUT_MAX}, not {raw!r}; unset it to use {PROCESS_TEST_TIMEOUT}")
+    return int(raw)
+
+
 def process_tests(command, root, output):
     nodes = selected_nodes()
     identity = command_identity(command, root)
@@ -35,8 +59,9 @@ def process_tests(command, root, output):
             *PINNED_NODE_ID_OPTIONS, "--junitxml", str(report.resolve()), "-o", "junit_logging=no",
             "--port-stdio-json", json.dumps(command), *nodes])
     import os
+    timeout = process_test_timeout(os.environ)
     with owned_process(argv, cwd=root, env=dict(os.environ), stdin=subprocess.DEVNULL) as process:
-        stdout, stderr = process.communicate(timeout=240)
+        stdout, stderr = process.communicate(timeout=timeout)
     # Keep raw test output private. The public receipt includes only command
     # identity, selected nodes and pytest's per-node outcomes. JUnit messages
     # and captured streams stay private: they can include local paths or URLs.
@@ -72,14 +97,16 @@ def corpus(root, command, clearance):
             cleanup["database_dropped"] = True
             print(json.dumps({"arm": name, "era": era, "frames": len(result["stdout"]),
                               "exit": result["exit_code"], "database_dropped": True}), flush=True)
-    policy = StdioPolicy(readiness_wait_notice=True)
+    policy = StdioPolicy(readiness_wait_notice=True, oracle_proactor_abort=True)
     differences = [{"era": expected["era"], **difference}
         for expected, actual in zip(arms[:2], arms[2:]) for difference in judge_with_evidence(expected, actual, policy)]
     return {"arms": arms, "differences": differences, "resource_check": resource,
-            "policy": policy.name, "named_normalizations": ["source-text-lf", READINESS_WAIT_RULE],
+            "policy": policy.name,
+            "named_normalizations": ["source-text-lf", READINESS_WAIT_RULE, PROACTOR_SELF_PIPE_ABORT_RULE],
             "normalizations_applied": [{"era": expected["era"], **event}
                 for expected, actual in zip(arms[:2], arms[2:])
-                for event in readiness_wait_evidence(expected, actual, policy)],
+                for event in (*readiness_wait_evidence(expected, actual, policy),
+                              *proactor_abort_evidence(expected, actual, policy))],
             "judge_sensitivity_controls": judge_sensitivity_controls(arms[0], policy)}
 
 
@@ -201,6 +228,9 @@ def main():
         from .stdio_faults import run as fault_run
         receipt["faults"] = fault_run(root, command)
         receipt["differences"].extend(receipt["faults"]["differences"])
+        # receipt_status checks evidence in the top-level list only.
+        receipt.setdefault("normalizations_applied", []).extend({"surface": "faults", **event}
+            for event in receipt["faults"].get("normalizations_applied", []))
     from .stdio_scenarios import run as scenario_run
     receipt["scenarios"] = scenario_run(root, command, **selected_arguments)
     receipt["differences"].extend(receipt["scenarios"]["differences"])

@@ -359,3 +359,135 @@ async fn board_ring_queued_hint_write_keeps_a_higher_seen_mark() {
         "the hint write lowered .seen"
     );
 }
+/// A marker as the plugin's shell hooks wrote it before they wrote 0600:
+/// `printf > tmp && mv` under the user's umask, not the shim's owner-only
+/// writer. On POSIX that is 0644 under the common umask 022. POSIX only:
+/// the Windows marker check is the unchanged private-state ACL rule.
+#[cfg(unix)]
+fn hook_write(home: &Home, name: &str, text: &str) {
+    hook_write_mode(home, name, text, 0o644);
+}
+#[cfg(unix)]
+fn hook_write_mode(home: &Home, name: &str, text: &str, mode: u32) {
+    let temp = home.0.join(format!("{name}.{}", std::process::id()));
+    std::fs::write(&temp, text).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&temp, std::fs::Permissions::from_mode(mode)).unwrap();
+    }
+    std::fs::rename(&temp, home.0.join(name)).unwrap();
+}
+#[cfg(unix)]
+#[test]
+fn board_ring_liveness_reads_the_listener_records_the_stop_hook_writes() {
+    // Found 2026-11-06 in the client/hook matrix: under the native shim the
+    // Stop hook's wake never fired, because the listener records it writes
+    // (`<key>.wake`, `<key>.<token>.wake-armed`) are not owner-only and the
+    // shim refused to read them, so the daemon was never told a listener
+    // was armed. Python's wake_liveness.armed_until reads them.
+    let home = Home::new();
+    let digest = home.0.join("task.txt");
+    hook_write(&home, "task.wake", "waker\n");
+    hook_write(&home, "task.waker.wake-armed", "waker\n1050\n");
+    assert_eq!(liveness::armed_until_at(Some(&digest), 1000.0), 1050.0);
+    // The other refusals still hold for hook-written records: a second
+    // hard link, or a symlink in place of the owner file, arms nothing.
+    std::fs::hard_link(
+        home.0.join("task.waker.wake-armed"),
+        home.0.join("spare.wake-armed"),
+    )
+    .unwrap();
+    assert_eq!(liveness::armed_until_at(Some(&digest), 1000.0), 0.0);
+    std::fs::remove_file(home.0.join("spare.wake-armed")).unwrap();
+    assert_eq!(liveness::armed_until_at(Some(&digest), 1000.0), 1050.0);
+    #[cfg(unix)]
+    {
+        hook_write(&home, "real.wake", "waker\n");
+        std::fs::remove_file(home.0.join("task.wake")).unwrap();
+        std::os::unix::fs::symlink(home.0.join("real.wake"), home.0.join("task.wake")).unwrap();
+        assert_eq!(liveness::armed_until_at(Some(&digest), 1000.0), 0.0);
+    }
+}
+#[cfg(unix)]
+#[tokio::test]
+async fn board_ring_reads_and_raises_a_seen_mark_the_hook_wrote() {
+    // The prompt and Stop hooks mark mail seen in `<key>.seen` under the
+    // user's umask. The shim must honour that mark (no repeated hint for
+    // mail the session was shown) and still be able to raise it later.
+    let fixture = Fixture::new(0);
+    let home = Home::new();
+    let adapter = Adapter::enter(adapter_config(&fixture, &home))
+        .await
+        .unwrap();
+    let watermark = adapter.view().await.watermark;
+    hook_write(&home, "digest.seen", &format!("{watermark}\n"));
+    assert_eq!(adapter.view().await.delivered, watermark);
+    assert!(
+        adapter.deliver_hint().await.is_none(),
+        "the shim re-hinted mail the hook already marked seen"
+    );
+    adapter.update_mailbox(&json!({"pending_count": 2})).await;
+    let newer = adapter.view().await.watermark;
+    assert!(newer > watermark);
+    assert!(adapter.deliver_hint().await.is_some());
+    state::drain(&home.0.join("digest.txt")).await;
+    state::drain(&home.0.join("digest.seen")).await;
+    let marked = std::fs::read_to_string(home.0.join("digest.seen")).unwrap();
+    adapter.close().await;
+    assert_eq!(
+        marked.trim(),
+        newer.to_string(),
+        "the shim could not raise a hook-written .seen"
+    );
+}
+#[cfg(unix)]
+#[test]
+fn board_ring_liveness_refuses_listener_records_others_can_write_or_own() {
+    // Readable by others is harmless (0644 above); writable by others, or
+    // owned by another user, could forge a wake or suppress delivery.
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    let home = Home::new();
+    let digest = home.0.join("task.txt");
+    hook_write(&home, "task.waker.wake-armed", "waker\n1050\n");
+    for mode in [0o664, 0o666, 0o646] {
+        hook_write_mode(&home, "task.wake", "waker\n", mode);
+        assert_eq!(
+            liveness::armed_until_at(Some(&digest), 1000.0),
+            0.0,
+            "{mode:o} owner file"
+        );
+        hook_write(&home, "task.wake", "waker\n");
+        hook_write_mode(&home, "task.waker.wake-armed", "waker\n1050\n", mode);
+        assert_eq!(
+            liveness::armed_until_at(Some(&digest), 1000.0),
+            0.0,
+            "{mode:o} record"
+        );
+        hook_write(&home, "task.waker.wake-armed", "waker\n1050\n");
+        assert_eq!(liveness::armed_until_at(Some(&digest), 1000.0), 1050.0);
+    }
+    // A foreign group or owner needs privilege to arrange; as root (a CI
+    // container) both are refused, elsewhere this part is skipped.
+    if rustix::process::getuid().is_root() {
+        let record = home.0.join("task.waker.wake-armed");
+        let nobody = 65534;
+        std::os::unix::fs::lchown(&record, None, Some(nobody)).unwrap();
+        std::fs::set_permissions(&record, std::fs::Permissions::from_mode(0o664)).unwrap();
+        assert_eq!(std::fs::metadata(&record).unwrap().gid(), nobody);
+        assert_eq!(
+            liveness::armed_until_at(Some(&digest), 1000.0),
+            0.0,
+            "foreign group 0664"
+        );
+        std::fs::set_permissions(&record, std::fs::Permissions::from_mode(0o600)).unwrap();
+        std::os::unix::fs::lchown(&record, Some(nobody), None).unwrap();
+        assert_eq!(
+            liveness::armed_until_at(Some(&digest), 1000.0),
+            0.0,
+            "foreign owner"
+        );
+    } else {
+        eprintln!("not root: foreign group and owner cases skipped");
+    }
+}
