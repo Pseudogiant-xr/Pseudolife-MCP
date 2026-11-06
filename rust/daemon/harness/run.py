@@ -933,7 +933,9 @@ memory:
   top_k: 3
   hide_superseded: true
   miras:
-    preset: continuum
+    preset: custom
+    bands:
+      - name: hot
   search:
     min_score: 0.4
   bm25:
@@ -967,7 +969,7 @@ unknown_section:
         q = lambda **kw: s + urllib.parse.urlencode(kw)  # noqa: E731
         return [
             case("health with custom config", "GET", "/health"),
-            case("band of continuum", "GET", q(q="memory", band="working,forever"), [auth]),
+            case("band of a custom band", "GET", q(q="memory", band="hot"), [auth]),
             case("band of flat refused", "GET", q(q="memory", band="flat"), [auth]),
             case("search top_k=0 uses config", "GET", q(q="memory", top_k=0), [auth]),
             case("board check-in with the board disabled", "GET", "/api/hook/coordination-start", [auth]),
@@ -2250,6 +2252,47 @@ def run_refusals(binary: Path, root: Path, selected=None) -> list[dict]:
     return rows
 
 
+# Retired band layouts (R11, maintainer decision 2026-11-02): the Rust daemon
+# refuses them at startup, exit 1, naming the flat migration. Python still
+# serves them until R11's Python half lands, so only the Rust side runs here
+# (declared: divergences/write-path-w2-e/presets-with-more-than-one-band.md).
+# Each row: name, config.yaml, a phrase the refusal must carry.
+RETIRED_LAYOUT_REFUSALS = [
+    ("continuum preset", "memory:\n  miras:\n    preset: continuum\n",
+     'memory.miras.preset "continuum" configures 8 bands'),
+    ("memora alias", "memory:\n  miras:\n    preset: memora\n",
+     'memory.miras.preset "memora" configures 8 bands'),
+    ("custom two bands", "memory:\n  miras:\n    preset: custom\n    bands:\n      - name: hot\n      - {max_entries: 3}\n",
+     'memory.miras.preset "custom" configures 2 bands'),
+    ("custom recency_heavy band", "memory:\n  miras:\n    preset: custom\n    bands:\n"
+     "      - {name: flat, max_entries: 5, retention_policy: recency_heavy}\n",
+     'retention_policy "recency_heavy" is retired'),
+    ("custom surprise_heavy band", "memory:\n  miras:\n    preset: custom\n    bands:\n"
+     "      - {name: flat, max_entries: 5, retention_policy: surprise_heavy}\n",
+     'retention_policy "surprise_heavy" is retired'),
+]
+
+
+def run_retired_layout_refusals(binary: Path, root: Path) -> list[dict]:
+    rows = []
+    for name, config_yaml, phrase in RETIRED_LAYOUT_REFUSALS:
+        home = daemons.make_home(root, "retired-layout-rust", config_yaml)
+        e = daemons.base_env(home, common_env(Scenario(), f"postgresql://nobody@127.0.0.1:9/{pg.PREFIX}none"))
+        d = daemons.rust_daemon(binary, home, daemons.free_port(), rust_env(e))
+        try:
+            d.start(120, expect_exit=True)
+            code = d.wait_exit(60)
+        finally:
+            d.stop()
+        log = d.log.read_text(encoding="utf-8", errors="replace") if d.log.exists() else ""
+        diffs = [] if code == 1 else [f"exit: rust {code} (want 1)"]
+        diffs += [f"refusal lacks {want!r}" for want in (phrase, "`pseudolife-mcp migrate-flat`")
+                  if want not in log]
+        rows.append({"case": f"startup (rust, retired by R11): {name}", "python_exit": None,
+                     "rust_exit": code, "diffs": diffs})
+    return rows
+
+
 def load_golden(name: str) -> dict:
     data = json.loads((GOLDENS / f"{name}.json").read_text(encoding="utf-8"))
     # The replay process and its daemon share the host's cgroup/proc view.
@@ -2423,7 +2466,8 @@ def main() -> int:
                 print(f"  DB DIFF {d[:400]}", flush=True)
             if args.out:
                 args.out.write_text(json.dumps({"partial": results}, indent=1), encoding="utf-8")
-        refusals = (run_refusals(args.rust_bin, root) + run_config_differential(args.rust_bin, root)
+        refusals = (run_refusals(args.rust_bin, root) + run_retired_layout_refusals(args.rust_bin, root)
+                    + run_config_differential(args.rust_bin, root)
                     if "refusals" in names and mode != "golden" and not args.no_refusals else [])
         if "security-refusals" in names and mode != "golden" and not args.no_refusals:
             refusals += run_refusals(args.rust_bin, root, security_cases.startup_cases())

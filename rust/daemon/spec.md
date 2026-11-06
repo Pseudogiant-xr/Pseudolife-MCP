@@ -488,12 +488,12 @@ traced entry, a get from another session, and two faded ids, with
 | MS5 | `retrieval_log`: `events, last_event_at, uses, lesson_searches` (on failure `events, uses, lesson_searches, last_event_at` null and `unavailable: true`), then `enabled` and `write_errors`. `read_audit`: `entries` (`total, never_read, never_read_pct, reads_total, reads_median, top_decile_read_share, by_age` with 14- and 45-day buckets), `worst_sources` (at least 5 entries, five worst never-read shares), `slots`, `reinforcements` (on failure `{unavailable: true}`); then `graduation_candidates` (30-day window, at least 8 sessions, share at least 0.6, ten rows, text cut to 200 characters; `[]` on its own failure), `slot_tracking_enabled`, `slot_read_write_errors`. | `service.py:3434-3478`; `postgres.py:2325-2381, 2451-2575` |
 | MS6 | The MCP layer serves the dict as is; `memory_stats` is read-only (no `mutation` on failure). | `mcp_server.py:315-320, 1423-1428` |
 
-`harness/w2d_search.py --only mcp-stats mcp-stats-continuum
-mcp-stats-capacity` compares three scenarios. `mcp-stats` (7 calls on the
+`harness/w2d_search.py --only mcp-stats mcp-stats-capacity` compares two
+scenarios. `mcp-stats` (7 calls on the
 fact-get template plus `--stats-extra`: retrieval events from eight sessions,
 a community, a graph digest) reads the stats before and after a dense hit, a
-slot query, a miss, a get and a store. `mcp-stats-continuum` reads them
-around two searches with eight bands. `mcp-stats-capacity` sizes one custom
+slot query, a miss, a get and a store (the eight-band `mcp-stats-continuum`
+is retired with multi-band presets, R11). `mcp-stats-capacity` sizes one custom
 band one past the bank, so the warning reads "is NN% full" (the percentage
 rounds, so a large bank reads 100), then "full", and a second store evicts a
 true drop. The event and drop times are compared by presence and type, the

@@ -38,14 +38,16 @@ from schema_cases import clock_diffs
 from pseudolife_memory.storage.schema import assert_disposable_database
 
 pg = pgdisposable.Slice.from_env("pgs")
+# Multi-band presets and retention policies other than balanced are retired
+# (R11, maintainer 2026-11-02) and refuse Rust startup (run.py's retired-layout
+# refusals), so the custom cases run one balanced band: a stored band name
+# outside the preset is still renamed at hydration.
 CUSTOM_CONFIG = """memory:
   embedding_dim: 1024
   miras:
     preset: custom
     bands:
-      - {name: shallow, max_entries: 2, retention_policy: surprise_heavy}
-      - {name: middle, max_entries: 2, retention_policy: surprise_heavy}
-      - {name: deep, max_entries: 2, retention_policy: surprise_heavy}
+      - {name: shallow, max_entries: 2, retention_policy: balanced}
 """
 ZERO_TIME_CONFIG = """memory:
   embedding_dim: 1024
@@ -53,7 +55,6 @@ ZERO_TIME_CONFIG = """memory:
     preset: custom
     bands:
       - {name: hot, max_entries: 1, retention_policy: balanced}
-      - {name: deep, max_entries: 2, retention_policy: balanced}
 """
 LOAD_CLOCK = 1000.0
 FIDELITY_CASES = ("zero-timestamp-seating", "surprise-real-text-rounding",
