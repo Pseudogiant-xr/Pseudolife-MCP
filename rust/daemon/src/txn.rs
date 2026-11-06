@@ -28,6 +28,55 @@ fn reject_reentrant_call() {
 /// disconnecting client does not drop them; this guard covers the rest.
 static OPEN: AtomicBool = AtomicBool::new(false);
 
+/// Set while a writer transaction's `COMMIT` is on the wire, until its answer
+/// arrives. Still set when the next transaction starts means that future
+/// was dropped mid-`COMMIT`: whether it committed is unknown.
+static COMMIT_SENT: AtomicBool = AtomicBool::new(false);
+
+/// A writer transaction's `COMMIT` failed (any error, a lost reply or a
+/// server refusal alike) or was abandoned unanswered, so the bank may hold
+/// what the caller never published. `Service::init` re-reads the bank before
+/// serving again and clears this only once the re-read is published
+/// (maintainer decision 2026-11-07: rehydrate after a commit-unknown error
+/// instead of Python's per-call recovery barriers).
+static COMMIT_OUTCOME_UNKNOWN: AtomicBool = AtomicBool::new(false);
+
+/// Whether a `COMMIT` outcome is unknown since the last re-read.
+pub fn commit_outcome_unknown() -> bool {
+    COMMIT_OUTCOME_UNKNOWN.load(Ordering::SeqCst)
+}
+
+/// Taken before the resident copy is re-read; [`restore_commit_outcome_unknown`]
+/// puts it back when the re-read fails. True when it was set.
+pub fn take_commit_outcome_unknown() -> bool {
+    COMMIT_OUTCOME_UNKNOWN.swap(false, Ordering::SeqCst)
+}
+
+/// The re-read failed: the next call tries again.
+pub fn restore_commit_outcome_unknown() {
+    COMMIT_OUTCOME_UNKNOWN.store(true, Ordering::SeqCst);
+}
+
+#[cfg(test)]
+pub(crate) fn set_commit_outcome_unknown_for_test(unknown: bool) {
+    COMMIT_OUTCOME_UNKNOWN.store(unknown, Ordering::SeqCst);
+}
+
+fn note_commit_outcome_unknown() {
+    COMMIT_OUTCOME_UNKNOWN.store(true, Ordering::SeqCst);
+}
+
+/// Held across a `COMMIT` and forgotten once its answer arrives: dropped
+/// only when the transaction's future is (a cancelled or panicking
+/// caller), when the outcome is unknown.
+struct CommitInFlight;
+
+impl Drop for CommitInFlight {
+    fn drop(&mut self) {
+        note_commit_outcome_unknown();
+    }
+}
+
 /// Caller holds TX. An error or dropped future keeps the recovery marker;
 /// only a confirmed transaction-exit command makes the writer reusable.
 async fn finish(client: &Client, command: &str) -> Result<(), tokio_postgres::Error> {
@@ -51,6 +100,9 @@ where
     INSIDE_WRITER
         .scope((), async move {
             let _guard = TX.lock().await;
+            if COMMIT_SENT.swap(false, Ordering::SeqCst) {
+                note_commit_outcome_unknown();
+            }
             if OPEN.load(Ordering::SeqCst) {
                 finish(client, "ROLLBACK").await?;
             }
@@ -65,9 +117,18 @@ where
                         let _ = finish(client, "ROLLBACK").await;
                         return Err(E::from(error));
                     }
-                    match finish(client, "COMMIT").await {
+                    COMMIT_SENT.store(true, Ordering::SeqCst);
+                    // A future dropped while its COMMIT is on the wire sets
+                    // the flag as it drops, so no read is served from the
+                    // resident copy before the next transaction notices.
+                    let abandoned = CommitInFlight;
+                    let committed = finish(client, "COMMIT").await;
+                    std::mem::forget(abandoned);
+                    COMMIT_SENT.store(false, Ordering::SeqCst);
+                    match committed {
                         Ok(()) => Ok(v),
                         Err(error) => {
+                            note_commit_outcome_unknown();
                             let _ = finish(client, "ROLLBACK").await;
                             Err(E::from(error))
                         }
