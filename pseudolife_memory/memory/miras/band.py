@@ -34,6 +34,16 @@ import torch.nn.functional as F
 from pseudolife_memory.memory.titans_memory import MemoryEntry, RetrievalResult
 from pseudolife_memory.memory.miras.retention import build_policy, now_seconds
 
+# An exact duplicate's self-similarity misses 1.0 by float32 rounding, so
+# 1 - cos lands a little either side of 0 and the store reason (filtered_meta
+# at exactly 0, else below_surprise_threshold) followed the summation order.
+# Measured 2026-11-07 over 3,000 random unit 1024-d vectors: |1 - x.x| at most
+# 3.6e-7 under torch (this engine) and 1.8e-6 summed left to right in float32
+# (the Rust daemon's store::dot), nonzero for 71% and 92% of them. 1e-5 is
+# about five times the larger; any surprise below it is an exact duplicate.
+# The Rust daemon uses the same constant (rust/daemon/src/store.rs).
+SELF_SIMILARITY_EPSILON = 1e-5
+
 if TYPE_CHECKING:
     from pseudolife_memory.utils.config import MIRASBandSpec
 
@@ -106,7 +116,10 @@ class MIRASBand:
         x = embedding.to(self.device)
         x = F.normalize(x.unsqueeze(0), p=2, dim=1).squeeze(0)
         max_sim = float((self._pattern_matrix @ x).max())
-        return max(0.0, min(1.0, 1.0 - max_sim))
+        surprise = 1.0 - max_sim
+        if surprise < SELF_SIMILARITY_EPSILON:
+            return 0.0
+        return min(1.0, surprise)
 
     # ------------------------------------------------------------------
     # Store + eviction
