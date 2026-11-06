@@ -522,8 +522,8 @@ pub(crate) fn id_keyed(name: &str) -> Option<(&str, &str)> {
     let (key, id) = t.split_once(':')?;
     let mut chars = key.chars();
     let first_ok = chars.next().is_some_and(|c| c.is_ascii_alphabetic());
-    let key_ok = first_ok
-        && chars.all(|c| matches!(c, '.' | '-') || crate::recall_mentions::is_word(c));
+    let key_ok =
+        first_ok && chars.all(|c| matches!(c, '.' | '-') || crate::recall_mentions::is_word(c));
     let id_ok = !id.is_empty() && !id.chars().any(crate::recall_mentions::is_space);
     (key_ok && id_ok).then_some((key, id))
 }

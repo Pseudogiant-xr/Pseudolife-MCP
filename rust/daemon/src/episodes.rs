@@ -866,7 +866,9 @@ mod tests {
             "session - \u{968}\u{966}\u{968}\u{96c}-\u{967}\u{966}-\u{966}\u{96f} \u{967}\u{96b}:\u{966}\u{96a}\n"
         ));
         assert!(is_generic_title("session - 2026-10-09 15:0\u{664}"));
-        assert!(!is_generic_title("session - \u{b2}\u{2070}\u{b2}\u{2076}-10-09 15:04"));
+        assert!(!is_generic_title(
+            "session - \u{b2}\u{2070}\u{b2}\u{2076}-10-09 15:04"
+        ));
         assert!(!is_generic_title("session - 2026-10-09 15:0\u{664}\u{664}"));
     }
 }
