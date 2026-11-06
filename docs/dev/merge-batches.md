@@ -553,3 +553,18 @@ and sends the parity matrix to hosted. Rerunning only failed jobs would
 retain a previous successful planner's self-hosted choice. This does not
 change runner labels, Windows routing or the comparison allowlist; it does
 not cancel a running batch automatically.
+
+## Windows pool recovery
+
+The optional Windows pool moves only the `windows-latest` `w1c-connection`
+shard, and only when the planner saw a free, startable worker
+(`docs/specs/2026-10-19-self-hosted-parity-lane.md`, "Optional Windows
+batch pool"). If a routed shard is waiting on a worker that will not start,
+disable the switch and rerun the planner job from that run, exactly as for
+the Linux pool:
+
+```sh
+gh variable set PARITY_BATCH_WINDOWS_POOL --body hosted && gh run rerun <run-id> --job <planner-job-id>
+```
+
+The Linux pool's switch is separate and unaffected.

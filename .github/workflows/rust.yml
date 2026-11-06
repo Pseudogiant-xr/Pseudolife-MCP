@@ -802,6 +802,9 @@ jobs:
     timeout-minutes: 5
     outputs:
       linux_pool: ${{ steps.pool.outputs.linux_pool }}
+      # The Windows shards rust/ci/windows_pool.py found a free, startable
+      # self-hosted worker for (JSON list; empty or unset keeps hosted).
+      windows_suites: ${{ steps.pool.outputs.windows_suites }}
     steps:
       # The reader runs from reviewed code, never the batch merge ref: a
       # member's change to it (a fork-origin member's included) must not
@@ -863,7 +866,9 @@ jobs:
         include: ${{ fromJSON(needs.scope.outputs.parity).include }}
     # Repeat event selection in case the planner returns an incorrect choice.
     # Workflow approval and repository write access remain the trust boundary.
-    runs-on: ${{ github.repository == 'Pseudogiant-xr/Pseudolife-MCP' && ((github.event_name == 'push' && github.ref == 'refs/heads/master') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && needs.scope.outputs.integrate == 'true' && needs.scope.outputs.full == 'true')) && matrix.os == 'ubuntu-latest' && matrix.suite == 'cli-startup' && needs.parity-pool.outputs.linux_pool == 'self-hosted' && fromJSON('["self-hosted","pseudolife-parity-linux"]') || matrix.os }}
+    # The Windows branch repeats it too, and moves only the suites the planner
+    # listed, of an allowlist of one: w1c-connection (rust/ci/windows_pool.py).
+    runs-on: ${{ github.repository == 'Pseudogiant-xr/Pseudolife-MCP' && ((github.event_name == 'push' && github.ref == 'refs/heads/master') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && needs.scope.outputs.integrate == 'true' && needs.scope.outputs.full == 'true')) && matrix.os == 'ubuntu-latest' && matrix.suite == 'cli-startup' && needs.parity-pool.outputs.linux_pool == 'self-hosted' && fromJSON('["self-hosted","pseudolife-parity-linux"]') || github.repository == 'Pseudogiant-xr/Pseudolife-MCP' && ((github.event_name == 'push' && github.ref == 'refs/heads/master') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && needs.scope.outputs.integrate == 'true' && needs.scope.outputs.full == 'true')) && matrix.os == 'windows-latest' && matrix.suite == 'w1c-connection' && contains(fromJSON(needs.parity-pool.outputs.windows_suites || '[]'), matrix.suite) && fromJSON('["self-hosted","pseudolife-parity-windows"]') || matrix.os }}
     # Every cli and W1-C shard names its own budget beside its measurement
     # in the include list; eval and judges keep the 210-minute fallback.
     timeout-minutes: ${{ matrix.job_timeout || 210 }}

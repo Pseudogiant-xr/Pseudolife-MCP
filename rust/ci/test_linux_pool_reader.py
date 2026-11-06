@@ -136,8 +136,9 @@ def test_actual_planner_entrypoint_works_before_the_secret_exists(tmp_path, monk
     import sys
     monkeypatch.setattr(sys, "argv", ["linux_pool.py", "--github-output", str(output)])
     assert pool.main() == 0
-    assert output.read_text().splitlines() == ["selfhosted_suites=[]", "linux_pool=hosted"]
-    assert json.loads(capsys.readouterr().out)["selfhosted_suites"] == []
+    assert output.read_text().splitlines() == ["selfhosted_suites=[]", "linux_pool=hosted", "windows_suites=[]"]
+    linux, windows = (json.loads(line) for line in capsys.readouterr().out.splitlines())
+    assert linux["selfhosted_suites"] == [] and windows["windows_suites"] == []
 
 
 @pytest.mark.parametrize("payload", [
@@ -161,6 +162,6 @@ def test_unexpected_planner_errors_exit_successfully_with_hosted_output(tmp_path
     import sys
     monkeypatch.setattr(sys, "argv", ["linux_pool.py", "--github-output", str(output)])
     assert pool.main() == 0
-    assert output.read_text().splitlines() == ["selfhosted_suites=[]", "linux_pool=hosted"]
+    assert output.read_text().splitlines() == ["selfhosted_suites=[]", "linux_pool=hosted", "windows_suites=[]"]
     captured = capsys.readouterr()
     assert "fixture-reader-token" not in captured.out + captured.err
