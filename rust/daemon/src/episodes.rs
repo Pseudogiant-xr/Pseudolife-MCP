@@ -41,18 +41,18 @@ pub fn generic_title() -> String {
 }
 
 /// `GENERIC_TITLE_RE` (`session_title.py:23`): `^session - \d{4}-\d{2}-\d{2}
-/// \d{2}:\d{2}$`, where Python's `$` also matches before one final `\n`.
-/// Python's `\d` also takes non-ASCII decimal digits; producers write titles
-/// with `strftime`, so only ASCII digits are matched here (declared).
+/// \d{2}:\d{2}$`, where Python's `$` also matches before one final `\n` and
+/// `\d` is any Unicode decimal digit (general category Nd, CPython 3.11's
+/// `str.isdecimal`).
 pub fn is_generic_title(title: &str) -> bool {
     let t = title.strip_suffix('\n').unwrap_or(title);
     let Some(rest) = t.strip_prefix("session - ") else {
         return false;
     };
     let shape = "dddd-dd-dd dd:dd";
-    rest.len() == shape.len()
-        && shape.bytes().zip(rest.bytes()).all(|(s, c)| match s {
-            b'd' => c.is_ascii_digit(),
+    rest.chars().count() == shape.len()
+        && shape.chars().zip(rest.chars()).all(|(s, c)| match s {
+            'd' => crate::graph_review::is_decimal(c),
             other => other == c,
         })
 }
@@ -852,5 +852,21 @@ mod tests {
         assert!(!is_generic_title("Session - 2026-10-09 15:04"));
         assert!(!is_generic_title("session - 2026-10-09 15:4"));
         assert!(is_generic_title(&generic_title()));
+    }
+
+    /// Values from CPython 3.11's `GENERIC_TITLE_RE.match`: `\d` takes any
+    /// Unicode decimal digit (Arabic-Indic, Devanagari, mixed with ASCII),
+    /// never a digit-valued superscript.
+    #[test]
+    fn generic_title_takes_unicode_decimal_digits() {
+        assert!(is_generic_title(
+            "session - \u{662}\u{660}\u{662}\u{666}-\u{661}\u{660}-\u{660}\u{669} \u{661}\u{665}:\u{660}\u{664}"
+        ));
+        assert!(is_generic_title(
+            "session - \u{968}\u{966}\u{968}\u{96c}-\u{967}\u{966}-\u{966}\u{96f} \u{967}\u{96b}:\u{966}\u{96a}\n"
+        ));
+        assert!(is_generic_title("session - 2026-10-09 15:0\u{664}"));
+        assert!(!is_generic_title("session - \u{b2}\u{2070}\u{b2}\u{2076}-10-09 15:04"));
+        assert!(!is_generic_title("session - 2026-10-09 15:0\u{664}\u{664}"));
     }
 }

@@ -429,3 +429,44 @@ fn signed_zero_similarities_tie_and_ids_decide() {
     sorted.sort_unstable();
     assert_eq!(ids, sorted);
 }
+
+/// Values from CPython 3.11's `variant_tokens`: under `re.IGNORECASE` the
+/// ASCII boundary class also holds dotted and dotless I, so a size glued to
+/// one is no token, and the UD quant body runs through them.
+#[test]
+fn variant_boundaries_take_dotted_and_dotless_i() {
+    for (name, want) in [
+        ("qwen\u{131}7B", vec![]),
+        ("qwen 7B", vec!["7b"]),
+        ("UD-Q4_\u{131}XL model", vec!["ud-q4-\u{131}xl"]),
+        ("gemma-\u{130}7B", vec![]),
+        ("e4b\u{131}", vec![]),
+        ("\u{212a}q4_0 x", vec![]),
+    ] {
+        let got: Vec<String> = variant_tokens(name).into_iter().collect();
+        assert_eq!(got, want, "variant_tokens({name:?})");
+    }
+}
+
+/// Values from CPython 3.11's `_ID_KEYED_ENTITY.match`.
+#[test]
+fn id_keyed_matches_python() {
+    for (name, want) in [
+        ("lesson:abc", Some(("lesson", "abc"))),
+        ("lesson:abc\n", Some(("lesson", "abc"))),
+        ("les\u{e48}son:x", None),
+        ("a\u{b2}:x", Some(("a\u{b2}", "x"))),
+        ("a:b\u{3000}c", None),
+        ("a:b\u{1c}c", None),
+        ("a:b\u{85}", None),
+        ("\u{131}a:x", None),
+        ("a\u{131}:x", Some(("a\u{131}", "x"))),
+        ("a:b\u{180e}", Some(("a", "b\u{180e}"))),
+        ("a:b\u{200b}", Some(("a", "b\u{200b}"))),
+        ("a:", None),
+        (":x", None),
+        ("a:b:c", Some(("a", "b:c"))),
+    ] {
+        assert_eq!(id_keyed(name), want, "{name:?}");
+    }
+}
