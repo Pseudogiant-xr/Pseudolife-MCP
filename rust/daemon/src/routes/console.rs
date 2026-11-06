@@ -84,6 +84,19 @@ mod tests {
         cli::SERVED,
     ];
 
+    /// The routes the maintainer retired under D9 (rust/CUTOVER.md,
+    /// 2026-10-23; deprecated in 0.21.0): Python keeps serving them until a
+    /// later release removes them, and the Rust daemon answers each with its
+    /// declared 501. They are the only `ConsoleRoutes` registrations Rust
+    /// leaves unserved.
+    const D9_RETIRED: [(&str, &str); 5] = [
+        ("GET", "/api/curation/retired"),
+        ("GET", "/api/graph/communities"),
+        ("GET", "/api/graph/proposal-evidence"),
+        ("POST", "/api/lessons/restore"),
+        ("POST", "/api/world/restore"),
+    ];
+
     /// The declared 501s: every `routes.json` registration that no family
     /// declares served. Each is probed with no query and no body, so a
     /// partly served route (`GET /api/agents`, whose coordination view is
@@ -100,18 +113,20 @@ mod tests {
         let golden: Value =
             serde_json::from_str(include_str!("../../harness/goldens/routes.json")).unwrap();
         let app = mcp_refusal_app();
-        let mut unserved = 0;
+        let mut unserved: Vec<(&str, &str)> = Vec::new();
         for method in ["GET", "POST"] {
             for path in golden[method].as_array().unwrap() {
                 let path = path.as_str().unwrap();
                 if served.contains(&(method, path)) {
                     continue;
                 }
-                unserved += 1;
+                unserved.push((method, path));
                 assert_declared_501(&app, authed_request(method, path, None)).await;
             }
         }
-        assert_eq!(unserved + served.len(), 72);
+        assert_eq!(unserved.len() + served.len(), 72);
+        // Every retained route is served; only D9's retirements stay 501.
+        assert_eq!(unserved, D9_RETIRED);
         assert!(served.contains(&("POST", "/api/dream/run")));
         // A declared route is answered by its family, not the fall-through.
         for &(method, path) in &served {
