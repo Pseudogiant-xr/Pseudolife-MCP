@@ -6,6 +6,15 @@
 //! * `POST /api/console/link`, `GET /api/console/sessions` and
 //!   `POST /api/console/sessions/revoke` ([`route`]), behind the bearer gate,
 //!   which has already resolved the caller (a Console session included).
+//!
+//! With the maintainer passkey (spec section 5, `_passkey_challenge`,
+//! `_passkey_signin` and `_passkey_bind`; the bodies are in
+//! `maintainer_ops::signin`):
+//!
+//! * `POST /api/console/passkey-challenge` ([`passkey_challenge`]), the
+//!   third pre-auth route, beside `/api/console/session`;
+//! * the passkey body of `POST /api/console/session` ([`redeem`]);
+//! * `POST /api/console/passkey-bind`, behind the bearer gate ([`route`]).
 
 use crate::auth::{self, PrincipalSource, PrincipalStore};
 use crate::console_sessions::{self as sessions, Redeemed, SessionSnapshot, Unavailable};
@@ -13,6 +22,7 @@ use crate::http::{
     ApiCaller, App, RequestBody, authorization, first_header, json_response, media_type,
     method_not_allowed, parse_body_json, read_body, uvicorn_500,
 };
+use crate::maintainer_ops::signin::{self as passkey, Challenge, Signin};
 use crate::routes::pair::{Attempt, PairLimiter, Slot, is_sha256_hex, normalize_pairing_code};
 use axum::http::HeaderMap;
 use axum::response::Response;
@@ -24,15 +34,19 @@ use std::sync::Arc;
 /// A sign-in body is `{"code", "token_sha256", "label"}` (64 characters):
 /// under 300 bytes.
 const SIGNIN_BODY_LIMIT: usize = 1024;
+/// A passkey sign-in carries a WebAuthn assertion: an RS256 one alone is
+/// over 1 KiB, so its body gets 8 KiB (`_PASSKEY_SIGNIN_BODY_LIMIT`).
+const PASSKEY_SIGNIN_BODY_LIMIT: usize = 8192;
 const BANK_UNREACHABLE: &str = "the daemon could not reach its bank just now; try again in a \
      minute, and if it keeps failing, check the daemon log";
 const NO_TOKEN: &str = "this daemon has no token configured, so the Console needs no \
      sign-in: open it on this machine";
 const NO_BANK: &str = "Console sign-in needs the daemon's Postgres bank";
-const ROUTES: [(&str, &str); 3] = [
+const ROUTES: [(&str, &str); 4] = [
     ("/api/console/link", "POST"),
     ("/api/console/sessions", "GET"),
     ("/api/console/sessions/revoke", "POST"),
+    ("/api/console/passkey-bind", "POST"),
 ];
 
 fn refused() -> Response {
@@ -128,12 +142,21 @@ pub(crate) async fn redeem(
     let Some(attempt) = app.signin_limiter.reserve() else {
         return json_response(429, &json!({"error": "rate_limited"}));
     };
-    let Some(raw) = read_body(body, SIGNIN_BODY_LIMIT).await else {
+    let Some(raw) = read_body(body, PASSKEY_SIGNIN_BODY_LIMIT).await else {
         return json_response(413, &json!({"error": "request_too_large"}));
     };
     let parsed = std::str::from_utf8(&raw)
         .ok()
         .and_then(|t| parse_body_json(t).ok());
+    if let Some(Value::Object(o)) = &parsed {
+        let keys: HashSet<&str> = o.keys().map(String::as_str).collect();
+        if keys == HashSet::from(["payload", "mac", "assertion"]) {
+            return passkey_signin(app, &origin, o.clone(), attempt).await;
+        }
+    }
+    if raw.len() > SIGNIN_BODY_LIMIT {
+        return json_response(413, &json!({"error": "request_too_large"}));
+    }
     let request = parsed.as_ref().and_then(Value::as_object).and_then(|o| {
         let keys: HashSet<&str> = o.keys().map(String::as_str).collect();
         if keys != HashSet::from(["code", "token_sha256", "label"]) {
@@ -184,6 +207,190 @@ pub(crate) async fn redeem(
             eprintln!("console sign-in failed (store error)");
             signin_unavailable()
         }
+    }
+}
+
+/// `_passkey_origin`: the passkey origin in its stored form, when passkeys
+/// are set up; `Err` where Python's `problem()` raises (uvicorn's 500).
+fn passkey_origin(app: &App) -> Result<Option<String>, ()> {
+    let cfg = &app.board.config;
+    match crate::read::maintainer::config_problem(&cfg.maintainer_rp_id, &cfg.maintainer_origin)? {
+        Some(_) => Ok(None),
+        None => Ok(
+            sessions::normalize_origin(&cfg.maintainer_origin).map(|o| sessions::origin_key(&o))
+        ),
+    }
+}
+
+/// The passkey half of `POST /api/console/session` (`_passkey_signin`): at
+/// the passkey origin only; the signed-action completion verifies the
+/// assertion and the session is created in its transaction, under the board
+/// lock, in a task of its own so a client that goes away drops only its
+/// wait. Every bad assertion is the same `400 signin_refused`.
+async fn passkey_signin(
+    app: &App,
+    origin: &str,
+    body: Map<String, Value>,
+    attempt: Attempt,
+) -> Response {
+    let wanted = match passkey_origin(app) {
+        Ok(wanted) => wanted,
+        Err(()) => return uvicorn_500(),
+    };
+    let view = match (&app.sessions, wanted) {
+        (Some(view), Some(wanted))
+            if app.auth_configured() && sessions::origin_key(origin) == wanted =>
+        {
+            view.clone()
+        }
+        _ => return refused(),
+    };
+    let Some(slot) = app.signin_limiter.enter() else {
+        app.signin_limiter.refund(attempt);
+        return json_response(429, &json!({"error": "rate_limited"}));
+    };
+    let (board, env_principals, store) = (
+        app.board.clone(),
+        app.env_principals.clone(),
+        app.store.clone(),
+    );
+    let outcome = tokio::spawn(async move {
+        let outcome = passkey::complete_signin(board, env_principals, store, view, body).await;
+        drop(slot);
+        outcome
+    })
+    .await
+    .unwrap_or(Signin::Failed);
+    match outcome {
+        Signin::Session(row) => {
+            app.signin_limiter.refund(attempt);
+            // Published by complete_signin under the board lock.
+            json_response(
+                200,
+                &json!({"principal": row.principal, "session_id": row.session_id,
+                    "expires_at": row.expires_at}),
+            )
+        }
+        Signin::KeyUnavailable => {
+            app.signin_limiter.refund(attempt);
+            json_response(
+                409,
+                &json!({"error": "passkey_signin_unavailable", "hint": passkey::UNAVAILABLE_HINT}),
+            )
+        }
+        Signin::Unavailable => {
+            app.signin_limiter.refund(attempt);
+            signin_unavailable()
+        }
+        Signin::Refused => refused(),
+        Signin::Failed => {
+            eprintln!("console passkey sign-in failed (store error)");
+            signin_unavailable()
+        }
+    }
+}
+
+/// `POST /api/console/passkey-challenge` (`_passkey_challenge`, pre-auth):
+/// a `sign-in` challenge for the browser's token hash, at the passkey origin
+/// only, read on its own connection; it never creates the challenge
+/// secret. Its own failure budget and two slots, and a cap on challenges
+/// issued, since each opens a database connection and a well-formed request
+/// needs no secret.
+pub(crate) async fn passkey_challenge(
+    app: &App,
+    method: &str,
+    h: &HeaderMap,
+    body: &mut RequestBody,
+) -> Response {
+    if method != "POST" {
+        return method_not_allowed();
+    }
+    let Some(origin) = first_header(h, "origin").and_then(|o| sessions::normalize_origin(&o))
+    else {
+        return json_response(403, &json!({"error": "forbidden_origin"}));
+    };
+    if media_type(h) != "application/json" {
+        return json_response(
+            415,
+            &json!({"error": "content_type_must_be_application_json"}),
+        );
+    }
+    // Python's `reserve() is None or passkey_issued.reserve() is None`: an
+    // issued challenge is never refunded, and a spent issue budget keeps the
+    // failure attempt counted.
+    let Some(attempt) = app.passkey_limiter.reserve() else {
+        return json_response(429, &json!({"error": "rate_limited"}));
+    };
+    if app.passkey_issued.reserve().is_none() {
+        return json_response(429, &json!({"error": "rate_limited"}));
+    }
+    let Some(raw) = read_body(body, SIGNIN_BODY_LIMIT).await else {
+        return json_response(413, &json!({"error": "request_too_large"}));
+    };
+    let parsed = std::str::from_utf8(&raw)
+        .ok()
+        .and_then(|t| parse_body_json(t).ok());
+    let request = parsed.as_ref().and_then(Value::as_object).and_then(|o| {
+        let keys: HashSet<&str> = o.keys().map(String::as_str).collect();
+        if keys != HashSet::from(["token_sha256", "label"]) {
+            return None;
+        }
+        let token_hash = o["token_sha256"]
+            .as_str()
+            .filter(|_| is_sha256_hex(&o["token_sha256"]))?;
+        let label = sessions::clean_label(o["label"].as_str()?)?;
+        Some((token_hash.to_string(), label))
+    });
+    let Some((token_hash, label)) = request else {
+        return json_response(400, &json!({"error": "invalid_request"}));
+    };
+    let wanted = match passkey_origin(app) {
+        Ok(wanted) => wanted,
+        Err(()) => return uvicorn_500(),
+    };
+    let Some(wanted) = wanted.filter(|_| app.auth_configured() && app.sessions.is_some()) else {
+        app.passkey_limiter.refund(attempt);
+        return json_response(
+            409,
+            &json!({"error": "passkey_signin_unavailable", "hint": passkey::NO_KEYS_HINT}),
+        );
+    };
+    if sessions::origin_key(&origin) != wanted {
+        return json_response(403, &json!({"error": "forbidden_origin"}));
+    }
+    let Some(slot) = app.passkey_limiter.enter() else {
+        app.passkey_limiter.refund(attempt);
+        return json_response(429, &json!({"error": "rate_limited"}));
+    };
+    let (dsn, rp_id) = (
+        app.board.dsn.clone(),
+        app.board.config.maintainer_rp_id.clone(),
+    );
+    let issued = tokio::spawn(async move {
+        let issued = passkey::issue_signin_challenge(&dsn, &token_hash, &label, &rp_id).await;
+        drop(slot);
+        issued
+    })
+    .await
+    .unwrap_or_else(|_| Err("the challenge task failed".into()));
+    let issued = match issued {
+        Ok(issued) => issued,
+        Err(_) => {
+            eprintln!("console passkey challenge failed (store error)");
+            return signin_unavailable();
+        }
+    };
+    app.passkey_limiter.refund(attempt);
+    match issued {
+        Challenge::Issued(out) => json_response(200, &out),
+        Challenge::Unbound => json_response(
+            409,
+            &json!({"error": "passkey_signin_unavailable", "hint": passkey::UNAVAILABLE_HINT}),
+        ),
+        Challenge::NoKeys => json_response(
+            409,
+            &json!({"error": "passkey_signin_unavailable", "hint": passkey::NO_KEYS_HINT}),
+        ),
     }
 }
 
@@ -329,6 +536,10 @@ pub(crate) async fn route(
             return json_response(409, &json!({"error": "signin_unavailable", "hint": hint}));
         }
     };
+    if path == "/api/console/passkey-bind" {
+        let session = (caller.source == Some(PrincipalSource::Session)).then_some(principal);
+        return passkey::bind_route(app, h, session, principal, body).await;
+    }
     if path == "/api/console/sessions/revoke" {
         let session_id = body
             .get("session_id")

@@ -38,6 +38,7 @@ pub(crate) const PATHS: &[&str] = &[
 mod actions;
 mod mail;
 mod roles;
+pub(crate) mod signin;
 
 /// `CHALLENGE_TTL` (seconds).
 const CHALLENGE_TTL: i64 = 120;
@@ -416,14 +417,9 @@ async fn secret(c: &impl GenericClient) -> Outcome<Vec<u8>> {
     }
 }
 
-/// `issue`: the canonical payload for `purpose` carrying `fields`, and its
-/// MAC (`HMAC-SHA256` with the bank's secret, lower-case hex).
-async fn issue(
-    c: &impl GenericClient,
-    purpose: &str,
-    mut fields: Map<String, Value>,
-    now: f64,
-) -> Outcome<(String, String)> {
+/// The canonical payload for `purpose` carrying `fields`: a fresh nonce and
+/// an expiry `CHALLENGE_TTL` from `now` (`issue`'s `canonical(...)`).
+fn challenge_payload(purpose: &str, mut fields: Map<String, Value>, now: f64) -> Outcome<String> {
     let mut nonce = [0u8; 16];
     getrandom::fill(&mut nonce).map_err(|_| refuse("coordination_unavailable", "randomness"))?;
     fields.insert("purpose".into(), json!(purpose));
@@ -432,10 +428,27 @@ async fn issue(
         "expires_at".into(),
         json!(crate::read::stats::py_round(now + CHALLENGE_TTL as f64, 3)),
     );
-    let payload = crate::pyjson::dumps_sorted_compact(&Value::Object(fields));
-    let mut mac = Hmac::<Sha256>::new_from_slice(&secret(c).await?).expect("any key length");
+    Ok(crate::pyjson::dumps_sorted_compact(&Value::Object(fields)))
+}
+
+/// `HMAC-SHA256(secret, payload)`, lower-case hex.
+fn mac_hex(secret: &[u8], payload: &str) -> String {
+    let mut mac = Hmac::<Sha256>::new_from_slice(secret).expect("any key length");
     mac.update(payload.as_bytes());
-    Ok((payload, hex::encode(mac.finalize().into_bytes())))
+    hex::encode(mac.finalize().into_bytes())
+}
+
+/// `issue`: the canonical payload for `purpose` carrying `fields`, and its
+/// MAC (`HMAC-SHA256` with the bank's secret, lower-case hex).
+async fn issue(
+    c: &impl GenericClient,
+    purpose: &str,
+    fields: Map<String, Value>,
+    now: f64,
+) -> Outcome<(String, String)> {
+    let payload = challenge_payload(purpose, fields, now)?;
+    let mac = mac_hex(&secret(c).await?, &payload);
+    Ok((payload, mac))
 }
 
 /// `b64url_encode(challenge_bytes(payload))`.
@@ -671,6 +684,14 @@ async fn challenge(
 #[path = "maintainer_ops_tests.rs"]
 mod tests;
 
+/// `KEY_NOTICE`: the daemon notice a Console key change posts.
+fn key_notice(notice: &str) -> String {
+    format!(
+        "Maintainer passkey change in the Console: {notice}. A courtesy notice only; the \
+         Console's Settings, Your passkeys, is the record. Nothing for you to do."
+    )
+}
+
 async fn action_route(
     app: &App,
     path: &str,
@@ -694,6 +715,14 @@ async fn action_route(
     };
     let path = path.to_string();
     let owner = board.clone();
+    // v59: the Console sign-in a key enrolled through this request gives:
+    // the request's principal when it is the bank owner's, else none
+    // (`_run`'s `signs_in_as`; spec 2026-11-02, section 5).
+    let signs_in_as =
+        crate::board::console::owner_principals(&app.board.config, &app.env_tokens, &app.store)
+            .contains(&principal)
+            .then(|| principal.clone());
+    let view = app.sessions.clone();
     let answer = board
         .with_store(move |store, client| {
             Box::pin(async move {
@@ -702,7 +731,16 @@ async fn action_route(
                 let result: Outcome<Value> = async {
                     match path.as_str() {
                         "/api/maintainer/enrol" => {
-                            actions::enrol(store, client, rp, origin, &principal, &body).await
+                            actions::enrol(
+                                store,
+                                client,
+                                rp,
+                                origin,
+                                &principal,
+                                signs_in_as.as_deref(),
+                                &body,
+                            )
+                            .await
                         }
                         "/api/maintainer/cancel" => {
                             actions::cancel(store, client, rp, origin, &principal, &body).await
@@ -816,7 +854,19 @@ async fn action_route(
                 }
                 .await;
                 match result {
-                    Ok(v) => Ok(v),
+                    Ok(mut v) => {
+                        // A key just revoked under the coordination lock: its
+                        // Console sign-ins leave the daemon's view at once
+                        // (`_drop_key`); the rows were revoked in its
+                        // transaction.
+                        if let Some(Value::String(id)) =
+                            v.as_object_mut().and_then(|o| o.remove("_drop_key"))
+                            && let Some(view) = &view
+                        {
+                            view.drop_key(&id);
+                        }
+                        Ok(v)
+                    }
                     Err(Refusal::Code(code, check)) => {
                         eprintln!("maintainer route refused: {code} ({check})");
                         Ok(json!({"_refused":code}))
@@ -840,7 +890,7 @@ async fn action_route(
                     }
                 }
                 if let Some(Value::String(notice)) = out.remove("_notice") {
-                    board.daemon_notice(&format!("Maintainer passkey change in the Console: {notice}. A courtesy notice only; the Console's Settings, Your passkeys, is the record. Nothing for you to do.")).await;
+                    board.daemon_notice(&key_notice(&notice)).await;
                 }
             }
             json_response(200, &v)
