@@ -557,15 +557,18 @@ def cell(binary, number, case, result, mutant=None):
                         semantic_diffs.extend(dbstate.diff(
                             STALE_FAILURES[case], output.get("stale_dims"), f"/{kind}/expected_stale_dims"))
                     if output["ok"] and case == "zero-timestamp-seating":
+                        # One band (multi-band seating is retired, R11): both
+                        # stay in hot; the zero timestamp is served as the load
+                        # clock while the bank keeps 0.
                         semantic_diffs.extend(dbstate.diff(
-                            [("hot", LOAD_CLOCK), ("deep", LOAD_CLOCK - 100)],
+                            [("hot", LOAD_CLOCK), ("hot", LOAD_CLOCK - 100)],
                             [(row["band"], row["ts"]) for row in output["entries"]],
                             f"/{kind}/zero_timestamp_seats"))
                         table = state["rows"]["public.entries"]
                         columns = table["columns"]
                         durable = sorted(table["rows"], key=lambda row: row[columns.index("id")])
                         semantic_diffs.extend(dbstate.diff(
-                            [("hot", 0.0), ("deep", LOAD_CLOCK - 100)],
+                            [("hot", 0.0), ("hot", LOAD_CLOCK - 100)],
                             [(row[columns.index("band")], row[columns.index("ts")]) for row in durable],
                             f"/{kind}/durable_zero_timestamp_seats"))
                     if output["ok"] and case == "surprise-real-text-rounding":
