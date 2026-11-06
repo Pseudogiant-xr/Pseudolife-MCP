@@ -229,6 +229,11 @@ def test_overlay_has_no_route_out_and_no_live_credentials():
         assert key in env
     assert env["PSEUDOLIFE_MCP_TOKENS"] == "${PSEUDOLIFE_MIRROR_TOKENS:-}"  # mirror-pg starts first
     assert env["PSEUDOLIFE_MCP_TOKEN"] == "${PSEUDOLIFE_MIRROR_TOKEN:-}"
+    # ...and the daemon fails closed without it, before the image's entry point runs.
+    guard = daemon["entrypoint"]
+    assert guard[:2] == ["sh", "-c"] and guard[2].startswith('[ -n "$$PSEUDOLIFE_MCP_TOKENS" ] || {')
+    assert "exit 64" in guard[2] and guard[2].endswith('exec /usr/local/bin/provision-daemon-models "$$@"')
+    assert daemon["command"] == ["pseudolife-daemon"]
     assert "PSEUDOLIFE_MCP_TOKEN" not in re.sub(r"PSEUDOLIFE_MCP_TOKENS?:", "", text)
     assert env["PSEUDOLIFE_RELEASE_CHECK"] == "0" and float(env["PSEUDOLIFE_SESSION_IDLE_SECONDS"]) > 1e7
     dsn = re.sub(r"\$\{[^}]*\}", "pw", env["PSEUDOLIFE_MCP_DATABASE_URL"])

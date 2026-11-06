@@ -60,7 +60,16 @@ services:
   mirror-daemon:
     image: ${PSEUDOLIFE_RUST_IMAGE:-pseudolife-daemon-rust:checkout}
     pull_policy: never
-    restart: unless-stopped
+    # Fail closed: without the replay-only bearer map the daemon never
+    # starts, so it can never serve unauthenticated. The map is optional at
+    # interpolation only so mirror-pg can start before seeding writes it.
+    entrypoint:
+      - sh
+      - -c
+      - '[ -n "$$PSEUDOLIFE_MCP_TOKENS" ] || { echo "mirror: no replay-only bearer map; run seed.py tokens and pass its file with --env-file" >&2; exit 64; }; exec /usr/local/bin/provision-daemon-models "$$@"'
+      - mirror-guard
+    command: [pseudolife-daemon]
+    restart: on-failure:3
     logging: *default-logging
     # The writer's daemon user, which the image gives /models (#1316).
     user: "10001:10001"
@@ -77,8 +86,8 @@ services:
       PSEUDOLIFE_DAEMON_MODELS_DIR: /models
       PSEUDOLIFE_MCP_TRUST_BIND: "1"
       # Replay-only bearers from `seed.py tokens`, never the live values.
-      # Optional here so mirror-pg can start before seeding writes them;
-      # `seed.py health` refuses a daemon that came up without them.
+      # Optional at interpolation so mirror-pg can start before seeding
+      # writes them; the entrypoint above refuses to start without them.
       PSEUDOLIFE_MCP_TOKEN: ${PSEUDOLIFE_MIRROR_TOKEN:-}
       PSEUDOLIFE_MCP_TOKENS: ${PSEUDOLIFE_MIRROR_TOKENS:-}
       CUDA_VISIBLE_DEVICES: "-1"
