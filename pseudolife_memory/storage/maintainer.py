@@ -404,12 +404,15 @@ class MaintainerStore:
         """The completing route's five checks, then ``action(fields, key)``
         in the same transaction: a refused action spends nothing. A
         sign-count regression flags the key for review in a transaction of
-        its own, since the failing one rolls back."""
+        its own, since the failing one rolls back. The nonce is spent before
+        the assertion is verified, so a body sent twice (a browser's retry
+        after a lost answer) is refused as spent and never reaches the
+        counter check that would flag its key as cloned (#1361)."""
         try:
             fields = self.open(payload, mac, purpose)
             with self.storage._txn():
-                key = self._verify(payload, assertion)
                 self._spend(fields)
+                key = self._verify(payload, assertion)
                 self._touch(key)
                 return action(fields, key)
         except MaintainerError as exc:

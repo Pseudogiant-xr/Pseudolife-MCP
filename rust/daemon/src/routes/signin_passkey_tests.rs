@@ -778,6 +778,17 @@ async fn db_a_passkey_signs_the_browser_in_and_a_revoked_key_signs_it_out() {
     // A replay of the same assertion: the nonce is spent.
     let (status, out) = sign_in(&app, &body).await;
     assert_eq!((status, out), (400, json!({"error": "signin_refused"})));
+    // ...and the browser's retry does not flag the key as cloned (#1361):
+    // the nonce is spent before the counter is compared.
+    let flagged: Option<f64> = c
+        .query_one(
+            "SELECT flagged_at FROM maintainer_passkeys WHERE credential_id = $1",
+            &[&soft.id()],
+        )
+        .await
+        .unwrap()
+        .get(0);
+    assert_eq!(flagged, None, "a retried body flagged the key");
     // A second challenge for a token already in use: refused, and that
     // refusal spends nothing (its own assertion still fails the same way).
     let (_, again) = challenge(&app, browser_token).await;

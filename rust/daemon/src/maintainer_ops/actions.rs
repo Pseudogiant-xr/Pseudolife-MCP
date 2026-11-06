@@ -315,7 +315,7 @@ async fn finish(tx: Transaction<'_>, result: Outcome<Value>) -> Outcome<Value> {
     }
 }
 
-/// Verify, spend, advance the counter, and perform the action in one
+/// Spend the nonce, verify, advance the counter, and perform the action in one
 /// transaction. A refused action rolls every mutation back. A counter
 /// regression flags the key only after that rollback, in its own transaction.
 pub(super) async fn complete<F>(
@@ -337,6 +337,14 @@ where
 {
     let (payload, fields) = open(client, body, purposes).await?;
     let tx = client.transaction().await?;
+    // The nonce is spent before the assertion is verified, so a body sent
+    // twice (a browser's retry after a lost answer) is refused as spent and
+    // never reaches the counter check that would flag its key as cloned
+    // (#1361). A later refusal rolls the spend back.
+    if let Err(refusal) = spend(&tx, &fields).await {
+        tx.rollback().await?;
+        return Err(refusal);
+    }
     let key = match verify(&tx, rp_id, origin, &payload, body.get("assertion")).await {
         Ok(key) => key,
         Err(failure) => {
@@ -355,7 +363,6 @@ where
         }
     };
     let result = async {
-        spend(&tx, &fields).await?;
         touch(&tx, &key).await?;
         action(store, &tx, &fields, &key).await
     }
