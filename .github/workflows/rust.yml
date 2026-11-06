@@ -2101,6 +2101,9 @@ jobs:
     outputs:
       iterations: ${{ steps.plan.outputs.iterations }}
       kind: ${{ steps.plan.outputs.kind }}
+      # true for a cargo selection whose tests need a disposable PostgreSQL
+      # (stress.py CARGO_DATABASE_PROFILES); the other kinds always get one.
+      postgres: ${{ steps.plan.outputs.postgres }}
       oracle_base: ${{ steps.oracle.outputs.oracle_base }}
     steps:
       - uses: actions/checkout@v4
@@ -2233,12 +2236,15 @@ jobs:
           cache-dependency-path: pyproject.toml
       # A cargo iteration gets what the Rust job's Nextest step has: the
       # Python SDK fixture dependency, no checkout install, no PostgreSQL
-      # and no event oracle.
+      # and no event oracle. A cargo selection with a database profile also
+      # gets the checkout install (lease_ci.py and pgdisposable import it;
+      # it brings the embedding fixture's numpy, onnx and tokenizers and the
+      # onnxruntime wheel whose library ORT_DYLIB_PATH names) and PostgreSQL.
       - name: Install the Python SDK fixture dependency
         if: env.STRESS_KIND == 'cargo'
         run: python -m pip install "mcp==2.2.0"
       - name: Install checkout and test dependencies
-        if: env.STRESS_KIND != 'cargo'
+        if: env.STRESS_KIND != 'cargo' || needs.stress-plan.outputs.postgres == 'true'
         timeout-minutes: 15
         shell: pwsh
         run: |
@@ -2311,7 +2317,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           "PSEUDOLIFE_PORT_ORACLE_ROOT=$oracleMetadata" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Prepare disposable PostgreSQL
-        if: env.STRESS_KIND != 'cargo'
+        if: env.STRESS_KIND != 'cargo' || needs.stress-plan.outputs.postgres == 'true'
         timeout-minutes: 10
         shell: pwsh
         env:
