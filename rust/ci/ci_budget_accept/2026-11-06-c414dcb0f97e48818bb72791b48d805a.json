@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "parity-checks",
+  "before": "228bd3c4cc28e240",
+  "fingerprint": "75c17da5569da284",
+  "reason": "runs-on gains a Windows branch that can move only the windows-latest w1c-connection shard to a self-hosted worker for a same-repository batch or master push, and only when the planner found a free, startable worker; otherwise every combination keeps its hosted runner, commands, cases and selection, so hosted cost is unchanged or lower by that one shard."
+}

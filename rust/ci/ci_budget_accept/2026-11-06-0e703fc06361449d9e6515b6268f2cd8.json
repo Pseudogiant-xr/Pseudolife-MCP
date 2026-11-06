@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "parity-pool",
+  "before": "815e4a55323c1ac8",
+  "fingerprint": "743ed0bdc6621552",
+  "reason": "Adds only one output (windows_suites) written by the same single planner step and script run; no new step, job, runner or request beyond two variable reads in the same step when the Windows switch is self-hosted, so its hosted minutes are unchanged."
+}
