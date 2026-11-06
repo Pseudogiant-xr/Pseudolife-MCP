@@ -96,11 +96,12 @@ impl Options {
             crate::credentials::absolute_expanded(std::path::Path::new(&path))
                 .unwrap_or_else(|_| PathBuf::from(path))
         };
-        let home = dirs::home_dir().unwrap_or_default();
+        let home = crate::credentials::python_home_with(|key| env(key).map(Into::into));
         let configured_root = env("PSEUDOLIFE_AGENT_STATE_DIR").filter(|value| !value.is_empty());
         let session_state_root = configured_root.is_some();
         let state_root = configured_root.map(expanded).unwrap_or_else(|| {
             env("CODEX_HOME")
+                .filter(|value| !value.is_empty())
                 .map(expanded)
                 .unwrap_or_else(|| home.join(".codex"))
                 .join("pseudolife/agents")
@@ -1104,5 +1105,35 @@ mod registry_probe_tests {
         .await;
         assert!(result.is_some());
         assert_eq!(built, vec![1]);
+    }
+}
+
+#[cfg(test)]
+mod home_tests {
+    use super::*;
+
+    #[test]
+    fn digest_and_state_roots_follow_the_profile_variable_python_reads() {
+        // Python's Path.home() and the plugin hooks honour USERPROFILE on
+        // Windows; dirs::home_dir() alone ignores it, and the native shim
+        // wrote its digest where the hooks never look (2026-11-06).
+        let runtime = crate::lifecycle::Runtime {
+            url: "http://fixture".into(),
+            provider: crate::credentials::CredentialProvider::new(None, None).unwrap(),
+            session: crate::lifecycle::SessionIdentity::new(None, None),
+            health: None,
+            cache: None,
+            instructions_note: String::new(),
+        };
+        let home = std::env::temp_dir().join("pseudolife-home-fixture");
+        let profile = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
+        let options = Options::from_lookup(&runtime, false, |key| {
+            (key == profile).then(|| home.display().to_string())
+        });
+        assert_eq!(options.digest_root, home.join(".pseudolife-mcp/digests"));
+        assert_eq!(
+            options.state_root,
+            home.join(".codex").join("pseudolife/agents")
+        );
     }
 }

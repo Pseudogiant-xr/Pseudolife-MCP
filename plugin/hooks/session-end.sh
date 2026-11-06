@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Pseudolife-MCP SessionEnd hook — closes this session's episode promptly
 # (the idle reaper remains the backstop). Must never block session end.
+# Every file this hook writes beside the digest is private (0600), as the
+# shim's own state is: the native shim refuses markers others can write.
+umask 077
 private_regular() {
     local path="$1" maximum="$2" current parent meta
     case "$OSTYPE" in msys*|mingw*|cygwin*)

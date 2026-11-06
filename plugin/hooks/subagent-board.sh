@@ -23,6 +23,9 @@
 # Codex context this is a no-op, and so is any run Claude Code did not start
 # for this very session (a Codex run inside a Claude Bash tool inherits
 # CLAUDECODE).
+# Every file this hook writes beside the digest is private (0600), as the
+# shim's own state is: the native shim refuses markers others can write.
+umask 077
 EVENT="${1:-}"
 case "$EVENT" in start|stop) ;; *) exit 0 ;; esac
 setting() {
