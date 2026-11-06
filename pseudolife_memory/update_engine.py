@@ -969,6 +969,11 @@ class EngineUpdate:
             # The backup stages in both containers' /tmp: refuse before the build.
             disk_space.container(self.u.docker, self.pg)
             disk_space.container(self.u.docker, self.daemon)
+        rust_overlay = ["-f", str(self.ops / "docker-compose.rust-daemon.yml")]
+        if self.engine == "rust" or self.running_labels.get(ENGINE_LABEL) == "rust":
+            # The Rust overlay must resolve before anything changes, as the
+            # native updater's mount check requires it.
+            self.config([*self.base, *rust_overlay])
         # Tag first: rebuilding the same engine moves its :checkout tag, and
         # Docker's containerd image store then no longer resolves the
         # running image's ID, so it could not be tagged afterwards.
@@ -977,7 +982,6 @@ class EngineUpdate:
         service = {"image": image, "build": {"dockerfile": f"ops/Dockerfile.daemon{'-rust' if self.engine == 'rust' else ''}"},
                    "labels": {ENGINE_LABEL: self.engine, CHECKOUT_LABEL: str(self.repo), ACTIVATION_LABEL: secrets.token_hex(16)}}
         candidate = self.repo / "data/update-engine/docker-compose.engine-candidate.json"
-        rust_overlay = ["-f", str(self.ops / "docker-compose.rust-daemon.yml")]
         compose = [*self.base, *(rust_overlay if self.engine == "rust" else []), "-f", str(candidate)]
         self.built = False
         try:

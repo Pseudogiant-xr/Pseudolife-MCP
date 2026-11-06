@@ -340,11 +340,8 @@ impl Update {
             project_dir.to_string_lossy().into_owned(),
         ]);
         args.extend(compose_args(&files, &env_files));
-        let identity_args = identity_overlay.map(|overlay| {
-            let mut identity = args.clone();
-            identity.extend(compose_args(&[overlay], &[]));
-            identity
-        });
+        let identity_args =
+            identity_overlay.map(|overlay| engine::with_rust_overlay(&args, &overlay));
         let checkout = [
             project_dir.clone(),
             project_dir.parent().unwrap_or(&project_dir).to_owned(),
@@ -431,15 +428,12 @@ impl Update {
         // running mounts against the project with that overlay, so every other
         // mount is still held to the running daemon's.
         let identity = match &context.identity_args {
-            Some(args) => {
-                let mut identity_args = vec!["compose".into()];
-                identity_args.extend(args.clone());
-                identity_args.extend(["config".into(), "--format".into(), "json".into()]);
-                let (code, out) = self.command(&identity_args, Some(&env), 60, false);
-                serde_json::from_str(&out).ok().filter(|_: &Value| code == 0).ok_or_else(|| {
-                    UpdateError::usage("cannot resolve the Compose project with the running Rust overlay; check its files and env file, then retry; nothing was changed")
-                })?
-            }
+            Some(args) => engine::compose_config(
+                self,
+                args,
+                &env,
+                "cannot resolve the Compose project with the running Rust overlay; check its files and env file, then retry; nothing was changed",
+            )?,
             None => config.clone(),
         };
         engine::verify_bank_identity(self, &identity, &context.running)?;

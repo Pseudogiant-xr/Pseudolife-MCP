@@ -979,21 +979,16 @@ pub(super) fn deploy(u: &mut Update, repo: &Path) -> Result<()> {
     // its model volume: the checkout Rust overlay. A Rust-to-Rust update keeps
     // that volume, and a switch back to Python only leaves the model cache.
     let identity = if (choice == "rust" && !u.o.shadow) || labels[ENGINE_LABEL] == "rust" {
-        let mut args = vec!["compose".into()];
-        args.extend(base.clone());
+        // Named explicitly, not through compose_args: a checkout without its
+        // overlay is refused here, before the rollback tag.
+        let mut args = base.clone();
         args.extend([
             "-f".into(),
             ops.join("docker-compose.rust-daemon.yml")
                 .to_string_lossy()
                 .into_owned(),
-            "config".into(),
-            "--format".into(),
-            "json".into(),
         ]);
-        let (code, out) = u.command(&args, Some(&env), 60, false);
-        serde_json::from_str(&out).ok().filter(|_: &Value| code == 0).ok_or_else(|| {
-            UpdateError::usage("cannot resolve the Compose project; check its files and env file, then retry; nothing was changed")
-        })?
+        compose_config(u, &args, &env, UNRESOLVED)?
     } else {
         config.clone()
     };
@@ -1142,13 +1137,7 @@ pub(super) fn deploy(u: &mut Update, repo: &Path) -> Result<()> {
             built = true;
             if choice == "rust" {
                 // The config the replacement runs with: its model directory and volume.
-                let mut args = vec!["compose".into()];
-                args.extend(compose.clone());
-                args.extend(["config".into(), "--format".into(), "json".into()]);
-                let (code, out) = u.command(&args, Some(&env), 60, false);
-                let replacement: Value = serde_json::from_str(&out).ok().filter(|_: &Value| code == 0).ok_or_else(|| {
-                UpdateError::usage("cannot resolve the Compose project; check its files and env file, then retry; nothing was changed")
-            })?;
+                let replacement = compose_config(u, &compose, &env, UNRESOLVED)?;
                 u.provision_models(&image, &replacement)?;
             }
             let backups = if stopped_handover {
@@ -1235,6 +1224,36 @@ pub(super) fn deploy(u: &mut Update, repo: &Path) -> Result<()> {
     }
     result
 }
+
+/// `docker compose <args> config --format json`, refused with `failure`:
+/// Compose errors can include resolved credentials, so they are never printed.
+pub(super) fn compose_config(
+    u: &Update,
+    args: &[String],
+    env: &Environment,
+    failure: &str,
+) -> Result<Value> {
+    let mut command = vec!["compose".into()];
+    command.extend(args.iter().cloned());
+    command.extend(["config".into(), "--format".into(), "json".into()]);
+    let (code, out) = u.command(&command, Some(env), 60, false);
+    serde_json::from_str(&out)
+        .ok()
+        .filter(|_: &Value| code == 0)
+        .ok_or_else(|| UpdateError::usage(failure))
+}
+
+/// The project's Compose arguments plus the Rust overlay that carries the
+/// daemon's /models volume, for release mode's check when a Rust daemon
+/// leaves Rust (the switch drops that volume on purpose; every other mount
+/// is still compared). A missing overlay adds nothing, as compose_args does.
+pub(super) fn with_rust_overlay(args: &[String], overlay: &Path) -> Vec<String> {
+    let mut identity = args.to_vec();
+    identity.extend(compose_args(&[overlay.to_path_buf()], &[]));
+    identity
+}
+
+const UNRESOLVED: &str = "cannot resolve the Compose project; check its files and env file, then retry; nothing was changed";
 
 /// A failure before the recreate: the rollback tag stays, and after a
 /// successful build its tag names an image that never passed the gate.

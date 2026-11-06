@@ -319,7 +319,9 @@ elif a[:1]==["tag"]:
  if a[-2] in s.setdefault("orphaned",[]):code=1;out="Error response from daemon: No such image: "+a[-2]
  else:s["images"][a[-1]]=s["images"].get(a[-2],a[-2])
 elif a[:1]==["compose"]:
- if "config" in a:
+ if "config" in a and any(not pathlib.Path(a[i+1]).is_file() for i,v in enumerate(a[:-1]) if v=="-f"):
+  code=1;out="open docker-compose file: no such file or directory"
+ elif "config" in a:
   config=json.loads(json.dumps(s["config"]))
   if s.get("relative_mount"):
    directory=pathlib.Path(a[a.index("--project-directory")+1]) if "--project-directory" in a else pathlib.Path(a[a.index("-f")+1]).parent
@@ -1000,6 +1002,34 @@ def test_checkout_switch_back_to_python_leaves_the_rust_model_volume(tmp_path, n
         state = json.loads(state_path.read_text())
         assert not any(m["Destination"] == "/models" for m in state["running"]["Mounts"])
         assert state["running"]["Config"]["Labels"]["org.pseudolife.engine"] == "python"
+
+
+@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+@pytest.mark.parametrize("target", ["rust", "python"])
+def test_missing_checkout_rust_overlay_is_refused_before_any_tag(tmp_path, native, target):
+    """A Rust checkout without ops/docker-compose.rust-daemon.yml cannot be
+    held to its model volume: both a rerun and a switch to Python refuse
+    before the rollback tag, rather than tag and then fail (or report a
+    dropped mount)."""
+    binary = _native_binary() if native else None
+    if native and not binary:
+        pytest.skip("native binary build is owned by the parent; set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path, "", "engine") as (repo, env, state_path):
+        common = ["--checkout", str(repo), "--no-test-login", "--no-cache-prune", "--json",
+                  "--health-retries", "1", "--health-delay-ms", "0"]
+        first = run_arm(repo, env, binary, [*common, "--engine", "rust", "--rollback-tag", "pre-rust"])
+        assert first.returncode == 0, first.stdout + first.stderr
+        (repo / "ops/docker-compose.rust-daemon.yml").unlink()
+        state = json.loads(state_path.read_text())
+        before, images = len(state["calls"]), dict(state["images"])
+        selection = repo / "data/update-engine/docker-compose.engine.json"
+        accepted = selection.read_bytes()
+        second = run_arm(repo, env, binary, [*common, "--engine", target, "--rollback-tag", "pre-second"])
+        assert second.returncode == 2, second.stdout + second.stderr
+        assert "cannot resolve the Compose project" in second.stdout and "nothing was changed" in second.stdout
+        after = json.loads(state_path.read_text())
+        assert stages({"calls": after["calls"][before:]}) == []
+        assert after["images"] == images and selection.read_bytes() == accepted
 
 
 @pytest.mark.parametrize("target", ["rust", "python"])

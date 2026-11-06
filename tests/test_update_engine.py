@@ -437,6 +437,8 @@ def engine_host(tmp_path, monkeypatch):
             return 0, "Filesystem 1024-blocks Used Available Capacity Mounted on\noverlay 99999999 1 99999998 1% /\n"
         if argv[:2] == ["docker", "compose"]:
             if "config" in argv:
+                if any(not Path(argv[i + 1]).is_file() for i, a in enumerate(argv[:-1]) if a == "-f"):
+                    return 1, "open docker-compose file: no such file or directory"
                 if not any(a.endswith("docker-compose.rust-daemon.yml") for a in argv):
                     return 0, json.dumps(config)
                 # The Rust overlay's model cache, as Compose renders it.
@@ -612,6 +614,22 @@ def test_same_engine_rerun_tags_the_running_image_before_rebuilding_it(engine_ho
     assert s["images"][update.report.rollback["tag"]] == running
     assert running not in s["orphaned"]
     assert s["running"]["Image"] != running
+
+
+@pytest.mark.parametrize("engine", ["rust", "python"])
+def test_missing_checkout_rust_overlay_is_refused_before_any_tag(engine_host, engine):
+    from pseudolife_memory import update_engine as eng
+    s = engine_host
+    eng.deploy_engine(s["update"]("rust"), s["repo"])
+    (s["repo"] / "ops/docker-compose.rust-daemon.yml").unlink()
+    selection = (s["repo"] / eng.SELECTION).read_bytes()
+    s["calls"].clear()
+    with pytest.raises(up.UpdateError, match="cannot resolve the Compose project") as caught:
+        eng.deploy_engine(s["update"](engine), s["repo"])
+    assert caught.value.exit_code == 2 and "nothing was changed" in str(caught.value)
+    assert not any(a[1:2] == ["tag"] or "build" in a or "up" in a or any("backup." in x for x in a)
+                   for a in s["calls"])
+    assert (s["repo"] / eng.SELECTION).read_bytes() == selection
 
 
 def test_provisioning_failure_changes_nothing(engine_host):
