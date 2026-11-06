@@ -828,11 +828,102 @@ pub(crate) fn text_param(v: Option<&Value>) -> Result<Option<String>, ToolError>
         Some(Value::Number(n)) => Ok(Some(pg_float8_text(
             n.to_string().parse().map_err(internal)?,
         ))),
+        Some(Value::Array(items)) => {
+            let mut kind = None;
+            array_kind(items, &mut kind)?;
+            Ok(Some(pg_array_text(items)?))
+        }
         Some(other) => Err(internal(format!(
             "a {} cannot be stored as text",
             py_type(other)
         ))),
     }
+}
+
+/// psycopg's list dumper: one element type across every level (`cannot
+/// dump lists of mixed types`), a level of lists or of scalars (`None`
+/// anywhere), rectangular nesting, and no dict (`cannot adapt type 'dict'`).
+#[allow(clippy::result_large_err)]
+fn array_kind(items: &[Value], kind: &mut Option<&'static str>) -> Result<(), ToolError> {
+    let lists = items.iter().filter(|v| v.is_array()).count();
+    if lists != 0 && lists != items.len() {
+        return Err(internal("a list mixing lists and scalars cannot be stored as text"));
+    }
+    let mut width = None;
+    for v in items {
+        match v {
+            Value::Array(sub) => {
+                if *width.get_or_insert(sub.len()) != sub.len() || sub.is_empty() {
+                    return Err(internal(
+                        "multidimensional arrays must have array expressions with matching dimensions",
+                    ));
+                }
+                array_kind(sub, kind)?;
+            }
+            Value::Null => {}
+            Value::Object(_) => {
+                return Err(internal("cannot adapt type 'dict' using placeholder '%s'"));
+            }
+            other => {
+                let k = py_type(other);
+                match *kind {
+                    None => *kind = Some(k),
+                    Some(prev) if prev != k => {
+                        return Err(internal(format!(
+                            "cannot dump lists of mixed types; got: {prev}, {k}"
+                        )));
+                    }
+                    Some(_) => {}
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// PostgreSQL's `array_out` text for a checked list ([`array_kind`]): `{a,b}`,
+/// an element quoted when empty, `NULL` in any case, or holding a brace,
+/// comma, quote, backslash or `array_isspace` character, with `"` and `\`
+/// escaped; booleans `t`/`f`, numbers in their column type's text form.
+#[allow(clippy::result_large_err)]
+fn pg_array_text(items: &[Value]) -> Result<String, ToolError> {
+    let mut parts = Vec::with_capacity(items.len());
+    for v in items {
+        parts.push(match v {
+            Value::Array(sub) => pg_array_text(sub)?,
+            Value::Null => "NULL".into(),
+            Value::Bool(b) => if *b { "t" } else { "f" }.into(),
+            Value::Number(n) if super::is_int_literal(n) => {
+                crate::pyjson::py_str(&Value::Number(n.clone()))
+            }
+            Value::Number(n) => pg_float8_text(n.to_string().parse().map_err(internal)?),
+            Value::String(s) => {
+                let quoted = s.is_empty()
+                    || s.eq_ignore_ascii_case("NULL")
+                    || s.chars().any(|c| {
+                        matches!(c, '{' | '}' | ',' | '"' | '\\' | ' ' | '\t' | '\n' | '\r')
+                            || c == '\u{b}'
+                            || c == '\u{c}'
+                    });
+                if quoted {
+                    let mut out = String::with_capacity(s.len() + 2);
+                    out.push('"');
+                    for c in s.chars() {
+                        if c == '"' || c == '\\' {
+                            out.push('\\');
+                        }
+                        out.push(c);
+                    }
+                    out.push('"');
+                    out
+                } else {
+                    s.clone()
+                }
+            }
+            Value::Object(_) => unreachable!("array_kind refuses a dict"),
+        });
+    }
+    Ok(format!("{{{}}}", parts.join(",")))
 }
 
 /// `insert_proposal` (3400-3412). A conflict still burns the sequence value.

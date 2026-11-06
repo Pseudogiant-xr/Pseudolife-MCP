@@ -310,3 +310,45 @@ fn bound_parameters_follow_postgres_casts() {
         Some("false")
     );
 }
+
+/// A list `rationale`: psycopg binds a Python list as an array, and the
+/// TEXT column stores PostgreSQL's array text. Values recorded from psycopg
+/// 3 against PostgreSQL 18 on 2026-11-07 (`INSERT INTO t (v) VALUES (%s)`
+/// with each list, then `SELECT v`).
+#[test]
+fn a_list_rationale_stores_postgres_array_text() {
+    for (value, stored) in [
+        (json!([]), "{}"),
+        (json!(["a"]), "{a}"),
+        (json!(["a", "b"]), "{a,b}"),
+        (json!(["two words", "x"]), r#"{"two words",x}"#),
+        (json!(["", "q"]), r#"{"",q}"#),
+        (json!(["NULL", "null", "Null"]), r#"{"NULL","null","Null"}"#),
+        (
+            json!(["quote\"d", "back\\slash", "brace{", "comma,", "tab\tx", "nl\nx"]),
+            "{\"quote\\\"d\",\"back\\\\slash\",\"brace{\",\"comma,\",\"tab\tx\",\"nl\nx\"}",
+        ),
+        (json!(["\u{e9}", "\u{65e5}\u{672c}"]), "{\u{e9},\u{65e5}\u{672c}}"),
+        (json!([" lead", "trail "]), r#"{" lead","trail "}"#),
+        (json!([null, "a"]), "{NULL,a}"),
+        (json!([1, 2, 3]), "{1,2,3}"),
+        (json!([-5]), "{-5}"),
+        (json!([1.5, 2.25]), "{1.5,2.25}"),
+        (json!([1e20, 1e-7]), "{1e+20,1e-07}"),
+        (json!([true, false]), "{t,f}"),
+        (json!([["a", "b"], ["c", "d"]]), "{{a,b},{c,d}}"),
+        (json!([null]), "{NULL}"),
+        (json!([null, null]), "{NULL,NULL}"),
+    ] {
+        assert_eq!(
+            text_param(Some(&value)).unwrap().as_deref(),
+            Some(stored),
+            "{value}"
+        );
+    }
+    // psycopg refuses these too ("cannot dump lists of mixed types", a dict
+    // it cannot adapt), so both daemons fail the call.
+    for value in [json!([1, 2.5]), json!(["a", 1]), json!([{"k": 1}]), json!([["a"], "b"])] {
+        assert!(text_param(Some(&value)).is_err(), "{value}");
+    }
+}

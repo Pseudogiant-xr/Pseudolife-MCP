@@ -1,0 +1,2 @@
+### Fixed (2026-11-07 — Rust daemon stores a list rationale in a graph proposal)
+- `memory_graph_review(action="propose")` with a proposal whose `rationale` is a list failed in the Rust daemon with an internal error after creating the proposal's entities, while the Python daemon stored the list as PostgreSQL array text. The Rust daemon now stores the same text (for example `{a,"two words",NULL}`). A list the Python daemon also cannot store, such as one mixing strings and numbers, still fails in both.
