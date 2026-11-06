@@ -2739,6 +2739,16 @@ also capped (below, and by the daemon's `wake` caps under
   marker and leaves the shared `.wake` ownership stamp alone; the stamp
   without a matching live marker proves no liveness. Stale evidence expires
   within 60 seconds even after an interrupted process.
+- The hooks create every new file beside the digest (`<key>.wake`, the
+  `.wake-armed` markers, `<key>.seen`) 0600. On Linux and macOS the native
+  (Rust) shim accepts a marker this user owns that is not group- or
+  world-writable, so 0644 markers from older hooks still work. It refuses one
+  another user owns or others can write, since that could forge or suppress
+  a wake, and prints one `pseudolife-mcp: ignoring <path>: …` line naming the
+  fix (`rm` it for another user's file; update the plugin or `chmod 600` it
+  for a writable one). On Windows the native shim still requires a protected
+  owner-only ACL, which hook-written files lack
+  ([#1326](https://github.com/Pseudogiant-xr/Pseudolife-MCP/issues/1326)).
 - A watcher listens for as long as the session stays open: at most
   1,209,540 s (14 days) after the turn that armed it, under the hook's
   `timeout` of 1,209,600 s, which Claude Code enforces on `asyncRewake` hooks.
@@ -3979,9 +3989,14 @@ restore. By default restore starts the daemon and waits for readiness;
 port needs `--daemon-url <url>` or `--leave-stopped`.
 
 **Free space:** Docker update, backup and restore check for at least
-**8 GiB free** in Docker storage and the host filesystems used for backups
-and temporary staging. Restore also checks PostgreSQL's writable mounts
-and, when replacing state, the state mounts. A low-space refusal says
+**8 GiB free** in Docker storage and the host filesystems used for backups.
+Backup and restore stage the tar stream they copy out of each container
+on the selected backup destination's filesystem (the backup directory, or
+restore's safety directory), not the system temporary directory, and check
+the floor on that destination before writing anything there; the staging
+files are removed on success, failure or interruption. Restore also checks
+PostgreSQL's writable mounts and, when replacing state, the state mounts.
+A low-space refusal says
 `less than 8 GiB is free on <location>; free at least 8 GiB there, then retry. Nothing was changed`.
 Free space on the named filesystem and rerun the same command. These
 checks precede bank replacement; a first checkout build without a current
@@ -4244,7 +4259,7 @@ installer and the session notices print.
 | `pseudolife-mcp update` | Docker tier: pull `ghcr.io/pseudogiant-xr/pseudolife-daemon:<newest release on PyPI>`, back the bank up, tag the running image `…-pre-update-<stamp>`, recreate only the daemon container, wait for `/health` at that version, then the client side. Pip / lite: upgrade the package where it is installed; restart nothing. |
 | `pseudolife-mcp update --tag 0.15.1` | the same for a pinned release |
 | `pseudolife-mcp update --check` | report only: exit 0 when a newer release exists, 3 when current, 2 when PyPI or the daemon did not answer |
-| `--clients-only` / `--daemon-only` | one half: the shim runtime + plugin cache + Codex step, or the daemon. On a client-only machine (run from a shim runtime, no daemon container here) plain `update` and `--clients-only` both move the clients to the daemon's release; a silent or unversioned endpoint is refused, and `--daemon-only` is refused naming the daemon's host |
+| `--clients-only` / `--daemon-only` | one half: the shim runtime + plugin cache + Codex step (+ refreshing running saved tunnels), or the daemon; the steps after a newly installed shim runtime run in that runtime ([below](#the-client-steps-after-a-new-shim-runtime)). On a client-only machine (run from a shim runtime, no daemon container here) plain `update` and `--clients-only` both move the clients to the daemon's release; a silent or unversioned endpoint is refused, and `--daemon-only` is refused naming the daemon's host |
 | `--reinstall` | recreate the daemon at the version it already runs, and install the shim runtime again when the current one is already that release (without it the shim step reports `current`, unless one of that runtime's installed requirements is outside the range its own `pseudolife-mcp` declares, as an mcp 2.1 runtime left by a 0.18.1 update is: then it installs again and says why); with `--clients-only`, install the release even over a checkout-built shim runtime of the same version |
 | `--allow-downgrade` | with `--tag`, allow a release older than the one the daemon runs (refused otherwise: the bank's schema may be newer than that release knows) |
 | `--env-file <path>` | the compose env file, when the one the container was created with is gone (without it the recreate would reset the Postgres password, the volume names and the bearer, so it stops instead) |
@@ -4327,6 +4342,45 @@ plugin copy through `codex plugin marketplace upgrade` when only its scripts
 are behind. It prints approval steps only when Codex would ask again, and
 the check compares Codex's installed copy with the daemon just deployed,
 never with a checkout at some other commit.
+
+### The client steps after a new shim runtime
+
+A release-mode client update (`--clients-only`, or the client half of a
+plain `update`) installs the new shim runtime first. When that runtime is a
+different release from the updater running the command, the updater hands
+the remaining client steps (plugin cache, Codex hooks, running saved
+tunnels) to the new runtime, so one run applies the new release's own
+client-step changes. The output names the hand-off:
+
+```text
+the client steps after the shim continue in runtime <runtime> (<version>), the release just installed
+```
+
+The new runtime then prints its own ladder and Codex steps, under the
+update lock the first updater holds, and its result is the run's: a
+`--clients-only` run, or one on a client-only machine, exits with its code,
+and after a daemon deploy a failed hand-off exits 5. A new runtime that
+cannot start fails the client step (exit 5) with the cause and a
+`--reinstall` retry command; the older code never runs those steps in its
+place.
+
+There is no hand-off for a checkout deploy, which already runs the
+checkout's code, or when the installed runtime is the release already
+running (as with `--reinstall` of the current release). Nor is there one
+when the target release predates the hand-off, which today includes every
+downgrade and a client machine following an older daemon; this run's own
+code then finishes, as before, and says so:
+
+```text
+runtime <runtime> (<version>) predates the client hand-off, so this run's own code (<version>) finishes the client steps
+```
+
+The hand-off runs in the release being *replaced*. An update from 0.22.0
+or earlier therefore still runs the client steps with the old code: run
+`pseudolife-mcp update --clients-only` a second time to apply the new
+release's client-step changes. The native (Rust) updater keeps that
+two-run shape for now
+([#1308](https://github.com/Pseudogiant-xr/Pseudolife-MCP/issues/1308)).
 
 ### Changing daemon bearer settings
 

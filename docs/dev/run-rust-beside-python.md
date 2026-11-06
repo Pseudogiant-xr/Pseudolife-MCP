@@ -75,6 +75,59 @@ configuration reports `already healthy` without recreating the companion.
 A failed command is not a successful rehearsal; retain its exit status and
 inspect the companion's logs before retrying.
 
+### A model cache created by an older companion
+
+Before #1319 the companion ran as root, so a model cache volume it created
+stays root-owned, with a model bundle directory uid 10001 cannot read. On
+such a host the companion fails its startup gate although the model files
+are there. While the updater waits, the companion's log
+(`docker ps -a --filter name=pseudolife-rust-shadow` names its container,
+then `docker logs <container>`) reports a missing model artifact, as
+`model artifact is missing or unsafe: <path>; …` or `Qwen model artifact is
+missing or incomplete in <directory>; …`. Once the wait fails (at the
+latest after its 32-minute provisioning budget), the updater removes the
+companion and stops with
+`shadow startup did not become ready within its provisioning budget;
+Python is unchanged; …`. The repair hint at the end of the log line does
+not apply here: the cache volume itself has to go.
+
+Remove the companion, then that project's model cache volume, then start
+again:
+
+```sh
+pseudolife-mcp update --engine python --shadow --checkout .
+docker volume rm pseudolife-mcp_pseudolife_shadow_models
+pseudolife-mcp update --engine rust --shadow --checkout .
+```
+
+The first command reports `no Rust shadow is installed` when the failed
+start already removed the companion; that is expected. The volume is
+`<project>_pseudolife_shadow_models`, and `pseudolife-mcp` is the default
+project name (`docker volume ls --filter name=pseudolife_shadow_models`
+lists it). The models download again, which can take up to about 30
+minutes.
+
+### Memory beside a busy writer
+
+The Python writer also writes on its read path: entry access counts and
+reinforcements, the counters row, episodes and session meta. The companion
+reloads only the stores whose tables changed. An entry change that touches
+only `access_count`, `reinforcements` or `last_logical_turn` is patched in
+place, and on a one-band preset new entries are appended in place when
+every new id is above the highest resident one. These still rebuild the
+whole resident bank, briefly holding its old and new copies and raising
+memory: deleted entries, any other column change (content, `dream_state`,
+so every dream, supersession, tags, episode), additions to a multi-band
+bank or out of id order, a new entry whose vector does not fit the
+embedder, and any entry change while a band of a multi-band bank is over
+capacity. A
+`facts`, `world_facts` or `lessons` change reloads that store whole. A new
+`bank_id`, a flat-migration refusal or a failed refresh rebuilds every
+store, as a cold start does. The companion's log says which happened:
+`read-only shadow: resident state refreshed (<summary>)`, `read-only
+shadow: rebuilding the bank (<reason>)` or `read-only shadow: rebuilding
+every store (<reason>)`.
+
 ## Compare reads
 
 The comparator is a **Python test oracle**, run on a machine with Python 3.10+
