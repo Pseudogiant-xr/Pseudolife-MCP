@@ -14,6 +14,22 @@ existing Docker bank, use [`pseudolife-mcp move`](remote-bank.md#moving-a-bank)
 from its current host; install the destination first and review `--dry-run`.
 Never hand-write or flatten a compose file to install or move a bank.
 
+## Daemon engine
+
+The Docker installers run the Python daemon unless told otherwise.
+`ops/install.sh --engine rust` (Windows: `ops/install.ps1 -Engine rust`)
+installs the Rust daemon instead, from the image the checkout's release
+publishes. It pulls that image and downloads the pinned models into their
+own volume before any container starts. If the release publishes no Rust
+image, the installer stops there, names `--engine python`, and starts
+nothing.
+
+A rerun keeps the engine already installed. Naming the other engine on an
+existing install finishes the install, then switches the daemon through
+`pseudolife-mcp update --engine <engine>`, which backs up the bank, tags a
+rollback and checks the new daemon before it keeps it. `--engine` applies
+only to a Docker install, so a `--client-only` install refuses it.
+
 ## Installer refusals
 
 Both Docker installers check before creating volumes or rewriting

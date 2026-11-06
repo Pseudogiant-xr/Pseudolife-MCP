@@ -39,6 +39,10 @@
 # omitted -Extractor uses sidecar, the local CPU default.
 # -NoToken (switch): open-loopback install - mint no bearer token, so the
 #   agent board stays off.
+# -Engine rust|python: the Docker daemon. rust pulls the release's published
+#   Rust image; a rerun keeps the engine installed (default for a new
+#   install: python); naming the other engine switches it through
+#   pseudolife-mcp update.
 # -TestLogin (switch): also give the test suite its own Postgres login, which
 #   cannot open the bank (`pseudolife-mcp test-login create`): for
 #   contributors who run the suite against this server; off by default.
@@ -147,7 +151,10 @@ param(
     # Optional guided ChatGPT Secure MCP Tunnel setup after local installation.
     [switch]$Tunnel,
     # Also give the test suite its own Postgres login (see the header).
-    [switch]$TestLogin
+    [switch]$TestLogin,
+    # The Docker daemon engine (see the header).
+    [ValidateSet("", "rust", "python")]
+    [string]$Engine = ""
 )
 $ErrorActionPreference = "Stop"
 
@@ -163,6 +170,12 @@ $LegacyOverrideMarker = "# pseudolife-mcp install: managed override (sonnet-only
 $LegacyShimOverrideMarker = "# pseudolife-mcp install: managed override (shim-only extractor) — do not edit; installer rewrites/removes this file"
 $EnvBegin = "# >>> pseudolife-mcp install (managed block — installer rewrites between markers) >>>"
 $EnvEnd = "# <<< pseudolife-mcp install <<<"
+# >>> engine flag >>>
+if ($Engine -and $ClientOnly) {
+    [Console]::Error.WriteLine("-Engine selects this host's Docker daemon, and a client-only install runs none; drop -Engine, or run the installer on the daemon's host. Nothing was changed.")
+    exit 2
+}
+# <<< engine flag <<<
 # >>> unattended mode >>>
 $interactive = ([Environment]::UserInteractive -and -not [Console]::IsInputRedirected) -and -not $Yes -and $env:PSEUDOLIFE_UNATTENDED -ne '1'
 if (-not $interactive -or $script:installerRerun) {
@@ -1295,6 +1308,34 @@ if (-not $ClientOnly) {
 }
 # <<< volumes <<<
 
+# -- 4b. daemon engine -----------------------------------------------------------
+# >>> daemon engine >>>
+# The engine already installed is kept; a new install takes -Engine (default
+# python). Naming the other engine on an existing bank switches it after the
+# install through pseudolife-mcp update (backup, rollback tag, health gate).
+# Rust pulls the release's image and provisions its models into their own
+# volume here, before any container starts, so a refusal starts nothing.
+function Invoke-EngineHelper {
+    & (Get-InstallerPython) (Join-Path $repo "ops/installer_engine.py") @args
+}
+$installedEngine = ""
+$composeEngine = ""
+$switchEngine = ""
+$engineFiles = @()
+if (-not $ClientOnly) {
+    $installedEngine = "$(Invoke-EngineHelper detect)".Trim()
+    if ($LASTEXITCODE -ne 0) { exit 1 }
+    $composeEngine = if ($installedEngine -eq 'none') { if ($Engine) { $Engine } else { 'python' } } else { $installedEngine }
+    if ($Engine -and $installedEngine -ne 'none' -and ($installedEngine -replace '-checkout$', '') -ne $Engine) {
+        $switchEngine = $Engine
+    }
+    $engineFiles = @(Invoke-EngineHelper prepare --repo $repo --engine $composeEngine | Where-Object { $_ })
+    if ($LASTEXITCODE -ne 0) { exit 1 }
+    if ($installedEngine -eq 'none') { Step "Daemon engine: $($composeEngine -replace '-checkout$', '')" }
+    else { Step "Daemon engine unchanged: $($composeEngine -replace '-checkout$', '')" }
+}
+# <<< daemon engine <<<
+
 # -- 5. managed env block --------------------------------------------------------
 # >>> extractor env >>>
 # What the managed block of ops/.env says about the extractor. The daemon
@@ -1494,7 +1535,13 @@ if ($ClientOnly) {
 if (-not $ClientOnly) {
     $compose = @("-p", "pseudolife-mcp", "--env-file", $envFile, "-f", $composeFile)
     if (Test-Path $overrideFile) { $compose += @("-f", $overrideFile) }
-    $composeSnapshotJson = Invoke-InstallerState plan --snapshot --repo $repo --env-file $envFile --override $overrideFile
+    # The engine overlays (stage 4b) follow, in the planner's checks too.
+    $engineStateArgs = @()
+    foreach ($engineFile in $engineFiles) {
+        $compose += @("-f", $engineFile)
+        $engineStateArgs += @("--overlay", $engineFile)
+    }
+    $composeSnapshotJson = Invoke-InstallerState plan --snapshot --repo $repo --env-file $envFile --override $overrideFile @engineStateArgs
     $composePlan = ($composeSnapshotJson | ConvertFrom-Json).action
     if ($composePlan -eq 'unchanged') {
         Step "Docker stack unchanged; no Compose up or build needed."
@@ -1510,7 +1557,7 @@ if (-not $ClientOnly) {
     } else {
         throw "Cannot determine the Docker startup step; rerun ops/preflight.ps1."
     }
-    $composeSnapshotJson = $composeSnapshotJson | Invoke-InstallerState started --expected-stdin --repo $repo --env-file $envFile --override $overrideFile
+    $composeSnapshotJson = $composeSnapshotJson | Invoke-InstallerState started --expected-stdin --repo $repo --env-file $envFile --override $overrideFile @engineStateArgs
 }
 
 # -- 8b. Claude Code plugin (hooks + commands layer) ------------------------------
@@ -3229,7 +3276,9 @@ if ($claudeShimMode) {
 if (-not $ClientOnly) {
     if ($composePlan -ne 'unchanged') { Step "Waiting for the daemon to report healthy..." }
     $h = $null
-    for ($i = 0; $i -lt 40; $i++) {
+    # Rust verifies its provisioned models before it serves: allow it longer.
+    $healthTries = if ($composeEngine -and $composeEngine -ne 'python') { 120 } else { 40 }
+    for ($i = 0; $i -lt $healthTries; $i++) {
         try {
             $h = Invoke-RestMethod -Uri "http://127.0.0.1:8765/health" -TimeoutSec 3
             if ($h.status -eq "ok") { break }
@@ -3241,6 +3290,12 @@ if (-not $ClientOnly) {
         exit 1
     }
     Step "Healthy: http://127.0.0.1:8765/health (Console: http://127.0.0.1:8765/ui/)"
+    if ($composeEngine -eq 'rust') {
+        # Recorded only now, as update records its own after its health gate.
+        $engineStatus = "$(Invoke-EngineHelper accept)".Trim()
+        if ($LASTEXITCODE -ne 0) { exit 1 }
+        if ($engineStatus -eq 'accepted') { Step "Rust daemon selection recorded; pseudolife-mcp update keeps it" }
+    }
     Invoke-EndpointContainerProbe
     if ($TestLogin) { Invoke-TestLoginSetup }
 }
@@ -3456,9 +3511,30 @@ if (-not $ClientOnly) {
     if ($resolvedInstructionChoices['gemini']) { $recordArgs += @('--instruction-gemini', $resolvedInstructionChoices['gemini']) }
     if ($resolvedInstructionChoices['generic']) { $recordArgs += @('--instruction-generic', $resolvedInstructionChoices['generic']) }
     if ($resolvedGenericTarget) { $recordArgs += @('--generic-target', $resolvedGenericTarget) }
+    $recordArgs += $engineStateArgs
     $composeSnapshotJson | Invoke-InstallerState @recordArgs | Out-Null
 }
 # <<< record successful deployment <<<
+# >>> engine switch >>>
+# After the record: the switch recreates the daemon, which the record checks.
+if ($switchEngine) {
+    $switchVersion = $null
+    try { $switchVersion = (Invoke-RestMethod -Uri "http://127.0.0.1:8765/health" -TimeoutSec 3).version } catch { }
+    $switchArgs = @('update', '--engine', $switchEngine, '--daemon-only')
+    if ($installedEngine -eq 'rust-checkout') { $switchArgs += @('--checkout', $repo) }
+    elseif ($switchVersion) { $switchArgs += @('--tag', "$switchVersion") }
+    if (-not (Install-ShimOnce) -or -not $script:shimInstallPath) {
+        [Console]::Error.WriteLine("The installed daemon was kept; switching it to $switchEngine needs the pseudolife-mcp shim, which is unavailable (see above). Run: pseudolife-mcp $($switchArgs -join ' ')")
+        exit 1
+    }
+    Step "Switching the daemon to $switchEngine (backup, rollback tag and health gate)..."
+    & $script:shimInstallPath @switchArgs
+    if ($LASTEXITCODE -ne 0) {
+        [Console]::Error.WriteLine("The switch to $switchEngine failed; its output above says what changed and how to roll back. Retry with: $($script:shimInstallPath) $($switchArgs -join ' ')")
+        exit 1
+    }
+}
+# <<< engine switch <<<
 if (-not $ClientOnly) { Invoke-MaintainerSetupOffer }
 if (-not $ClientOnly) { Invoke-ConsoleSignin }
 # >>> update line >>>

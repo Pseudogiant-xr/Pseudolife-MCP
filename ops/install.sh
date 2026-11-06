@@ -53,6 +53,11 @@
 #   --agents-file <path>             standing-file target for generic agents
 #   --no-art                         plain output (no banner, no color)
 #   --no-token                       open-loopback install: mint no bearer
+#   --engine rust|python             the Docker daemon: rust pulls the release's
+#                                    published Rust image; a rerun keeps the
+#                                    engine installed (default for a new
+#                                    install: python); naming the other engine
+#                                    switches it through pseudolife-mcp update
 #   --tunnel                         enter optional guided ChatGPT Secure MCP
 #                                    Tunnel setup after local installation
 #                                    token, so the agent board stays off
@@ -165,6 +170,7 @@ CLIENT_ONLY=""
 READ_TOKEN=""
 PAIRING_CODE=""
 CLIENT_UPDATE_SCHEDULE=ask
+ENGINE=""
 
 usage() {
     sed -n '/^# >>> usage >>>$/,/^# <<< usage <<<$/p' "$0" \
@@ -197,6 +203,7 @@ while [ $# -gt 0 ]; do
         --daemon-url) DAEMON_URL="$2"; shift 2 ;;
         --token-file) TOKEN_FILE="$2"; shift 2 ;;
         --client-only) CLIENT_ONLY=1; shift ;;
+        --engine) ENGINE="$2"; shift 2 ;;
         --read-token) READ_TOKEN=1; shift ;;
         --pairing-code) PAIRING_CODE="$2"; shift 2 ;;
         --client-update-schedule) CLIENT_UPDATE_SCHEDULE="$2"; shift 2 ;;
@@ -204,6 +211,16 @@ while [ $# -gt 0 ]; do
         *) echo "unknown argument: $1" >&2; usage ;;
     esac
 done
+# >>> engine flag >>>
+case "$ENGINE" in
+    ""|rust|python) ;;
+    *) echo "--engine must be rust or python; nothing was changed." >&2; exit 2 ;;
+esac
+if [ -n "$ENGINE" ] && [ -n "$CLIENT_ONLY" ]; then
+    echo "--engine selects this host's Docker daemon, and a client-only install runs none; drop --engine, or run the installer on the daemon's host. Nothing was changed." >&2
+    exit 2
+fi
+# <<< engine flag <<<
 # >>> unattended mode >>>
 # A pty cannot tell a person from an agent. Agents explicitly opt out of
 # questions with --yes or PSEUDOLIFE_UNATTENDED=1; redirected stdin also does.
@@ -1376,6 +1393,33 @@ if [ -z "$CLIENT_ONLY" ]; then
 fi
 # <<< volumes <<<
 
+# ── 4b. daemon engine ──────────────────────────────────────────────────────
+# >>> daemon engine >>>
+# The engine already installed is kept; a new install takes --engine (default
+# python). Naming the other engine on an existing bank switches it after the
+# install through pseudolife-mcp update (backup, rollback tag, health gate).
+# Rust pulls the release's image and provisions its models into their own
+# volume here, before any container starts, so a refusal starts nothing.
+engine_helper() { "$(installer_python)" "$repo/ops/installer_engine.py" "$@"; }
+INSTALLED_ENGINE=""
+COMPOSE_ENGINE=""
+SWITCH_ENGINE=""
+engine_files=()
+if [ -z "$CLIENT_ONLY" ]; then
+    INSTALLED_ENGINE="$(engine_helper detect)" || exit 1
+    if [ "$INSTALLED_ENGINE" = none ]; then COMPOSE_ENGINE="${ENGINE:-python}"; else COMPOSE_ENGINE="$INSTALLED_ENGINE"; fi
+    if [ -n "$ENGINE" ] && [ "$INSTALLED_ENGINE" != none ] && [ "${INSTALLED_ENGINE%-checkout}" != "$ENGINE" ]; then
+        SWITCH_ENGINE="$ENGINE"
+    fi
+    engine_out="$(engine_helper prepare --repo "$repo" --engine "$COMPOSE_ENGINE")" || exit 1
+    while IFS= read -r engine_file; do
+        [ -z "$engine_file" ] || engine_files+=("$engine_file")
+    done <<< "$engine_out"
+    if [ "$INSTALLED_ENGINE" = none ]; then step "Daemon engine: ${COMPOSE_ENGINE%-checkout}"
+    else step "Daemon engine unchanged: ${COMPOSE_ENGINE%-checkout}"; fi
+fi
+# <<< daemon engine <<<
+
 # ── 5. managed env block ───────────────────────────────────────────────────
 # >>> extractor env >>>
 # What the managed block of ops/.env says about the extractor. The daemon
@@ -1572,7 +1616,13 @@ fi
 if [ -z "$CLIENT_ONLY" ]; then
     compose=(-p pseudolife-mcp --env-file "$env_file" -f "$compose_file")
     [ -f "$override_file" ] && compose+=(-f "$override_file")
-    compose_snapshot_json="$(installer_state plan --snapshot --repo "$repo" --env-file "$env_file" --override "$override_file")" || exit 1
+    # The engine overlays (stage 4b) follow, in the planner's checks too.
+    engine_state_args=()
+    for engine_file in ${engine_files[@]+"${engine_files[@]}"}; do
+        compose+=(-f "$engine_file")
+        engine_state_args+=(--overlay "$engine_file")
+    done
+    compose_snapshot_json="$(installer_state plan --snapshot --repo "$repo" --env-file "$env_file" --override "$override_file" ${engine_state_args[@]+"${engine_state_args[@]}"})" || exit 1
     compose_plan="$(printf '%s' "$compose_snapshot_json" | "$(installer_python)" -c 'import json,sys; sys.stdout.write(json.load(sys.stdin)["action"])')"
     case "$compose_plan" in
         unchanged) step "Docker stack unchanged; no Compose up or build needed." ;;
@@ -1584,7 +1634,7 @@ if [ -z "$CLIENT_ONLY" ]; then
             docker compose "${compose[@]}" up -d --build ;;
         *) echo "Cannot determine the Docker startup step; rerun ops/preflight.sh." >&2; exit 1 ;;
     esac
-    compose_snapshot_json="$(printf '%s' "$compose_snapshot_json" | installer_state started --expected-stdin --repo "$repo" --env-file "$env_file" --override "$override_file")" || exit 1
+    compose_snapshot_json="$(printf '%s' "$compose_snapshot_json" | installer_state started --expected-stdin --repo "$repo" --env-file "$env_file" --override "$override_file" ${engine_state_args[@]+"${engine_state_args[@]}"})" || exit 1
 fi
 
 # ── 8b. Claude Code plugin (hooks + commands layer) ────────────────────────
@@ -3422,7 +3472,10 @@ fi
 if [ -z "$CLIENT_ONLY" ]; then
     if [ "${compose_plan:-}" != unchanged ]; then step "Waiting for the daemon to report healthy..."; fi
     healthy=""
-    for _ in $(seq 1 40); do
+    # Rust verifies its provisioned models before it serves: allow it longer.
+    health_tries=40
+    [ "${COMPOSE_ENGINE:-python}" = python ] || health_tries=120
+    for _ in $(seq 1 "$health_tries"); do
         if curl -fsS --max-time 3 http://127.0.0.1:8765/health 2>/dev/null \
             | grep -q '"status"[[:space:]]*:[[:space:]]*"ok"'; then
             healthy=1; break
@@ -3434,6 +3487,11 @@ if [ -z "$CLIENT_ONLY" ]; then
         exit 1
     }
     step "Healthy: http://127.0.0.1:8765/health (Console: http://127.0.0.1:8765/ui/)"
+    if [ "${COMPOSE_ENGINE:-python}" = rust ]; then
+        # Recorded only now, as update records its own after its health gate.
+        engine_status="$(engine_helper accept)" || exit 1
+        [ "$engine_status" != accepted ] || step "Rust daemon selection recorded; pseudolife-mcp update keeps it"
+    fi
     endpoint_container_probe
     shim_container_probe
     if [ -n "${TEST_LOGIN:-}" ]; then
@@ -3629,9 +3687,30 @@ if [ -z "$CLIENT_ONLY" ]; then
     [ -z "${RESOLVED_INSTRUCTIONS_GEMINI:-}" ] || record_args+=(--instruction-gemini "$RESOLVED_INSTRUCTIONS_GEMINI")
     [ -z "${RESOLVED_INSTRUCTIONS_GENERIC:-}" ] || record_args+=(--instruction-generic "$RESOLVED_INSTRUCTIONS_GENERIC")
     [ -z "${RESOLVED_GENERIC_TARGET:-}" ] || record_args+=(--generic-target "$RESOLVED_GENERIC_TARGET")
+    record_args+=(${engine_state_args[@]+"${engine_state_args[@]}"})
     printf '%s' "$compose_snapshot_json" | installer_state "${record_args[@]}" >/dev/null
 fi
 # <<< record successful deployment <<<
+# >>> engine switch >>>
+# After the record: the switch recreates the daemon, which the record checks.
+if [ -n "${SWITCH_ENGINE:-}" ]; then
+    switch_version="$(curl -fsS --max-time 3 http://127.0.0.1:8765/health 2>/dev/null \
+        | sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
+    switch_args=(update --engine "$SWITCH_ENGINE" --daemon-only)
+    if [ "$INSTALLED_ENGINE" = rust-checkout ]; then switch_args+=(--checkout "$repo")
+    elif [ -n "$switch_version" ]; then switch_args+=(--tag "$switch_version"); fi
+    ensure_shim
+    if [ -z "$SHIM_OK" ] || [ -z "$SHIM_PATH" ]; then
+        echo "The installed daemon was kept; switching it to $SWITCH_ENGINE needs the pseudolife-mcp shim, which is unavailable (see above). Run: pseudolife-mcp ${switch_args[*]}" >&2
+        exit 1
+    fi
+    step "Switching the daemon to $SWITCH_ENGINE (backup, rollback tag and health gate)..."
+    if ! "$SHIM_PATH" "${switch_args[@]}"; then
+        echo "The switch to $SWITCH_ENGINE failed; its output above says what changed and how to roll back. Retry with: $SHIM_PATH ${switch_args[*]}" >&2
+        exit 1
+    fi
+fi
+# <<< engine switch <<<
 if [ -z "$CLIENT_ONLY" ]; then offer_maintainer_setup; fi
 if [ -z "$CLIENT_ONLY" ]; then open_console_signin; fi
 # >>> update line >>>
