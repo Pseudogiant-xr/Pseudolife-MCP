@@ -685,8 +685,15 @@ async fn db_reconnect_failing_after_the_lease_is_retried_once() {
         .await
         .expect("verify")
         .expect("the immediate retry replaces the session");
-    assert_eq!(INJECT_EPOCH_READ_FAILURES.load(std::sync::atomic::Ordering::SeqCst), 0);
-    assert_eq!(fresh.lease_epoch(), e1 + 1, "the failed attempt bumped nothing");
+    assert_eq!(
+        INJECT_EPOCH_READ_FAILURES.load(std::sync::atomic::Ordering::SeqCst),
+        0
+    );
+    assert_eq!(
+        fresh.lease_epoch(),
+        e1 + 1,
+        "the failed attempt bumped nothing"
+    );
     fresh.ping().await.expect("ping");
     drop(s);
 
@@ -694,8 +701,17 @@ async fn db_reconnect_failing_after_the_lease_is_retried_once() {
     let e2 = fresh.lease_epoch();
     kill_writer(&fresh, &dsn).await;
     INJECT_EPOCH_READ_FAILURES.store(2, std::sync::atomic::Ordering::SeqCst);
-    assert!(fresh.verify_writer_session().await.expect("tolerated").is_none());
-    assert_eq!(INJECT_EPOCH_READ_FAILURES.load(std::sync::atomic::Ordering::SeqCst), 0);
+    assert!(
+        fresh
+            .verify_writer_session()
+            .await
+            .expect("tolerated")
+            .is_none()
+    );
+    assert_eq!(
+        INJECT_EPOCH_READ_FAILURES.load(std::sync::atomic::Ordering::SeqCst),
+        0
+    );
     let later = fresh
         .verify_writer_session()
         .await
