@@ -976,21 +976,26 @@ mod tests {
     /// positive threshold; a genuine near-duplicate keeps its surprise.
     #[test]
     fn exact_duplicate_surprise_is_exactly_zero() {
-        let mut off_one = 0;
+        // Only a self-similarity below 1.0 broke the old clamp: above it,
+        // 1 - x was already clamped to 0.
+        let mut below_one = 0;
         for seed in 1..=40u32 {
             let mut v: Vec<f32> = (0..1024u32)
                 .map(|i| (i.wrapping_mul(2_654_435_761u32.wrapping_mul(seed)) as f32).sin())
                 .collect();
             crate::bank::normalize_query(&mut v);
             let sim = dot(&v, &v);
-            off_one += usize::from(sim != 1.0);
+            below_one += usize::from(sim < 1.0);
             assert_eq!(
                 surprise_from(sim),
                 0.0,
                 "seed {seed}: self-similarity {sim}"
             );
         }
-        assert!(off_one > 0, "no vector misses 1.0: the test would not bite");
+        assert!(
+            below_one > 0,
+            "no vector falls below 1.0: the test would not bite"
+        );
         assert!((surprise_from(0.9999) - 1e-4).abs() < 1e-7);
         assert_eq!(surprise_from(-0.5), 1.0);
     }
