@@ -164,19 +164,24 @@ def _verify_backup(directory: Path, before: dict) -> dict:
         if after.get(state_name) == before.get(state_name) or not up._dump_complete(dump):
             raise ValueError("missing or unchanged backup")
         # A zero-exit backup script may still have warned that /data failed.
-        # Read the complete tar and gzip trailer, without extracting anything.
-        with gzip.open(state, "rb") as stream:
-            with tarfile.open(fileobj=stream, mode="r|") as archive:
-                for member in archive:
-                    if member.isfile():
-                        with archive.extractfile(member) as content:
-                            while content.read(1024 * 1024):
-                                pass
-            while stream.read(1024 * 1024):
-                pass
+        _read_state_archive(state)
     except (OSError, ValueError, EOFError, tarfile.TarError) as exc:
         raise up.UpdateError("the bank or state backup is missing or incomplete; fix the backup error and retry; nothing was deployed") from exc
     return {"dump": str(dump), "state_archive": str(state)}
+
+
+def _read_state_archive(state: Path) -> None:
+    """Read the complete tar and gzip trailer, without extracting anything;
+    raises on a truncated or corrupt archive."""
+    with gzip.open(state, "rb") as stream:
+        with tarfile.open(fileobj=stream, mode="r|") as archive:
+            for member in archive:
+                if member.isfile():
+                    with archive.extractfile(member) as content:
+                        while content.read(1024 * 1024):
+                            pass
+        while stream.read(1024 * 1024):
+            pass
 
 
 def deploy_engine(update, repo: Path) -> None:
@@ -407,9 +412,15 @@ class ReleaseEngineUpdate:
             _verify_backup(directory, before)
             return
         u.step("backing up the bank (pg_dump in the container + state volume tar)...")
-        if not u.builtin_backup().get("state"):
+        state = u.builtin_backup().get("state")
+        try:
+            if not state:
+                raise ValueError("no state archive")
+            # A failed copy can leave a partial archive behind: read it whole.
+            _read_state_archive(Path(state))
+        except (OSError, ValueError, EOFError, tarfile.TarError) as exc:
             raise up.UpdateError("the state volume backup is missing or incomplete; the bank dump is retained; fix the "
-                                 "backup error and retry; nothing was deployed")
+                                 "backup error and retry; nothing was deployed") from exc
 
     def require_imported(self, pg, user, db, daemon):
         raw = self.sql(pg, user, db, "SELECT value::text FROM meta WHERE key = 'schema_version'")

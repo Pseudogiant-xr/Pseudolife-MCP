@@ -211,6 +211,23 @@ def test_release_engine_refuses_a_backup_without_its_state_archive(tmp_path, mon
         eng.ReleaseEngineUpdate(update, "0.23.0", "0.22.1", None, "rust").backup(checkout)
 
 
+def test_release_engine_refuses_a_partial_builtin_state_archive(tmp_path, monkeypatch):
+    from pseudolife_memory import update_engine as eng
+    update = up.Update(up.Options(), log=lambda s: None)
+    partial = tmp_path / "pseudolife_state-20260101-000001.tgz"
+    partial.write_bytes(gzip.compress(b"not a whole tar")[:-6])  # a copy that failed midway
+    monkeypatch.setattr(update, "_checkout_script", lambda *a: None)
+    monkeypatch.setattr(update, "builtin_backup", lambda: {"dump": "x.sql.gz", "state": str(partial)})
+    with pytest.raises(up.UpdateError, match="state volume backup is missing or incomplete"):
+        eng.ReleaseEngineUpdate(update, "0.23.0", "0.22.1", None, "rust").backup(tmp_path)
+
+
+def test_engine_change_without_a_backup_is_refused_before_docker(monkeypatch, capsys):
+    monkeypatch.setattr(up, "run_cli", lambda *a, **kw: pytest.fail("refusal must precede Docker"))
+    assert up.main(["--engine", "rust", "--tag", "0.23.0", "--no-backup"]) == 2
+    assert "engine changes require a backup" in capsys.readouterr().err
+
+
 def test_engine_selection_never_moves_the_clients(monkeypatch):
     monkeypatch.setattr(up.Update, "detect_tier", lambda self: "pip")
     monkeypatch.setattr(up, "_on_shim_runtime", lambda: False)

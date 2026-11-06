@@ -658,6 +658,8 @@ class Update:
             raise UpdateError("--shadow requires --engine rust --checkout <repo> to start, or --engine python --checkout <repo> to remove; nothing was changed", 2)
         if (self.o.engine or self.o.shadow) and (self.o.clients_only or self.o.all_clients or self.o.unattended or self.o.schedule):
             raise UpdateError("engine selection updates only the Docker daemon; remove client/schedule options and retry", 2)
+        if self.o.engine and self.o.no_backup and not (self.o.shadow and self.o.engine == "python"):
+            raise UpdateError("engine changes require a backup; remove --no-backup and retry; nothing was changed", 2)
         if self.o.engine:
             # As the native updater: an engine change never moves the clients.
             self.o.daemon_only = True

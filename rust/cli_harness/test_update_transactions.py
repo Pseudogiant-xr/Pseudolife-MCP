@@ -1040,6 +1040,19 @@ def test_release_rust_models_go_to_their_own_volume_outside_the_backed_up_state(
 
 
 @pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+def test_release_engine_change_requires_a_backup(tmp_path, native):
+    binary = _native_binary()
+    if native and not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path) as (repo, env, state_path):
+        result = run_arm(repo, env, binary if native else None,
+                         ["--engine", "rust", "--tag", "0.21.1", "--no-backup", "--json"])
+        assert result.returncode == 2, result.stdout + result.stderr
+        assert "require a backup" in result.stdout + result.stderr
+        assert json.loads(state_path.read_text())["calls"] == []
+
+
+@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
 @pytest.mark.parametrize("case", ["misplaced_models", "newer_bank"])
 def test_release_rust_refuses_before_pulling_or_backing_up(tmp_path, native, case):
     binary = _native_binary()
