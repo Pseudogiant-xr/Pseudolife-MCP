@@ -1050,7 +1050,8 @@ def test_release_rust_models_go_to_their_own_volume_outside_the_backed_up_state(
 
 
 @pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
-def test_release_rust_models_mount_does_not_block_a_rerun_or_a_switch_back(tmp_path, native):
+@pytest.mark.parametrize("labelled", [False, True], ids=["bundled-overlay", "labelled-overlay"])
+def test_release_rust_models_mount_does_not_block_a_rerun_or_a_switch_back(tmp_path, native, labelled):
     # Once the Rust daemon runs with the overlay's /models volume, a plain
     # Rust rerun keeps it and --engine python drops it on purpose: neither
     # may be refused as "the Compose configuration drops a daemon mount".
@@ -1065,8 +1066,16 @@ def test_release_rust_models_mount_does_not_block_a_rerun_or_a_switch_back(tmp_p
         arm = binary if native else None
         first = run_arm(repo, env, arm, ["--engine", "rust", "--tag", "0.21.1", *common, "--rollback-tag", "to-rust"])
         assert first.returncode == 0, first.stdout + first.stderr
-        mounts = json.loads(state_path.read_text())["running"]["Mounts"]
-        assert any(m["Destination"] == "/models" for m in mounts)
+        state = json.loads(state_path.read_text())
+        assert any(m["Destination"] == "/models" for m in state["running"]["Mounts"])
+        if labelled:
+            # Compose records the overlay it was created with: the switch-back
+            # then checks against that file, not the bundled copy.
+            up = next(a for a in state["calls"] if a[:1] == ["compose"] and "up" in a)
+            overlay = next(v for v in up if v.endswith("docker-compose.rust-ghcr.yml"))
+            labels = state["running"]["Config"]["Labels"]
+            labels["com.docker.compose.project.config_files"] += "," + overlay
+            state_path.write_text(json.dumps(state))
         rerun = run_arm(repo, env, arm, ["--engine", "rust", "--tag", "0.21.1", "--reinstall", *common,
                                          "--rollback-tag", "rerun"])
         assert rerun.returncode == 0, rerun.stdout + rerun.stderr
