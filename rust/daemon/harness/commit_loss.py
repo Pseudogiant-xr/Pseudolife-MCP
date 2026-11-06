@@ -3,7 +3,7 @@ commits a write and the daemon never receives the COMMIT reply.
 
 usage:
   python commit_loss.py --rust-bin PATH [--only CASE ...] [--engines python,rust]
-                        [--out FILE] [--report FILE] [--keep]
+                        [--fault lost-reply|rollback] [--out FILE] [--report FILE] [--keep]
   python commit_loss.py --smoke        (the proxy alone, against plain psycopg)
 
 A TCP proxy (``CommitCutProxy``, asyncio in a background thread) sits
@@ -14,7 +14,10 @@ case's marker (a regex over the statements one transaction sent since its
 ``BEGIN``), it forwards that transaction's ``COMMIT``, forwards the
 server's replies up to the ``CommandComplete`` that answers it, drops that
 message and closes both sockets: the server has committed, the client
-never learns it. It fires once, then disarms itself. ``SSLRequest`` and
+never learns it. With ``--fault rollback`` it instead drops that
+``COMMIT`` unsent and closes both sockets: the server rolls the transaction
+back, the client sees its connection fail. It fires once, then disarms
+itself. ``SSLRequest`` and
 ``GSSENCRequest`` are refused by the proxy itself (``N``), so the stream
 stays plaintext; daemon DSNs to the proxy carry ``sslmode=disable``.
 
@@ -110,7 +113,9 @@ class CommitCutProxy:
     """See the module docstring. ``arm(marker)`` / ``disarm()`` from the
     harness thread; ``events`` records every fire."""
 
-    def __init__(self, upstream_host: str, upstream_port: int):
+    def __init__(self, upstream_host: str, upstream_port: int, mode: str = "lost-reply"):
+        assert mode in FAULTS, mode
+        self.mode = mode
         self.upstream = (upstream_host, upstream_port)
         self.loop = asyncio.new_event_loop()
         self.lock = threading.Lock()
@@ -238,6 +243,20 @@ class CommitCutProxy:
                             break
                         msg, buf = buf[:1 + n], buf[1 + n:]
                         self._inspect(conn, msg[:1], msg[5:])
+                        if conn.cut_pending and self.mode == "rollback":
+                            # The COMMIT never reaches the server, which
+                            # rolls the transaction back when the session
+                            # closes.
+                            if out:
+                                swriter.write(bytes(out))
+                                await swriter.drain()
+                            self.events.append({
+                                "connection": conn.cid, "server_tag": ROLLBACK_TAG,
+                                "transaction_statements": conn.cut_statements,
+                                "at": time.time()})
+                            self.fired.set()
+                            shut()
+                            return
                         out += msg
                     if out:
                         swriter.write(bytes(out))
@@ -593,7 +612,7 @@ CASES: dict[str, dict] = {
         "world": [{"query": "rust edition", "entity_norm": "rust", "attribute_norm": "edition",
                    "value": "2024"}],
         "committed": lambda t: t["counts"]["restore_decisions"] > 0,
-        "inconsistent_means": "restore decision recorded while the slot is not current",
+        "inconsistent_means": "the restore decisions and the slot's state disagree",
         "consistent": lambda t: (t["counts"]["restore_decisions"] > 0) == _world_current(
             t, "rust", "edition"),
     },
@@ -614,7 +633,7 @@ CASES: dict[str, dict] = {
         "world": [{"query": "Curate Host operating system", "entity_norm": "curate-host",
                    "attribute_norm": "operating-system", "value": "Debian 12 (bookworm)"}],
         "committed": lambda t: t["counts"]["restore_decisions"] > 0,
-        "inconsistent_means": "restore decision recorded while the slot is not current",
+        "inconsistent_means": "the restore decisions and the slot's state disagree",
         "consistent": lambda t: (t["counts"]["restore_decisions"] > 0) == _world_current(
             t, "curate-host", "operating-system"),
     },
@@ -904,6 +923,14 @@ def _truth_diff(a: dict, b: dict) -> list[str]:
     return out
 
 
+FAULTS = {
+    "lost-reply": "PostgreSQL commits the operation's transaction and the daemon never "
+                  "receives the COMMIT reply",
+    "rollback": "the operation's COMMIT never reaches PostgreSQL, which rolls the "
+                "transaction back as the connection closes",
+}
+ROLLBACK_TAG = "COMMIT not sent"
+
 VARIANTS = {
     "unrelated": "(d) is one unrelated memory_store",
     "retry": "(d) repeats the same call with the same arguments (the Rust error says "
@@ -912,13 +939,14 @@ VARIANTS = {
 
 
 def run_engine(name: str, case: dict, engine: str, binary: Path | None, template: str,
-               root: Path, owned: list[str], variant: str = "unrelated") -> dict:
-    db = pg.name(f"pl_cf_w7c_{name.replace('-', '_')[:20]}_{engine[:2]}_{variant[:2]}")
+               root: Path, owned: list[str], variant: str = "unrelated",
+               fault: str = "lost-reply") -> dict:
+    db = pg.name(f"pl_cf_w7c_{name.replace('-', '_')[:20]}_{engine[:2]}_{variant[:2]}_{fault[:2]}")
     owned.append(db)
     dsn = pg.create(db, template=template)
-    proxy = CommitCutProxy(*upstream()).start()
-    home = daemons.make_home(root, f"{name}-{engine}-{variant}", None)
-    result: dict = {"case": name, "engine": engine, "variant": variant,
+    proxy = CommitCutProxy(*upstream(), mode=fault).start()
+    home = daemons.make_home(root, f"{name}-{engine}-{variant}-{fault}", None)
+    result: dict = {"case": name, "engine": engine, "variant": variant, "fault_mode": fault,
                     "about": case["about"], "marker": case["marker"]}
     d = make_daemon(engine, binary, home, proxied_dsn(dsn, proxy.port))
     known: dict[str, set[int]] = {}
@@ -940,7 +968,7 @@ def run_engine(name: str, case: dict, engine: str, binary: Path | None, template
         result["a_answer"] = {"tool": tool_name, "isError": answer["isError"],
                               "value": answer["value"], "wall_s": round(time.monotonic() - t0, 3),
                               "at": answered_at}
-        result["fault"] = {"fired": bool(proxy.events), "events": proxy.events}
+        result["fault"] = {"fired": bool(proxy.events), "events": proxy.events, "mode": fault}
         time.sleep(1.0)
         result["c_db"] = db_truth(case, dsn)
         result["committed"] = case["committed"](result["c_db"])
@@ -1035,11 +1063,18 @@ def verdict(r: dict) -> dict:
 
     if "harness_error" in r:
         return {"valid": False, "why": r["harness_error"]}
-    if not r["fault"]["fired"] or not r["fault"]["events"][0]["server_tag"].startswith("COMMIT"):
+    rollback = r["fault"].get("mode") == "rollback"
+    tag = r["fault"]["events"][0]["server_tag"] if r["fault"]["fired"] else ""
+    if rollback and tag != ROLLBACK_TAG:
+        return {"valid": False, "why": "the proxy never dropped the operation's COMMIT"}
+    if not rollback and not tag.startswith("COMMIT"):
         return {"valid": False, "why": "the proxy never cut a committed COMMIT"}
     if r["fault"]["events"][0]["at"] > r["a_answer"].get("at", float("inf")):
         return {"valid": False, "why": "the cut came after the answer: another transaction"}
-    if not r["committed"]:
+    if rollback and r["committed"]:
+        return {"valid": False, "why": "the bank holds the operation's effect after its "
+                                       "COMMIT was dropped: the cut was another transaction"}
+    if not rollback and not r["committed"]:
         return {"valid": False, "why": "the cut transaction is not the operation's: "
                                        "the bank lacks its effect"}
     # A surface the probes cannot see at baseline would read as matching
@@ -1090,10 +1125,11 @@ def _short(v, n=110) -> str:
 
 def report(results: list[dict], meta: dict) -> str:
     lines = ["# Commit-loss fault injection: what each daemon serves", "",
-             "Each case cuts the connection after PostgreSQL committed the operation's "
-             "transaction and before the daemon received the COMMIT reply, then compares what "
-             "the daemon serves with the bank at (b) right after, (d) after one unrelated "
-             "store, and (e) after a graceful stop and a restart on a direct DSN.", "",
+             f"Fault (`{meta.get('fault', 'lost-reply')}`): "
+             f"{FAULTS[meta.get('fault', 'lost-reply')]}. Each case injects it into the "
+             "operation's transaction, then compares what the daemon serves with the bank at "
+             "(b) right after, (d) after the variant's next call, and (e) after a graceful "
+             "stop and a restart on a direct DSN.", "",
              f"Rust binary sha256: `{meta.get('rust_sha256', 'n/a')}`; repo head: "
              f"`{meta.get('head', 'n/a')}`.", "",
              "Variants: " + "; ".join(f"`{k}`: {v}" for k, v in VARIANTS.items()) + ".", "",
@@ -1119,7 +1155,8 @@ def report(results: list[dict], meta: dict) -> str:
     lines += ["", "## Details", ""]
     for r in results:
         v = r["verdict"]
-        lines.append(f"### {r['case']} / {r.get('variant', '-')} / {r['engine']}")
+        lines.append(f"### {r['case']} / {r.get('variant', '-')} / {r['engine']} / "
+                     f"{r.get('fault_mode', 'lost-reply')}")
         lines.append("")
         lines.append(f"{r['about']}. Marker: `{r['marker']}`.")
         if not v["valid"]:
@@ -1162,33 +1199,38 @@ def smoke() -> int:
         dsn = pg.create(name)
         with psycopg.connect(dsn, autocommit=True) as c:
             c.execute("CREATE TABLE smoke (id int PRIMARY KEY, note text)")
-        proxy = CommitCutProxy(*upstream()).start()
-        pdsn = proxied_dsn(dsn, proxy.port)
-        try:
-            with psycopg.connect(pdsn, autocommit=True) as c:
-                with c.transaction():
-                    c.execute("INSERT INTO smoke VALUES (1, 'unarmed')")
-            print("unarmed commit through the proxy: ok")
-            proxy.arm(r"INSERT\s+INTO\s+smoke")
-            failed = None
+        ok = True
+        for mode, row in (("lost-reply", 2), ("rollback", 4)):
+            proxy = CommitCutProxy(*upstream(), mode=mode).start()
+            pdsn = proxied_dsn(dsn, proxy.port)
             try:
                 with psycopg.connect(pdsn, autocommit=True) as c:
-                    c.execute("SELECT 1")
                     with c.transaction():
-                        c.execute("INSERT INTO smoke VALUES (%s, %s)", (2, "armed"))
-            except psycopg.Error as exc:
-                failed = f"{type(exc).__name__}: {exc}"
-            print(f"armed commit: client saw {failed or 'NO ERROR'}; events {proxy.events}")
-            with psycopg.connect(dsn, autocommit=True) as c:
-                rows = c.execute("SELECT id, note FROM smoke ORDER BY id").fetchall()
-            print(f"direct read: {rows}")
-            ok = failed is not None and rows == [(1, "unarmed"), (2, "armed")] and proxy.events
-            with psycopg.connect(pdsn, autocommit=True) as c:
-                with c.transaction():
-                    c.execute("INSERT INTO smoke VALUES (3, 'after')")
-            print("disarmed after firing: ok")
-        finally:
-            proxy.close()
+                        c.execute("INSERT INTO smoke VALUES (%s, 'unarmed')", (row - 1,))
+                print(f"{mode}: unarmed commit through the proxy: ok")
+                proxy.arm(r"INSERT\s+INTO\s+smoke")
+                failed = None
+                try:
+                    with psycopg.connect(pdsn, autocommit=True) as c:
+                        c.execute("SELECT 1")
+                        with c.transaction():
+                            c.execute("INSERT INTO smoke VALUES (%s, %s)", (row, "armed"))
+                except psycopg.Error as exc:
+                    failed = f"{type(exc).__name__}: {exc}"
+                print(f"{mode}: armed commit: client saw {failed or 'NO ERROR'}; "
+                      f"events {proxy.events}")
+                with psycopg.connect(dsn, autocommit=True) as c:
+                    landed = c.execute("SELECT count(*) FROM smoke WHERE id = %s",
+                                       (row,)).fetchone()[0]
+                print(f"{mode}: the armed row is {'in' if landed else 'not in'} the bank")
+                ok &= (failed is not None and bool(proxy.events)
+                       and bool(landed) == (mode == "lost-reply"))
+                with psycopg.connect(pdsn, autocommit=True) as c:
+                    with c.transaction():
+                        c.execute("INSERT INTO smoke VALUES (%s, 'after')", (row + 100,))
+                print(f"{mode}: disarmed after firing: ok")
+            finally:
+                proxy.close()
         print("SMOKE", "PASS" if ok else "FAIL")
         return 0 if ok else 1
     finally:
@@ -1208,6 +1250,7 @@ def main() -> int:
     ap.add_argument("--only", nargs="*", choices=sorted(CASES))
     ap.add_argument("--engines", default="python,rust")
     ap.add_argument("--variants", default=",".join(VARIANTS))
+    ap.add_argument("--fault", choices=sorted(FAULTS), default="lost-reply")
     ap.add_argument("--out", type=Path)
     ap.add_argument("--report", type=Path)
     ap.add_argument("--keep", action="store_true", help="keep the daemon homes")
@@ -1225,7 +1268,8 @@ def main() -> int:
     root = Path(tempfile.mkdtemp(prefix=f"commit-loss-{os.getpid()}-", dir=daemons.scratch_root()))
     out = a.out or root / "commit-loss.json"
     rep = a.report or out.with_suffix(".md")
-    meta = {"started": time.time(), "engines": engines, "variants": variants}
+    meta = {"started": time.time(), "engines": engines, "variants": variants,
+            "fault": a.fault}
     if a.rust_bin:
         meta["rust_sha256"] = hashlib.sha256(a.rust_bin.read_bytes()).hexdigest()
     try:
@@ -1253,7 +1297,7 @@ def main() -> int:
                         print(f"[{time.strftime('%H:%M:%S')}] {name}: {engine} / {variant}",
                               flush=True)
                         r = run_engine(name, case, engine, a.rust_bin, template, root, owned,
-                                       variant)
+                                       variant, a.fault)
                         r["verdict"] = verdict(r)
                         results.append(r)
                         print(f"  {engine}/{variant}: "
