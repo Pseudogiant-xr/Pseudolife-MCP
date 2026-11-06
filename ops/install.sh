@@ -1393,14 +1393,6 @@ if [ -z "$CLIENT_ONLY" ]; then
     volumes_changed=""
     BANK_EXISTED=""
     if printf '%s\n' "$existing_volumes" | grep -Fxq -- "$bank_vol"; then BANK_EXISTED=1; fi
-    for volume in "$bank_vol" "$state_vol"; do
-        if ! printf '%s\n' "$existing_volumes" | grep -Fxq -- "$volume"; then
-            docker volume create "$volume" >/dev/null
-            volumes_changed=1
-        fi
-    done
-    if [ -n "$volumes_changed" ]; then step "Volumes ready: $bank_vol, $state_vol"
-    else step "Volumes unchanged: $bank_vol, $state_vol"; fi
 fi
 # <<< volumes <<<
 
@@ -1441,6 +1433,20 @@ if [ -z "$CLIENT_ONLY" ]; then
     else step "Daemon engine unchanged: ${COMPOSE_ENGINE%-checkout}"; fi
 fi
 # <<< daemon engine <<<
+
+# ── 4c. create volumes (after every refusal above) ───────────────────────
+# >>> create volumes >>>
+if [ -z "$CLIENT_ONLY" ]; then
+    for volume in "$bank_vol" "$state_vol"; do
+        if ! printf '%s\n' "$existing_volumes" | grep -Fxq -- "$volume"; then
+            docker volume create "$volume" >/dev/null
+            volumes_changed=1
+        fi
+    done
+    if [ -n "$volumes_changed" ]; then step "Volumes ready: $bank_vol, $state_vol"
+    else step "Volumes unchanged: $bank_vol, $state_vol"; fi
+fi
+# <<< create volumes <<<
 
 # ── 5. managed env block ───────────────────────────────────────────────────
 # >>> extractor env >>>
@@ -3519,7 +3525,7 @@ if [ -z "$CLIENT_ONLY" ]; then
     step "Healthy: http://127.0.0.1:8765/health (Console: http://127.0.0.1:8765/ui/)"
     if [ "${COMPOSE_ENGINE:-python}" = rust ]; then
         # Recorded only now, as update records its own after its health gate.
-        engine_status="$(engine_helper accept)" || exit 1
+        engine_status="$(engine_helper accept --env-file "$env_file")" || exit 1
         [ "$engine_status" != accepted ] || step "Rust daemon selection recorded; pseudolife-mcp update keeps it"
     fi
     endpoint_container_probe
@@ -3728,7 +3734,12 @@ if [ -n "${SWITCH_ENGINE:-}" ]; then
         | sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
     switch_args=(update --engine "$SWITCH_ENGINE" --daemon-only)
     if [ "$INSTALLED_ENGINE" = rust-checkout ]; then switch_args+=(--checkout "$repo")
-    elif [ -n "$switch_version" ]; then switch_args+=(--tag "$switch_version"); fi
+    elif [ -n "$switch_version" ]; then switch_args+=(--tag "$switch_version")
+    else
+        # Without --tag, update would move to the newest release instead.
+        echo "The installed daemon was kept: its version could not be read from http://127.0.0.1:8765/health, so the switch to $SWITCH_ENGINE did not run. Run: pseudolife-mcp update --engine $SWITCH_ENGINE --daemon-only --tag <the daemon's version>" >&2
+        exit 1
+    fi
     ensure_shim
     if [ -z "$SHIM_OK" ] || [ -z "$SHIM_PATH" ]; then
         echo "The installed daemon was kept; switching it to $SWITCH_ENGINE needs the pseudolife-mcp shim, which is unavailable (see above). Run: pseudolife-mcp ${switch_args[*]}" >&2

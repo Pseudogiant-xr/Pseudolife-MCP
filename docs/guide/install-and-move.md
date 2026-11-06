@@ -29,7 +29,7 @@ engine and then switches through `pseudolife-mcp update --engine <engine>`.
 That update backs up the bank, tags a rollback, and accepts the new daemon
 only after it passes its health check; if it fails, it prints the commands
 that restore the previous one. The first rerun after such a switch
-recreates the daemon once to match. `--engine` applies only to a Docker
+recreates the daemon once to match. A Rust daemon selected by checkout-mode `update --checkout` is left to that command: the installer refuses and names it. `--engine` applies only to a Docker
 install, so a client-only install refuses it.
 
 ## Installer refusals

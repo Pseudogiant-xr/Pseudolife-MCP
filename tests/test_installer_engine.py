@@ -36,14 +36,21 @@ def helper(tmp_path, monkeypatch):
             state["volumes"].add(args[-1])
         elif args[:1] == ("pull",):
             code = int(state["fail"] == "pull")
+        elif args[:1] == ("run",) and "--schema-version" in args:
+            out = str(state.get("image_schema", 58))
         elif args[:1] == ("run",):
             code = int(state["fail"] == "provision")
         return subprocess.CompletedProcess(args, code, out, err)
 
     monkeypatch.setattr(module, "docker", docker)
     monkeypatch.setattr(module, "preflight_disk", lambda: state["calls"].append(["disk-check"]))
-    state["health"] = {"status": "ok", "ready": True, "version": "0.23.0"}
+    state["health"] = {"status": "ok", "ready": True, "version": "0.23.0", "schema": 58}
+    state["read"] = True
     monkeypatch.setattr(module, "health", lambda url: state["health"])
+    monkeypatch.setattr(eng, "authenticated_read", lambda url, token: state["read"] and token == "fixture-bearer")
+    env = tmp_path / "ops.env"
+    env.write_text("PSEUDOLIFE_MCP_TOKEN=fixture-bearer\n")
+    state["env"] = env
     repo = tmp_path / "checkout"
     (repo / "ops").mkdir(parents=True)
     (repo / "pyproject.toml").write_text('[project]\nversion = "0.23.0"\n')
@@ -74,7 +81,7 @@ def test_fresh_rust_install_pulls_provisions_then_records_only_after_health(help
     assert not eng.release_accepted().exists()
     _started(module, state)
     assert module.detect() == "rust-unaccepted"
-    assert module.accept() == "accepted"
+    assert module.accept(env_file=state["env"]) == "accepted"
     assert module.detect() == "rust"
     # update verifies the same record the installer wrote.
     assert eng._validated_engine_selection(state["labels"])["image"].endswith("-rust:0.23.0")
@@ -84,20 +91,25 @@ def test_accept_waits_for_a_ready_daemon_at_its_release(helper):
     module, state, repo = helper
     module.prepare(repo, "rust")
     _started(module, state)
-    for bad in ({"status": "ok", "ready": False, "version": "0.23.0"},
-                {"status": "ok", "ready": True, "version": "0.22.1"},
-                {"status": "ok", "ready": True, "version": "0.23.0", "counters_import_required": True}):
-        state["health"] = bad
+    good = {"status": "ok", "ready": True, "version": "0.23.0", "schema": 58}
+    for bad, read in (({**good, "ready": False}, True), ({**good, "version": "0.22.1"}, True),
+                      ({**good, "counters_import_required": True}, True), ({**good, "schema": 59}, True),
+                      (good, False)):
+        state["health"], state["read"] = bad, read
         with pytest.raises(module.Refusal, match="not ready"):
-            module.accept()
+            module.accept(env_file=state["env"])
         assert not eng.release_accepted().exists()
+    # No bearer in the env file: the authenticated read cannot pass either.
+    state["health"], state["read"] = good, True
+    with pytest.raises(module.Refusal, match="authenticated"):
+        module.accept(env_file=state["env"].with_name("missing.env"))
 
 
 def test_a_removed_container_keeps_the_accepted_rust_selection(helper):
     module, state, repo = helper
     [overlay] = module.prepare(repo, "rust")
     _started(module, state)
-    module.accept()
+    module.accept(env_file=state["env"])
     before, calls = overlay.read_bytes(), len(state["calls"])
     state["labels"] = None  # docker compose down
     assert module.detect() == "rust"
@@ -110,7 +122,7 @@ def test_a_later_checkout_selection_supersedes_a_removed_release_selection(helpe
     module, state, repo = helper
     module.prepare(repo, "rust")
     _started(module, state)
-    module.accept()
+    module.accept(env_file=state["env"])
     state["labels"] = None  # docker compose down after a checkout-mode switch back
     accepted = repo / eng.PYTHON_ACCEPTED
     accepted.parent.mkdir(parents=True, exist_ok=True)
@@ -130,23 +142,24 @@ def test_an_unaccepted_rust_daemon_is_redone_only_for_this_checkouts_release(hel
     module.prepare(repo, "rust")
     assert len([c for c in state["calls"] if c[0] == "pull"]) == pulls + 1
     assert module.prepare(repo, "python") == []
-    state["labels"][eng.RELEASE_LABEL] = "0.24.0"
-    for engine in ("rust", "python"):
-        with pytest.raises(module.Refusal, match="docker rm -f pseudolife-mcp-daemon"):
-            module.prepare(repo, engine)
+    for release in ("0.24.0", None):  # another release, or a Rust container without labels
+        state["labels"] = {eng.ENGINE_LABEL: "rust", **({eng.RELEASE_LABEL: release} if release else {})}
+        for engine in ("rust", "python"):
+            with pytest.raises(module.Refusal, match="docker rm -f pseudolife-mcp-daemon"):
+                module.prepare(repo, engine)
 
 
 def test_rerun_on_an_accepted_host_reproduces_the_overlay_without_pulling(helper):
     module, state, repo = helper
     [overlay] = module.prepare(repo, "rust")
     _started(module, state)
-    module.accept()
+    module.accept(env_file=state["env"])
     before, calls = overlay.read_bytes(), len(state["calls"])
     (repo / "pyproject.toml").write_text('[project]\nversion = "0.24.0"\n')
     assert module.prepare(repo, "rust") == [overlay]
     assert overlay.read_bytes() == before
     assert not any(c[0] in ("pull", "run") for c in state["calls"][calls:])
-    assert module.accept() == "unchanged"
+    assert module.accept(env_file=state["env"]) == "unchanged"
 
 
 @pytest.mark.parametrize("failure,expected", [("pull", "--engine python"), ("provision", "models")])
@@ -163,7 +176,7 @@ def test_accept_refuses_a_container_this_install_did_not_start(helper):
     module.prepare(repo, "rust")
     state["labels"] = {eng.ENGINE_LABEL: "rust", eng.RELEASE_LABEL: "0.23.0", eng.ACTIVATION_LABEL: "someone-else"}
     with pytest.raises(module.Refusal, match="not the one"):
-        module.accept()
+        module.accept(env_file=state["env"])
     assert not eng.release_accepted().exists()
 
 
@@ -174,13 +187,15 @@ def test_python_and_checkout_selections(helper):
     assert module.detect() == "python"
     state["labels"] = {eng.ENGINE_LABEL: "rust", eng.CHECKOUT_LABEL: str(repo), eng.ACTIVATION_LABEL: "a"}
     assert module.detect() == "rust-checkout"
+    # The installer never rebuilds a checkout-mode Rust daemon: update does.
+    with pytest.raises(module.Refusal, match="update --checkout"):
+        module.prepare(repo, "rust-checkout")
+    # With its container removed, the checkout's own selection still says Rust.
+    state["labels"] = None
     (repo / "data/update-engine").mkdir(parents=True)
     (repo / eng.SELECTION).write_text("{}")
-    assert module.prepare(repo, "rust-checkout") == [repo / "ops/docker-compose.rust-daemon.yml",
-                                                                      repo / eng.SELECTION]
-    state["labels"][eng.CHECKOUT_LABEL] = str(repo.parent / "other")
-    with pytest.raises(module.Refusal, match="checkout-mode update"):
-        module.prepare(repo, "rust-checkout")
+    assert module.detect(repo) == "rust-checkout"
+    assert module.detect() == "none"
 
 
 def test_unreleased_checkout_version_refuses_rust(helper):
@@ -232,7 +247,7 @@ def _stage(script, start, end):
 def test_engine_stage_keeps_the_installed_engine_and_defers_a_switch(tmp_path, script, installed, flag, bank,
                                                                      compose_engine, switch):
     if script.endswith(".ps1"):
-        stage = _stage(script, "# -- 4b. daemon engine", "# -- 5. managed env block")
+        stage = _stage(script, "# -- 4b. daemon engine", "# -- 4c. create volumes")
         definition = stage[stage.index("function Invoke-EngineHelper"):stage.index("$installedEngine =")]
         ps = _PowerShell(tmp_path)
         stub = ("function Invoke-EngineHelper {\n"
@@ -248,7 +263,7 @@ def test_engine_stage_keeps_the_installed_engine_and_defers_a_switch(tmp_path, s
         variants = _bash_variants()
         if not variants:
             pytest.skip("Bash unavailable")
-        stage = _stage(script, "# ── 4b. daemon engine", "# ── 5. managed env block")
+        stage = _stage(script, "# ── 4b. daemon engine", "# ── 4c. create volumes")
         definition = next(line for line in stage.splitlines() if line.startswith("engine_helper()"))
         shell = _Shell(variants[0], tmp_path)
         stub = ('engine_helper() { printf "helper|%s\\n" "$*" >>"$CALL_LOG"; '
@@ -327,6 +342,18 @@ def test_engine_flag_refusals(tmp_path, script, case):
         assert proc.returncode == 2
         assert ("client-only" if client else "token") in output.lower()
         assert "Nothing was changed" in output
+
+
+def test_no_volume_is_created_before_the_engine_stage_can_refuse():
+    # A refused Rust install must leave nothing a rerun's preflight would refuse.
+    for script in ("install.sh", "install.ps1"):
+        source = (ROOT / "ops" / script).read_text(encoding="utf-8")
+        engine = source.index("# >>> daemon engine >>>")
+        create = source.index("# >>> create volumes >>>")
+        assert engine < create, script
+        calls = [i for i, line in enumerate(source.splitlines()) if line.strip().startswith("docker volume create")]
+        assert len(calls) == 1, script
+        assert calls[0] > len(source[:create].splitlines()), script
 
 
 def test_the_engine_flag_is_checked_after_client_only_is_inferred():

@@ -1308,15 +1308,6 @@ if (-not $ClientOnly) {
     if ($LASTEXITCODE -ne 0) { throw "Could not list Docker volumes; check docker info and rerun." }
     $volumesChanged = $false
     $bankExisted = $existingVolumes -contains $bankVol
-    foreach ($volume in @($bankVol, $stateVol)) {
-        if ($existingVolumes -notcontains $volume) {
-            docker volume create $volume | Out-Null
-            if ($LASTEXITCODE -ne 0) { throw "Could not create volume $volume; fix Docker access and rerun." }
-            $volumesChanged = $true
-        }
-    }
-    if ($volumesChanged) { Step "Volumes ready: $bankVol, $stateVol" }
-    else { Step "Volumes unchanged: $bankVol, $stateVol" }
 }
 # <<< volumes <<<
 
@@ -1356,6 +1347,21 @@ if (-not $ClientOnly) {
     else { Step "Daemon engine unchanged: $($composeEngine -replace '-checkout$', '')" }
 }
 # <<< daemon engine <<<
+
+# -- 4c. create volumes (after every refusal above) -----------------------------
+# >>> create volumes >>>
+if (-not $ClientOnly) {
+    foreach ($volume in @($bankVol, $stateVol)) {
+        if ($existingVolumes -notcontains $volume) {
+            docker volume create $volume | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "Could not create volume $volume; fix Docker access and rerun." }
+            $volumesChanged = $true
+        }
+    }
+    if ($volumesChanged) { Step "Volumes ready: $bankVol, $stateVol" }
+    else { Step "Volumes unchanged: $bankVol, $stateVol" }
+}
+# <<< create volumes <<<
 
 # -- 5. managed env block --------------------------------------------------------
 # >>> extractor env >>>
@@ -3322,7 +3328,7 @@ if (-not $ClientOnly) {
     Step "Healthy: http://127.0.0.1:8765/health (Console: http://127.0.0.1:8765/ui/)"
     if ($composeEngine -eq 'rust') {
         # Recorded only now, as update records its own after its health gate.
-        $engineStatus = "$(Invoke-EngineHelper accept)".Trim()
+        $engineStatus = "$(Invoke-EngineHelper accept --env-file $envFile)".Trim()
         if ($LASTEXITCODE -ne 0) { exit 1 }
         if ($engineStatus -eq 'accepted') { Step "Rust daemon selection recorded; pseudolife-mcp update keeps it" }
     }
@@ -3553,6 +3559,11 @@ if ($switchEngine) {
     $switchArgs = @('update', '--engine', $switchEngine, '--daemon-only')
     if ($installedEngine -eq 'rust-checkout') { $switchArgs += @('--checkout', $repo) }
     elseif ($switchVersion) { $switchArgs += @('--tag', "$switchVersion") }
+    else {
+        # Without --tag, update would move to the newest release instead.
+        [Console]::Error.WriteLine("The installed daemon was kept: its version could not be read from http://127.0.0.1:8765/health, so the switch to $switchEngine did not run. Run: pseudolife-mcp update --engine $switchEngine --daemon-only --tag <the daemon's version>")
+        exit 1
+    }
     if (-not (Install-ShimOnce) -or -not $script:shimInstallPath) {
         [Console]::Error.WriteLine("The installed daemon was kept; switching it to $switchEngine needs the pseudolife-mcp shim, which is unavailable (see above). Run: pseudolife-mcp $($switchArgs -join ' ')")
         exit 1
