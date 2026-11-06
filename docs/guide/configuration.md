@@ -2739,7 +2739,7 @@ also capped (below, and by the daemon's `wake` caps under
   marker and leaves the shared `.wake` ownership stamp alone; the stamp
   without a matching live marker proves no liveness. Stale evidence expires
   within 60 seconds even after an interrupted process.
-- The hooks create every new file beside the digest (`<key>.wake`, the
+- The POSIX hooks create every new file beside the digest (`<key>.wake`, the
   `.wake-armed` markers, `<key>.seen`) 0600. On Linux and macOS the native
   (Rust) shim accepts a marker this user owns that is not group- or
   world-writable, so 0644 markers from older hooks still work. It refuses one
@@ -2747,7 +2747,8 @@ also capped (below, and by the daemon's `wake` caps under
   a wake, and prints one `pseudolife-mcp: ignoring <path>: …` line naming the
   fix (`rm` it for another user's file; update the plugin or `chmod 600` it
   for a writable one). On Windows the native shim still requires a protected
-  owner-only ACL, which hook-written files lack
+  owner-only ACL, which hook-written files lack, so board mail does not wake
+  a session there yet
   ([#1326](https://github.com/Pseudogiant-xr/Pseudolife-MCP/issues/1326)).
 - A watcher listens for as long as the session stays open: at most
   1,209,540 s (14 days) after the turn that armed it, under the hook's
@@ -3990,8 +3991,8 @@ port needs `--daemon-url <url>` or `--leave-stopped`.
 
 **Free space:** Docker update, backup and restore check for at least
 **8 GiB free** in Docker storage and the host filesystems used for backups.
-Backup and restore stage the tar stream they copy out of each container
-on the selected backup destination's filesystem (the backup directory, or
+The `backup` and `restore` commands stage the tar stream they copy out of
+each container on the selected backup destination's filesystem (the backup directory, or
 restore's safety directory), not the system temporary directory, and check
 the floor on that destination before writing anything there; the staging
 files are removed on success, failure or interruption. Restore also checks
@@ -4346,8 +4347,9 @@ never with a checkout at some other commit.
 ### The client steps after a new shim runtime
 
 A release-mode client update (`--clients-only`, or the client half of a
-plain `update`) installs the new shim runtime first. When that runtime is a
-different release from the updater running the command, the updater hands
+plain `update`) installs (or finds) the target shim runtime first. When
+that runtime is a different release from the updater running the command,
+the updater hands
 the remaining client steps (plugin cache, Codex hooks, running saved
 tunnels) to the new runtime, so one run applies the new release's own
 client-step changes. The output names the hand-off:
@@ -4365,8 +4367,9 @@ cannot start fails the client step (exit 5) with the cause and a
 place.
 
 There is no hand-off for a checkout deploy, which already runs the
-checkout's code, or when the installed runtime is the release already
-running (as with `--reinstall` of the current release). Nor is there one
+checkout's code, when the shim step manages no registration, or when the
+installed runtime is the release already running (as with `--reinstall` of
+the current release). Nor is there one
 when the target release predates the hand-off, which today includes every
 downgrade and a client machine following an older daemon; this run's own
 code then finishes, as before, and says so:
