@@ -830,7 +830,14 @@ pub(crate) fn text_param(v: Option<&Value>) -> Result<Option<String>, ToolError>
         ))),
         Some(Value::Array(items)) => {
             let mut kind = None;
-            array_kind(items, &mut kind)?;
+            element_kind(items, &mut kind)?;
+            // psycopg types a list only by an int, float or bool element;
+            // PostgreSQL then parses the literal and refuses a ragged one. A
+            // list of strings, of `None` or empty binds untyped and is
+            // stored as psycopg's own text, whatever its shape.
+            if kind.is_some_and(|k| k != "str") {
+                typed_shape(items)?;
+            }
             Ok(Some(pg_array_text(items)?))
         }
         Some(other) => Err(internal(format!(
@@ -841,34 +848,13 @@ pub(crate) fn text_param(v: Option<&Value>) -> Result<Option<String>, ToolError>
 }
 
 /// psycopg's list dumper: one element type across every level (`cannot
-/// dump lists of mixed types`), a level of lists or of scalars (`None`
-/// anywhere), rectangular nesting at every depth (every sibling sub-list
-/// has the same full shape), and no dict (`cannot adapt type 'dict'`).
-/// Returns the level's shape, outermost length first.
+/// dump lists of mixed types`), `None` anywhere, and no dict (`cannot adapt
+/// type 'dict'`).
 #[allow(clippy::result_large_err)]
-fn array_kind(items: &[Value], kind: &mut Option<&'static str>) -> Result<Vec<usize>, ToolError> {
-    let lists = items.iter().filter(|v| v.is_array()).count();
-    if lists != 0 && lists != items.len() {
-        return Err(internal(
-            "a list mixing lists and scalars cannot be stored as text",
-        ));
-    }
-    let ragged =
-        || internal("multidimensional arrays must have array expressions with matching dimensions");
-    let mut child: Option<Vec<usize>> = None;
+fn element_kind(items: &[Value], kind: &mut Option<&'static str>) -> Result<(), ToolError> {
     for v in items {
         match v {
-            Value::Array(sub) => {
-                if sub.is_empty() {
-                    return Err(ragged());
-                }
-                let shape = array_kind(sub, kind)?;
-                match &child {
-                    None => child = Some(shape),
-                    Some(first) if *first != shape => return Err(ragged()),
-                    Some(_) => {}
-                }
-            }
+            Value::Array(sub) => element_kind(sub, kind)?,
             Value::Null => {}
             Value::Object(_) => {
                 return Err(internal("cannot adapt type 'dict' using placeholder '%s'"));
@@ -887,15 +873,44 @@ fn array_kind(items: &[Value], kind: &mut Option<&'static str>) -> Result<Vec<us
             }
         }
     }
+    Ok(())
+}
+
+/// PostgreSQL's array input for a typed list ([`element_kind`] found an
+/// int, float or bool): a level of lists or of scalars (`None` counts as a
+/// scalar), no empty sub-list, and every sibling sub-list of the same full
+/// shape. Returns the level's shape, outermost length first.
+#[allow(clippy::result_large_err)]
+fn typed_shape(items: &[Value]) -> Result<Vec<usize>, ToolError> {
+    let malformed = || internal("malformed array literal");
+    let lists = items.iter().filter(|v| v.is_array()).count();
+    if lists != 0 && lists != items.len() {
+        return Err(malformed());
+    }
+    let mut child: Option<Vec<usize>> = None;
+    for sub in items.iter().filter_map(Value::as_array) {
+        if sub.is_empty() {
+            return Err(malformed());
+        }
+        let shape = typed_shape(sub)?;
+        match &child {
+            None => child = Some(shape),
+            Some(first) if *first != shape => return Err(malformed()),
+            Some(_) => {}
+        }
+    }
     let mut shape = vec![items.len()];
     shape.extend(child.unwrap_or_default());
     Ok(shape)
 }
 
-/// PostgreSQL's `array_out` text for a checked list ([`array_kind`]): `{a,b}`,
-/// an element quoted when empty, `NULL` in any case, or holding a brace,
-/// comma, quote, backslash or `array_isspace` character, with `"` and `\`
-/// escaped; booleans `t`/`f`, numbers in their column type's text form.
+/// The stored text of a list: psycopg's own dump for an untyped list (of
+/// strings, of `None`, or empty) and PostgreSQL's `array_out` for a typed
+/// one, which agree on every list [`element_kind`] admits: `{a,b}`, an
+/// element quoted when empty, `NULL` in any ASCII case, or holding a brace,
+/// comma, quote, backslash or ASCII space (`array_isspace`, psycopg's
+/// `\s`), with `"` and `\` escaped; `None` as `NULL`, booleans `t`/`f`,
+/// numbers in their column type's text form.
 #[allow(clippy::result_large_err)]
 fn pg_array_text(items: &[Value]) -> Result<String, ToolError> {
     let mut parts = Vec::with_capacity(items.len());
@@ -931,7 +946,7 @@ fn pg_array_text(items: &[Value]) -> Result<String, ToolError> {
                     s.clone()
                 }
             }
-            Value::Object(_) => unreachable!("array_kind refuses a dict"),
+            Value::Object(_) => unreachable!("element_kind refuses a dict"),
         });
     }
     Ok(format!("{{{}}}", parts.join(",")))

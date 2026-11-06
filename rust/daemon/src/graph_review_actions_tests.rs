@@ -349,6 +349,20 @@ fn a_list_rationale_stores_postgres_array_text() {
         (json!([["a", "b"], ["c", "d"]]), "{{a,b},{c,d}}"),
         (json!([null]), "{NULL}"),
         (json!([null, null]), "{NULL,NULL}"),
+        (json!([1, null, 2]), "{1,NULL,2}"),
+        // A list of strings, of None or empty binds untyped: psycopg's text
+        // is stored whatever its shape (psycopg 3.3.4 into a TEXT column,
+        // probed 2026-11-07).
+        (json!([[]]), "{{}}"),
+        (json!([[], []]), "{{},{}}"),
+        (json!([["a"], []]), "{{a},{}}"),
+        (json!([["a"], ["b", "c"]]), "{{a},{b,c}}"),
+        (json!(["a", ["b"]]), "{a,{b}}"),
+        (json!([["a"], "b"]), "{{a},b}"),
+        (json!([null, ["a"]]), "{NULL,{a}}"),
+        (json!([["a"], null]), "{{a},NULL}"),
+        (json!([["a"], [["b"]]]), "{{a},{{b}}}"),
+        (json!([[null], [null, null]]), "{{NULL},{NULL,NULL}}"),
     ] {
         assert_eq!(
             text_param(Some(&value)).unwrap().as_deref(),
@@ -356,15 +370,27 @@ fn a_list_rationale_stores_postgres_array_text() {
             "{value}"
         );
     }
-    // psycopg refuses these too ("cannot dump lists of mixed types", a dict
-    // it cannot adapt), so both daemons fail the call.
+    // psycopg refuses these ("cannot dump lists of mixed types", a dict it
+    // cannot adapt), so both daemons fail the call.
     for value in [
         json!([1, 2.5]),
         json!(["a", 1]),
+        json!([["a"], [1]]),
         json!([{"k": 1}]),
-        json!([["a"], "b"]),
-        // Ragged below the first level: PostgreSQL refuses the literal
-        // ("malformed array literal"), recorded 2026-11-07.
+        json!([["a"], {"k": 1}]),
+    ] {
+        assert!(text_param(Some(&value)).is_err(), "{value}");
+    }
+    // A typed list (int, float or bool) that is not rectangular: PostgreSQL
+    // refuses the literal ("malformed array literal", probed 2026-11-07).
+    for value in [
+        json!([[1], [2, 3]]),
+        json!([[1], [[2]]]),
+        json!([null, [1]]),
+        json!([[1], null]),
+        json!([[1], []]),
+        json!([true, [false]]),
+        json!([[1.5], []]),
         json!([[[1]], [[2, 3]]]),
         json!([[[1]], [2]]),
     ] {
