@@ -1065,7 +1065,9 @@ def test_scope_gates_every_heavy_job_and_fails_safe():
                                 "parity_selfhosted": "${{ steps.parity.outputs.selfhosted }}",
                                 "batch_passed": "${{ steps.batch.outputs.passed }}",
                                 "push_passed": "${{ steps.push.outputs.passed }}",
-                                "oracle_base": "${{ steps.ci_oracle.outputs.oracle_base }}"}
+                                "oracle_base": "${{ steps.ci_oracle.outputs.oracle_base }}",
+                                # The Linux pool's exact-case batch ref (test_linux_pool_workflow.py).
+                                "integrate": "${{ steps.trusted.outputs.integrate }}"}
     checkout = next(s for s in scope["steps"] if s.get("uses") == "actions/checkout@v4")
     assert checkout["with"]["fetch-depth"] == 2
     gated = ("${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.mode != 'ci' || needs.scope.result == 'success') "

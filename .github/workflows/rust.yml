@@ -133,6 +133,7 @@ jobs:
       batch_passed: ${{ steps.batch.outputs.passed }}
       push_passed: ${{ steps.push.outputs.passed }}
       oracle_base: ${{ steps.ci_oracle.outputs.oracle_base }}
+      integrate: ${{ steps.trusted.outputs.integrate }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -232,6 +233,21 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: python3 ops/ci_batch_passed.py --workflow .github/workflows/rust.yml --github-output "$GITHUB_OUTPUT"
+      # `integrate` admits the Linux pool planner's token step and the
+      # self-hosted label. Expression startsWith and == ignore case, so a
+      # same-repository `Integrate/x` pull request would pass them; this
+      # ordinal comparison does not. An empty output keeps hosted.
+      - name: Mark an exact integration batch ref
+        id: trusted
+        shell: pwsh
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          $integrate = $env:EVENT_NAME -ceq 'pull_request' -and [bool]$env:HEAD_REF -and $env:HEAD_REF.StartsWith('integrate/', [System.StringComparison]::Ordinal)
+          $line = "integrate=$($integrate.ToString().ToLowerInvariant())"
+          Write-Output $line
+          $line | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
       - name: Choose the parity suites
         id: parity
         env:
@@ -781,23 +797,30 @@ jobs:
     # job cannot spend an old heartbeat. A planner failure keeps hosted.
     name: Parity / Linux pool plan
     needs: [scope, candidate, candidate-harness, fixtures]
-    if: ${{ !cancelled() && needs.candidate.result == 'success' && needs.candidate-harness.result == 'success' && needs.fixtures.result == 'success' && (github.repository == 'Pseudogiant-xr/Pseudolife-MCP' && ((github.event_name == 'push' && github.ref == 'refs/heads/master') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.head_ref, 'integrate/') && needs.scope.outputs.full == 'true'))) }}
+    if: ${{ !cancelled() && needs.candidate.result == 'success' && needs.candidate-harness.result == 'success' && needs.fixtures.result == 'success' && (github.repository == 'Pseudogiant-xr/Pseudolife-MCP' && ((github.event_name == 'push' && github.ref == 'refs/heads/master') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && needs.scope.outputs.integrate == 'true' && needs.scope.outputs.full == 'true'))) }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
       linux_pool: ${{ steps.pool.outputs.linux_pool }}
     steps:
+      # The reader runs from reviewed code, never the batch merge ref: a
+      # member's change to it (a fork-origin member's included) must not
+      # read the token or print a self-hosted choice. The workflow file
+      # itself still comes from the merge ref, so batch review covers it.
+      # Before this script reaches master the base lacks it, the step fails
+      # under continue-on-error, and the run keeps hosted.
       - uses: actions/checkout@v4
         id: checkout
         continue-on-error: true
         timeout-minutes: 1
         with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.sha }}
           persist-credentials: false
       - name: Choose the Linux runner pool
         id: pool
         continue-on-error: true
         timeout-minutes: 2
-        if: steps.checkout.outcome == 'success' && github.repository == 'Pseudogiant-xr/Pseudolife-MCP' && ((github.event_name == 'push' && github.ref == 'refs/heads/master') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.head_ref, 'integrate/') && needs.scope.outputs.full == 'true'))
+        if: steps.checkout.outcome == 'success' && github.repository == 'Pseudogiant-xr/Pseudolife-MCP' && ((github.event_name == 'push' && github.ref == 'refs/heads/master') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && needs.scope.outputs.integrate == 'true' && needs.scope.outputs.full == 'true'))
         env:
           PARITY_VARS_READ_TOKEN: ${{ secrets.PARITY_VARS_READ_TOKEN }}
         run: python3 rust/ci/linux_pool.py --github-output "$GITHUB_OUTPUT"
@@ -840,7 +863,7 @@ jobs:
         include: ${{ fromJSON(needs.scope.outputs.parity).include }}
     # Repeat event selection in case the planner returns an incorrect choice.
     # Workflow approval and repository write access remain the trust boundary.
-    runs-on: ${{ github.repository == 'Pseudogiant-xr/Pseudolife-MCP' && ((github.event_name == 'push' && github.ref == 'refs/heads/master') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.head_ref, 'integrate/') && needs.scope.outputs.full == 'true')) && matrix.os == 'ubuntu-latest' && matrix.suite == 'cli-startup' && needs.parity-pool.outputs.linux_pool == 'self-hosted' && fromJSON('["self-hosted","pseudolife-parity-linux"]') || matrix.os }}
+    runs-on: ${{ github.repository == 'Pseudogiant-xr/Pseudolife-MCP' && ((github.event_name == 'push' && github.ref == 'refs/heads/master') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && needs.scope.outputs.integrate == 'true' && needs.scope.outputs.full == 'true')) && matrix.os == 'ubuntu-latest' && matrix.suite == 'cli-startup' && needs.parity-pool.outputs.linux_pool == 'self-hosted' && fromJSON('["self-hosted","pseudolife-parity-linux"]') || matrix.os }}
     # Every cli and W1-C shard names its own budget beside its measurement
     # in the include list; eval and judges keep the 210-minute fallback.
     timeout-minutes: ${{ matrix.job_timeout || 210 }}

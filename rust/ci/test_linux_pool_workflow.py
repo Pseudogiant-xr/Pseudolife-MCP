@@ -1,6 +1,9 @@
 """Exercise workflow event selection, including incorrect planner results."""
 import json
+import os
 from pathlib import Path
+import shutil
+import subprocess
 
 import pytest
 import yaml
@@ -49,15 +52,24 @@ class Actions(ci_budget.Evaluator):
         return json.loads(value)
 
 
+BASE_SHA = "b" * 40
+HEAD_SHA = "c" * 40
+
+
 def context(event="push", ref="refs/heads/master", head="", head_repo=REPO, repository=REPO):
-    return {"github": {"event_name": event, "ref": ref, "head_ref": head,
+    # The scope job's `integrate` output, as its exact-case step emits it
+    # (test_scope_marks_only_exact_integrate_refs runs that step).
+    integrate = "true" if event == "pull_request" and head.startswith("integrate/") else "false"
+    return {"github": {"event_name": event, "ref": ref, "head_ref": head, "sha": HEAD_SHA,
                        "repository": repository, "event": {"pull_request": {
+                           "base": {"sha": BASE_SHA},
                            "head": {"repo": {"full_name": head_repo}}}}},
             "steps": {"checkout": {"outcome": "success"}},
             "matrix": {"os": "ubuntu-latest", "suite": "cli-startup"},
             "needs": {**{name: {"result": "success"} for name in
                          ("candidate", "candidate-harness", "fixtures")},
-                      "scope": {"result": "success", "outputs": {"full": "true"}},
+                      "scope": {"result": "success",
+                                "outputs": {"full": "true", "integrate": integrate}},
                       "parity-pool": {"outputs": {"linux_pool": "self-hosted"}}}}
 
 
@@ -154,3 +166,74 @@ def test_mixed_case_integrate_ref_stays_hosted_when_scope_classifies_it_as_ordin
     assert evaluate(planner["if"], values) is False
     assert evaluate(planner["steps"][1]["if"], values) is False
     assert evaluate(jobs["parity-checks"]["runs-on"], values) == "ubuntu-latest"
+
+
+@pytest.mark.parametrize("head", ["Integrate/example", "INTEGRATE/example", "iNtegrate/x"])
+def test_mixed_case_integrate_ref_with_full_scope_never_reaches_the_token(head):
+    # GitHub's startsWith ignores case, and scope leaves full=true for an
+    # ordinary pull request whose diff is empty, so only the exact-case
+    # scope output may admit the token step and the self-hosted label.
+    jobs = yaml.safe_load(PATH.read_text())["jobs"]
+    values = context(event="pull_request", ref="refs/pull/123/merge", head=head)
+    assert values["needs"]["scope"]["outputs"] == {"full": "true", "integrate": "false"}
+    planner = jobs["parity-pool"]
+    step = next(step for step in planner["steps"] if step.get("id") == "pool")
+    assert evaluate(planner["if"], values) is False
+    assert evaluate(step["if"], values) is False
+    assert evaluate(jobs["parity-checks"]["runs-on"], values) == "ubuntu-latest"
+
+
+def test_every_trust_gate_reads_the_exact_case_scope_output():
+    text = PATH.read_text()
+    jobs = yaml.safe_load(text)["jobs"]
+    planner = jobs["parity-pool"]
+    step = next(step for step in planner["steps"] if step.get("id") == "pool")
+    for expression in (planner["if"], step["if"], jobs["parity-checks"]["runs-on"]):
+        assert "needs.scope.outputs.integrate == 'true'" in expression
+        assert "startsWith(github.head_ref" not in expression
+    assert jobs["scope"]["outputs"]["integrate"] == "${{ steps.trusted.outputs.integrate }}"
+
+
+def run_integrate_step(tmp_path, event, head):
+    step = next(s for s in yaml.safe_load(PATH.read_text())["jobs"]["scope"]["steps"]
+                if s.get("id") == "trusted")
+    assert step["shell"] == "pwsh"
+    assert step["env"] == {"EVENT_NAME": "${{ github.event_name }}", "HEAD_REF": "${{ github.head_ref }}"}
+    output = tmp_path / "github_output"
+    output.write_text("", encoding="utf-8")
+    result = subprocess.run(["pwsh", "-NoProfile", "-NonInteractive", "-Command", step["run"]],
+                            env=dict(os.environ, EVENT_NAME=event, HEAD_REF=head, GITHUB_OUTPUT=str(output)),
+                            capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    return output.read_text(encoding="utf-8-sig").split()
+
+
+@pytest.mark.skipif(shutil.which("pwsh") is None, reason="needs PowerShell 7")
+@pytest.mark.parametrize("event,head,expected", [
+    ("pull_request", "integrate/2026-11-06-batch-7", "true"),
+    ("pull_request", "integrate/", "true"),
+    # Near misses: case, prefix, missing slash, other events and no head ref.
+    ("pull_request", "Integrate/2026-11-06-batch-7", "false"),
+    ("pull_request", "INTEGRATE/x", "false"),
+    ("pull_request", "integrate", "false"),
+    ("pull_request", "xintegrate/x", "false"),
+    ("pull_request", "", "false"),
+    ("pull_request_target", "integrate/x", "false"),
+    ("merge_group", "integrate/x", "false"),
+    ("push", "", "false"),
+])
+def test_scope_marks_only_exact_integrate_refs(tmp_path, event, head, expected):
+    assert run_integrate_step(tmp_path, event, head) == [f"integrate={expected}"]
+
+
+@pytest.mark.parametrize("event,ref,head,revision", [
+    ("pull_request", "refs/pull/123/merge", "integrate/example", BASE_SHA),
+    ("push", "refs/heads/master", "", HEAD_SHA),
+])
+def test_planner_runs_reviewed_base_code_not_the_batch_merge_ref(event, ref, head, revision):
+    # A batch member's code must not be able to read the token or print a
+    # self-hosted choice: the reader comes from the base (or pushed master).
+    planner = yaml.safe_load(PATH.read_text())["jobs"]["parity-pool"]
+    checkout = planner["steps"][0]
+    assert checkout["uses"] == "actions/checkout@v4"
+    assert evaluate(checkout["with"]["ref"], context(event=event, ref=ref, head=head)) == revision

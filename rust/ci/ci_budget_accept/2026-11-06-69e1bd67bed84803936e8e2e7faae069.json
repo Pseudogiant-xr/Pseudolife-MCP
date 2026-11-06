@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "scope",
+  "before": "702c44bef393994a",
+  "fingerprint": "1be8245c7953029b",
+  "reason": "Adds one pwsh step that compares the head ref with an ordinal prefix and writes one output; no download, build or network call, within the job's measured setup noise."
+}

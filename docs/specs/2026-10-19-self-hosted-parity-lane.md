@@ -31,12 +31,25 @@ hosted; the comparison lane remains non-gating.
 Only a master push or a same-repository `integrate/*` pull request is
 eligible. Fork pull requests, other PR branches, merge groups, schedules
 and dispatches use hosted for the required matrix. No new trigger is
-added. Repeated event conditions catch planner mistakes within this workflow;
-repository write access and fork-workflow approval remain the trust boundary. The hosted `parity-pool` planner waits for candidate and fixture
+added. The `integrate/` prefix is matched exactly, case included, by a
+scope step (`integrate` output): Actions' `startsWith` ignores case, so
+an `Integrate/x` branch would otherwise reach the token step. Repeated
+event conditions catch planner mistakes within this workflow;
+repository write access and fork-workflow approval remain the trust
+boundary. The hosted `parity-pool` planner waits for candidate and fixture
 builds, then exposes `PARITY_VARS_READ_TOKEN` to its one reader step. The
 secret is a fine-grained token for this repository with only Variables:
 read. It never reaches the parity shards. Missing credentials and failed
 reads are normal hosted fallbacks, including before the secret exists.
+
+The reader is checked out at the pull request's base commit, or at the
+pushed master commit, never at the batch merge ref, so a member pull
+request's code cannot read the token or print a self-hosted choice. The
+workflow file itself still comes from the merge ref, so batch review covers
+edits to it. The routed shard does run the batch's code: reviewed, batched
+pull requests, fork-origin members included, execute on a homelab worker,
+which is a throwaway VM with no credentials, an egress filter and a
+rollback after every job.
 
 `PARITY_BATCH_LINUX_POOL` is the one routing switch: only `self-hosted`
 enables the pool; unset, `hosted` and every other value use hosted.
@@ -77,9 +90,14 @@ and adds one planner slot, with all other limits unchanged.
 
 This is a decision-point fallback. A worker disappearing after selection
 can still leave a queued or failed shard, and simultaneous planners can
-observe the same spare capacity. The heartbeat does not sample disk space or
-the suite lease: the required shard still fails its disk floor or a held
-lease rather than weakening those protections. Disable the switch and rerun the planner
+observe the same spare capacity. The heartbeat does not sample disk space:
+the required shard still fails its disk floor rather than weakening it. It
+does not sample the suite lease either, because the Linux workers cannot
+hold one: their lock directory is root-owned and read-only to jobs, nothing
+on them runs a full suite (no login besides the runner account, and a
+rollback after every job), so the yield step always reads free. A machine
+added later that does run full suites must report busy in the heartbeat
+before it joins the pool. Disable the switch and rerun the planner
 and its dependent jobs as described in
 [batch recovery](../dev/merge-batches.md#linux-pool-recovery). A failed-jobs-only
 rerun would reuse the previous successful planner's choice.
