@@ -19,6 +19,8 @@ rust/cli_harness/rows/maintainer.py | terminate_during | time.sleep(0.5) | minim
 
 rust/daemon/harness/w2d_search.py | disconnect | time.sleep(0.05) | minimum: holds the socket briefly before hang-up; nothing is asserted on the server's reaction
 
+rust/daemon/src/service_shadow_tests.rs | db_dropped_request_cannot_let_two_refreshes_overlap | tokio::time::sleep(SHADOW_PROBE_REUSE + Duration::from_millis(100)).await; | minimum: only has to outlast the probe reuse window so the next read probes; a slower machine only waits longer
+
 rust/shim/src/board/doorbell_linux_cleanup_deadline_tests.rs | metadata_success_after_deadline_is_rejected | let deadline = Instant::now() + Duration::from_millis(10); | minimum: the read below sleeps past it; a stall before the first check also times out
 rust/shim/src/board/doorbell_linux_cleanup_deadline_tests.rs | metadata_success_after_deadline_is_rejected | std::thread::sleep(Duration::from_millis(40)); | minimum: must outlast the 10 ms deadline on the same clock; slowness only helps
 
