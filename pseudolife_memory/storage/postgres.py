@@ -334,6 +334,13 @@ class WriterLeaseHeld(RuntimeError):
     callers that only know the generic refusal still fail loudly."""
 
 
+# Appended to a reconnect's schema refusal while the server cannot be
+# reached: the refusal names the last stamp read, which a restore may have
+# changed since. The Rust daemon appends the same text (storage/mod.rs).
+_SCHEMA_REFUSAL_STALE = (
+    " The bank could not be read since, so this refusal may be out of date.")
+
+
 class BankSchemaRefused(RuntimeError):
     """A reconnect found the bank stamped with a schema this build must not
     serve: a newer build upgraded it, or the stamp is malformed, while this
@@ -601,7 +608,7 @@ class PostgresStorage:
         unreachable: it clears only when a reconnect reads a stamp this
         build may serve."""
         if self._schema_refused:
-            raise BankSchemaRefused(self._schema_refused)
+            raise BankSchemaRefused(self._schema_refused + _SCHEMA_REFUSAL_STALE)
 
     @staticmethod
     def _probe_session(conn: psycopg.Connection) -> None:

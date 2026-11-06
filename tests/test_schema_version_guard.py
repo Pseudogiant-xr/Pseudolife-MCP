@@ -193,3 +193,12 @@ def test_the_native_import_names_the_same_restore_commands():
     from pseudolife_memory.storage.schema import _RESTORE_HINT
     rust = _RUST_TRANSFER.read_text(encoding="utf-8")
     assert f'const RESTORE: &str = "{_RESTORE_HINT}";' in rust
+
+
+def test_the_rust_daemon_marks_an_outage_refusal_the_same_way():
+    """A reconnect refusal held through an outage carries the same suffix on
+    both daemons (``postgres._SCHEMA_REFUSAL_STALE``, storage/mod.rs)."""
+    from pseudolife_memory.storage.postgres import _SCHEMA_REFUSAL_STALE
+    rust = (Path(__file__).resolve().parents[1] / "rust" / "daemon" / "src" / "storage"
+            / "mod.rs").read_text(encoding="utf-8")
+    assert f'"{_SCHEMA_REFUSAL_STALE}"' in rust

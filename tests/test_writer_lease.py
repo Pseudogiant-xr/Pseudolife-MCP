@@ -260,8 +260,9 @@ def test_reconnect_refuses_a_bank_restamped_while_disconnected(
         reachable = first.dsn
         first.dsn = "postgresql://nobody@127.0.0.1:1/pl_unreachable"
         first._schema_retry_at = 0.0  # noqa: SLF001 — skip the retry window
-        with pytest.raises(BankSchemaRefused, match=refusal):
+        with pytest.raises(BankSchemaRefused, match=refusal) as held:
             first.verify_writer_session()
+        assert str(held.value).endswith("so this refusal may be out of date.")
         first.dsn = reachable
         first._reconnect_retry_at = 0.0  # noqa: SLF001
 

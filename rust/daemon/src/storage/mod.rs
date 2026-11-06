@@ -160,6 +160,16 @@ pub fn operational(e: &tokio_postgres::Error) -> bool {
     )
 }
 
+/// `_SCHEMA_REFUSAL_STALE` (postgres.py): a reconnect's schema refusal
+/// while the server cannot be reached names the last stamp read, which a
+/// restore may have changed since.
+const SCHEMA_REFUSAL_STALE: &str =
+    " The bank could not be read since, so this refusal may be out of date.";
+
+fn stale_refusal<T>(refused: &str) -> Result<T, String> {
+    Err(format!("{refused}{SCHEMA_REFUSAL_STALE}"))
+}
+
 /// Why a reconnect failed, in the classes `PostgresStorage.conn` and
 /// `verify_writer_session` treat differently.
 #[derive(Debug)]
@@ -942,7 +952,7 @@ impl Storage {
                         )
                     };
                     if failing && let Some(refused) = refused {
-                        return Err(refused);
+                        return stale_refusal(&refused);
                     }
                     if failing || !self.client.is_closed() {
                         return Ok(None);
@@ -974,7 +984,10 @@ impl Storage {
             if state.reconnect_error.is_some()
                 && state.reconnect_retry_at.is_some_and(|at| now < at)
             {
-                return state.schema_refused.clone().map_or(Ok(None), Err);
+                return state
+                    .schema_refused
+                    .as_deref()
+                    .map_or(Ok(None), stale_refusal);
             }
         }
         eprintln!("postgres connection lost; reconnecting");
@@ -986,8 +999,8 @@ impl Storage {
                 .lock()
                 .unwrap()
                 .schema_refused
-                .clone()
-                .map_or(Ok(None), Err),
+                .as_deref()
+                .map_or(Ok(None), stale_refusal),
             other => other,
         }
     }

@@ -817,6 +817,11 @@ async fn db_reconnect_refuses_a_bank_restamped_while_disconnected() {
             held.as_deref().is_some_and(|m| m.contains(refusal)),
             "{held:?}"
         );
+        assert!(
+            held.as_deref()
+                .is_some_and(|m| m.ends_with("so this refusal may be out of date.")),
+            "{held:?}"
+        );
         assert_eq!(
             s.verify_writer_session().await.err(),
             held,
