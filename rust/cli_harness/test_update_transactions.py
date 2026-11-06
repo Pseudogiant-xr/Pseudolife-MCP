@@ -317,6 +317,12 @@ elif a[:1]==["compose"]:
   if s.get("relative_mount"):
    directory=pathlib.Path(a[a.index("--project-directory")+1]) if "--project-directory" in a else pathlib.Path(a[a.index("-f")+1]).parent
    config["services"]["pseudolife-daemon"]["volumes"].append({"type":"bind","source":str(directory/"config.yaml"),"target":"/data/config.yaml","read_only":True})
+  if any(v.endswith("docker-compose.rust-daemon.yml") for v in a):
+   # The checkout Rust overlay's model cache, as Compose renders it.
+   daemon=config["services"]["pseudolife-daemon"]
+   daemon["environment"]["PSEUDOLIFE_DAEMON_MODELS_DIR"]="/models"
+   daemon["volumes"].append({"type":"volume","source":"pseudolife_rust_models","target":"/models"})
+   config["volumes"]["pseudolife_rust_models"]={"name":"fixture-project_pseudolife_rust_models"}
   out=json.dumps(config)
  elif "ps" in a:
   out="fixture-pg" if a[-1]=="pseudolife-pg" else s["running"]["Id"]
@@ -885,8 +891,15 @@ def test_engine_activation_faults_preserve_rollback_and_retry_guard(tmp_path, na
             build = next(i for i, a in enumerate(state["calls"]) if a[:1] == ["compose"] and "build" in a)
             assert len(provisions) == 1 and build < provisions[0]
             run = state["calls"][provisions[0]]
-            assert run[-4:] == ["pseudolife-daemon-rust:checkout", "provision", "models", "--if-missing"]
-            assert "--volumes-from" not in run
+            # Exactly the overlay's model directory and volume the replacement runs with.
+            assert run == ["run", "--rm", "-e", "PSEUDOLIFE_DAEMON_MODELS_DIR=/models",
+                           "--mount", "type=volume,src=fixture-project_pseudolife_rust_models,dst=/models",
+                           "--entrypoint", "pseudolife-daemon", "pseudolife-daemon-rust:checkout",
+                           "provision", "models", "--if-missing"]
+            create = next(i for i, a in enumerate(state["calls"]) if a[:2] == ["volume", "create"])
+            assert create < provisions[0]
+            assert state["calls"][create][-1] == "fixture-project_pseudolife_rust_models"
+            assert "com.docker.compose.volume=pseudolife_rust_models" in state["calls"][create]
             later = [i for i, a in enumerate(state["calls"]) if a[:1] in (["fixture-backup"], ["tag"])
                      or a[:1] == ["exec"] and any("pg_dump" in s for s in a)]
             assert all(provisions[0] < i for i in later)

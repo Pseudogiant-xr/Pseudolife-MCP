@@ -1149,7 +1149,7 @@ pub(super) fn deploy(u: &mut Update, repo: &Path) -> Result<()> {
             repo.join(PYTHON_ACCEPTED)
         };
         u.rollback_lines = rollback_commands(
-            &checkout_rollback_base(&base, &rust_overlay, old),
+            &checkout_rollback_base(&base, &rust_overlay, old, &running),
             std::slice::from_ref(&env_file),
             &rollback_file,
             &accepted,
@@ -1199,17 +1199,41 @@ pub(super) fn deploy(u: &mut Update, repo: &Path) -> Result<()> {
 }
 
 /// The Compose files a printed checkout rollback recreates the old daemon
-/// with: a restored Rust daemon needs its overlay's model directory and volume.
+/// with: a restored Rust daemon keeps the model directory it ran with, the
+/// overlay's /models volume only when it already used it.
 pub(super) fn checkout_rollback_base(
     base: &[String],
     rust_overlay: &Path,
     old: &str,
+    running: &Value,
 ) -> Vec<String> {
     let mut files = base.to_vec();
-    if old == "rust" {
+    if old == "rust" && uses_models_volume(running) {
         files.extend(["-f".into(), rust_overlay.to_string_lossy().into_owned()]);
     }
     files
+}
+
+/// Whether a running Rust daemon reads its models from the overlay's
+/// /models (its environment names it, or a volume is mounted there), rather
+/// than an earlier checkout's /data/models.
+pub(super) fn uses_models_volume(running: &Value) -> bool {
+    let named = running["Config"]["Env"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .any(|entry| {
+            entry
+                .strip_prefix("PSEUDOLIFE_DAEMON_MODELS_DIR=")
+                .is_some_and(|dir| dir.trim_end_matches('/') == "/models")
+        });
+    named
+        || running["Mounts"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|mount| mount["Destination"] == "/models")
 }
 
 #[cfg(test)]

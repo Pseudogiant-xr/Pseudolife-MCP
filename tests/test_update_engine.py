@@ -645,19 +645,29 @@ def test_d2_stops_before_backup_or_image_movement(engine_host, schema, pending):
     assert not any("build" in a or "up" in a or a[1:2] == ["tag"] or any("backup." in x for x in a) for a in s["calls"])
 
 
-def test_switch_back_to_python_uses_running_rust_for_rollback(engine_host):
+@pytest.mark.parametrize("models", ["env", "mount", "legacy"])
+def test_switch_back_to_python_uses_running_rust_for_rollback(engine_host, models):
     from pseudolife_memory import update_engine as eng
     s = engine_host
     first = s["update"]()
     eng.deploy_engine(first, s["repo"])
-    # A rollback to Python needs no Rust overlay; one to Rust needs its model volume.
+    # A rollback to Python needs no Rust overlay.
     assert not any("docker-compose.rust-daemon.yml" in line for line in first.rollback_lines)
     s["running"]["Image"] = "sha256:validated-rust"
+    if models == "env":
+        s["running"]["Config"]["Env"].append("PSEUDOLIFE_DAEMON_MODELS_DIR=/models")
+    elif models == "mount":
+        s["running"]["Mounts"].append({"Destination": "/models", "Name": "fixture_pseudolife_rust_models"})
     update = s["update"]("python")
     eng.deploy_engine(update, s["repo"])
     restore = next(line for line in update.rollback_lines if "docker compose" in line)
     overlay = str(s["repo"] / "ops" / "docker-compose.rust-daemon.yml")
-    assert overlay in restore and restore.index(overlay) < restore.index(update.report.rollback["overlay"])
+    if models == "legacy":
+        # An earlier checkout Rust daemon read /data/models: its rollback keeps that.
+        assert overlay not in restore
+    else:
+        # One on the overlay's /models volume is restored with it.
+        assert overlay in restore and restore.index(overlay) < restore.index(update.report.rollback["overlay"])
     assert eng._selection(s["repo"]) is None
     assert any(a[1:3] == ["tag", "sha256:validated-rust"] for a in s["calls"])
     assert eng.selected_checkout(s["update"](None)) is None

@@ -345,6 +345,16 @@ def ensure_project_volume(command, config: dict, key: str) -> None:
         raise up.UpdateError(f"could not create the model volume {name}; check Docker and retry; nothing was deployed")
 
 
+def uses_models_volume(running: dict) -> bool:
+    """Whether a running Rust daemon reads its models from the overlay's
+    /models (its environment names it, or a volume is mounted there),
+    rather than an earlier checkout's /data/models."""
+    env = (running.get("Config") or {}).get("Env") or []
+    return (any(isinstance(e, str) and e.startswith("PSEUDOLIFE_DAEMON_MODELS_DIR=")
+                and e.split("=", 1)[1].rstrip("/") == "/models" for e in env)
+            or any(isinstance(m, dict) and m.get("Destination") == "/models" for m in running.get("Mounts") or []))
+
+
 def provision_models(update, command, image: str, config: dict) -> None:
     """Install the pinned models into the daemon's model volume before backup.
 
@@ -1005,8 +1015,10 @@ class EngineUpdate:
         rollback_file = self.repo / "data/update-engine" / f"docker-compose.rollback-{up._stamp()}.json"
         _write_overlay(rollback_file, old_service)
         selected_file = self.repo / SELECTION
-        # A restored Rust daemon needs its overlay's model directory and volume again.
-        rollback_args = [*self.base, *(rust_overlay if old_engine == "rust" else []), "-f", str(rollback_file)]
+        # A restored Rust daemon keeps the model directory it ran with: the
+        # overlay's /models volume only when it already used it.
+        rollback_args = [*self.base, *(rust_overlay if old_engine == "rust" and uses_models_volume(self.running) else []),
+                         "-f", str(rollback_file)]
         shown = " ".join('"' + str(a).replace('"', '\\"') + '"' for a in rollback_args)
         accepted_file = selected_file if old_engine == "rust" else self.repo / PYTHON_ACCEPTED
         copy = (f'Copy-Item -LiteralPath "{rollback_file}" -Destination "{accepted_file}" -ErrorAction Stop' if os.name == "nt"

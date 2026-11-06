@@ -1138,11 +1138,27 @@ fn native_update_gate_names_the_check_that_failed() {
 fn native_update_checkout_rollback_to_rust_keeps_its_model_overlay() {
     let base = vec!["-f".to_owned(), "ops/docker-compose.yml".to_owned()];
     let overlay = Path::new("ops/docker-compose.rust-daemon.yml");
+    let on_models = json!({"Config":{"Env":["PSEUDOLIFE_DAEMON_MODELS_DIR=/models"]},"Mounts":[]});
+    let mounted = json!({"Config":{"Env":[]},"Mounts":[{"Destination":"/models"}]});
+    // An earlier checkout Rust daemon read /data/models: its rollback keeps that.
+    let legacy = json!({"Config":{"Env":["PSEUDOLIFE_DAEMON_MODELS_DIR=/data/models"]},"Mounts":[{"Destination":"/data"}]});
     assert_eq!(
-        engine::checkout_rollback_base(&base, overlay, "python"),
+        engine::checkout_rollback_base(&base, overlay, "python", &on_models),
         base
     );
-    let rust = engine::checkout_rollback_base(&base, overlay, "rust");
+    assert_eq!(
+        engine::checkout_rollback_base(&base, overlay, "rust", &legacy),
+        base
+    );
+    assert_eq!(
+        engine::checkout_rollback_base(&base, overlay, "rust", &json!({"Config":{"Labels":null}})),
+        base
+    );
+    assert_eq!(
+        engine::checkout_rollback_base(&base, overlay, "rust", &mounted)[2..],
+        ["-f", "ops/docker-compose.rust-daemon.yml"]
+    );
+    let rust = engine::checkout_rollback_base(&base, overlay, "rust", &on_models);
     assert_eq!(rust[..2], base[..]);
     assert_eq!(rust[2..], ["-f", "ops/docker-compose.rust-daemon.yml"]);
     let lines = engine::rollback_commands(
