@@ -38,7 +38,7 @@ def test_the_budget_covers_every_workflow_that_runs_on_pull_requests():
 def test_a_full_rust_run_is_what_a_batch_starts():
     workflow = load("rust.yml")
     assert pull_request_reachable(workflow) == ["scope", "rust", "fixtures", "candidate", "candidate-harness",
-                                                "parity-checks", "daemon-image", "parity"]
+                                                "parity-pool", "parity-checks", "daemon-image", "parity"]
     names = reachable_names(workflow)
     assert "Parity checks / ubuntu-latest / h5-light" in names
     assert "Parity checks / windows-latest / h5-light" not in names
@@ -112,7 +112,7 @@ def test_an_estimate_counts_until_it_is_measured():
                                                    "Extra / ubuntu-latest", "Extra / windows-latest"])
 
 
-@pytest.mark.parametrize("limit, words", [("jobs", "job count 41 is over its limit"),
+@pytest.mark.parametrize("limit, words", [("jobs", "job count 42 is over its limit"),
                                           ("runner_minutes", "runner-minutes per full run, over the limit"),
                                           ("longest_job_minutes", "limit for one job"),
                                           ("critical_path_minutes", "slowest chain of needs")])
@@ -239,6 +239,31 @@ def test_one_key_saved_on_two_systems_is_two_caches():
     assert savers[("v0-rust-k", "Linux")] == ["a", "c"]
     assert savers[("v0-rust-k", "Windows")] == ["b"]
     assert savers[("v0-rust-k-d", "Linux")] == ["d"]
+
+
+def test_conditional_pool_routing_preserves_known_cache_saver_platforms():
+    workflow = {"jobs": {"parity": {
+        "runs-on": "${{ matrix.suite == 'cli-startup' && needs.pool.outputs.ready == 'true' && fromJSON('[\"self-hosted\",\"linux\"]') || matrix.os }}",
+        "strategy": {"matrix": {"os": ["ubuntu-latest", "windows-latest"], "suite": ["eval", "cli-startup"]}},
+        "steps": [{"uses": "Swatinem/rust-cache@v2", "if": "matrix.suite == 'eval'",
+                   "with": {"shared-key": "eval"}}],
+    }}}
+    savers = ci_budget.cache_savers(workflow)
+    assert set(savers) == {("v0-rust-eval", "Linux"), ("v0-rust-eval", "Windows")}
+    assert all(len(runs) == 1 for runs in savers.values())
+    workflow["jobs"]["parity"]["runs-on"] = "ubuntu-latest"
+    assert len(ci_budget.cache_savers(workflow)[("v0-rust-eval", "Linux")]) == 2
+
+
+def test_an_uncertain_runner_may_collide_with_a_known_platform_cache():
+    workflow = {"jobs": {"parity": {
+        "runs-on": "${{ github.event_name == 'schedule' && 'ubuntu-latest' || matrix.os }}",
+        "strategy": {"matrix": {"os": ["ubuntu-latest", "windows-latest"]}},
+        "steps": [{"uses": "Swatinem/rust-cache@v2", "with": {"shared-key": "eval"}}],
+    }}}
+    # Both save on Linux at night, although only one platform is statically
+    # known across every event. Unknown must not mean a separate safe OS.
+    assert len(ci_budget.cache_savers(workflow)[("v0-rust-eval", "Linux")]) == 2
 
 
 def test_a_heavy_install_must_skip_byte_compiling():

@@ -535,3 +535,21 @@ execution) and failure repair (reruns). It also flags reruns, drops and
 rebuilt batches. GitHub records no review event here, so review time stays
 inside "awaiting admission". The first measurement is in
 `evals/results/batch-lifecycle-20261023/`.
+
+## Linux pool recovery
+
+The optional Linux pool keeps the same required Parity checks. If a worker
+disappears after the hosted planner selected it, disable the switch and,
+once the run has finished or the maintainer has cancelled it, rerun the
+`Parity / Linux pool plan` job from that run:
+
+```sh
+gh variable set PARITY_BATCH_LINUX_POOL --body hosted && gh run rerun <run-id> --job <planner-job-id>
+```
+
+Use the planner's job database ID from `gh run view <run-id> --json jobs`.
+GitHub reruns that job and its dependents, so it re-reads the live switch
+and sends the parity matrix to hosted. Rerunning only failed jobs would
+retain a previous successful planner's self-hosted choice. This does not
+change runner labels, Windows routing or the comparison allowlist; it does
+not cancel a running batch automatically.
