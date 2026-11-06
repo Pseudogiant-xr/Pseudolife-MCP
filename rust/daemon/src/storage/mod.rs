@@ -170,6 +170,9 @@ enum Reopen {
     Unreachable(String),
     /// Any other error, which Python lets propagate to the caller.
     Failed(String),
+    /// `BankSchemaRefused`: the bank carries a schema stamp this build must
+    /// not serve (a newer build upgraded it in the gap, issue #909).
+    SchemaRefused(String),
     /// A failure after the lease was won (reading or bumping the epoch).
     /// Python has already cleared `_reconnect_error` by then, so nothing
     /// is cached: an operational one is tolerated and the next call
@@ -228,6 +231,11 @@ struct SessionState {
     /// `resident_invalidated`: set on the replacement session when another
     /// writer held the bank in the gap, until the owner re-reads the bank.
     resident_invalidated: Option<String>,
+    /// `_schema_refused`: the refusal the last reconnect got from the
+    /// bank's schema stamp; `ping` reports it while the stamp still refuses.
+    schema_refused: Option<String>,
+    /// `_schema_retry_at`; `None` is Python's initial 0.0 (always due).
+    schema_retry_at: Option<Instant>,
 }
 
 struct BankIdCache {
@@ -807,8 +815,9 @@ impl Storage {
     /// `ping` (postgres.py:725-742, spec H8): a fresh connection (2 s
     /// connect timeout, no application-name fallback) runs `SELECT 1`; then
     /// it fails while a reconnect was refused the lease and a holder is
-    /// still there, and while the owner has yet to re-read a bank another
-    /// writer held in the meantime.
+    /// still there, while the bank still carries the schema stamp a
+    /// reconnect refused, and while the owner has yet to re-read a bank
+    /// another writer held in the meantime.
     pub async fn ping(&self) -> Result<(), String> {
         let (client, task) = connect(&self.base, Duration::from_secs(2)).await?;
         let probe = async {
@@ -818,6 +827,11 @@ impl Storage {
                 && !lease_holders(&client).await?.is_empty()
             {
                 return Ok(Err(lost));
+            }
+            // `BankSchemaRefused` while the stamp a reconnect refused stays.
+            let refused = self.session.lock().unwrap().schema_refused.is_some();
+            if refused && let Some(m) = schema::bank_schema_refusal(&client).await? {
+                return Ok(Err(m));
             }
             Ok::<_, tokio_postgres::Error>(Ok(()))
         };
@@ -943,6 +957,11 @@ impl Storage {
             {
                 return Err(lost.clone());
             }
+            if let (Some(refused), Some(at)) = (&state.schema_refused, state.schema_retry_at)
+                && now < at
+            {
+                return Err(refused.clone());
+            }
             if state.reconnect_error.is_some()
                 && state.reconnect_retry_at.is_some_and(|at| now < at)
             {
@@ -973,6 +992,12 @@ impl Storage {
             Err(Reopen::AfterLease { message, .. }) => {
                 self.session.lock().unwrap().reconnect_error = None;
                 Err(message)
+            }
+            Err(Reopen::SchemaRefused(m)) => {
+                let mut state = self.session.lock().unwrap();
+                state.schema_refused = Some(m.clone());
+                state.schema_retry_at = Some(Instant::now() + LEASE_RETRY);
+                Err(m)
             }
             Err(Reopen::Failed(m)) => Err(m),
         }
@@ -1008,6 +1033,16 @@ impl Storage {
                 operational: operational(&e),
                 message: error_text(&e),
             };
+            // The schema is not re-ensured, but a newer build may have
+            // upgraded the bank in the gap: refuse it as a start would,
+            // before this session writes anything (issue #909).
+            if let Some(m) = schema::bank_schema_refusal(&client)
+                .await
+                .map_err(after_lease)?
+            {
+                eprintln!("after reconnecting: {m}");
+                return Err(Reopen::SchemaRefused(m));
+            }
             let found = read_lease_epoch(&client).await.map_err(after_lease)?;
             let epoch = bump_lease_epoch_raw(&client).await.map_err(after_lease)?;
             Ok::<_, Reopen>((found, epoch))

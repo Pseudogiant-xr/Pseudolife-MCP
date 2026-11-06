@@ -36,7 +36,7 @@ from typing import Any, Sequence
 import psycopg
 from psycopg.types.json import Jsonb
 
-from pseudolife_memory.storage.schema import ensure_schema
+from pseudolife_memory.storage.schema import bank_schema_refusal, ensure_schema
 
 logger = logging.getLogger(__name__)
 
@@ -334,6 +334,19 @@ class WriterLeaseHeld(RuntimeError):
     callers that only know the generic refusal still fail loudly."""
 
 
+class BankSchemaRefused(RuntimeError):
+    """A reconnect found the bank stamped with a schema this build must not
+    serve: a newer build upgraded it, or the stamp is malformed, while this
+    instance was disconnected (issue #909).
+
+    The same refusal a start gives (``schema._schema_version_refusal``).
+    The refused session is closed, so the newer build can hold the lease;
+    nothing was written. Calls inside ``_LEASE_RETRY_SECONDS`` are refused
+    from the cached text, later ones reconnect and check again, and
+    :meth:`PostgresStorage.ping` re-reads the stamp, so a bank restored to
+    a stamp this build serves is picked up again."""
+
+
 class BankChangedHands(RuntimeError):
     """Another writer held this bank while this instance was disconnected.
 
@@ -428,6 +441,11 @@ class PostgresStorage:
         self._lease_retry_at = 0.0
         self._reconnect_error: str | None = None
         self._reconnect_retry_at = 0.0
+        # Set while the last reconnect found a schema stamp this build must
+        # not serve (BankSchemaRefused); until _schema_retry_at, calls are
+        # refused from it without opening another session.
+        self._schema_refused: str | None = None
+        self._schema_retry_at = 0.0
         # The lease-epoch value this instance last wrote, and the sticky
         # refusal set when a reconnect finds another writer's epoch.
         self._lease_epoch: int | None = None
@@ -653,7 +671,9 @@ class PostgresStorage:
         fix: there was no reconnect anywhere, so a PG restart poisoned the
         daemon until manual restart). Heal-on-next-use: the call that hits
         the dead connection still raises; the *next* one reconnects.
-        Schema is NOT re-ensured (it exists); the vector adapter is
+        Schema is NOT re-ensured (it exists), but its stamp is re-checked:
+        a bank a newer build upgraded in the gap is refused
+        (:class:`BankSchemaRefused`, issue #909); the vector adapter is
         per-connection and must be re-registered. The writer lease died with
         the old session, so the replacement must win it back before it
         serves anything. If another writer took the bank in the gap, this
@@ -676,6 +696,9 @@ class PostgresStorage:
         if c.closed or c.broken:
             if self._lease_lost and time.monotonic() < self._lease_retry_at:
                 raise WriterLeaseHeld(self._lease_lost)
+            if (self._schema_refused
+                    and time.monotonic() < self._schema_retry_at):
+                raise BankSchemaRefused(self._schema_refused)
             if (self._reconnect_error
                     and time.monotonic() < self._reconnect_retry_at):
                 raise psycopg.OperationalError(self._reconnect_error)
@@ -695,6 +718,18 @@ class PostgresStorage:
             self._reconnect_error = None
             handed_over = None
             try:
+                # Schema is not re-ensured, but a newer build may have
+                # upgraded the bank in the gap: refuse it as a start would,
+                # before this session writes anything (issue #909).
+                with conn.cursor() as cur:
+                    refusal = bank_schema_refusal(cur)
+                if refusal is not None:
+                    self._schema_refused = refusal
+                    self._schema_retry_at = (
+                        time.monotonic() + _LEASE_RETRY_SECONDS)
+                    logger.error("after reconnecting: %s", refusal)
+                    raise BankSchemaRefused(refusal)
+                self._schema_refused = None
                 register_vector(conn)
                 if self._writer_lease:
                     found = self._read_lease_epoch(conn)
@@ -732,11 +767,18 @@ class PostgresStorage:
         every call fails as fine. Once the holder is gone the next call
         reconnects and takes the lease, so the probe stops reporting it.
         Also raises while the owner has yet to re-read a bank another writer
-        held in the meantime (:class:`BankChangedHands`)."""
+        held in the meantime (:class:`BankChangedHands`), and while the bank
+        still carries the schema stamp a reconnect refused
+        (:class:`BankSchemaRefused`)."""
         with connect_retrying_local_ports(self.dsn, connect_timeout=2) as c:
             c.execute("SELECT 1")
             if self._lease_lost and self._lease_holders(c):
                 raise WriterLeaseHeld(self._lease_lost)
+            if self._schema_refused:
+                with c.cursor() as cur:
+                    refusal = bank_schema_refusal(cur)
+                if refusal is not None:
+                    raise BankSchemaRefused(refusal)
         if self.resident_invalidated:
             raise BankChangedHands(self.resident_invalidated)
         return True
