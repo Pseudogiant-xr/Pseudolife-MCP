@@ -130,6 +130,21 @@ struct Context {
     identity_args: Option<Vec<String>>,
 }
 
+/// A copy of the shipped Compose files the release archive replaces: one
+/// of this updater's release archives, the Python updater's bundled copies,
+/// or a checkout's `ops/` (the installers' layout).
+fn packaged_compose(path: &Path) -> bool {
+    let Some(parent) = path.parent() else {
+        return false;
+    };
+    parent.parent() == Some(compose_root().as_path())
+        || parent == data_dir().join("compose")
+        || (parent.file_name().is_some_and(|d| d == "ops")
+            && parent
+                .parent()
+                .is_some_and(|checkout| checkout.join("pyproject.toml").is_file()))
+}
+
 pub(super) fn compose_root() -> PathBuf {
     if cfg!(windows) {
         std::env::var_os("LOCALAPPDATA")
@@ -308,17 +323,38 @@ impl Update {
         // Keep project-specific overrides, but never stale engine/candidate
         // overlays from a prior activation, which could override the new tag.
         let directory = self.release_compose(target)?;
-        let mut files = vec![directory.join("docker-compose.yml")];
+        // Only a packaged copy of a shipped file is replaced by the archive's.
+        // A stack manager's own file that shares a shipped name (a Portainer
+        // stack's docker-compose.yml) holds that stack's settings and stays.
+        let mut kept_base = None;
+        let mut kept_ghcr = false;
+        let mut rest = Vec::new();
         for path in existing.into_iter().filter(|p| p.is_file()) {
-            if !path.file_name().and_then(|n| n.to_str()).is_some_and(|n| {
-                n.starts_with("docker-compose.engine")
-                    || n.starts_with("docker-compose.rollback")
-                    || COMPOSE_FILES.contains(&n)
-            }) {
-                files.push(path);
+            let Some(name) = path.file_name().and_then(|n| n.to_str()).map(str::to_owned) else {
+                continue;
+            };
+            if name.starts_with("docker-compose.engine")
+                || name.starts_with("docker-compose.rollback")
+            {
+                continue;
             }
+            if COMPOSE_FILES.contains(&name.as_str()) {
+                if name == "docker-compose.rust-ghcr.yml" || packaged_compose(&path) {
+                    continue;
+                }
+                if name == "docker-compose.yml" {
+                    kept_base = Some(path);
+                    continue;
+                }
+                kept_ghcr |= name == "docker-compose.ghcr.yml";
+            }
+            rest.push(path);
         }
-        files.push(directory.join("docker-compose.ghcr.yml"));
+        let mut files = vec![kept_base.unwrap_or_else(|| directory.join("docker-compose.yml"))];
+        files.extend(rest);
+        if !kept_ghcr {
+            files.push(directory.join("docker-compose.ghcr.yml"));
+        }
         let leaving_rust = engine != "rust" && labels[engine::ENGINE_LABEL] == "rust";
         let identity_overlay = leaving_rust.then(|| {
             running_rust

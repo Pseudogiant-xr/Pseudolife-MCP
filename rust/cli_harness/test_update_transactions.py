@@ -1451,6 +1451,42 @@ def test_release_retains_original_project_directory_for_relative_mounts(tmp_path
                 assert args[args.index("--project-directory") + 1] == str(repo / "ops")
 
 
+@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+@pytest.mark.parametrize("layout", ["stack", "packaged"])
+def test_release_keeps_a_stack_file_that_only_shares_a_shipped_name(tmp_path, native, layout):
+    # A stack manager (Portainer: /data/compose/<id>/docker-compose.yml)
+    # labels its own docker-compose.yml. Native release mode replaced every
+    # file of a shipped name with the release archive's copy, losing that
+    # stack's settings; only a packaged copy (a checkout's ops/) is replaced.
+    binary = _native_binary()
+    if native and not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path) as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        labels = state["running"]["Config"]["Labels"]
+        if layout == "stack":
+            stack = tmp_path / "portainer/compose/12"
+            stack.mkdir(parents=True)
+            (stack / "docker-compose.yml").write_text("services:\n  pseudolife-daemon: {}\n")
+            labels["com.docker.compose.project.config_files"] = str(stack / "docker-compose.yml")
+            labels["com.docker.compose.project.working_dir"] = str(stack)
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary if native else None,
+                         ["--tag", "0.21.1", "--daemon-only", "--json", "--health-retries", "1",
+                          "--rollback-tag", "pre-stack"])
+        assert result.returncode == 0, result.stdout + result.stderr
+        calls = json.loads(state_path.read_text())["calls"]
+        up = next(a for a in calls if a[:1] == ["compose"] and "up" in a)
+        bases = [v for v in up if Path(v).name == "docker-compose.yml"]
+        if layout == "stack":
+            # The stack's own file, and no second base file beside it.
+            assert bases == [str(stack / "docker-compose.yml")], up
+        elif native:
+            # A packaged copy is still replaced by the verified archive's.
+            assert bases and bases != [str(repo / "ops/docker-compose.yml")], up
+            assert str(repo / "ops/docker-compose.yml") not in up
+
+
 @pytest.mark.parametrize("mode", ["release", "checkout"])
 def test_changed_mount_or_wrong_checkout_endpoint_refuses_before_backup(tmp_path, mode):
     binary = _native_binary()
