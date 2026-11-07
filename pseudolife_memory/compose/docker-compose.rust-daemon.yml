@@ -8,3 +8,12 @@ services:
       dockerfile: ops/Dockerfile.daemon-rust
     labels:
       org.pseudolife.engine: rust
+    # The pinned models are a re-downloadable cache: keep them out of /data,
+    # which every backup archives. The release overlay uses the same volume,
+    # and update provisions it before its backup.
+    environment:
+      PSEUDOLIFE_DAEMON_MODELS_DIR: /models
+    volumes:
+      - pseudolife_rust_models:/models
+volumes:
+  pseudolife_rust_models: {}

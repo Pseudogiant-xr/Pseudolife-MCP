@@ -340,11 +340,8 @@ impl Update {
             project_dir.to_string_lossy().into_owned(),
         ]);
         args.extend(compose_args(&files, &env_files));
-        let identity_args = identity_overlay.map(|overlay| {
-            let mut identity = args.clone();
-            identity.extend(compose_args(&[overlay], &[]));
-            identity
-        });
+        let identity_args =
+            identity_overlay.map(|overlay| engine::with_rust_overlay(&args, &overlay));
         let checkout = [
             project_dir.clone(),
             project_dir.parent().unwrap_or(&project_dir).to_owned(),
@@ -434,15 +431,12 @@ impl Update {
         // running mounts against the project with that overlay, so every other
         // mount is still held to the running daemon's.
         let identity = match &context.identity_args {
-            Some(args) => {
-                let mut identity_args = vec!["compose".into()];
-                identity_args.extend(args.clone());
-                identity_args.extend(["config".into(), "--format".into(), "json".into()]);
-                let (code, out) = self.command(&identity_args, Some(&env), 60, false);
-                serde_json::from_str(&out).ok().filter(|_: &Value| code == 0).ok_or_else(|| {
-                    UpdateError::usage("cannot resolve the Compose project with the running Rust overlay; check its files and env file, then retry; nothing was changed")
-                })?
-            }
+            Some(args) => engine::compose_config(
+                self,
+                args,
+                &env,
+                "cannot resolve the Compose project with the running Rust overlay; check its files and env file, then retry; nothing was changed",
+            )?,
             None => config.clone(),
         };
         engine::verify_bank_identity(self, &identity, &context.running)?;
@@ -797,6 +791,7 @@ impl Update {
         shadow: bool,
     ) -> Result<Value> {
         self.step("waiting for the daemon to report healthy...");
+        let mut reason = "/health did not answer".to_owned();
         for attempt in 0..self.o.health_retries {
             #[cfg(unix)]
             if super::signals::checkpoint() != 0 {
@@ -806,17 +801,17 @@ impl Update {
                 &format!("{}/health", self.o.daemon_url.trim_end_matches('/')),
                 3,
             );
-            if let Some(health) = health
-                && health["status"] == "ok"
-                && version.is_none_or(|v| health["version"] == v)
-                && schema.is_none_or(|v| health["schema"] == v)
-                && (token.is_none() || !truthy(&health["counters_import_required"]))
-                && (!shadow
-                    || (health["read_only"] == true
-                        && health["ready"] == true
-                        && health["db"] == "ok"))
-                && token.is_none_or(|token| seams::authenticated_read(&self.o.daemon_url, token))
-            {
+            let failed = gate_failure(
+                health.as_ref(),
+                version,
+                schema,
+                token.is_some(),
+                shadow,
+                || token.is_none_or(|token| seams::authenticated_read(&self.o.daemon_url, token)),
+            );
+            if let Some(failed) = failed {
+                reason = failed;
+            } else if let Some(health) = health {
                 if self
                     .schema_before
                     .zip(health["schema"].as_i64())
@@ -852,9 +847,12 @@ impl Update {
             }
         }
         let failure = if token.is_some() {
-            "the daemon failed its expected version, schema or authenticated-read health gate at the configured endpoint; the client side was not moved"
+            format!(
+                "the daemon failed its expected version, schema or authenticated-read health gate at the configured endpoint ({reason}, last of {} checks); the client side was not moved",
+                self.o.health_retries
+            )
         } else {
-            "the daemon did not report healthy at the expected version at the configured endpoint; inspect docker logs and use the rollback commands below; the client side was not moved"
+            "the daemon did not report healthy at the expected version at the configured endpoint; inspect docker logs and use the rollback commands below; the client side was not moved".to_owned()
         };
         // Shadow verification uses its temporary endpoint, not the main daemon's port.
         let ports = if !shadow {
@@ -1065,6 +1063,52 @@ impl Update {
     }
 }
 
+/// The first health-gate check this /health answer fails, or None. A None
+/// `version` or `schema` skips that check; `counters` checks
+/// counters_import_required; `read` (the authenticated bank read) runs only
+/// once every other check passed. Values print as JSON, as Python prints them.
+pub(super) fn gate_failure(
+    health: Option<&Value>,
+    version: Option<&str>,
+    schema: Option<i64>,
+    counters: bool,
+    shadow: bool,
+    read: impl FnOnce() -> bool,
+) -> Option<String> {
+    let Some(health) = health.filter(|h| h.is_object()) else {
+        return Some("/health did not answer".into());
+    };
+    if health["status"] != "ok" {
+        return Some(format!(
+            "/health reported status {} instead of \"ok\"",
+            health["status"]
+        ));
+    }
+    if let Some(v) = version.filter(|v| health["version"] != *v) {
+        return Some(format!(
+            "version {} instead of {}",
+            health["version"],
+            json!(v)
+        ));
+    }
+    if let Some(v) = schema.filter(|v| health["schema"] != *v) {
+        return Some(format!("schema {} instead of {v}", health["schema"]));
+    }
+    if counters && truthy(&health["counters_import_required"]) {
+        return Some("counters_import_required: the daemon has not imported its counters".into());
+    }
+    if shadow && !(health["read_only"] == true && health["ready"] == true && health["db"] == "ok") {
+        return Some(format!(
+            "the shadow is not ready read-only (read_only={}, ready={}, db={})",
+            health["read_only"], health["ready"], health["db"]
+        ));
+    }
+    if !read() {
+        return Some("the authenticated bank read was refused".into());
+    }
+    None
+}
+
 /// The running daemon's environment shaped as a Compose config, so its own
 /// bearer is read the same way as the configured one.
 fn running_config(running: &Value) -> Value {
@@ -1196,7 +1240,7 @@ fn volume_create_args(config: &Value, key: &str) -> Result<Vec<String>> {
 
 impl Update {
     /// Install the pinned models into the daemon's model volume before backup.
-    fn provision_models(&mut self, image: &str, config: &Value) -> Result<()> {
+    pub(super) fn provision_models(&mut self, image: &str, config: &Value) -> Result<()> {
         let Some((models, mounts)) = model_volumes(config)? else {
             self.step(
                 "the daemon names its own ONNX model directory; leaving model provisioning to it",
