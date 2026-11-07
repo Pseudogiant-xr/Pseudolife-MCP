@@ -485,6 +485,7 @@ impl Update {
         );
         if result.is_ok()
             && self.o.engine.as_deref() == Some("python")
+            && !self.after_import
             && engine::record_choice("python").is_err()
         {
             self.warn("the switch succeeded, but the Python choice could not be recorded; a later update may move this host to the default engine");
@@ -625,6 +626,10 @@ impl Update {
                 // leaves the Python daemon untouched, not one at the target.
                 self.check_config(&rust_image, &config)?;
                 self.after_import = true;
+                // The host changes from here, as in the Python updater: a
+                // later failure is the update's, never a defaulted fallback.
+                self.release_started = true;
+                let defaulted = std::mem::replace(&mut self.defaulted_engine, false);
                 let requested = self.o.engine.replace("python".into());
                 // A Python daemon already at the target must still restart to import.
                 let reinstall = std::mem::replace(&mut self.o.reinstall, true);
@@ -633,11 +638,15 @@ impl Update {
                 if !suffix.is_empty() {
                     self.o.rollback_suffix = format!("{suffix}-pre-import");
                 }
+                // The clients move once, after the Rust leg's gate, never mid-way.
+                let daemon_only = std::mem::replace(&mut self.o.daemon_only, true);
                 let first = self.deploy_release(current.clone(), before_recreate, previous.clone());
                 self.o.reinstall = reinstall;
                 self.o.rollback_suffix = suffix;
+                self.o.daemon_only = daemon_only;
                 if let Err(error) = first {
                     self.o.engine = requested;
+                    self.defaulted_engine = defaulted;
                     return Err(error);
                 }
                 // Leg 2 is Rust at this target, whatever chose it, without asking
@@ -648,6 +657,7 @@ impl Update {
                 let second = self.deploy_release(Some(target.clone()), None, previous);
                 self.o.engine = requested;
                 self.o.tag = tag;
+                self.defaulted_engine = defaulted;
                 if self.report.rollback.is_object() {
                     self.report.rollback["before_import"] = before_import;
                 }

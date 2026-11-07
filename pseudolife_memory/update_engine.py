@@ -496,7 +496,6 @@ class ReleaseEngineUpdate:
         self.target, self.current, self.previous_digest = target, current, previous_digest
         self.engine = choice
         self.defaulted = defaulted  # the G2 default chose this engine, not the operator
-        self.started = False  # True once the backup begins: the host changes from here
         # What a defaulted attempt added, removed again if it falls back.
         self.pulled_image: str | None = None
         self.created_volumes: list[str] = []
@@ -775,14 +774,16 @@ class ReleaseEngineUpdate:
                 # leaves the Python daemon untouched, not one at the target.
                 self.check_config(rust_image, config)
                 self.started = True
-                saved_suffix = o.rollback_suffix
+                saved_suffix, saved_daemon_only = o.rollback_suffix, o.daemon_only
                 if saved_suffix:
                     # Both legs tag a Python image of the same version: keep them apart.
                     o.rollback_suffix = f"{saved_suffix}-pre-import"
+                # The clients move once, after the Rust leg's gate, never mid-way.
+                o.daemon_only = True
                 try:
                     ReleaseEngineUpdate(u, self.target, self.current, self.previous_digest, "python").run(before_recreate)
                 finally:
-                    o.rollback_suffix = saved_suffix
+                    o.rollback_suffix, o.daemon_only = saved_suffix, saved_daemon_only
                 # The original image's rollback stays in the report beside the second leg's.
                 before_import = dict(u.report.rollback or {})
                 follow = ReleaseEngineUpdate(u, self.target, self.target, self.previous_digest, "rust")

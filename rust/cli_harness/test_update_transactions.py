@@ -302,7 +302,7 @@ elif a[:2]==["volume","inspect"]:
  if s.get("volume_inspect_failure"):code=1
  else:out=json.dumps(s.get("volume_inspections",{}).get(a[-1],[]))
 elif a[:1]==["ps"]: out=s["running"]["Id"]
-elif a[:1]==["pull"]: code=int(s["failure"]=="pull" or (bool(s.get("rust_pull_fails")) and "-rust:" in a[-1]))
+elif a[:1]==["pull"]: code=int(s["failure"]=="pull" or (bool(s.get("rust_pull_fails")) and "-rust:" in a[-1]) or (bool(s.get("python_pull_fails")) and "-rust:" not in a[-1]))
 elif a[:2]==["manifest","inspect"]: code=0 if s.get("rust_published") else 1
 elif a[:1]==["run"]:
  if "check-config" in a:
@@ -1487,6 +1487,65 @@ def test_release_default_imports_legacy_counters_unless_rust_refuses_the_configu
             assert ["image", "rm", "ghcr.io/pseudogiant-xr/pseudolife-daemon-rust:0.21.1"] in calls
             assert "memory.reranker.model_name" in result.stdout
             assert (_labels(state_path) or {}).get("org.pseudolife.engine", "python") == "python"
+
+
+@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+@pytest.mark.parametrize("outcome", ["moved", "rust-leg-fails"])
+def test_an_import_leg_update_moves_the_clients_once_after_the_rust_gate(tmp_path, native, outcome):
+    # Codex (review of the merge): an ordinary update that defaults to Rust
+    # through the import leg updated the clients in the Python leg, before
+    # the Rust leg's gate, and again at the end.
+    binary = _native_binary()
+    if native and not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path, "pending_import") as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        state["rust_published"] = True
+        state["import_stuck"] = outcome == "rust-leg-fails"
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary if native else None,
+                         ["--tag", "0.21.1", "--json", "--health-retries", "1", "--rollback-tag", "pre-clients"])
+        report = json.loads(result.stdout)
+        client_steps = [s for s in report["steps"] if s.startswith("updating the client side")]
+        if outcome == "moved":
+            assert result.returncode == 0, result.stdout + result.stderr
+            assert len(client_steps) == 1, report["steps"]
+            # After the Rust leg's recreation, not between the legs.
+            assert report["steps"].index(client_steps[0]) > max(
+                i for i, s in enumerate(report["steps"]) if "pulling ghcr.io/pseudogiant-xr/pseudolife-daemon:" in s)
+        else:
+            assert result.returncode == 1, result.stdout + result.stderr
+            assert client_steps == [], report["steps"]
+
+
+@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+@pytest.mark.parametrize("failure", ["python-leg", "rust-leg"])
+def test_a_failed_import_leg_of_a_defaulted_move_is_the_updates_error(tmp_path, native, failure):
+    # Once the import leg starts, the host is changing: a failure in either
+    # leg is the update's error in both updaters, never a fallback, and the
+    # leg's own --engine python is not recorded as the operator's choice.
+    binary = _native_binary()
+    if native and not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path, "pending_import") as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        state["rust_published"] = True
+        if failure == "python-leg":
+            state["python_pull_fails"] = True
+        else:
+            state["import_stuck"] = True
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary if native else None,
+                         ["--tag", "0.21.1", "--daemon-only", "--json", "--health-retries", "1",
+                          "--rollback-tag", "pre-leg-failure"])
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert "not moving to the rust daemon this time" not in result.stdout
+        choice = Path(env["PSEUDOLIFE_MCP_DATA_DIR"]) / "update-engine/engine-choice.json"
+        assert not choice.exists(), choice.read_text()
+        calls = json.loads(state_path.read_text())["calls"]
+        # No discard of a pulled image: the host is not falling back.
+        assert not any(a[:2] == ["image", "rm"] for a in calls), calls
+        assert (_labels(state_path) or {}).get("org.pseudolife.engine", "python") == "python"
 
 
 @pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
