@@ -74,7 +74,11 @@ DISK_FLOOR = 8 * 1024 ** 3
 # 2026-11-07. On the real bank's copy they waited on its whole backlog (3,915
 # entries pending a dream, 276 entity and 376 edge proposals pending a
 # judge), which no stub answer settles, so they compared nothing.
-QUIET_PREFIXES = {"w2e": ("judge-merge-", "curation-auto", "sweep-analyzer-", "console-dream-run")}
+# Extended the same way (conductor, 2026-11-08) to the junk and link judge
+# scenarios, whose judges reached the real backlog at different times on each
+# side, and the two session-end dreams, which expect no pending entry.
+QUIET_PREFIXES = {"w2e": ("judge-merge-", "curation-auto", "sweep-analyzer-", "console-dream-run",
+                          "junk-", "link-", "hook-session-end-dream", "cli-episode-end-dream")}
 QUIET_WHY = ("drives the dream, judge, curation or analyzer queue; on the real bank's copy it "
              "waited on the whole real backlog, so it runs on the seed's copy with that backlog "
              "acknowledged and its pending proposals removed")

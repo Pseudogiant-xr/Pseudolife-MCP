@@ -407,3 +407,19 @@ def test_a_kept_log_is_its_tail(tmp_path):
         "w2e", "x", "real", base=True)
     kept = next((tmp_path / "out" / "w2e" / "real").glob("x.daemon-logs/*/daemon.log")).read_text()
     assert kept.startswith("[truncated") and kept.endswith("END\n") and len(kept) < forced.KEPT_LOG_BYTES + 200
+
+
+@pytest.mark.parametrize("name", ["junk-auto", "junk-shadow", "junk-auto-reopen", "link-auto", "link-shadow",
+                                  "link-two-vote", "link-two-vote-same-model", "link-auto-reopen",
+                                  "hook-session-end-dream", "cli-episode-end-dream"])
+def test_the_judge_and_session_end_dream_scenarios_take_the_quiet_base(name):
+    """On the real bank's copy these judged or dreamed its backlog (276 and
+    376 proposals pending a judge, 3,915 entries pending a dream): Rust's
+    judges reached it before Python's, and the session-end dream expects no
+    pending entry (forced run, 2026-11-07). Conductor decision, extending D1."""
+    assert forced.base_for("w2e", name)[0] == "quiet"
+
+
+@pytest.mark.parametrize("name", ["hook-session-end", "cli-episode-end", "linked-reads", "junkyard"])
+def test_near_miss_names_keep_the_main_base(name):
+    assert forced.base_for("w2e", name)[0] == "main"
