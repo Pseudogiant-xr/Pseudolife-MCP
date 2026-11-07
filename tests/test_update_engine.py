@@ -245,6 +245,24 @@ def test_engine_selection_never_moves_the_clients(monkeypatch):
     assert update.o.daemon_only
 
 
+@pytest.mark.parametrize("schema,row,weights,expected", [
+    ("58", "t", False, None), ("58", "f", False, None), ("58", "f", True, 58),
+    ("56", "t", False, 56), ("bad", "t", False, -1),
+])
+def test_import_pending_reports_the_banks_schema_until_counters_are_imported(schema, row, weights, expected):
+    # G2-K: a pending import is what sends a Rust activation through Python first.
+    from pseudolife_memory import update_engine as eng
+    update = up.Update(up.Options(), log=lambda s: None)
+    release = eng.ReleaseEngineUpdate(update, "0.23.0", "0.22.1", None, "rust")
+
+    def command(args, **kw):
+        if "psql" in args:
+            return 0, row if "cms_counters" in args[-1] else schema
+        return (1 if weights else 0), ""
+    release.command = command
+    assert release.import_pending("pg", "user", "db", "daemon") == expected
+
+
 def test_release_rollback_commands_supply_the_rust_overlay_tag(tmp_path):
     from pseudolife_memory import update_engine as eng
     env = tmp_path / ".env"
