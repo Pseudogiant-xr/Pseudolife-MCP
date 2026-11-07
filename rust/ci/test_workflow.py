@@ -2068,6 +2068,9 @@ def test_body_evidence_reuses_runner_guards_and_never_gates():
     assert steps["Publish body evidence"]["if"] == "always()"
     assert steps["Publish body evidence"]["with"]["path"] == "${{ runner.temp }}/body-evidence/evidence.json"
     assert steps["Publish body evidence"]["with"]["if-no-files-found"] == "error"
+    # D6/D11 rows link a nightly's evidence.json: keep it for the repository's
+    # maximum (90 days), not the 30-day default other artifacts use.
+    assert steps["Publish body evidence"]["with"]["retention-days"] == 90
     require_command(commands(steps["Run every body differential"]["run"]),
                     ("python", "rust/ci/body_evidence.py", "run"), ("--rust-bin", "--out"))
     assert not any(s.get("uses", "").startswith("Swatinem/rust-cache") for s in lane["steps"])
