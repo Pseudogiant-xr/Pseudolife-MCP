@@ -173,7 +173,8 @@ fn engine_overlay(path: &Path) -> bool {
         .and_then(Path::file_name)
         .is_some_and(|d| d == "update-engine");
     (own_dir
-        && (name.starts_with("docker-compose.engine") || name.starts_with("docker-compose.rollback")))
+        && (name.starts_with("docker-compose.engine")
+            || name.starts_with("docker-compose.rollback")))
         || matches!(
             name,
             "docker-compose.rust-ghcr.yml"
