@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "rust",
+  "before": "1bf2949883eca84e",
+  "fingerprint": "10771332f7f5a929",
+  "reason": "Adds rust/daemon/harness/mirror/test_seed.py to the board-harness pytest step: 27 offline cases in 0.4 s on a Windows workstation (2026-11-07); its two database cases skip on windows-latest and start one throwaway pgvector container on ubuntu-latest (25 cases in 2.9 s on the daemon box). The step's 3-minute timeout holds."
+}
