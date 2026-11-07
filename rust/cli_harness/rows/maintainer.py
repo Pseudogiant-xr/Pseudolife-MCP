@@ -70,6 +70,23 @@ LABELS = {"pending": "laptop", "laptop": "laptop", "phone": "Tom's phone ☎",
 WRONG_CODE = "WRONGCODE2"
 
 
+def _session(sid: str, issuer: str, method: str) -> str:
+    """A v59 Console session row (test instrument): ``issuer`` is a passkey
+    credential id for a passkey sign-in, a token hash for a link one."""
+    token = hashlib.sha256(("cli-harness-browser-" + sid).encode()).hexdigest()
+    return ("INSERT INTO console_sessions (session_id, token_hash, principal, source, issuer, "
+            f"method, label, created_at, last_used_at, expires_at) VALUES ('{sid}', '{token}', "
+            f"'default', 'environment', '{issuer}', '{method}', 'Seeded {sid}', {T0}, NULL, "
+            f"{T0 + 90 * 86400.0})")
+
+
+# Signed-in browsers on the rich bank: the laptop key's and the phone key's
+# passkey sign-ins, and a link sign-in, which no key revocation touches.
+SESSIONS = (_session("sess-laptop", IDS["laptop"], "passkey"),
+            _session("sess-phone", IDS["phone"], "passkey"),
+            _session("sess-link", "0" * 64, "link"))
+
+
 class _Storage:
     """The minimal storage the oracle store runs on (as the CLI's own)."""
 
@@ -380,6 +397,13 @@ def maintainer_host_write(obs: dict) -> None:
                 row[field] = "<clock>"
     if keys:
         tables["maintainer_passkeys"] = sorted(json.dumps(r, sort_keys=True) for r in keys)
+    # v59: a revoked key's Console sign-ins end on the database clock.
+    sessions = [json.loads(text) for text in tables.get("console_sessions", [])]
+    for row in sessions:
+        if _in(row["revoked_at"], window):
+            row["revoked_at"] = "<clock>"
+    if sessions:
+        tables["console_sessions"] = sorted(json.dumps(r, sort_keys=True) for r in sessions)
     stdout = base64.b64decode(obs["stdout"])
     printed = _CODE_LINE.findall(stdout)
     codes = [json.loads(text) for text in tables.get("maintainer_bootstrap", [])]
@@ -650,7 +674,7 @@ WRITES = ("maintainer-host-write",)
 
 
 def case(case_id, kind, argv, *, rules=WRITES, during=None, env=None, dsn=True,
-         stdout_closed=False, skip_if=None, prepare=(), note="", programs=()):
+         stdout_closed=False, skip_if=None, prepare=(), note="", programs=(), golden=True):
     """``maintainer <argv>`` on this arm's own copy of a seeded bank;
     ``prepare`` statements run on that copy first (test instruments)."""
 
@@ -682,7 +706,7 @@ def case(case_id, kind, argv, *, rules=WRITES, during=None, env=None, dsn=True,
     return core.Case(case_id, ["maintainer", *argv], env=environment, setup=setup,
                      during=during, after=after, rules=rules, timeout=60,
                      stdout_closed=stdout_closed, skip_if=skip_if, note=note,
-                     programs=programs)
+                     programs=programs, golden=golden)
 
 
 LISTING = WRITES + ("maintainer-list-guard", "maintainer-local-times")
@@ -744,11 +768,20 @@ def cases() -> list[core.Case]:
         case("revoke-odd-space", "rich", ["revoke", "abc def"]),
         case("revoke-empty", "rich", ["revoke", ""]),
         case("revoke-non-ascii", "rich", ["revoke", "twinABé1"]),
+        # v59: a host revoke ends that key's passkey sign-ins only; reset ends
+        # every passkey's; link sign-ins stay. Live only: added after the
+        # goldens were recorded (see maintainer.md).
+        case("revoke-ends-the-keys-sign-ins", "rich", ["revoke", laptop[:8]],
+             prepare=SESSIONS, golden=False),
+        case("revoke-already-revoked-ends-nothing", "rich", ["revoke", IDS["spare"][:8]],
+             prepare=SESSIONS, golden=False),
         # reset
         case("reset-without-yes", "rich", ["reset"]),
         case("reset-rich", "rich", ["reset", "--yes"]),
         case("reset-pending", "pending", ["reset", "--yes"]),
         case("reset-empty", "empty", ["reset", "--yes"]),
+        case("reset-ends-every-passkey-sign-in", "rich", ["reset", "--yes"],
+             prepare=SESSIONS, golden=False),
         # a COMMIT that fails after every statement succeeded: Python's error
         # path with psycopg's class for the SQLSTATE (exact, then the class
         # prefix fallback), never a deferral
@@ -834,4 +867,7 @@ MUTANTS = [
     Mutant("maint-waiting-stdout-error-dropped", "maintainer", "shim/src/cli/maintainer/bank.rs",
            '            "error: {}; check PSEUDOLIFE_MCP_DATABASE_URL",\n',
            '            "error: {}; check the database",\n', ("enrol-code-wait-stdout-closed",)),
+    Mutant("maint-host-revoke-keeps-sign-ins", "maintainer", "shim/src/cli/maintainer/bank.rs",
+           "AND ($1::text IS NULL OR issuer = $1)", "AND FALSE AND ($1::text IS NULL OR issuer = $1)",
+           ("revoke-ends-the-keys-sign-ins", "reset-ends-every-passkey-sign-in")),
 ]
