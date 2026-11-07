@@ -47,6 +47,11 @@ const LEASE_RETRY: Duration = Duration::from_secs(5);
 /// reach the server, calls inside this window skip another attempt. Not
 /// measured in Python either: it bounds a burst to one attempt.
 const RECONNECT_RETRY: Duration = Duration::from_secs(5);
+/// Tests only: how many coming reconnects fail reading the lease epoch after
+/// they took the lease (an operational failure, as a dropped server would).
+#[cfg(test)]
+pub(crate) static INJECT_EPOCH_READ_FAILURES: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
 /// `_SESSION_PROBE_INTERVAL` (postgres.py:310-320): how long a writer
 /// session verified alive stays trusted. Python measured it 2026-09-23 on
 /// the bench PostgreSQL (Windows host to Docker): the `SELECT 1` probe costs
@@ -966,7 +971,9 @@ impl Storage {
 
     /// The reconnect half of `PostgresStorage.conn` (postgres.py:675-722):
     /// the cached refusal or failure inside its retry window, else a new
-    /// session that must win the lease back before it serves anything.
+    /// session that must win the lease back before it serves anything
+    /// (`reopen_and_record`, which holds `verify_writer_session`'s one
+    /// immediate retry).
     async fn heal(&self) -> Result<Option<Storage>, String> {
         {
             let state = self.session.lock().unwrap();
@@ -1006,38 +1013,50 @@ impl Storage {
     }
 
     async fn reopen_and_record(&self) -> Result<Option<Storage>, String> {
-        match self.reopen().await {
-            Ok(fresh) => Ok(Some(fresh)),
-            Err(Reopen::LeaseHeld(m)) => {
-                let mut state = self.session.lock().unwrap();
-                state.lease_lost = Some(m.clone());
-                state.lease_retry_at = Some(Instant::now() + LEASE_RETRY);
-                Err(m)
-            }
-            Err(Reopen::Unreachable(m)) => {
-                let mut state = self.session.lock().unwrap();
-                state.reconnect_error = Some(format!("reconnect failed: {m}"));
-                state.reconnect_retry_at = Some(Instant::now() + RECONNECT_RETRY);
-                Ok(None)
-            }
-            Err(Reopen::AfterLease {
-                operational: true, ..
-            }) => {
-                self.session.lock().unwrap().reconnect_error = None;
-                Ok(None)
-            }
-            Err(Reopen::AfterLease { message, .. }) => {
-                self.session.lock().unwrap().reconnect_error = None;
-                Err(message)
-            }
-            Err(Reopen::SchemaRefused(m)) => {
-                let mut state = self.session.lock().unwrap();
-                state.reconnect_error = None;
-                state.schema_refused = Some(m.clone());
-                state.schema_retry_at = Some(Instant::now() + LEASE_RETRY);
-                Err(m)
-            }
-            Err(Reopen::Failed(m)) => Err(m),
+        // A reconnect that won the lease but failed reading or bumping the
+        // epoch leaves no cached refusal, so `verify_writer_session`
+        // (postgres.py:555-568) reaches `self.conn` a second time at once:
+        // one immediate retry, then an operational failure is tolerated.
+        let mut retried = false;
+        loop {
+            return match self.reopen().await {
+                Ok(fresh) => Ok(Some(fresh)),
+                Err(Reopen::LeaseHeld(m)) => {
+                    let mut state = self.session.lock().unwrap();
+                    state.lease_lost = Some(m.clone());
+                    state.lease_retry_at = Some(Instant::now() + LEASE_RETRY);
+                    Err(m)
+                }
+                Err(Reopen::Unreachable(m)) => {
+                    let mut state = self.session.lock().unwrap();
+                    state.reconnect_error = Some(format!("reconnect failed: {m}"));
+                    state.reconnect_retry_at = Some(Instant::now() + RECONNECT_RETRY);
+                    Ok(None)
+                }
+                Err(Reopen::AfterLease {
+                    operational: true, ..
+                }) => {
+                    self.session.lock().unwrap().reconnect_error = None;
+                    if !retried {
+                        retried = true;
+                        eprintln!("reconnect failed after taking the lease; retrying once");
+                        continue;
+                    }
+                    Ok(None)
+                }
+                Err(Reopen::AfterLease { message, .. }) => {
+                    self.session.lock().unwrap().reconnect_error = None;
+                    Err(message)
+                }
+                Err(Reopen::SchemaRefused(m)) => {
+                    let mut state = self.session.lock().unwrap();
+                    state.reconnect_error = None;
+                    state.schema_refused = Some(m.clone());
+                    state.schema_retry_at = Some(Instant::now() + LEASE_RETRY);
+                    Err(m)
+                }
+                Err(Reopen::Failed(m)) => Err(m),
+            };
         }
     }
 
@@ -1080,6 +1099,20 @@ impl Storage {
             {
                 eprintln!("after reconnecting: {m}");
                 return Err(Reopen::SchemaRefused(m));
+            }
+            #[cfg(test)]
+            if INJECT_EPOCH_READ_FAILURES
+                .fetch_update(
+                    std::sync::atomic::Ordering::SeqCst,
+                    std::sync::atomic::Ordering::SeqCst,
+                    |n| n.checked_sub(1),
+                )
+                .is_ok()
+            {
+                return Err(Reopen::AfterLease {
+                    operational: true,
+                    message: "injected epoch read failure".into(),
+                });
             }
             let found = read_lease_epoch(&client).await.map_err(after_lease)?;
             let epoch = bump_lease_epoch_raw(&client).await.map_err(after_lease)?;
