@@ -1451,6 +1451,37 @@ def test_release_retains_original_project_directory_for_relative_mounts(tmp_path
                 assert args[args.index("--project-directory") + 1] == str(repo / "ops")
 
 
+@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+@pytest.mark.parametrize("engine", ["", "rust"])
+def test_release_keeps_a_user_override_whose_name_looks_like_an_engine_overlay(tmp_path, native, engine):
+    # A user's own Compose override named docker-compose.engine-*.yml beside
+    # the project was dropped as if it were one of the updater's overlays,
+    # losing its settings on recreation. Only the updater's own directory holds those.
+    binary = _native_binary()
+    if native and not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path) as (repo, env, state_path):
+        override = repo / "ops/docker-compose.engine-local.yml"
+        override.write_text('services:\n  pseudolife-daemon:\n    environment:\n      FIXTURE_LOCAL: "1"\n')
+        stale = Path(env["PSEUDOLIFE_MCP_DATA_DIR"]) / "update-engine/docker-compose.engine-candidate-old.json"
+        stale.parent.mkdir(parents=True, exist_ok=True)
+        stale.write_text("{}")
+        state = json.loads(state_path.read_text())
+        state["running"]["Config"]["Labels"]["com.docker.compose.project.config_files"] += (
+            "," + str(override) + "," + str(stale))
+        state_path.write_text(json.dumps(state))
+        args = ["--tag", "0.21.1", "--daemon-only", "--json", "--health-retries", "1", "--rollback-tag", "pre-own"]
+        if engine:
+            args = ["--engine", engine, *args]
+        result = run_arm(repo, env, binary if native else None, args)
+        assert result.returncode == 0, result.stdout + result.stderr
+        calls = json.loads(state_path.read_text())["calls"]
+        up = next(a for a in calls if a[:1] == ["compose"] and "up" in a)
+        assert str(override) in up, up
+        # The updater's own stale candidate is still never reused.
+        assert str(stale) not in up, up
+
+
 @pytest.mark.parametrize("mode", ["release", "checkout"])
 def test_changed_mount_or_wrong_checkout_endpoint_refuses_before_backup(tmp_path, mode):
     binary = _native_binary()
