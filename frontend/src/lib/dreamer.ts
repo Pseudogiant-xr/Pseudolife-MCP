@@ -23,6 +23,7 @@ export const DREAMER_MODELS = [
   { id: "gpt-5.6-luna", label: "Luna", note: "OpenAI fastest — unmeasured here" },
   { id: "gpt-6-sol", label: "GPT-6 Sol", note: "OpenAI GPT-6 flagship — unmeasured here" },
   { id: "gpt-6-luna", label: "GPT-6 Luna", note: "OpenAI GPT-6 fastest — unmeasured here" },
+  { id: "gpt-6.1-sol", label: "GPT-6.1 Sol", note: "OpenAI GPT-6.1 flagship — unmeasured here" },
 ];
 
 // Common levels every provider understands; the Extractor group's knob takes
