@@ -4755,9 +4755,9 @@ A daemon also refuses to start against a bank stamped by a newer build
 it is, so rolling back to an older release after an upgrade that moved
 the schema means restoring the backup taken before that upgrade
 (`pseudolife-mcp restore --backup-file <dump> --state-archive <state.tgz>`,
-`ops/restore.ps1 -Apply -BackupFile <dump>` or
-`ops/restore.sh --apply --backup-file <dump>`); `pseudolife-mcp update`
-says so beside its printed rollback when the deploy moved the schema.
+or from a checkout `ops/restore.ps1 -Apply -BackupFile <dump> -StateArchive <state.tgz>`
+or `ops/restore.sh --apply --backup-file <dump> --state-archive <state.tgz>`);
+`pseudolife-mcp update` says so beside its printed rollback when the deploy moved the schema.
 Separately from the schema meta version, Docker-tier installs created
 before 2026-08-14 also need the PostgreSQL 16 → 18 volume cutover —
 [the PostgreSQL 18 migration runbook](../runbooks/postgres-18-migration.md).

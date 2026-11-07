@@ -599,13 +599,15 @@ fn verify_endpoint(config: &Value, url: &str) -> Result<()> {
     }
     Ok(())
 }
-pub(super) fn require_imported_with(
+/// The bank's schema (-1 when unreadable) while its CMS counters still await
+/// the import from memory_state/weights.pt (D2), else None.
+pub(super) fn import_pending(
     u: &Update,
     pg: &str,
     user: &str,
     db: &str,
     daemon: &str,
-) -> Result<()> {
+) -> Result<Option<i64>> {
     let schema = sql(
         u,
         pg,
@@ -628,7 +630,16 @@ pub(super) fn require_imported_with(
     } else {
         true
     };
-    if schema.is_none_or(|s| s < 57) || pending {
+    Ok((schema.is_none_or(|s| s < 57) || pending).then(|| schema.unwrap_or(-1)))
+}
+pub(super) fn require_imported_with(
+    u: &Update,
+    pg: &str,
+    user: &str,
+    db: &str,
+    daemon: &str,
+) -> Result<()> {
+    if import_pending(u, pg, user, db, daemon)?.is_some() {
         return Err(UpdateError::usage(
             "Rust activation requires schema v57 or later and imported counters: run update --engine python --checkout <repo>, let the Python daemon import memory_state/weights.pt into cms_counters, then retry; nothing was changed",
         ));

@@ -1,0 +1,22 @@
+# Opt-in Rust release image; apply after docker-compose.ghcr.yml.
+# The updater supplies an explicit version and uses --no-build --no-deps.
+services:
+  pseudolife-daemon:
+    pull_policy: always
+    build: !reset null
+    image: ghcr.io/pseudogiant-xr/pseudolife-daemon-rust:${PSEUDOLIFE_IMAGE_TAG:?Select an explicit Rust release version}
+    labels:
+      org.pseudolife.engine: rust
+    # The pinned models are a re-downloadable cache: keep them out of /data,
+    # which every backup archives.
+    environment:
+      PSEUDOLIFE_DAEMON_MODELS_DIR: /models
+    volumes:
+      - pseudolife_rust_models:/models
+  # The release bundle is self-contained; the checkout base uses ../ops.
+  pseudolife-extractor:
+    build:
+      context: .
+      dockerfile: Dockerfile.extractor
+volumes:
+  pseudolife_rust_models: {}
