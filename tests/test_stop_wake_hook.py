@@ -221,6 +221,104 @@ def test_hooks_json_binds_stop_as_an_async_rewake_command():
     assert _constant("MAX_WAIT") < hook["timeout"]
 
 
+def test_hooks_json_binds_stop_failure_to_the_same_watcher():
+    """A turn that ends on an API or sign-in error runs StopFailure, never
+    Stop (Claude Code 2.1.318, measured 2026-11-07), so without this entry
+    such a turn left the session with no listener until a later turn ended
+    normally: two decisions to a T3 child waited 15 minutes behind a login
+    expiry. It is the Stop entry with the mode argument, async and
+    asyncRewake the same, so the watcher it arms wakes an idle session."""
+    hooks = json.loads((ROOT / "plugin/hooks/hooks.json").read_text(encoding="utf-8"))["hooks"]
+    [group] = hooks["StopFailure"]
+    [hook] = group["hooks"]
+    stop = _stop_hook()
+    assert hook["type"] == "command" and hook["async"] is True and hook["asyncRewake"] is True
+    assert hook["command"] == stop["command"] + " stop-failure"
+    assert hook["commandWindows"].endswith('lifecycle.ps1" -Event StopFailure')
+    assert hook["timeout"] == stop["timeout"]
+
+
+def _start_mode(env, mode, payload):
+    process = subprocess.Popen([bash_exe(), str(HOOK), mode], stdin=subprocess.PIPE,
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env,
+                               encoding="utf-8")
+    process.stdin.write(payload)
+    process.stdin.close()
+    STARTED.append(process)
+    return process
+
+
+def _failure_payload(session_id=SESSION):
+    return json.dumps({"session_id": session_id, "hook_event_name": "StopFailure",
+                       "error": "authentication_failed",
+                       "last_assistant_message": "Failed to authenticate"})
+
+
+def test_an_error_ended_turn_re_arms_the_listener_without_asking_the_gate(tmp_path):
+    """The StopFailure entry arms the same watcher as Stop, so a ring after
+    a failed turn still wakes the session. It never asks the park gate: a
+    failed turn has nothing to park, and a block would wake the session
+    into another turn that may fail the same way."""
+    server, requests = _gate_daemon("block\n" + GATE_MESSAGE + "\n")
+    try:
+        _digest(tmp_path, 3, "", ring=False)
+        _agent(tmp_path)
+        _turn(tmp_path, 1700000000)
+        env = _gate_env(tmp_path, server, PSEUDOLIFE_AGENT_WAKE_HOOK_WAIT="3540")
+        process = _start_mode(env, "stop-failure", _failure_payload())
+        lease = tmp_path / "digests" / f"{_key()}.wake"
+        assert _wait_until(lambda: lease.exists())
+        armed = lease.with_name(f"{_key()}.{lease.read_text().strip()}.wake-armed")
+        assert _wait_until(lambda: armed.exists())
+        _digest(tmp_path, 4, BODY)
+        code, out, err = _finish(process)
+        assert (code, out) == (2, "") and _woke(err)
+        assert [path for path, _ in requests if not path.startswith("POST ")] == []
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+@pytest.mark.parametrize("mode", ["stop-failures", "Stop-Failure", "stopfailure"])
+def test_a_near_miss_mode_argument_is_still_a_no_op(tmp_path, mode):
+    _digest(tmp_path, 4, BODY)
+    code, out, err = _finish(_start_mode(_env(tmp_path), mode, _failure_payload()))
+    assert (code, out, err) == (0, "", "")
+    assert not (tmp_path / "digests" / f"{_key()}.wake").exists()
+
+
+def test_stop_failure_does_nothing_in_codex_context(tmp_path):
+    """Codex 0.167.0 lists no StopFailure handler (an unknown event is
+    skipped, 2026-11-07); if a later one runs it, the script neither gates
+    nor waits."""
+    _digest(tmp_path, 4, BODY)
+    _agent(tmp_path)
+    env = _env(tmp_path, PSEUDOLIFE_CODEX_HOOK="1")
+    for name in ("CLAUDECODE", "CLAUDE_CODE_SESSION_ID"):
+        env.pop(name)
+    code, out, err = _finish(_start_mode(env, "stop-failure", _failure_payload()))
+    assert (code, out, err) == (0, "", "")
+    assert not (tmp_path / "digests" / f"{_key()}.wake").exists()
+
+
+def test_lifecycle_ps1_stop_failure_is_a_silent_no_op(tmp_path):
+    """The StopFailure entry's commandWindows is for a Codex that may one
+    day run it on Windows: it exits at once, asking nothing."""
+    server, requests = _recording_daemon()
+    try:
+        env = _env(tmp_path, PSEUDOLIFE_MCP_DAEMON_URL=f"http://127.0.0.1:{server.server_port}",
+                   PSEUDOLIFE_MCP_TOKEN="fixture-token")
+        _digest(tmp_path, 3, BODY)
+        _agent(tmp_path)
+        result = pwsh_run("-File", ROOT / "plugin/hooks/lifecycle.ps1", "-Event", "StopFailure",
+                          input=_failure_payload(), env=env)
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert (result.stdout, result.stderr, requests) == ("", "", [])
+    assert _read_seen(tmp_path) is None
+
+
 def test_the_watcher_outlasts_any_conductor_lease_granted_after_the_last_turn():
     """A session stays reachable while it is open (maintainer requirement
     2026-10-05), the delegate above all. The watcher armed at a turn end

@@ -668,6 +668,68 @@ async fn db_dead_writer_session_reconnects_without_a_handover() {
     fresh.close().await;
 }
 
+/// A reconnect that wins the lease and then fails reading its epoch is
+/// retried at once, as Python's `verify_writer_session` reaches `self.conn`
+/// a second time (postgres.py:555-568): one failure costs nothing; two are
+/// tolerated (no session, nothing cached) and the next call reconnects.
+#[tokio::test]
+async fn db_reconnect_failing_after_the_lease_is_retried_once() {
+    let Some(dsn) = test_dsn() else { return };
+    let _guard = DB.lock().await;
+    // A panic below must not leave injected failures for the next test.
+    struct ResetInjection;
+    impl Drop for ResetInjection {
+        fn drop(&mut self) {
+            INJECT_EPOCH_READ_FAILURES.store(0, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+    let _reset = ResetInjection;
+    let s = Storage::open(&dsn).await.expect("open");
+    let e1 = s.lease_epoch();
+    kill_writer(&s, &dsn).await;
+    INJECT_EPOCH_READ_FAILURES.store(1, std::sync::atomic::Ordering::SeqCst);
+    let fresh = s
+        .verify_writer_session()
+        .await
+        .expect("verify")
+        .expect("the immediate retry replaces the session");
+    assert_eq!(
+        INJECT_EPOCH_READ_FAILURES.load(std::sync::atomic::Ordering::SeqCst),
+        0
+    );
+    assert_eq!(
+        fresh.lease_epoch(),
+        e1 + 1,
+        "the failed attempt bumped nothing"
+    );
+    fresh.ping().await.expect("ping");
+    drop(s);
+
+    // Two failures in a row: tolerated, and the next call reconnects.
+    let e2 = fresh.lease_epoch();
+    kill_writer(&fresh, &dsn).await;
+    INJECT_EPOCH_READ_FAILURES.store(2, std::sync::atomic::Ordering::SeqCst);
+    assert!(
+        fresh
+            .verify_writer_session()
+            .await
+            .expect("tolerated")
+            .is_none()
+    );
+    assert_eq!(
+        INJECT_EPOCH_READ_FAILURES.load(std::sync::atomic::Ordering::SeqCst),
+        0
+    );
+    let later = fresh
+        .verify_writer_session()
+        .await
+        .expect("verify")
+        .expect("the next call reconnects");
+    assert_eq!(later.lease_epoch(), e2 + 1);
+    drop(fresh);
+    later.close().await;
+}
+
 #[tokio::test]
 async fn db_reconnect_after_another_writer_flags_the_handover() {
     let Some(dsn) = test_dsn() else { return };

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import re
 import os
 import shutil
 import subprocess
@@ -1718,7 +1719,7 @@ def _plugin_handler_keys():
                   "SessionEnd": "session_end", "Stop": "stop", "SubagentStop": "subagent_stop",
                   "PreToolUse": "pre_tool_use", "SubagentStart": "subagent_start"}
     return [f"pseudolife-memory@pseudolife-mcp:hooks/hooks.json:{event_keys[event]}:{g}:{h}"
-            for event, groups in manifest["hooks"].items()
+            for event, groups in manifest["hooks"].items() if event not in uc.CODEX_SKIPPED_HOOK_EVENTS
             for g, group in enumerate(groups) for h, _ in enumerate(group["hooks"])]
 
 
@@ -1986,3 +1987,45 @@ def test_the_installer_line_survives_a_console_that_cannot_encode_it(cli, monkey
     assert uc.marketplace_main() == 0
     sys.stdout.flush()
     assert b"backups in" in buffer.getvalue()
+
+
+# --- events Codex skips (StopFailure, 2026-11-07) ------------------------------
+
+def _without_stop_failure(manifest_bytes: bytes) -> bytes:
+    data = json.loads(manifest_bytes)
+    data["hooks"].pop("StopFailure", None)
+    return json.dumps(data).encode()
+
+
+def test_a_claude_only_hook_event_needs_no_codex_approval(tmp_path):
+    """Codex 0.167.0 skips the StopFailure event (no listing, no approval
+    asked; probed 2026-11-07), so an update must not report its handler as
+    unapproved: every Codex user would be told to re-approve, forever."""
+    manifest = json.loads((ROOT / "plugin/hooks/hooks.json").read_text(encoding="utf-8"))["hooks"]
+    assert "StopFailure" in manifest
+    (tmp_path / "hooks.json").write_bytes((ROOT / "plugin/hooks/hooks.json").read_bytes())
+    approved = ""
+    for event, groups in manifest.items():
+        if event == "StopFailure":
+            continue
+        name = re.sub(r"(?<!^)(?=[A-Z])", "_", event).lower()
+        for g, group in enumerate(groups):
+            for h, _ in enumerate(group["hooks"]):
+                approved += (f'\n[hooks.state."{uc.PLUGIN_ID}:hooks/hooks.json:{name}:{g}:{h}"]\n'
+                             f'trusted_hash = "sha256:{"0" * 64}"\n')
+    assert uc._unapproved_plugin_handlers(tmp_path, approved) == []
+
+
+def test_adding_a_codex_skipped_event_is_not_a_changed_codex_definition():
+    """The update that adds StopFailure leaves every handler Codex runs
+    byte-identical, so it is not a definition change Codex would ask about."""
+    current = (ROOT / "plugin/hooks/hooks.json").read_bytes()
+    assert uc._same_codex_hook_definitions(_without_stop_failure(current), current)
+
+
+def test_a_near_miss_change_to_a_codex_event_is_still_a_changed_definition():
+    current = json.loads((ROOT / "plugin/hooks/hooks.json").read_bytes())
+    changed = json.loads(json.dumps(current))
+    changed["hooks"]["Stop"][0]["hooks"][0]["timeout"] = 600
+    assert not uc._same_codex_hook_definitions(json.dumps(changed).encode(),
+                                               json.dumps(current).encode())

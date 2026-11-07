@@ -314,6 +314,31 @@ class WorldCortexStore:
             }
         return out
 
+    def retired_marks(self) -> dict[int, float | None]:
+        """Each retired record's ``superseded_at``, keyed by ``id(record)``:
+        what :meth:`undo_restore` puts back."""
+        return {id(r): r.superseded_at for r in self.records
+                if r.status == "retired"}
+
+    def undo_restore(self, restored: list, marks: dict[int, float | None],
+                     was_dirty: set) -> None:
+        """Put records a :meth:`restore` brought back into their retired
+        state again (status and ``superseded_at`` from ``marks``, taken by
+        :meth:`retired_marks` before the restore), for a restore whose
+        transaction failed. The dirty marks the restore added are dropped
+        (``was_dirty``: the slots dirty before it): when the COMMIT landed
+        with its reply lost the bank holds the restore, and a later sync must
+        not write the retired state back over it."""
+        for r in restored:
+            r.status = "retired"
+            r.superseded_at = marks.get(id(r))
+            if r.key not in was_dirty:
+                self.dirty_slots.discard(r.key)
+        if restored:
+            self._current = {
+                r.key: i for i, r in enumerate(self.records) if r.status == "current"
+            }
+
     def stats(self) -> dict:
         cur = sum(1 for r in self.records if r.status == "current")
         retired = sum(1 for r in self.records if r.status == "retired")

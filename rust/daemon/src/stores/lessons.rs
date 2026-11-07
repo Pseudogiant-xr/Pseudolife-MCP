@@ -411,6 +411,25 @@ impl LessonStore {
         picks
     }
 
+    /// `undo_restore` (`lessons.py`): put the records a [`Self::restore`]
+    /// brought back into their retired state again, each with the
+    /// `superseded_at` it had, for a restore whose transaction failed. The
+    /// dirty mark the restore added is dropped (each entry's flag: its slot
+    /// was dirty before): when the COMMIT landed with its reply lost the bank
+    /// holds the restore, and a later sync must not write the retired state
+    /// back over it.
+    pub fn undo_restore(&mut self, restored: &[(usize, Option<f64>, bool)]) {
+        for &(i, superseded_at, was_dirty) in restored {
+            let r = &mut self.records[i];
+            r.status = "retired".into();
+            r.superseded_at = superseded_at;
+            if !was_dirty {
+                let key = r.key.clone();
+                self.dirty_slots.remove(&key);
+            }
+        }
+    }
+
     /// `_refresh_source_retired_lessons_locked` (`service.py:5173-5203`):
     /// mirror the cascade's committed retirements, matched by stable record
     /// identity `(entity_norm, attribute_norm, value, asserted_at)`, onto

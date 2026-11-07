@@ -38,14 +38,16 @@ from schema_cases import clock_diffs
 from pseudolife_memory.storage.schema import assert_disposable_database
 
 pg = pgdisposable.Slice.from_env("pgs")
+# Multi-band presets and retention policies other than balanced are retired
+# (R11, maintainer 2026-11-02) and refuse Rust startup (run.py's retired-layout
+# refusals), so the custom cases run one balanced band: a stored band name
+# outside the preset is still renamed at hydration.
 CUSTOM_CONFIG = """memory:
   embedding_dim: 1024
   miras:
     preset: custom
     bands:
-      - {name: shallow, max_entries: 2, retention_policy: surprise_heavy}
-      - {name: middle, max_entries: 2, retention_policy: surprise_heavy}
-      - {name: deep, max_entries: 2, retention_policy: surprise_heavy}
+      - {name: shallow, max_entries: 2, retention_policy: balanced}
 """
 ZERO_TIME_CONFIG = """memory:
   embedding_dim: 1024
@@ -53,7 +55,6 @@ ZERO_TIME_CONFIG = """memory:
     preset: custom
     bands:
       - {name: hot, max_entries: 1, retention_policy: balanced}
-      - {name: deep, max_entries: 2, retention_policy: balanced}
 """
 LOAD_CLOCK = 1000.0
 FIDELITY_CASES = ("zero-timestamp-seating", "surprise-real-text-rounding",
@@ -113,7 +114,6 @@ MUTANTS = {
     "startup-skip-world": ("preset-rename", "/startup/world:"),
     "startup-hlc-zero": ("preset-rename", "/startup/hlc_highwater:"),
     "startup-drop-tombstones": ("preset-rename", "/startup/metadata/episode_tombstones/"),
-    "startup-skip-seating": ("preset-rename", "/entries:"),
     "startup-skip-stamp": ("preset-rename", "/rows/public.entries/rows:"),
     "startup-skip-cortex-dims": ("stale-cortex-dims", "/ok:"),
     "startup-keep-zero-timestamp": ("zero-timestamp-seating", "/entries:"),
@@ -183,6 +183,10 @@ def seed(storage, case):
             "session_key": f"session-{index}",
             "parent_id": EPISODES[1] if index == 2 else None,
         })
+    # deep-overflow keeps its name and golden key: with multi-band layouts
+    # retired (R11) it seeds nine entries into the one custom band of two,
+    # so it pins how an over-capacity single band hydrates, no longer the
+    # overflow walk between bands.
     count = 0 if case == "clock-retry" else 9 if case == "deep-overflow" else 5
     for index in range(count):
         dimension = (384 if index < 2 and case in {"stale-entry-dims", "stale-combined-dims"}
@@ -556,15 +560,18 @@ def cell(binary, number, case, result, mutant=None):
                         semantic_diffs.extend(dbstate.diff(
                             STALE_FAILURES[case], output.get("stale_dims"), f"/{kind}/expected_stale_dims"))
                     if output["ok"] and case == "zero-timestamp-seating":
+                        # One band (multi-band seating is retired, R11): both
+                        # stay in hot; the zero timestamp is served as the load
+                        # clock while the bank keeps 0.
                         semantic_diffs.extend(dbstate.diff(
-                            [("hot", LOAD_CLOCK), ("deep", LOAD_CLOCK - 100)],
+                            [("hot", LOAD_CLOCK), ("hot", LOAD_CLOCK - 100)],
                             [(row["band"], row["ts"]) for row in output["entries"]],
                             f"/{kind}/zero_timestamp_seats"))
                         table = state["rows"]["public.entries"]
                         columns = table["columns"]
                         durable = sorted(table["rows"], key=lambda row: row[columns.index("id")])
                         semantic_diffs.extend(dbstate.diff(
-                            [("hot", 0.0), ("deep", LOAD_CLOCK - 100)],
+                            [("hot", 0.0), ("hot", LOAD_CLOCK - 100)],
                             [(row[columns.index("band")], row[columns.index("ts")]) for row in durable],
                             f"/{kind}/durable_zero_timestamp_seats"))
                     if output["ok"] and case == "surprise-real-text-rounding":

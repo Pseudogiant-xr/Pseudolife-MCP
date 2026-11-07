@@ -1,0 +1,404 @@
+{
+  "tested_head": "5274b0b9269305f304f2b41ec756e408b60cac42",
+  "python_release_for_upgrade": "v0.22.1",
+  "venue": "Windows host Docker Desktop 29.9.2, one disposable Docker-in-Docker host per proof (debian:bookworm, docker-ce 29.9.3, nested cgroup v2), removed after each run; its own PostgreSQL, bank and state volumes; never the live bank",
+  "run_window_utc": [
+    "2026-11-06T16:53:34Z",
+    "2026-11-06T17:49:40Z"
+  ],
+  "snapshot_scope": "entries: count and md5 over id:md5(text) per row; facts: count and one md5 over entity|attribute|value|status of every row; meta.schema_version. Two of the bank's tables; embeddings, tags, episodes, graph, counters and the /data state volume are not fingerprinted.",
+  "proof_1_fresh_install": {
+    "steps": {
+      "clone": 0,
+      "checkout-master": 0,
+      "install-checkout": 0,
+      "health-after-install": 0,
+      "select-rust-default": 1,
+      "select-rust-show-failed-rollback": 0,
+      "select-rust-run-failed-rollback": 0,
+      "select-rust-health-after-failed-rollback": 0,
+      "select-rust-engine-after-failed-rollback": 0,
+      "select-rust": 0,
+      "health-rust": 0,
+      "engine-rust": 0,
+      "store-via-registered-shim": 0,
+      "restart-daemon": 0,
+      "health-after-restart": 0,
+      "engine-after-restart": 0,
+      "read-after-restart": 0,
+      "rerun-select-rust": 0
+    },
+    "health_after_install": {
+      "status": "ok",
+      "version": "0.22.1",
+      "schema": 59,
+      "storage": "postgres",
+      "auth": true,
+      "bank": null,
+      "persist_errors": 0,
+      "build_git_sha": "unknown"
+    },
+    "engine_after_select": {
+      "engine_label": "rust",
+      "image": "pseudolife-daemon-rust:checkout",
+      "image_id": "sha256:2ddad8cabca1"
+    },
+    "health_after_restart": {
+      "status": "ok",
+      "version": "0.22.1",
+      "schema": 59,
+      "storage": "postgres",
+      "auth": true,
+      "bank": null,
+      "persist_errors": 0,
+      "build_git_sha": "5274b0b9269305f304f2b41ec756e408b60cac42"
+    },
+    "engine_after_restart": {
+      "engine_label": "rust",
+      "image": "pseudolife-daemon-rust:checkout",
+      "image_id": "sha256:2ddad8cabca1"
+    },
+    "reads_after_restart_via_registered_shim": [
+      {
+        "tool": "memory_search",
+        "isError": false,
+        "count": 1,
+        "texts": [
+          "G2 fresh-install note served by Rust"
+        ]
+      },
+      {
+        "tool": "memory_fact_get",
+        "isError": false,
+        "value": "rust"
+      }
+    ],
+    "rerun_excerpt": [
+      "==> backing up the bank and /data before switching engines...",
+      "==> building the rust daemon; rollback image pseudolife-daemon-rust:0.22.1-pre-update-20261106-174930",
+      "==> rust health gate passed: version 0.22.1, schema 59, authenticated bank read",
+      "==> selected Rust; future updates retain this engine; rollback commands:"
+    ]
+  },
+  "proof_2_update_python_0_22_1_to_rust": {
+    "steps": {
+      "clone": 0,
+      "checkout-v0.22.1": 0,
+      "install-python-0.22.1": 0,
+      "health-python": 0,
+      "engine-python": 0,
+      "seed-via-registered-shim": 0,
+      "snapshot-before": 0,
+      "checkout-master": 0,
+      "update-to-rust-default": 1,
+      "update-to-rust-show-failed-rollback": 0,
+      "update-to-rust-run-failed-rollback": 0,
+      "update-to-rust-health-after-failed-rollback": 0,
+      "update-to-rust-engine-after-failed-rollback": 0,
+      "update-to-rust": 0,
+      "health-rust": 0,
+      "engine-rust": 0,
+      "rollback-tags": 0,
+      "snapshot-after": 0,
+      "read-via-registered-shim": 0
+    },
+    "engine_before": {
+      "engine_label": null,
+      "image": "pseudolife-daemon:0.22.1",
+      "image_id": "sha256:4d43da62ac0c"
+    },
+    "engine_after": {
+      "engine_label": "rust",
+      "image": "pseudolife-daemon-rust:checkout",
+      "image_id": "sha256:91200b49c6ea"
+    },
+    "health_after": {
+      "status": "ok",
+      "version": "0.22.1",
+      "schema": 59,
+      "storage": "postgres",
+      "auth": true,
+      "bank": "313d9ec766827a8b",
+      "persist_errors": 0,
+      "build_git_sha": "5274b0b9269305f304f2b41ec756e408b60cac42"
+    },
+    "bank_before": {
+      "entries": {
+        "rows": 2,
+        "fingerprint": "d8e4fde7fde82dd141e024ff898f8055"
+      },
+      "facts": {
+        "rows": 1,
+        "fingerprint": "b89b9b3100bad9bd1d371e2265fe5776"
+      },
+      "schema": {
+        "rows": 0,
+        "fingerprint": "59"
+      }
+    },
+    "bank_after": {
+      "entries": {
+        "rows": 2,
+        "fingerprint": "d8e4fde7fde82dd141e024ff898f8055"
+      },
+      "facts": {
+        "rows": 1,
+        "fingerprint": "b89b9b3100bad9bd1d371e2265fe5776"
+      },
+      "schema": {
+        "rows": 0,
+        "fingerprint": "59"
+      }
+    },
+    "rollback_tags": [
+      "pseudolife-daemon-rust:checkout 91200b49c6ea",
+      "pseudolife-daemon-python:0.22.1-pre-update-20261106-165803 4d43da62ac0c",
+      "pseudolife-daemon-python:0.22.1-pre-update-20261106-170638 4d43da62ac0c",
+      "pseudolife-daemon:0.22.1 4d43da62ac0c"
+    ],
+    "reads_via_registered_shim": [
+      {
+        "tool": "memory_search",
+        "isError": false,
+        "count": 2,
+        "texts": [
+          "G2 proof note two: the bank must survive the engine switch",
+          "G2 proof note one, written by Python 0.22.1"
+        ]
+      },
+      {
+        "tool": "memory_fact_get",
+        "isError": false,
+        "value": "python-0.22.1"
+      }
+    ],
+    "update_backup_excerpt": [
+      "==> backing up the bank and /data before switching engines...",
+      "Dumping pseudolife_memory from container 4198b3306ce6f8a187ce34d476f520aaff8b4035cfdb397f0c8e39b74636c185 -> /proof/repo-upgrade/data/backups/pseudolife_memory-20261106-170424.sql.gz",
+      "State volume -> /proof/repo-upgrade/data/backups/pseudolife_state-20261106-170424.tgz",
+      "Recorded in the daemon (/health last_backup)",
+      "Backup complete. Retained last 7 days in /proof/repo-upgrade/data/backups",
+      "==> building the rust daemon; rollback image pseudolife-daemon-python:0.22.1-pre-update-20261106-170638",
+      "==> rust health gate passed: version 0.22.1, schema 59, authenticated bank read"
+    ]
+  },
+  "proof_3_backup_restore_rollback": {
+    "steps": {
+      "write-under-rust": 0,
+      "snapshot-rust": 0,
+      "backup-under-rust": 0,
+      "write-after-backup": 0,
+      "list-backups": 0,
+      "restore-under-rust": 0,
+      "health-after-restore": 0,
+      "engine-after-restore": 0,
+      "snapshot-after-restore": 0,
+      "read-after-restore": 0,
+      "show-printed-rollback": 0,
+      "printed-rollback-to-python-0.22.1": 0,
+      "health-python-0.22.1-after-rollback": 0,
+      "engine-after-printed-rollback": 0,
+      "snapshot-after-printed-rollback": 0,
+      "python-0.22.1-reads-rust-writes": 0,
+      "python-0.22.1-writes": 0,
+      "engine-python-from-master": 0,
+      "health-python-master": 0,
+      "engine-python-master": 0,
+      "snapshot-python-master": 0
+    },
+    "bank_at_backup": {
+      "entries": {
+        "rows": 3,
+        "fingerprint": "6fb36c5ceb47ef3ffc2984d2dd3ba484"
+      },
+      "facts": {
+        "rows": 2,
+        "fingerprint": "ebf3ccd800c862acaef67819fe3b4537"
+      },
+      "schema": {
+        "rows": 0,
+        "fingerprint": "59"
+      }
+    },
+    "backup_excerpt": [
+      "bank dump:     /root/.pseudolife-mcp/backups/pseudolife_memory-20261106-170913-6615f3a0.sql.gz",
+      "state archive: /root/.pseudolife-mcp/backups/pseudolife_state-20261106-170913-6615f3a0.tgz"
+    ],
+    "restore_excerpt": [
+      "==> Safety-dumping the current database and state volume...",
+      "Safety backup: /root/.pseudolife-mcp/backups/pseudolife_memory-20261106-171514-c224d15b.sql.gz + /root/.pseudolife-mcp/backups/pseudolife_state-20261106-171514-c224d15b.tgz",
+      "==> Dropping + recreating pseudolife_memory...",
+      "Restore complete; daemon started."
+    ],
+    "bank_after_restore": {
+      "entries": {
+        "rows": 3,
+        "fingerprint": "6fb36c5ceb47ef3ffc2984d2dd3ba484"
+      },
+      "facts": {
+        "rows": 2,
+        "fingerprint": "ebf3ccd800c862acaef67819fe3b4537"
+      },
+      "schema": {
+        "rows": 0,
+        "fingerprint": "59"
+      }
+    },
+    "engine_after_restore": {
+      "engine_label": "rust",
+      "image": "pseudolife-daemon-rust:checkout",
+      "image_id": "sha256:91200b49c6ea"
+    },
+    "reads_after_restore": [
+      {
+        "tool": "memory_search",
+        "isError": false,
+        "count": 3,
+        "texts": [
+          "G2 proof note one, written by Python 0.22.1",
+          "G2 proof note three, written by the Rust daemon",
+          "G2 proof note two: the bank must survive the engine switch"
+        ]
+      },
+      {
+        "tool": "memory_fact_get",
+        "isError": false,
+        "value": "rust"
+      }
+    ],
+    "engine_after_printed_rollback": {
+      "engine_label": "python",
+      "image": "pseudolife-daemon-python:0.22.1-pre-update-20261106-170638",
+      "image_id": "sha256:4d43da62ac0c"
+    },
+    "health_after_printed_rollback": {
+      "status": "ok",
+      "version": "0.22.1",
+      "schema": 59,
+      "storage": "postgres",
+      "auth": true,
+      "bank": "313d9ec766827a8b",
+      "persist_errors": 0,
+      "build_git_sha": "unknown"
+    },
+    "bank_after_printed_rollback": {
+      "entries": {
+        "rows": 3,
+        "fingerprint": "6fb36c5ceb47ef3ffc2984d2dd3ba484"
+      },
+      "facts": {
+        "rows": 2,
+        "fingerprint": "ebf3ccd800c862acaef67819fe3b4537"
+      },
+      "schema": {
+        "rows": 0,
+        "fingerprint": "59"
+      }
+    },
+    "python_0_22_1_reads_rust_writes": [
+      {
+        "tool": "memory_search",
+        "isError": false,
+        "count": 3,
+        "texts": [
+          "G2 proof note three, written by the Rust daemon",
+          "G2 proof note one, written by Python 0.22.1",
+          "G2 proof note two: the bank must survive the engine switch"
+        ]
+      },
+      {
+        "tool": "memory_fact_get",
+        "isError": false,
+        "value": "rust"
+      }
+    ],
+    "engine_python_from_master": {
+      "engine_label": "python",
+      "image": "pseudolife-daemon-python:checkout",
+      "image_id": "sha256:3ca70df7f3c6"
+    },
+    "bank_after_engine_python_from_master": {
+      "entries": {
+        "rows": 4,
+        "fingerprint": "fb59bfc0ed3711df36e2c370149c5ffb"
+      },
+      "facts": {
+        "rows": 2,
+        "fingerprint": "ebf3ccd800c862acaef67819fe3b4537"
+      },
+      "schema": {
+        "rows": 0,
+        "fingerprint": "59"
+      }
+    }
+  },
+  "default_activation": [
+    {
+      "host": "upgrade (this run)",
+      "exit": 1,
+      "updater": [
+        "WARNING: the engine failed its version, schema or authenticated-read gate"
+      ],
+      "daemon_at_failure": [
+        "pseudolife-mcp-daemon pseudolife-daemon-rust:checkout Up 43 seconds (health: starting)",
+        "pseudolife-mcp-postgres pseudolife-pg:18 Up 6 minutes (healthy)",
+        "curl: (56) Recv failure: Connection reset by peer",
+        "model provisioning phase: installing pinned artifacts; daemon readiness follows this phase",
+        "downloading model.onnx (1 of 12)",
+        "downloading model.onnx_data (2 of 12)"
+      ],
+      "engine_after_failed_rollback": {
+        "engine_label": "python",
+        "image": "pseudolife-daemon-python:0.22.1-pre-update-20261106-165803",
+        "image_id": "sha256:4d43da62ac0c"
+      },
+      "health_after_failed_rollback": {
+        "status": "ok",
+        "version": "0.22.1",
+        "schema": 59,
+        "storage": "postgres",
+        "auth": true,
+        "bank": "313d9ec766827a8b",
+        "persist_errors": 0,
+        "build_git_sha": "unknown"
+      }
+    },
+    {
+      "host": "fresh (this run)",
+      "exit": 1,
+      "updater": [
+        "WARNING: the engine failed its version, schema or authenticated-read gate"
+      ],
+      "daemon_at_failure": [
+        "pseudolife-mcp-daemon pseudolife-daemon-rust:checkout Up 43 seconds (health: starting)",
+        "pseudolife-mcp-postgres pseudolife-pg:18 Up 6 minutes (healthy)",
+        "curl: (56) Recv failure: Connection reset by peer",
+        "model provisioning phase: installing pinned artifacts; daemon readiness follows this phase",
+        "downloading model.onnx (1 of 12)",
+        "downloading model.onnx_data (2 of 12)"
+      ],
+      "engine_after_failed_rollback": {
+        "engine_label": "python",
+        "image": "pseudolife-daemon-python:0.22.1-pre-update-20261106-173217",
+        "image_id": "sha256:5978a78fb525"
+      },
+      "health_after_failed_rollback": {
+        "status": "ok",
+        "version": "0.22.1",
+        "schema": 59,
+        "storage": "postgres",
+        "auth": true,
+        "bank": null,
+        "persist_errors": 0,
+        "build_git_sha": "unknown"
+      }
+    },
+    {
+      "host": "fresh (the run before, 16:40-16:49Z, harness without diagnostics)",
+      "exit": 1,
+      "updater": [
+        "WARNING: the engine failed its version, schema or authenticated-read gate"
+      ]
+    }
+  ]
+}

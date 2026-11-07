@@ -30,6 +30,7 @@
 #![allow(clippy::result_large_err)]
 
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
@@ -40,7 +41,6 @@ use super::{get_meta, internal, py_json, py_truthy, py_type};
 use crate::episodes::{Caller, WriteState};
 #[cfg(test)]
 use crate::lesson_write::compound_halves;
-use crate::lesson_write::link_lesson_graph;
 use crate::mcp::dispatch::ToolError;
 use crate::pyjson::py_str;
 use crate::service::{Ready, Service};
@@ -520,6 +520,140 @@ struct Restored {
     entry: Value,
 }
 
+/// `_restore_decisions_with_slots` for the world legacy restore: its
+/// decision rows and its slot save as one transaction, so the bank holds
+/// both or neither: never a restore decision for a slot it still holds
+/// retired, nor a restored slot without its decision. On a failure the
+/// resident restore is undone (`marks`: each restored record's index, the
+/// `superseded_at` it had and whether its slot was dirty), so a later save
+/// cannot write the slot without its decision and a retry restores again;
+/// the restore's own dirty mark is dropped, so a COMMIT that landed with
+/// its reply lost is never written back over (the resident copy then
+/// holds the slot retired until it is re-read). The dirty marks clear
+/// only after the commit. A failure of the slot save or the COMMIT counts
+/// as a persistence failure, as Python's does; a failed decision write
+/// does not.
+async fn commit_world_restore(
+    svc: &Service,
+    ready: &Ready,
+    decisions: &[(&SlotKey, &Value)],
+    marks: &[(usize, Option<f64>, bool)],
+    now: f64,
+) -> Result<(), ToolError> {
+    let snap = ready.world.snapshot();
+    let saving = AtomicBool::new(false);
+    let outcome = {
+        let (snap, saving) = (&snap, &saving);
+        in_txn(ready.storage.client(), |c| async move {
+            for (key, snapshot) in decisions {
+                if !crate::mutants::active("mcp-review-slot-no-decision") {
+                    crate::forget_tools::record_store_decision(
+                        c,
+                        Store::World.name(),
+                        (&key.0, &key.1),
+                        "restore",
+                        Some(DECIDED_BY),
+                        None,
+                        snapshot,
+                        now,
+                    )
+                    .await
+                    .map_err(internal)?;
+                }
+            }
+            saving.store(true, Ordering::SeqCst);
+            crate::stores::world::sync_slot_rows_in(c, snap)
+                .await
+                .map_err(|e| internal(format!("world cortex save failed: {e:#}")))
+        })
+        .await
+    };
+    drop(snap);
+    let slots = outcome.inspect_err(|e| {
+        ready.world.write(|s| s.undo_restore(marks));
+        if saving.load(Ordering::SeqCst) {
+            svc.persist_errors.fetch_add(1, Ordering::Relaxed);
+            eprintln!(
+                "World cortex save failed (NOT durably persisted): {}",
+                error_text(e)
+            );
+        }
+    })?;
+    ready.world.write(|s| {
+        for key in &slots {
+            s.dirty_slots.remove(key);
+        }
+    });
+    Ok(())
+}
+
+/// [`commit_world_restore`] for the lesson legacy restore, its graph links
+/// in the same transaction.
+async fn commit_lesson_restore(
+    svc: &Service,
+    ready: &Ready,
+    recs: &[Restored],
+    marks: &[(usize, Option<f64>, bool)],
+    now: f64,
+) -> Result<(), ToolError> {
+    if let Err(e) = crate::forget_tools::ensure_lessons_refreshed(ready).await {
+        ready.lessons.write(|l| l.undo_restore(marks));
+        return Err(internal(e));
+    }
+    let snap = ready.lessons.snapshot();
+    let saving = AtomicBool::new(false);
+    let outcome = {
+        let (snap, saving) = (&snap, &saving);
+        in_txn(ready.storage.client(), |c| async move {
+            for r in recs {
+                if !crate::mutants::active("mcp-review-slot-no-decision") {
+                    crate::forget_tools::record_store_decision(
+                        c,
+                        Store::Lesson.name(),
+                        (&r.key.0, &r.key.1),
+                        "restore",
+                        Some(DECIDED_BY),
+                        None,
+                        &r.audit,
+                        now,
+                    )
+                    .await
+                    .map_err(internal)?;
+                }
+                crate::lesson_write::link_lesson_graph_in(
+                    c,
+                    &r.task,
+                    r.about.as_deref(),
+                    &r.polarity,
+                )
+                .await?;
+            }
+            saving.store(true, Ordering::SeqCst);
+            crate::stores::lessons::sync_slot_rows_in(c, snap)
+                .await
+                .map_err(|e| internal(format!("lesson store save failed: {e:#}")))
+        })
+        .await
+    };
+    drop(snap);
+    let slots = outcome.inspect_err(|e| {
+        ready.lessons.write(|l| l.undo_restore(marks));
+        if saving.load(Ordering::SeqCst) {
+            svc.persist_errors.fetch_add(1, Ordering::Relaxed);
+            eprintln!(
+                "Lesson store save failed (NOT durably persisted): {}",
+                error_text(e)
+            );
+        }
+    })?;
+    ready.lessons.write(|s| {
+        for key in &slots {
+            s.dirty_slots.remove(key);
+        }
+    });
+    Ok(())
+}
+
 /// The lesson legacy path, then the audit-snapshot fallback for the retired
 /// slots it could not cover (`service.lesson_restore`).
 async fn restore_lessons(
@@ -533,8 +667,18 @@ async fn restore_lessons(
     let ne = norm_key(task);
     let na = aspect.map(norm_key);
     let now = crate::episodes::now();
-    let recs: Vec<Restored> = ready.lessons.write(|l| {
-        l.restore(task, aspect)
+    type Marks = Vec<(usize, Option<f64>, bool)>;
+    let (marks, recs): (Marks, Vec<Restored>) = ready.lessons.write(|l| {
+        let marks: Marks = l
+            .restore_picks(task, aspect)
+            .into_iter()
+            .map(|i| {
+                let r = &l.records[i];
+                (i, r.superseded_at, l.dirty_slots.contains(&r.key))
+            })
+            .collect();
+        let recs = l
+            .restore(task, aspect)
             .into_iter()
             .map(|i| {
                 let r = &l.records[i];
@@ -547,16 +691,11 @@ async fn restore_lessons(
                     entry: Value::Object(crate::lesson_tools::record_to_dict(r)),
                 }
             })
-            .collect()
+            .collect();
+        (marks, recs)
     });
     if !recs.is_empty() {
-        for r in &recs {
-            if !crate::mutants::active("mcp-review-slot-no-decision") {
-                write_restore_decision(ready, Store::Lesson, &r.key, None, &r.audit, now).await?;
-            }
-            link_lesson_graph(client, &r.task, r.about.as_deref(), &r.polarity).await?;
-        }
-        crate::forget_tools::save_lessons(svc, ready).await?;
+        commit_lesson_restore(svc, ready, &recs, &marks, now).await?;
     }
     let live: HashSet<SlotKey> = ready
         .lessons
@@ -601,19 +740,26 @@ async fn restore_world(
     let ne = norm_key(entity);
     let na = attribute.map(norm_key);
     let now = crate::episodes::now();
-    let recs: Vec<(usize, SlotKey, Value)> = ready.world.write(|s| {
-        s.restore(entity, attribute)
+    type Marks = Vec<(usize, Option<f64>, bool)>;
+    let (marks, recs): (Marks, Vec<(usize, SlotKey, Value)>) = ready.world.write(|s| {
+        let marks = s
+            .restore_picks(entity, attribute)
+            .into_iter()
+            .map(|i| {
+                let r = &s.records[i];
+                (i, r.superseded_at, s.dirty_slots.contains(&r.key))
+            })
+            .collect();
+        let recs = s
+            .restore(entity, attribute)
             .into_iter()
             .map(|i| (i, s.records[i].key.clone(), s.records[i].audit_snapshot()))
-            .collect()
+            .collect();
+        (marks, recs)
     });
     if !recs.is_empty() {
-        for (_, key, snapshot) in &recs {
-            if !crate::mutants::active("mcp-review-slot-no-decision") {
-                write_restore_decision(ready, Store::World, key, None, snapshot, now).await?;
-            }
-        }
-        crate::world_tools::save_world(svc, ready).await?;
+        let decisions: Vec<(&SlotKey, &Value)> = recs.iter().map(|(_, k, s)| (k, s)).collect();
+        commit_world_restore(svc, ready, &decisions, &marks, now).await?;
     }
     let live: HashSet<SlotKey> = ready
         .world

@@ -72,12 +72,15 @@ CLOCK_COLUMNS = {
     ("retrieval_uses", "created_at"): "clock: wall clock per use label (storage/postgres.py:2199)",
 }
 # Each deliberate break (rust/daemon/src/mutants.rs, `--features mutants`)
-# and the scenario that must catch it.
+# and the scenario that must catch it. Multi-band presets are retired (R11,
+# maintainer 2026-11-02) and refuse Rust startup, so the continuum suites and
+# the two breaks only a multi-band bank reaches (depth recency, a filtered
+# tier) are gone; run.py's retired-layout refusals cover the refusal.
 MUTANTS = {"search-skip-event": "log-off-control", "search-no-access-bump": "default",
            "search-timeline-unsorted": "timeline", "search-chronicle-limit": "default",
            "search-no-contiguity": "contiguity", "search-rrf-off": "rrf-pool",
            "search-no-cortex": "default", "search-rerank-unfused": "margin-gate",
-           "search-neighbours-reversed": "contiguity", "search-recency-off": "continuum",
+           "search-neighbours-reversed": "contiguity",
            "search-cortex-stripped-q": "default", "w2d-cortex-skip-slot-reads": "default",
            "mcp-search-no-dedup": "mcp-search", "mcp-search-no-correct-with": "mcp-search",
            "search-no-subtree": "mcp-search",
@@ -89,8 +92,7 @@ MUTANTS = {"search-skip-event": "log-off-control", "search-no-access-bump": "def
            "mcp-get-no-db-bump": "mcp-get", "mcp-get-no-use-credit": "mcp-get",
            "mcp-stats-no-tier-hits": "mcp-stats", "mcp-stats-no-graduation": "mcp-stats",
            "mcp-stats-no-capacity-warning": "mcp-stats-capacity",
-           "trace-no-trace": "trace", "trace-no-relevance-drop": "trace",
-           "trace-filtered-tier-missing": "trace-continuum"}
+           "trace-no-trace": "trace", "trace-no-relevance-drop": "trace"}
 pg = pgdisposable.Slice("w2d")
 
 
@@ -295,22 +297,6 @@ class LogOffControl(Scenario):
     def cases(self):
         auth = [bearer(TOKEN)]
         return [case(f"logged {i}", q(q=t), auth) for i, t in enumerate(CRAFTED[:3])]
-
-
-class Continuum(Scenario):
-    """Review finding (Opus, 2026-10-09): multi-band presets with depth
-    recency. The flat-seeded rows are reseated into the first band."""
-    name = "continuum"
-    config_yaml = "memory:\n  recency_boost_enabled: true\n  miras:\n    preset: continuum\n"
-    require = {"recency_boost": 1, "with_entries": 4}
-
-    def cases(self):
-        auth = [bearer(TOKEN)]
-        return [case(f"continuum {i}", q(q=t, top_k=6), auth) for i, t in enumerate(CRAFTED[:5])] + [
-            case("band working", q(q="deploy the daemon", band="working"), auth),
-            case("band forever (empty)", q(q="deploy the daemon", band="forever"), auth),
-            case("recency off", q(q="deploy the daemon", disable_recency_boost="1"), auth),
-            case("band flat (not in preset)", q(q="deploy", band="flat"), auth)]
 
 
 class HideSuperseded(Scenario):
@@ -657,22 +643,6 @@ class McpStats(Scenario):
         ]
 
 
-class McpStatsContinuum(Scenario):
-    """memory_stats with the eight continuum bands: per-band hit rates and the
-    v0.4 aliases (instant by name, short_term and long_term by position)."""
-    name = "mcp-stats-continuum"
-    live_only = True
-    config_yaml = "memory:\n  miras:\n    preset: continuum\n"
-    require = {"stats.responses": 2, "stats.multiband": 2, "stats.hits": 1}
-
-    def cases(self):
-        stats = lambda n: mcp_case(n, {}, tool="memory_stats")  # noqa: E731
-        return [stats("continuum stats before"),
-                mcp_case("continuum search", {"query": "deploy the daemon", "top_k": 4}),
-                mcp_case("continuum search 2", {"query": "harness evidence", "top_k": 4}),
-                stats("continuum stats after")]
-
-
 class McpStatsCapacity(Scenario):
     """memory_stats at capacity: one custom band sized one past the seeded
     bank, so the warning reads "NN% full", then "full" after a store, and a
@@ -754,20 +724,6 @@ class TraceRerank(Scenario):
             case("trace rerank off by request", tq(q="how do I back up the bank", rerank="0"), auth)]
 
 
-class TraceContinuum(Scenario):
-    """Multi-band tiers: depth recency (each candidate's recency weight),
-    and the tiers a band filter leaves out."""
-    name = "trace-continuum"
-    config_yaml = "memory:\n  recency_boost_enabled: true\n  miras:\n    preset: continuum\n"
-    require = {"trace.recency": 1, "trace.filtered_out_tier": 1}
-
-    def cases(self):
-        auth = [bearer(TOKEN)]
-        return [case(f"trace continuum {i}", tq(q=t, top_k=6), auth)
-                for i, t in enumerate(CRAFTED[:4])] + [
-            case("trace band working", tq(q="deploy the daemon", band="working"), auth)]
-
-
 class TraceTimeline(Scenario):
     """The timeline channel's record: fired with its injections, or why not."""
     name = "trace-timeline"
@@ -782,11 +738,11 @@ class TraceTimeline(Scenario):
 
 
 SCENARIOS = {s.name: s for s in (Default, Timeline, Contiguity, RrfPool, MarginGate, LogOff,
-                                  LogOffControl, Continuum, HideSuperseded, ConfidenceFloor,
+                                  LogOffControl, HideSuperseded, ConfidenceFloor,
                                   PointerExpired, ConfidenceRounding, McpSearch, McpExplain,
                                   McpTransportSession, McpRecent, McpFactGet, McpGet,
-                                  McpStats, McpStatsContinuum, McpStatsCapacity, Trace,
-                                  TraceRerank, TraceContinuum, TraceTimeline)}
+                                  McpStats, McpStatsCapacity, Trace,
+                                  TraceRerank, TraceTimeline)}
 
 
 # ---- comparison ----------------------------------------------------------------------

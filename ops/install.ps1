@@ -39,6 +39,10 @@
 # omitted -Extractor uses sidecar, the local CPU default.
 # -NoToken (switch): open-loopback install - mint no bearer token, so the
 #   agent board stays off.
+# -Engine rust|python: the Docker daemon. rust pulls the release's published
+#   Rust image; a rerun keeps the engine installed (default for a new
+#   install: python); naming the other engine switches it through
+#   pseudolife-mcp update.
 # -TestLogin (switch): also give the test suite its own Postgres login, which
 #   cannot open the bank (`pseudolife-mcp test-login create`): for
 #   contributors who run the suite against this server; off by default.
@@ -147,7 +151,10 @@ param(
     # Optional guided ChatGPT Secure MCP Tunnel setup after local installation.
     [switch]$Tunnel,
     # Also give the test suite its own Postgres login (see the header).
-    [switch]$TestLogin
+    [switch]$TestLogin,
+    # The Docker daemon engine (see the header).
+    [ValidateSet("", "rust", "python")]
+    [string]$Engine = ""
 )
 $ErrorActionPreference = "Stop"
 
@@ -184,7 +191,10 @@ function Get-InstallerPython {
     # next one. Never alters the user's PATH.
     foreach ($candidate in @("python", "python3", "py")) {
         if (-not (Get-Command $candidate -ErrorAction SilentlyContinue)) { continue }
-        $probeArgs = if ($candidate -eq "py") { @("-3") } else { @() }
+        # Assigned: an if-expression unrolls a one-item array to a string, which
+        # splats as characters (py - 3).
+        $probeArgs = @()
+        if ($candidate -eq "py") { $probeArgs = @("-3") }
         try {
             $probe = & $candidate @probeArgs -c 'import sys; sys.exit(1) if sys.version_info < (3, 10) else print(sys.executable)' 2>$null
             if (($LASTEXITCODE -eq 0) -and $probe) { return "$probe".Trim() }
@@ -878,6 +888,23 @@ if (-not $ClientOnly -and "$ClientUpdateSchedule" -notin "", "ask", "no") {
 }
 # <<< client-only mode <<<
 
+# >>> engine flag >>>
+# After every client-only inference (-DaemonUrl, the environment, the bank
+# question), so an implied client-only install refuses it too. ValidateSet
+# ignores case; the helper and update do not.
+$Engine = "$Engine".ToLowerInvariant()
+if ($Engine -and $ClientOnly) {
+    [Console]::Error.WriteLine("-Engine selects this host's Docker daemon, and a client-only install runs none; drop -Engine, or run the installer on the daemon's host. Nothing was changed.")
+    exit 2
+}
+# Rust needs a bearer: -NoToken mints none, and neither does -Transport http
+# unless ops/.env already sets one.
+$envHasToken = [bool]"$env:PSEUDOLIFE_MCP_TOKEN$env:PSEUDOLIFE_MCP_TOKENS" -or ((Test-Path $envFile) -and [bool](Select-String -LiteralPath $envFile -Pattern '^PSEUDOLIFE_MCP_TOKENS?=\S' -Quiet))
+if ($Engine -eq 'rust' -and ($NoToken -or ($Transport -eq 'http' -and -not $envHasToken))) {
+    [Console]::Error.WriteLine("-Engine rust needs the daemon's bearer token: pseudolife-mcp update verifies the Rust daemon with an authenticated read, and this install would mint none (-NoToken, or -Transport http with no token in ops/.env). Drop that option or use -Engine python. Nothing was changed.")
+    exit 2
+}
+# <<< engine flag <<<
 # -- 1. provider selection (before preflight, so it checks what you picked) ------
 # The official Windows CLI may be installed outside PATH. Keep its forwarding
 # command in this script's scope so discovery, preflight and registration use
@@ -1283,6 +1310,50 @@ if (-not $ClientOnly) {
     $existingVolumes = @(docker volume ls --format '{{.Name}}')
     if ($LASTEXITCODE -ne 0) { throw "Could not list Docker volumes; check docker info and rerun." }
     $volumesChanged = $false
+    $bankExisted = $existingVolumes -contains $bankVol
+}
+# <<< volumes <<<
+
+# -- 4b. daemon engine -----------------------------------------------------------
+# >>> daemon engine >>>
+# The engine already installed is kept; a new install takes -Engine (default
+# python). Naming the other engine on an existing bank switches it after the
+# install through pseudolife-mcp update (backup, rollback tag, health gate).
+# Rust pulls the release's image and provisions its models into their own
+# volume here, before any container starts, so a refusal starts nothing.
+function Invoke-EngineHelper {
+    & (Get-InstallerPython) (Join-Path $repo "ops/installer_engine.py") @args
+}
+$installedEngine = ""
+$composeEngine = ""
+$switchEngine = ""
+$engineFiles = @()
+if (-not $ClientOnly) {
+    $installedEngine = "$(Invoke-EngineHelper detect --repo $repo)".Trim()
+    if ($LASTEXITCODE -ne 0) { exit 1 }
+    if ($installedEngine -eq 'none') {
+        $composeEngine = if ($Engine) { $Engine } else { 'python' }
+        # An existing bank reaches Rust only through update, which checks its
+        # schema and counters first.
+        if ($composeEngine -eq 'rust' -and $bankExisted) { $composeEngine = 'python'; $switchEngine = 'rust' }
+    } elseif ($installedEngine -eq 'rust-unaccepted') {
+        # This checkout's own unfinished Rust install: redo it, or install Python.
+        $composeEngine = if ($Engine) { $Engine } else { 'rust' }
+    } else {
+        $composeEngine = $installedEngine
+        if ($Engine -and ($installedEngine -replace '-checkout$', '') -ne $Engine) { $switchEngine = $Engine }
+    }
+    $engineFiles = @(Invoke-EngineHelper prepare --repo $repo --engine $composeEngine | Where-Object { $_ })
+    if ($LASTEXITCODE -ne 0) { exit 1 }
+    if ($switchEngine) { Step "Daemon engine: $($composeEngine -replace '-checkout$', '') for now; switching to $switchEngine after the install" }
+    elseif ($installedEngine -in 'none', 'rust-unaccepted') { Step "Daemon engine: $($composeEngine -replace '-checkout$', '')" }
+    else { Step "Daemon engine unchanged: $($composeEngine -replace '-checkout$', '')" }
+}
+# <<< daemon engine <<<
+
+# -- 4c. create volumes (after every refusal above) -----------------------------
+# >>> create volumes >>>
+if (-not $ClientOnly) {
     foreach ($volume in @($bankVol, $stateVol)) {
         if ($existingVolumes -notcontains $volume) {
             docker volume create $volume | Out-Null
@@ -1293,7 +1364,7 @@ if (-not $ClientOnly) {
     if ($volumesChanged) { Step "Volumes ready: $bankVol, $stateVol" }
     else { Step "Volumes unchanged: $bankVol, $stateVol" }
 }
-# <<< volumes <<<
+# <<< create volumes <<<
 
 # -- 5. managed env block --------------------------------------------------------
 # >>> extractor env >>>
@@ -1494,7 +1565,13 @@ if ($ClientOnly) {
 if (-not $ClientOnly) {
     $compose = @("-p", "pseudolife-mcp", "--env-file", $envFile, "-f", $composeFile)
     if (Test-Path $overrideFile) { $compose += @("-f", $overrideFile) }
-    $composeSnapshotJson = Invoke-InstallerState plan --snapshot --repo $repo --env-file $envFile --override $overrideFile
+    # The engine overlays (stage 4b) follow, in the planner's checks too.
+    $engineStateArgs = @()
+    foreach ($engineFile in $engineFiles) {
+        $compose += @("-f", $engineFile)
+        $engineStateArgs += @("--overlay", $engineFile)
+    }
+    $composeSnapshotJson = Invoke-InstallerState plan --snapshot --repo $repo --env-file $envFile --override $overrideFile @engineStateArgs
     $composePlan = ($composeSnapshotJson | ConvertFrom-Json).action
     if ($composePlan -eq 'unchanged') {
         Step "Docker stack unchanged; no Compose up or build needed."
@@ -1510,7 +1587,7 @@ if (-not $ClientOnly) {
     } else {
         throw "Cannot determine the Docker startup step; rerun ops/preflight.ps1."
     }
-    $composeSnapshotJson = $composeSnapshotJson | Invoke-InstallerState started --expected-stdin --repo $repo --env-file $envFile --override $overrideFile
+    $composeSnapshotJson = $composeSnapshotJson | Invoke-InstallerState started --expected-stdin --repo $repo --env-file $envFile --override $overrideFile @engineStateArgs
 }
 
 # -- 8b. Claude Code plugin (hooks + commands layer) ------------------------------
@@ -2227,7 +2304,9 @@ foreach ($selectedClient in $clients) {
         $codexPython = $null
         foreach ($candidate in @("python", "python3", "py")) {
             if (-not (Get-Command $candidate -ErrorAction SilentlyContinue)) { continue }
-            $probeArgs = if ($candidate -eq "py") { @("-3") } else { @() }
+            # Assigned, as in Get-InstallerPython: an if-expression would splat "- 3".
+            $probeArgs = @()
+            if ($candidate -eq "py") { $probeArgs = @("-3") }
             try {
                 $probe = & $candidate @probeArgs -c 'import sys; sys.exit(1) if sys.version_info < (3, 10) else print(sys.executable)' 2>$null
                 if (($LASTEXITCODE -eq 0) -and $probe) { $codexPython = "$probe".Trim(); break }
@@ -3115,7 +3194,14 @@ function Invoke-EndpointContainerProbe {
     # Any HTTP answer counts: a 401 or 404 still means the server is there.
     $probe = "import sys, urllib.error, urllib.request`ntry:`n    urllib.request.urlopen(sys.argv[1] + '/models', timeout=10)`nexcept urllib.error.HTTPError:`n    pass"
     $global:LASTEXITCODE = 0
-    try { docker exec pseudolife-mcp-daemon python -c $probe $probeUrl 2>&1 | Out-Null } catch { $global:LASTEXITCODE = 1 }
+    try {
+        if ($composeEngine -and $composeEngine -ne 'python') {
+            # The Rust image has curl and no Python; without -f any HTTP status is 0.
+            docker exec pseudolife-mcp-daemon curl -s -o /dev/null --max-time 10 "$probeUrl/models" 2>&1 | Out-Null
+        } else {
+            docker exec pseudolife-mcp-daemon python -c $probe $probeUrl 2>&1 | Out-Null
+        }
+    } catch { $global:LASTEXITCODE = 1 }
     if ($LASTEXITCODE -eq 0) {
         $script:endpointContainer = "reachable"
         Step "The daemon's container reaches the extractor endpoint at $probeUrl."
@@ -3229,11 +3315,15 @@ if ($claudeShimMode) {
 if (-not $ClientOnly) {
     if ($composePlan -ne 'unchanged') { Step "Waiting for the daemon to report healthy..." }
     $h = $null
-    for ($i = 0; $i -lt 40; $i++) {
+    # Rust verifies its provisioned models before it serves: allow it longer.
+    $healthTries = if ($composeEngine -and $composeEngine -ne 'python') { 120 } else { 40 }
+    for ($i = 0; $i -lt $healthTries; $i++) {
         try {
             $h = Invoke-RestMethod -Uri "http://127.0.0.1:8765/health" -TimeoutSec 3
-            if ($h.status -eq "ok") { break }
-        } catch { Start-Sleep -Milliseconds 1500 }
+            # Rust answers "ok" while it still initializes: wait for ready.
+            if ($h.status -eq "ok" -and ($composeEngine -eq 'python' -or -not $composeEngine -or $h.ready -eq $true)) { break }
+        } catch { }
+        Start-Sleep -Milliseconds 1500
         $h = $null
     }
     if (-not $h) {
@@ -3241,6 +3331,12 @@ if (-not $ClientOnly) {
         exit 1
     }
     Step "Healthy: http://127.0.0.1:8765/health (Console: http://127.0.0.1:8765/ui/)"
+    if ($composeEngine -eq 'rust') {
+        # Recorded only now, as update records its own after its health gate.
+        $engineStatus = "$(Invoke-EngineHelper accept)".Trim()
+        if ($LASTEXITCODE -ne 0) { exit 1 }
+        if ($engineStatus -eq 'accepted') { Step "Rust daemon selection recorded; pseudolife-mcp update keeps it" }
+    }
     Invoke-EndpointContainerProbe
     if ($TestLogin) { Invoke-TestLoginSetup }
 }
@@ -3456,9 +3552,36 @@ if (-not $ClientOnly) {
     if ($resolvedInstructionChoices['gemini']) { $recordArgs += @('--instruction-gemini', $resolvedInstructionChoices['gemini']) }
     if ($resolvedInstructionChoices['generic']) { $recordArgs += @('--instruction-generic', $resolvedInstructionChoices['generic']) }
     if ($resolvedGenericTarget) { $recordArgs += @('--generic-target', $resolvedGenericTarget) }
+    $recordArgs += $engineStateArgs
     $composeSnapshotJson | Invoke-InstallerState @recordArgs | Out-Null
 }
 # <<< record successful deployment <<<
+# >>> engine switch >>>
+# After the record: the switch recreates the daemon, which the record checks.
+if ($switchEngine) {
+    $switchVersion = $null
+    try { $switchVersion = (Invoke-RestMethod -Uri "http://127.0.0.1:8765/health" -TimeoutSec 3).version } catch { }
+    $switchArgs = @('update', '--engine', $switchEngine, '--daemon-only')
+    # (A checkout-mode Rust host never gets here: stage 4b refuses it.)
+    if ($switchVersion) { $switchArgs += @('--tag', "$switchVersion") }
+    else {
+        # Without --tag, update would move to the newest release instead.
+        [Console]::Error.WriteLine("The installed daemon was kept: its version could not be read from http://127.0.0.1:8765/health, so the switch to $switchEngine did not run. Run: pseudolife-mcp update --engine $switchEngine --daemon-only --tag <the daemon's version>")
+        exit 1
+    }
+    if (-not (Install-ShimOnce) -or -not $script:shimInstallPath) {
+        [Console]::Error.WriteLine("The installed daemon was kept; switching it to $switchEngine needs the pseudolife-mcp shim, which is unavailable (see above). Run: pseudolife-mcp $($switchArgs -join ' ')")
+        exit 1
+    }
+    Step "Switching the daemon to $switchEngine (backup, rollback tag and health gate)..."
+    # Stdin closed: update's own questions take their defaults, never hang.
+    $null | & $script:shimInstallPath @switchArgs
+    if ($LASTEXITCODE -ne 0) {
+        [Console]::Error.WriteLine("The switch to $switchEngine failed; its output above says what changed and how to roll back. Retry with: $($script:shimInstallPath) $($switchArgs -join ' ')")
+        exit 1
+    }
+}
+# <<< engine switch <<<
 if (-not $ClientOnly) { Invoke-MaintainerSetupOffer }
 if (-not $ClientOnly) { Invoke-ConsoleSignin }
 # >>> update line >>>
