@@ -76,7 +76,8 @@ def _admin():
 # 5 s connect_timeout is about 150x the slowest. Hosted windows-latest still
 # exceeded it once, in a lease row's teardown after every comparison passed
 # (run 42348225338, job 128340727137), so a timeout is a transient stall.
-# Three attempts, 1 s then 2 s apart: at most about 18 s.
+# Three attempts, 1 s then 2 s apart: at most about 18 s per connect, so a
+# drop() that meets it at both of its connects waits about 36 s.
 CONNECT_ATTEMPTS = 3
 CONNECT_BACKOFF_SECONDS = (1.0, 2.0)
 
@@ -100,16 +101,27 @@ def teardown(name: str) -> None:
     A failed drop does not fail the case by itself: if the bank is gone, the
     failure is printed and the case keeps its result. If the bank is still
     there, or its absence cannot be confirmed, the bank leaked and the
-    failure propagates."""
+    failure propagates. A guard refusal (a name this run does not own, or a
+    production database) always propagates."""
+    from pseudolife_memory.storage.schema import ProductionDatabaseError  # noqa: PLC0415
     try:
         drop(name)
+    except (ValueError, ProductionDatabaseError):
+        raise
     except Exception as failure:
+        check = left = None
         try:
             with _retrying(_admin) as conn:
                 left = conn.execute(
                     "SELECT 1 FROM pg_database WHERE datname = %s", (name,)).fetchone()
-        except Exception:
-            raise failure from None
+        except Exception as error:  # noqa: BLE001 — reported on the original failure
+            check = error
+        if check is not None:
+            # Raised here, outside the check's handler, so the original
+            # failure keeps its own context.
+            failure.add_note(f"teardown could not confirm {name} is gone: "
+                             f"{type(check).__name__}: {check}")
+            raise
         if left is not None:
             raise
         print(f"cli_harness: teardown of {name} failed ({type(failure).__name__}: {failure}), "

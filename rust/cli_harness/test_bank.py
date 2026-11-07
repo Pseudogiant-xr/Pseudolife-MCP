@@ -312,3 +312,54 @@ def test_teardown_keeps_the_case_only_when_the_bank_is_gone(monkeypatch, capsys)
     with pytest.raises(psycopg.OperationalError) as caught:
         _bank.teardown(_bank.name("pl_cf_teardown_leaked"))
     assert caught.value is failure
+
+
+def test_drop_retries_a_timed_out_admin_connect(monkeypatch):
+    import psycopg
+
+    statements = []
+    admin = _teardown_fixture(monkeypatch, [None], statements)
+    attempts = [psycopg.errors.ConnectionTimeout("admin timeout")]
+
+    def admin_connect():
+        if attempts:
+            raise attempts.pop(0)
+        return admin
+
+    monkeypatch.setattr(_bank, "_admin", admin_connect)
+    _bank.drop(_bank.name("pl_cf_teardown_admin_timeout"))
+    assert attempts == [] and admin.exists is False
+
+
+def test_teardown_propagates_when_the_check_fails_or_a_guard_refuses(monkeypatch):
+    import psycopg
+    from pseudolife_memory.storage.schema import ProductionDatabaseError
+
+    failure = psycopg.OperationalError("server closed the connection")
+
+    def broken_drop(_name):
+        raise failure
+
+    def no_admin():
+        raise psycopg.OperationalError("cannot reach the server")
+
+    # The absence check itself fails: the original failure propagates, with
+    # its own context kept and the check's error noted.
+    _teardown_fixture(monkeypatch, [], [])
+    monkeypatch.setattr(_bank, "drop", broken_drop)
+    monkeypatch.setattr(_bank, "_admin", no_admin)
+    with pytest.raises(psycopg.OperationalError) as caught:
+        _bank.teardown(_bank.name("pl_cf_teardown_unconfirmed"))
+    assert caught.value is failure
+    assert any("could not confirm" in note for note in caught.value.__notes__)
+
+    # A guard refusal propagates even when the bank is gone.
+    for refusal in (ValueError("not a disposable name"), ProductionDatabaseError("production")):
+        _teardown_fixture(monkeypatch, [], [], exists=False)
+
+        def refusing_drop(_name, refusal=refusal):
+            raise refusal
+
+        monkeypatch.setattr(_bank, "drop", refusing_drop)
+        with pytest.raises(type(refusal)):
+            _bank.teardown(_bank.name("pl_cf_teardown_guard"))
