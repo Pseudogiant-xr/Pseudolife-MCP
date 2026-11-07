@@ -371,7 +371,7 @@ impl Update {
                     .file_name()
                     .and_then(|n| n.to_str())
                     .is_some_and(|n| COMPOSE_FILES.contains(&n));
-                !engine_overlay(p) && !(shipped && packaged_compose(p))
+                !(engine_overlay(p) || (shipped && packaged_compose(p)))
             })
             .map(|p| p.display().to_string())
             .collect();
