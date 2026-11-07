@@ -141,6 +141,33 @@ def quiet_base_use(report: dict) -> dict:
     return {"database": QUIET_DB, "scenarios": used, "why": QUIET_WHY}
 
 
+# A kept daemon log's tail: one log covers one launch (daemons.py opens it
+# "wb"), and its last lines say why it died.
+KEPT_LOG_BYTES = 4 * 1024 * 1024
+
+
+def keep_daemon_logs(scratch: Path, kept: Path) -> str:
+    """Copy the tail of each daemon.log under ``scratch`` into ``kept``. The
+    daemons' own logs say which one died and why; they may quote bank text,
+    so they stay beside the private report on the host. A log that cannot be
+    kept (a full disk, a log gone mid-copy) is noted, never fatal."""
+    notes = ""
+    for daemon_log in scratch.rglob("daemon.log") if scratch.is_dir() else ():
+        rel = daemon_log.parent.relative_to(scratch)
+        try:
+            target = kept / rel
+            target.mkdir(parents=True, exist_ok=True)
+            with daemon_log.open("rb") as src, (target / "daemon.log").open("wb") as dst:
+                size = src.seek(0, os.SEEK_END)
+                if size > KEPT_LOG_BYTES:
+                    dst.write(f"[truncated: last {KEPT_LOG_BYTES} of {size} bytes]\n".encode())
+                src.seek(max(0, size - KEPT_LOG_BYTES))
+                shutil.copyfileobj(src, dst)
+        except OSError as e:
+            notes += f"\nkept no daemon log for {rel}: {e}"
+    return notes
+
+
 def read_oom_kills() -> int | None:
     """The OOM kills inside this container's memory cgroup so far, or None
     outside one: an error with kills during its attempt is the runner's
@@ -190,16 +217,13 @@ class Runner:
             log += f"\nswept {swept} leftover disposable databases"
         if reaped:
             log = f"stopped {len(reaped)} leftover processes before this scenario\n" + log
-        result = outcome(code, log)
-        if result["status"] != "pass":
-            # The daemons' own logs say which one died and why; they may quote
-            # bank text, so they stay beside the private report on the host.
-            scratch = Path(env["PL_HARNESS_SCRATCH"])
-            for daemon_log in scratch.rglob("daemon.log") if scratch.is_dir() else ():
-                keep = work / f"{safe}.daemon-logs" / daemon_log.parent.relative_to(scratch)
-                keep.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(daemon_log, keep / "daemon.log")
-        shutil.rmtree(env["PL_HARNESS_SCRATCH"], ignore_errors=True)
+        kept = work / f"{safe}.daemon-logs"
+        shutil.rmtree(kept, ignore_errors=True)  # an earlier attempt's logs are not this one's
+        try:
+            if outcome(code, log)["status"] != "pass":
+                log += keep_daemon_logs(Path(env["PL_HARNESS_SCRATCH"]), kept)
+        finally:
+            shutil.rmtree(env["PL_HARNESS_SCRATCH"], ignore_errors=True)
         (work / f"{safe}.log").write_text(log, encoding="utf-8")
         kills = after - before if before is not None and after is not None else None
         return {**outcome(code, log), "exit": code, "seconds": round(time.monotonic() - started, 1),

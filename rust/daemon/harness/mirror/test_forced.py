@@ -372,3 +372,38 @@ def test_an_attempt_that_does_not_pass_keeps_its_daemons_logs(tmp_path):
         kept = list((out / "w2e" / "real").glob("x.daemon-logs/*/daemon.log"))
         assert bool(kept) == (status == "error"), status
     assert "own error" in kept[0].read_text()
+
+
+def _logging_runner(tmp_path, status, text="Traceback: the python daemon's own error\n"):
+    class Logs(forced.Runner):
+        def _run(self, argv, env):
+            home = Path(env["PL_HARNESS_SCRATCH"]) / "w2f-x-python"
+            home.mkdir(parents=True, exist_ok=True)
+            (home / "daemon.log").write_text(text)
+            return (0, "") if status == "pass" else (1, "Traceback\nConnectionRefusedError\n")
+    return Logs(Path("rust-bin"), tmp_path / "out", 60, tmp_path / "STOP", scratch=tmp_path / "s",
+                oom_kills=lambda: 0)
+
+
+def test_a_log_that_cannot_be_kept_never_ends_the_run(tmp_path, monkeypatch):
+    def full(src, dst, *a, **k):
+        raise OSError(28, "No space left on device")
+    monkeypatch.setattr(forced.shutil, "copy2", full)
+    monkeypatch.setattr(forced.shutil, "copyfileobj", full)
+    got = _logging_runner(tmp_path, "error").invoke("w2e", "x", "real", base=True)
+    assert got["status"] == "error"
+    assert "kept no daemon log" in (tmp_path / "out" / "w2e" / "real" / "x.log").read_text()
+    assert not (tmp_path / "s" / "w2e" / "x").exists()  # the scratch is still removed
+
+
+def test_a_later_attempt_replaces_the_logs_an_earlier_one_kept(tmp_path):
+    _logging_runner(tmp_path, "error").invoke("w2e", "x", "real", base=True)
+    _logging_runner(tmp_path, "pass").invoke("w2e", "x", "real", base=True)
+    assert not (tmp_path / "out" / "w2e" / "real" / "x.daemon-logs").exists()
+
+
+def test_a_kept_log_is_its_tail(tmp_path):
+    _logging_runner(tmp_path, "error", text="x" * (forced.KEPT_LOG_BYTES + 100) + "END\n").invoke(
+        "w2e", "x", "real", base=True)
+    kept = next((tmp_path / "out" / "w2e" / "real").glob("x.daemon-logs/*/daemon.log")).read_text()
+    assert kept.startswith("[truncated") and kept.endswith("END\n") and len(kept) < forced.KEPT_LOG_BYTES + 200
