@@ -645,8 +645,8 @@ KNOBS: list[dict[str, Any]] = [
      "suggestions": ["http://pseudolife-extractor:8081/v1",
                      "http://host.docker.internal:8086/v1"],
      "help": "OpenAI-compatible /v1 endpoint used when the primary is "
-             "unreachable (or mode = fallback): the bundled sidecar "
-             "(pseudolife-extractor:8081) or the Codex CLI shim "
+             "unreachable (or mode = fallback), for example the bundled "
+             "sidecar (pseudolife-extractor:8081) or the Codex CLI shim "
              "(host.docker.internal:8086). Empty disables selection "
              "entirely — single-extractor behavior. It never receives the "
              "primary's API key: a fallback that needs one reads "

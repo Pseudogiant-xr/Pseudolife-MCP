@@ -12,8 +12,8 @@
 # `python ops/shim_autostart.py restart codex`.
 #   OpenAI models: gpt-5.6-terra (default), gpt-5.6-sol, gpt-5.6-luna, gpt-6-sol,
 #   gpt-6-luna, gpt-6.1-sol (the list ops/install.sh offers; the GPT-6 ids were
-#   accepted by the Codex CLI on 2026-09-29, gpt-6.1-sol on 2026-11-07; any
-#   other id passes to the shim unchanged)
+#   accepted by the Codex CLI on 2026-09-29, gpt-6.1-sol on 2026-11-08 by
+#   Codex CLI 0.165.0; any other id passes to the shim unchanged)
 #
 # The shim wraps the ChatGPT-plan `codex` CLI as an OpenAI-compatible endpoint
 # for the daemon's dream pass. Requires a signed-in CLI (`codex login`).
