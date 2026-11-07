@@ -1,0 +1,123 @@
+# Opt-in Rust mirror on a private copy of the bank
+# (docs/specs/2026-11-06-full-rust-shadow.md §4.2). A separate Compose
+# project: it never touches the live `pseudolife-mcp` stack, its PostgreSQL
+# or its volumes. Seeding, tokens and health: rust/daemon/harness/mirror/.
+#
+#   docker compose -p pseudolife-mirror --env-file <mirror.env> \
+#       -f ops/docker-compose.rust-mirror.yml up -d mirror-pg
+#   python3 rust/daemon/harness/mirror/seed.py seed --backups data/backups --secret-file <secret>
+#   python3 rust/daemon/harness/mirror/seed.py tokens --secret-file <secret> --out <tokens.env>
+#   docker compose ... --env-file <tokens.env> up -d mirror-daemon
+#   python3 rust/daemon/harness/mirror/seed.py health
+#
+# No route out: both containers join only an `internal: true` network, so
+# the extractor, the judges, the release check and model downloads cannot
+# leave the host. For the same reason nothing is published: Docker 29.9.3
+# answers no host connection to a port published from an internal-only
+# network (measured on the daemon box, 2026-11-07), so peers on `mirror`
+# are the only clients, and a stray client cannot reach the mirror.
+#
+# Memory: on the daemon box (20 GB) the live writer measured 3.0 GiB, the
+# read-only companion 3.8 GiB and the live PostgreSQL 0.2 GiB (2026-11-07);
+# the Rust daemon peaked at 4.2 GiB under write load (G1, 2026-11-06), and a
+# restored 271 MB bank held 0.17 GiB in PostgreSQL. oom_score_adj 1000 makes
+# these the kernel's first choice if the host runs out, never the live writer.
+# Never `down -v`: the bank volume is the mirror's own, but the habit is not.
+name: pseudolife-mirror
+
+x-logging: &default-logging
+  driver: json-file
+  options: {max-size: "10m", max-file: "3"}
+
+services:
+  mirror-pg:
+    # Images only, never built here: a build would retag the live stack's
+    # pseudolife-pg:18 or the companion's Rust image from this checkout.
+    image: ${PSEUDOLIFE_MIRROR_PG_IMAGE:-pseudolife-pg:18}
+    pull_policy: never
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      # The dump's ALTER ... OWNER TO lines name the live owner role.
+      POSTGRES_USER: pseudolife
+      POSTGRES_PASSWORD: ${PSEUDOLIFE_MIRROR_PG_PASSWORD:?Set a mirror-only PostgreSQL password}
+      POSTGRES_DB: pl_cf_mir_home
+    volumes:
+      - mirror_pgdata:/var/lib/postgresql
+      # Read-only: seeding never rotates, holds or deletes a backup.
+      - ${PSEUDOLIFE_MIRROR_BACKUPS:?Set the directory holding the nightly backups}:/backups:ro
+    mem_limit: ${PSEUDOLIFE_MIRROR_PG_MEM_LIMIT:-2g}
+    memswap_limit: ${PSEUDOLIFE_MIRROR_PG_MEM_LIMIT:-2g}
+    oom_score_adj: 1000
+    healthcheck:
+      # Over TCP: the image's first-start server listens only on its socket.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U pseudolife -d pl_cf_mir_home"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    networks: [mirror]
+
+  mirror-daemon:
+    image: ${PSEUDOLIFE_RUST_IMAGE:-pseudolife-daemon-rust:checkout}
+    pull_policy: never
+    # Fail closed: without the replay-only bearer map the daemon never
+    # starts, so it can never serve unauthenticated. The map is optional at
+    # interpolation only so mirror-pg can start before seeding writes it.
+    entrypoint:
+      - sh
+      - -c
+      - '[ -n "$$PSEUDOLIFE_MCP_TOKENS" ] || { echo "mirror: no replay-only bearer map; run seed.py tokens and pass its file with --env-file" >&2; exit 64; }; exec /usr/local/bin/provision-daemon-models "$$@"'
+      - mirror-guard
+    command: [pseudolife-daemon]
+    restart: on-failure:3
+    logging: *default-logging
+    # The writer's daemon user, which the image gives /models (#1316).
+    user: "10001:10001"
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    mem_limit: ${PSEUDOLIFE_MIRROR_DAEMON_MEM_LIMIT:-4608m}
+    memswap_limit: ${PSEUDOLIFE_MIRROR_DAEMON_MEM_LIMIT:-4608m}
+    oom_score_adj: 1000
+    environment:
+      PSEUDOLIFE_MCP_DATABASE_URL: postgresql://pseudolife:${PSEUDOLIFE_MIRROR_PG_PASSWORD:?Set a mirror-only PostgreSQL password}@mirror-pg:5432/pl_cf_mir_bank
+      PSEUDOLIFE_MCP_HOST: 0.0.0.0
+      PSEUDOLIFE_MCP_PORT: "8765"
+      PSEUDOLIFE_MCP_DATA_DIR: /data
+      PSEUDOLIFE_DAEMON_MODELS_DIR: /models
+      PSEUDOLIFE_MCP_TRUST_BIND: "1"
+      # Replay-only bearers from `seed.py tokens`, never the live values.
+      # Optional at interpolation so mirror-pg can start before seeding
+      # writes them; the entrypoint above refuses to start without them.
+      PSEUDOLIFE_MCP_TOKEN: ${PSEUDOLIFE_MIRROR_TOKEN:-}
+      PSEUDOLIFE_MCP_TOKENS: ${PSEUDOLIFE_MIRROR_TOKENS:-}
+      CUDA_VISIBLE_DEVICES: "-1"
+      # The live writer's values (#1316: a missing TZ made 64 differences).
+      TZ: ${TZ:-UTC}
+      PSEUDOLIFE_WRITER_ID: ${PSEUDOLIFE_WRITER_ID:-mcp-client}
+      PSEUDOLIFE_MCP_TOOLSET: ${PSEUDOLIFE_MCP_TOOLSET:-core}
+      PSEUDOLIFE_MCP_TIER_MAP: ${PSEUDOLIFE_MCP_TIER_MAP:-}
+      # Outbound and autonomous work off (spec §2.3); config.yaml from
+      # `seed.py config` turns off dreams, judges and stall notices.
+      PSEUDOLIFE_RELEASE_CHECK: "0"
+      PSEUDOLIFE_SESSION_IDLE_SECONDS: "31536000"
+    volumes:
+      # Owned by uid 10001; holds the config.yaml `seed.py config` writes.
+      - ${PSEUDOLIFE_MIRROR_DATA:?Set the mirror daemon's data directory}:/data
+      # The read-only companion's provisioned models (it must have started
+      # once), read-only: the entry point finds them present and downloads
+      # nothing. A Rust image pinning other models fails its start here.
+      - mirror_models:/models:ro
+    depends_on:
+      mirror-pg:
+        condition: service_healthy
+    networks: [mirror]
+
+networks:
+  mirror:
+    internal: true
+
+volumes:
+  mirror_pgdata: {}
+  mirror_models:
+    external: true
+    name: ${PSEUDOLIFE_MIRROR_MODELS_VOLUME:-pseudolife-mcp_pseudolife_shadow_models}

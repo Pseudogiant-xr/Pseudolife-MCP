@@ -3762,6 +3762,17 @@ class PostgresStorage:
                  now)).fetchone()
         return int(row[0])
 
+    def store_decision_ids_present(self, ids) -> set[int]:
+        """The ``store_decisions`` ids among ``ids`` that the bank holds: how
+        a caller learns whether the transaction that inserted them
+        committed (ids are unique and never reused)."""
+        ids = [int(i) for i in ids]
+        if not ids:
+            return set()
+        rows = self.conn.execute(
+            "SELECT id FROM store_decisions WHERE id = ANY(%s)", (ids,)).fetchall()
+        return {int(r[0]) for r in rows}
+
     def store_decisions(self, store: str, *, entity_norm: str | None = None,
                         attribute_norm: str | None = None,
                         limit: int = 500) -> list[dict]:
