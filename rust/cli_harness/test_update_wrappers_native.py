@@ -14,6 +14,17 @@ NATIVE_HELP = (
     "--sha256sums <SUMS-file> --version <version> [--json]"
 )
 NATIVE_CAPABILITY = "pseudolife-mcp native-update-v1"
+# Deadline for one `pwsh -File ops/update.ps1` spawn (issue #1299). Measured
+# 2026-11-07 on the maintainer's Windows host (pwsh 7.6, idle): the 34 pwsh
+# cases here took 0.44-2.63 s (median 0.61 s), and the missing-argument
+# refusal (`-Tag` with no value) took 1.17-1.32 s over 10 runs, about 2.7x the
+# unknown-flag refusal (0.41-0.50 s). On hosted windows-latest every other
+# pwsh case stayed under 2.8 s (run 42348225338, job 128332259564), but the
+# missing-argument case twice ran past the old flat 30 s (runs 41955075994 and
+# 42348225338) while 20 VM runs passed. So this is a slow tail of that error
+# path, not a hang. 120 s is about 90x its measured time; bash and Python
+# spawns keep 30 s.
+PWSH_SPAWN_SECONDS = 120
 
 
 def fixture(tmp_path, code):
@@ -68,7 +79,8 @@ def test_native_opt_in_maps_flags_and_preserves_exact_exit(tmp_path, code, shell
         argv = [program, str(repo / "ops/update.sh").replace("\\", "/"), "--engine", "rust", "--shadow", "--tag", "pre-fixture", "--no-test-login"]
     else:
         argv = [program, str(repo / "ops/update.py"), "--engine", "rust", "--shadow", "--rollback-tag", "pre-fixture", "--no-test-login"]
-    result = subprocess.run(argv, env=env, stdin=subprocess.DEVNULL, capture_output=True, timeout=30)
+    result = subprocess.run(argv, env=env, stdin=subprocess.DEVNULL, capture_output=True,
+                            timeout=PWSH_SPAWN_SECONDS if shell == "pwsh" else 30)
     assert result.returncode == code, result.stderr.decode(errors="replace")
     args = json.loads(output.read_text())
     assert args[:3] == ["update", "--checkout", str(repo)] or (
@@ -85,7 +97,7 @@ def test_native_missing_binary_never_falls_back_to_python(tmp_path):
     repo, env, output = fixture(tmp_path, 0)
     env["PSEUDOLIFE_NATIVE_CLI"] = str(tmp_path / "absent-native")
     result = subprocess.run([program, "-NoProfile", "-NonInteractive", "-File", str(repo / "ops/update.ps1")],
-                            env=env, stdin=subprocess.DEVNULL, capture_output=True, timeout=30)
+                            env=env, stdin=subprocess.DEVNULL, capture_output=True, timeout=PWSH_SPAWN_SECONDS)
     assert result.returncode == 2
     assert not output.exists()
     assert b"native" in (result.stdout + result.stderr).lower()
@@ -130,7 +142,8 @@ def test_powershell_fixture_cannot_consume_parent_input(tmp_path, probe):
             # should make an accidentally interactive child appear isolated.
             child.stdin.write(b"input belonging to the parent\n")
             child.stdin.flush()
-            child.wait(timeout=60)
+            # The worker's own pwsh spawn may take PWSH_SPAWN_SECONDS; wait past it.
+            child.wait(timeout=PWSH_SPAWN_SECONDS + 30)
         finally:
             if child.poll() is None:
                 child.kill()
@@ -257,8 +270,8 @@ class Wrapper:
                 [self.program, "--noprofile", "--norc", str(self.repo / "ops/update.sh").replace("\\", "/")])
         # These fixtures never ask for input; a runner's open stdin must not
         # turn an accidental read or PowerShell prompt into a stalled test.
-        return subprocess.run([*argv, *args], env=self.env, stdin=subprocess.DEVNULL,
-                              capture_output=True, text=True, timeout=30)
+        return subprocess.run([*argv, *args], env=self.env, stdin=subprocess.DEVNULL, capture_output=True,
+                              text=True, timeout=PWSH_SPAWN_SECONDS if self.shell == "pwsh" else 30)
 
     def crlf(self):
         path = self.repo / "ops/.env"
