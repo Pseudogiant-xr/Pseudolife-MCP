@@ -484,7 +484,7 @@
     "rust/shim/src/cli/update/engine.rs": "fb25dc2df6939fb59c7aba889fd74ed9a336a1a9d4edae167ce3e66ebb10a0fe",
     "rust/shim/src/cli/update/mod.rs": "56744e5c3a3142bab2bd9c6fc34c22c29369105422fb39001ddbc40f358571a7",
     "rust/shim/src/cli/update/options.rs": "940c9747875d2d9e407637d871484e4670d47a4f3c6f6d961f4d26ed0e92470e",
-    "rust/shim/src/cli/update/release.rs": "2974a3b3e7da9bc7dfb722f07b2f75f9a4c2057193db274053d491009cd55297",
+    "rust/shim/src/cli/update/release.rs": "6ad8dd9b3fd18fb0114fd860ffc32c98a4efea5a764d1daebf8ea9aff9321c6e",
     "rust/shim/src/cli/update/seams.rs": "da8b4ae1a6df9e9c97af062b5bf337a8ecc0b7bcf2354c52ce1a9d339817cf66",
     "rust/shim/src/cli/update/shadow.rs": "be4da00a9b8cc9e593a0be00ce364ace769d2e59767a65802e11426445c80aa3",
     "rust/shim/src/cli/update/signals.rs": "f0c47d95a459ab923b34f0c0ebcd84c62db54a75d8fb592b4b2fdcce69866f93",
@@ -31541,7 +31541,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/release.rs:423",
+          "location": "rust/shim/src/cli/update/release.rs:430",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -69852,7 +69852,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "rust/shim/src/cli/update/release.rs:1107",
+      "location": "rust/shim/src/cli/update/release.rs:1114",
       "name": "PSEUDOLIFE_DAEMON_ONNX_DIR",
       "shape": {
         "channel": "environment",
@@ -69866,7 +69866,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "rust/shim/src/cli/update/release.rs:1113",
+      "location": "rust/shim/src/cli/update/release.rs:1120",
       "name": "PSEUDOLIFE_DAEMON_MODELS_DIR",
       "shape": {
         "channel": "environment",
@@ -74335,7 +74335,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "rust/shim/src/cli/update/release.rs:806",
+      "location": "rust/shim/src/cli/update/release.rs:813",
       "method": null,
       "name": "/health",
       "shape": {
@@ -77094,7 +77094,7 @@
     {
       "evidence": "static",
       "kind": "environment",
-      "location": "rust/shim/src/cli/update/release.rs:1236",
+      "location": "rust/shim/src/cli/update/release.rs:1243",
       "name": "PSEUDOLIFE_DAEMON_MODELS_DIR",
       "shape": {
         "channel": "environment",
@@ -101866,13 +101866,13 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/release.rs:1107",
+      "location": "rust/shim/src/cli/update/release.rs:1114",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_DAEMON_ONNX_DIR"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/release.rs:1113",
+      "location": "rust/shim/src/cli/update/release.rs:1120",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_DAEMON_MODELS_DIR"
     },
@@ -101890,13 +101890,13 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/release.rs:423",
+      "location": "rust/shim/src/cli/update/release.rs:430",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_IMAGE_TAG"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/release.rs:806",
+      "location": "rust/shim/src/cli/update/release.rs:813",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
