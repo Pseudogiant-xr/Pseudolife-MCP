@@ -98,6 +98,13 @@ pub(crate) struct Update {
     pub rollback_lines: Vec<String>,
     pub schema_before: Option<i64>,
     pub selected_engine: String,
+    /// The G2 default moved an unchosen host to another engine this run.
+    pub defaulted_engine: bool,
+    /// The release deploy began its backup: the host changes from here.
+    pub release_started: bool,
+    /// What a defaulted attempt pulled or created, removed if it falls back.
+    pub default_pulled: Option<String>,
+    pub default_volumes: Vec<String>,
     /// G2-K: the Python leg that imports weights.pt already ran this update.
     pub after_import: bool,
     pub maintainer_context: Option<(Vec<String>, Environment)>,
@@ -194,6 +201,10 @@ impl Update {
             rollback_lines: vec![],
             schema_before: None,
             selected_engine: "python".into(),
+            defaulted_engine: false,
+            release_started: false,
+            default_pulled: None,
+            default_volumes: vec![],
             after_import: false,
             maintainer_context: None,
             rollback_scope: None,
