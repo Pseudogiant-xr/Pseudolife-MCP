@@ -1319,9 +1319,14 @@ def _refuse_on_embedding_dim_mismatch(cur) -> None:
         )
 
 
+# A restore needs the state archive too, not only the dump: since schema
+# v57 the memory counters and documents moved into the bank, but the state
+# volume still holds the cortex and graph snapshots (issue #909).
 _RESTORE_HINT = (
-    "(`ops/restore.ps1 -Apply -BackupFile <dump>` or "
-    "`ops/restore.sh --apply --backup-file <dump>`)"
+    "(`pseudolife-mcp restore --backup-file <dump> --state-archive "
+    "<state.tgz>`; from a checkout, `ops/restore.ps1 -Apply -BackupFile "
+    "<dump> -StateArchive <state.tgz>` or `ops/restore.sh --apply "
+    "--backup-file <dump> --state-archive <state.tgz>`)"
 )
 
 
@@ -1364,9 +1369,9 @@ def _schema_version_refusal(stamp: str) -> str | None:
     )
 
 
-def _refuse_on_future_or_malformed_version(cur) -> None:
-    """Refuse to start, before any DDL runs, on a bank whose schema stamp
-    this build must not touch (see :func:`_schema_version_refusal`).
+def bank_schema_refusal(cur) -> str | None:
+    """The refusal for the bank ``cur`` reads, or ``None`` when this build
+    may open it (see :func:`_schema_version_refusal`). Read-only.
 
     A fresh install has no ``meta`` table and an unstamped bank has no
     row: neither has anything to refuse.
@@ -1374,14 +1379,20 @@ def _refuse_on_future_or_malformed_version(cur) -> None:
     cur.execute("SELECT to_regclass('public.meta')")
     row = cur.fetchone()
     if row is None or row[0] is None:
-        return
+        return None
     cur.execute(
         "SELECT value::text FROM public.meta WHERE key = 'schema_version'"
     )
     row = cur.fetchone()
     if row is None:
-        return
-    refusal = _schema_version_refusal(row[0])
+        return None
+    return _schema_version_refusal(row[0])
+
+
+def _refuse_on_future_or_malformed_version(cur) -> None:
+    """Refuse to start, before any DDL runs, on a bank whose schema stamp
+    this build must not touch (see :func:`bank_schema_refusal`)."""
+    refusal = bank_schema_refusal(cur)
     if refusal is not None:
         raise RuntimeError(refusal)
 

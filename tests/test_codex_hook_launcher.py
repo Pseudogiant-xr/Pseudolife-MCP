@@ -342,12 +342,17 @@ def test_real_codex_keeps_trusting_the_manual_hooks_across_a_refresh(tmp_path, m
 # behavior and describe it in the CHANGELOG; approve only if Codex asks.
 # 2026-10-05: Stop timeout 3600 -> 1209600 (the Claude Code watcher lasts while
 # the session is open). Stop is not clamped, so Codex asks for approval once.
-CODEX_APPROVED_HOOKS = "db7941284dd05bb685de699f3e252fc1732962227b348320a74c1c61c29357cb"
+# 2026-11-07: a StopFailure handler added (Claude Code's re-arm after a failed
+# turn). Codex 0.167.0 skips the unknown event: hooks/list shows no error and
+# no StopFailure handler, and the existing handlers keep their trusted
+# currentHash, so Codex asks for nothing.
+CODEX_APPROVED_HOOKS = "2e43e3306caeee0bba732645d1781ec530f812a2b40f7d331f19c5017a162917"
 
 
 @pytest.mark.parametrize("event, cap", [
     ("UserPromptSubmit", None), ("SessionStart", None), ("SessionEnd", 3),
-    ("Stop", None), ("SubagentStart", None), ("SubagentStop", None), ("PreToolUse", None),
+    ("Stop", None), ("StopFailure", None), ("SubagentStart", None), ("SubagentStop", None),
+    ("PreToolUse", None),
 ])
 def test_plugin_handlers_fit_codex_event_timeout_caps(event, cap):
     """Codex clamps only SessionEnd/Interrupt, not the other events.

@@ -21,7 +21,9 @@ import time
 import psycopg
 import pytest
 
-from pseudolife_memory.storage.postgres import PostgresStorage
+from pseudolife_memory.storage.postgres import (
+    BankChangedHands, BankSchemaRefused, PostgresStorage)
+from pseudolife_memory.storage.schema import SCHEMA_META_VERSION
 from tests.pg_fixtures import pg_conn, pg_url  # noqa: F401
 
 LEASE_KEY = "pseudolife-bank-writer"
@@ -202,6 +204,96 @@ def test_reconnect_fails_closed_when_another_writer_took_the_lease(pg_conn, pg_u
         first.close()
         if second is not None:
             second.close()
+
+
+def _meta_value(conn, key: str):
+    row = conn.execute(
+        "SELECT value::text FROM meta WHERE key = %s", (key,)).fetchone()
+    conn.commit()
+    return None if row is None else row[0]
+
+
+@pytest.mark.parametrize("stamp, refusal", [
+    (str(SCHEMA_META_VERSION + 1), "is newer than this build"),
+    ('"57"', "must be a positive integer"),
+])
+def test_reconnect_refuses_a_bank_restamped_while_disconnected(
+        pg_conn, pg_url, stamp, refusal):
+    """Issue #909, gap 1: a newer build upgrades the bank while this one
+    waits to reconnect. The reconnect must refuse it as a start would,
+    write nothing (no lease-epoch bump, no stamp change), and let go of
+    the lease so the newer daemon can serve."""
+    first = PostgresStorage(pg_url)
+    current = _meta_value(pg_conn, "schema_version")
+    try:
+        _kill(pg_conn, first.conn.info.backend_pid)
+        with pytest.raises(psycopg.OperationalError):
+            first.conn.execute("SELECT 1")
+        pg_conn.execute(
+            "UPDATE meta SET value = %s::jsonb WHERE key = 'schema_version'",
+            (stamp,))
+        pg_conn.commit()
+        epoch = _meta_value(pg_conn, "writer_lease_epoch")
+
+        with pytest.raises(RuntimeError, match=refusal) as refused:
+            first.meta_set("schema-probe", "older writer")
+        assert "--state-archive" in str(refused.value)
+        assert _meta_value(pg_conn, "schema-probe") is None
+        assert _meta_value(pg_conn, "schema_version") == stamp
+        assert _meta_value(pg_conn, "writer_lease_epoch") == epoch
+        # The refused session is closed, so the newer build can take the bank.
+        deadline = time.monotonic() + 5
+        while _lease_holder_pids(pg_conn) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert _lease_holder_pids(pg_conn) == []
+        # /health's probe reports it, and a burst refuses from the cached
+        # refusal instead of reconnecting each time.
+        with pytest.raises(RuntimeError, match=refusal):
+            first.ping()
+        before = _client_backends(pg_conn)
+        with pytest.raises(RuntimeError, match=refusal):
+            first.meta_set("schema-probe", "older writer")
+        assert _client_backends(pg_conn) <= before
+
+        # Past the window with the server unreachable, the refusal stands:
+        # an outage must not hand the resident copy back to callers.
+        reachable = first.dsn
+        first.dsn = "postgresql://nobody@127.0.0.1:1/pl_unreachable"
+        first._schema_retry_at = 0.0  # noqa: SLF001 — skip the retry window
+        with pytest.raises(BankSchemaRefused, match=refusal) as held:
+            first.verify_writer_session()
+        assert str(held.value).endswith("so this refusal may be out of date.")
+        first.dsn = reachable
+        first._reconnect_retry_at = 0.0  # noqa: SLF001
+
+        # Once the bank is restored to a stamp this build serves, the probe
+        # stops reporting the stamp, and the next reconnect takes the bank
+        # back but makes the owner re-read it before anything is served: a
+        # restore may have kept this process's lease epoch.
+        pg_conn.execute(
+            "UPDATE meta SET value = %s::jsonb WHERE key = 'schema_version'",
+            (current,))
+        pg_conn.commit()
+        assert first.ping() is True
+        with pytest.raises(BankChangedHands) as reread:
+            first.meta_set("schema-probe", "after restore")
+        # The Rust daemon's text (storage/tests.rs pins the same literal).
+        assert str(reread.value) == (
+            "this bank carried a schema stamp this build refused while this "
+            "process was disconnected; it opens again, but its resident copy "
+            "may be stale, so nothing is served or saved until it re-reads "
+            "the bank")
+        assert _meta_value(pg_conn, "schema-probe") is None
+        first.acknowledge_rehydration()
+        first.meta_set("schema-probe", "after restore")
+        assert _meta_value(pg_conn, "schema-probe") == '"after restore"'
+    finally:
+        pg_conn.execute(
+            "UPDATE meta SET value = %s::jsonb WHERE key = 'schema_version'",
+            (current,))
+        pg_conn.execute("DELETE FROM meta WHERE key = 'schema-probe'")
+        pg_conn.commit()
+        first.close()
 
 
 def test_memory_service_inherits_the_lease_before_any_model_load(

@@ -32,7 +32,7 @@ Design notes
 from __future__ import annotations
 
 from collections import Counter
-from contextlib import ExitStack, nullcontext
+from contextlib import ExitStack, contextmanager, nullcontext
 from copy import deepcopy
 from dataclasses import dataclass, replace
 import gc
@@ -5044,12 +5044,16 @@ class MemoryService(DreamOps, MaintainerOps):
                 if restored is not None:
                     return restored
             now = _t.time()
+            marks = self._world.retired_marks()
+            was_dirty = set(self._world.dirty_slots)
             recs = self._world.restore(entity, attribute)
             if recs:
-                for r in recs:
-                    self._record_store_decision(
-                        "world", r, "restore", decided_by, None, now)
-                self._save_world()
+                with self._restore_decisions_with_slots(
+                        "world", self._world, recs, marks, was_dirty):
+                    for r in recs:
+                        self._record_store_decision(
+                            "world", r, "restore", decided_by, None, now)
+                    self._save_world()
             # Slots the in-memory pass could not cover (compaction purged
             # the retired row) fall back to their audit snapshot in the
             # SAME call — "every retired slot" is the contract, and the two
@@ -5623,13 +5627,17 @@ class MemoryService(DreamOps, MaintainerOps):
                 if restored is not None:
                     return restored
             now = _t.time()
+            marks = self._lessons.retired_marks()
+            was_dirty = set(self._lessons.dirty_slots)
             recs = self._lessons.restore(task, aspect)
             if recs:
-                for r in recs:
-                    self._record_store_decision(
-                        "lesson", r, "restore", decided_by, None, now)
-                    self._link_lesson_graph(r.entity, r.about, r.polarity)
-                self._save_lessons()
+                with self._restore_decisions_with_slots(
+                        "lesson", self._lessons, recs, marks, was_dirty):
+                    for r in recs:
+                        self._record_store_decision(
+                            "lesson", r, "restore", decided_by, None, now)
+                        self._link_lesson_graph(r.entity, r.about, r.polarity)
+                    self._save_lessons()
             # Slots the in-memory pass could not cover (compaction purged
             # the retired row) fall back to their audit snapshot in the
             # SAME call — "every retired slot" is the contract, and the two
@@ -5664,6 +5672,43 @@ class MemoryService(DreamOps, MaintainerOps):
                   else "audit_snapshot" if not recs else "mixed")
         return {"restored": total, "source": source, **label,
                 "entries": entries + fb["entries"]}
+
+    @contextmanager
+    def _restore_decisions_with_slots(self, store: str, cortex, restored: list,
+                                      marks: dict, was_dirty: set):
+        """A legacy restore's decision rows and its slot save as one
+        transaction, so the bank holds both or neither: never a restore
+        decision for a slot it still holds retired, nor a restored slot
+        without its decision. On a failure the resident restore is undone
+        (``restored`` back to ``marks``, taken before the restore), so a
+        later save cannot write the slot without its decision and a retry
+        restores again. The dirty marks the sync cleared come back except
+        the restore's own (``was_dirty``: the slots dirty before it), so a
+        COMMIT that landed with its reply lost is never written back over;
+        the resident copy then holds the slot retired while the bank holds
+        the restore, until a restart. A COMMIT failure counts as a
+        persistence failure, as the saves' own failures do.
+        Caller holds the lock; file mode has no transaction."""
+        if self._storage is None:
+            yield
+            return
+        dirty = set(cortex.dirty_slots)
+        saved = False
+        try:
+            with self._storage.transaction():
+                yield
+                saved = True
+        except BaseException as exc:
+            cortex.dirty_slots |= dirty
+            cortex.undo_restore(restored, marks, was_dirty)
+            if saved and isinstance(exc, Exception):
+                # The writes returned and the COMMIT failed: the saves'
+                # handlers never saw it.
+                self._persist_errors += 1
+                logger.error("%s restore commit failed (NOT durably persisted): %s",
+                             store, exc)
+                raise PersistenceError(f"{store} restore commit failed: {exc}") from exc
+            raise
 
     def _record_store_decision(self, store: str, rec, action: str,
                                decided_by: str | None, reason: str | None,

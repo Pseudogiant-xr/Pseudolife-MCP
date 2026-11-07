@@ -202,8 +202,9 @@ changes no Python, so CI skips the four Python suite lanes for it and runs
 a `guards` job instead (the tracked-tree and release-doc guards); the Rust
 workflow is that PR's gate. The master push that merges it, and a nightly
 run, still run the full suite. The Rust port under `rust/` is experimental:
-only an opt-in checkout-mode `pseudolife-mcp update --engine rust` installs
-it (beside the Python daemon with `--shadow`; see
+only an opt-in `pseudolife-mcp update --engine rust` installs it, in
+checkout mode or, for a release that publishes the Rust image, in release
+mode (beside the Python daemon with `--shadow`, checkout mode only; see
 [docs/dev/run-rust-beside-python.md](docs/dev/run-rust-beside-python.md)),
 and [rust/README.md](rust/README.md) has the rest.
 

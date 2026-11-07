@@ -175,6 +175,10 @@ CALLER_HOLDS_LOCK = {
     "_file_analyzer_duplicates",
     "_sweep_unreachable_orphans",
     "_record_store_decision",
+    # A legacy restore's one-transaction decision rows and slot save
+    # (2026-11-07): entered only inside world_restore / lesson_restore's
+    # locked block.
+    "_restore_decisions_with_slots",
     "_unreachable_orphans",
     # Alias retry list for a slot miss (one storage probe for shadowed
     # aliases) — reached only from cortex_lookup and chain(), both locked.

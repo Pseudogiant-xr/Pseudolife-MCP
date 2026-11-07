@@ -249,9 +249,6 @@ pub(crate) fn entry_from_row(
 /// move the seated order and bands depend on the stored bands and ids alone,
 /// never on the retention scores (access counts, reinforcements).
 pub(crate) fn seating_moves(entries: &[Entry], bands: &[StartupBandSpec]) -> bool {
-    if crate::mutants::active("startup-skip-seating") {
-        return false;
-    }
     let mut counts = vec![0usize; bands.len()];
     for entry in entries {
         let band = bands
@@ -468,9 +465,6 @@ fn seating_plan(
             .rposition(|b| b.name == entry.stored_band)
             .unwrap_or(0);
         seats[band].push(i);
-    }
-    if crate::mutants::active("startup-skip-seating") {
-        return (seats, moves);
     }
     for depth in 0..bands.len().saturating_sub(1) {
         let overflow = seats[depth].len().saturating_sub(bands[depth].max_entries);

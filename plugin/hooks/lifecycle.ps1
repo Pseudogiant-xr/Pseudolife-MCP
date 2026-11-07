@@ -1,8 +1,17 @@
 #Requires -Version 7
 # Native Windows override for Codex. Claude keeps the existing Bash commands.
 param([ValidateSet('SessionStart', 'MemoryPolicy', 'UserPromptSubmit', 'CoordinationStart', 'CoordinationPrompt', 'SessionEnd', 'Stop', 'SubagentStop', 'SubagentBoardGuard',
-    'SubagentBoardStart', 'SubagentBoardStop')][string]$Event)
+    'SubagentBoardStart', 'SubagentBoardStop', 'StopFailure')][string]$Event)
 $ErrorActionPreference = 'Stop'
+
+# The StopFailure entry is Claude Code's re-arm after a turn that ended on an
+# API or sign-in error (stop-wake.sh stop-failure, which Claude Code runs on
+# every platform). Codex 0.167.0 does not list the event (2026-11-07); one
+# that runs this command gets nothing: no park gate after a failed turn.
+if ($Event -eq 'StopFailure') {
+    try { [void][Console]::In.ReadToEnd() } catch {}
+    exit 0
+}
 
 # The PreToolUse entry is Claude Code's subagent board guard
 # (subagent-board-guard.sh, which Claude Code runs on every platform). Codex

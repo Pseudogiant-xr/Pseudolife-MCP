@@ -213,6 +213,28 @@ impl WorldStore {
         picks
     }
 
+    /// `undo_restore` (`world_cortex.py`): put the records a [`Self::restore`]
+    /// brought back into their retired state again, each with the
+    /// `superseded_at` it had, for a restore whose transaction failed. The
+    /// dirty mark the restore added is dropped (each entry's flag: its slot
+    /// was dirty before): when the COMMIT landed with its reply lost the bank
+    /// holds the restore, and a later sync must not write the retired state
+    /// back over it.
+    pub fn undo_restore(&mut self, restored: &[(usize, Option<f64>, bool)]) {
+        for &(i, superseded_at, was_dirty) in restored {
+            let r = &mut self.records[i];
+            r.status = "retired".into();
+            r.superseded_at = superseded_at;
+            if !was_dirty {
+                let key = r.key.clone();
+                self.dirty_slots.remove(&key);
+            }
+        }
+        if !restored.is_empty() {
+            self.reindex();
+        }
+    }
+
     /// Append a current record and index it, its slot dirty (the curation
     /// restore's record rebuilt from its audit snapshot). Returns its index.
     pub fn push_current(&mut self, mut rec: WorldRecord) -> usize {
@@ -596,6 +618,40 @@ mod tests {
             writer_id: Some("w"),
             session_id: None,
         }
+    }
+
+    /// A restore whose transaction failed is undone exactly: the record is
+    /// retired again with its old `superseded_at`, the slot has no current
+    /// record, and a retry restores it.
+    #[test]
+    fn undo_restore_puts_the_retired_record_back() {
+        let mut s = WorldStore::default();
+        s.write_fact(
+            "acme",
+            "ceo",
+            "jane",
+            None,
+            &write(10.0, (10, 0), "https://a"),
+        );
+        assert_eq!(s.retire("acme", Some("ceo"), 20.0), vec![0]);
+        s.dirty_slots.clear();
+        let marks: Vec<(usize, Option<f64>, bool)> = s
+            .restore_picks("acme", Some("ceo"))
+            .into_iter()
+            .map(|i| (i, s.records[i].superseded_at, false))
+            .collect();
+        assert_eq!(s.restore("acme", Some("ceo")), vec![0]);
+        assert!(s.lookup("acme", "ceo").is_some());
+        s.undo_restore(&marks);
+        assert_eq!(s.records[0].status, "retired");
+        assert_eq!(s.records[0].superseded_at, Some(20.0));
+        assert!(s.lookup("acme", "ceo").is_none());
+        assert!(s.current.is_empty());
+        assert!(
+            !s.dirty_slots.contains(&s.records[0].key),
+            "a later sync must not write the retired state over a landed restore"
+        );
+        assert_eq!(s.restore("acme", Some("ceo")), vec![0], "a retry restores");
     }
 
     #[test]

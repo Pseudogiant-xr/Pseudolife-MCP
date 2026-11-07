@@ -505,7 +505,7 @@ fn native_update_option_refusals_precede_effects() {
         vec!["--tag", "1.2;bad"],
         vec!["--rollback-tag", "bad/tag"],
         vec!["--no-test-login"],
-        vec!["--engine", "rust"],
+        vec!["--engine", "nope"],
     ] {
         assert_eq!(
             Options::parse(args.into_iter().map(OsString::from).collect())
@@ -527,6 +527,16 @@ fn native_update_engine_is_opt_in() {
     .unwrap();
     assert_eq!(options.engine.as_deref(), Some("rust"));
     assert!(options.shadow);
+    // Release mode selects the published Rust image (G2-A).
+    let release = Options::parse(
+        ["--engine", "rust", "--tag", "1.2.3"]
+            .into_iter()
+            .map(OsString::from)
+            .collect(),
+    )
+    .unwrap();
+    assert_eq!(release.engine.as_deref(), Some("rust"));
+    assert!(release.checkout.is_none());
 }
 #[test]
 fn native_update_lock_excludes_and_releases() {

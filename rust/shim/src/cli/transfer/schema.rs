@@ -12,7 +12,7 @@ use tokio_postgres::{
 include!("../../../../daemon/src/storage/schema_meta.rs");
 const SQL: &str = include_str!("../../../../daemon/src/storage/schema.sql");
 const PLAN: &str = include_str!("../../../../daemon/src/storage/schema_plan.json");
-const RESTORE: &str = "(`ops/restore.ps1 -Apply -BackupFile <dump>` or `ops/restore.sh --apply --backup-file <dump>`)";
+const RESTORE: &str = "(`pseudolife-mcp restore --backup-file <dump> --state-archive <state.tgz>`; from a checkout, `ops/restore.ps1 -Apply -BackupFile <dump> -StateArchive <state.tgz>` or `ops/restore.sh --apply --backup-file <dump> --state-archive <state.tgz>`)";
 
 pub(super) enum Error {
     Refused(String),

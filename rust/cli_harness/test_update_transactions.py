@@ -301,12 +301,19 @@ elif a[:2]==["volume","inspect"]:
  if s.get("volume_inspect_failure"):code=1
  else:out=json.dumps(s.get("volume_inspections",{}).get(a[-1],[]))
 elif a[:1]==["ps"]: out=s["running"]["Id"]
-elif a[:1]==["pull"]: code=int(s["failure"]=="pull")
-elif a[:1]==["run"]: out="58" if "--schema-version" in a else "SCHEMA_META_VERSION = 58\n"
+elif a[:1]==["pull"]: code=int(s["failure"]=="pull" or (bool(s.get("rust_pull_fails")) and "-rust:" in a[-1]))
+elif a[:1]==["run"]:
+ if "provision" in a: code=int(s["failure"]=="provision")
+ else: out="58" if "--schema-version" in a else "SCHEMA_META_VERSION = 58\n"
 elif a[:1]==["tag"]: s["images"][a[-1]]=a[-2]
 elif a[:1]==["compose"]:
  if "config" in a:
   config=json.loads(json.dumps(s["config"]))
+  if s.get("models_overlay") and any(v.endswith("docker-compose.rust-ghcr.yml") for v in a):
+   daemon=config["services"]["pseudolife-daemon"]
+   daemon["environment"]["PSEUDOLIFE_DAEMON_MODELS_DIR"]="/models"
+   daemon["volumes"].append({"type":"volume","source":"pseudolife_rust_models","target":"/models"})
+   config["volumes"]["pseudolife_rust_models"]={"name":"fixture-project_pseudolife_rust_models"}
   if s.get("relative_mount"):
    directory=pathlib.Path(a[a.index("--project-directory")+1]) if "--project-directory" in a else pathlib.Path(a[a.index("-f")+1]).parent
    config["services"]["pseudolife-daemon"]["volumes"].append({"type":"bind","source":str(directory/"config.yaml"),"target":"/data/config.yaml","read_only":True})
@@ -326,7 +333,13 @@ elif a[:1]==["compose"]:
     try:
      service=json.loads(pathlib.Path(path).read_text())["services"]["pseudolife-daemon"]
      if "labels" in service:s["running"]["Config"]["Labels"]={**(s["running"]["Config"]["Labels"] or {}),**service["labels"]}
+     if service.get("labels",{}).get("org.pseudolife.engine")=="python" and not s.get("import_stuck"):s["imported"]=True
     except (OSError,ValueError,KeyError):pass
+   if s.get("models_overlay"):
+    mounts=[m for m in s["running"]["Mounts"] if m.get("Destination")!="/models"]
+    if any(v.endswith("docker-compose.rust-ghcr.yml") for v in overlays):
+     mounts.append({"Type":"volume","Name":"fixture-project_pseudolife_rust_models","Destination":"/models","RW":True})
+    s["running"]["Mounts"]=mounts
    s["running"]["Image"]="sha256:replacement"
    s["running"]["Id"]=s.get("replacement_id",s["running"]["Id"])
 elif a[:1]==["exec"]:
@@ -334,9 +347,9 @@ elif a[:1]==["exec"]:
  elif "--host-state" in a or "pseudolife_memory.maintainer_setup" in a:
   out=s.get("setup_reply",json.dumps({"problem":None,"keys":[{"state":"active"}]}))
  elif "psql" in a:
-  if "cms_counters" in a[-1]:out="f" if s["failure"]=="pending_import" else "t"
-  else:out="56" if s["failure"]=="old_schema" else "unreadable" if s["failure"]=="unreadable_schema" else "58"
- elif any("test ! -e /data/memory_state/weights.pt" in v for v in a):code=int(s["failure"] in ("pending_import","imported_weights"))
+  if "cms_counters" in a[-1]:out="f" if s["failure"]=="pending_import" and not s.get("imported") else "t"
+  else:out="56" if s["failure"]=="old_schema" and not s.get("imported") else "unreadable" if s["failure"]=="unreadable_schema" else "58"
+ elif any("test ! -e /data/memory_state/weights.pt" in v for v in a):code=int(s["failure"] in ("pending_import","imported_weights") and not s.get("imported"))
  elif any("pg_dump" in v for v in a):code=int(s["failure"]=="backup")
  elif any("tar czf" in v for v in a):code=int(s["failure"]=="missing_state")
 elif a[:1]==["cp"]:
@@ -500,7 +513,7 @@ def host(tmp_path, failure="", mode="release"):
                 deployed = current["deployed"]
                 body = json.dumps({"status": "error" if deployed and failure == "health" or not deployed and failure == "stopped" else "ok",
                                    "version": "wrong" if deployed and failure == "version" else current.get("target_version", "0.21.1") if deployed else "0.21.0",
-                                   "schema": 59 if deployed and failure == "schema" else 58,
+                                   "schema": (59 if failure == "schema" else 58) if deployed else current.get("running_schema", 58),
                                    "auth": True, "persist_errors": 0,
                                    "updates": {"unattended_daemon": True}}).encode()
             else:
@@ -909,17 +922,381 @@ def test_checkout_d2_guard_is_reached_before_backup_and_accepts_imported_row(tmp
             assert "import" in result.stdout.lower()
 
 
+def _labels(state_path):
+    return json.loads(state_path.read_text())["running"]["Config"]["Labels"]
+
+
+def _accepted(env):
+    return Path(env["PSEUDOLIFE_MCP_DATA_DIR"]) / "update-engine/docker-compose.release-accepted.json"
+
+
 @pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
-def test_release_rust_refuses_unpublished_image_before_any_effect(tmp_path, native):
+def test_release_rust_activation_keeps_and_switches_back_on_the_same_bank(tmp_path, native):
     binary = _native_binary()
     if native and not binary:
         pytest.skip("set PSEUDOLIFE_RUST_BINARY")
     with host(tmp_path) as (repo, env, state_path):
-        result = run_arm(repo, env, binary if native else None, ["--engine", "rust", "--tag", "0.21.1", "--json"])
+        common = ["--daemon-only", "--json", "--health-retries", "1", "--health-delay-ms", "0"]
+        result = run_arm(repo, env, binary if native else None,
+                         ["--engine", "rust", "--tag", "0.21.1", *common, "--rollback-tag", "pre-rust"])
+        assert result.returncode == 0, result.stdout + result.stderr
+        state = json.loads(state_path.read_text())
+        assert stages(state) == ["pull", "backup", "tag", "up"]
+        pull = next(a for a in state["calls"] if a[:1] == ["pull"])
+        assert pull == ["pull", "ghcr.io/pseudogiant-xr/pseudolife-daemon-rust:0.21.1"]
+        provision = next(i for i, a in enumerate(state["calls"]) if a[:1] == ["run"] and "provision" in a)
+        backup = next(i for i, a in enumerate(state["calls"]) if a[:1] == ["fixture-backup"])
+        assert provision < backup
+        assert "type=volume,src=fixture-state,dst=/data" in state["calls"][provision]
+        assert "--if-missing" in state["calls"][provision]
+        assert "PSEUDOLIFE_DAEMON_MODELS_DIR=/data/models" in state["calls"][provision]
+        assert "--volumes-from" not in state["calls"][provision]
+        up = next(a for a in state["calls"] if a[:1] == ["compose"] and "up" in a)
+        assert any(v.endswith("docker-compose.rust-ghcr.yml") for v in up)
+        assert "--no-build" in up and "--no-deps" in up
+        tag = next(a for a in state["calls"] if a[:1] == ["tag"])
+        assert tag[-1].startswith("ghcr.io/pseudogiant-xr/pseudolife-daemon:") and tag[-1].endswith("-pre-rust")
+        labels = _labels(state_path)
+        assert labels["org.pseudolife.engine"] == "rust" and labels["org.pseudolife.release"] == "0.21.1"
+        first = labels["org.pseudolife.activation"]
+        accepted = json.loads(_accepted(env).read_text())["services"][SERVICE]["labels"]
+        assert accepted["org.pseudolife.activation"] == first
+        report = json.loads(result.stdout)
+        assert report["rollback"]["state"] == "tagged" and Path(report["rollback"]["overlay"]).is_file()
+
+        # An unset engine keeps Rust and records a fresh accepted activation.
+        result = run_arm(repo, env, binary if native else None,
+                         ["--tag", "0.21.1", "--reinstall", *common, "--rollback-tag", "pre-keep"])
+        assert result.returncode == 0, result.stdout + result.stderr
+        state = json.loads(state_path.read_text())
+        assert [a for a in state["calls"] if a[:1] == ["pull"]][-1][-1].endswith("pseudolife-daemon-rust:0.21.1")
+        assert [a for a in state["calls"] if a[:1] == ["tag"]][-1][-1].startswith("ghcr.io/pseudogiant-xr/pseudolife-daemon-rust:")
+        labels = _labels(state_path)
+        assert labels["org.pseudolife.engine"] == "rust" and labels["org.pseudolife.activation"] != first
+
+        # Without --json, so the printed rollback commands can be read.
+        plain = [arg for arg in common if arg != "--json"]
+        result = run_arm(repo, env, binary if native else None,
+                         ["--engine", "python", "--tag", "0.21.1", "--reinstall", *plain, "--rollback-tag", "pre-back"])
+        assert result.returncode == 0, result.stdout + result.stderr
+        state = json.loads(state_path.read_text())
+        assert [a for a in state["calls"] if a[:1] == ["pull"]][-1][-1] == "ghcr.io/pseudogiant-xr/pseudolife-daemon:0.21.1"
+        up = [a for a in state["calls"] if a[:1] == ["compose"] and "up" in a][-1]
+        assert not any(v.endswith("docker-compose.rust-ghcr.yml") for v in up)
+        assert _labels(state_path)["org.pseudolife.engine"] == "python"
+        assert json.loads(_accepted(env).read_text())["services"][SERVICE]["labels"]["org.pseudolife.engine"] == "python"
+        # Rolling the switch back restores Rust with its model volume overlay.
+        restore = next(line for line in result.stdout.splitlines() if "--pull never" in line)
+        assert "docker-compose.rust-ghcr.yml" in restore
+
+
+@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+@pytest.mark.parametrize("failure", ["pull", "provision", "backup", "up", "health", "version", "read"])
+def test_release_rust_activation_faults_never_commit_the_selection(tmp_path, native, failure):
+    binary = _native_binary()
+    if native and not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path, failure) as (repo, env, state_path):
+        result = run_arm(repo, env, binary if native else None,
+                         ["--engine", "rust", "--tag", "0.21.1", "--daemon-only", "--json", "--health-retries", "1",
+                          "--health-delay-ms", "0", "--rollback-tag", "pre-fixture"])
+        assert result.returncode == 1, result.stdout + result.stderr
+        state = json.loads(state_path.read_text())
+        expected = {"pull": ["pull"], "provision": ["pull"], "backup": ["pull", "backup"]}
+        assert stages(state) == expected.get(failure, ["pull", "backup", "tag", "up"])
+        assert not _accepted(env).exists()
+        if failure == "pull":
+            assert "--engine python" in result.stdout
+        if failure in expected:
+            assert not any(a[:1] == ["tag"] for a in state["calls"])
+        else:
+            assert json.loads(result.stdout)["rollback"]["state"] == "tagged"
+            assert "rollback" in result.stdout.lower()
+        if failure in ("health", "version", "read"):
+            # The recreated container never passed its gate: a plain retry
+            # must not treat it as an accepted Rust selection.
+            retry = run_arm(repo, env, binary if native else None, ["--tag", "0.21.1", "--daemon-only", "--json"])
+            assert retry.returncode == 2, retry.stdout + retry.stderr
+            assert "rollback" in retry.stdout.lower()
+            assert stages(json.loads(state_path.read_text())) == ["pull", "backup", "tag", "up"]
+
+
+@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+def test_release_rust_models_go_to_their_own_volume_outside_the_backed_up_state(tmp_path, native):
+    binary = _native_binary()
+    if native and not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path) as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        daemon = state["config"]["services"][SERVICE]
+        daemon["environment"]["PSEUDOLIFE_DAEMON_MODELS_DIR"] = "/models"
+        daemon["volumes"].append({"type": "volume", "source": "pseudolife_rust_models", "target": "/models"})
+        state["config"]["volumes"]["pseudolife_rust_models"] = {"name": "fixture-project_pseudolife_rust_models"}
+        state_path.write_text(json.dumps(state))
+        # No --daemon-only: an engine change still moves no client.
+        result = run_arm(repo, env, binary if native else None,
+                         ["--engine", "rust", "--tag", "0.21.1", "--json", "--health-retries", "1",
+                          "--rollback-tag", "pre-models"])
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert json.loads(result.stdout)["clients"] is None
+        calls = json.loads(state_path.read_text())["calls"]
+        create = next(a for a in calls if a[:2] == ["volume", "create"])
+        assert create[-1] == "fixture-project_pseudolife_rust_models"
+        assert "com.docker.compose.project=fixture-project" in create
+        assert "com.docker.compose.volume=pseudolife_rust_models" in create
+        provision = next(a for a in calls if a[:1] == ["run"] and "provision" in a)
+        assert "type=volume,src=fixture-project_pseudolife_rust_models,dst=/models" in provision
+        assert "PSEUDOLIFE_DAEMON_MODELS_DIR=/models" in provision
+        assert not any(v.endswith("dst=/data") for v in provision)
+
+
+@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+@pytest.mark.parametrize("labelled", [False, True], ids=["bundled-overlay", "labelled-overlay"])
+def test_release_rust_models_mount_does_not_block_a_rerun_or_a_switch_back(tmp_path, native, labelled):
+    # Once the Rust daemon runs with the overlay's /models volume, a plain
+    # Rust rerun keeps it and --engine python drops it on purpose: neither
+    # may be refused as "the Compose configuration drops a daemon mount".
+    binary = _native_binary()
+    if native and not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path) as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        state["models_overlay"] = True
+        state_path.write_text(json.dumps(state))
+        common = ["--daemon-only", "--json", "--health-retries", "1", "--health-delay-ms", "0"]
+        arm = binary if native else None
+        first = run_arm(repo, env, arm, ["--engine", "rust", "--tag", "0.21.1", *common, "--rollback-tag", "to-rust"])
+        assert first.returncode == 0, first.stdout + first.stderr
+        state = json.loads(state_path.read_text())
+        assert any(m["Destination"] == "/models" for m in state["running"]["Mounts"])
+        if labelled:
+            # Compose records the overlay it was created with: the switch-back
+            # then checks against that file, not the bundled copy.
+            up = next(a for a in state["calls"] if a[:1] == ["compose"] and "up" in a)
+            overlay = next(v for v in up if v.endswith("docker-compose.rust-ghcr.yml"))
+            labels = state["running"]["Config"]["Labels"]
+            labels["com.docker.compose.project.config_files"] += "," + overlay
+            state_path.write_text(json.dumps(state))
+        rerun = run_arm(repo, env, arm, ["--engine", "rust", "--tag", "0.21.1", "--reinstall", *common,
+                                         "--rollback-tag", "rerun"])
+        assert rerun.returncode == 0, rerun.stdout + rerun.stderr
+        assert "drops a daemon mount" not in rerun.stdout + rerun.stderr
+        back = run_arm(repo, env, arm, ["--engine", "python", "--tag", "0.21.1", *common, "--rollback-tag", "to-python"])
+        assert back.returncode == 0, back.stdout + back.stderr
+        assert "drops a daemon mount" not in back.stdout + back.stderr
+        state = json.loads(state_path.read_text())
+        assert _labels(state_path)["org.pseudolife.engine"] == "python"
+        assert not any(m["Destination"] == "/models" for m in state["running"]["Mounts"])
+
+
+def test_release_native_switch_back_still_refuses_dropping_another_mount(tmp_path):
+    # Near miss for the row above: only the Rust overlay's models volume may
+    # go when leaving Rust. Native release mode checks every mount; the
+    # Python release updater checks only /data, so this row is native-only.
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path) as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        state["models_overlay"] = True
+        state_path.write_text(json.dumps(state))
+        common = ["--daemon-only", "--json", "--health-retries", "1", "--health-delay-ms", "0"]
+        first = run_arm(repo, env, binary, ["--engine", "rust", "--tag", "0.21.1", *common, "--rollback-tag", "to-rust"])
+        assert first.returncode == 0, first.stdout + first.stderr
+        state = json.loads(state_path.read_text())
+        state["running"]["Mounts"].append({"Type": "volume", "Name": "fixture-cache", "Destination": "/cache", "RW": True})
+        before = len(state["calls"])
+        state_path.write_text(json.dumps(state))
+        back = run_arm(repo, env, binary, ["--engine", "python", "--tag", "0.21.1", *common, "--rollback-tag", "to-python"])
+        assert back.returncode == 2, back.stdout + back.stderr
+        assert "drops a daemon mount" in back.stdout
+        state = json.loads(state_path.read_text())
+        assert stages({"calls": state["calls"][before:]}) == []
+        assert _labels(state_path)["org.pseudolife.engine"] == "rust"
+
+
+@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+def test_release_engine_change_requires_a_backup(tmp_path, native):
+    binary = _native_binary()
+    if native and not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path) as (repo, env, state_path):
+        result = run_arm(repo, env, binary if native else None,
+                         ["--engine", "rust", "--tag", "0.21.1", "--no-backup", "--json"])
         assert result.returncode == 2, result.stdout + result.stderr
-        assert "not published" in result.stdout + result.stderr
-        assert "--checkout" in result.stdout + result.stderr
+        assert "require a backup" in result.stdout + result.stderr
         assert json.loads(state_path.read_text())["calls"] == []
+
+
+@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+@pytest.mark.parametrize("case", ["misplaced_models", "newer_bank"])
+def test_release_rust_refuses_before_pulling_or_backing_up(tmp_path, native, case):
+    binary = _native_binary()
+    if native and not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path) as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        if case == "misplaced_models":
+            state["config"]["services"][SERVICE]["environment"]["PSEUDOLIFE_DAEMON_MODELS_DIR"] = "/models"
+        else:
+            # The running daemon reports v59; the image's probe says 58.
+            state["running_schema"] = 59
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary if native else None,
+                         ["--engine", "rust", "--tag", "0.21.1", "--json", "--health-retries", "1"])
+        assert result.returncode == 2, result.stdout + result.stderr
+        state = json.loads(state_path.read_text())
+        assert stages(state) == ([] if case == "misplaced_models" else ["pull"])
+        assert ("no persistent volume" if case == "misplaced_models" else "newer than") in result.stdout
+
+
+@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+def test_rust_host_keeps_its_daemon_when_a_release_has_no_rust_image(tmp_path, native):
+    binary = _native_binary()
+    if native and not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path) as (repo, env, state_path):
+        common = ["--tag", "0.21.1", "--daemon-only", "--json", "--health-retries", "1"]
+        first = run_arm(repo, env, binary if native else None, ["--engine", "rust", *common, "--rollback-tag", "pre-a"])
+        assert first.returncode == 0, first.stdout + first.stderr
+        state = json.loads(state_path.read_text())
+        state["failure"] = "pull"
+        before = len(state["calls"])
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary if native else None, [*common, "--reinstall", "--rollback-tag", "pre-b"])
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert "keeps its current Rust daemon" in result.stdout
+        state = json.loads(state_path.read_text())
+        assert stages({"calls": state["calls"][before:]}) == ["pull"]
+        assert _labels(state_path)["org.pseudolife.engine"] == "rust"
+
+
+@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+@pytest.mark.parametrize("failure", ["pending_import", "old_schema"])
+def test_release_rust_imports_legacy_counters_on_python_first(tmp_path, native, failure):
+    # G2-K: the Rust daemon never reads memory_state/weights.pt. Update first
+    # moves to the Python daemon at the target, whose startup imports it.
+    binary = _native_binary()
+    if native and not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path, failure) as (repo, env, state_path):
+        result = run_arm(repo, env, binary if native else None,
+                         ["--engine", "rust", "--tag", "0.21.1", "--daemon-only", "--json", "--health-retries", "1",
+                          "--rollback-tag", "pre-import"])
+        assert result.returncode == 0, result.stdout + result.stderr
+        state = json.loads(state_path.read_text())
+        # The Rust image is pulled first, before the Python leg changes anything.
+        assert stages(state) == ["pull", "pull", "backup", "tag", "up", "pull", "backup", "tag", "up"]
+        pulled = [a[-1] for a in state["calls"] if a[:1] == ["pull"]]
+        assert pulled == ["ghcr.io/pseudogiant-xr/pseudolife-daemon-rust:0.21.1",
+                          "ghcr.io/pseudogiant-xr/pseudolife-daemon:0.21.1",
+                          "ghcr.io/pseudogiant-xr/pseudolife-daemon-rust:0.21.1"]
+        assert "moving to the Python daemon 0.21.1 first" in result.stdout
+        assert _labels(state_path)["org.pseudolife.engine"] == "rust"
+        # The original image's rollback survives beside the second leg's.
+        rollback = json.loads(result.stdout)["rollback"]
+        assert rollback["state"] == "tagged"
+        assert rollback["before_import"]["state"] == "tagged"
+        assert rollback["before_import"]["tag"].endswith("-pre-import-pre-import")
+        assert rollback["tag"] != rollback["before_import"]["tag"]
+
+
+@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+@pytest.mark.parametrize("case", ["rust_host", "unreadable_schema"])
+def test_release_rust_refuses_an_unimportable_bank_without_an_import_leg(tmp_path, native, case):
+    # A Rust daemon never imports weights.pt, and an unreadable schema would
+    # fail the Python daemon too: both refuse before changing anything.
+    binary = _native_binary()
+    if native and not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path, "pending_import" if case == "rust_host" else case) as (repo, env, state_path):
+        if case == "rust_host":
+            state = json.loads(state_path.read_text())
+            state["running"]["Config"]["Labels"]["org.pseudolife.engine"] = "rust"
+            state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary if native else None,
+                         ["--engine", "rust", "--tag", "0.21.1", "--daemon-only", "--json", "--health-retries", "1"])
+        assert result.returncode == 2, result.stdout + result.stderr
+        assert "nothing was changed" in result.stdout
+        assert "moving to the Python daemon" not in result.stdout
+        state = json.loads(state_path.read_text())
+        assert "backup" not in stages(state) and "up" not in stages(state)
+
+
+@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+def test_release_rust_stops_on_python_when_the_import_does_not_happen(tmp_path, native):
+    binary = _native_binary()
+    if native and not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path, "pending_import") as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        state["import_stuck"] = True
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary if native else None,
+                         ["--engine", "rust", "--tag", "0.21.1", "--daemon-only", "--json", "--health-retries", "1",
+                          "--rollback-tag", "pre-stuck"])
+        # The Python leg changed the host, so this is a failure, not a refusal.
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert "did not import memory_state/weights.pt" in result.stdout
+        assert "move memory_state/weights.pt aside" in result.stdout
+        state = json.loads(state_path.read_text())
+        assert stages(state) == ["pull", "pull", "backup", "tag", "up"]
+        assert _labels(state_path)["org.pseudolife.engine"] == "python"
+
+
+@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+def test_release_rust_without_an_image_refuses_before_the_import_leg(tmp_path, native):
+    binary = _native_binary()
+    if native and not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path, "pending_import") as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        state["rust_pull_fails"] = True
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary if native else None,
+                         ["--engine", "rust", "--tag", "0.21.1", "--daemon-only", "--json", "--health-retries", "1"])
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert "nothing was changed" in result.stdout
+        assert stages(json.loads(state_path.read_text())) == ["pull"]
+
+
+@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+def test_release_rust_import_leg_runs_at_the_same_version_with_a_fixed_rollback_tag(tmp_path, native):
+    # The Python daemon already runs the target: it still restarts to import,
+    # and the two legs' rollback tags (same version, same suffix) stay apart.
+    binary = _native_binary()
+    if native and not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path, "pending_import") as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        state["target_version"] = "0.21.0"
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary if native else None,
+                         ["--engine", "rust", "--tag", "0.21.0", "--daemon-only", "--json", "--health-retries", "1",
+                          "--rollback-tag", "fixed"])
+        assert result.returncode == 0, result.stdout + result.stderr
+        state = json.loads(state_path.read_text())
+        assert stages(state) == ["pull", "pull", "backup", "tag", "up", "pull", "backup", "tag", "up"]
+        tags = [a[-1] for a in state["calls"] if a[:1] == ["tag"]]
+        assert len(tags) == 2 and tags[0] != tags[1], tags
+        assert tags[0].endswith("-fixed-pre-import") and tags[1].endswith("-fixed")
+        assert _labels(state_path)["org.pseudolife.engine"] == "rust"
+
+
+@pytest.mark.parametrize("native_first", [True, False], ids=["native-first", "python-first"])
+def test_release_rust_selection_is_shared_by_both_updaters(tmp_path, native_first):
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path) as (repo, env, state_path):
+        arms = [native_first, not native_first, native_first]
+        rounds = [["--engine", "rust"], [], ["--engine", "python"]]
+        for index, (native, extra) in enumerate(zip(arms, rounds)):
+            result = run_arm(repo, env, binary if native else None,
+                             [*extra, "--tag", "0.21.1", "--reinstall", "--daemon-only", "--json",
+                              "--health-retries", "1", "--rollback-tag", f"pre-round-{index}"])
+            assert result.returncode == 0, result.stdout + result.stderr
+            assert _labels(state_path)["org.pseudolife.engine"] == ("python" if index == 2 else "rust")
 
 
 def test_native_release_rollback_supplies_required_compose_image_tag(tmp_path):

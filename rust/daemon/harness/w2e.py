@@ -334,6 +334,9 @@ GENERIC = re.compile(r"^session - \d{4}-\d{2}-\d{2} \d{2}:\d{2}$")
 # detached from its connection, so only the shutdown drain can observe it.
 MUTANTS = ["store-tags-raw", "store-skip-session-episode", "store-no-hint", "store-surprise-raw",
            "mcp-store-no-session",
+           # An exact duplicate's surprise snapped to 0: caught by
+           # store-exact-duplicates.
+           "store-surprise-unsnapped",
            # /health's subsystem keys: caught by the health-* scenarios.
            "health-no-stall", "health-no-capacity-warning",
            # The counters row: caught by the counters-* scenarios.
@@ -747,6 +750,28 @@ SCENARIOS: dict[str, dict] = {
                      [sess("sess-a")]), "abandon": True},
             store("The next store after a disconnect", [sess("sess-a")]),
         ],
+    },
+    # Exact duplicates at a positive threshold: each text's second store is
+    # filtered_meta in both daemons. Without the snap of a surprise below
+    # SELF_SIMILARITY_EPSILON to 0, an identical vector's float32
+    # self-similarity left 1 - cos a few 1e-7 either side of 0, so the reason
+    # (filtered_meta or below_surprise_threshold) and the note followed each
+    # engine's summation order.
+    "store-exact-duplicates": {
+        "config": "memory:\n  surprise_threshold: 0.05\n",
+        "seed": [],
+        "ops": [op for text in (
+            "The release pipeline publishes to PyPI with trusted publishing.",
+            "The staging server runs Debian 12 on the second rack.",
+            "Backups rotate nightly and keep fourteen days.",
+            "The Console signs in with a one-time link.",
+            "Dream extraction uses the Sonnet shim by default.",
+            "The bench database listens on a loopback port.",
+            "Search fuses dense and keyword candidates.",
+            "Each session episode gets a generic title first.",
+            "The reranker skips when the margin is wide.",
+            "Graph merges go to the review queue.",
+        ) for op in (store(text), store(text))],
     },
     # The gate on: meta filter, surprise threshold, contradiction admission.
     "store-gate": {
@@ -2718,6 +2743,37 @@ SCENARIOS.update({
         "config": None,
         "seed": REVIEW_SEED,
         "ops": REVIEW_OPS,
+    },
+    # A list `rationale`: Python's psycopg binds it as an array, so the TEXT
+    # column holds PostgreSQL's array text; a list psycopg cannot dump fails
+    # the call on both sides after the entities are minted.
+    "review-propose-list-rationale": {
+        "config": None,
+        "seed": [],
+        "ops": [
+            review("propose", proposals=[
+                {"src": "Tide Gauge", "relation": "runs-on", "dst": "Harbor Host",
+                 "rationale": ["shared tide tables", "same rack", ""]},
+                {"src": "Kelp Farm", "relation": "uses", "dst": "Ocean",
+                 "rationale": [None, 'say "salt"', "back\\slash", "NULL"]},
+                {"src": "Warehouse", "relation": "depends-on", "dst": "Ocean",
+                 "rationale": [[1, 2], [3, 4]]},
+                {"src": "Lighthouse", "relation": "related-to", "dst": "Harbor Host",
+                 "rationale": [True, False]},
+                # Untyped (strings, None, empty): stored whatever its shape.
+                {"src": "Buoy", "relation": "related-to", "dst": "Ocean",
+                 "rationale": [["a"], "b", None, []]},
+            ]),
+            review("propose", proposals=[
+                {"src": "Pier", "relation": "related-to", "dst": "Ocean", "rationale": ["a", 1]},
+            ]),
+            # Typed and ragged: PostgreSQL refuses the literal on both sides.
+            review("propose", proposals=[
+                {"src": "Jetty", "relation": "related-to", "dst": "Ocean",
+                 "rationale": [[1], [2, 3]]},
+            ]),
+            review(),
+        ],
     },
     "review-list-gated": {
         "config": "memory:\n  deep_dream:\n    judges_enabled: false\n",

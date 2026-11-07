@@ -204,6 +204,20 @@ def test_a_spent_nonce_is_refused(svc):
     assert len(receive(svc, agent)["messages"]) == 1
 
 
+def test_a_retried_body_from_a_counting_authenticator_is_spent_not_flagged(svc):
+    """#1361: a browser that sends the same signed body twice (a retry after a
+    dropped response) is refused as spent, and the key is not flagged as
+    cloned: the nonce is spent before the counter is compared."""
+    auth = bootstrap(svc)
+    auth.sign_count = 5              # a hardware key: the counter moves
+    agent = peer(svc)
+    _, body = maintainer_send(svc, auth, agent["agent_id"])
+    refused("challenge_spent", call, svc, "send", body)
+    (key,) = call(svc, "status")["passkeys"]
+    assert key["flagged_at"] is None
+    assert len(receive(svc, agent)["messages"]) == 1
+
+
 def test_an_expired_payload_is_refused(svc, monkeypatch):
     auth = bootstrap(svc)
     agent = peer(svc)

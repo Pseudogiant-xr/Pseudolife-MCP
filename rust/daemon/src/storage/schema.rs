@@ -191,7 +191,7 @@ pub async fn ensure_schema_in_transaction(client: &Client) -> Result<(), SchemaE
     Ok(())
 }
 
-const RESTORE_HINT: &str = "(`ops/restore.ps1 -Apply -BackupFile <dump>` or `ops/restore.sh --apply --backup-file <dump>`)";
+const RESTORE_HINT: &str = "(`pseudolife-mcp restore --backup-file <dump> --state-archive <state.tgz>`; from a checkout, `ops/restore.ps1 -Apply -BackupFile <dump> -StateArchive <state.tgz>` or `ops/restore.sh --apply --backup-file <dump> --state-archive <state.tgz>`)";
 
 /// schema.py's `_schema_version_refusal`, word for word: a newer build's
 /// stamp is refused rather than stamped down, and so is a stamp that is not
@@ -210,23 +210,36 @@ fn version_refusal(value: &str) -> Option<String> {
     }
 }
 
-async fn refuse_future_or_malformed_version(client: &Client) -> Result<(), SchemaError> {
+/// schema.py's `bank_schema_refusal`: the refusal for the bank `client`
+/// reads, or `None` when this build may open it. Read-only, so a
+/// reconnect can run it before its session writes anything (issue #909).
+pub(crate) async fn bank_schema_refusal(
+    client: &Client,
+) -> Result<Option<String>, tokio_postgres::Error> {
     if !matches!(
         simple_value(client, "SELECT to_regclass('public.meta')").await?,
         Some(Some(_))
     ) {
-        return Ok(());
+        return Ok(None);
     }
-    if let Some(Some(value)) = simple_value(
-        client,
-        "SELECT value::text FROM public.meta WHERE key = 'schema_version'",
+    Ok(
+        match simple_value(
+            client,
+            "SELECT value::text FROM public.meta WHERE key = 'schema_version'",
+        )
+        .await?
+        {
+            Some(Some(value)) => version_refusal(&value),
+            _ => None,
+        },
     )
-    .await?
-        && let Some(message) = version_refusal(&value)
-    {
-        return Err(SchemaError::Refused(message));
+}
+
+async fn refuse_future_or_malformed_version(client: &Client) -> Result<(), SchemaError> {
+    match bank_schema_refusal(client).await? {
+        Some(message) => Err(SchemaError::Refused(message)),
+        None => Ok(()),
     }
-    Ok(())
 }
 
 fn test(
@@ -277,10 +290,10 @@ mod tests {
         // Expected text produced by schema.py's _schema_version_refusal;
         // tests/test_schema_version_guard.py reads these two literals back.
         let newer = format!(
-            "Refusing to start: bank schema version 999999 is newer than this build's schema version {SCHEMA_META_VERSION}. A newer Pseudolife release upgraded this bank and this build cannot serve it safely, so the bank was left untouched. Run that release or a newer one (`pseudolife-mcp update`); to roll back to this build instead, first restore the backup taken before that upgrade (`ops/restore.ps1 -Apply -BackupFile <dump>` or `ops/restore.sh --apply --backup-file <dump>`)."
+            "Refusing to start: bank schema version 999999 is newer than this build's schema version {SCHEMA_META_VERSION}. A newer Pseudolife release upgraded this bank and this build cannot serve it safely, so the bank was left untouched. Run that release or a newer one (`pseudolife-mcp update`); to roll back to this build instead, first restore the backup taken before that upgrade (`pseudolife-mcp restore --backup-file <dump> --state-archive <state.tgz>`; from a checkout, `ops/restore.ps1 -Apply -BackupFile <dump> -StateArchive <state.tgz>` or `ops/restore.sh --apply --backup-file <dump> --state-archive <state.tgz>`)."
         );
         assert_eq!(version_refusal("999999").unwrap(), newer);
-        let malformed = "Refusing to start: bank schema_version must be a positive integer, but this bank's is 0. Pseudolife never writes that value, so the bank was left untouched. Restore the bank from a backup (`ops/restore.ps1 -Apply -BackupFile <dump>` or `ops/restore.sh --apply --backup-file <dump>`).";
+        let malformed = "Refusing to start: bank schema_version must be a positive integer, but this bank's is 0. Pseudolife never writes that value, so the bank was left untouched. Restore the bank from a backup (`pseudolife-mcp restore --backup-file <dump> --state-archive <state.tgz>`; from a checkout, `ops/restore.ps1 -Apply -BackupFile <dump> -StateArchive <state.tgz>` or `ops/restore.sh --apply --backup-file <dump> --state-archive <state.tgz>`).";
         assert_eq!(version_refusal("0").unwrap(), malformed);
     }
 

@@ -362,6 +362,16 @@ PARK_GATE_MESSAGE = (
     "queued for receive on a later turn. Claude Code's Stop hook keeps listening "
     "while this session stays open, and a Codex thread needs its doorbell active; "
     "without either, record that you are reachable on your next turn.")
+# The block for mail that rang after the session's park (reason
+# ``rung_since_park``): the ring may have come after the session last looked
+# (on 2026-11-07 one rang at 17:19:01Z and the gate blocked at 17:19:03Z,
+# before the shim's next heartbeat showed it), and the plain request above
+# made the continuation re-park "waiting on you" with the answer unread.
+PARK_GATE_RUNG_MESSAGE = (
+    "Before ending: board mail rang for you after your last park. Read it first "
+    "(memory_message receive, then ack each message_id) and act on it; then update your "
+    "board status and park to match (memory_agents update park_reason=... park_needs=... "
+    "park_clear_by=... park_resume=...), or set a done status if nothing is left.")
 
 
 def park_gate(service, headers: Mapping[str, str], *, agent, since,
@@ -394,7 +404,9 @@ def park_gate(service, headers: Mapping[str, str], *, agent, since,
         return "allow\n"
     if verdict.get("gate") != "block":
         return "allow\n"
-    return f"block\n{PARK_GATE_MESSAGE}\n"
+    message = (PARK_GATE_RUNG_MESSAGE if verdict.get("reason") == "rung_since_park"
+               else PARK_GATE_MESSAGE)
+    return f"block\n{message}\n"
 
 
 def woke(service, headers: Mapping[str, str], *, agent, token_map=None, token=None) -> str:

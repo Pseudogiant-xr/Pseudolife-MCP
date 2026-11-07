@@ -28,9 +28,14 @@ pub(crate) fn is_word(c: char) -> bool {
     contains(data::WORD, c)
 }
 
+/// `\s` for str patterns: `Py_UNICODE_ISSPACE`.
+pub(crate) fn is_space(c: char) -> bool {
+    contains(data::SPACE, c)
+}
+
 /// `[\s_\-/]`, also `_NAME_SEP`'s split class (`recall.py:38`).
 fn is_sep(c: char) -> bool {
-    matches!(c, '_' | '-' | '/') || contains(data::SPACE, c)
+    matches!(c, '_' | '-' | '/') || is_space(c)
 }
 
 fn is_apostrophe(c: char) -> bool {

@@ -373,6 +373,29 @@ async fn confirm(session: &mut pg::Session, prefix: &str) -> Result<(String, Str
     finish(tx, result).await
 }
 
+/// v59 `_end_sessions` (`console_sessions.revoke_issuer_sessions`): end the
+/// Console sessions a revoked key signed in (every passkey's with `None`),
+/// inside the change's transaction, so its sign-ins never outlive it. A
+/// bank before v59 has no session table; it is probed first, since a failed
+/// statement would abort the transaction.
+async fn end_sessions(tx: &Transaction<'_>, credential_id: Option<&str>) -> Result<(), Stop> {
+    let present: bool = tx
+        .query_one(
+            "SELECT to_regclass('public.console_sessions') IS NOT NULL",
+            &[],
+        )
+        .await?
+        .try_get(0)?;
+    if present {
+        tx.execute(
+            "UPDATE public.console_sessions              SET revoked_at = EXTRACT(EPOCH FROM clock_timestamp())::double precision              WHERE method = 'passkey' AND revoked_at IS NULL              AND ($1::text IS NULL OR issuer = $1)",
+            &[&credential_id],
+        )
+        .await?;
+    }
+    Ok(())
+}
+
 async fn revoke(session: &mut pg::Session, prefix: &str) -> Result<(String, String), Stop> {
     let tx = session.client_mut().transaction().await?;
     let result = async {
@@ -385,6 +408,7 @@ async fn revoke(session: &mut pg::Session, prefix: &str) -> Result<(String, Stri
             )
             .await?;
         if revoked != 0 {
+            end_sessions(&tx, Some(&id)).await?;
             key_change(&tx, "revoke", Some(&id), Some(&label), None).await?;
         }
         Ok((id, label))
@@ -402,6 +426,7 @@ async fn reset(session: &mut pg::Session) -> Result<u64, Stop> {
                 &[&clock()?],
             )
             .await?;
+        end_sessions(&tx, None).await?;
         tx.execute("DELETE FROM maintainer_bootstrap", &[]).await?;
         tx.execute("DELETE FROM meta WHERE key=$1", &[&SECRET_META_KEY])
             .await?;

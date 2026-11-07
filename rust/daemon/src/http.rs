@@ -57,6 +57,11 @@ pub struct App {
     /// Sign-in's own failure budget and two slots, apart from pairing's, so
     /// a burst of bad pairing codes cannot lock sign-in out, nor the reverse.
     pub(crate) signin_limiter: crate::routes::pair::PairLimiter,
+    /// The passkey challenge's own failure budget and two slots, and its
+    /// cap on challenges issued (`passkey_issued`, 30 a minute: a design
+    /// bound, a person signs in a few times a day, not a measurement).
+    pub(crate) passkey_limiter: crate::routes::pair::PairLimiter,
+    pub(crate) passkey_issued: crate::routes::pair::PairLimiter,
 }
 
 impl App {
@@ -83,6 +88,8 @@ impl App {
             env_issuers,
             env_principals,
             signin_limiter: Default::default(),
+            passkey_limiter: Default::default(),
+            passkey_issued: crate::routes::pair::PairLimiter::with_limit(30),
         }
     }
 
@@ -903,6 +910,11 @@ async fn dispatch(
     // bearer gate and checks the Origin against the code's.
     if path == "/api/console/session" {
         return crate::routes::signin::redeem(app, method, h, body).await;
+    }
+    // The passkey sign-in's challenge (spec section 5): pre-auth too, at
+    // the passkey origin only.
+    if path == "/api/console/passkey-challenge" {
+        return crate::routes::signin::passkey_challenge(app, method, h, body).await;
     }
     if path.starts_with("/api/") || path == "/api" {
         return api(app, path, method, h, raw_query, body).await;
