@@ -625,6 +625,17 @@ def host(tmp_path, failure="", mode="release"):
         thread.join(timeout=5)
 
 
+def _skip_windows_ci_python_arm(native):
+    """The G2 default rows (#1367) run both arms on the hosted Ubuntu cli
+    shard but only the native arm on hosted Windows. Both arms there took the
+    windows-latest cli step past its 15-minute limit: batches #1394 and #1396
+    were cancelled at 15:01 and 15:02 (pytest 13:53), against 12:37 without
+    these rows in batch #1391. The Python-oracle arm was about 40% of their
+    local Windows time (92 of 232 s). A local Windows run keeps both arms."""
+    if not native and os.name == "nt" and os.environ.get("GITHUB_ACTIONS") == "true":
+        pytest.skip("Python-oracle arm of a G2 default row: it runs on the hosted Linux cli shard")
+
+
 def run_arm(repo, env, native, args):
     if native:
         command = [native, "update", *args]
@@ -1264,6 +1275,7 @@ def test_release_refuses_to_recreate_without_project_files_or_an_env_file(tmp_pa
     binary = _native_binary()
     if native and not binary:
         pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    _skip_windows_ci_python_arm(native)
     with host(tmp_path) as (repo, env, state_path):
         state = json.loads(state_path.read_text())
         state["running"]["Config"]["Labels"] = {"com.docker.compose.project": "fixture-project",
@@ -1435,6 +1447,7 @@ def test_release_default_moves_only_an_unchosen_attended_host_to_rust(tmp_path, 
     binary = _native_binary()
     if native and not binary:
         pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    _skip_windows_ci_python_arm(native)
     with host(tmp_path) as (repo, env, state_path):
         state = json.loads(state_path.read_text())
         state["rust_published"] = case != "unpublished"
@@ -1502,6 +1515,7 @@ def test_a_fallback_never_removes_an_image_a_docker_error_hid(tmp_path, native):
     binary = _native_binary()
     if native and not binary:
         pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    _skip_windows_ci_python_arm(native)
     with host(tmp_path, "missing_state") as (repo, env, state_path):
         state = json.loads(state_path.read_text())
         state["rust_published"] = True
@@ -1524,6 +1538,7 @@ def test_a_fallback_after_provisioning_removes_the_model_volume_it_created(tmp_p
     binary = _native_binary()
     if native and not binary:
         pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    _skip_windows_ci_python_arm(native)
     with host(tmp_path, "missing_state") as (repo, env, state_path):
         state = json.loads(state_path.read_text())
         state["rust_published"] = True
@@ -1553,6 +1568,7 @@ def test_release_default_never_applies_to_unattended_or_auth_change_runs(tmp_pat
     binary = _native_binary()
     if native and not binary:
         pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    _skip_windows_ci_python_arm(native)
     with host(tmp_path) as (repo, env, state_path):
         state = json.loads(state_path.read_text())
         state["rust_published"] = True
@@ -1586,6 +1602,7 @@ def test_release_default_keeps_python_for_a_configuration_rust_refuses(tmp_path,
     binary = _native_binary()
     if native and not binary:
         pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    _skip_windows_ci_python_arm(native)
     with host(tmp_path) as (repo, env, state_path):
         state = json.loads(state_path.read_text())
         state["rust_published"] = True
@@ -1618,6 +1635,7 @@ def test_explicit_rust_refuses_an_unsupported_configuration_before_the_backup(tm
     binary = _native_binary()
     if native and not binary:
         pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    _skip_windows_ci_python_arm(native)
     with host(tmp_path) as (repo, env, state_path):
         state = json.loads(state_path.read_text())
         state["check_config"] = 3 if case == "unsupported" else 2
@@ -1645,6 +1663,7 @@ def test_a_failed_python_choice_write_only_warns(tmp_path, native, case):
     binary = _native_binary()
     if native and not binary:
         pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    _skip_windows_ci_python_arm(native)
     with host(tmp_path) as (repo, env, state_path):
         state = json.loads(state_path.read_text())
         if case == "nothing-to-do":
@@ -1671,6 +1690,7 @@ def test_release_default_never_blocks_an_ordinary_update(tmp_path, native, case)
     binary = _native_binary()
     if native and not binary:
         pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    _skip_windows_ci_python_arm(native)
     failure = {"state-backup-refused": "missing_state"}.get(case, "")
     with host(tmp_path, failure) as (repo, env, state_path):
         state = json.loads(state_path.read_text())
@@ -1715,6 +1735,7 @@ def test_release_default_imports_legacy_counters_unless_rust_refuses_the_configu
     binary = _native_binary()
     if native and not binary:
         pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    _skip_windows_ci_python_arm(native)
     with host(tmp_path, "pending_import") as (repo, env, state_path):
         state = json.loads(state_path.read_text())
         state["rust_published"] = True
@@ -1749,6 +1770,7 @@ def test_an_import_leg_update_moves_the_clients_once_after_the_rust_gate(tmp_pat
     binary = _native_binary()
     if native and not binary:
         pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    _skip_windows_ci_python_arm(native)
     with host(tmp_path, "pending_import") as (repo, env, state_path):
         state = json.loads(state_path.read_text())
         state["rust_published"] = True
@@ -1778,6 +1800,7 @@ def test_a_failed_import_leg_of_a_defaulted_move_is_the_updates_error(tmp_path, 
     binary = _native_binary()
     if native and not binary:
         pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    _skip_windows_ci_python_arm(native)
     with host(tmp_path, "pending_import") as (repo, env, state_path):
         state = json.loads(state_path.read_text())
         state["rust_published"] = True
@@ -1804,6 +1827,7 @@ def test_an_unreadable_choice_record_still_keeps_the_host_engine(tmp_path, nativ
     binary = _native_binary()
     if native and not binary:
         pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    _skip_windows_ci_python_arm(native)
     with host(tmp_path) as (repo, env, state_path):
         state = json.loads(state_path.read_text())
         state["rust_published"] = True
@@ -1823,6 +1847,7 @@ def test_an_explicit_python_choice_with_nothing_to_deploy_is_kept(tmp_path, nati
     binary = _native_binary()
     if native and not binary:
         pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    _skip_windows_ci_python_arm(native)
     with host(tmp_path) as (repo, env, state_path):
         state = json.loads(state_path.read_text())
         state["rust_published"] = True
