@@ -474,7 +474,10 @@ impl Update {
         )
     }
     fn requires_state_backup(&self) -> bool {
-        self.o.engine.is_some() || self.selected_engine == "rust" || self.o.allow_auth_change
+        self.o.engine.is_some()
+            || self.selected_engine == "rust"
+            || self.defaulted_engine
+            || self.o.allow_auth_change
     }
     pub(super) fn with_state_helper<T>(
         &self,

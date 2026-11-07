@@ -303,16 +303,21 @@ elif a[:1] in (["run"],["create"]) and any(v in s.get("orphaned",[]) for v in a)
 elif a[:2]==["image","inspect"]:
  if "Created" in " ".join(a): out="2026-01-01|"+s["images"].get(a[-1],s["running"]["Image"])
  elif a[-1] in s["images"]: out=s["images"][a[-1]]
- else: code=1
+ elif s.get("image_inspect_error"): code=1;out="Cannot connect to the Docker daemon at unix:///var/run/docker.sock"
+ else: code=1;out="Error response from daemon: No such image: "+a[-1]
 elif a[:2]==["image","ls"]: out="\n".join(s["images"]) if s.get("list_images") else ""
 elif a[:1]==["port"]:out="127.0.0.1:9876" if a[-1]=="8765/tcp" else "127.0.0.1:5433"
 elif a[:2]==["volume","inspect"]:
  if s.get("volume_inspect_failure"):code=1
  else:out=json.dumps(s.get("volume_inspections",{}).get(a[-1],[]))
 elif a[:1]==["ps"]: out=s["running"]["Id"]
-elif a[:1]==["pull"]: code=int(s["failure"]=="pull" or (bool(s.get("rust_pull_fails")) and "-rust:" in a[-1]))
+elif a[:1]==["pull"]: code=int(s["failure"]=="pull" or (bool(s.get("rust_pull_fails")) and "-rust:" in a[-1]) or (bool(s.get("python_pull_fails")) and "-rust:" not in a[-1]))
+elif a[:2]==["manifest","inspect"]: code=0 if s.get("rust_published") else 1
 elif a[:1]==["run"]:
- if "provision" in a: code=int(s["failure"]=="provision")
+ if "check-config" in a:
+  code=s.get("check_config",0)
+  out={3:"unsupported memory.reranker.model_name 'BAAI/bge-reranker-base': the native daemon supports only cross-encoder/ms-marco-MiniLM-L-6-v2; set memory.reranker.model_name to that model, or keep the Python engine for a different reranker",2:"storage resolution refused: the Rust daemon requires PSEUDOLIFE_MCP_DATABASE_URL"}.get(code,"the native daemon supports the configuration in /data/config.yaml")
+ elif "provision" in a: code=int(s["failure"]=="provision")
  else: out="58" if "--schema-version" in a else "SCHEMA_META_VERSION = 58\n"
 elif a[:1]==["tag"]:
  # The containerd image store: an ID no name refers to any more no longer resolves.
@@ -510,6 +515,7 @@ def host(tmp_path, failure="", mode="release"):
         (ops / "backup.sh").write_text(f"#!/bin/sh\nexec {shlex.quote(sys.executable)} {shlex.quote(str(backup))} \"$@\"\n")
     state_path = home / "fixture-state.json"
     state = {"calls": [], "deployed": False, "failure": failure, "images": {"pseudolife-daemon:0.21.0": "sha256:validated"},
+             "volume_inspections": {"fixture-state": [{"Name": "fixture-state"}]},
              "running": {"Id": "fixture-daemon", "Image": "sha256:validated", "State": {"Running": True},
                          "NetworkSettings": {"Networks": {"fixture": {"Aliases": ["pseudolife-pg"]}}},
                          "Mounts": [{"Destination": "/data", "Name": "fixture-state", "Type": "volume", "RW": True}],
@@ -564,7 +570,7 @@ def host(tmp_path, failure="", mode="release"):
             elif self.path == "/api/coordination/agents":
                 # Backup completion brings a peer onto the board. Only the
                 # callback inside deploy_release can observe this transition.
-                active = any(a[:1] == ["fixture-backup"] for a in current["calls"])
+                active = not current.get("no_board_peer") and any(a[:1] == ["fixture-backup"] for a in current["calls"])
                 payload = {"agents": [{"agent_id": "fixture-peer", "task": "working"}] if active else []}
             else:
                 payload = {"recipients": 1}
@@ -1395,6 +1401,421 @@ def test_rust_host_keeps_its_daemon_when_a_release_has_no_rust_image(tmp_path, n
         state = json.loads(state_path.read_text())
         assert stages({"calls": state["calls"][before:]}) == ["pull"]
         assert _labels(state_path)["org.pseudolife.engine"] == "rust"
+
+
+@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+@pytest.mark.parametrize("case", ["unchosen", "unpublished", "chose-python", "chose-python-then-rust",
+                                  "corrupt-choice", "binary-choice", "working-dir"])
+def test_release_default_moves_only_an_unchosen_attended_host_to_rust(tmp_path, native, case):
+    binary = _native_binary()
+    if native and not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path) as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        state["rust_published"] = case != "unpublished"
+        state_path.write_text(json.dumps(state))
+        if case == "chose-python":
+            # `--engine python` leaves an accepted python record: the host chose.
+            accepted = _accepted(env)
+            accepted.parent.mkdir(parents=True)
+            accepted.write_text(json.dumps({"services": {SERVICE: {"image": "py", "labels": {
+                "org.pseudolife.engine": "python", "org.pseudolife.activation": "chosen",
+                "org.pseudolife.release": "0.21.0"}}}}))
+        choice = Path(env["PSEUDOLIFE_MCP_DATA_DIR"]) / "update-engine/engine-choice.json"
+        if case == "chose-python-then-rust":
+            choice.parent.mkdir(parents=True, exist_ok=True)
+            choice.write_text('{"engine": "python"}\n')
+        if case == "corrupt-choice":
+            choice.parent.mkdir(parents=True, exist_ok=True)
+            choice.write_text("{not json")
+        if case == "binary-choice":
+            # Not UTF-8 (Codex, round 3 delta): a warning, never a crash.
+            choice.parent.mkdir(parents=True, exist_ok=True)
+            choice.write_bytes(b"\xff\xfe{\x00")
+        if case == "working-dir":
+            state = json.loads(state_path.read_text())
+            state["config"]["services"][SERVICE]["working_dir"] = "/data"
+            state_path.write_text(json.dumps(state))
+        args = ["--tag", "0.21.1", "--daemon-only", "--json", "--health-retries", "1", "--rollback-tag", "pre-default"]
+        if case == "chose-python-then-rust":
+            # A named engine beats a recorded choice.
+            args = ["--engine", "rust", *args]
+        result =run_arm(repo, env, binary if native else None, args)
+        assert result.returncode == 0, result.stdout + result.stderr
+        state = json.loads(state_path.read_text())
+        pulled = [a[-1] for a in state["calls"] if a[:1] == ["pull"]]
+        if case in ("unchosen", "chose-python-then-rust", "working-dir"):
+            assert pulled == ["ghcr.io/pseudogiant-xr/pseudolife-daemon-rust:0.21.1"]
+            assert _labels(state_path)["org.pseudolife.engine"] == "rust"
+            assert ("default since G2" in result.stdout) == (case != "chose-python-then-rust")
+            # The configuration check ran on the target image before the
+            # models were provisioned and before the backup.
+            calls = state["calls"]
+            check = next(i for i, a in enumerate(calls) if a[:1] == ["run"] and "check-config" in a)
+            provision = next(i for i, a in enumerate(calls) if a[:1] == ["run"] and "provision" in a)
+            backup = next(i for i, a in enumerate(calls) if a[:1] == ["fixture-backup"])
+            assert check < provision < backup
+            # The daemon's own working directory, for relative model paths.
+            assert (calls[check][4:6] == ["-w", "/data"]) == (case == "working-dir"), calls[check]
+            assert "--network" in calls[check] and "none" in calls[check]
+            assert "type=volume,src=fixture-state,dst=/data,readonly=true" in calls[check]
+            assert not any("TOKEN" in v or "DATABASE_URL" in v for v in calls[check])
+        else:
+            assert pulled == ["ghcr.io/pseudogiant-xr/pseudolife-daemon:0.21.1"]
+            assert (_labels(state_path) or {}).get("org.pseudolife.engine", "python") == "python"
+            if case == "unpublished":
+                assert "could not confirm a published rust daemon image" in result.stdout
+            if case in ("corrupt-choice", "binary-choice"):
+                assert "cannot read the engine choice" in result.stdout
+                assert "default since G2" not in result.stdout
+
+
+@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+def test_a_fallback_never_removes_an_image_a_docker_error_hid(tmp_path, native):
+    # `docker image inspect` failed for another reason than "No such image":
+    # the image may have been there before this run, so it stays.
+    binary = _native_binary()
+    if native and not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path, "missing_state") as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        state["rust_published"] = True
+        state["image_inspect_error"] = True
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary if native else None,
+                         ["--tag", "0.21.1", "--daemon-only", "--json", "--health-retries", "1",
+                          "--rollback-tag", "pre-inspect"])
+        assert result.returncode == 0, result.stdout + result.stderr
+        calls = json.loads(state_path.read_text())["calls"]
+        assert any(a[:2] == ["image", "inspect"] and "-rust:" in a[-1] for a in calls)
+        assert "not moving to the rust daemon this time" in result.stdout
+        assert not any(a[:2] == ["image", "rm"] for a in calls), calls
+
+
+@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+def test_a_fallback_after_provisioning_removes_the_model_volume_it_created(tmp_path, native):
+    # The move provisioned the overlay's models volume, then the state backup
+    # refused: falling back removes the volume and the image it added.
+    binary = _native_binary()
+    if native and not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path, "missing_state") as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        state["rust_published"] = True
+        state["models_overlay"] = True
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary if native else None,
+                         ["--tag", "0.21.1", "--daemon-only", "--json", "--health-retries", "1",
+                          "--rollback-tag", "pre-volume"])
+        assert result.returncode == 0, result.stdout + result.stderr
+        calls = json.loads(state_path.read_text())["calls"]
+        created = [a[-1] for a in calls if a[:2] == ["volume", "create"]]
+        assert created == ["fixture-project_pseudolife_rust_models"], created
+        assert ["volume", "rm", "fixture-project_pseudolife_rust_models"] in calls
+        assert ["image", "rm", "ghcr.io/pseudogiant-xr/pseudolife-daemon-rust:0.21.1"] in calls
+        # The check never mounted the volume before it existed, so Docker
+        # never created it unlabelled.
+        check = next(a for a in calls if a[:1] == ["run"] and "check-config" in a)
+        assert not any("pseudolife_rust_models" in v for v in check)
+        assert (_labels(state_path) or {}).get("org.pseudolife.engine", "python") == "python"
+
+
+@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+@pytest.mark.parametrize("flag", ["--unattended", "--allow-auth-change"])
+def test_release_default_never_applies_to_unattended_or_auth_change_runs(tmp_path, native, flag):
+    # Maintainer, 2026-11-07: only the scheduled --unattended run keeps the
+    # engine; a run without a terminal does move an unchosen host.
+    binary = _native_binary()
+    if native and not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path) as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        state["rust_published"] = True
+        state["no_board_peer"] = True  # an idle board: the unattended run proceeds
+        state_path.write_text(json.dumps(state))
+        if flag == "--unattended":
+            # Its own run shape: it reads the board with the bearer and takes no --daemon-only.
+            env["PSEUDOLIFE_MCP_TOKEN"] = "fixture-bearer"
+            args = [flag, "--tag", "0.21.1", "--json", "--health-retries", "1", "--rollback-tag", "pre-flag"]
+        else:
+            # The arguments --allow-auth-change requires, so the update itself runs.
+            args = [flag, "--env-file", str(repo / "ops/.env"), "--tag", "0.21.1", "--reinstall", "--daemon-only",
+                    "--json", "--health-retries", "1", "--rollback-tag", "pre-flag"]
+        result = run_arm(repo, env, binary if native else None, args)
+        assert result.returncode == 0, result.stdout + result.stderr
+        state = json.loads(state_path.read_text())
+        # The update ran, on the Python daemon, without asking about Rust.
+        assert "up" in stages(state), stages(state)
+        assert not any(a[:1] == ["pull"] and "-rust:" in a[-1] for a in state["calls"]), result.stdout
+        assert not any(a[:2] == ["manifest", "inspect"] for a in state["calls"])
+        assert "default since G2" not in result.stdout
+        assert (_labels(state_path) or {}).get("org.pseudolife.engine", "python") == "python"
+
+
+@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+@pytest.mark.parametrize("case", ["unsupported", "uncheckable"])
+def test_release_default_keeps_python_for_a_configuration_rust_refuses(tmp_path, native, case):
+    # Codex P1 (round 3): the Rust daemon refuses a non-default reranker or an
+    # embedding model it cannot load at startup, so the move checks the bank's
+    # configuration against the target image before the backup.
+    binary = _native_binary()
+    if native and not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path) as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        state["rust_published"] = True
+        state["check_config"] = 3 if case == "unsupported" else 2
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary if native else None,
+                         ["--tag", "0.21.1", "--daemon-only", "--json", "--health-retries", "1",
+                          "--rollback-tag", "pre-check"])
+        assert result.returncode == 0, result.stdout + result.stderr
+        state = json.loads(state_path.read_text())
+        calls = state["calls"]
+        check = next(i for i, a in enumerate(calls) if a[:1] == ["run"] and "check-config" in a)
+        # No backup or tag before the fallback, and the pulled image is removed.
+        assert not any(a[:1] in (["fixture-backup"], ["tag"]) for a in calls[:check])
+        assert ["image", "rm", "ghcr.io/pseudogiant-xr/pseudolife-daemon-rust:0.21.1"] in calls[check:]
+        pulled = [a[-1] for a in calls if a[:1] == ["pull"]]
+        assert pulled[-1] == "ghcr.io/pseudogiant-xr/pseudolife-daemon:0.21.1"
+        assert (_labels(state_path) or {}).get("org.pseudolife.engine", "python") == "python"
+        warning = next(line for line in result.stdout.splitlines() if "not moving to the rust daemon" in line)
+        if case == "unsupported":
+            # The daemon's own named error, its fix included.
+            assert "memory.reranker.model_name" in warning and "keep the Python engine" in warning
+        else:
+            assert "could not check this bank's configuration" in warning
+
+
+@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+@pytest.mark.parametrize("case", ["unsupported", "uncheckable"])
+def test_explicit_rust_refuses_an_unsupported_configuration_before_the_backup(tmp_path, native, case):
+    binary = _native_binary()
+    if native and not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path) as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        state["check_config"] = 3 if case == "unsupported" else 2
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary if native else None,
+                         ["--engine", "rust", "--tag", "0.21.1", "--daemon-only", "--json", "--health-retries", "1",
+                          "--rollback-tag", "pre-explicit"])
+        state = json.loads(state_path.read_text())
+        if case == "unsupported":
+            assert result.returncode == 2, result.stdout + result.stderr
+            assert "does not support this bank's configuration" in result.stdout
+            assert "memory.reranker.model_name" in result.stdout
+            assert "backup" not in stages(state)
+            assert (_labels(state_path) or {}).get("org.pseudolife.engine", "python") == "python"
+        else:
+            # An image that cannot check (an older one) leaves the check to the gate.
+            assert result.returncode == 0, result.stdout + result.stderr
+            assert "could not check this bank's configuration" in result.stdout
+            assert _labels(state_path)["org.pseudolife.engine"] == "rust"
+
+
+@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+@pytest.mark.parametrize("case", ["after-switch", "nothing-to-do"])
+def test_a_failed_python_choice_write_only_warns(tmp_path, native, case):
+    binary = _native_binary()
+    if native and not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path) as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        if case == "nothing-to-do":
+            state["target_version"] = "0.21.0"
+        state_path.write_text(json.dumps(state))
+        common = ["--daemon-only", "--json", "--health-retries", "1", "--health-delay-ms", "0"]
+        arm = binary if native else None
+        if case == "after-switch":
+            first = run_arm(repo, env, arm, ["--engine", "rust", "--tag", "0.21.1", *common, "--rollback-tag", "to-rust"])
+            assert first.returncode == 0, first.stdout + first.stderr
+        # A non-empty directory where the choice file belongs: no write can replace it.
+        blocker = Path(env["PSEUDOLIFE_MCP_DATA_DIR"]) / "update-engine/engine-choice.json"
+        blocker.mkdir(parents=True, exist_ok=True)
+        (blocker / "keep").write_text("x")
+        tag = "0.21.1" if case == "after-switch" else "0.21.0"
+        back = run_arm(repo, env, arm, ["--engine", "python", "--tag", tag, *common, "--rollback-tag", "to-python"])
+        assert back.returncode == 0, back.stdout + back.stderr
+        assert "choice could not be recorded" in back.stdout
+
+
+@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+@pytest.mark.parametrize("case", ["tokenless", "no-backup", "rust-pull-fails", "state-backup-refused"])
+def test_release_default_never_blocks_an_ordinary_update(tmp_path, native, case):
+    binary = _native_binary()
+    if native and not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    failure = {"state-backup-refused": "missing_state"}.get(case, "")
+    with host(tmp_path, failure) as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        state["rust_published"] = True
+        state["rust_pull_fails"] = case == "rust-pull-fails"
+        if case == "tokenless":
+            # A --no-token install: the Rust move refuses before any change.
+            state["config"]["services"][SERVICE]["environment"].pop("PSEUDOLIFE_MCP_TOKEN")
+            state["running"]["Config"]["Env"] = [e for e in state["running"]["Config"]["Env"]
+                                                 if not e.startswith("PSEUDOLIFE_MCP_TOKEN=")]
+        state_path.write_text(json.dumps(state))
+        args = ["--tag", "0.21.1", "--daemon-only", "--json", "--health-retries", "1", "--rollback-tag", "pre-ordinary"]
+        if case == "no-backup":
+            args.append("--no-backup")
+        result = run_arm(repo, env, binary if native else None, args)
+        assert result.returncode == 0, result.stdout + result.stderr
+        state = json.loads(state_path.read_text())
+        pulled = [a[-1] for a in state["calls"] if a[:1] == ["pull"]]
+        assert pulled[-1] == "ghcr.io/pseudogiant-xr/pseudolife-daemon:0.21.1", pulled
+        assert (_labels(state_path) or {}).get("org.pseudolife.engine", "python") == "python"
+        if case != "no-backup":
+            assert "not moving to the rust daemon this time" in result.stdout
+            # The refusal's whole first line, its one fix included.
+            warning = next(line for line in result.stdout.splitlines() if "not moving to the rust daemon" in line)
+            fix = {"tokenless": "set PSEUDOLIFE_MCP_TOKEN", "rust-pull-fails": "keeps its Python daemon",
+                   "state-backup-refused": "state"}[case]
+            assert fix in warning, warning
+            assert "keeps its current Rust daemon" not in warning
+            assert "next attended update tries again" in result.stdout
+            removed = ["image", "rm", "ghcr.io/pseudogiant-xr/pseudolife-daemon-rust:0.21.1"] in state["calls"]
+            # Only a pull that succeeded leaves an image to remove.
+            assert removed == (case == "state-backup-refused")
+
+
+@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+@pytest.mark.parametrize("case", ["supported", "unsupported"])
+def test_release_default_imports_legacy_counters_unless_rust_refuses_the_configuration(tmp_path, native, case):
+    # With G2-K, a defaulted move on a bank whose counters still need the
+    # Python daemon's import takes the import leg, then moves to Rust. The
+    # configuration check runs first, so a configuration Rust refuses falls
+    # back before the Python leg changes anything.
+    binary = _native_binary()
+    if native and not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path, "pending_import") as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        state["rust_published"] = True
+        if case == "unsupported":
+            state["check_config"] = 3
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary if native else None,
+                         ["--tag", "0.21.1", "--daemon-only", "--json", "--health-retries", "1",
+                          "--rollback-tag", "pre-default-import"])
+        assert result.returncode == 0, result.stdout + result.stderr
+        state = json.loads(state_path.read_text())
+        calls = state["calls"]
+        check = next(i for i, a in enumerate(calls) if a[:1] == ["run"] and "check-config" in a)
+        assert not any(a[:1] == ["fixture-backup"] for a in calls[:check])
+        if case == "supported":
+            assert stages(state) == ["pull", "pull", "backup", "tag", "up", "pull", "backup", "tag", "up"]
+            assert _labels(state_path)["org.pseudolife.engine"] == "rust"
+        else:
+            # No Python leg: the ordinary update runs once, on Python.
+            assert stages({"calls": calls[check:]}) == ["pull", "backup", "tag", "up"]
+            assert ["image", "rm", "ghcr.io/pseudogiant-xr/pseudolife-daemon-rust:0.21.1"] in calls
+            assert "memory.reranker.model_name" in result.stdout
+            assert (_labels(state_path) or {}).get("org.pseudolife.engine", "python") == "python"
+
+
+@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+@pytest.mark.parametrize("outcome", ["moved", "rust-leg-fails"])
+def test_an_import_leg_update_moves_the_clients_once_after_the_rust_gate(tmp_path, native, outcome):
+    # Codex (review of the merge): an ordinary update that defaults to Rust
+    # through the import leg updated the clients in the Python leg, before
+    # the Rust leg's gate, and again at the end.
+    binary = _native_binary()
+    if native and not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path, "pending_import") as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        state["rust_published"] = True
+        state["import_stuck"] = outcome == "rust-leg-fails"
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary if native else None,
+                         ["--tag", "0.21.1", "--json", "--health-retries", "1", "--rollback-tag", "pre-clients"])
+        report = json.loads(result.stdout)
+        client_steps = [s for s in report["steps"] if s.startswith("updating the client side")]
+        if outcome == "moved":
+            assert result.returncode == 0, result.stdout + result.stderr
+            assert len(client_steps) == 1, report["steps"]
+            # After the Rust leg's recreation, not between the legs.
+            assert report["steps"].index(client_steps[0]) > max(
+                i for i, s in enumerate(report["steps"]) if "pulling ghcr.io/pseudogiant-xr/pseudolife-daemon:" in s)
+        else:
+            assert result.returncode == 1, result.stdout + result.stderr
+            assert client_steps == [], report["steps"]
+
+
+@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+@pytest.mark.parametrize("failure", ["python-leg", "rust-leg"])
+def test_a_failed_import_leg_of_a_defaulted_move_is_the_updates_error(tmp_path, native, failure):
+    # Once the import leg starts, the host is changing: a failure in either
+    # leg is the update's error in both updaters, never a fallback, and the
+    # leg's own --engine python is not recorded as the operator's choice.
+    binary = _native_binary()
+    if native and not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path, "pending_import") as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        state["rust_published"] = True
+        if failure == "python-leg":
+            state["python_pull_fails"] = True
+        else:
+            state["import_stuck"] = True
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary if native else None,
+                         ["--tag", "0.21.1", "--daemon-only", "--json", "--health-retries", "1",
+                          "--rollback-tag", "pre-leg-failure"])
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert "not moving to the rust daemon this time" not in result.stdout
+        choice = Path(env["PSEUDOLIFE_MCP_DATA_DIR"]) / "update-engine/engine-choice.json"
+        assert not choice.exists(), choice.read_text()
+        calls = json.loads(state_path.read_text())["calls"]
+        # No discard of a pulled image: the host is not falling back.
+        assert not any(a[:2] == ["image", "rm"] for a in calls), calls
+        assert (_labels(state_path) or {}).get("org.pseudolife.engine", "python") == "python"
+
+
+@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+def test_an_unreadable_choice_record_still_keeps_the_host_engine(tmp_path, native):
+    binary = _native_binary()
+    if native and not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path) as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        state["rust_published"] = True
+        state_path.write_text(json.dumps(state))
+        # A directory where the file belongs: present, but unreadable as a choice.
+        (Path(env["PSEUDOLIFE_MCP_DATA_DIR"]) / "update-engine/engine-choice.json").mkdir(parents=True)
+        result = run_arm(repo, env, binary if native else None,
+                         ["--tag", "0.21.1", "--daemon-only", "--json", "--health-retries", "1", "--rollback-tag", "pre-unread"])
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "default since G2" not in result.stdout
+        assert "cannot read the engine choice" in result.stdout
+        assert (_labels(state_path) or {}).get("org.pseudolife.engine", "python") == "python"
+
+
+@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+def test_an_explicit_python_choice_with_nothing_to_deploy_is_kept(tmp_path, native):
+    binary = _native_binary()
+    if native and not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path) as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        state["rust_published"] = True
+        state["target_version"] = "0.21.0"  # already at the target: nothing to deploy
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary if native else None,
+                         ["--engine", "python", "--tag", "0.21.0", "--daemon-only", "--json"])
+        assert result.returncode == 0, result.stdout + result.stderr
+        choice = Path(env["PSEUDOLIFE_MCP_DATA_DIR"]) / "update-engine/engine-choice.json"
+        assert json.loads(choice.read_text())["engine"] == "python"
+        state = json.loads(state_path.read_text())
+        state["target_version"] = "0.21.1"
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary if native else None,
+                         ["--tag", "0.21.1", "--daemon-only", "--json", "--health-retries", "1", "--rollback-tag", "pre-kept"])
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "default since G2" not in result.stdout
+        assert (_labels(state_path) or {}).get("org.pseudolife.engine", "python") == "python"
 
 
 @pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
