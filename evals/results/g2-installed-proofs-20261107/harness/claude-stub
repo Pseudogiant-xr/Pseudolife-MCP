@@ -1,0 +1,21 @@
+#!/bin/sh
+# Stand-in for the Claude Code CLI on the disposable host. It records every
+# call and the stdio registration the installer makes; the proof then runs
+# exactly that registered command.
+log=/proof/claude-cli.log
+mkdir -p /proof; printf '%s\n' "$*" >> "$log"
+case "$1" in
+  --version) echo "2.9.0 (Claude Code)"; exit 0 ;;
+esac
+if [ "$1" = mcp ]; then
+  case "$2" in
+    get) exit 1 ;;
+    add)
+      for a in "$@"; do [ "$a" = --help ] && { echo "  -e, --env <env...>  Set environment variables"; exit 0; }; done
+      : > /proof/claude-mcp-add.args
+      for a in "$@"; do printf '%s\n' "$a" >> /proof/claude-mcp-add.args; done
+      exit 0 ;;
+    list) exit 0 ;;
+  esac
+fi
+exit 0
