@@ -229,7 +229,7 @@ fi
 # unchanged, so a model release is usable the day it ships.
 EXTRACTOR_MODES="sidecar claude-only claude-fallback openai-only openai-fallback endpoint endpoint-fallback"
 CLAUDE_MODELS="claude-opus-5-5 claude-opus-5 claude-sonnet-5-5 claude-sonnet-5 claude-haiku-5-5 claude-haiku-4-5 claude-fable-5-1 claude-fable-5"
-OPENAI_MODELS="gpt-5.6-terra gpt-5.6-sol gpt-5.6-luna gpt-6-sol gpt-6-luna"
+OPENAI_MODELS="gpt-5.6-terra gpt-5.6-sol gpt-5.6-luna gpt-6-sol gpt-6-luna gpt-6.1-sol"
 # The model-era names (2026-07-14 to 2026-09-28) stay accepted.
 extractor_alias=""
 case "$EXTRACTOR" in
@@ -1338,8 +1338,9 @@ if [ -n "$codex_shim_mode" ] && [ -z "$MODEL" ]; then
         echo "  3) gpt-5.6-luna  — fastest / lightest on plan usage (unmeasured)"
         echo "  4) gpt-6-sol     — GPT-6 flagship (unmeasured)"
         echo "  5) gpt-6-luna    — GPT-6 fastest / lightest (unmeasured)"
+        echo "  6) gpt-6.1-sol   — GPT-6.1 flagship (unmeasured)"
         while [ -z "$MODEL" ]; do
-            printf "Choose 1/2/3/4/5 (Enter = 1): "
+            printf "Choose 1/2/3/4/5/6 (Enter = 1): "
             read -r choice
             case "$choice" in
                 ""|1) MODEL=gpt-5.6-terra ;;
@@ -1347,7 +1348,8 @@ if [ -n "$codex_shim_mode" ] && [ -z "$MODEL" ]; then
                 3) MODEL=gpt-5.6-luna ;;
                 4) MODEL=gpt-6-sol ;;
                 5) MODEL=gpt-6-luna ;;
-                *) echo "  please answer 1, 2, 3, 4 or 5" ;;
+                6) MODEL=gpt-6.1-sol ;;
+                *) echo "  please answer 1, 2, 3, 4, 5 or 6" ;;
             esac
         done
     else

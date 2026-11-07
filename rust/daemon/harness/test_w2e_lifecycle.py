@@ -937,12 +937,17 @@ def test_the_init_snapshot_waits_for_both_warmups(harness, monkeypatch, tmp_path
     assert second["diffs"] == []  # reported once, at the init step
 
 
-@pytest.mark.parametrize("before,prior", [
-    ({"rows": {}}, []),
+@pytest.mark.parametrize("before,prior,issued", [
+    ({"rows": {}}, [], 0),
     ({"rows": {"public.retrieval_events": {"columns": ["query_text", "id"],
-                                           "rows": [["warmup probe", 1], ["other", 4]]}}}, [1, 4]),
+                                           "rows": [["warmup probe", 1], ["other", 4]]}}}, [1, 4], 0),
+    # A real-bank base: its rows are not dumped, but the sequence says which
+    # ids every earlier start's probe already took.
+    ({"rows": {"public.retrieval_events": {"columns": ["query_text", "id"], "rows": []}},
+      "catalog": {"sequences": [["public", "retrieval_events_id_seq", "bigint", 1, 1, 9410],
+                                ["public", "entries_id_seq", "bigint", 1, 1, 99999]]}}, [], 9410),
 ])
-def test_a_template_probe_does_not_count_as_this_boots_probe(harness, monkeypatch, before, prior):
+def test_a_template_probe_does_not_count_as_this_boots_probe(harness, monkeypatch, before, prior, issued):
     seen = []
 
     class Conn:
@@ -961,7 +966,7 @@ def test_a_template_probe_does_not_count_as_this_boots_probe(harness, monkeypatc
     assert harness.warmup_landed("dsn", before) is False
     (sql, params), = seen
     assert "query_text = 'warmup probe'" in sql and "origin = 'search'" in sql
-    assert "NOT (id = ANY(%s::bigint[]))" in sql and params == (prior,)
+    assert "NOT (id = ANY(%s::bigint[])) AND id > %s" in sql and params == (prior, issued)
 
 
 def live_config_answer(value, status=200):

@@ -49,7 +49,12 @@ One stub may serve both daemons of a differential run: each side then
 sends its own bearer key, and ``drain(auth=...)`` / ``count(auth=...)``
 read that side's records alone.
 
-A request no table entry answers gets HTTP 500 and is flagged unanswered.
+A request no table entry answers gets HTTP 500 and is flagged unanswered,
+unless the launcher sets ``PL_HARNESS_STUB_DEFAULT_CONTENT``: it is then
+answered with that content and recorded as ``defaulted``. A run on a
+restored real bank (``mirror/forced.py``) sets it, since its prompts carry
+the bank's own notes and no declared table can answer them; both daemons
+then get the same model output, and their request bytes are still compared.
 Each record keeps the request's ``Authorization`` header as a digest
 (``auth_digest``), so a run can check which key reached which endpoint
 without the key appearing in any record. Standard library only.
@@ -58,6 +63,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -147,6 +153,9 @@ def parse_chat(body: bytes) -> tuple[str, str | None] | None:
     return request_kind(system), user
 
 
+DEFAULT_CONTENT_ENV = "PL_HARNESS_STUB_DEFAULT_CONTENT"
+
+
 class StubExtractor:
     """One stub endpoint on 127.0.0.1, serving a primary and a fallback base."""
 
@@ -161,6 +170,7 @@ class StubExtractor:
         self._server: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
         self.origin = self.base_url = self.fallback_base_url = None
+        self.default_content = os.environ.get(DEFAULT_CONTENT_ENV)
 
     # ── lifecycle ──────────────────────────────────────────────────────────
     def start(self) -> "StubExtractor":
@@ -264,14 +274,17 @@ class StubExtractor:
         route = path.split("?", 1)[0]
         status, payload, answered, extra = self._route(
             method, route, body, auth_digest(handler.headers.get("Authorization")))
+        record = {
+            "method": method, "path": path,
+            "body": None if method == "GET" else body.decode("latin-1"),
+            "sha256": None if method == "GET" else hashlib.sha256(body).hexdigest(),
+            "authorization": auth_digest(handler.headers.get("Authorization")),
+            "answered": answered,
+        }
+        if extra.get("defaulted"):
+            record["defaulted"] = True
         with self._lock:
-            self._records.append({
-                "method": method, "path": path,
-                "body": None if method == "GET" else body.decode("latin-1"),
-                "sha256": None if method == "GET" else hashlib.sha256(body).hexdigest(),
-                "authorization": auth_digest(handler.headers.get("Authorization")),
-                "answered": answered,
-            })
+            self._records.append(record)
         raw = payload.encode("utf-8") if isinstance(payload, str) else payload
         handler.send_response(status, extra.get("reason"))
         handler.send_header("Content-Type", "application/json")
@@ -313,9 +326,12 @@ class StubExtractor:
         if method == "POST" and route in CHAT_PATHS:
             endpoint = CHAT_PATHS[route]
             entry = self.lookup(body, endpoint, auth)
+            if entry is None and self.default_content is not None:
+                entry = {"content": self.default_content, "defaulted": True}
             if entry is None:
                 return 500, json.dumps({"error": "stub_extractor: no table entry"}), False, {}
-            extra = {"reason": entry.get("reason"), "headers": entry.get("headers")}
+            extra = {"reason": entry.get("reason"), "headers": entry.get("headers"),
+                     "defaulted": entry.get("defaulted", False)}
             if "status" in entry:
                 return int(entry["status"]), entry.get("body", ""), True, extra
             content = entry.get("content")

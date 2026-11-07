@@ -30,6 +30,7 @@ python3 rust/daemon/harness/mirror/seed.py seed --backups <live>/data/backups --
 python3 rust/daemon/harness/mirror/seed.py tokens --secret-file secret --out tokens.env
 python3 rust/daemon/harness/mirror/seed.py config --backups <live>/data/backups \
     --backup <the seeded backup> --out <PSEUDOLIFE_MIRROR_DATA>/config.yaml   # needs PyYAML
+python3 rust/daemon/harness/mirror/seed.py quiet --record quiet.json  # the forced run's quiet base
 $C --env-file tokens.env up -d mirror-daemon
 python3 rust/daemon/harness/mirror/seed.py health --schema <schema_version from seed.json>
 ```
@@ -38,7 +39,71 @@ python3 rust/daemon/harness/mirror/seed.py health --schema <schema_version from 
   credentials. It then clones the result as `pl_cf_mir_bank`, the daemon's
   database. Harnesses may clone `pl_cf_mir_seed` while it is idle.
 - **Reseeding:** stop `mirror-daemon` first; `seed` refuses while it runs.
+  `seed` drops the quiet copy and stamps the new seed with its backup, so
+  run `seed.py quiet` again after it; the forced run refuses a quiet copy
+  made from another seed.
+- **Disk:** the 8 GiB floor is measured inside the mirror PostgreSQL's
+  container, on its data directory, which is the storage a restore fills.
 - **Refusals:** every refusal exits 3 and says what to fix. Nothing has
   changed when it does.
 - **Stopping:** `$C stop` stops the mirror. Never run `down -v` here or on
   the live project.
+
+## Forced real-data run
+
+`forced.py` runs every live Python-vs-Rust differential on a copy of the
+seeded bank: w2e, w2d_search, board and the route harness (`run.py`). Both
+daemons come from one release. `ops/Dockerfile.mirror-runner` combines the
+release's Python image, run from the mounted checkout, with the release's
+Rust binary.
+
+- **Base bank:** every disposable database a harness creates copies
+  `pl_cf_mir_seed` (`PL_HARNESS_BASE_DATABASE`). Each scenario then seeds
+  and runs on top of real data.
+- **Dumps:** a dump holds only the rows that differ from the base
+  (`dbstate`). A whole 284 MB bank per step took the harness past 9.6 GiB.
+- **Model output:** any prompt no stub table answers gets
+  `PL_HARNESS_STUB_DEFAULT_CONTENT`, so both daemons see the same model
+  output while their request bytes are still compared.
+
+A scenario that differs runs again on the real bank, and then on the
+harness's synthetic bank. Its class follows from those runs:
+
+| Class | What the reruns showed |
+|---|---|
+| `transient` | The second real-bank run was clean |
+| `preexisting` | It also differs on the synthetic bank |
+| `new` | It differs on real data only |
+
+`summary.json` holds counts and names only. `private.json` quotes bank text
+and stays on the host.
+
+Run it on the mirror's network with a cap. Stop the mirror daemon first, to
+free its memory for the run:
+
+```sh
+docker build -t pseudolife-mirror-runner -f ops/Dockerfile.mirror-runner ops
+docker run -d --network pseudolife-mirror_mirror --memory 10g --memory-swap 10g \
+  --oom-score-adj 1000 --cpus 4 --cpu-shares 256 \
+  -v "$PWD":/repo -v <out>:/out -v <control>:/control:ro \
+  -v <test-pg.env>:/run/mirror/test-pg.env:ro \
+  -v pseudolife-mcp_pseudolife_shadow_models:/models:ro \
+  -e PSEUDOLIFE_TEST_PG_HOST_PORT=mirror-pg:5432 \
+  -e PSEUDOLIFE_TEST_PG_LOGIN_FILE=/run/mirror/test-pg.env \
+  -e PL_HARNESS_BASE_DATABASE=pl_cf_mir_seed -e PL_HARNESS_STUB_DEFAULT_CONTENT='[]' \
+  -e PSEUDOLIFE_DAEMON_ONNX_DIR=/models/<bundle>/embedding \
+  -e PSEUDOLIFE_DAEMON_RERANK_DIR=/models/<bundle>/reranker \
+  pseudolife-mirror-runner \
+  python rust/daemon/harness/mirror/forced.py --rust-bin /usr/local/bin/pseudolife-daemon --out /out/forced
+```
+
+- **`test-pg.env`:** the mirror's own login, as `PSEUDOLIFE_TEST_PG_USER`
+  and `PSEUDOLIFE_TEST_PG_PASSWORD`.
+- **Stopping:** `touch <control>/STOP` stops the run before its next
+  scenario. Below 8 GiB free disk it stops by itself.
+- **Limit:** a checkout whose schema is newer than the backup migrates each
+  template, which changes every migrated table's row text, so those tables
+  dump whole again. Compare same-schema pairs.
+- **Not forced:** `dream_cursors.py` admits only the bench PostgreSQL;
+  the CLI harness drives a fixture daemon or synthetic databases; golden
+  and mutant modes replay recordings of synthetic banks.
