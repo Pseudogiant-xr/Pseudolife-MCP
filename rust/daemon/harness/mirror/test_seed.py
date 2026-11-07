@@ -388,7 +388,13 @@ INSERT INTO entries (band, text, embedding, ts, dream_state)
     if not _rows(cid, "SELECT 1 FROM pg_database WHERE datname = 'pl_cf_mir_home'"):
         d.psql(cid, "pl_cf_mir_seed", "CREATE DATABASE pl_cf_mir_home;\n")
     d.psql(cid, "pl_cf_mir_seed", "COMMENT ON DATABASE pl_cf_mir_seed IS 'pl_cf_mir seed from t at 1';\n")
-    record = seed.quiet(d, cid=cid)
+    # The floor around what this engine really has free, not the 8 GiB a
+    # hosted runner may lack (7.7 GiB on ubuntu-latest, run 42378751062):
+    # a GiB over refuses, a GiB under copies.
+    free = seed.require_disk(d, cid, floor=0)
+    with pytest.raises(seed.Refused, match="GiB floor"):
+        seed.quiet(d, cid=cid, floor=free + 1024 ** 3)
+    record = seed.quiet(d, cid=cid, floor=max(0, free - 1024 ** 3))
     assert seed.read_comment(d, cid, seed.QUIET_DB) == "quiet copy of: pl_cf_mir seed from t at 1"
     assert record["changes"]["acknowledged"] == 4
     out = d.psql(cid, seed.QUIET_DB, "SELECT dream_state, count(*) FROM entries GROUP BY 1 ORDER BY 1;\n")

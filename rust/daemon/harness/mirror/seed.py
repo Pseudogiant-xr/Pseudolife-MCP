@@ -283,7 +283,7 @@ def require_disk(docker: Docker, cid: str, floor: int = DISK_FLOOR) -> int:
                       "nothing was changed. Check the container answers `df`.") from None
     if free < floor:
         raise Refused(f"{free / 1024 ** 3:.1f} GiB free on the mirror PostgreSQL's storage, below the "
-                      "8 GiB floor; free space before seeding. Nothing was changed.")
+                      f"{floor / 1024 ** 3:g} GiB floor; free space before seeding. Nothing was changed.")
     return free
 
 
@@ -381,14 +381,14 @@ COMMIT;
 """
 
 
-def quiet(docker: Docker, cid: str | None = None) -> dict:
+def quiet(docker: Docker, cid: str | None = None, floor: int = DISK_FLOOR) -> dict:
     """Copy the seed as QUIET_DB and empty the copy's dream backlog and
     pending review queues, for the scenarios that drive them."""
     cid = cid or docker.container("mirror-pg")
     if cid is None:
         raise Refused("the mirror's PostgreSQL is not running. Nothing was changed.")
     refuse_live_server(server_facts(docker, cid, "pl_cf_mir_home"))
-    require_disk(docker, cid)
+    require_disk(docker, cid, floor)
     provenance = read_comment(docker, cid, SEED_DB)
     if not provenance.startswith(PROVENANCE):
         raise Refused(f"{SEED_DB} carries no provenance; reseed with seed.py seed. Nothing was changed.")
