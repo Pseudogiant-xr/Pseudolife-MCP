@@ -270,6 +270,57 @@ def test_the_install_records_an_explicit_python_choice_and_accepts_rust(tmp_path
 
 
 @pytest.mark.parametrize("script", ["install.sh", "install.ps1"])
+@pytest.mark.parametrize("flag", ["", "rust"])
+def test_no_shim_tooling_is_decided_before_anything_is_pulled(tmp_path, script, flag):
+    # Conductor round-4 delta: with the shim transport, no token set and no
+    # pipx or pip, stage 5b mints none. Stage 4b now knows that before its
+    # prepare pulls the image and fills the models volume.
+    if script.endswith(".ps1"):
+        stage = _stage(script, "# -- 4b. daemon engine", "# -- 4c. create volumes")
+        definition = stage[stage.index("function Invoke-EngineHelper"):stage.index("$installedEngine =")]
+        stage = stage.replace(definition, "").replace("function Test-ShimToolingReady(", "function Test-ShimToolingReady-Real(")
+        ps = _PowerShell(tmp_path)
+        stub = ("function Invoke-EngineHelper {\n"
+                f"    Add-Content -LiteralPath '{ps.calls}' -Value ('helper|' + (@($args) -join ' '))\n"
+                "    $global:LASTEXITCODE = 0\n"
+                "    if ($args[0] -eq 'detect') { return 'none' }\n}\n"
+                "function Test-ShimToolingReady($python) { return $false }\n"
+                "function Get-EnvValue($name) { return $null }\n"
+                "function Get-InstallerPython { return 'python' }\n")
+        proc = ps.run(f"$ClientOnly=$false\n$Engine='{flag}'\n$rustBearer=$true\n$Transport='shim'\n"
+                      "$env:PSEUDOLIFE_MCP_TOKEN=$null\n$env:PSEUDOLIFE_MCP_TOKENS=$null\n"
+                      "$engineDefaulted=$false\n$bankExisted=$false\n" + stub + stage
+                      + "Write-Output \"RESULT:$composeEngine\"\n")
+        calls, output = ps.logged(), _output(proc)
+    else:
+        variants = _bash_variants()
+        if not variants:
+            pytest.skip("Bash unavailable")
+        stage = _stage(script, "# ── 4b. daemon engine", "# ── 4c. create volumes")
+        definition = next(line for line in stage.splitlines() if line.startswith("engine_helper()"))
+        stage = stage.replace(definition, "").replace("shim_tooling_ready() {", "shim_tooling_ready_real() {")
+        shell = _Shell(variants[0], tmp_path)
+        stub = ('engine_helper() { printf "helper|%s\\n" "$*" >>"$CALL_LOG"; '
+                'case "$1" in detect) echo none ;; esac; }\n'
+                'step() { echo "STEP: $*"; }\nshim_tooling_ready() { return 1; }\nget_env() { :; }\n')
+        proc = shell.run(f"CLIENT_ONLY=''\nENGINE='{flag}'\nRUST_BEARER=1\nTRANSPORT=shim\nBANK_EXISTED=''\n"
+                         "unset PSEUDOLIFE_MCP_TOKEN PSEUDOLIFE_MCP_TOKENS\n" + stub + stage
+                         + 'echo "RESULT:$COMPOSE_ENGINE"\n')
+        calls, output = shell.logged(), proc.stdout + proc.stderr
+    prepares = [call for call in calls if "prepare" in call]
+    if flag == "rust":
+        # An explicit Rust install refuses before it pulls anything.
+        assert proc.returncode == 2, output
+        assert "cannot mint one" in output and "Nothing was pulled or started" in output
+        assert prepares == []
+    else:
+        assert proc.returncode == 0, output
+        assert "RESULT:python" in output
+        assert "no bearer token for the default Rust daemon" in output
+        assert [call for call in prepares if "--engine rust" in call] == []
+
+
+@pytest.mark.parametrize("script", ["install.sh", "install.ps1"])
 @pytest.mark.parametrize("token_state,defaulted,expected", [
     ("minted", True, "rust"), ("present", True, "rust"), ("no-shim", True, "python"), ("failed", True, "python"),
     ("no-shim", False, "refused"), ("present", False, "rust"),
@@ -298,7 +349,7 @@ def test_the_rust_engine_follows_the_token_the_install_produced(tmp_path, script
         output = proc.stdout + proc.stderr
     if expected == "refused":
         assert proc.returncode == 2, output
-        assert "needs its bearer token" in output and "No container was started" in output
+        assert "needs its bearer token" in output and "The daemon was not started" in output
         return
     assert proc.returncode == 0, output
     result = next(line for line in output.splitlines() if line.startswith("RESULT:"))
@@ -396,6 +447,7 @@ def test_engine_stage_keeps_the_installed_engine_and_defers_a_switch(tmp_path, s
                 f"    if ($args[0] -eq 'detect') {{ return '{installed}' }}\n"
                 "    if ($args[4] -ne 'python') { return 'C:\\fixture\\engine.yml' }\n}\n")
         proc = ps.run(f"$ClientOnly=$false\n$Engine='{flag}'\n$rustBearer=$true\n$engineDefaulted=$false\n"
+                      "$env:PSEUDOLIFE_MCP_TOKEN='fixture-bearer'\n"
                       f"$bankExisted=${'true' if bank else 'false'}\n" + stub
                       + stage.replace(definition, "")
                       + "Write-Output \"RESULT:$composeEngine|$switchEngine|$($engineFiles -join ',')\"\n")
@@ -410,7 +462,8 @@ def test_engine_stage_keeps_the_installed_engine_and_defers_a_switch(tmp_path, s
         stub = ('engine_helper() { printf "helper|%s\\n" "$*" >>"$CALL_LOG"; '
                 f'case "$1" in detect) echo {installed} ;; prepare) [ "$5" = python ] || echo /fixture/engine.yml ;; esac; }}\n'
                 'step() { echo "STEP: $*"; }\n')
-        proc = shell.run(f"CLIENT_ONLY=''\nENGINE='{flag}'\nRUST_BEARER=1\nBANK_EXISTED='{bank}'\n" + stub
+        proc = shell.run(f"CLIENT_ONLY=''\nENGINE='{flag}'\nRUST_BEARER=1\nBANK_EXISTED='{bank}'\n"
+                         "PSEUDOLIFE_MCP_TOKEN=fixture-bearer\n" + stub
                          + stage.replace(definition, "")
                          + 'echo "RESULT:$COMPOSE_ENGINE|$SWITCH_ENGINE|${engine_files[*]-}"\n')
         output = proc.stdout + proc.stderr
@@ -609,6 +662,7 @@ def test_the_default_engine_falls_back_to_python(tmp_path, script, case):
                 "    $global:LASTEXITCODE = 0\n"
                 "    if ($args[0] -eq 'detect') { return 'none' }\n}\n")
         proc = ps.run(f"$ClientOnly=$false\n$Engine=''\n$rustBearer=${str(bearer).lower()}\n$engineDefaulted=$false\n"
+                      "$env:PSEUDOLIFE_MCP_TOKEN='fixture-bearer'\n"
                       "$bankExisted=$false\n" + stub + stage.replace(definition, "")
                       + "Write-Output \"RESULT:$composeEngine\"\n")
         calls, output = ps.logged(), _output(proc)
@@ -623,7 +677,8 @@ def test_the_default_engine_falls_back_to_python(tmp_path, script, case):
         stub = ('engine_helper() { printf "helper|%s\\n" "$*" >>"$CALL_LOG"; '
                 'case "$1" in detect) echo none ;; esac; }\n'
                 'step() { echo "STEP: $*"; }\n')
-        proc = shell.run(f"CLIENT_ONLY=''\nENGINE=''\nRUST_BEARER='{'1' if bearer else ''}'\nBANK_EXISTED=''\n" + stub
+        proc = shell.run(f"CLIENT_ONLY=''\nENGINE=''\nRUST_BEARER='{'1' if bearer else ''}'\nBANK_EXISTED=''\n"
+                         "PSEUDOLIFE_MCP_TOKEN=fixture-bearer\n" + stub
                          + stage.replace(definition, "") + 'echo "RESULT:$COMPOSE_ENGINE"\n')
         calls, output = shell.logged(), proc.stdout + proc.stderr
     assert proc.returncode == 0, output

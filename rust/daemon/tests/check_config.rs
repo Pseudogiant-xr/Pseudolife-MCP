@@ -122,6 +122,25 @@ fn the_check_never_reaches_the_database() {
 }
 
 #[test]
+fn an_unreadable_configuration_is_an_io_failure_not_a_refusal() {
+    // A directory where config.yaml belongs: no verdict, so exit 1, never 3.
+    let dir = scratch("unreadable");
+    let file = dir.join("config.yaml");
+    let mut command = Command::new(env!("CARGO_BIN_EXE_pseudolife-daemon"));
+    std::fs::create_dir_all(&file).unwrap();
+    let output = command
+        .arg("check-config")
+        .env_remove("PSEUDOLIFE_MCP_DATABASE_URL")
+        .env("PSEUDOLIFE_MCP_DATA_DIR", &dir)
+        .env("PSEUDOLIFE_MCP_CONFIG", &file)
+        .output()
+        .unwrap();
+    let err = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(1), "{err}");
+    assert!(err.contains("could not read"), "{err}");
+}
+
+#[test]
 fn the_pinned_default_model_passes_before_it_is_provisioned() {
     // The updater checks before provisioning; the daemon verifies the model at load.
     let dir = scratch("stock");

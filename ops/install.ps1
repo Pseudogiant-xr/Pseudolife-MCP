@@ -1313,7 +1313,26 @@ if (-not $ClientOnly) {
 # <<< volumes <<<
 
 # -- 4b. daemon engine -----------------------------------------------------------
+# Whether stage 11 can be expected to install the shim: pipx, or a Python
+# >= 3.10 with pip outside a PEP 668 externally managed environment (where
+# `pip install --user` refuses). The helper needs that Python either way.
+function Test-ShimToolingReady($python) {
+    if (-not $python) { return $false }
+    if (Get-Command pipx -ErrorAction SilentlyContinue) { return $true }
+    try {
+        & $python -c "import os, sys, sysconfig, pip; marker = os.path.join(sysconfig.get_path('stdlib'), 'EXTERNALLY-MANAGED'); sys.exit(1 if sys.prefix == sys.base_prefix and os.path.exists(marker) else 0)" 2>$null | Out-Null
+        return ($LASTEXITCODE -eq 0)
+    } catch { return $false }
+}
 # >>> daemon engine >>>
+# The bearer stage 5b will have: one already set, or one it can mint
+# (which needs the shim's tooling). Rust is verified with an authenticated read.
+function Test-RustTokenExpected {
+    if (-not $rustBearer) { return $false }
+    if ($env:PSEUDOLIFE_MCP_TOKEN -or $env:PSEUDOLIFE_MCP_TOKENS -or
+            (Get-EnvValue "PSEUDOLIFE_MCP_TOKEN") -or (Get-EnvValue "PSEUDOLIFE_MCP_TOKENS")) { return $true }
+    return ($Transport -eq 'shim' -and (Test-ShimToolingReady (Get-InstallerPython)))
+}
 # The engine already installed is kept; a new install takes -Engine (default
 # rust since G2, python without a bearer or an available Rust image). Naming the other engine on an existing bank switches it after the
 # install through pseudolife-mcp update (backup, rollback tag, health gate).
@@ -1339,7 +1358,7 @@ if (-not $ClientOnly) {
             $composeEngine = 'python'
             Step "Daemon engine: python for this existing bank; the next attended pseudolife-mcp update moves it to Rust after its checks"
         }
-        elseif ($rustBearer) { $composeEngine = 'rust'; $engineDefaulted = $true }
+        elseif (Test-RustTokenExpected) { $composeEngine = 'rust'; $engineDefaulted = $true }
         else { $composeEngine = 'python'; Step "Daemon engine: python (no bearer token for the default Rust daemon)" }
         # An existing bank reaches Rust only through update, which checks its
         # schema and counters first.
@@ -1353,6 +1372,11 @@ if (-not $ClientOnly) {
     }
     # Assigned, not `= if (...)`: an if-expression unrolls a one-item array to a string.
     $defaultArgs = @()
+    # Before anything is pulled: Rust with no bearer to come refuses here.
+    if ($composeEngine -eq 'rust' -and -not $engineDefaulted -and -not (Test-RustTokenExpected)) {
+        [Console]::Error.WriteLine("The Rust daemon needs its bearer token, and this install cannot mint one (no pipx or pip-capable Python >= 3.10 to install the shim): set PSEUDOLIFE_MCP_TOKEN in ops/.env, or install pipx, then rerun; or rerun with -Engine python. Nothing was pulled or started.")
+        exit 2
+    }
     if ($engineDefaulted) { $defaultArgs = @('--default') }
     $engineFiles = @(Invoke-EngineHelper prepare --repo $repo --engine $composeEngine @defaultArgs | Where-Object { $_ })
     if ($LASTEXITCODE -ne 0) { exit 1 }
@@ -1481,17 +1505,6 @@ if (-not $ClientOnly) {
 # -Transport http, whose registrations cannot carry a token file; a host with
 # no Python for the shim falls back to HTTP, so it mints none.
 # >>> mint token >>>
-# Whether stage 11 can be expected to install the shim: pipx, or a Python
-# >= 3.10 with pip outside a PEP 668 externally managed environment (where
-# `pip install --user` refuses). The helper needs that Python either way.
-function Test-ShimToolingReady($python) {
-    if (-not $python) { return $false }
-    if (Get-Command pipx -ErrorAction SilentlyContinue) { return $true }
-    try {
-        & $python -c "import os, sys, sysconfig, pip; marker = os.path.join(sysconfig.get_path('stdlib'), 'EXTERNALLY-MANAGED'); sys.exit(1 if sys.prefix == sys.base_prefix and os.path.exists(marker) else 0)" 2>$null | Out-Null
-        return ($LASTEXITCODE -eq 0)
-    } catch { return $false }
-}
 $tokenState = $null
 $tokenPython = $null
 # A client-only install never mints: the remote daemon's token is the file
@@ -1534,7 +1547,7 @@ if ($composeEngine -eq 'rust' -and $tokenState -notin 'minted', 'present') {
         $engineFiles = @()
         Step "Daemon engine: python after all (no bearer token for the default Rust daemon: $tokenState)"
     } else {
-        [Console]::Error.WriteLine("The Rust daemon needs its bearer token, and this install has none ($tokenState): set PSEUDOLIFE_MCP_TOKEN in ops/.env, or install pipx or a pip-capable Python >= 3.10 so the installer mints one, then rerun; or rerun with -Engine python. No container was started.")
+        [Console]::Error.WriteLine("The Rust daemon needs its bearer token, and this install has none ($tokenState): set PSEUDOLIFE_MCP_TOKEN in ops/.env, or install pipx or a pip-capable Python >= 3.10 so the installer mints one, then rerun; or rerun with -Engine python. The daemon was not started; the Rust image and models stay downloaded for the rerun.")
         exit 2
     }
 }

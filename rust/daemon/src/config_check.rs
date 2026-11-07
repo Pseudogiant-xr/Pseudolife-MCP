@@ -10,7 +10,8 @@ use std::path::PathBuf;
 
 /// The configuration is valid but the native daemon refuses it. Distinct
 /// from 2, which an image without this command returns when it falls
-/// through to startup and refuses the missing database URL.
+/// through to startup and refuses the missing database URL, and from 1, a
+/// file it could not read (no verdict on the configuration).
 pub const UNSUPPORTED: i32 = 3;
 
 /// The configuration refusals startup makes before it serves. A new one
@@ -28,6 +29,18 @@ pub fn sweep_refusal(config: &config::Config) -> Option<&'static str> {
 }
 
 fn check(config_file: &std::path::Path) -> Result<()> {
+    // An unreadable file is an I/O failure, not a refusal: `config::load`
+    // would report it as one, so read it here first.
+    if let Err(error) = std::fs::read(config_file)
+        && !matches!(
+            error.kind(),
+            std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+        )
+    {
+        return Err(
+            anyhow::Error::new(error).context(format!("cannot read {}", config_file.display()))
+        );
+    }
     let config = config::load(config_file).map_err(|e| anyhow!("{e}"))?;
     startup_refusals(&config)?;
     if let Some(refusal) = sweep_refusal(&config) {
@@ -61,11 +74,22 @@ pub fn command(args: &[OsString]) -> i32 {
             );
             0
         }
+        // A file that could not be read gives no verdict: only a refusal is 3.
+        Err(error) if is_io(&error) => {
+            eprintln!("check-config could not read what it checks: {error:#}");
+            1
+        }
         Err(error) => {
             eprintln!("{error:#}");
             UNSUPPORTED
         }
     }
+}
+
+fn is_io(error: &anyhow::Error) -> bool {
+    error
+        .chain()
+        .any(|cause| cause.downcast_ref::<std::io::Error>().is_some())
 }
 
 #[cfg(test)]

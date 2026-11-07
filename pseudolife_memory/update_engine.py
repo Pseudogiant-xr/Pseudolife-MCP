@@ -741,8 +741,12 @@ class ReleaseEngineUpdate:
             model_volumes(config)  # refuse a misplaced model directory before the pull
         image = f"{RUST_IMAGE if self.engine == 'rust' else up.GHCR_IMAGE}:{self.target}"
         u.preflight_disk(up.data_dir())
-        # A defaulted attempt removes an image it pulled if it falls back.
-        fresh = self.defaulted and self.command(["image", "inspect", image], timeout=60)[0] != 0
+        # A defaulted attempt removes an image it pulled if it falls back:
+        # only one Docker said was absent, never one a Docker error hid.
+        fresh = False
+        if self.defaulted:
+            code, out = up.run_cli([u.docker, "image", "inspect", image], timeout=60)
+            fresh = code != 0 and "no such image" in out.lower()
         u.step(f"pulling {image}...")
         code, out = self.command(["pull", image], timeout=7200, stream=not o.as_json)
         if code == 0 and fresh:

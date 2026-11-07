@@ -590,8 +590,12 @@ impl Update {
             pg.as_deref(),
             context.running["Image"].as_str(),
         )?;
-        // A defaulted attempt removes an image it pulled if it falls back.
-        let fresh = self.defaulted_engine && self.docker_call(&["image", "inspect", &image]).0 != 0;
+        // A defaulted attempt removes an image it pulled if it falls back:
+        // only one Docker said was absent, never one a Docker error hid.
+        let fresh = self.defaulted_engine && {
+            let (code, out) = self.docker_call(&["image", "inspect", &image]);
+            code != 0 && out.to_lowercase().contains("no such image")
+        };
         self.step(format!("pulling {image}..."));
         if self
             .command(&["pull".into(), image.clone()], None, 7200, true)

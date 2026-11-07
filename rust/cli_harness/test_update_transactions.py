@@ -294,7 +294,8 @@ if a[:1]==["inspect"]:
 elif a[:2]==["image","inspect"]:
  if "Created" in " ".join(a): out="2026-01-01|"+s["images"].get(a[-1],s["running"]["Image"])
  elif a[-1] in s["images"]: out=s["images"][a[-1]]
- else: code=1
+ elif s.get("image_inspect_error"): code=1;out="Cannot connect to the Docker daemon at unix:///var/run/docker.sock"
+ else: code=1;out="Error response from daemon: No such image: "+a[-1]
 elif a[:2]==["image","ls"]: out="\n".join(s["images"]) if s.get("list_images") else ""
 elif a[:1]==["port"]:out="127.0.0.1:9876" if a[-1]=="8765/tcp" else "127.0.0.1:5433"
 elif a[:2]==["volume","inspect"]:
@@ -540,7 +541,7 @@ def host(tmp_path, failure="", mode="release"):
             elif self.path == "/api/coordination/agents":
                 # Backup completion brings a peer onto the board. Only the
                 # callback inside deploy_release can observe this transition.
-                active = any(a[:1] == ["fixture-backup"] for a in current["calls"])
+                active = not current.get("no_board_peer") and any(a[:1] == ["fixture-backup"] for a in current["calls"])
                 payload = {"agents": [{"agent_id": "fixture-peer", "task": "working"}] if active else []}
             else:
                 payload = {"recipients": 1}
@@ -1243,6 +1244,28 @@ def test_release_default_moves_only_an_unchosen_attended_host_to_rust(tmp_path, 
 
 
 @pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+def test_a_fallback_never_removes_an_image_a_docker_error_hid(tmp_path, native):
+    # `docker image inspect` failed for another reason than "No such image":
+    # the image may have been there before this run, so it stays.
+    binary = _native_binary()
+    if native and not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path, "missing_state") as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        state["rust_published"] = True
+        state["image_inspect_error"] = True
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary if native else None,
+                         ["--tag", "0.21.1", "--daemon-only", "--json", "--health-retries", "1",
+                          "--rollback-tag", "pre-inspect"])
+        assert result.returncode == 0, result.stdout + result.stderr
+        calls = json.loads(state_path.read_text())["calls"]
+        assert any(a[:2] == ["image", "inspect"] and "-rust:" in a[-1] for a in calls)
+        assert "not moving to the rust daemon this time" in result.stdout
+        assert not any(a[:2] == ["image", "rm"] for a in calls), calls
+
+
+@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
 def test_a_fallback_after_provisioning_removes_the_model_volume_it_created(tmp_path, native):
     # The move provisioned the overlay's models volume, then the state backup
     # refused: falling back removes the volume and the image it added.
@@ -1281,14 +1304,25 @@ def test_release_default_never_applies_to_unattended_or_auth_change_runs(tmp_pat
     with host(tmp_path) as (repo, env, state_path):
         state = json.loads(state_path.read_text())
         state["rust_published"] = True
+        state["no_board_peer"] = True  # an idle board: the unattended run proceeds
         state_path.write_text(json.dumps(state))
-        result = run_arm(repo, env, binary if native else None,
-                         [flag, "--tag", "0.21.1", "--daemon-only", "--json", "--health-retries", "1",
-                          "--rollback-tag", "pre-flag"])
+        if flag == "--unattended":
+            # Its own run shape: it reads the board with the bearer and takes no --daemon-only.
+            env["PSEUDOLIFE_MCP_TOKEN"] = "fixture-bearer"
+            args = [flag, "--tag", "0.21.1", "--json", "--health-retries", "1", "--rollback-tag", "pre-flag"]
+        else:
+            # The arguments --allow-auth-change requires, so the update itself runs.
+            args = [flag, "--env-file", str(repo / "ops/.env"), "--tag", "0.21.1", "--reinstall", "--daemon-only",
+                    "--json", "--health-retries", "1", "--rollback-tag", "pre-flag"]
+        result = run_arm(repo, env, binary if native else None, args)
+        assert result.returncode == 0, result.stdout + result.stderr
         state = json.loads(state_path.read_text())
+        # The update ran, on the Python daemon, without asking about Rust.
+        assert "up" in stages(state), stages(state)
         assert not any(a[:1] == ["pull"] and "-rust:" in a[-1] for a in state["calls"]), result.stdout
         assert not any(a[:2] == ["manifest", "inspect"] for a in state["calls"])
         assert "default since G2" not in result.stdout
+        assert (_labels(state_path) or {}).get("org.pseudolife.engine", "python") == "python"
 
 
 @pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
