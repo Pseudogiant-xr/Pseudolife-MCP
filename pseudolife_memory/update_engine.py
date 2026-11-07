@@ -220,10 +220,19 @@ RUST_RELEASE_OVERLAY = "docker-compose.rust-ghcr.yml"
 TRANSIENT_OVERLAYS = ("docker-compose.engine", "docker-compose.rollback")
 
 
+# The directory every engine, candidate, rollback and installer overlay is
+# written to (`<data dir>/update-engine`, or `<checkout>/data/update-engine`).
+TRANSIENT_DIR = "update-engine"
+
+
 def transient_overlay(path: Path) -> bool:
-    """Engine overlays a release update supplies itself, never reuses."""
-    name = Path(path).name
-    return name.startswith(TRANSIENT_OVERLAYS) or name == RUST_RELEASE_OVERLAY
+    """Engine overlays a release update supplies itself, never reuses: the
+    updaters' own files in their own directory, by name. A user's override
+    elsewhere is kept whatever it is called."""
+    path = Path(path)
+    if path.name == RUST_RELEASE_OVERLAY:
+        return True
+    return path.name.startswith(TRANSIENT_OVERLAYS) and path.parent.name == TRANSIENT_DIR
 
 
 def host_labels(update) -> dict:
