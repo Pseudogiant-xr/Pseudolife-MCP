@@ -969,10 +969,11 @@ impl Storage {
         self.heal().await
     }
 
-    /// The reconnect half of `PostgresStorage.conn` (postgres.py:675-722)
-    /// with `verify_writer_session`'s one immediate retry:
+    /// The reconnect half of `PostgresStorage.conn` (postgres.py:675-722):
     /// the cached refusal or failure inside its retry window, else a new
-    /// session that must win the lease back before it serves anything.
+    /// session that must win the lease back before it serves anything
+    /// (`reopen_and_record`, which holds `verify_writer_session`'s one
+    /// immediate retry).
     async fn heal(&self) -> Result<Option<Storage>, String> {
         {
             let state = self.session.lock().unwrap();
