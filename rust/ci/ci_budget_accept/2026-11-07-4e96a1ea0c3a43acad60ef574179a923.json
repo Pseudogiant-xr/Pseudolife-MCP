@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "test-lite-windows",
+  "before": "38f5d06841a4c316",
+  "fingerprint": "eb78a3c12bf79977",
+  "reason": "adds tests/test_installer_engine.py to the pytest list only (no new step, setup or shard): 60 cases, 18.7 s on a native Windows 11 run of this head (2026-11-07), so the job's measured 5.0 min holds within noise"
+}

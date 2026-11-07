@@ -231,6 +231,8 @@ def test_ps_volume_creation_consumes_resolved_names_and_stops_on_failure(tmp_pat
     from tests.test_installer_client_only_ps import _PowerShell, _q, _output
     text = (ROOT / "ops/install.ps1").read_text(encoding="utf-8")
     block = text.split("# >>> volumes >>>\n", 1)[1].split("# <<< volumes <<<", 1)[0]
+    # Creation runs in its own block, after the engine stage can refuse.
+    block += text.split("# >>> create volumes >>>\n", 1)[1].split("# <<< create volumes <<<", 1)[0]
     ps = _PowerShell(tmp_path)
     proc = ps.run(
         "$ClientOnly=$false\n$envFile='fixture.env'\n"

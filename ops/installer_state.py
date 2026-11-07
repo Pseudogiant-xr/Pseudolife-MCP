@@ -183,7 +183,7 @@ def digest(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
 
 
-def deployment(repo, env_file, override):
+def deployment(repo, env_file, override, overlays=()):
     head = run(["git", "-C", str(repo), "rev-parse", "HEAD"]).strip()
     delta = run(["git", "-C", str(repo), "diff", "--binary", "HEAD"])
     untracked = run(["git", "-C", str(repo), "ls-files", "-z", "--others", "--exclude-standard"])
@@ -200,6 +200,9 @@ def deployment(repo, env_file, override):
     compose = ["docker", "compose", "-p", "pseudolife-mcp", "--env-file", str(env_file), "-f", str(repo / "ops/docker-compose.yml")]
     if override.is_file():
         compose += ["-f", str(override)]
+    for overlay in overlays:
+        # The engine overlays the stack is brought up with (installer_engine.py).
+        compose += ["-f", str(overlay)]
     config = json.loads(run([*compose, "config", "--format", "json"]))
     service_hashes = {}
     for line in run([*compose, "config", "--hash", "*"]).splitlines():
@@ -228,8 +231,8 @@ def deployment(repo, env_file, override):
     return hashes, complete, running, applied
 
 
-def plan(repo, path, override, *, snapshot=False):
-    hashes, complete, running, applied = deployment(repo, path, override)
+def plan(repo, path, override, *, snapshot=False, overlays=()):
+    hashes, complete, running, applied = deployment(repo, path, override, overlays)
     _, _, block, _ = read(path)
     old = fields(block)
     if not complete or any(old.get(PREFIX + key) != hashes[key] for key in ("SOURCE_HASH", "BUILD_HASH", "IMAGES_HASH")):
@@ -243,8 +246,8 @@ def _same_inputs(expected, hashes):
     return isinstance(expected, dict) and all(expected.get(key) == hashes[key] for key in INPUT_HASHES)
 
 
-def started(repo, path, override, *, expected):
-    hashes, complete, _, applied = deployment(repo, path, override)
+def started(repo, path, override, *, expected, overlays=()):
+    hashes, complete, _, applied = deployment(repo, path, override, overlays)
     if not _same_inputs(expected, hashes):
         raise Refusal("Checkout or Compose inputs changed during startup; rerun the installer with a stable checkout, and no success record has been saved.")
     if not complete or not applied:
@@ -254,8 +257,8 @@ def started(repo, path, override, *, expected):
     return {**expected, "STARTED_IMAGES_HASH": hashes["IMAGES_HASH"]}
 
 
-def record(repo, path, override, *, expected, instructions=None, generic_target=None):
-    hashes, complete, running, applied = deployment(repo, path, override)
+def record(repo, path, override, *, expected, instructions=None, generic_target=None, overlays=()):
+    hashes, complete, running, applied = deployment(repo, path, override, overlays)
     if not _same_inputs(expected, hashes) or expected.get("STARTED_IMAGES_HASH") != hashes["IMAGES_HASH"]:
         raise Refusal("Checkout, Compose inputs or images changed after startup; rerun the installer with stable inputs, and no success record has been saved.")
     if not complete or not running or not applied:
@@ -289,6 +292,7 @@ def main():
     parser.add_argument("--instruction-gemini", choices=("append", "skip"))
     parser.add_argument("--instruction-generic", choices=("append", "skip"))
     parser.add_argument("--generic-target")
+    parser.add_argument("--overlay", type=Path, action="append", default=[])
     args = parser.parse_args()
     try:
         if args.action == "target":
@@ -302,18 +306,19 @@ def main():
             incoming = sys.stdin.buffer.read().decode("utf-8")
             result = write_env(args.env_file, incoming, args.template) if args.action == "write-env" else write_file(args.path, incoming)
         elif args.action == "plan":
-            result = plan(args.repo, args.env_file, args.override, snapshot=args.snapshot)
+            result = plan(args.repo, args.env_file, args.override, snapshot=args.snapshot, overlays=args.overlay)
         else:
             if not args.expected_stdin:
                 raise Refusal("The deployment plan is missing; rerun the installer from startup before recording success.")
             expected = json.loads(sys.stdin.buffer.read().decode("utf-8"))
             if args.action == "started":
-                result = started(args.repo, args.env_file, args.override, expected=expected)
+                result = started(args.repo, args.env_file, args.override, expected=expected, overlays=args.overlay)
             else:
                 instructions = {client: value for client, value in (("gemini", args.instruction_gemini),
                                 ("generic", args.instruction_generic)) if value}
                 result = record(args.repo, args.env_file, args.override, expected=expected,
-                                instructions=instructions, generic_target=args.generic_target)
+                                instructions=instructions, generic_target=args.generic_target,
+                                overlays=args.overlay)
         print(json.dumps(result, separators=(",", ":")) if isinstance(result, dict) else result)
         return 0
     except UnicodeError:
