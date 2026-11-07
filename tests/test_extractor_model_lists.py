@@ -134,6 +134,7 @@ def test_the_claude_model_list_is_one_list():
 def test_the_openai_model_list_is_one_list():
     installer = _sh_list("OPENAI_MODELS")
     assert "gpt-5.6-terra" in installer
+    assert "gpt-6.1-sol" in installer
     sources = {
         "ops/install.ps1 $openaiModels": _ps_list("openaiModels"),
         "ops/install.sh menu": _family(_menu(_read("ops/install.sh"), MODEL), "gpt-"),
