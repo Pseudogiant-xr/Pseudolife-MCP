@@ -158,6 +158,17 @@ def test_unanswered_request_is_flagged(stub_factory):
                    "answered": False}
 
 
+def test_launcher_default_answers_what_no_entry_does(stub_factory, monkeypatch):
+    monkeypatch.setenv("PL_HARNESS_STUB_DEFAULT_CONTENT", "[]")
+    s = stub_factory({"replies": [{"kind": "claims", "user": "known", "content": "c"}]})
+    for user, content in (("unknown", "[]"), ("known", "c")):
+        status, raw = request(s, "POST", "/v1/chat/completions", chat_body(CLAIMS_SYSTEM, user))
+        assert status == 200 and json.loads(raw)["choices"][0]["message"]["content"] == content
+    first, second = s.drain()
+    assert first["answered"] and first["defaulted"] is True
+    assert second["answered"] and "defaulted" not in second  # a declared answer reads as before
+
+
 def test_authorization_is_recorded_as_a_digest(stub_factory):
     from stub_extractor import auth_digest
     s = stub_factory({"replies": [{"kind": "claims", "user": "n", "content": "c"}]})

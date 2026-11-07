@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "rust",
+  "before": "1bf2949883eca84e",
+  "fingerprint": "535280cbf3a2802c",
+  "reason": "Adds rust/daemon/harness/mirror/test_seed_keys.py to the board-harness pytest step: 3 cases on its own throwaway pgvector container (one more container start than test_seed.py's), 6 s on a workstation Docker engine (2026-11-08); skipped on windows-latest. The 3-minute timeout holds."
+}

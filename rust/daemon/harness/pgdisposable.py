@@ -30,7 +30,12 @@ from rust.cli_harness.run_names import RunNames
 HOST_PORT = os.environ.get("PSEUDOLIFE_TEST_PG_HOST_PORT", "127.0.0.1:5433")
 LOGIN_FILE = Path(os.environ.get("PSEUDOLIFE_TEST_PG_LOGIN_FILE")
                   or Path.home() / ".pseudolife-mcp" / "test-pg.env")
-SLICE_ID = re.compile(r"w[0-9][a-z]|http|pgs|prn")
+SLICE_ID = re.compile(r"w[0-9][a-z]|http|pgs|prn|mir")
+# A restored real bank every new database copies instead of an empty one
+# (rust/daemon/harness/mirror/forced.py): only the mirror's names, and only
+# where the launcher sets it, so no slice reaches it by default.
+BASE_ENV = "PL_HARNESS_BASE_DATABASE"
+BASE_NAME = re.compile(r"pl_cf_mir_[a-z0-9_]{1,40}")
 DEFAULT_SLICE = "w1a"
 # One run owns every slice's names: name() adds a random run suffix so two
 # invocations of the same slice cannot share a database.
@@ -129,6 +134,17 @@ def _login() -> tuple[str, str]:
         raise SystemExit(f"{LOGIN_FILE}: no test login; run `pseudolife-mcp test-login create`")
 
 
+def base_database() -> str | None:
+    """The launcher's real-bank base, checked, or None."""
+    base = os.environ.get(BASE_ENV)
+    if not base:
+        return None
+    refuse_production_database(base)
+    if not BASE_NAME.fullmatch(base):
+        raise ValueError(f"refusing base database {base!r}: expected pl_cf_mir_*")
+    return base
+
+
 def _check(name: str, space: Slice | None = None) -> str:
     PREFIX = (space or current()).PREFIX
     DISPOSABLE_NAME = _pattern(PREFIX)
@@ -192,15 +208,19 @@ def _dsn(space, name: str) -> str:
 
 def _create(space, name: str, template: str | None) -> str:
     space.drop(name)
+    base = space.base_database() if template is None else None
     with space._admin() as conn:
         space.assert_disposable_database(conn)
-        if template is None:
+        if base is not None:
+            conn.execute(sql.SQL("CREATE DATABASE {} TEMPLATE {}").format(
+                sql.Identifier(space._check(name)), sql.Identifier(base)))
+        elif template is None:
             space.create_from_default_template(conn, sql.SQL("CREATE DATABASE {}").format(
                 sql.Identifier(space._check(name))))
         else:
             conn.execute(sql.SQL("CREATE DATABASE {} TEMPLATE {}").format(
                 sql.Identifier(space._check(name)), sql.Identifier(space._check(template))))
-    if template is not None:
+    if template is not None or base is not None:
         try:  # the harness's own dbstate when it is on the path, so one
             from dbstate import UNPORTED_ROWS  # module instance holds it
         except ImportError:

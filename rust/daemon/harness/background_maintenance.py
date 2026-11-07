@@ -76,7 +76,8 @@ s.close()
             relation_table = "public.relations"
             columns = state["rows"][relation_table]["columns"]
             clock = columns.index("created_at")
-            prior = {row[0]: row for row in before["rows"][relation_table]["rows"]}
+            prior = {row[0]: row for row in dbstate.prior_rows(
+                before, relation_table, state["rows"][relation_table]["rows"])}
             for row in state["rows"][relation_table]["rows"]:
                 if row[0] in prior and row[clock] != prior[row[0]][clock]:
                     raise RuntimeError("sweep changed a seeded relation clock")
