@@ -1748,6 +1748,26 @@ def test_release_keeps_a_stack_file_that_only_shares_a_shipped_name(tmp_path, na
 
 
 @pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+def test_release_refuses_when_a_labelled_override_beside_ops_is_missing(tmp_path, native):
+    # Review (Opus): a missing override in a checkout's ops/ was exempt
+    # because its directory looked packaged; only a shipped file's packaged
+    # copy is the archive's to replace. The Python updater already refused.
+    binary = _native_binary()
+    if native and not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path) as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        missing = repo / "ops/docker-compose.engine-local.yml"
+        state["running"]["Config"]["Labels"]["com.docker.compose.project.config_files"] += "," + str(missing)
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary if native else None,
+                         ["--tag", "0.21.1", "--daemon-only", "--json", "--health-retries", "1"])
+        assert result.returncode == 2, result.stdout + result.stderr
+        assert "docker-compose.engine-local.yml" in result.stdout
+        assert stages(json.loads(state_path.read_text())) == []
+
+
+@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
 def test_release_refuses_when_a_stack_file_is_missing_on_this_host(tmp_path, native):
     # Portainer records /data/compose/<id>/docker-compose.yml, a path inside
     # its own container. The release's files would replace the stack's

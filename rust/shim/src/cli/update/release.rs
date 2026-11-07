@@ -364,7 +364,15 @@ impl Update {
         let unavailable: Vec<String> = existing
             .iter()
             .filter(|p| !p.is_file())
-            .filter(|p| !engine_overlay(p) && !packaged_compose(p))
+            // Only a packaged copy of a shipped file is the archive's to replace;
+            // any other missing file, in a packaged directory or not, held settings.
+            .filter(|p| {
+                let shipped = p
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| COMPOSE_FILES.contains(&n));
+                !engine_overlay(p) && !(shipped && packaged_compose(p))
+            })
             .map(|p| p.display().to_string())
             .collect();
         if !unavailable.is_empty() {
