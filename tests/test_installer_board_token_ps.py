@@ -97,7 +97,9 @@ def _mint(ps: _PowerShell, env_file: Path, *, no_token: bool = False,
         f"$envFile = '{_q(env_file)}'\n"
         f"$NoToken = [switch]${'true' if no_token else 'false'}\n"
         f"$Transport = '{transport}'\n"
-        + stub + _block("mint token") + "\nWrite-Output \"TOKEN_STATE=$tokenState\"\n")
+        # The token stage calls the shim-tooling check stage 4b defines first.
+        + stub + _block("shim tooling") + _block("mint token")
+        + "\nWrite-Output \"TOKEN_STATE=$tokenState\"\n")
 
 
 def _minted(env_file: Path) -> list[str]:

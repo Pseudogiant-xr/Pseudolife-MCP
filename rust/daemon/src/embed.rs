@@ -116,14 +116,57 @@ fn validate_cpu_dtype(configured: &str, override_value: &str) -> Result<()> {
     Ok(())
 }
 
+/// What `Embedder::inspect` read from a model's metadata, for loading.
+struct Layout {
+    transformer_path: String,
+    always_normalize: bool,
+    pooling: Pooling,
+    dim: usize,
+    st: Value,
+    tokenizer_config: Value,
+    native_cap: u64,
+    tokenizer_name: String,
+}
+
 impl Embedder {
-    /// An override is a complete local model root. The configured graph name
-    /// is relative to its Transformer module; loading never guesses files.
-    pub fn load_config(
+    /// The configuration checks loading starts with, and `check-config`
+    /// runs alone: settings the native daemon supports and an ONNX graph it
+    /// can find. `(model root, Hub layout, graph file)`; nothing is read
+    /// beyond the files' existence.
+    pub fn admit(
         config: &EmbeddingConfig,
         override_root: Option<&Path>,
-        threads: usize,
-    ) -> Result<Self> {
+    ) -> Result<(PathBuf, bool, String)> {
+        Self::settings(config)?;
+        let file = config.onnx_file_name.replace('\\', "/");
+        let model = override_root
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_else(|| config.model_name.clone());
+        let (root, hub) = artifacts::resolve(&model, &file, &cache_root())?;
+        Ok((root, hub, file))
+    }
+
+    /// `check-config`'s embedding check: everything loading refuses before
+    /// it builds an inference session. The pinned default model is installed
+    /// by provisioning and verified at load, so only its settings are the
+    /// bank's to get wrong while it is absent.
+    pub fn check(config: &EmbeddingConfig, override_root: Option<&Path>) -> Result<()> {
+        if override_root.is_none() && config.model_name == artifacts::provision::EMBEDDING_MODEL {
+            Self::settings(config)?;
+            let file = artifacts::graph_name(&config.onnx_file_name)?;
+            let Ok(root) = artifacts::provision::embedding_root() else {
+                return Ok(());
+            };
+            if !artifacts::layout_available(&root, &file, false) {
+                return Ok(());
+            }
+            return Self::inspect(config, &root, false).map(|_| ());
+        }
+        let (root, hub, _) = Self::admit(config, override_root)?;
+        Self::inspect(config, &root, hub).map(|_| ())
+    }
+
+    fn settings(config: &EmbeddingConfig) -> Result<()> {
         if !matches!(config.backend.as_str(), "torch" | "onnx") {
             bail!("embedding backend must be 'torch' or 'onnx'");
         }
@@ -134,22 +177,21 @@ impl Embedder {
         if config.batch_size <= 0 || config.max_seq_length <= 0 {
             bail!("embedding batch_size and max_seq_length must be positive");
         }
-        let file = config.onnx_file_name.replace('\\', "/");
-        let model = override_root
-            .map(|p| p.to_string_lossy().into_owned())
-            .unwrap_or_else(|| config.model_name.clone());
-        let (root, hub) = artifacts::resolve(&model, &file, &cache_root())?;
-        if config.model_name == artifacts::provision::EMBEDDING_MODEL && !harness_fixture(&root) {
-            artifacts::provision::verify_embedding(&root, &file, hub)?;
-        }
+        Ok(())
+    }
+
+    /// The model's metadata, read and checked as loading uses it: saved
+    /// prompts, the module layout, dimensions, pooling and the tokenizer
+    /// files, short of building the tokenizer or a session.
+    fn inspect(config: &EmbeddingConfig, root: &Path, hub: bool) -> Result<Layout> {
         if root.join("config_sentence_transformers.json").exists() {
-            validate_saved_prompt(&metadata(&root, "config_sentence_transformers.json", hub)?)?;
+            validate_saved_prompt(&metadata(root, "config_sentence_transformers.json", hub)?)?;
         }
         let mut transformer_path = String::new();
         let mut pooling_path = None;
         let mut always_normalize = false;
         if root.join("modules.json").exists() {
-            let modules = metadata(&root, "modules.json", hub)?;
+            let modules = metadata(root, "modules.json", hub)?;
             let mut transformers = 0;
             for module in modules
                 .as_array()
@@ -189,7 +231,7 @@ impl Embedder {
                 format!("{transformer_path}/{name}")
             }
         };
-        let model_config = metadata(&root, &sub("config.json"), hub)?;
+        let model_config = metadata(root, &sub("config.json"), hub)?;
         let dim = model_config["hidden_size"]
             .as_u64()
             .ok_or_else(|| anyhow!("model has no hidden_size"))? as usize;
@@ -207,7 +249,7 @@ impl Embedder {
             } else {
                 format!("{path}/config.json")
             };
-            let p = metadata(&root, &name, hub)?;
+            let p = metadata(root, &name, hub)?;
             if p["word_embedding_dimension"].as_u64() != Some(dim as u64) {
                 bail!("pooling dimension mismatch");
             }
@@ -232,11 +274,11 @@ impl Embedder {
         };
         let st_name = sub("sentence_bert_config.json");
         let st = if root.join(&st_name).exists() {
-            metadata(&root, &st_name, hub)?
+            metadata(root, &st_name, hub)?
         } else {
             Value::Null
         };
-        let tokenizer_config = metadata(&root, &sub("tokenizer_config.json"), hub)?;
+        let tokenizer_config = metadata(root, &sub("tokenizer_config.json"), hub)?;
         let native_cap = st["max_seq_length"].as_u64().unwrap_or_else(|| {
             model_config["max_position_embeddings"]
                 .as_u64()
@@ -247,11 +289,51 @@ impl Embedder {
                         .unwrap_or(u64::MAX),
                 )
         });
-        let cap = (config.max_seq_length as usize).min(native_cap as usize);
         let tokenizer_name = sub("tokenizer.json");
-        if !artifacts::existing_file(&root, &artifacts::relative_parts(&tokenizer_name)?, hub) {
+        if !artifacts::existing_file(root, &artifacts::relative_parts(&tokenizer_name)?, hub) {
             bail!("missing or unsafe tokenizer.json");
         }
+        Ok(Layout {
+            transformer_path,
+            always_normalize,
+            pooling,
+            dim,
+            st,
+            tokenizer_config,
+            native_cap,
+            tokenizer_name,
+        })
+    }
+
+    /// An override is a complete local model root. The configured graph name
+    /// is relative to its Transformer module; loading never guesses files.
+    pub fn load_config(
+        config: &EmbeddingConfig,
+        override_root: Option<&Path>,
+        threads: usize,
+    ) -> Result<Self> {
+        let (root, hub, file) = Self::admit(config, override_root)?;
+        if config.model_name == artifacts::provision::EMBEDDING_MODEL && !harness_fixture(&root) {
+            artifacts::provision::verify_embedding(&root, &file, hub)?;
+        }
+        let Layout {
+            transformer_path,
+            always_normalize,
+            pooling,
+            dim,
+            st,
+            tokenizer_config,
+            native_cap,
+            tokenizer_name,
+        } = Self::inspect(config, &root, hub)?;
+        let sub = |name: &str| {
+            if transformer_path.is_empty() {
+                name.to_string()
+            } else {
+                format!("{transformer_path}/{name}")
+            }
+        };
+        let cap = (config.max_seq_length as usize).min(native_cap as usize);
         let mut tokenizer =
             Tokenizer::from_file(root.join(&tokenizer_name)).map_err(|e| anyhow!("{e}"))?;
         tokenizer
