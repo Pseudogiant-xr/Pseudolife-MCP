@@ -260,6 +260,10 @@ class Mail(MaintainerScenario):
         mid = lambda key: lambda ctx: {"message_id": ctx.vals[key]}
         return [*bootstrap(), S.reg("register mail recipient", "A", project="p", label="Mail fixture"),
                 challenge("mail", "send", fields), complete("mail", "send", save=save("mail-id")),
+                # #1361: the browser's retry of the same body is spent, and
+                # the counting key is not flagged (rollback: nothing changed).
+                post("retried send body", "send", lambda ctx: copy.deepcopy(ctx.vals["body:mail"]),
+                     expected=410, error="challenge_spent", rollback=True),
                 complete("spent send nonce", "send", source="mail", expected=410,
                          error="challenge_spent", rollback=True),
                 challenge("withdraw unread", "repudiate", mid("mail-id")),

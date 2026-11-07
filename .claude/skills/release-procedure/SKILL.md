@@ -168,7 +168,14 @@ them in this order (first done 2026-07-16, v0.8.0; GHCR images added
    repository variables, disabled when unset, and all publication remains
    downstream of the human-approved `publish` job. The Rust image gets
    only the explicit version tag, never `latest`, until the default switch
-   is separately approved. Neither variable switches a host's engine.
+   is separately approved. Neither variable switches a host's engine:
+   with the image published, release-mode `pseudolife-mcp update --engine
+   rust` can select it for that release (and `--engine python` switches
+   back); without it, that command stops at its `docker pull` with nothing
+   changed. Verify a published image with
+   `docker manifest inspect ghcr.io/pseudogiant-xr/pseudolife-daemon-rust:<version>`
+   and flip its GHCR package to public after the first release that runs
+   the job, as for the Python image.
 
    Run the build-only `release.yml` workflow dispatch on the candidate
    first: all five target binaries must compile and execute their version

@@ -15,6 +15,8 @@ pub(crate) mod mcp;
 pub(crate) mod pair;
 pub(crate) mod read;
 pub(crate) mod signin;
+#[cfg(test)]
+mod signin_passkey_tests;
 pub(crate) mod writes;
 
 use std::collections::HashSet;

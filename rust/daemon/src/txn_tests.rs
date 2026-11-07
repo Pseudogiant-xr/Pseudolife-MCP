@@ -501,3 +501,136 @@ async fn typed_refusal_rolls_back_prior_write() {
     drop(client);
     connection_task.abort();
 }
+
+/// One writer transaction against a fixture server whose COMMIT answer is
+/// `answer` (`ok`, `error`: a server refusal, `drop`: the connection lost);
+/// returns whether the commit-unknown flag was set.
+async fn commit_outcome_case(answer: &'static str) -> bool {
+    let _test = TESTS.lock().await;
+    set_commit_outcome_unknown_for_test(false);
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        startup(&mut stream).await;
+        assert_eq!(query(&mut stream).await, "BEGIN");
+        completion(&mut stream, b"BEGIN\0", b'T').await;
+        assert_eq!(query(&mut stream).await, "INSERT INTO fixture VALUES (1)");
+        completion(&mut stream, b"INSERT 0 1\0", b'T').await;
+        assert_eq!(query(&mut stream).await, "SELECT 1");
+        completion(&mut stream, b"SELECT 1\0", b'T').await;
+        assert_eq!(query(&mut stream).await, "COMMIT");
+        match answer {
+            "ok" => completion(&mut stream, b"COMMIT\0", b'I').await,
+            "error" => {
+                terminal_error(&mut stream, "40001").await;
+                assert_eq!(query(&mut stream).await, "ROLLBACK");
+                completion(&mut stream, b"ROLLBACK\0", b'I').await;
+            }
+            _ => drop(stream),
+        }
+    });
+    let dsn = format!(
+        "host=127.0.0.1 port={} user=fixture dbname=fixture sslmode=disable",
+        address.port()
+    );
+    let (client, connection) = tokio_postgres::connect(&dsn, NoTls).await.unwrap();
+    let connection_task = tokio::spawn(connection);
+    let result = run(&client, |c| async move {
+        c.batch_execute("INSERT INTO fixture VALUES (1)").await?;
+        Ok::<_, tokio_postgres::Error>(())
+    })
+    .await;
+    server.await.unwrap();
+    assert_eq!(result.is_ok(), answer == "ok", "{answer}: {result:?}");
+    let unknown = commit_outcome_unknown();
+    drop(client);
+    connection_task.abort();
+    // The fixture writer is gone: leave no marker for the next test.
+    OPEN.store(false, Ordering::SeqCst);
+    COMMIT_SENT.store(false, Ordering::SeqCst);
+    set_commit_outcome_unknown_for_test(false);
+    unknown
+}
+
+/// Every COMMIT failure leaves the resident copy unverifiable, a server
+/// refusal as much as a lost reply; a clean commit does not.
+#[tokio::test]
+async fn a_failed_commit_sets_the_commit_unknown_flag() {
+    // (refused, reply lost, committed)
+    let seen = (
+        commit_outcome_case("error").await,
+        commit_outcome_case("drop").await,
+        commit_outcome_case("ok").await,
+    );
+    assert_eq!(seen, (true, true, false));
+}
+
+/// A transaction abandoned after its COMMIT was sent and before the answer:
+/// whether it committed is unknown, so dropping it sets the flag at once
+/// (no read waits for the next transaction to notice), and the next writer
+/// transaction sets it too as it rolls the leftover back.
+#[tokio::test]
+async fn a_commit_abandoned_unanswered_sets_the_flag() {
+    let _test = TESTS.lock().await;
+    set_commit_outcome_unknown_for_test(false);
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (sent, commit_seen) = oneshot::channel();
+    let (go, answer_late) = oneshot::channel::<()>();
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        startup(&mut stream).await;
+        assert_eq!(query(&mut stream).await, "BEGIN");
+        completion(&mut stream, b"BEGIN\0", b'T').await;
+        assert_eq!(query(&mut stream).await, "SELECT 1");
+        completion(&mut stream, b"SELECT 1\0", b'T').await;
+        assert_eq!(query(&mut stream).await, "COMMIT");
+        let _ = sent.send(());
+        answer_late.await.unwrap();
+        // The abandoned request's answer arrives late; the client drops it.
+        completion(&mut stream, b"COMMIT\0", b'I').await;
+        assert_eq!(query(&mut stream).await, "ROLLBACK");
+        completion(&mut stream, b"ROLLBACK\0", b'I').await;
+        assert_eq!(query(&mut stream).await, "BEGIN");
+        completion(&mut stream, b"BEGIN\0", b'T').await;
+        assert_eq!(query(&mut stream).await, "SELECT 1");
+        completion(&mut stream, b"SELECT 1\0", b'T').await;
+        assert_eq!(query(&mut stream).await, "COMMIT");
+        completion(&mut stream, b"COMMIT\0", b'I').await;
+    });
+    let dsn = format!(
+        "host=127.0.0.1 port={} user=fixture dbname=fixture sslmode=disable",
+        address.port()
+    );
+    let (client, connection) = tokio_postgres::connect(&dsn, NoTls).await.unwrap();
+    let client = Arc::new(client);
+    let connection_task = tokio::spawn(connection);
+    let first = {
+        let client = client.clone();
+        tokio::spawn(async move {
+            let _ = run(&client, |_| async { Ok::<_, tokio_postgres::Error>(()) }).await;
+        })
+    };
+    commit_seen.await.unwrap();
+    first.abort();
+    let _ = first.await;
+    assert!(
+        commit_outcome_unknown(),
+        "dropping a transaction mid-COMMIT sets the flag at once"
+    );
+    // The next transaction is the backstop for a marker the drop missed.
+    set_commit_outcome_unknown_for_test(false);
+    go.send(()).unwrap();
+    run(&client, |_| async { Ok::<_, tokio_postgres::Error>(()) })
+        .await
+        .unwrap();
+    let unknown = commit_outcome_unknown();
+    server.await.unwrap();
+    drop(client);
+    connection_task.abort();
+    OPEN.store(false, Ordering::SeqCst);
+    COMMIT_SENT.store(false, Ordering::SeqCst);
+    set_commit_outcome_unknown_for_test(false);
+    assert!(unknown, "an abandoned COMMIT's outcome is unknown");
+}

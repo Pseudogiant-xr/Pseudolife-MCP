@@ -173,6 +173,7 @@
     "maint-confirm-audit-dropped",
     "maint-ending-error-ignored",
     "maint-exact-classes-dropped",
+    "maint-host-revoke-keeps-sign-ins",
     "maint-like-escape-dropped",
     "maint-list-order-flipped",
     "maint-redeemed-text",
