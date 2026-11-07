@@ -66,11 +66,13 @@ class FakeDocker(seed.Docker):
 
     def __init__(self, tmp: Path, *, production=False, project=seed.MIRROR_PROJECT,
                  daemon=False, free=100 * 1024 ** 3, ports=None, name=None,
-                 production_after_restore=False, rewrite_fails=False):
+                 production_after_restore=False, rewrite_fails=False, seed_comment=None,
+                 quiet_comment=None):
         self.calls, self.production, self.project = [], production, project
         self.daemon, self.free, self.ports, self.tmp = daemon, free, ports or {}, tmp
         self.name, self.production_after_restore = name, production_after_restore
         self.rewrite_fails = rewrite_fails
+        self.comments = {seed.SEED_DB: seed_comment, seed.QUIET_DB: quiet_comment}
 
     def run(self, args, input=None, redact=""):
         self.calls.append((args, input))
@@ -82,6 +84,14 @@ class FakeDocker(seed.Docker):
                 "com.docker.compose.project": self.project}}, "NetworkSettings": {"Ports": self.ports}}])
         if args[0] == "info":
             return str(self.tmp)
+        if args[0] == "exec" and "df" in args:  # the engine's own storage, as the restore fills it
+            if self.free is None:
+                raise SystemExit("docker exec failed (exit 1): df: not found")
+            return ("Filesystem 1024-blocks Used Available Capacity Mounted on\n"
+                    f"/dev/x 99999999 1 {self.free // 1024} 1% /var/lib/postgresql\n")
+        if args[0] == "exec" and input and b"shobj_description" in input:
+            database = input.decode().split("datname = '")[1].split("'")[0]
+            return (self.comments.get(database) or "") + "\n"
         if args[0] == "exec" and input and b"current_database(), EXISTS" in input:
             database = args[args.index("-d") + 1]
             live = self.production or (self.production_after_restore and database == seed.RESTORE_DB)
@@ -121,7 +131,7 @@ def backups(tmp: Path, complete=True) -> Path:
 def test_seed_refuses_before_changing_anything(tmp_path, monkeypatch, case, match):
     monkeypatch.setattr(seed.shutil, "disk_usage",
                         lambda p: type("U", (), {"free": case.get("free", 100 * 1024 ** 3)}))
-    docker = FakeDocker(tmp_path, **{k: v for k, v in case.items() if k != "free"})
+    docker = FakeDocker(tmp_path, **case)  # free: what df says inside the engine
     with pytest.raises(seed.Refused, match=match):
         seed.seed(docker, backups(tmp_path), SECRET)
     assert not docker.changed(), docker.calls
@@ -348,7 +358,7 @@ def test_the_rewrite_check_fails_closed_when_a_live_value_survives(throwaway_pg)
 
 
 def test_quiet_copies_the_seed_then_quiets_only_the_copy(tmp_path):
-    docker = FakeDocker(tmp_path)
+    docker = FakeDocker(tmp_path, seed_comment="pl_cf_mir seed from b at t")
     record = seed.quiet(docker)
     done = docker.statements()
     copy = next(i for i, s in enumerate(done) if f"CREATE DATABASE {seed.QUIET_DB} TEMPLATE {seed.SEED_DB}" in s)
@@ -360,7 +370,7 @@ def test_quiet_copies_the_seed_then_quiets_only_the_copy(tmp_path):
 
 
 def test_quiet_refuses_a_live_server(tmp_path):
-    docker = FakeDocker(tmp_path, production=True)
+    docker = FakeDocker(tmp_path, production=True, seed_comment="pl_cf_mir seed from b at t")
     with pytest.raises(seed.Refused, match="live bank's PostgreSQL"):
         seed.quiet(docker)
     assert not any("CREATE DATABASE" in s for s in docker.statements())
@@ -377,8 +387,54 @@ INSERT INTO entries (band, text, embedding, ts, dream_state)
 """)
     if not _rows(cid, "SELECT 1 FROM pg_database WHERE datname = 'pl_cf_mir_home'"):
         d.psql(cid, "pl_cf_mir_seed", "CREATE DATABASE pl_cf_mir_home;\n")
-    seed.quiet(d, cid=cid)
+    d.psql(cid, "pl_cf_mir_seed", "COMMENT ON DATABASE pl_cf_mir_seed IS 'pl_cf_mir seed from t at 1';\n")
+    record = seed.quiet(d, cid=cid)
+    assert seed.read_comment(d, cid, seed.QUIET_DB) == "quiet copy of: pl_cf_mir seed from t at 1"
+    assert record["changes"]["acknowledged"] == 4
     out = d.psql(cid, seed.QUIET_DB, "SELECT dream_state, count(*) FROM entries GROUP BY 1 ORDER BY 1;\n")
     assert out.split() == ["acknowledged|8"]
     assert _rows(cid, "SELECT dream_state, count(*) FROM entries GROUP BY 1 ORDER BY 1") == [
         ["acknowledged", "4"], ["pending", "4"]]  # the seed is untouched
+
+
+def test_disk_is_measured_on_the_engine_storage_the_restore_fills(tmp_path, monkeypatch):
+    """The host's own disk says nothing about Docker's storage (Docker
+    Desktop's sits in its VM): the floor is checked inside the engine."""
+    monkeypatch.setattr(seed.shutil, "disk_usage", lambda p: type("U", (), {"free": 10 ** 13}))
+    with pytest.raises(seed.Refused, match="below the 8 GiB floor"):
+        seed.seed(FakeDocker(tmp_path, free=7 * 1024 ** 3), backups(tmp_path), SECRET)
+    with pytest.raises(seed.Refused, match="could not measure"):
+        seed.quiet(FakeDocker(tmp_path, free=None, seed_comment="x"))
+
+
+def test_seed_drops_the_old_quiet_copy_and_stamps_its_provenance(tmp_path):
+    docker = FakeDocker(tmp_path)
+    record = seed.seed(docker, backups(tmp_path), SECRET)
+    done = docker.statements()
+    first = next(s for s in done if "DROP DATABASE IF EXISTS" in s)
+    assert f"DROP DATABASE IF EXISTS {seed.QUIET_DB} WITH (FORCE);" in first
+    stamp = next(s for s in done if f"COMMENT ON DATABASE {seed.SEED_DB}" in s)
+    assert record["backup"] in stamp and record["provenance"] in stamp
+
+
+def test_quiet_needs_a_stamped_seed_and_names_it_on_the_copy(tmp_path):
+    with pytest.raises(seed.Refused, match="no provenance"):
+        seed.quiet(FakeDocker(tmp_path, seed_comment=None))
+    docker = FakeDocker(tmp_path, seed_comment="pl_cf_mir seed from b.sql.gz at t")
+    record = seed.quiet(docker)
+    stamp = next(s for s in docker.statements() if f"COMMENT ON DATABASE {seed.QUIET_DB}" in s)
+    assert "quiet copy of: pl_cf_mir seed from b.sql.gz at t" in stamp
+    assert record["copied_from_provenance"] == "pl_cf_mir seed from b.sql.gz at t"
+
+
+@pytest.mark.parametrize("seed_comment,quiet_comment,ok", [
+    ("pl_cf_mir seed from a at t", "quiet copy of: pl_cf_mir seed from a at t", True),
+    ("pl_cf_mir seed from b at u", "quiet copy of: pl_cf_mir seed from a at t", False),  # a reseed
+    ("pl_cf_mir seed from a at t", None, False),  # never made
+])
+def test_the_quiet_preflight_wants_a_copy_of_the_current_seed(seed_comment, quiet_comment, ok):
+    if ok:
+        seed.quiet_preflight(seed_comment, quiet_comment)
+    else:
+        with pytest.raises(seed.Refused, match="seed.py quiet"):
+            seed.quiet_preflight(seed_comment, quiet_comment)

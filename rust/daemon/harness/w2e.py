@@ -2351,7 +2351,8 @@ SCENARIOS.update({
             sql("INSERT INTO entity_sources (entity_id, source, count, origin, updated_at) "
                 "SELECT id, s, 1, 'derived', 0 FROM entities, "
                 "(VALUES ('claude-code'), ('agent')) v(s) WHERE canonical IN ('web-app', "
-                "'postgres')", after_stop=True),
+                "'postgres') ON CONFLICT (entity_id, source) DO UPDATE SET count = EXCLUDED.count, "
+                "origin = EXCLUDED.origin, updated_at = EXCLUDED.updated_at", after_stop=True),
         ],
         "ops": [
             # the default neighborhood: asserted edges with tags, a transitive

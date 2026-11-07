@@ -266,14 +266,43 @@ def dump_complete(path: Path) -> bool:
     return DUMP_COMPLETE in tail
 
 
-def require_disk(docker: Docker, floor: int = DISK_FLOOR) -> int:
-    root = docker.run(["info", "--format", "{{.DockerRootDir}}"]).strip() or "/"
-    # Docker Desktop's root is inside its VM, not a host path: measure here.
-    free = shutil.disk_usage(root if Path(root).exists() else Path.cwd()).free
+PG_DATA = "/var/lib/postgresql"
+PROVENANCE = "pl_cf_mir seed from "
+QUIET_OF = "quiet copy of: "
+
+
+def require_disk(docker: Docker, cid: str, floor: int = DISK_FLOOR) -> int:
+    """Free space where a restore lands: the mirror PostgreSQL's own data
+    directory, measured inside its container, since the host's disk need not
+    be Docker's storage (Docker Desktop keeps it in a VM)."""
+    try:
+        line = docker.run(["exec", cid, "df", "-Pk", PG_DATA]).strip().splitlines()[-1]
+        free = int(line.split()[3]) * 1024
+    except (SystemExit, IndexError, ValueError):
+        raise Refused(f"could not measure free space on the mirror PostgreSQL's storage ({PG_DATA}); "
+                      "nothing was changed. Check the container answers `df`.") from None
     if free < floor:
-        raise Refused(f"{free / 1024 ** 3:.1f} GiB free under {root}, below the 8 GiB floor; "
-                      "free space before seeding. Nothing was changed.")
+        raise Refused(f"{free / 1024 ** 3:.1f} GiB free on the mirror PostgreSQL's storage, below the "
+                      "8 GiB floor; free space before seeding. Nothing was changed.")
     return free
+
+
+def read_comment(docker: Docker, cid: str, database: str) -> str:
+    """A mirror database's comment: the seed's provenance, or what a quiet
+    copy was copied from."""
+    return docker.psql(cid, "pl_cf_mir_home", "SELECT coalesce((SELECT shobj_description(oid, "
+                       f"'pg_database') FROM pg_database WHERE datname = '{database}'), '');\n").strip()
+
+
+def quiet_preflight(seed_comment: str | None, quiet_comment: str | None) -> None:
+    """Refuse a quiet base that is missing or copied from an earlier seed: a
+    reseed would otherwise leave its scenarios comparing an older backup."""
+    if not seed_comment or not seed_comment.startswith(PROVENANCE):
+        raise Refused(f"{SEED_DB} carries no provenance; reseed with seed.py seed, then run "
+                      "seed.py quiet. Nothing was run.")
+    if quiet_comment != QUIET_OF + seed_comment:
+        raise Refused(f"{QUIET_DB} is missing or was copied from another seed "
+                      f"({quiet_comment or 'none'!r}); run seed.py quiet. Nothing was run.")
 
 
 def seed(docker: Docker, backups: Path, secret: str, backup: str | None = None,
@@ -292,11 +321,12 @@ def seed(docker: Docker, backups: Path, secret: str, backup: str | None = None,
                       f"{MIRROR_PROJECT} -f ops/docker-compose.rust-mirror.yml stop mirror-daemon")
     refuse_live_server(server_facts(docker, cid, "pl_cf_mir_home"))
     path = pick_backup(backups, backup)
-    free = require_disk(docker)
+    free = require_disk(docker, cid)
     if not dump_complete(path):
         raise Refused(f"{path.name} has no end-of-dump marker: it is incomplete. Nothing was changed.")
     record = {"backup": path.name, "backup_bytes": path.stat().st_size, "free_bytes_before": free}
     docker.psql(cid, "pl_cf_mir_home", f"""
+DROP DATABASE IF EXISTS {QUIET_DB} WITH (FORCE);
 DROP DATABASE IF EXISTS {BANK_DB} WITH (FORCE);
 DROP DATABASE IF EXISTS {SEED_DB} WITH (FORCE);
 DROP DATABASE IF EXISTS {RESTORE_DB} WITH (FORCE);
@@ -322,7 +352,10 @@ END $$;
         docker.psql(cid, "pl_cf_mir_home", f"DROP DATABASE IF EXISTS {RESTORE_DB} WITH (FORCE);\n")
         raise
     started = time.monotonic()
+    record["provenance"] = provenance = (f"{PROVENANCE}{path.name} at "
+                                         f"{time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}")
     docker.psql(cid, "pl_cf_mir_home", f"ALTER DATABASE {RESTORE_DB} RENAME TO {SEED_DB};\n"
+                f"COMMENT ON DATABASE {SEED_DB} IS {_sql_text(provenance)};\n"
                 f"CREATE DATABASE {BANK_DB} TEMPLATE {SEED_DB};\n")
     record["clone_seconds"] = round(time.monotonic() - started, 1)
     sizes = docker.psql(cid, SEED_DB, "SELECT pg_database_size(current_database()), "
@@ -355,7 +388,10 @@ def quiet(docker: Docker, cid: str | None = None) -> dict:
     if cid is None:
         raise Refused("the mirror's PostgreSQL is not running. Nothing was changed.")
     refuse_live_server(server_facts(docker, cid, "pl_cf_mir_home"))
-    require_disk(docker)
+    require_disk(docker, cid)
+    provenance = read_comment(docker, cid, SEED_DB)
+    if not provenance.startswith(PROVENANCE):
+        raise Refused(f"{SEED_DB} carries no provenance; reseed with seed.py seed. Nothing was changed.")
     docker.psql(cid, "pl_cf_mir_home", f"DROP DATABASE IF EXISTS {QUIET_DB} WITH (FORCE);\n"
                 f"CREATE DATABASE {QUIET_DB} TEMPLATE {SEED_DB};\n")
     refuse_live_server(server_facts(docker, cid, QUIET_DB))
@@ -364,7 +400,10 @@ def quiet(docker: Docker, cid: str | None = None) -> dict:
         key, _, count = line.partition("|")
         if count.isdigit():
             changes[key] = int(count)
-    return {"base": QUIET_DB, "copied_from": SEED_DB, "changes": changes}
+    docker.psql(cid, "pl_cf_mir_home",
+                f"COMMENT ON DATABASE {QUIET_DB} IS {_sql_text(QUIET_OF + provenance)};\n")
+    return {"base": QUIET_DB, "copied_from": SEED_DB, "copied_from_provenance": provenance,
+            "changes": changes}
 
 
 def health(docker: Docker, timeout: float, expect_schema: str | None = None) -> dict:

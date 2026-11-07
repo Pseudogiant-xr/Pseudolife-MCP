@@ -290,13 +290,46 @@ def run(runner: Runner, suites: list[str], only: list[str] | None,
             verdict = classify(first, retry, synthetic)
             rows.append({"scenario": name, "class": verdict, "differences": len(first["diffs"]),
                          "seconds": first["seconds"], "base": first.get("base"),
-                         "oom_kills": sum(a.get("oom_kills") or 0 for a in (first, retry, synthetic) if a)})
+                         "oom_kills": _oom_total(first, retry, synthetic)})
             if verdict != "pass":
                 private[f"{suite}/{name}"] = {"real": first, "real_retry": retry, "synthetic": synthetic}
             print(f"{suite}/{name}: {verdict} ({len(first['diffs'])} differences, {first['seconds']}s)",
                   flush=True)
     report["complete"] = True
     return report, private
+
+
+def _oom_total(*attempts) -> int | None:
+    measured = [a["oom_kills"] for a in attempts if a and a.get("oom_kills") is not None]
+    return sum(measured) if measured else None
+
+
+# A real bank's own rows can stand in for a seed's fixture, which then may not
+# be the case the scenario names: reported beside the counts.
+FIXTURE_NOTES = {
+    "w2e/dream-deep-exclusion": "the real bank already holds an entity named 'release-checklist', "
+                                "which stands in for the seed's lesson-only one, so the lesson-only "
+                                "exclusion case may not be exercised on the real copy",
+}
+
+
+def base_comments() -> tuple[str, str]:
+    """The seed's provenance and the quiet copy's, from the mirror PostgreSQL."""
+    sys.path.insert(0, str(HARNESS))
+    import pgdisposable
+    with pgdisposable._admin() as conn:
+        def comment(name):
+            row = conn.execute("SELECT shobj_description(oid, 'pg_database') FROM pg_database "
+                               "WHERE datname = %s", (name,)).fetchone()
+            return row[0] if row else None
+        return comment(os.environ.get("PL_HARNESS_BASE_DATABASE", "")), comment(QUIET_DB)
+
+
+def run_scratch() -> Path:
+    """This run's own marker: a leftover is reaped only under it, so two runs
+    on one host never stop each other's daemons."""
+    return Path("/tmp/forced") / f"{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}-{os.getpid()}-" \
+        f"{os.urandom(3).hex()}"
 
 
 def counts(report: dict) -> dict:
@@ -307,8 +340,9 @@ def counts(report: dict) -> dict:
                       **{c: classes.count(c) for c in ("pass", "transient", "preexisting", "new", "error")},
                       "differences": sum(r["differences"] for r in body["rows"]),
                       # Errors whose attempts saw the runner's cgroup kill a process.
-                      "errors_with_oom": sum(1 for r in body["rows"]
-                                             if r["class"] == "error" and r.get("oom_kills")),
+                      # Null when no attempt could read the cgroup: not measured is not none.
+                      "errors_with_oom": None if all(r.get("oom_kills") is None for r in body["rows"])
+                      else sum(1 for r in body["rows"] if r["class"] == "error" and r.get("oom_kills")),
                       "new_scenarios": [r["scenario"] for r in body["rows"] if r["class"] == "new"]}
     return out
 
@@ -354,11 +388,21 @@ def main(argv: list[str] | None = None) -> int:
     except seed.Refused as e:
         print(f"forced.py: {e}", file=sys.stderr)
         return 3
+    planned = {suite: [n for n in scenario_names(suite) if not args.only or n in args.only]
+               for suite in args.suites if suite in QUIET_PREFIXES}
+    if any(base_for(suite, n)[0] == "quiet" for suite, names in planned.items() for n in names):
+        try:  # a reseed drops the quiet copy; an old one would compare an older backup
+            seed.quiet_preflight(*base_comments())
+        except seed.Refused as e:
+            print(f"forced.py: {e}", file=sys.stderr)
+            return 3
     args.out.mkdir(parents=True, exist_ok=True)
-    runner = Runner(args.rust_bin, args.out, args.timeout, args.stop_file, sweep=sweep_leftovers)
+    runner = Runner(args.rust_bin, args.out, args.timeout, args.stop_file, sweep=sweep_leftovers,
+                    scratch=run_scratch())
     report, private = run(runner, args.suites, args.only)
     summary = {"base": base, "complete": report["complete"], "stopped": report.get("stopped"),
                "not_forced": report["not_forced"], "quiet_base": quiet_base_use(report),
+               "fixture_notes": FIXTURE_NOTES,
                "counts": counts(report)}
     (args.out / "summary.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
     (args.out / "private.json").write_text(json.dumps({"report": report, "differences": private},

@@ -30,6 +30,7 @@ python3 rust/daemon/harness/mirror/seed.py seed --backups <live>/data/backups --
 python3 rust/daemon/harness/mirror/seed.py tokens --secret-file secret --out tokens.env
 python3 rust/daemon/harness/mirror/seed.py config --backups <live>/data/backups \
     --backup <the seeded backup> --out <PSEUDOLIFE_MIRROR_DATA>/config.yaml   # needs PyYAML
+python3 rust/daemon/harness/mirror/seed.py quiet --record quiet.json  # the forced run's quiet base
 $C --env-file tokens.env up -d mirror-daemon
 python3 rust/daemon/harness/mirror/seed.py health --schema <schema_version from seed.json>
 ```
@@ -38,6 +39,11 @@ python3 rust/daemon/harness/mirror/seed.py health --schema <schema_version from 
   credentials. It then clones the result as `pl_cf_mir_bank`, the daemon's
   database. Harnesses may clone `pl_cf_mir_seed` while it is idle.
 - **Reseeding:** stop `mirror-daemon` first; `seed` refuses while it runs.
+  `seed` drops the quiet copy and stamps the new seed with its backup, so
+  run `seed.py quiet` again after it; the forced run refuses a quiet copy
+  made from another seed.
+- **Disk:** the 8 GiB floor is measured inside the mirror PostgreSQL's
+  container, on its data directory, which is the storage a restore fills.
 - **Refusals:** every refusal exits 3 and says what to fix. Nothing has
   changed when it does.
 - **Stopping:** `$C stop` stops the mirror. Never run `down -v` here or on

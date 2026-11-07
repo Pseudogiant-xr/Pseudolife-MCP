@@ -67,7 +67,7 @@ def test_run_classifies_each_scenario_and_reruns_only_what_differs(tmp_path):
     assert set(private) == {"w2e/flaky", "w2e/old", "w2e/fresh"} and report["complete"]
     counts = forced.counts(report)["w2e"]
     assert counts == {"planned": 4, "run": 4, "pass": 1, "transient": 1, "preexisting": 1, "new": 1,
-                      "error": 0, "differences": 3, "errors_with_oom": 0, "new_scenarios": ["fresh"]}
+                      "error": 0, "differences": 3, "errors_with_oom": None, "new_scenarios": ["fresh"]}
     assert "DIFF" not in json.dumps(counts)  # counts and names only
 
 
@@ -198,14 +198,17 @@ def test_a_harness_that_exits_leaves_none_of_its_processes_behind(tmp_path, monk
     script, pidfile = tmp_path / "quits.py", tmp_path / "child.pid"
     script.write_text(
         "import subprocess, sys\n"
-        "c = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(600)'])\n"
+        # Its own output, as a daemon's goes to its log: the harness's pipe
+        # closes when the harness exits, so no timeout stands in for the stop.
+        "c = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(600)'],\n"
+        "                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)\n"
         f"open({str(pidfile)!r}, 'w').write(str(c.pid))\n"
         "raise SystemExit(1)\n")
     monkeypatch.setitem(forced.SUITES, "w2e", (str(script), tmp_path, ""))
     runner = forced.Runner(Path("rust-bin"), tmp_path / "out", 60, tmp_path / "STOP",
                            scratch=tmp_path / "scratch")
     got = runner.invoke("w2e", "quits", "real", base=True)
-    assert got["status"] == "error"
+    assert got["status"] == "error" and got["exit"] == 1 and got["seconds"] < 30
     assert _wait_dead(int(pidfile.read_text())), "the harness's daemon outlived its scenario"
 
 
@@ -289,3 +292,56 @@ def test_the_summary_says_which_scenarios_used_the_quiet_base_and_why(tmp_path):
     report, _ = forced.run(FakeRunner(tmp_path, answers), ["w2e"], None, names=lambda s: list(answers))
     quiet = forced.quiet_base_use(report)
     assert quiet["scenarios"] == ["w2e/judge-merge-auto"] and "backlog" in quiet["why"]
+
+
+def _main_env(monkeypatch):
+    monkeypatch.setenv("PSEUDOLIFE_TEST_PG_HOST_PORT", "mirror-pg:5432")
+    monkeypatch.setenv("PL_HARNESS_BASE_DATABASE", "pl_cf_mir_seed")
+
+
+def test_a_run_needing_the_quiet_base_refuses_a_stale_or_missing_copy(tmp_path, monkeypatch):
+    _main_env(monkeypatch)
+    monkeypatch.setattr(forced, "base_comments", lambda: ("pl_cf_mir seed from new at u",
+                                                          "quiet copy of: pl_cf_mir seed from old at t"))
+    monkeypatch.setattr(forced, "run", lambda *a, **k: pytest.fail("ran on a stale quiet copy"))
+    assert forced.main(["--rust-bin", "x", "--out", str(tmp_path / "o"), "--suites", "w2e"]) == 3
+
+
+def test_a_run_needing_no_quiet_scenario_skips_the_preflight(tmp_path, monkeypatch):
+    _main_env(monkeypatch)
+    monkeypatch.setattr(forced, "scenario_names", lambda suite: ["store-defaults"])
+    monkeypatch.setattr(forced, "base_comments", lambda: pytest.fail("checked the quiet copy"))
+    monkeypatch.setattr(forced, "run", lambda runner, *a, **k: ({"suites": {}, "not_forced": {},
+                                                                 "complete": True}, {}))
+    assert forced.main(["--rust-bin", "x", "--out", str(tmp_path / "o"), "--suites", "w2e",
+                        "--only", "store-defaults"]) == 0
+
+
+def test_an_unmeasured_oom_count_stays_null(tmp_path):
+    answers = {"x": {"real": {"status": "error", "diffs": [], "seconds": 1, "oom_kills": None},
+                     "real-retry": {"status": "error", "diffs": [], "seconds": 1, "oom_kills": None},
+                     "synthetic": {"status": "pass", "diffs": [], "seconds": 1, "oom_kills": None}}}
+    report, _ = forced.run(FakeRunner(tmp_path, answers), ["w2e"], None, names=lambda s: ["x"])
+    assert report["suites"]["w2e"]["rows"][0]["oom_kills"] is None
+    assert forced.counts(report)["w2e"]["errors_with_oom"] is None  # not measured, not "none"
+
+
+def test_each_run_reaps_only_under_its_own_marker(tmp_path, monkeypatch):
+    _main_env(monkeypatch)
+    seen = []
+    monkeypatch.setattr(forced, "scenario_names", lambda suite: ["store-defaults"])
+    monkeypatch.setattr(forced, "run", lambda runner, *a, **k: seen.append(runner.scratch) or (
+        {"suites": {}, "not_forced": {}, "complete": True}, {}))
+    for _ in range(2):
+        forced.main(["--rust-bin", "x", "--out", str(tmp_path / "o"), "--suites", "w2e", "--only", "store-defaults"])
+    assert len(set(seen)) == 2 and all(p.parent == Path("/tmp/forced") for p in seen)
+
+
+def test_the_summary_names_the_fixture_a_real_entity_stands_in_for(tmp_path, monkeypatch):
+    _main_env(monkeypatch)
+    monkeypatch.setattr(forced, "scenario_names", lambda suite: ["store-defaults"])
+    monkeypatch.setattr(forced, "run", lambda runner, *a, **k: ({"suites": {}, "not_forced": {},
+                                                                 "complete": True}, {}))
+    forced.main(["--rust-bin", "x", "--out", str(tmp_path / "o"), "--suites", "w2e", "--only", "store-defaults"])
+    notes = json.loads((tmp_path / "o" / "summary.json").read_text())["fixture_notes"]
+    assert "release-checklist" in notes["w2e/dream-deep-exclusion"]
