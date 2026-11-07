@@ -179,6 +179,9 @@ CALLER_HOLDS_LOCK = {
     # (2026-11-07): entered only inside world_restore / lesson_restore's
     # locked block.
     "_restore_decisions_with_slots",
+    # Its commit-outcome read after a failed COMMIT (2026-11-07), reached
+    # only from _restore_decisions_with_slots.
+    "_restore_landed",
     "_unreachable_orphans",
     # Alias retry list for a slot miss (one storage probe for shadowed
     # aliases) — reached only from cortex_lookup and chain(), both locked.

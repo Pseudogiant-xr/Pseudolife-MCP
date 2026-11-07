@@ -5049,10 +5049,10 @@ class MemoryService(DreamOps, MaintainerOps):
             recs = self._world.restore(entity, attribute)
             if recs:
                 with self._restore_decisions_with_slots(
-                        "world", self._world, recs, marks, was_dirty):
+                        "world", self._world, recs, marks, was_dirty) as decided:
                     for r in recs:
-                        self._record_store_decision(
-                            "world", r, "restore", decided_by, None, now)
+                        decided.append(self._record_store_decision(
+                            "world", r, "restore", decided_by, None, now))
                     self._save_world()
             # Slots the in-memory pass could not cover (compaction purged
             # the retired row) fall back to their audit snapshot in the
@@ -5632,10 +5632,10 @@ class MemoryService(DreamOps, MaintainerOps):
             recs = self._lessons.restore(task, aspect)
             if recs:
                 with self._restore_decisions_with_slots(
-                        "lesson", self._lessons, recs, marks, was_dirty):
+                        "lesson", self._lessons, recs, marks, was_dirty) as decided:
                     for r in recs:
-                        self._record_store_decision(
-                            "lesson", r, "restore", decided_by, None, now)
+                        decided.append(self._record_store_decision(
+                            "lesson", r, "restore", decided_by, None, now))
                         self._link_lesson_graph(r.entity, r.about, r.polarity)
                     self._save_lessons()
             # Slots the in-memory pass could not cover (compaction purged
@@ -5679,48 +5679,89 @@ class MemoryService(DreamOps, MaintainerOps):
         """A legacy restore's decision rows and its slot save as one
         transaction, so the bank holds both or neither: never a restore
         decision for a slot it still holds retired, nor a restored slot
-        without its decision. On a failure the resident restore is undone
-        (``restored`` back to ``marks``, taken before the restore), so a
-        later save cannot write the slot without its decision and a retry
-        restores again. The dirty marks the sync cleared come back except
-        the restore's own (``was_dirty``: the slots dirty before it), so a
-        COMMIT that landed with its reply lost is never written back over;
-        the resident copy then holds the slot retired while the bank holds
-        the restore, until a restart. A COMMIT failure counts as a
-        persistence failure, as the saves' own failures do.
-        Caller holds the lock; file mode has no transaction."""
+        without its decision.
+
+        A failure before the COMMIT rolled the transaction back: the resident
+        restore is undone (``restored`` back to ``marks``, taken before the
+        restore) and the dirty marks the sync cleared come back, except the
+        restore's own (``was_dirty``: the slots dirty before it). A COMMIT
+        that failed may have landed, and an explicit save or the exit flush
+        rewrites the whole table from the resident copy, so the bank decides
+        (``_restore_landed``: whether the decision rows this call inserted,
+        whose ids the body appends to the yielded list, exist): landed,
+        the restore is served and the call succeeds, as the curated path's
+        ``reconciled`` does; not landed, it is undone as above; the bank
+        unreadable, the resident restore is kept, so a later save writes what
+        the user asked for rather than overwrite a restore that committed
+        (at worst the slot is saved without its audit row). A COMMIT failure
+        that is not known to have landed counts as a persistence failure, as
+        the saves' own failures do. Caller holds the lock; file mode has no
+        transaction."""
+        decided: list[int | None] = []
         if self._storage is None:
-            yield
+            yield decided
             return
         dirty = set(cortex.dirty_slots)
         saved = False
         try:
             with self._storage.transaction():
-                yield
+                yield decided
                 saved = True
         except BaseException as exc:
+            if not saved:
+                # Rolled back before its COMMIT; the saves' handlers counted
+                # their own failures.
+                cortex.dirty_slots |= dirty
+                cortex.undo_restore(restored, marks, was_dirty)
+                raise
+            landed = (self._restore_landed(store, restored, decided)
+                      if isinstance(exc, Exception) else None)
+            if landed:
+                logger.warning("%s restore: COMMIT reply lost, but the bank holds "
+                               "the restore; serving it (%s)", store, exc)
+                return
             cortex.dirty_slots |= dirty
-            cortex.undo_restore(restored, marks, was_dirty)
-            if saved and isinstance(exc, Exception):
-                # The writes returned and the COMMIT failed: the saves'
-                # handlers never saw it.
-                self._persist_errors += 1
-                logger.error("%s restore commit failed (NOT durably persisted): %s",
-                             store, exc)
-                raise PersistenceError(f"{store} restore commit failed: {exc}") from exc
-            raise
+            if landed is False:
+                cortex.undo_restore(restored, marks, was_dirty)
+            if not isinstance(exc, Exception):
+                raise
+            self._persist_errors += 1
+            logger.error("%s restore commit failed (NOT durably persisted): %s",
+                         store, exc)
+            raise PersistenceError(f"{store} restore commit failed: {exc}") from exc
+
+    def _restore_landed(self, store: str, restored: list,
+                        decided: list) -> bool | None:
+        """Whether a legacy restore's transaction committed: True when the
+        bank holds each decision row it inserted (``decided``: their ids,
+        unique and never reused, so an earlier restore of the slot cannot be
+        mistaken for this one), False when it holds none, None when the bank
+        cannot be read or the answer is mixed. Caller holds the lock."""
+        ids = {i for i in decided if i is not None}
+        if len(ids) != len(restored):
+            return None
+        try:
+            present = self._storage.store_decision_ids_present(ids)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("%s restore: the commit outcome could not be read: %s",
+                           store, exc)
+            return None
+        if present == ids:
+            return True
+        return False if not present else None
 
     def _record_store_decision(self, store: str, rec, action: str,
                                decided_by: str | None, reason: str | None,
-                               now: float) -> None:
+                               now: float) -> int | None:
         """Audit row for a lesson/world retire or restore, carrying the
-        verbatim record. Caller holds the lock; no-op in file mode."""
+        verbatim record; returns its id. Caller holds the lock; no-op (None)
+        in file mode."""
         if self._storage is None:
-            return
+            return None
         snapshot = ({**_lesson_record_to_dict(rec), "support": sorted(rec.support)}
                     if store == "lesson" else _world_record_snapshot(rec))
         ne, na = rec.key
-        self._storage.record_store_decision(
+        return self._storage.record_store_decision(
             store, ne, na, action, decided_by=decided_by, reason=reason,
             record=snapshot, now=now)
 
