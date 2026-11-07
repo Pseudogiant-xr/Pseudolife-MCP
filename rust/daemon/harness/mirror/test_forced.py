@@ -348,3 +348,27 @@ def test_the_summary_names_the_fixture_a_real_entity_stands_in_for(tmp_path, mon
     forced.main(["--rust-bin", "x", "--out", str(tmp_path / "o"), "--suites", "w2e", "--only", "store-defaults"])
     notes = json.loads((tmp_path / "o" / "summary.json").read_text())["fixture_notes"]
     assert "release-checklist" in notes["w2e/dream-deep-exclusion"]
+
+
+def test_an_attempt_that_does_not_pass_keeps_its_daemons_logs(tmp_path):
+    """The harness traceback alone did not say which daemon died or why
+    (board's ConnectionRefused, 2026-11-07): the daemons' own logs are kept,
+    on the host with the private report."""
+    class Logs(forced.Runner):
+        def __init__(self, *a, status, **k):
+            super().__init__(*a, **k)
+            self.status = status
+
+        def _run(self, argv, env):
+            home = Path(env["PL_HARNESS_SCRATCH"]) / "w2f-x-python"
+            home.mkdir(parents=True)
+            (home / "daemon.log").write_text("Traceback: the python daemon's own error\n")
+            return (0, "") if self.status == "pass" else (1, "Traceback\nConnectionRefusedError\n")
+
+    for status in ("pass", "error"):
+        out = tmp_path / status
+        Logs(Path("rust-bin"), out, 60, tmp_path / "STOP", scratch=tmp_path / f"s-{status}",
+             oom_kills=lambda: 0, status=status).invoke("w2e", "x", "real", base=True)
+        kept = list((out / "w2e" / "real").glob("x.daemon-logs/*/daemon.log"))
+        assert bool(kept) == (status == "error"), status
+    assert "own error" in kept[0].read_text()

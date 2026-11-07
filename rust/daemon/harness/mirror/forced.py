@@ -190,6 +190,15 @@ class Runner:
             log += f"\nswept {swept} leftover disposable databases"
         if reaped:
             log = f"stopped {len(reaped)} leftover processes before this scenario\n" + log
+        result = outcome(code, log)
+        if result["status"] != "pass":
+            # The daemons' own logs say which one died and why; they may quote
+            # bank text, so they stay beside the private report on the host.
+            scratch = Path(env["PL_HARNESS_SCRATCH"])
+            for daemon_log in scratch.rglob("daemon.log") if scratch.is_dir() else ():
+                keep = work / f"{safe}.daemon-logs" / daemon_log.parent.relative_to(scratch)
+                keep.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(daemon_log, keep / "daemon.log")
         shutil.rmtree(env["PL_HARNESS_SCRATCH"], ignore_errors=True)
         (work / f"{safe}.log").write_text(log, encoding="utf-8")
         kills = after - before if before is not None and after is not None else None
