@@ -5740,20 +5740,15 @@ class MemoryService(DreamOps, MaintainerOps):
         ids = {i for i in decided if i is not None}
         if len(ids) != len(restored):
             return None
-        found = []
         try:
-            for r in restored:
-                ne, na = r.key
-                rows = self._storage.store_decisions(
-                    store, entity_norm=ne, attribute_norm=na, limit=10)
-                found.append(any(d["id"] in ids for d in rows))
+            present = self._storage.store_decision_ids_present(ids)
         except Exception as exc:  # noqa: BLE001
             logger.warning("%s restore: the commit outcome could not be read: %s",
                            store, exc)
             return None
-        if found and all(found):
+        if present == ids:
             return True
-        return False if not any(found) else None
+        return False if not present else None
 
     def _record_store_decision(self, store: str, rec, action: str,
                                decided_by: str | None, reason: str | None,

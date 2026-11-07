@@ -421,7 +421,7 @@ def test_a_restore_whose_commit_landed_survives_a_full_save(svc, monkeypatch, st
     assert other in cortex.dirty_slots
 
     real_transaction = svc._storage.transaction
-    real_decisions = svc._storage.store_decisions
+    real_present = svc._storage.store_decision_ids_present
 
     @contextmanager
     def lost_reply():
@@ -432,7 +432,7 @@ def test_a_restore_whose_commit_landed_survives_a_full_save(svc, monkeypatch, st
             def unreadable(*a, **k):
                 raise psycopg.OperationalError("injected: the bank cannot be read")
 
-            monkeypatch.setattr(svc._storage, "store_decisions", unreadable)
+            monkeypatch.setattr(svc._storage, "store_decision_ids_present", unreadable)
         raise psycopg.OperationalError("injected lost COMMIT reply")
 
     monkeypatch.setattr(svc._storage, "transaction", lost_reply)
@@ -441,7 +441,7 @@ def test_a_restore_whose_commit_landed_survives_a_full_save(svc, monkeypatch, st
     except PersistenceError:
         result = None
     monkeypatch.setattr(svc._storage, "transaction", real_transaction)
-    monkeypatch.setattr(svc._storage, "store_decisions", real_decisions)
+    monkeypatch.setattr(svc._storage, "store_decision_ids_present", real_present)
     assert actions() == ["restore", "retire"]
     assert bank_statuses() == ["current", "current"]
     assert key in cortex._current, "the committed restore is served"
@@ -493,6 +493,41 @@ def test_a_rolled_back_restore_is_not_mistaken_for_an_earlier_one(svc, monkeypat
     assert actions == ["retire", "restore", "retire"]
     svc.save()
     assert sorted(s for s, _ in _pg_rows(svc, "world_facts", "acme")) == ["retired"]
+
+
+def test_store_decision_ids_present_answers_exactly(svc):
+    """The commit-outcome lookup answers by id, however many later-dated
+    decisions the slot carries (a history window could miss this call's row
+    after a clock step back)."""
+    first = svc._storage.record_store_decision(
+        "world", "acme", "ceo", "retire", decided_by="agent", reason=None,
+        record=None, now=2_000_000_000.0)
+    for k in range(12):
+        svc._storage.record_store_decision(
+            "world", "acme", "ceo", "retire", decided_by="agent", reason=None,
+            record=None, now=2_000_000_100.0 + k)
+    missing = first + 10 ** 9
+    assert svc._storage.store_decision_ids_present({first, missing}) == {first}
+    assert svc._storage.store_decision_ids_present(set()) == set()
+
+
+def test_a_landed_restore_is_found_behind_later_dated_decisions(svc):
+    """A committed restore decision followed by many later-dated decisions
+    on the slot (a clock stepped back): the commit-outcome check still finds
+    it, so a landed restore is never mistaken for a rolled-back one."""
+    svc.world_write("acme", "ceo", "jane", source_url="https://x.test/a",
+                    source_quote="Jane is CEO", confidence=0.8)
+    rec = next(r for r in svc._world.records if r.key == ("acme", "ceo"))
+    restored_id = svc._storage.record_store_decision(
+        "world", "acme", "ceo", "restore", decided_by="human", reason=None,
+        record=None, now=1_000_000_000.0)
+    for k in range(12):
+        svc._storage.record_store_decision(
+            "world", "acme", "ceo", "retire", decided_by="agent", reason=None,
+            record=None, now=2_000_000_000.0 + k)
+    with svc._lock:
+        assert svc._restore_landed("world", [rec], [restored_id]) is True
+        assert svc._restore_landed("world", [rec], [restored_id + 10 ** 9]) is False
 
 
 def test_world_restore_from_the_audit_snapshot_keeps_the_citation(svc):
