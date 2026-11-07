@@ -254,10 +254,7 @@ pub fn rank_traced(
     for (depth, members) in by_band.iter().enumerate() {
         let name = p.band_order[depth].as_str();
         if !band_ok(name) {
-            if let Some(t) = trace
-                .as_deref_mut()
-                .filter(|_| !crate::mutants::active("trace-filtered-tier-missing"))
-            {
+            if let Some(t) = trace.as_deref_mut() {
                 push_tier(
                     t,
                     json!({
@@ -269,11 +266,7 @@ pub fn rank_traced(
             }
             continue;
         }
-        let (boost, half_life) = if n == 1
-            || p.disable_recency_boost
-            || !p.recency_boost_enabled
-            || crate::mutants::active("search-recency-off")
-        {
+        let (boost, half_life) = if n == 1 || p.disable_recency_boost || !p.recency_boost_enabled {
             (0.0, f64::INFINITY)
         } else {
             let frac = depth as f64 / (n - 1) as f64;
