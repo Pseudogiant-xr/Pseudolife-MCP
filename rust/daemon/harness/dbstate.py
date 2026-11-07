@@ -26,6 +26,7 @@ import hashlib
 import json
 from collections import Counter
 import os
+import re
 import time as clock
 import uuid
 from datetime import date, datetime, time
@@ -146,6 +147,8 @@ def _order_columns(conn, schema: str, table: str) -> list[str]:
 
 
 _BASE_HASHES: dict[str, dict[str, Counter]] = {}
+_BASE_KEYS: dict[str, dict[str, set[str]]] = {}
+_BASE_INFO: dict[str, str] = {}
 
 
 def _base_hashes(dsn: str) -> dict[str, Counter] | None:
@@ -157,13 +160,62 @@ def _base_hashes(dsn: str) -> dict[str, Counter] | None:
     if base not in _BASE_HASHES:
         from pseudolife_memory.storage.schema import refuse_production_database
         refuse_production_database(base)
-        out = {}
-        with psycopg.connect(psycopg.conninfo.make_conninfo(dsn, dbname=base), autocommit=True) as conn:
+        if not re.fullmatch(r"pl_cf_mir_[a-z0-9_]{1,40}", base):
+            raise ValueError(f"refusing base database {base!r}: expected pl_cf_mir_*")
+        info = psycopg.conninfo.make_conninfo(dsn, dbname=base)
+        out, keys = {}, {}
+        with psycopg.connect(info, autocommit=True) as conn:
             for schema, table in _tables(conn):
-                out[f"{schema}.{table}"] = Counter(r[0] for r in conn.execute(
+                qualified = f"{schema}.{table}"
+                out[qualified] = Counter(r[0] for r in conn.execute(
                     sql.SQL("SELECT md5(t::text) FROM {} t").format(sql.Identifier(schema, table))))
-        _BASE_HASHES[base] = out
+                first = _select_list(conn, schema, table)[0].split(", ", 1)[0]
+                keys[qualified] = {json.dumps(_plain(r[0]), sort_keys=True) for r in conn.execute(
+                    f'SELECT {first} FROM "{schema}"."{table}"')} if first else set()
+        _BASE_HASHES[base], _BASE_KEYS[base], _BASE_INFO[base] = out, keys, info
     return _BASE_HASHES[base]
+
+
+def base_keys(qualified: str) -> set[str]:
+    """The base's first-column values of a table (as ``normalize`` keys a
+    row), or none without a base: a base row a run rewrites is an existing
+    row, whose clocks are compared exactly."""
+    return _BASE_KEYS.get(os.environ.get("PL_HARNESS_BASE_DATABASE") or "", {}).get(qualified, set())
+
+
+def prior_rows(before: dict, qualified: str, current: list) -> list:
+    """``before``'s rows of a table plus, under a base, the base's version of
+    each row in ``current`` whose key the base holds and ``before`` does
+    not, since a dump leaves out rows equal to the base. A consumer that
+    compares a row with its earlier self reads this, not ``before`` alone."""
+    rows = list(before["rows"].get(qualified, {}).get("rows", []))
+    base = os.environ.get("PL_HARNESS_BASE_DATABASE") or ""
+    keys = base_keys(qualified)
+    if not keys:
+        return rows
+    have = {json.dumps(r[0], sort_keys=True) for r in rows}
+    wanted = {json.dumps(r[0], sort_keys=True): r[0] for r in current}
+    missing = [v for k, v in wanted.items() if k in keys and k not in have]
+    if not missing:
+        return rows
+    schema, table = qualified.split(".", 1)
+    with psycopg.connect(_BASE_INFO[base], autocommit=True) as conn:
+        select, first = _select_list(conn, schema, table)
+        rows += [_plain(list(r)) for r in conn.execute(
+            f'SELECT {select} FROM "{schema}"."{table}" WHERE "{first}"::text = ANY(%s)',
+            ([v if isinstance(v, str) else json.dumps(v) for v in missing],))]
+    return rows
+
+
+def _select_list(conn, schema: str, table: str) -> tuple[str, str]:
+    """The dump's select list for a table (non-JSON types as text) and the
+    name of its first column."""
+    cols = conn.execute(
+        "SELECT column_name, data_type FROM information_schema.columns "
+        "WHERE table_schema = %s AND table_name = %s ORDER BY ordinal_position",
+        (schema, table)).fetchall()
+    select = ", ".join(f'"{c}"::text' if t == "USER-DEFINED" else f'"{c}"' for c, t in cols)
+    return select, (cols[0][0] if cols else "")
 
 
 def _base_missing(known: Counter, present: Counter) -> dict:
@@ -276,6 +328,7 @@ def normalize(state: dict, rules: dict[tuple[str, str], str] | None = None,
         if before is not None:
             prior = {json.dumps(r[0], sort_keys=True)
                      for r in before["rows"].get(qualified, {}).get("rows", [])}
+            prior |= base_keys(qualified)  # rows equal to the base are not dumped
         for idx, col in enumerate(table["columns"]):
             if (name, col) not in rules:
                 continue

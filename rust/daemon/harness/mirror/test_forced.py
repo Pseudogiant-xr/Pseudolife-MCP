@@ -30,7 +30,8 @@ def test_outcome_reads_the_harness_output():
     (DIFF, PASS, None, "transient"),
     (DIFF, DIFF, DIFF, "preexisting"),
     (DIFF, DIFF, PASS, "new"),
-    ({"status": "error", "diffs": []}, {"status": "error", "diffs": []}, PASS, "new"),
+    ({"status": "error", "diffs": []}, {"status": "error", "diffs": []}, PASS, "error"),
+    ({"status": "error", "diffs": []}, {"status": "error", "diffs": []}, DIFF, "error"),
 ])
 def test_classification(first, retry, synthetic, want):
     assert forced.classify(first, retry, synthetic) == want
@@ -66,7 +67,7 @@ def test_run_classifies_each_scenario_and_reruns_only_what_differs(tmp_path):
     assert set(private) == {"w2e/flaky", "w2e/old", "w2e/fresh"} and report["complete"]
     counts = forced.counts(report)["w2e"]
     assert counts == {"planned": 4, "run": 4, "pass": 1, "transient": 1, "preexisting": 1, "new": 1,
-                      "differences": 3, "new_scenarios": ["fresh"]}
+                      "error": 0, "differences": 3, "new_scenarios": ["fresh"]}
     assert "DIFF" not in json.dumps(counts)  # counts and names only
 
 
@@ -90,3 +91,83 @@ def test_the_runner_refuses_a_live_or_missing_base_before_anything(tmp_path, mon
 def test_every_suite_names_a_live_harness_script():
     for suite, (script, directory, _) in forced.SUITES.items():
         assert (forced.HARNESS / script).is_file() and directory.is_dir(), suite
+
+
+def test_preexisting_needs_the_synthetic_run_to_differ_in_the_same_place():
+    real = {"status": "diff", "diffs": [
+        'DIFF [store-reaper] step 1 {"op": "tool"}: db /rows/public.episodes/rows: row only in python: [1]']}
+    same = {"status": "diff", "diffs": [
+        'DIFF [store-reaper] step 1 {"op": "x"}: db /rows/public.episodes/rows: row only in rust: [2]']}
+    elsewhere = {"status": "diff", "diffs": ['DIFF [store-reaper] step 2 {}: /json/results: python 1 vs rust 2']}
+    broken = {"status": "error", "diffs": [], "error_tail": ["Traceback", "OSError: port in use"]}
+    assert forced.signatures(real) == {("1", "/rows/public.episodes/rows")}
+    assert forced.classify(real, real, same) == "preexisting"
+    assert forced.classify(real, real, elsewhere) == "new"
+    assert forced.classify(real, real, broken) == "new"  # an unrelated synthetic failure excuses nothing
+    # A scenario no attempt could compare is an error, never preexisting or a pass.
+    assert forced.classify(broken, broken, broken) == "error"
+
+
+def test_every_harness_summary_line_counts_and_progress_lines_do_not():
+    log = ("DIFF refusals/oversize-body: ['status 413 vs 400']\n"
+           "STATE [identity] /rows/public.coordination_agents: x\n"
+           "CHAIN [identity] python chain broken at 3\n"
+           "  DB DIFF /rows/public.entries: repeated progress line\n")
+    got = forced.outcome(1, log)
+    assert got["status"] == "diff" and len(got["diffs"]) == 3
+
+
+def test_an_unknown_scenario_is_refused_not_reported_complete(tmp_path, monkeypatch):
+    monkeypatch.setattr(forced, "scenario_names", lambda suite: ["clean"])
+    monkeypatch.setattr(forced, "run", lambda *a, **k: pytest.fail("ran an empty selection"))
+    assert forced.main(["--rust-bin", "x", "--out", str(tmp_path / "o"), "--suites", "w2e",
+                        "--only", "cleen"]) == 2
+
+
+def test_an_unset_host_is_checked_as_the_harnesses_default(tmp_path, monkeypatch):
+    monkeypatch.delenv("PSEUDOLIFE_TEST_PG_HOST_PORT", raising=False)
+    monkeypatch.setenv("PL_HARNESS_BASE_DATABASE", "pl_cf_mir_seed")
+    monkeypatch.setattr(forced, "run", lambda *a, **k: pytest.fail("ran past the refusal"))
+    assert forced.main(["--rust-bin", "x", "--out", str(tmp_path / "out")]) == 3  # 127.0.0.1:5433
+
+
+def test_a_suite_that_cannot_list_its_scenarios_does_not_end_the_run(tmp_path):
+    def names(suite):
+        if suite == "board":
+            raise forced.subprocess.CalledProcessError(1, "x")
+        return ["clean"]
+    report, _ = forced.run(FakeRunner(tmp_path, ANSWERS), ["board", "w2e"], None, names=names)
+    assert report["suites"]["board"]["error"] and report["suites"]["w2e"]["rows"][0]["class"] == "pass"
+
+
+@pytest.mark.skipif(not hasattr(forced.os, "killpg"), reason="the runner is Linux; process groups are POSIX")
+def test_a_timeout_stops_the_whole_group_and_sweeps(tmp_path, monkeypatch):
+    script = tmp_path / "slow.py"
+    pidfile = tmp_path / "child.pid"
+    script.write_text(
+        "import subprocess, sys, time, os\n"
+        "assert 'PL_HARNESS_BASE_DATABASE' not in os.environ\n"
+        "assert 'PL_HARNESS_STUB_DEFAULT_CONTENT' not in os.environ\n"
+        f"c = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(600)'])\n"
+        f"open({str(pidfile)!r}, 'w').write(str(c.pid))\n"
+        "print('DIFF [slow] step 1 {}: started', flush=True)\n"
+        "time.sleep(600)\n")
+    monkeypatch.setitem(forced.SUITES, "w2e", (str(script), tmp_path, ""))
+    monkeypatch.setenv("PL_HARNESS_BASE_DATABASE", "pl_cf_mir_seed")
+    monkeypatch.setenv("PL_HARNESS_STUB_DEFAULT_CONTENT", "[]")
+    swept = []
+    runner = forced.Runner(Path("rust-bin"), tmp_path / "out", 3, tmp_path / "STOP",
+                           sweep=lambda: swept.append(1) or 2)
+    got = runner.invoke("w2e", "slow", "synthetic", base=False)
+    assert got["exit"] is None and got["status"] == "diff" and swept == [1]
+    log = (tmp_path / "out" / "w2e" / "synthetic" / "slow.log").read_text()
+    assert "TIMEOUT after 3s" in log and "swept 2 leftover" in log
+    child = int(pidfile.read_text())
+    for _ in range(50):
+        try:
+            forced.os.kill(child, 0)
+        except ProcessLookupError:
+            break
+        forced.time.sleep(0.1)
+    else:
+        pytest.fail("the harness's child outlived the timeout")

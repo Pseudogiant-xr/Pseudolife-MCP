@@ -30,6 +30,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -57,7 +58,16 @@ NOT_FORCED = {
                    "databases, not a bank a restore can replace",
     "golden and mutant modes": "they compare against recordings made on synthetic banks",
 }
-DIFF_LINE = re.compile(r"^(?:DB )?DIFF \[")
+# The summary lines every live harness prints, one per difference: "DIFF
+# [scenario]" and "DB DIFF [...]", run.py's refusal rows "DIFF <case>:", and
+# the board's "STATE [...]" and "CHAIN [...]". Indented progress lines repeat
+# them and are not counted.
+DIFF_LINE = re.compile(r"^(?:(?:DB )?DIFF[ \[]|STATE \[|CHAIN \[)")
+# Where a difference is: its step or case, and the first state or response path.
+LOCATION = re.compile(r": (?:db )?(/[^\s:]+)")
+STEP = re.compile(r"\] (?:step |#)?(\d+)")
+# What the synthetic arm drops, so it is the harness's own baseline (CI's).
+REAL_BANK_ENV = ("PL_HARNESS_BASE_DATABASE", "PL_HARNESS_STUB_DEFAULT_CONTENT")
 DISK_FLOOR = 8 * 1024 ** 3
 
 
@@ -83,12 +93,26 @@ def outcome(exit_code: int | None, log: str) -> dict:
     return {"status": status, "diffs": diffs, "error_tail": tail}
 
 
+def signatures(result: dict) -> set:
+    """Each difference's (step, path)."""
+    out = set()
+    for line in result["diffs"]:
+        step, where = STEP.search(line), LOCATION.search(line)
+        out.add((step.group(1) if step else "", where.group(1) if where else line[:120]))
+    return out
+
+
 def classify(first: dict, retry: dict | None, synthetic: dict | None) -> str:
+    """``preexisting`` only when the synthetic run differs in the same place:
+    an unrelated synthetic failure does not excuse a real-bank difference."""
     if first["status"] == "pass":
         return "pass"
     if retry is not None and retry["status"] == "pass":
         return "transient"
-    if synthetic is not None and synthetic["status"] != "pass":
+    if first["status"] == "error" and (retry is None or retry["status"] == "error"):
+        return "error"  # no comparison completed: never a pass, never preexisting
+    if synthetic is not None and synthetic["status"] == "diff" \
+            and signatures(first) & signatures(synthetic):
         return "preexisting"
     return "new"
 
@@ -96,8 +120,9 @@ def classify(first: dict, retry: dict | None, synthetic: dict | None) -> str:
 class Runner:
     """One harness process per scenario; tests replace ``invoke``."""
 
-    def __init__(self, rust_bin: Path, out: Path, timeout: float, stop: Path):
+    def __init__(self, rust_bin: Path, out: Path, timeout: float, stop: Path, sweep=None):
         self.rust_bin, self.out, self.timeout, self.stop = rust_bin, out, timeout, stop
+        self.sweep = sweep or (lambda: 0)
 
     def invoke(self, suite: str, name: str, label: str, base: bool) -> dict:
         script = HARNESS / SUITES[suite][0]
@@ -107,18 +132,40 @@ class Runner:
         env = dict(os.environ, PYTHONUNBUFFERED="1",
                    PL_HARNESS_SCRATCH=str(Path("/tmp") / "forced" / suite / safe))
         if not base:
-            env.pop("PL_HARNESS_BASE_DATABASE", None)
+            for key in REAL_BANK_ENV:
+                env.pop(key, None)
         started = time.monotonic()
+        # Its own process group: a timeout stops the daemons it started too.
+        proc = subprocess.Popen([sys.executable, str(script), "live", "--rust-bin", str(self.rust_bin),
+                                 "--only", name, "--out", str(work / f"{safe}.json")],
+                                cwd=ROOT, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                start_new_session=True)
         try:
-            done = subprocess.run([sys.executable, str(script), "live", "--rust-bin", str(self.rust_bin),
-                                   "--only", name, "--out", str(work / f"{safe}.json")],
-                                  cwd=ROOT, env=env, capture_output=True, text=True, timeout=self.timeout)
-            code, log = done.returncode, done.stdout + done.stderr
-        except subprocess.TimeoutExpired as e:
-            code, log = None, f"{e.stdout or ''}{e.stderr or ''}\nTIMEOUT after {self.timeout:g}s"
+            raw, _ = proc.communicate(timeout=self.timeout)
+            code, log = proc.returncode, raw.decode("utf-8", errors="replace")
+        except subprocess.TimeoutExpired:
+            code, log = None, self._stop(proc) + f"\nTIMEOUT after {self.timeout:g}s"
+            swept = self.sweep()
+            log += f"\nswept {swept} leftover disposable databases"
         shutil.rmtree(env["PL_HARNESS_SCRATCH"], ignore_errors=True)
         (work / f"{safe}.log").write_text(log, encoding="utf-8")
         return {**outcome(code, log), "exit": code, "seconds": round(time.monotonic() - started, 1)}
+
+    @staticmethod
+    def _stop(proc: subprocess.Popen) -> str:
+        """SIGINT first, so the harness's own cleanup stops its daemons and
+        drops its databases; SIGKILL to the group if it has not exited."""
+        for sig, wait in ((signal.SIGINT, 60), (signal.SIGKILL, 30)):
+            try:
+                os.killpg(proc.pid, sig)
+            except ProcessLookupError:
+                break
+            try:
+                raw, _ = proc.communicate(timeout=wait)
+                return raw.decode("utf-8", errors="replace")
+            except subprocess.TimeoutExpired:
+                continue
+        return ""
 
     def blocked(self) -> str | None:
         if self.stop.exists():
@@ -133,7 +180,11 @@ def run(runner: Runner, suites: list[str], only: list[str] | None,
     report = {"suites": {}, "not_forced": NOT_FORCED, "complete": False}
     private: dict = {}
     for suite in suites:
-        planned = [n for n in names(suite) if not only or n in only]
+        try:
+            planned = [n for n in names(suite) if not only or n in only]
+        except (subprocess.SubprocessError, ValueError, IndexError) as e:
+            report["suites"][suite] = {"planned": 0, "rows": [], "error": str(e)[:300]}
+            continue
         rows = []
         report["suites"][suite] = {"planned": len(planned), "rows": rows}
         for name in planned:
@@ -163,10 +214,28 @@ def counts(report: dict) -> dict:
     for suite, body in report["suites"].items():
         classes = [r["class"] for r in body["rows"]]
         out[suite] = {"planned": body["planned"], "run": len(classes),
-                      **{c: classes.count(c) for c in ("pass", "transient", "preexisting", "new")},
+                      **{c: classes.count(c) for c in ("pass", "transient", "preexisting", "new", "error")},
                       "differences": sum(r["differences"] for r in body["rows"]),
                       "new_scenarios": [r["scenario"] for r in body["rows"] if r["class"] == "new"]}
     return out
+
+
+def sweep_leftovers() -> int:
+    """After a killed harness: drop the disposable databases it left. The
+    mirror's PostgreSQL holds only this run's copies besides the pl_cf_mir_*
+    banks, and scenarios run one at a time."""
+    sys.path.insert(0, str(HARNESS))
+    import pgdisposable
+    from psycopg import sql
+    dropped = 0
+    with pgdisposable._admin() as conn:
+        pgdisposable.assert_disposable_database(conn)
+        for (name,) in conn.execute("SELECT datname FROM pg_database WHERE datname LIKE 'pl\\_cf\\_%' "
+                                    "AND datname NOT LIKE 'pl\\_cf\\_mir\\_%'").fetchall():
+            pgdisposable.refuse_production_database(name)
+            conn.execute(sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(sql.Identifier(name)))
+            dropped += 1
+    return dropped
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -178,15 +247,22 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--timeout", type=float, default=1800.0)
     ap.add_argument("--stop-file", type=Path, default=Path("/control/STOP"))
     args = ap.parse_args(argv)
+    if args.only:  # a misspelt name must not make an empty, "complete" run
+        known = {n for suite in args.suites for n in scenario_names(suite)}
+        unknown = sorted(set(args.only) - known)
+        if unknown:
+            print(f"forced.py: no such scenario in {args.suites}: {unknown}", file=sys.stderr)
+            return 2
     base = os.environ.get("PL_HARNESS_BASE_DATABASE", "")
-    host = os.environ.get("PSEUDOLIFE_TEST_PG_HOST_PORT", "")
+    # The address the harnesses will use: pgdisposable's own default when unset.
+    host = os.environ.get("PSEUDOLIFE_TEST_PG_HOST_PORT") or "127.0.0.1:5433"
     try:  # the run's own refusal, before any database is created
         seed.refuse_live_dsn(f"postgresql://runner@{host}/{base}")
     except seed.Refused as e:
         print(f"forced.py: {e}", file=sys.stderr)
         return 3
     args.out.mkdir(parents=True, exist_ok=True)
-    runner = Runner(args.rust_bin, args.out, args.timeout, args.stop_file)
+    runner = Runner(args.rust_bin, args.out, args.timeout, args.stop_file, sweep=sweep_leftovers)
     report, private = run(runner, args.suites, args.only)
     summary = {"base": base, "complete": report["complete"], "stopped": report.get("stopped"),
                "not_forced": report["not_forced"], "counts": counts(report)}
@@ -194,7 +270,9 @@ def main(argv: list[str] | None = None) -> int:
     (args.out / "private.json").write_text(json.dumps({"report": report, "differences": private},
                                                       indent=1) + "\n", encoding="utf-8")
     print(json.dumps(summary["counts"]))
-    return 0 if report["complete"] and not any(c["new"] for c in summary["counts"].values()) else 1
+    clean = all(not c["new"] and not c["error"] and not body.get("error")
+                for c, body in zip(summary["counts"].values(), report["suites"].values()))
+    return 0 if report["complete"] and clean else 1
 
 
 if __name__ == "__main__":

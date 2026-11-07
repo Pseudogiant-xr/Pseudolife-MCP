@@ -95,6 +95,9 @@ docker run -d --network pseudolife-mirror_mirror --memory 10g --memory-swap 10g 
   and `PSEUDOLIFE_TEST_PG_PASSWORD`.
 - **Stopping:** `touch <control>/STOP` stops the run before its next
   scenario. Below 8 GiB free disk it stops by itself.
+- **Limit:** a checkout whose schema is newer than the backup migrates each
+  template, which changes every migrated table's row text, so those tables
+  dump whole again. Compare same-schema pairs.
 - **Not forced:** `dream_cursors.py` admits only the bench PostgreSQL;
   the CLI harness drives a fixture daemon or synthetic databases; golden
   and mutant modes replay recordings of synthetic banks.

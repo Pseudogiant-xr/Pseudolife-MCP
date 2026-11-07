@@ -6210,10 +6210,15 @@ def warmup_landed(dsn: str, before: dict) -> bool:
     import psycopg
     t = before["rows"].get("public.retrieval_events", {})
     prior = [r[t["columns"].index("id")] for r in t.get("rows", [])]
+    # Rows equal to a real-bank base are not dumped, and a real bank holds
+    # every past start's probe: only an id past the pre-start sequence is new.
+    issued = max([r[5] or 0 for r in before.get("catalog", {}).get("sequences", [])
+                  if r[1] == "retrieval_events_id_seq"] or [0])
     with psycopg.connect(dsn, autocommit=True) as conn:
         return conn.execute(
             "SELECT 1 FROM retrieval_events WHERE query_text = 'warmup probe' "
-            "AND origin = 'search' AND NOT (id = ANY(%s::bigint[]))", (prior,)).fetchone() is not None
+            "AND origin = 'search' AND NOT (id = ANY(%s::bigint[])) AND id > %s",
+            (prior, issued)).fetchone() is not None
 
 
 def wait_warmups(dsns: dict, before: dict, deadline_s: float = 300.0,

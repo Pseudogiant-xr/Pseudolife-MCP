@@ -44,6 +44,8 @@ def base(monkeypatch):
         conn.execute("CREATE TABLE marks (tag TEXT)")
         conn.execute("INSERT INTO notes VALUES (1, 'one'), (2, 'two'), (3, 'three')")
         conn.execute("INSERT INTO marks VALUES ('a'), ('a')")
+        conn.execute("CREATE TABLE stamps (id INT PRIMARY KEY, seen DOUBLE PRECISION)")
+        conn.execute("INSERT INTO stamps VALUES (1, 0.5)")
     dbstate._BASE_HASHES.clear()
     yield name
     dbstate._BASE_HASHES.clear()
@@ -79,3 +81,26 @@ def test_new_databases_copy_the_base_and_dumps_hold_only_the_difference(base, mo
         assert dbstate.diff(untouched, changed)
     finally:
         pg.drop(copy)
+
+
+def test_a_rewritten_base_row_keeps_its_clock_compared_exactly(base, monkeypatch):
+    """A row equal to the base is not dumped, but it existed: a clock one side
+    rewrites on it must still differ (normalize's existing-row rule), and a
+    consumer comparing it with its earlier self gets the base's version."""
+    import psycopg
+    monkeypatch.setenv(pgdisposable.BASE_ENV, base)
+    sides = {s: pg.name(f"pl_cf_mir_clock{s}") for s in ("py", "rs")}
+    try:
+        dsns = {s: pg.create(n) for s, n in sides.items()}
+        before = {s: dbstate.dump(d) for s, d in dsns.items()}
+        assert before["py"]["rows"]["public.stamps"]["rows"] == []  # the base row is not dumped
+        for s, stamp in (("py", "1.0"), ("rs", "2.0")):
+            with psycopg.connect(dsns[s], autocommit=True) as conn:
+                conn.execute(f"UPDATE stamps SET seen = {stamp} WHERE id = 1")
+        rules = {("stamps", "seen"): "clock"}
+        after = {s: dbstate.normalize(dbstate.dump(dsns[s]), rules, before[s]) for s in dsns}
+        assert dbstate.diff(after["py"], after["rs"]), "a one-sided clock rewrite was hidden"
+        assert dbstate.prior_rows(before["py"], "public.stamps", [[1, 1.0]]) == [[1, 0.5]]
+    finally:
+        for n in sides.values():
+            pg.drop(n)
