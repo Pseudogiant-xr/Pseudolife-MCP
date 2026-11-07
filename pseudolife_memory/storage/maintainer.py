@@ -291,7 +291,8 @@ class MaintainerStore:
         return fields
 
     def _spend(self, fields: dict) -> None:
-        """Step 5, in the action's transaction: a duplicate is spent. The
+        """Step 4, in the action's transaction, before the assertion is
+        verified (#1361): a duplicate is spent. The
         expiry is checked again here, on the same clock reading as the
         insert, and spent rows are kept SPENT_NONCE_RETENTION past their
         expiry: a replay that passed ``open`` just before expiry and reached
@@ -347,7 +348,7 @@ class MaintainerStore:
         return raw
 
     def _verify(self, payload: str, assertion) -> dict:
-        """Step 4, in the action's transaction: the credential is active and
+        """Step 5, in the action's transaction: the credential is active and
         past quarantine, the assertion verifies with its stored key and alg,
         and the sign count moves forward (compare-and-set in ``_touch``)."""
         try:
@@ -404,12 +405,15 @@ class MaintainerStore:
         """The completing route's five checks, then ``action(fields, key)``
         in the same transaction: a refused action spends nothing. A
         sign-count regression flags the key for review in a transaction of
-        its own, since the failing one rolls back."""
+        its own, since the failing one rolls back. The nonce is spent before
+        the assertion is verified, so a body sent twice (a browser's retry
+        after a lost answer) is refused as spent and never reaches the
+        counter check that would flag its key as cloned (#1361)."""
         try:
             fields = self.open(payload, mac, purpose)
             with self.storage._txn():
-                key = self._verify(payload, assertion)
                 self._spend(fields)
+                key = self._verify(payload, assertion)
                 self._touch(key)
                 return action(fields, key)
         except MaintainerError as exc:

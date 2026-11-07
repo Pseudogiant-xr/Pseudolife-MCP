@@ -805,6 +805,116 @@ async fn db_reconnect_refused_while_another_writer_holds_the_lease() {
     fresh.close().await;
 }
 
+async fn meta_text(c: &Client, key: &str) -> Option<String> {
+    c.query_opt("SELECT value::text FROM meta WHERE key = $1", &[&key])
+        .await
+        .unwrap()
+        .map(|r| r.get(0))
+}
+
+async fn set_stamp(c: &Client, stamp: &str) {
+    c.execute(
+        "UPDATE meta SET value = $1::text::jsonb WHERE key = 'schema_version'",
+        &[&stamp],
+    )
+    .await
+    .unwrap();
+}
+
+/// Issue #909, gap 1: a newer build upgrades the bank while this writer
+/// is disconnected. The reconnect refuses it with the start refusal,
+/// writes nothing (no epoch bump, no stamp change), lets go of the lease,
+/// and serves again once the bank is restored to a stamp it can serve.
+#[tokio::test]
+async fn db_reconnect_refuses_a_bank_restamped_while_disconnected() {
+    let Some(dsn) = test_dsn() else { return };
+    let _guard = DB.lock().await;
+    Storage::open(&dsn)
+        .await
+        .expect("stamp the bank")
+        .close()
+        .await;
+    let (c, t) = side_client(&dsn).await;
+    let current = meta_text(&c, "schema_version").await.expect("stamped");
+    for (stamp, refusal) in [
+        (
+            (schema::SCHEMA_META_VERSION + 1).to_string(),
+            "is newer than this build",
+        ),
+        ("\"57\"".to_string(), "must be a positive integer"),
+    ] {
+        let mut s = Storage::open(&dsn).await.expect("open");
+        let e1 = s.lease_epoch();
+        kill_writer(&s, &dsn).await;
+        set_stamp(&c, &stamp).await;
+        let refused = s.verify_writer_session().await.err().expect("refused");
+        assert!(refused.contains(refusal), "{refused}");
+        assert!(refused.contains("--state-archive <state.tgz>"), "{refused}");
+        assert_eq!(meta_text(&c, "schema_version").await, Some(stamp.clone()));
+        assert_eq!(
+            meta_text(&c, "writer_lease_epoch").await,
+            Some(e1.to_string()),
+            "the refused reconnect wrote no epoch"
+        );
+        // The refused session is closed, so another opener wins the lease
+        // (and is then refused by the stamp, not by the lease).
+        assert!(matches!(
+            Storage::open(&dsn).await,
+            Err(OpenError::Refused(m)) if m.contains(refusal)
+        ));
+        // ping reports it, and inside the window the cached refusal answers.
+        assert_eq!(s.ping().await, Err(refused.clone()));
+        let started = Instant::now();
+        assert_eq!(s.verify_writer_session().await.err(), Some(refused));
+        assert!(started.elapsed() < Duration::from_millis(1500));
+        // Past the window with the server unreachable, the refusal stands:
+        // an outage must not hand the resident copy back to callers.
+        tokio::time::sleep(LEASE_RETRY).await;
+        let reachable = std::mem::replace(
+            &mut s.base,
+            parse_dsn("postgresql://nobody@127.0.0.1:1/pl_cf_w1a_none").unwrap(),
+        );
+        let held = s.verify_writer_session().await.err();
+        assert!(
+            held.as_deref().is_some_and(|m| m.contains(refusal)),
+            "{held:?}"
+        );
+        assert!(
+            held.as_deref()
+                .is_some_and(|m| m.ends_with("so this refusal may be out of date.")),
+            "{held:?}"
+        );
+        assert_eq!(
+            s.verify_writer_session().await.err(),
+            held,
+            "inside the reconnect window"
+        );
+        s.base = reachable;
+        // Restored to a stamp this build serves: ping stops reporting it,
+        // and the next reconnect takes the bank back but makes the owner
+        // re-read it first (a restore may have kept this lease epoch).
+        set_stamp(&c, &current).await;
+        s.ping().await.expect("ping after the restore");
+        tokio::time::sleep(RECONNECT_RETRY).await;
+        let fresh = s
+            .verify_writer_session()
+            .await
+            .expect("verify after the window")
+            .expect("replaced");
+        assert_eq!(fresh.lease_epoch(), e1 + 1);
+        let reread = "this bank carried a schema stamp this build refused while this process was disconnected; it opens again, but its resident copy may be stale, so nothing is served or saved until it re-reads the bank";
+        assert_eq!(fresh.resident_invalidated().as_deref(), Some(reread));
+        assert_eq!(fresh.ping().await, Err(reread.to_string()));
+        fresh.acknowledge_rehydration();
+        fresh.ping().await.expect("ping after the re-read");
+        drop(s);
+        fresh.close().await;
+    }
+    set_stamp(&c, &current).await;
+    drop(c);
+    let _ = t.await;
+}
+
 #[tokio::test]
 async fn db_unreachable_reconnect_is_tolerated_and_retried_after_its_window() {
     let Some(dsn) = test_dsn() else { return };

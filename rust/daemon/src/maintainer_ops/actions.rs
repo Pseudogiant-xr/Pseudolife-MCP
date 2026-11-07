@@ -10,6 +10,7 @@ use super::{
     Outcome, Refusal, check_label, create_options, issue, live_keys, refuse, secret, unrevoked_keys,
 };
 use crate::board::store::{Event, Store, append, now};
+use crate::console_sessions::revoke_issuer_sessions;
 use crate::maintainer_webauthn::{
     self as webauthn, AssertionInput, Registration, RegistrationInput,
 };
@@ -32,6 +33,9 @@ pub(super) struct VerifiedKey {
     pub(super) credential_id: String,
     pub(super) label: String,
     pub(super) proof: Value,
+    /// v59 `signs_in_as`: the principal this key signs the Console in as
+    /// (an empty value is none, as Python's truthiness reads it).
+    pub(super) signs_in_as: Option<String>,
     sign_count: i64,
     new_count: i64,
     created_at: f64,
@@ -268,10 +272,16 @@ async fn verify(
         "signature": webauthn::b64url_encode(&signature),
         "payload": payload, "signed_at": at,
     });
+    let signs_in_as = row
+        .try_get::<_, Option<String>>("signs_in_as")
+        .ok()
+        .flatten()
+        .filter(|p| !p.is_empty());
     Ok(VerifiedKey {
         credential_id: id,
         label,
         proof,
+        signs_in_as,
         sign_count,
         new_count,
         created_at: row.get("created_at"),
@@ -305,7 +315,7 @@ async fn finish(tx: Transaction<'_>, result: Outcome<Value>) -> Outcome<Value> {
     }
 }
 
-/// Verify, spend, advance the counter, and perform the action in one
+/// Spend the nonce, verify, advance the counter, and perform the action in one
 /// transaction. A refused action rolls every mutation back. A counter
 /// regression flags the key only after that rollback, in its own transaction.
 pub(super) async fn complete<F>(
@@ -327,6 +337,14 @@ where
 {
     let (payload, fields) = open(client, body, purposes).await?;
     let tx = client.transaction().await?;
+    // The nonce is spent before the assertion is verified, so a body sent
+    // twice (a browser's retry after a lost answer) is refused as spent and
+    // never reaches the counter check that would flag its key as cloned
+    // (#1361). A later refusal rolls the spend back.
+    if let Err(refusal) = spend(&tx, &fields).await {
+        tx.rollback().await?;
+        return Err(refusal);
+    }
     let key = match verify(&tx, rp_id, origin, &payload, body.get("assertion")).await {
         Ok(key) => key,
         Err(failure) => {
@@ -345,7 +363,6 @@ where
         }
     };
     let result = async {
-        spend(&tx, &fields).await?;
         touch(&tx, &key).await?;
         action(store, &tx, &fields, &key).await
     }
@@ -375,6 +392,9 @@ fn register(
     .map_err(webauthn_error)
 }
 
+/// `_insert_key`. v59: `signs_in_as` is the Console sign-in this key will
+/// give, the bearer principal of the request that enrolled it when that is
+/// the bank owner's (spec 2026-11-02, section 5).
 async fn insert_key(
     c: &impl GenericClient,
     registration: &Registration,
@@ -382,14 +402,16 @@ async fn insert_key(
     enrolled_by: &str,
     state: &str,
     active_from: Option<f64>,
+    signs_in_as: Option<&str>,
 ) -> Outcome<Value> {
     let id = webauthn::b64url_encode(&registration.credential_id);
     let alg = registration.alg as i32;
     let count = i64::from(registration.sign_count);
+    let signs_in_as = signs_in_as.filter(|p| !p.is_empty());
     if c.execute(
         "INSERT INTO maintainer_passkeys (credential_id,public_key,alg,sign_count,label,\
-         enrolled_by,state,active_from,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) \
-         ON CONFLICT (credential_id) DO NOTHING",
+         enrolled_by,state,active_from,created_at,signs_in_as) \
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT (credential_id) DO NOTHING",
         &[
             &id,
             &registration.public_key,
@@ -400,6 +422,7 @@ async fn insert_key(
             &state,
             &active_from,
             &now(),
+            &signs_in_as,
         ],
     )
     .await?
@@ -410,7 +433,7 @@ async fn insert_key(
     Ok(json!({"credential_id": id, "label": label, "state": state, "active_from": active_from}))
 }
 
-async fn key_change(
+pub(super) async fn key_change(
     c: &impl GenericClient,
     principal: &str,
     change: &str,
@@ -461,6 +484,7 @@ async fn enrol_bootstrap(
     rp_id: &str,
     origin: &str,
     principal: &str,
+    signs_in_as: Option<&str>,
     body: &Map<String, Value>,
 ) -> Outcome<Value> {
     let (payload, fields) = open(client, body, &["enrol-bootstrap"]).await?;
@@ -491,7 +515,16 @@ async fn enrol_bootstrap(
         if live_keys(&tx).await? != 0 {
             return Err(refuse("enrolment_closed", "live_keys"));
         }
-        let out = insert_key(&tx, &registration, &label, "bootstrap", "pending", None).await?;
+        let out = insert_key(
+            &tx,
+            &registration,
+            &label,
+            "bootstrap",
+            "pending",
+            None,
+            signs_in_as,
+        )
+        .await?;
         let id = out["credential_id"].as_str().expect("inserted id");
         tx.execute(
             "UPDATE maintainer_bootstrap SET used_at=$1,credential_id=$2 WHERE code_hash=$3",
@@ -523,6 +556,7 @@ async fn enrol_approved(
     rp_id: &str,
     origin: &str,
     principal: &str,
+    signs_in_as: Option<&str>,
     body: &Map<String, Value>,
 ) -> Outcome<Value> {
     let (payload, fields) = open(client, body, &["enrol"]).await?;
@@ -555,6 +589,7 @@ async fn enrol_approved(
             &id,
             "active",
             Some(at + QUARANTINE_SECONDS),
+            signs_in_as,
         )
         .await?;
         key_change(
@@ -579,6 +614,7 @@ pub(super) async fn enrol(
     rp_id: &str,
     origin: &str,
     principal: &str,
+    signs_in_as: Option<&str>,
     body: &Map<String, Value>,
 ) -> Outcome<Value> {
     if body.contains_key("assertion") {
@@ -611,9 +647,9 @@ pub(super) async fn enrol(
     }
     let bootstrap = body.contains_key("code");
     let out = if bootstrap {
-        enrol_bootstrap(client, rp_id, origin, principal, body).await?
+        enrol_bootstrap(client, rp_id, origin, principal, signs_in_as, body).await?
     } else {
-        enrol_approved(client, rp_id, origin, principal, body).await?
+        enrol_approved(client, rp_id, origin, principal, signs_in_as, body).await?
     };
     let id = out["credential_id"].as_str().expect("inserted id");
     let prefix: String = id.chars().take(12).collect();
@@ -662,9 +698,12 @@ pub(super) async fn cancel(
             let label: String = target.get("label");
             tx.execute("UPDATE maintainer_passkeys SET state='revoked',revoked_at=$1,revoked_by=$2 WHERE credential_id=$3",
                 &[&at, &key.credential_id, &id]).await?;
+            // v59 `_end_sessions`: its sign-ins end in the same transaction.
+            revoke_issuer_sessions(tx, Some(&id), None).await?;
             key_change(tx, &principal, "cancel", &id, &label, &key.credential_id).await?;
             let prefix: String = id.chars().take(12).collect();
-            Ok(json!({"state": "revoked", "_notice": format!("key {prefix} was cancelled by an older key")}))
+            Ok(json!({"state": "revoked", "_notice": format!("key {prefix} was cancelled by an older key"),
+                "_drop_key": id}))
         })).await
 }
 
@@ -684,8 +723,11 @@ pub(super) async fn revoke(
             }
             tx.execute("UPDATE maintainer_passkeys SET state='revoked',revoked_at=$1,revoked_by=$2 WHERE credential_id=$2",
                 &[&now(), &key.credential_id]).await?;
+            // v59 `_end_sessions`: its sign-ins end in the same transaction.
+            revoke_issuer_sessions(tx, Some(&key.credential_id), None).await?;
             key_change(tx, &principal, "revoke", &key.credential_id, &key.label, &key.credential_id).await?;
             let prefix: String = key.credential_id.chars().take(12).collect();
-            Ok(json!({"state": "revoked", "_notice": format!("key {prefix} revoked itself")}))
+            Ok(json!({"state": "revoked", "_notice": format!("key {prefix} revoked itself"),
+                "_drop_key": key.credential_id}))
         })).await
 }

@@ -29,10 +29,18 @@ const REDEMPTION_SLOTS: usize = 2;
 /// `pairing_gate`): the failed-attempt window (`FailureLimiter`) and the
 /// two-slot redemption gate (`RedemptionGate`). Cloning shares both, so the
 /// redemption task that outlives a disconnected request keeps them.
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub(crate) struct PairLimiter {
     failures: Arc<Mutex<Failures>>,
     in_flight: Arc<AtomicUsize>,
+    /// Attempts allowed per window (`FailureLimiter(limit=...)`).
+    limit: usize,
+}
+
+impl Default for PairLimiter {
+    fn default() -> Self {
+        Self::with_limit(PAIR_FAILURES_PER_WINDOW)
+    }
 }
 
 /// The window's attempts, each with its own id, so a refund gives back that
@@ -61,6 +69,15 @@ impl Drop for Slot {
 }
 
 impl PairLimiter {
+    /// A budget of `limit` attempts per window.
+    pub(crate) fn with_limit(limit: usize) -> Self {
+        Self {
+            failures: Arc::default(),
+            in_flight: Arc::default(),
+            limit,
+        }
+    }
+
     /// `FailureLimiter.reserve`: count one attempt, or None when spent.
     pub(crate) fn reserve(&self) -> Option<Attempt> {
         let mut f = self.failures.lock().expect("pair limiter");
@@ -72,7 +89,7 @@ impl PairLimiter {
         {
             f.attempts.pop_front();
         }
-        if f.attempts.len() >= PAIR_FAILURES_PER_WINDOW {
+        if f.attempts.len() >= self.limit {
             return None;
         }
         f.next += 1;

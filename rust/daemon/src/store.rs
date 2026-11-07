@@ -148,6 +148,30 @@ fn dot(a: &[f32], b: &[f32]) -> f32 {
     a.iter().zip(b).map(|(x, y)| x * y).sum()
 }
 
+/// `SELF_SIMILARITY_EPSILON` (`memory/miras/band.py`): an exact duplicate's
+/// self-similarity misses 1.0 by float32 rounding, so `1 - cos` lands a
+/// little either side of 0 and the store reason (`filtered_meta` at exactly
+/// 0, else `below_surprise_threshold`) followed the summation order.
+/// Measured 2026-11-07 over 3,000 random unit 1024-d vectors: |1 - x.x| at
+/// most 1.8e-6 summed left to right in float32 (this [`dot`]) and 3.6e-7
+/// under torch (the Python daemon), nonzero for 92% and 71% of them. 1e-5
+/// is about five times the larger.
+const SELF_SIMILARITY_EPSILON: f64 = 1e-5;
+
+/// `MIRASBand.compute_surprise` from a band's best similarity: below the
+/// epsilon an exact duplicate (exactly 0), else `1 - cos` capped at 1.
+fn surprise_from(max_sim: f32) -> f64 {
+    let surprise = 1.0 - f64::from(max_sim);
+    if crate::mutants::active("store-surprise-unsnapped") {
+        return surprise.clamp(0.0, 1.0);
+    }
+    if surprise < SELF_SIMILARITY_EPSILON {
+        0.0
+    } else {
+        surprise.min(1.0)
+    }
+}
+
 /// `RetentionPolicy.source_weighted_score` under `balanced`
 /// (`protocols.py:84-103`, `retention.py:37-47`).
 fn retention_score(e: &Entry, now: f64, boost: f64) -> f64 {
@@ -195,7 +219,7 @@ fn scan(bank: &Bank, bands: &[String], text: &str, q: &[f32], anchor: Option<&st
         .iter()
         .map(|m| match m {
             None => 1.0,
-            Some(m) => (1.0 - f64::from(*m)).clamp(0.0, 1.0),
+            Some(m) => surprise_from(*m),
         })
         .collect();
     let slots = slots::extract_slots(text, anchor);
@@ -945,5 +969,34 @@ mod tests {
         // ((4/50 + 0.05) + 1) * 1.5 + 1.0 * log1p(3)
         let want = (4.0 / 50.0 + 0.05 + 1.0) * 1.5 + 3f64.ln_1p();
         assert!((retention_score(&e, 150.0, 1.0) - want).abs() < 1e-12);
+    }
+
+    /// An exact duplicate's surprise is exactly 0 whatever its float32
+    /// self-similarity rounds to, so its reason is `filtered_meta` at any
+    /// positive threshold; a genuine near-duplicate keeps its surprise.
+    #[test]
+    fn exact_duplicate_surprise_is_exactly_zero() {
+        // Only a self-similarity below 1.0 broke the old clamp: above it,
+        // 1 - x was already clamped to 0.
+        let mut below_one = 0;
+        for seed in 1..=40u32 {
+            let mut v: Vec<f32> = (0..1024u32)
+                .map(|i| (i.wrapping_mul(2_654_435_761u32.wrapping_mul(seed)) as f32).sin())
+                .collect();
+            crate::bank::normalize_query(&mut v);
+            let sim = dot(&v, &v);
+            below_one += usize::from(sim < 1.0);
+            assert_eq!(
+                surprise_from(sim),
+                0.0,
+                "seed {seed}: self-similarity {sim}"
+            );
+        }
+        assert!(
+            below_one > 0,
+            "no vector falls below 1.0: the test would not bite"
+        );
+        assert!((surprise_from(0.9999) - 1e-4).abs() < 1e-7);
+        assert_eq!(surprise_from(-0.5), 1.0);
     }
 }

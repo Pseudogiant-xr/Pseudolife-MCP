@@ -169,6 +169,10 @@ class ContainerTests(unittest.TestCase):
         self.assertIn("\n    build: !reset null\n", overlay)
         self.assertIn("${PSEUDOLIFE_IMAGE_TAG:?", overlay)
         self.assertIn("\n      org.pseudolife.engine: rust\n", overlay)
+        # The models stay outside /data, which every backup archives.
+        self.assertIn("\n      PSEUDOLIFE_DAEMON_MODELS_DIR: /models\n", overlay)
+        self.assertIn("\n      - pseudolife_rust_models:/models\n", overlay)
+        self.assertIn("\nvolumes:\n  pseudolife_rust_models: {}\n", overlay)
 
     def test_runtime_contract_is_explicit_and_default_compose_is_not_used(self):
         dockerfile = (ROOT / "ops/Dockerfile.daemon-rust").read_text(encoding="utf-8")

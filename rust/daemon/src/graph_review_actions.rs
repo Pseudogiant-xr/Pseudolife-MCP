@@ -828,11 +828,128 @@ pub(crate) fn text_param(v: Option<&Value>) -> Result<Option<String>, ToolError>
         Some(Value::Number(n)) => Ok(Some(pg_float8_text(
             n.to_string().parse().map_err(internal)?,
         ))),
+        Some(Value::Array(items)) => {
+            let mut kind = None;
+            element_kind(items, &mut kind)?;
+            // psycopg types a list only by an int, float or bool element;
+            // PostgreSQL then parses the literal and refuses a ragged one. A
+            // list of strings, of `None` or empty binds untyped and is
+            // stored as psycopg's own text, whatever its shape.
+            if kind.is_some_and(|k| k != "str") {
+                typed_shape(items)?;
+            }
+            Ok(Some(pg_array_text(items)?))
+        }
         Some(other) => Err(internal(format!(
             "a {} cannot be stored as text",
             py_type(other)
         ))),
     }
+}
+
+/// psycopg's list dumper: one element type across every level (`cannot
+/// dump lists of mixed types`), `None` anywhere, and no dict (`cannot adapt
+/// type 'dict'`).
+#[allow(clippy::result_large_err)]
+fn element_kind(items: &[Value], kind: &mut Option<&'static str>) -> Result<(), ToolError> {
+    for v in items {
+        match v {
+            Value::Array(sub) => element_kind(sub, kind)?,
+            Value::Null => {}
+            Value::Object(_) => {
+                return Err(internal("cannot adapt type 'dict' using placeholder '%s'"));
+            }
+            other => {
+                let k = py_type(other);
+                match *kind {
+                    None => *kind = Some(k),
+                    Some(prev) if prev != k => {
+                        return Err(internal(format!(
+                            "cannot dump lists of mixed types; got: {prev}, {k}"
+                        )));
+                    }
+                    Some(_) => {}
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// PostgreSQL's array input for a typed list ([`element_kind`] found an
+/// int, float or bool): a level of lists or of scalars (`None` counts as a
+/// scalar), no empty sub-list, and every sibling sub-list of the same full
+/// shape. Returns the level's shape, outermost length first.
+#[allow(clippy::result_large_err)]
+fn typed_shape(items: &[Value]) -> Result<Vec<usize>, ToolError> {
+    let malformed = || internal("malformed array literal");
+    let lists = items.iter().filter(|v| v.is_array()).count();
+    if lists != 0 && lists != items.len() {
+        return Err(malformed());
+    }
+    let mut child: Option<Vec<usize>> = None;
+    for sub in items.iter().filter_map(Value::as_array) {
+        if sub.is_empty() {
+            return Err(malformed());
+        }
+        let shape = typed_shape(sub)?;
+        match &child {
+            None => child = Some(shape),
+            Some(first) if *first != shape => return Err(malformed()),
+            Some(_) => {}
+        }
+    }
+    let mut shape = vec![items.len()];
+    shape.extend(child.unwrap_or_default());
+    Ok(shape)
+}
+
+/// The stored text of a list: psycopg's own dump for an untyped list (of
+/// strings, of `None`, or empty) and PostgreSQL's `array_out` for a typed
+/// one, which agree on every list [`element_kind`] admits: `{a,b}`, an
+/// element quoted when empty, `NULL` in any ASCII case, or holding a brace,
+/// comma, quote, backslash or ASCII space (`array_isspace`, psycopg's
+/// `\s`), with `"` and `\` escaped; `None` as `NULL`, booleans `t`/`f`,
+/// numbers in their column type's text form.
+#[allow(clippy::result_large_err)]
+fn pg_array_text(items: &[Value]) -> Result<String, ToolError> {
+    let mut parts = Vec::with_capacity(items.len());
+    for v in items {
+        parts.push(match v {
+            Value::Array(sub) => pg_array_text(sub)?,
+            Value::Null => "NULL".into(),
+            Value::Bool(b) => if *b { "t" } else { "f" }.into(),
+            Value::Number(n) if super::is_int_literal(n) => {
+                crate::pyjson::py_str(&Value::Number(n.clone()))
+            }
+            Value::Number(n) => pg_float8_text(n.to_string().parse().map_err(internal)?),
+            Value::String(s) => {
+                let quoted = s.is_empty()
+                    || s.eq_ignore_ascii_case("NULL")
+                    || s.chars().any(|c| {
+                        matches!(c, '{' | '}' | ',' | '"' | '\\' | ' ' | '\t' | '\n' | '\r')
+                            || c == '\u{b}'
+                            || c == '\u{c}'
+                    });
+                if quoted {
+                    let mut out = String::with_capacity(s.len() + 2);
+                    out.push('"');
+                    for c in s.chars() {
+                        if c == '"' || c == '\\' {
+                            out.push('\\');
+                        }
+                        out.push(c);
+                    }
+                    out.push('"');
+                    out
+                } else {
+                    s.clone()
+                }
+            }
+            Value::Object(_) => unreachable!("element_kind refuses a dict"),
+        });
+    }
+    Ok(format!("{{{}}}", parts.join(",")))
 }
 
 /// `insert_proposal` (3400-3412). A conflict still burns the sequence value.

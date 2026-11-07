@@ -165,6 +165,16 @@ pub fn operational(e: &tokio_postgres::Error) -> bool {
     )
 }
 
+/// `_SCHEMA_REFUSAL_STALE` (postgres.py): a reconnect's schema refusal
+/// while the server cannot be reached names the last stamp read, which a
+/// restore may have changed since.
+const SCHEMA_REFUSAL_STALE: &str =
+    " The bank could not be read since, so this refusal may be out of date.";
+
+fn stale_refusal<T>(refused: &str) -> Result<T, String> {
+    Err(format!("{refused}{SCHEMA_REFUSAL_STALE}"))
+}
+
 /// Why a reconnect failed, in the classes `PostgresStorage.conn` and
 /// `verify_writer_session` treat differently.
 #[derive(Debug)]
@@ -175,6 +185,9 @@ enum Reopen {
     Unreachable(String),
     /// Any other error, which Python lets propagate to the caller.
     Failed(String),
+    /// `BankSchemaRefused`: the bank carries a schema stamp this build must
+    /// not serve (a newer build upgraded it in the gap, issue #909).
+    SchemaRefused(String),
     /// A failure after the lease was won (reading or bumping the epoch).
     /// Python has already cleared `_reconnect_error` by then, so nothing
     /// is cached: an operational one is tolerated and the next call
@@ -233,6 +246,11 @@ struct SessionState {
     /// `resident_invalidated`: set on the replacement session when another
     /// writer held the bank in the gap, until the owner re-reads the bank.
     resident_invalidated: Option<String>,
+    /// `_schema_refused`: the refusal the last reconnect got from the
+    /// bank's schema stamp; `ping` reports it while the stamp still refuses.
+    schema_refused: Option<String>,
+    /// `_schema_retry_at`; `None` is Python's initial 0.0 (always due).
+    schema_retry_at: Option<Instant>,
 }
 
 struct BankIdCache {
@@ -812,8 +830,9 @@ impl Storage {
     /// `ping` (postgres.py:725-742, spec H8): a fresh connection (2 s
     /// connect timeout, no application-name fallback) runs `SELECT 1`; then
     /// it fails while a reconnect was refused the lease and a holder is
-    /// still there, and while the owner has yet to re-read a bank another
-    /// writer held in the meantime.
+    /// still there, while the bank still carries the schema stamp a
+    /// reconnect refused, and while the owner has yet to re-read a bank
+    /// another writer held in the meantime.
     pub async fn ping(&self) -> Result<(), String> {
         let (client, task) = connect(&self.base, Duration::from_secs(2)).await?;
         let probe = async {
@@ -823,6 +842,11 @@ impl Storage {
                 && !lease_holders(&client).await?.is_empty()
             {
                 return Ok(Err(lost));
+            }
+            // `BankSchemaRefused` while the stamp a reconnect refused stays.
+            let refused = self.session.lock().unwrap().schema_refused.is_some();
+            if refused && let Some(m) = schema::bank_schema_refusal(&client).await? {
+                return Ok(Err(m));
             }
             Ok::<_, tokio_postgres::Error>(Ok(()))
         };
@@ -925,7 +949,16 @@ impl Storage {
                 // already failing, the server is unreachable; with the
                 // session still open, `self.conn` keeps it (nothing to heal).
                 Err(e) if operational(&e) => {
-                    let failing = self.session.lock().unwrap().reconnect_error.is_some();
+                    let (failing, refused) = {
+                        let state = self.session.lock().unwrap();
+                        (
+                            state.reconnect_error.is_some(),
+                            state.schema_refused.clone(),
+                        )
+                    };
+                    if failing && let Some(refused) = refused {
+                        return stale_refusal(&refused);
+                    }
                     if failing || !self.client.is_closed() {
                         return Ok(None);
                     }
@@ -949,13 +982,36 @@ impl Storage {
             {
                 return Err(lost.clone());
             }
+            if let (Some(refused), Some(at)) = (&state.schema_refused, state.schema_retry_at)
+                && now < at
+            {
+                return Err(refused.clone());
+            }
             if state.reconnect_error.is_some()
                 && state.reconnect_retry_at.is_some_and(|at| now < at)
             {
-                return Ok(None);
+                return state
+                    .schema_refused
+                    .as_deref()
+                    .map_or(Ok(None), stale_refusal);
             }
         }
         eprintln!("postgres connection lost; reconnecting");
+        // `_raise_schema_refusal`: an unreachable server never hands the
+        // resident copy back while a reconnect's schema refusal stands.
+        match self.reopen_and_record().await {
+            Ok(None) => self
+                .session
+                .lock()
+                .unwrap()
+                .schema_refused
+                .as_deref()
+                .map_or(Ok(None), stale_refusal),
+            other => other,
+        }
+    }
+
+    async fn reopen_and_record(&self) -> Result<Option<Storage>, String> {
         // A reconnect that won the lease but failed reading or bumping the
         // epoch leaves no cached refusal, so `verify_writer_session`
         // (postgres.py:555-568) reaches `self.conn` a second time at once:
@@ -990,6 +1046,13 @@ impl Storage {
                 Err(Reopen::AfterLease { message, .. }) => {
                     self.session.lock().unwrap().reconnect_error = None;
                     Err(message)
+                }
+                Err(Reopen::SchemaRefused(m)) => {
+                    let mut state = self.session.lock().unwrap();
+                    state.reconnect_error = None;
+                    state.schema_refused = Some(m.clone());
+                    state.schema_retry_at = Some(Instant::now() + LEASE_RETRY);
+                    Err(m)
                 }
                 Err(Reopen::Failed(m)) => Err(m),
             };
@@ -1026,6 +1089,16 @@ impl Storage {
                 operational: operational(&e),
                 message: error_text(&e),
             };
+            // The schema is not re-ensured, but a newer build may have
+            // upgraded the bank in the gap: refuse it as a start would,
+            // before this session writes anything (issue #909).
+            if let Some(m) = schema::bank_schema_refusal(&client)
+                .await
+                .map_err(after_lease)?
+            {
+                eprintln!("after reconnecting: {m}");
+                return Err(Reopen::SchemaRefused(m));
+            }
             #[cfg(test)]
             if INJECT_EPOCH_READ_FAILURES
                 .fetch_update(
@@ -1054,16 +1127,28 @@ impl Storage {
         };
         let moved =
             found != Some(self.lease_epoch) && !crate::mutants::active("writer-epoch-unchecked");
-        let handed_over = moved.then(|| {
-            format!(
+        // A refused stamp means another build wrote the bank, and a
+        // restore since may have kept this process's lease epoch, so the
+        // resident copy is re-read either way.
+        let restamped = self.session.lock().unwrap().schema_refused.is_some();
+        let handed_over = if moved {
+            Some(format!(
                 "another writer held this bank while this process was \
                  disconnected (lease epoch {} -> {}); its resident copy may \
                  be stale, so nothing is served or saved until it re-reads \
                  the bank",
                 self.lease_epoch,
                 py_epoch(found)
-            )
-        });
+            ))
+        } else {
+            restamped.then(|| {
+                "this bank carried a schema stamp this build refused while this \
+                 process was disconnected; it opens again, but its resident copy \
+                 may be stale, so nothing is served or saved until it re-reads \
+                 the bank"
+                    .to_string()
+            })
+        };
         if let Some(m) = &handed_over {
             eprintln!("{m}");
         }
