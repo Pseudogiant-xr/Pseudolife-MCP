@@ -12,6 +12,7 @@ mod bank;
 mod board;
 mod briefing;
 mod config;
+mod config_check;
 mod config_io;
 mod console_sessions;
 mod consolidation_tools;
@@ -152,6 +153,9 @@ fn main() {
     if args.first().is_some_and(|a| a == "provision") {
         std::process::exit(native::command(&args[1..]));
     }
+    if args.first().is_some_and(|a| a == "check-config") {
+        std::process::exit(config_check::command(&args[1..]));
+    }
     #[cfg(feature = "principal-harness")]
     if std::env::var_os("PSEUDOLIFE_PRINCIPAL_HARNESS").is_some() {
         let runtime = tokio::runtime::Runtime::new().unwrap();
@@ -209,11 +213,7 @@ fn main() {
         println!("{}", pyjson::dumps(&config.dump()));
         std::process::exit(0);
     }
-    onnx_artifacts::validate_reranker_model(&config.memory.reranker.model_name)
-        .unwrap_or_else(|e| fail(1, &e.to_string()));
-    if let Some(refusal) = config::retired_band_refusal(&config.memory) {
-        fail(1, &refusal);
-    }
+    config_check::startup_refusals(&config).unwrap_or_else(|e| fail(1, &e.to_string()));
     let env = config::DaemonEnv::from_env(&env_lookup).unwrap_or_else(|e| fail(1, &e.to_string()));
     let read_only = config.read_only || env.read_only;
     if !read_only && let Err(e) = std::fs::create_dir_all(&data_dir) {
@@ -277,10 +277,8 @@ fn main() {
         }
     };
     let autosave_every = seconds("PSEUDOLIFE_MCP_AUTOSAVE_SECONDS", 30.0);
-    if (config.dream.enabled || config.memory.retrieval_log_enabled)
-        && !config.dream.sweep_interval_ok
-    {
-        fail(1, "memory.dream.sweep_interval_seconds is not a number");
+    if let Some(refusal) = config_check::sweep_refusal(&config) {
+        fail(1, refusal);
     }
     let idle_seconds = seconds("PSEUDOLIFE_SESSION_IDLE_SECONDS", 1800.0);
     let reap_every = seconds("PSEUDOLIFE_SESSION_REAP_SECONDS", 300.0);

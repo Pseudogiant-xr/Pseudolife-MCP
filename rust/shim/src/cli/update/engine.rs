@@ -9,6 +9,34 @@ pub(super) const RELEASE_LABEL: &str = "org.pseudolife.release";
 pub(super) fn release_accepted() -> PathBuf {
     data_dir().join("update-engine/docker-compose.release-accepted.json")
 }
+/// An explicit engine choice that left no activation (installer
+/// `--engine python`, or `update --engine python` with nothing to deploy),
+/// shared with the Python updater's `update-engine/engine-choice.json`.
+pub(super) fn choice_path() -> PathBuf {
+    data_dir().join("update-engine/engine-choice.json")
+}
+/// `Ok(None)` only for a missing file; `Err(reason)` for one that cannot be
+/// read or holds no engine, which still keeps the host's choice.
+pub(super) fn recorded_choice() -> std::result::Result<Option<String>, String> {
+    let bytes = match fs::read(choice_path()) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.to_string()),
+    };
+    let value: Value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
+    match value["engine"].as_str() {
+        Some(engine @ ("python" | "rust")) => Ok(Some(engine.to_owned())),
+        _ => Err("not an engine choice".to_owned()),
+    }
+}
+pub(super) fn record_choice(engine: &str) -> Result<()> {
+    let path = choice_path();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    seams::write_atomic(&path, format!("{{\"engine\": \"{engine}\"}}\n").as_bytes())?;
+    Ok(())
+}
 pub(super) fn selection(path: &Path) -> Result<Option<Value>> {
     match fs::read(path) {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
