@@ -2744,6 +2744,37 @@ SCENARIOS.update({
         "seed": REVIEW_SEED,
         "ops": REVIEW_OPS,
     },
+    # A list `rationale`: Python's psycopg binds it as an array, so the TEXT
+    # column holds PostgreSQL's array text; a list psycopg cannot dump fails
+    # the call on both sides after the entities are minted.
+    "review-propose-list-rationale": {
+        "config": None,
+        "seed": [],
+        "ops": [
+            review("propose", proposals=[
+                {"src": "Tide Gauge", "relation": "runs-on", "dst": "Harbor Host",
+                 "rationale": ["shared tide tables", "same rack", ""]},
+                {"src": "Kelp Farm", "relation": "uses", "dst": "Ocean",
+                 "rationale": [None, 'say "salt"', "back\\slash", "NULL"]},
+                {"src": "Warehouse", "relation": "depends-on", "dst": "Ocean",
+                 "rationale": [[1, 2], [3, 4]]},
+                {"src": "Lighthouse", "relation": "related-to", "dst": "Harbor Host",
+                 "rationale": [True, False]},
+                # Untyped (strings, None, empty): stored whatever its shape.
+                {"src": "Buoy", "relation": "related-to", "dst": "Ocean",
+                 "rationale": [["a"], "b", None, []]},
+            ]),
+            review("propose", proposals=[
+                {"src": "Pier", "relation": "related-to", "dst": "Ocean", "rationale": ["a", 1]},
+            ]),
+            # Typed and ragged: PostgreSQL refuses the literal on both sides.
+            review("propose", proposals=[
+                {"src": "Jetty", "relation": "related-to", "dst": "Ocean",
+                 "rationale": [[1], [2, 3]]},
+            ]),
+            review(),
+        ],
+    },
     "review-list-gated": {
         "config": "memory:\n  deep_dream:\n    judges_enabled: false\n",
         "seed": REVIEW_SEED,
