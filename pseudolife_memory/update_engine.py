@@ -140,6 +140,31 @@ def authenticated_read(url: str, token: str) -> bool:
         return False
 
 
+def gate_failure(health, version, schema, read, *, shadow: bool = False) -> str | None:
+    """The first health-gate check this /health answer fails, or None.
+
+    ``version`` or ``schema`` None skips that check; ``read`` performs the
+    authenticated bank read, attempted only once every other check passed.
+    Values print as JSON, as the native updater prints them.
+    """
+    if not isinstance(health, dict):
+        return "/health did not answer"
+    if health.get("status") != "ok":
+        return f"/health reported status {json.dumps(health.get('status'))} instead of \"ok\""
+    if version is not None and health.get("version") != version:
+        return f"version {json.dumps(health.get('version'))} instead of {json.dumps(version)}"
+    if schema is not None and health.get("schema") != schema:
+        return f"schema {json.dumps(health.get('schema'))} instead of {json.dumps(schema)}"
+    if health.get("counters_import_required"):
+        return "counters_import_required: the daemon has not imported its counters"
+    if shadow and not (health.get("read_only") is True and health.get("ready") is True and health.get("db") == "ok"):
+        return (f"the shadow is not ready read-only (read_only={json.dumps(health.get('read_only'))}, "
+                f"ready={json.dumps(health.get('ready'))}, db={json.dumps(health.get('db'))})")
+    if not read():
+        return "the authenticated bank read was refused"
+    return None
+
+
 def _write_overlay(path: Path, service: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + ".tmp")
@@ -195,10 +220,19 @@ RUST_RELEASE_OVERLAY = "docker-compose.rust-ghcr.yml"
 TRANSIENT_OVERLAYS = ("docker-compose.engine", "docker-compose.rollback")
 
 
+# The directory every engine, candidate, rollback and installer overlay is
+# written to (`<data dir>/update-engine`, or `<checkout>/data/update-engine`).
+TRANSIENT_DIR = "update-engine"
+
+
 def transient_overlay(path: Path) -> bool:
-    """Engine overlays a release update supplies itself, never reuses."""
-    name = Path(path).name
-    return name.startswith(TRANSIENT_OVERLAYS) or name == RUST_RELEASE_OVERLAY
+    """Engine overlays a release update supplies itself, never reuses: the
+    updaters' own files in their own directory, by name. A user's override
+    elsewhere is kept whatever it is called."""
+    path = Path(path)
+    if path.name == RUST_RELEASE_OVERLAY:
+        return True
+    return path.name.startswith(TRANSIENT_OVERLAYS) and path.parent.name == TRANSIENT_DIR
 
 
 def host_labels(update) -> dict:
@@ -461,6 +495,51 @@ class DefaultFallback(up.UpdateError):
         super().__init__(self.reason)
 
 
+def kept_note(message: str, rollback: str, built: str | None) -> str:
+    """A failure before the recreate: the rollback tag stays, and after a
+    successful build its tag names an image that never passed the gate."""
+    note = f"{message}; the running image keeps its rollback tag {rollback}"
+    return note + (f"; {built} now names the unvalidated build" if built else "")
+
+
+def uses_models_volume(running: dict) -> bool:
+    """Whether a running Rust daemon reads its models from the overlay's
+    /models (its environment names it, or a volume is mounted there),
+    rather than an earlier checkout's /data/models."""
+    env = (running.get("Config") or {}).get("Env") or []
+    return (any(isinstance(e, str) and e.startswith("PSEUDOLIFE_DAEMON_MODELS_DIR=")
+                and e.split("=", 1)[1].rstrip("/") == "/models" for e in env)
+            or any(isinstance(m, dict) and m.get("Destination") == "/models" for m in running.get("Mounts") or []))
+
+
+def provision_models(update, command, image: str, config: dict, created: list | None = None) -> None:
+    """Install the pinned models into the daemon's model volume before backup.
+
+    A first start would otherwise download them inside the health gate.
+    The running daemon keeps serving; a rerun only verifies the cache.
+    ``config`` is the Compose config the replacement will run with. Volumes
+    this call creates are appended to ``created`` (a defaulted move removes
+    them again if it falls back).
+    """
+    plan = model_volumes(config)
+    if plan is None:
+        update.step("the daemon names its own ONNX model directory; leaving model provisioning to it")
+        return
+    models_dir, mounts = plan
+    for _flag, _value, key in mounts:
+        if key is not None and ensure_project_volume(command, config, key) and created is not None:
+            created.append((config.get("volumes", {}).get(key) or {}).get("name") or key)
+    update.step(f"provisioning the Rust daemon's pinned models into {models_dir} (a first activation downloads them)...")
+    args = ["run", "--rm", "-e", f"PSEUDOLIFE_DAEMON_MODELS_DIR={models_dir}"]
+    for flag, value, _key in mounts:
+        args += [flag, value]
+    code, out = command([*args, "--entrypoint", "pseudolife-daemon", image, "provision", "models", "--if-missing"],
+                        timeout=3600, stream=not update.o.as_json)
+    if code:
+        raise up.UpdateError("could not provision the Rust daemon's models" + (f" ({up._last_line(out)})" if out.strip() else "")
+                             + "; check this host's network access and disk space, then retry; nothing was deployed")
+
+
 def deploy_release_engine(update, target: str, current: str | None, previous_digest: str | None,
                           before_recreate, choice: str, defaulted: bool = False) -> None:
     engine = ReleaseEngineUpdate(update, target, current, previous_digest, choice, defaulted=defaulted)
@@ -657,36 +736,15 @@ class ReleaseEngineUpdate:
                "the new daemon instead")
 
     def provision_models(self, image, config):
-        """Install the pinned models into the daemon's model volume before backup.
-
-        A first start would otherwise download them inside the health gate.
-        The running daemon keeps serving; a rerun only verifies the cache.
-        """
-        plan = model_volumes(config)
-        if plan is None:
-            self.u.step("the daemon names its own ONNX model directory; leaving model provisioning to it")
-            return
-        models_dir, mounts = plan
-        for _flag, _value, key in mounts:
-            if key is not None and ensure_project_volume(self.command, config, key):
-                self.created_volumes.append((config.get("volumes", {}).get(key) or {}).get("name") or key)
-        self.u.step(f"provisioning the Rust daemon's pinned models into {models_dir} (a first activation downloads them)...")
-        args = ["run", "--rm", "-e", f"PSEUDOLIFE_DAEMON_MODELS_DIR={models_dir}"]
-        for flag, value, _key in mounts:
-            args += [flag, value]
-        code, out = self.command([*args, "--entrypoint", "pseudolife-daemon", image, "provision", "models", "--if-missing"],
-                                 timeout=3600, stream=not self.o.as_json)
-        if code:
-            raise up.UpdateError("could not provision the Rust daemon's models" + (f" ({up._last_line(out)})" if out.strip() else "")
-                                 + "; check this host's network access and disk space, then retry; nothing was deployed")
+        provision_models(self.u, self.command, image, config, self.created_volumes)
 
     def gate(self, token, schema):
         self.u.step("waiting for the daemon to report healthy...")
+        reason = "/health did not answer"
         for attempt in range(self.o.health_retries):
             health = self.u.daemon_health()
-            if (health and health.get("status") == "ok" and health.get("version") == self.target
-                    and health.get("schema") == schema and not health.get("counters_import_required")
-                    and authenticated_read(self.o.daemon_url, token)):
+            reason = gate_failure(health, self.target, schema, lambda: authenticated_read(self.o.daemon_url, token))
+            if reason is None:
                 before, after = self.u.schema_before, health.get("schema")
                 if type(before) is int and type(after) is int and after > before:
                     self.u.report.rollback["restore_required"] = True
@@ -701,7 +759,8 @@ class ReleaseEngineUpdate:
             if attempt + 1 < self.o.health_retries:
                 up.sleep(self.o.health_delay_ms / 1000)
         raise up.UpdateError("the daemon failed its expected version, schema or authenticated-read health gate at the "
-                             "configured endpoint; the client side was not moved\n" + self.u._health_endpoint_hint())
+                             f"configured endpoint ({reason}, last of {self.o.health_retries} checks); the client side "
+                             "was not moved\n" + self.u._health_endpoint_hint())
 
     def run(self, before_recreate) -> None:
         u, o = self.u, self.o
@@ -756,7 +815,9 @@ class ReleaseEngineUpdate:
                 shown = f"v{pending}" if pending >= 0 else "an unreadable schema"
                 u.step(f"this bank ({shown}) still keeps its CMS counters in memory_state/weights.pt: moving to the "
                        f"Python daemon {self.target} first, which imports them, then to the Rust daemon")
-                # The Rust image must exist before the Python leg changes anything.
+                # The Rust image must exist before the Python leg changes anything,
+                # and the disk floor holds before that image is pulled.
+                u.preflight_disk(up.data_dir())
                 rust_image = f"{RUST_IMAGE}:{self.target}"
                 fresh = False
                 if self.defaulted:
@@ -1150,19 +1211,36 @@ class EngineUpdate:
 
     def gate(self, url, *, retries=None, announce=True):
         retries = self.o.health_retries if retries is None else retries
+        reason = "/health did not answer"
         for attempt in range(retries):
             health = up.fetch_json(url.rstrip("/") + "/health", timeout=3)
-            if (health and health.get("status") == "ok" and health.get("version") == self.version
-                    and health.get("schema") == self.schema and not health.get("counters_import_required")
-                    and (not self.o.shadow or (health.get("read_only") is True
-                                              and health.get("ready") is True and health.get("db") == "ok"))
-                    and authenticated_read(url, self.token)):
+            reason = gate_failure(health, self.version, self.schema, lambda: authenticated_read(url, self.token),
+                                  shadow=self.o.shadow)
+            if reason is None:
                 if announce:
                     self.u.step(f"{self.engine} health gate passed: version {self.version}, schema {self.schema}, authenticated bank read")
                 return health
             if attempt + 1 < retries:
                 up.sleep(self.o.health_delay_ms / 1000)
-        raise up.UpdateError("the engine failed its version, schema or authenticated-read gate")
+        raise up.UpdateError(f"the engine failed its version, schema or authenticated-read gate: {reason} "
+                             f"(last of {retries} checks)")
+
+    def build(self, compose, image):
+        """Build the replacement, then install its pinned models: both before
+        the backup, so a first activation's model download never runs inside
+        the health gate, and a failure leaves the running daemon untouched."""
+        now = up.tree_state(self.repo)
+        if now["sha"] != self.tree["sha"] or now["dirty"] != self.tree["dirty"]:
+            raise up.UpdateError("the checkout moved since this update started; retry from a stable checkout; "
+                                 "nothing was deployed")
+        self.u.step(f"building the {self.engine} daemon (the running daemon keeps serving)...")
+        code, _ = self.command(["compose", *compose, "build", up.DAEMON_SERVICE], env=self.env, timeout=7200, stream=not self.o.as_json)
+        if code:
+            raise up.UpdateError("engine build failed; the running daemon is unchanged; nothing was deployed")
+        self.built = True
+        if self.engine == "rust":
+            # The config the replacement runs with: its model directory and volume.
+            provision_models(self.u, self.command, image, self.config(compose))
 
     def run(self):
         if self.o.shadow and self.engine == "python":
@@ -1175,13 +1253,48 @@ class EngineUpdate:
         if self.o.shadow:
             from pseudolife_memory.update_shadow import ShadowUpdate
             return ShadowUpdate(self).start()
-        self.backup()
-        disk_space.host(self.repo)
-        disk_space.docker_storage(self.u.docker, [self.pg, self.daemon], self.running.get("Image"), self.u.warn)
-        if self.stopped_handover:
-            current = self.inspect(self.daemon)
-            if current.get("Image") != self.running.get("Image") or current.get("State", {}).get("Running") is not False or current.get("Config") != self.running.get("Config"):
-                raise up.UpdateError("the stopped daemon changed during backup; stop other updates and retry; nothing was deployed", 2)
+        if not self.stopped_handover:
+            # The backup stages in both containers' /tmp: refuse before the build.
+            disk_space.container(self.u.docker, self.pg)
+            disk_space.container(self.u.docker, self.daemon)
+        rust_overlay = ["-f", str(self.ops / "docker-compose.rust-daemon.yml")]
+        if self.engine == "rust" or self.running_labels.get(ENGINE_LABEL) == "rust":
+            # The Rust overlay must resolve before anything changes, as the
+            # native updater's mount check requires it.
+            self.config([*self.base, *rust_overlay])
+        # Tag first: rebuilding the same engine moves its :checkout tag, and
+        # Docker's containerd image store then no longer resolves the
+        # running image's ID, so it could not be tagged afterwards.
+        rollback = self.tag_rollback()
+        image = f"pseudolife-daemon-{self.engine}:checkout"
+        service = {"image": image, "build": {"dockerfile": f"ops/Dockerfile.daemon{'-rust' if self.engine == 'rust' else ''}"},
+                   "labels": {ENGINE_LABEL: self.engine, CHECKOUT_LABEL: str(self.repo), ACTIVATION_LABEL: secrets.token_hex(16)}}
+        candidate = self.repo / "data/update-engine/docker-compose.engine-candidate.json"
+        compose = [*self.base, *(rust_overlay if self.engine == "rust" else []), "-f", str(candidate)]
+        self.built = False
+        try:
+            try:
+                _write_overlay(candidate, service)
+                self.build(compose, image)
+                self.back_up(rollback)
+            except (up.UpdateError, OSError) as exc:
+                raise up.UpdateError(kept_note(str(exc), rollback, image if self.built else None),
+                                     getattr(exc, "exit_code", 1)) from exc
+            health = self.activate(compose, service, rust_overlay, rollback)
+        finally:
+            try:
+                candidate.unlink(missing_ok=True)
+            except OSError:
+                self.u.warn("could not remove the temporary engine overlay; the rollback instructions remain usable")
+        self.u.step("selected Rust; future updates retain this engine; rollback commands:" if self.engine == "rust"
+                    else "restored Python; future updates use the ordinary update path; rollback commands:")
+        for line in self.u.rollback_lines:
+            self.u.step(line)
+        self.u.checkout_post_deploy(self.repo, self.previous_digest, health)
+        self.u.prune_cache(self.repo)
+
+    def tag_rollback(self):
+        """Tag the validated running image for rollback, by its ID."""
         old_engine = self.running_labels.get(ENGINE_LABEL, "python")
         suffix = self.o.rollback_suffix or f"pre-update-{up._stamp()}"
         if not re.fullmatch(r"[A-Za-z0-9_.-]+", suffix):
@@ -1196,6 +1309,25 @@ class EngineUpdate:
         code, _ = self.command(["tag", self.running["Image"], rollback], timeout=60)
         if code:
             raise up.UpdateError("could not tag the running image for rollback; nothing was deployed")
+        self.u.step(f"tagged rollback image: {rollback}")
+        self.u.report.rollback = {"tag": rollback, "state": "tagged"}
+        return rollback
+
+    def back_up(self, rollback):
+        """The backup, after the build and models, just before the recreate."""
+        from pseudolife_memory import disk_space
+        self.backup()
+        disk_space.host(self.repo)
+        # By tag: after a same-engine rebuild the running image's ID may not resolve.
+        disk_space.docker_storage(self.u.docker, [self.pg, self.daemon], rollback, self.u.warn)
+        if self.stopped_handover:
+            current = self.inspect(self.daemon)
+            if current.get("Image") != self.running.get("Image") or current.get("State", {}).get("Running") is not False or current.get("Config") != self.running.get("Config"):
+                raise up.UpdateError("the stopped daemon changed during backup; stop other updates and retry; nothing was deployed", 2)
+
+    def activate(self, compose, service, rust_overlay, rollback):
+        """Write the rollback overlay and commands, recreate on the built image and gate it."""
+        old_engine = self.running_labels.get(ENGINE_LABEL, "python")
         old_service = {"image": rollback, "build": {"dockerfile": f"ops/Dockerfile.daemon{'-rust' if old_engine == 'rust' else ''}"},
                        "labels": {ENGINE_LABEL: old_engine, CHECKOUT_LABEL: str(self.repo)}}
         activation = self.running_labels.get(ACTIVATION_LABEL)
@@ -1204,7 +1336,10 @@ class EngineUpdate:
         rollback_file = self.repo / "data/update-engine" / f"docker-compose.rollback-{up._stamp()}.json"
         _write_overlay(rollback_file, old_service)
         selected_file = self.repo / SELECTION
-        rollback_args = [*self.base, "-f", str(rollback_file)]
+        # A restored Rust daemon keeps the model directory it ran with: the
+        # overlay's /models volume only when it already used it.
+        rollback_args = [*self.base, *(rust_overlay if old_engine == "rust" and uses_models_volume(self.running) else []),
+                         "-f", str(rollback_file)]
         shown = " ".join('"' + str(a).replace('"', '\\"') + '"' for a in rollback_args)
         accepted_file = selected_file if old_engine == "rust" else self.repo / PYTHON_ACCEPTED
         copy = (f'Copy-Item -LiteralPath "{rollback_file}" -Destination "{accepted_file}" -ErrorAction Stop' if os.name == "nt"
@@ -1234,23 +1369,8 @@ class EngineUpdate:
         # the image this run tagged is still running, even after a downgrade.
         for engine in ("python", "rust"):
             self.u.prune_rollbacks(self.repo, f"pseudolife-daemon-{engine}")
-        image = f"pseudolife-daemon-{self.engine}:checkout"
-        service = {"image": image, "build": {"dockerfile": f"ops/Dockerfile.daemon{'-rust' if self.engine == 'rust' else ''}"},
-                   "labels": {ENGINE_LABEL: self.engine, CHECKOUT_LABEL: str(self.repo), ACTIVATION_LABEL: secrets.token_hex(16)}}
-        candidate = self.repo / "data/update-engine/docker-compose.engine-candidate.json"
-        _write_overlay(candidate, service)
-        compose = list(self.base)
-        if self.engine == "rust":
-            compose += ["-f", str(self.ops / "docker-compose.rust-daemon.yml")]
-        compose += ["-f", str(candidate)]
         try:
-            self.u.step(f"building the {self.engine} daemon; rollback image {rollback}")
-            now = up.tree_state(self.repo)
-            if now["sha"] != self.tree["sha"] or now["dirty"] != self.tree["dirty"]:
-                raise up.UpdateError("the checkout moved during backup; retry from a stable checkout")
-            code, _ = self.command(["compose", *compose, "build", up.DAEMON_SERVICE], env=self.env, timeout=7200, stream=not self.o.as_json)
-            if code:
-                raise up.UpdateError("engine build failed; the running daemon is unchanged")
+            self.u.step(f"recreating the {self.engine} daemon; rollback image {rollback}")
             code, _ = self.command(["compose", *compose, "up", "-d", "--no-deps", "--no-build", up.DAEMON_SERVICE], env=self.env, timeout=120, stream=not self.o.as_json)
             if code:
                 raise up.UpdateError("engine recreate failed")
@@ -1262,14 +1382,4 @@ class EngineUpdate:
                 selected_file.unlink(missing_ok=True)
         except (up.UpdateError, OSError) as exc:
             raise up.UpdateError(str(exc) + "\nto roll back:\n" + "\n".join(self.u.rollback_lines)) from exc
-        finally:
-            try:
-                candidate.unlink(missing_ok=True)
-            except OSError:
-                self.u.warn("could not remove the temporary engine overlay; the rollback instructions remain usable")
-        self.u.step("selected Rust; future updates retain this engine; rollback commands:" if self.engine == "rust"
-                    else "restored Python; future updates use the ordinary update path; rollback commands:")
-        for line in self.u.rollback_lines:
-            self.u.step(line)
-        self.u.checkout_post_deploy(self.repo, self.previous_digest, health)
-        self.u.prune_cache(self.repo)
+        return health

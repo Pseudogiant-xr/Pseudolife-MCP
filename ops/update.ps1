@@ -114,7 +114,10 @@ foreach ($candidate in @("python", "python3", "py")) {
         if ($application) { break }
     }
     if (-not $application) { continue }
-    $probeArgs = if ($candidate -eq "py") { @("-3") } else { @() }
+    # Assigned: an if-expression unrolls a one-item array to a string, which
+    # splats as characters (py - 3).
+    $probeArgs = @()
+    if ($candidate -eq "py") { $probeArgs = @("-3") }
     try {
         & $application.Source @probeArgs -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' 2>$null
         if ($LASTEXITCODE -eq 0) { $python = $application.Source; $pyArgs = $probeArgs; break }

@@ -1,0 +1,2 @@
+### Fixed (2026-11-07 — Rust daemon retries a reconnect that fails after taking the lease)
+- When the Rust daemon reconnected to PostgreSQL after losing its session and the new session took the writer lease but then failed reading or bumping the lease epoch, the call that triggered the reconnect failed, while the Python daemon, when its session was already marked broken, retried the reconnect once at once and served it. The Rust daemon now retries once; a second failure is still tolerated and the next call reconnects.

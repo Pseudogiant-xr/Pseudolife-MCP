@@ -273,6 +273,11 @@ DOCKER = r'''
 import gzip,io,json,os,pathlib,sys,tarfile
 p=pathlib.Path(os.environ["UPDATE_FIXTURE_STATE"])
 s=json.loads(p.read_text());a=sys.argv[1:]
+def models_overlay(s,files):
+ # The Rust overlay that carries the models volume at /models: the checkout
+ # one always, the release one when the row models it (models_overlay).
+ return any(v.endswith("docker-compose.rust-daemon.yml") for v in files) or bool(
+  s.get("models_overlay") and any(v.endswith("docker-compose.rust-ghcr.yml") for v in files))
 s["calls"].append(a)
 code=0;out=""
 if a[:1]==["inspect"]:
@@ -291,6 +296,10 @@ if a[:1]==["inspect"]:
   elif f=="{{json .}}":out=json.dumps(s["running"])
   else: out=s["running"]["Id"]
  else: out=json.dumps([s["running"]] if a[-1]!="fixture-pg" else [{"Name":"/fixture-pg","NetworkSettings":{"Networks":{"fixture":{"Aliases":["pseudolife-pg"]}}}}])
+elif a[:2]==["image","inspect"] and a[-1] in s.get("orphaned",[]):code=1;out="Error: No such image: "+a[-1]
+elif a[:1] in (["run"],["create"]) and any(v in s.get("orphaned",[]) for v in a):
+ # The containerd image store: an ID no name refers to any more no longer resolves.
+ code=1;out="Error response from daemon: No such image"
 elif a[:2]==["image","inspect"]:
  if "Created" in " ".join(a): out="2026-01-01|"+s["images"].get(a[-1],s["running"]["Image"])
  elif a[-1] in s["images"]: out=s["images"][a[-1]]
@@ -310,18 +319,24 @@ elif a[:1]==["run"]:
   out={3:"unsupported memory.reranker.model_name 'BAAI/bge-reranker-base': the native daemon supports only cross-encoder/ms-marco-MiniLM-L-6-v2; set memory.reranker.model_name to that model, or keep the Python engine for a different reranker",2:"storage resolution refused: the Rust daemon requires PSEUDOLIFE_MCP_DATABASE_URL"}.get(code,"the native daemon supports the configuration in /data/config.yaml")
  elif "provision" in a: code=int(s["failure"]=="provision")
  else: out="58" if "--schema-version" in a else "SCHEMA_META_VERSION = 58\n"
-elif a[:1]==["tag"]: s["images"][a[-1]]=a[-2]
+elif a[:1]==["tag"]:
+ # The containerd image store: an ID no name refers to any more no longer resolves.
+ if a[-2] in s.setdefault("orphaned",[]):code=1;out="Error response from daemon: No such image: "+a[-2]
+ else:s["images"][a[-1]]=s["images"].get(a[-2],a[-2])
 elif a[:1]==["compose"]:
- if "config" in a:
+ if "config" in a and any(not pathlib.Path(a[i+1]).is_file() for i,v in enumerate(a[:-1]) if v=="-f"):
+  code=1;out="open docker-compose file: no such file or directory"
+ elif "config" in a:
   config=json.loads(json.dumps(s["config"]))
-  if s.get("models_overlay") and any(v.endswith("docker-compose.rust-ghcr.yml") for v in a):
+  if s.get("relative_mount"):
+   directory=pathlib.Path(a[a.index("--project-directory")+1]) if "--project-directory" in a else pathlib.Path(a[a.index("-f")+1]).parent
+   config["services"]["pseudolife-daemon"]["volumes"].append({"type":"bind","source":str(directory/"config.yaml"),"target":"/data/config.yaml","read_only":True})
+  if models_overlay(s,a):
+   # A Rust overlay's model cache, as Compose renders it.
    daemon=config["services"]["pseudolife-daemon"]
    daemon["environment"]["PSEUDOLIFE_DAEMON_MODELS_DIR"]="/models"
    daemon["volumes"].append({"type":"volume","source":"pseudolife_rust_models","target":"/models"})
    config["volumes"]["pseudolife_rust_models"]={"name":"fixture-project_pseudolife_rust_models"}
-  if s.get("relative_mount"):
-   directory=pathlib.Path(a[a.index("--project-directory")+1]) if "--project-directory" in a else pathlib.Path(a[a.index("-f")+1]).parent
-   config["services"]["pseudolife-daemon"]["volumes"].append({"type":"bind","source":str(directory/"config.yaml"),"target":"/data/config.yaml","read_only":True})
   out=json.dumps(config)
  elif "ps" in a:
   out="fixture-pg" if a[-1]=="pseudolife-pg" else s["running"]["Id"]
@@ -329,26 +344,39 @@ elif a[:1]==["compose"]:
   if s["failure"]=="ambiguous_project_daemon" and a[-1]=="pseudolife-daemon":out="first\nsecond"
   if s.get("deployed") and s["failure"]=="recreated_missing" and a[-1]=="pseudolife-daemon":out=""
  elif "build" in a and s["failure"]=="build":code=1
+ elif "build" in a:
+  # The build moves the candidate's tag; the image it left, if no other
+  # name refers to it, is no longer resolvable by ID (containerd store).
+  for path in [a[i+1] for i,v in enumerate(a[:-1]) if v=="-f"]:
+   try:name=json.loads(pathlib.Path(path).read_text())["services"]["pseudolife-daemon"]["image"]
+   except (OSError,ValueError,KeyError):continue
+   previous=s["images"].get(name);s["images"][name]="sha256:built-"+str(len(s["calls"]))
+   if previous and previous not in s["images"].values():s.setdefault("orphaned",[]).append(previous)
  elif "up" in a:
   code=int(s["failure"]=="up")
   if code==0:
    s["deployed"]=True
+   built=""
    overlays=[a[i+1] for i,v in enumerate(a[:-1]) if v=="-f"]
    for path in overlays:
     try:
      service=json.loads(pathlib.Path(path).read_text())["services"]["pseudolife-daemon"]
      if "labels" in service:s["running"]["Config"]["Labels"]={**(s["running"]["Config"]["Labels"] or {}),**service["labels"]}
+     built=s["images"].get(service.get("image"),"")
      if service.get("labels",{}).get("org.pseudolife.engine")=="python" and not s.get("import_stuck"):s["imported"]=True
     except (OSError,ValueError,KeyError):pass
-   if s.get("models_overlay"):
-    mounts=[m for m in s["running"]["Mounts"] if m.get("Destination")!="/models"]
-    if any(v.endswith("docker-compose.rust-ghcr.yml") for v in overlays):
-     mounts.append({"Type":"volume","Name":"fixture-project_pseudolife_rust_models","Destination":"/models","RW":True})
-    s["running"]["Mounts"]=mounts
-   s["running"]["Image"]="sha256:replacement"
+   s["running"]["Image"]=built if built.startswith("sha256:built-") else "sha256:replacement"
+   # A Rust overlay's model directory and volume, as the recreated container
+   # has them: the checkout overlay always, the release one under models_overlay.
+   env=[e for e in s["running"]["Config"]["Env"] if not e.startswith("PSEUDOLIFE_DAEMON_MODELS_DIR=")]
+   mounts=[m for m in s["running"]["Mounts"] if m.get("Destination")!="/models"]
+   if models_overlay(s,overlays):
+    env.append("PSEUDOLIFE_DAEMON_MODELS_DIR=/models")
+    mounts.append({"Type":"volume","Name":"fixture-project_pseudolife_rust_models","Destination":"/models","RW":True})
+   s["running"]["Config"]["Env"]=env;s["running"]["Mounts"]=mounts
    s["running"]["Id"]=s.get("replacement_id",s["running"]["Id"])
 elif a[:1]==["exec"]:
- if "df" in a: out="Filesystem 1024-blocks Used Available Capacity Mounted on\noverlay 99999999 1 99999998 1% /"
+ if "df" in a: out="Filesystem 1024-blocks Used Available Capacity Mounted on\n"+("overlay 99999999 1 1 99% /" if s.get("low_disk") else "overlay 99999999 1 99999998 1% /")
  elif "--host-state" in a or "pseudolife_memory.maintainer_setup" in a:
   out=s.get("setup_reply",json.dumps({"problem":None,"keys":[{"state":"active"}]}))
  elif "psql" in a:
@@ -629,6 +657,15 @@ def test_fixture_backup_finds_bash_when_powershell_is_in_a_separate_directory(tm
         assert (directory / "pseudolife_state-20260101-000001.tgz").is_file()
 
 
+def _report_text(value):
+    """Every string in a JSON report, decoded, one per line."""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        value = list(value.values())
+    return "\n".join(_report_text(v) for v in value) if isinstance(value, list) else ""
+
+
 def stages(state):
     result = []
     for args in state["calls"]:
@@ -859,7 +896,7 @@ def test_checkout_discovery_never_falls_back_to_another_projects_global_daemon(t
 
 
 @pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
-@pytest.mark.parametrize("failure", ["", "backup", "incomplete", "build", "up", "health", "version", "schema", "read"])
+@pytest.mark.parametrize("failure", ["", "build", "provision", "backup", "incomplete", "up", "health", "version", "schema", "read"])
 def test_engine_activation_faults_preserve_rollback_and_retry_guard(tmp_path, native, failure):
     binary = _native_binary() if native else None
     if native and not binary:
@@ -872,18 +909,207 @@ def test_engine_activation_faults_preserve_rollback_and_retry_guard(tmp_path, na
         report = json.loads(result.stdout)
         state = json.loads(state_path.read_text())
         observed = stages(state)
-        expected = ["backup"] if failure in ("backup", "incomplete") else ["backup", "tag", "build"] if failure == "build" else ["backup", "tag", "build", "up"]
+        # The rollback tag precedes the build (which may move the running
+        # image's name); the build and the model provisioning precede the
+        # backup and the recreate.
+        expected = (["tag", "build"] if failure in ("build", "provision") else ["tag", "build", "backup"]
+                    if failure in ("backup", "incomplete") else ["tag", "build", "backup", "up"])
         assert observed == expected
+        provisions = [i for i, a in enumerate(state["calls"]) if a[:1] == ["run"] and "provision" in a]
+        if failure == "build":
+            assert provisions == []
+        else:
+            build = next(i for i, a in enumerate(state["calls"]) if a[:1] == ["compose"] and "build" in a)
+            assert len(provisions) == 1 and build < provisions[0]
+            run = state["calls"][provisions[0]]
+            # Exactly the overlay's model directory and volume the replacement runs with.
+            assert run == ["run", "--rm", "-e", "PSEUDOLIFE_DAEMON_MODELS_DIR=/models",
+                           "--mount", "type=volume,src=fixture-project_pseudolife_rust_models,dst=/models",
+                           "--entrypoint", "pseudolife-daemon", "pseudolife-daemon-rust:checkout",
+                           "provision", "models", "--if-missing"]
+            create = next(i for i, a in enumerate(state["calls"]) if a[:2] == ["volume", "create"])
+            assert create < provisions[0]
+            assert state["calls"][create][-1] == "fixture-project_pseudolife_rust_models"
+            assert "com.docker.compose.volume=pseudolife_rust_models" in state["calls"][create]
+            later = [i for i, a in enumerate(state["calls"]) if a[:1] == ["fixture-backup"]
+                     or a[:1] == ["exec"] and any("pg_dump" in s for s in a)]
+            assert all(provisions[0] < i for i in later)
         selection = repo / "data/update-engine/docker-compose.engine.json"
         assert selection.exists() is (not failure)
-        if failure not in ("backup", "incomplete"):
+        assert report["rollback"]["tag"] == "pseudolife-daemon-python:0.21.0-pre-fixture"
+        assert report["rollback"]["state"] == "tagged"
+        if failure in ("build", "provision", "backup", "incomplete"):
+            assert "nothing was deployed" in result.stdout
+            assert "the running image keeps its rollback tag pseudolife-daemon-python:0.21.0-pre-fixture" in result.stdout
+            # Only a build that succeeded moved :checkout to an unvalidated image.
+            assert ("pseudolife-daemon-rust:checkout now names the unvalidated build" in result.stdout) \
+                is (failure != "build")
+            assert "to roll back:" not in result.stdout
+        else:
             assert Path(report["rollback"]["overlay"]).is_file()
             assert report["rollback"]["state"] == "tagged"
+        if failure in ("health", "version", "schema", "read"):
+            reason = {"health": '/health reported status "error" instead of "ok"',
+                      "version": 'version "wrong" instead of "0.21.1"', "schema": "schema 59 instead of 58",
+                      "read": "the authenticated bank read was refused"}[failure]
+            text = _report_text(report)
+            assert reason in text and "last of 1 checks" in text, text
         if failure in ("health", "version", "schema", "read"):
             retry = run_arm(repo, env, binary, args)
             assert retry.returncode == 2, retry.stdout + retry.stderr
             assert stages(json.loads(state_path.read_text())) == observed
             assert "rollback" in retry.stdout.lower()
+
+
+@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+def test_same_engine_checkout_rerun_tags_the_running_image_before_rebuilding_it(tmp_path, native):
+    """Docker's containerd image store no longer resolves an image's ID once
+    a build moved the only tag naming it: a Rust-to-Rust rerun must tag the
+    running image for rollback before it rebuilds :checkout."""
+    binary = _native_binary() if native else None
+    if native and not binary:
+        pytest.skip("native binary build is owned by the parent; set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path, "", "engine") as (repo, env, state_path):
+        args = ["--checkout", str(repo), "--engine", "rust", "--no-test-login", "--no-cache-prune", "--json",
+                "--health-retries", "1", "--health-delay-ms", "0"]
+        first = run_arm(repo, env, binary, [*args, "--rollback-tag", "pre-first"])
+        assert first.returncode == 0, first.stdout + first.stderr
+        state = json.loads(state_path.read_text())
+        running = state["running"]["Image"]
+        assert running == state["images"]["pseudolife-daemon-rust:checkout"]
+        before = len(state["calls"])
+        second = run_arm(repo, env, binary, [*args, "--rollback-tag", "pre-second"])
+        assert second.returncode == 0, second.stdout + second.stderr
+        state = json.loads(state_path.read_text())
+        calls = state["calls"][before:]
+        assert stages({"calls": calls}) == ["tag", "build", "backup", "up"]
+        tag = next(a for a in calls if a[:1] == ["tag"])
+        assert tag == ["tag", running, "pseudolife-daemon-rust:0.21.1-pre-second"]
+        assert state["images"]["pseudolife-daemon-rust:0.21.1-pre-second"] == running
+        assert running not in state["orphaned"]
+        assert state["running"]["Image"] != running
+
+
+@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+def test_checkout_switch_back_to_python_leaves_the_rust_model_volume(tmp_path, native):
+    """The Rust daemon's /models volume comes from the checkout overlay;
+    switching back to Python may leave that cache, and is not refused as a
+    dropped persistent mount."""
+    binary = _native_binary() if native else None
+    if native and not binary:
+        pytest.skip("native binary build is owned by the parent; set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path, "", "engine") as (repo, env, state_path):
+        common = ["--checkout", str(repo), "--no-test-login", "--no-cache-prune", "--json",
+                  "--health-retries", "1", "--health-delay-ms", "0"]
+        first = run_arm(repo, env, binary, [*common, "--engine", "rust", "--rollback-tag", "pre-rust"])
+        assert first.returncode == 0, first.stdout + first.stderr
+        assert any(m["Destination"] == "/models" for m in json.loads(state_path.read_text())["running"]["Mounts"])
+        back = run_arm(repo, env, binary, [*common, "--engine", "python", "--rollback-tag", "pre-python"])
+        assert back.returncode == 0, back.stdout + back.stderr
+        state = json.loads(state_path.read_text())
+        assert not any(m["Destination"] == "/models" for m in state["running"]["Mounts"])
+        assert state["running"]["Config"]["Labels"]["org.pseudolife.engine"] == "python"
+
+
+@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+@pytest.mark.parametrize("target", ["rust", "python"])
+def test_missing_checkout_rust_overlay_is_refused_before_any_tag(tmp_path, native, target):
+    """A Rust checkout without ops/docker-compose.rust-daemon.yml cannot be
+    held to its model volume: both a rerun and a switch to Python refuse
+    before the rollback tag, rather than tag and then fail (or report a
+    dropped mount)."""
+    binary = _native_binary() if native else None
+    if native and not binary:
+        pytest.skip("native binary build is owned by the parent; set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path, "", "engine") as (repo, env, state_path):
+        common = ["--checkout", str(repo), "--no-test-login", "--no-cache-prune", "--json",
+                  "--health-retries", "1", "--health-delay-ms", "0"]
+        first = run_arm(repo, env, binary, [*common, "--engine", "rust", "--rollback-tag", "pre-rust"])
+        assert first.returncode == 0, first.stdout + first.stderr
+        (repo / "ops/docker-compose.rust-daemon.yml").unlink()
+        state = json.loads(state_path.read_text())
+        before, images = len(state["calls"]), dict(state["images"])
+        selection = repo / "data/update-engine/docker-compose.engine.json"
+        accepted = selection.read_bytes()
+        second = run_arm(repo, env, binary, [*common, "--engine", target, "--rollback-tag", "pre-second"])
+        assert second.returncode == 2, second.stdout + second.stderr
+        assert "cannot resolve the Compose project" in second.stdout and "nothing was changed" in second.stdout
+        after = json.loads(state_path.read_text())
+        assert stages({"calls": after["calls"][before:]}) == []
+        assert after["images"] == images and selection.read_bytes() == accepted
+
+
+@pytest.mark.parametrize("target", ["rust", "python"])
+def test_native_checkout_still_refuses_an_undeclared_mount_beside_the_rust_model_volume(tmp_path, target):
+    """The overlay supplies only the /models volume: a running Rust daemon's
+    other mount that no Compose file declares is still a dropped mount, on a
+    rerun and on a switch to Python, and nothing changes."""
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("native binary build is owned by the parent; set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path, "", "engine") as (repo, env, state_path):
+        common = ["--checkout", str(repo), "--no-test-login", "--no-cache-prune", "--json",
+                  "--health-retries", "1", "--health-delay-ms", "0"]
+        first = run_arm(repo, env, binary, [*common, "--engine", "rust", "--rollback-tag", "pre-rust"])
+        assert first.returncode == 0, first.stdout + first.stderr
+        state = json.loads(state_path.read_text())
+        assert any(m["Destination"] == "/models" for m in state["running"]["Mounts"])
+        state["running"]["Mounts"].append({"Destination": "/srv/x", "Source": str(tmp_path / "extra"),
+                                           "Type": "bind", "RW": True})
+        state_path.write_text(json.dumps(state))
+        selection = repo / "data/update-engine/docker-compose.engine.json"
+        accepted = selection.read_bytes()
+        before = len(state["calls"])
+        images = dict(state["images"])
+        second = run_arm(repo, env, binary, [*common, "--engine", target, "--rollback-tag", "pre-second"])
+        assert second.returncode == 2, second.stdout + second.stderr
+        assert "the Compose configuration drops a daemon mount" in second.stdout
+        assert "nothing was changed" in second.stdout
+        after = json.loads(state_path.read_text())
+        assert stages({"calls": after["calls"][before:]}) == []
+        assert after["images"] == images
+        assert selection.read_bytes() == accepted
+        assert not (repo / "data/update-engine/docker-compose.python-accepted.json").exists()
+
+
+@pytest.mark.parametrize("models", ["volume", "legacy"])
+def test_rust_to_rust_rollback_keeps_the_model_directory_the_daemon_ran_with(tmp_path, models):
+    """Both updaters print the same restore command for a failed Rust-to-Rust
+    rerun: with the checkout overlay's /models volume when the running daemon
+    uses it, without it for one that read /data/models."""
+    import re
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("native binary build is owned by the parent; set PSEUDOLIFE_RUST_BINARY")
+    files = {}
+    for arm, native in (("python", None), ("native", binary)):
+        with host(tmp_path / arm, "", "engine") as (repo, env, state_path):
+            args = ["--checkout", str(repo), "--engine", "rust", "--no-test-login", "--no-cache-prune", "--json",
+                    "--health-retries", "1", "--health-delay-ms", "0"]
+            first = run_arm(repo, env, native, [*args, "--rollback-tag", "pre-first"])
+            assert first.returncode == 0, first.stdout + first.stderr
+            state = json.loads(state_path.read_text())
+            assert "PSEUDOLIFE_DAEMON_MODELS_DIR=/models" in state["running"]["Config"]["Env"]
+            assert any(m["Destination"] == "/models" for m in state["running"]["Mounts"])
+            if models == "legacy":
+                # A daemon an earlier checkout overlay created, on /data/models.
+                state["running"]["Config"]["Env"].remove("PSEUDOLIFE_DAEMON_MODELS_DIR=/models")
+                state["running"]["Mounts"] = [m for m in state["running"]["Mounts"] if m["Destination"] != "/models"]
+            state["failure"] = "up"
+            state_path.write_text(json.dumps(state))
+            second = run_arm(repo, env, native, [*args, "--rollback-tag", "pre-second"])
+            assert second.returncode == 1, second.stdout + second.stderr
+            text = _report_text(json.loads(second.stdout))
+            assert "to roll back:" in text
+            restore = next(line for line in text.splitlines() if "docker compose" in line and " up " in line)
+            # The Compose files of the recreate, not the selection copy after it.
+            command = restore[restore.index("docker compose"):restore.index(" up ")]
+            found = [re.sub(r"rollback-.*\.json$", "rollback.json", name)
+                     for name in re.findall(r"[\w.\-]+\.(?:yml|json)", command)]
+            files[arm] = found
+            assert ("docker-compose.rust-daemon.yml" in found) is (models == "volume"), restore
+            assert found[-1] == "docker-compose.rollback.json", restore
+    assert files["python"] == files["native"]
 
 
 @pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
@@ -921,7 +1147,7 @@ def test_checkout_d2_guard_is_reached_before_backup_and_accepts_imported_row(tmp
         assert sql and "schema_version" in sql[0]
         if failure == "imported_weights":
             assert any("cms_counters" in query for query in sql)
-            assert stages(state) == ["backup", "tag", "build", "up"]
+            assert stages(state) == ["tag", "build", "backup", "up"]
             assert not any("test ! -e /data/memory_state/weights.pt" in " ".join(a) for a in state["calls"])
         else:
             assert stages(state) == []
@@ -1666,6 +1892,26 @@ def test_release_rust_stops_on_python_when_the_import_does_not_happen(tmp_path, 
 
 
 @pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+def test_release_rust_import_leg_checks_the_disk_before_pulling(tmp_path, native):
+    # The Rust image is pulled before the Python leg; the 8 GiB floor must
+    # hold first, as it does before every other pull.
+    binary = _native_binary()
+    if native and not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path, "pending_import") as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        state["low_disk"] = True
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary if native else None,
+                         ["--engine", "rust", "--tag", "0.21.1", "--daemon-only", "--json", "--health-retries", "1"])
+        assert result.returncode == 2, result.stdout + result.stderr
+        assert "8 GiB" in result.stdout, result.stdout
+        calls = json.loads(state_path.read_text())["calls"]
+        assert not any(a[:1] == ["pull"] for a in calls), calls
+        assert stages(json.loads(state_path.read_text())) == []
+
+
+@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
 def test_release_rust_without_an_image_refuses_before_the_import_leg(tmp_path, native):
     binary = _native_binary()
     if native and not binary:
@@ -1872,6 +2118,37 @@ def test_release_retains_original_project_directory_for_relative_mounts(tmp_path
                 assert args[args.index("--project-directory") + 1] == str(repo / "ops")
 
 
+@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+@pytest.mark.parametrize("engine", ["", "rust"])
+def test_release_keeps_a_user_override_whose_name_looks_like_an_engine_overlay(tmp_path, native, engine):
+    # A user's own Compose override named docker-compose.engine-*.yml beside
+    # the project was dropped as if it were one of the updater's overlays,
+    # losing its settings on recreation. Only the updater's own directory holds those.
+    binary = _native_binary()
+    if native and not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path) as (repo, env, state_path):
+        override = repo / "ops/docker-compose.engine-local.yml"
+        override.write_text('services:\n  pseudolife-daemon:\n    environment:\n      FIXTURE_LOCAL: "1"\n')
+        stale = Path(env["PSEUDOLIFE_MCP_DATA_DIR"]) / "update-engine/docker-compose.engine-candidate-old.json"
+        stale.parent.mkdir(parents=True, exist_ok=True)
+        stale.write_text("{}")
+        state = json.loads(state_path.read_text())
+        state["running"]["Config"]["Labels"]["com.docker.compose.project.config_files"] += (
+            "," + str(override) + "," + str(stale))
+        state_path.write_text(json.dumps(state))
+        args = ["--tag", "0.21.1", "--daemon-only", "--json", "--health-retries", "1", "--rollback-tag", "pre-own"]
+        if engine:
+            args = ["--engine", engine, *args]
+        result = run_arm(repo, env, binary if native else None, args)
+        assert result.returncode == 0, result.stdout + result.stderr
+        calls = json.loads(state_path.read_text())["calls"]
+        up = next(a for a in calls if a[:1] == ["compose"] and "up" in a)
+        assert str(override) in up, up
+        # The updater's own stale candidate is still never reused.
+        assert str(stale) not in up, up
+
+
 @pytest.mark.parametrize("mode", ["release", "checkout"])
 def test_changed_mount_or_wrong_checkout_endpoint_refuses_before_backup(tmp_path, mode):
     binary = _native_binary()
@@ -1958,7 +2235,8 @@ def test_discovered_checkout_backup_policy_uses_effective_engine(tmp_path, engin
         if engine == "rust":
             assert result.returncode != 0, result.stdout + result.stderr
             assert "state" in result.stdout
-            assert stages(json.loads(state_path.read_text())) == ["backup"]
+            # The Rust engine builds and provisions before its backup.
+            assert stages(json.loads(state_path.read_text())) == ["tag", "build", "backup"]
         else:
             assert result.returncode == 0, result.stdout + result.stderr
             assert "continuing with the complete SQL dump" in result.stdout

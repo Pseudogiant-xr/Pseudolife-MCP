@@ -185,7 +185,7 @@ class RealDaemon:
                 self.proc.kill()
                 self.proc.wait(20)
         self._log.close()
-        _bank.drop(self.bank)
+        _bank.teardown(self.bank)
         shutil.rmtree(self.data, ignore_errors=True)
 
 

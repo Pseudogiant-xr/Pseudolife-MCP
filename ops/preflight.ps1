@@ -78,7 +78,10 @@ if (Get-Command docker -ErrorAction SilentlyContinue) {
 $resourcePython = $null
 foreach ($candidate in @("python", "python3", "py")) {
     if (-not (Get-Command $candidate -ErrorAction SilentlyContinue)) { continue }
-    $probeArgs = if ($candidate -eq "py") { @("-3") } else { @() }
+    # Assigned: an if-expression unrolls a one-item array to a string, which
+    # splats as characters (py - 3).
+    $probeArgs = @()
+    if ($candidate -eq "py") { $probeArgs = @("-3") }
     try {
         $probe = & $candidate @probeArgs -c 'import sys; sys.exit(1) if sys.version_info < (3, 10) else print(sys.executable)' 2>$null
         if ($LASTEXITCODE -eq 0 -and $probe) { $resourcePython = "$probe".Trim(); break }
@@ -122,7 +125,10 @@ if ($checks -contains "claude-desktop") {
     $desktopPythonOk = $false
     foreach ($candidate in @("python", "python3", "py")) {
         if (-not (Get-Command $candidate -ErrorAction SilentlyContinue)) { continue }
-        $probeArgs = if ($candidate -eq "py") { @("-3") } else { @() }
+        # Assigned: an if-expression unrolls a one-item array to a string, which
+        # splats as characters (py - 3).
+        $probeArgs = @()
+        if ($candidate -eq "py") { $probeArgs = @("-3") }
         try {
             & $candidate @probeArgs -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)" 2>$null | Out-Null
             if ($LASTEXITCODE -eq 0) { $desktopPythonOk = $true; break }

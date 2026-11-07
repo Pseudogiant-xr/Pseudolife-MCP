@@ -207,7 +207,7 @@ class Board:
         self.server.server_close()
         self.thread.join(5)
         self.conn.close()
-        _bank.drop(self.name)
+        _bank.teardown(self.name)
 
 
 def _local(state="absent", name=NAME):
