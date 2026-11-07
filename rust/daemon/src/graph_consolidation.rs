@@ -513,15 +513,25 @@ pub(crate) struct SlotRecord {
     pub embedding: Option<Vec<f32>>,
 }
 
-/// `_ID_KEYED_ENTITY`: `^([A-Za-z][\w.-]*):(\S+)$`.
-static ID_KEYED: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(r"^([A-Za-z][\p{L}\p{N}_.\-]*):([^\s\x1c-\x1f]+)$").expect("id-keyed regex")
-});
+/// `_ID_KEYED_ENTITY.match`: `^([A-Za-z][\w.-]*):(\S+)$` over CPython
+/// 3.11's `\w` and `\s` tables (`recall_unicode14`). The class cannot hold
+/// `:`, so the key is the run before the first `:`; `$` also matches before
+/// one final `\n`, which `\S` cannot consume.
+pub(crate) fn id_keyed(name: &str) -> Option<(&str, &str)> {
+    let t = name.strip_suffix('\n').unwrap_or(name);
+    let (key, id) = t.split_once(':')?;
+    let mut chars = key.chars();
+    let first_ok = chars.next().is_some_and(|c| c.is_ascii_alphabetic());
+    let key_ok =
+        first_ok && chars.all(|c| matches!(c, '.' | '-') || crate::recall_mentions::is_word(c));
+    let id_ok = !id.is_empty() && !id.chars().any(crate::recall_mentions::is_space);
+    (key_ok && id_ok).then_some((key, id))
+}
 
 fn id_keyed_siblings(ea: &str, eb: &str) -> bool {
-    match (ID_KEYED.captures(ea), ID_KEYED.captures(eb)) {
+    match (id_keyed(ea), id_keyed(eb)) {
         (Some(a), Some(b)) => {
-            py_casefold(&a[1]) == py_casefold(&b[1]) && py_casefold(&a[2]) != py_casefold(&b[2])
+            py_casefold(a.0) == py_casefold(b.0) && py_casefold(a.1) != py_casefold(b.1)
         }
         _ => false,
     }
@@ -606,16 +616,19 @@ const JUNK_STOPWORDS: [&str; 12] = [
     "null",
 ];
 
-/// `_VARIANT_PATTERNS`, in order.
+/// `_VARIANT_PATTERNS`, in order. Under `re.IGNORECASE` CPython's
+/// `[A-Za-z0-9]` also takes U+0130, U+0131, U+017F and U+212A (every match
+/// beyond ASCII, CPython 3.11); `(?i)` folds the last two, so the first two
+/// are listed.
 static VARIANT_PATTERNS: LazyLock<Vec<fancy_regex::Regex>> = LazyLock::new(|| {
-    const VB: &str = r"(?<![A-Za-z0-9])";
-    const VE: &str = r"(?![A-Za-z0-9])";
+    const VB: &str = r"(?<![A-Za-z0-9\x{130}\x{131}])";
+    const VE: &str = r"(?![A-Za-z0-9\x{130}\x{131}])";
     [
         format!(r"(?i){VB}E\d+B{VE}"),
         format!(r"(?i){VB}\d+(?:\.\d+)?[MK]?B{VE}"),
         format!(r"(?i){VB}Q\d[_-]K(?:[_-](?:XS|S|M|L|XL))?{VE}"),
         format!(r"(?i){VB}q\d[_-]\d{VE}"),
-        format!(r"(?i){VB}UD[_-]Q[A-Za-z0-9_-]*{VE}"),
+        format!(r"(?i){VB}UD[_-]Q[A-Za-z0-9_\x{{130}}\x{{131}}-]*{VE}"),
         r"\d+\.\d+(?:\.\d+)*".to_string(),
     ]
     .iter()
