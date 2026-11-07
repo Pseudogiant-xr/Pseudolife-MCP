@@ -239,6 +239,7 @@
     "ops/docker-compose.ghcr.yml": "a64059a8d81e18ccb441bedd3510c366e90172e3d70681ce7a91e8aa58d174de",
     "ops/docker-compose.rust-daemon.yml": "06b6163bd041cfe0f1e7a2f6eb62daf9311ec233f61ed53f3dd663ccb19a1dcd",
     "ops/docker-compose.rust-ghcr.yml": "d0b38b642020a76e20ff50d7bd861d083f5b3410c1c4e5ad4c8e85f4a8749663",
+    "ops/docker-compose.rust-mirror.yml": "4a2f464b252cb34b6984c4ade882509278d8790588e59729a2c45aa9482f88b9",
     "ops/docker-compose.rust-shadow.yml": "12d0a25a74101100cf7280cc6a2a94a22a1fe1a337f0aa5a59bcd860f6bb7917",
     "ops/docker-compose.rust.yml": "29b3590c58a8cd7a13a581d0e0488e48b2f934ad10844b4bf7b0b2eed4670ce0",
     "ops/docker-compose.stack-extractor.yml": "2af67c750ef93efe2528d7936ff2a8e5d3bd97c6d27721f41467ad79a1126091",
@@ -484,7 +485,7 @@
     "rust/shim/src/cli/update/engine.rs": "34013774a01541dd6ffdae01068d0aab9bf1361840aa97f0e10037cabab7b8cd",
     "rust/shim/src/cli/update/mod.rs": "56744e5c3a3142bab2bd9c6fc34c22c29369105422fb39001ddbc40f358571a7",
     "rust/shim/src/cli/update/options.rs": "940c9747875d2d9e407637d871484e4670d47a4f3c6f6d961f4d26ed0e92470e",
-    "rust/shim/src/cli/update/release.rs": "fee2a3e4910e8e54ccf20c4669ac22e07e57717424a5d8b13462373ae5de4f7f",
+    "rust/shim/src/cli/update/release.rs": "5d15cb25cdda22e1dd6f332be12536895317280eebf3c76824aaab89c3b65206",
     "rust/shim/src/cli/update/seams.rs": "da8b4ae1a6df9e9c97af062b5bf337a8ecc0b7bcf2354c52ce1a9d339817cf66",
     "rust/shim/src/cli/update/shadow.rs": "be4da00a9b8cc9e593a0be00ce364ace769d2e59767a65802e11426445c80aa3",
     "rust/shim/src/cli/update/signals.rs": "f0c47d95a459ab923b34f0c0ebcd84c62db54a75d8fb592b4b2fdcce69866f93",
@@ -31541,7 +31542,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/release.rs:427",
+          "location": "rust/shim/src/cli/update/release.rs:521",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -34610,6 +34611,19 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
+          "location": "ops/docker-compose.rust-mirror.yml:82",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "postgresql://pseudolife:${PSEUDOLIFE_MIRROR_PG_PASSWORD:?Set a mirror-only PostgreSQL password}@mirror-pg:5432/pl_cf_mir_bank",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "assignment-candidate"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
           "location": "ops/docker-compose.rust-shadow.yml:29",
           "shape": {
             "channel": "environment",
@@ -35945,6 +35959,19 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
+          "location": "ops/docker-compose.rust-mirror.yml:85",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "/data",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "assignment-candidate"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
           "location": "ops/docker-compose.rust-shadow.yml:32",
           "shape": {
             "channel": "environment",
@@ -36377,6 +36404,19 @@
             "parameters": {}
           },
           "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "ops/docker-compose.rust-mirror.yml:83",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "0.0.0.0",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "assignment-candidate"
         },
         {
           "dynamic": "unresolved",
@@ -37569,6 +37609,19 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
+          "location": "ops/docker-compose.rust-mirror.yml:84",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "\"8765\"",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "assignment-candidate"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
           "location": "ops/docker-compose.rust-shadow.yml:31",
           "shape": {
             "channel": "environment",
@@ -38182,6 +38235,19 @@
             "parameters": {}
           },
           "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "ops/docker-compose.rust-mirror.yml:98",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "${PSEUDOLIFE_MCP_TIER_MAP:-}",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "assignment-candidate"
         },
         {
           "dynamic": "unresolved",
@@ -39129,6 +39195,19 @@
             "parameters": {}
           },
           "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "ops/docker-compose.rust-mirror.yml:91",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "${PSEUDOLIFE_MIRROR_TOKEN:-}",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "assignment-candidate"
         },
         {
           "dynamic": "unresolved",
@@ -41020,6 +41099,32 @@
             "parameters": {}
           },
           "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "ops/docker-compose.rust-mirror.yml:69",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "ops/docker-compose.rust-mirror.yml:92",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "${PSEUDOLIFE_MIRROR_TOKENS:-}",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "assignment-candidate"
         },
         {
           "dynamic": "unresolved",
@@ -44208,6 +44313,19 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
+          "location": "ops/docker-compose.rust-mirror.yml:97",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "${PSEUDOLIFE_MCP_TOOLSET:-core}",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "assignment-candidate"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
           "location": "ops/docker-compose.rust-shadow.yml:42",
           "shape": {
             "channel": "environment",
@@ -44579,6 +44697,19 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
+          "location": "ops/docker-compose.rust-mirror.yml:87",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "\"1\"",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "assignment-candidate"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
           "location": "ops/docker-compose.rust-shadow.yml:34",
           "shape": {
             "channel": "environment",
@@ -44935,6 +45066,19 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
+          "location": "ops/docker-compose.rust-mirror.yml:101",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "\"0\"",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "assignment-candidate"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
           "location": "rust/shim/src/cli/doctor/proof.rs:531",
           "shape": {
             "channel": "environment",
@@ -45055,6 +45199,19 @@
             "parameters": {}
           },
           "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "ops/docker-compose.rust-mirror.yml:102",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "\"31536000\"",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "assignment-candidate"
         }
       ]
     },
@@ -48022,6 +48179,19 @@
             "parameters": {}
           },
           "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "ops/docker-compose.rust-mirror.yml:96",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "${PSEUDOLIFE_WRITER_ID:-mcp-client}",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "assignment-candidate"
         },
         {
           "dynamic": "unresolved",
@@ -68494,6 +68664,202 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
+      "location": "ops/docker-compose.rust-mirror.yml:105",
+      "name": "PSEUDOLIFE_MIRROR_DATA",
+      "shape": {
+        "channel": "environment",
+        "complete": false,
+        "expression": "?Set the mirror daemon's data directory}:/data",
+        "parameters": {}
+      },
+      "usage": "assignment-candidate"
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "environment",
+      "location": "ops/docker-compose.rust-mirror.yml:123",
+      "name": "PSEUDOLIFE_MIRROR_MODELS_VOLUME",
+      "shape": {
+        "channel": "environment",
+        "complete": false,
+        "expression": "-pseudolife-mcp_pseudolife_shadow_models}",
+        "parameters": {}
+      },
+      "usage": "assignment-candidate"
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "environment",
+      "location": "ops/docker-compose.rust-mirror.yml:36",
+      "name": "PSEUDOLIFE_MIRROR_PG_IMAGE",
+      "shape": {
+        "channel": "environment",
+        "complete": false,
+        "expression": "-pseudolife-pg:18}",
+        "parameters": {}
+      },
+      "usage": "assignment-candidate"
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "environment",
+      "location": "ops/docker-compose.rust-mirror.yml:43",
+      "name": "PSEUDOLIFE_MIRROR_PG_PASSWORD",
+      "shape": {
+        "channel": "environment",
+        "complete": false,
+        "expression": "?Set a mirror-only PostgreSQL password}",
+        "parameters": {}
+      },
+      "usage": "assignment-candidate"
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "environment",
+      "location": "ops/docker-compose.rust-mirror.yml:48",
+      "name": "PSEUDOLIFE_MIRROR_BACKUPS",
+      "shape": {
+        "channel": "environment",
+        "complete": false,
+        "expression": "?Set the directory holding the nightly backups}:/backups:ro",
+        "parameters": {}
+      },
+      "usage": "assignment-candidate"
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "environment",
+      "location": "ops/docker-compose.rust-mirror.yml:49",
+      "name": "PSEUDOLIFE_MIRROR_PG_MEM_LIMIT",
+      "shape": {
+        "channel": "environment",
+        "complete": false,
+        "expression": "-2g}",
+        "parameters": {}
+      },
+      "usage": "assignment-candidate"
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "environment",
+      "location": "ops/docker-compose.rust-mirror.yml:50",
+      "name": "PSEUDOLIFE_MIRROR_PG_MEM_LIMIT",
+      "shape": {
+        "channel": "environment",
+        "complete": false,
+        "expression": "-2g}",
+        "parameters": {}
+      },
+      "usage": "assignment-candidate"
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "environment",
+      "location": "ops/docker-compose.rust-mirror.yml:61",
+      "name": "PSEUDOLIFE_RUST_IMAGE",
+      "shape": {
+        "channel": "environment",
+        "complete": false,
+        "expression": "-pseudolife-daemon-rust:checkout}",
+        "parameters": {}
+      },
+      "usage": "assignment-candidate"
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "environment",
+      "location": "ops/docker-compose.rust-mirror.yml:78",
+      "name": "PSEUDOLIFE_MIRROR_DAEMON_MEM_LIMIT",
+      "shape": {
+        "channel": "environment",
+        "complete": false,
+        "expression": "-4608m}",
+        "parameters": {}
+      },
+      "usage": "assignment-candidate"
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "environment",
+      "location": "ops/docker-compose.rust-mirror.yml:79",
+      "name": "PSEUDOLIFE_MIRROR_DAEMON_MEM_LIMIT",
+      "shape": {
+        "channel": "environment",
+        "complete": false,
+        "expression": "-4608m}",
+        "parameters": {}
+      },
+      "usage": "assignment-candidate"
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "environment",
+      "location": "ops/docker-compose.rust-mirror.yml:82",
+      "name": "PSEUDOLIFE_MIRROR_PG_PASSWORD",
+      "shape": {
+        "channel": "environment",
+        "complete": false,
+        "expression": "?Set a mirror-only PostgreSQL password}@mirror-pg:5432/pl_cf_mir_bank",
+        "parameters": {}
+      },
+      "usage": "assignment-candidate"
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "environment",
+      "location": "ops/docker-compose.rust-mirror.yml:86",
+      "name": "PSEUDOLIFE_DAEMON_MODELS_DIR",
+      "shape": {
+        "channel": "environment",
+        "complete": false,
+        "expression": "/models",
+        "parameters": {}
+      },
+      "usage": "assignment-candidate"
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "environment",
+      "location": "ops/docker-compose.rust-mirror.yml:91",
+      "name": "PSEUDOLIFE_MIRROR_TOKEN",
+      "shape": {
+        "channel": "environment",
+        "complete": false,
+        "expression": "-}",
+        "parameters": {}
+      },
+      "usage": "assignment-candidate"
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "environment",
+      "location": "ops/docker-compose.rust-mirror.yml:92",
+      "name": "PSEUDOLIFE_MIRROR_TOKENS",
+      "shape": {
+        "channel": "environment",
+        "complete": false,
+        "expression": "-}",
+        "parameters": {}
+      },
+      "usage": "assignment-candidate"
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "environment",
       "location": "ops/docker-compose.rust-shadow.yml:19",
       "name": "PSEUDOLIFE_SHADOW_CONFIGURATION",
       "shape": {
@@ -69880,7 +70246,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "rust/shim/src/cli/update/release.rs:1165",
+      "location": "rust/shim/src/cli/update/release.rs:1259",
       "name": "PSEUDOLIFE_DAEMON_ONNX_DIR",
       "shape": {
         "channel": "environment",
@@ -69894,7 +70260,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "rust/shim/src/cli/update/release.rs:1171",
+      "location": "rust/shim/src/cli/update/release.rs:1265",
       "name": "PSEUDOLIFE_DAEMON_MODELS_DIR",
       "shape": {
         "channel": "environment",
@@ -69908,7 +70274,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "rust/shim/src/cli/update/release.rs:201",
+      "location": "rust/shim/src/cli/update/release.rs:254",
       "name": "PSEUDOLIFE_RELEASE_API_BASE_URL",
       "shape": {
         "channel": "environment",
@@ -69922,7 +70288,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "rust/shim/src/cli/update/release.rs:234",
+      "location": "rust/shim/src/cli/update/release.rs:287",
       "name": "PSEUDOLIFE_RELEASE_BASE_URL",
       "shape": {
         "channel": "environment",
@@ -74363,7 +74729,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "rust/shim/src/cli/update/release.rs:1093",
+      "location": "rust/shim/src/cli/update/release.rs:1187",
       "method": null,
       "name": "/health",
       "shape": {
@@ -74377,7 +74743,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "rust/shim/src/cli/update/release.rs:1097",
+      "location": "rust/shim/src/cli/update/release.rs:1191",
       "method": null,
       "name": "/health",
       "shape": {
@@ -74391,7 +74757,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "rust/shim/src/cli/update/release.rs:808",
+      "location": "rust/shim/src/cli/update/release.rs:902",
       "method": null,
       "name": "/health",
       "shape": {
@@ -74405,7 +74771,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "rust/shim/src/cli/update/release.rs:815",
+      "location": "rust/shim/src/cli/update/release.rs:909",
       "method": null,
       "name": "/health",
       "shape": {
@@ -77192,7 +77558,7 @@
     {
       "evidence": "static",
       "kind": "environment",
-      "location": "rust/shim/src/cli/update/release.rs:1294",
+      "location": "rust/shim/src/cli/update/release.rs:1388",
       "name": "PSEUDOLIFE_DAEMON_MODELS_DIR",
       "shape": {
         "channel": "environment",
@@ -93350,6 +93716,168 @@
     },
     {
       "dynamic": "unresolved",
+      "location": "ops/docker-compose.rust-mirror.yml:101",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_RELEASE_CHECK"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.rust-mirror.yml:102",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_SESSION_IDLE_SECONDS"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.rust-mirror.yml:105",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:environment:PSEUDOLIFE_MIRROR_DATA"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.rust-mirror.yml:123",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:environment:PSEUDOLIFE_MIRROR_MODELS_VOLUME"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.rust-mirror.yml:36",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:environment:PSEUDOLIFE_MIRROR_PG_IMAGE"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.rust-mirror.yml:43",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:environment:PSEUDOLIFE_MIRROR_PG_PASSWORD"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.rust-mirror.yml:48",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:environment:PSEUDOLIFE_MIRROR_BACKUPS"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.rust-mirror.yml:49",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:environment:PSEUDOLIFE_MIRROR_PG_MEM_LIMIT"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.rust-mirror.yml:50",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:environment:PSEUDOLIFE_MIRROR_PG_MEM_LIMIT"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.rust-mirror.yml:61",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:environment:PSEUDOLIFE_RUST_IMAGE"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.rust-mirror.yml:69",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.rust-mirror.yml:78",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:environment:PSEUDOLIFE_MIRROR_DAEMON_MEM_LIMIT"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.rust-mirror.yml:79",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:environment:PSEUDOLIFE_MIRROR_DAEMON_MEM_LIMIT"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.rust-mirror.yml:82",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_DATABASE_URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.rust-mirror.yml:82",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:environment:PSEUDOLIFE_MIRROR_PG_PASSWORD"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.rust-mirror.yml:83",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_HOST"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.rust-mirror.yml:84",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_PORT"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.rust-mirror.yml:85",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_DATA_DIR"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.rust-mirror.yml:86",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:environment:PSEUDOLIFE_DAEMON_MODELS_DIR"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.rust-mirror.yml:87",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TRUST_BIND"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.rust-mirror.yml:91",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.rust-mirror.yml:91",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:environment:PSEUDOLIFE_MIRROR_TOKEN"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.rust-mirror.yml:92",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.rust-mirror.yml:92",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:environment:PSEUDOLIFE_MIRROR_TOKENS"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.rust-mirror.yml:96",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_WRITER_ID"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.rust-mirror.yml:97",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOOLSET"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.rust-mirror.yml:98",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TIER_MAP"
+    },
+    {
+      "dynamic": "unresolved",
       "location": "ops/docker-compose.rust-shadow.yml:10",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_BUILD_DIRTY"
@@ -102008,55 +102536,55 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/release.rs:1093",
+      "location": "rust/shim/src/cli/update/release.rs:1187",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/release.rs:1097",
+      "location": "rust/shim/src/cli/update/release.rs:1191",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/release.rs:1165",
+      "location": "rust/shim/src/cli/update/release.rs:1259",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_DAEMON_ONNX_DIR"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/release.rs:1171",
+      "location": "rust/shim/src/cli/update/release.rs:1265",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_DAEMON_MODELS_DIR"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/release.rs:201",
+      "location": "rust/shim/src/cli/update/release.rs:254",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_RELEASE_API_BASE_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/release.rs:234",
+      "location": "rust/shim/src/cli/update/release.rs:287",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_RELEASE_BASE_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/release.rs:427",
+      "location": "rust/shim/src/cli/update/release.rs:521",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_IMAGE_TAG"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/release.rs:808",
+      "location": "rust/shim/src/cli/update/release.rs:902",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/release.rs:815",
+      "location": "rust/shim/src/cli/update/release.rs:909",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },

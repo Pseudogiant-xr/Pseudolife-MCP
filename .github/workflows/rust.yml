@@ -347,8 +347,10 @@ jobs:
         # Windows startup/import floor pending its first hosted measurement.
         # The slice-isolation probe imports every slice-binding harness in
         # subprocesses: 50 tests in 1.45s on a Windows desktop, 2026-10-29.
+        # The mirror seed's database cases start a throwaway PostgreSQL on a
+        # Linux engine and skip elsewhere.
         timeout-minutes: 3
-        run: python -m pytest -q rust/daemon/harness/board/test_norm.py rust/daemon/harness/board/test_run.py rust/daemon/harness/test_pgdisposable_slices.py
+        run: python -m pytest -q rust/daemon/harness/board/test_norm.py rust/daemon/harness/board/test_run.py rust/daemon/harness/test_pgdisposable_slices.py rust/daemon/harness/mirror/test_seed.py
       - name: Bind the event-selected Python oracle
         shell: pwsh
         working-directory: .
