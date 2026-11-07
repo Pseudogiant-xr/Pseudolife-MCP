@@ -516,7 +516,14 @@ impl Update {
                 self.step(format!(
                     "this bank ({shown}) still keeps its CMS counters in memory_state/weights.pt: moving to the Python daemon {target} first, which imports them, then to the Rust daemon"
                 ));
-                // The Rust image must exist before the Python leg changes anything.
+                // The Rust image must exist before the Python leg changes anything,
+                // and the disk floor holds before that image is pulled.
+                disk::host(&data_dir())?;
+                self.disk_storage(
+                    context.running["Id"].as_str().unwrap_or(DAEMON_CONTAINER),
+                    Some(pg.as_str()),
+                    context.running["Image"].as_str(),
+                )?;
                 let rust_image = format!("{RUST_IMAGE}:{target}");
                 self.step(format!("pulling {rust_image}..."));
                 if self
