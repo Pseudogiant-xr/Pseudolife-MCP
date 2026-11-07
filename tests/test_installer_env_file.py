@@ -65,7 +65,7 @@ def _raw_calls(shell: _Shell) -> bytes:
 def test_install_rewrites_a_crlf_env_file_before_reading_volume_names(bash, tmp_path):
     shell = _Shell(bash, tmp_path)
     env = _env_file(tmp_path, CRLF)
-    proc = _install(shell, env, "env line endings", "volumes")
+    proc = _install(shell, env, "env line endings", "volumes", "create volumes")
     assert proc.returncode == 0, proc.stderr
     assert env.read_bytes() == LF
     [backup] = list(env.parent.glob(".env.crlf-*"))
@@ -84,7 +84,7 @@ def test_install_leaves_an_lf_env_file_alone(bash, tmp_path):
     shell = _Shell(bash, tmp_path)
     env = _env_file(tmp_path, LF)
     before = env.stat().st_mtime_ns
-    proc = _install(shell, env, "env line endings", "volumes")
+    proc = _install(shell, env, "env line endings", "volumes", "create volumes")
     assert proc.returncode == 0, proc.stderr
     assert env.read_bytes() == LF
     assert env.stat().st_mtime_ns == before
@@ -133,7 +133,7 @@ def test_a_value_read_from_a_crlf_env_file_carries_no_cr_even_unrewritten(bash, 
     the rewrite, or run on a file rewritten by hand, still gets clean names."""
     shell = _Shell(bash, tmp_path)
     env = _env_file(tmp_path, CRLF)
-    proc = _install(shell, env, "volumes")
+    proc = _install(shell, env, "volumes", "create volumes")
     assert proc.returncode == 0, proc.stderr
     assert b"docker|volume create custom-bank\n" in _raw_calls(shell)
     assert b"\r" not in _raw_calls(shell)

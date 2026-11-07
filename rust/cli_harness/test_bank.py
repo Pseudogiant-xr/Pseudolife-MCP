@@ -187,3 +187,179 @@ def test_default_template_retry_is_bounded_and_preserves_other_errors(monkeypatc
         create_from_default_template(Connection(), "CREATE DATABASE fixture")
     assert caught.value is failure
     assert len(statements) == attempts
+
+
+class _TeardownAdmin:
+    """The admin connection drop() reaps through: a catalog that holds the
+    bank until DROP runs, recording every statement."""
+
+    def __init__(self, statements, exists=True, catalog=(0, True)):
+        self.statements, self.exists, self.catalog = statements, exists, catalog
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_exc):
+        return False
+
+    def execute(self, statement, params=None):
+        self.statements.append(statement)
+        result = self
+
+        class _Rows:
+            def __init__(self, row):
+                self.row = row
+
+            def fetchone(self):
+                return self.row
+
+        if statement.startswith("SELECT 1 FROM pg_database"):
+            return _Rows((1,) if result.exists else None)
+        if statement.startswith("SELECT datconnlimit"):
+            return _Rows(result.catalog if result.exists else None)
+        if statement.startswith("DROP DATABASE"):
+            result.exists = False
+        return _Rows(None)
+
+
+def _teardown_fixture(monkeypatch, connects, statements, **admin):
+    import time
+    from pseudolife_memory.storage import schema
+
+    monkeypatch.setattr(_bank, "url", lambda name: name)
+    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(schema, "assert_disposable_database", lambda _conn: None)
+    monkeypatch.setattr(schema, "refuse_production_database", lambda _name: None)
+    admin_conn = _TeardownAdmin(statements, **admin)
+    monkeypatch.setattr(_bank, "_admin", lambda: admin_conn)
+
+    class _Target:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc):
+            return False
+
+    def connect(_name, autocommit=True):
+        failure = connects.pop(0) if connects else None
+        if failure is not None:
+            raise failure
+        return _Target()
+
+    monkeypatch.setattr(_bank, "_connect", connect)
+    return admin_conn
+
+
+def test_teardown_drop_retries_a_connect_timeout(monkeypatch):
+    """A connect that times out on the first teardown attempt (hosted
+    windows-latest, run 42348225338) no longer fails the case: drop() retries
+    it and reaps the bank."""
+    import psycopg
+
+    connects = [psycopg.errors.ConnectionTimeout("connection timeout expired"), None]
+    statements = []
+    admin = _teardown_fixture(monkeypatch, connects, statements)
+    name = _bank.name("pl_cf_teardown_timeout")
+    _bank.drop(name)
+    assert connects == []
+    assert any(s.startswith("DROP DATABASE") for s in statements)
+    assert admin.exists is False
+
+
+def test_connect_retry_is_bounded_and_only_for_timeouts(monkeypatch):
+    import psycopg
+
+    # Timeouts every time: three attempts, then the catalog check decides,
+    # and an ordinary (not half-dropped) bank still raises.
+    timeouts = [psycopg.errors.ConnectionTimeout("timeout")] * 5
+    statements = []
+    _teardown_fixture(monkeypatch, timeouts, statements)
+    name = _bank.name("pl_cf_teardown_bounded")
+    with pytest.raises(psycopg.errors.ConnectionTimeout):
+        _bank.drop(name)
+    assert len(timeouts) == 5 - _bank.CONNECT_ATTEMPTS
+
+    # A refusal that is not a timeout (a half-dropped bank) is not retried:
+    # the catalog check sends it on to DROP, as before.
+    refusals = [psycopg.OperationalError("database is not accepting connections"), None]
+    statements = []
+    admin = _teardown_fixture(monkeypatch, refusals, statements, catalog=(-2, False))
+    name = _bank.name("pl_cf_teardown_half_dropped")
+    _bank.drop(name)
+    assert refusals == [None]
+    assert admin.exists is False
+
+
+def test_teardown_keeps_the_case_only_when_the_bank_is_gone(monkeypatch, capsys):
+    import psycopg
+
+    failure = psycopg.OperationalError("server closed the connection")
+
+    def broken_drop(_name):
+        raise failure
+
+    # The drop failed but the bank is gone: printed, the case keeps its result.
+    statements = []
+    _teardown_fixture(monkeypatch, [], statements, exists=False)
+    monkeypatch.setattr(_bank, "drop", broken_drop)
+    name = _bank.name("pl_cf_teardown_gone")
+    _bank.teardown(name)
+    assert "the bank is gone; the case keeps its result" in capsys.readouterr().err
+
+    # The bank is still there: a leak, so the failure propagates.
+    _teardown_fixture(monkeypatch, [], [], exists=True)
+    monkeypatch.setattr(_bank, "drop", broken_drop)
+    with pytest.raises(psycopg.OperationalError) as caught:
+        _bank.teardown(_bank.name("pl_cf_teardown_leaked"))
+    assert caught.value is failure
+
+
+def test_drop_retries_a_timed_out_admin_connect(monkeypatch):
+    import psycopg
+
+    statements = []
+    admin = _teardown_fixture(monkeypatch, [None], statements)
+    attempts = [psycopg.errors.ConnectionTimeout("admin timeout")]
+
+    def admin_connect():
+        if attempts:
+            raise attempts.pop(0)
+        return admin
+
+    monkeypatch.setattr(_bank, "_admin", admin_connect)
+    _bank.drop(_bank.name("pl_cf_teardown_admin_timeout"))
+    assert attempts == [] and admin.exists is False
+
+
+def test_teardown_propagates_when_the_check_fails_or_a_guard_refuses(monkeypatch):
+    import psycopg
+    from pseudolife_memory.storage.schema import ProductionDatabaseError
+
+    failure = psycopg.OperationalError("server closed the connection")
+
+    def broken_drop(_name):
+        raise failure
+
+    def no_admin():
+        raise psycopg.OperationalError("cannot reach the server")
+
+    # The absence check itself fails: the original failure propagates, with
+    # its own context kept and the check's error noted.
+    _teardown_fixture(monkeypatch, [], [])
+    monkeypatch.setattr(_bank, "drop", broken_drop)
+    monkeypatch.setattr(_bank, "_admin", no_admin)
+    with pytest.raises(psycopg.OperationalError) as caught:
+        _bank.teardown(_bank.name("pl_cf_teardown_unconfirmed"))
+    assert caught.value is failure
+    assert any("could not confirm" in note for note in caught.value.__notes__)
+
+    # A guard refusal propagates even when the bank is gone.
+    for refusal in (ValueError("not a disposable name"), ProductionDatabaseError("production")):
+        _teardown_fixture(monkeypatch, [], [], exists=False)
+
+        def refusing_drop(_name, refusal=refusal):
+            raise refusal
+
+        monkeypatch.setattr(_bank, "drop", refusing_drop)
+        with pytest.raises(type(refusal)):
+            _bank.teardown(_bank.name("pl_cf_teardown_guard"))

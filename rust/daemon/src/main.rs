@@ -211,6 +211,9 @@ fn main() {
     }
     onnx_artifacts::validate_reranker_model(&config.memory.reranker.model_name)
         .unwrap_or_else(|e| fail(1, &e.to_string()));
+    if let Some(refusal) = config::retired_band_refusal(&config.memory) {
+        fail(1, &refusal);
+    }
     let env = config::DaemonEnv::from_env(&env_lookup).unwrap_or_else(|e| fail(1, &e.to_string()));
     let read_only = config.read_only || env.read_only;
     if !read_only && let Err(e) = std::fs::create_dir_all(&data_dir) {

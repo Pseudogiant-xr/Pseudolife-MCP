@@ -986,7 +986,24 @@ pub(super) fn deploy(u: &mut Update, repo: &Path) -> Result<()> {
             "the current daemon must be running for the backup and rollback tag; start it and retry",
         ));
     }
-    verify_identity(u, &config, &running, &u.o.daemon_url)?;
+    // Check the running daemon's mounts against the configuration that holds
+    // its model volume: the checkout Rust overlay. A Rust-to-Rust update keeps
+    // that volume, and a switch back to Python only leaves the model cache.
+    let identity = if (choice == "rust" && !u.o.shadow) || labels[ENGINE_LABEL] == "rust" {
+        // Named explicitly, not through compose_args: a checkout without its
+        // overlay is refused here, before the rollback tag.
+        let mut args = base.clone();
+        args.extend([
+            "-f".into(),
+            ops.join("docker-compose.rust-daemon.yml")
+                .to_string_lossy()
+                .into_owned(),
+        ]);
+        compose_config(u, &args, &env, UNRESOLVED)?
+    } else {
+        config.clone()
+    };
+    verify_identity(u, &identity, &running, &u.o.daemon_url)?;
     disk::host(&repo)?;
     u.disk_storage(&daemon, Some(&pg), running["Image"].as_str())?;
     u.set_rollback_scope(&config, &running)?;
@@ -1074,24 +1091,14 @@ pub(super) fn deploy(u: &mut Update, repo: &Path) -> Result<()> {
             schema,
         );
     }
-    let backups = if stopped_handover {
-        u.builtin_backup(&pg, &daemon, &repo.join("data/backups"))?
-    } else {
-        u.project_backup(&repo, &pg, &daemon, user, db)?
-    };
-    disk::host(&repo)?;
-    u.disk_storage(&daemon, Some(&pg), running["Image"].as_str())?;
-    if stopped_handover {
-        let current = inspect(u, &daemon)?;
-        if current["Image"] != running["Image"]
-            || current["State"]["Running"] != false
-            || current["Config"] != running["Config"]
-        {
-            return Err(UpdateError::usage(
-                "the stopped daemon changed during backup; stop other updates and retry; nothing was deployed",
-            ));
-        }
+    if !stopped_handover {
+        // The backup stages in both containers' /tmp: refuse before the build.
+        u.disk_container(&pg, "/tmp")?;
+        u.disk_container(&daemon, "/tmp")?;
     }
+    // Tag first: rebuilding the same engine moves its :checkout tag, and
+    // Docker's containerd image store then no longer resolves the running
+    // image's ID, so it could not be tagged afterwards.
     let old = labels[ENGINE_LABEL].as_str().unwrap_or("python");
     let suffix = u.rollback_suffix();
     let rollback = format!("pseudolife-daemon-{old}:{running_version}-{suffix}");
@@ -1099,92 +1106,212 @@ pub(super) fn deploy(u: &mut Update, repo: &Path) -> Result<()> {
         .as_str()
         .ok_or_else(|| UpdateError::usage("cannot identify the running image"))?;
     tag_validated(u, id, &rollback)?;
-    let old_service = rollback_service(&running, &rollback, Some(&repo));
-    let rollback_file = repo.join("data/update-engine").join(format!(
-        "docker-compose.rollback-{}-{}.json",
-        stamp(),
-        uuid::Uuid::new_v4().simple()
-    ));
-    write_overlay(&rollback_file, &old_service)?;
-    let selected = repo.join(SELECTION);
-    let accepted = if old == "rust" {
-        selected.clone()
-    } else {
-        repo.join(PYTHON_ACCEPTED)
+    u.step(format!("tagged rollback image: {rollback}"));
+    u.report.rollback = json!({"tag":rollback,"state":"tagged"});
+    let image = format!("pseudolife-daemon-{choice}:checkout");
+    let kept = |e: UpdateError, built: bool| UpdateError {
+        message: kept_note(&e.message, &rollback, built.then_some(image.as_str())),
+        exit_code: e.exit_code,
     };
-    u.rollback_lines = rollback_commands(
-        &base,
-        &[env_file],
-        &rollback_file,
-        &accepted,
-        (old == "python").then_some(selected.as_path()),
-        None,
-    );
-    u.rollback_lines.extend(u.schema_rollback_note());
-    u.report.rollback =
-        json!({"tag":rollback,"state":"tagged","overlay":rollback_file,"backup":backups});
-    u.prune_rollbacks("pseudolife-daemon-python");
-    u.prune_rollbacks("pseudolife-daemon-rust");
     let activation = uuid::Uuid::new_v4().simple().to_string();
-    let service = json!({"image":format!("pseudolife-daemon-{choice}:checkout"),"build":{"dockerfile":format!("ops/Dockerfile.daemon{}",if choice=="rust"{"-rust"}else{""})},"labels":{ENGINE_LABEL:choice,CHECKOUT_LABEL:repo,ACTIVATION_LABEL:activation}});
+    let service = json!({"image":image,"build":{"dockerfile":format!("ops/Dockerfile.daemon{}",if choice=="rust"{"-rust"}else{""})},"labels":{ENGINE_LABEL:choice,CHECKOUT_LABEL:repo,ACTIVATION_LABEL:activation}});
     let candidate = repo.join("data/update-engine/docker-compose.engine-candidate.json");
-    write_overlay(&candidate, &service).map_err(|e| u.rollback_error(e.message))?;
-    let mut compose = base;
+    let rust_overlay = ops.join("docker-compose.rust-daemon.yml");
+    let mut compose = base.clone();
     if choice == "rust" {
-        compose.extend([
-            "-f".into(),
-            ops.join("docker-compose.rust-daemon.yml")
-                .to_string_lossy()
-                .into_owned(),
-        ]);
+        compose.extend(["-f".into(), rust_overlay.to_string_lossy().into_owned()]);
     }
     compose.extend(["-f".into(), candidate.to_string_lossy().into_owned()]);
+    write_overlay(&candidate, &service).map_err(|e| kept(e, false))?;
+    let mut built = false;
     let result = (|| -> Result<()> {
-        if tree_state(&repo) != tree {
-            return Err(UpdateError::new(
-                "the checkout moved during backup; retry from a stable checkout",
-            ));
-        }
-        u.step(format!(
-            "building the {choice} daemon; rollback image {rollback}"
-        ));
-        let mut args = vec!["compose".into()];
-        args.extend(compose.clone());
-        args.extend(["build".into(), DAEMON_SERVICE.into()]);
-        if u.command(&args, Some(&env), 7200, true).0 != 0 {
-            return Err(UpdateError::new(
-                "engine build failed; the running daemon is unchanged",
-            ));
-        }
-        let mut args = vec!["compose".into()];
-        args.extend(compose);
-        args.extend([
-            "up".into(),
-            "-d".into(),
-            "--no-deps".into(),
-            "--no-build".into(),
-            DAEMON_SERVICE.into(),
-        ]);
-        if u.command(&args, Some(&env), 120, true).0 != 0 {
-            return Err(UpdateError::new("engine recreate failed"));
-        }
-        let health = u.wait_health(Some(&version), Some(schema), &token, false)?;
-        if choice == "rust" {
-            write_overlay(&selected, &service)?;
-        } else {
-            write_overlay(&repo.join(PYTHON_ACCEPTED), &service)?;
-            if selected.exists() {
-                fs::remove_file(&selected)?;
+        // Build the replacement, then install its pinned models: both before
+        // the backup, so a first activation's model download never runs
+        // inside the health gate, and a failure leaves the daemon untouched.
+        let prepared = (|| -> Result<Value> {
+            if tree_state(&repo) != tree {
+                return Err(UpdateError::new(
+                    "the checkout moved since this update started; retry from a stable checkout; nothing was deployed",
+                ));
             }
-        }
-        u.checkout_post_deploy(&repo, before["hooks_digest"].as_str(), &health)?;
-        u.prune_cache(Some(&repo));
-        Ok(())
+            u.step(format!(
+                "building the {choice} daemon (the running daemon keeps serving)..."
+            ));
+            let mut args = vec!["compose".into()];
+            args.extend(compose.clone());
+            args.extend(["build".into(), DAEMON_SERVICE.into()]);
+            if u.command(&args, Some(&env), 7200, true).0 != 0 {
+                return Err(UpdateError::new(
+                    "engine build failed; the running daemon is unchanged; nothing was deployed",
+                ));
+            }
+            built = true;
+            if choice == "rust" {
+                // The config the replacement runs with: its model directory and volume.
+                let replacement = compose_config(u, &compose, &env, UNRESOLVED)?;
+                u.provision_models(&image, &replacement)?;
+            }
+            let backups = if stopped_handover {
+                u.builtin_backup(&pg, &daemon, &repo.join("data/backups"))?
+            } else {
+                u.project_backup(&repo, &pg, &daemon, user, db)?
+            };
+            disk::host(&repo)?;
+            // By tag: after a same-engine rebuild the running image's ID may not resolve.
+            u.disk_storage(&daemon, Some(&pg), Some(&rollback))?;
+            if stopped_handover {
+                let current = inspect(u, &daemon)?;
+                if current["Image"] != running["Image"]
+                    || current["State"]["Running"] != false
+                    || current["Config"] != running["Config"]
+                {
+                    return Err(UpdateError::usage(
+                        "the stopped daemon changed during backup; stop other updates and retry; nothing was deployed",
+                    ));
+                }
+            }
+            Ok(backups)
+        })();
+        let backups = prepared.map_err(|e| kept(e, built))?;
+        let old_service = rollback_service(&running, &rollback, Some(&repo));
+        let rollback_file = repo.join("data/update-engine").join(format!(
+            "docker-compose.rollback-{}-{}.json",
+            stamp(),
+            uuid::Uuid::new_v4().simple()
+        ));
+        write_overlay(&rollback_file, &old_service)?;
+        let selected = repo.join(SELECTION);
+        let accepted = if old == "rust" {
+            selected.clone()
+        } else {
+            repo.join(PYTHON_ACCEPTED)
+        };
+        u.rollback_lines = rollback_commands(
+            &checkout_rollback_base(&base, &rust_overlay, old, &running),
+            std::slice::from_ref(&env_file),
+            &rollback_file,
+            &accepted,
+            (old == "python").then_some(selected.as_path()),
+            None,
+        );
+        u.rollback_lines.extend(u.schema_rollback_note());
+        u.report.rollback =
+            json!({"tag":rollback,"state":"tagged","overlay":rollback_file,"backup":backups});
+        u.prune_rollbacks("pseudolife-daemon-python");
+        u.prune_rollbacks("pseudolife-daemon-rust");
+        let recreated = (|| -> Result<()> {
+            u.step(format!(
+                "recreating the {choice} daemon; rollback image {rollback}"
+            ));
+            let mut args = vec!["compose".into()];
+            args.extend(compose.clone());
+            args.extend([
+                "up".into(),
+                "-d".into(),
+                "--no-deps".into(),
+                "--no-build".into(),
+                DAEMON_SERVICE.into(),
+            ]);
+            if u.command(&args, Some(&env), 120, true).0 != 0 {
+                return Err(UpdateError::new("engine recreate failed"));
+            }
+            let health = u.wait_health(Some(&version), Some(schema), &token, false)?;
+            if choice == "rust" {
+                write_overlay(&selected, &service)?;
+            } else {
+                write_overlay(&repo.join(PYTHON_ACCEPTED), &service)?;
+                if selected.exists() {
+                    fs::remove_file(&selected)?;
+                }
+            }
+            u.checkout_post_deploy(&repo, before["hooks_digest"].as_str(), &health)?;
+            u.prune_cache(Some(&repo));
+            Ok(())
+        })();
+        recreated.map_err(|e| u.rollback_error(e.message))
     })();
     if fs::remove_file(&candidate).is_err() {
         u.warn("could not remove the temporary engine overlay; the rollback instructions remain usable");
     }
-    result.map_err(|e| u.rollback_error(e.message))
+    result
+}
+
+/// `docker compose <args> config --format json`, refused with `failure`:
+/// Compose errors can include resolved credentials, so they are never printed.
+pub(super) fn compose_config(
+    u: &Update,
+    args: &[String],
+    env: &Environment,
+    failure: &str,
+) -> Result<Value> {
+    let mut command = vec!["compose".into()];
+    command.extend(args.iter().cloned());
+    command.extend(["config".into(), "--format".into(), "json".into()]);
+    let (code, out) = u.command(&command, Some(env), 60, false);
+    serde_json::from_str(&out)
+        .ok()
+        .filter(|_: &Value| code == 0)
+        .ok_or_else(|| UpdateError::usage(failure))
+}
+
+/// The project's Compose arguments plus the Rust overlay that carries the
+/// daemon's /models volume, for release mode's check when a Rust daemon
+/// leaves Rust (the switch drops that volume on purpose; every other mount
+/// is still compared). A missing overlay adds nothing, as compose_args does.
+pub(super) fn with_rust_overlay(args: &[String], overlay: &Path) -> Vec<String> {
+    let mut identity = args.to_vec();
+    identity.extend(compose_args(&[overlay.to_path_buf()], &[]));
+    identity
+}
+
+const UNRESOLVED: &str = "cannot resolve the Compose project; check its files and env file, then retry; nothing was changed";
+
+/// A failure before the recreate: the rollback tag stays, and after a
+/// successful build its tag names an image that never passed the gate.
+pub(super) fn kept_note(message: &str, rollback: &str, built: Option<&str>) -> String {
+    let note = format!("{message}; the running image keeps its rollback tag {rollback}");
+    match built {
+        Some(image) => format!("{note}; {image} now names the unvalidated build"),
+        None => note,
+    }
+}
+
+/// The Compose files a printed checkout rollback recreates the old daemon
+/// with: a restored Rust daemon keeps the model directory it ran with, the
+/// overlay's /models volume only when it already used it.
+pub(super) fn checkout_rollback_base(
+    base: &[String],
+    rust_overlay: &Path,
+    old: &str,
+    running: &Value,
+) -> Vec<String> {
+    let mut files = base.to_vec();
+    if old == "rust" && uses_models_volume(running) {
+        files.extend(["-f".into(), rust_overlay.to_string_lossy().into_owned()]);
+    }
+    files
+}
+
+/// Whether a running Rust daemon reads its models from the overlay's
+/// /models (its environment names it, or a volume is mounted there), rather
+/// than an earlier checkout's /data/models.
+pub(super) fn uses_models_volume(running: &Value) -> bool {
+    let named = running["Config"]["Env"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .any(|entry| {
+            entry
+                .strip_prefix("PSEUDOLIFE_DAEMON_MODELS_DIR=")
+                .is_some_and(|dir| dir.trim_end_matches('/') == "/models")
+        });
+    named
+        || running["Mounts"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|mount| mount["Destination"] == "/models")
 }
 
 #[cfg(test)]

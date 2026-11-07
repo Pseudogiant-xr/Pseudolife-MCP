@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 from urllib.parse import quote
 
 from ..pg_create import create_from_default_template
@@ -68,13 +69,72 @@ def _admin():
         connect_timeout=5, autocommit=True)
 
 
+# A connect that times out is retried, the only connect failure that is: a
+# half-dropped bank refuses connections with a different error, which keeps
+# its catalog check below. Measured 2026-11-07: 100 psycopg connects to the
+# Windows host's bench PostgreSQL took 5.9-32.1 ms (median 24.9 ms), so the
+# 5 s connect_timeout is about 150x the slowest. Hosted windows-latest still
+# exceeded it once, in a lease row's teardown after every comparison passed
+# (run 42348225338, job 128340727137), so a timeout is a transient stall.
+# Three attempts, 1 s then 2 s apart: at most about 18 s per connect, so a
+# drop() that meets it at both of its connects waits about 36 s.
+CONNECT_ATTEMPTS = 3
+CONNECT_BACKOFF_SECONDS = (1.0, 2.0)
+
+
+def _retrying(connect):
+    """``connect()``, retried on a connect timeout alone (see CONNECT_ATTEMPTS)."""
+    import time  # noqa: PLC0415
+    import psycopg  # noqa: PLC0415
+    for attempt in range(CONNECT_ATTEMPTS):
+        try:
+            return connect()
+        except psycopg.errors.ConnectionTimeout:
+            if attempt + 1 == CONNECT_ATTEMPTS:
+                raise
+            time.sleep(CONNECT_BACKOFF_SECONDS[attempt])
+
+
+def teardown(name: str) -> None:
+    """Drop a case's bank after its arm ran, from a fixture's close().
+
+    A failed drop does not fail the case by itself: if the bank is gone, the
+    failure is printed and the case keeps its result. If the bank is still
+    there, or its absence cannot be confirmed, the bank leaked and the
+    failure propagates. A guard refusal (a name this run does not own, or a
+    production database) always propagates."""
+    from pseudolife_memory.storage.schema import ProductionDatabaseError  # noqa: PLC0415
+    try:
+        drop(name)
+    except (ValueError, ProductionDatabaseError):
+        raise
+    except Exception as failure:
+        check = left = None
+        try:
+            with _retrying(_admin) as conn:
+                left = conn.execute(
+                    "SELECT 1 FROM pg_database WHERE datname = %s", (name,)).fetchone()
+        except Exception as error:  # noqa: BLE001 — reported on the original failure
+            check = error
+        if check is not None:
+            # Raised here, outside the check's handler, so the original
+            # failure keeps its own context.
+            failure.add_note(f"teardown could not confirm {name} is gone: "
+                             f"{type(check).__name__}: {check}")
+            raise
+        if left is not None:
+            raise
+        print(f"cli_harness: teardown of {name} failed ({type(failure).__name__}: {failure}), "
+              "but the bank is gone; the case keeps its result", file=sys.stderr)
+
+
 def drop(name: str) -> None:
     import psycopg  # noqa: PLC0415
     from pseudolife_memory.storage.schema import (  # noqa: PLC0415
         assert_disposable_database, refuse_production_database)
     NAMES.require_owned(name)
     url(name)  # validates the name
-    with _admin() as conn:
+    with _retrying(_admin) as conn:
         if not conn.execute(
                 "SELECT 1 FROM pg_database WHERE datname = %s", (name,)).fetchone():
             return
@@ -87,7 +147,7 @@ def drop(name: str) -> None:
         # connections but must still be droppable: refuse a production name
         # by itself, then carry on to the DROP.
         try:
-            with _connect(name) as target:
+            with _retrying(lambda: _connect(name)) as target:
                 assert_disposable_database(target)
         except psycopg.OperationalError:
             row = conn.execute(

@@ -1152,6 +1152,8 @@ def _unapproved_plugin_handlers(manifest_dir: Path, config_text: str) -> list[st
         return None
     missing = []
     for event, groups in manifest.items():
+        if event in CODEX_SKIPPED_HOOK_EVENTS:
+            continue
         name = re.sub(r"(?<!^)(?=[A-Z])", "_", event).lower()
         for g, group in enumerate(groups):
             for h, _ in enumerate(group.get("hooks") or []):
@@ -1172,6 +1174,14 @@ def _unapproved_plugin_handlers(manifest_dir: Path, config_text: str) -> list[st
 # finish this.
 CODEX_HOOK_NAMES = HOOK_SCRIPTS + ("hooks.json",)
 CODEX_REAPPROVAL_VERIFY = "pseudolife-mcp doctor reports codex_hooks = current"
+
+
+# Events in the plugin's hooks.json that Codex does not run. StopFailure is
+# Claude Code's re-arm after a failed turn: Codex 0.167.0 skips the unknown
+# event (hooks/list shows no error and no handler, and the other handlers keep
+# their trusted hash; probed 2026-11-07), so it is no consent change, no
+# approval to ask for and no handler Codex must load.
+CODEX_SKIPPED_HOOK_EVENTS = frozenset({"StopFailure"})
 
 
 def _codex_hook_manifest(data: bytes | None) -> str | None:
@@ -1221,6 +1231,8 @@ def _codex_hook_manifest(data: bytes | None) -> str | None:
         return None
     if not isinstance(manifest, dict) or not isinstance(manifest.get("hooks"), dict):
         return None
+    for event in CODEX_SKIPPED_HOOK_EVENTS:
+        manifest["hooks"].pop(event, None)
     if set(manifest) - {"description", "hooks"}:  # HooksFile denies unknown top-level fields.
         return None
     if manifest.get("description") is not None and not isinstance(manifest["description"], str):
@@ -1591,8 +1603,8 @@ def _codex_runtime_hook_status(codex_home: Path, manifest_dir: Path) -> str:
         manifest = json.loads(definition)["hooks"]
         expected = {
             f"{PLUGIN_ID}:hooks/hooks.json:{re.sub(r'(?<!^)(?=[A-Z])', '_', event).lower()}:{g}:{h}"
-            for event, groups in manifest.items() for g, group in enumerate(groups)
-            for h, _ in enumerate(group.get("hooks") or [])}
+            for event, groups in manifest.items() if event not in CODEX_SKIPPED_HOOK_EVENTS
+            for g, group in enumerate(groups) for h, _ in enumerate(group.get("hooks") or [])}
         with codex(executable, codex_home, Path.cwd()) as client:
             result = client.rpc("hooks/list", {"cwds": [str(Path.cwd())]})
         entries = result.get("data", [])

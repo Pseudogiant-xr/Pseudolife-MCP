@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "test-lite-windows",
+  "before": "eb78a3c12bf79977",
+  "fingerprint": "200ef2b514faec86",
+  "reason": "merge of #1364 and #1368: the pytest list gains tests/test_installer_engine.py (60 cases, 18.7 s) and tests/test_installer_py_launcher_ps.py (5 cases, 2.5 s), both measured natively on Windows 11 (2026-11-07); no new step, setup or shard, so the measured 5.0 min holds"
+}

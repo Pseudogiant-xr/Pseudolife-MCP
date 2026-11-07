@@ -426,14 +426,17 @@ def _board_day(store):
     return a, b
 
 
-@pytest.mark.parametrize("listener", ["unknown", "expired"])
+@pytest.mark.parametrize("listener", ["unknown", "rearming", "expired"])
 def test_stats_do_not_classify_an_absent_listener_receipt_as_rung(store, cli, tmp_path, listener):
+    """``rearming`` is an attached Claude session whose listener lapsed (it
+    is open, usually mid-turn); ``expired`` is the same listener after the
+    attachment lease (60 s) ran out too."""
     sender = store.register("alice")
     recipient = store.register("alice", capabilities={"ring": True})
     store.attach(*creds(recipient), attachment_id="listener", ring=True,
-                 ring_armed_until=1001.0 if listener == "expired" else None)
+                 ring_armed_until=None if listener == "unknown" else 1001.0)
     store.update(*creds(recipient), park_reason="waiting_peer", park_needs="review", park_clear_by="anyone")
-    store.test_time[0] = 1020.0
+    store.test_time[0] = 1070.0 if listener == "expired" else 1020.0
     receipt = store.send(*creds(sender), to=recipient["agent_id"], text="review ready", request_id="absent-listener")
     assert receipt["wake"]["decision"] == "no_path"
     assert receipt["wake"]["reason"] == "listener_" + listener
