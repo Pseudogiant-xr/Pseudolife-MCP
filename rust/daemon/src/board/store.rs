@@ -1968,7 +1968,8 @@ impl Store {
                 if let Some(latest) = latest
                     && park.park_set_at.is_none_or(|s| s <= latest)
                 {
-                    return Ok(json!({"gate": "block", "reason": "not_updated_this_turn"}));
+                    // Mail that rang after the park: read it before re-parking.
+                    return Ok(json!({"gate": "block", "reason": "rung_since_park"}));
                 }
             }
             return Ok(json!({"gate": "allow", "reason": "parked"}));

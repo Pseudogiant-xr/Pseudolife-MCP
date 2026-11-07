@@ -31,6 +31,29 @@ def test_compute_surprise_is_novelty():
     assert b.compute_surprise(_unit(2)) > 0.3    # unrelated vector -> high
 
 
+def test_exact_duplicate_surprise_is_exactly_zero():
+    """An exact duplicate's self-similarity misses 1.0 by float32 rounding,
+    so 1 - cos lands a few 1e-7 either side of 0. Snapped to exactly 0, the
+    store reason is filtered_meta at any positive threshold, never
+    below_surprise_threshold by the luck of the summation order."""
+    raw_positive = 0
+    for seed in range(1, 41):
+        b = _band()
+        e = _unit(seed)
+        b.store("x", e, source="t", surprise=1.0)
+        x = F.normalize(e.unsqueeze(0), p=2, dim=1)  # as the band normalizes both sides
+        raw = 1.0 - float((x @ x.squeeze(0)).max())
+        raw_positive += raw > 0.0
+        assert b.compute_surprise(e) == 0.0, (seed, raw)
+    assert raw_positive, "no seed leaves a positive 1 - x.x: the test would not bite"
+    # The near miss: a genuine near-duplicate keeps its surprise.
+    b = _band()
+    e = _unit(1)
+    b.store("x", e, source="t", surprise=1.0)
+    near = F.normalize(e + 0.02 * _unit(2), dim=0)
+    assert b.compute_surprise(near) > 1e-5
+
+
 def test_retrieve_is_pure_cosine():
     b = _band()
     a, z = _unit(1), _unit(2)

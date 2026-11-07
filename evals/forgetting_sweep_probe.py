@@ -212,12 +212,15 @@ def resolve_dump_dir(explicit: Path | None,
 def reconstruct_surprise(entries: list[dict]) -> list[float]:
     """``MIRASBand.compute_surprise`` replayed over a dump's entries.
 
-    ``1 - max cosine`` against the entries already resident, clamped into
-    [0, 1], with 1.0 for the first entry (band.py:100-109 returns 1.0 for
+    ``1 - max cosine`` against the entries already resident, exactly 0
+    below ``SELF_SIMILARITY_EPSILON`` and capped at 1, with 1.0 for the
+    first entry (band.py:100-109 returns 1.0 for
     an empty band). Magnitudes are irrelevant — the real method
     normalises, so contradiction-decayed embeddings score identically.
     """
     import numpy as np  # noqa: PLC0415
+
+    from pseudolife_memory.memory.miras.band import SELF_SIMILARITY_EPSILON  # noqa: PLC0415
 
     n = len(entries)
     if n == 0:
@@ -229,7 +232,8 @@ def reconstruct_surprise(entries: list[dict]) -> list[float]:
     sims = emb @ emb.T
     out = [1.0] * n
     for i in range(1, n):
-        out[i] = max(0.0, min(1.0, 1.0 - float(sims[i, :i].max())))
+        surprise = 1.0 - float(sims[i, :i].max())
+        out[i] = 0.0 if surprise < SELF_SIMILARITY_EPSILON else min(1.0, surprise)
     return out
 
 

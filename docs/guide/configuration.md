@@ -2376,7 +2376,7 @@ characters) and `urgent`, and returns `wake` beside the receipt:
 | `capped` | over a cap: `reason` names it (`recipient_hour`, `nightly`, `urgent_sender_hour`, `authority_sender_hour`) | the parked need, if any |
 
 `reason` says which branch decided (`active`, `parked_done`, `wake_disabled`,
-`listener_unknown`, `listener_expired`, `no_steer_path`,
+`listener_unknown`, `listener_expired`, `listener_rearming`, `no_steer_path`,
 `clearer`, `anyone`, `clears`, `urgent`, `maintainer`, `coordinator`,
 `need_not_cleared`, `no_park`, or a cap). `rung` is evidence of a known armed path at send time; it does not mean
 that a turn started, that the recipient read the message, or that it acted.
@@ -2409,7 +2409,12 @@ support; it does not prove a listener is still running. The adapter reports
 `ring_armed_until` at attach and heartbeat, a finite epoch capped by the
 daemon to 60 seconds and valid only while that attachment is live. It renews
 that evidence only while a recipient listener is armed. Missing evidence is
-`listener_unknown`; expired evidence is `listener_expired`. Eligible parked ring mail
+`listener_unknown`; expired evidence is `listener_expired`, except for a
+Claude Code session whose shim is still attached: that one is open with its
+Stop-hook listener down, usually working in the turn an earlier ring started
+(each ring ends the watcher until the turn ends), and reads
+`listener_rearming`, whose fallback says the queued ring fires at that turn's
+end with no resend needed. Eligible parked ring mail
 without a listener remains queued for a later armed listener; the send's
 `no_path` receipt remains the honest result at send time. A pending queued
 ring survives an outage or a new attachment until its mail is acknowledged
@@ -2499,12 +2504,12 @@ peer's urgency reach a session that asked not to be reached.
 
 A reopen needs a live listener like any ring. With none, the receipt is
 `no_path` with the reason (`listener_unknown`, `listener_expired`,
-`wake_disabled`), `queued: true` (the ring is served when a listener arms)
+`listener_rearming`, `wake_disabled`), `queued: true` (the ring is served when a listener arms)
 and the other ways to reach that client in `fallback_paths`:
 
 | Recipient | Listener the ring needs | `fallback_paths` |
 | --- | --- | --- |
-| Claude Code (CLI or Desktop Code tab) | the Stop hook's watcher, armed at every turn end while the session stays open, or a background `wait-mail` | `claude_desktop_send_message` (only a Desktop Code-tab session, which the board cannot tell from a CLI one: the host's session `send_message` starts a turn without the board), `maintainer_types` |
+| Claude Code (CLI, Desktop Code tab, or a T3 Code thread) | the Stop hook's watcher, armed at every turn end (a failed turn's included, not an interrupted one's) while the session stays open, or a background `wait-mail` | `t3_thread_send` (only a T3 Code thread: a thread send from its parent or the maintainer starts a turn), `claude_desktop_send_message` (only a Desktop Code-tab session: the host's session `send_message` starts a turn without the board), `maintainer_types`; the board cannot tell these hosts apart |
 | Codex CLI or desktop | the [Codex doorbell](#codex-doorbell), which serves CLI and desktop threads alike | `codex_doorbell` (it re-arms at the thread's next Pseudolife call), `maintainer_types` |
 
 `capabilities.codex` on a Codex row is the optional
@@ -2665,6 +2670,17 @@ also capped (below, and by the daemon's `wake` caps under
   marker it found, and the next prompt prints the digest again unless a
   wake or a hint showed it since. A ring the session already saw
   therefore never fires after those, even when the shim writes it late.
+- One watcher listens at a time, and a ring ends it: firing is its exit.
+  The next turn end arms the next one, so mail sent while the session works
+  in the turn a ring started waits for that turn to end (or for its next
+  Pseudolife tool result), and the sender's receipt says `no_path` with
+  reason `listener_rearming`. A turn that ends on an API or sign-in error runs
+  Claude Code's `StopFailure` hook instead of `Stop` (2.1.318, measured
+  2026-11-07), so the plugin registers the same script there too
+  (`stop-wake.sh stop-failure`, async and asyncRewake): it arms the watcher
+  without the park gate, since a failed turn has nothing to park. Codex
+  0.167.0 skips the unknown event without an error and without asking to
+  approve anything again.
 - At most 20 wakes per session in any hour, the same figure the daemon now
   applies per recipient before it decides a ring. A ring over the hook's
   cap waits for the window to free up; it is delayed, not dropped.
@@ -2680,7 +2696,10 @@ also capped (below, and by the daemon's `wake` caps under
   without another update unless the session received a `rung` delivery
   after the turn started: then the park must have been set strictly after
   the newest such delivery, or the gate answers `block` with
-  `not_updated_this_turn`, even if an earlier update occurred this turn.
+  `rung_since_park`, even if an earlier update occurred this turn, and the
+  block text asks the session to read that mail first (`memory_message
+  receive`) and then re-park: the ring can land after the session last
+  looked.
   Delivery means the wake decision's `created_at`, not its staggered
   `ring_at` or the adapter's `served_at`; mail to another session and
   other wake decisions do not invalidate the park. The hook then ends
@@ -4755,9 +4774,9 @@ A daemon also refuses to start against a bank stamped by a newer build
 it is, so rolling back to an older release after an upgrade that moved
 the schema means restoring the backup taken before that upgrade
 (`pseudolife-mcp restore --backup-file <dump> --state-archive <state.tgz>`,
-`ops/restore.ps1 -Apply -BackupFile <dump>` or
-`ops/restore.sh --apply --backup-file <dump>`); `pseudolife-mcp update`
-says so beside its printed rollback when the deploy moved the schema.
+or from a checkout `ops/restore.ps1 -Apply -BackupFile <dump> -StateArchive <state.tgz>`
+or `ops/restore.sh --apply --backup-file <dump> --state-archive <state.tgz>`);
+`pseudolife-mcp update` says so beside its printed rollback when the deploy moved the schema.
 Separately from the schema meta version, Docker-tier installs created
 before 2026-08-14 also need the PostgreSQL 16 → 18 volume cutover —
 [the PostgreSQL 18 migration runbook](../runbooks/postgres-18-migration.md).

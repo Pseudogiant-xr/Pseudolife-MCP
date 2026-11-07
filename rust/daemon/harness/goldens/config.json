@@ -2,32 +2,32 @@
  "db_state": {
   "catalog": {
    "column_types": {
-    "rows": 479,
-    "sha256": "959d3a0824286d778e1dcd50"
+    "rows": 541,
+    "sha256": "5466b0d4d226295898f2e558"
    },
    "columns": {
-    "rows": 479,
-    "sha256": "7d7a406b70e80acb80375191"
+    "rows": 541,
+    "sha256": "672d325c753f7a389cc837ff"
    },
    "constraints": {
-    "rows": 356,
-    "sha256": "9bce460b3ecd0f8909edebb6"
+    "rows": 404,
+    "sha256": "78bbad5a658bd6be9542ff4b"
    },
    "extensions": {
     "rows": 2,
-    "sha256": "f58378ad9e787652d80b1192"
+    "sha256": "379f1d04a33d23de5113afa2"
    },
    "functions": {
     "rows": 0,
     "sha256": "4f53cda18c2baa0c0354bb5f"
    },
    "indexes": {
-    "rows": 99,
-    "sha256": "3b955cd29ea7c77a4ed4a2ff"
+    "rows": 107,
+    "sha256": "23d2a0af007401704066aaf5"
    },
    "owners_and_comments": {
-    "rows": 161,
-    "sha256": "221ce8131afb68c41151a482"
+    "rows": 175,
+    "sha256": "dc54134521168c387634b8bb"
    },
    "schemas": {
     "rows": 1,
@@ -39,7 +39,7 @@
    },
    "sequences": {
     "rows": 19,
-    "sha256": "62e2c919c4ada0e8138a969a"
+    "sha256": "c2bfaa2d1e2342912340d4cc"
    },
    "triggers": {
     "rows": 0,
@@ -84,6 +84,20 @@
     ],
     "rows": []
    },
+   "public.cms_counters": {
+    "columns": [
+     "id",
+     "preset_name",
+     "interaction_count",
+     "logical_turn_count",
+     "tier_queries",
+     "tier_hits",
+     "surprise_history",
+     "consolidation_events",
+     "updated_at"
+    ],
+    "rows": []
+   },
    "public.communities": {
     "columns": [
      "id",
@@ -91,6 +105,35 @@
      "size",
      "cohesion",
      "computed_at"
+    ],
+    "rows": []
+   },
+   "public.console_sessions": {
+    "columns": [
+     "session_id",
+     "token_hash",
+     "principal",
+     "source",
+     "issuer",
+     "method",
+     "label",
+     "created_at",
+     "last_used_at",
+     "expires_at",
+     "revoked_at"
+    ],
+    "rows": []
+   },
+   "public.console_signin_codes": {
+    "columns": [
+     "code_hash",
+     "principal",
+     "source",
+     "issuer",
+     "origin",
+     "expires_at",
+     "used_at",
+     "created_at"
     ],
     "rows": []
    },
@@ -312,7 +355,15 @@
      "judged_at",
      "judge_relation",
      "decided_by",
-     "decided_at"
+     "decided_at",
+     "judge_served_model",
+     "judge2_verdict",
+     "judge2_confidence",
+     "judge2_model",
+     "judged2_at",
+     "judge2_relation",
+     "judge2_served_model",
+     "judge2_policy"
     ],
     "rows": []
    },
@@ -391,7 +442,16 @@
      "judge2_verdict",
      "judge2_confidence",
      "judge2_model",
-     "judged2_at"
+     "judged2_at",
+     "judge_served_model",
+     "judge2_served_model",
+     "judge2_policy",
+     "judge3_verdict",
+     "judge3_confidence",
+     "judge3_model",
+     "judged3_at",
+     "judge3_served_model",
+     "judge3_policy"
     ],
     "rows": []
    },
@@ -575,7 +635,8 @@
      "last_used_at",
      "revoked_at",
      "revoked_by",
-     "flagged_at"
+     "flagged_at",
+     "signs_in_as"
     ],
     "rows": []
    },
@@ -608,7 +669,8 @@
      "score",
      "reason",
      "decided_by",
-     "decided_at"
+     "decided_at",
+     "votes"
     ],
     "rows": []
    },
@@ -620,7 +682,7 @@
     "rows": [
      [
       "schema_version",
-      55
+      59
      ],
      [
       "writer_lease_epoch",
@@ -644,6 +706,13 @@
     ],
     "rows": []
    },
+   "public.principal_activity": {
+    "columns": [
+     "principal",
+     "last_seen_at"
+    ],
+    "rows": []
+   },
    "public.principals": {
     "columns": [
      "principal",
@@ -655,7 +724,30 @@
      "paired_code_hash",
      "created_at",
      "paired_at",
-     "revoked_at"
+     "revoked_at",
+     "owned"
+    ],
+    "rows": []
+   },
+   "public.reference_chunks": {
+    "columns": [
+     "id",
+     "source",
+     "chunk_index",
+     "text",
+     "embedding",
+     "metadata",
+     "ingested_at",
+     "created_at"
+    ],
+    "rows": []
+   },
+   "public.rejected_bearers": {
+    "columns": [
+     "hash_prefix",
+     "rejections",
+     "first_seen_at",
+     "last_seen_at"
     ],
     "rows": []
    },
@@ -795,7 +887,157 @@
      "params",
      "served_facts"
     ],
-    "rows": []
+    "rows": [
+     [
+      1,
+      "warmup probe",
+      "search",
+      null,
+      null,
+      [],
+      "<created_at>",
+      {
+       "band_count": 1,
+       "bm25": {
+        "enabled": false
+       },
+       "candidate_pool": {
+        "fusion": "weighted_sum",
+        "multiplier": 1,
+        "pool_size": 0,
+        "rerank_position": "after_cut"
+       },
+       "contiguity_neighbors": 0,
+       "filters": {
+        "bands": null,
+        "episodes": null,
+        "min_logical_turn": null,
+        "sources": null,
+        "tags": null
+       },
+       "hide_superseded": true,
+       "min_score": 0.4,
+       "min_score_explicit": false,
+       "recency_base_half_life_s": 86400.0,
+       "recency_boost": false,
+       "reranker": {
+        "candidate_count": 0,
+        "enabled": false,
+        "fired": false,
+        "scored_candidates": 0,
+        "scoring_policy": "complete_pool_or_skip",
+        "skip_reason": null,
+        "top_n": 20
+       },
+       "timeline": {
+        "enabled": false,
+        "fired": false
+       },
+       "top_k": 1
+      },
+      null
+     ],
+     [
+      2,
+      "memory",
+      "search",
+      null,
+      null,
+      [],
+      "<created_at>",
+      {
+       "band_count": 1,
+       "bm25": {
+        "enabled": false
+       },
+       "candidate_pool": {
+        "fusion": "weighted_sum",
+        "multiplier": 1,
+        "pool_size": 0,
+        "rerank_position": "after_cut"
+       },
+       "contiguity_neighbors": 0,
+       "filters": {
+        "bands": [
+         "hot"
+        ],
+        "episodes": null,
+        "min_logical_turn": null,
+        "sources": null,
+        "tags": null
+       },
+       "hide_superseded": true,
+       "min_score": 0.4,
+       "min_score_explicit": false,
+       "recency_base_half_life_s": 86400.0,
+       "recency_boost": false,
+       "reranker": {
+        "candidate_count": 0,
+        "enabled": false,
+        "fired": false,
+        "scored_candidates": 0,
+        "scoring_policy": "complete_pool_or_skip",
+        "skip_reason": null,
+        "top_n": 20
+       },
+       "timeline": {
+        "enabled": false,
+        "fired": false
+       },
+       "top_k": 12
+      },
+      null
+     ],
+     [
+      3,
+      "memory",
+      "search",
+      null,
+      null,
+      [],
+      "<created_at>",
+      {
+       "band_count": 1,
+       "bm25": {
+        "enabled": false
+       },
+       "candidate_pool": {
+        "fusion": "weighted_sum",
+        "multiplier": 1,
+        "pool_size": 0,
+        "rerank_position": "after_cut"
+       },
+       "contiguity_neighbors": 0,
+       "filters": {
+        "bands": null,
+        "episodes": null,
+        "min_logical_turn": null,
+        "sources": null,
+        "tags": null
+       },
+       "hide_superseded": true,
+       "min_score": 0.4,
+       "min_score_explicit": false,
+       "recency_base_half_life_s": 86400.0,
+       "recency_boost": false,
+       "reranker": {
+        "candidate_count": 0,
+        "enabled": false,
+        "fired": false,
+        "scored_candidates": 0,
+        "scoring_policy": "complete_pool_or_skip",
+        "skip_reason": null,
+        "top_n": 20
+       },
+       "timeline": {
+        "enabled": false,
+        "fired": false
+       },
+       "top_k": 3
+      },
+      null
+     ]
+    ]
    },
    "public.retrieval_uses": {
     "columns": [
@@ -882,16 +1124,10 @@
     "the listing-spelling carry-over stamps the clock (W2-E)"
    ],
    [
-    "table",
+    "warmup",
     "retrieval_events",
     null,
-    "the warmup search logs a retrieval event (W2-D telemetry)"
-   ],
-   [
-    "sequence",
-    "retrieval_events_id_seq",
-    null,
-    "advanced by that retrieval event (W2-D telemetry)"
+    "one warmup probe and its sequence increment (W2-D telemetry)"
    ]
   ],
   "db_nondeterministic": [
@@ -899,6 +1135,11 @@
     "relations",
     "created_at",
     "clock: wall clock per row (storage/postgres.py:765)"
+   ],
+   [
+    "retrieval_events",
+    "created_at",
+    "clock: retrieval event wall clock per row"
    ]
   ],
   "golden": "golden_scrub in run.py",
@@ -914,6 +1155,10 @@
    "json": {
     "auth": true,
     "bank": null,
+    "console_signin": {
+     "link": true,
+     "passkey": false
+    },
     "coordination": {
      "enabled": false,
      "wake": {
@@ -932,14 +1177,28 @@
      "dtype": "<str|null>"
     },
     "extractor": "disabled",
-    "hooks_digest": "c5f1ef7c6da48574d68a738f412e136941bb4b3ff0bc625a57bd633de02481d7",
+    "hooks_digest": "e0f4cca15b9dd98b6e83f02a208154f519e6a1275332f7b07b1b1d0b2839b82c",
     "memory": {
-     "source": "unavailable"
+     "anon_bytes": "<free int>",
+     "current_bytes": "<free int>",
+     "events": {
+      "max": "<free int>",
+      "oom": "<free int>",
+      "oom_kill": "<free int>"
+     },
+     "file_bytes": "<free int>",
+     "limit_bytes": null,
+     "near_limit": null,
+     "rss_bytes": "<free int>",
+     "rss_peak_bytes": "<free int>",
+     "source": "cgroup",
+     "used_fraction": null,
+     "working_set_bytes": "<free int>"
     },
     "pending": [],
     "persist_errors": 0,
     "ready": true,
-    "schema": 55,
+    "schema": 59,
     "status": "ok",
     "storage": "postgres",
     "updates": {
@@ -951,6 +1210,68 @@
     },
     "version": "<free str>"
    },
+   "number_tokens": [
+    {
+     "path": [
+      "schema"
+     ],
+     "token": "59"
+    },
+    {
+     "path": [
+      "persist_errors"
+     ],
+     "token": "0"
+    },
+    {
+     "path": [
+      "coordination",
+      "wake",
+      "per_recipient_per_hour"
+     ],
+     "token": "7"
+    },
+    {
+     "path": [
+      "coordination",
+      "wake",
+      "urgent_per_sender_per_hour"
+     ],
+     "token": "2"
+    },
+    {
+     "path": [
+      "coordination",
+      "wake",
+      "nightly_total"
+     ],
+     "token": "50"
+    },
+    {
+     "path": [
+      "coordination",
+      "wake",
+      "fan_out_stagger_seconds"
+     ],
+     "token": "5"
+    },
+    {
+     "path": [
+      "coordination",
+      "wake",
+      "active_seconds"
+     ],
+     "token": "9"
+    },
+    {
+     "path": [
+      "coordination",
+      "wake",
+      "authority_per_sender_per_hour"
+     ],
+     "token": "3"
+    }
+   ],
    "status": 200
   },
   {
@@ -965,6 +1286,14 @@
     "low_confidence": true,
     "query": "memory"
    },
+   "number_tokens": [
+    {
+     "path": [
+      "count"
+     ],
+     "token": "0"
+    }
+   ],
    "status": 200
   },
   {
@@ -976,6 +1305,7 @@
    "json": {
     "error": "<free text>"
    },
+   "number_tokens": [],
    "status": 400
   },
   {
@@ -990,6 +1320,14 @@
     "low_confidence": true,
     "query": "memory"
    },
+   "number_tokens": [
+    {
+     "path": [
+      "count"
+     ],
+     "token": "0"
+    }
+   ],
    "status": 200
   },
   {

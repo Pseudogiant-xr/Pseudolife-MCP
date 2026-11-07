@@ -102,14 +102,14 @@ def test_existing_stats_comparator_accepts_only_clock_differences():
 
 
 def register(harness):
-    """Reuse the exact three memory_stats scenarios; add REST/MCP/REST pairs.
+    """Reuse the exact two memory_stats scenarios; add REST/MCP/REST pairs.
 
     A REST case deliberately retains tool='memory_stats' as comparator metadata:
     w2d dispatch selects MCP only by the presence of the 'mcp' key, so these
     requests really hit GET /api/stats and retain the complete stats rules.
     """
     result = {}
-    for base in (harness.McpStats, harness.McpStatsContinuum, harness.McpStatsCapacity):
+    for base in (harness.McpStats, harness.McpStatsCapacity):
         def cases(self, base=base):
             out = []
             for original in base.cases(self):
@@ -274,7 +274,7 @@ def observed_stats(harness, expected_groups: int):
 def self_check():
     # Execute only the existing declarative cases, not harness imports or DB code.
     source = ast.parse((HERE / "w2d_search.py").read_text(encoding="utf-8"))
-    selected = {"case", "mcp_case", "McpStats", "McpStatsContinuum", "McpStatsCapacity"}
+    selected = {"case", "mcp_case", "McpStats", "McpStatsCapacity"}
     nodes = [node for node in source.body if getattr(node, "name", None) in selected]
     from types import SimpleNamespace
     scope = {"Scenario": type("Scenario", (), {"env": {}, "config_yaml": None}),
@@ -344,7 +344,7 @@ def main():
     parser.add_argument("--host-port")
     parser.add_argument("--login-file", type=Path)
     parser.add_argument("--out", type=Path)
-    parser.add_argument("--only", nargs="+", default=["api-stats", "api-stats-continuum", "api-stats-capacity"])
+    parser.add_argument("--only", nargs="+", default=["api-stats", "api-stats-capacity"])
     parser.add_argument("--paragraphs", type=int, default=150)
     args = parser.parse_args()
     if args.self_check:

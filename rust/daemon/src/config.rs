@@ -2645,6 +2645,34 @@ fn read_miras(miras: &[(Node, Node)]) -> Result<(String, Vec<String>), ConfigErr
     Ok((preset, bands))
 }
 
+/// The startup refusal for retired band layouts (R11, maintainer decision
+/// 2026-11-02): multi-band presets (`continuum` and its aliases, a `custom`
+/// list of more than one band) and every `retention_policy` but `balanced`
+/// are retired, so this daemon serves one balanced band and refuses the
+/// rest: a multi-band layout naming the flat migration (or the Python
+/// engine), a single band's policy naming the one setting to change. The
+/// config itself still parses, so the config differential and
+/// `migrate-flat-config` read it unchanged.
+pub fn retired_band_refusal(memory: &MemoryConfig) -> Option<String> {
+    if memory.band_specs.len() > 1 {
+        return Some(format!(
+            "memory.miras.preset {:?} configures {} bands; multi-band presets are retired and \
+             this daemon serves a single band. Flatten the bank and its config first with \
+             `pseudolife-mcp migrate-flat` (it backs up and keeps every entry), or keep the \
+             Python engine until then.",
+            memory.preset,
+            memory.band_specs.len()
+        ));
+    }
+    let policy = memory.band_specs.first()?.retention_policy.as_str();
+    (policy != "balanced").then(|| {
+        format!(
+            "memory.miras.bands[0].retention_policy {policy:?} is retired; this daemon evicts \
+             with balanced only. Set it to balanced."
+        )
+    })
+}
+
 fn read_startup_bands(
     miras: &[(Node, Node)],
     preset: &str,
@@ -3212,6 +3240,57 @@ mod tests {
             Ok(c) => c,
             Err(e) => panic!("refused {text:?}: {e}"),
         }
+    }
+
+    /// Multi-band presets and non-balanced retention policies parse but
+    /// refuse startup, naming the flat migration and the Python engine;
+    /// one balanced band of any name starts.
+    #[test]
+    fn retired_band_layouts_refuse_startup() {
+        let refusal = |text: &str| retired_band_refusal(&cfg(text).memory);
+        for preset in ["continuum", "titans", "moneta", "yaad", "memora"] {
+            let msg = refusal(&format!("memory:\n  miras:\n    preset: {preset}\n"))
+                .unwrap_or_else(|| panic!("{preset} started"));
+            assert!(
+                msg.contains(&format!(
+                    "memory.miras.preset \"{preset}\" configures 8 bands"
+                )),
+                "{msg}"
+            );
+            assert!(
+                msg.contains("`pseudolife-mcp migrate-flat`") && msg.contains("Python engine"),
+                "{msg}"
+            );
+        }
+        let two = "memory:\n  miras:\n    preset: custom\n    bands:\n      - name: hot\n      - {max_entries: 3}\n";
+        assert!(refusal(two).unwrap().contains("configures 2 bands"));
+        for policy in ["recency_heavy", "surprise_heavy"] {
+            let text = format!(
+                "memory:\n  miras:\n    preset: custom\n    bands:\n      - {{name: flat, max_entries: 5, retention_policy: {policy}}}\n"
+            );
+            let msg = refusal(&text).unwrap_or_else(|| panic!("{policy} started"));
+            assert!(
+                msg.contains(&format!("retention_policy \"{policy}\" is retired")),
+                "{msg}"
+            );
+            assert!(msg.ends_with("Set it to balanced."), "one fix: {msg}");
+            assert!(!msg.contains("migrate-flat"), "one fix: {msg}");
+        }
+        // The near misses that start: the default, flat, and one balanced band.
+        assert_eq!(refusal(""), None);
+        assert_eq!(refusal("memory:\n  miras:\n    preset: flat\n"), None);
+        assert_eq!(
+            refusal(
+                "memory:\n  miras:\n    preset: custom\n    bands:\n      - {name: hot, max_entries: 5}\n"
+            ),
+            None
+        );
+        assert_eq!(
+            refusal(
+                "memory:\n  miras:\n    preset: custom\n    bands:\n      - {name: flat, retention_policy: balanced}\n"
+            ),
+            None
+        );
     }
 
     #[test]

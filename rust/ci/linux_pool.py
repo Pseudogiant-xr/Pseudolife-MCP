@@ -20,6 +20,9 @@ MAX_AHEAD_SECONDS = 30
 MIN_IDLE = 3
 SUITE = "cli-startup"
 REPOSITORY = "Pseudogiant-xr/Pseudolife-MCP"
+# The Windows pool's switch and health (rust/ci/windows_pool.py) share this
+# reader; no other variable can be fetched with the reader token.
+READABLE = {POOL_VARIABLE, HEALTH_VARIABLE, "PARITY_BATCH_WINDOWS_POOL", "PARITY_WINDOWS_HEALTH"}
 
 
 class ReadError(Exception):
@@ -35,7 +38,7 @@ def fetch_variable(repository: str, name: str, token: str) -> str | None:
     if (not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9_.-]+", repository)
             or repository.split("/")[-1] in {".", ".."}):
         raise ReadError("invalid repository identifier")
-    if name not in {POOL_VARIABLE, HEALTH_VARIABLE}:
+    if name not in READABLE:
         raise ReadError("unknown pool variable")
     if not token or any(ord(c) < 33 or ord(c) > 126 for c in token):
         raise ReadError("reader credential is missing or invalid")
@@ -106,17 +109,30 @@ def main() -> int:
     context = dict(event=os.environ.get("GITHUB_EVENT_NAME", ""), ref=os.environ.get("GITHUB_REF", ""),
                    head_ref=os.environ.get("GITHUB_HEAD_REF", ""), head_repository=head_repository,
                    repository=os.environ.get("GITHUB_REPOSITORY", ""))
+    token = os.environ.get("PARITY_VARS_READ_TOKEN", "")
     try:
-        result = live_choice(context, os.environ.get("PARITY_VARS_READ_TOKEN", ""))
+        result = live_choice(context, token)
     except Exception:
         # The planner is an optimization. Do not turn an unexpected reader
         # or parser error into a red check that prevents a hosted batch.
         result = {"selfhosted_suites": [], "reason": "availability could not be verified; using hosted"}
+    # Linux's choice is written before the Windows reads start, so a slow or
+    # killed Windows read can only leave windows_suites unset (hosted).
     if args.github_output:
         with args.github_output.open("a", encoding="utf-8") as stream:
             stream.write("selfhosted_suites=" + json.dumps(result["selfhosted_suites"]) + "\n")
             stream.write("linux_pool=" + ("self-hosted" if result["selfhosted_suites"] else "hosted") + "\n")
-    print(json.dumps(result))
+    print(json.dumps(result), flush=True)
+    try:
+        # Each pool decides alone: a Windows failure never moves Linux.
+        import windows_pool
+        windows = windows_pool.live_choice(context, token)
+    except Exception:
+        windows = {"windows_suites": [], "reason": "availability could not be verified; using hosted"}
+    if args.github_output:
+        with args.github_output.open("a", encoding="utf-8") as stream:
+            stream.write("windows_suites=" + json.dumps(windows["windows_suites"]) + "\n")
+    print(json.dumps(windows))
     return 0
 
 

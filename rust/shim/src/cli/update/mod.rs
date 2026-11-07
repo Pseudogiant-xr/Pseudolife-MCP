@@ -105,6 +105,8 @@ pub(crate) struct Update {
     /// What a defaulted attempt pulled or created, removed if it falls back.
     pub default_pulled: Option<String>,
     pub default_volumes: Vec<String>,
+    /// G2-K: the Python leg that imports weights.pt already ran this update.
+    pub after_import: bool,
     pub maintainer_context: Option<(Vec<String>, Environment)>,
     pub rollback_scope: Option<String>,
     pub stopped_handover: bool,
@@ -203,6 +205,7 @@ impl Update {
             release_started: false,
             default_pulled: None,
             default_volumes: vec![],
+            after_import: false,
             maintainer_context: None,
             rollback_scope: None,
             stopped_handover: false,

@@ -401,6 +401,11 @@ struct Inner {
     seq: u64,
     loaded_at: Option<Instant>,
     active_passkeys: HashSet<String>,
+    /// Keys a passkey sign-in just proved active, and keys just revoked
+    /// (`_keys_added`, `_keys_dropped`): held, like `added` and `dropped`,
+    /// until a refresh that started after them completes.
+    keys_added: HashMap<String, u64>,
+    keys_dropped: HashMap<String, u64>,
 }
 
 /// A refresh's start: taken before the database read, so a sign-in or a
@@ -452,6 +457,8 @@ impl SessionSnapshot {
         let mut s = self.lock();
         s.added.retain(|_, (seq, _)| *seq > read.seq);
         s.dropped.retain(|_, seq| *seq > read.seq);
+        s.keys_added.retain(|_, seq| *seq > read.seq);
+        s.keys_dropped.retain(|_, seq| *seq > read.seq);
         let mut merged: HashMap<String, ConsoleSession> = HashMap::new();
         for row in rows {
             if !s.dropped.contains_key(&row.session_id) {
@@ -465,7 +472,12 @@ impl SessionSnapshot {
         // Uses of sessions that are gone have nothing left to extend.
         s.used.retain(|sid, _| live.contains(sid));
         s.by_hash = merged;
-        s.active_passkeys = passkeys.into_iter().collect();
+        let mut active: HashSet<String> = passkeys.into_iter().collect();
+        active.extend(s.keys_added.keys().cloned());
+        for key in s.keys_dropped.keys() {
+            active.remove(key);
+        }
+        s.active_passkeys = active;
         s.loaded_at = Some(read.started);
     }
 
@@ -480,8 +492,44 @@ impl SessionSnapshot {
         }
         s.seq += 1;
         let seq = s.seq;
+        if row.method == METHOD_PASSKEY {
+            // The completion just verified the key active: a sign-in in the
+            // 10 s after its confirm must not bounce back to the dialog.
+            s.keys_added.insert(row.issuer.clone(), seq);
+            s.keys_dropped.remove(&row.issuer);
+            s.active_passkeys.insert(row.issuer.clone());
+        }
         s.added.insert(row.session_id.clone(), (seq, row.clone()));
         s.by_hash.insert(row.token_hash.clone(), row);
+    }
+
+    /// `drop_key`: a key just revoked; its passkey sessions and the key
+    /// leave the view at once.
+    pub fn drop_key(&self, credential_id: &str) {
+        self.drop_issuer(credential_id, None);
+        let mut s = self.lock();
+        s.seq += 1;
+        let seq = s.seq;
+        s.keys_dropped.insert(credential_id.to_string(), seq);
+        s.keys_added.remove(credential_id);
+        s.active_passkeys.remove(credential_id);
+    }
+
+    /// `drop_issuer`: a key's passkey sessions just revoked, all of them or
+    /// all but those signed in as `keep_principal` (a rebind).
+    pub fn drop_issuer(&self, issuer: &str, keep_principal: Option<&str>) {
+        let ids: Vec<String> = self
+            .lock()
+            .by_hash
+            .values()
+            .filter(|row| {
+                row.method == METHOD_PASSKEY
+                    && row.issuer == issuer
+                    && Some(row.principal.as_str()) != keep_principal
+            })
+            .map(|row| row.session_id.clone())
+            .collect();
+        self.drop_ids(&ids);
     }
 
     /// Revocations that just committed: gone at once (`drop`).
@@ -953,7 +1001,39 @@ where
             return Ok(Redeemed::Unavailable);
         }
     }
-    let inserted = tx
+    let inserted = insert_session(
+        &tx,
+        token_hash,
+        &principal,
+        &source,
+        &issuer,
+        METHOD_LINK,
+        label,
+    )
+    .await;
+    match inserted {
+        Ok(session) => {
+            tx.commit().await?;
+            Ok(Redeemed::Session(session))
+        }
+        Err(e) if e.code() == Some(&SqlState::UNIQUE_VIOLATION) => Ok(Redeemed::Refused),
+        Err(e) => Err(e),
+    }
+}
+
+/// `insert_session`: insert a session on `c` inside the caller's
+/// transaction, on the database clock. A token hash already in use is a
+/// `UNIQUE_VIOLATION`.
+pub async fn insert_session<C: GenericClient>(
+    c: &C,
+    token_hash: &str,
+    principal: &str,
+    source: &str,
+    issuer: &str,
+    method: &str,
+    label: &str,
+) -> Result<ConsoleSession, tokio_postgres::Error> {
+    let row = c
         .query_one(
             &format!(
                 "INSERT INTO public.console_sessions \
@@ -968,21 +1048,47 @@ where
                 &principal,
                 &source,
                 &issuer,
-                &METHOD_LINK,
+                &method,
                 &label,
                 &SESSION_MAX_S,
             ],
         )
-        .await;
-    match inserted {
-        Ok(row) => {
-            let session = session_row(&row)?;
-            tx.commit().await?;
-            Ok(Redeemed::Session(session))
-        }
-        Err(e) if e.code() == Some(&SqlState::UNIQUE_VIOLATION) => Ok(Redeemed::Refused),
-        Err(e) => Err(e),
+        .await?;
+    session_row(&row)
+}
+
+/// `revoke_issuer_sessions`: revoke the live passkey sessions `issuer` (a
+/// credential id; every passkey's with `None`) signed in, inside the
+/// caller's transaction; `keep_principal` spares those signed in as it (a
+/// rebind). A bank before v59 has no sessions: 0. The table is probed
+/// first, since a failed statement would abort the transaction.
+pub async fn revoke_issuer_sessions<C: GenericClient>(
+    c: &C,
+    issuer: Option<&str>,
+    keep_principal: Option<&str>,
+) -> Result<u64, tokio_postgres::Error> {
+    let present: bool = c
+        .query_one(
+            "SELECT to_regclass('public.console_sessions') IS NOT NULL",
+            &[],
+        )
+        .await?
+        .get(0);
+    if !present {
+        return Ok(0);
     }
+    let rows = c
+        .query(
+            &format!(
+                "UPDATE public.console_sessions SET revoked_at = {NOW} \
+                 WHERE method = $1 AND revoked_at IS NULL \
+                 AND ($2::text IS NULL OR issuer = $2) \
+                 AND ($3::text IS NULL OR principal <> $3) RETURNING session_id"
+            ),
+            &[&METHOD_PASSKEY, &issuer, &keep_principal],
+        )
+        .await?;
+    Ok(rows.len() as u64)
 }
 
 /// `describe`: a session as the routes show it, never its token hash or

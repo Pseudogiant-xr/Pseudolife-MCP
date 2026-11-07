@@ -17,7 +17,11 @@ pub const UNSUPPORTED: i32 = 3;
 /// The configuration refusals startup makes before it serves. A new one
 /// belongs here, so `check-config` reports it too.
 pub fn startup_refusals(config: &config::Config) -> Result<()> {
-    onnx_artifacts::validate_reranker_model(&config.memory.reranker.model_name)
+    onnx_artifacts::validate_reranker_model(&config.memory.reranker.model_name)?;
+    if let Some(refusal) = config::retired_band_refusal(&config.memory) {
+        anyhow::bail!(refusal);
+    }
+    Ok(())
 }
 
 /// Startup refuses this later, after its environment checks, so it keeps

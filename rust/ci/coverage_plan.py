@@ -61,6 +61,12 @@ EXCEPTIONS = {
                           'routes/signin.rs and console_sessions.rs unit tests cover the gate\'s '
                           'session call sites, the operator allowlist, staleness and every refusal on '
                           'both OSes.',
+        'console-passkey-signin': 'Live only (B5, blocker 8): each arm signs its own '
+                                  'daemon-issued challenges, and the sessions, nonces and '
+                                  "expiries are the run's own; the evidence is a local live run "
+                                  'cited in the PR (D6/D11). The routes/signin_passkey_tests.rs '
+                                  'unit tests cover every refusal before the bank, the 8 KiB '
+                                  'body, the issue cap and /health on both OSes.',
     },
     'cli_mutants': {
         'linux': {

@@ -293,9 +293,30 @@ FALLBACK_CODEX = (
     "session's window.")
 FALLBACK_CLAUDE = (
     "Mail is queued for receive on the session's next turn and rings once its Stop-hook "
-    "listener re-arms at a turn end. Only if it is a Claude Desktop Code-tab session (the "
-    "board cannot tell) does its host's session send_message reach it now; a Claude Code "
-    "CLI session is reached by the maintainer typing into its window.")
+    "listener re-arms at a turn end. Only its host reaches it sooner, and the board cannot "
+    "tell which host it is: a T3 Code thread takes a thread send, a Claude Desktop Code-tab "
+    "session its host's session send_message, and a Claude Code CLI session the maintainer "
+    "typing into its window.")
+# A Claude Code session has one Stop-hook listener at a time: a ring ends
+# it (the hook's exit is the delivery) and only the next normal turn end
+# arms the next one. Mail sent in between, while its shim is still
+# attached, is usually mail to a session working in the turn that ring
+# started, not to a lapsed one: on 2026-11-07 every listener_expired receipt
+# to a T3 delegated child came mid-turn, and the queued ring fired when the
+# turn ended. A turn that ends on an API or sign-in error, or an interrupt,
+# runs no Stop hook (Claude Code 2.1.318 runs StopFailure instead), so only
+# that case leaves the open session without a listener.
+FALLBACK_CLAUDE_REARMING = (
+    "Mail is queued: the session is open but not listening, which usually means it is "
+    "working in a turn (often one an earlier ring started, since each ring ends the "
+    "Stop-hook watcher until the turn ends). Its next Pseudolife tool result shows the "
+    "mail, and with the plugin's Stop hook the queued ring fires when that turn ends: no "
+    "resend needed. An interrupted turn, an error-ended one under a plugin older than "
+    "its StopFailure re-arm, or a session listening only through a wait-mail that has "
+    "ended re-arms nothing until its next turn: if last_activity stays old, reach it "
+    "through its host (the board cannot tell which): a T3 Code thread takes a thread "
+    "send, a Claude Desktop Code-tab session its host's session send_message, and a "
+    "Claude Code CLI session the maintainer typing into its window.")
 # What a role grant tells the maintainer or operator when the holder has no
 # live wake path now (maintainer requirement 2026-10-05: the conductor above
 # all must be reachable). Keyed by ``_listener_path``'s reasons.
@@ -312,7 +333,7 @@ UNREACHABLE_WARNING = (
 # ``claude_desktop_send_message`` applies only to a Desktop Code-tab session;
 # the board cannot tell one from a CLI session, so the text says so.
 FALLBACK_PATHS_CODEX = ("codex_doorbell", "maintainer_types")
-FALLBACK_PATHS_CLAUDE = ("claude_desktop_send_message", "maintainer_types")
+FALLBACK_PATHS_CLAUDE = ("t3_thread_send", "claude_desktop_send_message", "maintainer_types")
 DONE_STATUS = re.compile(r"^\W*(done|complete|completed|finished|merged)\b", re.IGNORECASE)
 # Rings decided at send (v49) are kept this long: the nightly total counts a
 # day of them, and a week matches the request-key window.
@@ -2682,9 +2703,11 @@ class CoordinationStore:
     @classmethod
     def reachability(cls, agent, now, *, role=None):
         """Whether maintainer mail rings ``agent`` (an agent row, or None for
-        a holder with no board row) now: ``reachable`` and the no-path
-        ``reason`` a send would carry, plus, given ``role``, the ``warning``
-        a grant shows when it is not."""
+        a holder with no board row) now: ``reachable`` and the listener-path
+        ``reason`` (``_listener_path``'s; a send's receipt refines an
+        attached Claude row's ``listener_expired`` to ``listener_rearming``,
+        ``_no_path``), plus, given ``role``, the ``warning`` a grant shows
+        when it is not."""
         reason = "wake_disabled" if agent is None else cls._listener_path(agent, now)
         out = {"reachable": reason is None, "reason": reason}
         if role is not None and reason is not None:
@@ -3302,14 +3325,24 @@ class CoordinationStore:
                     **ring}
         missing = self._listener_path(recipient, now)
         if missing is not None:
-            codex = "codex" in (recipient.get("capabilities") or {})
-            return {"decision": "no_path", "reason": missing, "queued": True,
-                    "last_activity": recipient["last_activity"],
-                    "fallback": FALLBACK_CODEX if codex else FALLBACK_CLAUDE,
-                    "fallback_paths": list(FALLBACK_PATHS_CODEX if codex
-                                           else FALLBACK_PATHS_CLAUDE),
-                    **need, **reopened, **ring}
+            return {**self._no_path(recipient, now, missing), **need, **reopened, **ring}
         return {"decision": decision, "reason": reason, "ring_at": ring_at, **reopened, **ring}
+
+    @staticmethod
+    def _no_path(recipient, now, missing):
+        """The ``no_path`` receipt for a ring the recipient's listener cannot
+        take now: queued, with the client's fallback. An attached Claude
+        session whose listener is down reads ``listener_rearming`` (see
+        FALLBACK_CLAUDE_REARMING); every other reason is ``_listener_path``'s."""
+        codex = "codex" in (recipient.get("capabilities") or {})
+        attached = (recipient["attachment_id"] is not None
+                    and (recipient["lease_until"] or 0) > now)
+        fallback = FALLBACK_CODEX if codex else FALLBACK_CLAUDE
+        if missing == "listener_expired" and attached and not codex:
+            missing, fallback = "listener_rearming", FALLBACK_CLAUDE_REARMING
+        return {"decision": "no_path", "reason": missing, "queued": True,
+                "last_activity": recipient["last_activity"], "fallback": fallback,
+                "fallback_paths": list(FALLBACK_PATHS_CODEX if codex else FALLBACK_PATHS_CLAUDE)}
 
     def _lease_grant_wake(self, sender, recipient, now, *, message_id):
         """A committed grant rings once without spending peer wake budgets.
@@ -3321,11 +3354,7 @@ class CoordinationStore:
             (recipient["agent_id"], sender["agent_id"], message_id, now, now))
         missing = self._listener_path(recipient, now)
         if missing is not None:
-            codex = "codex" in (recipient.get("capabilities") or {})
-            return {"decision": "no_path", "reason": missing, "queued": True,
-                    "last_activity": recipient["last_activity"], "_ring": "lease_grant",
-                    "fallback": FALLBACK_CODEX if codex else FALLBACK_CLAUDE,
-                    "fallback_paths": list(FALLBACK_PATHS_CODEX if codex else FALLBACK_PATHS_CLAUDE)}
+            return {**self._no_path(recipient, now, missing), "_ring": "lease_grant"}
         return {"decision": "rung", "reason": "lease_grant", "ring_at": now, "_ring": "lease_grant"}
 
     def _maintainer_wake(self, sender, recipient, now, *, message_id, conductor=False):
@@ -3358,12 +3387,7 @@ class CoordinationStore:
             ring["reopened"] = True
         missing = self._listener_path(recipient, now)
         if missing is not None:
-            codex = "codex" in (recipient.get("capabilities") or {})
-            return {"decision": "no_path", "reason": missing, "queued": True,
-                    "last_activity": recipient["last_activity"],
-                    "fallback": FALLBACK_CODEX if codex else FALLBACK_CLAUDE,
-                    "fallback_paths": list(FALLBACK_PATHS_CODEX if codex
-                                           else FALLBACK_PATHS_CLAUDE), **ring}
+            return {**self._no_path(recipient, now, missing), **ring}
         return {"decision": "rung", "reason": reason, "ring_at": now, **ring}
 
     def park_gate(self, agent_id, principal, *, since=None):
@@ -3394,7 +3418,9 @@ class CoordinationStore:
                     (agent_id, since))["created_at"]
                 if latest is not None and (park["park_set_at"] is None or
                                            park["park_set_at"] <= latest):
-                    return {"gate": "block", "reason": "not_updated_this_turn"}
+                    # Mail that rang after the park: read it before re-parking
+                    # (coordination.PARK_GATE_RUNG_MESSAGE).
+                    return {"gate": "block", "reason": "rung_since_park"}
             return {"gate": "allow", "reason": "parked"}
         if since is not None:
             # Status and park changes are update events whose fields name

@@ -175,6 +175,20 @@ fn a_dense_embedding_module_is_unsupported() {
 }
 
 #[test]
+fn a_multi_band_preset_is_unsupported() {
+    // Startup refuses retired multi-band layouts (#1370); so does the check.
+    let dir = scratch("bands");
+    let root = model_root(&dir);
+    let (code, out, err) = run(
+        &dir,
+        "memory:\n  miras:\n    preset: continuum\n",
+        Some(&root),
+    );
+    assert_eq!(code, 3, "{out}{err}");
+    assert!(err.contains("memory.miras.preset"), "{err}");
+}
+
+#[test]
 fn an_unreadable_sweep_interval_is_unsupported() {
     let dir = scratch("sweep");
     let root = model_root(&dir);

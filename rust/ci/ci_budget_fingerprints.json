@@ -9,7 +9,7 @@
       "test": "bb217dd816ccb0b8",
       "test-lite-linux": "a1c2bb60ed678398",
       "test-lite-macos": "f3e61581c78da942",
-      "test-lite-windows": "38f5d06841a4c316"
+      "test-lite-windows": "eb78a3c12bf79977"
     },
     "rust.yml": {
       "candidate": "0930d9d93aaa182c",
@@ -17,8 +17,8 @@
       "daemon-image": "028fd79f06c19794",
       "fixtures": "2c17c5dbf6eed90d",
       "parity": "4b13f8c55b6e3de3",
-      "parity-checks": "228bd3c4cc28e240",
-      "parity-pool": "815e4a55323c1ac8",
+      "parity-checks": "75c17da5569da284",
+      "parity-pool": "743ed0bdc6621552",
       "rust": "1bf2949883eca84e",
       "scope": "1be8245c7953029b"
     }
