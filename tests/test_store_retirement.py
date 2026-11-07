@@ -265,7 +265,7 @@ def test_world_forget_retires_and_restores_with_the_citation(svc):
     assert _pg_rows(svc, "world_facts", "acme") == [("current", "jane")]
 
 
-@pytest.mark.parametrize("failure", ["slot save", "commit", "lost reply"])
+@pytest.mark.parametrize("failure", ["slot save", "commit"])
 @pytest.mark.parametrize("store", ["world", "lesson"])
 def test_a_restore_commits_its_decision_with_the_slot_save(svc, monkeypatch, store, failure):
     """The restore decision and the restored slot commit in one
@@ -332,15 +332,9 @@ def test_a_restore_commits_its_decision_with_the_slot_save(svc, monkeypatch, sto
 
         @contextmanager
         def failing_commit():
-            if failure == "commit":
-                with real_transaction():
-                    yield
-                    raise psycopg.OperationalError("injected COMMIT failure")
-            else:
-                # The COMMIT lands; its reply is lost.
-                with real_transaction():
-                    yield
-                raise psycopg.OperationalError("injected lost COMMIT reply")
+            with real_transaction():
+                yield
+                raise psycopg.OperationalError("injected COMMIT failure")
 
         monkeypatch.setattr(svc._storage, "transaction", failing_commit)
     with pytest.raises(PersistenceError):
@@ -370,6 +364,135 @@ def test_a_restore_commits_its_decision_with_the_slot_save(svc, monkeypatch, sto
     assert restore()["restored"] == 1
     assert actions() == ["restore", "retire"]
     assert bank_statuses() == ["current", "current"]
+
+
+@pytest.mark.parametrize("bank_readable", [True, False])
+@pytest.mark.parametrize("store", ["world", "lesson"])
+def test_a_restore_whose_commit_landed_survives_a_full_save(svc, monkeypatch, store,
+                                                            bank_readable):
+    """A restore whose COMMIT landed with its reply lost: the bank holds the
+    restored slot and its decision, and neither an explicit save nor the
+    exit flush (both rewrite the whole table from the resident copy) may
+    write it back to retired. When the bank answers, the call learns that
+    the restore committed and serves it; when it cannot, the resident
+    restore is kept, so a full save writes what the user asked for."""
+    from contextlib import contextmanager
+
+    import psycopg
+
+    from pseudolife_memory.service import PersistenceError
+
+    if store == "world":
+        svc.world_write("acme", "ceo", "jane", source_url="https://x.test/a",
+                        source_quote="Jane is CEO", confidence=0.8)
+        svc.world_forget("acme", "ceo", decided_by="agent")
+        restore, cortex, ne, key = (lambda: svc.world_restore("acme", "ceo"),
+                                    svc._world, "acme", ("acme", "ceo"))
+    else:
+        svc.lesson_write("deploy engine", "approach", "build the image first")
+        svc.lesson_forget("deploy engine", "approach", decided_by="agent")
+        restore, cortex, ne, key = (
+            lambda: svc.lesson_restore("deploy engine", "approach"),
+            svc._lessons, "deploy-engine", ("deploy-engine", "approach"))
+    table = "world_facts" if store == "world" else "lessons"
+
+    def actions():
+        return [d["action"] for d in svc._storage.store_decisions(store, entity_norm=ne)]
+
+    def bank_statuses():
+        return sorted(s for s, _ in _pg_rows(svc, table, ne))
+
+    # Another slot of the entity holds an unsaved change (its save failed):
+    # the restore's transaction writes it too.
+    replace = "replace_slot_world_facts" if store == "world" else "replace_slot_lessons"
+
+    def refuse(*a, **k):
+        raise psycopg.OperationalError("injected earlier save failure")
+
+    monkeypatch.setattr(svc._storage, replace, refuse)
+    with pytest.raises(PersistenceError):
+        if store == "world":
+            svc.world_write("acme", "cfo", "bob", source_url="https://x.test/b",
+                            source_quote="Bob is CFO", confidence=0.8)
+        else:
+            svc.lesson_write("deploy engine", "pitfall", "skip the cache")
+    monkeypatch.undo()
+    other = ("acme", "cfo") if store == "world" else ("deploy-engine", "pitfall")
+    assert other in cortex.dirty_slots
+
+    real_transaction = svc._storage.transaction
+    real_decisions = svc._storage.store_decisions
+
+    @contextmanager
+    def lost_reply():
+        # The COMMIT lands; its reply is lost.
+        with real_transaction():
+            yield
+        if not bank_readable:
+            def unreadable(*a, **k):
+                raise psycopg.OperationalError("injected: the bank cannot be read")
+
+            monkeypatch.setattr(svc._storage, "store_decisions", unreadable)
+        raise psycopg.OperationalError("injected lost COMMIT reply")
+
+    monkeypatch.setattr(svc._storage, "transaction", lost_reply)
+    try:
+        result = restore()
+    except PersistenceError:
+        result = None
+    monkeypatch.setattr(svc._storage, "transaction", real_transaction)
+    monkeypatch.setattr(svc._storage, "store_decisions", real_decisions)
+    assert actions() == ["restore", "retire"]
+    assert bank_statuses() == ["current", "current"]
+    assert key in cortex._current, "the committed restore is served"
+    if bank_readable:
+        assert result is not None and result["restored"] == 1, "the call learned it committed"
+        assert other not in cortex.dirty_slots, "the landed transaction saved the other slot"
+    else:
+        assert result is None, "an unconfirmed restore still answers the error"
+        assert other in cortex.dirty_slots, "an unconfirmed save keeps its marks"
+    for full_save in (svc.save, svc.flush):
+        full_save()
+        assert bank_statuses() == ["current", "current"], (
+            f"{full_save.__name__}() wrote a committed restore back to retired")
+        assert actions() == ["restore", "retire"]
+
+
+def test_a_rolled_back_restore_is_not_mistaken_for_an_earlier_one(svc, monkeypatch):
+    """Two restores of one slot in the same clock tick (time.time() has a
+    coarse resolution on some hosts): when the second one's COMMIT fails
+    without landing, the bank's earlier restore decision must not be taken
+    for it, so the resident restore is undone and the call fails."""
+    from contextlib import contextmanager
+    import time
+
+    import psycopg
+
+    from pseudolife_memory.service import PersistenceError
+
+    monkeypatch.setattr(time, "time", lambda: 1_800_000_000.0)
+    svc.world_write("acme", "ceo", "jane", source_url="https://x.test/a",
+                    source_quote="Jane is CEO", confidence=0.8)
+    svc.world_forget("acme", "ceo", decided_by="agent")
+    assert svc.world_restore("acme", "ceo")["restored"] == 1
+    svc.world_forget("acme", "ceo", decided_by="agent")
+    real_transaction = svc._storage.transaction
+
+    @contextmanager
+    def failing_commit():
+        with real_transaction():
+            yield
+            raise psycopg.OperationalError("injected COMMIT failure")
+
+    monkeypatch.setattr(svc._storage, "transaction", failing_commit)
+    with pytest.raises(PersistenceError):
+        svc.world_restore("acme", "ceo")
+    monkeypatch.setattr(svc._storage, "transaction", real_transaction)
+    assert ("acme", "ceo") not in svc._world._current, "the rolled-back restore is served"
+    actions = [d["action"] for d in svc._storage.store_decisions("world", entity_norm="acme")]
+    assert actions == ["retire", "restore", "retire"]
+    svc.save()
+    assert sorted(s for s, _ in _pg_rows(svc, "world_facts", "acme")) == ["retired"]
 
 
 def test_world_restore_from_the_audit_snapshot_keeps_the_citation(svc):
