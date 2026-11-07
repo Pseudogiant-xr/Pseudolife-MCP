@@ -1257,7 +1257,7 @@ def test_release_rust_import_leg_checks_the_disk_before_pulling(tmp_path, native
         state_path.write_text(json.dumps(state))
         result = run_arm(repo, env, binary if native else None,
                          ["--engine", "rust", "--tag", "0.21.1", "--daemon-only", "--json", "--health-retries", "1"])
-        assert result.returncode != 0, result.stdout + result.stderr
+        assert result.returncode == 2, result.stdout + result.stderr
         assert "8 GiB" in result.stdout, result.stdout
         calls = json.loads(state_path.read_text())["calls"]
         assert not any(a[:1] == ["pull"] for a in calls), calls
