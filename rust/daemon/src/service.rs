@@ -20,6 +20,15 @@ const RETRY_MAX_S: f64 = 60.0;
 // for 16 probes. Reuse for one second to amortize bursts; the shadow proof
 // verifies that 16 concurrent readers share one probe after expiry.
 const SHADOW_PROBE_REUSE: Duration = Duration::from_secs(1);
+/// How long a commit-unknown re-read waits for the writes already holding
+/// the resident copy's writer mutex: a bound, so a writer that called back
+/// into initialization could not hold the service forever (no such path
+/// exists; reviewed 2026-11-07). Not measured; long enough for a deep-dream
+/// apply, which holds the mutex across its graph load and plan and can pass
+/// 10 s on a large bank (review of 2026-11-07), since every call queued
+/// behind the service mutex waits on this too. On timeout the call answers
+/// an error and the next call tries again.
+const COMMIT_UNKNOWN_WRITER_WAIT: Duration = Duration::from_secs(120);
 
 pub const READ_ONLY_MESSAGE: &str = "read-only shadow: this daemon cannot change the bank; send writes to the active writer daemon instead";
 
@@ -176,6 +185,19 @@ pub struct Service {
     /// mutex, after its read of the row versions and meta (taken).
     #[cfg(test)]
     pub(crate) preread_gate: std::sync::Mutex<Option<tokio::sync::oneshot::Receiver<()>>>,
+    /// Test seam: a commit-unknown re-read signals the first channel once it
+    /// has read the bank, then waits for the second before it swaps the
+    /// stores in (taken).
+    #[cfg(test)]
+    pub(crate) reread_gate: std::sync::Mutex<
+        Option<(
+            tokio::sync::oneshot::Sender<()>,
+            tokio::sync::oneshot::Receiver<()>,
+        )>,
+    >,
+    /// Test seam: the next commit-unknown re-read fails after its read.
+    #[cfg(test)]
+    pub(crate) reread_fails: std::sync::atomic::AtomicBool,
     /// Test seam: the next shadow bank patch signals the first channel on
     /// its blocking thread, then waits for the second before it applies.
     #[cfg(test)]
@@ -244,6 +266,10 @@ impl Service {
             verify_gate: std::sync::Mutex::new(None),
             #[cfg(test)]
             preread_gate: std::sync::Mutex::new(None),
+            #[cfg(test)]
+            reread_gate: std::sync::Mutex::new(None),
+            #[cfg(test)]
+            reread_fails: std::sync::atomic::AtomicBool::new(false),
             #[cfg(test)]
             patch_gate: std::sync::Mutex::new(None),
             health_capacity: std::sync::Mutex::new(None),
@@ -461,6 +487,9 @@ impl Service {
             }
         }
         self.rehydrate_if_bank_changed_hands(&mut inner);
+        if !self.config.read_only {
+            self.reread_after_commit_unknown(&inner).await?;
+        }
         // Probe tuple versions, not embeddings. The service lock coalesces
         // concurrent refreshes: waiters reuse the first published snapshot.
         // Keep the pre-hydration marker so a commit during hydration causes
@@ -879,6 +908,116 @@ impl Service {
             }
         });
         Ok(())
+    }
+
+    /// After a writer transaction's COMMIT outcome is unknown
+    /// ([`crate::txn::commit_outcome_unknown`]), the bank may hold a write
+    /// the resident stores never published: re-read them before serving
+    /// again (maintainer decision 2026-11-07, in place of Python's per-call
+    /// recovery barriers). In place, under the copy's writer mutex, so a
+    /// write already in flight finishes and publishes first, and one waiting
+    /// for the mutex lands on the re-read copy: none publishes into stores the
+    /// re-read then replaces. The flag is taken before the read (a COMMIT
+    /// failing meanwhile sets it again) and put back when the re-read fails,
+    /// so the next call tries again rather than serve the stale copy.
+    ///
+    /// What a cold start rebuilds from the bank is re-read: the bank, the
+    /// cortex, world and lesson stores, the episode log and active session
+    /// (`episodes::from_startup`), and the dream's acknowledgement state.
+    /// Process-local state a cold start would reset is kept: the counters
+    /// row's in-memory values, and each surviving entry's access count where
+    /// the resident one is ahead (searches accrue them in memory until an
+    /// autosave syncs them; the next autosave now does). A canonical-store
+    /// change whose save failed, and that no later save persisted, is
+    /// dropped as a restart drops it: its call answered the save error.
+    async fn reread_after_commit_unknown(&self, inner: &Inner) -> Result<(), String> {
+        if !crate::txn::commit_outcome_unknown() {
+            return Ok(());
+        }
+        let Some(ready) = inner.ready.clone() else {
+            // No resident copy: the build that follows reads the bank.
+            return Ok(());
+        };
+        let Ok(mut ws) = tokio::time::timeout(COMMIT_UNKNOWN_WRITER_WAIT, ready.write.lock()).await
+        else {
+            return Err(
+                "a write was still running after a write whose commit outcome is unknown; \
+                 the bank is re-read before the next call is served"
+                    .into(),
+            );
+        };
+        if !crate::txn::take_commit_outcome_unknown() {
+            return Ok(());
+        }
+        eprintln!("a write's COMMIT outcome is unknown: re-reading the bank before serving");
+        let client = ready.storage.client();
+        let dim = ready.embedder.embedding_dim();
+        let read = async {
+            let metadata = crate::startup::metadata(client)
+                .await
+                .map_err(|e| anyhow::anyhow!("startup metadata failed: {e}"))?;
+            let (bank, startup) =
+                crate::startup::candidate(client, &self.config.memory, metadata, dim).await?;
+            let mut cortex = crate::stores::cortex::hydrate(client, dim).await?;
+            cortex.configure(&self.config.memory.cortex, &startup.metadata);
+            let world = crate::stores::world::hydrate(client).await?;
+            let lessons = crate::stores::lessons::hydrate(client).await?;
+            let episodes = crate::episodes::from_startup(&startup)?;
+            #[cfg(test)]
+            if self
+                .reread_fails
+                .swap(false, std::sync::atomic::Ordering::SeqCst)
+            {
+                anyhow::bail!("injected re-read failure");
+            }
+            Ok::<_, anyhow::Error>((bank, cortex, world, lessons, episodes))
+        }
+        .await;
+        #[cfg(test)]
+        {
+            let gate = self.reread_gate.lock().unwrap().take();
+            if let Some((reached, release)) = gate {
+                let _ = reached.send(());
+                let _ = release.await;
+            }
+        }
+        match read {
+            Ok((bank, cortex, world, lessons, episodes)) => {
+                use std::sync::atomic::Ordering::Relaxed;
+                {
+                    let mut resident = ready.bank.write().expect("bank lock");
+                    let counts: std::collections::HashMap<i64, i64> = resident
+                        .entries
+                        .iter()
+                        .map(|e| (e.id, e.access_count.load(Relaxed)))
+                        .collect();
+                    for entry in &bank.entries {
+                        if let Some(&count) = counts.get(&entry.id)
+                            && count > entry.access_count.load(Relaxed)
+                        {
+                            entry.access_count.store(count, Relaxed);
+                        }
+                    }
+                    *resident = bank;
+                }
+                self.counters_pending
+                    .store(true, std::sync::atomic::Ordering::SeqCst);
+                ready.cortex.write(|c| *c = cortex);
+                ready.world.write(|w| *w = world);
+                ready.lessons.write(|l| *l = lessons);
+                ws.log = episodes.log;
+                ws.active_session = episodes.active_session;
+                ws.entity_kinds = None;
+                *ready.dream.lock().await = Default::default();
+                Ok(())
+            }
+            Err(e) => {
+                crate::txn::restore_commit_outcome_unknown();
+                Err(format!(
+                    "re-reading the bank after a write whose commit outcome is unknown failed: {e:#}"
+                ))
+            }
+        }
     }
 
     /// `_rehydrate_if_bank_changed_hands` (service.py:1381-1438): another

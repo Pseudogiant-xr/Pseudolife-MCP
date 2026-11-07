@@ -36,9 +36,18 @@ struct Shadow {
 
 impl Shadow {
     async fn open(dsn: &str, model: &std::path::Path) -> Shadow {
+        Shadow::open_with(dsn, model, true).await
+    }
+
+    /// The same fixture service in writer mode.
+    async fn open_writer(dsn: &str, model: &std::path::Path) -> Shadow {
+        Shadow::open_with(dsn, model, false).await
+    }
+
+    async fn open_with(dsn: &str, model: &std::path::Path, read_only: bool) -> Shadow {
         let defaults = Config::default();
         let config = Config {
-            read_only: true,
+            read_only,
             embedding: crate::config::EmbeddingConfig {
                 model_name: "pseudolife-test/shadow-fixture".into(),
                 backend: "onnx".into(),
@@ -59,7 +68,7 @@ impl Shadow {
             dsn.to_string(),
             false,
         ));
-        assert!(service.config.read_only);
+        assert_eq!(service.config.read_only, read_only);
         // What `install` sets at startup.
         let _ = service.handle.set(Arc::downgrade(&service));
         let storage = Arc::new(Storage::open(dsn).await.unwrap());
@@ -278,5 +287,155 @@ async fn db_meta_commit_during_service_init_is_refreshed() {
     );
     assert_eq!(ready.cortex.snapshot().dream_cursor, 12.5);
     drop((first, ready));
+    shadow.close().await;
+}
+
+/// A writer whose COMMIT reply was lost: the bank holds `lost`, which the
+/// resident copy never published.
+async fn lose_a_commit(shadow: &Shadow, text: &str, k: usize) -> i64 {
+    let id = shadow.insert(text, k).await;
+    crate::txn::set_commit_outcome_unknown_for_test(true);
+    id
+}
+
+fn resident_ids(ready: &Ready) -> Vec<i64> {
+    ready
+        .bank
+        .read()
+        .unwrap()
+        .entries
+        .iter()
+        .map(|e| e.id)
+        .collect()
+}
+
+/// A commit-unknown re-read waits for the write already holding the
+/// resident copy's writer mutex, so what that write commits is in the copy
+/// the re-read publishes rather than lost under it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn db_commit_unknown_reread_waits_for_the_write_in_flight() {
+    let Some(dsn) = test_dsn() else { return };
+    let Some(model) = fixture_model() else { return };
+    let _guard = DB.lock().await;
+    let _flag = crate::txn::tests::TESTS.lock().await;
+    crate::txn::set_commit_outcome_unknown_for_test(false);
+    let shadow = Shadow::open_writer(&dsn, &model).await;
+    shadow.insert("alpha", 1).await;
+    let ready = shadow.service.ensure_init_inner().await.unwrap();
+    // A write is in flight: it holds the writer mutex when the flag sets.
+    let in_flight = ready.write.lock().await;
+    let lost = lose_a_commit(&shadow, "lost", 2).await;
+    let (reached, read_done) = tokio::sync::oneshot::channel();
+    let (release, released) = tokio::sync::oneshot::channel();
+    *shadow.service.reread_gate.lock().unwrap() = Some((reached, released));
+    let service = shadow.service.clone();
+    let call = tokio::spawn(async move { service.ensure_init_inner().await });
+    let read_early = tokio::time::timeout(Duration::from_secs(2), read_done).await;
+    // The write in flight commits and releases the mutex.
+    let in_flight_id = shadow.insert("in flight", 3).await;
+    drop(in_flight);
+    release.send(()).unwrap();
+    let after = call.await.unwrap().unwrap();
+    assert!(
+        read_early.is_err(),
+        "the re-read read the bank while a write still held the writer mutex"
+    );
+    assert!(Arc::ptr_eq(&after, &ready), "re-read in place");
+    let ids = resident_ids(&after);
+    assert!(ids.contains(&lost), "the lost commit is resident");
+    assert!(
+        ids.contains(&in_flight_id),
+        "the write in flight is resident"
+    );
+    shadow.assert_bank_matches(&after).await;
+    assert!(!crate::txn::commit_outcome_unknown());
+    drop((ready, after));
+    shadow.close().await;
+}
+
+/// A re-read that fails answers the call with an error and leaves the flag
+/// set, so the next call re-reads rather than serve the stale copy.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn db_failed_commit_unknown_reread_keeps_the_flag() {
+    let Some(dsn) = test_dsn() else { return };
+    let Some(model) = fixture_model() else { return };
+    let _guard = DB.lock().await;
+    let _flag = crate::txn::tests::TESTS.lock().await;
+    crate::txn::set_commit_outcome_unknown_for_test(false);
+    let shadow = Shadow::open_writer(&dsn, &model).await;
+    shadow.insert("alpha", 1).await;
+    let ready = shadow.service.ensure_init_inner().await.unwrap();
+    let lost = lose_a_commit(&shadow, "lost", 2).await;
+    shadow
+        .service
+        .reread_fails
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    let Err(error) = shadow.service.ensure_init_inner().await else {
+        panic!("the call was served from the stale copy");
+    };
+    assert!(error.contains("commit outcome is unknown"), "{error}");
+    assert!(
+        crate::txn::commit_outcome_unknown(),
+        "a failed re-read leaves the flag set"
+    );
+    assert!(!resident_ids(&ready).contains(&lost));
+    let after = shadow.service.ensure_init_inner().await.unwrap();
+    assert!(
+        resident_ids(&after).contains(&lost),
+        "the next call re-read the bank"
+    );
+    shadow.assert_bank_matches(&after).await;
+    assert!(!crate::txn::commit_outcome_unknown());
+    drop((ready, after));
+    shadow.close().await;
+}
+
+/// The re-read rebuilds what a cold start reads from the bank (here the
+/// active session, part of the episode state) and keeps what only this
+/// process holds (an access count searches accrued since the last autosave).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn db_commit_unknown_reread_keeps_access_counts_and_rereads_episodes() {
+    let Some(dsn) = test_dsn() else { return };
+    let Some(model) = fixture_model() else { return };
+    let _guard = DB.lock().await;
+    let _flag = crate::txn::tests::TESTS.lock().await;
+    crate::txn::set_commit_outcome_unknown_for_test(false);
+    let shadow = Shadow::open_writer(&dsn, &model).await;
+    let alpha = shadow.insert("alpha", 1).await;
+    let ready = shadow.service.ensure_init_inner().await.unwrap();
+    let count = |ready: &Ready| {
+        ready
+            .bank
+            .read()
+            .unwrap()
+            .entries
+            .iter()
+            .find(|e| e.id == alpha)
+            .map(|e| e.access_count.load(std::sync::atomic::Ordering::Relaxed))
+    };
+    {
+        let bank = ready.bank.read().unwrap();
+        let entry = bank.entries.iter().find(|e| e.id == alpha).unwrap();
+        entry
+            .access_count
+            .store(7, std::sync::atomic::Ordering::Relaxed);
+    }
+    ready.write.lock().await.active_session = Some(("ghost".into(), 1.0));
+    lose_a_commit(&shadow, "lost", 2).await;
+    let after = shadow.service.ensure_init_inner().await.unwrap();
+    assert_eq!(count(&after), Some(7), "an unsynced access count survives");
+    assert_eq!(
+        after.write.lock().await.active_session,
+        None,
+        "the episode state is re-read from the bank"
+    );
+    assert!(
+        shadow
+            .service
+            .counters_pending
+            .load(std::sync::atomic::Ordering::SeqCst),
+        "the next autosave syncs the kept counts"
+    );
+    drop((ready, after));
     shadow.close().await;
 }
