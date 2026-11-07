@@ -560,7 +560,9 @@ class ReleaseEngineUpdate:
                 shown = f"v{pending}" if pending >= 0 else "an unreadable schema"
                 u.step(f"this bank ({shown}) still keeps its CMS counters in memory_state/weights.pt: moving to the "
                        f"Python daemon {self.target} first, which imports them, then to the Rust daemon")
-                # The Rust image must exist before the Python leg changes anything.
+                # The Rust image must exist before the Python leg changes anything,
+                # and the disk floor holds before that image is pulled.
+                u.preflight_disk(up.data_dir())
                 rust_image = f"{RUST_IMAGE}:{self.target}"
                 u.step(f"pulling {rust_image}...")
                 code, out = self.command(["pull", rust_image], timeout=7200, stream=not o.as_json)

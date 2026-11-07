@@ -343,7 +343,7 @@ elif a[:1]==["compose"]:
    s["running"]["Image"]="sha256:replacement"
    s["running"]["Id"]=s.get("replacement_id",s["running"]["Id"])
 elif a[:1]==["exec"]:
- if "df" in a: out="Filesystem 1024-blocks Used Available Capacity Mounted on\noverlay 99999999 1 99999998 1% /"
+ if "df" in a: out="Filesystem 1024-blocks Used Available Capacity Mounted on\n"+("overlay 99999999 1 1 99% /" if s.get("low_disk") else "overlay 99999999 1 99999998 1% /")
  elif "--host-state" in a or "pseudolife_memory.maintainer_setup" in a:
   out=s.get("setup_reply",json.dumps({"problem":None,"keys":[{"state":"active"}]}))
  elif "psql" in a:
@@ -1242,6 +1242,26 @@ def test_release_rust_stops_on_python_when_the_import_does_not_happen(tmp_path, 
         state = json.loads(state_path.read_text())
         assert stages(state) == ["pull", "pull", "backup", "tag", "up"]
         assert _labels(state_path)["org.pseudolife.engine"] == "python"
+
+
+@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+def test_release_rust_import_leg_checks_the_disk_before_pulling(tmp_path, native):
+    # The Rust image is pulled before the Python leg; the 8 GiB floor must
+    # hold first, as it does before every other pull.
+    binary = _native_binary()
+    if native and not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path, "pending_import") as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        state["low_disk"] = True
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary if native else None,
+                         ["--engine", "rust", "--tag", "0.21.1", "--daemon-only", "--json", "--health-retries", "1"])
+        assert result.returncode != 0, result.stdout + result.stderr
+        assert "8 GiB" in result.stdout, result.stdout
+        calls = json.loads(state_path.read_text())["calls"]
+        assert not any(a[:1] == ["pull"] for a in calls), calls
+        assert stages(json.loads(state_path.read_text())) == []
 
 
 @pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
