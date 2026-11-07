@@ -133,16 +133,44 @@ struct Context {
 /// A copy of the shipped Compose files the release archive replaces: one
 /// of this updater's release archives, the Python updater's bundled copies,
 /// or a checkout's `ops/` (the installers' layout).
+/// Recognised by shape as well as by today's roots, so an archive or copy
+/// written under another home or data directory still counts.
 fn packaged_compose(path: &Path) -> bool {
     let Some(parent) = path.parent() else {
         return false;
     };
-    parent.parent() == Some(compose_root().as_path())
-        || parent == data_dir().join("compose")
-        || (parent.file_name().is_some_and(|d| d == "ops")
-            && parent
-                .parent()
-                .is_some_and(|checkout| checkout.join("pyproject.toml").is_file()))
+    let name = |p: Option<&Path>| {
+        p.and_then(Path::file_name)
+            .and_then(|n| n.to_str())
+            .map(str::to_owned)
+    };
+    let grandparent = parent.parent();
+    // <...>/pseudolife-mcp/compose/<x.y.z>/: a release archive.
+    let archive = grandparent == Some(compose_root().as_path())
+        || (name(Some(parent)).is_some_and(|v| plain_release(&v))
+            && name(grandparent).as_deref() == Some("compose")
+            && name(grandparent.and_then(Path::parent)).as_deref() == Some("pseudolife-mcp"));
+    // <data dir>/compose/: the Python updater's bundled copies.
+    let bundled = parent == data_dir().join("compose")
+        || (name(Some(parent)).as_deref() == Some("compose")
+            && name(grandparent).as_deref() == Some(".pseudolife-mcp"));
+    // <checkout>/ops/: the installers' layout.
+    let checkout = name(Some(parent)).as_deref() == Some("ops")
+        && grandparent.is_some_and(|c| c.join("pyproject.toml").is_file());
+    archive || bundled || checkout
+}
+
+/// The updater's own overlays and the release's engine overlays: never a
+/// project's settings, so never kept from the labels.
+fn engine_overlay(name: &str) -> bool {
+    name.starts_with("docker-compose.engine")
+        || name.starts_with("docker-compose.rollback")
+        || matches!(
+            name,
+            "docker-compose.rust-ghcr.yml"
+                | "docker-compose.rust-daemon.yml"
+                | "docker-compose.rust-shadow.yml"
+        )
 }
 
 pub(super) fn compose_root() -> PathBuf {
@@ -319,6 +347,30 @@ impl Update {
                 "the daemon's compose files are gone and no env file was found; name the original file with --env-file. Nothing was changed",
             ));
         }
+        // A project file that is neither packaged nor one of the updater's
+        // own overlays holds this stack's settings: if it is missing here (a
+        // stack manager's path inside its own container), the release's files
+        // would replace that configuration, so refuse, as the Python updater does.
+        let unavailable: Vec<String> = existing
+            .iter()
+            .filter(|p| !p.is_file())
+            .filter(|p| {
+                !p.file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(engine_overlay)
+                    && !packaged_compose(p)
+            })
+            .map(|p| p.display().to_string())
+            .collect();
+        if !unavailable.is_empty() {
+            let project = labels["com.docker.compose.project"]
+                .as_str()
+                .unwrap_or("pseudolife-mcp");
+            return Err(UpdateError::usage(format!(
+                "compose project {project:?} has files unavailable on this host: {}. Their settings cannot be recovered from the env file, and the release's Compose files would replace this stack's configuration. Restore those files at those paths (Portainer: Stacks > {project} > Editor), then retry. Nothing was changed",
+                unavailable.join(", ")
+            )));
+        }
         // Release Compose is always taken from the checksum-verified archive.
         // Keep project-specific overrides, but never stale engine/candidate
         // overlays from a prior activation, which could override the new tag.
@@ -326,32 +378,32 @@ impl Update {
         // Only a packaged copy of a shipped file is replaced by the archive's.
         // A stack manager's own file that shares a shipped name (a Portainer
         // stack's docker-compose.yml) holds that stack's settings and stays.
-        let mut kept_base = None;
+        let mut kept_base = false;
         let mut kept_ghcr = false;
-        let mut rest = Vec::new();
+        let mut kept = Vec::new();
         for path in existing.into_iter().filter(|p| p.is_file()) {
             let Some(name) = path.file_name().and_then(|n| n.to_str()).map(str::to_owned) else {
                 continue;
             };
-            if name.starts_with("docker-compose.engine")
-                || name.starts_with("docker-compose.rollback")
-            {
+            if engine_overlay(&name) {
                 continue;
             }
             if COMPOSE_FILES.contains(&name.as_str()) {
-                if name == "docker-compose.rust-ghcr.yml" || packaged_compose(&path) {
+                if packaged_compose(&path) {
                     continue;
                 }
-                if name == "docker-compose.yml" {
-                    kept_base = Some(path);
-                    continue;
-                }
+                kept_base |= name == "docker-compose.yml";
                 kept_ghcr |= name == "docker-compose.ghcr.yml";
             }
-            rest.push(path);
+            kept.push(path);
         }
-        let mut files = vec![kept_base.unwrap_or_else(|| directory.join("docker-compose.yml"))];
-        files.extend(rest);
+        // Kept files stay in label order; the archive supplies a base and
+        // the ghcr overlay only where the project kept none of its own.
+        let mut files = Vec::new();
+        if !kept_base {
+            files.push(directory.join("docker-compose.yml"));
+        }
+        files.extend(kept);
         if !kept_ghcr {
             files.push(directory.join("docker-compose.ghcr.yml"));
         }

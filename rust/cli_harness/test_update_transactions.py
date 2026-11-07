@@ -1452,7 +1452,7 @@ def test_release_retains_original_project_directory_for_relative_mounts(tmp_path
 
 
 @pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
-@pytest.mark.parametrize("layout", ["stack", "packaged"])
+@pytest.mark.parametrize("layout", ["stack", "packaged", "old-archive"])
 def test_release_keeps_a_stack_file_that_only_shares_a_shipped_name(tmp_path, native, layout):
     # A stack manager (Portainer: /data/compose/<id>/docker-compose.yml)
     # labels its own docker-compose.yml. Native release mode replaced every
@@ -1470,6 +1470,14 @@ def test_release_keeps_a_stack_file_that_only_shares_a_shipped_name(tmp_path, na
             (stack / "docker-compose.yml").write_text("services:\n  pseudolife-daemon: {}\n")
             labels["com.docker.compose.project.config_files"] = str(stack / "docker-compose.yml")
             labels["com.docker.compose.project.working_dir"] = str(stack)
+        if layout == "old-archive":
+            # An archive an earlier run wrote under another home: still packaged.
+            old = tmp_path / "old-home/.local/share/pseudolife-mcp/compose/0.21.0"
+            old.mkdir(parents=True)
+            for name in ("docker-compose.yml", "docker-compose.ghcr.yml"):
+                (old / name).write_text("services:\n  pseudolife-daemon: {}\n")
+            labels["com.docker.compose.project.config_files"] = ",".join(
+                str(old / name) for name in ("docker-compose.yml", "docker-compose.ghcr.yml"))
         state_path.write_text(json.dumps(state))
         result = run_arm(repo, env, binary if native else None,
                          ["--tag", "0.21.1", "--daemon-only", "--json", "--health-retries", "1",
@@ -1477,14 +1485,42 @@ def test_release_keeps_a_stack_file_that_only_shares_a_shipped_name(tmp_path, na
         assert result.returncode == 0, result.stdout + result.stderr
         calls = json.loads(state_path.read_text())["calls"]
         up = next(a for a in calls if a[:1] == ["compose"] and "up" in a)
-        bases = [v for v in up if Path(v).name == "docker-compose.yml"]
+        files = [up[i + 1] for i, v in enumerate(up[:-1]) if v == "-f"]
+        bases = [v for v in files if Path(v).name == "docker-compose.yml"]
+        ghcr = [v for v in files if Path(v).name == "docker-compose.ghcr.yml"]
         if layout == "stack":
-            # The stack's own file, and no second base file beside it.
-            assert bases == [str(stack / "docker-compose.yml")], up
+            # The stack's own file, no second base beside it, and the image
+            # overlay after it.
+            assert bases == [str(stack / "docker-compose.yml")], files
+            assert len(ghcr) == 1 and files.index(ghcr[0]) > files.index(bases[0]), files
         elif native:
-            # A packaged copy is still replaced by the verified archive's.
-            assert bases and bases != [str(repo / "ops/docker-compose.yml")], up
-            assert str(repo / "ops/docker-compose.yml") not in up
+            # A packaged copy is replaced by this release's verified archive.
+            archive = Path(ghcr[0]).parent
+            assert archive.name == "0.21.1" and archive.parent.name == "compose", files
+            assert [Path(v) for v in bases] == [archive / "docker-compose.yml"], files
+            assert files[0] == bases[0] and files.index(ghcr[0]) > files.index(bases[0]), files
+
+
+@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+def test_release_refuses_when_a_stack_file_is_missing_on_this_host(tmp_path, native):
+    # Portainer records /data/compose/<id>/docker-compose.yml, a path inside
+    # its own container. The release's files would replace the stack's
+    # configuration, so both updaters refuse before changing anything.
+    binary = _native_binary()
+    if native and not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path) as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        labels = state["running"]["Config"]["Labels"]
+        stack = tmp_path / "portainer-only/compose/12"
+        labels["com.docker.compose.project.config_files"] = str(stack / "docker-compose.yml")
+        labels["com.docker.compose.project.working_dir"] = str(repo / "ops")
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary if native else None,
+                         ["--tag", "0.21.1", "--daemon-only", "--json", "--health-retries", "1"])
+        assert result.returncode == 2, result.stdout + result.stderr
+        assert "unavailable on this host" in result.stdout and "Nothing was changed" in result.stdout
+        assert stages(json.loads(state_path.read_text())) == []
 
 
 @pytest.mark.parametrize("mode", ["release", "checkout"])
