@@ -6,7 +6,7 @@
      {
       "access_count": 0,
       "authority": null,
-      "band": "deep",
+      "band": "shallow",
       "distortion_tolerance": null,
       "dream_state": "acknowledged",
       "embedding": [
@@ -1062,7 +1062,7 @@
      {
       "access_count": 1,
       "authority": "observation",
-      "band": "deep",
+      "band": "shallow",
       "distortion_tolerance": "episodic",
       "dream_state": "pending",
       "embedding": [
@@ -2118,7 +2118,7 @@
      {
       "access_count": 2,
       "authority": null,
-      "band": "deep",
+      "band": "shallow",
       "distortion_tolerance": null,
       "dream_state": "pending",
       "embedding": [
@@ -3174,7 +3174,7 @@
      {
       "access_count": 3,
       "authority": "observation",
-      "band": "deep",
+      "band": "shallow",
       "distortion_tolerance": "episodic",
       "dream_state": "pending",
       "embedding": [
@@ -4230,7 +4230,7 @@
      {
       "access_count": 4,
       "authority": null,
-      "band": "deep",
+      "band": "shallow",
       "distortion_tolerance": null,
       "dream_state": "pending",
       "embedding": [
@@ -5286,7 +5286,7 @@
      {
       "access_count": 5,
       "authority": "observation",
-      "band": "middle",
+      "band": "shallow",
       "distortion_tolerance": "episodic",
       "dream_state": "pending",
       "embedding": [
@@ -6342,7 +6342,7 @@
      {
       "access_count": 6,
       "authority": null,
-      "band": "middle",
+      "band": "shallow",
       "distortion_tolerance": null,
       "dream_state": "pending",
       "embedding": [
@@ -13986,7 +13986,7 @@
      {
       "access_count": 0,
       "authority": null,
-      "band": "deep",
+      "band": "shallow",
       "distortion_tolerance": null,
       "dream_state": "acknowledged",
       "embedding": [
@@ -15042,7 +15042,7 @@
      {
       "access_count": 1,
       "authority": "observation",
-      "band": "deep",
+      "band": "shallow",
       "distortion_tolerance": "episodic",
       "dream_state": "pending",
       "embedding": [
@@ -16098,7 +16098,7 @@
      {
       "access_count": 2,
       "authority": null,
-      "band": "deep",
+      "band": "shallow",
       "distortion_tolerance": null,
       "dream_state": "pending",
       "embedding": [
@@ -17154,7 +17154,7 @@
      {
       "access_count": 3,
       "authority": "observation",
-      "band": "deep",
+      "band": "shallow",
       "distortion_tolerance": "episodic",
       "dream_state": "pending",
       "embedding": [
@@ -18210,7 +18210,7 @@
      {
       "access_count": 4,
       "authority": null,
-      "band": "deep",
+      "band": "shallow",
       "distortion_tolerance": null,
       "dream_state": "pending",
       "embedding": [
@@ -19266,7 +19266,7 @@
      {
       "access_count": 5,
       "authority": "observation",
-      "band": "middle",
+      "band": "shallow",
       "distortion_tolerance": "episodic",
       "dream_state": "pending",
       "embedding": [
@@ -20322,7 +20322,7 @@
      {
       "access_count": 6,
       "authority": null,
-      "band": "middle",
+      "band": "shallow",
       "distortion_tolerance": null,
       "dream_state": "pending",
       "embedding": [
@@ -125616,7 +125616,7 @@
      {
       "access_count": 0,
       "authority": null,
-      "band": "deep",
+      "band": "shallow",
       "distortion_tolerance": null,
       "dream_state": "acknowledged",
       "embedding": [
@@ -126672,7 +126672,7 @@
      {
       "access_count": 1,
       "authority": "observation",
-      "band": "middle",
+      "band": "shallow",
       "distortion_tolerance": "episodic",
       "dream_state": "pending",
       "embedding": [
@@ -127728,7 +127728,7 @@
      {
       "access_count": 2,
       "authority": null,
-      "band": "middle",
+      "band": "shallow",
       "distortion_tolerance": null,
       "dream_state": "pending",
       "embedding": [
@@ -135372,7 +135372,7 @@
      {
       "access_count": 0,
       "authority": null,
-      "band": "deep",
+      "band": "shallow",
       "distortion_tolerance": null,
       "dream_state": "acknowledged",
       "embedding": [
@@ -136428,7 +136428,7 @@
      {
       "access_count": 1,
       "authority": "observation",
-      "band": "middle",
+      "band": "shallow",
       "distortion_tolerance": "episodic",
       "dream_state": "pending",
       "embedding": [
@@ -137484,7 +137484,7 @@
      {
       "access_count": 2,
       "authority": null,
-      "band": "middle",
+      "band": "shallow",
       "distortion_tolerance": null,
       "dream_state": "pending",
       "embedding": [
@@ -213020,7 +213020,7 @@
      {
       "access_count": 1,
       "authority": null,
-      "band": "deep",
+      "band": "hot",
       "distortion_tolerance": null,
       "dream_state": "pending",
       "embedding": [
@@ -215136,7 +215136,7 @@
      {
       "access_count": 1,
       "authority": null,
-      "band": "deep",
+      "band": "hot",
       "distortion_tolerance": null,
       "dream_state": "pending",
       "embedding": [
@@ -216209,5 +216209,5 @@
   "relations.created_at": "new constructor rows only, checked against each arm's invocation window",
   "restart.meta.writer_lease_epoch": "removed only for idempotence; increment checked separately"
  },
- "oracle_head": "867f790e7d909886361ecc616dab0f638f05af73"
+ "oracle_head": "785a0103514cfb5617e3bc3fcb6a2cc5b4691bfa"
 }

@@ -9,7 +9,7 @@
       "test": "bb217dd816ccb0b8",
       "test-lite-linux": "a1c2bb60ed678398",
       "test-lite-macos": "f3e61581c78da942",
-      "test-lite-windows": "38f5d06841a4c316"
+      "test-lite-windows": "eb78a3c12bf79977"
     },
     "rust.yml": {
       "candidate": "0930d9d93aaa182c",

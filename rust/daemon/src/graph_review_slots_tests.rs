@@ -308,6 +308,38 @@ fn store_of(records: Vec<LessonRecord>) -> LessonStore {
     }
 }
 
+/// A lesson restore whose transaction failed is undone exactly: the record
+/// is retired again with its old `superseded_at` and a retry restores it.
+#[test]
+fn undo_lesson_restore_puts_the_retired_record_back() {
+    let mut l = store_of(vec![curated(
+        "Approach",
+        "Rotate keys.",
+        "retired",
+        Some(50.0),
+    )]);
+    let marks: Vec<(usize, Option<f64>, bool)> = l
+        .restore_picks("Curate Keys", Some("Approach"))
+        .into_iter()
+        .map(|i| (i, l.records[i].superseded_at, false))
+        .collect();
+    assert_eq!(l.restore("Curate Keys", Some("Approach")), vec![0]);
+    assert_eq!(l.records[0].status, "current");
+    l.undo_restore(&marks);
+    assert_eq!(l.records[0].status, "retired");
+    assert_eq!(l.records[0].superseded_at, Some(50.0));
+    assert_eq!(l.current_records().count(), 0);
+    assert!(
+        l.dirty_slots.is_empty(),
+        "the restore's own dirty mark is dropped"
+    );
+    assert_eq!(
+        l.restore("Curate Keys", Some("Approach")),
+        vec![0],
+        "a retry restores"
+    );
+}
+
 // ── the reconciliation of a failed curated restore ───────────────────────
 
 /// The oracle's `rec(aspect, value, ...)` (`o1c_recovery_oracle.py`).

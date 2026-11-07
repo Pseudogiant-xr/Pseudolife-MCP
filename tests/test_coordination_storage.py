@@ -1255,7 +1255,7 @@ def test_reopening_a_done_park_without_a_listener_says_no_path_and_names_the_fal
     assert (wake["decision"], wake["reason"], wake["queued"], wake["reopened"]) == (
         "no_path", "listener_unknown", True, True)
     expected = (["codex_doorbell", "maintainer_types"] if client == "codex"
-                else ["claude_desktop_send_message", "maintainer_types"])
+                else ["t3_thread_send", "claude_desktop_send_message", "maintainer_types"])
     assert wake["fallback_paths"] == expected
     assert ("doorbell" in wake["fallback"]) is (client == "codex")
     assert ("send_message" in wake["fallback"]) is (client == "claude")
@@ -1654,7 +1654,7 @@ def test_park_gate_requires_a_park_strictly_after_a_rung_delivery(store, reset_a
         _renew_wake_path(store, recipient)
         store.update(*creds(recipient), park_reason="blocked")
     expected = ({"gate": "allow", "reason": "parked"} if reset_at == 1700.0
-                else {"gate": "block", "reason": "not_updated_this_turn"})
+                else {"gate": "block", "reason": "rung_since_park"})
     assert store.park_gate(recipient["agent_id"], "alice", since=1500.0) == expected
 
 
@@ -1686,7 +1686,7 @@ def test_park_gate_blocks_a_null_park_timestamp_after_a_rung_delivery(store):
         "decision,reason,ring_at,created_at) VALUES (%s,%s,%s,'rung','anyone',%s,%s)",
         (recipient["agent_id"], sender["agent_id"], "fixture-message", 1600.0, 1600.0))
     assert store.park_gate(recipient["agent_id"], "alice", since=1500.0) == {
-        "gate": "block", "reason": "not_updated_this_turn"}
+        "gate": "block", "reason": "rung_since_park"}
 
 
 def test_park_gate_ignores_rung_deliveries_to_another_agent(store):
@@ -1734,6 +1734,26 @@ def test_park_gate_compares_the_park_with_the_newest_rung_delivery(store):
     _renew_wake_path(store, recipient)
     assert _wake(store, sender, recipient)["decision"] == "rung"
     assert store.park_gate(recipient["agent_id"], "alice", since=1500.0) == {
+        "gate": "block", "reason": "rung_since_park"}
+
+
+def test_park_gate_names_mail_that_rang_after_the_park_apart_from_a_missing_update(store):
+    """Both block, for different reasons: mail that rang after this turn's
+    park needs reading first (the session may not have seen it yet: a ring
+    at 17:19:01Z was blocked on at 17:19:03Z, before the shim's heartbeat
+    showed it, and the continuation re-parked "waiting on you" unread),
+    while a turn that never touched the board only needs its update."""
+    sender = store.register("alice")
+    recipient = _wake_capable(store)
+    store.update(*creds(recipient), park_reason="blocked", park_needs="a review",
+                 park_clear_by="anyone")
+    store.test_time[0] = 1600.0
+    _renew_wake_path(store, recipient)
+    assert _wake(store, sender, recipient)["decision"] == "rung"
+    assert store.park_gate(recipient["agent_id"], "alice", since=1500.0)["reason"] == (
+        "rung_since_park")
+    idle = _wake_capable(store)
+    assert store.park_gate(idle["agent_id"], "alice", since=1650.0) == {
         "gate": "block", "reason": "not_updated_this_turn"}
 
 
@@ -1861,12 +1881,14 @@ def test_listener_heartbeat_expiry_and_disarm(store):
                  park_clear_by="anyone")
     assert _wake(store, sender, recipient)["decision"] == "rung"
     store.test_time[0] = 1041.0
-    assert _wake(store, sender, recipient)["reason"] == "listener_expired"
+    # The attachment still holds: the session is open, its listener down
+    # until a turn end re-arms it (listener_rearming, not a lapse).
+    assert _wake(store, sender, recipient)["reason"] == "listener_rearming"
     renewed = store.heartbeat(*creds(recipient), attachment_id="listener",
                               generation=first["generation"], ring_armed_until=1080.0)
     assert renewed["wake"]["decision"] == "rung"
     store.heartbeat(*creds(recipient), attachment_id="listener", generation=first["generation"])
-    assert _wake(store, sender, recipient)["reason"] == "listener_expired"
+    assert _wake(store, sender, recipient)["reason"] == "listener_rearming"
     assert store.authenticate(*creds(recipient))["last_activity"] == 1000.0
 
 
@@ -1884,6 +1906,57 @@ def test_expired_attachment_cannot_claim_a_live_listener(store):
     store.heartbeat(*creds(recipient), attachment_id="replacement", generation=second["generation"], ring_armed_until=1100.0)
     store.detach(*creds(recipient), attachment_id="replacement", generation=second["generation"])
     assert _wake(store, sender, recipient)["reason"] == "listener_expired"
+
+
+@pytest.mark.parametrize("sender_kind", ["peer", "conductor"])
+def test_an_attached_claude_session_whose_ring_used_its_listener_is_rearming(store, sender_kind):
+    """A Claude Code session has one Stop-hook listener at a time: a ring
+    ends it, and the next normal turn end arms the next one. Mail sent in
+    between, while the shim is still attached (the session is open, usually
+    in the turn that ring started), is not a lapsed listener: the receipt
+    says the mail rings when that turn ends, needs no resend, and names the
+    paths for the one case that skips the re-arm, a turn that ends on an
+    error or interrupt (T3 delegated children, 2026-11-07)."""
+    sender = _delegate(store) if sender_kind == "conductor" else store.register("alice")
+    recipient = store.register("alice", project="proj", capabilities={"ring": True})
+    first = store.attach(*creds(recipient), attachment_id="listener", ring=True,
+                         ring_armed_until=1040.0)
+    store.update(*creds(recipient), park_reason="waiting_peer", park_needs="review",
+                 park_clear_by="anyone")
+    _idle(store, recipient)
+    assert _wake(store, sender, recipient)["decision"] == "rung"
+    # The ring fired the Stop hook; its next heartbeat reports no listener.
+    store.heartbeat(*creds(recipient), attachment_id="listener", generation=first["generation"])
+    wake = _wake(store, sender, recipient)
+    assert (wake["decision"], wake["reason"], wake["queued"]) == (
+        "no_path", "listener_rearming", True)
+    assert "turn ends" in wake["fallback"] and "no resend" in wake["fallback"]
+    assert "error" in wake["fallback"] and "thread send" in wake["fallback"]
+    assert wake["fallback_paths"] == [
+        "t3_thread_send", "claude_desktop_send_message", "maintainer_types"]
+    # The queued ring still reaches the next listener.
+    renewed = store.heartbeat(*creds(recipient), attachment_id="listener",
+                              generation=first["generation"], ring_armed_until=1080.0)
+    assert renewed["wake"]["decision"] == "rung"
+    # Once the attachment is gone the session is not open: still lapsed.
+    store.detach(*creds(recipient), attachment_id="listener", generation=first["generation"])
+    assert _wake(store, sender, recipient)["reason"] == "listener_expired"
+
+
+def test_a_codex_thread_without_a_live_doorbell_keeps_listener_expired(store):
+    """The re-arm-at-turn-end reading is Claude's Stop hook only; a Codex
+    thread's doorbell has its own fallback."""
+    sender = store.register("alice")
+    recipient = store.register("alice", capabilities={"codex": False, "ring": True})
+    first = store.attach(*creds(recipient), attachment_id="listener", ring=True,
+                         ring_armed_until=1040.0)
+    store.update(*creds(recipient), park_reason="waiting_peer", park_needs="review",
+                 park_clear_by="anyone")
+    _idle(store, recipient)
+    store.heartbeat(*creds(recipient), attachment_id="listener", generation=first["generation"])
+    wake = _wake(store, sender, recipient)
+    assert (wake["reason"], wake["fallback_paths"]) == (
+        "listener_expired", ["codex_doorbell", "maintainer_types"])
 
 
 def test_queued_no_path_mail_reaches_a_later_live_channel_and_counts_toward_caps(store):
@@ -2553,7 +2626,7 @@ def test_a_reopened_session_is_asked_to_park_again(store):
     store.test_time[0] += 1
     assert _wake(store, delegate, b, urgent=True)["reason"] == "conductor"
     assert store.park_gate(b["agent_id"], "alice", since=since) == {
-        "gate": "block", "reason": "not_updated_this_turn"}
+        "gate": "block", "reason": "rung_since_park"}
 
 
 def test_a_conductors_project_burst_reopens_only_its_own_project(store):

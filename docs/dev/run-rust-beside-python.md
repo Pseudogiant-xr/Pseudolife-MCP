@@ -118,9 +118,8 @@ is patched in place, and on a bank with one band new entries are appended
 in place when every new id is above the highest resident one. These still rebuild the
 whole resident bank, briefly holding its old and new copies and raising
 memory: deleted entries, any other column change (content, `dream_state`,
-so every dream, supersession, tags, episode), additions to a multi-band
-bank or out of id order, and any entry change while a band of a
-multi-band bank is over capacity. A `facts`, `world_facts` or `lessons`
+so every dream, supersession, tags, episode) and additions out of id
+order. A `facts`, `world_facts` or `lessons`
 change reloads that store whole. A new `bank_id` or a failed refresh
 rebuilds every store, as a cold start does. An entry or fact vector that
 does not fit the embedder, or a flat-band migration the loaded config does
