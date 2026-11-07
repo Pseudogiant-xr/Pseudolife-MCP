@@ -2341,10 +2341,13 @@ SCENARIOS.update({
             # an overwritten fact: only the current one is projected
             fact("Web App", "framework", "Flask"),
             # what only the dream writes: communities and source attribution
+            # Upsert: a real bank's entity of the same name already has a
+            # community (mirror/forced.py), and the seed's own must win.
             sql("INSERT INTO entity_communities (entity_id, community_id, computed_at) "
                 "SELECT id, CASE WHEN canonical IN ('island', 'atoll') THEN 2 ELSE 1 END, 0 "
                 "FROM entities WHERE canonical IN ('web-app', 'postgres', 'disk', 'island', "
-                "'atoll')", after_stop=True),
+                "'atoll') ON CONFLICT (entity_id) DO UPDATE SET community_id = EXCLUDED.community_id, "
+                "computed_at = EXCLUDED.computed_at", after_stop=True),
             sql("INSERT INTO entity_sources (entity_id, source, count, origin, updated_at) "
                 "SELECT id, s, 1, 'derived', 0 FROM entities, "
                 "(VALUES ('claude-code'), ('agent')) v(s) WHERE canonical IN ('web-app', "
@@ -4353,10 +4356,13 @@ DEEP_EXCLUSION_SEED = [
     # lesson-only, both ways: "release checklist" has only a prefers edge
     # (as a lesson's task-type link mints it); "Backup Window" is a lesson's
     # entity_id
+    # A real bank may already hold an entity of one of these names
+    # (mirror/forced.py): it then stands in for the seed's own.
     sql("INSERT INTO entities (canonical, display, etype, created_at) VALUES "
         "('ship-the-release', 'ship the release', NULL, 1700000000.0), "
         "('release-checklist', 'release checklist', NULL, 1700000000.0), "
-        "('backup-window', 'Backup Window', NULL, 1700000000.0)", after_stop=True),
+        "('backup-window', 'Backup Window', NULL, 1700000000.0) ON CONFLICT (canonical) DO NOTHING",
+        after_stop=True),
     sql("INSERT INTO edges (src_id, relation, dst_id, confidence, origin, asserted_at) VALUES "
         f"({eid('ship-the-release')}, 'prefers', {eid('release-checklist')}, 0.7, 'action', 1.0)",
         after_stop=True),

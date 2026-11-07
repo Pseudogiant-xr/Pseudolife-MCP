@@ -69,6 +69,16 @@ STEP = re.compile(r"\] (?:step |#)?(\d+)")
 # What the synthetic arm drops, so it is the harness's own baseline (CI's).
 REAL_BANK_ENV = ("PL_HARNESS_BASE_DATABASE", "PL_HARNESS_STUB_DEFAULT_CONTENT")
 DISK_FLOOR = 8 * 1024 ** 3
+# Scenarios that drive the dream, judge, curation or analyzer queues run on
+# the seed's quiet copy (seed.py quiet): the conductor's decision D1,
+# 2026-11-07. On the real bank's copy they waited on its whole backlog (3,915
+# entries pending a dream, 276 entity and 376 edge proposals pending a
+# judge), which no stub answer settles, so they compared nothing.
+QUIET_PREFIXES = {"w2e": ("judge-merge-", "curation-auto", "sweep-analyzer-", "console-dream-run")}
+QUIET_WHY = ("drives the dream, judge, curation or analyzer queue; on the real bank's copy it "
+             "waited on the whole real backlog, so it runs on the seed's copy with that backlog "
+             "acknowledged and its pending proposals removed")
+QUIET_DB = seed.QUIET_DB
 
 
 def scenario_names(suite: str) -> list[str]:
@@ -117,12 +127,42 @@ def classify(first: dict, retry: dict | None, synthetic: dict | None) -> str:
     return "new"
 
 
-class Runner:
-    """One harness process per scenario; tests replace ``invoke``."""
+def base_for(suite: str, name: str) -> tuple[str, str | None]:
+    """Which base a scenario's real-bank attempts copy, and why."""
+    if any(name.startswith(p) for p in QUIET_PREFIXES.get(suite, ())):
+        return "quiet", QUIET_WHY
+    return "main", None
 
-    def __init__(self, rust_bin: Path, out: Path, timeout: float, stop: Path, sweep=None):
+
+def quiet_base_use(report: dict) -> dict:
+    """The scenarios that ran on the quiet base, for the summary."""
+    used = [f"{suite}/{r['scenario']}" for suite, body in report["suites"].items()
+            for r in body["rows"] if r.get("base") == "quiet"]
+    return {"database": QUIET_DB, "scenarios": used, "why": QUIET_WHY}
+
+
+def read_oom_kills() -> int | None:
+    """The OOM kills inside this container's memory cgroup so far, or None
+    outside one: an error with kills during its attempt is the runner's
+    capacity, not a daemon's verdict."""
+    try:
+        for line in Path("/sys/fs/cgroup/memory.events").read_text().splitlines():
+            key, _, value = line.partition(" ")
+            if key == "oom_kill":
+                return int(value)
+    except (OSError, ValueError):
+        pass
+    return None
+
+
+class Runner:
+    """One harness process per scenario; tests replace ``invoke`` or ``_run``."""
+
+    def __init__(self, rust_bin: Path, out: Path, timeout: float, stop: Path, sweep=None,
+                 scratch: Path = Path("/tmp/forced"), oom_kills=read_oom_kills):
         self.rust_bin, self.out, self.timeout, self.stop = rust_bin, out, timeout, stop
         self.sweep = sweep or (lambda: 0)
+        self.scratch, self.oom_kills = scratch, oom_kills
 
     def invoke(self, suite: str, name: str, label: str, base: bool) -> dict:
         script = HARNESS / SUITES[suite][0]
@@ -130,26 +170,75 @@ class Runner:
         work.mkdir(parents=True, exist_ok=True)
         safe = re.sub(r"[^A-Za-z0-9_.-]", "_", name)[:80]
         env = dict(os.environ, PYTHONUNBUFFERED="1",
-                   PL_HARNESS_SCRATCH=str(Path("/tmp") / "forced" / suite / safe))
+                   PL_HARNESS_SCRATCH=str(self.scratch / suite / safe))
+        which = base_for(suite, name)[0] if base else None
         if not base:
             for key in REAL_BANK_ENV:
                 env.pop(key, None)
+        elif which == "quiet":
+            env["PL_HARNESS_BASE_DATABASE"] = QUIET_DB
+        reaped = self.reap_leftovers()
+        before = self.oom_kills()
         started = time.monotonic()
-        # Its own process group: a timeout stops the daemons it started too.
-        proc = subprocess.Popen([sys.executable, str(script), "live", "--rust-bin", str(self.rust_bin),
-                                 "--only", name, "--out", str(work / f"{safe}.json")],
-                                cwd=ROOT, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                start_new_session=True)
+        code, log = self._run([sys.executable, str(script), "live", "--rust-bin", str(self.rust_bin),
+                               "--only", name, "--out", str(work / f"{safe}.json")], env)
+        after = self.oom_kills()
+        # Scenarios run one at a time, so no disposable database should
+        # outlive its attempt; a harness that raised never reached its drops.
+        swept = self.sweep()
+        if swept:
+            log += f"\nswept {swept} leftover disposable databases"
+        if reaped:
+            log = f"stopped {len(reaped)} leftover processes before this scenario\n" + log
+        shutil.rmtree(env["PL_HARNESS_SCRATCH"], ignore_errors=True)
+        (work / f"{safe}.log").write_text(log, encoding="utf-8")
+        kills = after - before if before is not None and after is not None else None
+        return {**outcome(code, log), "exit": code, "seconds": round(time.monotonic() - started, 1),
+                "oom_kills": kills, "base": which}
+
+    def _run(self, argv: list[str], env: dict) -> tuple[int | None, str]:
+        # Its own process group, stopped whatever the outcome: a harness that
+        # raised may leave a daemon its cleanup lost (2.9 GiB each).
+        proc = subprocess.Popen(argv, cwd=ROOT, env=env, stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT, start_new_session=True)
         try:
             raw, _ = proc.communicate(timeout=self.timeout)
             code, log = proc.returncode, raw.decode("utf-8", errors="replace")
         except subprocess.TimeoutExpired:
             code, log = None, self._stop(proc) + f"\nTIMEOUT after {self.timeout:g}s"
-            swept = self.sweep()
-            log += f"\nswept {swept} leftover disposable databases"
-        shutil.rmtree(env["PL_HARNESS_SCRATCH"], ignore_errors=True)
-        (work / f"{safe}.log").write_text(log, encoding="utf-8")
-        return {**outcome(code, log), "exit": code, "seconds": round(time.monotonic() - started, 1)}
+        if hasattr(os, "killpg"):  # the runner is Linux
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                pass
+        return code, log
+
+    def reap_leftovers(self) -> list[int]:
+        """Stop every process left from an earlier scenario, found by this
+        run's own marker (a daemon's data directory under the run's scratch
+        root): a daemon in a session of its own escapes its group's stop."""
+        marker = str(self.scratch) + os.sep
+        found = []
+        proc_root = Path("/proc")
+        if not proc_root.is_dir():
+            return found
+        for entry in proc_root.iterdir():
+            if not entry.name.isdigit() or int(entry.name) in (os.getpid(), os.getppid()):
+                continue
+            try:
+                raw = (entry / "environ").read_bytes()
+            except OSError:
+                continue
+            for item in raw.split(b"\0"):
+                if item.startswith(b"PSEUDOLIFE_MCP_DATA_DIR=") \
+                        and item.split(b"=", 1)[1].decode(errors="replace").startswith(marker):
+                    try:
+                        os.kill(int(entry.name), signal.SIGKILL)
+                        found.append(int(entry.name))
+                    except ProcessLookupError:
+                        pass
+                    break
+        return found
 
     @staticmethod
     def _stop(proc: subprocess.Popen) -> str:
@@ -200,7 +289,8 @@ def run(runner: Runner, suites: list[str], only: list[str] | None,
                     synthetic = runner.invoke(suite, name, "synthetic", base=False)
             verdict = classify(first, retry, synthetic)
             rows.append({"scenario": name, "class": verdict, "differences": len(first["diffs"]),
-                         "seconds": first["seconds"]})
+                         "seconds": first["seconds"], "base": first.get("base"),
+                         "oom_kills": sum(a.get("oom_kills") or 0 for a in (first, retry, synthetic) if a)})
             if verdict != "pass":
                 private[f"{suite}/{name}"] = {"real": first, "real_retry": retry, "synthetic": synthetic}
             print(f"{suite}/{name}: {verdict} ({len(first['diffs'])} differences, {first['seconds']}s)",
@@ -216,6 +306,9 @@ def counts(report: dict) -> dict:
         out[suite] = {"planned": body["planned"], "run": len(classes),
                       **{c: classes.count(c) for c in ("pass", "transient", "preexisting", "new", "error")},
                       "differences": sum(r["differences"] for r in body["rows"]),
+                      # Errors whose attempts saw the runner's cgroup kill a process.
+                      "errors_with_oom": sum(1 for r in body["rows"]
+                                             if r["class"] == "error" and r.get("oom_kills")),
                       "new_scenarios": [r["scenario"] for r in body["rows"] if r["class"] == "new"]}
     return out
 
@@ -265,7 +358,8 @@ def main(argv: list[str] | None = None) -> int:
     runner = Runner(args.rust_bin, args.out, args.timeout, args.stop_file, sweep=sweep_leftovers)
     report, private = run(runner, args.suites, args.only)
     summary = {"base": base, "complete": report["complete"], "stopped": report.get("stopped"),
-               "not_forced": report["not_forced"], "counts": counts(report)}
+               "not_forced": report["not_forced"], "quiet_base": quiet_base_use(report),
+               "counts": counts(report)}
     (args.out / "summary.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
     (args.out / "private.json").write_text(json.dumps({"report": report, "differences": private},
                                                       indent=1) + "\n", encoding="utf-8")

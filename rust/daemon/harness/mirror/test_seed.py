@@ -345,3 +345,40 @@ def test_the_rewrite_check_fails_closed_when_a_live_value_survives(throwaway_pg)
     # The whole transaction rolled back: the live value is still there, unrewritten.
     assert _rows(cid, "SELECT credential_hash FROM coordination_agents WHERE credential_hash IS NOT NULL") \
         == [["e" * 64]]
+
+
+def test_quiet_copies_the_seed_then_quiets_only_the_copy(tmp_path):
+    docker = FakeDocker(tmp_path)
+    record = seed.quiet(docker)
+    done = docker.statements()
+    copy = next(i for i, s in enumerate(done) if f"CREATE DATABASE {seed.QUIET_DB} TEMPLATE {seed.SEED_DB}" in s)
+    quieted = next(i for i, s in enumerate(done) if "dream_state = 'acknowledged'" in s)
+    assert copy < quieted
+    target = [a for a, i in docker.calls if i and b"dream_state = 'acknowledged'" in i][0]
+    assert target[target.index("-d") + 1] == seed.QUIET_DB  # never the seed itself
+    assert record["base"] == seed.QUIET_DB and "acknowledged" in record["changes"]
+
+
+def test_quiet_refuses_a_live_server(tmp_path):
+    docker = FakeDocker(tmp_path, production=True)
+    with pytest.raises(seed.Refused, match="live bank's PostgreSQL"):
+        seed.quiet(docker)
+    assert not any("CREATE DATABASE" in s for s in docker.statements())
+
+
+def test_the_quiet_copy_holds_no_backlog_and_the_seed_keeps_its_own(throwaway_pg):
+    cid = throwaway_pg
+    d = seed.Docker()
+    d.psql(cid, "pl_cf_mir_seed", """
+TRUNCATE entries, entity_proposals, edge_proposals CASCADE;
+INSERT INTO entries (band, text, embedding, ts, dream_state)
+  SELECT 'flat', 'note ' || g, array_fill(0.0::real, ARRAY[1024])::vector, g, s
+  FROM generate_series(1, 4) g, (VALUES ('pending'), ('acknowledged')) v(s);
+""")
+    if not _rows(cid, "SELECT 1 FROM pg_database WHERE datname = 'pl_cf_mir_home'"):
+        d.psql(cid, "pl_cf_mir_seed", "CREATE DATABASE pl_cf_mir_home;\n")
+    seed.quiet(d, cid=cid)
+    out = d.psql(cid, seed.QUIET_DB, "SELECT dream_state, count(*) FROM entries GROUP BY 1 ORDER BY 1;\n")
+    assert out.split() == ["acknowledged|8"]
+    assert _rows(cid, "SELECT dream_state, count(*) FROM entries GROUP BY 1 ORDER BY 1") == [
+        ["acknowledged", "4"], ["pending", "4"]]  # the seed is untouched

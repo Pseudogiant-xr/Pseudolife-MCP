@@ -8,6 +8,7 @@ with the standard library and the docker CLI (``config`` also needs PyYAML):
     seed.py seed --backups data/backups --secret-file S [--backup NAME]
     seed.py tokens --secret-file S --out mirror-tokens.env
     seed.py config --backups data/backups --backup NAME --out DIR/config.yaml
+    seed.py quiet [--record quiet.json]
     seed.py health [--timeout 1800]
 
 ``seed`` restores one backup into ``pl_cf_mir_restore`` inside the mirror's
@@ -267,7 +268,8 @@ def dump_complete(path: Path) -> bool:
 
 def require_disk(docker: Docker, floor: int = DISK_FLOOR) -> int:
     root = docker.run(["info", "--format", "{{.DockerRootDir}}"]).strip() or "/"
-    free = shutil.disk_usage(root).free
+    # Docker Desktop's root is inside its VM, not a host path: measure here.
+    free = shutil.disk_usage(root if Path(root).exists() else Path.cwd()).free
     if free < floor:
         raise Refused(f"{free / 1024 ** 3:.1f} GiB free under {root}, below the 8 GiB floor; "
                       "free space before seeding. Nothing was changed.")
@@ -330,6 +332,41 @@ END $$;
     return record
 
 
+QUIET_DB = "pl_cf_mir_seed_quiet"
+# The copy's queues emptied (conductor's decision D1, 2026-11-07): the real
+# bank held 3,915 entries pending a dream and 276 entity and 376 edge
+# proposals pending a judge, so a scenario driving those queues waited on
+# the whole real backlog and never settled. Copy only; the seed is untouched.
+QUIET_SQL = """BEGIN;
+WITH d AS (UPDATE entries SET dream_state = 'acknowledged' WHERE dream_state = 'pending' RETURNING 1)
+  SELECT 'acknowledged', count(*) FROM d;
+WITH d AS (DELETE FROM entity_proposals WHERE status = 'pending' RETURNING 1)
+  SELECT 'entity_proposals_removed', count(*) FROM d;
+WITH d AS (DELETE FROM edge_proposals WHERE status = 'pending' RETURNING 1)
+  SELECT 'edge_proposals_removed', count(*) FROM d;
+COMMIT;
+"""
+
+
+def quiet(docker: Docker, cid: str | None = None) -> dict:
+    """Copy the seed as QUIET_DB and empty the copy's dream backlog and
+    pending review queues, for the scenarios that drive them."""
+    cid = cid or docker.container("mirror-pg")
+    if cid is None:
+        raise Refused("the mirror's PostgreSQL is not running. Nothing was changed.")
+    refuse_live_server(server_facts(docker, cid, "pl_cf_mir_home"))
+    require_disk(docker)
+    docker.psql(cid, "pl_cf_mir_home", f"DROP DATABASE IF EXISTS {QUIET_DB} WITH (FORCE);\n"
+                f"CREATE DATABASE {QUIET_DB} TEMPLATE {SEED_DB};\n")
+    refuse_live_server(server_facts(docker, cid, QUIET_DB))
+    changes = dict.fromkeys(("acknowledged", "entity_proposals_removed", "edge_proposals_removed"))
+    for line in docker.psql(cid, QUIET_DB, QUIET_SQL).splitlines():
+        key, _, count = line.partition("|")
+        if count.isdigit():
+            changes[key] = int(count)
+    return {"base": QUIET_DB, "copied_from": SEED_DB, "changes": changes}
+
+
 def health(docker: Docker, timeout: float, expect_schema: str | None = None) -> dict:
     """Wait for the mirror daemon: ok, ready, a writer, the bank's schema."""
     end = time.monotonic() + timeout
@@ -388,6 +425,8 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("--backup", required=True)
     c.add_argument("--out", type=Path, required=True)
     c.add_argument("--uid", type=int, default=10001)
+    q = sub.add_parser("quiet", help=f"copy {SEED_DB} as {QUIET_DB} with its queues emptied")
+    q.add_argument("--record", type=Path)
     h = sub.add_parser("health")
     h.add_argument("--timeout", type=float, default=1800)
     h.add_argument("--schema")
@@ -396,6 +435,11 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.cmd == "seed":
             record = seed(docker, args.backups, _secret(args.secret_file), args.backup, args.dsn)
+            if args.record:
+                _write_private(args.record, json.dumps(record, indent=2) + "\n")
+            print(json.dumps(record))
+        elif args.cmd == "quiet":
+            record = quiet(docker)
             if args.record:
                 _write_private(args.record, json.dumps(record, indent=2) + "\n")
             print(json.dumps(record))

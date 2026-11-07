@@ -67,7 +67,7 @@ def test_run_classifies_each_scenario_and_reruns_only_what_differs(tmp_path):
     assert set(private) == {"w2e/flaky", "w2e/old", "w2e/fresh"} and report["complete"]
     counts = forced.counts(report)["w2e"]
     assert counts == {"planned": 4, "run": 4, "pass": 1, "transient": 1, "preexisting": 1, "new": 1,
-                      "error": 0, "differences": 3, "new_scenarios": ["fresh"]}
+                      "error": 0, "differences": 3, "errors_with_oom": 0, "new_scenarios": ["fresh"]}
     assert "DIFF" not in json.dumps(counts)  # counts and names only
 
 
@@ -157,7 +157,7 @@ def test_a_timeout_stops_the_whole_group_and_sweeps(tmp_path, monkeypatch):
     monkeypatch.setenv("PL_HARNESS_STUB_DEFAULT_CONTENT", "[]")
     swept = []
     runner = forced.Runner(Path("rust-bin"), tmp_path / "out", 3, tmp_path / "STOP",
-                           sweep=lambda: swept.append(1) or 2)
+                           sweep=lambda: swept.append(1) or 2, scratch=tmp_path / "scratch")
     got = runner.invoke("w2e", "slow", "synthetic", base=False)
     assert got["exit"] is None and got["status"] == "diff" and swept == [1]
     log = (tmp_path / "out" / "w2e" / "synthetic" / "slow.log").read_text()
@@ -171,3 +171,121 @@ def test_a_timeout_stops_the_whole_group_and_sweeps(tmp_path, monkeypatch):
         forced.time.sleep(0.1)
     else:
         pytest.fail("the harness's child outlived the timeout")
+
+
+def _alive(pid: int) -> bool:
+    try:
+        forced.os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    stat = Path(f"/proc/{pid}/stat")
+    return not (stat.exists() and stat.read_text().rsplit(")", 1)[1].split()[0] == "Z")
+
+
+def _wait_dead(pid: int) -> bool:
+    for _ in range(50):
+        if not _alive(pid):
+            return True
+        forced.time.sleep(0.1)
+    return False
+
+
+@pytest.mark.skipif(not hasattr(forced.os, "killpg"), reason="the runner is Linux; process groups are POSIX")
+def test_a_harness_that_exits_leaves_none_of_its_processes_behind(tmp_path, monkeypatch):
+    """A harness that raised (a daemon refused, a seed collided) may leave a
+    daemon its cleanup lost: 2.9 GiB each, which pushed later scenarios past
+    the runner's cap (83 OOM kills, daemon box, 2026-11-07)."""
+    script, pidfile = tmp_path / "quits.py", tmp_path / "child.pid"
+    script.write_text(
+        "import subprocess, sys\n"
+        "c = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(600)'])\n"
+        f"open({str(pidfile)!r}, 'w').write(str(c.pid))\n"
+        "raise SystemExit(1)\n")
+    monkeypatch.setitem(forced.SUITES, "w2e", (str(script), tmp_path, ""))
+    runner = forced.Runner(Path("rust-bin"), tmp_path / "out", 60, tmp_path / "STOP",
+                           scratch=tmp_path / "scratch")
+    got = runner.invoke("w2e", "quits", "real", base=True)
+    assert got["status"] == "error"
+    assert _wait_dead(int(pidfile.read_text())), "the harness's daemon outlived its scenario"
+
+
+@pytest.mark.skipif(not hasattr(forced.os, "killpg"), reason="the runner is Linux; process groups are POSIX")
+def test_a_leftover_in_its_own_session_is_stopped_by_the_run_marker(tmp_path):
+    scratch = tmp_path / "scratch"
+    mine = forced.subprocess.Popen(
+        [forced.sys.executable, "-c", "import time; time.sleep(600)"], start_new_session=True,
+        env=dict(forced.os.environ, PSEUDOLIFE_MCP_DATA_DIR=str(scratch / "board" / "identity" / "py" / "data")))
+    other = forced.subprocess.Popen(
+        [forced.sys.executable, "-c", "import time; time.sleep(600)"], start_new_session=True,
+        env=dict(forced.os.environ, PSEUDOLIFE_MCP_DATA_DIR=str(tmp_path / "elsewhere" / "data")))
+    try:
+        runner = forced.Runner(Path("rust-bin"), tmp_path / "out", 60, tmp_path / "STOP", scratch=scratch)
+        assert runner.reap_leftovers() == [mine.pid]
+        assert _wait_dead(mine.pid) and _alive(other.pid)  # only this run's marker
+    finally:
+        for p in (mine, other):
+            p.kill()
+            p.wait()
+
+
+def test_each_attempt_records_the_oom_kills_it_saw(tmp_path):
+    counts = iter([5, 7])
+
+    class Counting(forced.Runner):
+        def _run(self, argv, env):
+            return 1, "Traceback\nConnectionRefusedError: [Errno 111] Connection refused\n"
+
+    runner = Counting(Path("rust-bin"), tmp_path / "out", 60, tmp_path / "STOP",
+                      scratch=tmp_path / "scratch", oom_kills=lambda: next(counts))
+    got = runner.invoke("w2e", "x", "real", base=True)
+    assert got["status"] == "error" and got["oom_kills"] == 2
+
+
+def test_every_attempt_sweeps_the_databases_a_failed_harness_left(tmp_path):
+    """A harness that raised never reached its own drops: board/identity's
+    two copies of the bank outlived it (daemon box, 2026-11-07)."""
+    swept = []
+
+    class Quits(forced.Runner):
+        def _run(self, argv, env):
+            return 1, "Traceback\nConnectionRefusedError\n"
+
+    runner = Quits(Path("rust-bin"), tmp_path / "out", 60, tmp_path / "STOP", scratch=tmp_path / "s",
+                   sweep=lambda: swept.append(1) or 2, oom_kills=lambda: 0)
+    runner.invoke("w2e", "x", "real", base=True)
+    assert swept == [1]
+    assert "swept 2 leftover disposable databases" in (tmp_path / "out" / "w2e" / "real" / "x.log").read_text()
+
+
+@pytest.mark.parametrize("suite,name,want", [
+    ("w2e", "judge-merge-tiebreak", "quiet"), ("w2e", "curation-auto-fold", "quiet"),
+    ("w2e", "sweep-analyzer-tick", "quiet"), ("w2e", "console-dream-run-gates", "quiet"),
+    ("w2e", "dream-deep-apply", "main"), ("w2e", "curation-shadow", "main"),
+    ("board", "judge-merge-x", "main"),
+])
+def test_queue_driven_scenarios_take_the_quiet_base(suite, name, want):
+    assert forced.base_for(suite, name)[0] == want
+
+
+def test_a_quiet_scenario_runs_its_real_attempts_on_the_quiet_base(tmp_path, monkeypatch):
+    monkeypatch.setenv("PL_HARNESS_BASE_DATABASE", "pl_cf_mir_seed")
+    seen = []
+
+    class Records(forced.Runner):
+        def _run(self, argv, env):
+            seen.append(env.get("PL_HARNESS_BASE_DATABASE"))
+            return 0, ""
+
+    runner = Records(Path("rust-bin"), tmp_path / "out", 60, tmp_path / "STOP", scratch=tmp_path / "s",
+                     oom_kills=lambda: 0)
+    assert runner.invoke("w2e", "judge-merge-auto", "real", base=True)["base"] == "quiet"
+    assert runner.invoke("w2e", "store-defaults", "real", base=True)["base"] == "main"
+    assert runner.invoke("w2e", "judge-merge-auto", "synthetic", base=False)["base"] is None
+    assert seen == ["pl_cf_mir_seed_quiet", "pl_cf_mir_seed", None]
+
+
+def test_the_summary_says_which_scenarios_used_the_quiet_base_and_why(tmp_path):
+    answers = {"judge-merge-auto": {"real": dict(PASS, base="quiet")}, "clean": {"real": dict(PASS, base="main")}}
+    report, _ = forced.run(FakeRunner(tmp_path, answers), ["w2e"], None, names=lambda s: list(answers))
+    quiet = forced.quiet_base_use(report)
+    assert quiet["scenarios"] == ["w2e/judge-merge-auto"] and "backlog" in quiet["why"]
