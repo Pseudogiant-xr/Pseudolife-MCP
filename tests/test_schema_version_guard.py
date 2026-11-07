@@ -157,7 +157,22 @@ def test_the_refusal_decides_on_the_stamp_alone():
         assert "must be a positive integer" in _schema_version_refusal(stamp), stamp
 
 
+def test_the_refusal_names_the_state_archive_beside_the_dump():
+    """Issue #909, gap 2: restoring only the dump leaves the state volume
+    (cortex and graph snapshots, pre-v57 documents) at the newer build's
+    copy, so every way out the refusal names takes the state archive."""
+    for refusal in (_schema_version_refusal(str(NEWER)), _schema_version_refusal("0")):
+        assert ("pseudolife-mcp restore --backup-file <dump> "
+                "--state-archive <state.tgz>") in refusal
+        assert ("ops/restore.ps1 -Apply -BackupFile <dump> "
+                "-StateArchive <state.tgz>") in refusal
+        assert ("ops/restore.sh --apply --backup-file <dump> "
+                "--state-archive <state.tgz>") in refusal
+
+
 _RUST = Path(__file__).resolve().parents[1] / "rust" / "daemon" / "src" / "storage" / "schema.rs"
+_RUST_TRANSFER = (Path(__file__).resolve().parents[1] / "rust" / "shim" / "src" / "cli"
+                  / "transfer" / "schema.rs")
 
 
 def test_the_rust_daemon_refuses_with_the_same_text():
@@ -170,3 +185,20 @@ def test_the_rust_daemon_refuses_with_the_same_text():
         f"version {SCHEMA_META_VERSION}.", "version {SCHEMA_META_VERSION}.")
     assert newer in rust
     assert _schema_version_refusal("0") in rust
+
+
+def test_the_native_import_names_the_same_restore_commands():
+    """The native shim's import guard (``transfer/schema.rs``) refuses the
+    same stamps; its restore hint must be the daemon's word for word."""
+    from pseudolife_memory.storage.schema import _RESTORE_HINT
+    rust = _RUST_TRANSFER.read_text(encoding="utf-8")
+    assert f'const RESTORE: &str = "{_RESTORE_HINT}";' in rust
+
+
+def test_the_rust_daemon_marks_an_outage_refusal_the_same_way():
+    """A reconnect refusal held through an outage carries the same suffix on
+    both daemons (``postgres._SCHEMA_REFUSAL_STALE``, storage/mod.rs)."""
+    from pseudolife_memory.storage.postgres import _SCHEMA_REFUSAL_STALE
+    rust = (Path(__file__).resolve().parents[1] / "rust" / "daemon" / "src" / "storage"
+            / "mod.rs").read_text(encoding="utf-8")
+    assert f'"{_SCHEMA_REFUSAL_STALE}"' in rust

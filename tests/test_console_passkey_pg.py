@@ -93,6 +93,20 @@ def test_a_replayed_assertion_is_refused(svc):
             principal_source=_env)
 
 
+def test_a_retried_sign_in_from_a_counting_authenticator_does_not_flag_the_key(svc):
+    """#1361: the browser retries the same sign-in body; it is spent, and the
+    key is not flagged as having its sign count go backwards."""
+    auth = bootstrap(svc)
+    auth.sign_count = 5
+    _, body = _sign_in(svc, auth)
+    refused("challenge_spent", console_passkey.complete_signin, svc, body,
+            principal_source=_env)
+    with _conn(svc) as conn:
+        flagged = conn.execute("SELECT flagged_at FROM maintainer_passkeys WHERE credential_id = %s",
+                               (auth.id,)).fetchone()[0]
+    assert flagged is None
+
+
 def test_a_challenge_for_another_token_cannot_be_reused(svc):
     auth = bootstrap(svc)
     challenge = _challenge(svc)

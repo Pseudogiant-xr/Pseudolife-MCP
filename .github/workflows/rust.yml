@@ -1893,7 +1893,9 @@ jobs:
           name: rust-body-evidence-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/body-evidence/evidence.json
           if-no-files-found: error
-          retention-days: 30
+          # The cutover checklist links these (D6/D11): keep each for the
+          # repository's maximum artifact retention, 90 days (2026-11-07).
+          retention-days: 90
       # RUNNER_TEMP is cleared between jobs. The runner's tracking cleanup
       # stops its PostgreSQL process; its next job hook removes only its own
       # pl-cli-lease-postgres-* directories (self-hosted parity conventions).

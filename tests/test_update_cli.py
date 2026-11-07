@@ -712,7 +712,8 @@ def test_the_env_file_falls_back_to_the_working_directorys(world, clients, tmp_p
 
 
 def test_bundled_compose_files_match_the_checkouts():
-    for name in ("docker-compose.yml", "docker-compose.ghcr.yml", "docker-compose.rust-daemon.yml", "docker-compose.rust-shadow.yml"):
+    for name in ("docker-compose.yml", "docker-compose.ghcr.yml", "docker-compose.rust-daemon.yml", "docker-compose.rust-shadow.yml",
+                 "docker-compose.rust-ghcr.yml"):
         assert (up.BUNDLED_COMPOSE / name).read_bytes() == (ROOT / "ops" / name).read_bytes(), name
 
 
