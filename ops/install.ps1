@@ -1316,6 +1316,7 @@ if (-not $ClientOnly) {
 # <<< volumes <<<
 
 # -- 4b. daemon engine -----------------------------------------------------------
+# >>> shim tooling >>>
 # Whether stage 11 can be expected to install the shim: pipx, or a Python
 # >= 3.10 with pip outside a PEP 668 externally managed environment (where
 # `pip install --user` refuses). The helper needs that Python either way.
@@ -1327,6 +1328,7 @@ function Test-ShimToolingReady($python) {
         return ($LASTEXITCODE -eq 0)
     } catch { return $false }
 }
+# <<< shim tooling <<<
 # >>> daemon engine >>>
 # The bearer stage 5b will have: one already set, or one it can mint
 # (which needs the shim's tooling). Rust is verified with an authenticated read.

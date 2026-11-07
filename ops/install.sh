@@ -1402,6 +1402,7 @@ fi
 # <<< volumes <<<
 
 # ── 4b. daemon engine ──────────────────────────────────────────────────────
+# >>> shim tooling >>>
 # Whether stage 11 can be expected to install the shim: pipx, or a Python
 # >= 3.10 with pip outside a PEP 668 externally managed environment (where
 # `pip install --user` refuses). The helper needs that Python either way.
@@ -1413,6 +1414,7 @@ import pip
 marker = os.path.join(sysconfig.get_path("stdlib"), "EXTERNALLY-MANAGED")
 sys.exit(1 if sys.prefix == sys.base_prefix and os.path.exists(marker) else 0)' >/dev/null 2>&1
 }
+# <<< shim tooling <<<
 # >>> daemon engine >>>
 # The bearer stage 5b will have: one already set, or one it can mint
 # (which needs the shim's tooling). Rust is verified with an authenticated read.

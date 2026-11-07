@@ -68,7 +68,9 @@ def _mint(shell: _Shell, env_file: Path, *, no_token: str = "", transport: str =
     return shell.run(
         extra + f"env_file='{shell.path(env_file)}'\nNO_TOKEN='{no_token}'\n"
         f"TRANSPORT='{transport}'\n"
-        + _block("mint token") + "\nprintf 'TOKEN_STATE=%s\\n' \"$TOKEN_STATE\"\n")
+        # The token stage calls the shim-tooling check stage 4b defines first.
+        + _block("shim tooling") + _block("mint token")
+        + "\nprintf 'TOKEN_STATE=%s\\n' \"$TOKEN_STATE\"\n")
 
 
 def _minted(env_file: Path) -> list[str]:
