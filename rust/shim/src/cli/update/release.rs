@@ -664,8 +664,9 @@ impl Update {
         if choice == "rust" {
             // A first start would otherwise download the models inside the
             // health gate. The running daemon keeps serving meanwhile.
-            self.provision_models(&image, &config)?;
+            // Before provisioning: a configuration Rust refuses downloads no models.
             self.check_config(&image, &config)?;
+            self.provision_models(&image, &config)?;
         }
         let backups = if self.o.no_backup {
             self.warn("skipping backup (--no-backup)");
@@ -1228,14 +1229,19 @@ fn volume_create_args(config: &Value, key: &str) -> Result<Vec<String>> {
 const CHECK_UNSUPPORTED: i32 = 3;
 
 /// `docker run` arguments giving `check-config` the daemon's own view: its
-/// configuration environment and every persistent mount, read-only. Never a
-/// bearer or the database URL: the check opens no bank.
-fn config_check_args(config: &Value) -> Vec<String> {
+/// working directory, configuration environment and every persistent mount,
+/// read-only. Never a bearer, a credential or the database URL: the check
+/// opens no bank. A named volume that does not exist yet holds nothing to
+/// check, and mounting it would create it outside Compose.
+fn config_check_args(config: &Value, volume_exists: impl Fn(&str) -> bool) -> Vec<String> {
     let service = &config["services"][DAEMON_SERVICE];
     let mut args: Vec<String> = ["run", "--rm", "--network", "none"]
         .into_iter()
         .map(str::to_owned)
         .collect();
+    if let Some(dir) = service["working_dir"].as_str().filter(|s| !s.is_empty()) {
+        args.extend(["-w".to_owned(), dir.to_owned()]);
+    }
     if let Some(env) = service["environment"].as_object() {
         let mut keys: Vec<&String> = env.keys().collect();
         keys.sort();
@@ -1256,7 +1262,11 @@ fn config_check_args(config: &Value) -> Vec<String> {
                     "XDG_CACHE_HOME",
                 ]
                 .contains(&key.as_str());
-            let Some(value) = env[key].as_str().filter(|_| wanted) else {
+            // A credential under an allowed prefix (HF_TOKEN) stays out of argv.
+            let secret = ["TOKEN", "KEY", "SECRET", "PASSWORD", "CREDENTIAL"]
+                .iter()
+                .any(|word| key.to_uppercase().contains(word));
+            let Some(value) = env[key].as_str().filter(|_| wanted && !secret) else {
                 continue;
             };
             args.extend(["-e".to_owned(), format!("{key}={value}")]);
@@ -1272,6 +1282,9 @@ fn config_check_args(config: &Value) -> Vec<String> {
         let mut fields = match volume["type"].as_str() {
             Some("volume") => {
                 let name = config["volumes"][source]["name"].as_str().unwrap_or(source);
+                if !volume_exists(name) {
+                    continue;
+                }
                 let mut fields = vec![("type", "volume"), ("src", name), ("dst", target)];
                 if let Some(subpath) = volume["volume"]["subpath"]
                     .as_str()
@@ -1364,7 +1377,14 @@ impl Update {
         self.step(format!(
             "checking this bank's configuration against {image}..."
         ));
-        let mut args = config_check_args(config);
+        let mut args = config_check_args(config, |name| {
+            let (code, out) = self.docker_call(&["volume", "inspect", name]);
+            code == 0
+                && serde_json::from_str::<Value>(&out)
+                    .ok()
+                    .and_then(|v| v.as_array().map(|a| !a.is_empty()))
+                    .unwrap_or(false)
+        });
         args.extend(
             ["--entrypoint", "pseudolife-daemon", image, "check-config"]
                 .into_iter()

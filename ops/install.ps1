@@ -1534,7 +1534,7 @@ if ($composeEngine -eq 'rust' -and $tokenState -notin 'minted', 'present') {
         $engineFiles = @()
         Step "Daemon engine: python after all (no bearer token for the default Rust daemon: $tokenState)"
     } else {
-        [Console]::Error.WriteLine("-Engine rust needs the daemon's bearer token, and this install has none ($tokenState): set PSEUDOLIFE_MCP_TOKEN in ops/.env, or install pipx or a pip-capable Python >= 3.10 so the installer mints one, then rerun; or rerun with -Engine python. No container was started.")
+        [Console]::Error.WriteLine("The Rust daemon needs its bearer token, and this install has none ($tokenState): set PSEUDOLIFE_MCP_TOKEN in ops/.env, or install pipx or a pip-capable Python >= 3.10 so the installer mints one, then rerun; or rerun with -Engine python. No container was started.")
         exit 2
     }
 }

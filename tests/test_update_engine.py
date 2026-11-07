@@ -253,6 +253,7 @@ def test_engine_selection_never_moves_the_clients(monkeypatch):
     ("no-backup", ("python", "python", False)), ("activation-label", ("python", "python", False)),
     ("recorded-choice", ("python", "python", False)), ("unreadable-record", ("python", "python", False)),
     ("allow-auth-change", ("python", "python", False)), ("corrupt-choice", ("python", "python", False)),
+    ("binary-choice", ("python", "python", False)),
     ("explicit-rust-over-choice", ("python", "rust", False)),
 ])
 def test_default_engine_moves_only_an_unchosen_attended_host(tmp_path, monkeypatch, case, expected):
@@ -269,6 +270,9 @@ def test_default_engine_moves_only_an_unchosen_attended_host(tmp_path, monkeypat
     if case == "corrupt-choice":
         (tmp_path / eng.CHOICE).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path / eng.CHOICE).write_text("{not json")
+    if case == "binary-choice":
+        (tmp_path / eng.CHOICE).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / eng.CHOICE).write_bytes(bytes([0xff, 0xfe, 0x7b, 0x00]))
     if case == "unreadable-record":
         (tmp_path / eng.RELEASE_ACCEPTED).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path / eng.RELEASE_ACCEPTED).write_text("{not json")
@@ -284,7 +288,7 @@ def test_default_engine_moves_only_an_unchosen_attended_host(tmp_path, monkeypat
     update = up.Update(options, log=lambda s: None)
     assert eng.release_engine_choice(update, "0.23.0") == expected
     warned = [step for step in update.report.steps if "cannot read the engine choice" in step]
-    assert len(warned) == (case == "corrupt-choice")
+    assert len(warned) == (case in ("corrupt-choice", "binary-choice"))
 
 
 def test_an_unreadable_choice_parent_says_one_line_and_keeps_the_engine(tmp_path, monkeypatch):
@@ -292,7 +296,7 @@ def test_an_unreadable_choice_parent_says_one_line_and_keeps_the_engine(tmp_path
     # PermissionError here; the read reports it once instead.
     from pseudolife_memory import update_engine as eng
     monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(tmp_path))
-    real = type(tmp_path).read_text
+    real = type(tmp_path).read_bytes
 
     def denied(self, *args, **kwargs):
         if self.name == "engine-choice.json":
@@ -304,7 +308,7 @@ def test_an_unreadable_choice_parent_says_one_line_and_keeps_the_engine(tmp_path
         if self.name == "engine-choice.json":
             raise PermissionError(13, "Permission denied")
         return real_exists(self, *args, **kwargs)
-    monkeypatch.setattr(type(tmp_path), "read_text", denied)
+    monkeypatch.setattr(type(tmp_path), "read_bytes", denied)
     monkeypatch.setattr(type(tmp_path), "exists", exists)
     update = up.Update(up.Options(), log=lambda s: None)
     assert eng.recorded_choice(update) == "unknown"
@@ -332,17 +336,22 @@ def test_a_defaulted_move_falls_back_on_any_error_before_the_backup(monkeypatch,
 
 def test_config_check_passes_configuration_mounts_read_only_and_no_secrets():
     from pseudolife_memory import update_engine as eng
-    config = {"volumes": {"state": {"name": "proj_state"}, "models": {"name": "proj_models"}},
+    config = {"volumes": {"state": {"name": "proj_state"}, "models": {"name": "proj_models"},
+                          "later": {"name": "proj_later"}},
               "services": {up.DAEMON_SERVICE: {
+                  "working_dir": "/data",
                   "environment": {"PSEUDOLIFE_MCP_TOKEN": "secret", "PSEUDOLIFE_MCP_DATABASE_URL": "postgresql://x",
                                   "PSEUDOLIFE_DAEMON_MODELS_DIR": "/models", "HF_HOME": "/data/hf",
+                                  "HF_TOKEN": "hf-secret", "HUGGINGFACE_HUB_TOKEN": "hf-secret",
                                   "PSEUDOLIFE_MCP_DATA_DIR": "/data"},
                   "volumes": [{"type": "volume", "source": "state", "target": "/data"},
                               {"type": "volume", "source": "models", "target": "/models"},
                               {"type": "bind", "source": "/srv/config.yaml", "target": "/data/config.yaml"},
+                              {"type": "volume", "source": "later", "target": "/later"},
                               {"type": "tmpfs", "target": "/tmp"}]}}}
-    args = eng.config_check_args(config)
-    assert args[:4] == ["run", "--rm", "--network", "none"]
+    # A volume that does not exist yet is not mounted (Docker would create it).
+    args = eng.config_check_args(config, lambda name: name != "proj_later")
+    assert args[:6] == ["run", "--rm", "--network", "none", "-w", "/data"]
     assert not any("secret" in a or "postgresql" in a for a in args)
     assert "PSEUDOLIFE_DAEMON_MODELS_DIR=/models" in args and "HF_HOME=/data/hf" in args
     mounts = [args[i + 1] for i, a in enumerate(args) if a == "--mount"]

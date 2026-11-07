@@ -31,8 +31,8 @@ A release-mode `pseudolife-mcp update` moves a Docker host that never
 chose an engine to the Rust daemon when the target release publishes its
 image. Every run does this except the scheduled `--unattended` one, which
 always keeps the engine; a run with no terminal (a script, ssh, an agent's
-shell) moves the host too. Before it backs anything up, the update asks
-the Rust image whether it supports this bank's configuration (`pseudolife-daemon
+shell) moves the host too. Before it downloads the models or backs
+anything up, the update asks the Rust image whether it supports this bank's configuration (`pseudolife-daemon
 check-config`: a non-default reranker or embedding model, for instance, is
 not). If that check, or anything else before the backup, refuses, the update
 removes what it pulled for the move, warns with the refusal and its fix,

@@ -277,10 +277,8 @@ fn main() {
         }
     };
     let autosave_every = seconds("PSEUDOLIFE_MCP_AUTOSAVE_SECONDS", 30.0);
-    if (config.dream.enabled || config.memory.retrieval_log_enabled)
-        && !config.dream.sweep_interval_ok
-    {
-        fail(1, "memory.dream.sweep_interval_seconds is not a number");
+    if let Some(refusal) = config_check::sweep_refusal(&config) {
+        fail(1, refusal);
     }
     let idle_seconds = seconds("PSEUDOLIFE_SESSION_IDLE_SECONDS", 1800.0);
     let reap_every = seconds("PSEUDOLIFE_SESSION_REAP_SECONDS", 300.0);

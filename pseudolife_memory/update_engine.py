@@ -235,15 +235,15 @@ def recorded_choice(update=None) -> str | None:
     keeps the host's engine, and says so once."""
     path = up.data_dir() / CHOICE
     try:
-        raw = path.read_text(encoding="utf-8")
+        raw = path.read_bytes()
     except FileNotFoundError:
         return None
     except OSError as exc:
         reason = exc.strerror or type(exc).__name__
     else:
         try:
-            engine = json.loads(raw).get("engine")
-        except (ValueError, AttributeError):
+            engine = json.loads(raw.decode("utf-8")).get("engine")
+        except (ValueError, AttributeError):  # UnicodeDecodeError is a ValueError
             engine = None
         if engine in ("python", "rust"):
             return engine
@@ -407,18 +407,29 @@ def ensure_project_volume(command, config: dict, key: str) -> bool:
 # a bearer or the database URL (the check opens no bank).
 _CHECK_ENV_PREFIXES = ("PSEUDOLIFE_DAEMON_", "PSEUDOLIFE_EMBEDDING_", "HF_", "HUGGINGFACE_", "TRANSFORMERS_")
 _CHECK_ENV_NAMES = ("PSEUDOLIFE_MCP_CONFIG", "PSEUDOLIFE_MCP_DATA_DIR", "HOME", "XDG_CACHE_HOME")
+# A credential under an allowed prefix (HF_TOKEN) stays out of docker's argv.
+_CHECK_ENV_SECRET = ("TOKEN", "KEY", "SECRET", "PASSWORD", "CREDENTIAL")
+
+
+def _check_env(key: str) -> bool:
+    return ((key.startswith(_CHECK_ENV_PREFIXES) or key in _CHECK_ENV_NAMES)
+            and not any(word in key.upper() for word in _CHECK_ENV_SECRET))
 # `pseudolife-daemon check-config`: the image refuses this configuration. An
 # image without the command falls through to startup and exits 2 instead.
 CHECK_UNSUPPORTED = 3
 
 
-def config_check_args(config: dict) -> list[str]:
+def config_check_args(config: dict, volume_exists) -> list[str]:
     """``docker run`` arguments giving `check-config` the daemon's own view:
-    its configuration environment and every persistent mount, read-only."""
+    its working directory, configuration environment and every persistent
+    mount, read-only. A named volume that does not exist yet holds nothing
+    to check, and mounting it would create it outside Compose."""
     service = config["services"][up.DAEMON_SERVICE]
     args = ["run", "--rm", "--network", "none"]
+    if service.get("working_dir"):
+        args += ["-w", str(service["working_dir"])]
     for key, value in sorted((service.get("environment") or {}).items()):
-        if value is not None and (key.startswith(_CHECK_ENV_PREFIXES) or key in _CHECK_ENV_NAMES):
+        if value is not None and _check_env(key):
             args += ["-e", f"{key}={value}"]
     for volume in service.get("volumes", []) or []:
         source, target = volume.get("source"), volume.get("target")
@@ -426,6 +437,8 @@ def config_check_args(config: dict) -> list[str]:
             continue
         if volume.get("type") == "volume":
             name = (config.get("volumes", {}).get(source) or {}).get("name") or source
+            if not volume_exists(name):
+                continue
             fields = [("type", "volume"), ("src", name), ("dst", target)]
             subpath = (volume.get("volume") or {}).get("subpath")
             if subpath:
@@ -610,14 +623,21 @@ class ReleaseEngineUpdate:
                 self.u.warn(f"could not remove {args[-1]} after falling back (docker {args[0]} rm); remove it by hand "
                             "if the disk is short")
 
+    def volume_exists(self, name: str) -> bool:
+        code, out = self.command(["volume", "inspect", name], timeout=60)
+        try:
+            return code == 0 and bool(json.loads(out))
+        except ValueError:
+            return False
+
     def check_config(self, image, config):
         """Refuse before the backup a configuration the Rust daemon would
         refuse at startup (a non-default reranker, an embedding model it
         cannot load): the Python daemon keeps serving."""
         u = self.u
         u.step(f"checking this bank's configuration against {image}...")
-        code, out = up.run_cli([u.docker, *config_check_args(config), "--entrypoint", "pseudolife-daemon", image,
-                                "check-config"], timeout=600)
+        code, out = up.run_cli([u.docker, *config_check_args(config, self.volume_exists), "--entrypoint",
+                                "pseudolife-daemon", image, "check-config"], timeout=600)
         if code == 0:
             return
         detail = out.strip().splitlines()[-1].strip() if out.strip() else ""
@@ -746,8 +766,9 @@ class ReleaseEngineUpdate:
             raise up.UpdateError(f"the bank is at schema v{bank}, newer than {image}'s v{schema}, which would refuse it; "
                                  f"update to a release at schema v{bank} or later; nothing was changed", 2)
         if self.engine == "rust":
-            self.provision_models(image, config)
+            # Before provisioning: a configuration Rust refuses downloads no models.
             self.check_config(image, config)
+            self.provision_models(image, config)
         # A backup changes nothing on the host: a refused one still lets a
         # defaulted move fall back to the ordinary update.
         self.backup(context["checkout"])

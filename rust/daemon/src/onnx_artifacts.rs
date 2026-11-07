@@ -154,12 +154,18 @@ pub fn layout_available(root: &Path, file_name: &str, hub: bool) -> bool {
 
 /// Resolve only an existing local directory or the cached Hub `refs/main` snapshot.
 /// No network client or exporter participates in this path.
-pub fn resolve(model: &str, file_name: &str, cache: &Path) -> Result<(PathBuf, bool)> {
+/// The configured graph file, normalized: a relative `.onnx` path.
+pub fn graph_name(file_name: &str) -> Result<String> {
     let normalized = file_name.replace('\\', "/");
     relative_parts(&normalized)?;
     if !normalized.ends_with(".onnx") {
         bail!("embedding.onnx_file_name must be a relative .onnx path");
     }
+    Ok(normalized)
+}
+
+pub fn resolve(model: &str, file_name: &str, cache: &Path) -> Result<(PathBuf, bool)> {
+    let normalized = graph_name(file_name)?;
     if model == provision::EMBEDDING_MODEL {
         let root = provision::embedding_root()?;
         if layout_available(&root, &normalized, false) {

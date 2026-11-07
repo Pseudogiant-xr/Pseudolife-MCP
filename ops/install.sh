@@ -1614,7 +1614,7 @@ if [ "${COMPOSE_ENGINE:-}" = rust ] && [ "$TOKEN_STATE" != minted ] && [ "$TOKEN
         engine_files=()
         step "Daemon engine: python after all (no bearer token for the default Rust daemon: $TOKEN_STATE)"
     else
-        echo "--engine rust needs the daemon's bearer token, and this install has none ($TOKEN_STATE): set PSEUDOLIFE_MCP_TOKEN in ops/.env, or install pipx or a pip-capable Python >= 3.10 so the installer mints one, then rerun; or rerun with --engine python. No container was started." >&2
+        echo "The Rust daemon needs its bearer token, and this install has none ($TOKEN_STATE): set PSEUDOLIFE_MCP_TOKEN in ops/.env, or install pipx or a pip-capable Python >= 3.10 so the installer mints one, then rerun; or rerun with --engine python. No container was started." >&2
         exit 2
     fi
 fi

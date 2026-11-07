@@ -298,7 +298,7 @@ def test_the_rust_engine_follows_the_token_the_install_produced(tmp_path, script
         output = proc.stdout + proc.stderr
     if expected == "refused":
         assert proc.returncode == 2, output
-        assert "needs the daemon's bearer token" in output and "No container was started" in output
+        assert "needs its bearer token" in output and "No container was started" in output
         return
     assert proc.returncode == 0, output
     result = next(line for line in output.splitlines() if line.startswith("RESULT:"))

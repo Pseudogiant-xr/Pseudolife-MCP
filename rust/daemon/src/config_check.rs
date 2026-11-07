@@ -19,12 +19,23 @@ pub fn startup_refusals(config: &config::Config) -> Result<()> {
     onnx_artifacts::validate_reranker_model(&config.memory.reranker.model_name)
 }
 
+/// Startup refuses this later, after its environment checks, so it keeps
+/// its own place there; `check-config` reports it with the rest.
+pub fn sweep_refusal(config: &config::Config) -> Option<&'static str> {
+    ((config.dream.enabled || config.memory.retrieval_log_enabled)
+        && !config.dream.sweep_interval_ok)
+        .then_some("memory.dream.sweep_interval_seconds is not a number")
+}
+
 fn check(config_file: &std::path::Path) -> Result<()> {
     let config = config::load(config_file).map_err(|e| anyhow!("{e}"))?;
     startup_refusals(&config)?;
-    // Startup admits the embedding model when it builds the embedder.
+    if let Some(refusal) = sweep_refusal(&config) {
+        anyhow::bail!(refusal);
+    }
+    // Startup checks the embedding model when it builds the embedder.
     let override_root = std::env::var_os("PSEUDOLIFE_DAEMON_ONNX_DIR").map(PathBuf::from);
-    embed::Embedder::admit(&config.embedding, override_root.as_deref())?;
+    embed::Embedder::check(&config.embedding, override_root.as_deref())?;
     Ok(())
 }
 
