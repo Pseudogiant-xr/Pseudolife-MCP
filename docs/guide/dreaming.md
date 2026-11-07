@@ -394,9 +394,11 @@ menu):
   - `gpt-5.6-luna`: fastest, lightest on plan usage.
   - `gpt-6-sol`: GPT-6 flagship.
   - `gpt-6-luna`: GPT-6 fastest, lightest.
+  - `gpt-6.1-sol`: GPT-6.1 flagship.
 
 No ladder run has measured the OpenAI models yet; the GPT-6 ids were
-accepted by the Codex CLI on 2026-09-29.
+accepted by the Codex CLI on 2026-09-29, and `gpt-6.1-sol` on 2026-11-08
+(Codex CLI 0.165.0).
 
 These lists are the menu, not a gate: a CLI shim mode takes a model id it
 does not list, says so in one line, and passes it to the shim unchanged, so
@@ -554,7 +556,7 @@ stale-ok window only costs one failed primary attempt before the dream
 falls back. To run it by hand instead:
 
 ```bash
-python evals/codex_shim.py    # --model gpt-5.6-sol / gpt-5.6-luna / gpt-6-sol / gpt-6-luna to change the default
+python evals/codex_shim.py    # --model gpt-5.6-sol / gpt-5.6-luna / gpt-6-sol / gpt-6-luna / gpt-6.1-sol to change the default
 ```
 
 then point the env triple at it exactly as in step 2 above, with
@@ -563,7 +565,7 @@ Linux, the same docker-bridge bind note as the Claude shim — pass `--host`
 accordingly). Either way the shim honours a concrete `gpt-*` or `codex-*`
 name per request, so the Console's **Dreamer** card switches between
 `gpt-5.6-sol` / `gpt-5.6-terra` / `gpt-5.6-luna` / `gpt-6-sol` /
-`gpt-6-luna` live, exactly like the
+`gpt-6-luna` / `gpt-6.1-sol` live, exactly like the
 Claude presets. On Windows the shim finds the official installer's
 `codex.exe` on its own (the `%LOCALAPPDATA%\OpenAI\Codex\bin\<hash>\`
 layout is off PATH and rotates on auto-update — the shim re-resolves the

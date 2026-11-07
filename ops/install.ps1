@@ -217,7 +217,7 @@ $claudeModels = @("claude-opus-5-5", "claude-opus-5", "claude-sonnet-5-5",
     "claude-sonnet-5", "claude-haiku-5-5", "claude-haiku-4-5", "claude-fable-5-1",
     "claude-fable-5")
 $openaiModels = @("gpt-5.6-terra", "gpt-5.6-sol", "gpt-5.6-luna", "gpt-6-sol",
-    "gpt-6-luna")
+    "gpt-6-luna", "gpt-6.1-sol")
 # An explicit -Model "" is refused like a whitespace one; an absent -Model
 # picks the menu's default.
 $modelGiven = $PSBoundParameters.ContainsKey("Model")
@@ -1278,14 +1278,16 @@ if ($codexShimMode -and -not $Model) {
         Write-Host "  3) gpt-5.6-luna  - fastest / lightest on plan usage (unmeasured)"
         Write-Host "  4) gpt-6-sol     - GPT-6 flagship (unmeasured)"
         Write-Host "  5) gpt-6-luna    - GPT-6 fastest / lightest (unmeasured)"
+        Write-Host "  6) gpt-6.1-sol   - GPT-6.1 flagship (unmeasured)"
         while (-not $Model) {
-            switch (Read-Host "Choose 1/2/3/4/5 (Enter = 1)") {
+            switch (Read-Host "Choose 1/2/3/4/5/6 (Enter = 1)") {
                 { $_ -in "", "1" } { $Model = "gpt-5.6-terra" }
                 "2" { $Model = "gpt-5.6-sol" }
                 "3" { $Model = "gpt-5.6-luna" }
                 "4" { $Model = "gpt-6-sol" }
                 "5" { $Model = "gpt-6-luna" }
-                default { Write-Host "  please answer 1, 2, 3, 4 or 5" }
+                "6" { $Model = "gpt-6.1-sol" }
+                default { Write-Host "  please answer 1, 2, 3, 4, 5 or 6" }
             }
         }
     } else {
