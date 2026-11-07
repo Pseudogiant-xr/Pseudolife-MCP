@@ -68,10 +68,192 @@ def test_engine_rechecks_space_after_backup(engine_host, monkeypatch, engine):
     assert not any("build" in c or "up" in c or c[1:2] == ["tag"] for c in s["calls"])
 
 
-def test_release_rust_refuses_before_docker(monkeypatch, capsys):
-    monkeypatch.setattr(up, "run_cli", lambda *a, **kw: pytest.fail("refusal must precede Docker"))
+def test_release_rust_is_no_longer_refused_as_unpublished(monkeypatch, capsys):
+    # Without Docker the run stops at the tier check, not at a blanket refusal.
+    monkeypatch.setattr(up, "which", lambda name: None)
+    monkeypatch.setattr(up, "_on_shim_runtime", lambda: False)
     assert up.main(["--engine", "rust"]) == 2
-    assert "--checkout" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "not published" not in err and "Docker host" in err
+
+
+def _release_labels(tmp_path, monkeypatch, extra_files=(), labels=None):
+    ops = tmp_path / "ops"
+    ops.mkdir(exist_ok=True)
+    for name in ("docker-compose.yml", "docker-compose.ghcr.yml", "docker-compose.rust-ghcr.yml", ".env"):
+        (ops / name).write_text("# fixture\n")
+    files = [ops / "docker-compose.yml", ops / "docker-compose.ghcr.yml", *extra_files]
+    labels = {"com.docker.compose.project": "pseudolife-mcp",
+              "com.docker.compose.project.config_files": ",".join(map(str, files)),
+              "com.docker.compose.project.working_dir": str(ops),
+              "com.docker.compose.project.environment_file": str(ops / ".env"), **(labels or {})}
+    monkeypatch.setattr(up, "run_cli", lambda argv, **kw: (0, json.dumps(labels)))
+    return ops
+
+
+@pytest.mark.parametrize("engine", ["python", "rust"])
+def test_release_compose_context_drops_engine_overlays_left_by_earlier_runs(tmp_path, monkeypatch, engine):
+    # Compose labels name every -f file, including the deleted candidate and
+    # rollback overlays of an earlier engine run and the Rust release overlay.
+    stale = [tmp_path / "update-engine/docker-compose.engine-candidate-0123.json",
+             tmp_path / "update-engine/docker-compose.rollback-20261107-000000-ab.json",
+             tmp_path / "ops/docker-compose.rust-ghcr.yml"]
+    monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(tmp_path / "data"))
+    ops = _release_labels(tmp_path, monkeypatch, stale)
+    context = up.Update(up.Options(), log=lambda s: None).compose_context(engine=engine)
+    files = [context["args"][i + 1] for i, a in enumerate(context["args"]) if a == "-f"]
+    assert files[:2] == [str(ops / "docker-compose.yml"), str(ops / "docker-compose.ghcr.yml")]
+    # The deploy takes this package's Rust overlay, never the clone's (it may
+    # be older, without the model volume); a rollback takes the running one.
+    bundled = tmp_path / "data/compose/docker-compose.rust-ghcr.yml"
+    assert files[2:] == ([str(bundled)] if engine == "rust" else [])
+    if engine == "rust":
+        assert bundled.read_bytes() == (up.BUNDLED_COMPOSE / "docker-compose.rust-ghcr.yml").read_bytes()
+        assert "pseudolife_rust_models" in bundled.read_text(encoding="utf-8")
+        assert context["rust_overlay"] == str(ops / "docker-compose.rust-ghcr.yml")
+
+
+def test_release_rust_host_stays_on_the_release_path(tmp_path, monkeypatch):
+    from pseudolife_memory import update_engine as eng
+    monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(tmp_path))
+    labels = {eng.ENGINE_LABEL: "rust", eng.ACTIVATION_LABEL: "accepted", eng.RELEASE_LABEL: "0.23.0"}
+    eng._write_overlay(tmp_path / eng.RELEASE_ACCEPTED, {"image": "fixture", "labels": labels})
+    monkeypatch.setattr(up, "run_cli", lambda argv, **kw: (0, json.dumps(labels)))
+    update = up.Update(up.Options(tag="0.23.0", reinstall=True), log=lambda s: None)
+    assert eng.selected_checkout(update) is None
+    assert eng.release_engine_choice(update) == ("rust", "rust")
+    update.o.engine = "python"
+    assert eng.release_engine_choice(update) == ("rust", "python")
+
+
+def _release_config(env=None, volumes=None):
+    return {"name": "fixture", "services": {up.DAEMON_SERVICE: {
+        "environment": {"PSEUDOLIFE_MCP_TOKEN": "new-bearer", **(env or {})},
+        "volumes": volumes if volumes is not None else [{"type": "volume", "source": "state", "target": "/data"}],
+        "ports": [{"target": 8765, "published": "18765", "host_ip": "127.0.0.1"}]}},
+        "volumes": {"state": {"name": "fixture-state"}, "models": {"name": "fixture_models"}}}
+
+
+def test_release_engine_reads_the_running_bank_with_the_running_bearer():
+    from pseudolife_memory import update_engine as eng
+    update = up.Update(up.Options(daemon_url="http://127.0.0.1:18765"), log=lambda s: None)
+    release = eng.ReleaseEngineUpdate(update, "0.23.0", "0.22.1", None, "rust")
+    running = {"Mounts": [{"Destination": "/data", "Name": "fixture-state"}],
+               "Config": {"Env": ["PSEUDOLIFE_MCP_TOKEN=old-bearer"]}}
+    assert release.verify_project(_release_config(), running) == ("new-bearer", "old-bearer")
+
+
+def test_release_engine_models_volume_and_overrides():
+    from pseudolife_memory import update_engine as eng
+    data = {"type": "volume", "source": "state", "target": "/data"}
+    models = {"type": "volume", "source": "models", "target": "/models"}
+    assert eng.model_volumes(_release_config({"PSEUDOLIFE_DAEMON_MODELS_DIR": "/models"}, [data, models])) == \
+        ("/models", [("--mount", "type=volume,src=fixture_models,dst=/models", "models")])
+    assert eng.model_volumes(_release_config(volumes=[data])) == \
+        ("/data/models", [("--mount", "type=volume,src=fixture-state,dst=/data", "state")])
+    nested = {**models, "volume": {"subpath": "cache"}}
+    assert eng.model_volumes(_release_config({"PSEUDOLIFE_DAEMON_MODELS_DIR": "/models"}, [nested]))[1][0][1] \
+        .endswith(",volume-subpath=cache")
+    bind = {"type": "bind", "source": "/srv/models", "target": "/models"}
+    assert eng.model_volumes(_release_config({"PSEUDOLIFE_DAEMON_MODELS_DIR": "/models"}, [bind]))[1] == \
+        [("-v", "/srv/models:/models", None)]
+    assert eng.model_volumes(_release_config({"PSEUDOLIFE_DAEMON_ONNX_DIR": "/opt/onnx"})) is None
+    with pytest.raises(up.UpdateError, match="no persistent volume"):
+        eng.model_volumes(_release_config({"PSEUDOLIFE_DAEMON_MODELS_DIR": "/models"}, [data]))
+
+
+def test_a_comma_in_a_model_volume_subpath_is_quoted_for_docker_mount_csv():
+    import csv
+    from pseudolife_memory import update_engine as eng
+    nested = {"type": "volume", "source": "models", "target": "/models", "volume": {"subpath": 'a,"b"'}}
+    spec = eng.model_volumes(_release_config({"PSEUDOLIFE_DAEMON_MODELS_DIR": "/models"}, [nested]))[1][0][1]
+    # Parsed as Docker parses --mount: one CSV record of key=value fields.
+    assert next(csv.reader([spec])) == ["type=volume", "src=fixture_models", "dst=/models", 'volume-subpath=a,"b"']
+
+
+def test_an_open_running_daemon_is_read_with_the_configured_bearer():
+    from pseudolife_memory import update_engine as eng
+    update = up.Update(up.Options(daemon_url="http://127.0.0.1:18765"), log=lambda s: None)
+    release = eng.ReleaseEngineUpdate(update, "0.23.0", "0.22.1", None, "rust")
+    running = {"Mounts": [{"Destination": "/data", "Name": "fixture-state"}], "Config": {"Env": ["PATH=/bin"]}}
+    assert release.verify_project(_release_config(), running) == ("new-bearer", "new-bearer")
+
+
+def test_model_volume_is_created_with_its_driver_or_must_exist_when_external():
+    from pseudolife_memory import update_engine as eng
+    calls = []
+
+    def command(args, **kw):
+        calls.append(args)
+        return (1, "") if args[:2] == ["volume", "inspect"] else (0, "")
+    config = _release_config()
+    config["volumes"]["models"] = {"name": "fixture_models", "driver": "local",
+                                   "driver_opts": {"type": "none", "o": "bind", "device": "/srv/models"}}
+    eng.ensure_project_volume(command, config, "models")
+    create = calls[-1]
+    assert create[-1] == "fixture_models" and create[create.index("--driver") + 1] == "local"
+    assert "device=/srv/models" in create and "com.docker.compose.volume=models" in create
+    config["volumes"]["models"] = {"name": "fixture_models", "external": True}
+    with pytest.raises(up.UpdateError, match="external"):
+        eng.ensure_project_volume(command, config, "models")
+
+
+@pytest.mark.parametrize("script", [True, False])
+def test_release_engine_refuses_a_backup_without_its_state_archive(tmp_path, monkeypatch, script):
+    from pseudolife_memory import update_engine as eng
+    update = up.Update(up.Options(), log=lambda s: None)
+    checkout = tmp_path / "checkout"
+    directory = checkout / "data/backups"
+    if script:
+        monkeypatch.setattr(update, "_checkout_script", lambda *a: Path("backup.sh"))
+
+        def backup(_checkout):
+            directory.mkdir(parents=True, exist_ok=True)
+            (directory / "pseudolife_memory-20260101-000001.sql.gz").write_bytes(
+                gzip.compress(b"-- PostgreSQL database dump complete\n"))
+        monkeypatch.setattr(update, "backup", backup)
+    else:
+        monkeypatch.setattr(update, "_checkout_script", lambda *a: None)
+        monkeypatch.setattr(update, "builtin_backup", lambda: {"dump": "x.sql.gz", "state": None})
+    with pytest.raises(up.UpdateError, match="state"):
+        eng.ReleaseEngineUpdate(update, "0.23.0", "0.22.1", None, "rust").backup(checkout)
+
+
+def test_release_engine_refuses_a_partial_builtin_state_archive(tmp_path, monkeypatch):
+    from pseudolife_memory import update_engine as eng
+    update = up.Update(up.Options(), log=lambda s: None)
+    partial = tmp_path / "pseudolife_state-20260101-000001.tgz"
+    partial.write_bytes(gzip.compress(b"not a whole tar")[:-6])  # a copy that failed midway
+    monkeypatch.setattr(update, "_checkout_script", lambda *a: None)
+    monkeypatch.setattr(update, "builtin_backup", lambda: {"dump": "x.sql.gz", "state": str(partial)})
+    with pytest.raises(up.UpdateError, match="state volume backup is missing or incomplete"):
+        eng.ReleaseEngineUpdate(update, "0.23.0", "0.22.1", None, "rust").backup(tmp_path)
+
+
+def test_engine_change_without_a_backup_is_refused_before_docker(monkeypatch, capsys):
+    monkeypatch.setattr(up, "run_cli", lambda *a, **kw: pytest.fail("refusal must precede Docker"))
+    assert up.main(["--engine", "rust", "--tag", "0.23.0", "--no-backup"]) == 2
+    assert "engine changes require a backup" in capsys.readouterr().err
+
+
+def test_engine_selection_never_moves_the_clients(monkeypatch):
+    monkeypatch.setattr(up.Update, "detect_tier", lambda self: "pip")
+    monkeypatch.setattr(up, "_on_shim_runtime", lambda: False)
+    update = up.Update(up.Options(engine="rust"), log=lambda s: None)
+    with pytest.raises(up.UpdateError, match="Docker host"):
+        update._run()
+    assert update.o.daemon_only
+
+
+def test_release_rollback_commands_supply_the_rust_overlay_tag(tmp_path):
+    from pseudolife_memory import update_engine as eng
+    env = tmp_path / ".env"
+    env.write_text("PSEUDOLIFE_MCP_TOKEN=x\n")
+    lines = eng.rollback_commands(["-p", "pseudolife-mcp", "-f", "base.yml"], [env], tmp_path / "rollback.json",
+                                  tmp_path / "accepted.json", "0.23.0")
+    assert len(lines) == 2 and "PSEUDOLIFE_MCP_TOKEN" in lines[0]
+    assert "PSEUDOLIFE_IMAGE_TAG" in lines[1] and "0.23.0" in lines[1]
+    assert "--no-build --pull never" in lines[1] and "accepted.json" in lines[1]
 
 
 def test_python_accepts_native_release_activation_and_rejects_failed_retry(tmp_path, monkeypatch):
