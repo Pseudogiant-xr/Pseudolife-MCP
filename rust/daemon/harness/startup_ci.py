@@ -31,8 +31,8 @@ REPO = HERE.parents[2]
 # PL_SHADOW_REFRESH_REQUIRED=1 a test whose inputs are missing panics
 # instead of skipping, and the run must still report this many passed.
 SHADOW_DB_FILTERS = ("shadow::tests::db_", "service::shadow_refresh_tests::db_")
-SHADOW_DB_TESTS = 12
-# 2026-11-06, Windows workstation: the twelve took about 6 s in a debug
+SHADOW_DB_TESTS = 15
+# 2026-11-06, Windows workstation: the first twelve took about 6 s in a debug
 # build. Hosted Windows runners are several times slower and each test
 # opens its own session; 600 s bounds a hang while leaving the part-2
 # step (26 minutes, about 13 used by the cells) its margin.

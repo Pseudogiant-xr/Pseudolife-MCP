@@ -16,6 +16,41 @@ same day the Windows dev VM moved to the NVMe pool, its C: was grown to
 runner is online but stays out of the nightly list until a dispatched
 trial passes on it ("Trying a new machine").
 
+## Optional Windows batch pool (2026-11-07)
+
+The Windows comparison lane passed five consecutive complete clean shared
+runs on 2026-11-06 (42114883218, 42133608663, 42149846556, 42164196659,
+42178398560; 16/16 Windows shards each), and the maintainer asked for
+Windows routing. It reuses the Linux pool's planner job, reader step,
+token, event boundary and hosted fallback below, and moves only the
+`windows-latest` `w1c-connection` shard (0.67x hosted time on the workers
+over those runs). `eval` is the planned second shard once routed batches
+have been observed; its rust-cache step saves on hosted runners only, which
+`rust/ci/ci_budget.py`'s cache check cannot yet see through a pool route.
+
+The Windows workers start on demand, so "free" means a worker can take the
+job now without waiting: one already running with an idle runner, or one
+stopped, rolled back and startable under the hypervisor's host-memory guard
+(it refuses a Windows start below 12288 MB available). The controller's
+orchestrator writes `PARITY_WINDOWS_HEALTH` every 30-second demand poll:
+schema 1, `observed_at`, `workers`, `idle_running`, `stopped_clean`,
+`queued` (Windows jobs already waiting) and `memory_available_mb` (null
+while the hypervisor's memory note is missing or stale).
+`rust/ci/windows_pool.py` routes only when `PARITY_BATCH_WINDOWS_POOL` is
+exactly `self-hosted`, the frame is at most 120 seconds old and 30 seconds
+ahead, no other Windows job is queued, and at least one worker is free.
+Starting stopped workers counts sequentially: each start needs 12288 MB
+plus a 2048 MB margin, and each booted worker holds about 10240 MB. Any
+other value, missing memory, a malformed frame or a read failure keeps
+hosted. `PARITY_HEARTBEAT_WINDOWS` keeps its bare Unix time for the runner
+watcher.
+
+The residual risk is the Linux pool's: memory can fall, or another job can
+take the worker, between the frame and the start, and two planners can see
+the same free worker. A routed shard then waits for the next worker rather
+than failing. Disable `PARITY_BATCH_WINDOWS_POOL` to stop routing (see
+"Windows pool recovery" in `docs/dev/merge-batches.md`).
+
 ## Optional Linux batch pool (2026-11-06)
 
 The maintainer approved Linux promotion after five consecutive complete

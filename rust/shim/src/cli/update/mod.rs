@@ -98,6 +98,8 @@ pub(crate) struct Update {
     pub rollback_lines: Vec<String>,
     pub schema_before: Option<i64>,
     pub selected_engine: String,
+    /// G2-K: the Python leg that imports weights.pt already ran this update.
+    pub after_import: bool,
     pub maintainer_context: Option<(Vec<String>, Environment)>,
     pub rollback_scope: Option<String>,
     pub stopped_handover: bool,
@@ -192,6 +194,7 @@ impl Update {
             rollback_lines: vec![],
             schema_before: None,
             selected_engine: "python".into(),
+            after_import: false,
             maintainer_context: None,
             rollback_scope: None,
             stopped_handover: false,
