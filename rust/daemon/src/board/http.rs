@@ -46,6 +46,13 @@ queued for receive on a later turn. Claude Code's Stop hook keeps listening \
 while this session stays open, and a Codex thread needs its doorbell active; \
 without either, record that you are reachable on your next turn.";
 
+/// `PARK_GATE_RUNG_MESSAGE`: the block for mail that rang after the park
+/// (reason `rung_since_park`).
+pub const PARK_GATE_RUNG_MESSAGE: &str = "Before ending: board mail rang for you after your last park. Read it first \
+(memory_message receive, then ack each message_id) and act on it; then update your \
+board status and park to match (memory_agents update park_reason=... park_needs=... \
+park_clear_by=... park_resume=...), or set a done status if nothing is left.";
+
 /// The request headers as `web/api.py` hands them to the board: names
 /// lower-cased, values latin-1, the last of a repeated header winning.
 pub fn header_dict(h: &HeaderMap) -> HashMap<String, String> {
@@ -267,7 +274,14 @@ pub async fn hook_park_gate(app: &App, h: &HeaderMap, query: &HashMap<String, St
         Box::pin(async move { store.park_gate(&*client, &agent, &principal, since).await })
     });
     match verdict.await {
-        Ok(v) if v["gate"] == "block" => text(format!("block\n{PARK_GATE_MESSAGE}\n"), None),
+        Ok(v) if v["gate"] == "block" => {
+            let message = if v["reason"] == "rung_since_park" {
+                PARK_GATE_RUNG_MESSAGE
+            } else {
+                PARK_GATE_MESSAGE
+            };
+            text(format!("block\n{message}\n"), None)
+        }
         _ => allow(),
     }
 }
