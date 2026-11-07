@@ -564,7 +564,7 @@ KNOBS: list[dict[str, Any]] = [
                      "claude-sonnet-5", "claude-haiku-5-5", "claude-haiku-4-5",
                      "claude-fable-5-1", "claude-fable-5", "gpt-5.6-sol",
                      "gpt-5.6-terra", "gpt-5.6-luna", "gpt-6-sol",
-                     "gpt-6-luna"],
+                     "gpt-6-luna", "gpt-6.1-sol"],
      "help": "Model-only override for the primary extractor — wins over BOTH "
              "env and config ownership, so the dreamer model can be switched "
              "without re-owning the endpoint wiring. Any model id the wired "
@@ -642,9 +642,12 @@ KNOBS: list[dict[str, Any]] = [
     {"path": "memory.dream.fallback_base_url", "group": "Extractor",
      "label": "Fallback base URL", "type": "string", "format": "url",
      "default": None, "restart": False,
-     "suggestions": ["http://pseudolife-extractor:8081/v1"],
+     "suggestions": ["http://pseudolife-extractor:8081/v1",
+                     "http://host.docker.internal:8086/v1"],
      "help": "OpenAI-compatible /v1 endpoint used when the primary is "
-             "unreachable (or mode = fallback). Empty disables selection "
+             "unreachable (or mode = fallback): the bundled sidecar "
+             "(pseudolife-extractor:8081) or the Codex CLI shim "
+             "(host.docker.internal:8086). Empty disables selection "
              "entirely — single-extractor behavior. It never receives the "
              "primary's API key: a fallback that needs one reads "
              "PSEUDOLIFE_DREAM_FALLBACK_API_KEY (env-only). Effective only "

@@ -838,7 +838,8 @@
      "gpt-5.6-terra",
      "gpt-5.6-luna",
      "gpt-6-sol",
-     "gpt-6-luna"
+     "gpt-6-luna",
+     "gpt-6.1-sol"
     ]
    }
   },
@@ -961,10 +962,11 @@
     "label": "Fallback base URL",
     "type": "string",
     "restart": false,
-    "help": "OpenAI-compatible /v1 endpoint used when the primary is unreachable (or mode = fallback). Empty disables selection entirely — single-extractor behavior. It never receives the primary's API key: a fallback that needs one reads PSEUDOLIFE_DREAM_FALLBACK_API_KEY (env-only). Effective only when settings source = config.",
+    "help": "OpenAI-compatible /v1 endpoint used when the primary is unreachable (or mode = fallback): the bundled sidecar (pseudolife-extractor:8081) or the Codex CLI shim (host.docker.internal:8086). Empty disables selection entirely — single-extractor behavior. It never receives the primary's API key: a fallback that needs one reads PSEUDOLIFE_DREAM_FALLBACK_API_KEY (env-only). Effective only when settings source = config.",
     "format": "url",
     "suggestions": [
-     "http://pseudolife-extractor:8081/v1"
+     "http://pseudolife-extractor:8081/v1",
+     "http://host.docker.internal:8086/v1"
     ]
    }
   },
@@ -2519,7 +2521,8 @@
          "gpt-5.6-terra",
          "gpt-5.6-luna",
          "gpt-6-sol",
-         "gpt-6-luna"
+         "gpt-6-luna",
+         "gpt-6.1-sol"
         ],
         "value": null
        },
@@ -2626,10 +2629,11 @@
         "label": "Fallback base URL",
         "type": "string",
         "restart": false,
-        "help": "OpenAI-compatible /v1 endpoint used when the primary is unreachable (or mode = fallback). Empty disables selection entirely — single-extractor behavior. It never receives the primary's API key: a fallback that needs one reads PSEUDOLIFE_DREAM_FALLBACK_API_KEY (env-only). Effective only when settings source = config.",
+        "help": "OpenAI-compatible /v1 endpoint used when the primary is unreachable (or mode = fallback): the bundled sidecar (pseudolife-extractor:8081) or the Codex CLI shim (host.docker.internal:8086). Empty disables selection entirely — single-extractor behavior. It never receives the primary's API key: a fallback that needs one reads PSEUDOLIFE_DREAM_FALLBACK_API_KEY (env-only). Effective only when settings source = config.",
         "format": "url",
         "suggestions": [
-         "http://pseudolife-extractor:8081/v1"
+         "http://pseudolife-extractor:8081/v1",
+         "http://host.docker.internal:8086/v1"
         ],
         "value": null
        },
@@ -3629,7 +3633,8 @@
          "gpt-5.6-terra",
          "gpt-5.6-luna",
          "gpt-6-sol",
-         "gpt-6-luna"
+         "gpt-6-luna",
+         "gpt-6.1-sol"
         ],
         "value": null
        },
@@ -3736,10 +3741,11 @@
         "label": "Fallback base URL",
         "type": "string",
         "restart": false,
-        "help": "OpenAI-compatible /v1 endpoint used when the primary is unreachable (or mode = fallback). Empty disables selection entirely — single-extractor behavior. It never receives the primary's API key: a fallback that needs one reads PSEUDOLIFE_DREAM_FALLBACK_API_KEY (env-only). Effective only when settings source = config.",
+        "help": "OpenAI-compatible /v1 endpoint used when the primary is unreachable (or mode = fallback): the bundled sidecar (pseudolife-extractor:8081) or the Codex CLI shim (host.docker.internal:8086). Empty disables selection entirely — single-extractor behavior. It never receives the primary's API key: a fallback that needs one reads PSEUDOLIFE_DREAM_FALLBACK_API_KEY (env-only). Effective only when settings source = config.",
         "format": "url",
         "suggestions": [
-         "http://pseudolife-extractor:8081/v1"
+         "http://pseudolife-extractor:8081/v1",
+         "http://host.docker.internal:8086/v1"
         ],
         "value": null
        },
@@ -4737,7 +4743,8 @@
          "gpt-5.6-terra",
          "gpt-5.6-luna",
          "gpt-6-sol",
-         "gpt-6-luna"
+         "gpt-6-luna",
+         "gpt-6.1-sol"
         ],
         "value": null
        },
@@ -4844,10 +4851,11 @@
         "label": "Fallback base URL",
         "type": "string",
         "restart": false,
-        "help": "OpenAI-compatible /v1 endpoint used when the primary is unreachable (or mode = fallback). Empty disables selection entirely — single-extractor behavior. It never receives the primary's API key: a fallback that needs one reads PSEUDOLIFE_DREAM_FALLBACK_API_KEY (env-only). Effective only when settings source = config.",
+        "help": "OpenAI-compatible /v1 endpoint used when the primary is unreachable (or mode = fallback): the bundled sidecar (pseudolife-extractor:8081) or the Codex CLI shim (host.docker.internal:8086). Empty disables selection entirely — single-extractor behavior. It never receives the primary's API key: a fallback that needs one reads PSEUDOLIFE_DREAM_FALLBACK_API_KEY (env-only). Effective only when settings source = config.",
         "format": "url",
         "suggestions": [
-         "http://pseudolife-extractor:8081/v1"
+         "http://pseudolife-extractor:8081/v1",
+         "http://host.docker.internal:8086/v1"
         ],
         "value": null
        },
@@ -5845,7 +5853,8 @@
          "gpt-5.6-terra",
          "gpt-5.6-luna",
          "gpt-6-sol",
-         "gpt-6-luna"
+         "gpt-6-luna",
+         "gpt-6.1-sol"
         ],
         "value": null
        },
@@ -5952,10 +5961,11 @@
         "label": "Fallback base URL",
         "type": "string",
         "restart": false,
-        "help": "OpenAI-compatible /v1 endpoint used when the primary is unreachable (or mode = fallback). Empty disables selection entirely — single-extractor behavior. It never receives the primary's API key: a fallback that needs one reads PSEUDOLIFE_DREAM_FALLBACK_API_KEY (env-only). Effective only when settings source = config.",
+        "help": "OpenAI-compatible /v1 endpoint used when the primary is unreachable (or mode = fallback): the bundled sidecar (pseudolife-extractor:8081) or the Codex CLI shim (host.docker.internal:8086). Empty disables selection entirely — single-extractor behavior. It never receives the primary's API key: a fallback that needs one reads PSEUDOLIFE_DREAM_FALLBACK_API_KEY (env-only). Effective only when settings source = config.",
         "format": "url",
         "suggestions": [
-         "http://pseudolife-extractor:8081/v1"
+         "http://pseudolife-extractor:8081/v1",
+         "http://host.docker.internal:8086/v1"
         ],
         "value": null
        },

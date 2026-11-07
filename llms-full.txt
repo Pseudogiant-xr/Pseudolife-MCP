@@ -3783,9 +3783,10 @@ menu):
   - `gpt-5.6-luna`: fastest, lightest on plan usage.
   - `gpt-6-sol`: GPT-6 flagship.
   - `gpt-6-luna`: GPT-6 fastest, lightest.
+  - `gpt-6.1-sol`: GPT-6.1 flagship.
 
 No ladder run has measured the OpenAI models yet; the GPT-6 ids were
-accepted by the Codex CLI on 2026-09-29.
+accepted by the Codex CLI on 2026-09-29, and `gpt-6.1-sol` on 2026-11-07.
 
 These lists are the menu, not a gate: a CLI shim mode takes a model id it
 does not list, says so in one line, and passes it to the shim unchanged, so
