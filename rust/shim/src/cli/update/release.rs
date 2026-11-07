@@ -310,9 +310,16 @@ impl Update {
         let directory = self.release_compose(target)?;
         let mut files = vec![directory.join("docker-compose.yml")];
         for path in existing.into_iter().filter(|p| p.is_file()) {
+            // The updaters' own overlays live in their own directory; a
+            // user's override elsewhere is kept whatever it is called.
+            let own_dir = path
+                .parent()
+                .and_then(Path::file_name)
+                .is_some_and(|d| d == "update-engine");
             if !path.file_name().and_then(|n| n.to_str()).is_some_and(|n| {
-                n.starts_with("docker-compose.engine")
-                    || n.starts_with("docker-compose.rollback")
+                (own_dir
+                    && (n.starts_with("docker-compose.engine")
+                        || n.starts_with("docker-compose.rollback")))
                     || COMPOSE_FILES.contains(&n)
             }) {
                 files.push(path);
