@@ -6,6 +6,14 @@ every row of every table, ordered by its primary key (or by every column
 when a table has none). ``diff`` compares two dumps after the declared
 normalizers, which replace nondeterministic values by rule, never by hand:
 
+* With ``PL_HARNESS_BASE_DATABASE`` (a restored real bank every disposable
+  database copies, ``pgdisposable.base_database``), a table's dump holds
+  only the rows the base does not hold, byte for byte (``md5(row::text)``),
+  and ``base_missing`` counts and digests the base rows that are gone
+  (deleted or rewritten). A whole real bank per step would not fit in
+  memory: on a 284 MB bank two full dumps took the harness past 9.6 GiB
+  (daemon box, 2026-11-07). Base rows are identical on both sides by
+  construction, so the comparison loses nothing but their display.
 * ``NONDETERMINISTIC`` names ``(table, column)`` pairs whose values are
   wall-clock times or random identifiers. A rule ``"clock"`` keeps only
   null-or-not (two inserts may share a clock tick on one side and not the
@@ -14,7 +22,11 @@ normalizers, which replace nondeterministic values by rule, never by hand:
 """
 from __future__ import annotations
 
+import hashlib
 import json
+from collections import Counter
+import os
+import re
 import time as clock
 import uuid
 from datetime import date, datetime, time
@@ -134,6 +146,85 @@ def _order_columns(conn, schema: str, table: str) -> list[str]:
     return [r[0] for r in cols]
 
 
+_BASE_HASHES: dict[str, dict[str, Counter]] = {}
+_BASE_KEYS: dict[str, dict[str, set[str]]] = {}
+_BASE_INFO: dict[str, str] = {}
+
+
+def _base_hashes(dsn: str) -> dict[str, Counter] | None:
+    """Every base table's row hashes, read once per process (the base never
+    changes while a run copies it), or None without a base."""
+    base = os.environ.get("PL_HARNESS_BASE_DATABASE")
+    if not base:
+        return None
+    if base not in _BASE_HASHES:
+        from pseudolife_memory.storage.schema import refuse_production_database
+        refuse_production_database(base)
+        if not re.fullmatch(r"pl_cf_mir_[a-z0-9_]{1,40}", base):
+            raise ValueError(f"refusing base database {base!r}: expected pl_cf_mir_*")
+        info = psycopg.conninfo.make_conninfo(dsn, dbname=base)
+        out, keys = {}, {}
+        with psycopg.connect(info, autocommit=True) as conn:
+            for schema, table in _tables(conn):
+                qualified = f"{schema}.{table}"
+                out[qualified] = Counter(r[0] for r in conn.execute(
+                    sql.SQL("SELECT md5(t::text) FROM {} t").format(sql.Identifier(schema, table))))
+                first = _select_list(conn, schema, table)[0].split(", ", 1)[0]
+                keys[qualified] = {json.dumps(_plain(r[0]), sort_keys=True) for r in conn.execute(
+                    f'SELECT {first} FROM "{schema}"."{table}"')} if first else set()
+        _BASE_HASHES[base], _BASE_KEYS[base], _BASE_INFO[base] = out, keys, info
+    return _BASE_HASHES[base]
+
+
+def base_keys(qualified: str) -> set[str]:
+    """The base's first-column values of a table (as ``normalize`` keys a
+    row), or none without a base: a base row a run rewrites is an existing
+    row, whose clocks are compared exactly."""
+    return _BASE_KEYS.get(os.environ.get("PL_HARNESS_BASE_DATABASE") or "", {}).get(qualified, set())
+
+
+def prior_rows(before: dict, qualified: str, current: list) -> list:
+    """``before``'s rows of a table plus, under a base, the base's version of
+    each row in ``current`` whose key the base holds and ``before`` does
+    not, since a dump leaves out rows equal to the base. A consumer that
+    compares a row with its earlier self reads this, not ``before`` alone."""
+    rows = list(before["rows"].get(qualified, {}).get("rows", []))
+    base = os.environ.get("PL_HARNESS_BASE_DATABASE") or ""
+    keys = base_keys(qualified)
+    if not keys:
+        return rows
+    have = {json.dumps(r[0], sort_keys=True) for r in rows}
+    wanted = {json.dumps(r[0], sort_keys=True): r[0] for r in current}
+    missing = [v for k, v in wanted.items() if k in keys and k not in have]
+    if not missing:
+        return rows
+    schema, table = qualified.split(".", 1)
+    with psycopg.connect(_BASE_INFO[base], autocommit=True) as conn:
+        select, first = _select_list(conn, schema, table)
+        rows += [_plain(list(r)) for r in conn.execute(
+            f'SELECT {select} FROM "{schema}"."{table}" WHERE "{first}"::text = ANY(%s)',
+            ([v if isinstance(v, str) else json.dumps(v) for v in missing],))]
+    return rows
+
+
+def _select_list(conn, schema: str, table: str) -> tuple[str, str]:
+    """The dump's select list for a table (non-JSON types as text) and the
+    name of its first column."""
+    cols = conn.execute(
+        "SELECT column_name, data_type FROM information_schema.columns "
+        "WHERE table_schema = %s AND table_name = %s ORDER BY ordinal_position",
+        (schema, table)).fetchall()
+    select = ", ".join(f'"{c}"::text' if t == "USER-DEFINED" else f'"{c}"' for c, t in cols)
+    return select, (cols[0][0] if cols else "")
+
+
+def _base_missing(known: Counter, present: Counter) -> dict:
+    """The base rows gone, counted as a multiset (a table without a key may
+    hold the same row twice)."""
+    gone = sorted((known - present).elements())
+    return {"count": len(gone), "digest": hashlib.sha256("".join(gone).encode()).hexdigest()}
+
+
 class _Busy(Exception):
     """A dump attempt gave way to a concurrent lock holder; retry it."""
 
@@ -165,6 +256,7 @@ def dump(dsn: str, timeout: float = 60.0) -> dict:
 
 def _dump_once(dsn: str) -> dict:
     out: dict = {"catalog": {}, "rows": {}}
+    base = _base_hashes(dsn)
     with psycopg.connect(dsn, autocommit=True) as conn:
         tables = _tables(conn)
     with psycopg.connect(dsn) as conn:
@@ -190,11 +282,32 @@ def _dump_once(dsn: str) -> dict:
             select = ", ".join(
                 f'"{c}"::text' if t == "USER-DEFINED" else f'"{c}"' for c, t in cols)
             ordering = ", ".join(f'"{c}"::text' for c in order) or "1"
-            rows = [] if schema == "public" and table in UNPORTED_ROWS else conn.execute(
-                f'SELECT {select} FROM "{schema}"."{table}" ORDER BY {ordering}').fetchall()
-            out["rows"][f"{schema}.{table}"] = {
+            key = f"{schema}.{table}"
+            extra = {}
+            if schema == "public" and table in UNPORTED_ROWS:
+                rows = []
+            elif base is not None and key in base:
+                known = base[key]
+                present = Counter(r[0] for r in conn.execute(
+                    f'SELECT md5(t::text) FROM "{schema}"."{table}" t'))
+                extra["base_missing"] = _base_missing(known, present)
+                # New rows, plus the extra copies of a row the base holds fewer times.
+                surplus = present - known
+                fetched = conn.execute(
+                    f'SELECT md5(t::text), {select} FROM "{schema}"."{table}" t '
+                    f'WHERE md5(t::text) = ANY(%s) ORDER BY {ordering}', (list(surplus),)).fetchall()
+                rows, owed = [], Counter(surplus)
+                for row in fetched:
+                    if owed[row[0]] > 0:
+                        owed[row[0]] -= 1
+                        rows.append(row[1:])
+            else:
+                rows = conn.execute(
+                    f'SELECT {select} FROM "{schema}"."{table}" ORDER BY {ordering}').fetchall()
+            out["rows"][key] = {
                 "columns": [c for c, _ in cols],
                 "rows": [_plain(list(r)) for r in rows],
+                **extra,
             }
     return out
 
@@ -215,6 +328,7 @@ def normalize(state: dict, rules: dict[tuple[str, str], str] | None = None,
         if before is not None:
             prior = {json.dumps(r[0], sort_keys=True)
                      for r in before["rows"].get(qualified, {}).get("rows", [])}
+            prior |= base_keys(qualified)  # rows equal to the base are not dumped
         for idx, col in enumerate(table["columns"]):
             if (name, col) not in rules:
                 continue

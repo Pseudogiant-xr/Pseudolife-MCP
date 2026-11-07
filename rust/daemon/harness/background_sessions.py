@@ -226,7 +226,9 @@ def normalize_closes(state, before, start, end):
     def records(snapshot, table):
         t = snapshot["rows"]["public." + table]
         return [dict(zip(t["columns"], r)) for r in t["rows"]]
-    prior = {e["id"]: e["ended_at"] for e in records(before, "episodes")}
+    t = before["rows"]["public.episodes"]
+    prior = {e["id"]: e["ended_at"] for e in (dict(zip(t["columns"], r)) for r in dbstate.prior_rows(
+        before, "public.episodes", state["rows"]["public.episodes"]["rows"]))}
     close_times = {}
     meta = {r[0]: r[1] for r in state["rows"]["public.meta"]["rows"]}
     for ep in records(state, "episodes"):
