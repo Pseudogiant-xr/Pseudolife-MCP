@@ -1604,6 +1604,21 @@ else
     esac
 fi
 # <<< mint token <<<
+# >>> engine token >>>
+# The default Rust daemon is verified with an authenticated read, so it
+# follows the bearer this stage actually produced, not the one stage 4b
+# predicted (a host that cannot install the shim mints none).
+if [ "${COMPOSE_ENGINE:-}" = rust ] && [ "$TOKEN_STATE" != minted ] && [ "$TOKEN_STATE" != present ]; then
+    if [ -n "${ENGINE_DEFAULTED:-}" ]; then
+        COMPOSE_ENGINE=python
+        engine_files=()
+        step "Daemon engine: python after all (no bearer token for the default Rust daemon: $TOKEN_STATE)"
+    else
+        echo "--engine rust needs the daemon's bearer token, and this install has none ($TOKEN_STATE): set PSEUDOLIFE_MCP_TOKEN in ops/.env, or install pipx or a pip-capable Python >= 3.10 so the installer mints one, then rerun; or rerun with --engine python. No container was started." >&2
+        exit 2
+    fi
+fi
+# <<< engine token <<<
 
 # ── 6. sidecar enable/disable via the compose override ────────────────────
 # >>> sidecar override >>>
@@ -3542,6 +3557,7 @@ if [ -z "$CLIENT_ONLY" ]; then
         exit 1
     }
     step "Healthy: http://127.0.0.1:8765/health (Console: http://127.0.0.1:8765/ui/)"
+    # >>> engine record >>>
     if [ "${COMPOSE_ENGINE:-python}" = rust ]; then
         # Recorded only now, as update records its own after its health gate.
         engine_status="$(engine_helper accept)" || exit 1
@@ -3550,6 +3566,7 @@ if [ -z "$CLIENT_ONLY" ]; then
         # Kept by later updates too: the G2 default never moves a chosen host.
         engine_helper choose --engine python >/dev/null || exit 1
     fi
+    # <<< engine record <<<
     endpoint_container_probe
     shim_container_probe
     if [ -n "${TEST_LOGIN:-}" ]; then

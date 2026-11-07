@@ -117,13 +117,14 @@ fn validate_cpu_dtype(configured: &str, override_value: &str) -> Result<()> {
 }
 
 impl Embedder {
-    /// An override is a complete local model root. The configured graph name
-    /// is relative to its Transformer module; loading never guesses files.
-    pub fn load_config(
+    /// The configuration checks loading starts with, and `check-config`
+    /// runs alone: settings the native daemon supports and an ONNX graph it
+    /// can find. `(model root, Hub layout, graph file)`; nothing is read
+    /// beyond the files' existence.
+    pub fn admit(
         config: &EmbeddingConfig,
         override_root: Option<&Path>,
-        threads: usize,
-    ) -> Result<Self> {
+    ) -> Result<(PathBuf, bool, String)> {
         if !matches!(config.backend.as_str(), "torch" | "onnx") {
             bail!("embedding backend must be 'torch' or 'onnx'");
         }
@@ -139,6 +140,17 @@ impl Embedder {
             .map(|p| p.to_string_lossy().into_owned())
             .unwrap_or_else(|| config.model_name.clone());
         let (root, hub) = artifacts::resolve(&model, &file, &cache_root())?;
+        Ok((root, hub, file))
+    }
+
+    /// An override is a complete local model root. The configured graph name
+    /// is relative to its Transformer module; loading never guesses files.
+    pub fn load_config(
+        config: &EmbeddingConfig,
+        override_root: Option<&Path>,
+        threads: usize,
+    ) -> Result<Self> {
+        let (root, hub, file) = Self::admit(config, override_root)?;
         if config.model_name == artifacts::provision::EMBEDDING_MODEL && !harness_fixture(&root) {
             artifacts::provision::verify_embedding(&root, &file, hub)?;
         }

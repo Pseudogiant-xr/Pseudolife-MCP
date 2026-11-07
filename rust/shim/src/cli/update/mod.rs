@@ -102,6 +102,9 @@ pub(crate) struct Update {
     pub defaulted_engine: bool,
     /// The release deploy began its backup: the host changes from here.
     pub release_started: bool,
+    /// What a defaulted attempt pulled or created, removed if it falls back.
+    pub default_pulled: Option<String>,
+    pub default_volumes: Vec<String>,
     pub maintainer_context: Option<(Vec<String>, Environment)>,
     pub rollback_scope: Option<String>,
     pub stopped_handover: bool,
@@ -198,6 +201,8 @@ impl Update {
             selected_engine: "python".into(),
             defaulted_engine: false,
             release_started: false,
+            default_pulled: None,
+            default_volumes: vec![],
             maintainer_context: None,
             rollback_scope: None,
             stopped_handover: false,

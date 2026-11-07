@@ -418,9 +418,14 @@ impl Update {
         // accepted activation so the next update can verify it.
         let activating = self.o.engine.is_some() || choice == "rust";
         if current.as_deref() == Some(&target) && !self.o.reinstall && choice == selected {
-            if self.o.engine.as_deref() == Some("python") {
+            if self.o.engine.as_deref() == Some("python")
+                && let Err(error) = engine::record_choice("python")
+            {
                 // An explicit choice is kept even when there is nothing to deploy.
-                engine::record_choice("python")?;
+                self.warn(format!(
+                    "the Python choice could not be recorded ({}); a later update may move this host to the default engine",
+                    error.message
+                ));
             }
             self.step(format!("the daemon already runs {target}; nothing to do (--reinstall to recreate it anyway, --clients-only for the shim and plugin)"));
             return Ok(());
@@ -442,20 +447,13 @@ impl Update {
             match attempt {
                 Err(error) if !self.release_started => {
                     self.defaulted_engine = false;
-                    // The cause only: the refusal's own advice (--engine python)
-                    // would opt the host out of the default for good.
-                    let first = error.message.lines().next().unwrap_or("");
-                    let reason = first
-                        .split(';')
-                        .next()
-                        .unwrap_or("")
-                        .split(": run ")
-                        .next()
-                        .unwrap_or("");
+                    self.discard_default_attempt();
+                    // The refusal's whole first line, its fix included.
+                    let reason = error.message.lines().next().unwrap_or("").trim();
                     self.warn(format!(
                         "not moving to the {choice} daemon this time: {reason}"
                     ));
-                    self.step(format!("staying on the {selected} daemon for this update"));
+                    self.step(format!("staying on the {selected} daemon for this update; nothing was recorded, so the next attended update tries again (--engine {selected} keeps it)"));
                     if current.as_deref() == Some(&target) && !self.o.reinstall {
                         self.step(format!("the daemon already runs {target}; nothing to do"));
                         return Ok(());
@@ -592,6 +590,8 @@ impl Update {
             pg.as_deref(),
             context.running["Image"].as_str(),
         )?;
+        // A defaulted attempt removes an image it pulled if it falls back.
+        let fresh = self.defaulted_engine && self.docker_call(&["image", "inspect", &image]).0 != 0;
         self.step(format!("pulling {image}..."));
         if self
             .command(&["pull".into(), image.clone()], None, 7200, true)
@@ -599,7 +599,11 @@ impl Update {
             != 0
         {
             return Err(UpdateError::new(
-                if choice == "rust" && self.o.engine.is_none() {
+                if choice == "rust" && self.defaulted_engine {
+                    format!(
+                        "docker pull {image} failed; nothing was changed: this host keeps its Python daemon. A later update moves it once {target}'s Rust daemon image pulls"
+                    )
+                } else if choice == "rust" && self.o.engine.is_none() {
                     format!(
                         "docker pull {image} failed; nothing was changed: this host keeps its current Rust daemon. Retry once {target} publishes its Rust daemon image, or move to it on Python with --engine python"
                     )
@@ -613,6 +617,9 @@ impl Update {
                     )
                 },
             ));
+        }
+        if fresh {
+            self.default_pulled = Some(image.clone());
         }
         let probe = if choice == "rust" {
             vec![
@@ -658,6 +665,7 @@ impl Update {
             // A first start would otherwise download the models inside the
             // health gate. The running daemon keeps serving meanwhile.
             self.provision_models(&image, &config)?;
+            self.check_config(&image, &config)?;
         }
         let backups = if self.o.no_backup {
             self.warn("skipping backup (--no-backup)");
@@ -1215,6 +1223,73 @@ fn volume_create_args(config: &Value, key: &str) -> Result<Vec<String>> {
     Ok(args)
 }
 
+/// `pseudolife-daemon check-config`: the image refuses this configuration. An
+/// image without the command falls through to startup and exits 2 instead.
+const CHECK_UNSUPPORTED: i32 = 3;
+
+/// `docker run` arguments giving `check-config` the daemon's own view: its
+/// configuration environment and every persistent mount, read-only. Never a
+/// bearer or the database URL: the check opens no bank.
+fn config_check_args(config: &Value) -> Vec<String> {
+    let service = &config["services"][DAEMON_SERVICE];
+    let mut args: Vec<String> = ["run", "--rm", "--network", "none"]
+        .into_iter()
+        .map(str::to_owned)
+        .collect();
+    if let Some(env) = service["environment"].as_object() {
+        let mut keys: Vec<&String> = env.keys().collect();
+        keys.sort();
+        for key in keys {
+            let wanted = [
+                "PSEUDOLIFE_DAEMON_",
+                "PSEUDOLIFE_EMBEDDING_",
+                "HF_",
+                "HUGGINGFACE_",
+                "TRANSFORMERS_",
+            ]
+            .iter()
+            .any(|prefix| key.starts_with(prefix))
+                || [
+                    "PSEUDOLIFE_MCP_CONFIG",
+                    "PSEUDOLIFE_MCP_DATA_DIR",
+                    "HOME",
+                    "XDG_CACHE_HOME",
+                ]
+                .contains(&key.as_str());
+            let Some(value) = env[key].as_str().filter(|_| wanted) else {
+                continue;
+            };
+            args.extend(["-e".to_owned(), format!("{key}={value}")]);
+        }
+    }
+    for volume in service["volumes"].as_array().into_iter().flatten() {
+        let (Some(source), Some(target)) = (
+            volume["source"].as_str().filter(|s| !s.is_empty()),
+            volume["target"].as_str().filter(|s| !s.is_empty()),
+        ) else {
+            continue;
+        };
+        let mut fields = match volume["type"].as_str() {
+            Some("volume") => {
+                let name = config["volumes"][source]["name"].as_str().unwrap_or(source);
+                let mut fields = vec![("type", "volume"), ("src", name), ("dst", target)];
+                if let Some(subpath) = volume["volume"]["subpath"]
+                    .as_str()
+                    .filter(|s| !s.is_empty())
+                {
+                    fields.push(("volume-subpath", subpath));
+                }
+                fields
+            }
+            Some("bind") => vec![("type", "bind"), ("src", source), ("dst", target)],
+            _ => continue,
+        };
+        fields.push(("readonly", "true"));
+        args.extend(["--mount".to_owned(), mount_spec(&fields)]);
+    }
+    args
+}
+
 /// The engine a Docker host that never chose one gets (G2). A host chose when
 /// it runs Rust or recorded an accepted selection (`--engine python` leaves one).
 pub(super) const DEFAULT_ENGINE: &str = "rust";
@@ -1227,18 +1302,29 @@ impl Update {
     /// choice (an unreadable record counts as chosen). The default applies
     /// only on an attended update with a backup.
     fn default_choice(&mut self, selected: &str, labels: &Value, target: &str) -> (String, bool) {
-        let chosen = selected == "rust"
-            || labels[engine::ACTIVATION_LABEL]
-                .as_str()
-                .is_some_and(|s| !s.is_empty())
-            || !matches!(engine::selection(&engine::release_accepted()), Ok(None))
-            || engine::recorded_choice().is_some();
-        if chosen
-            || self.o.unattended
+        // The run's own flags first: an unattended run never reads the records.
+        if self.o.unattended
             || self.o.no_backup
             || self.o.allow_auth_change
             || DEFAULT_ENGINE == selected
         {
+            return (selected.to_owned(), false);
+        }
+        let chosen = labels[engine::ACTIVATION_LABEL]
+            .as_str()
+            .is_some_and(|s| !s.is_empty())
+            || !matches!(engine::selection(&engine::release_accepted()), Ok(None))
+            || match engine::recorded_choice() {
+                Ok(choice) => choice.is_some(),
+                Err(reason) => {
+                    self.warn(format!(
+                        "cannot read the engine choice in {} ({reason}); this host keeps its engine. Fix or remove that file to let the default engine apply",
+                        engine::choice_path().display()
+                    ));
+                    true
+                }
+            };
+        if chosen {
             return (selected.to_owned(), false);
         }
         let image = format!("{RUST_IMAGE}:{target}");
@@ -1252,6 +1338,62 @@ impl Update {
             "moving this host to the {DEFAULT_ENGINE} daemon, the default since G2 (keep {selected} with --engine {selected})"
         ));
         (DEFAULT_ENGINE.to_owned(), true)
+    }
+    /// Remove what a defaulted attempt pulled or created, so falling back
+    /// leaves the host as it found it.
+    fn discard_default_attempt(&mut self) {
+        let mut removals: Vec<(&str, String)> = Vec::new();
+        if let Some(image) = self.default_pulled.take() {
+            removals.push(("image", image));
+        }
+        for volume in std::mem::take(&mut self.default_volumes) {
+            removals.push(("volume", volume));
+        }
+        for (kind, name) in removals {
+            if self.docker_call(&[kind, "rm", &name]).0 != 0 {
+                self.warn(format!(
+                    "could not remove {name} after falling back (docker {kind} rm); remove it by hand if the disk is short"
+                ));
+            }
+        }
+    }
+    /// Refuse before the backup a configuration the Rust daemon would refuse
+    /// at startup (a non-default reranker, an embedding model it cannot
+    /// load): the Python daemon keeps serving.
+    fn check_config(&mut self, image: &str, config: &Value) -> Result<()> {
+        self.step(format!(
+            "checking this bank's configuration against {image}..."
+        ));
+        let mut args = config_check_args(config);
+        args.extend(
+            ["--entrypoint", "pseudolife-daemon", image, "check-config"]
+                .into_iter()
+                .map(str::to_owned),
+        );
+        let (code, out) = self.command(&args, None, 600, false);
+        if code == 0 {
+            return Ok(());
+        }
+        let detail = out.trim().lines().last().unwrap_or("").trim().to_owned();
+        if code == CHECK_UNSUPPORTED {
+            return Err(UpdateError::usage(format!(
+                "the Rust daemon does not support this bank's configuration: {detail}; nothing was deployed"
+            )));
+        }
+        if self.defaulted_engine {
+            return Err(UpdateError::new(format!(
+                "could not check this bank's configuration against {image} (exit {code}{}); nothing was deployed",
+                if detail.is_empty() {
+                    String::new()
+                } else {
+                    format!(": {detail}")
+                }
+            )));
+        }
+        self.warn(format!(
+            "could not check this bank's configuration against {image} (exit {code}); the health gate checks the new daemon instead"
+        ));
+        Ok(())
     }
     /// Install the pinned models into the daemon's model volume before backup.
     fn provision_models(&mut self, image: &str, config: &Value) -> Result<()> {
@@ -1281,6 +1423,9 @@ impl Update {
                     return Err(UpdateError::new(format!(
                         "could not create the model volume {name}; check Docker and retry; nothing was deployed"
                     )));
+                }
+                if self.defaulted_engine {
+                    self.default_volumes.push(name.clone());
                 }
             }
         }

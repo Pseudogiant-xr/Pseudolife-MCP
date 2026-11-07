@@ -1663,7 +1663,11 @@ class Update:
         if current == target and not self.o.reinstall and choice == selected:
             if self.o.engine == "python":
                 # An explicit choice is kept even when there is nothing to deploy.
-                update_engine.record_choice("python")
+                try:
+                    update_engine.record_choice("python")
+                except OSError as exc:
+                    self.warn(f"the Python choice could not be recorded ({exc.strerror or exc}); a later update may "
+                              "move this host to the default engine")
             self.step(f"the daemon already runs {target}; nothing to do (--reinstall to recreate it anyway, "
                       f"--clients-only for the shim and plugin)")
             return
@@ -1671,17 +1675,15 @@ class Update:
             # Engine selection, and every update of a Rust host, record an
             # accepted activation so the next update can verify it.
             try:
-                update_engine.deploy_release_engine(self, target, current, previous_digest, before_recreate, choice)
+                update_engine.deploy_release_engine(self, target, current, previous_digest, before_recreate, choice,
+                                                    defaulted)
                 return
-            except UpdateError as exc:
-                if not (defaulted and getattr(exc, "before_change", False)):
-                    raise
-                # The default never blocks an ordinary update: stay on Python.
-                # The cause only: the refusal's own advice (--engine python)
-                # would opt the host out of the default for good.
-                reason = str(exc).splitlines()[0].split(";")[0].split(": run ")[0]
-                self.warn(f"not moving to the {choice} daemon this time: {reason}")
-                self.step(f"staying on the {selected} daemon for this update")
+            except update_engine.DefaultFallback as exc:
+                # The default never blocks an ordinary update: stay on Python,
+                # with the refusal's whole first line, its fix included.
+                self.warn(f"not moving to the {choice} daemon this time: {exc.reason}")
+                self.step(f"staying on the {selected} daemon for this update; nothing was recorded, so the next attended "
+                          f"update tries again (--engine {selected} keeps it)")
                 if current == target and not self.o.reinstall:
                     self.step(f"the daemon already runs {target}; nothing to do")
                     return

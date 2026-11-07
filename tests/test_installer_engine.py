@@ -215,9 +215,97 @@ def test_an_explicit_python_install_records_its_choice(helper, capsys):
     assert module.main(["choose", "--engine", "python"]) == 0
     assert eng.recorded_choice() == "python"
     assert module.main(["choose", "--engine", "rust"]) == 1
-    for script, call in (("install.sh", "engine_helper choose --engine python"),
-                         ("install.ps1", "Invoke-EngineHelper choose --engine python")):
-        assert call in (ROOT / "ops" / script).read_text(encoding="utf-8"), script
+
+
+def test_a_failed_choice_write_warns_and_the_install_succeeds(helper, capsys, tmp_path):
+    module, state, repo = helper
+    # A non-empty directory where the choice file belongs: no write can replace it.
+    blocker = tmp_path / "data" / eng.CHOICE
+    blocker.mkdir(parents=True)
+    (blocker / "keep").write_text("x")
+    assert module.main(["choose", "--engine", "python"]) == 0
+    out, err = capsys.readouterr()
+    assert out.strip() == "unrecorded"
+    assert "could not record the Python engine choice" in err
+
+
+def _record_stage(tmp_path, script, engine, compose_engine, helper_exit=0):
+    """Run the post-health engine record stage with a logging helper stub."""
+    if script.endswith(".ps1"):
+        stage = _stage(script, "# >>> engine record >>>", "# <<< engine record <<<")
+        ps = _PowerShell(tmp_path)
+        stub = ("function Invoke-EngineHelper {\n"
+                f"    Add-Content -LiteralPath '{ps.calls}' -Value ('helper|' + (@($args) -join ' '))\n"
+                f"    $global:LASTEXITCODE = {helper_exit}\n"
+                "    if ($args[0] -eq 'accept') { return 'accepted' }\n    return 'unrecorded'\n}\n"
+                "function Step($text) { Write-Output \"STEP: $text\" }\n")
+        proc = ps.run(f"$Engine='{engine}'\n$composeEngine='{compose_engine}'\n" + stub + stage
+                      + "Write-Output 'RESULT:done'\n")
+        return proc, ps.logged(), _output(proc)
+    variants = _bash_variants()
+    if not variants:
+        pytest.skip("Bash unavailable")
+    stage = _stage(script, "# >>> engine record >>>", "# <<< engine record <<<")
+    shell = _Shell(variants[0], tmp_path)
+    stub = ('engine_helper() { printf "helper|%s\\n" "$*" >>"$CALL_LOG"; '
+            f'[ "$1" = accept ] && echo accepted || echo unrecorded; return {helper_exit}; }}\n'
+            'step() { echo "STEP: $*"; }\n')
+    proc = shell.run(f"ENGINE='{engine}'\nCOMPOSE_ENGINE='{compose_engine}'\n" + stub + stage + 'echo "RESULT:done"\n')
+    return proc, shell.logged(), proc.stdout + proc.stderr
+
+
+@pytest.mark.parametrize("script", ["install.sh", "install.ps1"])
+@pytest.mark.parametrize("engine,compose_engine,expected", [
+    ("python", "python", "choose --engine python"), ("", "rust", "accept"), ("rust", "rust", "accept"),
+    ("", "python", None),
+])
+def test_the_install_records_an_explicit_python_choice_and_accepts_rust(tmp_path, script, engine, compose_engine,
+                                                                         expected):
+    proc, calls, output = _record_stage(tmp_path, script, engine, compose_engine)
+    assert proc.returncode == 0, output
+    assert "RESULT:done" in output
+    recorded = [call.split("|", 1)[1] for call in calls if call.startswith("helper|")]
+    # A defaulted Python install records nothing: a later update's default may still move it.
+    assert recorded == ([expected] if expected else []), recorded
+
+
+@pytest.mark.parametrize("script", ["install.sh", "install.ps1"])
+@pytest.mark.parametrize("token_state,defaulted,expected", [
+    ("minted", True, "rust"), ("present", True, "rust"), ("no-shim", True, "python"), ("failed", True, "python"),
+    ("no-shim", False, "refused"), ("present", False, "rust"),
+])
+def test_the_rust_engine_follows_the_token_the_install_produced(tmp_path, script, token_state, defaulted, expected):
+    # Codex P1 (round 3): with the shim transport but no pipx or pip, stage 4b
+    # predicted a bearer that stage 5b never minted.
+    if script.endswith(".ps1"):
+        stage = _stage(script, "# >>> engine token >>>", "# <<< engine token <<<")
+        ps = _PowerShell(tmp_path)
+        proc = ps.run("function Step($text) { Write-Output \"STEP: $text\" }\n"
+                      f"$composeEngine='rust'\n$engineDefaulted=${'true' if defaulted else 'false'}\n"
+                      f"$engineFiles=@('C:\\fixture\\engine.yml')\n$tokenState='{token_state}'\n" + stage
+                      + "Write-Output \"RESULT:$composeEngine|$($engineFiles -join ',')\"\n")
+        output = _output(proc)
+    else:
+        variants = _bash_variants()
+        if not variants:
+            pytest.skip("Bash unavailable")
+        stage = _stage(script, "# >>> engine token >>>", "# <<< engine token <<<")
+        shell = _Shell(variants[0], tmp_path)
+        proc = shell.run('step() { echo "STEP: $*"; }\n'
+                         f"COMPOSE_ENGINE=rust\nENGINE_DEFAULTED='{'1' if defaulted else ''}'\n"
+                         f"engine_files=(/fixture/engine.yml)\nTOKEN_STATE='{token_state}'\n" + stage
+                         + 'echo "RESULT:$COMPOSE_ENGINE|${engine_files[*]-}"\n')
+        output = proc.stdout + proc.stderr
+    if expected == "refused":
+        assert proc.returncode == 2, output
+        assert "needs the daemon's bearer token" in output and "No container was started" in output
+        return
+    assert proc.returncode == 0, output
+    result = next(line for line in output.splitlines() if line.startswith("RESULT:"))
+    engine, files = result[len("RESULT:"):].split("|")
+    assert engine == expected
+    assert bool(files) == (expected == "rust")
+    assert ("python after all" in output) == (expected == "python")
 
 
 def test_accept_refuses_a_container_this_install_did_not_start(helper):

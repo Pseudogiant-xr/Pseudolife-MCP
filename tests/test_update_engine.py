@@ -246,10 +246,14 @@ def test_engine_selection_never_moves_the_clients(monkeypatch):
 
 
 @pytest.mark.parametrize("case,expected", [
-    ("unchosen", "rust"), ("unpublished", "python"), ("chose-python", "python"), ("unattended", "python"),
-    ("explicit-python", "python"), ("runs-rust", "rust"), ("no-backup", "python"),
-    ("activation-label", "python"), ("recorded-choice", "python"), ("unreadable-record", "python"),
-    ("allow-auth-change", "python"),
+    # (selected, choice, defaulted): only an unchosen attended Python host is defaulted.
+    ("unchosen", ("python", "rust", True)), ("unpublished", ("python", "python", False)),
+    ("chose-python", ("python", "python", False)), ("unattended", ("python", "python", False)),
+    ("explicit-python", ("python", "python", False)), ("runs-rust", ("rust", "rust", False)),
+    ("no-backup", ("python", "python", False)), ("activation-label", ("python", "python", False)),
+    ("recorded-choice", ("python", "python", False)), ("unreadable-record", ("python", "python", False)),
+    ("allow-auth-change", ("python", "python", False)), ("corrupt-choice", ("python", "python", False)),
+    ("explicit-rust-over-choice", ("python", "rust", False)),
 ])
 def test_default_engine_moves_only_an_unchosen_attended_host(tmp_path, monkeypatch, case, expected):
     from pseudolife_memory import update_engine as eng
@@ -260,8 +264,11 @@ def test_default_engine_moves_only_an_unchosen_attended_host(tmp_path, monkeypat
         labels = {eng.ENGINE_LABEL: "python", eng.ACTIVATION_LABEL: "a", eng.CHECKOUT_LABEL: str(tmp_path)}
     if case == "chose-python":
         eng._write_overlay(tmp_path / eng.RELEASE_ACCEPTED, {"image": "py", "labels": {eng.ENGINE_LABEL: "python"}})
-    if case == "recorded-choice":
+    if case in ("recorded-choice", "explicit-rust-over-choice"):
         eng.record_choice("python")
+    if case == "corrupt-choice":
+        (tmp_path / eng.CHOICE).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / eng.CHOICE).write_text("{not json")
     if case == "unreadable-record":
         (tmp_path / eng.RELEASE_ACCEPTED).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path / eng.RELEASE_ACCEPTED).write_text("{not json")
@@ -271,10 +278,77 @@ def test_default_engine_moves_only_an_unchosen_attended_host(tmp_path, monkeypat
             return (1, "") if case == "unpublished" else (0, "{}")
         return 0, json.dumps(labels)
     monkeypatch.setattr(up, "run_cli", run)
-    options = up.Options(unattended=case == "unattended", engine="python" if case == "explicit-python" else None,
+    engine = {"explicit-python": "python", "explicit-rust-over-choice": "rust"}.get(case)
+    options = up.Options(unattended=case == "unattended", engine=engine,
                          no_backup=case == "no-backup", allow_auth_change=case == "allow-auth-change")
     update = up.Update(options, log=lambda s: None)
-    assert eng.release_engine_choice(update, "0.23.0")[1] == expected
+    assert eng.release_engine_choice(update, "0.23.0") == expected
+    warned = [step for step in update.report.steps if "cannot read the engine choice" in step]
+    assert len(warned) == (case == "corrupt-choice")
+
+
+def test_an_unreadable_choice_parent_says_one_line_and_keeps_the_engine(tmp_path, monkeypatch):
+    # A parent directory the updater cannot search: `Path.exists()` raised
+    # PermissionError here; the read reports it once instead.
+    from pseudolife_memory import update_engine as eng
+    monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(tmp_path))
+    real = type(tmp_path).read_text
+
+    def denied(self, *args, **kwargs):
+        if self.name == "engine-choice.json":
+            raise PermissionError(13, "Permission denied")
+        return real(self, *args, **kwargs)
+    real_exists = type(tmp_path).exists
+
+    def exists(self, *args, **kwargs):
+        if self.name == "engine-choice.json":
+            raise PermissionError(13, "Permission denied")
+        return real_exists(self, *args, **kwargs)
+    monkeypatch.setattr(type(tmp_path), "read_text", denied)
+    monkeypatch.setattr(type(tmp_path), "exists", exists)
+    update = up.Update(up.Options(), log=lambda s: None)
+    assert eng.recorded_choice(update) == "unknown"
+    assert sum("cannot read the engine choice" in step for step in update.report.steps) == 1
+
+
+@pytest.mark.parametrize("failure", [up.UpdateError("refused; nothing was changed", 2), KeyError("services"),
+                                     OSError("disk")])
+def test_a_defaulted_move_falls_back_on_any_error_before_the_backup(monkeypatch, failure):
+    # Parity with the native updater, which falls back on every error.
+    from pseudolife_memory import update_engine as eng
+    discarded = []
+    monkeypatch.setattr(eng.ReleaseEngineUpdate, "run", lambda self, before: (_ for _ in ()).throw(failure))
+    monkeypatch.setattr(eng.ReleaseEngineUpdate, "discard", lambda self: discarded.append(True))
+    monkeypatch.setattr(eng, "host_labels", lambda update: {})
+    update = up.Update(up.Options(), log=lambda s: None)
+    with pytest.raises(eng.DefaultFallback) as raised:
+        eng.deploy_release_engine(update, "0.23.0", "0.22.1", None, None, "rust", defaulted=True)
+    assert raised.value.reason == (str(failure).splitlines()[0] if str(failure) else type(failure).__name__)
+    assert discarded == [True]
+    # A named engine never falls back: its error is the update's.
+    with pytest.raises(type(failure)):
+        eng.deploy_release_engine(update, "0.23.0", "0.22.1", None, None, "rust", defaulted=False)
+
+
+def test_config_check_passes_configuration_mounts_read_only_and_no_secrets():
+    from pseudolife_memory import update_engine as eng
+    config = {"volumes": {"state": {"name": "proj_state"}, "models": {"name": "proj_models"}},
+              "services": {up.DAEMON_SERVICE: {
+                  "environment": {"PSEUDOLIFE_MCP_TOKEN": "secret", "PSEUDOLIFE_MCP_DATABASE_URL": "postgresql://x",
+                                  "PSEUDOLIFE_DAEMON_MODELS_DIR": "/models", "HF_HOME": "/data/hf",
+                                  "PSEUDOLIFE_MCP_DATA_DIR": "/data"},
+                  "volumes": [{"type": "volume", "source": "state", "target": "/data"},
+                              {"type": "volume", "source": "models", "target": "/models"},
+                              {"type": "bind", "source": "/srv/config.yaml", "target": "/data/config.yaml"},
+                              {"type": "tmpfs", "target": "/tmp"}]}}}
+    args = eng.config_check_args(config)
+    assert args[:4] == ["run", "--rm", "--network", "none"]
+    assert not any("secret" in a or "postgresql" in a for a in args)
+    assert "PSEUDOLIFE_DAEMON_MODELS_DIR=/models" in args and "HF_HOME=/data/hf" in args
+    mounts = [args[i + 1] for i, a in enumerate(args) if a == "--mount"]
+    assert mounts == ["type=volume,src=proj_state,dst=/data,readonly=true",
+                      "type=volume,src=proj_models,dst=/models,readonly=true",
+                      "type=bind,src=/srv/config.yaml,dst=/data/config.yaml,readonly=true"]
 
 
 def test_release_rollback_commands_supply_the_rust_overlay_tag(tmp_path):

@@ -15,19 +15,19 @@ pub(super) fn release_accepted() -> PathBuf {
 pub(super) fn choice_path() -> PathBuf {
     data_dir().join("update-engine/engine-choice.json")
 }
-pub(super) fn recorded_choice() -> Option<String> {
-    // Only a missing file means "no choice": an unreadable one (permissions,
-    // a Windows sharing violation) still keeps the host's choice.
+/// `Ok(None)` only for a missing file; `Err(reason)` for one that cannot be
+/// read or holds no engine, which still keeps the host's choice.
+pub(super) fn recorded_choice() -> std::result::Result<Option<String>, String> {
     let bytes = match fs::read(choice_path()) {
         Ok(bytes) => bytes,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return None,
-        Err(_) => return Some("unknown".to_owned()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.to_string()),
     };
     let value: Value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
-    Some(match value["engine"].as_str() {
-        Some(engine @ ("python" | "rust")) => engine.to_owned(),
-        _ => "unknown".to_owned(),
-    })
+    match value["engine"].as_str() {
+        Some(engine @ ("python" | "rust")) => Ok(Some(engine.to_owned())),
+        _ => Err("not an engine choice".to_owned()),
+    }
 }
 pub(super) fn record_choice(engine: &str) -> Result<()> {
     let path = choice_path();

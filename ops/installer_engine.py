@@ -343,8 +343,17 @@ def main(argv=None) -> int:
             # python), recorded as update reads it, so the G2 default keeps it.
             if args.engine != "python":
                 raise Refusal("choose records only --engine python.")
-            eng.record_choice("python")
-            print("recorded")
+            try:
+                eng.record_choice("python")
+            except OSError as exc:
+                # The install itself succeeded; only a later update's default
+                # could still move the host.
+                print(f"WARNING: could not record the Python engine choice ({exc.strerror or exc}); a later "
+                      "pseudolife-mcp update may move this host to the Rust daemon unless it runs with "
+                      "--engine python.", file=sys.stderr)
+                print("unrecorded")
+            else:
+                print("recorded")
         else:
             print(accept())
         return 0

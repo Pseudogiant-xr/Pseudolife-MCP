@@ -1524,6 +1524,21 @@ if ($ClientOnly) {
     }
 }
 # <<< mint token <<<
+# >>> engine token >>>
+# The default Rust daemon is verified with an authenticated read, so it
+# follows the bearer this stage actually produced, not the one stage 4b
+# predicted (a host that cannot install the shim mints none).
+if ($composeEngine -eq 'rust' -and $tokenState -notin 'minted', 'present') {
+    if ($engineDefaulted) {
+        $composeEngine = 'python'
+        $engineFiles = @()
+        Step "Daemon engine: python after all (no bearer token for the default Rust daemon: $tokenState)"
+    } else {
+        [Console]::Error.WriteLine("-Engine rust needs the daemon's bearer token, and this install has none ($tokenState): set PSEUDOLIFE_MCP_TOKEN in ops/.env, or install pipx or a pip-capable Python >= 3.10 so the installer mints one, then rerun; or rerun with -Engine python. No container was started.")
+        exit 2
+    }
+}
+# <<< engine token <<<
 
 # -- 6. sidecar enable/disable via the compose override --------------------------
 # >>> sidecar override >>>
@@ -3343,6 +3358,7 @@ if (-not $ClientOnly) {
         exit 1
     }
     Step "Healthy: http://127.0.0.1:8765/health (Console: http://127.0.0.1:8765/ui/)"
+    # >>> engine record >>>
     if ($composeEngine -eq 'rust') {
         # Recorded only now, as update records its own after its health gate.
         $engineStatus = "$(Invoke-EngineHelper accept)".Trim()
@@ -3353,6 +3369,7 @@ if (-not $ClientOnly) {
         Invoke-EngineHelper choose --engine python | Out-Null
         if ($LASTEXITCODE -ne 0) { exit 1 }
     }
+    # <<< engine record <<<
     Invoke-EndpointContainerProbe
     if ($TestLogin) { Invoke-TestLoginSetup }
 }

@@ -12,6 +12,7 @@ mod bank;
 mod board;
 mod briefing;
 mod config;
+mod config_check;
 mod config_io;
 mod console_sessions;
 mod consolidation_tools;
@@ -152,6 +153,9 @@ fn main() {
     if args.first().is_some_and(|a| a == "provision") {
         std::process::exit(native::command(&args[1..]));
     }
+    if args.first().is_some_and(|a| a == "check-config") {
+        std::process::exit(config_check::command(&args[1..]));
+    }
     #[cfg(feature = "principal-harness")]
     if std::env::var_os("PSEUDOLIFE_PRINCIPAL_HARNESS").is_some() {
         let runtime = tokio::runtime::Runtime::new().unwrap();
@@ -209,8 +213,7 @@ fn main() {
         println!("{}", pyjson::dumps(&config.dump()));
         std::process::exit(0);
     }
-    onnx_artifacts::validate_reranker_model(&config.memory.reranker.model_name)
-        .unwrap_or_else(|e| fail(1, &e.to_string()));
+    config_check::startup_refusals(&config).unwrap_or_else(|e| fail(1, &e.to_string()));
     let env = config::DaemonEnv::from_env(&env_lookup).unwrap_or_else(|e| fail(1, &e.to_string()));
     let read_only = config.read_only || env.read_only;
     if !read_only && let Err(e) = std::fs::create_dir_all(&data_dir) {
