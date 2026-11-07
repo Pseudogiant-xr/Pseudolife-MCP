@@ -178,8 +178,11 @@ def _alive(pid: int) -> bool:
         forced.os.kill(pid, 0)
     except ProcessLookupError:
         return False
-    stat = Path(f"/proc/{pid}/stat")
-    return not (stat.exists() and stat.read_text().rsplit(")", 1)[1].split()[0] == "Z")
+    try:  # gone between the signal check and this read: dead too
+        state = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0]
+    except OSError:
+        return False
+    return state != "Z"
 
 
 def _wait_dead(pid: int) -> bool:
