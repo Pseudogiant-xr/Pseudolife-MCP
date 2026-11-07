@@ -253,6 +253,35 @@ impl Update {
         publish_compose(&compose_root(), target, &files)
     }
     fn release_context(&self, target: &str, engine: &str) -> Result<Context> {
+        // The Python updater's first refusal, in its order: with no project
+        // file on this host and no env file to recreate from, the release's
+        // files would reset the Postgres password, the volume names and the
+        // bearer. It reads only the labels, as Python does.
+        {
+            let labels = engine::host_labels(self, DAEMON_CONTAINER);
+            let list = |key: &str| -> Vec<PathBuf> {
+                labels[key]
+                    .as_str()
+                    .unwrap_or("")
+                    .split(',')
+                    .filter(|s| !s.is_empty())
+                    .map(PathBuf::from)
+                    .collect()
+            };
+            let no_files = !list("com.docker.compose.project.config_files")
+                .iter()
+                .any(|p| p.is_file());
+            let labelled_env = list("com.docker.compose.project.environment_file");
+            let working_env = labels["com.docker.compose.project.working_dir"]
+                .as_str()
+                .map(|d| PathBuf::from(d).join(".env"))
+                .is_some_and(|p| p.is_file());
+            if no_files && self.o.env_file.is_none() && labelled_env.is_empty() && !working_env {
+                return Err(UpdateError::usage(
+                    "the daemon's compose files are gone and no env file was found beside them; recreating the container from the bundled compose files without one would reset the Postgres password, the volume names and the bearer. Name the file with --env-file. Nothing was changed",
+                ));
+            }
+        }
         let (code, out) = self.docker_call(&["inspect", DAEMON_CONTAINER]);
         let running=serde_json::from_str::<Value>(&out).ok().and_then(|v|v.as_array().and_then(|a|a.first()).cloned()).filter(|_|code==0).ok_or_else(||UpdateError::usage("cannot inspect the daemon's Compose project; start it and retry; nothing was changed"))?;
         let labels = &running["Config"]["Labels"];

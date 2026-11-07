@@ -1254,6 +1254,31 @@ def test_release_rust_activation_faults_never_commit_the_selection(tmp_path, nat
 
 
 @pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+@pytest.mark.parametrize("engine", ["", "rust"])
+def test_release_refuses_to_recreate_without_project_files_or_an_env_file(tmp_path, native, engine):
+    # The daemon's labels name no Compose file on this host and no env file:
+    # recreating from the release's files would reset the Postgres password,
+    # the volume names and the bearer. Both updaters refuse first, with the
+    # same words (the G2 default's fallback warning repeats them: CLI-UPDATE
+    # update-current-noop).
+    binary = _native_binary()
+    if native and not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path) as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        state["running"]["Config"]["Labels"] = {"com.docker.compose.project": "fixture-project",
+                                                "com.docker.compose.service": SERVICE}
+        state_path.write_text(json.dumps(state))
+        args = ["--tag", "0.21.1", "--daemon-only", "--json", "--health-retries", "1"]
+        if engine:
+            args = ["--engine", engine, *args]
+        result = run_arm(repo, env, binary if native else None, args)
+        assert result.returncode == 2, result.stdout + result.stderr
+        assert "compose files are gone and no env file was found beside them" in result.stdout
+        assert stages(json.loads(state_path.read_text())) == []
+
+
+@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
 def test_release_rust_models_go_to_their_own_volume_outside_the_backed_up_state(tmp_path, native):
     binary = _native_binary()
     if native and not binary:
