@@ -34,9 +34,13 @@ def register(h):
             h.sql("INSERT INTO coordination_leases "
                   "(name,holder_agent_id,holder_principal,fence,acquired_at,expires_at) "
                   f"VALUES ('{lease}','{agent}','{principal}',{fence},1700000000,{expiry})", after_stop=True),
+            # The next free seq, in case order: on an empty bank that is i;
+            # a real bank's copy already holds its own events (mirror/forced.py).
             h.sql("INSERT INTO coordination_events "
                   "(seq,event,actor,agent_id,payload,created_at,prev_hash,hash) "
-                  f"VALUES ({i},'{event}','{actor}','{agent}','{payload}',1700000000,'fixture','fixture')",
+                  "SELECT COALESCE(MAX(seq), 0) + 1, "
+                  f"'{event}','{actor}','{agent}','{payload}',1700000000,'fixture','fixture' "
+                  "FROM coordination_events",
                   after_stop=True),
         ])
     ops = [changes(), changes("agent=malformed"), changes("agent=" + "f" * 32)]

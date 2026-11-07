@@ -1,0 +1,24 @@
+# The forced real-data runner (rust/daemon/harness/mirror/forced.py): the
+# differential harnesses with both daemons of one release, on the mirror's
+# internal network. The Python oracle runs from the mounted checkout on the
+# release image's interpreter, dependencies and embedding cache; the Rust
+# daemon is the release's binary with its ONNX Runtime and PDFium.
+ARG PYTHON_IMAGE=ghcr.io/pseudogiant-xr/pseudolife-daemon:0.22.1
+ARG RUST_IMAGE=pseudolife-daemon-rust:checkout
+FROM ${RUST_IMAGE} AS rust
+
+FROM ${PYTHON_IMAGE}
+# The release image already carries psycopg, PyYAML, psutil and the MCP SDK.
+RUN python -m pip install --no-cache-dir "pytest==9.2.0"
+COPY --from=rust /usr/local/bin/pseudolife-daemon /usr/local/bin/pseudolife-daemon
+COPY --from=rust /opt/ort /opt/ort
+COPY --from=rust /opt/pdfium /opt/pdfium
+ENV ORT_DYLIB_PATH=/opt/ort/libonnxruntime.so.1.27.0 \
+    PSEUDOLIFE_DAEMON_PDFIUM_DIR=/opt/pdfium \
+    PSEUDOLIFE_DAEMON_ORT_THREADS=3 \
+    PSEUDOLIFE_EMBEDDING_CPU_DTYPE=fp32 \
+    MALLOC_ARENA_MAX=2 \
+    PYTHONUNBUFFERED=1
+WORKDIR /repo
+ENTRYPOINT []
+CMD ["python", "rust/daemon/harness/mirror/forced.py", "--help"]

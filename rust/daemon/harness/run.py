@@ -915,7 +915,8 @@ class Pairing(Scenario):
         prior = before["rows"].get("public.principals")
         if table and prior:
             at = table["columns"].index("paired_at")
-            was = {json.dumps(r[0]): r[at] for r in prior["rows"]}
+            was = {json.dumps(r[0]): r[at]
+                   for r in dbstate.prior_rows(before, "public.principals", table["rows"])}
             for row in table["rows"]:
                 value = row[at]
                 if was.get(json.dumps(row[0])) is None and isinstance(value, (int, float)) \
@@ -2191,7 +2192,7 @@ def scrub_declared_rows(state: dict, before: dict) -> dict:
             continue
         identity = t["columns"].index("key" if table == "meta" else "id")
         old = {json.dumps(r[identity], sort_keys=True)
-               for r in before["rows"].get(f"public.{table}", {}).get("rows", [])}
+               for r in dbstate.prior_rows(before, f"public.{table}", t["rows"])}
         new = [r for r in t["rows"] if json.dumps(r[identity], sort_keys=True) not in old]
         if kind == "warmup":
             # The oracle warmup runs search("warmup probe") once. A row alone
