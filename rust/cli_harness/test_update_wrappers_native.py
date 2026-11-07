@@ -14,17 +14,17 @@ NATIVE_HELP = (
     "--sha256sums <SUMS-file> --version <version> [--json]"
 )
 NATIVE_CAPABILITY = "pseudolife-mcp native-update-v1"
-# Deadline for one `pwsh -File ops/update.ps1` spawn (issue #1299). Measured
-# 2026-11-07 on the maintainer's Windows host (pwsh 7.6, idle): the 34 pwsh
-# cases here took 0.44-2.63 s (median 0.61 s), and the missing-argument
-# refusal (`-Tag` with no value) took 1.17-1.32 s over 10 runs, about 2.7x the
-# unknown-flag refusal (0.41-0.50 s). On hosted windows-latest every other
-# pwsh case stayed under 2.8 s (run 42348225338, job 128332259564), but the
-# missing-argument case twice ran past the old flat 30 s (runs 41955075994 and
-# 42348225338) while 20 VM runs passed. So this is a slow tail of that error
-# path, not a hang. 120 s is about 90x its measured time; bash and Python
-# spawns keep 30 s.
-PWSH_SPAWN_SECONDS = 120
+# Deadline for one `pwsh -File ops/update.ps1` spawn (issue #1299). The
+# missing-argument refusal (`-Tag` with no value) timed out at the old flat
+# 30 s twice on hosted windows-latest (runs 41955075994 and 42348225338), while
+# every other pwsh case there stayed under 2.8 s and 20 Windows dev VM runs
+# passed. Its error path walks PowerShell's module path. Measured 2026-11-07 on
+# the maintainer's Windows host (pwsh 7.6, idle): 0.59-0.62 s with the
+# inherited module path, 0.36-0.42 s with an empty one (the unknown-flag
+# refusal takes about 0.4 s). A hosted runner installs far more modules, so the
+# fixture pins PSModulePath (`fixture`). 60 s is still about 150x the pinned
+# time; bash and Python spawns keep 30 s.
+PWSH_SPAWN_SECONDS = 60
 
 
 def fixture(tmp_path, code):
@@ -48,6 +48,12 @@ def fixture(tmp_path, code):
     env = {key: os.environ[key] for key in ("SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "PATH") if key in os.environ}
     temporary = tmp_path / "tmp"
     temporary.mkdir()
+    # An empty module path: pwsh's error paths then never scan the runner's
+    # installed modules (issue #1299, PWSH_SPAWN_SECONDS); its own $PSHOME
+    # modules still load.
+    modules = tmp_path / "psmodules"
+    modules.mkdir()
+    env["PSModulePath"] = str(modules)
     env.update(HOME=str(tmp_path / "home"), USERPROFILE=str(tmp_path / "home"),
                TEMP=str(temporary), TMP=str(temporary), TMPDIR=temporary.as_posix(),
                PSEUDOLIFE_NATIVE_UPDATE="1", PSEUDOLIFE_NATIVE_CLI=str(native))
