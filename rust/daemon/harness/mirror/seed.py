@@ -400,16 +400,30 @@ CURATION_DB = "pl_cf_mir_seed_curation"
 # the 8 most similar pairs over all current records, so on the real bank's
 # copy (3,748 lessons, 411 world facts) the scenarios' own pairs were never
 # judged. Superseded, not retired: a retired lesson can be reinstated when
-# its sources refresh; superseded rows are audit history only.
+# its sources refresh; superseded rows are audit history only. Stamped now,
+# not at an old time, so compaction (which keeps a slot's newest non-live
+# rows) does not take them first. The real curation state goes too: its
+# judgments, its lesson and world dismissals and their bindings, which
+# name slots that no longer hold a current record.
 CURATION_SQL = QUIET_SQL.replace("COMMIT;\n", """\
-WITH d AS (UPDATE lessons SET status = 'superseded', superseded_at = 1.0
+WITH d AS (UPDATE lessons SET status = 'superseded', superseded_at = extract(epoch FROM now())
            WHERE status = 'current' RETURNING 1)
   SELECT 'lessons_superseded', count(*) FROM d;
-WITH d AS (UPDATE world_facts SET status = 'superseded', superseded_at = 1.0
+WITH d AS (UPDATE world_facts SET status = 'superseded', superseded_at = extract(epoch FROM now())
            WHERE status = 'current' RETURNING 1)
   SELECT 'world_facts_superseded', count(*) FROM d;
+WITH d AS (DELETE FROM curation_judgments RETURNING 1)
+  SELECT 'curation_judgments_removed', count(*) FROM d;
+WITH d AS (DELETE FROM dismissed_pairs WHERE a_norm LIKE 'lesson:%' OR a_norm LIKE 'world:%'
+           RETURNING 1)
+  SELECT 'curation_dismissals_removed', count(*) FROM d;
+WITH d AS (DELETE FROM meta WHERE key IN ('curation_judgment_evidence_v1',
+                                          'curation_auto_dismissals_v1') RETURNING 1)
+  SELECT 'curation_meta_removed', count(*) FROM d;
 COMMIT;
 """)
+CURATION_KEYS = ("lessons_superseded", "world_facts_superseded", "curation_judgments_removed",
+                 "curation_dismissals_removed", "curation_meta_removed")
 
 
 def _derived_copy(docker: Docker, cid: str | None, floor: int, database: str, stamp: str,
@@ -451,7 +465,7 @@ def curation(docker: Docker, cid: str | None = None, floor: int = DISK_FLOOR) ->
     """Copy the seed as CURATION_DB: the quiet copy's changes, and no current
     lesson or world fact, for the curation judge's scenarios."""
     return _derived_copy(docker, cid, floor, CURATION_DB, CURATION_OF, CURATION_SQL,
-                         (*QUIET_KEYS, "lessons_superseded", "world_facts_superseded"))
+                         (*QUIET_KEYS, *CURATION_KEYS))
 
 
 def health(docker: Docker, timeout: float, expect_schema: str | None = None) -> dict:

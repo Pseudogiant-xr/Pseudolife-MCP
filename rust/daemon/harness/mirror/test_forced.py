@@ -434,6 +434,8 @@ def test_the_curation_scenarios_take_the_curation_base(name):
     (forced run, 2026-11-08). Conductor decision (c)."""
     which, why = forced.base_for("w2e", name)
     assert which == "curation" and "lesson" in why
+    # Not also listed for the quiet copy, where it would land if the order flipped.
+    assert not any(name.startswith(p) for p in forced.QUIET_PREFIXES["w2e"])
 
 
 def test_a_curation_scenario_runs_its_real_attempts_on_the_curation_base(tmp_path, monkeypatch):

@@ -376,8 +376,8 @@ FIXTURE_NOTES = {
 }
 
 
-def base_comments() -> tuple[str, str]:
-    """The seed's provenance and the quiet copy's, from the mirror PostgreSQL."""
+def _seed_and_copy_comments(copy: str) -> tuple[str, str]:
+    """The seed's provenance and ``copy``'s stamp, from the mirror PostgreSQL."""
     sys.path.insert(0, str(HARNESS))
     import pgdisposable
     with pgdisposable._admin() as conn:
@@ -385,19 +385,17 @@ def base_comments() -> tuple[str, str]:
             row = conn.execute("SELECT shobj_description(oid, 'pg_database') FROM pg_database "
                                "WHERE datname = %s", (name,)).fetchone()
             return row[0] if row else None
-        return comment(os.environ.get("PL_HARNESS_BASE_DATABASE", "")), comment(QUIET_DB)
+        return comment(os.environ.get("PL_HARNESS_BASE_DATABASE", "")), comment(copy)
+
+
+def base_comments() -> tuple[str, str]:
+    """The seed's provenance and the quiet copy's."""
+    return _seed_and_copy_comments(QUIET_DB)
 
 
 def curation_comments() -> tuple[str, str]:
-    """The seed's provenance and the curation copy's, from the mirror PostgreSQL."""
-    sys.path.insert(0, str(HARNESS))
-    import pgdisposable
-    with pgdisposable._admin() as conn:
-        def comment(name):
-            row = conn.execute("SELECT shobj_description(oid, 'pg_database') FROM pg_database "
-                               "WHERE datname = %s", (name,)).fetchone()
-            return row[0] if row else None
-        return comment(os.environ.get("PL_HARNESS_BASE_DATABASE", "")), comment(CURATION_DB)
+    """The seed's provenance and the curation copy's."""
+    return _seed_and_copy_comments(CURATION_DB)
 
 
 def run_scratch() -> Path:
