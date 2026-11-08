@@ -15,6 +15,7 @@ just deleted; ids the call created are left to ``w2e``'s own renaming.
 from __future__ import annotations
 
 import json
+import os
 
 
 # Deliberate breaks (``--features mutants``) the ``episode-curation`` scenario
@@ -59,7 +60,12 @@ def run_rest(op: dict, port: int, dsn: str, harness) -> dict:
         body = op["body_json"].encode()
     emap = _before_map(dsn)
     hdrs = [harness.AUTH] + ([("Content-Type", "application/json")] if body is not None else [])
-    r = harness.w1a.call(port, op["method"], op["path"], hdrs, body)
+    # A dream run over a real bank's copy can outlast the default; the
+    # forced run's real-bank arms set a longer one (mirror/forced.py).
+    timeout = 120.0
+    if op["path"].startswith("/api/dream") and os.environ.get("PL_HARNESS_DREAM_REST_TIMEOUT"):
+        timeout = float(os.environ["PL_HARNESS_DREAM_REST_TIMEOUT"])
+    r = harness.w1a.call(port, op["method"], op["path"], hdrs, body, timeout=timeout)
     value = r.get("json", r.get("bytes"))
     return {"isError": r["status"] != 200, "status": r["status"], "value": _rename(value, emap)}
 
