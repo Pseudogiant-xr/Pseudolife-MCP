@@ -91,9 +91,9 @@ class RetentionPolicy:
         (default) makes the term vanish → eviction is byte-identical to before.
         """
         base = self.eviction_score(entry, now)
-        # A raw Console source (a list or object) stays on the live entry
-        # until a restart reloads its stored text; it names no weighted
-        # tier, and an unhashable one must not fail the store evicting it.
+        # A non-string source (a raw Console value where no PostgreSQL row
+        # gives it back as text) names no weighted tier, and an unhashable
+        # one must not fail the store evicting it.
         source = entry.source
         weight = self.source_weights.get(source, 1.0) if isinstance(source, str) else 1.0
         score = ((base + 1.0) * weight

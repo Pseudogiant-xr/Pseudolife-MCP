@@ -54,3 +54,41 @@ def test_a_full_band_still_stores_after_a_list_source():
     band.store(text="third", embedding=torch.zeros(4), source="user")  # evicts
     assert len(band.entries) == 2
     assert band.entries[-1].text == "third"
+
+
+# The Console path end to end, on the bench PostgreSQL: the live entry takes
+# the stored text of a raw source, as the Rust daemon's does
+# (``correction_tools.rs``, ``pyjson::pg_text``), so filtered searches, the
+# source list and eviction all see one string, before a restart and after.
+from tests.pg_fixtures import pg_conn, pg_service, pg_url  # noqa: E402,F401
+
+
+@pytest.mark.parametrize("raw, stored", [(["user"], "{user}"), ([["a"], ["b", "c"]], "{{a},{b,c}}"),
+                                         (True, "true"), (7, "7")], ids=repr)
+def test_a_consolidated_raw_source_lives_as_its_stored_text(pg_service, raw, stored):
+    svc = pg_service
+    svc.store("The raw source target note.", source="user")
+    out = svc.consolidate(replaces=["The raw source target note."],
+                          new_text="The raw source replacement note.", source=raw)
+    assert out.get("superseded_count") == 1, out
+    [live] = [e for b in svc._cms.bands for e in b.entries
+              if e.text == "The raw source replacement note."]
+    row = svc._storage.conn.execute("SELECT source FROM entries WHERE id = %s",
+                                    (live.db_id,)).fetchone()
+    assert (live.source, row[0]) == (stored, stored)
+    # Each of these hashed the raw value and raised before.
+    assert stored in {s["source"] for s in svc.list_sources()["sources"]}
+    svc.search("raw source replacement", sources=["user"])
+    svc._cms.bands[0].max_entries = len(svc._cms.bands[0].entries)
+    svc.store("A later note into the full band.", source="user")
+
+
+def test_a_string_consolidate_source_is_kept_as_given(pg_service):
+    """The near miss: a string source is stored and kept unchanged."""
+    svc = pg_service
+    svc.store("The plain source target note.", source="user")
+    svc.consolidate(replaces=["The plain source target note."],
+                    new_text="The plain source replacement note.", source="{user}")
+    [live] = [e for b in svc._cms.bands for e in b.entries
+              if e.text == "The plain source replacement note."]
+    assert live.source == "{user}"
