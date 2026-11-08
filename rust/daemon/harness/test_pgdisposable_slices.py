@@ -146,6 +146,6 @@ def test_the_option_test_leaves_no_strict_mode_behind():
         [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
          f"{here / 'test_pgdisposable_slices.py'}::test_the_option_turns_database_skips_into_failures",
          str(here / "mirror" / "test_base_delta.py")],
-        cwd=here.parents[2], env=env, capture_output=True, text=True, timeout=300)
+        cwd=here.parents[2], env=env, capture_output=True, text=True, timeout=120)
     assert run.returncode == 0, run.stdout[-2000:] + run.stderr[-2000:]
-    assert " skipped" in run.stdout and "error" not in run.stdout.splitlines()[-1]
+    assert "2 skipped" in run.stdout.splitlines()[-1], run.stdout[-2000:]
