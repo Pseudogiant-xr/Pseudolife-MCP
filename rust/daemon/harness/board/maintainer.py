@@ -92,19 +92,36 @@ class SignedNormalizer(Normalizer):
 
 
 def snapshot(dsn, _ctx):
-    """Exact same-arm durable state: a refusal must not spend or mutate it."""
+    """Exact same-arm durable state: a refusal must not spend or mutate it.
+
+    Each table is a row count and the digest of its rows' JSON in sorted
+    order, computed by the server: as exact as the rows themselves for an
+    equality check, without fetching a large board's every event (96k on a
+    real board's copy) before and after each refused step."""
     import psycopg
-    from board.run import BOARD_TABLES
+    from board.run import BOARD_TABLES, META_KEYS, SEQUENCES
 
     with psycopg.connect(dsn, autocommit=True) as conn:
-        return {table: sorted(conn.execute(f"SELECT row_to_json(t)::text FROM {table} t").fetchall())
-                for table in (*BOARD_TABLES, *TABLES)}
+        out = {table: tuple(conn.execute(
+                   "SELECT count(*), md5(coalesce(string_agg(r, chr(10) ORDER BY r), '')) "
+                   f"FROM (SELECT row_to_json(t)::text AS r FROM {table} t) rows").fetchone())
+               for table in (*BOARD_TABLES, *TABLES)}
+        # The meta keys and sequences the skipped cross-side dump also held.
+        out["meta"] = conn.execute("SELECT key, value FROM meta WHERE key = ANY(%s) ORDER BY key",
+                                   (list(META_KEYS),)).fetchall()
+        out["sequences"] = conn.execute(
+            "SELECT sequencename, last_value FROM pg_sequences WHERE sequencename = ANY(%s) "
+            "ORDER BY sequencename", (list(SEQUENCES),)).fetchall()
+        return out
 
 
 def post(title, route, body=None, *, expected=200, error=None, save=None, token="default",
          rollback=False):
+    # A refusal's own snapshot proves its side unchanged, and both sides start
+    # equal, so it skips the cross-side state dump: on a real board's copy those
+    # dumps outlasted the 120 s challenge (410 challenge_expired, 2026-11-07).
     step = S.Step(title, path="/api/maintainer/" + route, body={} if body is None else body,
-                  token=token, save=save)
+                  token=token, save=save, write=not rollback)
     if rollback:
         step.before = snapshot
 
