@@ -264,10 +264,10 @@ def test_every_attempt_sweeps_the_databases_a_failed_harness_left(tmp_path):
 
 
 @pytest.mark.parametrize("suite,name,want", [
-    ("w2e", "judge-merge-tiebreak", "quiet"), ("w2e", "curation-auto-fold", "quiet"),
+    ("w2e", "judge-merge-tiebreak", "quiet"), ("w2e", "curation-auto-fold", "curation"),
     ("w2e", "sweep-analyzer-tick", "quiet"), ("w2e", "console-dream-run-gates", "quiet"),
-    ("w2e", "dream-deep-apply", "main"), ("w2e", "curation-shadow", "main"),
-    ("board", "judge-merge-x", "main"),
+    ("w2e", "dream-deep-apply", "main"), ("w2e", "curation-shadow", "curation"),
+    ("board", "judge-merge-x", "main"), ("board", "curation-shadow", "main"),
 ])
 def test_queue_driven_scenarios_take_the_quiet_base(suite, name, want):
     assert forced.base_for(suite, name)[0] == want
@@ -481,6 +481,64 @@ def test_the_judge_and_session_end_dream_scenarios_take_the_quiet_base(name):
 @pytest.mark.parametrize("name", ["hook-session-end", "cli-episode-end", "linked-reads", "junkyard"])
 def test_near_miss_names_keep_the_main_base(name):
     assert forced.base_for("w2e", name)[0] == "main"
+
+
+@pytest.mark.parametrize("name", ["curation-shadow", "curation-auto", "curation-auto-distinct",
+                                  "curation-auto-distinct-reopen", "curation-auto-fold"])
+def test_the_curation_scenarios_take_the_curation_base(name):
+    """The curation judge takes the 8 most similar pairs over every current
+    lesson and world fact: on the real bank's copy (3,748 lessons, 411 world
+    facts) real pairs outranked the scenario's, which never got judged
+    (forced run, 2026-11-08). Conductor decision (c)."""
+    which, why = forced.base_for("w2e", name)
+    assert which == "curation" and "lesson" in why
+    # Not also listed for the quiet copy, where it would land if the order flipped.
+    assert not any(name.startswith(p) for p in forced.QUIET_PREFIXES["w2e"])
+
+
+def test_a_curation_scenario_runs_its_real_attempts_on_the_curation_base(tmp_path, monkeypatch):
+    monkeypatch.setenv("PL_HARNESS_BASE_DATABASE", "pl_cf_mir_seed")
+    seen = []
+
+    class Records(forced.Runner):
+        def _run(self, argv, env):
+            seen.append(env.get("PL_HARNESS_BASE_DATABASE"))
+            return 0, ""
+
+    runner = Records(Path("rust-bin"), tmp_path / "out", 60, tmp_path / "STOP", scratch=tmp_path / "s",
+                     oom_kills=lambda: 0)
+    assert runner.invoke("w2e", "curation-shadow", "real", base=True)["base"] == "curation"
+    assert runner.invoke("w2e", "curation-shadow", "synthetic", base=False)["base"] is None
+    assert seen == ["pl_cf_mir_seed_curation", None]
+
+
+def test_the_summary_says_which_scenarios_used_the_curation_base_and_why(tmp_path):
+    answers = {"curation-shadow": {"real": dict(PASS, base="curation")},
+               "judge-merge-auto": {"real": dict(PASS, base="quiet")}}
+    report, _ = forced.run(FakeRunner(tmp_path, answers), ["w2e"], None, names=lambda s: list(answers))
+    used = forced.curation_base_use(report)
+    assert used["scenarios"] == ["w2e/curation-shadow"] and used["database"] == "pl_cf_mir_seed_curation"
+    assert forced.quiet_base_use(report)["scenarios"] == ["w2e/judge-merge-auto"]
+
+
+def test_a_run_needing_the_curation_base_refuses_a_stale_or_missing_copy(tmp_path, monkeypatch):
+    _main_env(monkeypatch)
+    monkeypatch.setattr(forced, "scenario_names", lambda suite: ["curation-shadow"])
+    monkeypatch.setattr(forced, "curation_comments", lambda: ("pl_cf_mir seed from new at u",
+                                                              "curation copy of: pl_cf_mir seed from old at t"))
+    monkeypatch.setattr(forced, "run", lambda *a, **k: pytest.fail("ran on a stale curation copy"))
+    assert forced.main(["--rust-bin", "x", "--out", str(tmp_path / "o"), "--suites", "w2e",
+                        "--only", "curation-shadow"]) == 3
+
+
+def test_a_run_needing_no_curation_scenario_skips_its_preflight(tmp_path, monkeypatch):
+    _main_env(monkeypatch)
+    monkeypatch.setattr(forced, "scenario_names", lambda suite: ["store-defaults"])
+    monkeypatch.setattr(forced, "curation_comments", lambda: pytest.fail("checked the curation copy"))
+    monkeypatch.setattr(forced, "run", lambda runner, *a, **k: ({"suites": {}, "not_forced": {},
+                                                                 "complete": True}, {}))
+    assert forced.main(["--rust-bin", "x", "--out", str(tmp_path / "o"), "--suites", "w2e",
+                        "--only", "store-defaults"]) == 0
 
 
 # ---- real-bank accommodations: known limits and the dream REST timeout ----
