@@ -410,3 +410,54 @@ fn a_list_rationale_stores_postgres_array_text() {
         Some("{{1,2},{3,4}}")
     );
 }
+
+/// A list of strings binds untyped, so its text is psycopg's own list dump,
+/// both where a TEXT column stores it (`text_param`) and where a Console
+/// decision's BIGINT cast echoes it (`console_id_array`). Since psycopg 3.3.7
+/// (`psycopg/types/array.py:215-223` in 3.3.8, `_get_needs_quotes_regexp`)
+/// that dump also quotes an element holding U+1680, U+2000-U+200A, U+2028,
+/// U+2029, U+202F, U+205F or U+3000, on top of the ASCII `\s` set (which
+/// includes U+000B). Other Unicode white space, U+00A0 and U+0085 among it,
+/// stays unquoted. Expected values read from the 3.3.8 source.
+#[test]
+fn a_string_list_quotes_unicode_space_like_psycopg() {
+    let cases = [
+        // The nightly `console-graph-malformed` input.
+        (
+            json!(["a\\b", "NULL", "x y", "\u{2003}"]),
+            "{\"a\\\\b\",\"NULL\",\"x y\",\"\u{2003}\"}",
+        ),
+        (json!(["\u{1680}"]), "{\"\u{1680}\"}"),
+        (
+            json!(["\u{2000}x", "y\u{200a}"]),
+            "{\"\u{2000}x\",\"y\u{200a}\"}",
+        ),
+        (
+            json!(["\u{2028}", "\u{2029}", "\u{202f}", "\u{205f}", "\u{3000}"]),
+            "{\"\u{2028}\",\"\u{2029}\",\"\u{202f}\",\"\u{205f}\",\"\u{3000}\"}",
+        ),
+        (json!(["a\u{b}b"]), "{\"a\u{b}b\"}"),
+        // Near misses: white space or invisible outside psycopg's set, a
+        // control byte Python's bytes `\s` leaves out, and plain non-ASCII.
+        (
+            json!(["\u{a0}", "\u{85}", "\u{200b}", "\u{feff}", "\u{180e}"]),
+            "{\u{a0},\u{85},\u{200b},\u{feff},\u{180e}}",
+        ),
+        (
+            json!(["\u{1c}", "\u{e9}", "\u{2010}"]),
+            "{\u{1c},\u{e9},\u{2010}}",
+        ),
+    ];
+    for (value, text) in cases {
+        assert_eq!(
+            text_param(Some(&value)).unwrap().as_deref(),
+            Some(text),
+            "text_param {value}"
+        );
+        assert_eq!(
+            console_id_array(&value).unwrap(),
+            (text.to_string(), None),
+            "console_id_array {value}"
+        );
+    }
+}

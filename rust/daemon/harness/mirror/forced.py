@@ -67,7 +67,36 @@ DIFF_LINE = re.compile(r"^(?:(?:DB )?DIFF[ \[]|STATE \[|CHAIN \[)")
 LOCATION = re.compile(r": (?:db )?(/[^\s:]+)")
 STEP = re.compile(r"\] (?:step |#)?(\d+)")
 # What the synthetic arm drops, so it is the harness's own baseline (CI's).
-REAL_BANK_ENV = ("PL_HARNESS_BASE_DATABASE", "PL_HARNESS_STUB_DEFAULT_CONTENT")
+REAL_BANK_ENV = ("PL_HARNESS_BASE_DATABASE", "PL_HARNESS_STUB_DEFAULT_CONTENT",
+                 "PL_HARNESS_DREAM_REST_TIMEOUT")
+# The real-bank arms' REST timeout for /api/dream calls, in seconds: Python's
+# Console dream run over the real bank's copy outlasted the default 120 s
+# (console-dream-run and -gates, forced run of 2026-11-08). Synthetic arms
+# keep the default.
+DREAM_REST_TIMEOUT = 600
+# Scenarios whose real-bank arms do not run, by scenario, with the reason:
+# their premise cannot hold on a real bank, so a real-bank result would be
+# timing noise. Their synthetic arm still runs and must pass ("excluded");
+# CI's synthetic coverage is unchanged. Conductor decision, 2026-11-08.
+REAL_BANK_EXCLUDED = {
+    "w2e/sweep-analyzer-tick": (
+        "the scenario rests on one analyzer batch (50 anchors) covering every entity, so the "
+        "settled state does not depend on how many ticks ran; a real bank holds far more entities, "
+        "its seeded entities are the newest, and each daemon's analyzer walks 50 per tick from the "
+        "copied cursor on its own timer, so the two arms compare at different stages (the settle "
+        "also never went quiet: forced run, 2026-11-08)"),
+}
+# Known limits the maintainer accepted, by scenario: an error where both real
+# attempts each saw the runner's cgroup OOM counter rise is classified
+# "accepted" with this reason, not "error". Any other error in these
+# scenarios still counts.
+ACCEPTED_OOM = {
+    name: ("a known Python memory limit at the harness's worst-case -1.0 floors: Python peaks at "
+           "14.5 GiB in deep apply plus the candidate judge (3.3 GiB at production floors) while "
+           "Rust passes at 4.1 GiB, so both daemons together exceed the 18 GiB runner. Accepted by "
+           "the maintainer on 2026-11-08 (option (c), Python is being retired); no Python fix")
+    for name in ("w2e/candidate-auto", "w2e/candidate-auto-reopen")
+}
 DISK_FLOOR = 8 * 1024 ** 3
 # Scenarios that drive the dream, judge, curation or analyzer queues run on
 # the seed's quiet copy (seed.py quiet): the conductor's decision D1,
@@ -208,6 +237,8 @@ class Runner:
                 env.pop(key, None)
         elif which == "quiet":
             env["PL_HARNESS_BASE_DATABASE"] = QUIET_DB
+        if base:
+            env.setdefault("PL_HARNESS_DREAM_REST_TIMEOUT", str(DREAM_REST_TIMEOUT))
         reaped = self.reap_leftovers()
         before = self.oom_kills()
         started = time.monotonic()
@@ -318,6 +349,19 @@ def run(runner: Runner, suites: list[str], only: list[str] | None,
             if reason:
                 report["stopped"] = f"before {suite}/{name}: {reason}"
                 return report, private
+            if f"{suite}/{name}" in REAL_BANK_EXCLUDED:
+                synthetic = runner.invoke(suite, name, "synthetic", base=False)
+                # Only the real bank is excluded: a failing synthetic arm is an error.
+                verdict = "excluded" if synthetic["status"] == "pass" else "error"
+                rows.append({"scenario": name, "class": verdict,
+                             "differences": len(synthetic["diffs"]), "seconds": synthetic["seconds"],
+                             "base": None, "oom_kills": _oom_total(synthetic)})
+                if verdict != "excluded":
+                    private[f"{suite}/{name}"] = {"real": None, "real_retry": None,
+                                                  "synthetic": synthetic}
+                print(f"{suite}/{name}: {verdict} (real bank excluded; synthetic "
+                      f"{synthetic['status']})", flush=True)
+                continue
             first = runner.invoke(suite, name, "real", base=True)
             retry = synthetic = None
             if first["status"] != "pass":
@@ -325,6 +369,12 @@ def run(runner: Runner, suites: list[str], only: list[str] | None,
                 if retry["status"] != "pass":
                     synthetic = runner.invoke(suite, name, "synthetic", base=False)
             verdict = classify(first, retry, synthetic)
+            # Each failing real attempt must itself have been OOM-killed: an
+            # unrelated failure stays an error, and the small synthetic arm's
+            # kills are not the accepted limit.
+            if verdict == "error" and f"{suite}/{name}" in ACCEPTED_OOM \
+                    and all((a.get("oom_kills") or 0) > 0 for a in (first, retry)):
+                verdict = "accepted"
             rows.append({"scenario": name, "class": verdict, "differences": len(first["diffs"]),
                          "seconds": first["seconds"], "base": first.get("base"),
                          "oom_kills": _oom_total(first, retry, synthetic)})
@@ -374,7 +424,8 @@ def counts(report: dict) -> dict:
     for suite, body in report["suites"].items():
         classes = [r["class"] for r in body["rows"]]
         out[suite] = {"planned": body["planned"], "run": len(classes),
-                      **{c: classes.count(c) for c in ("pass", "transient", "preexisting", "new", "error")},
+                      **{c: classes.count(c) for c in ("pass", "transient", "preexisting", "new",
+                                                        "accepted", "excluded", "error")},
                       "differences": sum(r["differences"] for r in body["rows"]),
                       # Errors whose attempts saw the runner's cgroup kill a process.
                       # Null when no attempt could read the cgroup: not measured is not none.
@@ -438,7 +489,9 @@ def main(argv: list[str] | None = None) -> int:
         return 3
     planned = {suite: [n for n in scenario_names(suite) if not args.only or n in args.only]
                for suite in args.suites if suite in QUIET_PREFIXES}
-    if any(base_for(suite, n)[0] == "quiet" for suite, names in planned.items() for n in names):
+    # An excluded scenario's real-bank arms never run, so it needs no quiet copy.
+    if any(base_for(suite, n)[0] == "quiet" and f"{suite}/{n}" not in REAL_BANK_EXCLUDED
+           for suite, names in planned.items() for n in names):
         try:  # a reseed drops the quiet copy; an old one would compare an older backup
             seed.quiet_preflight(*base_comments())
         except seed.Refused as e:
@@ -450,6 +503,8 @@ def main(argv: list[str] | None = None) -> int:
     report, private = run(runner, args.suites, args.only)
     summary = {"base": base, "complete": report["complete"], "stopped": report.get("stopped"),
                "not_forced": report["not_forced"], "quiet_base": quiet_base_use(report),
+               "accepted_limits": ACCEPTED_OOM,
+               "real_bank_exclusions": REAL_BANK_EXCLUDED,
                "fixture_notes": FIXTURE_NOTES,
                "counts": counts(report)}
     (args.out / "summary.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
