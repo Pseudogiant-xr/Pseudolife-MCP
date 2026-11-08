@@ -423,3 +423,7 @@ def test_the_judge_and_session_end_dream_scenarios_take_the_quiet_base(name):
 @pytest.mark.parametrize("name", ["hook-session-end", "cli-episode-end", "linked-reads", "junkyard"])
 def test_near_miss_names_keep_the_main_base(name):
     assert forced.base_for("w2e", name)[0] == "main"
+
+
+def test_the_synthetic_arm_drops_the_default_verdict_too():
+    assert "PL_HARNESS_STUB_DEFAULT_VERDICT" in forced.REAL_BANK_ENV

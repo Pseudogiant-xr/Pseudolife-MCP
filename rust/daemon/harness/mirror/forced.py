@@ -67,7 +67,8 @@ DIFF_LINE = re.compile(r"^(?:(?:DB )?DIFF[ \[]|STATE \[|CHAIN \[)")
 LOCATION = re.compile(r": (?:db )?(/[^\s:]+)")
 STEP = re.compile(r"\] (?:step |#)?(\d+)")
 # What the synthetic arm drops, so it is the harness's own baseline (CI's).
-REAL_BANK_ENV = ("PL_HARNESS_BASE_DATABASE", "PL_HARNESS_STUB_DEFAULT_CONTENT")
+REAL_BANK_ENV = ("PL_HARNESS_BASE_DATABASE", "PL_HARNESS_STUB_DEFAULT_CONTENT",
+                 "PL_HARNESS_STUB_DEFAULT_VERDICT")
 DISK_FLOOR = 8 * 1024 ** 3
 # Scenarios that drive the dream, judge, curation or analyzer queues run on
 # the seed's quiet copy (seed.py quiet): the conductor's decision D1,

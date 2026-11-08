@@ -154,6 +154,13 @@ def parse_chat(body: bytes) -> tuple[str, str | None] | None:
 
 
 DEFAULT_CONTENT_ENV = "PL_HARNESS_STUB_DEFAULT_CONTENT"
+# One fixed verdict (a JSON object) for every judge proposal no declared key
+# names, the same for both daemons: on a real bank's copy the judges batch
+# the bank's own proposals with a scenario's, and without a verdict for each
+# no judge scenario settled (forced run, 2026-11-07; maintainer decision,
+# 2026-11-08). Unset, judge replies are exactly as declared.
+DEFAULT_VERDICT_ENV = "PL_HARNESS_STUB_DEFAULT_VERDICT"
+JUDGE_KINDS = ("judge_merges", "judge_links", "judge_junk", "judge_candidates", "judge_slot_pairs")
 
 
 class StubExtractor:
@@ -171,6 +178,8 @@ class StubExtractor:
         self._thread: threading.Thread | None = None
         self.origin = self.base_url = self.fallback_base_url = None
         self.default_content = os.environ.get(DEFAULT_CONTENT_ENV)
+        raw_verdict = os.environ.get(DEFAULT_VERDICT_ENV)
+        self.default_verdict = json.loads(raw_verdict) if raw_verdict else None
 
     # ── lifecycle ──────────────────────────────────────────────────────────
     def start(self) -> "StubExtractor":
@@ -326,6 +335,10 @@ class StubExtractor:
         if method == "POST" and route in CHAT_PATHS:
             endpoint = CHAT_PATHS[route]
             entry = self.lookup(body, endpoint, auth)
+            parsed = parse_chat(body)
+            judge = parsed is not None and parsed[0] in JUDGE_KINDS
+            if entry is None and judge and self.default_verdict is not None:
+                entry = {"verdicts": {}}  # every proposal takes the default verdict
             if entry is None and self.default_content is not None:
                 entry = {"content": self.default_content, "defaulted": True}
             if entry is None:
@@ -336,7 +349,8 @@ class StubExtractor:
                 return int(entry["status"]), entry.get("body", ""), True, extra
             content = entry.get("content")
             if "verdicts" in entry:
-                content = judge_reply(entry["verdicts"], body)
+                content, defaulted = judge_reply_counted(entry["verdicts"], body, self.default_verdict)
+                extra["defaulted"] = extra["defaulted"] or defaulted > 0
             default_model = self.spec.get("reply_model", "stub-model")
             if endpoint in JUDGE_ENDPOINTS:
                 default_model = self.spec.get(f"{endpoint}_reply_model", default_model)
@@ -389,10 +403,24 @@ class StubExtractor:
         return True
 
 
-def judge_reply(verdicts: dict, body: bytes) -> str:
+def judge_reply(verdicts: dict, body: bytes, default: dict | None = None) -> str:
     """A ``judge_merges`` reply built from the request's proposals: each
     proposal whose ``FROM|INTO`` (either order) names a key gets that
-    verdict (each of a list of them), under its number."""
+    verdict (each of a list of them), under its number; with ``default``,
+    every other proposal gets that verdict."""
+    return judge_reply_counted(verdicts, body, default)[0]
+
+
+def judge_reply_counted(verdicts: dict, body: bytes, default: dict | None = None) -> tuple[str, int]:
+    """:func:`judge_reply` and how many proposals took ``default``."""
+    used = [0]
+
+    def pick(v):
+        if v is None and default is not None:
+            used[0] += 1
+            return [default]
+        return v if isinstance(v, list) else [] if v is None else [v]
+
     parsed = parse_chat(body)
     user = parsed[1] if parsed and isinstance(parsed[1], str) else ""
     out = []
@@ -402,9 +430,9 @@ def judge_reply(verdicts: dict, body: bytes) -> str:
             if not head:
                 continue
             v = verdicts.get(head.group(2))
-            for one in (v if isinstance(v, list) else [] if v is None else [v]):
+            for one in pick(v):
                 out.append({"id": int(head.group(1)), **one})
-        return json.dumps({"verdicts": out})
+        return json.dumps({"verdicts": out}), used[0]
     if parsed and parsed[0] == "judge_slot_pairs":
         for block in re.split(r"\n\n(?=\[\d+\] store=)", user):
             lines = block.split("\n")
@@ -414,9 +442,9 @@ def judge_reply(verdicts: dict, body: bytes) -> str:
                 continue
             a, b = (f"{m.group(2)}.{m.group(3)}" for m in sides)
             v = verdicts.get(f"{a}|{b}") or verdicts.get(f"{b}|{a}")
-            for one in (v if isinstance(v, list) else [] if v is None else [v]):
+            for one in pick(v):
                 out.append({"id": int(head.group(1)), **one})
-        return json.dumps({"verdicts": out})
+        return json.dumps({"verdicts": out}), used[0]
     if parsed and parsed[0] == "judge_candidates":
         for block in re.split(r"\n\n(?=\[\d+\] ')", user):
             head = CANDIDATE_HEAD.match(block.split("\n", 1)[0])
@@ -424,9 +452,9 @@ def judge_reply(verdicts: dict, body: bytes) -> str:
                 continue
             a, b = head.group(2), head.group(3)
             v = verdicts.get(f"{a}|{b}") or verdicts.get(f"{b}|{a}")
-            for one in (v if isinstance(v, list) else [] if v is None else [v]):
+            for one in pick(v):
                 out.append({"id": int(head.group(1)), **one})
-        return json.dumps({"verdicts": out})
+        return json.dumps({"verdicts": out}), used[0]
     if parsed and parsed[0] == "judge_links":
         for block in re.split(r"\n\n(?=\[\d+\] SRC ')", user):
             head = link_head(block)
@@ -434,9 +462,9 @@ def judge_reply(verdicts: dict, body: bytes) -> str:
                 continue
             n, a, b = head
             v = verdicts.get(f"{a}|{b}") or verdicts.get(f"{b}|{a}")
-            for one in (v if isinstance(v, list) else [] if v is None else [v]):
+            for one in pick(v):
                 out.append({"id": n, **one})
-        return json.dumps({"verdicts": out})
+        return json.dumps({"verdicts": out}), used[0]
     for block in re.split(r"\n\n(?=\[\d+\] FROM )", user):
         head = PROPOSAL_HEAD.search(block)
         into = PROPOSAL_INTO.search(block)
@@ -444,6 +472,6 @@ def judge_reply(verdicts: dict, body: bytes) -> str:
             continue
         a, b = head.group(2), into.group(1)
         v = verdicts.get(f"{a}|{b}") or verdicts.get(f"{b}|{a}")
-        for one in (v if isinstance(v, list) else [] if v is None else [v]):
+        for one in pick(v):
             out.append({"id": int(head.group(1)), **one})
-    return json.dumps({"verdicts": out})
+    return json.dumps({"verdicts": out}), used[0]

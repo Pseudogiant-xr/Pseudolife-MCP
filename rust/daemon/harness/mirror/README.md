@@ -65,6 +65,10 @@ Rust binary.
 - **Model output:** any prompt no stub table answers gets
   `PL_HARNESS_STUB_DEFAULT_CONTENT`, so both daemons see the same model
   output while their request bytes are still compared.
+- **Judge verdicts:** every judge proposal no declared key names gets
+  `PL_HARNESS_STUB_DEFAULT_VERDICT` (`leave`, which every judge accepts and
+  which changes nothing), so judge, curation and candidate scenarios settle
+  on the proposals a real bank files beside their own.
 
 A scenario that differs runs again on the real bank, and then on the
 harness's synthetic bank. Its class follows from those runs:
@@ -83,7 +87,7 @@ free its memory for the run:
 
 ```sh
 docker build -t pseudolife-mirror-runner -f ops/Dockerfile.mirror-runner ops
-docker run -d --network pseudolife-mirror_mirror --memory 10g --memory-swap 10g \
+docker run -d --network pseudolife-mirror_mirror --memory 18g --memory-swap 18g \
   --oom-score-adj 1000 --cpus 4 --cpu-shares 256 \
   -v "$PWD":/repo -v <out>:/out -v <control>:/control:ro \
   -v <test-pg.env>:/run/mirror/test-pg.env:ro \
@@ -91,6 +95,7 @@ docker run -d --network pseudolife-mirror_mirror --memory 10g --memory-swap 10g 
   -e PSEUDOLIFE_TEST_PG_HOST_PORT=mirror-pg:5432 \
   -e PSEUDOLIFE_TEST_PG_LOGIN_FILE=/run/mirror/test-pg.env \
   -e PL_HARNESS_BASE_DATABASE=pl_cf_mir_seed -e PL_HARNESS_STUB_DEFAULT_CONTENT='[]' \
+  -e PL_HARNESS_STUB_DEFAULT_VERDICT='{"verdict": "leave", "confidence": 0.5}' \
   -e PSEUDOLIFE_DAEMON_ONNX_DIR=/models/<bundle>/embedding \
   -e PSEUDOLIFE_DAEMON_RERANK_DIR=/models/<bundle>/reranker \
   pseudolife-mirror-runner \

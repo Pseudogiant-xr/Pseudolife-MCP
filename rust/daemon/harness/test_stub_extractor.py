@@ -504,3 +504,83 @@ def test_shared_stub_env_and_config(harness, stub_factory):
         assert stubs["python"] is stubs["rust"] and stubs["seed"] is not stubs["python"]
     finally:
         harness.close_stubs(stubs)
+
+
+def _judge_bodies():
+    """One prompt per judge kind, two numbered proposals each, built by the
+    daemon's own formatters."""
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+    from pseudolife_memory.memory import dream as d
+    side = lambda name: {"display": name, "degree": 1, "scopes": []}  # noqa: E731
+    rows = {
+        "judge_merges": (d._JUDGE_SYSTEM_PROMPT, d.format_judge_proposal,
+                         [{"n": 1, "from": side("Alpha"), "into": side("Beta"), "reason": "near"},
+                          {"n": 2, "from": side("Gamma"), "into": side("Delta"), "reason": "near"}]),
+        "judge_links": (d._LINK_JUDGE_SYSTEM_PROMPT, d.format_link_proposal,
+                        [{"n": 1, "src": "Alpha", "relation": "uses", "dst": "Beta"},
+                         {"n": 2, "src": "Gamma", "relation": "uses", "dst": "Delta"}]),
+        "judge_junk": (d._JUNK_JUDGE_SYSTEM_PROMPT, d.format_junk_proposal,
+                       [{"n": 1, "display": "a, b", "reason": "list-artifact"},
+                        {"n": 2, "display": "c, d", "reason": "list-artifact"}]),
+        "judge_candidates": (d._CANDIDATE_JUDGE_SYSTEM_PROMPT, d.format_candidate,
+                             [{"n": 1, "src": "Alpha", "dst": "Beta", "similarity": 0.8},
+                              {"n": 2, "src": "Gamma", "dst": "Delta", "similarity": 0.7}]),
+        "judge_slot_pairs": (d._SLOT_JUDGE_SYSTEM_PROMPT, d.format_slot_pair,
+                             [{"n": 1, "store": "world", "similarity": 0.9,
+                               "a": {"entity": "Alpha", "attribute": "os", "value": "x"},
+                               "b": {"entity": "Beta", "attribute": "os", "value": "x"}},
+                              {"n": 2, "store": "world", "similarity": 0.9,
+                               "a": {"entity": "Gamma", "attribute": "os", "value": "y"},
+                               "b": {"entity": "Delta", "attribute": "os", "value": "y"}}]),
+    }
+    return {kind: json.dumps({"messages": [{"role": "system", "content": system},
+                                           {"role": "user", "content": NL.join(fmt(r) for r in rs)}]}).encode()
+            for kind, (system, fmt, rs) in rows.items()}
+
+
+LEAVE = {"verdict": "leave", "confidence": 0.5}
+
+
+@pytest.mark.parametrize("kind", ["judge_merges", "judge_links", "judge_junk", "judge_candidates",
+                                  "judge_slot_pairs"])
+def test_a_default_verdict_answers_every_proposal_no_key_names(kind):
+    """On a real bank's copy the judges batch the bank's own proposals with a
+    scenario's: none of their pairs is declared, so without a verdict for
+    each the settle never held (judge-merge-*, curation-*, forced run,
+    2026-11-07). Declared verdicts still win."""
+    import stub_extractor
+    body = _judge_bodies()[kind]
+    declared = {"judge_merges": "Alpha|Beta", "judge_links": "Alpha|Beta", "judge_junk": "a, b",
+                "judge_candidates": "Alpha|Beta", "judge_slot_pairs": "Alpha.os|Beta.os"}[kind]
+    verdict = {"verdict": "accept" if kind != "judge_junk" else "delete", "confidence": 0.9}
+    got = json.loads(stub_extractor.judge_reply({declared: verdict}, body, default=LEAVE))
+    assert got == {"verdicts": [{"id": 1, **verdict}, {"id": 2, **LEAVE}]}
+    # Unchanged without a default: only the declared proposal is answered.
+    assert json.loads(stub_extractor.judge_reply({declared: verdict}, body)) == {
+        "verdicts": [{"id": 1, **verdict}]}
+
+
+def test_the_launcher_default_verdict_answers_judge_prompts_no_entry_answers(stub_factory, monkeypatch):
+    monkeypatch.setenv("PL_HARNESS_STUB_DEFAULT_VERDICT", json.dumps(LEAVE))
+    monkeypatch.setenv("PL_HARNESS_STUB_DEFAULT_CONTENT", "[]")
+    s = stub_factory({"replies": []})
+    status, raw = request(s, "POST", "/v1/chat/completions", _judge_bodies()["judge_merges"])
+    assert status == 200
+    assert json.loads(json.loads(raw)["choices"][0]["message"]["content"]) == {
+        "verdicts": [{"id": 1, **LEAVE}, {"id": 2, **LEAVE}]}
+    # A prompt that is not a judge's keeps the plain default content.
+    status, raw = request(s, "POST", "/v1/chat/completions", chat_body(CLAIMS_SYSTEM, "x"))
+    assert json.loads(raw)["choices"][0]["message"]["content"] == "[]"
+    first, second = s.drain()
+    assert first["defaulted"] is True and second["defaulted"] is True
+
+
+def test_a_declared_judge_entry_fills_the_rest_with_the_default(stub_factory, monkeypatch):
+    monkeypatch.setenv("PL_HARNESS_STUB_DEFAULT_VERDICT", json.dumps(LEAVE))
+    s = stub_factory({"replies": [{"kind": "judge_merges",
+                                   "verdicts": {"Alpha|Beta": {"verdict": "accept", "confidence": 0.9}}}]})
+    _, raw = request(s, "POST", "/v1/chat/completions", _judge_bodies()["judge_merges"])
+    assert json.loads(json.loads(raw)["choices"][0]["message"]["content"]) == {
+        "verdicts": [{"id": 1, "verdict": "accept", "confidence": 0.9}, {"id": 2, **LEAVE}]}
+    (rec,) = s.drain()
+    assert rec["defaulted"] is True  # one proposal took the default
