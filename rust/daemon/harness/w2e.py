@@ -4534,8 +4534,17 @@ JUDGE_KEYS = {"A": "Alpha Node|Alpha Service", "B": "Beta Node|Beta Store",
               "G": "Gamma Node|Gamma Tool", "D": "Delta Node|Delta Unit",
               "L": "Llama 26B|Llama 4B", "E": "Epsilon Node|Epsilon Box"}
 JUDGE_SETTLE = {"quiet_s": 3.0, "timeout_s": 240.0}
-JUDGE_ALL_FIRST = ("SELECT NOT EXISTS (SELECT 1 FROM entity_proposals "
-                   "WHERE status = 'pending' AND judge_verdict IS NULL)")
+
+
+def first_votes(*pairs: str) -> str:
+    """Each inserted pair's pending proposal has its first verdict. Scoped to
+    the scenario's own proposals (by ``judge_insert`` reason, as
+    ``three_votes``): on a copy of a real bank the judge also receives
+    proposals the scenario never filed, and "none pending is unjudged" never
+    held there (forced real-data run, daemon box, 2026-11-08)."""
+    reasons = ", ".join(f"'write-dedup: {p.lower()}'" for p in pairs)
+    return ("SELECT NOT EXISTS (SELECT 1 FROM entity_proposals WHERE status = 'pending' "
+            f"AND reason IN ({reasons}) AND judge_verdict IS NULL)")
 
 
 def judge_config(mode="shadow", tiebreak="off", second="judge-two", third=None, extra=""):
@@ -4584,15 +4593,15 @@ def judge_stub(first, second=None, third=None, *, reply_model="judge-one",
     return spec
 
 
-def judge_insert(*pairs, until=JUDGE_ALL_FIRST) -> dict:
+def judge_insert(*pairs, until=None) -> dict:
     """The pending merge proposals, inserted on both banks at once, then
-    the judges' settle."""
+    the judges' settle (by default: each inserted pair's first verdict)."""
     rows = ", ".join(
         f"('merge', {eid(JUDGE_PAIRS[p][0])}, {eid(JUDGE_PAIRS[p][1])}, "
         f"{JUDGE_PAIRS[p][2]}, 'write-dedup: {p.lower()}', 1.0)" for p in pairs)
     op = external("INSERT INTO entity_proposals (kind, entity_id, into_id, score, reason, "
                   f"created_at) VALUES {rows}")
-    op["settle"] = {**JUDGE_SETTLE, "until": until}
+    op["settle"] = {**JUDGE_SETTLE, "until": first_votes(*pairs) if until is None else until}
     return op
 
 
