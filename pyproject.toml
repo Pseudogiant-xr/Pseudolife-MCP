@@ -55,9 +55,11 @@ dependencies = [
     # reach users through a Pseudolife release. pypdf stays the fallback
     # when this cannot be imported or its library cannot be loaded.
     "pypdfium2==5.14.0",
-    # 3.2.4+: every binary wheel ships libpq 16 or newer, which the lite tier
-    # needs (require_auth keeps its password off the wire, 2026-10-25).
-    "psycopg[binary]>=3.3.7",
+    # 3.3.8+: 3.3.7 began quoting list elements that hold one of 17 Unicode
+    # spaces, which the Rust daemon matches (2026-11-09), and 3.3.8 reverted
+    # 3.3.7's /etc/ssl wheel setting. Since 3.2.4 every binary wheel ships
+    # libpq 16 or newer, which the lite tier needs (require_auth, 2026-10-25).
+    "psycopg[binary]>=3.3.8",
     "pgvector>=0.3",
     "uvicorn>=0.30",
     "networkx>=3.0",
