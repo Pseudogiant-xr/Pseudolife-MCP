@@ -81,7 +81,7 @@ SHIM_REQUIREMENTS = (
     "anyio>=4",
     "pydantic>=2.12,<3",
     "pyyaml>=6.0",
-    "psycopg[binary]>=3.2.4",
+    "psycopg[binary]>=3.3.7",
     "pgvector>=0.3",
 )
 
