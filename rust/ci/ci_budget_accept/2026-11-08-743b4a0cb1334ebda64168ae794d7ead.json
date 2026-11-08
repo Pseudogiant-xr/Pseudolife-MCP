@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "rust",
+  "before": "a5945ef39915a21a",
+  "fingerprint": "4360cde586e97039",
+  "reason": "Adds rust/daemon/harness/test_w2e_own_decisions.py (one offline case; its database case skips without the disposable-bank login, as on hosted runners; 0.7 s on a workstation, 2026-11-08) to the port-inventories step beside test_w2e_lifecycle.py. The step's timeout holds."
+}

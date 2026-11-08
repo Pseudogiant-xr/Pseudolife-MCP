@@ -334,7 +334,7 @@ jobs:
         run: |
           python -m pip install pytest pyyaml "psycopg[binary]" psutil
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python -m pytest -q rust/test_contract_inventory.py rust/test_producer_census.py rust/daemon/harness/test_w2e_lifecycle.py
+          python -m pytest -q rust/test_contract_inventory.py rust/test_producer_census.py rust/daemon/harness/test_w2e_lifecycle.py rust/daemon/harness/test_w2e_own_decisions.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python rust/producer_census.py --ci-check
           exit $LASTEXITCODE
