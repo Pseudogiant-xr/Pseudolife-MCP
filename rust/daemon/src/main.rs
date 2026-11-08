@@ -91,6 +91,9 @@ mod stores;
 mod txn;
 mod world_tools;
 
+#[cfg(test)]
+mod test_alloc;
+
 use std::path::PathBuf;
 use std::sync::Arc;
 
