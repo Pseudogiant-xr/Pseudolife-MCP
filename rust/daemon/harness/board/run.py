@@ -22,6 +22,7 @@ Exit status: 0 only when no step, no state and no chain check differs.
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 from contextlib import ExitStack
 import hashlib
 import http.client
@@ -136,13 +137,33 @@ def mcp_call(port: int, headers, tool: str, args: dict, timeout=180.0) -> dict:
 # ---- bank state ----------------------------------------------------------------------
 
 def dump(dsn: str, extra_tables=()) -> dict:
+    """The board's rows, meta keys and sequences. Under a real-bank base
+    (``PL_HARNESS_BASE_DATABASE``) a table holds only its rows the base does
+    not hold byte for byte, and ``base_missing`` counts and digests the base
+    rows gone (deleted or rewritten), as ``dbstate.dump`` does: every row of
+    a copied real board (96k events) per write step took about 10 s and let
+    60-second listener windows expire mid-scenario (daemon box, 2026-11-08).
+    Both arms copy the same base, so its unchanged rows lose only their
+    display, and their clocks, which no captured window holds, go unchecked;
+    a base row a step rewrote is dumped, and ``normalize_state`` compares its
+    clocks exactly."""
     import psycopg
     from psycopg.rows import dict_row
+    import dbstate
+    base = dbstate._base_hashes(dsn)
     out = {}
-    with psycopg.connect(dsn, autocommit=True, row_factory=dict_row) as conn:
+    # One snapshot: under a base each table is read twice (hashes, then rows).
+    with psycopg.connect(dsn, row_factory=dict_row) as conn:
+        conn.isolation_level = psycopg.IsolationLevel.REPEATABLE_READ
         conn.execute("SET extra_float_digits = 3")
         for t in (*BOARD_TABLES, *extra_tables):
-            out[t] = conn.execute(f"SELECT * FROM {t}").fetchall()
+            if base is None:
+                out[t] = conn.execute(f"SELECT * FROM {t}").fetchall()
+                continue
+            columns, rows, missing = dbstate.base_delta(
+                conn, "public", t, base.get(f"public.{t}", Counter()), "t.*")
+            out[t] = [dict(zip(columns, r)) for r in rows]
+            out.setdefault("base_missing", {})[t] = missing
         out["meta"] = conn.execute("SELECT key, value FROM meta WHERE key = ANY(%s) ORDER BY key",
                                    (list(META_KEYS),)).fetchall()
         out["sequences"] = conn.execute(
@@ -151,14 +172,64 @@ def dump(dsn: str, extra_tables=()) -> dict:
     return out
 
 
+CLOCK_PROBLEM = "does not match the captured clock windows"  # Normalizer.unmatched's text
+# Per base and table, beside the dbstate base hashes it was read with: a
+# base re-read there (a test recreating it) is re-read here too.
+_BASE_ROW_KEYS: dict[tuple[str, str], tuple[object, list[str], set[str]]] = {}
+
+
+def _row_key(row: dict, columns: list[str]) -> str | None:
+    import dbstate
+    if not columns or any(c not in row for c in columns):
+        return None
+    return json.dumps([dbstate._plain(row[c]) for c in columns], sort_keys=True)
+
+
+def _base_row_keys(table: str) -> tuple[list[str], set[str]]:
+    """A board table's primary-key columns and the keys the base holds, read
+    once per process; none for a table without a primary key or without a
+    base. ``coordination_lease_waiters`` is keyed by (name, agent_id), so a
+    new waiter on a lease the base already queues on is a new row."""
+    import psycopg
+    import dbstate
+    base = os.environ.get("PL_HARNESS_BASE_DATABASE") or ""
+    if not base or base not in dbstate._BASE_INFO:
+        return [], set()
+    hashes = dbstate._BASE_HASHES.get(base)
+    cached = _BASE_ROW_KEYS.get((base, table))
+    if cached is None or cached[0] is not hashes:
+        with psycopg.connect(dbstate._BASE_INFO[base], autocommit=True) as conn:
+            columns = [r[0] for r in conn.execute(
+                "SELECT a.attname FROM pg_index i JOIN pg_attribute a ON a.attrelid = i.indrelid "
+                "AND a.attnum = ANY(i.indkey) WHERE i.indrelid = to_regclass(%s) AND i.indisprimary "
+                "ORDER BY array_position(i.indkey::int2[], a.attnum)", (f"public.{table}",))]
+            keys = set()
+            if columns:
+                select = ", ".join(f'"{c}"' for c in columns)
+                keys = {json.dumps([dbstate._plain(v) for v in r], sort_keys=True)
+                        for r in conn.execute(f'SELECT {select} FROM public."{table}"')}
+        _BASE_ROW_KEYS[(base, table)] = (hashes, columns, keys)
+    return _BASE_ROW_KEYS[(base, table)][1:]
+
+
 def normalize_state(state: dict, norm: Normalizer) -> dict:
     out = {}
-    for t in (key for key in state if key not in ("meta", "sequences")):
+    if "base_missing" in state:
+        out["base_missing"] = state["base_missing"]  # counts and digests: already comparable
+    for t in (key for key in state if key not in ("meta", "sequences", "base_missing")):
+        # Under a base, a row whose primary key the base holds is an existing
+        # row a step rewrote (``age_bank`` shifts every clock): its clocks are
+        # compared exactly, as ``dbstate.normalize`` does, rather than checked
+        # against the captured windows. Only those clock problems are dropped.
+        columns, existing = _base_row_keys(t) if "base_missing" in state else ([], set())
         rows = []
         for r in state[t]:
             r = dict(r)
             payload = r.pop("payload") if t == "coordination_events" else None
+            known = len(norm.problems)
             row = norm.value(r)
+            if existing and _row_key(r, columns) in existing:
+                norm.problems[known:] = [p for p in norm.problems[known:] if CLOCK_PROBLEM not in p]
             if payload is not None:
                 row["payload"] = norm.payload(payload)
             rows.append(json.dumps(row, sort_keys=True, default=str))
@@ -197,17 +268,31 @@ def diff_state(a: dict, b: dict) -> list[str]:
 
 
 def chain_check(dsn: str) -> list[str]:
-    """Python's verifier, hash and canonical form over every row of a chain."""
+    """Python's verifier, hash and canonical form over every row of a chain.
+
+    Under a real-bank base the verifier still walks the whole chain, since a
+    link is only checkable against its neighbours, and it already fails on
+    the first hash mismatch anywhere; the per-row hash and canonical-text
+    reports skip the rows still equal to the base, which neither daemon
+    wrote in this run and which both arms hold alike."""
     import psycopg
     from pseudolife_memory.storage.coordination import (
         _canonical, audit_events, audit_hash, verify_audit_chain)
-    problems = []
+    import dbstate
+    base = dbstate._base_hashes(dsn)
+    problems, unchanged = [], set()
     with psycopg.connect(dsn, autocommit=True) as conn:
         rows = [dict(r) for r in audit_events(conn)]
+        if base is not None:
+            known = base.get("public.coordination_events", ())
+            unchanged = {seq for seq, digest in conn.execute(
+                "SELECT seq, md5(t::text) FROM coordination_events t") if digest in known}
     verdict = verify_audit_chain(rows)
     if not verdict.get("ok"):
         problems.append(f"verify_audit_chain: {verdict}")
     for r in rows:
+        if r["seq"] in unchanged:
+            continue
         if audit_hash(r["prev_hash"], r) != r["hash"]:
             problems.append(f"seq {r['seq']}: audit_hash differs")
         if r["payload"] != _canonical(json.loads(r["payload"])):

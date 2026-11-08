@@ -34,6 +34,7 @@ from decimal import Decimal
 
 import psycopg
 from psycopg import sql
+from psycopg.rows import tuple_row
 
 # (table, column) -> why its value is not reproducible across two runs.
 NONDETERMINISTIC: dict[tuple[str, str], str] = {}
@@ -225,6 +226,29 @@ def _base_missing(known: Counter, present: Counter) -> dict:
     return {"count": len(gone), "digest": hashlib.sha256("".join(gone).encode()).hexdigest()}
 
 
+def base_delta(conn, schema: str, table: str, known: Counter, select: str,
+               ordering: str = "1") -> tuple[list[str], list[tuple], dict]:
+    """A table's rows the base does not hold, byte for byte, with
+    ``select`` read per row in ``ordering``, as (column names, row tuples,
+    ``base_missing``). Only the differing rows cross the wire: every row's
+    hash does, and the rows are fetched by hash."""
+    with conn.cursor(row_factory=tuple_row) as cur:
+        present = Counter(r[0] for r in cur.execute(
+            f'SELECT md5(t::text) FROM "{schema}"."{table}" t'))
+        # New rows, plus the extra copies of a row the base holds fewer times.
+        surplus = present - known
+        fetched = cur.execute(
+            f'SELECT md5(t::text), {select} FROM "{schema}"."{table}" t '
+            f'WHERE md5(t::text) = ANY(%s) ORDER BY {ordering}', (list(surplus),)).fetchall()
+        columns = [d.name for d in cur.description[1:]]
+    rows, owed = [], Counter(surplus)
+    for row in fetched:
+        if owed[row[0]] > 0:
+            owed[row[0]] -= 1
+            rows.append(row[1:])
+    return columns, rows, _base_missing(known, present)
+
+
 class _Busy(Exception):
     """A dump attempt gave way to a concurrent lock holder; retry it."""
 
@@ -287,20 +311,8 @@ def _dump_once(dsn: str) -> dict:
             if schema == "public" and table in UNPORTED_ROWS:
                 rows = []
             elif base is not None and key in base:
-                known = base[key]
-                present = Counter(r[0] for r in conn.execute(
-                    f'SELECT md5(t::text) FROM "{schema}"."{table}" t'))
-                extra["base_missing"] = _base_missing(known, present)
-                # New rows, plus the extra copies of a row the base holds fewer times.
-                surplus = present - known
-                fetched = conn.execute(
-                    f'SELECT md5(t::text), {select} FROM "{schema}"."{table}" t '
-                    f'WHERE md5(t::text) = ANY(%s) ORDER BY {ordering}', (list(surplus),)).fetchall()
-                rows, owed = [], Counter(surplus)
-                for row in fetched:
-                    if owed[row[0]] > 0:
-                        owed[row[0]] -= 1
-                        rows.append(row[1:])
+                _, rows, extra["base_missing"] = base_delta(
+                    conn, schema, table, base[key], select, ordering)
             else:
                 rows = conn.execute(
                     f'SELECT {select} FROM "{schema}"."{table}" ORDER BY {ordering}').fetchall()
