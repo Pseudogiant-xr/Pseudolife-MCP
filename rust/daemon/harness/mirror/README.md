@@ -75,6 +75,7 @@ harness's synthetic bank. Its class follows from those runs:
 | `preexisting` | It also differs on the synthetic bank |
 | `new` | It differs on real data only |
 | `accepted` | Both real-bank attempts saw the runner's OOM counter rise, in a scenario whose limit the maintainer accepted (`ACCEPTED_OOM` in `forced.py`, with each reason; the summary lists them) |
+| `excluded` | Its real-bank arms do not run, because its premise cannot hold on a real bank (`REAL_BANK_EXCLUDED` in `forced.py`, with each reason; the summary lists them as `real_bank_exclusions`); its synthetic arm ran and passed |
 
 `summary.json` holds counts and names only. `private.json` quotes bank text
 and stays on the host.

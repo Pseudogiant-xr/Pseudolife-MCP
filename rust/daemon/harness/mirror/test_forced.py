@@ -66,7 +66,7 @@ def test_run_classifies_each_scenario_and_reruns_only_what_differs(tmp_path):
     assert [c[3] for c in runner.calls if c[1] == "fresh"] == [True, True, False]
     assert set(private) == {"w2e/flaky", "w2e/old", "w2e/fresh"} and report["complete"]
     counts = forced.counts(report)["w2e"]
-    assert counts == {"planned": 4, "run": 4, "pass": 1, "transient": 1, "preexisting": 1, "new": 1, "accepted": 0,
+    assert counts == {"planned": 4, "run": 4, "pass": 1, "transient": 1, "preexisting": 1, "new": 1, "accepted": 0, "excluded": 0,
                       "error": 0, "differences": 3, "errors_with_oom": None, "new_scenarios": ["fresh"]}
     assert "DIFF" not in json.dumps(counts)  # counts and names only
 
@@ -348,6 +348,49 @@ def test_the_summary_names_the_fixture_a_real_entity_stands_in_for(tmp_path, mon
     forced.main(["--rust-bin", "x", "--out", str(tmp_path / "o"), "--suites", "w2e", "--only", "store-defaults"])
     notes = json.loads((tmp_path / "o" / "summary.json").read_text())["fixture_notes"]
     assert "release-checklist" in notes["w2e/dream-deep-exclusion"]
+
+
+def test_sweep_analyzer_tick_skips_only_its_real_bank_arms(tmp_path):
+    """Conductor decision (option 2), 2026-11-08: the scenario rests on one
+    analyzer batch covering every entity, which a real bank cannot hold, so
+    its real-bank arms do not run. Its synthetic arm still does, and every
+    other scenario, the analyzer's sweep siblings included, runs as before."""
+    answers = {"sweep-analyzer-tick": {"synthetic": PASS},
+               "sweep-deep-tick": {"real": PASS},
+               "sweep-dream-auto": {"real": DIFF, "real-retry": DIFF, "synthetic": PASS}}
+    runner = FakeRunner(tmp_path, answers)
+    report, private = forced.run(runner, ["w2e"], None, names=lambda s: list(answers))
+    rows = {r["scenario"]: r for r in report["suites"]["w2e"]["rows"]}
+    assert [c for c in runner.calls if c[1] == "sweep-analyzer-tick"] == [
+        ("w2e", "sweep-analyzer-tick", "synthetic", False)]
+    assert rows["sweep-analyzer-tick"]["class"] == "excluded"
+    assert ("w2e", "sweep-deep-tick", "real", True) in runner.calls
+    assert rows["sweep-deep-tick"]["class"] == "pass" and rows["sweep-dream-auto"]["class"] == "new"
+    counted = forced.counts(report)["w2e"]
+    assert counted["excluded"] == 1 and counted["pass"] == 1 and counted["new"] == 1
+    assert "every entity" in forced.REAL_BANK_EXCLUDED["w2e/sweep-analyzer-tick"]
+    assert list(forced.REAL_BANK_EXCLUDED) == ["w2e/sweep-analyzer-tick"]
+
+
+def test_an_excluded_scenario_whose_synthetic_arm_fails_is_an_error(tmp_path):
+    """The near miss: the exclusion covers the real bank only, so a failing
+    synthetic arm is not hidden behind it."""
+    for synthetic in (DIFF, {"status": "error", "diffs": [], "seconds": 1.0}):
+        runner = FakeRunner(tmp_path, {"sweep-analyzer-tick": {"synthetic": synthetic}})
+        report, private = forced.run(runner, ["w2e"], None, names=lambda s: ["sweep-analyzer-tick"])
+        assert report["suites"]["w2e"]["rows"][0]["class"] == "error"
+        assert "w2e/sweep-analyzer-tick" in private
+
+
+def test_the_summary_lists_the_real_bank_exclusions(tmp_path, monkeypatch):
+    _main_env(monkeypatch)
+    monkeypatch.setattr(forced, "scenario_names", lambda suite: ["store-defaults"])
+    monkeypatch.setattr(forced, "run", lambda runner, *a, **k: ({"suites": {}, "not_forced": {},
+                                                                 "complete": True}, {}))
+    forced.main(["--rust-bin", "x", "--out", str(tmp_path / "o"), "--suites", "w2e", "--only", "store-defaults"])
+    summary = json.loads((tmp_path / "o" / "summary.json").read_text())
+    assert summary["real_bank_exclusions"] == forced.REAL_BANK_EXCLUDED
+    assert summary["accepted_limits"] == forced.ACCEPTED_OOM
 
 
 def test_an_attempt_that_does_not_pass_keeps_its_daemons_logs(tmp_path):
