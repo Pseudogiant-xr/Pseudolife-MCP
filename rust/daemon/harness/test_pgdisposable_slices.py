@@ -120,7 +120,11 @@ def test_the_option_turns_database_skips_into_failures(monkeypatch):
     import importlib.util
     from types import SimpleNamespace
     gate = _gate()
-    monkeypatch.delenv(gate.REQUIRE_DATABASES_ENV, raising=False)
+    # Registered with monkeypatch first (set, then removed), so teardown takes
+    # away what pytest_configure sets below: left set, it turned every later
+    # database skip in this process into a failure (review finding on #1415).
+    monkeypatch.setenv(gate.REQUIRE_DATABASES_ENV, "0")
+    monkeypatch.delenv(gate.REQUIRE_DATABASES_ENV)
     spec = importlib.util.spec_from_file_location(
         "rust_conftest", Path(__file__).resolve().parents[2] / "conftest.py")
     conftest = importlib.util.module_from_spec(spec)
@@ -129,3 +133,19 @@ def test_the_option_turns_database_skips_into_failures(monkeypatch):
     assert gate.REQUIRE_DATABASES_ENV not in __import__("os").environ
     conftest.pytest_configure(SimpleNamespace(getoption=lambda name: name == "--require-databases"))
     assert __import__("os").environ[gate.REQUIRE_DATABASES_ENV] == "1"
+
+
+
+def test_the_option_test_leaves_no_strict_mode_behind():
+    """Run in CI's order, without the option and without a login, the
+    database cases after the option test still skip."""
+    here = Path(__file__).resolve().parent
+    env = {k: v for k, v in os.environ.items() if k != _gate().REQUIRE_DATABASES_ENV}
+    env["PSEUDOLIFE_TEST_PG_LOGIN_FILE"] = str(here / "no-such-login.env")
+    run = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
+         f"{here / 'test_pgdisposable_slices.py'}::test_the_option_turns_database_skips_into_failures",
+         str(here / "mirror" / "test_base_delta.py")],
+        cwd=here.parents[2], env=env, capture_output=True, text=True, timeout=300)
+    assert run.returncode == 0, run.stdout[-2000:] + run.stderr[-2000:]
+    assert " skipped" in run.stdout and "error" not in run.stdout.splitlines()[-1]

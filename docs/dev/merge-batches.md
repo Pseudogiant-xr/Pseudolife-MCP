@@ -415,12 +415,14 @@ the push or `gh pr create` fails, nothing is commented on and rerunning
    missing) plus the eval shard's `pytest rust/ci`; census currency is not
    among them, since `build` regenerates the census and `open` runs CI's
    verdict.
-   - **Its database cases run here, not in CI.** Hosted runners have no
-     disposable-bank login, so those cases skip there. This run has the
+   - **Some database cases run only here.** Hosted runners have no
+     disposable-bank login, so the login cases skip there, and the hosted
+     Windows runner has no Linux Docker engine, so the mirror seed's Docker
+     cases run only on the hosted Linux runner. This run has the
      test login (`~/.pseudolife-mcp/test-pg.env`, or
      `PSEUDOLIFE_TEST_PG_LOGIN_FILE`) for the bench PostgreSQL at
      127.0.0.1:5433, which must be up, and a running Docker engine for the
-     mirror seed tests' throwaway PostgreSQL.
+     mirror seed tests' throwaway PostgreSQL (Linux containers).
    - **`--require-databases`**, part of the printed command, makes a
      database case that finds no login or no Docker engine fail, naming the
      cause and the fix, instead of skipping, so it cannot pass unseen.
@@ -429,7 +431,8 @@ the push or `gh pr create` fails, nothing is commented on and rerunning
    These need no built Rust binary; the
    parity shards' other harness files drive the release candidates and stay
    CI's. Run it natively from the batch checkout (a targeted run, about
-   140 s on Windows; `rust/ci/test_workflow.py` needs `pwsh`) in any
+   5 minutes on Windows with its database cases, measured 2026-11-08;
+   `rust/ci/test_workflow.py` needs `pwsh`) in any
    Python with the project's dev dependencies, for example `uv run
    --no-project --python 3.11 --with mcp==2.2.0 --with pytest --with
    psycopg --with psutil --with httpx --with pyyaml python -m pytest ...`,

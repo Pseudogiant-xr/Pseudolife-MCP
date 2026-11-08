@@ -267,8 +267,9 @@ def _engine() -> bool:
 def throwaway_pg():
     if not _engine():
         database_gate.unavailable("no Linux Docker engine answers here",
-                                  "start Docker (Docker Desktop on Windows) and rerun; this case "
-                                  "needs a throwaway PostgreSQL it can administer")
+                                  "start Docker with Linux containers (on Windows, Docker Desktop "
+                                  "switched to Linux containers) and rerun; this case needs a "
+                                  "throwaway PostgreSQL it can administer")
     image = os.environ.get("PSEUDOLIFE_MIRROR_TEST_PG_IMAGE", "pgvector/pgvector:pg18")
     name = f"plmirtest-{uuid.uuid4().hex[:10]}"
     subprocess.run(["docker", "network", "create", "--internal", name], check=True, capture_output=True)
