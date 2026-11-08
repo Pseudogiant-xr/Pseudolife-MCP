@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "rust",
+  "before": "883266f7ac21fc64",
+  "fingerprint": "d2eb1ecb9dfd5579",
+  "reason": "Merge of master into #1409: the board and mirror harness pytest step now holds master's files, including #1402's board/test_maintainer_rollback.py, and this PR's rust/daemon/harness/test_w2e_judge_settle.py (0.5 s on a workstation, 2026-11-08; its database case skips without the disposable-bank login, as on hosted runners). The 3-minute timeout holds."
+}

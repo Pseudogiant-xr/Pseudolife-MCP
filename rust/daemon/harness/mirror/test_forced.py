@@ -66,7 +66,7 @@ def test_run_classifies_each_scenario_and_reruns_only_what_differs(tmp_path):
     assert [c[3] for c in runner.calls if c[1] == "fresh"] == [True, True, False]
     assert set(private) == {"w2e/flaky", "w2e/old", "w2e/fresh"} and report["complete"]
     counts = forced.counts(report)["w2e"]
-    assert counts == {"planned": 4, "run": 4, "pass": 1, "transient": 1, "preexisting": 1, "new": 1,
+    assert counts == {"planned": 4, "run": 4, "pass": 1, "transient": 1, "preexisting": 1, "new": 1, "accepted": 0, "excluded": 0,
                       "error": 0, "differences": 3, "errors_with_oom": None, "new_scenarios": ["fresh"]}
     assert "DIFF" not in json.dumps(counts)  # counts and names only
 
@@ -320,6 +320,21 @@ def test_a_run_needing_no_quiet_scenario_skips_the_preflight(tmp_path, monkeypat
                         "--only", "store-defaults"]) == 0
 
 
+def test_a_run_of_only_real_bank_excluded_scenarios_needs_no_quiet_copy(tmp_path, monkeypatch):
+    """Review (Codex, Opus): sweep-analyzer-tick matches a quiet prefix, but
+    its real-bank arms never run, so a missing quiet copy must not refuse it;
+    with a quiet scenario beside it the preflight still runs (near miss)."""
+    _main_env(monkeypatch)
+    monkeypatch.setattr(forced, "scenario_names",
+                        lambda suite: ["sweep-analyzer-tick", "judge-merge-auto"])
+    monkeypatch.setattr(forced, "base_comments", lambda: ("pl_cf_mir seed from new at u", None))
+    monkeypatch.setattr(forced, "run", lambda runner, *a, **k: ({"suites": {}, "not_forced": {},
+                                                                 "complete": True}, {}))
+    out = ["--rust-bin", "x", "--out", str(tmp_path / "o"), "--suites", "w2e", "--only"]
+    assert forced.main(out + ["sweep-analyzer-tick"]) == 0
+    assert forced.main(out + ["sweep-analyzer-tick", "judge-merge-auto"]) == 3
+
+
 def test_an_unmeasured_oom_count_stays_null(tmp_path):
     answers = {"x": {"real": {"status": "error", "diffs": [], "seconds": 1, "oom_kills": None},
                      "real-retry": {"status": "error", "diffs": [], "seconds": 1, "oom_kills": None},
@@ -348,6 +363,49 @@ def test_the_summary_names_the_fixture_a_real_entity_stands_in_for(tmp_path, mon
     forced.main(["--rust-bin", "x", "--out", str(tmp_path / "o"), "--suites", "w2e", "--only", "store-defaults"])
     notes = json.loads((tmp_path / "o" / "summary.json").read_text())["fixture_notes"]
     assert "release-checklist" in notes["w2e/dream-deep-exclusion"]
+
+
+def test_sweep_analyzer_tick_skips_only_its_real_bank_arms(tmp_path):
+    """Conductor decision (option 2), 2026-11-08: the scenario rests on one
+    analyzer batch covering every entity, which a real bank cannot hold, so
+    its real-bank arms do not run. Its synthetic arm still does, and every
+    other scenario, the analyzer's sweep siblings included, runs as before."""
+    answers = {"sweep-analyzer-tick": {"synthetic": PASS},
+               "sweep-deep-tick": {"real": PASS},
+               "sweep-dream-auto": {"real": DIFF, "real-retry": DIFF, "synthetic": PASS}}
+    runner = FakeRunner(tmp_path, answers)
+    report, private = forced.run(runner, ["w2e"], None, names=lambda s: list(answers))
+    rows = {r["scenario"]: r for r in report["suites"]["w2e"]["rows"]}
+    assert [c for c in runner.calls if c[1] == "sweep-analyzer-tick"] == [
+        ("w2e", "sweep-analyzer-tick", "synthetic", False)]
+    assert rows["sweep-analyzer-tick"]["class"] == "excluded"
+    assert ("w2e", "sweep-deep-tick", "real", True) in runner.calls
+    assert rows["sweep-deep-tick"]["class"] == "pass" and rows["sweep-dream-auto"]["class"] == "new"
+    counted = forced.counts(report)["w2e"]
+    assert counted["excluded"] == 1 and counted["pass"] == 1 and counted["new"] == 1
+    assert "every entity" in forced.REAL_BANK_EXCLUDED["w2e/sweep-analyzer-tick"]
+    assert list(forced.REAL_BANK_EXCLUDED) == ["w2e/sweep-analyzer-tick"]
+
+
+def test_an_excluded_scenario_whose_synthetic_arm_fails_is_an_error(tmp_path):
+    """The near miss: the exclusion covers the real bank only, so a failing
+    synthetic arm is not hidden behind it."""
+    for synthetic in (DIFF, {"status": "error", "diffs": [], "seconds": 1.0}):
+        runner = FakeRunner(tmp_path, {"sweep-analyzer-tick": {"synthetic": synthetic}})
+        report, private = forced.run(runner, ["w2e"], None, names=lambda s: ["sweep-analyzer-tick"])
+        assert report["suites"]["w2e"]["rows"][0]["class"] == "error"
+        assert "w2e/sweep-analyzer-tick" in private
+
+
+def test_the_summary_lists_the_real_bank_exclusions(tmp_path, monkeypatch):
+    _main_env(monkeypatch)
+    monkeypatch.setattr(forced, "scenario_names", lambda suite: ["store-defaults"])
+    monkeypatch.setattr(forced, "run", lambda runner, *a, **k: ({"suites": {}, "not_forced": {},
+                                                                 "complete": True}, {}))
+    forced.main(["--rust-bin", "x", "--out", str(tmp_path / "o"), "--suites", "w2e", "--only", "store-defaults"])
+    summary = json.loads((tmp_path / "o" / "summary.json").read_text())
+    assert summary["real_bank_exclusions"] == forced.REAL_BANK_EXCLUDED
+    assert summary["accepted_limits"] == forced.ACCEPTED_OOM
 
 
 def test_an_attempt_that_does_not_pass_keeps_its_daemons_logs(tmp_path):
@@ -481,6 +539,75 @@ def test_a_run_needing_no_curation_scenario_skips_its_preflight(tmp_path, monkey
                                                                  "complete": True}, {}))
     assert forced.main(["--rust-bin", "x", "--out", str(tmp_path / "o"), "--suites", "w2e",
                         "--only", "store-defaults"]) == 0
+
+
+# ---- real-bank accommodations: known limits and the dream REST timeout ----
+
+def _rows_for(tmp_path, answers, oom):
+    class Kills(FakeRunner):
+        def invoke(self, suite, name, label, base):
+            out = super().invoke(suite, name, label, base)
+            return {**out, "oom_kills": oom.get((name, label), 0)}
+    report, _ = forced.run(Kills(tmp_path, answers), ["w2e"], None, names=lambda s: list(answers))
+    return {r["scenario"]: r for r in report["suites"]["w2e"]["rows"]}, report
+
+
+def test_a_known_python_memory_limit_is_accepted_not_an_error(tmp_path):
+    """Maintainer decision (c), 2026-11-08: candidate-auto and -reopen
+    exceed the runner's memory on Python at the harness's -1.0 floors."""
+    err = {"status": "error", "diffs": [], "error_tail": ["IncompleteRead"], "seconds": 1.0}
+    answers = {"candidate-auto": {"real": err, "real-retry": err, "synthetic": PASS},
+               "dream-deep-dry": {"real": err, "real-retry": err, "synthetic": PASS},
+               "candidate-auto-reopen": {"real": err, "real-retry": err, "synthetic": PASS}}
+    rows, report = _rows_for(tmp_path, answers, {("candidate-auto", "real"): 1,
+                                                 ("candidate-auto", "real-retry"): 1,
+                                                 ("dream-deep-dry", "real"): 1,
+                                                 ("dream-deep-dry", "real-retry"): 1,
+                                                 ("candidate-auto-reopen", "real"): 1,
+                                                 ("candidate-auto-reopen", "synthetic"): 1})
+    assert rows["candidate-auto"]["class"] == "accepted"
+    # Near misses: an OOM in a scenario not listed, and a listed one whose
+    # real retry failed without an OOM (the first attempt's and the small
+    # synthetic arm's OOM do not excuse it).
+    assert rows["dream-deep-dry"]["class"] == "error"
+    assert rows["candidate-auto-reopen"]["class"] == "error"
+    counted = forced.counts(report)["w2e"]
+    assert counted["accepted"] == 1 and counted["error"] == 2
+    assert "Python" in forced.ACCEPTED_OOM["w2e/candidate-auto"]
+
+
+def test_real_bank_arms_get_the_longer_dream_rest_timeout(tmp_path, monkeypatch):
+    monkeypatch.setenv("PL_HARNESS_BASE_DATABASE", "pl_cf_mir_seed")
+    monkeypatch.delenv("PL_HARNESS_DREAM_REST_TIMEOUT", raising=False)
+    seen = []
+
+    class Records(forced.Runner):
+        def _run(self, argv, env):
+            seen.append(env.get("PL_HARNESS_DREAM_REST_TIMEOUT"))
+            return 0, ""
+
+    runner = Records(Path("rust-bin"), tmp_path / "out", 60, tmp_path / "STOP", scratch=tmp_path / "s",
+                     oom_kills=lambda: 0)
+    runner.invoke("w2e", "console-dream-run", "real", base=True)
+    runner.invoke("w2e", "console-dream-run", "synthetic", base=False)
+    assert seen == [str(forced.DREAM_REST_TIMEOUT), None]
+
+
+def test_dream_rest_calls_take_the_timeout_and_others_keep_the_default(monkeypatch):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    import w2e_episodes
+    from types import SimpleNamespace
+    calls = []
+    fake = SimpleNamespace(AUTH=("authorization", "x"), resolve_args=lambda a, d: a,
+                           w1a=SimpleNamespace(call=lambda port, m, p, h, b, **kw: calls.append(
+                               (p, kw.get("timeout"))) or {"status": 200, "json": {}}))
+    monkeypatch.setattr(w2e_episodes, "_before_map", lambda dsn: {})
+    monkeypatch.setenv("PL_HARNESS_DREAM_REST_TIMEOUT", "600")
+    w2e_episodes.run_rest({"method": "POST", "path": "/api/dream/run"}, 1, "dsn", fake)
+    w2e_episodes.run_rest({"method": "GET", "path": "/api/facts"}, 1, "dsn", fake)
+    monkeypatch.delenv("PL_HARNESS_DREAM_REST_TIMEOUT")
+    w2e_episodes.run_rest({"method": "POST", "path": "/api/dream/run"}, 1, "dsn", fake)
+    assert calls == [("/api/dream/run", 600.0), ("/api/facts", 120.0), ("/api/dream/run", 120.0)]
 
 
 def test_an_empty_only_refuses_instead_of_running_everything(tmp_path, monkeypatch, capsys):
