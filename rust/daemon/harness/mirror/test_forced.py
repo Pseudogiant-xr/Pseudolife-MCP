@@ -550,3 +550,42 @@ def test_dream_rest_calls_take_the_timeout_and_others_keep_the_default(monkeypat
     monkeypatch.delenv("PL_HARNESS_DREAM_REST_TIMEOUT")
     w2e_episodes.run_rest({"method": "POST", "path": "/api/dream/run"}, 1, "dsn", fake)
     assert calls == [("/api/dream/run", 600.0), ("/api/facts", 120.0), ("/api/dream/run", 120.0)]
+
+
+def test_an_empty_only_refuses_instead_of_running_everything(tmp_path, monkeypatch, capsys):
+    """``--only`` given no names (a list that came out empty, as a broken
+    name-computing step yields) used to read as no filter and plan every
+    scenario. It now refuses, naming the cause and the fix."""
+    _main_env(monkeypatch)
+    monkeypatch.setattr(forced, "scenario_names", lambda suite: ["store-defaults", "judge-merge-auto"])
+    monkeypatch.setattr(forced, "base_comments", lambda: pytest.fail("got past the refusal"))
+    monkeypatch.setattr(forced, "run", lambda *a, **k: pytest.fail("ran with an empty --only"))
+    assert forced.main(["--rust-bin", "x", "--out", str(tmp_path / "o"), "--suites", "w2e", "--only"]) == 2
+    err = capsys.readouterr().err
+    assert "--only" in err and "no scenario" in err and "omit --only" in err
+    assert not (tmp_path / "o").exists()
+
+
+def test_no_only_still_plans_every_scenario(tmp_path, monkeypatch):
+    """The near miss: leaving ``--only`` out is the legitimate way to run all."""
+    _main_env(monkeypatch)
+    monkeypatch.setattr(forced, "scenario_names", lambda suite: ["store-defaults"])
+    seen = []
+
+    def run(runner, suites, only, **_):
+        seen.append(only)
+        return {"suites": {}, "not_forced": {}, "complete": True}, {}
+
+    monkeypatch.setattr(forced, "run", run)
+    assert forced.main(["--rust-bin", "x", "--out", str(tmp_path / "o"), "--suites", "w2e"]) == 0
+    assert seen == [None]
+
+
+def test_an_empty_suites_refuses_instead_of_an_empty_complete_run(tmp_path, monkeypatch, capsys):
+    """``--suites`` given no names planned nothing and reported the run complete."""
+    _main_env(monkeypatch)
+    monkeypatch.setattr(forced, "run", lambda *a, **k: pytest.fail("ran with an empty --suites"))
+    assert forced.main(["--rust-bin", "x", "--out", str(tmp_path / "o"), "--suites"]) == 2
+    err = capsys.readouterr().err
+    assert "--suites" in err and "omit --suites" in err
+    assert not (tmp_path / "o").exists()
