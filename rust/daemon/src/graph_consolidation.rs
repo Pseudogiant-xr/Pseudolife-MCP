@@ -79,6 +79,47 @@ pub(crate) fn py_head(len: usize, n: i64) -> usize {
     }
 }
 
+/// Keeps the items that rank first under `T`'s order, at most `k` at a
+/// time: the first `k` of a stable full sort, without holding every item.
+/// `T`'s order must be total; the rank keys below end in the scan position,
+/// which is what a stable sort falls back to.
+pub(crate) struct TopK<T: Ord> {
+    k: usize,
+    heap: std::collections::BinaryHeap<T>,
+}
+
+impl<T: Ord> TopK<T> {
+    pub(crate) fn new(k: usize) -> Self {
+        Self {
+            k,
+            heap: std::collections::BinaryHeap::new(),
+        }
+    }
+
+    /// The heap's top is the worst kept item; a better one replaces it.
+    pub(crate) fn push(&mut self, item: T) {
+        if self.heap.len() < self.k {
+            self.heap.push(item);
+        } else if let Some(mut worst) = self.heap.peek_mut()
+            && item < *worst
+        {
+            *worst = item;
+        }
+    }
+
+    /// The kept items, best first.
+    pub(crate) fn into_sorted(self) -> Vec<T> {
+        self.heap.into_sorted_vec()
+    }
+}
+
+/// How many items `seq[:n]` can keep before the total is known: `n` for
+/// `n >= 0`; a negative `n` drops from the end, so every item is kept and
+/// `py_head` cuts after the sort.
+fn top_k_bound(n: i64) -> usize {
+    usize::try_from(n).unwrap_or(usize::MAX)
+}
+
 /// `s[:n]` on code points, Python slice semantics.
 pub(crate) fn py_slice_chars(s: &str, n: i64) -> String {
     let count = s.chars().count();
@@ -395,6 +436,37 @@ pub(crate) struct CandidateOpts<'a> {
     pub excluded_ids: &'a HashSet<i64>,
 }
 
+/// `candidate_pairs`' sort position: similarity descending, then the ids.
+struct CandidateRank {
+    similarity: f64,
+    src_id: i64,
+    dst_id: i64,
+    seq: usize,
+}
+
+impl Ord for CandidateRank {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        py_float_cmp(other.similarity, self.similarity)
+            .then(self.src_id.cmp(&other.src_id))
+            .then(self.dst_id.cmp(&other.dst_id))
+            .then(self.seq.cmp(&other.seq))
+    }
+}
+
+impl PartialOrd for CandidateRank {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl PartialEq for CandidateRank {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other).is_eq()
+    }
+}
+
+impl Eq for CandidateRank {}
+
 /// `candidate_pairs`: unlinked, non-duplicate, undismissed, scope-coherent
 /// pairs whose supporting entries are not co-mentions (name-contained pairs
 /// exempt), at or above `min_similarity`, best first, cut to `top_k`. The
@@ -428,13 +500,18 @@ pub(crate) fn candidate_pairs(
         .filter(|i| !o.excluded_ids.contains(i))
         .collect();
     ids.sort_unstable();
-    let mut scored = Vec::new();
     if ids.len() < 2 {
-        return scored;
+        return Vec::new();
     }
+    // Only the best `top_k` survivors are held, as rank keys; the labels are
+    // built for those alone. Collecting every survivor first grew one deep
+    // dream past 18 GiB on a real bank with the floors at -1.0.
+    let mut top = TopK::new(top_k_bound(o.top_k));
+    let mut seq = 0usize;
     let empty = BTreeSet::new();
     for (n, &u) in ids.iter().enumerate() {
         let vu = &contexts.vectors[&u];
+        let su: HashSet<&String> = scope_map.get(&u).into_iter().flatten().collect();
         for &v in &ids[n + 1..] {
             let k = key(u, v);
             if linked.contains(&k) || dup.contains(&k) {
@@ -471,32 +548,36 @@ pub(crate) fn candidate_pairs(
                     continue;
                 }
             }
-            let su: HashSet<&String> = scope_map.get(&u).into_iter().flatten().collect();
             let sv: HashSet<&String> = scope_map.get(&v).into_iter().flatten().collect();
             if !su.is_empty() && !sv.is_empty() && su.is_disjoint(&sv) {
                 continue;
             }
-            let label = |id: i64| {
-                disp.get(&id)
-                    .map_or_else(|| id.to_string(), |d| d.to_string())
-            };
-            scored.push(Candidate {
+            top.push(CandidateRank {
+                similarity: py_round(sim, 4),
                 src_id: u,
                 dst_id: v,
-                src: label(u),
-                dst: label(v),
-                similarity: py_round(sim, 4),
+                seq,
             });
+            seq += 1;
         }
     }
-    scored.sort_by(|a, b| {
-        py_float_cmp(b.similarity, a.similarity)
-            .then(a.src_id.cmp(&b.src_id))
-            .then(a.dst_id.cmp(&b.dst_id))
-    });
-    let keep = py_head(scored.len(), o.top_k);
-    scored.truncate(keep);
-    scored
+    let ranked = top.into_sorted();
+    let keep = py_head(ranked.len(), o.top_k);
+    let label = |id: i64| {
+        disp.get(&id)
+            .map_or_else(|| id.to_string(), |d| d.to_string())
+    };
+    ranked
+        .into_iter()
+        .take(keep)
+        .map(|r| Candidate {
+            src_id: r.src_id,
+            dst_id: r.dst_id,
+            src: label(r.src_id),
+            dst: label(r.dst_id),
+            similarity: r.similarity,
+        })
+        .collect()
 }
 
 // ── store curation: cross-key near-duplicate slot pairs ──────────────────
@@ -544,6 +625,40 @@ fn slot_entity(rec: &SlotRecord) -> String {
     }
 }
 
+/// `slot_duplicate_candidates`' sort position: similarity descending, then
+/// the ordered keys; `a` and `b` index the records the pair's labels take.
+struct SlotRank<'r> {
+    similarity: f64,
+    a_key: &'r String,
+    b_key: &'r String,
+    seq: usize,
+    a: usize,
+    b: usize,
+}
+
+impl Ord for SlotRank<'_> {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        py_float_cmp(other.similarity, self.similarity)
+            .then_with(|| self.a_key.cmp(other.a_key))
+            .then_with(|| self.b_key.cmp(other.b_key))
+            .then(self.seq.cmp(&other.seq))
+    }
+}
+
+impl PartialOrd for SlotRank<'_> {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl PartialEq for SlotRank<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other).is_eq()
+    }
+}
+
+impl Eq for SlotRank<'_> {}
+
 /// `slot_duplicate_candidates`: cross-key pairs over the records' own
 /// normalized embeddings at or above the floor (`same_entity_min` for one
 /// entity's aspect siblings), identifier-keyed siblings and dismissed pairs
@@ -559,7 +674,16 @@ pub(crate) fn slot_duplicate_candidates(
         .iter()
         .map(|r| l2(r.embedding.clone().unwrap_or_default()))
         .collect();
-    let mut scored: Vec<(f64, String, String, Value)> = Vec::new();
+    // Each record's casefolded entity, once (the pair loop used to rebuild
+    // both per pair).
+    let ents: Vec<String> = recs
+        .iter()
+        .map(|r| py_casefold(py_strip(&slot_entity(r))))
+        .collect();
+    // Only the best `top_k` pairs are held, as rank keys; the label maps are
+    // cloned for those alone (see `candidate_pairs`).
+    let mut top = TopK::new(top_k_bound(top_k));
+    let mut seq = 0usize;
     for i in 0..recs.len() {
         for j in i + 1..recs.len() {
             let (ki, kj) = (&recs[i].key, &recs[j].key);
@@ -567,12 +691,11 @@ pub(crate) fn slot_duplicate_candidates(
             if ka == kb {
                 continue;
             }
-            if dismissed.contains(&(ka.clone(), kb.clone())) {
+            if !dismissed.is_empty() && dismissed.contains(&(ka.clone(), kb.clone())) {
                 continue;
             }
-            let ea = py_casefold(py_strip(&slot_entity(recs[i])));
-            let eb = py_casefold(py_strip(&slot_entity(recs[j])));
-            if id_keyed_siblings(&ea, &eb) {
+            let (ea, eb) = (&ents[i], &ents[j]);
+            if id_keyed_siblings(ea, eb) {
                 continue;
             }
             let sim = f64::from(sdot(&vecs[i], &vecs[j]));
@@ -584,28 +707,33 @@ pub(crate) fn slot_duplicate_candidates(
             if sim < floor {
                 continue;
             }
-            let (a, b) = if recs[i].key == *ka {
-                (recs[i], recs[j])
-            } else {
-                (recs[j], recs[i])
-            };
-            let rounded = py_round(sim, 4);
-            let mut m = Map::new();
-            m.insert("a_key".into(), json!(ka));
-            m.insert("b_key".into(), json!(kb));
-            m.insert("a".into(), Value::Object(a.label.clone()));
-            m.insert("b".into(), Value::Object(b.label.clone()));
-            m.insert("similarity".into(), json!(rounded));
-            scored.push((rounded, ka.clone(), kb.clone(), Value::Object(m)));
+            let (a, b) = if recs[i].key == *ka { (i, j) } else { (j, i) };
+            top.push(SlotRank {
+                similarity: py_round(sim, 4),
+                a_key: ka,
+                b_key: kb,
+                seq,
+                a,
+                b,
+            });
+            seq += 1;
         }
     }
-    scored.sort_by(|x, y| {
-        py_float_cmp(y.0, x.0)
-            .then_with(|| x.1.cmp(&y.1))
-            .then_with(|| x.2.cmp(&y.2))
-    });
-    let keep = py_head(scored.len(), top_k);
-    scored.into_iter().take(keep).map(|s| s.3).collect()
+    let ranked = top.into_sorted();
+    let keep = py_head(ranked.len(), top_k);
+    ranked
+        .into_iter()
+        .take(keep)
+        .map(|r| {
+            let mut m = Map::new();
+            m.insert("a_key".into(), json!(r.a_key));
+            m.insert("b_key".into(), json!(r.b_key));
+            m.insert("a".into(), Value::Object(recs[r.a].label.clone()));
+            m.insert("b".into(), Value::Object(recs[r.b].label.clone()));
+            m.insert("similarity".into(), json!(r.similarity));
+            Value::Object(m)
+        })
+        .collect()
 }
 
 // ── SP-1: entity consolidation (merge + junk surfacing) ──────────────────
@@ -944,3 +1072,7 @@ pub(crate) fn junk_entities(
 #[cfg(test)]
 #[path = "graph_consolidation_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "graph_consolidation_topk_tests.rs"]
+mod topk_tests;

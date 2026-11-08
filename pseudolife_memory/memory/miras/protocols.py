@@ -91,7 +91,11 @@ class RetentionPolicy:
         (default) makes the term vanish → eviction is byte-identical to before.
         """
         base = self.eviction_score(entry, now)
-        weight = self.source_weights.get(entry.source, 1.0)
+        # A non-string source (a raw Console value where no PostgreSQL row
+        # gives it back as text) names no weighted tier, and an unhashable
+        # one must not fail the store evicting it.
+        source = entry.source
+        weight = self.source_weights.get(source, 1.0) if isinstance(source, str) else 1.0
         score = ((base + 1.0) * weight
                  + self.retention_boost * math.log1p(entry.reinforcements))
         # Superseded history is always cheaper to lose than current state.

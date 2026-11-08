@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "rust",
+  "before": "535280cbf3a2802c",
+  "fingerprint": "e3d26eaca1115ae8",
+  "reason": "Adds rust/daemon/harness/board/test_maintainer_rollback.py (one offline case; its database case skips without the disposable-bank login, as on hosted runners; 0.4 s on a workstation, 2026-11-08) to the board-harness pytest step. The 3-minute timeout holds."
+}
