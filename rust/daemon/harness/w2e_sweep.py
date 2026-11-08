@@ -75,6 +75,29 @@ ANALYZER_SEED_SQL = (
     "WHERE a.display = 'Ledger Exporter' AND b.display = 'Ledger Export'"
 )
 
+# sweep-analyzer-tick's quiet phase watches its own rows: on a copy of the
+# real bank the analyzer walks every entity 50 per tick, so its cursor in
+# ``meta`` (part of the whole judge digest) moved on each sweep and the settle
+# never went quiet (forced real-data run, daemon box, 2026-11-08). The rows the
+# scenario seeds and compares are the proposals, decisions and dismissals
+# touching its four entities, and the reconcile cursor.
+ANALYZER_OWN = ("Billing Gateway", "Billing Gateway Service", "Ledger Export", "Ledger Exporter")
+ANALYZER_QUIET_SQL = (
+    "WITH own AS (SELECT id, canonical, display FROM entities WHERE display IN ("
+    + ", ".join(f"'{d}'" for d in ANALYZER_OWN) + ")) "
+    "SELECT md5(concat_ws('|', "
+    "(SELECT string_agg(p::text, ',' ORDER BY p.id) FROM entity_proposals p "
+    " WHERE p.entity_id IN (SELECT id FROM own) OR p.into_id IN (SELECT id FROM own)), "
+    "(SELECT string_agg(p::text, ',' ORDER BY p.id) FROM edge_proposals p "
+    " WHERE p.src_id IN (SELECT id FROM own) OR p.dst_id IN (SELECT id FROM own)), "
+    "(SELECT string_agg(d::text, ',' ORDER BY d.a_norm, d.b_norm) FROM dismissed_pairs d "
+    " WHERE d.a_norm IN (SELECT canonical FROM own) OR d.b_norm IN (SELECT canonical FROM own)), "
+    "(SELECT string_agg(m::text, ',' ORDER BY m.id) FROM merge_decisions m "
+    " WHERE m.entity_display IN (SELECT display FROM own) "
+    " OR m.into_display IN (SELECT display FROM own)), "
+    "(SELECT value::text FROM meta WHERE key = 'analyzer_pair_reconcile_cursor')))"
+)
+
 # The sweep's mutants (src/dream/ticks.rs, deep.rs), each caught by the
 # scenario named beside it. The overdue rule and the notices are checked
 # against Python's tracker in src/dream/stall_tests.rs.
@@ -179,6 +202,7 @@ def scenarios(w) -> dict:
             "init_settle": {**SETTLE,
                             "until": "SELECT EXISTS (SELECT 1 FROM meta "
                                      "WHERE key = 'analyzer_pair_reconcile_cursor')",
+                            "quiet_sql": ANALYZER_QUIET_SQL,
                             "expect": ["SELECT EXISTS (SELECT 1 FROM meta "
                                        "WHERE key = 'analyzer_duplicate_cursor')"]},
             "seed": [w.fact("Billing Gateway", "region", "eu-west"),

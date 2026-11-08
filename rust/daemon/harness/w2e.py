@@ -5915,10 +5915,21 @@ def judge_digest(dsn: str) -> str:
     return ",".join(parts)
 
 
+def quiet_digest(spec: dict, dsn: str) -> str:
+    """What a settle's quiet phase watches: the scenario's ``quiet_sql``
+    when it declares one, otherwise every judge table."""
+    if not spec.get("quiet_sql"):
+        return judge_digest(dsn)
+    import psycopg
+    with psycopg.connect(dsn, autocommit=True) as conn:
+        return str(conn.execute(spec["quiet_sql"]).fetchone()[0])
+
+
 def settle_sides(spec: dict, dsns: dict, stubs: dict, scn: dict) -> None:
     """Wait until each side's background work is idle: ``until`` (a query
     whose first column must be true) holds, then neither the judge tables
-    nor the side's stub requests change for ``quiet_s`` seconds."""
+    (or ``quiet_sql``'s single value, for a scenario that settles on its own
+    rows) nor the side's stub requests change for ``quiet_s`` seconds."""
     import psycopg
     quiet = float(spec.get("quiet_s", 3.0))
     deadline = time.monotonic() + float(spec.get("timeout_s", 180.0))
@@ -5937,7 +5948,7 @@ def settle_sides(spec: dict, dsns: dict, stubs: dict, scn: dict) -> None:
         while True:
             count = stubs[side].count(side_auth(side) if scn.get("shared_stub") else None) \
                 if stubs else 0
-            snap = (judge_digest(dsn), count)
+            snap = (quiet_digest(spec, dsn), count)
             if snap != last:
                 last, since = snap, time.monotonic()
             elif time.monotonic() - since >= quiet:
