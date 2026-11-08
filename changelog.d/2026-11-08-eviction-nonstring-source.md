@@ -1,0 +1,2 @@
+### Fixed (2026-11-08 — a full bank keeps storing after a Console consolidate with a list or object source)
+- The Console's consolidate stores a raw JSON `source` as given. On the Python daemon, an entry whose source was a list or object made capacity eviction raise `unhashable type`, so every later store into a full band failed with a 500 until the daemon restarted. Eviction now weighs a non-string source 1.0, the weight of any unweighted tier and what the Rust daemon already does; string sources keep their configured weights.
