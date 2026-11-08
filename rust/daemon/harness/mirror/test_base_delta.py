@@ -17,6 +17,7 @@ sys.path.insert(0, str(HERE.parents[3]))
 
 import dbstate  # noqa: E402
 import pgdisposable  # noqa: E402
+import database_gate  # noqa: E402
 
 pg = pgdisposable.Slice("mir")
 
@@ -35,7 +36,9 @@ def test_a_base_outside_the_mirror_names_is_refused(monkeypatch):
 @pytest.fixture
 def base(monkeypatch):
     if not pgdisposable.LOGIN_FILE.exists():
-        pytest.skip("no disposable-bank login here")
+        database_gate.unavailable("no disposable-bank login here",
+                                  "create it once on the daemon host with `pseudolife-mcp test-login "
+                                  "create`, or point PSEUDOLIFE_TEST_PG_LOGIN_FILE at it")
     monkeypatch.delenv(pgdisposable.BASE_ENV, raising=False)
     name = pg.name("pl_cf_mir_basetest")
     import psycopg

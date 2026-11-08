@@ -23,8 +23,10 @@ import yaml
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[3]
 sys.path.insert(0, str(HERE))
+sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(REPO))
 
+import database_gate  # noqa: E402
 import seed  # noqa: E402
 
 SECRET = "s" * 40
@@ -264,7 +266,9 @@ def _engine() -> bool:
 @pytest.fixture(scope="module")
 def throwaway_pg():
     if not _engine():
-        pytest.skip("no Linux Docker engine answers here")
+        database_gate.unavailable("no Linux Docker engine answers here",
+                                  "start Docker (Docker Desktop on Windows) and rerun; this case "
+                                  "needs a throwaway PostgreSQL it can administer")
     image = os.environ.get("PSEUDOLIFE_MIRROR_TEST_PG_IMAGE", "pgvector/pgvector:pg18")
     name = f"plmirtest-{uuid.uuid4().hex[:10]}"
     subprocess.run(["docker", "network", "create", "--internal", name], check=True, capture_output=True)

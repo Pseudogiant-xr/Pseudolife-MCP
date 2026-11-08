@@ -90,13 +90,25 @@ CENSUS_SUBJECT = "Regenerate producer census and CI metadata for this batch"
 # not among them: `build` regenerates the census and `open` runs CI's own
 # verdict, `producer_census.py --ci-check`. 767 tests, about 140 s natively
 # on Windows (2026-10-21).
+# Every pytest path of the `rust` job is here (a test pins it): hosted CI has
+# no disposable-bank login, so a harness database case skips there and runs
+# routinely only in this run. `--require-databases` makes such a case fail,
+# naming the cause and the fix, when it finds no bench login or no Docker
+# engine (rust/conftest.py, rust/daemon/harness/database_gate.py), so a
+# skipped database case cannot pass unseen.
 RUST_HARNESS = (
     "rust/test_contract_inventory.py", "rust/test_producer_census.py",
     "rust/daemon/harness/test_w2e_lifecycle.py",
     "rust/daemon/harness/board/test_norm.py", "rust/daemon/harness/board/test_run.py",
+    "rust/daemon/harness/board/test_lease_recovery.py",
+    "rust/daemon/harness/test_pgdisposable_slices.py",
+    "rust/daemon/harness/mirror/test_seed.py", "rust/daemon/harness/mirror/test_forced.py",
+    "rust/daemon/harness/mirror/test_base_delta.py",
+    "rust/daemon/harness/mirror/test_seed_keys.py",
     "rust/ci",
 )
-RUST_HARNESS_COMMAND = "python -m pytest -q -p no:cacheprovider " + " ".join(RUST_HARNESS)
+RUST_HARNESS_COMMAND = ("python -m pytest -q -p no:cacheprovider --require-databases "
+                        + " ".join(RUST_HARNESS))
 # Neither the full suite nor the harness run compiles Rust, so two members
 # that each compile alone can still break the batch: #991 changed record()'s
 # signature, #994 called it the old way, and batch #1017 failed hosted CI

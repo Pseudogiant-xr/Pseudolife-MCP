@@ -2852,3 +2852,32 @@ def test_a_member_that_pushed_after_build_joins_a_later_batch(world, capsys):
     assert "joins a later batch" in out
     assert "close" not in out.lower()
     assert not _plan_file(world).exists()
+
+
+def _rust_job_pytest_paths() -> list[str]:
+    """Every path the pytest commands of rust.yml's `rust` job name."""
+    import yaml
+    workflow = yaml.safe_load((ROOT / ".github" / "workflows" / "rust.yml").read_text(encoding="utf-8"))
+    paths = []
+    for step in workflow["jobs"]["rust"]["steps"]:
+        for line in (step.get("run") or "").splitlines():
+            words = line.split()
+            if "pytest" in words:
+                paths += [w for w in words[words.index("pytest") + 1:] if w.startswith("rust/")]
+    return paths
+
+
+def test_every_pytest_path_of_the_rust_job_is_in_the_rust_harness():
+    """The reverse of the check above: a test CI's `rust` job runs is also
+    in the batch's local harness run, which has the bench login hosted
+    runners lack, so its database cases run somewhere routinely."""
+    paths = _rust_job_pytest_paths()
+    assert "rust/daemon/harness/mirror/test_seed.py" in paths  # the parse found the steps
+    missing = sorted(set(paths) - set(integrate.RUST_HARNESS))
+    assert missing == [], f"add to RUST_HARNESS in ops/integrate.py: {missing}"
+
+
+def test_the_rust_harness_run_fails_a_database_case_it_cannot_run():
+    """A database case the local run skips would pass unseen: the printed
+    command turns those skips into failures naming the cause and the fix."""
+    assert "--require-databases" in integrate.RUST_HARNESS_COMMAND.split()
