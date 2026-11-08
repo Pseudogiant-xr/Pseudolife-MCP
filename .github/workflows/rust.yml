@@ -1103,7 +1103,12 @@ jobs:
         if: matrix.suite == 'cli'
         # Updater transaction/wrapper acceptance adds about five minutes on
         # the Windows dev VM; keep that allowance beyond the existing step.
-        timeout-minutes: 15
+        # 22 since #1367 (the G2 default rows), measured on windows-latest:
+        # 12:37 without them (batch run 42378632131); with them the step hit
+        # 15:00 in batch runs 42388348056 and 42400397903, and pytest alone
+        # took 14:42 in dispatch run 42404612150 with only their native arm
+        # on Windows. About 16.5 minutes with the rows, plus a third.
+        timeout-minutes: 22
         shell: pwsh
         run: |
           $binaryName = if ($IsWindows) { 'pseudolife-stdio.exe' } else { 'pseudolife-stdio' }

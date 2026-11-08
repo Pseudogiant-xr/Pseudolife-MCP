@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "parity-checks",
+  "before": "75c17da5569da284",
+  "fingerprint": "881382325b091313",
+  "reason": "PR #1367 raises only the windows cli shard's CLI differential harness step timeout (15 to 22 minutes) for the G2 default harness rows; no other shard's steps changed. That shard grows by about 4 minutes (its step 12.6 minutes in batch run 42378632131; pytest alone 14.7 in dispatch run 42404612150), well inside the 34-minute longest-job limit; re-measure it from the batch or master runs that include #1367"
+}

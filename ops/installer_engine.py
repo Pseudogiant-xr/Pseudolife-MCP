@@ -44,6 +44,11 @@ class Refusal(Exception):
     pass
 
 
+class Unavailable(Refusal):
+    """Rust is unavailable for this checkout (no release version, image or
+    models): the defaulted engine falls back to Python on this alone."""
+
+
 def docker(*args, capture=True, timeout=60):
     try:
         return subprocess.run([up.docker_cmd(), *args], capture_output=capture, text=True, encoding="utf-8",
@@ -123,7 +128,7 @@ def detect(repo: Path | None = None) -> str:
 def checkout_version(repo: Path) -> str:
     match = re.search(r'^version\s*=\s*"([^"]+)"', (repo / "pyproject.toml").read_text(encoding="utf-8"), re.M)
     if not match or not up.plain_release(match.group(1)):
-        raise Refusal("Cannot read a release version from this checkout's pyproject.toml; rerun with --engine python. "
+        raise Unavailable("Cannot read a release version from this checkout's pyproject.toml; rerun with --engine python. "
                       "Nothing was started.")
     return match.group(1)
 
@@ -185,8 +190,12 @@ def preflight_disk() -> None:
 def provision(image: str) -> None:
     preflight_disk()
     print(f"Pulling the Rust daemon image {image}...", file=sys.stderr)
-    if docker("pull", image, capture=False, timeout=7200).returncode:
-        raise Refusal(f"Cannot pull {image}: this release may not publish a Rust daemon image. Rerun with "
+    try:
+        pulled = docker("pull", image, capture=False, timeout=7200).returncode == 0
+    except Refusal:
+        pulled = False  # a pull that timed out: Rust is unavailable here, not Docker
+    if not pulled:
+        raise Unavailable(f"Cannot pull {image}: this release may not publish a Rust daemon image. Rerun with "
                       "--engine python (-Engine python) to install the Python daemon. Nothing was started.")
     volume = f"{PROJECT}_{MODELS_VOLUME}"
     found = docker("volume", "inspect", volume)
@@ -199,7 +208,7 @@ def provision(image: str) -> None:
     if docker("run", "--rm", "-e", f"PSEUDOLIFE_DAEMON_MODELS_DIR={MODELS_DIR}", "-v", f"{volume}:{MODELS_DIR}",
               "--entrypoint", "pseudolife-daemon", image,
               "provision", "models", "--if-missing", capture=False, timeout=3600).returncode:
-        raise Refusal("Cannot provision the Rust daemon's models; check network access and disk space, then rerun "
+        raise Unavailable("Cannot provision the Rust daemon's models; check network access and disk space, then rerun "
                       "(or rerun with --engine python). Nothing was started.")
 
 
@@ -214,7 +223,7 @@ def refuse_foreign_unaccepted(found: dict | None, version: str) -> None:
                       "(docker rm -f pseudolife-mcp-daemon; the bank volumes stay) and rerun. Nothing was started.")
 
 
-def prepare(repo: Path, engine: str) -> list[Path]:
+def prepare(repo: Path, engine: str, default: bool = False) -> list[Path]:
     if engine == "python":
         found = labels()
         if found and found.get(eng.ENGINE_LABEL) == "rust":
@@ -231,10 +240,20 @@ def prepare(repo: Path, engine: str) -> list[Path]:
     kept = accepted_release() if found is None else accepted(found)
     if kept is not None:
         return [write_overlay({"image": kept["image"], "labels": kept["labels"]})]
-    version = checkout_version(repo)
-    refuse_foreign_unaccepted(found, version)
-    image =f"{eng.RUST_IMAGE}:{version}"
-    provision(image)
+    try:
+        version = checkout_version(repo)
+        refuse_foreign_unaccepted(found, version)
+        image = f"{eng.RUST_IMAGE}:{version}"
+        provision(image)
+    except Unavailable as exc:
+        if not default:
+            raise
+        # The default engine falls back to Python; an explicit --engine rust
+        # refuses. Low disk or an unreachable Docker refuse either way.
+        cause = str(exc).split(";")[0].split(". Rerun")[0].split(". Nothing")[0].rstrip(".")
+        print(f"{cause}. The default Rust daemon is unavailable, so this install uses the Python daemon.",
+              file=sys.stderr)
+        return []
     return [write_overlay({"image": image, "labels": {eng.ENGINE_LABEL: "rust", eng.ACTIVATION_LABEL: secrets.token_hex(16),
                                                       eng.RELEASE_LABEL: version}})]
 
@@ -306,9 +325,10 @@ def accept(url: str = up.DEFAULT_DAEMON_URL) -> str:
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("detect", "prepare", "accept"))
+    parser.add_argument("action", choices=("detect", "prepare", "accept", "choose"))
     parser.add_argument("--repo", type=Path)
     parser.add_argument("--engine", choices=("python", "rust", "rust-checkout"))
+    parser.add_argument("--default", action="store_true", help="the engine was defaulted, not named: fall back to Python")
     args = parser.parse_args(argv)
     try:
         if args.action == "detect":
@@ -316,8 +336,24 @@ def main(argv=None) -> int:
         elif args.action == "prepare":
             if not args.repo or not args.engine:
                 raise Refusal("prepare needs --repo and --engine.")
-            for path in prepare(args.repo, args.engine):
+            for path in prepare(args.repo, args.engine, args.default):
                 print(path)
+        elif args.action == "choose":
+            # An explicit engine choice that leaves no activation (--engine
+            # python), recorded as update reads it, so the G2 default keeps it.
+            if args.engine != "python":
+                raise Refusal("choose records only --engine python.")
+            try:
+                eng.record_choice("python")
+            except OSError as exc:
+                # The install itself succeeded; only a later update's default
+                # could still move the host.
+                print(f"WARNING: could not record the Python engine choice ({exc.strerror or exc}); a later "
+                      "pseudolife-mcp update may move this host to the Rust daemon unless it runs with "
+                      "--engine python.", file=sys.stderr)
+                print("unrecorded")
+            else:
+                print("recorded")
         else:
             print(accept())
         return 0

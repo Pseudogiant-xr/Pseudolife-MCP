@@ -245,10 +245,91 @@ def host_labels(update) -> dict:
     return labels if isinstance(labels, dict) else {}
 
 
-def release_engine_choice(update) -> tuple[str, str]:
-    """``(selected, choice)``: the engine the host runs and the one this run deploys."""
-    selected = "rust" if host_labels(update).get(ENGINE_LABEL) == "rust" else "python"
-    return selected, update.o.engine or selected
+# The engine a Docker host that never chose one gets (G2). A host chose when
+# it runs Rust or recorded an accepted selection (`--engine python` leaves one).
+DEFAULT_ENGINE = "rust"
+
+
+CHOICE = "update-engine/engine-choice.json"
+
+
+def recorded_release_engine() -> str | None:
+    try:
+        selected = _selection(up.data_dir(), RELEASE_ACCEPTED)
+    except up.UpdateError:
+        # An unreadable record is still a record: never treat it as "unchosen".
+        return "unknown"
+    return selected["labels"][ENGINE_LABEL] if selected else None
+
+
+def recorded_choice(update=None) -> str | None:
+    """An explicit engine choice that left no activation (installer
+    `--engine python`, or `update --engine python` with nothing to deploy).
+    Only a missing file means no choice: an unreadable or corrupt one still
+    keeps the host's engine, and says so once."""
+    path = up.data_dir() / CHOICE
+    try:
+        raw = path.read_bytes()
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        reason = exc.strerror or type(exc).__name__
+    else:
+        try:
+            engine = json.loads(raw.decode("utf-8")).get("engine")
+        except (ValueError, AttributeError):  # UnicodeDecodeError is a ValueError
+            engine = None
+        if engine in ("python", "rust"):
+            return engine
+        reason = "not an engine choice"
+    if update is not None:
+        update.warn(f"cannot read the engine choice in {path} ({reason}); this host keeps its engine. Fix or remove "
+                    "that file to let the default engine apply")
+    return "unknown"
+
+
+def record_choice(engine: str) -> None:
+    path = up.data_dir() / CHOICE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(json.dumps({"engine": engine}) + "\n", encoding="utf-8")
+    temporary.replace(path)
+
+
+def rust_image_published(update, target: str) -> bool:
+    code, _ = up.run_cli([update.docker, "manifest", "inspect", f"{RUST_IMAGE}:{target}"], timeout=120,
+                         stdout_only=True)
+    return code == 0
+
+
+def release_engine_choice(update, target: str | None = None) -> tuple[str, str, bool]:
+    """``(selected, choice, defaulted)``: the engine the host runs, the one this
+    run deploys, and whether that is the G2 default rather than a choice.
+
+    An unchosen host moves to the default engine only on an attended update
+    with a backup, when the target release publishes its image; the update
+    falls back to Python if the move refuses before any change. A host chose
+    when it runs Rust, carries an activation label (either updater's engine
+    path), or recorded an accepted selection or an explicit choice.
+    """
+    labels = host_labels(update)
+    selected = "rust" if labels.get(ENGINE_LABEL) == "rust" else "python"
+    if update.o.engine:
+        return selected, update.o.engine, False
+    # The run's own flags first: an unattended run never reads the records.
+    if (update.o.unattended or update.o.no_backup or update.o.allow_auth_change
+            or DEFAULT_ENGINE == selected or target is None):
+        return selected, selected, False
+    if (bool(labels.get(ACTIVATION_LABEL)) or recorded_release_engine() is not None
+            or recorded_choice(update) is not None):
+        return selected, selected, False
+    if not rust_image_published(update, target):
+        update.step(f"could not confirm a published {DEFAULT_ENGINE} daemon image for {target} "
+                    f"(docker manifest inspect); this host stays on {selected}")
+        return selected, selected, False
+    update.step(f"moving this host to the {DEFAULT_ENGINE} daemon, the default since G2 (keep {selected} with "
+                f"--engine {selected})")
+    return selected, DEFAULT_ENGINE, True
 
 
 def release_accepted() -> Path:
@@ -328,15 +409,16 @@ def model_volumes(config: dict) -> tuple[str, list[tuple[str, str, str | None]]]
     return models_dir, mounts
 
 
-def ensure_project_volume(command, config: dict, key: str) -> None:
+def ensure_project_volume(command, config: dict, key: str) -> bool:
     """Create a project volume as Compose would (its driver, options and
-    labels), so ``up`` adopts it; an external one must already exist."""
+    labels), so ``up`` adopts it; an external one must already exist. True
+    when this call created it."""
     definition = config.get("volumes", {}).get(key) or {}
     name = definition.get("name") or key
     code, out = command(["volume", "inspect", name], timeout=60)
     try:
         if code == 0 and json.loads(out):
-            return
+            return False
     except ValueError:
         pass
     if definition.get("external"):
@@ -352,6 +434,65 @@ def ensure_project_volume(command, config: dict, key: str) -> None:
         args += ["--label", f"{label}={value}"]
     if command([*args, name], timeout=60)[0]:
         raise up.UpdateError(f"could not create the model volume {name}; check Docker and retry; nothing was deployed")
+    return True
+
+
+# Environment `check-config` reads: model and configuration locations, never
+# a bearer or the database URL (the check opens no bank).
+_CHECK_ENV_PREFIXES = ("PSEUDOLIFE_DAEMON_", "PSEUDOLIFE_EMBEDDING_", "HF_", "HUGGINGFACE_", "TRANSFORMERS_")
+_CHECK_ENV_NAMES = ("PSEUDOLIFE_MCP_CONFIG", "PSEUDOLIFE_MCP_DATA_DIR", "HOME", "XDG_CACHE_HOME")
+# A credential under an allowed prefix (HF_TOKEN) stays out of docker's argv.
+_CHECK_ENV_SECRET = ("TOKEN", "KEY", "SECRET", "PASSWORD", "CREDENTIAL")
+
+
+def _check_env(key: str) -> bool:
+    return ((key.startswith(_CHECK_ENV_PREFIXES) or key in _CHECK_ENV_NAMES)
+            and not any(word in key.upper() for word in _CHECK_ENV_SECRET))
+# `pseudolife-daemon check-config`: the image refuses this configuration. An
+# image without the command falls through to startup and exits 2 instead.
+CHECK_UNSUPPORTED = 3
+
+
+def config_check_args(config: dict, volume_exists) -> list[str]:
+    """``docker run`` arguments giving `check-config` the daemon's own view:
+    its working directory, configuration environment and every persistent
+    mount, read-only. A named volume that does not exist yet holds nothing
+    to check, and mounting it would create it outside Compose."""
+    service = config["services"][up.DAEMON_SERVICE]
+    args = ["run", "--rm", "--network", "none"]
+    if service.get("working_dir"):
+        args += ["-w", str(service["working_dir"])]
+    for key, value in sorted((service.get("environment") or {}).items()):
+        if value is not None and _check_env(key):
+            args += ["-e", f"{key}={value}"]
+    for volume in service.get("volumes", []) or []:
+        source, target = volume.get("source"), volume.get("target")
+        if not source or not target:
+            continue
+        if volume.get("type") == "volume":
+            name = (config.get("volumes", {}).get(source) or {}).get("name") or source
+            if not volume_exists(name):
+                continue
+            fields = [("type", "volume"), ("src", name), ("dst", target)]
+            subpath = (volume.get("volume") or {}).get("subpath")
+            if subpath:
+                fields.append(("volume-subpath", subpath))
+        elif volume.get("type") == "bind":
+            fields = [("type", "bind"), ("src", source), ("dst", target)]
+        else:
+            continue
+        args += ["--mount", _mount_spec([*fields, ("readonly", "true")])]
+    return args
+
+
+class DefaultFallback(up.UpdateError):
+    """A defaulted move stopped before the backup: the host is unchanged and
+    the update continues on its own engine."""
+
+    def __init__(self, cause: BaseException):
+        text = str(cause).strip()
+        self.reason = text.splitlines()[0] if text else type(cause).__name__
+        super().__init__(self.reason)
 
 
 def kept_note(message: str, rollback: str, built: str | None) -> str:
@@ -371,12 +512,14 @@ def uses_models_volume(running: dict) -> bool:
             or any(isinstance(m, dict) and m.get("Destination") == "/models" for m in running.get("Mounts") or []))
 
 
-def provision_models(update, command, image: str, config: dict) -> None:
+def provision_models(update, command, image: str, config: dict, created: list | None = None) -> None:
     """Install the pinned models into the daemon's model volume before backup.
 
     A first start would otherwise download them inside the health gate.
     The running daemon keeps serving; a rerun only verifies the cache.
-    ``config`` is the Compose config the replacement will run with.
+    ``config`` is the Compose config the replacement will run with. Volumes
+    this call creates are appended to ``created`` (a defaulted move removes
+    them again if it falls back).
     """
     plan = model_volumes(config)
     if plan is None:
@@ -384,8 +527,8 @@ def provision_models(update, command, image: str, config: dict) -> None:
         return
     models_dir, mounts = plan
     for _flag, _value, key in mounts:
-        if key is not None:
-            ensure_project_volume(command, config, key)
+        if key is not None and ensure_project_volume(command, config, key) and created is not None:
+            created.append((config.get("volumes", {}).get(key) or {}).get("name") or key)
     update.step(f"provisioning the Rust daemon's pinned models into {models_dir} (a first activation downloads them)...")
     args = ["run", "--rm", "-e", f"PSEUDOLIFE_DAEMON_MODELS_DIR={models_dir}"]
     for flag, value, _key in mounts:
@@ -398,8 +541,23 @@ def provision_models(update, command, image: str, config: dict) -> None:
 
 
 def deploy_release_engine(update, target: str, current: str | None, previous_digest: str | None,
-                          before_recreate, choice: str) -> None:
-    ReleaseEngineUpdate(update, target, current, previous_digest, choice).run(before_recreate)
+                          before_recreate, choice: str, defaulted: bool = False) -> None:
+    engine = ReleaseEngineUpdate(update, target, current, previous_digest, choice, defaulted=defaulted)
+    try:
+        engine.run(before_recreate)
+    except Exception as exc:
+        # Before the backup nothing on the host has changed: whatever stopped
+        # a defaulted move, the ordinary update still runs.
+        if defaulted and not engine.started:
+            engine.discard()
+            raise DefaultFallback(exc) from exc
+        raise
+    if choice == "python":
+        try:
+            record_choice("python")
+        except OSError as exc:
+            update.warn(f"the switch succeeded, but the Python choice could not be recorded ({exc}); "
+                        "a later update may move this host to the default engine")
 
 
 class ReleaseEngineUpdate:
@@ -412,10 +570,14 @@ class ReleaseEngineUpdate:
     and only then record the accepted selection.
     """
 
-    def __init__(self, update, target, current, previous_digest, choice):
+    def __init__(self, update, target, current, previous_digest, choice, defaulted=False):
         self.u, self.o = update, update.o
         self.target, self.current, self.previous_digest = target, current, previous_digest
         self.engine = choice
+        self.defaulted = defaulted  # the G2 default chose this engine, not the operator
+        # What a defaulted attempt added, removed again if it falls back.
+        self.pulled_image: str | None = None
+        self.created_volumes: list[str] = []
         self.host_engine = "rust" if host_labels(update).get(ENGINE_LABEL) == "rust" else "python"
         self.started = False  # True once the host changes (the backup, or the import leg)
         self.after_import = False  # the Python leg that imports weights.pt already ran
@@ -537,8 +699,44 @@ class ReleaseEngineUpdate:
                                  "contract and retry; nothing was deployed", 2)
         return int(match.group(1))
 
+    def discard(self) -> None:
+        """Remove what a defaulted attempt pulled or created, so falling back
+        leaves the host as it found it."""
+        for args in ([["image", "rm", self.pulled_image]] if self.pulled_image else []) + [
+                ["volume", "rm", name] for name in self.created_volumes]:
+            if self.command(args, timeout=120)[0]:
+                self.u.warn(f"could not remove {args[-1]} after falling back (docker {args[0]} rm); remove it by hand "
+                            "if the disk is short")
+
+    def volume_exists(self, name: str) -> bool:
+        code, out = self.command(["volume", "inspect", name], timeout=60)
+        try:
+            return code == 0 and bool(json.loads(out))
+        except ValueError:
+            return False
+
+    def check_config(self, image, config):
+        """Refuse before the backup a configuration the Rust daemon would
+        refuse at startup (a non-default reranker, an embedding model it
+        cannot load): the Python daemon keeps serving."""
+        u = self.u
+        u.step(f"checking this bank's configuration against {image}...")
+        code, out = up.run_cli([u.docker, *config_check_args(config, self.volume_exists), "--entrypoint",
+                                "pseudolife-daemon", image, "check-config"], timeout=600)
+        if code == 0:
+            return
+        detail = out.strip().splitlines()[-1].strip() if out.strip() else ""
+        if code == CHECK_UNSUPPORTED:
+            raise up.UpdateError(f"the Rust daemon does not support this bank's configuration: {detail}; "
+                                 "nothing was deployed", 2)
+        if self.defaulted:
+            raise up.UpdateError(f"could not check this bank's configuration against {image} (exit {code}"
+                                 + (f": {detail}" if detail else "") + "); nothing was deployed")
+        u.warn(f"could not check this bank's configuration against {image} (exit {code}); the health gate checks "
+               "the new daemon instead")
+
     def provision_models(self, image, config):
-        provision_models(self.u, self.command, image, config)
+        provision_models(self.u, self.command, image, config, self.created_volumes)
 
     def gate(self, token, schema):
         self.u.step("waiting for the daemon to report healthy...")
@@ -621,21 +819,32 @@ class ReleaseEngineUpdate:
                 # and the disk floor holds before that image is pulled.
                 u.preflight_disk(up.data_dir())
                 rust_image = f"{RUST_IMAGE}:{self.target}"
+                fresh = False
+                if self.defaulted:
+                    code, out = up.run_cli([u.docker, "image", "inspect", rust_image], timeout=60)
+                    fresh = code != 0 and "no such image" in out.lower()
                 u.step(f"pulling {rust_image}...")
                 code, out = self.command(["pull", rust_image], timeout=7200, stream=not o.as_json)
                 if code:
                     raise up.UpdateError(f"docker pull {rust_image} failed" + (f" ({up._last_line(out)})" if out.strip() else "")
                                          + f"; nothing was changed. Is a Rust daemon image published for {self.target}? "
                                          "Use --engine python to stay on the Python daemon")
+                if fresh:
+                    self.pulled_image = rust_image
+                # And it must run this bank's configuration: a refusal now
+                # leaves the Python daemon untouched, not one at the target.
+                self.check_config(rust_image, config)
                 self.started = True
-                saved_suffix = o.rollback_suffix
+                saved_suffix, saved_daemon_only = o.rollback_suffix, o.daemon_only
                 if saved_suffix:
                     # Both legs tag a Python image of the same version: keep them apart.
                     o.rollback_suffix = f"{saved_suffix}-pre-import"
+                # The clients move once, after the Rust leg's gate, never mid-way.
+                o.daemon_only = True
                 try:
                     ReleaseEngineUpdate(u, self.target, self.current, self.previous_digest, "python").run(before_recreate)
                 finally:
-                    o.rollback_suffix = saved_suffix
+                    o.rollback_suffix, o.daemon_only = saved_suffix, saved_daemon_only
                 # The original image's rollback stays in the report beside the second leg's.
                 before_import = dict(u.report.rollback or {})
                 follow = ReleaseEngineUpdate(u, self.target, self.target, self.previous_digest, "rust")
@@ -655,17 +864,28 @@ class ReleaseEngineUpdate:
             model_volumes(config)  # refuse a misplaced model directory before the pull
         image = f"{RUST_IMAGE if self.engine == 'rust' else up.GHCR_IMAGE}:{self.target}"
         u.preflight_disk(up.data_dir())
+        # A defaulted attempt removes an image it pulled if it falls back:
+        # only one Docker said was absent, never one a Docker error hid.
+        fresh = False
+        if self.defaulted:
+            code, out = up.run_cli([u.docker, "image", "inspect", image], timeout=60)
+            fresh = code != 0 and "no such image" in out.lower()
         u.step(f"pulling {image}...")
         code, out = self.command(["pull", image], timeout=7200, stream=not o.as_json)
+        if code == 0 and fresh:
+            self.pulled_image = image
         if code != 0:
             if self.engine != "rust":
                 hint = f"; nothing was changed. Is {self.target} a published release?"
             elif o.engine:
                 hint = (f"; nothing was changed. Is a Rust daemon image published for {self.target}? Use --engine python "
                         "to stay on the Python daemon")
-            else:
+            elif self.host_engine == "rust":
                 hint = (f"; nothing was changed: this host keeps its current Rust daemon. Retry once {self.target} "
                         "publishes its Rust daemon image, or move to it on Python with --engine python")
+            else:
+                hint = (f"; nothing was changed: this host keeps its Python daemon. A later update moves it once "
+                        f"{self.target}'s Rust daemon image pulls")
             raise up.UpdateError(f"docker pull {image} failed" + (f" ({up._last_line(out)})" if out.strip() else "") + hint)
         schema = self.probe_schema(image)
         bank = before.get("schema")
@@ -673,8 +893,13 @@ class ReleaseEngineUpdate:
             raise up.UpdateError(f"the bank is at schema v{bank}, newer than {image}'s v{schema}, which would refuse it; "
                                  f"update to a release at schema v{bank} or later; nothing was changed", 2)
         if self.engine == "rust":
+            # Before provisioning: a configuration Rust refuses downloads no models.
+            self.check_config(image, config)
             self.provision_models(image, config)
+        # A backup changes nothing on the host: a refused one still lets a
+        # defaulted move fall back to the ordinary update.
         self.backup(context["checkout"])
+        self.started = True
         if before_recreate is not None:
             before_recreate()
         running_id, _ref = u.running_image()
