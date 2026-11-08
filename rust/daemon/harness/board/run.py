@@ -172,26 +172,64 @@ def dump(dsn: str, extra_tables=()) -> dict:
     return out
 
 
+CLOCK_PROBLEM = "does not match the captured clock windows"  # Normalizer.unmatched's text
+# Per base and table, beside the dbstate base hashes it was read with: a
+# base re-read there (a test recreating it) is re-read here too.
+_BASE_ROW_KEYS: dict[tuple[str, str], tuple[object, list[str], set[str]]] = {}
+
+
+def _row_key(row: dict, columns: list[str]) -> str | None:
+    import dbstate
+    if not columns or any(c not in row for c in columns):
+        return None
+    return json.dumps([dbstate._plain(row[c]) for c in columns], sort_keys=True)
+
+
+def _base_row_keys(table: str) -> tuple[list[str], set[str]]:
+    """A board table's primary-key columns and the keys the base holds, read
+    once per process; none for a table without a primary key or without a
+    base. ``coordination_lease_waiters`` is keyed by (name, agent_id), so a
+    new waiter on a lease the base already queues on is a new row."""
+    import psycopg
+    import dbstate
+    base = os.environ.get("PL_HARNESS_BASE_DATABASE") or ""
+    if not base or base not in dbstate._BASE_INFO:
+        return [], set()
+    hashes = dbstate._BASE_HASHES.get(base)
+    cached = _BASE_ROW_KEYS.get((base, table))
+    if cached is None or cached[0] is not hashes:
+        with psycopg.connect(dbstate._BASE_INFO[base], autocommit=True) as conn:
+            columns = [r[0] for r in conn.execute(
+                "SELECT a.attname FROM pg_index i JOIN pg_attribute a ON a.attrelid = i.indrelid "
+                "AND a.attnum = ANY(i.indkey) WHERE i.indrelid = %s::regclass AND i.indisprimary "
+                "ORDER BY array_position(i.indkey::int2[], a.attnum)", (f"public.{table}",))]
+            keys = set()
+            if columns:
+                select = ", ".join(f'"{c}"' for c in columns)
+                keys = {json.dumps([dbstate._plain(v) for v in r], sort_keys=True)
+                        for r in conn.execute(f'SELECT {select} FROM public."{table}"')}
+        _BASE_ROW_KEYS[(base, table)] = (hashes, columns, keys)
+    return _BASE_ROW_KEYS[(base, table)][1:]
+
+
 def normalize_state(state: dict, norm: Normalizer) -> dict:
     out = {}
     if "base_missing" in state:
         out["base_missing"] = state["base_missing"]  # counts and digests: already comparable
-    import dbstate
     for t in (key for key in state if key not in ("meta", "sequences", "base_missing")):
-        # Under a base, a row whose key (first column) the base holds is an
-        # existing row a step rewrote (``age_bank`` shifts every clock): its
-        # clocks are compared exactly, as ``dbstate.normalize`` does, not
-        # checked against the captured windows.
-        existing = dbstate.base_keys(f"public.{t}") if "base_missing" in state else set()
+        # Under a base, a row whose primary key the base holds is an existing
+        # row a step rewrote (``age_bank`` shifts every clock): its clocks are
+        # compared exactly, as ``dbstate.normalize`` does, rather than checked
+        # against the captured windows. Only those clock problems are dropped.
+        columns, existing = _base_row_keys(t) if "base_missing" in state else ([], set())
         rows = []
         for r in state[t]:
             r = dict(r)
             payload = r.pop("payload") if t == "coordination_events" else None
             known = len(norm.problems)
             row = norm.value(r)
-            if existing and r and json.dumps(dbstate._plain(next(iter(r.values()))),
-                                             sort_keys=True) in existing:
-                del norm.problems[known:]  # an unmatched clock stays raw: compared exactly
+            if existing and _row_key(r, columns) in existing:
+                norm.problems[known:] = [p for p in norm.problems[known:] if CLOCK_PROBLEM not in p]
             if payload is not None:
                 row["payload"] = norm.payload(payload)
             rows.append(json.dumps(row, sort_keys=True, default=str))

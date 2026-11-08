@@ -170,6 +170,55 @@ def test_rewritten_base_rows_keep_their_old_clocks_without_a_clock_problem(copy)
     assert any('"created_at": 999951' in r for r in state["coordination_events"])
 
 
+def test_a_new_waiter_on_a_lease_the_base_queues_on_is_still_clock_checked(base, copy):
+    """Review (Codex): a waiter's key is (name, agent_id), not its first
+    column, so a new waiter on a lease the base already queues on is a new
+    row, checked against the captured windows; the base's own waiter,
+    rewritten, is compared exactly."""
+    import psycopg
+    with psycopg.connect(pg.dsn(base), autocommit=True) as conn:
+        conn.execute("INSERT INTO coordination_lease_waiters (name, agent_id, principal, ttl, "
+                     "enqueued_at) VALUES ('gpu', 'agent-base', 'p', 60, %s)", (OLD,))
+    dbstate._BASE_HASHES.clear()
+    dsn = copy("boardwaiter")
+    now = time.time()
+    with psycopg.connect(dsn, autocommit=True) as conn:
+        conn.execute("UPDATE coordination_lease_waiters SET enqueued_at = enqueued_at - 50")
+        conn.execute("INSERT INTO coordination_lease_waiters (name, agent_id, principal, ttl, "
+                     "enqueued_at) VALUES ('gpu', 'agent-new', 'p', 60, 2000000.25)")
+    windows = Windows()
+    windows.steps.append((now - 1, now + 1))
+    norm = Normalizer(windows)
+    run.normalize_state(run.dump(dsn), norm)
+    unmatched = [p for p in norm.problems if "does not match the captured clock windows" in p]
+    assert any("2000000.25" in p for p in unmatched), f"a new waiter went unchecked: {unmatched}"
+    assert not [p for p in unmatched if "999950.5" in p], \
+        f"the base's rewritten waiter was clock-checked: {unmatched}"
+
+
+def test_a_rewritten_base_row_keeps_its_non_clock_problems(monkeypatch):
+    """Review (Codex): only the clock-window problems of an existing row are
+    dropped; any other check a normalizer makes on it (the maintainer's proof
+    verification) still reports."""
+    class Checks(Normalizer):
+        def value(self, v, key=None):
+            if key is None and isinstance(v, dict) and "seq" in v:  # the row, not its payload
+                self.problems.append("maintainer response MAC does not authenticate its payload")
+                self.unmatched("created_at", 999951.5)
+            return super().value(v, key)
+
+    monkeypatch.setattr(run, "_base_row_keys",
+                        lambda table: (["seq"], {json.dumps([2])}) if table == "coordination_events"
+                        else ([], set()))
+    norm = Checks(Windows())
+    state = {"coordination_events": [{"seq": 2, "created_at": 999951.5, "payload": CANONICAL}],
+             "meta": [],
+             "sequences": [], "base_missing": {"coordination_events": {"count": 1, "digest": "d"}}}
+    run.normalize_state(state, norm)
+    assert "maintainer response MAC does not authenticate its payload" in norm.problems
+    assert not [p for p in norm.problems if "captured clock windows" in p]
+
+
 def test_chain_check_verifies_every_row_but_reports_only_changed_payloads(copy):
     import psycopg
     dsn = copy("boardchain")
