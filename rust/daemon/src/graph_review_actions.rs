@@ -906,11 +906,12 @@ fn typed_shape(items: &[Value]) -> Result<Vec<usize>, ToolError> {
 
 /// The stored text of a list: psycopg's own dump for an untyped list (of
 /// strings, of `None`, or empty) and PostgreSQL's `array_out` for a typed
-/// one, which agree on every list [`element_kind`] admits: `{a,b}`, an
-/// element quoted when empty, `NULL` in any ASCII case, or holding a brace,
-/// comma, quote, backslash or ASCII space (`array_isspace`, psycopg's
-/// `\s`), with `"` and `\` escaped; `None` as `NULL`, booleans `t`/`f`,
-/// numbers in their column type's text form.
+/// one (int, float or bool): `{a,b}`, `None` as `NULL`, booleans `t`/`f`,
+/// numbers in their column type's text form. A string element exists only
+/// in an untyped list ([`element_kind`] refuses mixed types), so its quoting
+/// is psycopg's rule ([`crate::pyjson::psycopg_list_str`], which since
+/// psycopg 3.3.7 also quotes some Unicode spaces), never `array_out`'s
+/// ASCII-only `array_isspace`.
 #[allow(clippy::result_large_err)]
 fn pg_array_text(items: &[Value]) -> Result<String, ToolError> {
     let mut parts = Vec::with_capacity(items.len());
@@ -923,29 +924,7 @@ fn pg_array_text(items: &[Value]) -> Result<String, ToolError> {
                 crate::pyjson::py_str(&Value::Number(n.clone()))
             }
             Value::Number(n) => pg_float8_text(n.to_string().parse().map_err(internal)?),
-            Value::String(s) => {
-                let quoted = s.is_empty()
-                    || s.eq_ignore_ascii_case("NULL")
-                    || s.chars().any(|c| {
-                        matches!(c, '{' | '}' | ',' | '"' | '\\' | ' ' | '\t' | '\n' | '\r')
-                            || c == '\u{b}'
-                            || c == '\u{c}'
-                    });
-                if quoted {
-                    let mut out = String::with_capacity(s.len() + 2);
-                    out.push('"');
-                    for c in s.chars() {
-                        if c == '"' || c == '\\' {
-                            out.push('\\');
-                        }
-                        out.push(c);
-                    }
-                    out.push('"');
-                    out
-                } else {
-                    s.clone()
-                }
-            }
+            Value::String(s) => crate::pyjson::psycopg_list_str(s),
             Value::Object(_) => unreachable!("element_kind refuses a dict"),
         });
     }
@@ -1997,15 +1976,7 @@ fn console_id_array(value: &Value) -> Result<(String, Option<&'static str>), Too
                 items.iter().map(dump).collect::<Vec<_>>().join(",")
             ),
             Value::Null => "NULL".into(),
-            Value::String(s)
-                if s.is_empty()
-                    || s.eq_ignore_ascii_case("null")
-                    || s.chars()
-                        .any(|c| c.is_ascii_whitespace() || "{},\\\"".contains(c)) =>
-            {
-                format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
-            }
-            Value::String(s) => s.clone(),
+            Value::String(s) => crate::pyjson::psycopg_list_str(s),
             _ => crate::pyjson::py_str(v),
         }
     }
