@@ -57,7 +57,7 @@ dependencies = [
     "pypdfium2==5.14.0",
     # 3.2.4+: every binary wheel ships libpq 16 or newer, which the lite tier
     # needs (require_auth keeps its password off the wire, 2026-10-25).
-    "psycopg[binary]>=3.2.4",
+    "psycopg[binary]>=3.3.7",
     "pgvector>=0.3",
     "uvicorn>=0.30",
     "networkx>=3.0",
