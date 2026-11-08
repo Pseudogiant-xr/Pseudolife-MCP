@@ -411,6 +411,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--timeout", type=float, default=1800.0)
     ap.add_argument("--stop-file", type=Path, default=Path("/control/STOP"))
     args = ap.parse_args(argv)
+    if args.only == []:
+        # Given but empty (a name list that came out empty) is not "no
+        # filter": it would plan every scenario of the chosen suites.
+        print("forced.py: --only was given no scenario names, so nothing was run; pass the names "
+              "to run, or omit --only to run every scenario", file=sys.stderr)
+        return 2
     if args.only:  # a misspelt name must not make an empty, "complete" run
         known = {n for suite in args.suites for n in scenario_names(suite)}
         unknown = sorted(set(args.only) - known)

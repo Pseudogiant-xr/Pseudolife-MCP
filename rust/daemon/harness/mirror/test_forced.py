@@ -423,3 +423,32 @@ def test_the_judge_and_session_end_dream_scenarios_take_the_quiet_base(name):
 @pytest.mark.parametrize("name", ["hook-session-end", "cli-episode-end", "linked-reads", "junkyard"])
 def test_near_miss_names_keep_the_main_base(name):
     assert forced.base_for("w2e", name)[0] == "main"
+
+
+def test_an_empty_only_refuses_instead_of_running_everything(tmp_path, monkeypatch, capsys):
+    """``--only`` given no names (a list that came out empty, as a broken
+    name-computing step yields) used to read as no filter and plan every
+    scenario. It now refuses, naming the cause and the fix."""
+    _main_env(monkeypatch)
+    monkeypatch.setattr(forced, "scenario_names", lambda suite: ["store-defaults", "judge-merge-auto"])
+    monkeypatch.setattr(forced, "base_comments", lambda: pytest.fail("got past the refusal"))
+    monkeypatch.setattr(forced, "run", lambda *a, **k: pytest.fail("ran with an empty --only"))
+    assert forced.main(["--rust-bin", "x", "--out", str(tmp_path / "o"), "--suites", "w2e", "--only"]) == 2
+    err = capsys.readouterr().err
+    assert "--only" in err and "no scenario" in err and "omit --only" in err
+    assert not (tmp_path / "o").exists()
+
+
+def test_no_only_still_plans_every_scenario(tmp_path, monkeypatch):
+    """The near miss: leaving ``--only`` out is the legitimate way to run all."""
+    _main_env(monkeypatch)
+    monkeypatch.setattr(forced, "scenario_names", lambda suite: ["store-defaults"])
+    seen = []
+
+    def run(runner, suites, only, **_):
+        seen.append(only)
+        return {"suites": {}, "not_forced": {}, "complete": True}, {}
+
+    monkeypatch.setattr(forced, "run", run)
+    assert forced.main(["--rust-bin", "x", "--out", str(tmp_path / "o"), "--suites", "w2e"]) == 0
+    assert seen == [None]
