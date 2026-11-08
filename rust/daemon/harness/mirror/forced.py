@@ -74,9 +74,10 @@ REAL_BANK_ENV = ("PL_HARNESS_BASE_DATABASE", "PL_HARNESS_STUB_DEFAULT_CONTENT",
 # (console-dream-run and -gates, forced run of 2026-11-08). Synthetic arms
 # keep the default.
 DREAM_REST_TIMEOUT = 600
-# Known limits the maintainer accepted, by scenario: an error whose attempts
-# saw the runner's cgroup kill a process (OOM) is classified "accepted" with
-# this reason, not "error". Any other error in these scenarios still counts.
+# Known limits the maintainer accepted, by scenario: an error where both real
+# attempts each saw the runner's cgroup OOM counter rise is classified
+# "accepted" with this reason, not "error". Any other error in these
+# scenarios still counts.
 ACCEPTED_OOM = {
     name: ("a known Python memory limit at the harness's worst-case -1.0 floors: Python peaks at "
            "14.5 GiB in deep apply plus the candidate judge (3.3 GiB at production floors) while "
