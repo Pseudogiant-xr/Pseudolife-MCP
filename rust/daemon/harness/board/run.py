@@ -201,7 +201,7 @@ def _base_row_keys(table: str) -> tuple[list[str], set[str]]:
         with psycopg.connect(dbstate._BASE_INFO[base], autocommit=True) as conn:
             columns = [r[0] for r in conn.execute(
                 "SELECT a.attname FROM pg_index i JOIN pg_attribute a ON a.attrelid = i.indrelid "
-                "AND a.attnum = ANY(i.indkey) WHERE i.indrelid = %s::regclass AND i.indisprimary "
+                "AND a.attnum = ANY(i.indkey) WHERE i.indrelid = to_regclass(%s) AND i.indisprimary "
                 "ORDER BY array_position(i.indkey::int2[], a.attnum)", (f"public.{table}",))]
             keys = set()
             if columns:
