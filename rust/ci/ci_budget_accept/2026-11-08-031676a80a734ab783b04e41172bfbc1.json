@@ -2,7 +2,7 @@
   "schema": 1,
   "workflow": "rust.yml",
   "job": "rust",
-  "before": "883266f7ac21fc64",
-  "fingerprint": "547529da7e11c8b2",
+  "before": "328c5674484d85a4",
+  "fingerprint": "544f258782233c6a",
   "reason": "Adds rust/daemon/harness/board/test_base_delta.py (board base-delta dumps) to the board harness step: 6 tests, about 5 s against a local bench PostgreSQL; on hosted runners without the disposable-bank login its 5 database cases skip and the pure case runs in under 0.2 s, so the step's 3-minute timeout holds."
 }

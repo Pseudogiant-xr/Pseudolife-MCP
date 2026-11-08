@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "rust",
+  "before": "a5945ef39915a21a",
+  "fingerprint": "9dfe05b8338324d8",
+  "reason": "Adds rust/daemon/harness/test_w2e_judge_settle.py (one offline case; its database case skips without the disposable-bank login, as on hosted runners; 0.5 s on a workstation, 2026-11-08) to the board and mirror harness pytest step. The 3-minute timeout holds."
+}

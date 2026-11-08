@@ -334,7 +334,7 @@ jobs:
         run: |
           python -m pip install pytest pyyaml "psycopg[binary]" psutil
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python -m pytest -q rust/test_contract_inventory.py rust/test_producer_census.py rust/daemon/harness/test_w2e_lifecycle.py
+          python -m pytest -q rust/test_contract_inventory.py rust/test_producer_census.py rust/daemon/harness/test_w2e_lifecycle.py rust/daemon/harness/test_w2e_own_decisions.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python rust/producer_census.py --ci-check
           exit $LASTEXITCODE
@@ -350,7 +350,7 @@ jobs:
         # The mirror seed's database cases start a throwaway PostgreSQL on a
         # Linux engine and skip elsewhere.
         timeout-minutes: 3
-        run: python -m pytest -q rust/daemon/harness/board/test_norm.py rust/daemon/harness/board/test_run.py rust/daemon/harness/board/test_lease_recovery.py rust/daemon/harness/board/test_maintainer_rollback.py rust/daemon/harness/board/test_base_delta.py rust/daemon/harness/test_pgdisposable_slices.py rust/daemon/harness/mirror/test_seed.py rust/daemon/harness/mirror/test_forced.py rust/daemon/harness/mirror/test_base_delta.py rust/daemon/harness/mirror/test_seed_keys.py
+        run: python -m pytest -q rust/daemon/harness/board/test_norm.py rust/daemon/harness/board/test_run.py rust/daemon/harness/board/test_lease_recovery.py rust/daemon/harness/board/test_maintainer_rollback.py rust/daemon/harness/board/test_base_delta.py rust/daemon/harness/test_pgdisposable_slices.py rust/daemon/harness/test_w2e_judge_settle.py rust/daemon/harness/mirror/test_seed.py rust/daemon/harness/mirror/test_forced.py rust/daemon/harness/mirror/test_base_delta.py rust/daemon/harness/mirror/test_seed_keys.py
       - name: Bind the event-selected Python oracle
         shell: pwsh
         working-directory: .
@@ -1084,7 +1084,7 @@ jobs:
         timeout-minutes: 1
         shell: pwsh
         run: |
-          python -m pytest -q rust/daemon/harness/test_w2d_controls.py rust/daemon/harness/test_w2d_namespace.py rust/daemon/harness/test_w2d_recent.py rust/daemon/harness/test_config_knobs_golden.py -ra --durations=30 --junitxml (Join-Path $env:RUNNER_TEMP 'junit/offline-w2-d-search-harness-regressions.xml')
+          python -m pytest -q rust/daemon/harness/test_w2d_controls.py rust/daemon/harness/test_w2d_namespace.py rust/daemon/harness/test_w2d_recent.py rust/daemon/harness/test_w2d_seed_base.py rust/daemon/harness/test_config_knobs_golden.py -ra --durations=30 --junitxml (Join-Path $env:RUNNER_TEMP 'junit/offline-w2-d-search-harness-regressions.xml')
           exit $LASTEXITCODE
       # This fixture creates a small graph locally; no model is downloaded.
       - name: Offline embedding golden and mutant row
