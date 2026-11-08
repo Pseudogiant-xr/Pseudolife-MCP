@@ -143,8 +143,8 @@ packaging==26.2
 pgvector==0.4.2
 propcache==0.5.2
 protobuf==6.33.6
-psycopg-binary==3.3.4
-psycopg==3.3.4
+psycopg-binary==3.3.8
+psycopg==3.3.8
 pybase64==1.4.3
 pycparser==3.0
 pydantic-settings==2.14.2

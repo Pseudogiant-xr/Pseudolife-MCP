@@ -84,3 +84,68 @@ else:
     result = subprocess.run([sys.executable, "-c", probe_code], cwd=HERE, env=env,
                             capture_output=True, text=True, encoding="utf-8", timeout=120)
     assert result.returncode == 0, result.stderr
+
+
+
+def _gate():
+    """The harness's database gate, imported in this process (the tests above
+    import harness modules in subprocesses)."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import database_gate
+    return database_gate
+
+def test_an_unavailable_database_skips_by_default(monkeypatch):
+    import pytest as _pytest
+    gate = _gate()
+    monkeypatch.delenv(gate.REQUIRE_DATABASES_ENV, raising=False)
+    with _pytest.raises(_pytest.skip.Exception, match="no disposable-bank login"):
+        gate.unavailable("no disposable-bank login here", "create one")
+
+
+def test_an_unavailable_database_fails_when_databases_are_required(monkeypatch):
+    """The batch's local harness run (--require-databases) must not pass a
+    database case it never ran: it fails, naming the cause and the fix."""
+    import pytest as _pytest
+    gate = _gate()
+    monkeypatch.setenv(gate.REQUIRE_DATABASES_ENV, "1")
+    with _pytest.raises(_pytest.fail.Exception) as failed:
+        gate.unavailable("no Linux Docker engine answers here", "start Docker and rerun")
+    text = str(failed.value)
+    assert "no Linux Docker engine answers here" in text and "start Docker and rerun" in text
+    assert "--require-databases" in text
+
+
+def test_the_option_turns_database_skips_into_failures(monkeypatch):
+    """rust/conftest.py's --require-databases sets what unavailable() reads."""
+    import importlib.util
+    from types import SimpleNamespace
+    gate = _gate()
+    # Registered with monkeypatch first (set, then removed), so teardown takes
+    # away what pytest_configure sets below: left set, it turned every later
+    # database skip in this process into a failure (review finding on #1415).
+    monkeypatch.setenv(gate.REQUIRE_DATABASES_ENV, "0")
+    monkeypatch.delenv(gate.REQUIRE_DATABASES_ENV)
+    spec = importlib.util.spec_from_file_location(
+        "rust_conftest", Path(__file__).resolve().parents[2] / "conftest.py")
+    conftest = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(conftest)
+    conftest.pytest_configure(SimpleNamespace(getoption=lambda name: False))
+    assert gate.REQUIRE_DATABASES_ENV not in __import__("os").environ
+    conftest.pytest_configure(SimpleNamespace(getoption=lambda name: name == "--require-databases"))
+    assert __import__("os").environ[gate.REQUIRE_DATABASES_ENV] == "1"
+
+
+
+def test_the_option_test_leaves_no_strict_mode_behind():
+    """Run in CI's order, without the option and without a login, the
+    database cases after the option test still skip."""
+    here = Path(__file__).resolve().parent
+    env = {k: v for k, v in os.environ.items() if k != _gate().REQUIRE_DATABASES_ENV}
+    env["PSEUDOLIFE_TEST_PG_LOGIN_FILE"] = str(here / "no-such-login.env")
+    run = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
+         f"{here / 'test_pgdisposable_slices.py'}::test_the_option_turns_database_skips_into_failures",
+         str(here / "mirror" / "test_base_delta.py")],
+        cwd=here.parents[2], env=env, capture_output=True, text=True, timeout=120)
+    assert run.returncode == 0, run.stdout[-2000:] + run.stderr[-2000:]
+    assert "2 skipped" in run.stdout.splitlines()[-1], run.stdout[-2000:]

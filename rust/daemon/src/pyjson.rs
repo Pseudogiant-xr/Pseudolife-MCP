@@ -27,6 +27,35 @@ pub(crate) fn type_name(v: &Value) -> &'static str {
     }
 }
 
+/// One string element of psycopg's text dump of a Python list
+/// (`ListDumper`), which an untyped list (strings, `None`, empty) binds as
+/// verbatim. psycopg quotes the element, escaping `"` and `\`, when it is
+/// empty, is `NULL` in any ASCII case, or holds `{`, `}`, `,`, `"`, `\`, an
+/// ASCII space of Python's bytes `\s` (space, `\t`, `\n`, `\v`, `\f`, `\r`)
+/// or, since psycopg 3.3.7, one of the Unicode spaces U+1680, U+2000-U+200A,
+/// U+2028, U+2029, U+202F, U+205F, U+3000 (`_get_needs_quotes_regexp`,
+/// `psycopg/types/array.py:215-223` in 3.3.8). Other Unicode white space
+/// (U+00A0, U+0085) is not quoted. PostgreSQL's own `array_out` quotes ASCII
+/// space only, so this is psycopg's rule and not the stored text of a typed
+/// array, which never holds a string element. psycopg up to 3.3.6 quoted
+/// only the ASCII set; this follows the release CI installs.
+pub(crate) fn psycopg_list_str(s: &str) -> String {
+    const ASCII: &str = "{},\"\\ \t\n\u{b}\u{c}\r";
+    let unicode_space = |c: char| {
+        matches!(c, '\u{2000}'..='\u{200a}')
+            || matches!(c, '\u{1680}' | '\u{2028}' | '\u{2029}' | '\u{202f}')
+            || matches!(c, '\u{205f}' | '\u{3000}')
+    };
+    let quoted = s.is_empty()
+        || s.eq_ignore_ascii_case("null")
+        || s.chars().any(|c| ASCII.contains(c) || unicode_space(c));
+    if quoted {
+        format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
+    } else {
+        s.to_string()
+    }
+}
+
 /// psycopg parameters assigned to a PostgreSQL TEXT column. Keep this
 /// separate from Python str(): bools and arrays have different SQL text.
 pub(crate) async fn pg_text(
@@ -79,18 +108,7 @@ pub(crate) async fn pg_text(
                 Ok(match v {
                     Value::Null => "NULL".into(),
                     Value::Bool(b) => if *b { "t" } else { "f" }.into(),
-                    Value::String(s) => {
-                        if s.is_empty()
-                            || s.eq_ignore_ascii_case("null")
-                            || s.bytes().any(|b| {
-                                b.is_ascii_whitespace() || b == 0x0b || b"{},\"\\".contains(&b)
-                            })
-                        {
-                            format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
-                        } else {
-                            s.clone()
-                        }
-                    }
+                    Value::String(s) => psycopg_list_str(s),
                     Value::Number(n) => number_text(n),
                     Value::Array(a) => format!(
                         "{{{}}}",
@@ -326,6 +344,32 @@ mod tests {
             assert_eq!(dumps(&value), format!("{{\"timestamp\": {expected}}}"));
             assert_eq!(py_str(&value["timestamp"]), expected);
         }
+    }
+
+    #[test]
+    fn list_str_quotes_exactly_psycopg_needs_quotes_set() {
+        // Every code point whose `"a{c}b"` psycopg 3.3.8's needs-quotes
+        // regex (`psycopg/types/array.py:215-223`, delimiter `,`) matches,
+        // scanned over U+0000-U+10FFFF in CPython 3.11 on 2026-11-09.
+        const QUOTED: [u32; 28] = [
+            0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x20, 0x22, 0x2c, 0x5c, 0x7b, 0x7d, 0x1680, 0x2000,
+            0x2001, 0x2002, 0x2003, 0x2004, 0x2005, 0x2006, 0x2007, 0x2008, 0x2009, 0x200a, 0x2028,
+            0x2029, 0x202f, 0x205f, 0x3000,
+        ];
+        let mut got = Vec::new();
+        for c in (0..=0x10ffffu32).filter_map(char::from_u32) {
+            let s = format!("a{c}b");
+            let out = psycopg_list_str(&s);
+            if out != s {
+                assert!(out.starts_with('"') && out.ends_with('"'), "{out:?}");
+                got.push(c as u32);
+            }
+        }
+        assert_eq!(got, QUOTED);
+        assert_eq!(psycopg_list_str(""), "\"\"");
+        assert_eq!(psycopg_list_str("nUlL"), "\"nUlL\"");
+        assert_eq!(psycopg_list_str("nulls"), "nulls");
+        assert_eq!(psycopg_list_str("a\"\\\u{2003}"), "\"a\\\"\\\\\u{2003}\"");
     }
 
     #[test]
