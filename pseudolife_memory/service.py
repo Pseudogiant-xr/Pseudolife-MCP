@@ -2960,6 +2960,16 @@ class MemoryService(DreamOps, MaintainerOps):
         replacement = self._correction_replacement(staged, before_dream_ids)
         if self._storage is not None and replacement.db_id is None:
             raise RuntimeError("correction replacement has no durable row ID")
+        if self._storage is not None and not isinstance(replacement.source, str):
+            # The Console passes a raw JSON source (a list, number or
+            # boolean); keep the text the row stored, as a restart would load
+            # it and as the Rust daemon holds it. A raw list on the live entry
+            # failed every later hash of it: eviction, ``sources=`` filters,
+            # the source list. Read inside the correction's own transaction.
+            row = self._storage.conn.execute(
+                "SELECT source FROM entries WHERE id = %s",
+                (replacement.db_id,)).fetchone()
+            replacement.source = row[0] if row is not None and row[0] is not None else ""
         return derived, replacement, surprise
 
     def _apply_correction_locked(
