@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "parity-checks",
+  "before": "881382325b091313",
+  "fingerprint": "930cb80745ed6a02",
+  "reason": "Adds rust/daemon/harness/test_w2d_seed_base.py (its two database cases skip without the disposable-bank login, as on hosted runners; 5 s on a workstation with the login, 2026-11-08) to the offline w2-d search harness regressions step. The step's timeout holds."
+}

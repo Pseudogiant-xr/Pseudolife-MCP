@@ -1084,7 +1084,7 @@ jobs:
         timeout-minutes: 1
         shell: pwsh
         run: |
-          python -m pytest -q rust/daemon/harness/test_w2d_controls.py rust/daemon/harness/test_w2d_namespace.py rust/daemon/harness/test_w2d_recent.py rust/daemon/harness/test_config_knobs_golden.py -ra --durations=30 --junitxml (Join-Path $env:RUNNER_TEMP 'junit/offline-w2-d-search-harness-regressions.xml')
+          python -m pytest -q rust/daemon/harness/test_w2d_controls.py rust/daemon/harness/test_w2d_namespace.py rust/daemon/harness/test_w2d_recent.py rust/daemon/harness/test_w2d_seed_base.py rust/daemon/harness/test_config_knobs_golden.py -ra --durations=30 --junitxml (Join-Path $env:RUNNER_TEMP 'junit/offline-w2-d-search-harness-regressions.xml')
           exit $LASTEXITCODE
       # This fixture creates a small graph locally; no model is downloaded.
       - name: Offline embedding golden and mutant row
