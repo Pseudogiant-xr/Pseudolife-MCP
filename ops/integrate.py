@@ -98,9 +98,10 @@ CENSUS_SUBJECT = "Regenerate producer census and CI metadata for this batch"
 # skipped database case cannot pass unseen.
 RUST_HARNESS = (
     "rust/test_contract_inventory.py", "rust/test_producer_census.py",
-    "rust/daemon/harness/test_w2e_lifecycle.py",
+    "rust/daemon/harness/test_w2e_lifecycle.py", "rust/daemon/harness/test_w2e_own_decisions.py",
     "rust/daemon/harness/board/test_norm.py", "rust/daemon/harness/board/test_run.py",
     "rust/daemon/harness/board/test_lease_recovery.py",
+    "rust/daemon/harness/board/test_maintainer_rollback.py",
     "rust/daemon/harness/test_pgdisposable_slices.py",
     "rust/daemon/harness/mirror/test_seed.py", "rust/daemon/harness/mirror/test_forced.py",
     "rust/daemon/harness/mirror/test_base_delta.py",
