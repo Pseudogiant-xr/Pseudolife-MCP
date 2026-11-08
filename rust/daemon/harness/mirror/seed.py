@@ -383,6 +383,10 @@ QUIET_DB = "pl_cf_mir_seed_quiet"
 # bank held 3,915 entries pending a dream and 276 entity and 376 edge
 # proposals pending a judge, so a scenario driving those queues waited on
 # the whole real backlog and never settled. Copy only; the seed is untouched.
+# The automatic decisions go too (extending D1, 2026-11-08): each sweep tick
+# a judge reopens a batch of the decided proposals they name, so on the copy
+# the merge judge reopened 8 a tick from 2,851 records and its queue never
+# drained. The decided proposal rows stay, as history.
 QUIET_SQL = """BEGIN;
 WITH d AS (UPDATE entries SET dream_state = 'acknowledged' WHERE dream_state = 'pending' RETURNING 1)
   SELECT 'acknowledged', count(*) FROM d;
@@ -390,6 +394,9 @@ WITH d AS (DELETE FROM entity_proposals WHERE status = 'pending' RETURNING 1)
   SELECT 'entity_proposals_removed', count(*) FROM d;
 WITH d AS (DELETE FROM edge_proposals WHERE status = 'pending' RETURNING 1)
   SELECT 'edge_proposals_removed', count(*) FROM d;
+WITH d AS (DELETE FROM meta WHERE key = 'automatic_review_decisions_v1'
+                              OR key LIKE 'automatic\\_review\\_decision\\_v1:%' RETURNING 1)
+  SELECT 'automatic_decisions_removed', count(*) FROM d;
 COMMIT;
 """
 
@@ -452,7 +459,8 @@ def _derived_copy(docker: Docker, cid: str | None, floor: int, database: str, st
             "changes": changes}
 
 
-QUIET_KEYS = ("acknowledged", "entity_proposals_removed", "edge_proposals_removed")
+QUIET_KEYS = ("acknowledged", "entity_proposals_removed", "edge_proposals_removed",
+              "automatic_decisions_removed")
 
 
 def quiet(docker: Docker, cid: str | None = None, floor: int = DISK_FLOOR) -> dict:

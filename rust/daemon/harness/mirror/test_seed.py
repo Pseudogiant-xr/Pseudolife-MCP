@@ -529,3 +529,36 @@ def test_the_curation_copy_holds_no_current_lesson_or_world_fact(throwaway_pg):
     # The current rows are superseded, stamped; the one already superseded keeps its own stamp.
     assert sorted(out.split()) == ["l|superseded|f", "l|superseded|t", "w|superseded|t"]
     assert _rows(cid, "SELECT status FROM lessons ORDER BY status") == [["current"], ["superseded"]]
+
+
+def test_quiet_removes_the_automatic_decisions_a_judge_would_reconsider(tmp_path):
+    """Each sweep tick the merge judge reopens a batch of decided proposals
+    its automatic decisions name (review_decisions.refresh_proposal_terminals).
+    On the real bank's quiet copy that reopened 8 a tick from 2,851 records,
+    so the judge's queue never drained and judge-merge never settled (forced
+    run, 2026-11-08). Conductor decision, extending D1."""
+    docker = FakeDocker(tmp_path, seed_comment="pl_cf_mir seed from b at t")
+    record = seed.quiet(docker)
+    sql = next(i for a, i in docker.calls if i and b"dream_state = 'acknowledged'" in i).decode()
+    assert "automatic_review_decisions_v1" in sql
+    assert r"automatic\_review\_decision\_v1:%" in sql  # LIKE with the underscores literal
+    assert "automatic_decisions_removed" in record["changes"]
+
+
+def test_the_quiet_copy_holds_no_automatic_decision_and_the_seed_keeps_them(throwaway_pg):
+    cid = throwaway_pg
+    d = seed.Docker()
+    d.psql(cid, "pl_cf_mir_seed",
+           "DELETE FROM meta WHERE key LIKE 'automatic_review_decision%' OR key = 'unrelated_key';\n"
+           "INSERT INTO meta (key, value) VALUES ('automatic_review_decisions_v1', '{\"active\": {}}'), "
+           "('automatic_review_decision_v1:d1', '{}'), ('automatic_review_decision_v1:d2', '{}'), "
+           "('unrelated_key', '1');\n")
+    if not _rows(cid, "SELECT 1 FROM pg_database WHERE datname = 'pl_cf_mir_home'"):
+        d.psql(cid, "pl_cf_mir_seed", "CREATE DATABASE pl_cf_mir_home;\n")
+    d.psql(cid, "pl_cf_mir_seed", "COMMENT ON DATABASE pl_cf_mir_seed IS 'pl_cf_mir seed from t at 1';\n")
+    record = seed.quiet(d, cid=cid, floor=0)
+    assert record["changes"]["automatic_decisions_removed"] == 3
+    left = d.psql(cid, seed.QUIET_DB, "SELECT key FROM meta WHERE key LIKE 'automatic_review_decision%' "
+                  "OR key = 'unrelated_key' ORDER BY key;\n").split()
+    assert left == ["unrelated_key"]  # only the automatic decisions go
+    assert _rows(cid, "SELECT count(*) FROM meta WHERE key LIKE 'automatic_review_decision%'") == [["3"]]
