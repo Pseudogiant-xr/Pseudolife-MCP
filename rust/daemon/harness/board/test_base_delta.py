@@ -145,6 +145,31 @@ def test_clock_windows_check_new_rows_but_not_unchanged_base_rows(copy):
         f"unchanged base rows were clock-checked: {unmatched}"
 
 
+def test_rewritten_base_rows_keep_their_old_clocks_without_a_clock_problem(copy):
+    """A step that rewrites base rows (the scenarios' ``age_bank`` shifts
+    every row's clocks) dumps them with clocks no captured window holds:
+    like ``dbstate.normalize``, a row whose key the base holds is an
+    existing row, compared exactly rather than clock-checked."""
+    import psycopg
+    dsn = copy("boardaged")
+    now = time.time()
+    with psycopg.connect(dsn, autocommit=True) as conn:
+        conn.execute("UPDATE coordination_events SET created_at = created_at - 50")
+        seq, prev = _head(conn)
+        _insert(conn, _event(seq + 1, prev, CANONICAL, 2_000_000.25))
+    windows = Windows()
+    windows.steps.append((now - 1, now + 1))
+    norm = Normalizer(windows)
+    state = run.normalize_state(run.dump(dsn), norm)
+    unmatched = [p for p in norm.problems if "does not match the captured clock windows" in p]
+    assert not [p for p in unmatched if "999951" in p or "999952" in p or "999953" in p], \
+        f"rewritten base rows were clock-checked: {unmatched}"
+    # The near miss: a new row's foreign clock is still reported.
+    assert any("2000000.25" in p for p in unmatched), "a new row's foreign clock went unreported"
+    # The rewritten rows' clocks stay raw, so a difference between arms shows.
+    assert any('"created_at": 999951' in r for r in state["coordination_events"])
+
+
 def test_chain_check_verifies_every_row_but_reports_only_changed_payloads(copy):
     import psycopg
     dsn = copy("boardchain")

@@ -144,13 +144,17 @@ def dump(dsn: str, extra_tables=()) -> dict:
     a copied real board (96k events) per write step took about 10 s and let
     60-second listener windows expire mid-scenario (daemon box, 2026-11-08).
     Both arms copy the same base, so its unchanged rows lose only their
-    display, and their clocks, which no captured window holds, go unchecked."""
+    display, and their clocks, which no captured window holds, go unchecked;
+    a base row a step rewrote is dumped, and ``normalize_state`` compares its
+    clocks exactly."""
     import psycopg
     from psycopg.rows import dict_row
     import dbstate
     base = dbstate._base_hashes(dsn)
     out = {}
-    with psycopg.connect(dsn, autocommit=True, row_factory=dict_row) as conn:
+    # One snapshot: under a base each table is read twice (hashes, then rows).
+    with psycopg.connect(dsn, row_factory=dict_row) as conn:
+        conn.isolation_level = psycopg.IsolationLevel.REPEATABLE_READ
         conn.execute("SET extra_float_digits = 3")
         for t in (*BOARD_TABLES, *extra_tables):
             if base is None:
@@ -172,12 +176,22 @@ def normalize_state(state: dict, norm: Normalizer) -> dict:
     out = {}
     if "base_missing" in state:
         out["base_missing"] = state["base_missing"]  # counts and digests: already comparable
+    import dbstate
     for t in (key for key in state if key not in ("meta", "sequences", "base_missing")):
+        # Under a base, a row whose key (first column) the base holds is an
+        # existing row a step rewrote (``age_bank`` shifts every clock): its
+        # clocks are compared exactly, as ``dbstate.normalize`` does, not
+        # checked against the captured windows.
+        existing = dbstate.base_keys(f"public.{t}") if "base_missing" in state else set()
         rows = []
         for r in state[t]:
             r = dict(r)
             payload = r.pop("payload") if t == "coordination_events" else None
+            known = len(norm.problems)
             row = norm.value(r)
+            if existing and r and json.dumps(dbstate._plain(next(iter(r.values()))),
+                                             sort_keys=True) in existing:
+                del norm.problems[known:]  # an unmatched clock stays raw: compared exactly
             if payload is not None:
                 row["payload"] = norm.payload(payload)
             rows.append(json.dumps(row, sort_keys=True, default=str))
