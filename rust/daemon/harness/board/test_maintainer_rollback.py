@@ -50,7 +50,13 @@ def test_the_rollback_snapshot_sees_any_change_and_ignores_row_order(board_db):
         assert maintainer.snapshot(board_db, None) == first  # same rows, other order
         conn.execute("UPDATE maintainer_nonces SET expires_at = 3 WHERE nonce = 'n2'")
         changed = maintainer.snapshot(board_db, None)
-    assert changed != first
-    assert [t for t in first if first[t] != changed[t]] == ["maintainer_nonces"]
+        assert changed != first
+        assert [t for t in first if first[t] != changed[t]] == ["maintainer_nonces"]
+        # A refusal that spends a lease fence number is seen too: the skipped
+        # cross-side dump held the sequences and meta keys as well.
+        conn.execute("SELECT nextval('coordination_lease_fence')")
+        fenced = maintainer.snapshot(board_db, None)
+    assert [t for t in changed if changed[t] != fenced[t]] == ["sequences"]
     # A digest per table, computed by the server: no row crosses the wire.
-    assert all(isinstance(v, tuple) and len(v) == 2 for v in first.values()), first
+    assert all(isinstance(first[t], tuple) and len(first[t]) == 2
+               for t in first if t not in ("meta", "sequences")), first

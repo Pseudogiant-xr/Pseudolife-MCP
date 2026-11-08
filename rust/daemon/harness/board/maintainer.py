@@ -99,13 +99,20 @@ def snapshot(dsn, _ctx):
     equality check, without fetching a large board's every event (96k on a
     real board's copy) before and after each refused step."""
     import psycopg
-    from board.run import BOARD_TABLES
+    from board.run import BOARD_TABLES, META_KEYS, SEQUENCES
 
     with psycopg.connect(dsn, autocommit=True) as conn:
-        return {table: tuple(conn.execute(
-                    "SELECT count(*), md5(coalesce(string_agg(r, chr(10) ORDER BY r), '')) "
-                    f"FROM (SELECT row_to_json(t)::text AS r FROM {table} t) rows").fetchone())
-                for table in (*BOARD_TABLES, *TABLES)}
+        out = {table: tuple(conn.execute(
+                   "SELECT count(*), md5(coalesce(string_agg(r, chr(10) ORDER BY r), '')) "
+                   f"FROM (SELECT row_to_json(t)::text AS r FROM {table} t) rows").fetchone())
+               for table in (*BOARD_TABLES, *TABLES)}
+        # The meta keys and sequences the skipped cross-side dump also held.
+        out["meta"] = conn.execute("SELECT key, value FROM meta WHERE key = ANY(%s) ORDER BY key",
+                                   (list(META_KEYS),)).fetchall()
+        out["sequences"] = conn.execute(
+            "SELECT sequencename, last_value FROM pg_sequences WHERE sequencename = ANY(%s) "
+            "ORDER BY sequencename", (list(SEQUENCES),)).fetchall()
+        return out
 
 
 def post(title, route, body=None, *, expected=200, error=None, save=None, token="default",
