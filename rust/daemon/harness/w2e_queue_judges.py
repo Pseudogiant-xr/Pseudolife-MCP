@@ -116,14 +116,39 @@ CANDIDATES_DONE = (
     "SELECT EXISTS (SELECT 1 FROM meta j JOIN meta a ON a.key = 'deep_last_apply' "
     "WHERE j.key = 'deep_candidates_judged' AND (j.value->>'complete')::boolean "
     "AND j.value->'ts' = a.value->'ts')")
+# The candidate scenarios' own automatic dismissals, by pair (the record's
+# sorted canonicals). Every decision check names its own pair, entity or
+# rationale: on a real bank's copy the bank's own decisions are there too,
+# and a check matching any decision of a queue and state could hold, or
+# fail, on those alone (forced real-data run, 2026-11-08).
+CANDIDATE_PAIRS = (("kafka-broker", "postgres"), ("kelp-farm", "warehouse"))
+DISMISSED_PAIR = CANDIDATE_PAIRS[0]
+
+
+def own_pairs(*pairs: tuple[str, str]) -> str:
+    """``value->'pair'`` is one of ``pairs``."""
+    listed = ", ".join("'[\"%s\", \"%s\"]'::jsonb" % tuple(sorted(p)) for p in pairs)
+    return f"value->'pair' IN ({listed})"
+
+
+def candidate_records_sql(pairs: tuple = CANDIDATE_PAIRS) -> str:
+    """The active automatic candidate dismissals of ``pairs``."""
+    return ("SELECT value FROM meta WHERE key LIKE 'automatic_review_decision_v1:%' "
+            "AND value->>'queue' = 'candidate' AND value->>'state' = 'active' "
+            f"AND {own_pairs(*pairs)}")
+
+
 CANDIDATE_REOPENED = (
     "SELECT EXISTS (SELECT 1 FROM meta WHERE key LIKE 'automatic_review_decision_v1:%' "
-    "AND value->>'queue' = 'candidate' AND value->>'state' = 'reopened') "
+    "AND value->>'queue' = 'candidate' AND value->>'state' = 'reopened' "
+    f"AND {own_pairs(DISMISSED_PAIR)}) "
     "AND EXISTS (SELECT 1 FROM meta WHERE key LIKE 'automatic_review_decision_v1:%' "
-    "AND value->>'queue' = 'candidate' AND value->>'state' = 'active')")
+    f"AND value->>'queue' = 'candidate' AND value->>'state' = 'active' "
+    f"AND {own_pairs(DISMISSED_PAIR)})")
 
 
-def fingerprint_diffs(dsns: dict, config_text: str) -> list[str]:
+def fingerprint_diffs(dsns: dict, config_text: str,
+                      pairs: tuple = CANDIDATE_PAIRS) -> list[str]:
     """Python's own candidate fingerprints over each side's bank: the scan
     generation against the bank's watermark, and each active automatic
     dismissal's evidence against its record. The bank is the same on both
@@ -166,9 +191,7 @@ def fingerprint_diffs(dsns: dict, config_text: str) -> list[str]:
             if not mark or mark[0].get("generation") != want:
                 out.append(f"candidate generation {side}: bank {want}, watermark "
                            f"{mark[0].get('generation') if mark else None}")
-            for (rec,) in conn.execute(
-                    "SELECT value FROM meta WHERE key LIKE 'automatic_review_decision_v1:%' "
-                    "AND value->>'queue' = 'candidate' AND value->>'state' = 'active'"):
+            for (rec,) in conn.execute(candidate_records_sql(pairs)):
                 got = candidate_evidence_fingerprints(svc, [rec.get("candidate") or {}])[0]
                 if got != rec.get("evidence_fingerprint"):
                     out.append(f"candidate evidence {side} {rec.get('target')}: bank {got}, "
@@ -324,7 +347,8 @@ def scenarios(w) -> dict:
 
     candidate_decision = ("SELECT EXISTS (SELECT 1 FROM meta WHERE key LIKE "
                           "'automatic_review_decision_v1:%' AND value->>'queue' = 'candidate' "
-                          "AND value->>'action' = 'dismiss' AND value->>'state' = 'active')")
+                          "AND value->>'action' = 'dismiss' AND value->>'state' = 'active' "
+                          f"AND {own_pairs(DISMISSED_PAIR)})")
     memo_count = ("SELECT (SELECT COUNT(*) FROM jsonb_object_keys("
                   "(SELECT value->'pairs' FROM meta WHERE key = 'deep_candidate_verdicts'))) "
                   "> 0")
@@ -430,7 +454,7 @@ def scenarios(w) -> dict:
                      candidate_pair("warehouse", "kelp-farm"),
                      "SELECT NOT EXISTS (SELECT 1 FROM meta WHERE key LIKE "
                      "'automatic_review_decision_v1:%' AND value->>'queue' = 'candidate' "
-                     "AND value->>'state' = 'reopened')",
+                     f"AND value->>'state' = 'reopened' AND {own_pairs(*CANDIDATE_PAIRS)})",
                      f"SELECT NOT ({proposed('billing-service', 'kafka-broker-cluster')[7:]})",
                      f"SELECT NOT ({proposed('deploy-agent', 'kafka-broker-cluster')[7:]})"),
             w.review()]),
@@ -513,7 +537,8 @@ def scenarios(w) -> dict:
                                   "until": "SELECT EXISTS (SELECT 1 FROM meta WHERE key LIKE "
                                            "'automatic_review_decision_v1:%' AND "
                                            "value->>'queue' = 'link' AND "
-                                           "value->>'state' = 'reopened')"}},
+                                           "value->>'state' = 'reopened' AND "
+                                           "value->'proposal'->>'rationale' = 'detector: p2')"}},
                       link_row("P2", "status = 'rejected'"), link_pair("P2"),
                       link_decision("P2", pair=True)),
              w.review()]),
@@ -539,7 +564,8 @@ def scenarios(w) -> dict:
                                              "AND judge_confidence = 0"),
                       "SELECT EXISTS (SELECT 1 FROM meta WHERE key LIKE "
                       "'automatic_review_decision_v1:%' AND value->>'queue' = 'junk' "
-                      "AND value->>'action' = 'keep')"),
+                      "AND value->>'action' = 'keep' AND value->'proposal'->>'entity_id' = "
+                      f"({w.eid('beta-store')})::text)"),
              w.snapshot_file(), w.review()]),
             # Delta Node carries two current facts: its delete fails the bar.
             "seed": [*w.JUDGE_SEED, w.fact("Delta Node", "port", "7001"),
@@ -556,7 +582,10 @@ def scenarios(w) -> dict:
                        "settle": {**w.JUDGE_SETTLE,
                                   "until": "SELECT EXISTS (SELECT 1 FROM meta WHERE key LIKE "
                                            "'automatic_review_decision_v1:%' AND "
-                                           "value->>'state' = 'reopened')"}},
+                                           "value->>'queue' = 'junk' AND "
+                                           "value->>'state' = 'reopened' AND "
+                                           "value->'proposal'->>'entity_id' = "
+                                           f"({w.eid('beta-store')})::text)"}},
                       junk_row("beta-store", "status = 'rejected'")),
              w.review()]),
     }
