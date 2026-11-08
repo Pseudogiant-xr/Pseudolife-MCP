@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "rust",
+  "before": "535280cbf3a2802c",
+  "fingerprint": "a5945ef39915a21a",
+  "reason": "Adds rust/daemon/harness/board/test_lease_recovery.py (2 offline cases, under 0.1 s on a workstation, 2026-11-08) to the board-harness pytest step. The 3-minute timeout holds."
+}

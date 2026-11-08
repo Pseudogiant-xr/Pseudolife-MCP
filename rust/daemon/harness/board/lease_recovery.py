@@ -2,10 +2,17 @@
 from board.scenarios import BASE_CONFIG, Scenario, act, age, msg, reg, seed
 
 
+LEASE = "resource"  # the one lease these scenarios take (setup below)
+
+
 def holder(step, who, queue):
     def check(_dsn, ctx, response, _before):
         assert response["status"] == 200, response
-        [lease] = response["json"]["leases"]
+        # This scenario's lease by name: a copy of a real board also lists
+        # its own (forced real-data run, 2026-11-07).
+        mine = [lease for lease in response["json"]["leases"] if lease.get("name") == LEASE]
+        assert len(mine) == 1, response["json"]["leases"]
+        [lease] = mine
         assert lease["holder"]["agent_id"] == ctx.id(who), lease
         assert [w["agent_id"] for w in lease["queue"]] == [ctx.id(a) for a in queue], lease
     step.check = check
@@ -35,7 +42,7 @@ def offer(step):
 def setup():
     return [reg(f"register {who}", who, capabilities={"ring": True, "codex": False})
             for who in "ABCD"] + [
-        act(f"{who} takes or queues", "lease", agent=who, body={"name": "resource", "ttl": 120})
+        act(f"{who} takes or queues", "lease", agent=who, body={"name": LEASE, "ttl": 120})
         for who in "ABCD"]
 
 
@@ -160,7 +167,7 @@ class LeaseAcceptedGrant(Scenario):
             step.body["ttl"] = 600
         return initial + [
             act("release grants B", "release", agent="A", body={"name": "resource"}),
-            act("B accepts shorter hold", "lease", agent="B", body={"name": "resource", "ttl": 120}),
+            act("B accepts shorter hold", "lease", agent="B", body={"name": LEASE, "ttl": 120}),
             age(121),
             act("C returns", "update", agent="C", body={"status": "ready"}),
             holder(act("accepted B gets no priority retry", "leases"), "C", ["D"]),
