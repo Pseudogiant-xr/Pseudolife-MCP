@@ -548,17 +548,20 @@ def test_quiet_removes_the_automatic_decisions_a_judge_would_reconsider(tmp_path
 def test_the_quiet_copy_holds_no_automatic_decision_and_the_seed_keeps_them(throwaway_pg):
     cid = throwaway_pg
     d = seed.Docker()
+    # A near miss for the LIKE: an unescaped "_" would match the "X" and take it.
+    keys = ("'automatic_review_decisions_v1', 'automatic_review_decision_v1:d1', "
+            "'automatic_review_decision_v1:d2', 'automaticXreview_decision_v1:x', 'unrelated_key'")
     d.psql(cid, "pl_cf_mir_seed",
-           "DELETE FROM meta WHERE key LIKE 'automatic_review_decision%' OR key = 'unrelated_key';\n"
+           f"DELETE FROM meta WHERE key IN ({keys});\n"
            "INSERT INTO meta (key, value) VALUES ('automatic_review_decisions_v1', '{\"active\": {}}'), "
            "('automatic_review_decision_v1:d1', '{}'), ('automatic_review_decision_v1:d2', '{}'), "
-           "('unrelated_key', '1');\n")
+           "('automaticXreview_decision_v1:x', '{}'), ('unrelated_key', '1');\n")
     if not _rows(cid, "SELECT 1 FROM pg_database WHERE datname = 'pl_cf_mir_home'"):
         d.psql(cid, "pl_cf_mir_seed", "CREATE DATABASE pl_cf_mir_home;\n")
     d.psql(cid, "pl_cf_mir_seed", "COMMENT ON DATABASE pl_cf_mir_seed IS 'pl_cf_mir seed from t at 1';\n")
     record = seed.quiet(d, cid=cid, floor=0)
     assert record["changes"]["automatic_decisions_removed"] == 3
-    left = d.psql(cid, seed.QUIET_DB, "SELECT key FROM meta WHERE key LIKE 'automatic_review_decision%' "
-                  "OR key = 'unrelated_key' ORDER BY key;\n").split()
-    assert left == ["unrelated_key"]  # only the automatic decisions go
-    assert _rows(cid, "SELECT count(*) FROM meta WHERE key LIKE 'automatic_review_decision%'") == [["3"]]
+    left = d.psql(cid, seed.QUIET_DB, f"SELECT key FROM meta WHERE key IN ({keys}) ORDER BY key;\n").split()
+    # Only the automatic decisions go; the near miss and the unrelated key stay.
+    assert left == ["automaticXreview_decision_v1:x", "unrelated_key"]
+    assert _rows(cid, f"SELECT count(*) FROM meta WHERE key IN ({keys})") == [["5"]]  # seed untouched

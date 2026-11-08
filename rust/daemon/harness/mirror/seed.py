@@ -464,8 +464,9 @@ QUIET_KEYS = ("acknowledged", "entity_proposals_removed", "edge_proposals_remove
 
 
 def quiet(docker: Docker, cid: str | None = None, floor: int = DISK_FLOOR) -> dict:
-    """Copy the seed as QUIET_DB and empty the copy's dream backlog and
-    pending review queues, for the scenarios that drive them."""
+    """Copy the seed as QUIET_DB and empty the copy's dream backlog, pending
+    review queues and automatic decisions (which judges reconsider), for the
+    scenarios that drive them."""
     return _derived_copy(docker, cid, floor, QUIET_DB, QUIET_OF, QUIET_SQL, QUIET_KEYS)
 
 
@@ -534,7 +535,8 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("--backup", required=True)
     c.add_argument("--out", type=Path, required=True)
     c.add_argument("--uid", type=int, default=10001)
-    q = sub.add_parser("quiet", help=f"copy {SEED_DB} as {QUIET_DB} with its queues emptied")
+    q = sub.add_parser("quiet", help=f"copy {SEED_DB} as {QUIET_DB} with its queues and "
+                       "automatic decisions emptied")
     q.add_argument("--record", type=Path)
     cu = sub.add_parser("curation", help=f"copy {SEED_DB} as {CURATION_DB}: quiet, and no "
                         "current lesson or world fact")

@@ -85,7 +85,8 @@ QUIET_PREFIXES = {"w2e": (
 )}
 QUIET_WHY = ("drives the dream, judge or analyzer queue; on the real bank's copy it "
              "waited on the whole real backlog, so it runs on the seed's copy with that backlog "
-             "acknowledged and its pending proposals removed")
+             "acknowledged, its pending proposals removed and its automatic decisions (which the "
+             "judges reconsider) removed")
 QUIET_DB = seed.QUIET_DB
 # The curation judge's scenarios, on a quiet copy that also holds no current
 # lesson or world fact (conductor decision (c), 2026-11-08). The judge takes
