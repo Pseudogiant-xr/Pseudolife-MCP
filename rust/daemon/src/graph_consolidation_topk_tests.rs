@@ -328,10 +328,10 @@ fn candidate_pairs_peak_memory_does_not_grow_with_survivors() {
     );
 }
 
-#[test]
-fn slot_duplicates_peak_memory_does_not_grow_with_survivors() {
-    // 700 distinct-entity records, every pair above the floor: 244,650 pairs.
-    let records: Vec<SlotRecord> = (0..700)
+/// `n` records with distinct entities (so the 0.95 same-entity floor never
+/// applies): every pair clears a -1.0 floor.
+fn distinct_records(n: usize) -> Vec<SlotRecord> {
+    (0..n)
         .map(|i| {
             let mut label = Map::new();
             label.insert(
@@ -352,7 +352,13 @@ fn slot_duplicates_peak_memory_does_not_grow_with_survivors() {
                 embedding: Some(unit(i as u64, 8)),
             }
         })
-        .collect();
+        .collect()
+}
+
+#[test]
+fn slot_duplicates_peak_memory_does_not_grow_with_survivors() {
+    // 700 records, every pair above the floor: 244,650 pairs.
+    let records = distinct_records(700);
     let (got, peak) = peak_during(|| slot_duplicate_candidates(&records, -1.0, 8, &HashSet::new()));
     assert_eq!(got.len(), 8);
     assert!(
@@ -363,32 +369,12 @@ fn slot_duplicates_peak_memory_does_not_grow_with_survivors() {
 
 #[test]
 fn the_meter_sees_a_full_collect() {
-    // Near miss for the bound itself: the reference full collect over the
-    // same slot records is far above it, so the bound can fail.
-    let records: Vec<SlotRecord> = (0..700)
-        .map(|i| {
-            let mut label = Map::new();
-            label.insert(
-                "entity".into(),
-                json!(format!("Distinct subject number {i}")),
-            );
-            label.insert("attribute".into(), json!("an attribute name"));
-            label.insert(
-                "value".into(),
-                json!(format!(
-                    "{i} {}",
-                    "a reasonably long stored value ".repeat(3)
-                )),
-            );
-            SlotRecord {
-                key: format!("subject-{i}|attribute"),
-                label,
-                embedding: Some(unit(i as u64, 8)),
-            }
-        })
-        .collect();
+    // Near miss for the bound itself: the reference full collect over 400
+    // such records (79,800 pairs, about 174 MB) is far above it, so the
+    // bound can fail. Kept small: this test pays the old cost on purpose.
+    let records = distinct_records(400);
     let (got, peak) =
         peak_during(|| reference_slot_duplicate_candidates(&records, -1.0, 8, &HashSet::new()));
     assert_eq!(got.len(), 8);
-    assert!(peak > 8 * BOUND, "the full collect held only {peak} bytes");
+    assert!(peak > 4 * BOUND, "the full collect held only {peak} bytes");
 }
