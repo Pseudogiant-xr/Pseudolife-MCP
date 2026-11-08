@@ -9,6 +9,7 @@ with the standard library and the docker CLI (``config`` also needs PyYAML):
     seed.py tokens --secret-file S --out mirror-tokens.env
     seed.py config --backups data/backups --backup NAME --out DIR/config.yaml
     seed.py quiet [--record quiet.json]
+    seed.py curation [--record curation.json]
     seed.py health [--timeout 1800]
 
 ``seed`` restores one backup into ``pl_cf_mir_restore`` inside the mirror's
@@ -269,6 +270,7 @@ def dump_complete(path: Path) -> bool:
 PG_DATA = "/var/lib/postgresql"
 PROVENANCE = "pl_cf_mir seed from "
 QUIET_OF = "quiet copy of: "
+CURATION_OF = "curation copy of: "
 
 
 def require_disk(docker: Docker, cid: str, floor: int = DISK_FLOOR) -> int:
@@ -305,6 +307,16 @@ def quiet_preflight(seed_comment: str | None, quiet_comment: str | None) -> None
                       f"({quiet_comment or 'none'!r}); run seed.py quiet. Nothing was run.")
 
 
+def curation_preflight(seed_comment: str | None, copy_comment: str | None) -> None:
+    """Refuse a curation base that is missing or copied from an earlier seed."""
+    if not seed_comment or not seed_comment.startswith(PROVENANCE):
+        raise Refused(f"{SEED_DB} carries no provenance; reseed with seed.py seed, then run "
+                      "seed.py curation. Nothing was run.")
+    if copy_comment != CURATION_OF + seed_comment:
+        raise Refused(f"{CURATION_DB} is missing or was copied from another seed "
+                      f"({copy_comment or 'none'!r}); run seed.py curation. Nothing was run.")
+
+
 def seed(docker: Docker, backups: Path, secret: str, backup: str | None = None,
          dsn: str = DEFAULT_DSN) -> dict:
     _, _, database = refuse_live_dsn(dsn)
@@ -327,6 +339,7 @@ def seed(docker: Docker, backups: Path, secret: str, backup: str | None = None,
     record = {"backup": path.name, "backup_bytes": path.stat().st_size, "free_bytes_before": free}
     docker.psql(cid, "pl_cf_mir_home", f"""
 DROP DATABASE IF EXISTS {QUIET_DB} WITH (FORCE);
+DROP DATABASE IF EXISTS {CURATION_DB} WITH (FORCE);
 DROP DATABASE IF EXISTS {BANK_DB} WITH (FORCE);
 DROP DATABASE IF EXISTS {SEED_DB} WITH (FORCE);
 DROP DATABASE IF EXISTS {RESTORE_DB} WITH (FORCE);
@@ -381,9 +394,28 @@ COMMIT;
 """
 
 
-def quiet(docker: Docker, cid: str | None = None, floor: int = DISK_FLOOR) -> dict:
-    """Copy the seed as QUIET_DB and empty the copy's dream backlog and
-    pending review queues, for the scenarios that drive them."""
+CURATION_DB = "pl_cf_mir_seed_curation"
+# The quiet copy's queues emptied, and every current lesson and world fact
+# superseded (conductor's decision (c), 2026-11-08): the curation judge takes
+# the 8 most similar pairs over all current records, so on the real bank's
+# copy (3,748 lessons, 411 world facts) the scenarios' own pairs were never
+# judged. Superseded, not retired: a retired lesson can be reinstated when
+# its sources refresh; superseded rows are audit history only.
+CURATION_SQL = QUIET_SQL.replace("COMMIT;\n", """\
+WITH d AS (UPDATE lessons SET status = 'superseded', superseded_at = 1.0
+           WHERE status = 'current' RETURNING 1)
+  SELECT 'lessons_superseded', count(*) FROM d;
+WITH d AS (UPDATE world_facts SET status = 'superseded', superseded_at = 1.0
+           WHERE status = 'current' RETURNING 1)
+  SELECT 'world_facts_superseded', count(*) FROM d;
+COMMIT;
+""")
+
+
+def _derived_copy(docker: Docker, cid: str | None, floor: int, database: str, stamp: str,
+                  sql: str, keys: tuple[str, ...]) -> dict:
+    """Copy the seed as ``database``, run ``sql`` on the copy alone and stamp
+    the copy with what it was copied from."""
     cid = cid or docker.container("mirror-pg")
     if cid is None:
         raise Refused("the mirror's PostgreSQL is not running. Nothing was changed.")
@@ -392,18 +424,34 @@ def quiet(docker: Docker, cid: str | None = None, floor: int = DISK_FLOOR) -> di
     provenance = read_comment(docker, cid, SEED_DB)
     if not provenance.startswith(PROVENANCE):
         raise Refused(f"{SEED_DB} carries no provenance; reseed with seed.py seed. Nothing was changed.")
-    docker.psql(cid, "pl_cf_mir_home", f"DROP DATABASE IF EXISTS {QUIET_DB} WITH (FORCE);\n"
-                f"CREATE DATABASE {QUIET_DB} TEMPLATE {SEED_DB};\n")
-    refuse_live_server(server_facts(docker, cid, QUIET_DB))
-    changes = dict.fromkeys(("acknowledged", "entity_proposals_removed", "edge_proposals_removed"))
-    for line in docker.psql(cid, QUIET_DB, QUIET_SQL).splitlines():
+    docker.psql(cid, "pl_cf_mir_home", f"DROP DATABASE IF EXISTS {database} WITH (FORCE);\n"
+                f"CREATE DATABASE {database} TEMPLATE {SEED_DB};\n")
+    refuse_live_server(server_facts(docker, cid, database))
+    changes = dict.fromkeys(keys)
+    for line in docker.psql(cid, database, sql).splitlines():
         key, _, count = line.partition("|")
         if count.isdigit():
             changes[key] = int(count)
     docker.psql(cid, "pl_cf_mir_home",
-                f"COMMENT ON DATABASE {QUIET_DB} IS {_sql_text(QUIET_OF + provenance)};\n")
-    return {"base": QUIET_DB, "copied_from": SEED_DB, "copied_from_provenance": provenance,
+                f"COMMENT ON DATABASE {database} IS {_sql_text(stamp + provenance)};\n")
+    return {"base": database, "copied_from": SEED_DB, "copied_from_provenance": provenance,
             "changes": changes}
+
+
+QUIET_KEYS = ("acknowledged", "entity_proposals_removed", "edge_proposals_removed")
+
+
+def quiet(docker: Docker, cid: str | None = None, floor: int = DISK_FLOOR) -> dict:
+    """Copy the seed as QUIET_DB and empty the copy's dream backlog and
+    pending review queues, for the scenarios that drive them."""
+    return _derived_copy(docker, cid, floor, QUIET_DB, QUIET_OF, QUIET_SQL, QUIET_KEYS)
+
+
+def curation(docker: Docker, cid: str | None = None, floor: int = DISK_FLOOR) -> dict:
+    """Copy the seed as CURATION_DB: the quiet copy's changes, and no current
+    lesson or world fact, for the curation judge's scenarios."""
+    return _derived_copy(docker, cid, floor, CURATION_DB, CURATION_OF, CURATION_SQL,
+                         (*QUIET_KEYS, "lessons_superseded", "world_facts_superseded"))
 
 
 def health(docker: Docker, timeout: float, expect_schema: str | None = None) -> dict:
@@ -466,6 +514,9 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("--uid", type=int, default=10001)
     q = sub.add_parser("quiet", help=f"copy {SEED_DB} as {QUIET_DB} with its queues emptied")
     q.add_argument("--record", type=Path)
+    cu = sub.add_parser("curation", help=f"copy {SEED_DB} as {CURATION_DB}: quiet, and no "
+                        "current lesson or world fact")
+    cu.add_argument("--record", type=Path)
     h = sub.add_parser("health")
     h.add_argument("--timeout", type=float, default=1800)
     h.add_argument("--schema")
@@ -477,8 +528,8 @@ def main(argv: list[str] | None = None) -> int:
             if args.record:
                 _write_private(args.record, json.dumps(record, indent=2) + "\n")
             print(json.dumps(record))
-        elif args.cmd == "quiet":
-            record = quiet(docker)
+        elif args.cmd in ("quiet", "curation"):
+            record = quiet(docker) if args.cmd == "quiet" else curation(docker)
             if args.record:
                 _write_private(args.record, json.dumps(record, indent=2) + "\n")
             print(json.dumps(record))

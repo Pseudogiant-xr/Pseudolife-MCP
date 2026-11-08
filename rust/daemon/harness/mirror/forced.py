@@ -69,20 +69,35 @@ STEP = re.compile(r"\] (?:step |#)?(\d+)")
 # What the synthetic arm drops, so it is the harness's own baseline (CI's).
 REAL_BANK_ENV = ("PL_HARNESS_BASE_DATABASE", "PL_HARNESS_STUB_DEFAULT_CONTENT")
 DISK_FLOOR = 8 * 1024 ** 3
-# Scenarios that drive the dream, judge, curation or analyzer queues run on
-# the seed's quiet copy (seed.py quiet): the conductor's decision D1,
-# 2026-11-07. On the real bank's copy they waited on its whole backlog (3,915
-# entries pending a dream, 276 entity and 376 edge proposals pending a
-# judge), which no stub answer settles, so they compared nothing.
-# Extended the same way (conductor, 2026-11-08) to the junk and link judge
-# scenarios, whose judges reached the real backlog at different times on each
-# side, and the two session-end dreams, which expect no pending entry.
-QUIET_PREFIXES = {"w2e": ("judge-merge-", "curation-auto", "sweep-analyzer-", "console-dream-run",
-                          "junk-", "link-", "hook-session-end-dream", "cli-episode-end-dream")}
-QUIET_WHY = ("drives the dream, judge, curation or analyzer queue; on the real bank's copy it "
+# Scenarios that drive the dream, judge or analyzer queues run on the seed's
+# quiet copy (seed.py quiet): the conductor's decision D1, 2026-11-07. On the
+# real bank's copy they waited on its whole backlog (3,915 entries pending a
+# dream, 276 entity and 376 edge proposals pending a judge), which no stub
+# answer settles, so they compared nothing. Why each prefix is here:
+QUIET_PREFIXES = {"w2e": (
+    "judge-merge-",           # the merge judge: 276 real entity proposals pending (D1)
+    "sweep-analyzer-",        # the analyzer files proposals into the same queues (D1)
+    "console-dream-run",      # a Console dream pulls the 3,915-entry dream backlog (D1)
+    "junk-",                  # the junk judge reached real proposals at a different time per side
+    "link-",                  # the link judge: 376 real edge proposals pending (2026-11-08)
+    "hook-session-end-dream",  # session-end dreams expect no pending entry (2026-11-08)
+    "cli-episode-end-dream",
+)}
+QUIET_WHY = ("drives the dream, judge or analyzer queue; on the real bank's copy it "
              "waited on the whole real backlog, so it runs on the seed's copy with that backlog "
              "acknowledged and its pending proposals removed")
 QUIET_DB = seed.QUIET_DB
+# The curation judge's scenarios, on a quiet copy that also holds no current
+# lesson or world fact (conductor decision (c), 2026-11-08). The judge takes
+# the 8 most similar pairs over every current record, and on the real bank's
+# copy (3,748 lessons, 411 world facts) real pairs outranked the scenarios'
+# own, which were never judged: curation-shadow and the curation-auto family
+# never settled. Checked before QUIET_PREFIXES.
+CURATION_PREFIXES = {"w2e": ("curation-",)}
+CURATION_WHY = ("drives the curation judge, which ranks pairs over every current lesson and world "
+                "fact; on the real bank's copy real pairs outranked the scenario's, so it runs on a "
+                "quiet copy whose real lessons and world facts are superseded")
+CURATION_DB = seed.CURATION_DB
 
 
 def scenario_names(suite: str) -> list[str]:
@@ -133,6 +148,8 @@ def classify(first: dict, retry: dict | None, synthetic: dict | None) -> str:
 
 def base_for(suite: str, name: str) -> tuple[str, str | None]:
     """Which base a scenario's real-bank attempts copy, and why."""
+    if any(name.startswith(p) for p in CURATION_PREFIXES.get(suite, ())):
+        return "curation", CURATION_WHY
     if any(name.startswith(p) for p in QUIET_PREFIXES.get(suite, ())):
         return "quiet", QUIET_WHY
     return "main", None
@@ -143,6 +160,13 @@ def quiet_base_use(report: dict) -> dict:
     used = [f"{suite}/{r['scenario']}" for suite, body in report["suites"].items()
             for r in body["rows"] if r.get("base") == "quiet"]
     return {"database": QUIET_DB, "scenarios": used, "why": QUIET_WHY}
+
+
+def curation_base_use(report: dict) -> dict:
+    """The scenarios that ran on the curation base, for the summary."""
+    used = [f"{suite}/{r['scenario']}" for suite, body in report["suites"].items()
+            for r in body["rows"] if r.get("base") == "curation"]
+    return {"database": CURATION_DB, "scenarios": used, "why": CURATION_WHY}
 
 
 # A kept daemon log's tail: one log covers one launch (daemons.py opens it
@@ -208,6 +232,8 @@ class Runner:
                 env.pop(key, None)
         elif which == "quiet":
             env["PL_HARNESS_BASE_DATABASE"] = QUIET_DB
+        elif which == "curation":
+            env["PL_HARNESS_BASE_DATABASE"] = CURATION_DB
         reaped = self.reap_leftovers()
         before = self.oom_kills()
         started = time.monotonic()
@@ -362,6 +388,18 @@ def base_comments() -> tuple[str, str]:
         return comment(os.environ.get("PL_HARNESS_BASE_DATABASE", "")), comment(QUIET_DB)
 
 
+def curation_comments() -> tuple[str, str]:
+    """The seed's provenance and the curation copy's, from the mirror PostgreSQL."""
+    sys.path.insert(0, str(HARNESS))
+    import pgdisposable
+    with pgdisposable._admin() as conn:
+        def comment(name):
+            row = conn.execute("SELECT shobj_description(oid, 'pg_database') FROM pg_database "
+                               "WHERE datname = %s", (name,)).fetchone()
+            return row[0] if row else None
+        return comment(os.environ.get("PL_HARNESS_BASE_DATABASE", "")), comment(CURATION_DB)
+
+
 def run_scratch() -> Path:
     """This run's own marker: a leftover is reaped only under it, so two runs
     on one host never stop each other's daemons."""
@@ -426,10 +464,16 @@ def main(argv: list[str] | None = None) -> int:
         print(f"forced.py: {e}", file=sys.stderr)
         return 3
     planned = {suite: [n for n in scenario_names(suite) if not args.only or n in args.only]
-               for suite in args.suites if suite in QUIET_PREFIXES}
+               for suite in args.suites if suite in QUIET_PREFIXES or suite in CURATION_PREFIXES}
     if any(base_for(suite, n)[0] == "quiet" for suite, names in planned.items() for n in names):
         try:  # a reseed drops the quiet copy; an old one would compare an older backup
             seed.quiet_preflight(*base_comments())
+        except seed.Refused as e:
+            print(f"forced.py: {e}", file=sys.stderr)
+            return 3
+    if any(base_for(suite, n)[0] == "curation" for suite, names in planned.items() for n in names):
+        try:  # dropped by a reseed too
+            seed.curation_preflight(*curation_comments())
         except seed.Refused as e:
             print(f"forced.py: {e}", file=sys.stderr)
             return 3
@@ -439,6 +483,7 @@ def main(argv: list[str] | None = None) -> int:
     report, private = run(runner, args.suites, args.only)
     summary = {"base": base, "complete": report["complete"], "stopped": report.get("stopped"),
                "not_forced": report["not_forced"], "quiet_base": quiet_base_use(report),
+               "curation_base": curation_base_use(report),
                "fixture_notes": FIXTURE_NOTES,
                "counts": counts(report)}
     (args.out / "summary.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")

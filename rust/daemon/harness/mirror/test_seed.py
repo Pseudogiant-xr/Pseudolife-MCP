@@ -444,3 +444,73 @@ def test_the_quiet_preflight_wants_a_copy_of_the_current_seed(seed_comment, quie
     else:
         with pytest.raises(seed.Refused, match="seed.py quiet"):
             seed.quiet_preflight(seed_comment, quiet_comment)
+
+
+def test_curation_copies_the_seed_then_changes_only_the_copy(tmp_path):
+    docker = FakeDocker(tmp_path, seed_comment="pl_cf_mir seed from b at t")
+    record = seed.curation(docker)
+    done = docker.statements()
+    copy = next(i for i, s in enumerate(done)
+                if f"CREATE DATABASE {seed.CURATION_DB} TEMPLATE {seed.SEED_DB}" in s)
+    changed = next(i for i, s in enumerate(done) if "UPDATE lessons SET status = 'superseded'" in s)
+    assert copy < changed
+    target = [a for a, i in docker.calls if i and b"UPDATE lessons SET status = 'superseded'" in i][0]
+    assert target[target.index("-d") + 1] == seed.CURATION_DB  # never the seed itself
+    # The quiet copy's queues are emptied here too: curation-auto drives the judge.
+    assert {"acknowledged", "lessons_superseded", "world_facts_superseded"} <= set(record["changes"])
+    stamp = next(s for s in done if f"COMMENT ON DATABASE {seed.CURATION_DB}" in s)
+    assert "curation copy of: pl_cf_mir seed from b at t" in stamp
+
+
+def test_curation_refuses_a_live_server_and_an_unstamped_seed(tmp_path):
+    docker = FakeDocker(tmp_path, production=True, seed_comment="pl_cf_mir seed from b at t")
+    with pytest.raises(seed.Refused, match="live bank's PostgreSQL"):
+        seed.curation(docker)
+    assert not any("CREATE DATABASE" in s for s in docker.statements())
+    with pytest.raises(seed.Refused, match="no provenance"):
+        seed.curation(FakeDocker(tmp_path, seed_comment=None))
+
+
+def test_seed_drops_the_old_curation_copy(tmp_path):
+    docker = FakeDocker(tmp_path)
+    seed.seed(docker, backups(tmp_path), SECRET)
+    first = next(s for s in docker.statements() if "DROP DATABASE IF EXISTS" in s)
+    assert f"DROP DATABASE IF EXISTS {seed.CURATION_DB} WITH (FORCE);" in first
+
+
+@pytest.mark.parametrize("seed_comment,copy_comment,ok", [
+    ("pl_cf_mir seed from a at t", "curation copy of: pl_cf_mir seed from a at t", True),
+    ("pl_cf_mir seed from b at u", "curation copy of: pl_cf_mir seed from a at t", False),  # a reseed
+    ("pl_cf_mir seed from a at t", "quiet copy of: pl_cf_mir seed from a at t", False),  # the other copy
+    ("pl_cf_mir seed from a at t", None, False),  # never made
+])
+def test_the_curation_preflight_wants_a_copy_of_the_current_seed(seed_comment, copy_comment, ok):
+    if ok:
+        seed.curation_preflight(seed_comment, copy_comment)
+    else:
+        with pytest.raises(seed.Refused, match="seed.py curation"):
+            seed.curation_preflight(seed_comment, copy_comment)
+
+
+def test_the_curation_copy_holds_no_current_lesson_or_world_fact(throwaway_pg):
+    cid = throwaway_pg
+    d = seed.Docker()
+    row = "'E', 'a', 'e', 'a', 'v', '{s}', 0.9, 1.0, 1.0"
+    cols = "entity, attribute, entity_norm, attribute_norm, value, status, confidence, asserted_at, last_confirmed"
+    d.psql(cid, "pl_cf_mir_seed",
+           "TRUNCATE lessons, world_facts CASCADE;\n"
+           f"INSERT INTO lessons ({cols}) VALUES ({row.format(s='current')}), ({row.format(s='superseded')});\n"
+           f"INSERT INTO world_facts ({cols}) VALUES ({row.format(s='current')});\n")
+    if not _rows(cid, "SELECT 1 FROM pg_database WHERE datname = 'pl_cf_mir_home'"):
+        d.psql(cid, "pl_cf_mir_seed", "CREATE DATABASE pl_cf_mir_home;\n")
+    d.psql(cid, "pl_cf_mir_seed", "COMMENT ON DATABASE pl_cf_mir_seed IS 'pl_cf_mir seed from t at 1';\n")
+    record = seed.curation(d, cid=cid, floor=0)
+    assert record["changes"]["lessons_superseded"] == 1
+    assert record["changes"]["world_facts_superseded"] == 1
+    assert seed.read_comment(d, cid, seed.CURATION_DB) == "curation copy of: pl_cf_mir seed from t at 1"
+    out = d.psql(cid, seed.CURATION_DB,
+                 "SELECT 'l', status, superseded_at IS NOT NULL FROM lessons UNION ALL "
+                 "SELECT 'w', status, superseded_at IS NOT NULL FROM world_facts;\n")
+    # The current rows are superseded, stamped; the one already superseded keeps its own stamp.
+    assert sorted(out.split()) == ["l|superseded|f", "l|superseded|t", "w|superseded|t"]
+    assert _rows(cid, "SELECT status FROM lessons ORDER BY status") == [["current"], ["superseded"]]

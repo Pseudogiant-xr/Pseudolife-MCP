@@ -31,6 +31,7 @@ python3 rust/daemon/harness/mirror/seed.py tokens --secret-file secret --out tok
 python3 rust/daemon/harness/mirror/seed.py config --backups <live>/data/backups \
     --backup <the seeded backup> --out <PSEUDOLIFE_MIRROR_DATA>/config.yaml   # needs PyYAML
 python3 rust/daemon/harness/mirror/seed.py quiet --record quiet.json  # the forced run's quiet base
+python3 rust/daemon/harness/mirror/seed.py curation --record curation.json  # and its curation base
 $C --env-file tokens.env up -d mirror-daemon
 python3 rust/daemon/harness/mirror/seed.py health --schema <schema_version from seed.json>
 ```
@@ -39,9 +40,18 @@ python3 rust/daemon/harness/mirror/seed.py health --schema <schema_version from 
   credentials. It then clones the result as `pl_cf_mir_bank`, the daemon's
   database. Harnesses may clone `pl_cf_mir_seed` while it is idle.
 - **Reseeding:** stop `mirror-daemon` first; `seed` refuses while it runs.
-  `seed` drops the quiet copy and stamps the new seed with its backup, so
-  run `seed.py quiet` again after it; the forced run refuses a quiet copy
-  made from another seed.
+  `seed` drops the quiet and curation copies and stamps the new seed with
+  its backup, so run `seed.py quiet` and `seed.py curation` again after it;
+  the forced run refuses a copy made from another seed.
+- **Copies for queue-driven scenarios:** `forced.py` documents why each
+  scenario prefix runs where it does (`QUIET_PREFIXES`,
+  `CURATION_PREFIXES`).
+  - `pl_cf_mir_seed_quiet` has the real dream backlog acknowledged and the
+    pending proposals removed, for the dream, judge and analyzer scenarios.
+  - `pl_cf_mir_seed_curation` is the same, plus every current lesson and
+    world fact superseded, for the curation judge's scenarios. That judge
+    ranks pairs over all current records, so the real ones crowded out the
+    scenario's own.
 - **Disk:** the 8 GiB floor is measured inside the mirror PostgreSQL's
   container, on its data directory, which is the storage a restore fills.
 - **Refusals:** every refusal exits 3 and says what to fix. Nothing has
