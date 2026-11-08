@@ -452,3 +452,13 @@ def test_no_only_still_plans_every_scenario(tmp_path, monkeypatch):
     monkeypatch.setattr(forced, "run", run)
     assert forced.main(["--rust-bin", "x", "--out", str(tmp_path / "o"), "--suites", "w2e"]) == 0
     assert seen == [None]
+
+
+def test_an_empty_suites_refuses_instead_of_an_empty_complete_run(tmp_path, monkeypatch, capsys):
+    """``--suites`` given no names planned nothing and reported the run complete."""
+    _main_env(monkeypatch)
+    monkeypatch.setattr(forced, "run", lambda *a, **k: pytest.fail("ran with an empty --suites"))
+    assert forced.main(["--rust-bin", "x", "--out", str(tmp_path / "o"), "--suites"]) == 2
+    err = capsys.readouterr().err
+    assert "--suites" in err and "omit --suites" in err
+    assert not (tmp_path / "o").exists()
