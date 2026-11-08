@@ -343,7 +343,11 @@ def run(runner: Runner, suites: list[str], only: list[str] | None,
                 if retry["status"] != "pass":
                     synthetic = runner.invoke(suite, name, "synthetic", base=False)
             verdict = classify(first, retry, synthetic)
-            if verdict == "error" and f"{suite}/{name}" in ACCEPTED_OOM                     and _oom_total(first, retry, synthetic):
+            # Each failing real attempt must itself have been OOM-killed: an
+            # unrelated failure stays an error, and the small synthetic arm's
+            # kills are not the accepted limit.
+            if verdict == "error" and f"{suite}/{name}" in ACCEPTED_OOM \
+                    and all((a.get("oom_kills") or 0) > 0 for a in (first, retry)):
                 verdict = "accepted"
             rows.append({"scenario": name, "class": verdict, "differences": len(first["diffs"]),
                          "seconds": first["seconds"], "base": first.get("base"),

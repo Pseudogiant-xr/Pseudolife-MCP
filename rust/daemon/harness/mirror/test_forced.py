@@ -444,9 +444,15 @@ def test_a_known_python_memory_limit_is_accepted_not_an_error(tmp_path):
                "dream-deep-dry": {"real": err, "real-retry": err, "synthetic": PASS},
                "candidate-auto-reopen": {"real": err, "real-retry": err, "synthetic": PASS}}
     rows, report = _rows_for(tmp_path, answers, {("candidate-auto", "real"): 1,
-                                                 ("dream-deep-dry", "real"): 1})
+                                                 ("candidate-auto", "real-retry"): 1,
+                                                 ("dream-deep-dry", "real"): 1,
+                                                 ("dream-deep-dry", "real-retry"): 1,
+                                                 ("candidate-auto-reopen", "real"): 1,
+                                                 ("candidate-auto-reopen", "synthetic"): 1})
     assert rows["candidate-auto"]["class"] == "accepted"
-    # Near misses: an OOM in a scenario not listed, and a listed one with no OOM.
+    # Near misses: an OOM in a scenario not listed, and a listed one whose
+    # real retry failed without an OOM (the first attempt's and the small
+    # synthetic arm's OOM do not excuse it).
     assert rows["dream-deep-dry"]["class"] == "error"
     assert rows["candidate-auto-reopen"]["class"] == "error"
     counted = forced.counts(report)["w2e"]

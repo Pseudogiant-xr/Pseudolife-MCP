@@ -74,7 +74,7 @@ harness's synthetic bank. Its class follows from those runs:
 | `transient` | The second real-bank run was clean |
 | `preexisting` | It also differs on the synthetic bank |
 | `new` | It differs on real data only |
-| `accepted` | It ran out of memory, and is a limit the maintainer accepted (`ACCEPTED_OOM` in `forced.py`, with each reason; the summary lists them) |
+| `accepted` | Both real-bank attempts were killed for memory, in a scenario whose limit the maintainer accepted (`ACCEPTED_OOM` in `forced.py`, with each reason; the summary lists them) |
 
 `summary.json` holds counts and names only. `private.json` quotes bank text
 and stays on the host.
