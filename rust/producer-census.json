@@ -12,7 +12,7 @@
     "docs/cortex-mcp-spec.md": "43fba1fe5e5cd3710f59d7e99b414f7b78ea15eaa70b620b23716f3fae308d32",
     "docs/dev/ci-budget.md": "98b0227042a5722f8fba310ececa9dd1dc7c6c0c118434f630308d653780fc37",
     "docs/dev/dev-machines.md": "802349bb1973a19f1e9a93db4195a54fdf5e8c1c3b7a79554c4a6e5e855ba6f9",
-    "docs/dev/merge-batches.md": "715816a92dc9f9bd9b8c30b47aceb57f8435cc4a3b06657060c843f5cf74479f",
+    "docs/dev/merge-batches.md": "b21349cf3eca6918f5518fc67b2e656c9e8db738eade111b003ffa754f4b9186",
     "docs/dev/native-client-updates.md": "dc0847090e9696348569d1f0a9c063f34f57c2c61f9b4a97600db76367c1e21e",
     "docs/dev/native-runtimes.md": "6972b4d5028dc1f88eee51ffb656603b810dcd4b1588edf0bb912d9e65ad4056",
     "docs/dev/release-assets.md": "271459117c2db8f80293be9b0b14b66e41c997f7c67d3d18581d1f06367c9d99",
@@ -261,7 +261,7 @@
     "ops/install.sh": "fc91aa193aa782949577a4846b4a470dfb9d045e7df46b3d473653c06d3f4658",
     "ops/installer_engine.py": "1b83c360e5b7e02f0b56681f23dc8c88ac4803cebd88d2bb28c30c751141ec6e",
     "ops/installer_state.py": "3f53fa5268be9ab4e0dc7fc6df563f1cec306f4c0f9a92e6ec4e1500124c519a",
-    "ops/integrate.py": "b949b821661e1a949c0d1776ff36162f1d3c687099d2b70e95bc750b3a03a507",
+    "ops/integrate.py": "7ff4bf601f68027cf012dfa59aeba48e8e27a61d67532ed2e8548bc25480b22b",
     "ops/measure_reverify_population.py": "413ff8baa0e0b25b8a727b6bead248df753d4d26e7c697aa6a0542b68715cfa5",
     "ops/migrate-pg18.ps1": "a2a8bd96ab754249395a9d42b26bfd8e6b5ecf8d6da1cd72383ebf745c0acde8",
     "ops/migrate_drop_age.py": "bad14579affef14699a3e1898afd4ba6326944f5db1e9b5c0486ee2b23153eac",
@@ -47398,7 +47398,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/integrate.py:1661",
+          "location": "ops/integrate.py:1674",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -65741,6 +65741,20 @@
       "dynamic": "unresolved",
       "evidence": "documented",
       "kind": "environment",
+      "location": "docs/dev/merge-batches.md:423",
+      "name": "PSEUDOLIFE_TEST_PG_LOGIN_FILE",
+      "shape": {
+        "channel": "environment",
+        "complete": false,
+        "expression": "reference",
+        "parameters": {}
+      },
+      "usage": "reference"
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "documented",
+      "kind": "environment",
       "location": "docs/dev/native-runtimes.md:26",
       "name": "PSEUDOLIFE_NATIVE_CLI",
       "shape": {
@@ -78923,7 +78937,13 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/dev/merge-batches.md:456",
+      "location": "docs/dev/merge-batches.md:423",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:environment:PSEUDOLIFE_TEST_PG_LOGIN_FILE"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/dev/merge-batches.md:471",
       "reason": "forwarded parameters"
     },
     {
