@@ -166,9 +166,14 @@ def stats_extra() -> None:
                 "INSERT INTO retrieval_events (query_text, origin, session_id, served, created_at) "
                 "VALUES (%s, 'search', %s, %s, %s)",
                 (f"graduation probe {s}", f"grad-session-{s}", json.dumps(served), now - 3600))
+        # The next free community id and a replaced digest: on a copy of a
+        # real bank both already exist (UniqueViolation on the forced run of
+        # 2026-11-07); on an empty bank this is community 1, as before.
         conn.execute("INSERT INTO communities (id, label, size, cohesion, computed_at) "
-                     "VALUES (1, 'deploy tooling', 3, 0.5, %s)", (now - 7200,))
-        conn.execute("INSERT INTO meta (key, value) VALUES ('graph_digest', %s)",
+                     "SELECT coalesce(max(id), 0) + 1, 'deploy tooling', 3, 0.5, %s "
+                     "FROM communities", (now - 7200,))
+        conn.execute("INSERT INTO meta (key, value) VALUES ('graph_digest', %s) "
+                     "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
                      (json.dumps({"computed_at": 1791000000.25, "communities": 1}),))
 
 
