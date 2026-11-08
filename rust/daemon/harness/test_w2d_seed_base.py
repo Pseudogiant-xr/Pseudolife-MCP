@@ -25,6 +25,8 @@ def bank(monkeypatch):
         pytest.skip("no disposable-bank login here")
     import psycopg
     from pseudolife_memory.storage.schema import ensure_schema
+    # An empty bank of its own, never a copy of a mirror's base.
+    monkeypatch.delenv("PL_HARNESS_BASE_DATABASE", raising=False)
     pg = pgdisposable.Slice("w2d")
     name = pg.name("pl_cf_w2d_seed_base")
     dsn = pg.create(name)
