@@ -66,7 +66,7 @@ def test_run_classifies_each_scenario_and_reruns_only_what_differs(tmp_path):
     assert [c[3] for c in runner.calls if c[1] == "fresh"] == [True, True, False]
     assert set(private) == {"w2e/flaky", "w2e/old", "w2e/fresh"} and report["complete"]
     counts = forced.counts(report)["w2e"]
-    assert counts == {"planned": 4, "run": 4, "pass": 1, "transient": 1, "preexisting": 1, "new": 1,
+    assert counts == {"planned": 4, "run": 4, "pass": 1, "transient": 1, "preexisting": 1, "new": 1, "accepted": 0,
                       "error": 0, "differences": 3, "errors_with_oom": None, "new_scenarios": ["fresh"]}
     assert "DIFF" not in json.dumps(counts)  # counts and names only
 
@@ -423,3 +423,66 @@ def test_the_judge_and_session_end_dream_scenarios_take_the_quiet_base(name):
 @pytest.mark.parametrize("name", ["hook-session-end", "cli-episode-end", "linked-reads", "junkyard"])
 def test_near_miss_names_keep_the_main_base(name):
     assert forced.base_for("w2e", name)[0] == "main"
+
+
+# ---- real-bank accommodations: known limits and the dream REST timeout ----
+
+def _rows_for(tmp_path, answers, oom):
+    class Kills(FakeRunner):
+        def invoke(self, suite, name, label, base):
+            out = super().invoke(suite, name, label, base)
+            return {**out, "oom_kills": oom.get((name, label), 0)}
+    report, _ = forced.run(Kills(tmp_path, answers), ["w2e"], None, names=lambda s: list(answers))
+    return {r["scenario"]: r for r in report["suites"]["w2e"]["rows"]}, report
+
+
+def test_a_known_python_memory_limit_is_accepted_not_an_error(tmp_path):
+    """Maintainer decision (c), 2026-11-08: candidate-auto and -reopen
+    exceed the runner's memory on Python at the harness's -1.0 floors."""
+    err = {"status": "error", "diffs": [], "error_tail": ["IncompleteRead"], "seconds": 1.0}
+    answers = {"candidate-auto": {"real": err, "real-retry": err, "synthetic": PASS},
+               "dream-deep-dry": {"real": err, "real-retry": err, "synthetic": PASS},
+               "candidate-auto-reopen": {"real": err, "real-retry": err, "synthetic": PASS}}
+    rows, report = _rows_for(tmp_path, answers, {("candidate-auto", "real"): 1,
+                                                 ("dream-deep-dry", "real"): 1})
+    assert rows["candidate-auto"]["class"] == "accepted"
+    # Near misses: an OOM in a scenario not listed, and a listed one with no OOM.
+    assert rows["dream-deep-dry"]["class"] == "error"
+    assert rows["candidate-auto-reopen"]["class"] == "error"
+    counted = forced.counts(report)["w2e"]
+    assert counted["accepted"] == 1 and counted["error"] == 2
+    assert "Python" in forced.ACCEPTED_OOM["w2e/candidate-auto"]
+
+
+def test_real_bank_arms_get_the_longer_dream_rest_timeout(tmp_path, monkeypatch):
+    monkeypatch.setenv("PL_HARNESS_BASE_DATABASE", "pl_cf_mir_seed")
+    monkeypatch.delenv("PL_HARNESS_DREAM_REST_TIMEOUT", raising=False)
+    seen = []
+
+    class Records(forced.Runner):
+        def _run(self, argv, env):
+            seen.append(env.get("PL_HARNESS_DREAM_REST_TIMEOUT"))
+            return 0, ""
+
+    runner = Records(Path("rust-bin"), tmp_path / "out", 60, tmp_path / "STOP", scratch=tmp_path / "s",
+                     oom_kills=lambda: 0)
+    runner.invoke("w2e", "console-dream-run", "real", base=True)
+    runner.invoke("w2e", "console-dream-run", "synthetic", base=False)
+    assert seen == [str(forced.DREAM_REST_TIMEOUT), None]
+
+
+def test_dream_rest_calls_take_the_timeout_and_others_keep_the_default(monkeypatch):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    import w2e_episodes
+    from types import SimpleNamespace
+    calls = []
+    fake = SimpleNamespace(AUTH=("authorization", "x"), resolve_args=lambda a, d: a,
+                           w1a=SimpleNamespace(call=lambda port, m, p, h, b, **kw: calls.append(
+                               (p, kw.get("timeout"))) or {"status": 200, "json": {}}))
+    monkeypatch.setattr(w2e_episodes, "_before_map", lambda dsn: {})
+    monkeypatch.setenv("PL_HARNESS_DREAM_REST_TIMEOUT", "600")
+    w2e_episodes.run_rest({"method": "POST", "path": "/api/dream/run"}, 1, "dsn", fake)
+    w2e_episodes.run_rest({"method": "GET", "path": "/api/facts"}, 1, "dsn", fake)
+    monkeypatch.delenv("PL_HARNESS_DREAM_REST_TIMEOUT")
+    w2e_episodes.run_rest({"method": "POST", "path": "/api/dream/run"}, 1, "dsn", fake)
+    assert calls == [("/api/dream/run", 600.0), ("/api/facts", 120.0), ("/api/dream/run", 120.0)]

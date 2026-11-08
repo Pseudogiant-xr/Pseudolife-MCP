@@ -67,7 +67,23 @@ DIFF_LINE = re.compile(r"^(?:(?:DB )?DIFF[ \[]|STATE \[|CHAIN \[)")
 LOCATION = re.compile(r": (?:db )?(/[^\s:]+)")
 STEP = re.compile(r"\] (?:step |#)?(\d+)")
 # What the synthetic arm drops, so it is the harness's own baseline (CI's).
-REAL_BANK_ENV = ("PL_HARNESS_BASE_DATABASE", "PL_HARNESS_STUB_DEFAULT_CONTENT")
+REAL_BANK_ENV = ("PL_HARNESS_BASE_DATABASE", "PL_HARNESS_STUB_DEFAULT_CONTENT",
+                 "PL_HARNESS_DREAM_REST_TIMEOUT")
+# The real-bank arms' REST timeout for /api/dream calls, in seconds: Python's
+# Console dream run over the real bank's copy outlasted the default 120 s
+# (console-dream-run and -gates, forced run of 2026-11-08). Synthetic arms
+# keep the default.
+DREAM_REST_TIMEOUT = 600
+# Known limits the maintainer accepted, by scenario: an error whose attempts
+# saw the runner's cgroup kill a process (OOM) is classified "accepted" with
+# this reason, not "error". Any other error in these scenarios still counts.
+ACCEPTED_OOM = {
+    name: ("a known Python memory limit at the harness's worst-case -1.0 floors: Python peaks at "
+           "14.5 GiB in deep apply plus the candidate judge (3.3 GiB at production floors) while "
+           "Rust passes at 4.1 GiB, so both daemons together exceed the 18 GiB runner. Accepted by "
+           "the maintainer on 2026-11-08 (option (c), Python is being retired); no Python fix")
+    for name in ("w2e/candidate-auto", "w2e/candidate-auto-reopen")
+}
 DISK_FLOOR = 8 * 1024 ** 3
 # Scenarios that drive the dream, judge, curation or analyzer queues run on
 # the seed's quiet copy (seed.py quiet): the conductor's decision D1,
@@ -208,6 +224,8 @@ class Runner:
                 env.pop(key, None)
         elif which == "quiet":
             env["PL_HARNESS_BASE_DATABASE"] = QUIET_DB
+        if base:
+            env.setdefault("PL_HARNESS_DREAM_REST_TIMEOUT", str(DREAM_REST_TIMEOUT))
         reaped = self.reap_leftovers()
         before = self.oom_kills()
         started = time.monotonic()
@@ -325,6 +343,8 @@ def run(runner: Runner, suites: list[str], only: list[str] | None,
                 if retry["status"] != "pass":
                     synthetic = runner.invoke(suite, name, "synthetic", base=False)
             verdict = classify(first, retry, synthetic)
+            if verdict == "error" and f"{suite}/{name}" in ACCEPTED_OOM                     and _oom_total(first, retry, synthetic):
+                verdict = "accepted"
             rows.append({"scenario": name, "class": verdict, "differences": len(first["diffs"]),
                          "seconds": first["seconds"], "base": first.get("base"),
                          "oom_kills": _oom_total(first, retry, synthetic)})
@@ -374,7 +394,8 @@ def counts(report: dict) -> dict:
     for suite, body in report["suites"].items():
         classes = [r["class"] for r in body["rows"]]
         out[suite] = {"planned": body["planned"], "run": len(classes),
-                      **{c: classes.count(c) for c in ("pass", "transient", "preexisting", "new", "error")},
+                      **{c: classes.count(c) for c in ("pass", "transient", "preexisting", "new",
+                                                        "accepted", "error")},
                       "differences": sum(r["differences"] for r in body["rows"]),
                       # Errors whose attempts saw the runner's cgroup kill a process.
                       # Null when no attempt could read the cgroup: not measured is not none.
@@ -439,6 +460,7 @@ def main(argv: list[str] | None = None) -> int:
     report, private = run(runner, args.suites, args.only)
     summary = {"base": base, "complete": report["complete"], "stopped": report.get("stopped"),
                "not_forced": report["not_forced"], "quiet_base": quiet_base_use(report),
+               "accepted_limits": ACCEPTED_OOM,
                "fixture_notes": FIXTURE_NOTES,
                "counts": counts(report)}
     (args.out / "summary.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
