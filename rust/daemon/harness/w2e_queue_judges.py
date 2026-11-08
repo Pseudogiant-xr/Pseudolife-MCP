@@ -131,6 +131,13 @@ def own_pairs(*pairs: tuple[str, str]) -> str:
     return f"value->'pair' IN ({listed})"
 
 
+def candidate_records_sql(pairs: tuple = CANDIDATE_PAIRS) -> str:
+    """The active automatic candidate dismissals of ``pairs``."""
+    return ("SELECT value FROM meta WHERE key LIKE 'automatic_review_decision_v1:%' "
+            "AND value->>'queue' = 'candidate' AND value->>'state' = 'active' "
+            f"AND {own_pairs(*pairs)}")
+
+
 CANDIDATE_REOPENED = (
     "SELECT EXISTS (SELECT 1 FROM meta WHERE key LIKE 'automatic_review_decision_v1:%' "
     "AND value->>'queue' = 'candidate' AND value->>'state' = 'reopened' "
@@ -184,10 +191,7 @@ def fingerprint_diffs(dsns: dict, config_text: str,
             if not mark or mark[0].get("generation") != want:
                 out.append(f"candidate generation {side}: bank {want}, watermark "
                            f"{mark[0].get('generation') if mark else None}")
-            for (rec,) in conn.execute(
-                    "SELECT value FROM meta WHERE key LIKE 'automatic_review_decision_v1:%' "
-                    "AND value->>'queue' = 'candidate' AND value->>'state' = 'active' "
-                    f"AND {own_pairs(*pairs)}"):
+            for (rec,) in conn.execute(candidate_records_sql(pairs)):
                 got = candidate_evidence_fingerprints(svc, [rec.get("candidate") or {}])[0]
                 if got != rec.get("evidence_fingerprint"):
                     out.append(f"candidate evidence {side} {rec.get('target')}: bank {got}, "
