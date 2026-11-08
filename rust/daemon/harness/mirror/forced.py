@@ -478,7 +478,9 @@ def main(argv: list[str] | None = None) -> int:
         return 3
     planned = {suite: [n for n in scenario_names(suite) if not args.only or n in args.only]
                for suite in args.suites if suite in QUIET_PREFIXES}
-    if any(base_for(suite, n)[0] == "quiet" for suite, names in planned.items() for n in names):
+    # An excluded scenario's real-bank arms never run, so it needs no quiet copy.
+    if any(base_for(suite, n)[0] == "quiet" and f"{suite}/{n}" not in REAL_BANK_EXCLUDED
+           for suite, names in planned.items() for n in names):
         try:  # a reseed drops the quiet copy; an old one would compare an older backup
             seed.quiet_preflight(*base_comments())
         except seed.Refused as e:

@@ -320,6 +320,21 @@ def test_a_run_needing_no_quiet_scenario_skips_the_preflight(tmp_path, monkeypat
                         "--only", "store-defaults"]) == 0
 
 
+def test_a_run_of_only_real_bank_excluded_scenarios_needs_no_quiet_copy(tmp_path, monkeypatch):
+    """Review (Codex, Opus): sweep-analyzer-tick matches a quiet prefix, but
+    its real-bank arms never run, so a missing quiet copy must not refuse it;
+    with a quiet scenario beside it the preflight still runs (near miss)."""
+    _main_env(monkeypatch)
+    monkeypatch.setattr(forced, "scenario_names",
+                        lambda suite: ["sweep-analyzer-tick", "judge-merge-auto"])
+    monkeypatch.setattr(forced, "base_comments", lambda: ("pl_cf_mir seed from new at u", None))
+    monkeypatch.setattr(forced, "run", lambda runner, *a, **k: ({"suites": {}, "not_forced": {},
+                                                                 "complete": True}, {}))
+    out = ["--rust-bin", "x", "--out", str(tmp_path / "o"), "--suites", "w2e", "--only"]
+    assert forced.main(out + ["sweep-analyzer-tick"]) == 0
+    assert forced.main(out + ["sweep-analyzer-tick", "judge-merge-auto"]) == 3
+
+
 def test_an_unmeasured_oom_count_stays_null(tmp_path):
     answers = {"x": {"real": {"status": "error", "diffs": [], "seconds": 1, "oom_kills": None},
                      "real-retry": {"status": "error", "diffs": [], "seconds": 1, "oom_kills": None},
