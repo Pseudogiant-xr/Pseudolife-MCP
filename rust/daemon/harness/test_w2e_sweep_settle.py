@@ -110,11 +110,26 @@ def test_its_own_rows_moving_keep_it_unsettled(bank):
     the reconcile cursor."""
     dsn, conn = bank
     own_a, own_b = _ids(conn, "Billing Gateway", "Billing Gateway Service")
+    real_a, _ = _ids(conn, "Real Entity A", "Real Entity B")
     conn.execute("INSERT INTO entity_proposals (kind, entity_id, into_id, score, reason, "
                  "status, created_at) VALUES ('merge', %s, %s, 0.7, 'analyzer-duplicate', "
                  "'pending', 1)", (own_a, own_b))
+    # Each scoped table holds one own row, matched the way the daemons write
+    # it: edge ends by id, dismissals by canonical, decisions by display.
+    conn.execute("INSERT INTO relations (name, description, created_at) "
+                 "VALUES ('related-to', 'related', 1) ON CONFLICT DO NOTHING")
+    conn.execute("INSERT INTO edge_proposals (src_id, relation, dst_id, confidence, source, "
+                 "created_at) VALUES (%s, 'related-to', %s, 0.5, 'analyzer', 1)",
+                 (real_a, own_b))
+    conn.execute("INSERT INTO dismissed_pairs (a_norm, b_norm, dismissed_at) "
+                 "VALUES ('ledger export', 'real entity b', 1)")
+    conn.execute("INSERT INTO merge_decisions (entity_display, into_display, status, "
+                 "decided_at) VALUES ('Real Entity A', 'Ledger Exporter', 'rejected', 1)")
     spec = {**_settle_spec(), "timeout_s": 2.0}
     for churn in ("UPDATE entity_proposals SET score = %s / 1000.0",
+                  "UPDATE edge_proposals SET confidence = %s / 1000.0",
+                  "UPDATE dismissed_pairs SET dismissed_at = %s",
+                  "UPDATE merge_decisions SET decided_at = %s",
                   "UPDATE meta SET value = jsonb_build_object('at', %s::bigint) "
                   "WHERE key = 'analyzer_pair_reconcile_cursor'"):
         with pytest.raises(RuntimeError, match="did not settle"):

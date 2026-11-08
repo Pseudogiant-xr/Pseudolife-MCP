@@ -14,7 +14,10 @@ independent, so every scenario is built so that the settled state does not
 depend on how many ticks ran: the automatic dream's trigger fires only once
 the whole batch is stored, the deep tick fires once (its watermark stops
 it), the analyzer's batch covers every entity (its cursor stays put), and
-the stall's failures run out when the failing memory is quarantined.
+the stall's failures run out when the failing memory is quarantined. On a
+copy of the real bank the analyzer's batch cannot cover every entity, so its
+settle watches only its own rows (``ANALYZER_QUIET_SQL``), and the moving
+cursor shows as a difference rather than a settle that never ends.
 """
 from __future__ import annotations
 
