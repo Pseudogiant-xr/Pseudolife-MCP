@@ -277,3 +277,120 @@ def test_without_a_base_the_dump_and_its_checks_are_unchanged(base, monkeypatch)
     run.normalize_state(state, norm)
     assert len([p for p in norm.problems if p.startswith("created_at:")]) == 3
     assert [p for p in run.chain_check(dsn) if p.startswith("seq 2:")]
+
+
+# ---- responses that list base rows ------------------------------------------------
+# The Console's board view lists the copied board's newest events (owner
+# scope), its held leases and their holders; the maintainer status lists the
+# base's key changes as ``at``. Those clocks predate every captured window.
+
+LEASE_AT = 1_500_000.75    # a base lease's acquired_at
+
+
+def _clock_problems(norm) -> list[str]:
+    return [p for p in norm.problems if "does not match the captured clock windows" in p]
+
+
+@pytest.fixture
+def board_base(base):
+    """The base with one held lease beside its three events."""
+    import psycopg
+    with psycopg.connect(pg.dsn(base), autocommit=True) as conn:
+        conn.execute("INSERT INTO coordination_leases (name, holder_agent_id, holder_principal, "
+                     "fence, acquired_at) VALUES ('suite', 'agent-base', 'p', 1, %s)", (LEASE_AT,))
+    dbstate._BASE_HASHES.clear()
+    return base
+
+
+def _windowed_norm(cls=Normalizer):
+    windows = Windows()
+    now = time.time()
+    windows.steps.append((now - 1, now + 1))
+    return cls(windows)
+
+
+def test_a_response_listing_base_rows_reports_no_clock_problems(board_base, copy):
+    """The Console view of a copied board: base events' created_at, a base
+    lease holder's acquired_at and a status age read from a base event."""
+    run.dump(copy("boardview"))
+    norm = _windowed_norm()
+    body = {"events": [{"seq": 1, "created_at": OLD + 1}, {"seq": 3, "created_at": OLD + 3}],
+            "leases": [{"name": "suite", "holder": {"acquired_at": LEASE_AT, "expires_at": None}}],
+            "agents": [{"agent_id": "x", "status_set_at": OLD + 2}]}
+    out = run.normalize_response({"status": 200, "json": body}, norm)
+    assert not _clock_problems(norm), f"base rows' clocks were window-checked: {norm.problems}"
+    # Compared raw, so an arm serving another value still differs.
+    assert out["json"]["events"][0]["created_at"] == OLD + 1
+
+
+def test_a_new_rows_foreign_clock_in_a_response_is_still_reported(board_base, copy):
+    """The near miss: beside base rows, a clock the base does not hold (a new
+    event, or the base lease re-acquired with a wrong clock) is reported."""
+    run.dump(copy("boardnear"))
+    norm = _windowed_norm()
+    body = {"events": [{"seq": 9, "created_at": 2_000_000.25}, {"seq": 1, "created_at": OLD + 1}],
+            "leases": [{"name": "suite", "holder": {"acquired_at": 2_000_001.5}}]}
+    run.normalize_response({"status": 200, "json": body}, norm)
+    unmatched = _clock_problems(norm)
+    assert any("2000000.25" in p for p in unmatched), f"a new event's clock went unreported: {unmatched}"
+    assert any("2000001.5" in p for p in unmatched), f"a rewritten lease's clock went unreported: {unmatched}"
+    assert not [p for p in unmatched if "1000001.5" in p], unmatched
+
+
+def test_maintainer_status_key_changes_from_the_base_report_no_clock_problems(board_base, copy):
+    """``key_changes`` reads base ``maintainer_key`` events as ``at``; a new
+    key change's foreign ``at`` is still reported."""
+    from board.maintainer import SignedNormalizer
+    run.dump(copy("boardkeys"))
+    norm = _windowed_norm(SignedNormalizer)
+    body = {"key_changes": [{"at": 2_000_000.25, "change": "enrol"}, {"at": OLD + 2, "change": "enrol"}]}
+    run.normalize_response({"status": 200, "json": body}, norm)
+    unmatched = _clock_problems(norm)
+    assert not [p for p in unmatched if "1000002.5" in p], f"a base key change was window-checked: {unmatched}"
+    assert any("2000000.25" in p for p in unmatched), f"a new key change went unreported: {unmatched}"
+
+
+def test_a_base_passkey_listed_by_status_reports_no_clock_problems(board_base, copy):
+    """A scenario's extra tables (the maintainer's) count as base too."""
+    import psycopg
+    from board.maintainer import TABLES, SignedNormalizer
+    with psycopg.connect(pg.dsn(board_base), autocommit=True) as conn:
+        conn.execute("INSERT INTO maintainer_passkeys (credential_id, public_key, alg, label, "
+                     "enrolled_by, state, created_at, revoked_at) VALUES "
+                     "('base-key', %s, -8, 'old', 'bootstrap', 'revoked', %s, %s)", (b"k", OLD, OLD + 7))
+    dbstate._BASE_HASHES.clear()
+    run.dump(copy("boardpasskey"), TABLES)
+    norm = _windowed_norm(SignedNormalizer)
+    body = {"passkeys": [{"credential_id": "base-key", "created_at": OLD, "revoked_at": OLD + 7}]}
+    run.normalize_response({"status": 200, "json": body}, norm, TABLES)
+    assert not _clock_problems(norm), f"a base passkey was window-checked: {norm.problems}"
+
+
+def test_a_new_row_copying_a_base_clock_is_still_reported_by_the_state_dump(board_base, copy):
+    """The backstop: a response leaves a base-held clock unchecked, but a new
+    row stored with that clock (a daemon copying an old clock) has a key the
+    base lacks, so the state dump still reports it."""
+    import psycopg
+    dsn = copy("boardcopyclock")
+    with psycopg.connect(dsn, autocommit=True) as conn:
+        seq, prev = _head(conn)
+        _insert(conn, _event(seq + 1, prev, CANONICAL, OLD + 1))
+    norm = _windowed_norm()
+    run.normalize_response({"status": 200, "json": {"events": [{"seq": seq + 1, "created_at": OLD + 1}]}},
+                           norm)
+    assert not _clock_problems(norm)
+    run.normalize_state(run.dump(dsn), norm)
+    assert any("1000001.5" in p for p in _clock_problems(norm)), \
+        "a new row stored with a base row's clock went unreported"
+
+
+def test_without_a_base_a_response_reports_every_foreign_clock(monkeypatch):
+    monkeypatch.delenv(pgdisposable.BASE_ENV, raising=False)
+    norm = _windowed_norm()
+    run.normalize_response({"status": 200, "json": {"events": [{"seq": 1, "created_at": OLD + 1}],
+                                                    "key_changes": [{"at": OLD + 2}]}}, norm)
+    assert len(_clock_problems(norm)) == 1  # ``at`` is a maintainer key only
+    from board.maintainer import SignedNormalizer
+    norm = _windowed_norm(SignedNormalizer)
+    run.normalize_response({"status": 200, "json": {"key_changes": [{"at": OLD + 2}]}}, norm)
+    assert len(_clock_problems(norm)) == 1
