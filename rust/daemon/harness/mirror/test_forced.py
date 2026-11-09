@@ -117,7 +117,7 @@ SAME_PLACE = {
         "DB DIFF [default] public.retrieval_events[1].served[2].components.ce: python NoneType null vs rust float 0.5"),
     "w2d case": (
         "DIFF [rrf-pool] rrf 3: ['.entries[0].score: python 0.5 vs rust 0.6', '.entries[1].id: python 7 vs rust 8']",
-        "DIFF [rrf-pool] rrf 3: ['.entries[4].score: python 0.1 vs rust 0.2']"),
+        "DIFF [rrf-pool] rrf 3: ['.entries[4].score: python 0.1 vs rust 0.2', '.entries[2].id: python 1 vs rust 9']"),
     "w2d coverage": ("DB DIFF [mcp-stats] coverage stats.graduation: 1 < 3",
                      "DB DIFF [mcp-stats] coverage stats.graduation: 0 < 3"),
     "board state": (
@@ -129,6 +129,10 @@ SAME_PLACE = {
                   'DB DIFF [tokens] /rows/public.slot_reads/rows: row only in rust: ["box", "count", 4, 2.5]'),
     "routes error": ("DIFF [stamped] scenario error: ['ForeignKeyViolation: key (name)=(uses) (at run.py:12 in x)']",
                      "DIFF [stamped] scenario error: ['ForeignKeyViolation: key (name)=(other) (at run.py:12 in x)']"),
+    "board step": ("DIFF [identity] #3 register: ['.json.agent_id: python 1 vs rust 2', '.headers.content-type: a vs b']",
+                   "DIFF [identity] #3 register: ['.headers.content-type: c vs d', '.json.agent_id: python 5 vs rust 6']"),
+    "w2d status": ("DIFF [mcp-get] get 2: ['status: python 200 vs rust 500', 'body bytes differ']",
+                   "DIFF [mcp-get] get 2: ['status: python 404 vs rust 200', 'body bytes differ']"),
 }
 # Near misses: another field, case, step, table, clock, path or error type.
 ELSEWHERE = {
@@ -139,7 +143,41 @@ ELSEWHERE = {
     "board chain": "CHAIN [console] python: acquired_at: value 12.0 does not match the captured clock windows",
     "routes db": 'DB DIFF [tokens] /rows/public.retrieval_events/rows: row only in rust: [1, "probe"]',
     "routes error": "DIFF [stamped] scenario error: ['DuplicateTable: relation already exists (at run.py:9 in x)']",
+    "board step": "DIFF [identity] #4 register: ['.json.agent_id: python 1 vs rust 2']",
+    "w2d status": "DIFF [mcp-get] get 2: ['content-type: a vs b']",
 }
+
+
+def test_each_case_item_is_a_place_of_its_own():
+    """Review (Opus): a case line took only its first item's dotted path, so
+    a new status or header difference in a case whose synthetic arm differed
+    anywhere read as preexisting. Every printed item counts, keys with a
+    hyphen and items that are not paths included."""
+    real = {"status": "diff", "diffs": [
+        "DIFF [mcp-get] get 2: ['status: python 200 vs rust 500', '.json.total: python 1 vs rust 2']"]}
+    synthetic = {"status": "diff", "diffs": ["DIFF [mcp-get] get 2: ['.json.total: python 3 vs rust 4']"]}
+    assert ("get 2", "status") in forced.signatures(real)
+    assert forced.classify(real, real, synthetic) == "preexisting"   # shares .json.total
+    alone = {"status": "diff", "diffs": ["DIFF [mcp-get] get 2: ['status: python 200 vs rust 500']"]}
+    assert forced.classify(alone, alone, synthetic) == "new"           # status is not shared
+
+
+def test_a_scenario_error_keeps_its_harness_location():
+    """Review (Opus): the same exception type raised elsewhere in the
+    harness is another place."""
+    one = {"status": "diff", "diffs": [
+        "DIFF [stamped] scenario error: ['KeyError: x (case 'seed'; at run.py:12 in prepare_template)']"]}
+    other = {"status": "diff", "diffs": [
+        "DIFF [stamped] scenario error: ['KeyError: y (at run.py:40 in run_scenario)']"]}
+    assert forced.classify(one, one, other) == "new"
+    assert forced.signatures(one) == {("", "scenario error KeyError case 'seed'; run.py prepare_template")}
+
+
+def test_a_w2e_response_line_keeps_its_old_signature():
+    """w2e response differences carry no db path: their signature is still
+    the step and the line's first 120 characters, as before."""
+    line = 'DIFF [dream-rollback] step 19 {"op": "tool"}: .value.record.age: python "a" vs rust "b"'
+    assert forced.signatures({"diffs": [line]}) == {("19", line[:120])}
 
 
 @pytest.mark.parametrize("kind", sorted(SAME_PLACE))

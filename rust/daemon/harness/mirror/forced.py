@@ -26,6 +26,7 @@ holds the differences, which quote bank text, and stays on the host.
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import os
 import re
@@ -154,45 +155,70 @@ def outcome(exit_code: int | None, log: str) -> dict:
 
 # The other suites' lines: board STATE (after step N (label): table: ...),
 # board CHAIN (side: key: ...), routes DB (a leading /rows/... path), w2d
-# fields (public.table[i].field: python ... vs rust ...), w2d cases (case:
-# ['.path: ...', ...]), w2d coverage (coverage name: a < b) and scenario
-# errors (scenario error: ['Type: ...']). Indexes are masked, and no value
-# reaches a signature.
+# fields (public.table[i].field: python ... vs rust ...), w2d coverage
+# (coverage name: a < b), scenario errors (scenario error: ['Type: ...
+# (case 'x'; at file:N in fn)']) and case lines (case: ['item', ...], board's
+# as "#N name: [...]"), where each printed item is a place of its own. Indexes
+# are masked, and no value reaches a signature.
 HEAD = re.compile(r"^(?:DB )?(?:DIFF|STATE|CHAIN) \[[^\]]*\] ?")
 AFTER_STEP = re.compile(r"^after step (\d+) \([^)]*\): (\w+):")
-CHAIN_KEY = re.compile(r"^(?:python|rust): (\w+): value ")
+CHAIN_KEY = re.compile(r"^(python|rust): (\w+): value ")
 LEADING_PATH = re.compile(r"^(/[^\s:]+)")
-FIELD = re.compile(r"^([\w.\[\]]+): (?:python |only in |[\d.]+ <)")
-ERROR = re.compile(r"^scenario error: \[['\"](\w+)")
+FIELD = re.compile(r"^([\w.\[\]\-]+): (?:python |only in |[\d.]+ <)")
 COVERAGE = re.compile(r"^coverage ([\w.]+): ")
-CASE = re.compile(r"^([^:\[\]'\"]{1,80}): \[['\"](?:(\.[\w.\[\]]+):)?")
+ERROR = re.compile(r"^scenario error: \[['\"](\w+)")
+ERROR_WHERE = re.compile(r"\((case '[^']*'; )?at ([\w.]+):\d+ in (\w+)\)")
+CASE = re.compile(r"^([^:\[\]'\"]{1,80}): (\[.*\])$", re.S)
+ITEM_PATH = re.compile(r"^(\.?[\w.\[\]\-]+): ")
 INDEX = re.compile(r"\[\d+\]")
 
 
-def _place(line: str) -> tuple[str, str]:
+def _item_place(item) -> str:
+    """One printed case item's place: its path or key, else its words with
+    any value (numbers, quoted text) removed."""
+    text = str(item)
+    m = ITEM_PATH.match(text)
+    if m:
+        return INDEX.sub("[]", m.group(1))
+    words = re.sub(r"'[^']*'|\"[^\"]*\"|\S*\d\S*", "", text).split()
+    return " ".join(words[:4]) or "<item>"
+
+
+def _places(line: str) -> list[tuple[str, str]]:
     rest = HEAD.sub("", line, count=1)
     step, where = STEP.search(line), LOCATION.search(line)
     if step and where:  # w2e: step N {op}: db /path
-        return step.group(1), where.group(1)
+        return [(step.group(1), where.group(1))]
+    m = ERROR.match(rest)
+    if m:
+        at = ERROR_WHERE.search(rest)
+        return [("", f"scenario error {m.group(1)}"
+                 + (f" {at.group(1) or ''}{at.group(2)} {at.group(3)}" if at else ""))]
     for pattern, build in (
             (AFTER_STEP, lambda m: (m.group(1), m.group(2))),
-            (CHAIN_KEY, lambda m: ("", "chain " + m.group(1))),
+            (CHAIN_KEY, lambda m: ("", f"chain {m.group(1)} {m.group(2)}")),
             (LEADING_PATH, lambda m: ("", m.group(1))),
-            (ERROR, lambda m: ("", "scenario error " + m.group(1))),
             (COVERAGE, lambda m: ("", "coverage " + m.group(1))),
-            (FIELD, lambda m: ("", m.group(1))),
-            (CASE, lambda m: ("", m.group(1) + (" " + m.group(2) if m.group(2) else "")))):
+            (FIELD, lambda m: ("", m.group(1)))):
         m = pattern.match(rest)
         if m:
             s, w = build(m)
-            return s, INDEX.sub("[]", w)
-    return (step.group(1) if step else "", where.group(1) if where else line[:120])
+            return [(s, INDEX.sub("[]", w))]
+    m = CASE.match(rest)
+    if m:
+        try:
+            items = ast.literal_eval(m.group(2))
+        except (ValueError, SyntaxError):
+            items = None
+        if isinstance(items, list) and items:
+            return [(m.group(1), _item_place(i)) for i in items]
+    return [(step.group(1) if step else "", where.group(1) if where else line[:120])]
 
 
 def signatures(result: dict) -> set:
-    """Each difference's (step, place): the step or case and the state or
-    response path, never a value."""
-    return {_place(line) for line in result["diffs"]}
+    """Each difference's (step or case, place): the state or response path,
+    never a value. A case line gives one place per printed item."""
+    return {p for line in result["diffs"] for p in _places(line)}
 
 
 def classify(first: dict, retry: dict | None, synthetic: dict | None) -> str:
