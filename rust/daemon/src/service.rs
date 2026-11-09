@@ -1082,9 +1082,9 @@ impl Service {
             .map(|d| d.as_secs_f64())
             .unwrap_or(0.0);
         // Each store saves when this tick purged from it, or when an earlier
-        // save left slots dirty: Python's autosave retries those, and this
-        // daemon's autosave does not save the canonical stores, so without
-        // the retry a purge whose save failed would come back at restart.
+        // save left slots dirty, as the autosave (`save_dirty_canonical`)
+        // also retries them: a purge whose save failed would otherwise come
+        // back at restart.
         let _write = ready.write.lock().await;
         let facts = ready.cortex.write(|s| s.compact(keep, min_age, now));
         if (facts > 0 || !ready.cortex.snapshot().dirty_slots.is_empty())
@@ -1145,13 +1145,16 @@ impl Service {
         *reported = pending;
     }
 
-    /// `_persist_all`'s counters arm for `autosave_if_changed`: only when the
-    /// bank or cortex changed since the last save, or the last counters
-    /// write failed. Entries and canonical stores write through; searches
-    /// accrue access counts in memory, so a save synchronizes those counts
-    /// along with the counters row. A failed counters write is logged and
-    /// retried by the next autosave, as in Python.
-    async fn save_counters(&self) -> Result<(), String> {
+    /// `autosave_if_changed` (service.py:3687-3700) with `_persist_all`'s
+    /// storage arm, from the autosave loop and at a clean exit: the counters
+    /// row and access counts (`save_counters`), then each canonical store
+    /// holding unsaved changes (`save_dirty_canonical`), under the writer
+    /// lock. Entries write through at each call, and so do the canonical
+    /// stores, except a change whose own save failed (the call answered the
+    /// error and kept the value) and the forget cascade's retirements
+    /// (`retire_unsupported`), which only this save persists. An idle or
+    /// read-only run writes nothing.
+    async fn autosave_if_changed(&self) -> Result<(), String> {
         if self.config.read_only {
             return Ok(());
         }
@@ -1173,8 +1176,23 @@ impl Service {
         let Some(ready) = inner.ready.clone() else {
             return Ok(());
         };
+        let ws = ready.write.lock().await;
+        self.save_counters(&ready, &ws).await;
+        let saved = self.save_dirty_canonical(&ready).await;
+        drop(ws);
+        drop(inner);
+        saved
+    }
+
+    /// `_persist_all`'s counters arm: only when the bank or cortex changed
+    /// since the last save, or the last counters write failed. Searches
+    /// accrue access counts in memory, so a save synchronizes those counts
+    /// along with the counters row. A failed counters write is logged and
+    /// retried by the next autosave, as in Python. The caller holds the
+    /// writer lock (`ws`).
+    async fn save_counters(&self, ready: &Ready, ws: &crate::episodes::WriteState) {
         if crate::mutants::active("counters-save-off") {
-            return Ok(());
+            return;
         }
         // A `weights.pt` awaiting the Python import: a fresh row would be
         // newer than the file, and `_load_counters` keeps the newer row and
@@ -1186,15 +1204,14 @@ impl Service {
             .expect("counters import lock")
             .is_some()
         {
-            return Ok(());
+            return;
         }
-        let ws = ready.write.lock().await;
-        let fp = crate::counters::fingerprint(&ready);
+        let fp = crate::counters::fingerprint(ready);
         let pending = self
             .counters_pending
             .load(std::sync::atomic::Ordering::SeqCst);
         if !pending && *self.last_saved.lock().expect("last saved lock") == Some(fp) {
-            return Ok(());
+            return;
         }
         let row = {
             let bands: Vec<String> = self
@@ -1256,9 +1273,44 @@ impl Service {
             eprintln!("access-count sync failed: {error}");
         }
         *self.last_saved.lock().expect("last saved lock") = Some(fp);
-        drop(ws);
-        drop(inner);
-        Ok(())
+    }
+
+    /// `_persist_all`'s canonical arms (`_save_cortex`, `_save_world`,
+    /// `_save_lessons`): each store with dirty slots (or, for the cortex, an
+    /// unsaved supersession log or dream cursor) saves through its per-slot
+    /// sync. A failed save is logged and counted (`persist_errors`) by the
+    /// save itself and leaves its slots dirty, so the next autosave retries
+    /// it, as Python's unrecorded fingerprint does; the other stores still
+    /// save. Nothing dirty writes nothing. The caller holds the writer lock.
+    async fn save_dirty_canonical(&self, ready: &Ready) -> Result<(), String> {
+        let mut failed = Vec::new();
+        let cortex = {
+            let snap = ready.cortex.snapshot();
+            !snap.dirty_slots.is_empty() || snap.meta_dirty
+        };
+        if cortex && crate::fact_set::save_cortex(self, ready).await.is_err() {
+            failed.push("cortex");
+        }
+        if !ready.world.snapshot().dirty_slots.is_empty()
+            && crate::world_tools::save_world(self, ready).await.is_err()
+        {
+            failed.push("world cortex");
+        }
+        if !ready.lessons.snapshot().dirty_slots.is_empty()
+            && crate::forget_tools::save_lessons(self, ready)
+                .await
+                .is_err()
+        {
+            failed.push("lesson store");
+        }
+        if failed.is_empty() {
+            Ok(())
+        } else {
+            Err(format!(
+                "{} save failed; its changes stay unsaved until the next autosave",
+                failed.join(", ")
+            ))
+        }
     }
 
     /// `_refuse_on_stale_hydrated_dims`'s message.
@@ -1375,7 +1427,7 @@ impl crate::background::Duties for Service {
     /// and at a clean exit (`mcp_server._flush_on_exit`): only what changed
     /// since the last save, so an idle or read-only run writes nothing.
     fn autosave(&self) -> crate::background::Duty<'_> {
-        Box::pin(self.save_counters())
+        Box::pin(self.autosave_if_changed())
     }
 
     fn warmup(&self, stop: tokio::sync::watch::Receiver<bool>) -> crate::background::Duty<'_> {

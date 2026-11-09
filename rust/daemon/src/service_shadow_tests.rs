@@ -439,3 +439,127 @@ async fn db_commit_unknown_reread_keeps_access_counts_and_rereads_episodes() {
     drop((ready, after));
     shadow.close().await;
 }
+
+/// A cortex change no call saved is persisted by the next autosave, as
+/// Python's `autosave_if_changed` saves the cortex (`_persist_all` ->
+/// `_save_cortex`): the forget cascade's retirement, whose supersession-log
+/// row only the resident store holds once the cascade's transaction retired
+/// the facts row, and a write whose own save failed, which stays in the
+/// store and dirty. An autosave with nothing dirty writes nothing.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn db_autosave_saves_dirty_canonical_slots() {
+    use crate::background::Duties;
+    use crate::stores::cortex_write::FactWrite;
+    let Some(dsn) = test_dsn() else { return };
+    let Some(model) = fixture_model() else { return };
+    let _guard = DB.lock().await;
+    let shadow = Shadow::open_writer(&dsn, &model).await;
+    let ready = shadow.service.ensure_init_inner().await.unwrap();
+    let embedding: Arc<[f32]> = {
+        let mut v = vec![0.0f32; crate::bank::DIM];
+        v[0] = 1.0;
+        v.into()
+    };
+    let fact = |entity: &'static str, value: &'static str, t: f64| FactWrite {
+        entity,
+        attribute: "engine",
+        value,
+        raw: serde_json::Map::new(),
+        embedding: embedding.clone(),
+        slot_embedding: Some(embedding.clone()),
+        confidence: 1.0,
+        support: Some("user"),
+        now: t,
+        hlc: ((t * 1000.0) as i64, 0),
+        writer_id: Some("autosave-test".into()),
+        session_id: None,
+        freshness_class: "evergreen".into(),
+        authority: crate::labels::Resolved::Inherit,
+        distortion_tolerance: crate::labels::Resolved::Inherit,
+        provenance: Vec::new(),
+        stance: None,
+        force_contend: false,
+        dream: false,
+    };
+    // A current value, saved as `memory_fact_set` saves it.
+    ready
+        .cortex
+        .write(|s| s.write_fact(&fact("hosta", "postgres", 1000.0)))
+        .unwrap();
+    crate::fact_set::save_cortex(&shadow.service, &ready)
+        .await
+        .unwrap();
+    shadow.service.autosave().await.unwrap();
+    // The forget cascade: its transaction retires the row, then the
+    // resident store retires the value and logs it, with no save.
+    shadow
+        .exec(
+            "UPDATE facts SET status = 'retired', superseded_at = 2000, \
+             superseded_by_value = 'forgotten source entry 7' \
+             WHERE entity_norm = 'hosta' AND status = 'current'",
+        )
+        .await;
+    let retired = ready
+        .cortex
+        .write(|c| c.retire_unsupported("hosta", "engine", 7, 2000.0));
+    assert_eq!(retired, 1);
+    // A write whose save failed: in the store, dirty, not in the bank.
+    ready
+        .cortex
+        .write(|s| s.write_fact(&fact("hostb", "mysql", 2001.0)))
+        .unwrap();
+    shadow.service.autosave().await.unwrap();
+    let log: Option<serde_json::Value> = shadow
+        .side
+        .query_opt(
+            "SELECT value FROM meta WHERE key = 'cortex_supersession_log'",
+            &[],
+        )
+        .await
+        .unwrap()
+        .map(|r| r.get(0));
+    let last = log
+        .as_ref()
+        .and_then(|l| l.as_array())
+        .and_then(|l| l.last())
+        .cloned();
+    assert_eq!(
+        last.as_ref()
+            .map(|r| (r["decision"].clone(), r["reason"].clone())),
+        Some((
+            serde_json::json!("retired"),
+            serde_json::json!("forgotten source entry 7")
+        )),
+        "the autosave persisted the cascade's retirement log row: {log:?}"
+    );
+    let rows: i64 = shadow
+        .side
+        .query_one(
+            "SELECT count(*) FROM facts WHERE entity_norm = 'hostb' \
+             AND value = 'mysql' AND status = 'current'",
+            &[],
+        )
+        .await
+        .unwrap()
+        .get(0);
+    assert_eq!(rows, 1, "the autosave persisted the unsaved write");
+    {
+        let snap = ready.cortex.snapshot();
+        assert!(snap.dirty_slots.is_empty() && !snap.meta_dirty);
+    }
+    // Nothing dirty and nothing changed: a row edited behind the daemon's
+    // back stays as written.
+    shadow
+        .exec("UPDATE facts SET value = 'behind' WHERE entity_norm = 'hostb'")
+        .await;
+    shadow.service.autosave().await.unwrap();
+    let value: String = shadow
+        .side
+        .query_one("SELECT value FROM facts WHERE entity_norm = 'hostb'", &[])
+        .await
+        .unwrap()
+        .get(0);
+    assert_eq!(value, "behind", "an idle autosave wrote the cortex");
+    drop(ready);
+    shadow.close().await;
+}
