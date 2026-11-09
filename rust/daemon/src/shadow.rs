@@ -23,8 +23,8 @@
 //!   bump in `search.rs`, whose `count_access` is false in read-only mode
 //!   (`read/search_route.rs` `params_for`, `consolidation_tools.rs`); the
 //!   `memory_get` resident bump in `read/mcp_reads.rs`, guarded by
-//!   `!read_only`; and `Service::save_counters`, which returns early when
-//!   read-only.
+//!   `!read_only`; and `Service::autosave_if_changed`, which returns early
+//!   when read-only.
 //! - `Entry.reinforcements`: outcome and dream run (write paths only).
 //! - `Entry.last_logical_turn`: hydration only.
 //!
