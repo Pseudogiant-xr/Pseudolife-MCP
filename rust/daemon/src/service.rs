@@ -1082,28 +1082,50 @@ impl Service {
             .map(|d| d.as_secs_f64())
             .unwrap_or(0.0);
         // Each store saves when this tick purged from it, or when an earlier
-        // save left slots dirty: Python's autosave retries those, and this
-        // daemon's autosave does not save the canonical stores, so without
-        // the retry a purge whose save failed would come back at restart.
+        // save left slots dirty, as the autosave (`save_dirty_canonical`)
+        // also retries them: a purge whose save failed would otherwise come
+        // back at restart.
         let _write = ready.write.lock().await;
+        // The commit-unknown barrier `save_dirty_canonical` honours: the
+        // sweep released the service lock after its init, so a write may
+        // have lost its COMMIT reply since, leaving resident slots the bank
+        // has moved past (an undone legacy restore that committed). No store
+        // is compacted or saved while it is: checked here and again before
+        // each later store, since a store's save below can lose its own reply,
+        // and a store compacted but not saved would show readers a purge the
+        // bank never got until the next call's re-read.
+        let barrier = crate::txn::commit_outcome_unknown;
+        if barrier() {
+            return;
+        }
         let facts = ready.cortex.write(|s| s.compact(keep, min_age, now));
         if (facts > 0 || !ready.cortex.snapshot().dirty_slots.is_empty())
             && let Err(e) = crate::fact_set::save_cortex(self, ready).await
         {
             eprintln!("compaction: cortex save failed: {e:?}");
         }
-        let world_facts = ready.world.write(|s| s.compact(keep, min_age, now));
-        if (world_facts > 0 || !ready.world.snapshot().dirty_slots.is_empty())
-            && let Err(e) = crate::world_tools::save_world(self, ready).await
-        {
-            eprintln!("compaction: world cortex save failed: {e:?}");
-        }
-        let lessons = ready.lessons.write(|s| s.compact(keep, min_age, now));
-        if (lessons > 0 || !ready.lessons.snapshot().dirty_slots.is_empty())
-            && let Err(e) = crate::forget_tools::save_lessons(self, ready).await
-        {
-            eprintln!("compaction: lesson store save failed: {e:?}");
-        }
+        let world_facts = if barrier() {
+            0
+        } else {
+            let purged = ready.world.write(|s| s.compact(keep, min_age, now));
+            if (purged > 0 || !ready.world.snapshot().dirty_slots.is_empty())
+                && let Err(e) = crate::world_tools::save_world(self, ready).await
+            {
+                eprintln!("compaction: world cortex save failed: {e:?}");
+            }
+            purged
+        };
+        let lessons = if barrier() {
+            0
+        } else {
+            let purged = ready.lessons.write(|s| s.compact(keep, min_age, now));
+            if (purged > 0 || !ready.lessons.snapshot().dirty_slots.is_empty())
+                && let Err(e) = crate::forget_tools::save_lessons(self, ready).await
+            {
+                eprintln!("compaction: lesson store save failed: {e:?}");
+            }
+            purged
+        };
         let total = facts + world_facts + lessons;
         if total > 0 {
             eprintln!(
@@ -1145,13 +1167,16 @@ impl Service {
         *reported = pending;
     }
 
-    /// `_persist_all`'s counters arm for `autosave_if_changed`: only when the
-    /// bank or cortex changed since the last save, or the last counters
-    /// write failed. Entries and canonical stores write through; searches
-    /// accrue access counts in memory, so a save synchronizes those counts
-    /// along with the counters row. A failed counters write is logged and
-    /// retried by the next autosave, as in Python.
-    async fn save_counters(&self) -> Result<(), String> {
+    /// `autosave_if_changed` (service.py:3687-3700) with `_persist_all`'s
+    /// storage arm, from the autosave loop and at a clean exit: the counters
+    /// row and access counts (`save_counters`), then each canonical store
+    /// holding unsaved changes (`save_dirty_canonical`), under the writer
+    /// lock. Entries write through at each call, and so do the canonical
+    /// stores, except a change whose own save failed (the call answered the
+    /// error and kept the value) and the forget cascade's retirements
+    /// (`retire_unsupported`), which only this save persists. An idle or
+    /// read-only run writes nothing.
+    async fn autosave_if_changed(&self) -> Result<(), String> {
         if self.config.read_only {
             return Ok(());
         }
@@ -1173,8 +1198,23 @@ impl Service {
         let Some(ready) = inner.ready.clone() else {
             return Ok(());
         };
+        let ws = ready.write.lock().await;
+        self.save_counters(&ready, &ws).await;
+        let saved = self.save_dirty_canonical(&ready).await;
+        drop(ws);
+        drop(inner);
+        saved
+    }
+
+    /// `_persist_all`'s counters arm: only when the bank or cortex changed
+    /// since the last save, or the last counters write failed. Searches
+    /// accrue access counts in memory, so a save synchronizes those counts
+    /// along with the counters row. A failed counters write is logged and
+    /// retried by the next autosave, as in Python. The caller holds the
+    /// writer lock (`ws`).
+    async fn save_counters(&self, ready: &Ready, ws: &crate::episodes::WriteState) {
         if crate::mutants::active("counters-save-off") {
-            return Ok(());
+            return;
         }
         // A `weights.pt` awaiting the Python import: a fresh row would be
         // newer than the file, and `_load_counters` keeps the newer row and
@@ -1186,15 +1226,14 @@ impl Service {
             .expect("counters import lock")
             .is_some()
         {
-            return Ok(());
+            return;
         }
-        let ws = ready.write.lock().await;
-        let fp = crate::counters::fingerprint(&ready);
+        let fp = crate::counters::fingerprint(ready);
         let pending = self
             .counters_pending
             .load(std::sync::atomic::Ordering::SeqCst);
         if !pending && *self.last_saved.lock().expect("last saved lock") == Some(fp) {
-            return Ok(());
+            return;
         }
         let row = {
             let bands: Vec<String> = self
@@ -1256,9 +1295,57 @@ impl Service {
             eprintln!("access-count sync failed: {error}");
         }
         *self.last_saved.lock().expect("last saved lock") = Some(fp);
-        drop(ws);
-        drop(inner);
-        Ok(())
+    }
+
+    /// `_persist_all`'s canonical arms (`_save_cortex`, `_save_world`,
+    /// `_save_lessons`): each store with dirty slots (or, for the cortex, an
+    /// unsaved supersession log or dream cursor) saves through its per-slot
+    /// sync. A failed save is logged and counted (`persist_errors`) by the
+    /// save itself and leaves its slots dirty, so the next autosave retries
+    /// it, as Python's unrecorded fingerprint does; the other stores still
+    /// save. Nothing dirty writes nothing. The caller holds the writer lock.
+    ///
+    /// Nothing is flushed while a COMMIT outcome is unknown
+    /// ([`crate::txn::commit_outcome_unknown`]): the bank may then hold a
+    /// write the resident stores do not (a legacy restore whose transaction
+    /// committed with its reply lost is undone in memory, its slot still
+    /// dirty when it was before), so a flush could write stale slots over
+    /// it. The next call's re-read (`reread_after_commit_unknown`) replaces
+    /// the stores and their dirty marks first, dropping what a restart
+    /// would drop. Checked before each store, since a save earlier in the
+    /// same tick can lose its own COMMIT reply.
+    async fn save_dirty_canonical(&self, ready: &Ready) -> Result<(), String> {
+        let barrier = crate::txn::commit_outcome_unknown;
+        let mut failed = Vec::new();
+        let cortex = {
+            let snap = ready.cortex.snapshot();
+            !snap.dirty_slots.is_empty() || snap.meta_dirty
+        };
+        if cortex && !barrier() && crate::fact_set::save_cortex(self, ready).await.is_err() {
+            failed.push("cortex");
+        }
+        if !ready.world.snapshot().dirty_slots.is_empty()
+            && !barrier()
+            && crate::world_tools::save_world(self, ready).await.is_err()
+        {
+            failed.push("world cortex");
+        }
+        if !ready.lessons.snapshot().dirty_slots.is_empty()
+            && !barrier()
+            && crate::forget_tools::save_lessons(self, ready)
+                .await
+                .is_err()
+        {
+            failed.push("lesson store");
+        }
+        if failed.is_empty() {
+            Ok(())
+        } else {
+            Err(format!(
+                "{} save failed; its changes stay unsaved until the next autosave",
+                failed.join(", ")
+            ))
+        }
     }
 
     /// `_refuse_on_stale_hydrated_dims`'s message.
@@ -1375,7 +1462,7 @@ impl crate::background::Duties for Service {
     /// and at a clean exit (`mcp_server._flush_on_exit`): only what changed
     /// since the last save, so an idle or read-only run writes nothing.
     fn autosave(&self) -> crate::background::Duty<'_> {
-        Box::pin(self.save_counters())
+        Box::pin(self.autosave_if_changed())
     }
 
     fn warmup(&self, stop: tokio::sync::watch::Receiver<bool>) -> crate::background::Duty<'_> {
