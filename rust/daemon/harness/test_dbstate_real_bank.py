@@ -43,7 +43,7 @@ def base(monkeypatch):
                                   "create`, or point PSEUDOLIFE_TEST_PG_LOGIN_FILE at it")
     for env in (pgdisposable.BASE_ENV, dbstate.BASE_CACHE_ENV, dbstate.FAST_ENV, dbstate.VERIFY_ENV):
         monkeypatch.delenv(env, raising=False)
-    name = pg.name("pl_cf_mir_clockbase")
+    name = pg.name("pl_cf_mir_dbclkbase")
     import psycopg
     with psycopg.connect(pg.create(name), autocommit=True) as conn:
         conn.execute("CREATE TABLE stamps (id INT PRIMARY KEY, body TEXT NOT NULL, "
@@ -59,7 +59,7 @@ def base(monkeypatch):
 def arms(base, monkeypatch):
     """Two copies of the base, with their dumps before either arm wrote."""
     monkeypatch.setenv(pgdisposable.BASE_ENV, base)
-    names = {s: pg.name(f"pl_cf_mir_clock{s}") for s in ("py", "rs")}
+    names = {s: pg.name(f"pl_cf_mir_dbclk{s}") for s in ("py", "rs")}
     try:
         dsns = {s: pg.create(n) for s, n in names.items()}
         yield dsns, {s: dbstate.dump(d) for s, d in dsns.items()}
