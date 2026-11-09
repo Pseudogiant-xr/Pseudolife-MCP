@@ -152,14 +152,29 @@ def test_each_case_item_is_a_place_of_its_own():
     """Review (Opus): a case line took only its first item's dotted path, so
     its other items had no place of their own. Every printed item counts,
     keys with a hyphen and items that are not paths included. (classify()
-    still calls a scenario preexisting when any place is shared.)"""
+    calls a scenario preexisting only when every place is on the synthetic arm.)"""
     real = {"status": "diff", "diffs": [
         "DIFF [mcp-get] get 2: ['status: python 200 vs rust 500', '.json.total: python 1 vs rust 2']"]}
     synthetic = {"status": "diff", "diffs": ["DIFF [mcp-get] get 2: ['.json.total: python 3 vs rust 4']"]}
     assert ("get 2", "status") in forced.signatures(real)
-    assert forced.classify(real, real, synthetic) == "preexisting"   # shares .json.total
+    assert forced.classify(real, real, synthetic) == "new"   # status is not on the synthetic arm
     alone = {"status": "diff", "diffs": ["DIFF [mcp-get] get 2: ['status: python 200 vs rust 500']"]}
     assert forced.classify(alone, alone, synthetic) == "new"           # status is not shared
+
+
+def test_a_new_place_does_not_hide_behind_a_shared_one():
+    """Conductor decision, 2026-11-10: preexisting only when every real-bank
+    place is also on the synthetic arm. Sharing one place used to excuse
+    every other difference the real bank showed."""
+    shared = 'DIFF [store-reaper] step 1 {"op": "tool"}: db /rows/public.episodes/rows: row only in python: [1]'
+    extra = 'DIFF [store-reaper] step 3 {"op": "tool"}: db /rows/public.facts/rows: row only in rust: [2]'
+    real = {"status": "diff", "diffs": [shared, extra]}
+    synthetic = {"status": "diff", "diffs": [shared.replace("[1]", "[9]")]}
+    assert forced.classify(real, real, synthetic) == "new"
+    # The near miss: every real place on the synthetic arm (which may differ
+    # in more places) is preexisting.
+    wider = {"status": "diff", "diffs": [shared, extra, 'DIFF [store-reaper] step 4 {}: db /rows/public.meta/rows: x']}
+    assert forced.classify(real, real, wider) == "preexisting"
 
 
 def test_a_scenario_error_keeps_its_harness_location():
@@ -773,3 +788,12 @@ def test_an_empty_suites_refuses_instead_of_an_empty_complete_run(tmp_path, monk
     err = capsys.readouterr().err
     assert "--suites" in err and "omit --suites" in err
     assert not (tmp_path / "o").exists()
+
+
+def test_a_real_attempt_with_no_places_is_never_preexisting():
+    """An errored first attempt has no places, and the empty set is a subset
+    of any synthetic arm's: it must not read as preexisting."""
+    errored = {"status": "error", "diffs": [], "error_tail": ["x"]}
+    retried = {"status": "diff", "diffs": ["DIFF [s] step 1 {}: db /rows/public.facts/rows: x"]}
+    synthetic = {"status": "diff", "diffs": ["DIFF [s] step 1 {}: db /rows/public.facts/rows: y"]}
+    assert forced.classify(errored, retried, synthetic) == "new"

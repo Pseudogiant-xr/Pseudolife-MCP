@@ -241,16 +241,19 @@ def signatures(result: dict) -> set:
 
 
 def classify(first: dict, retry: dict | None, synthetic: dict | None) -> str:
-    """``preexisting`` only when the synthetic run differs in the same place:
-    an unrelated synthetic failure does not excuse a real-bank difference."""
+    """``preexisting`` only when the synthetic run differs in every place the
+    real bank does: an unrelated synthetic failure does not excuse a
+    real-bank difference, and neither does one shared place excuse the
+    others (conductor decision, 2026-11-10)."""
     if first["status"] == "pass":
         return "pass"
     if retry is not None and retry["status"] == "pass":
         return "transient"
     if first["status"] == "error" and (retry is None or retry["status"] == "error"):
         return "error"  # no comparison completed: never a pass, never preexisting
+    places = signatures(first)
     if synthetic is not None and synthetic["status"] == "diff" \
-            and signatures(first) & signatures(synthetic):
+            and places and places <= signatures(synthetic):  # an empty set excuses nothing
         return "preexisting"
     return "new"
 
