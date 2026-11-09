@@ -100,3 +100,26 @@ only the machine it dispatches to.
   machine, set in its private `full-suite.lease` (`PSEUDOLIFE_SUITE_LEASE`
   overrides). Without that file a run falls back to `full-suite`, the
   Windows host's lease, and the board mislabels it.
+
+## Sharing
+
+The rules are in `CLAUDE.md` ("Sharing the machine"); this section holds the
+knobs and procedures they point at.
+
+- **Suite lock switches.** `PSEUDOLIFE_SUITE_LOCK=fail` exits instead of
+  queueing, `=off` skips the lock (the CI default), and targeted runs never
+  lock. `PSEUDOLIFE_SUITE_SLOTS` stays at 1 on the Windows host.
+  `PSEUDOLIFE_SUITE_WINDOWS=allow` is only for a deliberate native Windows
+  run with no WSL suite going; `PSEUDOLIFE_SUITE_LOCK=off` is never a way
+  around the host's refusal of native runs.
+- **Offline models.** The launchers set `HF_HUB_OFFLINE=1`
+  (`ops/wsl-suite.sh`); a direct native full run sets it by hand.
+- **Lease check exit codes.** `pseudolife-mcp lease check <lease> --
+  <command>` exits 75 while the lease is held, 70 on a failed check, and
+  otherwise with the command's own exit code, so a `;` after a bare check
+  would run the work whatever the check said.
+- **Reproducing a Windows CI failure on the VM.** Loop the failing test or
+  slice, 20 runs to start, with CPU load only while no other dev machine
+  runs a suite; 20 clean runs rule out failure rates above about 15%, so an
+  unreproduced failure that recurs on hosted CI gets a deflake PR or an
+  issue naming the hosted run.

@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Prompt, rerun and refusal behaviour follow docs/dev/install-ux.md; read it
+# before changing what this script asks or prints.
 # Safely update ONLY the Pseudolife-MCP daemon to the current checkout code.
 # Bash port of ops/update.ps1 for Linux/macOS hosts.
 #

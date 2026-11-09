@@ -11,12 +11,12 @@ runs only the fast CI lanes. A batch PR normally needs passing CI for its
 current head integrated with current master (CLAUDE.md, "Shipping
 checklist"). These two exceptions let a batch PR merge on the CI an
 earlier head of it passed, after master moved; "the PR" below is that
-batch PR and "either side" is the batch against master. Both are to be
-removed when the GitHub merge queue is enabled. When in doubt, close the
-batch and build the next one.
+batch PR and "either side" is the batch against master. When in doubt,
+close the batch and build the next one.
 
 Merging before CI reports on the new head is a ruleset bypass (admin
-merge), so only the maintainer or the maintainer's conductor does it.
+merge), so only the maintainer, or a session they delegated that merge to
+in their own words, does it.
 
 ## A. Disjoint merge-forward
 

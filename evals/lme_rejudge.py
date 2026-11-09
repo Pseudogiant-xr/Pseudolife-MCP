@@ -5,7 +5,7 @@ The 2026-09-04 500-question run (`raglite-all-fresh`) is the first
 whole-benchmark memory-arm win this project has measured — hybrid beats the
 naive RAG control by +0.040 (paired sign-flip permutation p 0.015, 41 W /
 21 L). It was judged by one instrument only: the local Qwen3.8-27B server.
-The standing rule (CLAUDE.md, "Publishing a benchmark number") is that a
+The standing rule (evals/README.md, "Eval discipline") is that a
 claim reaching the README first runs under two independent judge families,
 because determinism is not validity — the retired BEAM cascade 0.936
 replicated at std 0.0000 three times and still did not survive a judge
