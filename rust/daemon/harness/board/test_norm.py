@@ -198,3 +198,40 @@ def test_oversized_integer_listener_deadline_is_captured_and_capped():
     norm.windows.steps.append((timestamp, timestamp + 0.5))
     assert norm.value(timestamp + 60.2, "ring_armed_until") == "T0+60"
     assert not norm.problems
+
+
+def _arm(steps: int, sleep_window: tuple[float, float]) -> Windows:
+    """Step windows two seconds apart, with step 28's (a sleep) replaced."""
+    w = Windows()
+    w.steps = [(100.0 + 2 * k, 100.5 + 2 * k) for k in range(steps)]
+    if steps > 28:
+        w.steps[28] = sleep_window
+    return w
+
+
+def test_a_clock_keeps_the_label_it_got_when_first_dumped():
+    """A future ring_at (step 13's ring plus the 30 s stagger) took whichever
+    window later covered it: on a copied real board, slow dumps made Python's
+    step-28 sleep cover it and Rust's not, so the same stored value read
+    T28+0 on one arm and T13+30 on the other (board wake, forced run of
+    2026-11-09). A value keeps the label it got when it was first dumped."""
+    t13 = 100.0 + 2 * 13 + 0.2
+    ring = t13 + 30
+    labels = {}
+    for side, sleep in (("python", (ring - 0.05, ring + 1.25)), ("rust", (ring + 1.35, ring + 2.65))):
+        norm = Normalizer(_arm(16, sleep))
+        first = norm.value({"ring_at": ring})["ring_at"]
+        norm.windows.steps = _arm(31, sleep).steps
+        again = norm.value({"ring_at": ring})["ring_at"]
+        assert first == again, (side, first, again)
+        labels[side] = again
+    assert labels == {"python": "T13+30", "rust": "T13+30"}
+
+
+def test_a_new_clock_still_takes_the_latest_window():
+    """The near miss: a value first dumped after a later window opened still
+    takes that window, and an unmatched value is still reported."""
+    norm = Normalizer(_arm(31, (156.0, 157.0)))
+    assert norm.value({"ring_at": 156.5})["ring_at"] == "T28+0"
+    assert norm.value({"created_at": 5.0})["created_at"] == 5.0
+    assert any("does not match the captured clock windows" in p for p in norm.problems)
