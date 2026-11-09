@@ -361,10 +361,12 @@ def test_a_side_whose_record_clock_did_not_move_still_differs(harness):
     ages = {"python": clocks(1240.0, 1249.0, 1251.0, 990.0, since=1200.0),
             "rust": clocks(-6000.0, 1259.0, 1261.0, 990.0, since=1200.0)}
     assert harness.compare_response(py, rs, {}, {}, ages=ages)
-    # The near miss: the same copied base row on both sides still compares.
-    base = {"python": clocks(-6000.0, 1249.0, 1251.0, 990.0, since=1200.0),
-            "rust": clocks(-6000.0, 1259.0, 1261.0, 990.0, since=1200.0)}
-    assert harness.compare_response(fact_answer("2 hours ago", 990.0), fact_answer("2 hours ago", 990.0),
+    # The near miss: the same copied base row (one anchor, older than the
+    # run) read more than one step apart by slow arms still compares equal
+    # (the one-step rule alone would not).
+    base = {"python": clocks(0.0, 3539.0, 3541.0, 990.0, since=3500.0),
+            "rust": clocks(0.0, 7210.0, 7212.0, 990.0, since=3500.0)}
+    assert harness.compare_response(fact_answer("59 minutes ago", 990.0), fact_answer("2 hours ago", 990.0),
                                     {}, {}, ages=base) == []
 
 
