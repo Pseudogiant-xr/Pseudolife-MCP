@@ -241,7 +241,7 @@ queue as on, not before:
 
 - **"Every PR requires passing CI for its current head integrated with
   current master … update the branch and wait for fresh CI"** (shipping
-  checklist, "CI before merge"). The queue's group run is the integrated check, provided
+  checklist, "Only an integration batch lands on master"). The queue's group run is the integrated check, provided
   every lane is a required check (see "Required checks" above). Without
   that, this rule must stay for the lanes the ruleset does not require. A PR
   needs its fast lanes (and no red check) on its own head before it is

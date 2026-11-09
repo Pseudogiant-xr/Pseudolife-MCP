@@ -1,9 +1,9 @@
 #Requires -Version 7
-# Prompt, rerun and refusal behaviour follow docs/dev/install-ux.md; read it
-# before changing what this script asks or prints.
 # ^ Windows PowerShell 5.1 (powershell.exe) writes UTF-8 WITH a BOM, which
 #   garbles the first key of ops/.env and can break settings.json parsing —
 #   run this under pwsh 7+ (winget install Microsoft.PowerShell).
+# Prompt, rerun and refusal behaviour follow docs/dev/install-ux.md; read it
+# before changing what this script asks or prints.
 # One-shot idempotent installer for the Pseudolife-MCP stack (issue #13
 # tier 2). Everything downstream of Docker: provider selection -> preflight ->
 # extractor choice -> compose up -> client hooks -> standing instructions ->

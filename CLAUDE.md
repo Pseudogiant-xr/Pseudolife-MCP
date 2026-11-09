@@ -300,8 +300,8 @@ touched, with no retrofit sweep.
   goes to the VM.
 - On the VM, loop the failing test or slice (20 runs to start, CPU load only
   while no other dev machine runs a suite): a reproduction gets a fix PR, a
-  confirmed flake a deflake PR, and an unreproduced failure an issue naming
-  the hosted run, because 20 clean runs only rule out rates above about 15%.
+  confirmed flake a deflake PR, and an unreproduced failure a deflake PR or
+  an issue naming the hosted run once it recurs, because 20 clean runs only rule out rates above about 15%.
 - **A PR that adds a `windows-latest` test resting on real process
   spawn/wait/kill, sockets or named pipes, file locks or atomic replace, or
   timeouts (a harness `run.py` scenario included; a test that only mocks
