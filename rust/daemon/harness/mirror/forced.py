@@ -173,15 +173,27 @@ ITEM_PATH = re.compile(r"^(\.?[\w.\[\]\-]+): ")
 INDEX = re.compile(r"\[\d+\]")
 
 
+RAW_PATH = re.compile(r"^raw (\S+?): ")
+SIDE = re.compile(r"^(python|rust): ")
+BARE_VALUE = re.compile(r"'[^']*'|\"[^\"]*\"|\S*\d\S*|\b(?:true|false|null|None)\b")
+
+
 def _item_place(item) -> str:
-    """One printed case item's place: its path or key, else its words with
-    any value (numbers, quoted text) removed."""
+    """One printed case item's place: its path or key; for run.py's "raw
+    <path>: ..." checks, that path; else its side and its words up to the
+    first ": " (after which a value follows), numbers, quoted text and bare
+    true/false/null removed."""
     text = str(item)
+    m = RAW_PATH.match(text)
+    if m:
+        return "raw " + INDEX.sub("[]", m.group(1))
     m = ITEM_PATH.match(text)
-    if m and m.group(1) not in ("python", "rust"):  # "python: ..." names a side, not a place
+    if m and m.group(1) not in ("python", "rust"):
         return INDEX.sub("[]", m.group(1))
-    words = re.sub(r"'[^']*'|\"[^\"]*\"|\S*\d\S*", "", text).split()
-    return " ".join(words[:12]) or "<item>"
+    side = SIDE.match(text)
+    body = text[side.end():] if side else text
+    words = BARE_VALUE.sub("", body.split(": ", 1)[0]).split()
+    return " ".join(([side.group(1)] if side else []) + words[:12]) or "<item>"
 
 
 def _places(line: str) -> list[tuple[str, str]]:

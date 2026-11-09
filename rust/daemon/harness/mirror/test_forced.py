@@ -190,8 +190,19 @@ def test_side_items_and_long_items_keep_what_tells_them_apart():
     a = {"status": "diff", "diffs": ["DIFF [schema] refusal: " + repr(
         ["python: stats clock 5 outside window", "future-schema refusal has incorrect content-type"])]}
     b = {"status": "diff", "diffs": ["DIFF [schema] refusal: " + repr(
-        ["rust: snapshot_at 3 outside window", "future-schema refusal has incorrect cache-control"])]}
+        ["python: snapshot_at 3 outside window", "future-schema refusal has incorrect cache-control"])]}
     assert not forced.signatures(a) & forced.signatures(b)
+
+
+def test_a_raw_check_keeps_its_path_and_no_value():
+    """Review (Opus): run.py's "raw <path>: string not written as
+    json.dumps writes it: <first 80 characters>" fell to the word fallback,
+    whose longer cap could carry those characters (a cut quote is not
+    stripped). It keeps its path; text after a ": " never counts."""
+    line = "DIFF [w1a] stats: " + repr(['raw .json.text: string not written as json.dumps writes it: "half a quot'])
+    assert forced.signatures({"diffs": [line]}) == {("stats", "raw .json.text")}
+    words = "DIFF [w1a] stats: " + repr(["refusal body differs: Mostly Bank Words here", "flag is true"])
+    assert forced.signatures({"diffs": [words]}) == {("stats", "refusal body differs"), ("stats", "flag is")}
 
 
 def test_a_w2e_response_line_keeps_its_old_signature():
