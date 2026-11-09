@@ -85,6 +85,8 @@ def register(h):
                        "VALUES ('old fixture task', 'success', "
                        "EXTRACT(EPOCH FROM CURRENT_TIMESTAMP) - 100 * 86400, 1)", after_stop=True)],
         "ops": [patch(**{"memory.lessons.signal_retention_days": 30}), read,
-                {**h.dream("run"), "expect": ["SELECT count(*) = 0 FROM outcome_signals"]}],
+                # A real bank keeps its own signals: count the fixture's only.
+                {**h.dream("run"), "expect": ["SELECT count(*) = 0 FROM outcome_signals "
+                                              "WHERE task = 'old fixture task'"]}],
     }
     return result
