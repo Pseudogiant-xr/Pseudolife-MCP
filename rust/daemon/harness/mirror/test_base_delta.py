@@ -346,6 +346,56 @@ def test_an_unwritable_cache_only_costs_the_cache(rich_base, monkeypatch, tmp_pa
         pg.drop(copy)
 
 
+def _per_table_columns(conn) -> dict:
+    """The column lists and primary keys as the dump read them per table
+    before one catalog read served them all."""
+    cols, pks = {}, {}
+    for s, t in dbstate._tables(conn):
+        cols[(s, t)] = [tuple(r) for r in conn.execute(
+            "SELECT column_name, data_type FROM information_schema.columns "
+            "WHERE table_schema = %s AND table_name = %s ORDER BY ordinal_position", (s, t))]
+        pk = [r[0] for r in conn.execute(
+            "SELECT a.attname FROM pg_index i JOIN pg_class c ON c.oid = i.indrelid "
+            "JOIN pg_namespace n ON n.oid = c.relnamespace "
+            "JOIN LATERAL unnest(i.indkey) WITH ORDINALITY k(attnum, ord) ON true "
+            "JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = k.attnum "
+            "WHERE i.indisprimary AND n.nspname = %s AND c.relname = %s ORDER BY k.ord", (s, t))]
+        if pk:
+            pks[(s, t)] = pk
+    return {"cols": cols, "pks": pks}
+
+
+def test_one_catalog_read_per_dump_reads_what_each_table_did(rich_base, monkeypatch):
+    """The dump's one read of every column list and primary key gives each
+    table what its own queries gave (a key in other than column order, a
+    dropped column, keyless and empty tables), so the dump is unchanged."""
+    import psycopg
+    copy = pg.name("pl_cf_mir_fastcatalog")
+    try:
+        dsn = pg.create(copy)
+        with psycopg.connect(dsn, autocommit=True) as conn:
+            # Key order (b, c, a) is neither column order nor name order.
+            conn.execute("CREATE TABLE multi (c INT, gone INT, a INT, b INT, PRIMARY KEY (b, c, a))")
+            conn.execute("ALTER TABLE multi DROP COLUMN gone")
+            conn.execute("INSERT INTO multi VALUES (1, 1, 2), (2, 1, 1), (1, 2, 1)")
+            conn.execute("INSERT INTO docs VALUES (100, 'new', 1.5)")
+            conn.execute("CREATE SCHEMA side")
+            conn.execute("CREATE TABLE side.docs (k TEXT PRIMARY KEY, v INT)")
+            conn.execute("INSERT INTO side.docs VALUES ('z', 1), ('a', 2)")
+        with psycopg.connect(dsn) as conn:
+            one, each = dbstate._columns_by_table(conn), _per_table_columns(conn)
+            tables = dbstate._tables(conn)
+            assert {q: one["cols"].get(q) for q in tables} == {q: each["cols"][q] for q in tables}
+            assert {q: one["pks"].get(q) for q in tables} == {q: each["pks"].get(q) for q in tables}
+            assert one["pks"][("public", "multi")] == ["b", "c", "a"]
+        fast = dbstate.dump(dsn)
+        monkeypatch.setattr(dbstate, "_columns_by_table", _per_table_columns)
+        assert dbstate.dump(dsn) == fast
+        assert fast["rows"]["public.multi"]["rows"] == [[1, 2, 1], [2, 1, 1], [1, 1, 2]]
+    finally:
+        pg.drop(copy)
+
+
 def test_verify_mode_refuses_a_fast_delta_that_disagrees(rich_base, monkeypatch):
     """``PL_HARNESS_DUMP_VERIFY=1`` (the A/B runs) checks every fast answer
     against the full hash; a wrong one stops the dump."""
