@@ -55,3 +55,26 @@ def test_route_arms_on_a_real_base_get_no_reaper_tick(monkeypatch):
     assert run.common_env(Reaper(), "dsn")[REAP] == "5"
     monkeypatch.delenv("PL_HARNESS_BASE_DATABASE")
     assert REAP not in run.common_env(Plain(), "dsn") and SAVE not in run.common_env(Plain(), "dsn")
+
+
+def test_w2d_search_arms_on_a_real_base_get_no_timer_ticks(monkeypatch):
+    """Review (Opus): the forced run's w2d_search suite builds its arms from
+    its own common_env, and its settle may take 900 s, past the reaper's
+    300 s."""
+    import w2d_search
+    monkeypatch.setenv("PL_HARNESS_BASE_DATABASE", "pl_cf_mir_seed")
+    env = w2d_search.common_env("dsn")
+    assert env[REAP] == "86400" and env[SAVE] == "86400"
+    monkeypatch.delenv("PL_HARNESS_BASE_DATABASE")
+    env = w2d_search.common_env("dsn")
+    assert REAP not in env and SAVE not in env
+
+
+def test_a_route_scenarios_own_autosave_wins(monkeypatch):
+    import run
+
+    class Saves(run.Scenario):
+        env = {SAVE: "1"}
+
+    monkeypatch.setenv("PL_HARNESS_BASE_DATABASE", "pl_cf_mir_seed")
+    assert run.common_env(Saves(), "dsn")[SAVE] == "1"
