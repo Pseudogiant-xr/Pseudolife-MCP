@@ -5455,9 +5455,11 @@ IDLE_SLACK_S = 1.0
 
 
 def normalize_state(state: dict, before: dict,
-                    ts_map: dict[float, str] | None = None) -> tuple[dict, dict, dict]:
+                    ts_map: dict[float, str] | None = None,
+                    windows=None) -> tuple[dict, dict, dict]:
+    """``windows``: the arm's captured clock windows (``dbstate.normalize``)."""
     state = w1a.scrub_declared_rows(state, before)["state"]
-    state = dbstate.normalize(state, w1a.DB_NONDETERMINISTIC, before)
+    state = dbstate.normalize(state, w1a.DB_NONDETERMINISTIC, before, windows=windows)
     numeric = extract_numeric(state)
     numeric["facts"] = extract_fact_numeric(state)
     numeric["world_facts"] = extract_fact_numeric(state, "world_facts")
@@ -5717,30 +5719,19 @@ def graph_answer_free(v) -> None:
 
 
 # Search telemetry: the float leaves w2d_search.py compares within its
-# SCORE_TOL (scores and fusion inputs rest on the embeddings).
-EVENT_FLOAT_KEYS = {"score", "dense", "ce", "bm25", "slot", "recency", "margin"}
-EVENT_SCORE_TOL = 2e-4
+# SCORE_TOL (scores and fusion inputs rest on the embeddings), shared with
+# the route harness's bank comparison (dbstate.event_scores_free).
+EVENT_FLOAT_KEYS = dbstate.EVENT_FLOAT_KEYS
+EVENT_SCORE_TOL = dbstate.EVENT_SCORE_TOL
 # A served entry's ``surprise``: an entry each side stored itself holds its
 # own surprise (``1 - max_sim`` over its own embeddings), so the logged value
 # compares as a stored surprise does, within the measured ``surprise_abs``.
 EVENT_SURPRISE_TOL = json.loads(TOLERANCE_FILE.read_text(encoding="utf-8"))["surprise_abs"]
+EVENT_TOLERANCES = {**dbstate.EVENT_TOLERANCES, "surprise": EVENT_SURPRISE_TOL}
 
 
 def _float_pair_free(x, y) -> None:
-    if isinstance(x, dict) and isinstance(y, dict):
-        for k in x.keys() & y.keys():
-            a, b = x[k], y[k]
-            numbers = (isinstance(a, (int, float)) and isinstance(b, (int, float))
-                       and not isinstance(a, bool) and not isinstance(b, bool))
-            if numbers and k == "surprise" and abs(a - b) <= EVENT_SURPRISE_TOL:
-                x[k] = y[k] = "<surprise>"
-            elif numbers and k in EVENT_FLOAT_KEYS and abs(a - b) <= EVENT_SCORE_TOL:
-                x[k] = y[k] = f"<{k}>"
-            else:
-                _float_pair_free(a, b)
-    elif isinstance(x, list) and isinstance(y, list):
-        for a, b in zip(x, y):
-            _float_pair_free(a, b)
+    dbstate.pair_floats(x, y, EVENT_TOLERANCES)
 
 
 def events_diff(a: dict, b: dict) -> list[str]:
@@ -6405,6 +6396,9 @@ def _run_live(name: str, scn: dict, tag: str, binary: Path, root: Path, record: 
         envs = {"python": penv, "rust": renv}
         configure_clean_exit(procs, scn)
         daemons.start_all(procs, 300)
+        # Each arm's clock window opens at its daemon's first start (a
+        # restart step moves started_at_unix) and closes after each dump.
+        first_start = {side: d.started_at_unix for side, d in procs.items()}
         w1a.wait_settled([d.port for d in procs.values()], token=TOKEN)
         warmup_diffs = wait_warmups(dsns, before) if warmup_expected(scn) else []
         clients = {side: Mcp(d.port) for side, d in procs.items()}
@@ -6466,12 +6460,14 @@ def _run_live(name: str, scn: dict, tag: str, binary: Path, root: Path, record: 
                 for side in ("python", "rust"):
                     row["diffs"] += extractor_key_diffs(side, scn, sent[side])
             raw_py, raw_rs = dbstate.dump(dsns["python"]), dbstate.dump(dsns["rust"])
+            dumped = time.time()
+            windows = {side: [(first_start[side], dumped)] for side in first_start}
             for side, raw in (("python", raw_py), ("rust", raw_rs)):
                 answer = row.get(side) if op.get("name") == "memory_dream" else None
                 row["diffs"] += run_clock_diffs(side, raw, answer)
             tsm_py, tsm_rs = ts_tokens(raw_py), ts_tokens(raw_rs)
-            sp, np_, ep = normalize_state(raw_py, before["python"], tsm_py)
-            sr, nr, er = normalize_state(raw_rs, before["rust"], tsm_rs)
+            sp, np_, ep = normalize_state(raw_py, before["python"], tsm_py, windows["python"])
+            sr, nr, er = normalize_state(raw_rs, before["rust"], tsm_rs, windows["rust"])
             if op["op"] != "init":
                 if op.get("name") == "memory_dream" or w2e_console_dream.is_dream(op):
                     row["diffs"] += idle_diffs(row["python"], row["rust"],

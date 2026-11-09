@@ -64,6 +64,9 @@ HEADERS_COMPARED = ("content-type", "cache-control", "location", "content-securi
 DB_NONDETERMINISTIC = {
     ("relations", "created_at"): "clock: wall clock per row (storage/postgres.py:765)",
     ("retrieval_events", "created_at"): "clock: retrieval event wall clock per row",
+    # A search reading an existing slot restamps it (storage/postgres.py
+    # slot_reads upsert); on a copy of a real bank both arms read its slots.
+    ("slot_reads", "last_read_at"): "clock: wall clock per slot read",
 }
 # State only the Python side writes during init, owned by later slices. Kind
 # "row": a new meta row by key; "warmup": one identified probe and its
@@ -575,6 +578,12 @@ class Scenario:
     golden_db_state = False
     ci_fixture = False
     settle_with_search = False
+    # Per side, the arm's captured clock windows for dbstate.normalize: set
+    # by the runner before each bank-state normalization.
+    clock_windows: dict | None = None
+
+    def clock_window(self, side: str) -> list | None:
+        return (self.clock_windows or {}).get(side)
 
     def timeline(self, procs: dict, holders: list) -> list[dict]:
         """Scenarios whose answers depend on time (lease, backoff, reaper):
@@ -614,7 +623,7 @@ class Scenario:
         return []
 
     def normalize_db(self, state: dict, before: dict, side: str) -> dict:
-        return dbstate.normalize(state, DB_NONDETERMINISTIC, before)
+        return dbstate.normalize(state, DB_NONDETERMINISTIC, before, windows=self.clock_window(side))
 
     def configure_daemons(self, procs: dict) -> None:
         """Optional explicit dependency seams, declared by the scenario."""
@@ -2097,6 +2106,9 @@ def _run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: bo
                                             daemons.base_env(home, rust_env(env)))
         scn.configure_daemons(procs)
         daemons.start_all(procs, 240, stages=scn.start_stages)
+        # Each arm's clock window opens at its daemon's first start (a
+        # timeline restart moves started_at_unix) and closes after its dump.
+        first_start = {side: d.started_at_unix for side, d in procs.items()}
         settle_before_cases(scn, [d.port for d in procs.values()])
         rows = []
         golden_name = scn.name
@@ -2151,6 +2163,8 @@ def _run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: bo
         sides = dbs if mode != "golden" else {"rust": dbs["rust"]}
         for side, name in sides.items():
             raw = dbstate.dump(pg.dsn(name))
+            scn.clock_windows = {**(scn.clock_windows or {}),
+                                 side: [(first_start[side], time.time())]}
             out = scrub_declared_rows(raw, before)
             states[side] = scn.normalize_db(out["state"], before, side)
             scrubbed[side] = out["declared"]
@@ -2161,7 +2175,10 @@ def _run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: bo
                 changes = dbstate.diff(before, raw)
                 unchanged_diffs += [f"{side} changed bank: {d}" for d in changes]
                 states[side] = {"unchanged_from_before": not changes}
-    db_diffs = dbstate.diff(states["python"], states["rust"]) if len(states) == 2 else []
+    # A retrieval event's served scores compare within the search
+    # harnesses' tolerance (dbstate.event_scores_free); all else exactly.
+    db_diffs = (dbstate.diff(*dbstate.event_scores_free(states["python"], states["rust"]))
+                if len(states) == 2 else [])
     if scn.name == "stamped":
         # A refusal has an independent postcondition: each side must leave
         # every row/catalog entry identical to the prepared bank.

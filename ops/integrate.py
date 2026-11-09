@@ -105,6 +105,7 @@ RUST_HARNESS = (
     "rust/daemon/harness/test_pgdisposable_slices.py", "rust/daemon/harness/test_w2e_judge_settle.py",
     "rust/daemon/harness/mirror/test_seed.py", "rust/daemon/harness/mirror/test_forced.py",
     "rust/daemon/harness/mirror/test_base_delta.py",
+    "rust/daemon/harness/test_dbstate_real_bank.py",
     "rust/daemon/harness/mirror/test_seed_keys.py",
     "rust/ci",
 )
