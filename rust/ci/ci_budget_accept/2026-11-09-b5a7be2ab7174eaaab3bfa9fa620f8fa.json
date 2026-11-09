@@ -2,7 +2,7 @@
   "schema": 1,
   "workflow": "rust.yml",
   "job": "rust",
-  "before": "544f258782233c6a",
-  "fingerprint": "3b1a49e3297909c1",
+  "before": "937c44bd577a2c11",
+  "fingerprint": "a98202c16224faa7",
   "reason": "The board/mirror harness step adds mirror/test_real_base_routes.py: 8 cases that skip without the disposable-bank login (13s locally with it); no new job, shard or setup."
 }
