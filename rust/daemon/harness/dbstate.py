@@ -23,6 +23,7 @@ normalizers, which replace nondeterministic values by rule, never by hand:
 from __future__ import annotations
 
 import contextlib
+from contextvars import ContextVar
 import hashlib
 import json
 from collections import Counter
@@ -132,7 +133,38 @@ def _tables(conn) -> list[tuple[str, str]]:
     return [(s, t) for s, t in rows]
 
 
+# A dump's column lists and primary keys, read once after every table is
+# locked (no ALTER lands until the dump ends): per table they cost two
+# catalog queries per dump, 90 ms of a 516 ms dump over a bank-sized copy
+# (this PC, bench Postgres, 46 tables, 2026-11-09).
+_DUMP_COLUMNS: ContextVar[dict | None] = ContextVar("_DUMP_COLUMNS", default=None)
+
+
+def _columns_by_table(conn) -> dict:
+    """Every table's (column, data type) list in ordinal order and its
+    primary key columns in key order, as the per-table queries read them."""
+    cols: dict = {}
+    for s, t, c, d in conn.execute(
+            "SELECT table_schema, table_name, column_name, data_type FROM information_schema.columns "
+            "WHERE table_schema NOT IN ('pg_catalog', 'information_schema') "
+            "ORDER BY table_schema, table_name, ordinal_position"):
+        cols.setdefault((s, t), []).append((c, d))
+    pks: dict = {}
+    for s, t, a in conn.execute(
+            "SELECT n.nspname, c.relname, a.attname FROM pg_index i JOIN pg_class c ON c.oid = i.indrelid "
+            "JOIN pg_namespace n ON n.oid = c.relnamespace "
+            "JOIN LATERAL unnest(i.indkey) WITH ORDINALITY k(attnum, ord) ON true "
+            "JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = k.attnum "
+            "WHERE i.indisprimary ORDER BY n.nspname, c.relname, k.ord"):
+        pks.setdefault((s, t), []).append(a)
+    return {"cols": cols, "pks": pks}
+
+
 def _order_columns(conn, schema: str, table: str) -> list[str]:
+    prefetched = _DUMP_COLUMNS.get()
+    if prefetched is not None:
+        return list(prefetched["pks"].get((schema, table))
+                    or [c for c, _ in prefetched["cols"].get((schema, table), [])])
     pk = conn.execute(
         "SELECT a.attname FROM pg_index i JOIN pg_class c ON c.oid = i.indrelid "
         "JOIN pg_namespace n ON n.oid = c.relnamespace "
@@ -189,7 +221,7 @@ _ATTRS = ("SELECT coalesce(json_agg(json_build_array(a.attnum, a.attname, a.attt
           "FROM pg_type ty JOIN pg_type ct ON ct.oid IN (ty.oid, ty.typelem, ty.typbasetype) "
           "JOIN pg_attribute ca ON ca.attrelid = ct.typrelid AND ca.attnum > 0 "
           "WHERE ty.oid = a.atttypid)) ORDER BY a.attnum), '[]')::text "
-          "FROM pg_attribute a WHERE a.attrelid = %s::regclass AND a.attnum > 0")
+          "FROM pg_attribute a WHERE a.attrelid = %(rel)s::regclass AND a.attnum > 0")
 
 
 def _regclass(schema: str, table: str) -> str:
@@ -203,7 +235,7 @@ def _table_stamp(conn, schema: str, table: str) -> dict:
     columns; freezing keeps the raw xmin (PostgreSQL 9.4+)."""
     rel = _regclass(schema, table)
     filenode = conn.execute("SELECT pg_relation_filenode(%s::regclass)", (rel,)).fetchone()[0]
-    attrs = conn.execute(_ATTRS, (rel,)).fetchone()[0]
+    attrs = conn.execute(_ATTRS, {"rel": rel}).fetchone()[0]
     census = conn.execute(sql.SQL("SELECT xmin::text, count(*) FROM {} GROUP BY 1 ORDER BY 1").format(
         sql.Identifier(schema, table))).fetchall()
     return {"filenode": filenode, "attrs": attrs, "census": [[x, n] for x, n in census]}
@@ -405,29 +437,30 @@ def _fast_delta(conn, schema: str, table: str, known: Counter, select: str,
     old = info["xmins"]
     rel = f'"{schema}"."{table}"'
     with conn.cursor(row_factory=tuple_row) as cur:
-        if cur.execute(_RENDER).fetchone()[0] != _BASE_RENDER.get(base):
-            return None
-        kept, candidates = cur.execute(
-            f"SELECT count(*) FILTER (WHERE xmin = ANY(%s::xid[])), "
+        # One statement per table: the scan, then (uncorrelated subqueries,
+        # run once) the session's rendering settings, the table's file and
+        # catalog, and one row the copy shares with the base. The statement
+        # locks the table before it runs, so no rewrite lands between the
+        # scan and the file it reports, nor until the dump ends.
+        kept, candidates, render, filenode, attrs, canary = cur.execute(
+            f"SELECT count(*) FILTER (WHERE xmin = ANY(%(old)s::xid[])), "
             f"coalesce(array_agg(ARRAY[ctid::text, md5(t::text)]) "
-            f"FILTER (WHERE NOT xmin = ANY(%s::xid[])), '{{}}') FROM {rel} t",
-            (old, old)).fetchone()
-        # The scan holds the table's lock now, so no rewrite can land until
-        # the dump ends, and the function reads the file the scan read.
-        filenode = cur.execute("SELECT pg_relation_filenode(%s::regclass)",
-                               (_regclass(schema, table),)).fetchone()[0]
+            f"FILTER (WHERE NOT xmin = ANY(%(old)s::xid[])), '{{}}'), "
+            f"({_RENDER}), (SELECT pg_relation_filenode(%(rel)s::regclass)), ({_ATTRS}), "
+            f"(SELECT ARRAY[t.ctid::text, t.xmin::text, md5(t::text)] FROM {rel} t "
+            f"WHERE t.xmin = ANY(%(old)s::xid[]) LIMIT 1) FROM {rel} t",
+            {"old": old, "rel": _regclass(schema, table)}).fetchone()
+        if render != _BASE_RENDER.get(base):
+            return None
         if filenode != info["filenode"]:
             return None
-        if cur.execute(_ATTRS, (_regclass(schema, table),)).fetchone()[0] != info["attrs"]:
+        if attrs != info["attrs"]:
             return None
         if kept:
             # One row the copy shares with the base must hash as the base's,
             # or every unchanged row's text has changed, and only the full
             # hash can tell which rows the base still holds.
-            ctid, xmin, digest = cur.execute(
-                f"SELECT ctid::text, xmin::text, md5(t::text) FROM {rel} t "
-                f"WHERE xmin = ANY(%s::xid[]) LIMIT 1", (old,)).fetchone()
-            if info["ctids"].get(ctid) != (xmin, digest):
+            if canary is None or info["ctids"].get(canary[0]) != (canary[1], canary[2]):
                 return None
         base_rows = sum(known.values())
         gone = Counter()
@@ -524,32 +557,38 @@ def _dump_once(dsn: str) -> dict:
             out["catalog"][key] = [_plain(list(r)) for r in conn.execute(query).fetchall()]
         if _tables(conn) != tables:
             raise _Busy("tables changed between listing and locking")
-        for schema, table in tables:
-            order = _order_columns(conn, schema, table)
-            # Vectors and other non-JSON types read as text: exact and comparable.
-            cols = conn.execute(
-                "SELECT column_name, data_type FROM information_schema.columns "
-                "WHERE table_schema = %s AND table_name = %s ORDER BY ordinal_position",
-                (schema, table)).fetchall()
-            select = ", ".join(
-                f'"{c}"::text' if t == "USER-DEFINED" else f'"{c}"' for c, t in cols)
-            ordering = ", ".join(f'"{c}"::text' for c in order) or "1"
-            key = f"{schema}.{table}"
-            extra = {}
-            if schema == "public" and table in UNPORTED_ROWS:
-                rows = []
-            elif base is not None and key in base:
-                _, rows, extra["base_missing"] = base_delta(
-                    conn, schema, table, base[key], select, ordering)
-            else:
-                rows = conn.execute(
-                    f'SELECT {select} FROM "{schema}"."{table}" ORDER BY {ordering}').fetchall()
-            out["rows"][key] = {
-                "columns": [c for c, _ in cols],
-                "rows": [_plain(list(r)) for r in rows],
-                **extra,
-            }
+        prefetched = _columns_by_table(conn)
+        token = _DUMP_COLUMNS.set(prefetched)
+        try:
+            _dump_tables(conn, tables, base, prefetched, out)
+        finally:
+            _DUMP_COLUMNS.reset(token)
     return out
+
+
+def _dump_tables(conn, tables, base, prefetched, out) -> None:
+    for schema, table in tables:
+        order = _order_columns(conn, schema, table)
+        # Vectors and other non-JSON types read as text: exact and comparable.
+        cols = prefetched["cols"].get((schema, table), [])
+        select = ", ".join(
+            f'"{c}"::text' if t == "USER-DEFINED" else f'"{c}"' for c, t in cols)
+        ordering = ", ".join(f'"{c}"::text' for c in order) or "1"
+        key = f"{schema}.{table}"
+        extra = {}
+        if schema == "public" and table in UNPORTED_ROWS:
+            rows = []
+        elif base is not None and key in base:
+            _, rows, extra["base_missing"] = base_delta(
+                conn, schema, table, base[key], select, ordering)
+        else:
+            rows = conn.execute(
+                f'SELECT {select} FROM "{schema}"."{table}" ORDER BY {ordering}').fetchall()
+        out["rows"][key] = {
+            "columns": [c for c, _ in cols],
+            "rows": [_plain(list(r)) for r in rows],
+            **extra,
+        }
 
 
 def normalize(state: dict, rules: dict[tuple[str, str], str] | None = None,
