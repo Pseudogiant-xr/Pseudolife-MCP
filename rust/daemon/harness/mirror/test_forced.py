@@ -9,7 +9,22 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import forced  # noqa: E402
+# Imported before any test points PSEUDOLIFE_TEST_PG_HOST_PORT at the box's
+# mirror: pgdisposable reads it once, and main's drops import it.
+import pgdisposable  # noqa: E402
+import database_gate  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _no_database_drops(monkeypatch):
+    """main's dropper drains through pgdisposable; these tests have no bank,
+    so a run's tombstone drops are recorded instead (the database tests at
+    the end use the real ones)."""
+    calls = []
+    monkeypatch.setattr(forced, "drop_tombstones", lambda token: calls.append(token) or 0)
+    return calls
 
 PASS = {"status": "pass", "diffs": [], "seconds": 1.0}
 DIFF = {"status": "diff", "diffs": ["DIFF [s] step 1 x: db /rows/public.entries"], "seconds": 1.0}
@@ -867,3 +882,342 @@ def test_an_op_whose_text_holds_a_colon_still_finds_its_diff():
         two = f"DIFF [store] step 4 {op}: .value.id: python 1 vs rust 2"
         assert forced.signatures({"diffs": [one]}) == {("4", ".value.stored")}
         assert forced.signatures({"diffs": [one]}) != forced.signatures({"diffs": [two]})
+
+
+# ---- background drops: a scenario's databases are renamed away and dropped
+# ---- while the next scenario runs
+
+def test_each_attempt_hands_its_drops_to_the_dropper_after_its_sweep(tmp_path):
+    """The harness gets the run's token, and the dropper starts only after
+    the sweep, which must not drop the tombstones itself (it waits)."""
+    events, seen = [], {}
+
+    class Records(forced.Runner):
+        def _run(self, argv, env):
+            seen.update(env)
+            return 0, ""
+
+    class Dropper:
+        def kick(self):
+            events.append("kick")
+
+    runner = Records(Path("rust-bin"), tmp_path / "out", 60, tmp_path / "STOP", scratch=tmp_path / "s",
+                     sweep=lambda: events.append("sweep") or 0, oom_kills=lambda: 0,
+                     drop_token="abcd1234ef", dropper=Dropper())
+    runner.invoke("w2e", "x", "real", base=True)
+    assert seen[forced.DROP_LATER_ENV] == "abcd1234ef"
+    assert events == ["sweep", "kick"]
+
+
+def test_without_a_dropper_the_harness_drops_as_before(tmp_path):
+    seen = {}
+
+    class Records(forced.Runner):
+        def _run(self, argv, env):
+            seen.update(env)
+            return 0, ""
+
+    Records(Path("rust-bin"), tmp_path / "out", 60, tmp_path / "STOP", scratch=tmp_path / "s",
+            oom_kills=lambda: 0).invoke("w2e", "x", "real", base=True)
+    assert forced.DROP_LATER_ENV not in seen
+
+
+def test_the_dropper_waits_for_its_last_pass_and_drains_before_returning():
+    """No two passes overlap (a pass that listed the tombstones before the
+    last scenario's renames would miss them), and the drain's own pass runs
+    after every background one has ended."""
+    import threading
+    import time
+    started, release, passes = threading.Event(), threading.Event(), []
+    lock, running, most = threading.Lock(), [0], [0]
+
+    def drop():
+        with lock:
+            running[0] += 1
+            most[0] = max(most[0], running[0])
+            passes.append(len(passes))
+        if len(passes) == 1:
+            started.set()
+            release.wait(5)
+        elif len(passes) == 2:
+            time.sleep(0.3)  # still running when the drain starts its own pass
+        with lock:
+            running[0] -= 1
+
+    dropper = forced.Dropper(drop)
+    dropper.kick()
+    assert started.wait(5)
+    threading.Timer(0.3, release.set).start()
+    dropper.kick()
+    dropper.drain()
+    assert passes == [0, 1, 2] and most[0] == 1 and running[0] == 0
+
+
+def test_every_drop_ends_before_the_summary_is_written(tmp_path, monkeypatch, _no_database_drops):
+    """A stopped run's too: the summary of a run that left databases behind
+    would hide them."""
+    _main_env(monkeypatch)
+    out = tmp_path / "o"
+    order = []
+
+    def drops(token):
+        order.append(("drops", (out / "summary.json").exists()))
+        return 0
+    monkeypatch.setattr(forced, "drop_tombstones", drops)
+    monkeypatch.setattr(forced, "scenario_names", lambda suite: ["store-defaults"])
+    monkeypatch.setattr(forced, "run", lambda runner, *a, **k: (
+        {"suites": {}, "not_forced": {}, "complete": False, "stopped": "before w2e/x: STOP file present"},
+        {}))
+    forced.main(["--rust-bin", "x", "--out", str(out), "--suites", "w2e", "--only", "store-defaults"])
+    assert order == [("drops", False)]
+    assert (out / "summary.json").exists()
+
+
+def test_a_run_that_raises_still_drops_its_databases(tmp_path, monkeypatch, _no_database_drops):
+    _main_env(monkeypatch)
+    monkeypatch.setattr(forced, "scenario_names", lambda suite: ["store-defaults"])
+
+    def boom(runner, *a, **k):
+        raise KeyboardInterrupt
+    monkeypatch.setattr(forced, "run", boom)
+    with pytest.raises(KeyboardInterrupt):
+        forced.main(["--rust-bin", "x", "--out", str(tmp_path / "o"), "--suites", "w2e",
+                     "--only", "store-defaults"])
+    assert len(_no_database_drops) == 1
+
+
+def _bench():
+    if not pgdisposable.LOGIN_FILE.exists():
+        database_gate.unavailable("no disposable-bank login here",
+                                  "create it once on the daemon host with `pseudolife-mcp test-login "
+                                  "create`, or point PSEUDOLIFE_TEST_PG_LOGIN_FILE at it")
+    return pgdisposable
+
+
+def _databases(pgdisposable, prefix: str) -> list[str]:
+    with pgdisposable._admin() as conn:
+        return sorted(r[0] for r in conn.execute(
+            "SELECT datname FROM pg_database WHERE starts_with(datname, %s)", (prefix,)))
+
+
+def test_a_drop_under_a_run_token_frees_the_name_and_leaves_a_tombstone(monkeypatch):
+    """The name is free at once (the scenario may create it again), and the
+    run's tombstone drop removes the database; without the token a drop
+    drops, as it always has."""
+    import uuid
+    pgdisposable = _bench()
+    pg = pgdisposable.Slice("mir")
+    token = uuid.uuid4().hex[:12]
+    tombs = pgdisposable.tombstone_prefix(token)
+    name = pg.name("pl_cf_mir_droplater")
+    try:
+        pg.create(name)
+        monkeypatch.setenv(pgdisposable.DROP_LATER_ENV, token)
+        pg.drop(name)
+        assert name not in _databases(pgdisposable, name)
+        assert len(_databases(pgdisposable, tombs)) == 1
+        pg.create(name)  # the name is free again
+        pg.drop(name)
+        assert len(_databases(pgdisposable, tombs)) == 2
+        assert pgdisposable.drop_tombstones(token) == 2
+        assert _databases(pgdisposable, tombs) == []
+        monkeypatch.delenv(pgdisposable.DROP_LATER_ENV)
+        pg.create(name)
+        pg.drop(name)
+        assert _databases(pgdisposable, name) == [] and _databases(pgdisposable, tombs) == []
+    finally:
+        monkeypatch.delenv(pgdisposable.DROP_LATER_ENV, raising=False)
+        pg.drop(name)
+        pgdisposable.drop_tombstones(token)
+
+
+def test_a_database_still_in_use_is_dropped_at_once(monkeypatch):
+    """A rename cannot end another session (FORCE can): the drop falls back
+    to dropping, and leaves no tombstone behind."""
+    import uuid
+    import psycopg
+    pgdisposable = _bench()
+    pg = pgdisposable.Slice("mir")
+    token = uuid.uuid4().hex[:12]
+    name = pg.name("pl_cf_mir_dropbusy")
+    try:
+        dsn = pg.create(name)
+        monkeypatch.setenv(pgdisposable.DROP_LATER_ENV, token)
+        with psycopg.connect(dsn, autocommit=True) as held:
+            held.execute("SELECT 1")
+            started = forced.time.monotonic()
+            pg.drop(name)
+            # Review (Opus): a rename would wait 5 s for the session first.
+            assert forced.time.monotonic() - started < 3
+        assert _databases(pgdisposable, name) == []
+        assert _databases(pgdisposable, pgdisposable.tombstone_prefix(token)) == []
+    finally:
+        monkeypatch.delenv(pgdisposable.DROP_LATER_ENV, raising=False)
+        pg.drop(name)
+        pgdisposable.drop_tombstones(token)
+
+
+def test_the_sweep_leaves_the_runs_tombstones_to_its_dropper(monkeypatch):
+    """Sweeping them would make every scenario wait for its drops again;
+    another run's tombstones (a killed run's) are leftovers it sweeps."""
+    import uuid
+    pgdisposable = _bench()
+    pg = pgdisposable.Slice("mir")
+    live = pgdisposable.Slice("w2f")  # the sweep spares pl_cf_mir_* (the banks)
+    mine, other = uuid.uuid4().hex[:12], uuid.uuid4().hex[:12]
+    names = [pg.name("pl_cf_mir_sweepmine"), pg.name("pl_cf_mir_sweepother")]
+    leftover = live.name("pl_cf_w2f_sweeplive")
+    try:
+        for n in names:
+            pg.create(n)
+        live.create(leftover)
+        monkeypatch.setenv(pgdisposable.DROP_LATER_ENV, mine)
+        pg.drop(names[0])
+        monkeypatch.setenv(pgdisposable.DROP_LATER_ENV, other)
+        pg.drop(names[1])
+        monkeypatch.delenv(pgdisposable.DROP_LATER_ENV)
+        with pgdisposable._admin() as conn:  # read only: the bench is shared
+            listed = set(forced.leftover_names(conn, spare=pgdisposable.tombstone_prefix(mine)))
+        assert not any(n.startswith(pgdisposable.tombstone_prefix(mine)) for n in listed)
+        assert any(n.startswith(pgdisposable.tombstone_prefix(other)) for n in listed)
+        assert leftover in listed and not set(names) & listed
+        # The run's drops are its own: another run's tombstone stays for its sweep.
+        assert pgdisposable.drop_tombstones(mine) == 1
+        assert len(_databases(pgdisposable, pgdisposable.tombstone_prefix(other))) == 1
+    finally:
+        monkeypatch.delenv(pgdisposable.DROP_LATER_ENV, raising=False)
+        for n in names:
+            pg.drop(n)
+        live.drop(leftover)
+        pgdisposable.drop_tombstones(mine)
+        pgdisposable.drop_tombstones(other)
+
+
+def test_a_stopped_run_leaves_none_of_its_tombstones(tmp_path, monkeypatch):
+    """A tombstone an earlier scenario left is dropped before a stopped
+    run's summary exists."""
+    import uuid
+    pgdisposable = _bench()
+    pg = pgdisposable.Slice("mir")
+    token = uuid.uuid4().hex[:12]  # its own: the bench is shared
+    monkeypatch.setattr(forced, "new_drop_token", lambda: token)
+    monkeypatch.setattr(forced, "drop_tombstones", pgdisposable.drop_tombstones)
+    name = pg.name("pl_cf_mir_dropstop")
+    try:
+        pg.create(name)
+        monkeypatch.setenv(pgdisposable.DROP_LATER_ENV, token)
+        pg.drop(name)
+        monkeypatch.delenv(pgdisposable.DROP_LATER_ENV)
+        assert len(_databases(pgdisposable, pgdisposable.tombstone_prefix(token))) == 1
+        _main_env(monkeypatch)
+        monkeypatch.setattr(forced, "scenario_names", lambda suite: ["store-defaults"])
+        (tmp_path / "STOP").write_text("")
+        forced.main(["--rust-bin", "x", "--out", str(tmp_path / "o"), "--suites", "w2e",
+                     "--only", "store-defaults", "--stop-file", str(tmp_path / "STOP")])
+        assert _databases(pgdisposable, pgdisposable.tombstone_prefix(token)) == []
+        assert "STOP" in json.loads((tmp_path / "o" / "summary.json").read_text())["stopped"]
+    finally:
+        monkeypatch.delenv(pgdisposable.DROP_LATER_ENV, raising=False)
+        pg.drop(name)
+        pgdisposable.drop_tombstones(token)
+
+
+@pytest.mark.skipif(not hasattr(forced.os, "killpg"), reason="the runner is Linux; process groups are POSIX")
+def test_an_interrupted_run_stops_its_harness_before_the_drops_drain(tmp_path, monkeypatch):
+    """Review (Codex): Ctrl-C reaches forced.py only (the harness has a
+    session of its own), so the harness is stopped as a timeout stops it, and
+    its cleanup (its renames) runs before the interrupt reaches main's drain."""
+    script, marker = tmp_path / "harness.py", tmp_path / "cleaned"
+    script.write_text(
+        "import signal, sys, time\n"
+        f"def cleanup(*_):\n    open({str(marker)!r}, 'w').write('renamed')\n    sys.exit(130)\n"
+        "signal.signal(signal.SIGINT, cleanup)\n"
+        "print('started', flush=True)\n"
+        "time.sleep(600)\n")
+    real = forced.subprocess.Popen.communicate
+    calls = []
+
+    def communicate(self, *a, **k):
+        calls.append(1)
+        if len(calls) == 1:
+            forced.time.sleep(1.0)  # the harness is up and has its handler
+            raise KeyboardInterrupt
+        return real(self, *a, **k)
+    monkeypatch.setattr(forced.subprocess.Popen, "communicate", communicate)
+    runner = forced.Runner(Path("rust-bin"), tmp_path / "out", 60, tmp_path / "STOP", scratch=tmp_path / "s")
+    with pytest.raises(KeyboardInterrupt):
+        runner._run([sys.executable, str(script)], dict(forced.os.environ))
+    assert marker.read_text() == "renamed"
+
+
+def test_tombstone_drops_retry_a_session_force_cannot_end(monkeypatch):
+    """Review (Codex): FORCE cannot end an autovacuum worker on a just-used
+    bank; the tombstone drop retries it as every other drop does."""
+    import psycopg
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    tries = []
+
+    class Conn:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def execute(self, query, params=None):
+            if isinstance(query, str) and query.startswith("SELECT datname"):
+                return type("R", (), {"fetchall": lambda s: [("pl_cf_gone_abcd1234_ffff",)]})()
+            tries.append(1)
+            if len(tries) == 1:
+                raise psycopg.errors.InsufficientPrivilege("autovacuum worker")
+
+    monkeypatch.setattr(pgdisposable, "_admin", lambda: Conn())
+    monkeypatch.setattr(pgdisposable, "assert_disposable_database", lambda conn: "postgres")
+    monkeypatch.setattr(pgdisposable.time, "sleep", lambda s: None)
+    assert pgdisposable.drop_tombstones("abcd1234") == 1
+    assert len(tries) == 2
+
+
+def test_a_final_drop_that_fails_keeps_the_results_and_fails_the_run(tmp_path, monkeypatch):
+    """Review (Opus): hours of results are not thrown away for one drop; the
+    summary says which drops failed and the run exits non-zero."""
+    _main_env(monkeypatch)
+
+    def drops(token):
+        raise RuntimeError("autovacuum held the database")
+    monkeypatch.setattr(forced, "drop_tombstones", drops)
+    monkeypatch.setattr(forced, "scenario_names", lambda suite: ["store-defaults"])
+    monkeypatch.setattr(forced, "run", lambda runner, *a, **k: ({"suites": {}, "not_forced": {},
+                                                                 "complete": True}, {}))
+    out = tmp_path / "o"
+    assert forced.main(["--rust-bin", "x", "--out", str(out), "--suites", "w2e",
+                        "--only", "store-defaults"]) == 1
+    summary = json.loads((out / "summary.json").read_text())
+    assert "autovacuum held the database" in summary["drops_failed"]
+    assert (out / "private.json").exists()
+
+
+def test_a_session_that_arrives_after_the_check_still_gets_dropped(monkeypatch):
+    """The activity check passed, then a session connected before the
+    rename: the rename refuses (ObjectInUse) and the drop falls back to
+    FORCE rather than fail."""
+    import psycopg
+
+    class Conn:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def execute(self, query, params=None):
+            text = query if isinstance(query, str) else ""
+            if text.startswith("SELECT 1 FROM pg_database"):
+                return type("R", (), {"fetchone": lambda s: (1,)})()
+            if text.startswith("SELECT count(*) FROM pg_stat_activity"):
+                return type("R", (), {"fetchone": lambda s: (0,)})()
+            raise psycopg.errors.ObjectInUse("database is being accessed by other users")
+
+    space = type("Space", (), {"_admin": staticmethod(lambda: Conn()),
+                               "assert_disposable_database": staticmethod(lambda conn: "postgres")})()
+    assert pgdisposable._rename_away(space, "pl_cf_mir_x_0123456789abcdef", "abcd1234") is False

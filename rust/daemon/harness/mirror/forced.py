@@ -33,6 +33,8 @@ import re
 import shutil
 import signal
 import subprocess
+import threading
+import uuid
 import sys
 import time
 from pathlib import Path
@@ -367,10 +369,14 @@ class Runner:
     """One harness process per scenario; tests replace ``invoke`` or ``_run``."""
 
     def __init__(self, rust_bin: Path, out: Path, timeout: float, stop: Path, sweep=None,
-                 scratch: Path = Path("/tmp/forced"), oom_kills=read_oom_kills):
+                 scratch: Path = Path("/tmp/forced"), oom_kills=read_oom_kills,
+                 drop_token: str | None = None, dropper: "Dropper | None" = None):
         self.rust_bin, self.out, self.timeout, self.stop = rust_bin, out, timeout, stop
         self.sweep = sweep or (lambda: 0)
         self.scratch, self.oom_kills = scratch, oom_kills
+        # With both, a scenario's drops rename its databases away and the
+        # dropper drops them while the next scenario runs.
+        self.drop_token, self.dropper = drop_token, dropper
 
     def invoke(self, suite: str, name: str, label: str, base: bool) -> dict:
         script = HARNESS / SUITES[suite][0]
@@ -387,6 +393,8 @@ class Runner:
             env["PL_HARNESS_BASE_DATABASE"] = QUIET_DB
         elif which == "curation":
             env["PL_HARNESS_BASE_DATABASE"] = CURATION_DB
+        if self.drop_token and self.dropper:
+            env[DROP_LATER_ENV] = self.drop_token
         if base:
             env.setdefault("PL_HARNESS_DREAM_REST_TIMEOUT", str(DREAM_REST_TIMEOUT))
             # One read of each base's row hashes for the whole run, not one per
@@ -403,6 +411,8 @@ class Runner:
         swept = self.sweep()
         if swept:
             log += f"\nswept {swept} leftover disposable databases"
+        if self.dropper:
+            self.dropper.kick()
         if reaped:
             log = f"stopped {len(reaped)} leftover processes before this scenario\n" + log
         kept = work / f"{safe}.daemon-logs"
@@ -423,15 +433,23 @@ class Runner:
         proc = subprocess.Popen(argv, cwd=ROOT, env=env, stdout=subprocess.PIPE,
                                 stderr=subprocess.STDOUT, start_new_session=True)
         try:
-            raw, _ = proc.communicate(timeout=self.timeout)
-            code, log = proc.returncode, raw.decode("utf-8", errors="replace")
-        except subprocess.TimeoutExpired:
-            code, log = None, self._stop(proc) + f"\nTIMEOUT after {self.timeout:g}s"
-        if hasattr(os, "killpg"):  # the runner is Linux
             try:
-                os.killpg(proc.pid, signal.SIGKILL)
-            except (ProcessLookupError, PermissionError):
-                pass
+                raw, _ = proc.communicate(timeout=self.timeout)
+                code, log = proc.returncode, raw.decode("utf-8", errors="replace")
+            except subprocess.TimeoutExpired:
+                code, log = None, self._stop(proc) + f"\nTIMEOUT after {self.timeout:g}s"
+            except BaseException:
+                # Interrupted (Ctrl-C reaches this process only: the harness has
+                # a session of its own): stop it as a timeout does, so its
+                # cleanup has renamed its databases before the run's drops drain.
+                self._stop(proc)
+                raise
+        finally:
+            if hasattr(os, "killpg"):  # the runner is Linux
+                try:
+                    os.killpg(proc.pid, signal.SIGKILL)
+                except (ProcessLookupError, PermissionError):
+                    pass
         return code, log
 
     def reap_leftovers(self) -> list[int]:
@@ -482,6 +500,44 @@ class Runner:
             return "STOP file present"
         if shutil.disk_usage("/").free < DISK_FLOOR:
             return "free disk below the 8 GiB floor"
+        return None
+
+
+# pgdisposable's: the variable a scenario's drops read the run's token from.
+DROP_LATER_ENV = "PL_HARNESS_DROP_LATER"
+
+
+class Dropper:
+    """Drops the run's renamed-away databases on a thread of its own while
+    the next scenario runs. ``kick`` starts a pass after the last one ended,
+    so none is missed; ``drain`` waits for it and drops what is left, and
+    says why if it could not, for the summary (the run then fails)."""
+
+    def __init__(self, drop):
+        self._drop, self._thread = drop, None
+        self.errors: list[str] = []
+
+    def _pass(self) -> None:
+        try:
+            self._drop()
+        except Exception as e:  # noqa: BLE001 - the drain's own pass retries and raises
+            self.errors.append(f"{type(e).__name__}: {e}"[:300])
+
+    def kick(self) -> None:
+        if self._thread is not None:
+            self._thread.join()
+        self._thread = threading.Thread(target=self._pass, name="forced-drops", daemon=True)
+        self._thread.start()
+
+    def drain(self) -> str | None:
+        """None when every tombstone is dropped, else why the last pass failed."""
+        if self._thread is not None:
+            self._thread.join()
+            self._thread = None
+        try:
+            self._drop()
+        except Exception as e:  # noqa: BLE001 - reported in the summary, the run fails
+            return f"{type(e).__name__}: {e}"[:300]
         return None
 
 
@@ -598,22 +654,49 @@ def counts(report: dict) -> dict:
     return out
 
 
-def sweep_leftovers() -> int:
+def new_drop_token() -> str:
+    """A run's own tombstone token (pgdisposable.DROP_TOKEN)."""
+    return uuid.uuid4().hex[:12]
+
+
+def tombstone_prefix(token: str) -> str:
+    sys.path.insert(0, str(HARNESS))
+    import pgdisposable
+    return pgdisposable.tombstone_prefix(token)
+
+
+def drop_tombstones(token: str) -> int:
+    """The run's renamed-away databases, dropped (pgdisposable's)."""
+    sys.path.insert(0, str(HARNESS))
+    import pgdisposable
+    return pgdisposable.drop_tombstones(token)
+
+
+def sweep_leftovers(spare: str = "") -> int:
     """After a killed harness: drop the disposable databases it left. The
     mirror's PostgreSQL holds only this run's copies besides the pl_cf_mir_*
-    banks, and scenarios run one at a time."""
+    banks, and scenarios run one at a time. Names starting with ``spare``
+    (the run's own tombstones, which its dropper drops) are left alone."""
     sys.path.insert(0, str(HARNESS))
     import pgdisposable
     from psycopg import sql
     dropped = 0
     with pgdisposable._admin() as conn:
         pgdisposable.assert_disposable_database(conn)
-        for (name,) in conn.execute("SELECT datname FROM pg_database WHERE datname LIKE 'pl\\_cf\\_%' "
-                                    "AND datname NOT LIKE 'pl\\_cf\\_mir\\_%'").fetchall():
+        for name in leftover_names(conn, spare):
             pgdisposable.refuse_production_database(name)
             conn.execute(sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(sql.Identifier(name)))
             dropped += 1
     return dropped
+
+
+def leftover_names(conn, spare: str = "") -> list[str]:
+    """The databases ``sweep_leftovers`` drops: every disposable copy but the
+    pl_cf_mir_* banks and names starting with ``spare``."""
+    return [name for (name,) in conn.execute(
+        "SELECT datname FROM pg_database WHERE datname LIKE 'pl\\_cf\\_%%' "
+        "AND datname NOT LIKE 'pl\\_cf\\_mir\\_%%' "
+        "AND (%s = '' OR NOT starts_with(datname, %s))", (spare, spare)).fetchall()]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -667,23 +750,39 @@ def main(argv: list[str] | None = None) -> int:
             print(f"forced.py: {e}", file=sys.stderr)
             return 3
     args.out.mkdir(parents=True, exist_ok=True)
-    runner = Runner(args.rust_bin, args.out, args.timeout, args.stop_file, sweep=sweep_leftovers,
-                    scratch=run_scratch())
-    report, private = run(runner, args.suites, args.only)
+    token = new_drop_token()
+    tombstones = tombstone_prefix(token)
+    dropper = Dropper(lambda: drop_tombstones(token))
+    runner = Runner(args.rust_bin, args.out, args.timeout, args.stop_file,
+                    sweep=lambda: sweep_leftovers(spare=tombstones), scratch=run_scratch(),
+                    drop_token=token, dropper=dropper)
+    try:
+        report, private = run(runner, args.suites, args.only)
+    finally:
+        # Every drop ends before the summary is written, a stopped run's too.
+        drops_failed = dropper.drain()
+        for error in dropper.errors:
+            print(f"forced.py: a background drop pass failed and the final pass retried it: {error}",
+                  file=sys.stderr)
     summary = {"base": base, "complete": report["complete"], "stopped": report.get("stopped"),
                "not_forced": report["not_forced"], "quiet_base": quiet_base_use(report),
                "curation_base": curation_base_use(report),
                "accepted_limits": ACCEPTED_OOM,
                "real_bank_exclusions": REAL_BANK_EXCLUDED,
                "fixture_notes": FIXTURE_NOTES,
-               "counts": counts(report)}
+               "counts": counts(report),
+               # The run's own databases still on the server, and why: the run fails.
+               "drops_failed": drops_failed,
+               "background_drop_errors": len(dropper.errors)}
     (args.out / "summary.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
     (args.out / "private.json").write_text(json.dumps({"report": report, "differences": private},
                                                       indent=1) + "\n", encoding="utf-8")
     print(json.dumps(summary["counts"]))
     clean = all(not c["new"] and not c["error"] and not body.get("error")
                 for c, body in zip(summary["counts"].values(), report["suites"].values()))
-    return 0 if report["complete"] and clean else 1
+    if drops_failed:
+        print(f"forced.py: the run's databases were not all dropped: {drops_failed}", file=sys.stderr)
+    return 0 if report["complete"] and clean and not drops_failed else 1
 
 
 if __name__ == "__main__":
