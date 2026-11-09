@@ -5715,15 +5715,23 @@ def window_ages(a, b, ages) -> None:
         return
     if isinstance(a, dict) and isinstance(b, dict):
         if isinstance(a.get("age"), str) and isinstance(b.get("age"), str):
-            fits = []
+            fits, anchors = [], []
             for side, d in (("python", a), ("rust", b)):
                 key = (d.get("value"), d.get("asserted_at"))
                 try:
                     anchor = ages[side]["anchors"].get(key)
                 except TypeError:  # an unhashable value
                     anchor = None
+                anchors.append(anchor)
                 fits.append(age_fits(d["age"], anchor, ages[side]["window"]))
-            if all(fits):
+            # Each age checks against its own side's row, so the two anchors
+            # must also agree: the same row copied from the base, or both
+            # written during this run. A side that failed to move its clock
+            # (a stale tx_time) still differs (review, 2026-11-10).
+            since = ages["python"].get("since")
+            fresh = since is not None and all(
+                isinstance(t, (int, float)) and t >= since for t in anchors)
+            if all(fits) and (anchors[0] == anchors[1] or fresh):
                 a["age"] = b["age"] = "<age>"
         for k in set(a) & set(b):
             if k != "age":
@@ -6522,6 +6530,7 @@ def _run_live(name: str, scn: dict, tag: str, binary: Path, root: Path, record: 
             client.init()
         tokens: dict[str, str | None] = {"python": None, "rust": None}
         max_wall = 0.0
+        run_start = time.time()  # a record written during this run is anchored after it
         for i, op in enumerate([{"op": "init"}] + scn["ops"]):
             row = {"step": i, "op": op, "diffs": [] if i else list(warmup_diffs)}
             if op["op"] == "init" and scn.get("init_settle"):
@@ -6598,7 +6607,8 @@ def _run_live(name: str, scn: dict, tag: str, binary: Path, root: Path, record: 
                     row["rust"] = w2e_documents.answer_tokens(row["rust"], clock_ranks(raw_rs))
                 row["python"] = rename_prefixes(row["python"], ep)
                 row["rust"] = rename_prefixes(row["rust"], er)
-                ages = windows and {side: {"window": windows[side], "anchors": age_anchors(raw)}
+                ages = windows and {side: {"window": windows[side], "anchors": age_anchors(raw),
+                                           "since": run_start}
                                     for side, raw in (("python", raw_py), ("rust", raw_rs))}
                 row["diffs"] += compare_response(row["python"], row["rust"], tol, stats, ages)
             row["diffs"] += compare_numeric(np_, nr, tol, stats)

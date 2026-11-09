@@ -298,8 +298,8 @@ def fact_answer(age, asserted_at):
         "kind": "scalar", "value": "staging"}}}
 
 
-def clocks(anchor, start, end, asserted_at):
-    return {"window": (start, end), "anchors": {("staging", asserted_at): anchor}}
+def clocks(anchor, start, end, asserted_at, since=900.0):
+    return {"window": (start, end), "anchors": {("staging", asserted_at): anchor}, "since": since}
 
 
 def test_age_compares_against_each_arms_own_clock(harness):
@@ -347,9 +347,25 @@ def test_set_members_and_removed_rows_compare_by_their_own_anchors(harness):
                                                  "removed": [member("4 minutes ago", 990.0)]}}}
     rs = {"isError": False, "value": {"record": {"kind": "set", "members": [],
                                                  "removed": [member("2 minutes ago", 1090.0)]}}}
-    ages = {"python": {"window": (1249.0, 1251.0), "anchors": {("signed tag", 990.0): 1000.0}},
-            "rust": {"window": (1259.0, 1261.0), "anchors": {("signed tag", 1090.0): 1100.0}}}
+    ages = {"python": {"window": (1249.0, 1251.0), "anchors": {("signed tag", 990.0): 1000.0}, "since": 900.0},
+            "rust": {"window": (1259.0, 1261.0), "anchors": {("signed tag", 1090.0): 1100.0}, "since": 900.0}}
     assert harness.compare_response(py, rs, {}, {}, ages=ages) == []
+
+
+def test_a_side_whose_record_clock_did_not_move_still_differs(harness):
+    """Review (Opus): each age checked only against its own side's row, so a
+    side that failed to move tx_time (a re-confirmation) read "2 hours ago"
+    against "just now" and both fitted. The anchors must agree: the same
+    copied base row, or both written during this run."""
+    py, rs = fact_answer("just now", 990.0), fact_answer("2 hours ago", 990.0)
+    ages = {"python": clocks(1240.0, 1249.0, 1251.0, 990.0, since=1200.0),
+            "rust": clocks(-6000.0, 1259.0, 1261.0, 990.0, since=1200.0)}
+    assert harness.compare_response(py, rs, {}, {}, ages=ages)
+    # The near miss: the same copied base row on both sides still compares.
+    base = {"python": clocks(-6000.0, 1249.0, 1251.0, 990.0, since=1200.0),
+            "rust": clocks(-6000.0, 1259.0, 1261.0, 990.0, since=1200.0)}
+    assert harness.compare_response(fact_answer("2 hours ago", 990.0), fact_answer("2 hours ago", 990.0),
+                                    {}, {}, ages=base) == []
 
 
 def test_age_anchors_read_each_facts_row_tx_time_or_asserted_at(harness):
