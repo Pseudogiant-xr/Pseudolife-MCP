@@ -135,7 +135,17 @@ def rich_base(monkeypatch):
         conn.execute("INSERT INTO plain SELECT g, 'v' || g FROM generate_series(1, 10) g")
         conn.execute("CREATE TYPE mood AS ENUM ('calm', 'busy')")
         conn.execute("CREATE TABLE moods (id INT PRIMARY KEY, m mood)")
-        conn.execute("INSERT INTO moods VALUES (1, 'calm'), (2, 'calm')")
+        conn.execute("INSERT INTO moods VALUES (1, 'calm'), (2, 'calm'), (3, 'busy')")
+        conn.execute("CREATE TABLE times (id INT PRIMARY KEY, ts TIMESTAMP)")
+        conn.execute("INSERT INTO times VALUES (1, NULL), (2, '2026-01-02 03:04:05')")
+        conn.execute("CREATE TABLE moodsets (id INT PRIMARY KEY, ms mood[])")
+        conn.execute("INSERT INTO moodsets VALUES (1, '{calm}'), (2, '{busy}')")
+        conn.execute("CREATE DOMAIN dmood AS mood")
+        conn.execute("CREATE TABLE dmoods (id INT PRIMARY KEY, m dmood)")
+        conn.execute("INSERT INTO dmoods VALUES (1, 'calm'), (2, 'busy')")
+        conn.execute("CREATE TYPE pair AS (a INT, b TEXT)")
+        conn.execute("CREATE TABLE pairs (id INT PRIMARY KEY, p pair)")
+        conn.execute("INSERT INTO pairs VALUES (1, '(1,x)'), (2, '(2,y)')")
     dbstate._BASE_HASHES.clear()
     monkeypatch.setenv(pgdisposable.BASE_ENV, name)
     yield name
@@ -237,14 +247,93 @@ def test_the_fast_delta_declines_a_rewritten_or_altered_table(rich_base):
             conn.execute("VACUUM FULL plain")
             conn.execute("ALTER TABLE tags ADD COLUMN extra INT DEFAULT 0")
             conn.execute("ALTER TYPE mood RENAME VALUE 'calm' TO 'still'")
+            # The table's own catalog rows stay; only the type's change.
+            conn.execute("ALTER TYPE pair ADD ATTRIBUTE c INT")
         deltas = _deltas(dsn)
         assert deltas["public.moods"][1][2]["count"] == 2  # no row hashes as the base's now
-        for q in ("public.docs", "public.plain", "public.tags", "public.moods"):
+        assert deltas["public.pairs"][1][2]["count"] == 2
+        for q in ("public.docs", "public.plain", "public.tags", "public.moods", "public.pairs"):
             assert deltas[q][0] is None, f"{q}: the fast delta vouched for a rewritten or altered table"
         assert deltas["public.docs"][1][2]["count"] == 1
         assert deltas["public.tags"][1][2]["count"] == 3  # every row's text changed
         assert deltas["public.spare"][0] == deltas["public.spare"][1]
         assert dbstate.dump(dsn)["rows"]["public.docs"]["base_missing"]["count"] == 1
+    finally:
+        pg.drop(copy)
+
+
+def test_the_fast_delta_declines_a_change_its_canary_row_does_not_show(rich_base):
+    """Renaming an enum label only a later row uses (in an enum column, an
+    enum array, a domain over the enum), and retyping a column without a
+    rewrite where the first row holds NULL, leave the canary row's text as
+    the base's and the file as it was; only the catalog shows the change,
+    and the fast delta declines on it."""
+    import psycopg
+    copy = pg.name("pl_cf_mir_fastcanary")
+    try:
+        dsn = pg.create(copy)
+        with psycopg.connect(dsn, autocommit=True) as conn:
+            files = {t: conn.execute("SELECT pg_relation_filenode(%s::regclass)", (t,)).fetchone()[0]
+                     for t in ("moods", "times")}
+            conn.execute("ALTER TYPE mood RENAME VALUE 'busy' TO 'hurried'")
+            conn.execute("SET timezone = 'UTC'")  # no rewrite for timestamp -> timestamptz
+            conn.execute("ALTER TABLE times ALTER COLUMN ts TYPE TIMESTAMPTZ")
+            assert files == {t: conn.execute("SELECT pg_relation_filenode(%s::regclass)",
+                                             (t,)).fetchone()[0] for t in files}, "a table was rewritten"
+        deltas = _deltas(dsn)
+        for q in ("public.moods", "public.times", "public.moodsets", "public.dmoods"):
+            fast, full = deltas[q]
+            assert full[2]["count"] == 1, f"{q}: the change should reach one base row"
+            assert fast is None, f"{q}: the fast delta vouched for a table whose text changed"
+    finally:
+        pg.drop(copy)
+
+
+def test_a_session_rendering_values_differently_is_declined(rich_base, monkeypatch):
+    """A session setting that renders rows differently from the base read
+    (here ``extra_float_digits``) changes no catalog row, and the canary row
+    may print the same (a whole number); the settings show it, and the fast
+    delta declines."""
+    copy = pg.name("pl_cf_mir_fastrender")
+    try:
+        dsn = pg.create(copy)
+        assert _agree(dsn)["public.docs"] == {"rows": [], "missing": 0}  # the base read
+        monkeypatch.setenv("PGOPTIONS", "-c extra_float_digits=-3")
+        fast, full = _deltas(dsn)["public.docs"]
+        assert 0 < full[2]["count"] < 40, "some docs rows, not all, should render differently"
+        assert fast is None, "the fast delta vouched for rows that no longer hash as the base's"
+    finally:
+        pg.drop(copy)
+
+
+def test_a_frozen_base_still_tells_its_rows_from_new_ones(rich_base):
+    """Freezing keeps a row's raw xmin, in the base before it is read and in
+    the copy after a write: a new frozen row is still a candidate."""
+    import psycopg
+    copy = pg.name("pl_cf_mir_fastfrozen")
+    try:
+        with psycopg.connect(pg.dsn(rich_base), autocommit=True) as conn:
+            conn.execute("VACUUM (FREEZE) docs")
+        dsn = pg.create(copy)
+        with psycopg.connect(dsn, autocommit=True) as conn:
+            conn.execute("INSERT INTO docs VALUES (101, 'frozen', 2.5)")
+            conn.execute("VACUUM (FREEZE) docs")
+        assert _agree(dsn)["public.docs"] == {"rows": [[101, "frozen", 2.5]], "missing": 0}
+    finally:
+        pg.drop(copy)
+
+
+def test_an_unwritable_cache_only_costs_the_cache(rich_base, monkeypatch, tmp_path):
+    """The cache saves time; a directory that cannot be written leaves this
+    process with its own read, and the dump answers."""
+    blocker = tmp_path / "not-a-directory"
+    blocker.write_text("")
+    monkeypatch.setenv(dbstate.BASE_CACHE_ENV, str(blocker / "cache"))
+    copy = pg.name("pl_cf_mir_fastnocache")
+    try:
+        dsn = pg.create(copy)
+        assert dbstate.dump(dsn)["rows"]["public.docs"]["base_missing"]["count"] == 0
+        assert list(tmp_path.iterdir()) == [blocker]
     finally:
         pg.drop(copy)
 
@@ -321,5 +410,12 @@ def test_a_run_reads_each_base_once_and_again_after_it_changes(rich_base, monkey
         altered = dbstate._base_hashes(dsn)
         assert len(reads) == 3 * read_once, "an altered base was not read again"
         assert altered["public.plain"] != moved["public.plain"]
+        # A process whose session renders values differently hashes them
+        # differently: it reads the base itself.
+        monkeypatch.setenv("PGOPTIONS", "-c extra_float_digits=-3")
+        dbstate._BASE_HASHES.clear()
+        rendered = dbstate._base_hashes(dsn)
+        assert len(reads) == 4 * read_once, "a cache hashed under other settings was reused"
+        assert rendered["public.docs"] != altered["public.docs"]
     finally:
         pg.drop(copy)

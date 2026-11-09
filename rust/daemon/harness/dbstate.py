@@ -22,6 +22,7 @@ normalizers, which replace nondeterministic values by rule, never by hand:
 """
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 from collections import Counter
@@ -155,16 +156,30 @@ _BASE_INFO: dict[str, str] = {}
 # its rows, for ``_fast_delta``. ``md5`` is the table's ``_BASE_HASHES``
 # Counter itself, so a caller's Counter shows which base it came from.
 _BASE_ROWS: dict[str, dict[str, dict]] = {}
+# The session settings PostgreSQL's output functions read, as the base was
+# hashed: a session rendering any differently can leave the canary row's
+# text alone (a float that prints the same) while other rows change.
+_BASE_RENDER: dict[str, str] = {}
+_RENDER = ("SELECT json_build_array(" + ", ".join(
+    f"current_setting('{g}')" for g in (
+        "DateStyle", "IntervalStyle", "TimeZone", "extra_float_digits", "bytea_output",
+        "lc_monetary", "standard_conforming_strings", "quote_all_identifiers", "search_path",
+        "xmloption")) + ")::text")
 # A directory where one run's harness processes share each base's hashes
 # (``mirror/forced.py`` sets it): a scenario is one process, and one hash
 # pass over a real bank's copy took 6.75 s (daemon box during a forced run,
 # 2026-11-09), so each process paid that before its first dump.
 BASE_CACHE_ENV = "PL_HARNESS_BASE_CACHE"
-_CACHE_FORMAT = 1
-# The attribute rows ``t::text`` depends on: a column added, dropped or
-# retyped changes every row's text without rewriting its tuple.
+_CACHE_FORMAT = 3
+# The catalog rows ``t::text`` depends on: a column added, dropped or retyped
+# changes rows' text without rewriting their tuples, and so does an enum label
+# renamed (of the column's type, its element type or a domain's base type),
+# which may reach only some rows.
 _ATTRS = ("SELECT coalesce(json_agg(json_build_array(a.attnum, a.attname, a.atttypid::int, "
-          "a.atttypmod, a.attisdropped, a.atthasmissing) ORDER BY a.attnum), '[]')::text "
+          "a.atttypmod, a.attisdropped, a.atthasmissing, "
+          "(SELECT json_agg(e.enumlabel ORDER BY e.enumtypid, e.enumsortorder) FROM pg_type ty "
+          "JOIN pg_enum e ON e.enumtypid IN (ty.oid, ty.typelem, ty.typbasetype) "
+          "WHERE ty.oid = a.atttypid)) ORDER BY a.attnum), '[]')::text "
           "FROM pg_attribute a WHERE a.attrelid = %s::regclass AND a.attnum > 0")
 
 
@@ -202,6 +217,7 @@ def _load_base(conn, base: str) -> dict[str, dict]:
     """Every base table's rows, stamps and keys: from the run's cache when
     every stamp still matches the base, else read and cached again."""
     oid = conn.execute("SELECT oid::int FROM pg_database WHERE datname = current_database()").fetchone()[0]
+    render = conn.execute(_RENDER).fetchone()[0]
     stamps = {f"{s}.{t}": _table_stamp(conn, s, t) for s, t in _tables(conn)}
     cache_dir = os.environ.get(BASE_CACHE_ENV)
     path = os.path.join(cache_dir, f"{base}.json") if cache_dir else None
@@ -210,7 +226,7 @@ def _load_base(conn, base: str) -> dict[str, dict]:
             with open(path, encoding="utf-8") as f:
                 cached = json.load(f)
             if cached.get("format") == _CACHE_FORMAT and cached.get("base") == base \
-                    and cached.get("oid") == oid \
+                    and cached.get("oid") == oid and cached.get("render") == render \
                     and {q: v["stamp"] for q, v in cached["tables"].items()} == stamps:
                 return cached["tables"]
         except (OSError, ValueError, KeyError, TypeError):
@@ -220,13 +236,21 @@ def _load_base(conn, base: str) -> dict[str, dict]:
         schema, table = q.split(".", 1)
         rows, keys = _read_base_table(conn, schema, table)
         tables[q] = {"stamp": stamp, "rows": rows, "keys": keys}
-    # Read again: a base written while it was read is not cached.
+    # Stamped again: a base whose file, columns or census changed while it
+    # was read is not cached. (A row added and deleted meanwhile leaves the
+    # census; this process then uses the same read as the cache would.)
     if path and {f"{s}.{t}": _table_stamp(conn, s, t) for s, t in _tables(conn)} == stamps:
-        os.makedirs(cache_dir, exist_ok=True)
         tmp = f"{path}.{os.getpid()}.tmp"
-        with open(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w", encoding="utf-8") as f:
-            json.dump({"format": _CACHE_FORMAT, "base": base, "oid": oid, "tables": tables}, f)
-        os.replace(tmp, path)
+        try:
+            os.makedirs(cache_dir, exist_ok=True)
+            with open(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w",
+                      encoding="utf-8") as f:
+                json.dump({"format": _CACHE_FORMAT, "base": base, "oid": oid, "render": render,
+                           "tables": tables}, f)
+            os.replace(tmp, path)
+        except OSError:  # the cache only saves time: this process has its read
+            with contextlib.suppress(OSError):
+                os.remove(tmp)
     return tables
 
 
@@ -245,6 +269,7 @@ def _base_hashes(dsn: str) -> dict[str, Counter] | None:
         info = psycopg.conninfo.make_conninfo(dsn, dbname=base)
         out, keys, located = {}, {}, {}
         with psycopg.connect(info, autocommit=True) as conn:
+            _BASE_RENDER[base] = conn.execute(_RENDER).fetchone()[0]
             for qualified, body in _load_base(conn, base).items():
                 out[qualified] = Counter(r[2] for r in body["rows"])
                 keys[qualified] = set(body["keys"])
@@ -347,12 +372,14 @@ def _fast_delta(conn, schema: str, table: str, known: Counter, select: str,
     the gone rows', and the other way round.
 
     It declines (None) for a table the base did not hash or another base
-    hashed, a file rewritten (VACUUM FULL, CLUSTER, TRUNCATE, a retype:
-    ctids no longer locate base rows), or an unchanged row whose text no
-    longer hashes as the base's (``t::text`` rendered differently). One such
-    row vouches for the table because a rendering change reaches every row:
-    a column added or dropped does, and the bank schema has no enum or
-    domain whose rename could reach only some rows.
+    hashed, a file rewritten (VACUUM FULL, CLUSTER, TRUNCATE, a rewriting
+    retype: ctids no longer locate base rows), a catalog change to what
+    ``t::text`` renders (a column added, dropped or retyped without a
+    rewrite, an enum label renamed: ``_ATTRS``), a session rendering values
+    differently from the base read (``_RENDER``), or an unchanged row whose
+    text no longer hashes as the base's: the canary for a rendering change
+    neither shows, such as an attribute added to a composite type, which
+    reaches every row holding a value of it.
 
     Freezing and wraparound cannot make a written row look like a base row:
     since PostgreSQL 9.4 freezing sets a flag and keeps the raw xmin, which
@@ -369,6 +396,8 @@ def _fast_delta(conn, schema: str, table: str, known: Counter, select: str,
     old = info["xmins"]
     rel = f'"{schema}"."{table}"'
     with conn.cursor(row_factory=tuple_row) as cur:
+        if cur.execute(_RENDER).fetchone()[0] != _BASE_RENDER.get(base):
+            return None
         kept, candidates = cur.execute(
             f"SELECT count(*) FILTER (WHERE xmin = ANY(%s::xid[])), "
             f"coalesce(array_agg(ARRAY[ctid::text, md5(t::text)]) "
@@ -380,10 +409,12 @@ def _fast_delta(conn, schema: str, table: str, known: Counter, select: str,
                                (_regclass(schema, table),)).fetchone()[0]
         if filenode != info["filenode"]:
             return None
+        if cur.execute(_ATTRS, (_regclass(schema, table),)).fetchone()[0] != info["attrs"]:
+            return None
         if kept:
             # One row the copy shares with the base must hash as the base's,
-            # or every unchanged row's text has changed (a column added or
-            # dropped, an enum label renamed) and only the full hash can tell.
+            # or every unchanged row's text has changed, and only the full
+            # hash can tell which rows the base still holds.
             ctid, xmin, digest = cur.execute(
                 f"SELECT ctid::text, xmin::text, md5(t::text) FROM {rel} t "
                 f"WHERE xmin = ANY(%s::xid[]) LIMIT 1", (old,)).fetchone()
