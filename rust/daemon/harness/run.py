@@ -1111,7 +1111,14 @@ class DimMismatch(Scenario):
         with psycopg.connect(dsn, autocommit=True) as conn:
             assert_disposable(conn)
             conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
-            conn.execute("CREATE TABLE entries (id BIGSERIAL PRIMARY KEY, embedding vector(384))")
+            if conn.execute("SELECT to_regclass('public.entries')").fetchone()[0] is None:
+                conn.execute("CREATE TABLE entries (id BIGSERIAL PRIMARY KEY, embedding vector(384))")
+            else:
+                # A copy of a real bank already has entries at this build's
+                # dimension. pgvector will not cast a stored 1,024-d value
+                # to vector(384), so the column moves with its values emptied.
+                conn.execute("ALTER TABLE entries ALTER COLUMN embedding DROP NOT NULL, "
+                             "ALTER COLUMN embedding TYPE vector(384) USING NULL")
 
     def cases(self):
         return [case("health, dim refusal", "GET", "/health"),
@@ -1133,6 +1140,30 @@ class DimMismatch(Scenario):
         raise RuntimeError(f"dim-mismatch startup did not refuse: {', '.join(sorted(waiting))}")
 
 
+def unreferenced_builtin_relation(conn, preferred: str = "uses") -> str | None:
+    """A builtin relation no row references, ``preferred`` when it qualifies.
+
+    On a copy of a real bank edges, edge proposals and other relations'
+    ``inverse_of`` reference most builtins, and deleting one of those fails
+    its foreign key. Every foreign key onto ``relations`` is read from the
+    catalog, so one added later is honoured too."""
+    from psycopg import sql
+    refs = conn.execute(
+        "SELECT n.nspname, c.relname, a.attname FROM pg_constraint k "
+        "JOIN pg_class c ON c.oid = k.conrelid JOIN pg_namespace n ON n.oid = c.relnamespace "
+        "JOIN pg_attribute a ON a.attrelid = k.conrelid AND a.attnum = k.conkey[1] "
+        "WHERE k.contype = 'f' AND k.confrelid = 'public.relations'::regclass "
+        "ORDER BY 1, 2, 3").fetchall()
+    unreferenced = sql.SQL(" AND ").join(
+        sql.SQL("NOT EXISTS (SELECT 1 FROM {} x WHERE x.{} = r.name)").format(
+            sql.Identifier(schema, table), sql.Identifier(column))
+        for schema, table, column in refs) if refs else sql.SQL("TRUE")
+    row = conn.execute(sql.SQL(
+        "SELECT r.name FROM relations r WHERE r.builtin AND {} "
+        "ORDER BY r.name <> %s, r.name LIMIT 1").format(unreferenced), (preferred,)).fetchone()
+    return row[0] if row else None
+
+
 class StampedBank(Scenario):
     """Future schema: both daemons refuse it before any DDL, with the same
     message, and leave the bank as it was."""
@@ -1150,7 +1181,10 @@ class StampedBank(Scenario):
             assert_disposable(conn)
             conn.execute("UPDATE meta SET value = '99'::jsonb WHERE key = 'schema_version'")
             conn.execute("UPDATE meta SET value = '\"x\"'::jsonb WHERE key = 'writer_lease_epoch'")
-            conn.execute("DELETE FROM relations WHERE name = 'uses'")
+            # A tripwire: initialization would seed this relation again.
+            tripwire = unreferenced_builtin_relation(conn)
+            if tripwire is not None:
+                conn.execute("DELETE FROM relations WHERE name = %s", (tripwire,))
 
     def cases(self):
         c = case("health on stamped bank", "GET", "/health")
@@ -1218,6 +1252,7 @@ class JsonFloatTies(Scenario):
     name = "json-float-shortest-ties"
     env = {"PSEUDOLIFE_MCP_TOKEN": T_DEFAULT}
     timestamps = ["-847044394961070.2", "93026504287663.12", "1000000000000000.2"]
+    memory_config = {"recency_boost_enabled": False, "search_confidence_floor": 0.0}
 
     def prepare_template(self, dsn):
         import psycopg
@@ -1227,8 +1262,11 @@ class JsonFloatTies(Scenario):
             assert_disposable(conn)
             for index, token in enumerate(self.timestamps):
                 # The offline "memory" query is (0.8, 0.6). Keep cosines
-                # distinct so torch.topk tie order cannot affect float tokens.
-                direction = [(0.8, 0.6), (1.0, 0.0), (0.8, -0.6)][index]
+                # distinct so torch.topk tie order cannot affect float tokens,
+                # and high (1.0, 0.96, 0.8) so that on a copy of a real bank
+                # no entry of its own outranks one: an old third row at 0.28
+                # lost its place to a real entry's BM25 match on "memory".
+                direction = [(0.8, 0.6), (0.6, 0.8), (1.0, 0.0)][index]
                 vector = json.dumps([*direction] + [0.0] * 1022)
                 conn.execute("INSERT INTO entries (band, text, embedding, ts, source) "
                              "VALUES ('flat', %s, %s::vector, %s, 'agent')",
@@ -1241,7 +1279,7 @@ class JsonFloatTies(Scenario):
         create(model, dimension=1024)
         config = {"embedding": {"model_name": str(model), "backend": "onnx", "device": "cpu",
                                 "cpu_dtype": "fp32", "query_prefix": "", "max_seq_length": 32},
-                  "memory": {"recency_boost_enabled": False, "search_confidence_floor": 0.0}}
+                  "memory": self.memory_config}
         (home / "data/config.yaml").write_text(json.dumps(config), encoding="utf-8")
         runtime = Path(onnxruntime.__file__).parent / "capi"
         library = runtime / "onnxruntime.dll" if os.name == "nt" else next(runtime.glob("libonnxruntime.so.*"))
@@ -1251,7 +1289,10 @@ class JsonFloatTies(Scenario):
 
     def cases(self):
         c = case("json-float-shortest-ties", "GET",
-                 "/api/search?q=memory&top_k=3&disable_recency_boost=true", [bearer(T_DEFAULT)])
+                 # bm25=false: the lexical channel would rank any real
+                 # entry mentioning "memory" beside the fixture rows.
+                 "/api/search?q=memory&top_k=3&disable_recency_boost=true&bm25=false",
+                 [bearer(T_DEFAULT)])
         c["exact_seed_timestamps"] = True
         c["expected_timestamps"] = self.timestamps
         return [c]

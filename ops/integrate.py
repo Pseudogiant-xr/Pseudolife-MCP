@@ -106,6 +106,7 @@ RUST_HARNESS = (
     "rust/daemon/harness/mirror/test_seed.py", "rust/daemon/harness/mirror/test_forced.py",
     "rust/daemon/harness/mirror/test_base_delta.py",
     "rust/daemon/harness/mirror/test_seed_keys.py",
+    "rust/daemon/harness/mirror/test_real_base_routes.py",
     "rust/ci",
 )
 RUST_HARNESS_COMMAND = ("python -m pytest -q -p no:cacheprovider --require-databases "

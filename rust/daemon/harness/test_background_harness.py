@@ -316,3 +316,103 @@ def test_reaper_title_validation_still_rejects_missing_durable_effect(scenario, 
         message = "root entry title stamps"
     with pytest.raises(RuntimeError, match=message):
         harness.SCENARIOS[scenario]().validate_expected(snapshot)
+
+
+# A copy of a real bank (the forced mirror run's PL_HARNESS_BASE_DATABASE)
+# already holds deferred_empty_roots and episode_tombstones entries with
+# close clocks from long before either daemon started. Every reaper and
+# sweep scenario raised "close clock outside the arm's captured window" on
+# it, because normalize_closes window-checked every entry of those maps.
+OLD_ROOT, OLD_TOMB, NEW_ROOT = "o" * 32, "t" * 32, "a" * 32
+
+
+def inherited_meta():
+    return [["deferred_empty_roots", {OLD_ROOT: 5.0}],
+            ["episode_tombstones", {OLD_TOMB: {"ended_at": 6.0, "session_key": "old"}}]]
+
+
+def state_over_inherited_meta(root_value=5.0, tomb_value=6.0):
+    snapshot = state()
+    snapshot["rows"]["public.meta"]["rows"] = [
+        ["deferred_empty_roots", {OLD_ROOT: root_value, NEW_ROOT: 100.0}],
+        ["episode_tombstones", {OLD_TOMB: {"ended_at": tomb_value, "session_key": "old"}}]]
+    return snapshot
+
+
+def meta_of(snapshot):
+    return {row[0]: row[1] for row in snapshot["rows"]["public.meta"]["rows"]}
+
+
+@pytest.fixture(params=["before", "base"])
+def inherited(request, monkeypatch):
+    """The old entries as ``before`` holds them (a synthetic template), or
+    only in the base, which a base dump leaves out of ``before`` and
+    ``dbstate.prior_rows`` supplies."""
+    import dbstate
+    prior = before()
+    if request.param == "before":
+        prior["rows"]["public.meta"]["rows"] = inherited_meta()
+        return prior
+    real = dbstate.prior_rows
+
+    def with_base(snapshot, qualified, current):
+        rows = real(snapshot, qualified, current)
+        if qualified == "public.meta":
+            have = {row[0] for row in rows}
+            rows += [row for row in inherited_meta() if row[0] not in have]
+        return rows
+
+    monkeypatch.setattr(dbstate, "prior_rows", with_base)
+    return prior
+
+
+def test_inherited_close_metadata_is_not_window_checked_and_stays_exact(inherited):
+    projected = meta_of(normalize_closes(state_over_inherited_meta(), inherited, 90.0, 110.0))
+    assert projected["deferred_empty_roots"] == {OLD_ROOT: 5.0, NEW_ROOT: "<close:" + NEW_ROOT + ">"}
+    assert projected["episode_tombstones"][OLD_TOMB]["ended_at"] == 6.0
+
+
+def test_an_arm_written_close_outside_the_window_still_fails_beside_inherited_ones(inherited):
+    broken = state_over_inherited_meta()
+    meta_of(broken)["deferred_empty_roots"]["n" * 32] = 120.0
+    with pytest.raises(RuntimeError, match="outside the arm's captured window"):
+        normalize_closes(broken, inherited, 90.0, 110.0)
+
+
+def test_an_inherited_close_an_arm_rewrote_is_its_own_write(inherited):
+    import dbstate
+    # Rewritten to a clock outside the window: refused like any arm write.
+    with pytest.raises(RuntimeError, match="outside the arm's captured window"):
+        normalize_closes(state_over_inherited_meta(root_value=7.0), inherited, 90.0, 110.0)
+    # Rewritten inside it: tokenized, so it still differs from an arm that
+    # left the inherited value alone.
+    kept = normalize_closes(state_over_inherited_meta(), inherited, 90.0, 110.0)
+    rewrote = normalize_closes(state_over_inherited_meta(tomb_value=101.0), inherited, 90.0, 110.0)
+    assert dbstate.diff(kept, rewrote)
+
+
+def test_a_sweep_must_write_its_own_tombstone_on_a_bank_that_has_some(inherited):
+    import run as harness
+    scenario = harness.SCENARIOS["session-sweep"]()
+    scenario.before = inherited
+    snapshot = titled_session_state(False)
+    snapshot["rows"]["public.meta"]["rows"] = inherited_meta()
+    with pytest.raises(RuntimeError, match="did not persist a tombstone"):
+        scenario.validate_expected(snapshot)
+    meta_of(snapshot)["episode_tombstones"][NEW_ROOT] = {"ended_at": 100.0}
+    scenario.validate_expected(snapshot)
+
+
+def test_a_sweeps_tombstone_of_an_inherited_deferred_root_keeps_its_old_clock(inherited):
+    # A sweep tombstones every expired deferred root, the base's too, with
+    # that root's own close clock: a carried clock, compared exactly.
+    swept = state_over_inherited_meta()
+    meta = meta_of(swept)
+    del meta["deferred_empty_roots"][OLD_ROOT]
+    meta["episode_tombstones"][OLD_ROOT] = {"ended_at": 5.0, "session_key": "older"}
+    projected = meta_of(normalize_closes(swept, inherited, 90.0, 110.0))
+    assert projected["episode_tombstones"][OLD_ROOT]["ended_at"] == 5.0
+    # The near miss: any other old clock on it is not the root's own.
+    meta["episode_tombstones"][OLD_ROOT]["ended_at"] = 4.0
+    with pytest.raises(RuntimeError, match="outside the arm's captured window"):
+        normalize_closes(swept, inherited, 90.0, 110.0)
