@@ -1,8 +1,8 @@
 """Tests for evals/ladder_sweep.py — canonical-result overwrite guard.
 
 A rerun once silently rewrote ``evals/results/sonnet-5.json`` in place
-(2026-07-21), erasing the canonical run's timing fields. The rule (CLAUDE.md,
-"Publishing a benchmark number") is: never overwrite a canonical result file
+(2026-07-21), erasing the canonical run's timing fields. The rule (evals/README.md,
+"Eval discipline") is: never overwrite a canonical result file
 on a rerun — tag the run and promote deliberately. These tests pin the code
 that enforces it.
 

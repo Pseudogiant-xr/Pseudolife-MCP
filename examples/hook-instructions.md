@@ -16,7 +16,7 @@ Check that the test login exists (`~/.pseudolife-mcp/test-pg.env`, from `pseudol
 
 ## Host-shaped symptoms
 
-If a test, a tool or a process fails in a way that has nothing to do with your change (a hung interpreter, a paging-file error, a database refusing a password, a daemon that stopped answering), message every active peer before you start debugging it. On this host that failure is usually breaking their run too.
+If something fails with evidence of shared impact (a hung interpreter, a paging-file error, a daemon that stopped answering, a failure peers' runs show too), message every active peer before you start debugging it, because on this host it is usually breaking their run too; a failure only your change explains is yours.
 
 ## Waiting and delivery
 

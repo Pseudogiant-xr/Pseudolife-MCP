@@ -1,8 +1,9 @@
 # Merge queue for master
 
-**Status:** CI is ready for the merge queue (2026-10-19). The queue itself is
-off until the maintainer turns it on in the master ruleset. Until then, every
-merge rule in CLAUDE.md still applies unchanged.
+**Status:** not applicable on the current personal repository, where GitHub
+offers no merge queue (maintainer decision 2026-10-21); kept for a move to an
+organization. CI was made ready for the queue on 2026-10-19. Every merge rule
+in CLAUDE.md applies unchanged.
 
 PRs land on master one at a time. Each PR needs CI on its head integrated with
 current master, so every merge makes the other open PRs' CI stale and they run
@@ -227,9 +228,9 @@ still ejects that PR and rebuilds everything behind it. It would also merge
 an earlier entry whose own run genuinely failed, provided the head passes.
 Start with `ALLGREEN`. Consider `HEADGREEN` only once Windows Parity flakes
 are rare, and only after the census and image ranges also move to master's
-tip (see "What CI does for a merge group"). The rule "Windows-only CI failures go
-to the Windows VM before a rerun" (CLAUDE.md, "Dev machines") matters more
-once the queue is on. Clear the open Windows Parity deflake issues before you
+tip (see "What CI does for a merge group"). The Windows-only CI failure rule
+(one rerun naming the flake issue, then the Windows dev VM; CLAUDE.md, "Dev
+machines") matters more once the queue is on. Clear the open Windows Parity deflake issues before you
 turn the queue on.
 
 ## CLAUDE.md rules that retire once the queue is on

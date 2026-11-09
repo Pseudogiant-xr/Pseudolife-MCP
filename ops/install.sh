@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Prompt, rerun and refusal behaviour follow docs/dev/install-ux.md; read it
+# before changing what this script asks or prints.
 # >>> usage >>>
 # One-shot idempotent installer for the Pseudolife-MCP stack (issue #13
 # tier 2). Everything downstream of Docker: provider selection -> preflight ->
