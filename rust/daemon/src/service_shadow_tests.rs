@@ -563,3 +563,146 @@ async fn db_autosave_saves_dirty_canonical_slots() {
     drop(ready);
     shadow.close().await;
 }
+
+/// The world-store write [`db_autosave_waits_for_the_commit_unknown_reread`]
+/// and [`db_autosave_retries_a_failed_world_save`] make.
+fn world_write(now: f64) -> crate::stores::world::WorldWrite<'static> {
+    crate::stores::world::WorldWrite {
+        confidence: 0.85,
+        source_url: "https://example.com/acme",
+        source_quote: "",
+        freshness_class: "volatile",
+        retrieved_at: None,
+        content_hash: None,
+        source_doc_id: None,
+        now,
+        hlc: ((now * 1000.0) as i64, 0),
+        writer_id: Some("autosave-test"),
+        session_id: None,
+    }
+}
+
+async fn world_status(shadow: &Shadow, entity_norm: &str) -> Vec<(String, String)> {
+    shadow
+        .side
+        .query(
+            "SELECT value, status FROM world_facts WHERE entity_norm = $1 ORDER BY id",
+            &[&entity_norm],
+        )
+        .await
+        .unwrap()
+        .iter()
+        .map(|r| (r.get(0), r.get(1)))
+        .collect()
+}
+
+/// A legacy world restore whose COMMIT reply was lost: the bank holds the
+/// restore, the resident store is undone to retired, and the slot keeps the
+/// dirty mark it had before the restore. The autosave must not flush that
+/// slot before the commit-unknown re-read (which the next call runs) has
+/// replaced the resident stores, or it writes the retired state over the
+/// restore that committed.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn db_autosave_waits_for_the_commit_unknown_reread() {
+    use crate::background::Duties;
+    let Some(dsn) = test_dsn() else { return };
+    let Some(model) = fixture_model() else { return };
+    let _guard = DB.lock().await;
+    let _flag = crate::txn::tests::TESTS.lock().await;
+    crate::txn::set_commit_outcome_unknown_for_test(false);
+    let shadow = Shadow::open_writer(&dsn, &model).await;
+    let ready = shadow.service.ensure_init_inner().await.unwrap();
+    // A retired value, saved.
+    ready.world.write(|s| {
+        s.write_fact("acme", "ceo", "jane", None, &world_write(1000.0));
+        s.retire("acme", Some("ceo"), 1500.0);
+    });
+    crate::world_tools::save_world(&shadow.service, &ready)
+        .await
+        .unwrap();
+    assert_eq!(
+        world_status(&shadow, "acme").await,
+        vec![("jane".into(), "retired".into())]
+    );
+    // The slot is dirty before the restore (an earlier save of it failed).
+    let key = ready.world.snapshot().records[0].key.clone();
+    ready.world.write(|s| s.dirty_slots.insert(key.clone()));
+    let marks: Vec<(usize, Option<f64>, bool)> = {
+        let snap = ready.world.snapshot();
+        snap.restore_picks("acme", Some("ceo"))
+            .into_iter()
+            .map(|i| (i, snap.records[i].superseded_at, true))
+            .collect()
+    };
+    ready.world.write(|s| s.restore("acme", Some("ceo")));
+    // The restore's transaction committed; its reply was lost.
+    shadow
+        .exec(
+            "UPDATE world_facts SET status = 'current', superseded_at = NULL \
+             WHERE entity_norm = 'acme'",
+        )
+        .await;
+    crate::txn::set_commit_outcome_unknown_for_test(true);
+    ready.world.write(|s| s.undo_restore(&marks));
+    assert!(ready.world.snapshot().dirty_slots.contains(&key));
+    // An autosave tick before the next call.
+    let _ = shadow.service.autosave().await;
+    assert_eq!(
+        world_status(&shadow, "acme").await,
+        vec![("jane".into(), "current".into())],
+        "the autosave wrote the undone resident slot over the committed restore"
+    );
+    assert!(crate::txn::commit_outcome_unknown());
+    // The next call re-reads the bank; the autosave after it writes nothing.
+    let after = shadow.service.ensure_init_inner().await.unwrap();
+    assert!(!crate::txn::commit_outcome_unknown());
+    assert!(after.world.snapshot().dirty_slots.is_empty());
+    shadow.service.autosave().await.unwrap();
+    assert_eq!(
+        world_status(&shadow, "acme").await,
+        vec![("jane".into(), "current".into())]
+    );
+    crate::txn::set_commit_outcome_unknown_for_test(false);
+    drop((ready, after));
+    shadow.close().await;
+}
+
+/// A world-store save the bank refuses leaves its slot dirty and answers
+/// the autosave with the failure; the next autosave retries it and, the
+/// refusal gone, persists it, as Python's next autosave retries a failed
+/// `_save_world`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn db_autosave_retries_a_failed_world_save() {
+    use crate::background::Duties;
+    let Some(dsn) = test_dsn() else { return };
+    let Some(model) = fixture_model() else { return };
+    let _guard = DB.lock().await;
+    let shadow = Shadow::open_writer(&dsn, &model).await;
+    let ready = shadow.service.ensure_init_inner().await.unwrap();
+    shadow
+        .exec(
+            "ALTER TABLE world_facts ADD CONSTRAINT autosave_test_refusal \
+             CHECK (entity_norm <> 'globex')",
+        )
+        .await;
+    ready
+        .world
+        .write(|s| s.write_fact("globex", "ceo", "hank", None, &world_write(1000.0)));
+    let failed = shadow.service.autosave().await;
+    shadow
+        .exec("ALTER TABLE world_facts DROP CONSTRAINT autosave_test_refusal")
+        .await;
+    let failed = failed.expect_err("a refused world save fails the autosave");
+    assert!(failed.contains("world cortex"), "{failed}");
+    assert!(world_status(&shadow, "globex").await.is_empty());
+    assert!(!ready.world.snapshot().dirty_slots.is_empty());
+    shadow.service.autosave().await.unwrap();
+    assert_eq!(
+        world_status(&shadow, "globex").await,
+        vec![("hank".into(), "current".into())],
+        "the next autosave retried the failed save"
+    );
+    assert!(ready.world.snapshot().dirty_slots.is_empty());
+    drop(ready);
+    shadow.close().await;
+}

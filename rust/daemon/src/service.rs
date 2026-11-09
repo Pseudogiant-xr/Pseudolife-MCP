@@ -1282,21 +1282,34 @@ impl Service {
     /// save itself and leaves its slots dirty, so the next autosave retries
     /// it, as Python's unrecorded fingerprint does; the other stores still
     /// save. Nothing dirty writes nothing. The caller holds the writer lock.
+    ///
+    /// Nothing is flushed while a COMMIT outcome is unknown
+    /// ([`crate::txn::commit_outcome_unknown`]): the bank may then hold a
+    /// write the resident stores do not (a legacy restore whose transaction
+    /// committed with its reply lost is undone in memory, its slot still
+    /// dirty when it was before), so a flush could write stale slots over
+    /// it. The next call's re-read (`reread_after_commit_unknown`) replaces
+    /// the stores and their dirty marks first, dropping what a restart
+    /// would drop. Checked before each store, since a save earlier in the
+    /// same tick can lose its own COMMIT reply.
     async fn save_dirty_canonical(&self, ready: &Ready) -> Result<(), String> {
+        let barrier = crate::txn::commit_outcome_unknown;
         let mut failed = Vec::new();
         let cortex = {
             let snap = ready.cortex.snapshot();
             !snap.dirty_slots.is_empty() || snap.meta_dirty
         };
-        if cortex && crate::fact_set::save_cortex(self, ready).await.is_err() {
+        if cortex && !barrier() && crate::fact_set::save_cortex(self, ready).await.is_err() {
             failed.push("cortex");
         }
         if !ready.world.snapshot().dirty_slots.is_empty()
+            && !barrier()
             && crate::world_tools::save_world(self, ready).await.is_err()
         {
             failed.push("world cortex");
         }
         if !ready.lessons.snapshot().dirty_slots.is_empty()
+            && !barrier()
             && crate::forget_tools::save_lessons(self, ready)
                 .await
                 .is_err()
