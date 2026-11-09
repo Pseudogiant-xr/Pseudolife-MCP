@@ -17,6 +17,8 @@ rust/cli_harness/rows/lease_operator.py | hold_case.during | time.sleep(0.5) | n
 
 rust/cli_harness/rows/maintainer.py | terminate_during | time.sleep(0.5) | minimum: lets the enrol-code poll pass once; the 57P01 reaches the CLI either way
 
+rust/daemon/harness/mirror/test_forced.py | test_the_dropper_waits_for_its_last_pass_and_drains_before_returning.drop | time.sleep(0.3)  # still running when the drain starts its own pass | minimum: keeps the second background pass running so a drain that does not wait for it overlaps it; a correct drain waits however long the pass takes, so a slower machine only lengthens the pass
+
 rust/daemon/harness/w2d_search.py | disconnect | time.sleep(0.05) | minimum: holds the socket briefly before hang-up; nothing is asserted on the server's reaction
 
 rust/daemon/src/service_shadow_tests.rs | db_dropped_request_cannot_let_two_refreshes_overlap | tokio::time::sleep(SHADOW_PROBE_REUSE + Duration::from_millis(100)).await; | minimum: only has to outlast the probe reuse window so the next read probes; a slower machine only waits longer
