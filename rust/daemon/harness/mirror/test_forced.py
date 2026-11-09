@@ -150,9 +150,9 @@ ELSEWHERE = {
 
 def test_each_case_item_is_a_place_of_its_own():
     """Review (Opus): a case line took only its first item's dotted path, so
-    a new status or header difference in a case whose synthetic arm differed
-    anywhere read as preexisting. Every printed item counts, keys with a
-    hyphen and items that are not paths included."""
+    its other items had no place of their own. Every printed item counts,
+    keys with a hyphen and items that are not paths included. (classify()
+    still calls a scenario preexisting when any place is shared.)"""
     real = {"status": "diff", "diffs": [
         "DIFF [mcp-get] get 2: ['status: python 200 vs rust 500', '.json.total: python 1 vs rust 2']"]}
     synthetic = {"status": "diff", "diffs": ["DIFF [mcp-get] get 2: ['.json.total: python 3 vs rust 4']"]}
@@ -166,11 +166,32 @@ def test_a_scenario_error_keeps_its_harness_location():
     """Review (Opus): the same exception type raised elsewhere in the
     harness is another place."""
     one = {"status": "diff", "diffs": [
-        "DIFF [stamped] scenario error: ['KeyError: x (case 'seed'; at run.py:12 in prepare_template)']"]}
+        "DIFF [stamped] scenario error: " + repr(["KeyError: x (case 'seed'; at run.py:12 in prepare_template)"])]}
     other = {"status": "diff", "diffs": [
         "DIFF [stamped] scenario error: ['KeyError: y (at run.py:40 in run_scenario)']"]}
     assert forced.classify(one, one, other) == "new"
     assert forced.signatures(one) == {("", "scenario error KeyError case 'seed'; run.py prepare_template")}
+    quoted = {"status": "diff", "diffs": [
+        "DIFF [stamped] scenario error: " + repr(["KeyError: x (case \"it's\"; at run.py:12 in prepare_template)"])]}
+    assert forced.signatures(quoted) == {("", "scenario error KeyError case \"it's\"; run.py prepare_template")}
+    # Review (Codex): a message with double quotes makes repr escape the
+    # apostrophes around the case; the location must read the same.
+    plain, dq = ({"status": "diff", "diffs": ["DIFF [stamped] scenario error: " + repr(
+        [f"UndefinedTable: relation {name} (case 'seed'; at run.py:12 in prepare_template)"])]}
+        for name in ("missing", '"missing"'))
+    assert forced.signatures(plain) == forced.signatures(dq)
+    assert forced.classify(plain, plain, dq) == "preexisting"
+
+
+def test_side_items_and_long_items_keep_what_tells_them_apart():
+    """Review (Opus): "python: ..." items took the side as their key, and a
+    four-word cap merged items differing later (run.py's future-schema
+    refusal checks name the header last)."""
+    a = {"status": "diff", "diffs": ["DIFF [schema] refusal: " + repr(
+        ["python: stats clock 5 outside window", "future-schema refusal has incorrect content-type"])]}
+    b = {"status": "diff", "diffs": ["DIFF [schema] refusal: " + repr(
+        ["rust: snapshot_at 3 outside window", "future-schema refusal has incorrect cache-control"])]}
+    assert not forced.signatures(a) & forced.signatures(b)
 
 
 def test_a_w2e_response_line_keeps_its_old_signature():

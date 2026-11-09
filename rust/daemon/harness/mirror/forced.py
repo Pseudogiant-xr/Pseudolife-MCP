@@ -167,7 +167,7 @@ LEADING_PATH = re.compile(r"^(/[^\s:]+)")
 FIELD = re.compile(r"^([\w.\[\]\-]+): (?:python |only in |[\d.]+ <)")
 COVERAGE = re.compile(r"^coverage ([\w.]+): ")
 ERROR = re.compile(r"^scenario error: \[['\"](\w+)")
-ERROR_WHERE = re.compile(r"\((case '[^']*'; )?at ([\w.]+):\d+ in (\w+)\)")
+ERROR_WHERE = re.compile(r"\((case (?:'[^']*'|\"[^\"]*\"); )?at ([\w.]+):\d+ in (\w+)\)")
 CASE = re.compile(r"^([^:\[\]'\"]{1,80}): (\[.*\])$", re.S)
 ITEM_PATH = re.compile(r"^(\.?[\w.\[\]\-]+): ")
 INDEX = re.compile(r"\[\d+\]")
@@ -178,10 +178,10 @@ def _item_place(item) -> str:
     any value (numbers, quoted text) removed."""
     text = str(item)
     m = ITEM_PATH.match(text)
-    if m:
+    if m and m.group(1) not in ("python", "rust"):  # "python: ..." names a side, not a place
         return INDEX.sub("[]", m.group(1))
     words = re.sub(r"'[^']*'|\"[^\"]*\"|\S*\d\S*", "", text).split()
-    return " ".join(words[:4]) or "<item>"
+    return " ".join(words[:12]) or "<item>"
 
 
 def _places(line: str) -> list[tuple[str, str]]:
@@ -191,7 +191,14 @@ def _places(line: str) -> list[tuple[str, str]]:
         return [(step.group(1), where.group(1))]
     m = ERROR.match(rest)
     if m:
-        at = ERROR_WHERE.search(rest)
+        # The printed list escapes quotes; decode it so the location reads
+        # the same whatever the message's own quoting.
+        try:
+            printed = ast.literal_eval(rest[len("scenario error: "):])
+            text = printed[0] if isinstance(printed, list) and printed else rest
+        except (ValueError, SyntaxError):
+            text = rest
+        at = ERROR_WHERE.search(str(text))
         return [("", f"scenario error {m.group(1)}"
                  + (f" {at.group(1) or ''}{at.group(2)} {at.group(3)}" if at else ""))]
     for pattern, build in (
