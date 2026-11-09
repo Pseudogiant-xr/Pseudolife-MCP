@@ -68,7 +68,7 @@ LOCATION = re.compile(r": (?:db )?(/[^\s:]+)")
 STEP = re.compile(r"\] (?:step |#)?(\d+)")
 # What the synthetic arm drops, so it is the harness's own baseline (CI's).
 REAL_BANK_ENV = ("PL_HARNESS_BASE_DATABASE", "PL_HARNESS_STUB_DEFAULT_CONTENT",
-                 "PL_HARNESS_DREAM_REST_TIMEOUT")
+                 "PL_HARNESS_DREAM_REST_TIMEOUT", "PL_HARNESS_BASE_CACHE")
 # The real-bank arms' REST timeout for /api/dream calls, in seconds: Python's
 # Console dream run over the real bank's copy outlasted the default 120 s
 # (console-dream-run and -gates, forced run of 2026-11-08). Synthetic arms
@@ -266,6 +266,9 @@ class Runner:
             env["PL_HARNESS_BASE_DATABASE"] = CURATION_DB
         if base:
             env.setdefault("PL_HARNESS_DREAM_REST_TIMEOUT", str(DREAM_REST_TIMEOUT))
+            # One read of each base's row hashes for the whole run, not one per
+            # scenario process (dbstate checks it against the base each time).
+            env["PL_HARNESS_BASE_CACHE"] = str(self.scratch / "base-cache")
         reaped = self.reap_leftovers()
         before = self.oom_kills()
         started = time.monotonic()

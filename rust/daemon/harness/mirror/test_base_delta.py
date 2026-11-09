@@ -107,3 +107,219 @@ def test_a_rewritten_base_row_keeps_its_clock_compared_exactly(base, monkeypatch
     finally:
         for n in sides.values():
             pg.drop(n)
+
+
+# ---- the fast delta: only rows written since the copy are hashed ---------------------
+
+@pytest.fixture
+def rich_base(monkeypatch):
+    """A base whose rows two transactions wrote, with a keyed table of large
+    rows, a keyless table holding a duplicate and an empty table."""
+    if not pgdisposable.LOGIN_FILE.exists():
+        database_gate.unavailable("no disposable-bank login here",
+                                  "create it once on the daemon host with `pseudolife-mcp test-login "
+                                  "create`, or point PSEUDOLIFE_TEST_PG_LOGIN_FILE at it")
+    for env in (pgdisposable.BASE_ENV, dbstate.BASE_CACHE_ENV, dbstate.FAST_ENV, dbstate.VERIFY_ENV):
+        monkeypatch.delenv(env, raising=False)
+    name = pg.name("pl_cf_mir_fastbase")
+    import psycopg
+    with psycopg.connect(pg.create(name), autocommit=True) as conn:
+        conn.execute("CREATE TABLE docs (id INT PRIMARY KEY, body TEXT NOT NULL, n DOUBLE PRECISION)")
+        conn.execute("INSERT INTO docs SELECT g, repeat(md5(g::text), 300), g / 3.0 "
+                     "FROM generate_series(1, 40) g")
+        conn.execute("UPDATE docs SET n = -1 WHERE id <= 5")  # a second base xmin
+        conn.execute("CREATE TABLE tags (tag TEXT)")
+        conn.execute("INSERT INTO tags VALUES ('a'), ('a'), ('b')")
+        conn.execute("CREATE TABLE spare (id INT PRIMARY KEY, v TEXT)")
+        conn.execute("CREATE TABLE plain (id INT PRIMARY KEY, v TEXT)")
+        conn.execute("INSERT INTO plain SELECT g, 'v' || g FROM generate_series(1, 10) g")
+        conn.execute("CREATE TYPE mood AS ENUM ('calm', 'busy')")
+        conn.execute("CREATE TABLE moods (id INT PRIMARY KEY, m mood)")
+        conn.execute("INSERT INTO moods VALUES (1, 'calm'), (2, 'calm')")
+    dbstate._BASE_HASHES.clear()
+    monkeypatch.setenv(pgdisposable.BASE_ENV, name)
+    yield name
+    dbstate._BASE_HASHES.clear()
+    monkeypatch.delenv(pgdisposable.BASE_ENV)
+    pg.drop(name)
+
+
+def _deltas(dsn: str) -> dict:
+    """Each base table's (fast, full) delta, read in one snapshot as the dump
+    reads it."""
+    import psycopg
+    base = dbstate._base_hashes(dsn)
+    out = {}
+    with psycopg.connect(dsn) as conn:
+        conn.isolation_level = psycopg.IsolationLevel.REPEATABLE_READ
+        for schema, table in dbstate._tables(conn):
+            q = f"{schema}.{table}"
+            select = dbstate._select_list(conn, schema, table)[0]
+            ordering = ", ".join(f'"{c}"::text' for c in dbstate._order_columns(conn, schema, table)) or "1"
+            args = (conn, schema, table, base[q], select, ordering)
+            out[q] = (dbstate._fast_delta(*args), dbstate._full_delta(*args))
+    return out
+
+
+def _agree(dsn: str) -> dict:
+    """Every table's fast delta, after checking it ran and matches the full
+    hash."""
+    out = {}
+    for q, (fast, full) in _deltas(dsn).items():
+        assert fast is not None, f"{q}: the fast delta declined an ordinary table"
+        assert fast == full, f"{q}: fast {fast[1:]} vs full {full[1:]}"
+        out[q] = {"rows": [list(r) for r in fast[1]], "missing": fast[2]["count"]}
+    return out
+
+
+def test_the_fast_delta_reports_exactly_what_the_full_hash_reports(rich_base):
+    """Inserts, updates, deletes, rewrites to identical bytes, a delete and
+    identical reinsert, duplicates in a keyless table, vacuum and freeze:
+    after each, the fast delta equals the full hash's answer."""
+    import psycopg
+    copy = pg.name("pl_cf_mir_fastcopy")
+    try:
+        dsn = pg.create(copy)
+        state = _agree(dsn)
+        assert state["public.docs"] == {"rows": [], "missing": 0}
+
+        def write(*statements):
+            with psycopg.connect(dsn, autocommit=True) as conn:
+                for s in statements:
+                    conn.execute(s)
+            return _agree(dsn)
+
+        state = write("INSERT INTO docs VALUES (100, 'new', 1.5)")
+        assert state["public.docs"] == {"rows": [[100, "new", 1.5]], "missing": 0}
+        state = write("UPDATE docs SET body = 'changed' WHERE id = 7")
+        # (ordered as the dump orders: by the key's text)
+        assert state["public.docs"] == {"rows": [[100, "new", 1.5], [7, "changed", 7 / 3.0]],
+                                        "missing": 1}
+        # A rewrite to the same bytes, of a row of either base transaction:
+        # a new tuple, but no difference.
+        state = write("UPDATE docs SET n = n WHERE id IN (3, 8)")
+        assert state["public.docs"]["missing"] == 1 and len(state["public.docs"]["rows"]) == 2
+        state = write("DELETE FROM docs WHERE id = 9")
+        assert state["public.docs"]["missing"] == 2
+        # Deleted and put back byte for byte: no difference either.
+        state = write("DELETE FROM docs WHERE id = 10",
+                      "INSERT INTO docs SELECT 10, repeat(md5('10'), 300), 10 / 3.0")
+        assert state["public.docs"]["missing"] == 2 and len(state["public.docs"]["rows"]) == 2
+        # A keyless table: one more copy of a held row, one copy of another gone.
+        state = write("INSERT INTO tags VALUES ('a')",
+                      "DELETE FROM tags WHERE ctid = (SELECT max(ctid) FROM tags WHERE tag = 'b')")
+        assert state["public.tags"] == {"rows": [["a"]], "missing": 1}
+        state = write("INSERT INTO spare VALUES (1, 'x')")
+        assert state["public.spare"] == {"rows": [[1, "x"]], "missing": 0}
+        # Vacuum reclaims the dead tuples and freeze marks the live ones;
+        # neither moves a live tuple or changes its raw xmin.
+        after = write("VACUUM docs", "VACUUM (FREEZE) docs", "VACUUM (FREEZE) tags")
+        assert after == state
+    finally:
+        pg.drop(copy)
+
+
+def test_the_fast_delta_declines_a_rewritten_or_altered_table(rich_base):
+    """VACUUM FULL moves every row (ctids no longer locate base rows), an
+    added column changes every row's text, and so does a renamed enum label
+    with neither a rewrite nor a column change: the fast delta declines and
+    the full hash answers."""
+    import psycopg
+    copy = pg.name("pl_cf_mir_fastalter")
+    try:
+        dsn = pg.create(copy)
+        with psycopg.connect(dsn, autocommit=True) as conn:
+            conn.execute("DELETE FROM docs WHERE id = 2")
+            conn.execute("VACUUM FULL docs")
+            # The rows after a deleted middle row slide down onto base ctids
+            # written by the same transaction: only the file shows the move.
+            conn.execute("DELETE FROM plain WHERE id = 5")
+            conn.execute("VACUUM FULL plain")
+            conn.execute("ALTER TABLE tags ADD COLUMN extra INT DEFAULT 0")
+            conn.execute("ALTER TYPE mood RENAME VALUE 'calm' TO 'still'")
+        deltas = _deltas(dsn)
+        assert deltas["public.moods"][1][2]["count"] == 2  # no row hashes as the base's now
+        for q in ("public.docs", "public.plain", "public.tags", "public.moods"):
+            assert deltas[q][0] is None, f"{q}: the fast delta vouched for a rewritten or altered table"
+        assert deltas["public.docs"][1][2]["count"] == 1
+        assert deltas["public.tags"][1][2]["count"] == 3  # every row's text changed
+        assert deltas["public.spare"][0] == deltas["public.spare"][1]
+        assert dbstate.dump(dsn)["rows"]["public.docs"]["base_missing"]["count"] == 1
+    finally:
+        pg.drop(copy)
+
+
+def test_verify_mode_refuses_a_fast_delta_that_disagrees(rich_base, monkeypatch):
+    """``PL_HARNESS_DUMP_VERIFY=1`` (the A/B runs) checks every fast answer
+    against the full hash; a wrong one stops the dump."""
+    import psycopg
+    copy = pg.name("pl_cf_mir_fastverify")
+    try:
+        dsn = pg.create(copy)
+        with psycopg.connect(dsn, autocommit=True) as conn:
+            conn.execute("DELETE FROM docs WHERE id = 4")
+        monkeypatch.setenv(dbstate.VERIFY_ENV, "1")
+        assert dbstate.dump(dsn)["rows"]["public.docs"]["base_missing"]["count"] == 1
+        real = dbstate._fast_delta
+
+        def wrong(*a):
+            got = real(*a)
+            return got and (got[0], got[1], {**got[2], "count": got[2]["count"] + 1})
+        monkeypatch.setattr(dbstate, "_fast_delta", wrong)
+        with pytest.raises(dbstate.DeltaMismatch):
+            dbstate.dump(dsn)
+        monkeypatch.delenv(dbstate.VERIFY_ENV)
+        assert dbstate.dump(dsn)["rows"]["public.docs"]["base_missing"]["count"] == 2  # unchecked
+    finally:
+        pg.drop(copy)
+
+
+def test_the_kill_switch_hashes_every_row(rich_base, monkeypatch):
+    """``PL_HARNESS_DUMP_FAST=0`` takes the full hash, whatever the fast
+    delta would answer."""
+    copy = pg.name("pl_cf_mir_fastoff")
+    try:
+        dsn = pg.create(copy)
+        monkeypatch.setattr(dbstate, "_fast_delta", lambda *a: pytest.fail("the fast delta ran"))
+        monkeypatch.setenv(dbstate.FAST_ENV, "0")
+        assert dbstate.dump(dsn)["rows"]["public.docs"]["base_missing"]["count"] == 0
+    finally:
+        pg.drop(copy)
+
+
+def test_a_run_reads_each_base_once_and_again_after_it_changes(rich_base, monkeypatch, tmp_path):
+    """With ``PL_HARNESS_BASE_CACHE`` a second harness process loads the
+    first one's read; a write to the base invalidates it."""
+    import psycopg
+    monkeypatch.setenv(dbstate.BASE_CACHE_ENV, str(tmp_path))
+    reads = []
+    real = dbstate._read_base_table
+    monkeypatch.setattr(dbstate, "_read_base_table", lambda *a: reads.append(a[1:]) or real(*a))
+    copy = pg.name("pl_cf_mir_fastcache")
+    try:
+        dsn = pg.create(copy)
+        first = {q: dict(c) for q, c in dbstate._base_hashes(dsn).items()}
+        assert reads and (tmp_path / f"{rich_base}.json").exists()
+        read_once = len(reads)
+        dbstate._BASE_HASHES.clear()  # a new harness process
+        assert {q: dict(c) for q, c in dbstate._base_hashes(dsn).items()} == first
+        assert len(reads) == read_once, "the second process read the base again"
+        assert _agree(dsn)["public.docs"] == {"rows": [], "missing": 0}
+        with psycopg.connect(pg.dsn(rich_base), autocommit=True) as conn:
+            conn.execute("UPDATE docs SET body = 'base moved' WHERE id = 1")
+        dbstate._BASE_HASHES.clear()
+        moved = dbstate._base_hashes(dsn)
+        assert len(reads) == 2 * read_once, "a changed base was not read again"
+        assert moved["public.docs"] != first["public.docs"]
+        # An added column changes every row's text, but no row's xmin, the
+        # rows' count or the file (a row added and deleted leaves the census).
+        with psycopg.connect(pg.dsn(rich_base), autocommit=True) as conn:
+            conn.execute("INSERT INTO plain VALUES (11, 'v11')")
+            conn.execute("DELETE FROM plain WHERE id = 11")
+            conn.execute("ALTER TABLE plain ADD COLUMN w INT DEFAULT 7")
+        dbstate._BASE_HASHES.clear()
+        altered = dbstate._base_hashes(dsn)
+        assert len(reads) == 3 * read_once, "an altered base was not read again"
+        assert altered["public.plain"] != moved["public.plain"]
+    finally:
+        pg.drop(copy)

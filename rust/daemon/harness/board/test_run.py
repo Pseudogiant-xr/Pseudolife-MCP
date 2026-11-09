@@ -134,11 +134,15 @@ def test_every_arm_waits_for_storage_before_board_reads(monkeypatch, tmp_path, m
     run.run_scenario(scenario, Path("unused"), tmp_path, mode, False)
 
 
-@pytest.mark.parametrize("require_embedder,expected_calls", [(False, 2), (True, 3)])
+@pytest.mark.parametrize("require_embedder,expected_calls", [(False, 2), (True, 4)])
 def test_readiness_requires_healthy_storage_and_the_requested_tier(
         monkeypatch, require_embedder, expected_calls):
+    # The embedder shows before initialization ends; a Rust daemon still
+    # reseeding its clock skips lease-grant notices, so the full tier waits
+    # for ``init`` to leave ``pending`` too.
     replies = iter([{"embedder": {}, "db": "error: fixture"},
-                    {"db": "ok"}, {"db": "ok", "embedder": {}}])
+                    {"db": "ok"}, {"db": "ok", "embedder": {}, "pending": ["init"]},
+                    {"db": "ok", "embedder": {}, "pending": []}])
     calls = []
 
     def health(*args, **kwargs):
