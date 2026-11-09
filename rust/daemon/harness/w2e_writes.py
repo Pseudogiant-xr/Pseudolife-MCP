@@ -66,8 +66,11 @@ def register(h) -> dict[str, dict]:
         "console-facts-null-keys": {
             "config": None, "seed": [null_trigger],
             "ops": [op for field in ("entity", "attribute") for op in (
+                # The rows either request could land if a null key were coerced
+                # to a string, not the whole table: a real bank has its own.
                 checked(set_fact, {"entity": "Console Null Key", "attribute": "field", "value": "valid", field: None},
-                        "SELECT count(*) = 0 FROM facts"),
+                        "SELECT count(*) = 0 FROM facts WHERE value = 'valid' "
+                        "AND (entity = 'Console Null Key' OR attribute = 'field')"),
                 {"op": "rest", "method": "GET", "path": "/api/facts"},
                 rest(forget, {"entity": None if field == "entity" else "Console Null Key"}))],
         },
@@ -248,7 +251,9 @@ def register(h) -> dict[str, dict]:
                   for value in (0, -1, 999999, "999999", 999999.5, False)],
                 rest(reinforce, {"entry_id": "0" * 4300}),
                 rest(reinforce, {"entry_id": "0" * 4301}),
-                checked(reinforce, {"entry_id": "١"},
+                # int() parses Arabic-Indic digits: the target's id written in
+                # them (on an empty bank "١", on a real bank's copy not id 1).
+                checked(reinforce, {"entry_id": "@idarabic:Console reinforcement target."},
                         "SELECT reinforcements = 1 AND explicit_reinforcements = 1 FROM entries "
                         "WHERE text = 'Console reinforcement target.'"),
                 checked(reinforce, {"entry_id": "@id:Console reinforcement target."},

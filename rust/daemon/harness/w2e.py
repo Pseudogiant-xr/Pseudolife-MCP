@@ -87,7 +87,11 @@ Normalizers (declared, spec "Free for W1 and W2"):
 * in responses, the same record clocks and an episode's ``started_at`` and
   ``ended_at`` keep only null-or-not, a generic session title keeps its
   shape, and a record's ``age`` may differ by one step ("just now" /
-  "1 minute ago"), since the two daemons answer seconds apart;
+  "1 minute ago"), since the two daemons answer seconds apart; any two ages
+  compare equal when each is exactly what the formatter writes for its own
+  facts row (``tx_time``, else ``asserted_at``) read during that side's own
+  call (``window_ages``), since on a real bank's copy one arm can run minutes
+  behind the other;
 * the dream's display clocks: in a ``memory_dream`` answer, a
   ``timestamp``, ``cursor`` or ``dream_cursor`` equal to an entry's ``ts``
   on the same side becomes ``<ts:ENTRY_ID>`` (and so does a
@@ -124,7 +128,8 @@ Normalizers (declared, spec "Free for W1 and W2"):
 Arguments may name rows by content, resolved on each side's own bank
 just before the call: ``@id:<text>`` (the first row with that text, or for
 a deleted row the entry of its first reinstatement decision),
-``@idn:<n>:<text>`` (the n-th, from 0), and for the first RETIRED row with
+``@idn:<n>:<text>`` (the n-th, from 0), ``@idarabic:<text>`` (the ``@id:``
+id as a string of Arabic-Indic digits), and for the first RETIRED row with
 that text ``@sup:<text>`` (its ``superseded_at``) and ``@sha:<field>:<text>``
 (the SHA-256 of its ``text``, ``source`` or ``by``, ``superseded_by_text``).
 
@@ -4958,6 +4963,9 @@ SCENARIOS.update({
 EXTERNAL_WRITES.update(n for n in SCENARIOS if n.startswith("judge-merge-"))
 
 
+ARABIC_INDIC_DIGITS = str.maketrans("0123456789", "".join(chr(0x0660 + d) for d in range(10)))
+
+
 def resolve_args(args: dict, dsn: str) -> dict:
     out = {}
     import psycopg
@@ -4991,6 +4999,12 @@ def resolve_args(args: dict, dsn: str) -> dict:
                 row = c.execute("SELECT id FROM episodes WHERE title = %s "
                                 "ORDER BY started_at LIMIT 1", (title,)).fetchone()
             v = row[0] if row else "0" * 32
+        elif isinstance(v, str) and v.startswith("@idarabic:"):
+            # ``@idarabic:<text>``: the ``@id:`` row id as a string of
+            # Arabic-Indic digits, which int() parses (an empty bank's first
+            # entry is "١"; a real bank's copy numbers it otherwise).
+            v = str(resolve_args({"v": "@id:" + v[len("@idarabic:"):]}, dsn)["v"]).translate(
+                ARABIC_INDIC_DIGITS)
         elif isinstance(v, str) and v.startswith(("@id:", "@idn:")):
             if v.startswith("@idn:"):
                 _, n, text = v.split(":", 2)
@@ -5627,6 +5641,106 @@ def _age_adjacent(x, y) -> bool:
     return (a, b) in {((0, 0), (1, 1)), ((1, 59), (2, 1)), ((2, 23), (3, 1))}
 
 
+# Each side's wall clock is read around its own call, so the daemon's "now"
+# falls inside that window; the slack only absorbs float rounding.
+AGE_WINDOW_SLACK_S = 1.0
+AGE_UNITS = ((86400, "day"), (3600, "hour"), (60, "minute"))
+
+
+def _age_text(seconds: float) -> str:
+    """The daemons' humanised age (``_relative_time``) of an age in seconds."""
+    for size, unit in AGE_UNITS:
+        if seconds >= size:
+            n = int(seconds // size)
+            return f"{n} {unit}{'s' if n != 1 else ''} ago"
+    return "just now"
+
+
+def _age_span(text):
+    """The ages in seconds ``text`` renders, as ``[lo, hi)``, or None when
+    the formatter would never write it ("2 minute ago", "60 minutes ago")."""
+    m = AGE.match(text) if isinstance(text, str) else None
+    if not m:
+        return None
+    if m.group(1) is None:
+        # A clock running ahead clamps to zero: "just now".
+        return (-math.inf, 60.0)
+    size = dict((u, sz) for sz, u in AGE_UNITS)[m.group(2)]
+    lo = int(m.group(1)) * size
+    if _age_text(lo) != text:
+        return None
+    return (float(lo), float(lo + size))
+
+
+def age_fits(text, anchor, window) -> bool:
+    """``text`` is the formatter's age of a record anchored at ``anchor``
+    (its ``tx_time``, else ``asserted_at``), read at some moment of ``window``."""
+    span = _age_span(text)
+    if span is None or not isinstance(anchor, (int, float)):
+        return False
+    lo = window[0] - anchor - AGE_WINDOW_SLACK_S
+    hi = window[1] - anchor + AGE_WINDOW_SLACK_S
+    return span[0] <= hi and span[1] > lo
+
+
+def age_anchors(raw: dict) -> dict:
+    """``(value, asserted_at)`` -> the anchor a fact's ``age`` is computed
+    from (``tx_time``, else ``asserted_at``), from one side's dump; a key two
+    rows share has no anchor."""
+    table = raw.get("rows", {}).get("public.facts")
+    if not table:
+        return {}
+    cols = table["columns"]
+    if not {"value", "asserted_at", "tx_time"} <= set(cols):
+        return {}
+    iv, ia, it = cols.index("value"), cols.index("asserted_at"), cols.index("tx_time")
+    out, seen = {}, set()
+    for row in table["rows"]:
+        key = (row[iv], row[ia])
+        if key in seen:
+            out.pop(key, None)
+            continue
+        seen.add(key)
+        out[key] = row[it] or row[ia]
+    return out
+
+
+def window_ages(a, b, ages) -> None:
+    """A record ``age`` both sides render correctly for their own record and
+    their own call's clock window becomes ``<age>``: on a real bank's copy the
+    two arms write and read seconds to minutes apart. ``ages`` is
+    ``{side: {"window": (start, end), "anchors": age_anchors(dump)}}``; any
+    other age is left to ``normalize_records``' one-step rule."""
+    if not ages:
+        return
+    if isinstance(a, dict) and isinstance(b, dict):
+        if isinstance(a.get("age"), str) and isinstance(b.get("age"), str):
+            fits, anchors = [], []
+            for side, d in (("python", a), ("rust", b)):
+                key = (d.get("value"), d.get("asserted_at"))
+                try:
+                    anchor = ages[side]["anchors"].get(key)
+                except TypeError:  # an unhashable value
+                    anchor = None
+                anchors.append(anchor)
+                fits.append(age_fits(d["age"], anchor, ages[side]["window"]))
+            # Each age checks against its own side's row, so the two anchors
+            # must also agree: the same row copied from the base, or both
+            # written during this run. A side that failed to move its clock
+            # (a stale tx_time) still differs (review, 2026-11-10).
+            since = ages["python"].get("since")
+            fresh = since is not None and all(
+                isinstance(t, (int, float)) and t >= since for t in anchors)
+            if all(fits) and (anchors[0] == anchors[1] or fresh):
+                a["age"] = b["age"] = "<age>"
+        for k in set(a) & set(b):
+            if k != "age":
+                window_ages(a[k], b[k], ages)
+    elif isinstance(a, list) and isinstance(b, list):
+        for x, y in zip(a, b):
+            window_ages(x, y, ages)
+
+
 def normalize_records(a, b, stats=None):
     """Record clocks keep null-or-not; an ``age`` one step apart compares equal;
     a search ``score`` within ``SCORE_TOLERANCE`` compares equal."""
@@ -5781,10 +5895,14 @@ def state_and_events_diff(a: dict, b: dict) -> list[str]:
     return events_diff(a, b) + state_diff(rest(a), rest(b))
 
 
-def compare_response(py: dict, rs: dict, tol: dict, stats: dict) -> list[str]:
+def compare_response(py: dict, rs: dict, tol: dict, stats: dict, ages=None) -> list[str]:
+    """``ages`` (``window_ages``): each side's call window and fact anchors,
+    when both sides were called live in this step."""
     a, b = generic_titles(json.loads(json.dumps(py))), generic_titles(json.loads(json.dumps(rs)))
     graph_answer_free(a)
     graph_answer_free(b)
+    # Before normalize_records, which masks the asserted_at it reads.
+    window_ages(a, b, ages)
     normalize_records(a, b, stats)
     out = []
     va, vb = a.get("value"), b.get("value")
@@ -6413,6 +6531,7 @@ def _run_live(name: str, scn: dict, tag: str, binary: Path, root: Path, record: 
             client.init()
         tokens: dict[str, str | None] = {"python": None, "rust": None}
         max_wall = 0.0
+        run_start = time.time()  # a record written during this run is anchored after it
         for i, op in enumerate([{"op": "init"}] + scn["ops"]):
             row = {"step": i, "op": op, "diffs": [] if i else list(warmup_diffs)}
             if op["op"] == "init" and scn.get("init_settle"):
@@ -6420,6 +6539,7 @@ def _run_live(name: str, scn: dict, tag: str, binary: Path, root: Path, record: 
                 # before the first comparison.
                 settle_sides(scn["init_settle"], dsns, stubs, scn)
                 row["diffs"] += expect_diffs(scn["init_settle"], dsns)
+            windows = None
             if op["op"] != "init":
                 started = time.monotonic()
                 if op["op"] in HOME_OPS:
@@ -6437,10 +6557,13 @@ def _run_live(name: str, scn: dict, tag: str, binary: Path, root: Path, record: 
                             stop_for_scenario(d, scn)
                     py, rs = counters_rows(dsns)
                 else:
+                    t0 = time.time()
                     py = run_op(with_pull_token(op, tokens["python"]), procs["python"].port,
                                 clients["python"], dsns["python"])
+                    t1 = time.time()
                     rs = run_op(with_pull_token(op, tokens["rust"]), procs["rust"].port,
                                 clients["rust"], dsns["rust"])
+                    windows = {"python": (t0, t1), "rust": (t1, time.time())}
                 if op.get("settle"):
                     settle_sides(op["settle"], dsns, stubs, scn)
                 row["diffs"] += expect_diffs(op, dsns)
@@ -6485,7 +6608,10 @@ def _run_live(name: str, scn: dict, tag: str, binary: Path, root: Path, record: 
                     row["rust"] = w2e_documents.answer_tokens(row["rust"], clock_ranks(raw_rs))
                 row["python"] = rename_prefixes(row["python"], ep)
                 row["rust"] = rename_prefixes(row["rust"], er)
-                row["diffs"] += compare_response(row["python"], row["rust"], tol, stats)
+                ages = windows and {side: {"window": windows[side], "anchors": age_anchors(raw),
+                                           "since": run_start}
+                                    for side, raw in (("python", raw_py), ("rust", raw_rs))}
+                row["diffs"] += compare_response(row["python"], row["rust"], tol, stats, ages)
             row["diffs"] += compare_numeric(np_, nr, tol, stats)
             row["diffs"] += [f"db {d}" for d in state_and_events_diff(sp, sr)]
             steps.append(row)
@@ -6646,6 +6772,8 @@ def run_golden(name: str, binary: Path, root: Path, tol: dict, owned: list[str])
 # in-process double, then the hydrated REAL), compared within
 # EVENT_SURPRISE_TOL (found by B4's restart scenario, 2026-10-27).
 RESTART_QUERY = "which port does the bench Postgres use"
+RESTART_TEXTS = ("The bench Postgres listens on port 5434 on the dev box.",
+                 "The live bank's Postgres container is never used for tests.")
 SCENARIOS.update({
     "search-after-restart": {
         "clean_stop": True,
@@ -6653,13 +6781,14 @@ SCENARIOS.update({
         "config": None,
         "seed": [],
         "ops": [
-            store("The bench Postgres listens on port 5434 on the dev box."),
-            store("The live bank's Postgres container is never used for tests."),
+            *[store(t) for t in RESTART_TEXTS],
             dict(search(RESTART_QUERY, top_k=2), expect=[
                 f"SELECT count(*) = 1 FROM retrieval_events WHERE query_text = '{RESTART_QUERY}'"]),
             # A restart writes some config: the default board setting, unchanged.
             {"op": "restart", "config": "coordination:\n  enabled: true\n",
-             "expect": ["SELECT count(*) = 2 FROM entries WHERE access_count = 1"]},
+             # The scenario's own entries: a real bank's copy holds others read once.
+             "expect": ["SELECT count(*) = 2 FROM entries WHERE access_count = 1 AND text IN ("
+                        + ", ".join("'%s'" % t.replace("'", "''") for t in RESTART_TEXTS) + ")"]},
             dict(search(RESTART_QUERY, top_k=2), expect=[
                 f"SELECT count(*) = 2 FROM retrieval_events WHERE query_text = '{RESTART_QUERY}'"]),
         ],

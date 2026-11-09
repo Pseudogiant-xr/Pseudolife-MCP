@@ -104,6 +104,7 @@ RUST_HARNESS = (
     "rust/daemon/harness/board/test_maintainer_rollback.py", "rust/daemon/harness/board/test_base_delta.py",
     "rust/daemon/harness/test_pgdisposable_slices.py", "rust/daemon/harness/test_w2e_judge_settle.py",
     "rust/daemon/harness/test_real_bank_timer_env.py",
+    "rust/daemon/harness/test_w2e_real_bank_expects.py",
     "rust/daemon/harness/mirror/test_seed.py", "rust/daemon/harness/mirror/test_forced.py",
     "rust/daemon/harness/mirror/test_base_delta.py",
     "rust/daemon/harness/mirror/test_seed_keys.py",
