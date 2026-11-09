@@ -394,3 +394,15 @@ def test_without_a_base_a_response_reports_every_foreign_clock(monkeypatch):
     norm = _windowed_norm(SignedNormalizer)
     run.normalize_response({"status": 200, "json": {"key_changes": [{"at": OLD + 2}]}}, norm)
     assert len(_clock_problems(norm)) == 1
+
+
+def test_the_cut_note_is_not_counted_as_a_difference():
+    """Review (Opus): the "+N more" note matched forced.py's DIFF_LINE, so it
+    counted as a difference and, identical on two arms, could be the only
+    place a new failure shared with its synthetic arm."""
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "mirror"))
+    import forced
+    lines = ["CHAIN [console] python: created_at: value 5 does not match the captured clock windows",
+             run.cut_note("console", 7)]
+    log = chr(10).join(lines)
+    assert len(forced.outcome(1, log)["diffs"]) == 1

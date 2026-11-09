@@ -316,6 +316,14 @@ def diff_state(a: dict, b: dict) -> list[str]:
     return diffs
 
 
+def cut_note(scenario: str, more: int) -> str:
+    """The note after a cut problem list. Python's lines sort first, so
+    without it a cut list reads as one arm's. It is indented so that
+    forced.py does not count it as a difference: identical on two arms, it
+    could be the only place a new failure shares with its synthetic arm."""
+    return f"  (CHAIN [{scenario}]: +{more} more problems; --out holds them all)"
+
+
 def chain_check(dsn: str) -> list[str]:
     """Python's verifier, hash and canonical form over every row of a chain.
 
@@ -692,8 +700,7 @@ def main() -> int:
         for p in r["chain"][:12]:
             print(f"CHAIN [{r['scenario']}] {p}")
         if len(r["chain"]) > 12:
-            # Python's lines sort first: without this a cut list reads as one arm's.
-            print(f"CHAIN [{r['scenario']}] (+{len(r['chain']) - 12} more; --out holds them all)")
+            print(cut_note(r["scenario"], len(r["chain"]) - 12))
     summary = {"steps": steps, "diff_steps": diff_steps, "state_diffs": state,
                "chain_problems": chain, "scenarios": len(results)}
     print(json.dumps(summary))
