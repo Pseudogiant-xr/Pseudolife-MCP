@@ -53,7 +53,7 @@ sys.path.insert(0, str(HERE))
 import daemons  # noqa: E402
 import dbstate  # noqa: E402
 import pgdisposable  # noqa: E402
-from run import DB_DECLARED, bearer, call, settled, wait_settled  # noqa: E402,F401
+from run import DB_DECLARED, bearer, call, real_bank_env, settled, wait_settled  # noqa: E402,F401
 
 REPO = HERE.parents[2]
 GOLDENS = HERE / "goldens" / "w2d"
@@ -994,7 +994,7 @@ def rust_env(extra: dict[str, str]) -> dict[str, str]:
 
 def common_env(dsn: str) -> dict[str, str]:
     return {"PSEUDOLIFE_RELEASE_CHECK": "0", "PSEUDOLIFE_MCP_TOKEN": TOKEN,
-            "PSEUDOLIFE_MCP_DATABASE_URL": dsn}
+            "PSEUDOLIFE_MCP_DATABASE_URL": dsn, **real_bank_env()}
 
 
 def require_requested_reranker(cases: list[dict], pairs: list, log: str,
