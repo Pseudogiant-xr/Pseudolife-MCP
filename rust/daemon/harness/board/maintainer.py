@@ -48,7 +48,7 @@ class SignedNormalizer(Normalizer):
         if key in ("active_from", "last_used_at", "revoked_at", "flagged_at", "used_at",
                    "signed_at", "at") and type(value) in (int, float):
             offsets = (0, 86400) if key == "active_from" else (0,)
-            return self.windows.match(value, offsets) or self.unmatched(key, value)
+            return self.clock(key, float(value), offsets) or self.unmatched(key, value)
         if key == "code_hash" and isinstance(value, str):
             return "<code hash>" if HEX64.fullmatch(value) else "<bad code hash>"
         if key == "payload" and isinstance(value, str):

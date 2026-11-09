@@ -82,6 +82,11 @@ class Normalizer:
         self.seq_map: dict[int, int] = {}
         self.message_seq: dict[str, int] = {}
         self.problems: list[str] = []
+        # Each stored clock's label as first dumped, kept: a future instant (a
+        # ring_at a stagger ahead) must not move to whichever later window
+        # happens to cover it, which differs between arms whose steps run at
+        # different speeds (board wake on a copied real board, 2026-11-09).
+        self.clock_labels: dict[tuple[str, float], str] = {}
 
     # -- id registry ------------------------------------------------------
     def learn(self, value) -> None:
@@ -176,6 +181,16 @@ class Normalizer:
                 return f"T{step}+{min(deadline, t0 + 60) - t0:g}"
         return self.unmatched("ring_armed_until", value)
 
+    def clock(self, key: str, value: float, offsets) -> str | None:
+        """The window label of a stored clock: the label it got when first
+        matched, or None while no window matches (reported by the caller)."""
+        label = self.clock_labels.get((key, value))
+        if label is None:
+            label = self.windows.match(value, offsets)
+            if label is not None:
+                self.clock_labels[(key, value)] = label
+        return label
+
     def unmatched(self, key, value):
         self.problems.append(f"{key}: value {value!r} does not match the captured clock windows")
         return value
@@ -221,7 +236,7 @@ class Normalizer:
                 if v == 0:
                     return v  # No listener deadline is armed.
                 return self.listener_deadline(v)
-            return self.windows.match(float(v), TIME_KEYS[key]) or self.unmatched(key, v)
+            return self.clock(key, float(v), TIME_KEYS[key]) or self.unmatched(key, v)
         if key in ("cutoff", "retained_since"):
             return self.cutoff(v, key)
         if key == "hlc" and isinstance(v, str) and v:

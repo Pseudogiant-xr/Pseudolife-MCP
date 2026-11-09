@@ -6177,6 +6177,7 @@ def extractor_diffs(py: list[dict], rs: list[dict]) -> list[str]:
 def side_env(scn: dict, dsn: str, extra: dict | None = None) -> dict:
     env = {"PSEUDOLIFE_RELEASE_CHECK": "0", "PSEUDOLIFE_PLUGIN_DIR": str(w1a.REPO / "plugin"),
            "PSEUDOLIFE_MCP_DATABASE_URL": dsn, "PSEUDOLIFE_MCP_TOKEN": TOKEN}
+    env.update(w1a.real_bank_env())
     env.update(scn.get("env", {}))
     env.update(extra or {})
     return env
