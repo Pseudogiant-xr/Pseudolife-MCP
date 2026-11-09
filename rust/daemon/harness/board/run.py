@@ -213,6 +213,54 @@ def _base_row_keys(table: str) -> tuple[list[str], set[str]]:
     return _BASE_ROW_KEYS[(base, table)][1:]
 
 
+# Response keys whose clock the base stores under another column: the
+# maintainer status's key changes (``key_changes``) and a roster entry's
+# status age both read ``coordination_events.created_at``.
+CLOCK_COLUMNS = {"at": "created_at", "status_set_at": "created_at"}
+UNMATCHED_CLOCK = re.compile(r"(\w+): value (.+) " + re.escape(CLOCK_PROBLEM))
+_BASE_CLOCKS: dict[tuple[str, str], tuple[object, dict[str, set[float]]]] = {}
+
+
+def _base_clocks(table: str) -> dict[str, set[float]]:
+    """A table's double-precision values the base holds, by column, read
+    once per process like ``_base_row_keys``; none without a base."""
+    import psycopg
+    import dbstate
+    base = os.environ.get("PL_HARNESS_BASE_DATABASE") or ""
+    if not base or base not in dbstate._BASE_INFO:
+        return {}
+    hashes = dbstate._BASE_HASHES.get(base)
+    cached = _BASE_CLOCKS.get((base, table))
+    if cached is None or cached[0] is not hashes:
+        clocks: dict[str, set[float]] = {}
+        with psycopg.connect(dbstate._BASE_INFO[base], autocommit=True) as conn:
+            columns = [r[0] for r in conn.execute(
+                "SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' "
+                "AND table_name = %s AND data_type = 'double precision'", (table,))]
+            if columns:
+                select = ", ".join(f'"{c}"' for c in columns)
+                for row in conn.execute(f'SELECT {select} FROM public."{table}"'):
+                    for c, v in zip(columns, row):
+                        if v is not None:
+                            clocks.setdefault(c, set()).add(float(v))
+        _BASE_CLOCKS[(base, table)] = (hashes, clocks)
+    return _BASE_CLOCKS[(base, table)][1]
+
+
+def _base_clock(problem: str, tables) -> bool:
+    """Whether a clock problem names a value the base itself stores in that
+    column: a pre-existing row a response lists, not one a daemon wrote."""
+    m = UNMATCHED_CLOCK.fullmatch(problem)
+    if not m:
+        return False
+    try:
+        value = float(m.group(2))
+    except ValueError:
+        return False
+    column = CLOCK_COLUMNS.get(m.group(1), m.group(1))
+    return any(value in _base_clocks(t).get(column, ()) for t in tables)
+
+
 def normalize_state(state: dict, norm: Normalizer) -> dict:
     out = {}
     if "base_missing" in state:
@@ -266,6 +314,14 @@ def diff_state(a: dict, b: dict) -> list[str]:
             diffs.append(f"{t}: python {json.dumps(a[t], default=str)[:300]} vs rust "
                          f"{json.dumps(b.get(t), default=str)[:300]}")
     return diffs
+
+
+def cut_note(scenario: str, more: int) -> str:
+    """The note after a cut problem list. Python's lines sort first, so
+    without it a cut list reads as one arm's. It is indented so that
+    forced.py does not count it as a difference: identical on two arms, it
+    could be the only place a new failure shares with its synthetic arm."""
+    return f"  (CHAIN [{scenario}]: +{more} more problems; --out holds them all)"
 
 
 def chain_check(dsn: str) -> list[str]:
@@ -372,10 +428,20 @@ class Arm:
                                 for r in rows])
 
 
-def normalize_response(resp: dict, norm: Normalizer) -> dict:
+def normalize_response(resp: dict, norm: Normalizer, extra_tables=()) -> dict:
+    """A response, normalized. Under a base, a listing of the copied board
+    (the Console's events, leases and roster, the maintainer status's key
+    changes) carries clocks no captured window holds: a clock whose exact
+    value the base stores in that column (``CLOCK_COLUMNS`` for renamed ones)
+    stays raw, so both arms compare it exactly, and is not reported. A new
+    row stored with such a clock still is, by ``normalize_state``, whose
+    exemption needs the row's key in the base."""
     out = {"status": resp["status"], "headers": resp.get("headers", {})}
     if "json" in resp:
+        known = len(norm.problems)
         out["json"] = norm.value(resp["json"])
+        tables = (*BOARD_TABLES, *extra_tables)
+        norm.problems[known:] = [p for p in norm.problems[known:] if not _base_clock(p, tables)]
     if "bytes" in resp:
         out["bytes"] = resp["bytes"]
     return out
@@ -442,6 +508,7 @@ def wait_ready(port: int, timeout: float = 600.0, *, require_embedder: bool = Tr
 
 def run_scenario(scn: S.Scenario, binary: Path, root: Path, mode: str, record: bool) -> dict:
     import yaml
+    import dbstate
 
     config = yaml.safe_load(scn.config_yaml or "") or {}
     retention_days = config.get("coordination", {}).get("audit_retention_days", 90)
@@ -456,6 +523,9 @@ def run_scenario(scn: S.Scenario, binary: Path, root: Path, mode: str, record: b
         for side in sides:
             cleanup.callback(pg.drop, names[side])
             dsn = pg.create(names[side])
+            # Read the base (if any) before the first response is normalized,
+            # which recognises the base's own clocks by it.
+            dbstate._base_hashes(dsn)
             procs[side] = start(side, scn, binary, root, dsn, tag)
             cleanup.callback(procs[side].stop)
             arms[side] = Arm(side, procs[side], dsn, retention_days)
@@ -471,9 +541,10 @@ def run_scenario(scn: S.Scenario, binary: Path, root: Path, mode: str, record: b
             out = {side: arms[side].run(step) for side in sides}
             if step.kind not in ("http", "mcp") or not getattr(step, "compare", True):
                 continue
-            py = (normalize_response(out["python"], arms["python"].norm) if "python" in out
+            extra = getattr(scn, "extra_tables", ())
+            py = (normalize_response(out["python"], arms["python"].norm, extra) if "python" in out
                   else golden["responses"][str(i)])
-            rs = normalize_response(out["rust"], arms["rust"].norm)
+            rs = normalize_response(out["rust"], arms["rust"].norm, extra)
             diffs = diff_values(py, rs)
             rows.append({"step": i, "name": step.name, "python_status": py["status"],
                          "rust_status": rs["status"], "diffs": diffs})
@@ -628,6 +699,8 @@ def main() -> int:
             print(f"STATE [{r['scenario']}] {d}")
         for p in r["chain"][:12]:
             print(f"CHAIN [{r['scenario']}] {p}")
+        if len(r["chain"]) > 12:
+            print(cut_note(r["scenario"], len(r["chain"]) - 12))
     summary = {"steps": steps, "diff_steps": diff_steps, "state_diffs": state,
                "chain_problems": chain, "scenarios": len(results)}
     print(json.dumps(summary))
