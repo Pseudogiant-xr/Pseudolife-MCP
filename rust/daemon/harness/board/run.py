@@ -39,6 +39,7 @@ REPO = HARNESS.parents[2]
 sys.path.insert(0, str(HARNESS))
 sys.path.insert(0, str(REPO))
 import daemons  # noqa: E402
+from pseudolife_memory import readiness  # noqa: E402
 import pgdisposable  # noqa: E402
 from board import scenarios as S  # noqa: E402
 from board.norm import Normalizer, Windows  # noqa: E402
@@ -422,11 +423,16 @@ def start(kind: str, scn: S.Scenario, binary: Path, root: Path, dsn: str, tag: s
 
 
 def wait_ready(port: int, timeout: float = 600.0, *, require_embedder: bool = True) -> None:
+    """Wait for healthy storage and, with ``require_embedder``, the finished
+    background initialization (``init`` no longer pending): the embedder alone
+    shows before a Rust daemon has reseeded its clock, and until then it skips
+    the lease-grant drain, so a step that grants a lease raced its notice."""
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         try:
             body = call(port, "GET", "/health", [], None, timeout=30).get("json") or {}
-            if body.get("db") == "ok" and (not require_embedder or "embedder" in body):
+            if body.get("db") == "ok" and (not require_embedder or (
+                    "embedder" in body and readiness.stages_done(body, ("init",)))):
                 return
         except OSError:
             pass

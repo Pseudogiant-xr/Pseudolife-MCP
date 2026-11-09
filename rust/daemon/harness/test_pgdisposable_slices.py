@@ -3,6 +3,7 @@ the shared helper first, and no other slice's."""
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 
@@ -148,4 +149,7 @@ def test_the_option_test_leaves_no_strict_mode_behind():
          str(here / "mirror" / "test_base_delta.py")],
         cwd=here.parents[2], env=env, capture_output=True, text=True, timeout=120)
     assert run.returncode == 0, run.stdout[-2000:] + run.stderr[-2000:]
-    assert "2 skipped" in run.stdout.splitlines()[-1], run.stdout[-2000:]
+    # Every database case in the module skips; counted, not pinned, so a
+    # case added there does not break this one.
+    skipped = re.search(r"(\d+) skipped", run.stdout.splitlines()[-1])
+    assert skipped and int(skipped.group(1)) >= 2, run.stdout[-2000:]

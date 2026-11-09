@@ -22,6 +22,7 @@ normalizers, which replace nondeterministic values by rule, never by hand:
 """
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 from collections import Counter
@@ -150,11 +151,122 @@ def _order_columns(conn, schema: str, table: str) -> list[str]:
 _BASE_HASHES: dict[str, dict[str, Counter]] = {}
 _BASE_KEYS: dict[str, dict[str, set[str]]] = {}
 _BASE_INFO: dict[str, str] = {}
+# Per base and table, where each base row sits: ``ctids`` maps a row's ctid
+# to its (xmin, md5), with the table's file, columns and the xmins that wrote
+# its rows, for ``_fast_delta``. ``md5`` is the table's ``_BASE_HASHES``
+# Counter itself, so a caller's Counter shows which base it came from.
+_BASE_ROWS: dict[str, dict[str, dict]] = {}
+# The session settings PostgreSQL's output functions read, as the base was
+# hashed: a session rendering any differently can leave the canary row's
+# text alone (a float that prints the same) while other rows change. Every
+# positive extra_float_digits prints the shortest exact float (PostgreSQL
+# 12+), so they compare as one: the board's dump sets 3, the base read 1.
+_BASE_RENDER: dict[str, str] = {}
+_RENDER = ("SELECT json_build_array(" + ", ".join(
+    f"current_setting('{g}')" for g in (
+        "DateStyle", "IntervalStyle", "TimeZone", "bytea_output", "lc_monetary",
+        "standard_conforming_strings", "quote_all_identifiers", "search_path", "xmloption"))
+    + ", CASE WHEN current_setting('extra_float_digits')::int > 0 THEN 'shortest' "
+      "ELSE current_setting('extra_float_digits') END)::text")
+# A directory where one run's harness processes share each base's hashes
+# (``mirror/forced.py`` sets it): a scenario is one process, and one hash
+# pass over a real bank's copy took 6.75 s (daemon box during a forced run,
+# 2026-11-09), so each process paid that before its first dump.
+BASE_CACHE_ENV = "PL_HARNESS_BASE_CACHE"
+_CACHE_FORMAT = 4
+# The catalog rows ``t::text`` depends on: a column added, dropped or retyped
+# changes rows' text without rewriting their tuples, and so does an enum label
+# renamed or a composite type's attribute added, dropped or retyped (of the
+# column's type, its element type or a domain's base type), which may reach
+# only some rows (a NULL composite prints the same).
+_ATTRS = ("SELECT coalesce(json_agg(json_build_array(a.attnum, a.attname, a.atttypid::int, "
+          "a.atttypmod, a.attisdropped, a.atthasmissing, "
+          "(SELECT json_agg(e.enumlabel ORDER BY e.enumtypid, e.enumsortorder) FROM pg_type ty "
+          "JOIN pg_enum e ON e.enumtypid IN (ty.oid, ty.typelem, ty.typbasetype) "
+          "WHERE ty.oid = a.atttypid), "
+          "(SELECT json_agg(json_build_array(ca.attrelid::int, ca.attnum, ca.attname, "
+          "ca.atttypid::int, ca.atttypmod, ca.attisdropped) ORDER BY ca.attrelid, ca.attnum) "
+          "FROM pg_type ty JOIN pg_type ct ON ct.oid IN (ty.oid, ty.typelem, ty.typbasetype) "
+          "JOIN pg_attribute ca ON ca.attrelid = ct.typrelid AND ca.attnum > 0 "
+          "WHERE ty.oid = a.atttypid)) ORDER BY a.attnum), '[]')::text "
+          "FROM pg_attribute a WHERE a.attrelid = %s::regclass AND a.attnum > 0")
+
+
+def _regclass(schema: str, table: str) -> str:
+    return ".".join('"' + part.replace('"', '""') + '"' for part in (schema, table))
+
+
+def _table_stamp(conn, schema: str, table: str) -> dict:
+    """What a base table's cached rows rest on: its file, its columns and how
+    many of its rows each transaction wrote. Any write to the base adds an
+    xmin or changes a count, a rewrite changes the file, an ALTER the
+    columns; freezing keeps the raw xmin (PostgreSQL 9.4+)."""
+    rel = _regclass(schema, table)
+    filenode = conn.execute("SELECT pg_relation_filenode(%s::regclass)", (rel,)).fetchone()[0]
+    attrs = conn.execute(_ATTRS, (rel,)).fetchone()[0]
+    census = conn.execute(sql.SQL("SELECT xmin::text, count(*) FROM {} GROUP BY 1 ORDER BY 1").format(
+        sql.Identifier(schema, table))).fetchall()
+    return {"filenode": filenode, "attrs": attrs, "census": [[x, n] for x, n in census]}
+
+
+def _read_base_table(conn, schema: str, table: str) -> tuple[list, list]:
+    """A base table's rows as [ctid, xmin, md5] and its first-column keys,
+    in one pass."""
+    first = _select_list(conn, schema, table)[0].split(", ", 1)[0]
+    rows, keys = [], []
+    for r in conn.execute(f'SELECT ctid::text, xmin::text, md5(t::text){", " + first if first else ""} '
+                          f'FROM "{schema}"."{table}" t'):
+        rows.append([r[0], r[1], r[2]])
+        if first:
+            keys.append(json.dumps(_plain(r[3]), sort_keys=True))
+    return rows, keys
+
+
+def _load_base(conn, base: str) -> dict[str, dict]:
+    """Every base table's rows, stamps and keys: from the run's cache when
+    every stamp still matches the base, else read and cached again."""
+    oid = conn.execute("SELECT oid::int FROM pg_database WHERE datname = current_database()").fetchone()[0]
+    render = conn.execute(_RENDER).fetchone()[0]
+    stamps = {f"{s}.{t}": _table_stamp(conn, s, t) for s, t in _tables(conn)}
+    cache_dir = os.environ.get(BASE_CACHE_ENV)
+    path = os.path.join(cache_dir, f"{base}.json") if cache_dir else None
+    if path and os.path.exists(path):
+        try:
+            with open(path, encoding="utf-8") as f:
+                cached = json.load(f)
+            if cached.get("format") == _CACHE_FORMAT and cached.get("base") == base \
+                    and cached.get("oid") == oid and cached.get("render") == render \
+                    and {q: v["stamp"] for q, v in cached["tables"].items()} == stamps:
+                return cached["tables"]
+        except (OSError, ValueError, KeyError, TypeError):
+            pass  # unreadable or stale: read the base again
+    tables = {}
+    for q, stamp in stamps.items():
+        schema, table = q.split(".", 1)
+        rows, keys = _read_base_table(conn, schema, table)
+        tables[q] = {"stamp": stamp, "rows": rows, "keys": keys}
+    # Stamped again: a base whose file, columns or census changed while it
+    # was read is not cached. (A row added and deleted meanwhile leaves the
+    # census; this process then uses the same read as the cache would.)
+    if path and {f"{s}.{t}": _table_stamp(conn, s, t) for s, t in _tables(conn)} == stamps:
+        tmp = f"{path}.{os.getpid()}.tmp"
+        try:
+            os.makedirs(cache_dir, exist_ok=True)
+            with open(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w",
+                      encoding="utf-8") as f:
+                json.dump({"format": _CACHE_FORMAT, "base": base, "oid": oid, "render": render,
+                           "tables": tables}, f)
+            os.replace(tmp, path)
+        except OSError:  # the cache only saves time: this process has its read
+            with contextlib.suppress(OSError):
+                os.remove(tmp)
+    return tables
 
 
 def _base_hashes(dsn: str) -> dict[str, Counter] | None:
     """Every base table's row hashes, read once per process (the base never
-    changes while a run copies it), or None without a base."""
+    changes while a run copies it), or None without a base. With
+    ``PL_HARNESS_BASE_CACHE`` a run's processes share one read."""
     base = os.environ.get("PL_HARNESS_BASE_DATABASE")
     if not base:
         return None
@@ -164,16 +276,18 @@ def _base_hashes(dsn: str) -> dict[str, Counter] | None:
         if not re.fullmatch(r"pl_cf_mir_[a-z0-9_]{1,40}", base):
             raise ValueError(f"refusing base database {base!r}: expected pl_cf_mir_*")
         info = psycopg.conninfo.make_conninfo(dsn, dbname=base)
-        out, keys = {}, {}
+        out, keys, located = {}, {}, {}
         with psycopg.connect(info, autocommit=True) as conn:
-            for schema, table in _tables(conn):
-                qualified = f"{schema}.{table}"
-                out[qualified] = Counter(r[0] for r in conn.execute(
-                    sql.SQL("SELECT md5(t::text) FROM {} t").format(sql.Identifier(schema, table))))
-                first = _select_list(conn, schema, table)[0].split(", ", 1)[0]
-                keys[qualified] = {json.dumps(_plain(r[0]), sort_keys=True) for r in conn.execute(
-                    f'SELECT {first} FROM "{schema}"."{table}"')} if first else set()
+            _BASE_RENDER[base] = conn.execute(_RENDER).fetchone()[0]
+            for qualified, body in _load_base(conn, base).items():
+                out[qualified] = Counter(r[2] for r in body["rows"])
+                keys[qualified] = set(body["keys"])
+                located[qualified] = {
+                    "md5": out[qualified], "ctids": {r[0]: (r[1], r[2]) for r in body["rows"]},
+                    "xmins": sorted({r[1] for r in body["rows"]}),
+                    "filenode": body["stamp"]["filenode"], "attrs": body["stamp"]["attrs"]}
         _BASE_HASHES[base], _BASE_KEYS[base], _BASE_INFO[base] = out, keys, info
+        _BASE_ROWS[base] = located
     return _BASE_HASHES[base]
 
 
@@ -226,12 +340,126 @@ def _base_missing(known: Counter, present: Counter) -> dict:
     return {"count": len(gone), "digest": hashlib.sha256("".join(gone).encode()).hexdigest()}
 
 
+FAST_ENV = "PL_HARNESS_DUMP_FAST"      # "0": always hash every row
+VERIFY_ENV = "PL_HARNESS_DUMP_VERIFY"  # "1": run both paths and require one answer
+
+
+class DeltaMismatch(AssertionError):
+    """The fast delta and the full hash disagreed (``PL_HARNESS_DUMP_VERIFY``)."""
+
+
 def base_delta(conn, schema: str, table: str, known: Counter, select: str,
                ordering: str = "1") -> tuple[list[str], list[tuple], dict]:
     """A table's rows the base does not hold, byte for byte, with
     ``select`` read per row in ``ordering``, as (column names, row tuples,
-    ``base_missing``). Only the differing rows cross the wire: every row's
-    hash does, and the rows are fetched by hash."""
+    ``base_missing``). ``_fast_delta`` answers when it can vouch for the
+    table; otherwise every row is hashed (``_full_delta``). Both give the
+    same answer, which ``PL_HARNESS_DUMP_VERIFY=1`` checks on every call."""
+    fast = None if os.environ.get(FAST_ENV) == "0" else _fast_delta(
+        conn, schema, table, known, select, ordering)
+    if fast is not None and os.environ.get(VERIFY_ENV) != "1":
+        return fast
+    full = _full_delta(conn, schema, table, known, select, ordering)
+    if fast is not None and fast != full:
+        raise DeltaMismatch(f"{schema}.{table}: fast delta {fast[1:]!r:.600} vs full {full[1:]!r:.600}")
+    return full
+
+
+def _fast_delta(conn, schema: str, table: str, known: Counter, select: str,
+                ordering: str) -> tuple[list[str], list[tuple], dict] | None:
+    """``_full_delta``'s answer without hashing the rows the copy still
+    shares with the base, or None when it cannot vouch for the table.
+
+    A disposable database is a file copy of the base, so a base row nobody
+    wrote is the same tuple at the same ctid with the same xmin, and its
+    bytes are the base's. Every insert or update makes a new tuple with a
+    new xmin, a rewrite to identical bytes included, and a delete removes
+    the tuple. So only the rows whose xmin wrote no base row are hashed
+    (``candidates``); a base tuple gone is found by ctid when fewer old-xmin
+    rows remain than the base holds. The multisets then give exactly the
+    full hash's surplus and ``base_missing``: the candidates' hashes minus
+    the gone rows', and the other way round.
+
+    It declines (None) for a table the base did not hash or another base
+    hashed, a file rewritten (VACUUM FULL, CLUSTER, TRUNCATE, a rewriting
+    retype: ctids no longer locate base rows), a catalog change to what
+    ``t::text`` renders (a column added, dropped or retyped without a
+    rewrite, an enum label renamed: ``_ATTRS``), a session rendering values
+    differently from the base read (``_RENDER``), or an unchanged row whose
+    text no longer hashes as the base's: a backstop for a rendering change
+    neither shows (a type's output function replaced), which no test can
+    stage without one of the other guards seeing it first.
+
+    Freezing and wraparound cannot make a written row look like a base row:
+    since PostgreSQL 9.4 freezing sets a flag and keeps the raw xmin, which
+    ``xmin`` reads (checked on PostgreSQL 18.6, the bench's and the
+    mirror's), and a transaction in the copy could reuse a base row's xid
+    only after about 2**31 more transactions on the cluster, which no run
+    approaches. The base's rows were written by one or two transactions per
+    table (mirror seed, quiet and curation copies, 2026-11-09), so the
+    ``= ANY`` test is a short list."""
+    base = os.environ.get("PL_HARNESS_BASE_DATABASE") or ""
+    info = _BASE_ROWS.get(base, {}).get(f"{schema}.{table}")
+    if info is None or info["md5"] is not known:
+        return None
+    old = info["xmins"]
+    rel = f'"{schema}"."{table}"'
+    with conn.cursor(row_factory=tuple_row) as cur:
+        if cur.execute(_RENDER).fetchone()[0] != _BASE_RENDER.get(base):
+            return None
+        kept, candidates = cur.execute(
+            f"SELECT count(*) FILTER (WHERE xmin = ANY(%s::xid[])), "
+            f"coalesce(array_agg(ARRAY[ctid::text, md5(t::text)]) "
+            f"FILTER (WHERE NOT xmin = ANY(%s::xid[])), '{{}}') FROM {rel} t",
+            (old, old)).fetchone()
+        # The scan holds the table's lock now, so no rewrite can land until
+        # the dump ends, and the function reads the file the scan read.
+        filenode = cur.execute("SELECT pg_relation_filenode(%s::regclass)",
+                               (_regclass(schema, table),)).fetchone()[0]
+        if filenode != info["filenode"]:
+            return None
+        if cur.execute(_ATTRS, (_regclass(schema, table),)).fetchone()[0] != info["attrs"]:
+            return None
+        if kept:
+            # One row the copy shares with the base must hash as the base's,
+            # or every unchanged row's text has changed, and only the full
+            # hash can tell which rows the base still holds.
+            ctid, xmin, digest = cur.execute(
+                f"SELECT ctid::text, xmin::text, md5(t::text) FROM {rel} t "
+                f"WHERE xmin = ANY(%s::xid[]) LIMIT 1", (old,)).fetchone()
+            if info["ctids"].get(ctid) != (xmin, digest):
+                return None
+        base_rows = sum(known.values())
+        gone = Counter()
+        if kept != base_rows:
+            present = set(cur.execute(f"SELECT ctid::text, xmin::text FROM {rel} t "
+                                      f"WHERE xmin = ANY(%s::xid[])", (old,)).fetchall())
+            if len(present) != kept or kept > base_rows:
+                return None
+            gone = Counter(digest for ctid, (xmin, digest) in info["ctids"].items()
+                           if (ctid, xmin) not in present)
+            if sum(gone.values()) != base_rows - kept:
+                return None
+        added = Counter(digest for _, digest in candidates)
+        # known - present and present - known, with present = known - gone + added.
+        surplus = added - gone
+        wanted = [ctid for ctid, digest in candidates if digest in surplus]
+        fetched = cur.execute(
+            f"SELECT md5(t::text), {select} FROM {rel} t WHERE ctid = ANY(%s::tid[]) "
+            f"ORDER BY {ordering}", (wanted,)).fetchall()
+        columns = [d.name for d in cur.description[1:]]
+    rows, owed = [], Counter(surplus)
+    for row in fetched:
+        if owed[row[0]] > 0:
+            owed[row[0]] -= 1
+            rows.append(row[1:])
+    return columns, rows, _base_missing(gone, added)
+
+
+def _full_delta(conn, schema: str, table: str, known: Counter, select: str,
+                ordering: str = "1") -> tuple[list[str], list[tuple], dict]:
+    """Every row's hash crosses the wire, and the differing rows are
+    fetched by hash."""
     with conn.cursor(row_factory=tuple_row) as cur:
         present = Counter(r[0] for r in cur.execute(
             f'SELECT md5(t::text) FROM "{schema}"."{table}" t'))
