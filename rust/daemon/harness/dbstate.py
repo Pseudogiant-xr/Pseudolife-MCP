@@ -158,27 +158,36 @@ _BASE_INFO: dict[str, str] = {}
 _BASE_ROWS: dict[str, dict[str, dict]] = {}
 # The session settings PostgreSQL's output functions read, as the base was
 # hashed: a session rendering any differently can leave the canary row's
-# text alone (a float that prints the same) while other rows change.
+# text alone (a float that prints the same) while other rows change. Every
+# positive extra_float_digits prints the shortest exact float (PostgreSQL
+# 12+), so they compare as one: the board's dump sets 3, the base read 1.
 _BASE_RENDER: dict[str, str] = {}
 _RENDER = ("SELECT json_build_array(" + ", ".join(
     f"current_setting('{g}')" for g in (
-        "DateStyle", "IntervalStyle", "TimeZone", "extra_float_digits", "bytea_output",
-        "lc_monetary", "standard_conforming_strings", "quote_all_identifiers", "search_path",
-        "xmloption")) + ")::text")
+        "DateStyle", "IntervalStyle", "TimeZone", "bytea_output", "lc_monetary",
+        "standard_conforming_strings", "quote_all_identifiers", "search_path", "xmloption"))
+    + ", CASE WHEN current_setting('extra_float_digits')::int > 0 THEN 'shortest' "
+      "ELSE current_setting('extra_float_digits') END)::text")
 # A directory where one run's harness processes share each base's hashes
 # (``mirror/forced.py`` sets it): a scenario is one process, and one hash
 # pass over a real bank's copy took 6.75 s (daemon box during a forced run,
 # 2026-11-09), so each process paid that before its first dump.
 BASE_CACHE_ENV = "PL_HARNESS_BASE_CACHE"
-_CACHE_FORMAT = 3
+_CACHE_FORMAT = 4
 # The catalog rows ``t::text`` depends on: a column added, dropped or retyped
 # changes rows' text without rewriting their tuples, and so does an enum label
-# renamed (of the column's type, its element type or a domain's base type),
-# which may reach only some rows.
+# renamed or a composite type's attribute added, dropped or retyped (of the
+# column's type, its element type or a domain's base type), which may reach
+# only some rows (a NULL composite prints the same).
 _ATTRS = ("SELECT coalesce(json_agg(json_build_array(a.attnum, a.attname, a.atttypid::int, "
           "a.atttypmod, a.attisdropped, a.atthasmissing, "
           "(SELECT json_agg(e.enumlabel ORDER BY e.enumtypid, e.enumsortorder) FROM pg_type ty "
           "JOIN pg_enum e ON e.enumtypid IN (ty.oid, ty.typelem, ty.typbasetype) "
+          "WHERE ty.oid = a.atttypid), "
+          "(SELECT json_agg(json_build_array(ca.attrelid::int, ca.attnum, ca.attname, "
+          "ca.atttypid::int, ca.atttypmod, ca.attisdropped) ORDER BY ca.attrelid, ca.attnum) "
+          "FROM pg_type ty JOIN pg_type ct ON ct.oid IN (ty.oid, ty.typelem, ty.typbasetype) "
+          "JOIN pg_attribute ca ON ca.attrelid = ct.typrelid AND ca.attnum > 0 "
           "WHERE ty.oid = a.atttypid)) ORDER BY a.attnum), '[]')::text "
           "FROM pg_attribute a WHERE a.attrelid = %s::regclass AND a.attnum > 0")
 
@@ -377,9 +386,9 @@ def _fast_delta(conn, schema: str, table: str, known: Counter, select: str,
     ``t::text`` renders (a column added, dropped or retyped without a
     rewrite, an enum label renamed: ``_ATTRS``), a session rendering values
     differently from the base read (``_RENDER``), or an unchanged row whose
-    text no longer hashes as the base's: the canary for a rendering change
-    neither shows, such as an attribute added to a composite type, which
-    reaches every row holding a value of it.
+    text no longer hashes as the base's: a backstop for a rendering change
+    neither shows (a type's output function replaced), which no test can
+    stage without one of the other guards seeing it first.
 
     Freezing and wraparound cannot make a written row look like a base row:
     since PostgreSQL 9.4 freezing sets a flag and keeps the raw xmin, which

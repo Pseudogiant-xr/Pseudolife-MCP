@@ -145,7 +145,7 @@ def rich_base(monkeypatch):
         conn.execute("INSERT INTO dmoods VALUES (1, 'calm'), (2, 'busy')")
         conn.execute("CREATE TYPE pair AS (a INT, b TEXT)")
         conn.execute("CREATE TABLE pairs (id INT PRIMARY KEY, p pair)")
-        conn.execute("INSERT INTO pairs VALUES (1, '(1,x)'), (2, '(2,y)')")
+        conn.execute("INSERT INTO pairs VALUES (1, NULL), (2, '(2,y)'), (3, '(3,z)')")
     dbstate._BASE_HASHES.clear()
     monkeypatch.setenv(pgdisposable.BASE_ENV, name)
     yield name
@@ -247,7 +247,8 @@ def test_the_fast_delta_declines_a_rewritten_or_altered_table(rich_base):
             conn.execute("VACUUM FULL plain")
             conn.execute("ALTER TABLE tags ADD COLUMN extra INT DEFAULT 0")
             conn.execute("ALTER TYPE mood RENAME VALUE 'calm' TO 'still'")
-            # The table's own catalog rows stay; only the type's change.
+            # The table's own catalog rows stay; only the type's change, and
+            # the first row's NULL prints the same.
             conn.execute("ALTER TYPE pair ADD ATTRIBUTE c INT")
         deltas = _deltas(dsn)
         assert deltas["public.moods"][1][2]["count"] == 2  # no row hashes as the base's now
@@ -318,6 +319,13 @@ def test_a_frozen_base_still_tells_its_rows_from_new_ones(rich_base):
         with psycopg.connect(dsn, autocommit=True) as conn:
             conn.execute("INSERT INTO docs VALUES (101, 'frozen', 2.5)")
             conn.execute("VACUUM (FREEZE) docs")
+            # Frozen only if no open transaction on the shared bench held
+            # the horizon back: relfrozenxid passed the new row's xmin.
+            frozen = conn.execute(
+                "SELECT (SELECT relfrozenxid FROM pg_class WHERE oid = 'docs'::regclass)::text::bigint "
+                "> xmin::text::bigint FROM docs WHERE id = 101").fetchone()[0]
+        if not frozen:
+            pytest.skip("an open transaction on the bench kept VACUUM FREEZE from freezing the row")
         assert _agree(dsn)["public.docs"] == {"rows": [[101, "frozen", 2.5]], "missing": 0}
     finally:
         pg.drop(copy)

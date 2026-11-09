@@ -111,14 +111,26 @@ def test_an_untouched_copy_dumps_no_board_rows(copy):
     assert set(state["base_missing"]) == set(run.BOARD_TABLES)
 
 
-def test_new_rewritten_and_deleted_base_rows_show(copy):
+def test_new_rewritten_and_deleted_base_rows_show(copy, monkeypatch):
+    """The board's dump, with its own session settings, takes the fast
+    delta for every table, and it shows new, rewritten and deleted base
+    rows."""
     import psycopg
     dsn = copy("boardedit")
     with psycopg.connect(dsn, autocommit=True) as conn:
         conn.execute("UPDATE coordination_events SET payload = %s WHERE seq = 2", (CANONICAL,))
         conn.execute("DELETE FROM coordination_events WHERE seq = 3")
         _insert(conn, _event(4, "x" * 64, CANONICAL, time.time()))
+    answered, real = [], dbstate._fast_delta
+
+    def fast(*args):
+        got = real(*args)
+        if got is not None:
+            answered.append(args[2])
+        return got
+    monkeypatch.setattr(dbstate, "_fast_delta", fast)
     state = run.dump(dsn)
+    assert sorted(answered) == sorted(run.BOARD_TABLES), "the board's dump declined the fast delta"
     assert sorted(r["seq"] for r in state["coordination_events"]) == [2, 4]
     rewritten = next(r for r in state["coordination_events"] if r["seq"] == 2)
     assert rewritten["payload"] == CANONICAL and rewritten["created_at"] == OLD + 2
