@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "rust",
+  "before": "544f258782233c6a",
+  "fingerprint": "937c44bd577a2c11",
+  "reason": "Adds rust/daemon/harness/test_real_bank_timer_env.py (5 pure env-assembly tests, under 1 s) to the existing contract-inventory pytest step; no new job, step or setup."
+}
