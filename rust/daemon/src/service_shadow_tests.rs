@@ -597,31 +597,20 @@ async fn world_status(shadow: &Shadow, entity_norm: &str) -> Vec<(String, String
 }
 
 /// A legacy world restore whose COMMIT reply was lost: the bank holds the
-/// restore, the resident store is undone to retired, and the slot keeps the
-/// dirty mark it had before the restore. The autosave must not flush that
-/// slot before the commit-unknown re-read (which the next call runs) has
-/// replaced the resident stores, or it writes the retired state over the
-/// restore that committed.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn db_autosave_waits_for_the_commit_unknown_reread() {
-    use crate::background::Duties;
-    let Some(dsn) = test_dsn() else { return };
-    let Some(model) = fixture_model() else { return };
-    let _guard = DB.lock().await;
-    let _flag = crate::txn::tests::TESTS.lock().await;
-    crate::txn::set_commit_outcome_unknown_for_test(false);
-    let shadow = Shadow::open_writer(&dsn, &model).await;
-    let ready = shadow.service.ensure_init_inner().await.unwrap();
+/// restore (`acme`/`ceo` current), the resident store is undone to retired,
+/// and the slot keeps the dirty mark it had before the restore; the
+/// commit-unknown flag is set. The caller holds `txn::tests::TESTS`.
+async fn undone_committed_restore(shadow: &Shadow, ready: &Ready) {
     // A retired value, saved.
     ready.world.write(|s| {
         s.write_fact("acme", "ceo", "jane", None, &world_write(1000.0));
         s.retire("acme", Some("ceo"), 1500.0);
     });
-    crate::world_tools::save_world(&shadow.service, &ready)
+    crate::world_tools::save_world(&shadow.service, ready)
         .await
         .unwrap();
     assert_eq!(
-        world_status(&shadow, "acme").await,
+        world_status(shadow, "acme").await,
         vec![("jane".into(), "retired".into())]
     );
     // The slot is dirty before the restore (an earlier save of it failed).
@@ -645,6 +634,25 @@ async fn db_autosave_waits_for_the_commit_unknown_reread() {
     crate::txn::set_commit_outcome_unknown_for_test(true);
     ready.world.write(|s| s.undo_restore(&marks));
     assert!(ready.world.snapshot().dirty_slots.contains(&key));
+}
+
+/// A legacy world restore whose COMMIT reply was lost: the bank holds the
+/// restore, the resident store is undone to retired, and the slot keeps the
+/// dirty mark it had before the restore. The autosave must not flush that
+/// slot before the commit-unknown re-read (which the next call runs) has
+/// replaced the resident stores, or it writes the retired state over the
+/// restore that committed.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn db_autosave_waits_for_the_commit_unknown_reread() {
+    use crate::background::Duties;
+    let Some(dsn) = test_dsn() else { return };
+    let Some(model) = fixture_model() else { return };
+    let _guard = DB.lock().await;
+    let _flag = crate::txn::tests::TESTS.lock().await;
+    crate::txn::set_commit_outcome_unknown_for_test(false);
+    let shadow = Shadow::open_writer(&dsn, &model).await;
+    let ready = shadow.service.ensure_init_inner().await.unwrap();
+    undone_committed_restore(&shadow, &ready).await;
     // An autosave tick before the next call.
     let _ = shadow.service.autosave().await;
     assert_eq!(
@@ -704,5 +712,39 @@ async fn db_autosave_retries_a_failed_world_save() {
     );
     assert!(ready.world.snapshot().dirty_slots.is_empty());
     drop(ready);
+    shadow.close().await;
+}
+
+/// The sweep's compaction honours the same commit-unknown barrier as the
+/// autosave: the sweep drops the service lock after its init, so a write
+/// can lose its COMMIT before the compaction runs, and saving the stores'
+/// dirty slots then writes the undone restore over the committed one.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn db_compaction_waits_for_the_commit_unknown_reread() {
+    let Some(dsn) = test_dsn() else { return };
+    let Some(model) = fixture_model() else { return };
+    let _guard = DB.lock().await;
+    let _flag = crate::txn::tests::TESTS.lock().await;
+    crate::txn::set_commit_outcome_unknown_for_test(false);
+    let shadow = Shadow::open_writer(&dsn, &model).await;
+    let ready = shadow.service.ensure_init_inner().await.unwrap();
+    undone_committed_restore(&shadow, &ready).await;
+    // A compaction that purges nothing still saves any dirty slot.
+    shadow.service.compact_superseded(&ready, 1000, 1.0e9).await;
+    assert_eq!(
+        world_status(&shadow, "acme").await,
+        vec![("jane".into(), "current".into())],
+        "the compaction wrote the undone resident slot over the committed restore"
+    );
+    assert!(crate::txn::commit_outcome_unknown());
+    let after = shadow.service.ensure_init_inner().await.unwrap();
+    assert!(!crate::txn::commit_outcome_unknown());
+    shadow.service.compact_superseded(&after, 1000, 1.0e9).await;
+    assert_eq!(
+        world_status(&shadow, "acme").await,
+        vec![("jane".into(), "current".into())]
+    );
+    crate::txn::set_commit_outcome_unknown_for_test(false);
+    drop((ready, after));
     shadow.close().await;
 }

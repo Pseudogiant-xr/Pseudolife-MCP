@@ -1086,6 +1086,16 @@ impl Service {
         // also retries them: a purge whose save failed would otherwise come
         // back at restart.
         let _write = ready.write.lock().await;
+        // The commit-unknown barrier `save_dirty_canonical` honours: the
+        // sweep released the service lock after its init, so a write may
+        // have lost its COMMIT reply since, leaving resident slots the bank
+        // has moved past (an undone legacy restore that committed). Nothing
+        // is compacted or saved until the next call's re-read; a store's
+        // save below can lose its own reply, so the later stores check again.
+        let barrier = crate::txn::commit_outcome_unknown;
+        if barrier() {
+            return;
+        }
         let facts = ready.cortex.write(|s| s.compact(keep, min_age, now));
         if (facts > 0 || !ready.cortex.snapshot().dirty_slots.is_empty())
             && let Err(e) = crate::fact_set::save_cortex(self, ready).await
@@ -1094,12 +1104,14 @@ impl Service {
         }
         let world_facts = ready.world.write(|s| s.compact(keep, min_age, now));
         if (world_facts > 0 || !ready.world.snapshot().dirty_slots.is_empty())
+            && !barrier()
             && let Err(e) = crate::world_tools::save_world(self, ready).await
         {
             eprintln!("compaction: world cortex save failed: {e:?}");
         }
         let lessons = ready.lessons.write(|s| s.compact(keep, min_age, now));
         if (lessons > 0 || !ready.lessons.snapshot().dirty_slots.is_empty())
+            && !barrier()
             && let Err(e) = crate::forget_tools::save_lessons(self, ready).await
         {
             eprintln!("compaction: lesson store save failed: {e:?}");
