@@ -1892,10 +1892,27 @@ def rust_env(extra: dict[str, str]) -> dict[str, str]:
     return out
 
 
+def real_bank_env() -> dict[str, str]:
+    """On a copy of a real bank (PL_HARNESS_BASE_DATABASE), the daemons'
+    background timers are put out of reach. Their ticks come one interval
+    after each daemon starts, not at any step, and on a real copy they did
+    work inside one arm's dumps and not the other's (forced run 8eb08c214,
+    daemon box, 2026-11-09):
+    - the idle-session reaper (300 s) closed real idle sessions and empty
+      roots on Rust's arm only;
+    - Python's autosave (30 s) re-saved still-dirty cortex slots, each save
+      re-inserting the slot's rows, so its facts_id_seq ran one ahead.
+    A scenario that drives either timer sets its own interval, which wins."""
+    if not os.environ.get("PL_HARNESS_BASE_DATABASE"):
+        return {}
+    return {"PSEUDOLIFE_SESSION_REAP_SECONDS": "86400", "PSEUDOLIFE_MCP_AUTOSAVE_SECONDS": "86400"}
+
+
 def common_env(scn: Scenario, dsn: str) -> dict[str, str]:
     env = {"PSEUDOLIFE_RELEASE_CHECK": "0", "PSEUDOLIFE_PLUGIN_DIR": str(REPO / "plugin")}
     if dsn:
         env["PSEUDOLIFE_MCP_DATABASE_URL"] = dsn
+    env.update(real_bank_env())
     env.update(scn.env)
     return env
 

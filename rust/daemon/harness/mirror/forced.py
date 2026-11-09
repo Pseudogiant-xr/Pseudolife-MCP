@@ -26,6 +26,7 @@ holds the differences, which quote bank text, and stays on the host.
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import os
 import re
@@ -152,26 +153,148 @@ def outcome(exit_code: int | None, log: str) -> dict:
     return {"status": status, "diffs": diffs, "error_tail": tail}
 
 
+# The other suites' lines: board STATE (after step N (label): table: ...),
+# board CHAIN (side: key: ...), routes DB (a leading /rows/... path), w2d
+# fields (public.table[i].field: python ... vs rust ...), w2d coverage
+# (coverage name: a < b), scenario errors (scenario error: ['Type: ...
+# (case 'x'; at file:N in fn)']) and case lines (case: ['item', ...], board's
+# as "#N name: [...]"), where each printed item is a place of its own. Indexes
+# are masked, and no value reaches a signature.
+HEAD = re.compile(r"^(?:DB )?(?:DIFF|STATE|CHAIN) \[[^\]]*\] ?")
+AFTER_STEP = re.compile(r"^after step (\d+) \([^)]*\): (\w+):")
+CHAIN_KEY = re.compile(r"^(python|rust): (\w+): value ")
+LEADING_PATH = re.compile(r"^(/[^\s:]+)")
+FIELD = re.compile(r"^([\w.\[\]\-]+): (?:python |only in |[\d.]+ <)")
+COVERAGE = re.compile(r"^coverage ([\w.]+): ")
+ERROR = re.compile(r"^scenario error: \[['\"](\w+)")
+ERROR_WHERE = re.compile(r"\((case (?:'[^']*'|\"[^\"]*\"); )?at ([\w.]+):\d+ in (\w+)\)")
+CASE = re.compile(r"^([^:\[\]'\"]{1,80}): (\[.*\])$", re.S)
+ITEM_PATH = re.compile(r"^(\.?[\w.\[\]\-]+): ")
+INDEX = re.compile(r"\[\d+\]")
+# w2e lines: "DIFF [s] step N <json.dumps(op)[:90]>: <diff>"; _w2e_diff
+# finds where the printed op ends.
+W2E_STEP = re.compile(r"^(?:DB )?DIFF \[[^\]]*\] step (\d+) ")
+OP_CUT = 90  # w2e prints json.dumps(op)[:90]
+W2E_EXPECT = re.compile(r"^expect (python|rust): (.*)$", re.S)
+W2E_DB_PATH = re.compile(r"^(?:db )?(/[^\s:]+)")
+DIFF_PATH = re.compile(r"^(?:db )?[\w.\[\]\-]+$")
+# Literals in an expect's SQL: quoted strings and standalone numbers, not the
+# digits inside identifiers (e2.id, a _v2 column).
+SQL_VALUE = re.compile(r"'(?:[^']|'')*'|(?<![\w.])-?\d+(?:\.\d+)?(?![\w.])")
+
+
+RAW_PATH = re.compile(r"^raw (\S+?): ")
+SIDE = re.compile(r"^(python|rust): ")
+BARE_VALUE = re.compile(r"'[^']*'|\"[^\"]*\"|\S*\d\S*|\b(?:true|false|null|None)\b")
+
+
+def _item_place(item) -> str:
+    """One printed case item's place: its path or key; for run.py's "raw
+    <path>: ..." checks, that path; else its side and its words up to the
+    first ": " (after which a value follows), numbers, quoted text and bare
+    true/false/null removed."""
+    text = str(item)
+    m = RAW_PATH.match(text)
+    if m:
+        return "raw " + INDEX.sub("[]", m.group(1))
+    m = ITEM_PATH.match(text)
+    if m and m.group(1) not in ("python", "rust"):
+        return INDEX.sub("[]", m.group(1))
+    side = SIDE.match(text)
+    body = text[side.end():] if side else text
+    words = BARE_VALUE.sub("", body.split(": ", 1)[0]).split()
+    return " ".join(([side.group(1)] if side else []) + words[:12]) or "<item>"
+
+
+def _w2e_diff(body: str) -> str | None:
+    """The diff after a w2e line's printed op (json.dumps(op)[:90]): an op
+    that decodes whole ends where the decoder stops; one that does not was
+    cut, so the diff starts after its 90 characters. Decoding, not a colon
+    search, because the op's own strings may hold ": " (a stored note)."""
+    try:
+        _, end = json.JSONDecoder().raw_decode(body)
+    except ValueError:
+        end = OP_CUT
+    return body[end + 2:] if body[end:end + 2] == ": " else None
+
+
+def _w2e_place(diff: str) -> str:
+    """A w2e diff's place: an expect's side and query without its literals,
+    a db path, or the text before its first ": " (a response or table path
+    as printed, else its words with values removed)."""
+    m = W2E_EXPECT.match(diff)
+    if m:
+        return f"expect {m.group(1)} " + " ".join(SQL_VALUE.sub("", m.group(2)).split())[:160]
+    m = W2E_DB_PATH.match(diff)
+    if m:
+        return m.group(1)
+    head = diff.split(": ", 1)[0]
+    if DIFF_PATH.match(head):
+        return INDEX.sub("[]", head)
+    return " ".join(BARE_VALUE.sub("", head).split()[:12]) or "<diff>"
+
+
+def _places(line: str) -> list[tuple[str, str]]:
+    rest = HEAD.sub("", line, count=1)
+    m = W2E_STEP.match(line)
+    if m:
+        diff = _w2e_diff(line[m.end():])
+        if diff is not None:
+            return [(m.group(1), _w2e_place(diff))]
+    step, where = STEP.search(line), LOCATION.search(line)
+    m = ERROR.match(rest)
+    if m:
+        # The printed list escapes quotes; decode it so the location reads
+        # the same whatever the message's own quoting.
+        try:
+            printed = ast.literal_eval(rest[len("scenario error: "):])
+            text = printed[0] if isinstance(printed, list) and printed else rest
+        except (ValueError, SyntaxError):
+            text = rest
+        at = ERROR_WHERE.search(str(text))
+        return [("", f"scenario error {m.group(1)}"
+                 + (f" {at.group(1) or ''}{at.group(2)} {at.group(3)}" if at else ""))]
+    for pattern, build in (
+            (AFTER_STEP, lambda m: (m.group(1), m.group(2))),
+            (CHAIN_KEY, lambda m: ("", f"chain {m.group(1)} {m.group(2)}")),
+            (LEADING_PATH, lambda m: ("", m.group(1))),
+            (COVERAGE, lambda m: ("", "coverage " + m.group(1))),
+            (FIELD, lambda m: ("", m.group(1)))):
+        m = pattern.match(rest)
+        if m:
+            s, w = build(m)
+            return [(s, INDEX.sub("[]", w))]
+    m = CASE.match(rest)
+    if m:
+        try:
+            items = ast.literal_eval(m.group(2))
+        except (ValueError, SyntaxError):
+            items = None
+        if isinstance(items, list) and items:
+            return [(m.group(1), _item_place(i)) for i in items]
+    return [(step.group(1) if step else "", where.group(1) if where else line[:120])]
+
+
 def signatures(result: dict) -> set:
-    """Each difference's (step, path)."""
-    out = set()
-    for line in result["diffs"]:
-        step, where = STEP.search(line), LOCATION.search(line)
-        out.add((step.group(1) if step else "", where.group(1) if where else line[:120]))
-    return out
+    """Each difference's (step or case, place): the state or response path,
+    never a value. A case line gives one place per printed item."""
+    return {p for line in result["diffs"] for p in _places(line)}
 
 
 def classify(first: dict, retry: dict | None, synthetic: dict | None) -> str:
-    """``preexisting`` only when the synthetic run differs in the same place:
-    an unrelated synthetic failure does not excuse a real-bank difference."""
+    """``preexisting`` only when the synthetic run differs in every place the
+    real bank does: an unrelated synthetic failure does not excuse a
+    real-bank difference, and neither does one shared place excuse the
+    others (conductor decision, 2026-11-10)."""
     if first["status"] == "pass":
         return "pass"
     if retry is not None and retry["status"] == "pass":
         return "transient"
     if first["status"] == "error" and (retry is None or retry["status"] == "error"):
         return "error"  # no comparison completed: never a pass, never preexisting
+    places = signatures(first)
     if synthetic is not None and synthetic["status"] == "diff" \
-            and signatures(first) & signatures(synthetic):
+            and places and places <= signatures(synthetic):  # an empty set excuses nothing
         return "preexisting"
     return "new"
 

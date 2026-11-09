@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -106,6 +107,172 @@ def test_preexisting_needs_the_synthetic_run_to_differ_in_the_same_place():
     assert forced.classify(real, real, broken) == "new"  # an unrelated synthetic failure excuses nothing
     # A scenario no attempt could compare is an error, never preexisting or a pass.
     assert forced.classify(broken, broken, broken) == "error"
+
+
+# The other suites' line formats (forced run, daemon box, 2026-11-09): each
+# pair differs only in values and list indexes, so it is the same place.
+SAME_PLACE = {
+    "w2d db field": (
+        "DB DIFF [default] public.retrieval_events[3].served[0].components.ce: python NoneType null vs rust float 0.12",
+        "DB DIFF [default] public.retrieval_events[1].served[2].components.ce: python NoneType null vs rust float 0.5"),
+    "w2d case": (
+        "DIFF [rrf-pool] rrf 3: ['.entries[0].score: python 0.5 vs rust 0.6', '.entries[1].id: python 7 vs rust 8']",
+        "DIFF [rrf-pool] rrf 3: ['.entries[4].score: python 0.1 vs rust 0.2', '.entries[2].id: python 1 vs rust 9']"),
+    "w2d coverage": ("DB DIFF [mcp-stats] coverage stats.graduation: 1 < 3",
+                     "DB DIFF [mcp-stats] coverage stats.graduation: 0 < 3"),
+    "board state": (
+        'STATE [wake] after step 13 (B to A anyone): coordination_wakes: row only in python: {"ring_at": "T13+30"}',
+        'STATE [wake] after step 13 (B to A anyone): coordination_wakes: row only in rust: {"ring_at": "T13+60"}'),
+    "board chain": ("CHAIN [console] python: created_at: value 1794232544.5 does not match the captured clock windows",
+                    "CHAIN [console] python: created_at: value 12.0 does not match the captured clock windows"),
+    "routes db": ('DB DIFF [tokens] /rows/public.slot_reads/rows: row only in python: ["box", "count", 4, 1.5]',
+                  'DB DIFF [tokens] /rows/public.slot_reads/rows: row only in rust: ["box", "count", 4, 2.5]'),
+    "routes error": ("DIFF [stamped] scenario error: ['ForeignKeyViolation: key (name)=(uses) (at run.py:12 in x)']",
+                     "DIFF [stamped] scenario error: ['ForeignKeyViolation: key (name)=(other) (at run.py:12 in x)']"),
+    "board step": ("DIFF [identity] #3 register: ['.json.agent_id: python 1 vs rust 2', '.headers.content-type: a vs b']",
+                   "DIFF [identity] #3 register: ['.headers.content-type: c vs d', '.json.agent_id: python 5 vs rust 6']"),
+    "w2d status": ("DIFF [mcp-get] get 2: ['status: python 200 vs rust 500', 'body bytes differ']",
+                   "DIFF [mcp-get] get 2: ['status: python 404 vs rust 200', 'body bytes differ']"),
+}
+# Near misses: another field, case, step, table, clock, path or error type.
+ELSEWHERE = {
+    "w2d db field": "DB DIFF [default] public.retrieval_events[3].served[0].components.dense: python 0.4 vs rust 0.5",
+    "w2d case": "DIFF [rrf-pool] rrf 4: ['.entries[0].score: python 0.5 vs rust 0.6']",
+    "w2d coverage": "DB DIFF [mcp-stats] coverage trace.reranker_fired: 1 < 3",
+    "board state": 'STATE [wake] after step 28 (B to A anyone): coordination_wakes: row only in rust: {"ring_at": "T28+0"}',
+    "board chain": "CHAIN [console] python: acquired_at: value 12.0 does not match the captured clock windows",
+    "routes db": 'DB DIFF [tokens] /rows/public.retrieval_events/rows: row only in rust: [1, "probe"]',
+    "routes error": "DIFF [stamped] scenario error: ['DuplicateTable: relation already exists (at run.py:9 in x)']",
+    "board step": "DIFF [identity] #4 register: ['.json.agent_id: python 1 vs rust 2']",
+    "w2d status": "DIFF [mcp-get] get 2: ['content-type: a vs b']",
+}
+
+
+def test_each_case_item_is_a_place_of_its_own():
+    """Review (Opus): a case line took only its first item's dotted path, so
+    its other items had no place of their own. Every printed item counts,
+    keys with a hyphen and items that are not paths included. (classify()
+    calls a scenario preexisting only when every place is on the synthetic arm.)"""
+    real = {"status": "diff", "diffs": [
+        "DIFF [mcp-get] get 2: ['status: python 200 vs rust 500', '.json.total: python 1 vs rust 2']"]}
+    synthetic = {"status": "diff", "diffs": ["DIFF [mcp-get] get 2: ['.json.total: python 3 vs rust 4']"]}
+    assert ("get 2", "status") in forced.signatures(real)
+    assert forced.classify(real, real, synthetic) == "new"   # status is not on the synthetic arm
+    alone = {"status": "diff", "diffs": ["DIFF [mcp-get] get 2: ['status: python 200 vs rust 500']"]}
+    assert forced.classify(alone, alone, synthetic) == "new"           # status is not shared
+
+
+def test_a_new_place_does_not_hide_behind_a_shared_one():
+    """Conductor decision, 2026-11-10: preexisting only when every real-bank
+    place is also on the synthetic arm. Sharing one place used to excuse
+    every other difference the real bank showed."""
+    shared = 'DIFF [store-reaper] step 1 {"op": "tool"}: db /rows/public.episodes/rows: row only in python: [1]'
+    extra = 'DIFF [store-reaper] step 3 {"op": "tool"}: db /rows/public.facts/rows: row only in rust: [2]'
+    real = {"status": "diff", "diffs": [shared, extra]}
+    synthetic = {"status": "diff", "diffs": [shared.replace("[1]", "[9]")]}
+    assert forced.classify(real, real, synthetic) == "new"
+    # The near miss: every real place on the synthetic arm (which may differ
+    # in more places) is preexisting.
+    wider = {"status": "diff", "diffs": [shared, extra, 'DIFF [store-reaper] step 4 {}: db /rows/public.meta/rows: x']}
+    assert forced.classify(real, real, wider) == "preexisting"
+
+
+def test_a_scenario_error_keeps_its_harness_location():
+    """Review (Opus): the same exception type raised elsewhere in the
+    harness is another place."""
+    one = {"status": "diff", "diffs": [
+        "DIFF [stamped] scenario error: " + repr(["KeyError: x (case 'seed'; at run.py:12 in prepare_template)"])]}
+    other = {"status": "diff", "diffs": [
+        "DIFF [stamped] scenario error: ['KeyError: y (at run.py:40 in run_scenario)']"]}
+    assert forced.classify(one, one, other) == "new"
+    assert forced.signatures(one) == {("", "scenario error KeyError case 'seed'; run.py prepare_template")}
+    quoted = {"status": "diff", "diffs": [
+        "DIFF [stamped] scenario error: " + repr(["KeyError: x (case \"it's\"; at run.py:12 in prepare_template)"])]}
+    assert forced.signatures(quoted) == {("", "scenario error KeyError case \"it's\"; run.py prepare_template")}
+    # Review (Codex): a message with double quotes makes repr escape the
+    # apostrophes around the case; the location must read the same.
+    plain, dq = ({"status": "diff", "diffs": ["DIFF [stamped] scenario error: " + repr(
+        [f"UndefinedTable: relation {name} (case 'seed'; at run.py:12 in prepare_template)"])]}
+        for name in ("missing", '"missing"'))
+    assert forced.signatures(plain) == forced.signatures(dq)
+    assert forced.classify(plain, plain, dq) == "preexisting"
+
+
+def test_side_items_and_long_items_keep_what_tells_them_apart():
+    """Review (Opus): "python: ..." items took the side as their key, and a
+    four-word cap merged items differing later (run.py's future-schema
+    refusal checks name the header last)."""
+    a = {"status": "diff", "diffs": ["DIFF [schema] refusal: " + repr(
+        ["python: stats clock 5 outside window", "future-schema refusal has incorrect content-type"])]}
+    b = {"status": "diff", "diffs": ["DIFF [schema] refusal: " + repr(
+        ["python: snapshot_at 3 outside window", "future-schema refusal has incorrect cache-control"])]}
+    assert not forced.signatures(a) & forced.signatures(b)
+
+
+def test_a_raw_check_keeps_its_path_and_no_value():
+    """Review (Opus): run.py's "raw <path>: string not written as
+    json.dumps writes it: <first 80 characters>" fell to the word fallback,
+    whose longer cap could carry those characters (a cut quote is not
+    stripped). It keeps its path; text after a ": " never counts."""
+    line = "DIFF [w1a] stats: " + repr(['raw .json.text: string not written as json.dumps writes it: "half a quot'])
+    assert forced.signatures({"diffs": [line]}) == {("stats", "raw .json.text")}
+    words = "DIFF [w1a] stats: " + repr(["refusal body differs: Mostly Bank Words here", "flag is true"])
+    assert forced.signatures({"diffs": [words]}) == {("stats", "refusal body differs"), ("stats", "flag is")}
+
+
+def test_a_w2e_response_line_names_its_response_path_without_values():
+    """Review (Opus): w2e response lines fell back to their first 120
+    characters. With a long op that cut came before the response path, so
+    every response difference at a step was one place; with a short op it
+    carried the values. The place is now the step and the response path."""
+    short = 'DIFF [dream-rollback] step 19 {"op": "tool"}: .value.record.age: python "a" vs rust "b"'
+    long_op = json.dumps({"op": "tool", "name": "memory_fact_get", "args": {"entity": "Bob", "attribute": "drink"}})
+    long = f'DIFF [dream-rollback] step 19 {long_op[:90]}: .value.record.age: python "x" vs rust "y"'
+    assert forced.signatures({"diffs": [short]}) == forced.signatures({"diffs": [long]})         == {("19", ".value.record.age")}
+    other = f'DIFF [dream-rollback] step 19 {long_op[:90]}: .value.record.value: python "x" vs rust "y"'
+    assert forced.signatures({"diffs": [other]}) != forced.signatures({"diffs": [long]})
+
+
+def test_a_w2e_db_field_line_names_its_field_without_values():
+    line = 'DIFF [recall] step 9 {"op": "tool"}: db retrieval_events[3].served[0].components.surprise: python 1 vs rust 2'
+    same = 'DIFF [recall] step 9 {"op": "tool"}: db retrieval_events[1].served[2].components.surprise: python 7 vs rust 8'
+    assert forced.signatures({"diffs": [line]}) == forced.signatures({"diffs": [same]})         == {("9", "db retrieval_events[].served[].components.surprise")}
+
+
+def test_a_w2e_expect_line_names_its_side_and_query_without_values():
+    line = 'DIFF [s] step 3 {"op": "tool", "name": "memory_dream"}: expect python: SELECT count(*) = 4 FROM outcome_signals'
+    same = 'DIFF [s] step 3 {"op": "tool", "name": "memory_dream"}: expect python: SELECT count(*) = 9 FROM outcome_signals'
+    assert forced.signatures({"diffs": [line]}) == forced.signatures({"diffs": [same]})         == {("3", "expect python SELECT count(*) = FROM outcome_signals")}
+
+
+def test_a_new_response_path_does_not_hide_behind_a_shared_one():
+    shared = 'DIFF [s] step 2 {"op": "tool"}: .value.a: python 1 vs rust 2'
+    new_path = 'DIFF [s] step 2 {"op": "tool"}: .value.b: python 1 vs rust 2'
+    real = {"status": "diff", "diffs": [shared, new_path]}
+    assert forced.classify(real, real, {"status": "diff", "diffs": [shared]}) == "new"
+    assert forced.classify(real, real, {"status": "diff", "diffs": [new_path, shared]}) == "preexisting"
+
+
+@pytest.mark.parametrize("kind", sorted(SAME_PLACE))
+def test_every_suites_lines_find_the_same_place_without_their_values(kind):
+    """w2d, board and routes lines held no step or db path that signatures()
+    read, so it fell back to the line's first 120 characters, values and all:
+    a synthetic arm differing in the same place never overlapped, and three
+    w2d scenarios read as new (forced run, 2026-11-09)."""
+    real, synthetic = ({"status": "diff", "diffs": [line]} for line in SAME_PLACE[kind])
+    assert forced.signatures(real) == forced.signatures(synthetic), kind
+    assert forced.classify(real, real, synthetic) == "preexisting", kind
+    elsewhere = {"status": "diff", "diffs": [ELSEWHERE[kind]]}
+    assert forced.classify(real, real, elsewhere) == "new", kind
+
+
+def test_a_signature_holds_no_value():
+    """Signatures name places, never values: no token in which a pair's two
+    lines differ (their values and indexes) reaches either signature."""
+    for kind, (real, synthetic) in SAME_PLACE.items():
+        a, b = (set(re.findall(r"[\w.]+", line)) for line in (real, synthetic))
+        places = " ".join(w for _, w in forced.signatures({"diffs": [real, synthetic]}))
+        assert not (a ^ b) & set(re.findall(r"[\w.]+", places)), kind
 
 
 def test_every_harness_summary_line_counts_and_progress_lines_do_not():
@@ -647,3 +814,56 @@ def test_an_empty_suites_refuses_instead_of_an_empty_complete_run(tmp_path, monk
     err = capsys.readouterr().err
     assert "--suites" in err and "omit --suites" in err
     assert not (tmp_path / "o").exists()
+
+
+def test_a_real_attempt_with_no_places_is_never_preexisting():
+    """An errored first attempt has no places, and the empty set is a subset
+    of any synthetic arm's: it must not read as preexisting."""
+    errored = {"status": "error", "diffs": [], "error_tail": ["x"]}
+    retried = {"status": "diff", "diffs": ["DIFF [s] step 1 {}: db /rows/public.facts/rows: x"]}
+    synthetic = {"status": "diff", "diffs": ["DIFF [s] step 1 {}: db /rows/public.facts/rows: y"]}
+    assert forced.classify(errored, retried, synthetic) == "new"
+
+
+@pytest.mark.parametrize("diff, place", [
+    ("entries[3].score: python 0.5 vs rust 0.6", "entries[].score"),
+    ("surprise: python 1 vs rust 2", "surprise"),
+    ("value.would_orphan: python true vs rust false", "value.would_orphan"),
+    ("db retrieval_events[2].served[0].components.bm25: python 1 vs rust 2",
+     "db retrieval_events[].served[].components.bm25"),
+    ("candidate generation python: bank 5, watermark 4", "candidate generation python"),
+])
+def test_every_w2e_diff_shape_names_its_place_without_values(diff, place):
+    """Review (Opus): compare_numeric, idle-clock, extractor, warmup and
+    fingerprint lines still fell back to their first 120 characters. Every
+    w2e diff now names the text before its first ": ", values removed."""
+    long_op = json.dumps({"op": "tool", "name": "memory_recall",
+                          "args": {"query": "a long query that runs past the ninety character cut", "top_k": 5}})
+    assert len(long_op) > 90
+    for op in ('{"op": "tool"}', long_op[:90]):
+        assert forced.signatures({"diffs": [f"DIFF [s] step 7 {op}: {diff}"]}) == {("7", place)}
+
+
+def test_an_expect_keeps_identifiers_and_drops_literals():
+    """Review (Opus): digits inside identifiers (e2.id) are part of the
+    query; quoted literals and numbers are values."""
+    line = ('DIFF [s] step 2 {"op": "sql"}: expect rust: SELECT count(*) = 3 FROM edges e2 '
+            "WHERE e2.id > 10 AND e2.kind = 'x'")
+    assert forced.signatures({"diffs": [line]}) == {
+        ("2", "expect rust SELECT count(*) = FROM edges e2 WHERE e2.id > AND e2.kind =")}
+
+
+def test_an_op_whose_text_holds_a_colon_still_finds_its_diff():
+    """Review (Opus): the colon search took ": t" inside a stored note
+    ("Completely unrelated: the tea kettle ...", w2e.py) for the start of the
+    diff, so every difference at that step was one place. The printed op is
+    now decoded to find where it ends, whole or cut at 90 characters."""
+    short = json.dumps({"op": "tool", "name": "memory_store", "args": {"text": "unrelated: the kettle"}})
+    long_op = json.dumps({"op": "tool", "name": "memory_store",
+                          "args": {"text": "Completely unrelated: the tea kettle whistles at six every morning"}})
+    assert len(short) <= 90 < len(long_op)
+    for op in (short, long_op[:90]):
+        one = f"DIFF [store] step 4 {op}: .value.stored: python true vs rust false"
+        two = f"DIFF [store] step 4 {op}: .value.id: python 1 vs rust 2"
+        assert forced.signatures({"diffs": [one]}) == {("4", ".value.stored")}
+        assert forced.signatures({"diffs": [one]}) != forced.signatures({"diffs": [two]})
