@@ -167,7 +167,27 @@ def test_no_other_column_or_field_is_loosened():
     assert a["rows"]["public.retrieval_events"]["rows"][0][2][0]["components"]["dense"] == 0.3
 
 
-def test_the_route_and_w2e_comparisons_share_the_tolerance():
+def test_w2e_events_keep_their_score_tolerance():
+    """Review (Opus): comparing the two modules' constants could not fail
+    once w2e aliased them. This pins w2e's own behaviour: a score inside the
+    tolerance compares equal, one ten times outside it differs."""
     import w2e
-    assert w2e.EVENT_SCORE_TOL == dbstate.EVENT_SCORE_TOL
-    assert w2e.EVENT_FLOAT_KEYS == dbstate.EVENT_FLOAT_KEYS
+    tol = dbstate.EVENT_SCORE_TOL
+    assert w2e.events_diff(_events(0.3), _events(0.3 + tol / 2)) == []
+    assert w2e.events_diff(_events(0.3), _events(0.3 + tol * 10))
+
+
+def test_the_route_harness_passes_each_arms_window_to_normalize(monkeypatch):
+    """Review (Opus): passing no windows would keep every other test green."""
+    import run
+    seen = []
+    monkeypatch.setattr(dbstate, "normalize",
+                        lambda state, rules, before, windows=None: seen.append(windows) or state)
+
+    class Plain(run.Scenario):
+        pass
+
+    scn = Plain()
+    scn.clock_windows = {"python": [(1.0, 2.0)], "rust": [(3.0, 4.0)]}
+    scn.normalize_db({}, {}, "rust")
+    assert seen == [[(3.0, 4.0)]]
