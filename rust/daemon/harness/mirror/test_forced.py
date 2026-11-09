@@ -823,3 +823,31 @@ def test_a_real_attempt_with_no_places_is_never_preexisting():
     retried = {"status": "diff", "diffs": ["DIFF [s] step 1 {}: db /rows/public.facts/rows: x"]}
     synthetic = {"status": "diff", "diffs": ["DIFF [s] step 1 {}: db /rows/public.facts/rows: y"]}
     assert forced.classify(errored, retried, synthetic) == "new"
+
+
+@pytest.mark.parametrize("diff, place", [
+    ("entries[3].score: python 0.5 vs rust 0.6", "entries[].score"),
+    ("surprise: python 1 vs rust 2", "surprise"),
+    ("value.would_orphan: python true vs rust false", "value.would_orphan"),
+    ("db retrieval_events[2].served[0].components.bm25: python 1 vs rust 2",
+     "db retrieval_events[].served[].components.bm25"),
+    ("fingerprint differs for 3 rows", "fingerprint differs for rows"),
+])
+def test_every_w2e_diff_shape_names_its_place_without_values(diff, place):
+    """Review (Opus): compare_numeric, idle-clock, extractor, warmup and
+    fingerprint lines still fell back to their first 120 characters. Every
+    w2e diff now names the text before its first ": ", values removed."""
+    long_op = json.dumps({"op": "tool", "name": "memory_recall",
+                          "args": {"query": "a long query that runs past the ninety character cut", "top_k": 5}})
+    assert len(long_op) > 90
+    for op in ('{"op": "tool"}', long_op[:90]):
+        assert forced.signatures({"diffs": [f"DIFF [s] step 7 {op}: {diff}"]}) == {("7", place)}
+
+
+def test_an_expect_keeps_identifiers_and_drops_literals():
+    """Review (Opus): digits inside identifiers (e2.id) are part of the
+    query; quoted literals and numbers are values."""
+    line = ('DIFF [s] step 2 {"op": "sql"}: expect rust: SELECT count(*) = 3 FROM edges e2 '
+            "WHERE e2.id > 10 AND e2.kind = 'x'")
+    assert forced.signatures({"diffs": [line]}) == {
+        ("2", "expect rust SELECT count(*) = FROM edges e2 WHERE e2.id > AND e2.kind =")}

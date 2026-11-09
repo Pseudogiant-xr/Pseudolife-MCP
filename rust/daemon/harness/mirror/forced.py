@@ -171,11 +171,18 @@ ERROR_WHERE = re.compile(r"\((case (?:'[^']*'|\"[^\"]*\"); )?at ([\w.]+):\d+ in 
 CASE = re.compile(r"^([^:\[\]'\"]{1,80}): (\[.*\])$", re.S)
 ITEM_PATH = re.compile(r"^(\.?[\w.\[\]\-]+): ")
 INDEX = re.compile(r"\[\d+\]")
-# w2e response lines: "step N <json.dumps(op)[:90]>: <diff>". Inside the op
-# every ": " is followed by a quote, brace or digit, so the first ": .path:"
-# or ": expect <side>:" within 90 characters of the step starts the diff.
-W2E_RESPONSE = re.compile(r"\] step (\d+) .{0,90}?: (\.[\w.\[\]\-]+|db [\w.\[\]\-]+): ")
-W2E_EXPECT = re.compile(r"\] step (\d+) .{0,90}?: expect (python|rust): (.*)$", re.S)
+# w2e lines: "DIFF [s] step N <json.dumps(op)[:90]>: <diff>". Outside its
+# strings, every ": " inside the op is followed by a JSON value (a quote,
+# brace, bracket, number, true, false or null), so the first ": " within 90
+# characters of the step that is not starts the diff.
+W2E_DIFF = re.compile(r"^(?:DB )?DIFF \[[^\]]*\] step (\d+) .{0,90}?: "
+                      r"(?![\"{\[]|-?\d|(?:true|false|null)\b)(.*)$", re.S)
+W2E_EXPECT = re.compile(r"^expect (python|rust): (.*)$", re.S)
+W2E_DB_PATH = re.compile(r"^(?:db )?(/[^\s:]+)")
+DIFF_PATH = re.compile(r"^(?:db )?[\w.\[\]\-]+$")
+# Literals in an expect's SQL: quoted strings and standalone numbers, not the
+# digits inside identifiers (e2.id, a _v2 column).
+SQL_VALUE = re.compile(r"'(?:[^']|'')*'|(?<![\w.])-?\d+(?:\.\d+)?(?![\w.])")
 
 
 RAW_PATH = re.compile(r"^raw (\S+?): ")
@@ -201,18 +208,28 @@ def _item_place(item) -> str:
     return " ".join(([side.group(1)] if side else []) + words[:12]) or "<item>"
 
 
+def _w2e_place(diff: str) -> str:
+    """A w2e diff's place: an expect's side and query without its literals,
+    a db path, or the text before its first ": " (a response or table path
+    as printed, else its words with values removed)."""
+    m = W2E_EXPECT.match(diff)
+    if m:
+        return f"expect {m.group(1)} " + " ".join(SQL_VALUE.sub("", m.group(2)).split())[:160]
+    m = W2E_DB_PATH.match(diff)
+    if m:
+        return m.group(1)
+    head = diff.split(": ", 1)[0]
+    if DIFF_PATH.match(head):
+        return INDEX.sub("[]", head)
+    return " ".join(BARE_VALUE.sub("", head).split()[:12]) or "<diff>"
+
+
 def _places(line: str) -> list[tuple[str, str]]:
     rest = HEAD.sub("", line, count=1)
+    m = W2E_DIFF.match(line)
+    if m:
+        return [(m.group(1), _w2e_place(m.group(2)))]
     step, where = STEP.search(line), LOCATION.search(line)
-    if step and where:  # w2e: step N {op}: db /path
-        return [(step.group(1), where.group(1))]
-    m = W2E_EXPECT.search(line)
-    if m:
-        sql = " ".join(BARE_VALUE.sub("", m.group(3)).split())[:160]
-        return [(m.group(1), f"expect {m.group(2)} {sql}")]
-    m = W2E_RESPONSE.search(line)
-    if m:
-        return [(m.group(1), INDEX.sub("[]", m.group(2)))]
     m = ERROR.match(rest)
     if m:
         # The printed list escapes quotes; decode it so the location reads
