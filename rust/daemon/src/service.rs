@@ -1089,9 +1089,11 @@ impl Service {
         // The commit-unknown barrier `save_dirty_canonical` honours: the
         // sweep released the service lock after its init, so a write may
         // have lost its COMMIT reply since, leaving resident slots the bank
-        // has moved past (an undone legacy restore that committed). Nothing
-        // is compacted or saved until the next call's re-read; a store's
-        // save below can lose its own reply, so the later stores check again.
+        // has moved past (an undone legacy restore that committed). No store
+        // is compacted or saved while it is: checked here and again before
+        // each later store, since a store's save below can lose its own reply,
+        // and a store compacted but not saved would show readers a purge the
+        // bank never got until the next call's re-read.
         let barrier = crate::txn::commit_outcome_unknown;
         if barrier() {
             return;
@@ -1102,20 +1104,28 @@ impl Service {
         {
             eprintln!("compaction: cortex save failed: {e:?}");
         }
-        let world_facts = ready.world.write(|s| s.compact(keep, min_age, now));
-        if (world_facts > 0 || !ready.world.snapshot().dirty_slots.is_empty())
-            && !barrier()
-            && let Err(e) = crate::world_tools::save_world(self, ready).await
-        {
-            eprintln!("compaction: world cortex save failed: {e:?}");
-        }
-        let lessons = ready.lessons.write(|s| s.compact(keep, min_age, now));
-        if (lessons > 0 || !ready.lessons.snapshot().dirty_slots.is_empty())
-            && !barrier()
-            && let Err(e) = crate::forget_tools::save_lessons(self, ready).await
-        {
-            eprintln!("compaction: lesson store save failed: {e:?}");
-        }
+        let world_facts = if barrier() {
+            0
+        } else {
+            let purged = ready.world.write(|s| s.compact(keep, min_age, now));
+            if (purged > 0 || !ready.world.snapshot().dirty_slots.is_empty())
+                && let Err(e) = crate::world_tools::save_world(self, ready).await
+            {
+                eprintln!("compaction: world cortex save failed: {e:?}");
+            }
+            purged
+        };
+        let lessons = if barrier() {
+            0
+        } else {
+            let purged = ready.lessons.write(|s| s.compact(keep, min_age, now));
+            if (purged > 0 || !ready.lessons.snapshot().dirty_slots.is_empty())
+                && let Err(e) = crate::forget_tools::save_lessons(self, ready).await
+            {
+                eprintln!("compaction: lesson store save failed: {e:?}");
+            }
+            purged
+        };
         let total = facts + world_facts + lessons;
         if total > 0 {
             eprintln!(

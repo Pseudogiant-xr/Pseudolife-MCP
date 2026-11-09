@@ -748,3 +748,124 @@ async fn db_compaction_waits_for_the_commit_unknown_reread() {
     drop((ready, after));
     shadow.close().await;
 }
+
+/// The sweep's compaction when the cortex save loses its COMMIT reply
+/// mid-tick: the world and lesson stores are neither compacted nor saved
+/// after it, so no reader sees a purge the bank never got and nothing is
+/// written before the re-read. The reply is lost for real: a deferred
+/// constraint trigger on `facts` refuses the COMMIT, and any COMMIT error
+/// leaves the outcome unknown (`txn::run`).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn db_compaction_stops_after_a_save_loses_its_commit() {
+    let Some(dsn) = test_dsn() else { return };
+    let Some(model) = fixture_model() else { return };
+    let _guard = DB.lock().await;
+    let _flag = crate::txn::tests::TESTS.lock().await;
+    crate::txn::set_commit_outcome_unknown_for_test(false);
+    let shadow = Shadow::open_writer(&dsn, &model).await;
+    let ready = shadow.service.ensure_init_inner().await.unwrap();
+    // A retired world value and a retired lesson, saved: both are purged by
+    // a compaction that keeps no non-live record.
+    ready.world.write(|s| {
+        s.write_fact("acme", "ceo", "jane", None, &world_write(1000.0));
+        s.retire("acme", Some("ceo"), 1500.0);
+    });
+    crate::world_tools::save_world(&shadow.service, &ready)
+        .await
+        .unwrap();
+    let lesson = crate::stores::lessons::LessonWrite {
+        about: None,
+        outcome: "success",
+        polarity: "+",
+        confidence: 0.6,
+        origin: Some("agent"),
+        provenance: &[],
+        support: &[],
+        now: 1000.0,
+        hlc: Some((1_000_000, 0)),
+        valid_time: None,
+        writer_id: None,
+        session_id: None,
+    };
+    ready.lessons.write(|s| {
+        s.write_fact("deploy", "approach", "use the pipeline", None, &lesson);
+        s.retire("deploy", Some("approach"), 1500.0);
+    });
+    crate::forget_tools::save_lessons(&shadow.service, &ready)
+        .await
+        .unwrap();
+    // An unsaved cortex write, whose save the compaction makes.
+    let embedding: Arc<[f32]> = {
+        let mut v = vec![0.0f32; crate::bank::DIM];
+        v[0] = 1.0;
+        v.into()
+    };
+    ready
+        .cortex
+        .write(|s| {
+            s.write_fact(&crate::stores::cortex_write::FactWrite {
+                entity: "hostc",
+                attribute: "engine",
+                value: "sqlite",
+                raw: serde_json::Map::new(),
+                embedding: embedding.clone(),
+                slot_embedding: Some(embedding.clone()),
+                confidence: 1.0,
+                support: Some("user"),
+                now: 2000.0,
+                hlc: (2_000_000, 0),
+                writer_id: Some("autosave-test".into()),
+                session_id: None,
+                freshness_class: "evergreen".into(),
+                authority: crate::labels::Resolved::Inherit,
+                distortion_tolerance: crate::labels::Resolved::Inherit,
+                provenance: Vec::new(),
+                stance: None,
+                force_contend: false,
+                dream: false,
+            })
+        })
+        .unwrap();
+    shadow
+        .exec(
+            "CREATE FUNCTION autosave_test_refuse_commit() RETURNS trigger \
+             LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'refused at commit'; END $$; \
+             CREATE CONSTRAINT TRIGGER autosave_test_refuse_commit AFTER INSERT ON facts \
+             DEFERRABLE INITIALLY DEFERRED FOR EACH ROW \
+             EXECUTE FUNCTION autosave_test_refuse_commit();",
+        )
+        .await;
+    shadow.service.compact_superseded(&ready, 0, 0.0).await;
+    shadow
+        .exec(
+            "DROP TRIGGER autosave_test_refuse_commit ON facts; \
+             DROP FUNCTION autosave_test_refuse_commit();",
+        )
+        .await;
+    assert!(
+        crate::txn::commit_outcome_unknown(),
+        "the cortex save's refused COMMIT leaves the outcome unknown"
+    );
+    let world = ready.world.snapshot();
+    let lessons = ready.lessons.snapshot();
+    assert_eq!(
+        (world.records.len(), lessons.records.len()),
+        (1, 1),
+        "the world or lesson store was compacted after the cortex save lost its COMMIT"
+    );
+    assert!(world.dirty_slots.is_empty() && lessons.dirty_slots.is_empty());
+    assert_eq!(
+        world_status(&shadow, "acme").await,
+        vec![("jane".into(), "retired".into())]
+    );
+    let lesson_rows: i64 = shadow
+        .side
+        .query_one("SELECT count(*) FROM lessons", &[])
+        .await
+        .unwrap()
+        .get(0);
+    assert_eq!(lesson_rows, 1);
+    crate::txn::set_commit_outcome_unknown_for_test(false);
+    drop((world, lessons, ready));
+    shadow.close().await;
+}
