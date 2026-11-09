@@ -399,7 +399,12 @@ def test_a_sweep_must_write_its_own_tombstone_on_a_bank_that_has_some(inherited)
     snapshot["rows"]["public.meta"]["rows"] = inherited_meta()
     with pytest.raises(RuntimeError, match="did not persist a tombstone"):
         scenario.validate_expected(snapshot)
-    meta_of(snapshot)["episode_tombstones"][NEW_ROOT] = {"ended_at": 100.0}
+    # Review (Opus): a new tombstone of the base's own expired deferred root
+    # is not the scenario's; only its empty session's tombstone counts.
+    meta_of(snapshot)["episode_tombstones"]["o" * 32] = {"ended_at": 5.0, "session_key": "older"}
+    with pytest.raises(RuntimeError, match="did not persist a tombstone"):
+        scenario.validate_expected(snapshot)
+    meta_of(snapshot)["episode_tombstones"][NEW_ROOT] = {"ended_at": 100.0, "session_key": "empty"}
     scenario.validate_expected(snapshot)
 
 

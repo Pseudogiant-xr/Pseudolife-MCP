@@ -1183,8 +1183,9 @@ class StampedBank(Scenario):
             conn.execute("UPDATE meta SET value = '\"x\"'::jsonb WHERE key = 'writer_lease_epoch'")
             # A tripwire: initialization would seed this relation again.
             tripwire = unreferenced_builtin_relation(conn)
-            if tripwire is not None:
-                conn.execute("DELETE FROM relations WHERE name = %s", (tripwire,))
+            if tripwire is None:  # without it the scenario would test less, silently
+                raise RuntimeError("stamped: every builtin relation is referenced; no tripwire to delete")
+            conn.execute("DELETE FROM relations WHERE name = %s", (tripwire,))
 
     def cases(self):
         c = case("health on stamped bank", "GET", "/health")

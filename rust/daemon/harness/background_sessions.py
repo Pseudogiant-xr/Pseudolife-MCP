@@ -180,10 +180,14 @@ svc._storage.close()
                     raise RuntimeError("reaper changed child attribution")
             meta = {row[0]: row[1] for row in state["rows"]["public.meta"]["rows"]}
             if self.sweep:
-                # A real bank's copy already holds tombstones: one must be new.
+                # A real bank's copy already holds tombstones, and a sweep also
+                # tombstones its expired deferred roots: the new one must be
+                # this scenario's own empty session's.
                 old = (prior_close_maps(state, self.before)["episode_tombstones"]
                        if hasattr(self, "before") else {})
-                if not set(meta.get("episode_tombstones") or {}) - set(old):
+                tombs = meta.get("episode_tombstones") or {}
+                if not any(isinstance(tombs[k], dict) and tombs[k].get("session_key") == "empty"
+                           for k in set(tombs) - set(old)):
                     raise RuntimeError("empty sweep did not persist a tombstone")
 
     class SessionSweep(SessionReap):
