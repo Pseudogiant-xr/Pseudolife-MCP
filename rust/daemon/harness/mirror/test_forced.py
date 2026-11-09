@@ -220,11 +220,37 @@ def test_a_raw_check_keeps_its_path_and_no_value():
     assert forced.signatures({"diffs": [words]}) == {("stats", "refusal body differs"), ("stats", "flag is")}
 
 
-def test_a_w2e_response_line_keeps_its_old_signature():
-    """w2e response differences carry no db path: their signature is still
-    the step and the line's first 120 characters, as before."""
-    line = 'DIFF [dream-rollback] step 19 {"op": "tool"}: .value.record.age: python "a" vs rust "b"'
-    assert forced.signatures({"diffs": [line]}) == {("19", line[:120])}
+def test_a_w2e_response_line_names_its_response_path_without_values():
+    """Review (Opus): w2e response lines fell back to their first 120
+    characters. With a long op that cut came before the response path, so
+    every response difference at a step was one place; with a short op it
+    carried the values. The place is now the step and the response path."""
+    short = 'DIFF [dream-rollback] step 19 {"op": "tool"}: .value.record.age: python "a" vs rust "b"'
+    long_op = json.dumps({"op": "tool", "name": "memory_fact_get", "args": {"entity": "Bob", "attribute": "drink"}})
+    long = f'DIFF [dream-rollback] step 19 {long_op[:90]}: .value.record.age: python "x" vs rust "y"'
+    assert forced.signatures({"diffs": [short]}) == forced.signatures({"diffs": [long]})         == {("19", ".value.record.age")}
+    other = f'DIFF [dream-rollback] step 19 {long_op[:90]}: .value.record.value: python "x" vs rust "y"'
+    assert forced.signatures({"diffs": [other]}) != forced.signatures({"diffs": [long]})
+
+
+def test_a_w2e_db_field_line_names_its_field_without_values():
+    line = 'DIFF [recall] step 9 {"op": "tool"}: db retrieval_events[3].served[0].components.surprise: python 1 vs rust 2'
+    same = 'DIFF [recall] step 9 {"op": "tool"}: db retrieval_events[1].served[2].components.surprise: python 7 vs rust 8'
+    assert forced.signatures({"diffs": [line]}) == forced.signatures({"diffs": [same]})         == {("9", "db retrieval_events[].served[].components.surprise")}
+
+
+def test_a_w2e_expect_line_names_its_side_and_query_without_values():
+    line = 'DIFF [s] step 3 {"op": "tool", "name": "memory_dream"}: expect python: SELECT count(*) = 4 FROM outcome_signals'
+    same = 'DIFF [s] step 3 {"op": "tool", "name": "memory_dream"}: expect python: SELECT count(*) = 9 FROM outcome_signals'
+    assert forced.signatures({"diffs": [line]}) == forced.signatures({"diffs": [same]})         == {("3", "expect python SELECT count(*) = FROM outcome_signals")}
+
+
+def test_a_new_response_path_does_not_hide_behind_a_shared_one():
+    shared = 'DIFF [s] step 2 {"op": "tool"}: .value.a: python 1 vs rust 2'
+    new_path = 'DIFF [s] step 2 {"op": "tool"}: .value.b: python 1 vs rust 2'
+    real = {"status": "diff", "diffs": [shared, new_path]}
+    assert forced.classify(real, real, {"status": "diff", "diffs": [shared]}) == "new"
+    assert forced.classify(real, real, {"status": "diff", "diffs": [new_path, shared]}) == "preexisting"
 
 
 @pytest.mark.parametrize("kind", sorted(SAME_PLACE))

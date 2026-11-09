@@ -171,6 +171,11 @@ ERROR_WHERE = re.compile(r"\((case (?:'[^']*'|\"[^\"]*\"); )?at ([\w.]+):\d+ in 
 CASE = re.compile(r"^([^:\[\]'\"]{1,80}): (\[.*\])$", re.S)
 ITEM_PATH = re.compile(r"^(\.?[\w.\[\]\-]+): ")
 INDEX = re.compile(r"\[\d+\]")
+# w2e response lines: "step N <json.dumps(op)[:90]>: <diff>". Inside the op
+# every ": " is followed by a quote, brace or digit, so the first ": .path:"
+# or ": expect <side>:" within 90 characters of the step starts the diff.
+W2E_RESPONSE = re.compile(r"\] step (\d+) .{0,90}?: (\.[\w.\[\]\-]+|db [\w.\[\]\-]+): ")
+W2E_EXPECT = re.compile(r"\] step (\d+) .{0,90}?: expect (python|rust): (.*)$", re.S)
 
 
 RAW_PATH = re.compile(r"^raw (\S+?): ")
@@ -201,6 +206,13 @@ def _places(line: str) -> list[tuple[str, str]]:
     step, where = STEP.search(line), LOCATION.search(line)
     if step and where:  # w2e: step N {op}: db /path
         return [(step.group(1), where.group(1))]
+    m = W2E_EXPECT.search(line)
+    if m:
+        sql = " ".join(BARE_VALUE.sub("", m.group(3)).split())[:160]
+        return [(m.group(1), f"expect {m.group(2)} {sql}")]
+    m = W2E_RESPONSE.search(line)
+    if m:
+        return [(m.group(1), INDEX.sub("[]", m.group(2)))]
     m = ERROR.match(rest)
     if m:
         # The printed list escapes quotes; decode it so the location reads
