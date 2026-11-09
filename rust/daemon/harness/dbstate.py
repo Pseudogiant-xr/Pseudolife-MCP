@@ -447,8 +447,8 @@ def _fast_delta(conn, schema: str, table: str, known: Counter, select: str,
             f"coalesce(array_agg(ARRAY[ctid::text, md5(t::text)]) "
             f"FILTER (WHERE NOT xmin = ANY(%(old)s::xid[])), '{{}}'), "
             f"({_RENDER}), (SELECT pg_relation_filenode(%(rel)s::regclass)), ({_ATTRS}), "
-            f"(SELECT ARRAY[c.ctid::text, c.xmin::text, md5(c::text)] FROM {rel} c "
-            f"WHERE c.xmin = ANY(%(old)s::xid[]) LIMIT 1) FROM {rel} t",
+            f"(SELECT ARRAY[t.ctid::text, t.xmin::text, md5(t::text)] FROM {rel} t "
+            f"WHERE t.xmin = ANY(%(old)s::xid[]) LIMIT 1) FROM {rel} t",
             {"old": old, "rel": _regclass(schema, table)}).fetchone()
         if render != _BASE_RENDER.get(base):
             return None
