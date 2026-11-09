@@ -171,12 +171,10 @@ ERROR_WHERE = re.compile(r"\((case (?:'[^']*'|\"[^\"]*\"); )?at ([\w.]+):\d+ in 
 CASE = re.compile(r"^([^:\[\]'\"]{1,80}): (\[.*\])$", re.S)
 ITEM_PATH = re.compile(r"^(\.?[\w.\[\]\-]+): ")
 INDEX = re.compile(r"\[\d+\]")
-# w2e lines: "DIFF [s] step N <json.dumps(op)[:90]>: <diff>". Outside its
-# strings, every ": " inside the op is followed by a JSON value (a quote,
-# brace, bracket, number, true, false or null), so the first ": " within 90
-# characters of the step that is not starts the diff.
-W2E_DIFF = re.compile(r"^(?:DB )?DIFF \[[^\]]*\] step (\d+) .{0,90}?: "
-                      r"(?![\"{\[]|-?\d|(?:true|false|null)\b)(.*)$", re.S)
+# w2e lines: "DIFF [s] step N <json.dumps(op)[:90]>: <diff>"; _w2e_diff
+# finds where the printed op ends.
+W2E_STEP = re.compile(r"^(?:DB )?DIFF \[[^\]]*\] step (\d+) ")
+OP_CUT = 90  # w2e prints json.dumps(op)[:90]
 W2E_EXPECT = re.compile(r"^expect (python|rust): (.*)$", re.S)
 W2E_DB_PATH = re.compile(r"^(?:db )?(/[^\s:]+)")
 DIFF_PATH = re.compile(r"^(?:db )?[\w.\[\]\-]+$")
@@ -208,6 +206,18 @@ def _item_place(item) -> str:
     return " ".join(([side.group(1)] if side else []) + words[:12]) or "<item>"
 
 
+def _w2e_diff(body: str) -> str | None:
+    """The diff after a w2e line's printed op (json.dumps(op)[:90]): an op
+    that decodes whole ends where the decoder stops; one that does not was
+    cut, so the diff starts after its 90 characters. Decoding, not a colon
+    search, because the op's own strings may hold ": " (a stored note)."""
+    try:
+        _, end = json.JSONDecoder().raw_decode(body)
+    except ValueError:
+        end = OP_CUT
+    return body[end + 2:] if body[end:end + 2] == ": " else None
+
+
 def _w2e_place(diff: str) -> str:
     """A w2e diff's place: an expect's side and query without its literals,
     a db path, or the text before its first ": " (a response or table path
@@ -226,9 +236,11 @@ def _w2e_place(diff: str) -> str:
 
 def _places(line: str) -> list[tuple[str, str]]:
     rest = HEAD.sub("", line, count=1)
-    m = W2E_DIFF.match(line)
+    m = W2E_STEP.match(line)
     if m:
-        return [(m.group(1), _w2e_place(m.group(2)))]
+        diff = _w2e_diff(line[m.end():])
+        if diff is not None:
+            return [(m.group(1), _w2e_place(diff))]
     step, where = STEP.search(line), LOCATION.search(line)
     m = ERROR.match(rest)
     if m:

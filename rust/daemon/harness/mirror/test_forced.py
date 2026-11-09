@@ -831,7 +831,7 @@ def test_a_real_attempt_with_no_places_is_never_preexisting():
     ("value.would_orphan: python true vs rust false", "value.would_orphan"),
     ("db retrieval_events[2].served[0].components.bm25: python 1 vs rust 2",
      "db retrieval_events[].served[].components.bm25"),
-    ("fingerprint differs for 3 rows", "fingerprint differs for rows"),
+    ("candidate generation python: bank 5, watermark 4", "candidate generation python"),
 ])
 def test_every_w2e_diff_shape_names_its_place_without_values(diff, place):
     """Review (Opus): compare_numeric, idle-clock, extractor, warmup and
@@ -851,3 +851,19 @@ def test_an_expect_keeps_identifiers_and_drops_literals():
             "WHERE e2.id > 10 AND e2.kind = 'x'")
     assert forced.signatures({"diffs": [line]}) == {
         ("2", "expect rust SELECT count(*) = FROM edges e2 WHERE e2.id > AND e2.kind =")}
+
+
+def test_an_op_whose_text_holds_a_colon_still_finds_its_diff():
+    """Review (Opus): the colon search took ": t" inside a stored note
+    ("Completely unrelated: the tea kettle ...", w2e.py) for the start of the
+    diff, so every difference at that step was one place. The printed op is
+    now decoded to find where it ends, whole or cut at 90 characters."""
+    short = json.dumps({"op": "tool", "name": "memory_store", "args": {"text": "unrelated: the kettle"}})
+    long_op = json.dumps({"op": "tool", "name": "memory_store",
+                          "args": {"text": "Completely unrelated: the tea kettle whistles at six every morning"}})
+    assert len(short) <= 90 < len(long_op)
+    for op in (short, long_op[:90]):
+        one = f"DIFF [store] step 4 {op}: .value.stored: python true vs rust false"
+        two = f"DIFF [store] step 4 {op}: .value.id: python 1 vs rust 2"
+        assert forced.signatures({"diffs": [one]}) == {("4", ".value.stored")}
+        assert forced.signatures({"diffs": [one]}) != forced.signatures({"diffs": [two]})
