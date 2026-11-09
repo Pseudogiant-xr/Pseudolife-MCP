@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "rust",
+  "before": "937c44bd577a2c11",
+  "fingerprint": "e03a7a511b2bf9f6",
+  "reason": "Adds rust/daemon/harness/test_w2e_real_bank_expects.py to the existing board/mirror harness step: 5 disposable-database tests that skip on hosted runners without the bench login (under 1 s there), about 3 s against a local bench PostgreSQL; no new job, step or setup."
+}

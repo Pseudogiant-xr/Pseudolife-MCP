@@ -27,7 +27,7 @@ def register(harness):
         def normalize_db(self, state, before, side):
             clocks = {**harness.DB_NONDETERMINISTIC,
                       ("entries", "ts"): "clock: store timestamp"}
-            return harness.dbstate.normalize(state, clocks, before)
+            return harness.dbstate.normalize(state, clocks, before, windows=self.clock_window(side))
 
         def timeline(self, procs, holders):
             import psycopg

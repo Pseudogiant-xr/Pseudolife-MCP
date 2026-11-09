@@ -157,7 +157,8 @@ svc._storage.close()
 
         def normalize_db(self, state, before, side):
             return dbstate.normalize(normalize_closes(state, before, self.starts[side], time.time()),
-                                     harness.DB_NONDETERMINISTIC, before)
+                                     harness.DB_NONDETERMINISTIC, before,
+                                     windows=self.clock_window(side))
 
         def validate_expected(self, state):
             table = state["rows"]["public.episodes"]

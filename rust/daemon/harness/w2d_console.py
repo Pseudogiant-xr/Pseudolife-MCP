@@ -122,7 +122,7 @@ IDLE_BOUND_S = 10.0
 _base_compare = w2e.compare_response
 
 
-def compare_response(py, rs, tol, stats) -> list[str]:
+def compare_response(py, rs, tol, stats, ages=None) -> list[str]:
     out = []
 
     def dream(r):
@@ -154,7 +154,7 @@ def compare_response(py, rs, tol, stats) -> list[str]:
             homes.append(v["config_path"])
     if homes and not all(str(h) == "<home>/data/config.yaml" for h in homes):
         out.append(f"config_path: python/rust {homes!r} not each side's data/config.yaml")
-    return out + _base_compare(py, rs, tol, stats)
+    return out + _base_compare(py, rs, tol, stats, ages)
 
 
 BACKUP = re.compile(r".+[\\/]config\.yaml\.\d{8}-\d{6}\.[a-z0-9_]{8}\.bak")

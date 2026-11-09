@@ -44,7 +44,7 @@ def register(harness):
         def normalize_db(self, state, before, side):
             clocks = {**harness.DB_NONDETERMINISTIC,
                       ("retrieval_events", "created_at"): "clock: per retrieval event"}
-            return harness.dbstate.normalize(state, clocks, before)
+            return harness.dbstate.normalize(state, clocks, before, windows=self.clock_window(side))
 
         def timeline(self, procs, holders):
             sessions = {side: Session(proc.port, harness.T_DEFAULT) for side, proc in procs.items()}
