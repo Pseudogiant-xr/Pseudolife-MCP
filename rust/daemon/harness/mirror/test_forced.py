@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -106,6 +107,61 @@ def test_preexisting_needs_the_synthetic_run_to_differ_in_the_same_place():
     assert forced.classify(real, real, broken) == "new"  # an unrelated synthetic failure excuses nothing
     # A scenario no attempt could compare is an error, never preexisting or a pass.
     assert forced.classify(broken, broken, broken) == "error"
+
+
+# The other suites' line formats (forced run, daemon box, 2026-11-09): each
+# pair differs only in values and list indexes, so it is the same place.
+SAME_PLACE = {
+    "w2d db field": (
+        "DB DIFF [default] public.retrieval_events[3].served[0].components.ce: python NoneType null vs rust float 0.12",
+        "DB DIFF [default] public.retrieval_events[1].served[2].components.ce: python NoneType null vs rust float 0.5"),
+    "w2d case": (
+        "DIFF [rrf-pool] rrf 3: ['.entries[0].score: python 0.5 vs rust 0.6', '.entries[1].id: python 7 vs rust 8']",
+        "DIFF [rrf-pool] rrf 3: ['.entries[4].score: python 0.1 vs rust 0.2']"),
+    "w2d coverage": ("DB DIFF [mcp-stats] coverage stats.graduation: 1 < 3",
+                     "DB DIFF [mcp-stats] coverage stats.graduation: 0 < 3"),
+    "board state": (
+        'STATE [wake] after step 13 (B to A anyone): coordination_wakes: row only in python: {"ring_at": "T13+30"}',
+        'STATE [wake] after step 13 (B to A anyone): coordination_wakes: row only in rust: {"ring_at": "T13+60"}'),
+    "board chain": ("CHAIN [console] python: created_at: value 1794232544.5 does not match the captured clock windows",
+                    "CHAIN [console] python: created_at: value 12.0 does not match the captured clock windows"),
+    "routes db": ('DB DIFF [tokens] /rows/public.slot_reads/rows: row only in python: ["box", "count", 4, 1.5]',
+                  'DB DIFF [tokens] /rows/public.slot_reads/rows: row only in rust: ["box", "count", 4, 2.5]'),
+    "routes error": ("DIFF [stamped] scenario error: ['ForeignKeyViolation: key (name)=(uses) (at run.py:12 in x)']",
+                     "DIFF [stamped] scenario error: ['ForeignKeyViolation: key (name)=(other) (at run.py:12 in x)']"),
+}
+# Near misses: another field, case, step, table, clock, path or error type.
+ELSEWHERE = {
+    "w2d db field": "DB DIFF [default] public.retrieval_events[3].served[0].components.dense: python 0.4 vs rust 0.5",
+    "w2d case": "DIFF [rrf-pool] rrf 4: ['.entries[0].score: python 0.5 vs rust 0.6']",
+    "w2d coverage": "DB DIFF [mcp-stats] coverage trace.reranker_fired: 1 < 3",
+    "board state": 'STATE [wake] after step 28 (B to A anyone): coordination_wakes: row only in rust: {"ring_at": "T28+0"}',
+    "board chain": "CHAIN [console] python: acquired_at: value 12.0 does not match the captured clock windows",
+    "routes db": 'DB DIFF [tokens] /rows/public.retrieval_events/rows: row only in rust: [1, "probe"]',
+    "routes error": "DIFF [stamped] scenario error: ['DuplicateTable: relation already exists (at run.py:9 in x)']",
+}
+
+
+@pytest.mark.parametrize("kind", sorted(SAME_PLACE))
+def test_every_suites_lines_find_the_same_place_without_their_values(kind):
+    """w2d, board and routes lines held no step or db path that signatures()
+    read, so it fell back to the line's first 120 characters, values and all:
+    a synthetic arm differing in the same place never overlapped, and three
+    w2d scenarios read as new (forced run, 2026-11-09)."""
+    real, synthetic = ({"status": "diff", "diffs": [line]} for line in SAME_PLACE[kind])
+    assert forced.signatures(real) == forced.signatures(synthetic), kind
+    assert forced.classify(real, real, synthetic) == "preexisting", kind
+    elsewhere = {"status": "diff", "diffs": [ELSEWHERE[kind]]}
+    assert forced.classify(real, real, elsewhere) == "new", kind
+
+
+def test_a_signature_holds_no_value():
+    """Signatures name places, never values: no token in which a pair's two
+    lines differ (their values and indexes) reaches either signature."""
+    for kind, (real, synthetic) in SAME_PLACE.items():
+        a, b = (set(re.findall(r"[\w.]+", line)) for line in (real, synthetic))
+        places = " ".join(w for _, w in forced.signatures({"diffs": [real, synthetic]}))
+        assert not (a ^ b) & set(re.findall(r"[\w.]+", places)), kind
 
 
 def test_every_harness_summary_line_counts_and_progress_lines_do_not():

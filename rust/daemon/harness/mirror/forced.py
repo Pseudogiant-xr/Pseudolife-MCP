@@ -152,13 +152,47 @@ def outcome(exit_code: int | None, log: str) -> dict:
     return {"status": status, "diffs": diffs, "error_tail": tail}
 
 
+# The other suites' lines: board STATE (after step N (label): table: ...),
+# board CHAIN (side: key: ...), routes DB (a leading /rows/... path), w2d
+# fields (public.table[i].field: python ... vs rust ...), w2d cases (case:
+# ['.path: ...', ...]), w2d coverage (coverage name: a < b) and scenario
+# errors (scenario error: ['Type: ...']). Indexes are masked, and no value
+# reaches a signature.
+HEAD = re.compile(r"^(?:DB )?(?:DIFF|STATE|CHAIN) \[[^\]]*\] ?")
+AFTER_STEP = re.compile(r"^after step (\d+) \([^)]*\): (\w+):")
+CHAIN_KEY = re.compile(r"^(?:python|rust): (\w+): value ")
+LEADING_PATH = re.compile(r"^(/[^\s:]+)")
+FIELD = re.compile(r"^([\w.\[\]]+): (?:python |only in |[\d.]+ <)")
+ERROR = re.compile(r"^scenario error: \[['\"](\w+)")
+COVERAGE = re.compile(r"^coverage ([\w.]+): ")
+CASE = re.compile(r"^([^:\[\]'\"]{1,80}): \[['\"](?:(\.[\w.\[\]]+):)?")
+INDEX = re.compile(r"\[\d+\]")
+
+
+def _place(line: str) -> tuple[str, str]:
+    rest = HEAD.sub("", line, count=1)
+    step, where = STEP.search(line), LOCATION.search(line)
+    if step and where:  # w2e: step N {op}: db /path
+        return step.group(1), where.group(1)
+    for pattern, build in (
+            (AFTER_STEP, lambda m: (m.group(1), m.group(2))),
+            (CHAIN_KEY, lambda m: ("", "chain " + m.group(1))),
+            (LEADING_PATH, lambda m: ("", m.group(1))),
+            (ERROR, lambda m: ("", "scenario error " + m.group(1))),
+            (COVERAGE, lambda m: ("", "coverage " + m.group(1))),
+            (FIELD, lambda m: ("", m.group(1))),
+            (CASE, lambda m: ("", m.group(1) + (" " + m.group(2) if m.group(2) else "")))):
+        m = pattern.match(rest)
+        if m:
+            s, w = build(m)
+            return s, INDEX.sub("[]", w)
+    return (step.group(1) if step else "", where.group(1) if where else line[:120])
+
+
 def signatures(result: dict) -> set:
-    """Each difference's (step, path)."""
-    out = set()
-    for line in result["diffs"]:
-        step, where = STEP.search(line), LOCATION.search(line)
-        out.add((step.group(1) if step else "", where.group(1) if where else line[:120]))
-    return out
+    """Each difference's (step, place): the step or case and the state or
+    response path, never a value."""
+    return {_place(line) for line in result["diffs"]}
 
 
 def classify(first: dict, retry: dict | None, synthetic: dict | None) -> str:
