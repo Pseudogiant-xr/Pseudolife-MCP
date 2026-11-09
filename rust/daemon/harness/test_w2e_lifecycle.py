@@ -289,6 +289,92 @@ def test_fact_answers_compare_clocks_by_presence_and_age_by_one_step(harness):
                                     answer(None, "just now", "just now"), {}, {})
 
 
+# A record's age on a real bank's copy, where the arms run minutes apart
+# (dream-rollback, dream-rollback-persistence; forced run).
+
+def fact_answer(age, asserted_at):
+    return {"isError": False, "value": {"contenders": [], "record": {
+        "age": age, "asserted_at": asserted_at, "attribute": "region", "entity": "Deploy Target",
+        "kind": "scalar", "value": "staging"}}}
+
+
+def clocks(anchor, start, end, asserted_at):
+    return {"window": (start, end), "anchors": {("staging", asserted_at): anchor}}
+
+
+def test_age_compares_against_each_arms_own_clock(harness):
+    """Python's arm wrote at 1000 and read at 1250 ("4 minutes ago"); Rust's
+    wrote at 1100 and read at 1260 ("2 minutes ago"). Each age is the
+    formatter's for its own record and window, so they compare equal."""
+    py, rs = fact_answer("4 minutes ago", 990.0), fact_answer("2 minutes ago", 1090.0)
+    ages = {"python": clocks(1000.0, 1249.0, 1251.0, 990.0),
+            "rust": clocks(1100.0, 1259.0, 1261.0, 1090.0)}
+    assert harness.compare_response(py, rs, {}, {}, ages=ages) == []
+    # Without the arms' clocks, two steps apart still differ.
+    assert harness.compare_response(py, rs, {}, {})
+
+
+@pytest.mark.parametrize("rust_age", [
+    "2 minute ago",     # malformed: the unit's plural is the formatter's
+    "120 seconds ago",  # a unit the formatter never writes
+    "0 minutes ago",    # "just now" below one minute
+    "60 minutes ago",   # "1 hour ago" from one hour
+    "3 days ago",       # well-formed, but older than its own record
+    "just now",         # well-formed, but younger than its own record
+])
+def test_a_malformed_or_implausible_age_still_differs(harness, rust_age):
+    py, rs = fact_answer("4 minutes ago", 990.0), fact_answer(rust_age, 1090.0)
+    ages = {"python": clocks(1000.0, 1249.0, 1251.0, 990.0),
+            "rust": clocks(1100.0, 1259.0, 1261.0, 1090.0)}
+    assert harness.compare_response(py, rs, {}, {}, ages=ages)
+
+
+def test_an_age_from_the_wrong_anchor_still_differs(harness):
+    """An age computed from ``asserted_at`` where the formatter uses the
+    record's ``tx_time`` (here 1100) is well-formed but not this record's."""
+    py, rs = fact_answer("4 minutes ago", 990.0), fact_answer("2 minutes ago", 990.0)
+    ages = {"python": clocks(1000.0, 1249.0, 1251.0, 990.0),
+            "rust": clocks(1100.0, 1259.0, 1261.0, 990.0)}
+    ages["rust"]["anchors"] = {("staging", 990.0): 1220.0}
+    assert harness.compare_response(py, rs, {}, {}, ages=ages)
+
+
+def test_set_members_and_removed_rows_compare_by_their_own_anchors(harness):
+    def member(age, at):
+        return {"age": age, "asserted_at": at, "kind": "member", "value": "signed tag"}
+
+    py = {"isError": False, "value": {"record": {"kind": "set", "members": [],
+                                                 "removed": [member("4 minutes ago", 990.0)]}}}
+    rs = {"isError": False, "value": {"record": {"kind": "set", "members": [],
+                                                 "removed": [member("2 minutes ago", 1090.0)]}}}
+    ages = {"python": {"window": (1249.0, 1251.0), "anchors": {("signed tag", 990.0): 1000.0}},
+            "rust": {"window": (1259.0, 1261.0), "anchors": {("signed tag", 1090.0): 1100.0}}}
+    assert harness.compare_response(py, rs, {}, {}, ages=ages) == []
+
+
+def test_age_anchors_read_each_facts_row_tx_time_or_asserted_at(harness):
+    raw = {"rows": {"public.facts": {
+        "columns": ["id", "value", "asserted_at", "tx_time"],
+        "rows": [[1, "staging", 990.0, 1000.0], [2, "eu-west", 995.0, None],
+                 # two rows the key cannot tell apart: no anchor
+                 [3, "dup", 5.0, 6.0], [4, "dup", 5.0, 7.0]]}}}
+    anchors = harness.age_anchors(raw)
+    assert anchors[("staging", 990.0)] == 1000.0
+    assert anchors[("eu-west", 995.0)] == 995.0
+    assert ("dup", 5.0) not in anchors
+    assert harness.age_anchors({"rows": {}}) == {}
+
+
+def test_the_console_harness_passes_the_arms_clocks_through(harness):
+    """w2d_console installs its own compare_response on w2e: the run loop's
+    clocks reach w2e's through it."""
+    import w2d_console
+    py, rs = fact_answer("4 minutes ago", 990.0), fact_answer("2 minutes ago", 1090.0)
+    ages = {"python": clocks(1000.0, 1249.0, 1251.0, 990.0),
+            "rust": clocks(1100.0, 1259.0, 1261.0, 1090.0)}
+    assert w2d_console.compare_response(py, rs, {}, {}, ages) == []
+    assert w2d_console.compare_response(py, rs, {}, {})
+
 def test_fact_set_scenarios_reach_every_declared_mutant(harness):
     names = [n for n in harness.SCENARIOS if n.startswith("fact-set-")]
     assert names, "no fact_set scenarios"
