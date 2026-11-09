@@ -6517,7 +6517,8 @@ def _run_live(name: str, scn: dict, tag: str, binary: Path, root: Path, record: 
         daemons.start_all(procs, 300)
         # Each arm's clock window opens at its daemon's first start (a
         # restart step moves started_at_unix) and closes after each dump.
-        first_start = {side: d.started_at_unix for side, d in procs.items()}
+        # A daemon with no start stamp (a test fake) gets no window: exact clocks.
+        first_start = {side: getattr(d, "started_at_unix", None) for side, d in procs.items()}
         w1a.wait_settled([d.port for d in procs.values()], token=TOKEN)
         warmup_diffs = wait_warmups(dsns, before) if warmup_expected(scn) else []
         clients = {side: Mcp(d.port) for side, d in procs.items()}
@@ -6585,13 +6586,15 @@ def _run_live(name: str, scn: dict, tag: str, binary: Path, root: Path, record: 
                     row["diffs"] += extractor_key_diffs(side, scn, sent[side])
             raw_py, raw_rs = dbstate.dump(dsns["python"]), dbstate.dump(dsns["rust"])
             dumped = time.time()
-            windows = {side: [(first_start[side], dumped)] for side in first_start}
+            # Not ``windows``: that is this step's call windows (record ages).
+            dump_windows = {side: ([(start, dumped)] if start is not None else None)
+                            for side, start in first_start.items()}
             for side, raw in (("python", raw_py), ("rust", raw_rs)):
                 answer = row.get(side) if op.get("name") == "memory_dream" else None
                 row["diffs"] += run_clock_diffs(side, raw, answer)
             tsm_py, tsm_rs = ts_tokens(raw_py), ts_tokens(raw_rs)
-            sp, np_, ep = normalize_state(raw_py, before["python"], tsm_py, windows["python"])
-            sr, nr, er = normalize_state(raw_rs, before["rust"], tsm_rs, windows["rust"])
+            sp, np_, ep = normalize_state(raw_py, before["python"], tsm_py, dump_windows["python"])
+            sr, nr, er = normalize_state(raw_rs, before["rust"], tsm_rs, dump_windows["rust"])
             if op["op"] != "init":
                 if op.get("name") == "memory_dream" or w2e_console_dream.is_dream(op):
                     row["diffs"] += idle_diffs(row["python"], row["rust"],

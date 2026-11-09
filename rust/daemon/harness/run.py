@@ -2167,7 +2167,8 @@ def _run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: bo
         daemons.start_all(procs, 240, stages=scn.start_stages)
         # Each arm's clock window opens at its daemon's first start (a
         # timeline restart moves started_at_unix) and closes after its dump.
-        first_start = {side: d.started_at_unix for side, d in procs.items()}
+        # A daemon with no start stamp (a test fake) gets no window: exact clocks.
+        first_start = {side: getattr(d, "started_at_unix", None) for side, d in procs.items()}
         settle_before_cases(scn, [d.port for d in procs.values()])
         rows = []
         golden_name = scn.name
@@ -2223,7 +2224,8 @@ def _run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: bo
         for side, name in sides.items():
             raw = dbstate.dump(pg.dsn(name))
             scn.clock_windows = {**(scn.clock_windows or {}),
-                                 side: [(first_start[side], time.time())]}
+                                 side: ([(first_start[side], time.time())]
+                                        if first_start.get(side) is not None else None)}
             out = scrub_declared_rows(raw, before)
             states[side] = scn.normalize_db(out["state"], before, side)
             scrubbed[side] = out["declared"]
