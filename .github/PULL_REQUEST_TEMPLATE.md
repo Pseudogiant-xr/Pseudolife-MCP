@@ -9,9 +9,8 @@ Title convention: type(scope): why it matters — not the mechanism.
   bad:  fix(dream): add non-blocking guard to dream_run
 -->
 
-## What and why
-
-<!-- The problem first, in one breath. Then the change. -->
+<!-- The problem first, in one breath. Then the change. This prose is the
+first thing a reader sees; no heading goes above it. -->
 
 ## Detail
 
@@ -28,6 +27,12 @@ and why, and its exit code:
   HF_HUB_OFFLINE=1 python -m pytest tests/test_<area>.py > /tmp/pytest-last.log 2>&1; echo $?
 Never pipe a test run through a pager — the pipe replaces the suite's exit
 code with the pager's.
+
+Then two fixed lines (CLAUDE.md "Running tests" and "Review discipline"):
+  Local full suite: not required under the ordinary-code rule
+      | required because <class>, passed at <head>
+  Reviews: <review pass>; Codex <short sha>, <n> findings, verdicts
+      | Codex skipped (docs-only / test-only)
 
 Contributing from a fork? Review passes (/code-review, reviewer subagents,
 the Codex second review) are the maintainer's to run; see "Contributing

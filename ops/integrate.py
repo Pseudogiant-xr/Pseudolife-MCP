@@ -2015,9 +2015,12 @@ def _refuse_unmergeable(plan: Plan, view: dict) -> None:
     red, waiting = _merge_checks(view.get("statusCheckRollup"))
     if red:
         raise Refusal(f"CI failed on #{n} at {plan.head[:12]}: {', '.join(red)}. Nothing "
-                      "is fixed inside a batch: rerun once only for the flake classes "
-                      "CLAUDE.md names (issues #830 and #855); otherwise drop the member "
-                      "the failing job covers, or bisect, then close the batch and build "
+                      "is fixed inside a batch: a Windows-only failure with a "
+                      "non-deterministic signature gets one rerun on the current merge "
+                      "ref naming the test and its flake issue (open one if none exists); "
+                      "a second or deterministic Windows-only failure goes to the Windows "
+                      "dev VM (CLAUDE.md \"Dev machines\"); otherwise drop the member the "
+                      "failing job covers, or bisect, then close the batch and build "
                       "again (docs/dev/merge-batches.md, \"Validating it\")")
     if waiting:
         raise Refusal(f"CI on #{n} has not finished ({', '.join(waiting)}); wait for "

@@ -217,12 +217,14 @@ doubled the wait.
 
 ## Building one
 
-Build a batch whenever no batch is open and at least one pull request is
-ready; a batch of one is how a lone pull request (an urgent fix, a revert,
-a red-master fix, a release cut) gets its full CI, since no pull request
-from any other branch is merged directly. One batch is open at a time;
-`build` and `open` refuse while any pull request from an `integrate/`
-branch is open.
+Build a batch when no batch is open and two or more pull requests are
+ready, or when a lone ready pull request has waited about one hour (one
+hosted-run cycle) or is urgent (a revert, a red-master fix) or a release
+cut, because a batch of one pays a full hour of hosted CI for one change
+and no pull request from any other branch is merged directly (maintainer
+decision 2026-11-09). One batch is open at a time; `build` and `open`
+refuse while any pull request from an `integrate/` branch is open, and
+`build` enforces only that none is open: the wait is policy.
 
 A release cut (a member whose own diff changes `project.version` in
 `pyproject.toml`) is batched alone: parity tests a cut against its own head
@@ -449,10 +451,12 @@ the push or `gh pr create` fails, nothing is commented on and rerunning
    run its members get: the Windows and macOS lite lanes, parity shards,
    clippy and fmt. Attribute the failing job to the member whose files it
    covers (`scope` in both workflows, `rust/ci/parity_scope.py` for a
-   parity shard). Rerun once only for the flake classes CLAUDE.md names
-   (issues #830 and #855), naming the issue on the batch pull request;
-   otherwise drop the attributed member with a comment, close the batch
-   and build again. If no member can be attributed, bisect by building
+   parity shard). A Windows-only failure with a non-deterministic
+   signature gets one rerun on the current merge ref, naming the test and
+   its flake issue (open one if none exists) on the batch pull request; a
+   second or deterministic Windows-only failure goes to the Windows dev VM
+   (CLAUDE.md "Dev machines"); otherwise drop the attributed member with a
+   comment, close the batch and build again. If no member can be attributed, bisect by building
    smaller batches.
 4. CI on the batch pull request is the combined check of its members and
    their only full CI; no member is ever merged directly. If master moves
