@@ -699,7 +699,11 @@ def test_the_digest_row_alone_is_not_a_community_difference(tmp_path):
     reason (betweenness-above-betweenness-sample.md) even when the two
     partitions agree, so a digest-only attempt stays new."""
     assert _community_rows(tmp_path, [DIGEST_PY, DIGEST_RS])["class"] == "new"
-    assert _community_rows(tmp_path, [MEMBERSHIP, DIGEST_PY, DIGEST_RS])["class"] == "accepted"
+    assert _community_rows(tmp_path / "m", [MEMBERSHIP, DIGEST_PY, DIGEST_RS])["class"] == "accepted"
+    # Each real attempt needs its own partition difference: a retry that
+    # differs only in the digest keeps the scenario new.
+    assert _community_rows(tmp_path / "r", [MEMBERSHIP, DIGEST_PY, DIGEST_RS],
+                           retry=[DIGEST_PY, DIGEST_RS])["class"] == "new"
 
 
 def test_the_summary_lists_the_accepted_divergences(tmp_path, monkeypatch):

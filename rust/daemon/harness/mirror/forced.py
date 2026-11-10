@@ -127,8 +127,9 @@ ACCEPTED_DIVERGENCES = {
         "real bank's copy Python re-partitions the copied communities after graph writes and Rust "
         "reproduces the base's. Accepted by the maintainer for real-bank arms, 2026-11-10 (D1); "
         "extended the same day to meta's graph_digest row beside a partition difference: the "
-        "snapshot _refresh_graph_insight writes with the partition, whose god_nodes also differ "
-        "by betweenness sampling (betweenness-above-betweenness-sample.md; partial run 870fb28fc)"),
+        "snapshot _refresh_graph_insight writes with the partition, whose god_nodes can also "
+        "differ by betweenness sampling above betweenness_sample nodes (betweenness-above-"
+        "betweenness-sample.md; partial run 870fb28fc)"),
 }
 COMMUNITY_TABLES = ("public.communities", "public.entity_communities")
 COMMUNITY_FIELDS = ("community", "communities")
