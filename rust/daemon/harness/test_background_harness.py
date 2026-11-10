@@ -514,6 +514,7 @@ def test_a_bank_that_held_a_graph_waits_for_the_dreams_graph_refresh(monkeypatch
     assert not graph_refresh_pending(without, before(), start)        # no graph: never waits
     held = before()
     held["rows"]["public.meta"]["rows"].append(["graph_digest", {"computed_at": 50.0}])
+    held["rows"]["public.edges"] = {"columns": ["id"], "rows": [[1]]}
     assert graph_refresh_pending(without, held, start)               # the digest not yet rewritten
     stale = state()
     stale["rows"]["public.meta"]["rows"].append(["graph_digest", {"computed_at": 50.0}])
@@ -524,8 +525,29 @@ def test_a_bank_that_held_a_graph_waits_for_the_dreams_graph_refresh(monkeypatch
     # Under a base, the digest row is the base's, so before leaves it out.
     monkeypatch.setattr(dbstate, "base_keys",
                         lambda qualified: {'"graph_digest"'} if qualified == "public.meta" else set())
+    assert not graph_refresh_pending(without, before(), start)       # ...with no edges left
+    monkeypatch.setattr(dbstate, "base_keys", lambda qualified: {
+        "public.meta": {'"graph_digest"'}, "public.edges": {"1"}}.get(qualified, set()))
     assert graph_refresh_pending(without, before(), start)
     assert not graph_refresh_pending(done, before(), start)
+
+
+def test_a_bank_with_a_digest_but_no_edges_never_waits_for_a_refresh(monkeypatch):
+    """Review (Codex P2): both daemons skip a graph with no edges
+    (empty_graph, before writing any digest), so a copy that kept its old
+    digest after its last edge was deleted would wait out the deadline."""
+    import dbstate
+    from background_sessions import graph_refresh_pending
+    held = before()
+    held["rows"]["public.meta"]["rows"].append(["graph_digest", {"computed_at": 50.0}])
+    assert not graph_refresh_pending(state(), held, 100.0)
+    edged = copy.deepcopy(held)
+    edged["rows"]["public.edges"] = {"columns": ["id", "src_id", "relation", "dst_id"], "rows": [[1, 1, "r", 2]]}
+    assert graph_refresh_pending(state(), edged, 100.0)
+    # Edges the arm's own state holds count too (a dump keeps new rows).
+    now = state()
+    now["rows"]["public.edges"] = edged["rows"]["public.edges"]
+    assert graph_refresh_pending(now, held, 100.0)
 
 
 def test_the_observed_banks_meta_rows_are_keyed_so_a_difference_names_its_row():

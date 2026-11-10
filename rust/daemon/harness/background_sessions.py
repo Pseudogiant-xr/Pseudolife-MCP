@@ -283,7 +283,11 @@ def graph_refresh_pending(state, before, start):
     is never refreshed, so a synthetic fixture never waits on this."""
     held = any(r[0] == "graph_digest" for r in before["rows"].get("public.meta", {}).get("rows", [])) \
         or json.dumps("graph_digest") in dbstate.base_keys("public.meta")
-    if not held:
+    # Both daemons skip a graph with no edges (empty_graph) before writing
+    # any digest, so a copy that kept its old digest waits for nothing.
+    edged = any(snapshot["rows"].get("public.edges", {}).get("rows") for snapshot in (before, state)) \
+        or bool(dbstate.base_keys("public.edges"))
+    if not (held and edged):
         return False
     digest = {r[0]: r[1] for r in state["rows"]["public.meta"]["rows"]}.get("graph_digest")
     at = digest.get("computed_at") if isinstance(digest, dict) else None
