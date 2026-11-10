@@ -1943,3 +1943,38 @@ def test_the_recordings_hold_both_a_cut_and_a_whole_printout():
         assert why is None, (path.name, why)
         kinds["whole" if forced.harness_lines(suite, data, capped=True) == full else "cut"] += 1
     assert kinds["whole"] and kinds["cut"], kinds
+
+
+def test_side_by_side_each_attempt_reads_its_own_out_json(tmp_path):
+    """Conductor (#1446's truncation fix with --jobs): the runner rebuilds an
+    attempt's full differences from its harness's --out JSON, so at --jobs 2
+    each worker must read its own scenario's file. Two recorded routes runs
+    with different full counts (8 and 1) start together; each scenario's
+    attempts keep their own count, from their own file."""
+    import shutil
+    import threading
+    together = threading.Barrier(2, timeout=30)
+    seen = []
+
+    class Recorded(forced.Runner):
+        first = True
+
+        def _run(self, argv, env):
+            name, out = argv[argv.index("--only") + 1], Path(argv[argv.index("--out") + 1])
+            if self.first:  # both first attempts run at once
+                self.first = False
+                together.wait()
+            seen.append((name, out))
+            shutil.copy(RECORDED / f"routes--{name}.json", out)
+            return 1, (RECORDED / f"routes--{name}.log").read_text(encoding="utf-8")
+
+    workers = [Recorded(Path("rust-bin"), tmp_path / "out", 60, tmp_path / "STOP", scratch=tmp_path / f"s{n}",
+                        sweep=lambda attempt: 0, oom_kills=lambda: None) for n in range(2)]
+    _, private = forced.run(workers[0], ["routes"], None, names=lambda s: ["seeded", "trust-bind"],
+                            workers=workers)
+    want = {"seeded": FULL_LINES["routes--seeded"], "trust-bind": FULL_LINES["routes--trust-bind"]}
+    for name, count in want.items():
+        for label in ("real", "real_retry", "synthetic"):
+            attempt = private[f"routes/{name}"][label]
+            assert attempt["diffs_complete"] and len(attempt["diffs"]) == count, (name, label)
+    assert len({out for _, out in seen}) == len({(n, out.parent.name) for n, out in seen})
