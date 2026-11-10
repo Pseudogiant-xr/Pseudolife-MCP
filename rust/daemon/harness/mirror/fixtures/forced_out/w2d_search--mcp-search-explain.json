@@ -1,0 +1,248 @@
+{
+ "complete": true,
+ "planned_scenarios": [
+  "mcp-search-explain"
+ ],
+ "summary": {
+  "scenarios": 1,
+  "cases": 12,
+  "case_diffs": 2,
+  "db_diff_scenarios": 1
+ },
+ "results": [
+  {
+   "scenario": "mcp-search-explain",
+   "cases": [
+    {
+     "case": "explain implies verbose",
+     "path": "mcp memory_search {\"explain\": true, \"query\": \"how does dreaming consolidate memory\"}",
+     "python_status": 200,
+     "rust_status": 200,
+     "diffs": [],
+     "notes": []
+    },
+    {
+     "case": "cortex projection remains",
+     "path": "mcp memory_search {\"explain\": true, \"query\": \"what os does the homelab box run\"}",
+     "python_status": 200,
+     "rust_status": 200,
+     "diffs": [],
+     "notes": []
+    },
+    {
+     "case": "trace ignores the search floor",
+     "path": "mcp memory_search {\"explain\": true, \"query\": \"deploy the daemon\", \"min_score\": 1.0}",
+     "python_status": 200,
+     "rust_status": 200,
+     "diffs": [],
+     "notes": []
+    },
+    {
+     "case": "trace source filter",
+     "path": "mcp memory_search {\"explain\": true, \"query\": \"deploy\", \"sources\": [\"conversation\"]}",
+     "python_status": 200,
+     "rust_status": 200,
+     "diffs": [],
+     "notes": []
+    },
+    {
+     "case": "trace tag normalization",
+     "path": "mcp memory_search {\"explain\": true, \"query\": \"deploy\", \"tags\": [\"DEPLOY\", \" bug\"]}",
+     "python_status": 200,
+     "rust_status": 200,
+     "diffs": [],
+     "notes": []
+    },
+    {
+     "case": "trace filter caller order",
+     "path": "mcp memory_search {\"explain\": true, \"query\": \"deploy\", \"episodes\": [\"z\", \"a\", \"z\"]}",
+     "python_status": 200,
+     "rust_status": 200,
+     "diffs": [],
+     "notes": []
+    },
+    {
+     "case": "trace rerank and bm25 overrides",
+     "path": "mcp memory_search {\"explain\": true, \"query\": \"how do I back up the bank\", \"rerank\": true, \"bm25\": false, \"top_k\": 3}",
+     "python_status": 200,
+     "rust_status": 200,
+     "diffs": [
+      ".entries[0].score: python 0.5442 vs rust 0.8068",
+      ".entries[1].score: python 0.4518 vs rust 0.5767",
+      ".entries[2].score: python 0.4423 vs rust 0.1327",
+      ".trace.final_topk[0].score: python 0.5442 vs rust 0.8068",
+      ".trace.final_topk[1].score: python 0.4518 vs rust 0.5767",
+      ".trace.final_topk[2].score: python 0.4423 vs rust 0.1327",
+      ".trace.reranker.candidate_count: only in python",
+      ".trace.reranker.candidates: only in rust",
+      ".trace.reranker.fired: python false vs rust true",
+      ".trace.reranker.fusion_weight: only in rust",
+      ".trace.reranker.model: only in rust",
+      ".trace.reranker.reason: only in python"
+     ],
+     "notes": []
+    },
+    {
+     "case": "trace empty lists",
+     "path": "mcp memory_search {\"explain\": true, \"query\": \"deploy\", \"sources\": [], \"bands\": [], \"tags\": [], \"episodes\": []}",
+     "python_status": 200,
+     "rust_status": 200,
+     "diffs": [],
+     "notes": []
+    },
+    {
+     "case": "trace blank query",
+     "path": "mcp memory_search {\"explain\": true, \"query\": \"   \"}",
+     "python_status": 200,
+     "rust_status": 200,
+     "diffs": [],
+     "notes": []
+    },
+    {
+     "case": "trace invalid band",
+     "path": "mcp memory_search {\"explain\": true, \"query\": \"deploy\", \"bands\": [\"absent\"]}",
+     "python_status": 422,
+     "rust_status": 422,
+     "diffs": [],
+     "notes": []
+    },
+    {
+     "case": "trace padded query",
+     "path": "mcp memory_search {\"explain\": true, \"query\": \"  deploy the daemon  \"}",
+     "python_status": 200,
+     "rust_status": 200,
+     "diffs": [
+      ".cortex[0].score: python 0.4791 vs rust 0.4874",
+      ".cortex[1].score: python 0.5686 vs rust 0.5798",
+      ".cortex[2].score: python 0.4033 vs rust 0.3974"
+     ],
+     "notes": []
+    },
+    {
+     "case": "after explain access counts",
+     "path": "mcp memory_search {\"query\": \"deploy the daemon\", \"verbose\": true}",
+     "python_status": 200,
+     "rust_status": 200,
+     "diffs": [],
+     "notes": []
+    }
+   ],
+   "db_diffs": [
+    "public.retrieval_events[10].served_facts[0].score: python 0.4791 vs rust 0.4874",
+    "public.retrieval_events[10].served_facts[1].score: python 0.5686 vs rust 0.5798",
+    "public.retrieval_events[10].served_facts[2].score: python 0.4033 vs rust 0.3974",
+    "public.retrieval_events[8].served[0].components.ce: python NoneType null vs rust float 0.9193678614063054",
+    "public.retrieval_events[8].served[0].score: python 0.5442 vs rust 0.8068",
+    "public.retrieval_events[8].served[1].components.ce: python NoneType null vs rust float 0.6302075438148126",
+    "public.retrieval_events[8].served[1].score: python 0.4518 vs rust 0.5767",
+    "public.retrieval_events[8].served[2].components.ce: python NoneType null vs rust float 2.2616853044681786e-05",
+    "public.retrieval_events[8].served[2].score: python 0.4423 vs rust 0.1327",
+    "public.retrieval_events[8].params.reranker.fired: python false vs rust true",
+    "public.retrieval_events[8].params.reranker.scored_candidates: python 0 vs rust 3",
+    "public.retrieval_events[8].params.reranker.skip_reason: python str \"rerank_failed_or_unavailable\" vs rust NoneType null"
+   ],
+   "declared": {
+    "python": [
+     "meta.dream_ack_secret_v1: dream tracking init writes a random secret (W3-H)",
+     "meta.curation_listing_spelling_v2: the listing-spelling carry-over stamps the clock (W2-E)"
+    ],
+    "rust": [
+     "meta.dream_ack_secret_v1: dream tracking init writes a random secret (W3-H)",
+     "meta.curation_listing_spelling_v2: the listing-spelling carry-over stamps the clock (W2-E)"
+    ]
+   },
+   "coverage": {
+    "with_entries": 8,
+    "with_events": 0,
+    "with_cortex": 1,
+    "via": {},
+    "channels": {
+     "dense": 46
+    },
+    "rerank_fired": 0,
+    "rerank_skips": {
+     "rerank_failed_or_unavailable": 1
+    },
+    "timeline_fired": 0,
+    "events_rows": 11,
+    "recency_boost": 0,
+    "sessions": 11,
+    "transport_sessions": 0,
+    "episodes": 11,
+    "low_confidence_true": 0,
+    "low_confidence_false": 1,
+    "disconnects": 0,
+    "chronicle_over_limit": 0,
+    "confidence_boundary": 0,
+    "correct_with": {
+     "contested": 0,
+     "aged": 0
+    },
+    "truncated": 0,
+    "replaced_by": 0,
+    "episode_filter_child_hit": 0,
+    "recent": {
+     "responses": 0,
+     "replaced_by": 0,
+     "superseded_verbose": 0,
+     "probe_present": 0,
+     "episode_hits": 0,
+     "child_excluded": 0,
+     "nonempty": 0
+    },
+    "fact": {
+     "records": 0,
+     "alias_hit": 0,
+     "set_removed": 0,
+     "empty_set": 0,
+     "contenders": 0,
+     "correct_with": 0,
+     "candidates_same": 0,
+     "candidates_similar": 0,
+     "entity_ref": 0,
+     "re_verify": 0,
+     "source_entries": 0,
+     "misses": 0,
+     "checks": 0
+    },
+    "get": {
+     "found": 0,
+     "faded": 0,
+     "replaced_by": 0,
+     "consolidated": 0,
+     "uses": 0
+    },
+    "stats": {
+     "responses": 0,
+     "graduation": 0,
+     "hits": 0,
+     "worst_sources": 0,
+     "communities": 0,
+     "digest": 0,
+     "interactions": 0,
+     "reads": 0,
+     "multiband": 0,
+     "capacity_warning": 0,
+     "true_drops": 0,
+     "last_true_drop": 0
+    },
+    "trace": {
+     "responses": 9,
+     "kept": 8,
+     "dropped_relevance": 2,
+     "dropped_duplicate": 0,
+     "filtered_out_tier": 0,
+     "recency": 0,
+     "bm25_fired": 7,
+     "slot_pool": 9,
+     "reranker_fired": 0,
+     "reranker_margin": 0,
+     "reranker_budget": 0,
+     "timeline_fired": 0,
+     "timeline_no_cue": 0,
+     "final": 8
+    }
+   }
+  }
+ ]
+}

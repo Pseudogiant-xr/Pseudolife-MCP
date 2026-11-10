@@ -16,6 +16,7 @@ import os
 import re
 import sys
 import time
+import uuid
 from pathlib import Path
 from urllib.parse import quote
 
@@ -31,6 +32,22 @@ HOST_PORT = os.environ.get("PSEUDOLIFE_TEST_PG_HOST_PORT", "127.0.0.1:5433")
 LOGIN_FILE = Path(os.environ.get("PSEUDOLIFE_TEST_PG_LOGIN_FILE")
                   or Path.home() / ".pseudolife-mcp" / "test-pg.env")
 SLICE_ID = re.compile(r"w[0-9][a-z]|http|pgs|prn|mir")
+# Set by the forced runner (mirror/forced.py) to its run's token: a drop
+# renames the database to one of the run's tombstones (``tombstone_prefix``)
+# and returns, and the runner drops the tombstones in the background while
+# the next scenario runs. Unset or malformed, a drop waits, as it always has.
+# A drop of a 270 MB bank copy took 0.7 s on the bench (2026-11-09); a
+# rename is one catalog update.
+DROP_LATER_ENV = "PL_HARNESS_DROP_LATER"
+DROP_TOKEN = re.compile(r"[a-z0-9]{8,16}")
+
+
+def tombstone_prefix(token: str) -> str:
+    """The names a run's renamed-away databases take: no slice admits them,
+    so nothing but their run's drops can open one."""
+    if not DROP_TOKEN.fullmatch(token):
+        raise ValueError(f"drop token {token!r}: expected 8-16 lowercase letters or digits")
+    return f"pl_cf_gone_{token}_"
 # A restored real bank every new database copies instead of an empty one
 # (rust/daemon/harness/mirror/forced.py): only the mirror's names, and only
 # where the launcher sets it, so no slice reaches it by default.
@@ -206,13 +223,28 @@ def _dsn(space, name: str) -> str:
             f"@{host}:{port}/{space._check(name)}")
 
 
+def _copy_retrying(conn, statement, attempts: int = 12) -> None:
+    """Copy the base, waiting out a session that reads it: a copy needs the
+    template to itself and gives up after about 5 s, and with the forced
+    runner's --jobs another worker's harness reads the shared base (its row
+    hashes) while this one copies it."""
+    for i in range(attempts):
+        try:
+            conn.execute(statement)
+            return
+        except psycopg.errors.ObjectInUse:
+            if i == attempts - 1:
+                raise
+            time.sleep(1)
+
+
 def _create(space, name: str, template: str | None) -> str:
     space.drop(name)
     base = space.base_database() if template is None else None
     with space._admin() as conn:
         space.assert_disposable_database(conn)
         if base is not None:
-            conn.execute(sql.SQL("CREATE DATABASE {} TEMPLATE {}").format(
+            _copy_retrying(conn, sql.SQL("CREATE DATABASE {} TEMPLATE {}").format(
                 sql.Identifier(space._check(name)), sql.Identifier(base)))
         elif template is None:
             space.create_from_default_template(conn, sql.SQL("CREATE DATABASE {}").format(
@@ -235,6 +267,9 @@ def _create(space, name: str, template: str | None) -> str:
 def _drop(space, name: str, attempts: int) -> None:
     space._check(name)
     space.NAMES.require_owned(name)
+    token = os.environ.get(DROP_LATER_ENV, "")
+    if DROP_TOKEN.fullmatch(token) and _rename_away(space, name, token):
+        return
     for i in range(attempts):
         try:
             with space._admin() as conn:
@@ -246,6 +281,51 @@ def _drop(space, name: str, attempts: int) -> None:
             if i == attempts - 1:
                 raise
             time.sleep(2)
+
+
+def _rename_away(space, name: str, token: str) -> bool:
+    """Free ``name`` now and leave its database to the runner's drops; False
+    when a session still uses it (FORCE ends those; a rename cannot), so the
+    caller drops it as before."""
+    try:
+        with space._admin() as conn:
+            space.assert_disposable_database(conn)
+            if conn.execute("SELECT 1 FROM pg_database WHERE datname = %s", (name,)).fetchone() is None:
+                return True  # nothing to drop
+            # A rename waits up to 5 s for other sessions before it refuses;
+            # FORCE ends them now.
+            if conn.execute("SELECT count(*) FROM pg_stat_activity WHERE datname = %s",
+                            (name,)).fetchone()[0]:
+                return False
+            conn.execute(sql.SQL("ALTER DATABASE {} RENAME TO {}").format(
+                sql.Identifier(name), sql.Identifier(tombstone_prefix(token) + uuid.uuid4().hex[:16])))
+        return True
+    except (psycopg.errors.ObjectInUse, psycopg.errors.InsufficientPrivilege):
+        return False
+
+
+def drop_tombstones(token: str, attempts: int = 10) -> int:
+    """Drop every database the run with ``token`` renamed away; the count.
+    Retried as ``drop`` retries: FORCE cannot end an autovacuum worker on a
+    just-used bank."""
+    prefix = tombstone_prefix(token)
+    dropped = 0
+    with _admin() as conn:
+        assert_disposable_database(conn)
+        for (name,) in conn.execute("SELECT datname FROM pg_database WHERE starts_with(datname, %s)",
+                                    (prefix,)).fetchall():
+            refuse_production_database(name)
+            for i in range(attempts):
+                try:
+                    conn.execute(sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(
+                        sql.Identifier(name)))
+                    break
+                except psycopg.errors.InsufficientPrivilege:
+                    if i == attempts - 1:
+                        raise
+                    time.sleep(2)
+            dropped += 1
+    return dropped
 
 
 def _existing(space) -> list[str]:

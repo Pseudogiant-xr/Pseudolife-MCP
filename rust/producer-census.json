@@ -484,7 +484,7 @@
     "rust/shim/src/cli/update/clients/mod.rs": "d55cc1e2de11fabeb9330f8dd5d84570f2709d61862a6e4a7c36e92a71881a11",
     "rust/shim/src/cli/update/clients/plugin.rs": "1fe97238c132861daf024e5aae55b43f8629ec8d48c6c4b1488e6a3bf6702fad",
     "rust/shim/src/cli/update/clients/tests.rs": "81faa98fc3643307298e943f61436cb5d9ec11ad7005dd476123ef2577b8f5c8",
-    "rust/shim/src/cli/update/disk.rs": "8b2ce5c111c5d8e99cb9f7a0546fcb37e24542dd44f93126e466fae005d07b9f",
+    "rust/shim/src/cli/update/disk.rs": "8d6e22ad89cd7e561509f4b51c19b9935982336f748a960b0d127cb8eac45818",
     "rust/shim/src/cli/update/engine.rs": "bac5fd7b752e2ad5c0c04a2e418bdc2760b84cbb6b5d4c50ef823265032d48c4",
     "rust/shim/src/cli/update/mod.rs": "3d4b3c7cd8e21a85620b40dd198d42f2547c6396fd08871b9a8e935d71ba57a3",
     "rust/shim/src/cli/update/options.rs": "940c9747875d2d9e407637d871484e4670d47a4f3c6f6d961f4d26ed0e92470e",

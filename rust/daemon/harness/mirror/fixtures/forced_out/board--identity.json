@@ -1,0 +1,642 @@
+{
+ "complete": true,
+ "planned_scenarios": [
+  "identity"
+ ],
+ "summary": {
+  "steps": 85,
+  "diff_steps": 0,
+  "state_diffs": 0,
+  "chain_problems": 24,
+  "scenarios": 1
+ },
+ "results": [
+  {
+   "scenario": "identity",
+   "steps": [
+    {
+     "step": 0,
+     "name": "context, no agent",
+     "python_status": 200,
+     "rust_status": 200,
+     "diffs": []
+    },
+    {
+     "step": 1,
+     "name": "context, read only",
+     "python_status": 200,
+     "rust_status": 200,
+     "diffs": []
+    },
+    {
+     "step": 2,
+     "name": "context, read_only not bool",
+     "python_status": 400,
+     "rust_status": 400,
+     "diffs": []
+    },
+    {
+     "step": 3,
+     "name": "context, agent without nonce",
+     "python_status": 400,
+     "rust_status": 400,
+     "diffs": []
+    },
+    {
+     "step": 4,
+     "name": "context, bad agent id",
+     "python_status": 400,
+     "rust_status": 400,
+     "diffs": []
+    },
+    {
+     "step": 5,
+     "name": "register A",
+     "python_status": 200,
+     "rust_status": 200,
+     "diffs": []
+    },
+    {
+     "step": 6,
+     "name": "register B",
+     "python_status": 200,
+     "rust_status": 200,
+     "diffs": []
+    },
+    {
+     "step": 7,
+     "name": "register C named",
+     "python_status": 200,
+     "rust_status": 200,
+     "diffs": []
+    },
+    {
+     "step": 8,
+     "name": "register D codex",
+     "python_status": 200,
+     "rust_status": 200,
+     "diffs": []
+    },
+    {
+     "step": 9,
+     "name": "register child of D",
+     "python_status": 200,
+     "rust_status": 200,
+     "diffs": []
+    },
+    {
+     "step": 10,
+     "name": "register, reserved label",
+     "python_status": 400,
+     "rust_status": 400,
+     "diffs": []
+    },
+    {
+     "step": 11,
+     "name": "register, daemon label",
+     "python_status": 400,
+     "rust_status": 400,
+     "diffs": []
+    },
+    {
+     "step": 12,
+     "name": "register, secret status",
+     "python_status": 400,
+     "rust_status": 400,
+     "diffs": []
+    },
+    {
+     "step": 13,
+     "name": "register, long label",
+     "python_status": 400,
+     "rust_status": 400,
+     "diffs": []
+    },
+    {
+     "step": 14,
+     "name": "register, control char",
+     "python_status": 400,
+     "rust_status": 400,
+     "diffs": []
+    },
+    {
+     "step": 15,
+     "name": "register, bad caps",
+     "python_status": 400,
+     "rust_status": 400,
+     "diffs": []
+    },
+    {
+     "step": 16,
+     "name": "register, too many caps",
+     "python_status": 400,
+     "rust_status": 400,
+     "diffs": []
+    },
+    {
+     "step": 17,
+     "name": "register, wake not bool",
+     "python_status": 400,
+     "rust_status": 400,
+     "diffs": []
+    },
+    {
+     "step": 18,
+     "name": "register, name_source without name",
+     "python_status": 400,
+     "rust_status": 400,
+     "diffs": []
+    },
+    {
+     "step": 19,
+     "name": "register, bad name_source",
+     "python_status": 400,
+     "rust_status": 400,
+     "diffs": []
+    },
+    {
+     "step": 20,
+     "name": "register, bad parent",
+     "python_status": 400,
+     "rust_status": 400,
+     "diffs": []
+    },
+    {
+     "step": 21,
+     "name": "register, parent not a string",
+     "python_status": 400,
+     "rust_status": 400,
+     "diffs": []
+    },
+    {
+     "step": 22,
+     "name": "register, parent braces",
+     "python_status": 400,
+     "rust_status": 400,
+     "diffs": []
+    },
+    {
+     "step": 23,
+     "name": "register, unknown param",
+     "python_status": 400,
+     "rust_status": 400,
+     "diffs": []
+    },
+    {
+     "step": 24,
+     "name": "register, not allowed principal",
+     "python_status": 403,
+     "rust_status": 403,
+     "diffs": []
+    },
+    {
+     "step": 25,
+     "name": "register, unknown bearer",
+     "python_status": 401,
+     "rust_status": 401,
+     "diffs": []
+    },
+    {
+     "step": 26,
+     "name": "register, no bearer",
+     "python_status": 401,
+     "rust_status": 401,
+     "diffs": []
+    },
+    {
+     "step": 27,
+     "name": "unknown action",
+     "python_status": 400,
+     "rust_status": 400,
+     "diffs": []
+    },
+    {
+     "step": 28,
+     "name": "update, no instance",
+     "python_status": 401,
+     "rust_status": 401,
+     "diffs": []
+    },
+    {
+     "step": 29,
+     "name": "update, wrong key",
+     "python_status": 403,
+     "rust_status": 403,
+     "diffs": []
+    },
+    {
+     "step": 30,
+     "name": "update, unknown agent",
+     "python_status": 404,
+     "rust_status": 404,
+     "diffs": []
+    },
+    {
+     "step": 31,
+     "name": "update, other principal's agent",
+     "python_status": 403,
+     "rust_status": 403,
+     "diffs": []
+    },
+    {
+     "step": 32,
+     "name": "update status and expect",
+     "python_status": 200,
+     "rust_status": 200,
+     "diffs": []
+    },
+    {
+     "step": 33,
+     "name": "update children",
+     "python_status": 200,
+     "rust_status": 200,
+     "diffs": []
+    },
+    {
+     "step": 34,
+     "name": "update children dup",
+     "python_status": 400,
+     "rust_status": 400,
+     "diffs": []
+    },
+    {
+     "step": 35,
+     "name": "update children too many",
+     "python_status": 400,
+     "rust_status": 400,
+     "diffs": []
+    },
+    {
+     "step": 36,
+     "name": "update park needs, no reason",
+     "python_status": 400,
+     "rust_status": 400,
+     "diffs": []
+    },
+    {
+     "step": 37,
+     "name": "update bad reason",
+     "python_status": 400,
+     "rust_status": 400,
+     "diffs": []
+    },
+    {
+     "step": 38,
+     "name": "update park",
+     "python_status": 200,
+     "rust_status": 200,
+     "diffs": []
+    },
+    {
+     "step": 39,
+     "name": "refine park",
+     "python_status": 200,
+     "rust_status": 200,
+     "diffs": []
+    },
+    {
+     "step": 40,
+     "name": "park expires too far",
+     "python_status": 400,
+     "rust_status": 400,
+     "diffs": []
+    },
+    {
+     "step": 41,
+     "name": "park expires bad",
+     "python_status": 400,
+     "rust_status": 400,
+     "diffs": []
+    },
+    {
+     "step": 42,
+     "name": "park with expiry",
+     "python_status": 200,
+     "rust_status": 200,
+     "diffs": []
+    },
+    {
+     "step": 43,
+     "name": "status with its park keeps it",
+     "python_status": 200,
+     "rust_status": 200,
+     "diffs": []
+    },
+    {
+     "step": 44,
+     "name": "status clears park",
+     "python_status": 200,
+     "rust_status": 200,
+     "diffs": []
+    },
+    {
+     "step": 45,
+     "name": "park done",
+     "python_status": 200,
+     "rust_status": 200,
+     "diffs": []
+    },
+    {
+     "step": 46,
+     "name": "clear park",
+     "python_status": 200,
+     "rust_status": 200,
+     "diffs": []
+    },
+    {
+     "step": 47,
+     "name": "agent name",
+     "python_status": 200,
+     "rust_status": 200,
+     "diffs": []
+    },
+    {
+     "step": 48,
+     "name": "agent name reserved",
+     "python_status": 400,
+     "rust_status": 400,
+     "diffs": []
+    },
+    {
+     "step": 49,
+     "name": "agent name clears",
+     "python_status": 200,
+     "rust_status": 200,
+     "diffs": []
+    },
+    {
+     "step": 50,
+     "name": "update expect bad",
+     "python_status": 400,
+     "rust_status": 400,
+     "diffs": []
+    },
+    {
+     "step": 51,
+     "name": "update unknown field",
+     "python_status": 400,
+     "rust_status": 400,
+     "diffs": []
+    },
+    {
+     "step": 52,
+     "name": "agents from A",
+     "python_status": 200,
+     "rust_status": 200,
+     "diffs": []
+    },
+    {
+     "step": 53,
+     "name": "agents scoped",
+     "python_status": 200,
+     "rust_status": 200,
+     "diffs": []
+    },
+    {
+     "step": 54,
+     "name": "agents bad limit",
+     "python_status": 400,
+     "rust_status": 400,
+     "diffs": []
+    },
+    {
+     "step": 55,
+     "name": "agents bad limit bool",
+     "python_status": 400,
+     "rust_status": 400,
+     "diffs": []
+    },
+    {
+     "step": 56,
+     "name": "context with proof",
+     "python_status": 200,
+     "rust_status": 200,
+     "diffs": []
+    },
+    {
+     "step": 57,
+     "name": "context proof wrong principal",
+     "python_status": 403,
+     "rust_status": 403,
+     "diffs": []
+    },
+    {
+     "step": 58,
+     "name": "binding mismatch",
+     "python_status": 409,
+     "rust_status": 409,
+     "diffs": []
+    },
+    {
+     "step": 59,
+     "name": "binding half",
+     "python_status": 409,
+     "rust_status": 409,
+     "diffs": []
+    },
+    {
+     "step": 60,
+     "name": "attach B",
+     "python_status": 200,
+     "rust_status": 200,
+     "diffs": []
+    },
+    {
+     "step": 61,
+     "name": "attach B busy",
+     "python_status": 400,
+     "rust_status": 400,
+     "diffs": []
+    },
+    {
+     "step": 62,
+     "name": "attach B renew",
+     "python_status": 200,
+     "rust_status": 200,
+     "diffs": []
+    },
+    {
+     "step": 63,
+     "name": "attach bad ring",
+     "python_status": 400,
+     "rust_status": 400,
+     "diffs": []
+    },
+    {
+     "step": 64,
+     "name": "attach deadline spelled 1E2",
+     "python_status": 200,
+     "rust_status": 200,
+     "diffs": []
+    },
+    {
+     "step": 65,
+     "name": "attach bad deadline",
+     "python_status": 400,
+     "rust_status": 400,
+     "diffs": []
+    },
+    {
+     "step": 66,
+     "name": "heartbeat B",
+     "python_status": 200,
+     "rust_status": 200,
+     "diffs": []
+    },
+    {
+     "step": 67,
+     "name": "heartbeat B same name",
+     "python_status": 200,
+     "rust_status": 200,
+     "diffs": []
+    },
+    {
+     "step": 68,
+     "name": "heartbeat stale",
+     "python_status": 400,
+     "rust_status": 400,
+     "diffs": []
+    },
+    {
+     "step": 69,
+     "name": "heartbeat bad generation",
+     "python_status": 400,
+     "rust_status": 400,
+     "diffs": []
+    },
+    {
+     "step": 70,
+     "name": "heartbeat generation float",
+     "python_status": 400,
+     "rust_status": 400,
+     "diffs": []
+    },
+    {
+     "step": 71,
+     "name": "heartbeat missing",
+     "python_status": 400,
+     "rust_status": 400,
+     "diffs": []
+    },
+    {
+     "step": 72,
+     "name": "heartbeat bad active",
+     "python_status": 400,
+     "rust_status": 400,
+     "diffs": []
+    },
+    {
+     "step": 73,
+     "name": "subagent start",
+     "python_status": 200,
+     "rust_status": 200,
+     "diffs": []
+    },
+    {
+     "step": 74,
+     "name": "subagent start again",
+     "python_status": 200,
+     "rust_status": 200,
+     "diffs": []
+    },
+    {
+     "step": 75,
+     "name": "subagent start other",
+     "python_status": 200,
+     "rust_status": 200,
+     "diffs": []
+    },
+    {
+     "step": 76,
+     "name": "agents shows children",
+     "python_status": 200,
+     "rust_status": 200,
+     "diffs": []
+    },
+    {
+     "step": 77,
+     "name": "subagent stop",
+     "python_status": 200,
+     "rust_status": 200,
+     "diffs": []
+    },
+    {
+     "step": 78,
+     "name": "subagent stop unknown",
+     "python_status": 200,
+     "rust_status": 200,
+     "diffs": []
+    },
+    {
+     "step": 79,
+     "name": "subagent wrong owner",
+     "python_status": 200,
+     "rust_status": 200,
+     "diffs": []
+    },
+    {
+     "step": 80,
+     "name": "subagent bad child",
+     "python_status": 200,
+     "rust_status": 200,
+     "diffs": []
+    },
+    {
+     "step": 81,
+     "name": "subagent bad event",
+     "python_status": 200,
+     "rust_status": 200,
+     "diffs": []
+    },
+    {
+     "step": 82,
+     "name": "detach B stale",
+     "python_status": 400,
+     "rust_status": 400,
+     "diffs": []
+    },
+    {
+     "step": 83,
+     "name": "detach B",
+     "python_status": 200,
+     "rust_status": 200,
+     "diffs": []
+    },
+    {
+     "step": 84,
+     "name": "agents after detach",
+     "python_status": 200,
+     "rust_status": 200,
+     "diffs": []
+    }
+   ],
+   "state_diffs": [],
+   "chain": [
+    "rust chain: seq 2: payload is not Python's canonical text: {\"label\":\"codex\",\"project\":\"p1\",\"task\":\"t1\",\"episode\":\"ep-a\",\"status\":\"working\",\"capabilities\":{\"resumable\":true},\"wake_enabled\":false}",
+    "rust chain: seq 3: payload is not Python's canonical text: {\"label\":\"claude-code\",\"project\":\"p1\",\"task\":\"t2\",\"episode\":\"\",\"status\":\"\",\"capabilities\":{\"ring\":true},\"wake_enabled\":true}",
+    "rust chain: seq 4: payload is not Python's canonical text: {\"label\":\"claude-code\",\"project\":\"\",\"task\":\"\",\"episode\":\"\",\"status\":\"\",\"capabilities\":{},\"wake_enabled\":false,\"name\":\"Session C\",\"name_source\":\"harness\"}",
+    "rust chain: seq 5: payload is not Python's canonical text: {\"label\":\"codex\",\"project\":\"p2\",\"task\":\"\",\"episode\":\"11111111-2222-4333-8444-555555555555\",\"status\":\"\",\"capabilities\":{\"codex\":true},\"wake_enabled\":false}",
+    "rust chain: seq 6: payload is not Python's canonical text: {\"label\":\"codex\",\"project\":\"\",\"task\":\"\",\"episode\":\"66666666-7777-4888-9999-000000000000\",\"status\":\"\",\"capabilities\":{\"codex\":true},\"wake_enabled\":false,\"parent_thread\":\"11111111-2222-4333-8444-5555555",
+    "rust chain: seq 7: payload is not Python's canonical text: {\"fields\":{\"status\":\"testing\",\"status_expires_at\":1794278490.0795891},\"before\":{\"status\":\"working\",\"status_expires_at\":null}}",
+    "rust chain: seq 8: payload is not Python's canonical text: {\"fields\":{\"children\":[{\"label\":\"writer\",\"since\":1794277890.2486322},{\"label\":\"reviewer\",\"since\":1794277890.2486322}]},\"before\":{\"children\":[]}}",
+    "rust chain: seq 9: payload is not Python's canonical text: {\"fields\":{\"park_reason\":\"waiting_peer\",\"park_needs\":\"review of the schema change\",\"park_clear_by\":\"anyone\",\"park_resume\":\"merge it\",\"park_set_at\":1794277890.963288,\"park_expires\":1794321090.963288},\"",
+    "rust chain: seq 10: payload is not Python's canonical text: {\"fields\":{\"park_needs\":\"review of the new schema change\",\"park_set_at\":1794277891.1173515},\"before\":{\"park_needs\":\"review of the schema change\",\"park_set_at\":1794277890.963288}}",
+    "rust chain: seq 11: payload is not Python's canonical text: {\"fields\":{\"park_reason\":\"blocked\",\"park_expires\":1794281491.4883192,\"park_set_at\":1794277891.5180173},\"before\":{\"park_reason\":\"waiting_peer\",\"park_expires\":1794321090.963288,\"park_set_at\":1794277891.",
+    "rust chain: seq 12: payload is not Python's canonical text: {\"fields\":{\"status\":\"waiting on CI\",\"park_reason\":\"blocked\",\"park_set_at\":1794277891.642061,\"status_expires_at\":null},\"before\":{\"status\":\"testing\",\"park_reason\":\"blocked\",\"park_set_at\":1794277891.5180",
+    "rust chain: seq 13: payload is not Python's canonical text: {\"fields\":{\"status\":\"back to work\",\"park_reason\":null,\"park_needs\":\"\",\"park_clear_by\":\"\",\"park_resume\":\"\",\"park_expires\":null,\"park_set_at\":null},\"before\":{\"status\":\"waiting on CI\",\"park_reason\":\"bloc",
+    "rust chain: seq 14: payload is not Python's canonical text: {\"fields\":{\"park_reason\":\"done\",\"park_set_at\":1794277891.9636467,\"park_expires\":1794321091.9636467},\"before\":{\"park_reason\":null,\"park_set_at\":null,\"park_expires\":null}}",
+    "rust chain: seq 15: payload is not Python's canonical text: {\"fields\":{\"park_reason\":null,\"park_needs\":\"\",\"park_clear_by\":\"\",\"park_resume\":\"\",\"park_expires\":null,\"park_set_at\":null},\"before\":{\"park_reason\":\"done\",\"park_needs\":\"\",\"park_clear_by\":\"\",\"park_resume",
+    "rust chain: seq 16: payload is not Python's canonical text: {\"fields\":{\"name\":\"Agent C\",\"name_source\":\"agent\"},\"before\":{\"name\":\"Session C\",\"name_source\":\"harness\"}}",
+    "rust chain: seq 17: payload is not Python's canonical text: {\"fields\":{\"name\":\"Session C\",\"name_source\":\"harness\"},\"before\":{\"name\":\"Agent C\",\"name_source\":\"agent\"}}",
+    "rust chain: seq 18: payload is not Python's canonical text: {\"generation\":1,\"lease_until\":1794277953.833881,\"wake_enabled\":true,\"renewed\":false}",
+    "rust chain: seq 19: payload is not Python's canonical text: {\"generation\":1,\"lease_until\":1794277954.09062,\"wake_enabled\":true,\"renewed\":true}",
+    "rust chain: seq 20: payload is not Python's canonical text: {\"generation\":1,\"lease_until\":1794277954.4181342,\"wake_enabled\":true,\"renewed\":true}",
+    "rust chain: seq 21: payload is not Python's canonical text: {\"fields\":{\"name\":\"Session B\",\"name_source\":\"harness\"},\"before\":{\"name\":\"\",\"name_source\":\"\"}}",
+    "rust chain: seq 22: payload is not Python's canonical text: {\"fields\":{\"children\":[{\"label\":\"general-purpose#a1b2c3d4\",\"since\":1794277895.711771,\"agent_id\":\"a1b2c3d4e5f60718\"}]},\"before\":{\"children\":[]}}",
+    "rust chain: seq 23: payload is not Python's canonical text: {\"fields\":{\"children\":[{\"label\":\"general-purpose#a1b2c3d4\",\"since\":1794277895.711771,\"agent_id\":\"a1b2c3d4e5f60718\"},{\"label\":\"subagent#ffff0000\",\"since\":1794277895.975271,\"agent_id\":\"ffff0000\"}]},\"bef",
+    "rust chain: seq 24: payload is not Python's canonical text: {\"fields\":{\"children\":[{\"label\":\"general-purpose#a1b2c3d4\",\"since\":1794277895.711771,\"agent_id\":\"a1b2c3d4e5f60718\"}]},\"before\":{\"children\":[{\"label\":\"general-purpose#a1b2c3d4\",\"since\":1794277895.71177",
+    "rust chain: seq 26: payload is not Python's canonical text: {\"fields\":{\"children\":[]},\"before\":{\"children\":[{\"label\":\"general-purpose#a1b2c3d4\",\"since\":1794277895.711771,\"agent_id\":\"a1b2c3d4e5f60718\"}]}}"
+   ]
+  }
+ ]
+}

@@ -1,6 +1,7 @@
 """The forced real-data runner's refusal, classification and report, without daemons."""
 from __future__ import annotations
 
+import collections
 import json
 import re
 import sys
@@ -9,10 +10,26 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import forced  # noqa: E402
+# Imported before any test points PSEUDOLIFE_TEST_PG_HOST_PORT at the box's
+# mirror: pgdisposable reads it once, and main's drops import it.
+import pgdisposable  # noqa: E402
+import database_gate  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _no_database_drops(monkeypatch):
+    """main's dropper drains through pgdisposable; these tests have no bank,
+    so a run's tombstone drops are recorded instead (the database tests at
+    the end use the real ones)."""
+    calls = []
+    monkeypatch.setattr(forced, "drop_tombstones", lambda token: calls.append(token) or 0)
+    return calls
 
 PASS = {"status": "pass", "diffs": [], "seconds": 1.0}
-DIFF = {"status": "diff", "diffs": ["DIFF [s] step 1 x: db /rows/public.entries"], "seconds": 1.0}
+DIFF = {"status": "diff", "diffs": ["DIFF [s] step 1 x: db /rows/public.entries"], "seconds": 1.0,
+        "diffs_complete": True}
 
 
 def test_outcome_reads_the_harness_output():
@@ -39,13 +56,30 @@ def test_classification(first, retry, synthetic, want):
 
 
 class FakeRunner(forced.Runner):
+    """An answer is either the attempt itself, or a harness run (``exit``,
+    ``log`` and the ``json`` its ``--out`` holds, None for none) that goes
+    through the real ``invoke``."""
+
     def __init__(self, tmp: Path, answers: dict, stop_after: int | None = None):
-        super().__init__(Path("rust-bin"), tmp, 60, tmp / "STOP")
+        # Its own scratch root: the real invoke reaps processes marked under it.
+        super().__init__(Path("rust-bin"), tmp, 60, tmp / "STOP", scratch=tmp / "scratch",
+                         oom_kills=lambda: 0)
         self.answers, self.calls, self.stop_after = answers, [], stop_after
 
     def invoke(self, suite, name, label, base):
         self.calls.append((suite, name, label, base))
-        return dict(self.answers[name][label])
+        answer = self.answers[name][label]
+        if "log" not in answer:
+            return dict(answer)
+        self.answer = answer
+        return super().invoke(suite, name, label, base)
+
+    def _run(self, argv, env):
+        out = Path(argv[argv.index("--out") + 1])
+        written = self.answer.get("json")
+        if written is not None:
+            out.write_text(written if isinstance(written, str) else json.dumps(written), encoding="utf-8")
+        return self.answer.get("exit", 1), self.answer["log"]
 
     def blocked(self):
         done = len({(s, n) for s, n, _, _ in self.calls})
@@ -95,9 +129,9 @@ def test_every_suite_names_a_live_harness_script():
 
 
 def test_preexisting_needs_the_synthetic_run_to_differ_in_the_same_place():
-    real = {"status": "diff", "diffs": [
+    real = {"status": "diff", "diffs_complete": True, "diffs": [
         'DIFF [store-reaper] step 1 {"op": "tool"}: db /rows/public.episodes/rows: row only in python: [1]']}
-    same = {"status": "diff", "diffs": [
+    same = {"status": "diff", "diffs_complete": True, "diffs": [
         'DIFF [store-reaper] step 1 {"op": "x"}: db /rows/public.episodes/rows: row only in rust: [2]']}
     elsewhere = {"status": "diff", "diffs": ['DIFF [store-reaper] step 2 {}: /json/results: python 1 vs rust 2']}
     broken = {"status": "error", "diffs": [], "error_tail": ["Traceback", "OSError: port in use"]}
@@ -153,12 +187,13 @@ def test_each_case_item_is_a_place_of_its_own():
     its other items had no place of their own. Every printed item counts,
     keys with a hyphen and items that are not paths included. (classify()
     calls a scenario preexisting only when every place is on the synthetic arm.)"""
-    real = {"status": "diff", "diffs": [
+    real = {"status": "diff", "diffs_complete": True, "diffs": [
         "DIFF [mcp-get] get 2: ['status: python 200 vs rust 500', '.json.total: python 1 vs rust 2']"]}
     synthetic = {"status": "diff", "diffs": ["DIFF [mcp-get] get 2: ['.json.total: python 3 vs rust 4']"]}
     assert ("get 2", "status") in forced.signatures(real)
     assert forced.classify(real, real, synthetic) == "new"   # status is not on the synthetic arm
-    alone = {"status": "diff", "diffs": ["DIFF [mcp-get] get 2: ['status: python 200 vs rust 500']"]}
+    alone = {"status": "diff", "diffs_complete": True,
+             "diffs": ["DIFF [mcp-get] get 2: ['status: python 200 vs rust 500']"]}
     assert forced.classify(alone, alone, synthetic) == "new"           # status is not shared
 
 
@@ -168,7 +203,7 @@ def test_a_new_place_does_not_hide_behind_a_shared_one():
     every other difference the real bank showed."""
     shared = 'DIFF [store-reaper] step 1 {"op": "tool"}: db /rows/public.episodes/rows: row only in python: [1]'
     extra = 'DIFF [store-reaper] step 3 {"op": "tool"}: db /rows/public.facts/rows: row only in rust: [2]'
-    real = {"status": "diff", "diffs": [shared, extra]}
+    real = {"status": "diff", "diffs": [shared, extra], "diffs_complete": True}
     synthetic = {"status": "diff", "diffs": [shared.replace("[1]", "[9]")]}
     assert forced.classify(real, real, synthetic) == "new"
     # The near miss: every real place on the synthetic arm (which may differ
@@ -180,7 +215,7 @@ def test_a_new_place_does_not_hide_behind_a_shared_one():
 def test_a_scenario_error_keeps_its_harness_location():
     """Review (Opus): the same exception type raised elsewhere in the
     harness is another place."""
-    one = {"status": "diff", "diffs": [
+    one = {"status": "diff", "diffs_complete": True, "diffs": [
         "DIFF [stamped] scenario error: " + repr(["KeyError: x (case 'seed'; at run.py:12 in prepare_template)"])]}
     other = {"status": "diff", "diffs": [
         "DIFF [stamped] scenario error: ['KeyError: y (at run.py:40 in run_scenario)']"]}
@@ -191,7 +226,7 @@ def test_a_scenario_error_keeps_its_harness_location():
     assert forced.signatures(quoted) == {("", "scenario error KeyError case \"it's\"; run.py prepare_template")}
     # Review (Codex): a message with double quotes makes repr escape the
     # apostrophes around the case; the location must read the same.
-    plain, dq = ({"status": "diff", "diffs": ["DIFF [stamped] scenario error: " + repr(
+    plain, dq = ({"status": "diff", "diffs_complete": True, "diffs": ["DIFF [stamped] scenario error: " + repr(
         [f"UndefinedTable: relation {name} (case 'seed'; at run.py:12 in prepare_template)"])]}
         for name in ("missing", '"missing"'))
     assert forced.signatures(plain) == forced.signatures(dq)
@@ -248,7 +283,7 @@ def test_a_w2e_expect_line_names_its_side_and_query_without_values():
 def test_a_new_response_path_does_not_hide_behind_a_shared_one():
     shared = 'DIFF [s] step 2 {"op": "tool"}: .value.a: python 1 vs rust 2'
     new_path = 'DIFF [s] step 2 {"op": "tool"}: .value.b: python 1 vs rust 2'
-    real = {"status": "diff", "diffs": [shared, new_path]}
+    real = {"status": "diff", "diffs": [shared, new_path], "diffs_complete": True}
     assert forced.classify(real, real, {"status": "diff", "diffs": [shared]}) == "new"
     assert forced.classify(real, real, {"status": "diff", "diffs": [new_path, shared]}) == "preexisting"
 
@@ -259,7 +294,8 @@ def test_every_suites_lines_find_the_same_place_without_their_values(kind):
     read, so it fell back to the line's first 120 characters, values and all:
     a synthetic arm differing in the same place never overlapped, and three
     w2d scenarios read as new (forced run, 2026-11-09)."""
-    real, synthetic = ({"status": "diff", "diffs": [line]} for line in SAME_PLACE[kind])
+    real, synthetic = ({"status": "diff", "diffs": [line], "diffs_complete": True}
+                       for line in SAME_PLACE[kind])
     assert forced.signatures(real) == forced.signatures(synthetic), kind
     assert forced.classify(real, real, synthetic) == "preexisting", kind
     elsewhere = {"status": "diff", "diffs": [ELSEWHERE[kind]]}
@@ -324,7 +360,7 @@ def test_a_timeout_stops_the_whole_group_and_sweeps(tmp_path, monkeypatch):
     monkeypatch.setenv("PL_HARNESS_STUB_DEFAULT_CONTENT", "[]")
     swept = []
     runner = forced.Runner(Path("rust-bin"), tmp_path / "out", 3, tmp_path / "STOP",
-                           sweep=lambda: swept.append(1) or 2, scratch=tmp_path / "scratch")
+                           sweep=lambda attempt: swept.append(1) or 2, scratch=tmp_path / "scratch")
     got = runner.invoke("w2e", "slow", "synthetic", base=False)
     assert got["exit"] is None and got["status"] == "diff" and swept == [1]
     log = (tmp_path / "out" / "w2e" / "synthetic" / "slow.log").read_text()
@@ -424,7 +460,7 @@ def test_every_attempt_sweeps_the_databases_a_failed_harness_left(tmp_path):
             return 1, "Traceback\nConnectionRefusedError\n"
 
     runner = Quits(Path("rust-bin"), tmp_path / "out", 60, tmp_path / "STOP", scratch=tmp_path / "s",
-                   sweep=lambda: swept.append(1) or 2, oom_kills=lambda: 0)
+                   sweep=lambda attempt: swept.append(1) or 2, oom_kills=lambda: 0)
     runner.invoke("w2e", "x", "real", base=True)
     assert swept == [1]
     assert "swept 2 leftover disposable databases" in (tmp_path / "out" / "w2e" / "real" / "x.log").read_text()
@@ -551,7 +587,74 @@ def test_sweep_analyzer_tick_skips_only_its_real_bank_arms(tmp_path):
     counted = forced.counts(report)["w2e"]
     assert counted["excluded"] == 1 and counted["pass"] == 1 and counted["new"] == 1
     assert "every entity" in forced.REAL_BANK_EXCLUDED["w2e/sweep-analyzer-tick"]
-    assert list(forced.REAL_BANK_EXCLUDED) == ["w2e/sweep-analyzer-tick"]
+    assert sorted(forced.REAL_BANK_EXCLUDED) == [
+        "w2d_search/hide-superseded", "w2d_search/mcp-stats", "w2e/candidate-auto",
+        "w2e/sweep-analyzer-tick"]
+
+
+def test_the_maintainers_real_bank_exclusions_have_their_reasons():
+    """Maintainer decision D2, 2026-11-10: three more scenarios whose premise
+    cannot hold on a real bank. candidate-auto-reopen is not excluded: it
+    stays an error unless both real attempts hit the accepted OOM."""
+    for key, word in (("w2d_search/hide-superseded", "ranking"), ("w2d_search/mcp-stats", "graduation"),
+                      ("w2e/candidate-auto", "judged first")):
+        assert word in forced.REAL_BANK_EXCLUDED[key] and "2026-11-10" in forced.REAL_BANK_EXCLUDED[key]
+    assert "w2e/candidate-auto-reopen" not in forced.REAL_BANK_EXCLUDED
+
+
+COMMUNITY_ROWS = "DIFF [graph-writes] step 35 {\"op\": \"tool\"}: db /rows/public.communities/rows: row only in python: [1]"
+COMMUNITY_MISSING = "DIFF [graph-writes] step 35 {\"op\": \"tool\"}: db /rows/public.communities/base_missing/count: python 1 vs rust 0"
+MEMBERSHIP = "DIFF [graph-writes] step 35 {\"op\": \"tool\"}: db /rows/public.entity_communities/rows: row only in rust: [2]"
+NODE_COMMUNITY = "DIFF [graph-writes] step 36 {\"op\": \"tool\"}: .value.nodes[3].community: python 4 vs rust 5"
+INSIGHT = "DIFF [graph-writes] step 36 {\"op\": \"tool\"}: .value.graph_insight.communities: python 9 vs rust 8"
+ROUTES_COMMUNITY = "DB DIFF [reaper] /rows/public.communities/rows: row only in rust: [7, \"x\", 1, 0.5, 2.0]"
+
+
+def _community_rows(tmp_path, first, retry=None, **retry_fields):
+    answers = {"graph-writes": {"real": {"status": "diff", "diffs": first, "seconds": 1.0, "exit": 1,
+                                         "diffs_complete": True},
+                                "real-retry": {"status": "diff", "diffs": retry or first, "seconds": 1.0,
+                                               "exit": 1, "diffs_complete": True, **retry_fields},
+                                "synthetic": PASS}}
+    report, _ = forced.run(FakeRunner(tmp_path, answers), ["w2e"], None, names=lambda s: list(answers))
+    return report["suites"]["w2e"]["rows"][0]
+
+
+def test_a_difference_confined_to_communities_is_accepted(tmp_path):
+    """Maintainer decision D1, 2026-11-10: on a real bank's copy the two
+    daemons' community partitions differ by Louvain's visiting order (Python
+    seed.shuffle, Rust graph order; #1417's divergence entry). A scenario
+    whose every difference is in the community tables or a community field
+    is accepted, with the reason recorded."""
+    row = _community_rows(tmp_path, [COMMUNITY_ROWS, COMMUNITY_MISSING, MEMBERSHIP, NODE_COMMUNITY, INSIGHT])
+    assert (row["class"], row.get("accepted_as")) == ("accepted", "community-partition")
+    row = _community_rows(tmp_path, [ROUTES_COMMUNITY])
+    assert row["class"] == "accepted"
+    assert "visiting order" in forced.ACCEPTED_DIVERGENCES["community-partition"]
+    assert "2026-11-10" in forced.ACCEPTED_DIVERGENCES["community-partition"]
+
+
+@pytest.mark.parametrize("other", [
+    "DIFF [graph-writes] step 35 {\"op\": \"tool\"}: db /rows/public.facts/rows: row only in python: [1]",
+    "DIFF [graph-writes] step 36 {\"op\": \"tool\"}: .value.confirmed: only in rust",
+    "DIFF [graph-writes] step 36 {\"op\": \"tool\"}: .value.community_count: python 1 vs rust 2",
+    "DIFF [graph-writes] step 35 {\"op\": \"tool\"}: db /rows/public.communities_backup/rows: row only in rust: [1]",
+])
+def test_community_plus_any_other_difference_stays_new(tmp_path, other):
+    """The confinement is exact: one difference anywhere else, in the first
+    attempt or the retry, keeps the scenario new."""
+    assert _community_rows(tmp_path, [COMMUNITY_ROWS, NODE_COMMUNITY, other])["class"] == "new"
+    assert _community_rows(tmp_path, [COMMUNITY_ROWS], retry=[COMMUNITY_ROWS, other])["class"] == "new"
+
+
+def test_the_summary_lists_the_accepted_divergences(tmp_path, monkeypatch):
+    _main_env(monkeypatch)
+    monkeypatch.setattr(forced, "scenario_names", lambda suite: ["store-defaults"])
+    monkeypatch.setattr(forced, "run", lambda runner, *a, **k: ({"suites": {}, "not_forced": {},
+                                                                 "complete": True}, {}))
+    forced.main(["--rust-bin", "x", "--out", str(tmp_path / "o"), "--suites", "w2e", "--only", "store-defaults"])
+    summary = json.loads((tmp_path / "o" / "summary.json").read_text())
+    assert summary["accepted_divergences"] == forced.ACCEPTED_DIVERGENCES
 
 
 def test_an_excluded_scenario_whose_synthetic_arm_fails_is_an_error(tmp_path):
@@ -722,25 +825,26 @@ def _rows_for(tmp_path, answers, oom):
 def test_a_known_python_memory_limit_is_accepted_not_an_error(tmp_path):
     """Maintainer decision (c), 2026-11-08: candidate-auto and -reopen
     exceed the runner's memory on Python at the harness's -1.0 floors."""
+    # candidate-auto's real-bank arms are excluded since 2026-11-10 (D2), so
+    # the rule is pinned on candidate-auto-reopen, which still runs them.
     err = {"status": "error", "diffs": [], "error_tail": ["IncompleteRead"], "seconds": 1.0}
-    answers = {"candidate-auto": {"real": err, "real-retry": err, "synthetic": PASS},
-               "dream-deep-dry": {"real": err, "real-retry": err, "synthetic": PASS},
+    answers = {"dream-deep-dry": {"real": err, "real-retry": err, "synthetic": PASS},
                "candidate-auto-reopen": {"real": err, "real-retry": err, "synthetic": PASS}}
-    rows, report = _rows_for(tmp_path, answers, {("candidate-auto", "real"): 1,
-                                                 ("candidate-auto", "real-retry"): 1,
-                                                 ("dream-deep-dry", "real"): 1,
+    rows, report = _rows_for(tmp_path, answers, {("dream-deep-dry", "real"): 1,
                                                  ("dream-deep-dry", "real-retry"): 1,
                                                  ("candidate-auto-reopen", "real"): 1,
-                                                 ("candidate-auto-reopen", "synthetic"): 1})
-    assert rows["candidate-auto"]["class"] == "accepted"
-    # Near misses: an OOM in a scenario not listed, and a listed one whose
-    # real retry failed without an OOM (the first attempt's and the small
-    # synthetic arm's OOM do not excuse it).
+                                                 ("candidate-auto-reopen", "real-retry"): 1})
+    assert rows["candidate-auto-reopen"]["class"] == "accepted"
+    # Near miss: an OOM in a scenario not listed.
     assert rows["dream-deep-dry"]["class"] == "error"
-    assert rows["candidate-auto-reopen"]["class"] == "error"
     counted = forced.counts(report)["w2e"]
-    assert counted["accepted"] == 1 and counted["error"] == 2
-    assert "Python" in forced.ACCEPTED_OOM["w2e/candidate-auto"]
+    assert counted["accepted"] == 1 and counted["error"] == 1
+    assert "Python" in forced.ACCEPTED_OOM["w2e/candidate-auto-reopen"]
+    # Near miss: the listed one whose real retry failed without an OOM (the
+    # first attempt's and the small synthetic arm's OOM do not excuse it).
+    rows, _ = _rows_for(tmp_path, {"candidate-auto-reopen": answers["candidate-auto-reopen"]},
+                        {("candidate-auto-reopen", "real"): 1, ("candidate-auto-reopen", "synthetic"): 1})
+    assert rows["candidate-auto-reopen"]["class"] == "error"
 
 
 def test_real_bank_arms_get_the_longer_dream_rest_timeout(tmp_path, monkeypatch):
@@ -820,7 +924,8 @@ def test_a_real_attempt_with_no_places_is_never_preexisting():
     """An errored first attempt has no places, and the empty set is a subset
     of any synthetic arm's: it must not read as preexisting."""
     errored = {"status": "error", "diffs": [], "error_tail": ["x"]}
-    retried = {"status": "diff", "diffs": ["DIFF [s] step 1 {}: db /rows/public.facts/rows: x"]}
+    retried = {"status": "diff", "diffs": ["DIFF [s] step 1 {}: db /rows/public.facts/rows: x"],
+               "diffs_complete": True}
     synthetic = {"status": "diff", "diffs": ["DIFF [s] step 1 {}: db /rows/public.facts/rows: y"]}
     assert forced.classify(errored, retried, synthetic) == "new"
 
@@ -867,3 +972,1009 @@ def test_an_op_whose_text_holds_a_colon_still_finds_its_diff():
         two = f"DIFF [store] step 4 {op}: .value.id: python 1 vs rust 2"
         assert forced.signatures({"diffs": [one]}) == {("4", ".value.stored")}
         assert forced.signatures({"diffs": [one]}) != forced.signatures({"diffs": [two]})
+
+
+# ---- background drops: a scenario's databases are renamed away and dropped
+# ---- while the next scenario runs
+
+def test_each_attempt_hands_its_drops_to_the_dropper_after_its_sweep(tmp_path):
+    """The harness gets the run's token, and the dropper starts only after
+    the sweep, which must not drop the tombstones itself (it waits)."""
+    events, seen = [], {}
+
+    class Records(forced.Runner):
+        def _run(self, argv, env):
+            seen.update(env)
+            return 0, ""
+
+    class Dropper:
+        def kick(self):
+            events.append("kick")
+
+    runner = Records(Path("rust-bin"), tmp_path / "out", 60, tmp_path / "STOP", scratch=tmp_path / "s",
+                     sweep=lambda attempt: events.append("sweep") or 0, oom_kills=lambda: 0,
+                     drop_token="abcd1234ef", dropper=Dropper())
+    runner.invoke("w2e", "x", "real", base=True)
+    assert seen[forced.DROP_LATER_ENV] == "abcd1234ef"
+    assert events == ["sweep", "kick"]
+
+
+def test_without_a_dropper_the_harness_drops_as_before(tmp_path):
+    seen = {}
+
+    class Records(forced.Runner):
+        def _run(self, argv, env):
+            seen.update(env)
+            return 0, ""
+
+    Records(Path("rust-bin"), tmp_path / "out", 60, tmp_path / "STOP", scratch=tmp_path / "s",
+            oom_kills=lambda: 0).invoke("w2e", "x", "real", base=True)
+    assert forced.DROP_LATER_ENV not in seen
+
+
+def test_the_dropper_waits_for_its_last_pass_and_drains_before_returning():
+    """No two passes overlap (a pass that listed the tombstones before the
+    last scenario's renames would miss them), and the drain's own pass runs
+    after every background one has ended."""
+    import threading
+    import time
+    started, release, passes = threading.Event(), threading.Event(), []
+    lock, running, most = threading.Lock(), [0], [0]
+
+    def drop():
+        with lock:
+            running[0] += 1
+            most[0] = max(most[0], running[0])
+            passes.append(len(passes))
+        if len(passes) == 1:
+            started.set()
+            release.wait(5)
+        elif len(passes) == 2:
+            time.sleep(0.3)  # still running when the drain starts its own pass
+        with lock:
+            running[0] -= 1
+
+    dropper = forced.Dropper(drop)
+    dropper.kick()
+    assert started.wait(5)
+    threading.Timer(0.3, release.set).start()
+    dropper.kick()
+    dropper.drain()
+    assert passes == [0, 1, 2] and most[0] == 1 and running[0] == 0
+
+
+def test_every_drop_ends_before_the_summary_is_written(tmp_path, monkeypatch, _no_database_drops):
+    """A stopped run's too: the summary of a run that left databases behind
+    would hide them."""
+    _main_env(monkeypatch)
+    out = tmp_path / "o"
+    order = []
+
+    def drops(token):
+        order.append(("drops", (out / "summary.json").exists()))
+        return 0
+    monkeypatch.setattr(forced, "drop_tombstones", drops)
+    monkeypatch.setattr(forced, "scenario_names", lambda suite: ["store-defaults"])
+    monkeypatch.setattr(forced, "run", lambda runner, *a, **k: (
+        {"suites": {}, "not_forced": {}, "complete": False, "stopped": "before w2e/x: STOP file present"},
+        {}))
+    forced.main(["--rust-bin", "x", "--out", str(out), "--suites", "w2e", "--only", "store-defaults"])
+    assert order == [("drops", False)]
+    assert (out / "summary.json").exists()
+
+
+def test_a_run_that_raises_still_drops_its_databases(tmp_path, monkeypatch, _no_database_drops):
+    _main_env(monkeypatch)
+    monkeypatch.setattr(forced, "scenario_names", lambda suite: ["store-defaults"])
+
+    def boom(runner, *a, **k):
+        raise KeyboardInterrupt
+    monkeypatch.setattr(forced, "run", boom)
+    with pytest.raises(KeyboardInterrupt):
+        forced.main(["--rust-bin", "x", "--out", str(tmp_path / "o"), "--suites", "w2e",
+                     "--only", "store-defaults"])
+    assert len(_no_database_drops) == 1
+
+
+def _bench():
+    if not pgdisposable.LOGIN_FILE.exists():
+        database_gate.unavailable("no disposable-bank login here",
+                                  "create it once on the daemon host with `pseudolife-mcp test-login "
+                                  "create`, or point PSEUDOLIFE_TEST_PG_LOGIN_FILE at it")
+    return pgdisposable
+
+
+def _databases(pgdisposable, prefix: str) -> list[str]:
+    with pgdisposable._admin() as conn:
+        return sorted(r[0] for r in conn.execute(
+            "SELECT datname FROM pg_database WHERE starts_with(datname, %s)", (prefix,)))
+
+
+def test_a_drop_under_a_run_token_frees_the_name_and_leaves_a_tombstone(monkeypatch):
+    """The name is free at once (the scenario may create it again), and the
+    run's tombstone drop removes the database; without the token a drop
+    drops, as it always has."""
+    import uuid
+    pgdisposable = _bench()
+    pg = pgdisposable.Slice("mir")
+    token = uuid.uuid4().hex[:12]
+    tombs = pgdisposable.tombstone_prefix(token)
+    name = pg.name("pl_cf_mir_droplater")
+    try:
+        pg.create(name)
+        monkeypatch.setenv(pgdisposable.DROP_LATER_ENV, token)
+        pg.drop(name)
+        assert name not in _databases(pgdisposable, name)
+        assert len(_databases(pgdisposable, tombs)) == 1
+        pg.create(name)  # the name is free again
+        pg.drop(name)
+        assert len(_databases(pgdisposable, tombs)) == 2
+        assert pgdisposable.drop_tombstones(token) == 2
+        assert _databases(pgdisposable, tombs) == []
+        monkeypatch.delenv(pgdisposable.DROP_LATER_ENV)
+        pg.create(name)
+        pg.drop(name)
+        assert _databases(pgdisposable, name) == [] and _databases(pgdisposable, tombs) == []
+    finally:
+        monkeypatch.delenv(pgdisposable.DROP_LATER_ENV, raising=False)
+        pg.drop(name)
+        pgdisposable.drop_tombstones(token)
+
+
+def test_a_database_still_in_use_is_dropped_at_once(monkeypatch):
+    """A rename cannot end another session (FORCE can): the drop falls back
+    to dropping, and leaves no tombstone behind."""
+    import uuid
+    import psycopg
+    pgdisposable = _bench()
+    pg = pgdisposable.Slice("mir")
+    token = uuid.uuid4().hex[:12]
+    name = pg.name("pl_cf_mir_dropbusy")
+    try:
+        dsn = pg.create(name)
+        monkeypatch.setenv(pgdisposable.DROP_LATER_ENV, token)
+        with psycopg.connect(dsn, autocommit=True) as held:
+            held.execute("SELECT 1")
+            started = forced.time.monotonic()
+            pg.drop(name)
+            # Review (Opus): a rename would wait 5 s for the session first.
+            assert forced.time.monotonic() - started < 3
+        assert _databases(pgdisposable, name) == []
+        assert _databases(pgdisposable, pgdisposable.tombstone_prefix(token)) == []
+    finally:
+        monkeypatch.delenv(pgdisposable.DROP_LATER_ENV, raising=False)
+        pg.drop(name)
+        pgdisposable.drop_tombstones(token)
+
+
+def test_the_sweep_leaves_the_runs_tombstones_to_its_dropper(monkeypatch):
+    """Sweeping them would make every scenario wait for its drops again;
+    another run's tombstones (a killed run's) are leftovers it sweeps."""
+    import uuid
+    pgdisposable = _bench()
+    pg = pgdisposable.Slice("mir")
+    live = pgdisposable.Slice("w2f")  # the sweep spares pl_cf_mir_* (the banks)
+    mine, other = uuid.uuid4().hex[:12], uuid.uuid4().hex[:12]
+    names = [pg.name("pl_cf_mir_sweepmine"), pg.name("pl_cf_mir_sweepother")]
+    leftover = live.name("pl_cf_w2f_sweeplive")
+    try:
+        for n in names:
+            pg.create(n)
+        live.create(leftover)
+        monkeypatch.setenv(pgdisposable.DROP_LATER_ENV, mine)
+        pg.drop(names[0])
+        monkeypatch.setenv(pgdisposable.DROP_LATER_ENV, other)
+        pg.drop(names[1])
+        monkeypatch.delenv(pgdisposable.DROP_LATER_ENV)
+        with pgdisposable._admin() as conn:  # read only: the bench is shared
+            listed = set(forced.leftover_names(conn, spare=pgdisposable.tombstone_prefix(mine)))
+        assert not any(n.startswith(pgdisposable.tombstone_prefix(mine)) for n in listed)
+        assert any(n.startswith(pgdisposable.tombstone_prefix(other)) for n in listed)
+        assert leftover in listed and not set(names) & listed
+        # The run's drops are its own: another run's tombstone stays for its sweep.
+        assert pgdisposable.drop_tombstones(mine) == 1
+        assert len(_databases(pgdisposable, pgdisposable.tombstone_prefix(other))) == 1
+    finally:
+        monkeypatch.delenv(pgdisposable.DROP_LATER_ENV, raising=False)
+        for n in names:
+            pg.drop(n)
+        live.drop(leftover)
+        pgdisposable.drop_tombstones(mine)
+        pgdisposable.drop_tombstones(other)
+
+
+def test_a_stopped_run_leaves_none_of_its_tombstones(tmp_path, monkeypatch):
+    """A tombstone an earlier scenario left is dropped before a stopped
+    run's summary exists."""
+    import uuid
+    pgdisposable = _bench()
+    pg = pgdisposable.Slice("mir")
+    token = uuid.uuid4().hex[:12]  # its own: the bench is shared
+    monkeypatch.setattr(forced, "new_drop_token", lambda: token)
+    monkeypatch.setattr(forced, "drop_tombstones", pgdisposable.drop_tombstones)
+    name = pg.name("pl_cf_mir_dropstop")
+    try:
+        pg.create(name)
+        monkeypatch.setenv(pgdisposable.DROP_LATER_ENV, token)
+        pg.drop(name)
+        monkeypatch.delenv(pgdisposable.DROP_LATER_ENV)
+        assert len(_databases(pgdisposable, pgdisposable.tombstone_prefix(token))) == 1
+        _main_env(monkeypatch)
+        monkeypatch.setattr(forced, "scenario_names", lambda suite: ["store-defaults"])
+        (tmp_path / "STOP").write_text("")
+        forced.main(["--rust-bin", "x", "--out", str(tmp_path / "o"), "--suites", "w2e",
+                     "--only", "store-defaults", "--stop-file", str(tmp_path / "STOP")])
+        assert _databases(pgdisposable, pgdisposable.tombstone_prefix(token)) == []
+        assert "STOP" in json.loads((tmp_path / "o" / "summary.json").read_text())["stopped"]
+    finally:
+        monkeypatch.delenv(pgdisposable.DROP_LATER_ENV, raising=False)
+        pg.drop(name)
+        pgdisposable.drop_tombstones(token)
+
+
+@pytest.mark.skipif(not hasattr(forced.os, "killpg"), reason="the runner is Linux; process groups are POSIX")
+def test_an_interrupted_run_stops_its_harness_before_the_drops_drain(tmp_path, monkeypatch):
+    """Review (Codex): Ctrl-C reaches forced.py only (the harness has a
+    session of its own), so the harness is stopped as a timeout stops it, and
+    its cleanup (its renames) runs before the interrupt reaches main's drain."""
+    script, marker = tmp_path / "harness.py", tmp_path / "cleaned"
+    script.write_text(
+        "import signal, sys, time\n"
+        f"def cleanup(*_):\n    open({str(marker)!r}, 'w').write('renamed')\n    sys.exit(130)\n"
+        "signal.signal(signal.SIGINT, cleanup)\n"
+        "print('started', flush=True)\n"
+        "time.sleep(600)\n")
+    real = forced.subprocess.Popen.communicate
+    calls = []
+
+    def communicate(self, *a, **k):
+        calls.append(1)
+        if len(calls) == 1:
+            forced.time.sleep(1.0)  # the harness is up and has its handler
+            raise KeyboardInterrupt
+        return real(self, *a, **k)
+    monkeypatch.setattr(forced.subprocess.Popen, "communicate", communicate)
+    runner = forced.Runner(Path("rust-bin"), tmp_path / "out", 60, tmp_path / "STOP", scratch=tmp_path / "s")
+    with pytest.raises(KeyboardInterrupt):
+        runner._run([sys.executable, str(script)], dict(forced.os.environ))
+    assert marker.read_text() == "renamed"
+
+
+def test_tombstone_drops_retry_a_session_force_cannot_end(monkeypatch):
+    """Review (Codex): FORCE cannot end an autovacuum worker on a just-used
+    bank; the tombstone drop retries it as every other drop does."""
+    import psycopg
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    tries = []
+
+    class Conn:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def execute(self, query, params=None):
+            if isinstance(query, str) and query.startswith("SELECT datname"):
+                return type("R", (), {"fetchall": lambda s: [("pl_cf_gone_abcd1234_ffff",)]})()
+            tries.append(1)
+            if len(tries) == 1:
+                raise psycopg.errors.InsufficientPrivilege("autovacuum worker")
+
+    monkeypatch.setattr(pgdisposable, "_admin", lambda: Conn())
+    monkeypatch.setattr(pgdisposable, "assert_disposable_database", lambda conn: "postgres")
+    monkeypatch.setattr(pgdisposable.time, "sleep", lambda s: None)
+    assert pgdisposable.drop_tombstones("abcd1234") == 1
+    assert len(tries) == 2
+
+
+def test_a_final_drop_that_fails_keeps_the_results_and_fails_the_run(tmp_path, monkeypatch):
+    """Review (Opus): hours of results are not thrown away for one drop; the
+    summary says which drops failed and the run exits non-zero."""
+    _main_env(monkeypatch)
+
+    def drops(token):
+        raise RuntimeError("autovacuum held the database")
+    monkeypatch.setattr(forced, "drop_tombstones", drops)
+    monkeypatch.setattr(forced, "scenario_names", lambda suite: ["store-defaults"])
+    monkeypatch.setattr(forced, "run", lambda runner, *a, **k: ({"suites": {}, "not_forced": {},
+                                                                 "complete": True}, {}))
+    out = tmp_path / "o"
+    assert forced.main(["--rust-bin", "x", "--out", str(out), "--suites", "w2e",
+                        "--only", "store-defaults"]) == 1
+    summary = json.loads((out / "summary.json").read_text())
+    assert "autovacuum held the database" in summary["drops_failed"]
+    assert (out / "private.json").exists()
+
+
+def test_a_session_that_arrives_after_the_check_still_gets_dropped(monkeypatch):
+    """The activity check passed, then a session connected before the
+    rename: the rename refuses (ObjectInUse) and the drop falls back to
+    FORCE rather than fail."""
+    import psycopg
+
+    class Conn:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def execute(self, query, params=None):
+            text = query if isinstance(query, str) else ""
+            if text.startswith("SELECT 1 FROM pg_database"):
+                return type("R", (), {"fetchone": lambda s: (1,)})()
+            if text.startswith("SELECT count(*) FROM pg_stat_activity"):
+                return type("R", (), {"fetchone": lambda s: (0,)})()
+            raise psycopg.errors.ObjectInUse("database is being accessed by other users")
+
+    space = type("Space", (), {"_admin": staticmethod(lambda: Conn()),
+                               "assert_disposable_database": staticmethod(lambda conn: "postgres")})()
+    assert pgdisposable._rename_away(space, "pl_cf_mir_x_0123456789abcdef", "abcd1234") is False
+
+
+# ---- --jobs N: scenarios side by side, each on its own worker
+
+class SlowRunner(forced.Runner):
+    """A worker whose answers take a set time, recording what it ran."""
+
+    def __init__(self, tmp: Path, answers: dict, delays: dict, ran: list, stop=None):
+        super().__init__(Path("rust-bin"), tmp, 60, tmp / "STOP")
+        self.answers, self.delays, self.ran, self.stop_when = answers, delays, ran, stop
+
+    def invoke(self, suite, name, label, base):
+        self.ran.append((id(self), name, label))
+        forced.time.sleep(self.delays.get(name, 0))
+        return dict(self.answers[name][label])
+
+    def blocked(self):
+        return self.stop_when() if self.stop_when else None
+
+
+def test_side_by_side_rows_keep_the_plan_order(tmp_path):
+    """The first scenario finishes last; its row still comes first, every
+    scenario runs once with its own retries on one worker, and the work is
+    shared."""
+    answers = {"a": {"real": PASS}, "b": {"real": DIFF, "real-retry": PASS}, "c": {"real": PASS},
+               "d": {"real": DIFF, "real-retry": DIFF, "synthetic": DIFF}}
+    ran = []
+    workers = [SlowRunner(tmp_path, answers, {"a": 0.6}, ran) for _ in range(3)]
+    report, private = forced.run(workers[0], ["w2e"], None, names=lambda s: list(answers),
+                                 workers=workers)
+    rows = report["suites"]["w2e"]["rows"]
+    assert [r["scenario"] for r in rows] == ["a", "b", "c", "d"] and report["complete"]
+    assert [r["class"] for r in rows] == ["pass", "transient", "pass", "preexisting"]
+    by_scenario = {}
+    for worker, name, label in ran:
+        by_scenario.setdefault(name, set()).add(worker)
+    assert all(len(w) == 1 for w in by_scenario.values()), "a scenario's attempts split over workers"
+    assert len({w for w, _, _ in ran}) > 1
+    assert sorted(n for _, n, label in ran if label == "real") == ["a", "b", "c", "d"]
+    assert set(private) == {"w2e/b", "w2e/d"}
+
+
+def test_a_stop_side_by_side_starts_nothing_more(tmp_path):
+    answers = {n: {"real": PASS} for n in "abcdef"}
+    ran = []
+
+    def stop():
+        return "STOP file present" if len(ran) >= 2 else None
+    workers = [SlowRunner(tmp_path, answers, {n: 0.3 for n in "abcdef"}, ran, stop) for _ in range(2)]
+    report, _ = forced.run(workers[0], ["w2e"], None, names=lambda s: list(answers), workers=workers)
+    assert not report["complete"] and "STOP file present" in report["stopped"]
+    assert [r["scenario"] for r in report["suites"]["w2e"]["rows"]] == ["a", "b"]
+    assert len(ran) == 2
+
+
+def test_a_worker_that_raises_ends_the_run_with_its_error(tmp_path):
+    class Raises(SlowRunner):
+        def invoke(self, suite, name, label, base):
+            if name == "b":
+                raise RuntimeError("worker broke")
+            return super().invoke(suite, name, label, base)
+
+    answers = {n: {"real": PASS} for n in "abcd"}
+    ran = []
+    workers = [Raises(tmp_path, answers, {}, ran) for _ in range(2)]
+    with pytest.raises(RuntimeError, match="worker broke"):
+        forced.run(workers[0], ["w2e"], None, names=lambda s: list(answers), workers=workers)
+
+
+def test_one_job_keeps_the_one_at_a_time_path(tmp_path):
+    """--jobs 1 plans each suite when it reaches it, as every run before: a
+    stop in the first suite never lists the second."""
+    listed = []
+
+    def names(suite):
+        listed.append(suite)
+        return ["clean", "flaky"]
+    runner = FakeRunner(tmp_path, ANSWERS, stop_after=1)
+    report, _ = forced.run(runner, ["w2e", "board"], None, names=names, workers=[runner])
+    assert listed == ["w2e"] and "stopped" in report
+
+
+def test_main_gives_each_job_its_own_worker(tmp_path, monkeypatch):
+    _main_env(monkeypatch)
+    monkeypatch.setattr(forced, "scenario_names", lambda suite: ["store-defaults"])
+    seen, swept = {}, []
+    monkeypatch.setattr(forced, "sweep_leftovers",
+                        lambda spare="", attempt="": swept.append(attempt) or 0)
+
+    def capture(runner, *a, workers=None, **k):
+        seen["workers"] = workers
+        return {"suites": {}, "not_forced": {}, "complete": True}, {}
+    monkeypatch.setattr(forced, "run", capture)
+    args = ["--rust-bin", "x", "--out", str(tmp_path / "o"), "--suites", "w2e", "--only", "store-defaults"]
+    assert forced.main(args + ["--jobs", "3"]) == 0
+    ws = seen["workers"]
+    assert len(ws) == 3 and len({w.scratch for w in ws}) == 3 and len({w.base_cache for w in ws}) == 1
+    assert all(w.oom_kills() is None for w in ws) and len({id(w.dropper) for w in ws}) == 1
+    assert swept == [""], "once every worker stopped, the run sweeps run-wide once"
+    ws[1].sweep("0a1b2c3d")
+    assert swept == ["", "0a1b2c3d"], "an attempt's sweep is scoped to its token"
+    assert json.loads((tmp_path / "o" / "summary.json").read_text())["jobs"] == 3
+    swept.clear()
+    assert forced.main(args) == 0
+    (one,) = seen["workers"]
+    one.sweep("0a1b2c3d")
+    assert swept == [""], "one at a time, the sweep is the run-wide one"
+    assert forced.main(args + ["--jobs", "0"]) == 2
+
+
+def test_each_attempt_names_its_databases_with_its_own_token(tmp_path):
+    seen, swept = [], []
+
+    class Records(forced.Runner):
+        def _run(self, argv, env):
+            seen.append(env[forced.ATTEMPT_ENV])
+            return 0, ""
+
+    runner = Records(Path("rust-bin"), tmp_path / "out", 60, tmp_path / "STOP", scratch=tmp_path / "s",
+                     sweep=lambda attempt: swept.append(attempt) or 0, oom_kills=lambda: 0)
+    runner.invoke("w2e", "x", "real", base=True)
+    runner.invoke("w2e", "x", "real-retry", base=True)
+    assert all(forced.re.fullmatch(r"[0-9a-f]{8}", a) for a in seen) and seen[0] != seen[1]
+    assert swept == seen
+
+
+def test_a_harness_suffix_starts_with_its_attempts_token():
+    import subprocess
+    code = ("import sys; sys.path.insert(0, sys.argv[1]); from rust.cli_harness.run_names import RunNames; "
+            "print(RunNames().name('pl_cf_w2e_x', max_length=40))")
+    root = str(Path(__file__).resolve().parents[4])
+    env = dict(forced.os.environ, PL_HARNESS_ATTEMPT="0a1b2c3d")
+    names = [subprocess.run([sys.executable, "-c", code, root], env=env, capture_output=True,
+                            text=True, check=True).stdout.strip() for _ in range(2)]
+    suffixes = [n.rsplit("_", 1)[1] for n in names]
+    assert all(s.startswith("0a1b2c3d") and len(s) == 16 for s in suffixes)
+    assert suffixes[0] != suffixes[1], "two processes of one attempt share a name"
+    env.pop("PL_HARNESS_ATTEMPT")
+    other = subprocess.run([sys.executable, "-c", code, root], env=env, capture_output=True,
+                           text=True, check=True).stdout.strip()
+    assert len(other.rsplit("_", 1)[1]) == 16
+
+
+def test_a_scoped_sweep_lists_only_its_attempts_databases():
+    """Another worker's live copies are not leftovers; read only but for the
+    two databases it makes (the bench is shared), named as two attempts'
+    harnesses name theirs."""
+    import secrets
+    from psycopg import sql
+    _bench()
+    mine, theirs = secrets.token_hex(4), secrets.token_hex(4)
+    names = [f"pl_cf_w2f_scoped_{mine}{secrets.token_hex(4)}",
+             f"pl_cf_w2f_scoped_{theirs}{secrets.token_hex(4)}"]
+    with pgdisposable._admin() as conn:
+        pgdisposable.assert_disposable_database(conn)
+        try:
+            for n in names:
+                conn.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(n)))
+            assert names[0] in forced.leftover_names(conn, attempt=mine)
+            assert names[1] not in forced.leftover_names(conn, attempt=mine)
+            assert set(names) <= set(forced.leftover_names(conn))
+            with pytest.raises(ValueError):
+                forced.leftover_names(conn, attempt="not-hex!")
+        finally:
+            for n in names:
+                conn.execute(sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(sql.Identifier(n)))
+
+
+@pytest.mark.skipif(not hasattr(forced.os, "killpg"), reason="the runner is Linux; process groups are POSIX")
+def test_an_interrupt_side_by_side_stops_every_running_harness(tmp_path):
+    """Ctrl-C reaches forced.py only: each worker's running harness gets
+    SIGINT (its cleanup renames its databases) before the interrupt reaches
+    main's drain, and no further scenario starts."""
+    import signal
+    import threading
+    script = tmp_path / "harness.py"
+    script.write_text(
+        "import signal, sys, time, os\n"
+        "def cleanup(*_):\n"
+        "    open(os.environ['MARK'] + '.' + str(os.getpid()), 'w').write('cleaned')\n"
+        "    sys.exit(130)\n"
+        "signal.signal(signal.SIGINT, cleanup)\n"
+        "open(os.environ['MARK'] + '.start.' + str(os.getpid()), 'w').write('started')\n"
+        "print('started', flush=True)\n"
+        "time.sleep(600)\n")
+    marks = tmp_path / "mark"
+
+    class Real(forced.Runner):
+        def invoke(self, suite, name, label, base):
+            # Review (Opus, Codex): an interrupted harness exits non-zero, so
+            # the attempt is an error and the scenario would go on to its retry.
+            code, log = self._run([sys.executable, str(script)], dict(forced.os.environ, MARK=str(marks)))
+            return {"status": "pass" if code == 0 else "error", "diffs": [], "seconds": 0, "exit": code}
+
+    # A timeout far past the test's own bound: only the interrupt can stop them.
+    workers = [Real(Path("rust-bin"), tmp_path / "out", 600, tmp_path / "STOP", scratch=tmp_path / f"s{n}")
+               for n in range(2)]
+    threading.Timer(1.5, lambda: signal.raise_signal(signal.SIGINT)).start()
+    started = forced.time.monotonic()
+    with pytest.raises(KeyboardInterrupt):
+        forced.run(workers[0], ["w2e"], None, names=lambda s: ["a", "b", "c", "d"], workers=workers)
+    assert forced.time.monotonic() - started < 30
+    assert len(list(tmp_path.glob("mark.start.*"))) == 2, "an interrupted run started another attempt"
+    assert len([p for p in tmp_path.glob("mark.*") if ".start." not in p.name]) == 2
+
+
+def test_an_interrupted_worker_starts_no_further_attempt(tmp_path):
+    """Review (Opus, Codex): the interrupt lands while an attempt runs; its
+    harness exits non-zero and the scenario would retry. A worker that was
+    interrupted refuses to start another attempt, retry or synthetic."""
+    runs = []
+
+    class Interrupted(forced.Runner):
+        def _run(self, argv, env):
+            runs.append(argv)
+            self.interrupt()  # arrives during this attempt (no harness to signal here)
+            return 130, "KeyboardInterrupt\n"
+
+    runner = Interrupted(Path("rust-bin"), tmp_path / "out", 60, tmp_path / "STOP", scratch=tmp_path / "s",
+                         oom_kills=lambda: 0)
+    with pytest.raises(forced.Cancelled):
+        forced._scenario(runner, "w2e", "x")
+    assert len(runs) == 1
+
+
+def test_an_interrupt_before_an_attempt_starts_no_harness(tmp_path):
+    """Between attempts, or before a worker's first: the interrupt leaves no
+    harness to signal, and the next one never starts."""
+    popened = []
+
+    class Records(forced.Runner):
+        pass
+
+    runner = Records(Path("rust-bin"), tmp_path / "out", 60, tmp_path / "STOP", scratch=tmp_path / "s",
+                     oom_kills=lambda: 0)
+    runner.interrupt()
+    real_popen = forced.subprocess.Popen
+    try:
+        forced.subprocess.Popen = lambda *a, **k: popened.append(a) or pytest.fail("a harness started")
+        with pytest.raises(forced.Cancelled):
+            runner.invoke("w2e", "x", "real", base=True)
+    finally:
+        forced.subprocess.Popen = real_popen
+    assert popened == []
+
+
+def test_a_worker_whose_admission_check_raises_ends_the_run(tmp_path):
+    """Review (Codex): an exception outside the scenario itself (the STOP
+    or disk check) must not read as a complete run with rows missing."""
+    class Broken(SlowRunner):
+        def blocked(self):
+            raise OSError("disk probe failed")
+
+    answers = {n: {"real": PASS} for n in "ab"}
+    workers = [Broken(tmp_path, answers, {}, []) for _ in range(2)]
+    with pytest.raises(OSError, match="disk probe failed"):
+        forced.run(workers[0], ["w2e"], None, names=lambda s: list(answers), workers=workers)
+
+
+def test_a_copy_of_the_base_waits_out_a_reader(monkeypatch):
+    """Review (Codex, Opus): with --jobs another worker's harness may be
+    reading the shared base (its row hashes) when this one copies it; the
+    copy gives up after about 5 s with ObjectInUse, so it is retried."""
+    import psycopg
+    calls = []
+
+    class Conn:
+        def execute(self, statement, params=None):
+            calls.append(statement)
+            if len(calls) < 3:
+                raise psycopg.errors.ObjectInUse('source database "pl_cf_mir_seed" is being accessed by other users')
+
+    monkeypatch.setattr(pgdisposable.time, "sleep", lambda s: None)
+    pgdisposable._copy_retrying(Conn(), "CREATE DATABASE x TEMPLATE pl_cf_mir_seed")
+    assert len(calls) == 3
+    calls.clear()
+
+    class Busy(Conn):
+        def execute(self, statement, params=None):
+            calls.append(statement)
+            raise psycopg.errors.ObjectInUse("still in use")
+
+    with pytest.raises(psycopg.errors.ObjectInUse):
+        pgdisposable._copy_retrying(Busy(), "CREATE DATABASE x TEMPLATE pl_cf_mir_seed", attempts=3)
+    assert len(calls) == 3
+
+
+def test_an_interrupt_racing_the_start_still_stops_the_harness_starting(tmp_path):
+    """The interrupt lands after invoke's check but before the harness
+    starts: _run checks again under the lock that guards the running one."""
+    runner = forced.Runner(Path("rust-bin"), tmp_path / "out", 60, tmp_path / "STOP", scratch=tmp_path / "s")
+    runner.cancelled = True
+    with pytest.raises(forced.Cancelled):
+        runner._run([sys.executable, "-c", "raise SystemExit('a harness started')"], dict(forced.os.environ))
+    assert runner._proc is None
+
+
+@pytest.mark.skipif(not hasattr(forced.os, "killpg"), reason="the runner is Linux; process groups are POSIX")
+def test_an_interrupt_kills_a_harness_that_ignores_it(tmp_path):
+    """As a timeout does: SIGINT, then SIGKILL to the group after the grace,
+    so a harness stuck in its cleanup cannot outlive the run."""
+    import threading
+    script = tmp_path / "stubborn.py"
+    script.write_text("import signal, time\nsignal.signal(signal.SIGINT, signal.SIG_IGN)\n"
+                      "print('started', flush=True)\ntime.sleep(600)\n")
+    runner = forced.Runner(Path("rust-bin"), tmp_path / "out", 600, tmp_path / "STOP", scratch=tmp_path / "s")
+    result = {}
+    worker = threading.Thread(target=lambda: result.update(
+        out=runner._run([sys.executable, str(script)], dict(forced.os.environ))), daemon=True)
+    worker.start()
+    for _ in range(100):
+        if runner._proc is not None:
+            break
+        forced.time.sleep(0.05)
+    started = forced.time.monotonic()
+    runner.interrupt(grace=1.0)
+    worker.join(30)
+    assert not worker.is_alive() and result["out"][0] is not None
+    assert forced.time.monotonic() - started < 15
+
+
+@pytest.mark.parametrize("errored", ["real", "real-retry"])
+def test_a_community_difference_beside_an_errored_attempt_stays_new(tmp_path, errored):
+    """Review (Opus confidence 90, Codex P1): with one real attempt showing
+    only community differences and the other errored, the errored one was
+    filtered out and the scenario accepted, hiding a crash or timeout. Both
+    real attempts must complete with community-only differences."""
+    diff = {"status": "diff", "diffs": [COMMUNITY_ROWS], "seconds": 1.0, "exit": 1, "diffs_complete": True}
+    err = {"status": "error", "diffs": [], "error_tail": ["ConnectionRefusedError"], "seconds": 1.0, "exit": 2}
+    answers = {"graph-writes": {"real": diff, "real-retry": diff, "synthetic": PASS}}
+    answers["graph-writes"][errored] = err
+    report, _ = forced.run(FakeRunner(tmp_path, answers), ["w2e"], None, names=lambda s: list(answers))
+    row = report["suites"]["w2e"]["rows"][0]
+    assert row["class"] == "new" and "accepted_as" not in row
+
+
+@pytest.mark.parametrize("cut", [{"exit": None}, {"exit": -9}, {"oom_kills": 1}])
+def test_a_community_difference_from_an_attempt_that_did_not_finish_stays_new(tmp_path, cut):
+    """Review (Opus, confidence 85): an attempt that timed out (exit None),
+    was killed by a signal or by the OOM killer after printing community
+    differences still reads as "diff". Accepting it would hide the cut."""
+    row = _community_rows(tmp_path, [COMMUNITY_ROWS], **cut)
+    assert row["class"] == "new" and "accepted_as" not in row
+
+
+# ---- the printed DIFF lines are capped; --out holds every difference ----
+
+GRAPH_OP = {"op": "tool", "name": "memory_graph_relate", "args": {"source": "Ada", "target": "Bob"}}
+
+
+def _w2e_attempt(scenario: str, steps: list, exit: int = 1) -> dict:
+    """A w2e harness run: its final --out JSON and the log it prints from it,
+    as w2e.py prints (``s["diffs"][:6]`` per step)."""
+    data = {"complete": True, "planned_scenarios": [scenario], "summary": {},
+            "scenarios": [{"scenario": scenario, "mutant": None, "stats": {},
+                           "steps": [{"step": i, "op": op, "diffs": diffs} for i, op, diffs in steps]}]}
+    printed = [f"DIFF [{scenario}] step {s['step']} {json.dumps(s['op'])[:90]}: {d}"
+               for s in data["scenarios"][0]["steps"] for d in s["diffs"][:6]]
+    return {"exit": exit, "log": "\n".join(printed + ['{"scenarios": 1}']) + "\n", "json": data}
+
+
+def _row(tmp_path, answers):
+    report, _ = forced.run(FakeRunner(tmp_path, answers), ["w2e"], None, names=lambda s: list(answers))
+    return report["suites"]["w2e"]["rows"][0]
+
+
+COMMUNITIES = [f"db /rows/public.communities/rows: row only in python: [{i}, \"c{i}\"]" for i in range(7)]
+FACTS = "db /rows/public.facts/rows: row only in rust: [1, \"Ada\", \"drink\"]"
+EPISODES = [f"db /rows/public.episodes/rows: row only in python: [{i}]" for i in range(6)]
+
+
+def test_a_difference_the_printout_cut_keeps_a_community_scenario_new(tmp_path):
+    """w2e prints 6 differences per step. With 7 community differences and a
+    facts one at the same step, the facts line was never printed, so every
+    printed difference was a community one and the scenario was accepted. The
+    runner now reads every difference from the harness's --out JSON."""
+    attempt = _w2e_attempt("graph-writes", [(35, GRAPH_OP, COMMUNITIES + [FACTS])])
+    assert "public.facts" not in attempt["log"] and attempt["log"].count("public.communities") == 6
+    row = _row(tmp_path, {"graph-writes": {"real": attempt, "real-retry": attempt, "synthetic": PASS}})
+    assert row["class"] == "new" and "accepted_as" not in row
+    assert row["differences"] == 8  # every difference, not the 6 printed
+
+
+def test_a_community_only_scenario_beyond_the_printout_is_still_accepted(tmp_path):
+    """The positive control: all 7 differences are community ones, so the
+    full list from --out still accepts it, and counts all 7."""
+    attempt = _w2e_attempt("graph-writes", [(35, GRAPH_OP, COMMUNITIES)])
+    row = _row(tmp_path, {"graph-writes": {"real": attempt, "real-retry": attempt, "synthetic": PASS}})
+    assert (row["class"], row.get("accepted_as"), row["differences"]) == ("accepted", "community-partition", 7)
+
+
+def test_a_real_bank_place_the_printout_cut_is_not_excused_as_preexisting(tmp_path):
+    """The synthetic arm differs in the episodes rows; the real arm also in
+    the facts rows, which its printout cut. Its printed places were all on
+    the synthetic arm, so it read as preexisting."""
+    real = _w2e_attempt("store-reaper", [(1, GRAPH_OP, EPISODES + [FACTS])])
+    synthetic = _w2e_attempt("store-reaper", [(1, GRAPH_OP, EPISODES[:1])])
+    assert "public.facts" not in real["log"]
+    assert _row(tmp_path, {"store-reaper": {"real": real, "real-retry": real,
+                                            "synthetic": synthetic}})["class"] == "new"
+    # Near miss: the synthetic arm differs there too (also beyond its printout).
+    wider = _w2e_attempt("store-reaper", [(1, GRAPH_OP, EPISODES + [FACTS])])
+    assert _row(tmp_path, {"store-reaper": {"real": real, "real-retry": real,
+                                            "synthetic": wider}})["class"] == "preexisting"
+
+
+def test_the_synthetic_arms_full_list_counts_too(tmp_path):
+    """The shared place is beyond the synthetic arm's printout: only its full
+    list shows the real arm's one place on it."""
+    real = _w2e_attempt("store-reaper", [(1, GRAPH_OP, [FACTS])])
+    synthetic = _w2e_attempt("store-reaper", [(1, GRAPH_OP, EPISODES + [FACTS])])
+    assert "public.facts" not in synthetic["log"]
+    assert _row(tmp_path, {"store-reaper": {"real": real, "real-retry": real,
+                                            "synthetic": synthetic}})["class"] == "preexisting"
+
+
+@pytest.mark.parametrize("written", [
+    None,                                                     # no --out file
+    "{\"complete\": true, \"scenarios\": [",                  # cut mid-write
+    {"complete": False, "planned_scenarios": ["x"], "scenarios": []},  # the progress write
+    "stale",                                                  # another run's file
+])
+def test_without_the_full_list_nothing_is_accepted_or_preexisting(tmp_path, written):
+    """With no complete --out JSON the printed lines may be cut, so they
+    neither accept a community difference nor excuse a place as preexisting."""
+    def without(attempt):
+        if written == "stale":
+            other = _w2e_attempt("graph-writes", [(2, GRAPH_OP, [FACTS])])["json"]
+            return {**attempt, "json": other}
+        return {**attempt, "json": written}
+
+    community = without(_w2e_attempt("graph-writes", [(35, GRAPH_OP, COMMUNITIES[:2])]))
+    row = _row(tmp_path / "c", {"graph-writes": {"real": community, "real-retry": community,
+                                                 "synthetic": PASS}})
+    assert row["class"] == "new" and "accepted_as" not in row and row["differences"] == 2
+    real = without(_w2e_attempt("store-reaper", [(1, GRAPH_OP, EPISODES[:2])]))
+    synthetic = _w2e_attempt("store-reaper", [(1, GRAPH_OP, EPISODES[:2])])
+    assert _row(tmp_path / "p", {"store-reaper": {"real": real, "real-retry": real,
+                                                  "synthetic": synthetic}})["class"] == "new"
+
+
+def test_an_earlier_runs_matching_out_file_is_not_this_attempts(tmp_path):
+    """The attempt writes no --out JSON, but an earlier run left one at the
+    same path whose capped lines match this log exactly. The runner deletes
+    it before the harness starts, so the printed lines stay incomplete and
+    the community-only scenario stays new."""
+    attempt = _w2e_attempt("graph-writes", [(35, GRAPH_OP, COMMUNITIES[:2])])
+    for label in ("real", "real-retry"):
+        left = tmp_path / "w2e" / label / "graph-writes.json"
+        left.parent.mkdir(parents=True)
+        left.write_text(json.dumps(attempt["json"]), encoding="utf-8")
+    silent = {**attempt, "json": None}
+    row = _row(tmp_path, {"graph-writes": {"real": silent, "real-retry": silent, "synthetic": PASS}})
+    assert row["class"] == "new" and "accepted_as" not in row
+    # Control: with this attempt's own file the same scenario is accepted.
+    row = _row(tmp_path / "own", {"graph-writes": {"real": attempt, "real-retry": attempt,
+                                                   "synthetic": PASS}})
+    assert row.get("accepted_as") == "community-partition"
+
+
+def _rebuilt(tmp_path, suite, data, log):
+    """Through the runner: the attempt's diffs and completeness."""
+    path = tmp_path / f"{suite}.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    printed = forced.outcome(1, log)["diffs"]
+    return forced.full_diffs(suite, path, printed)
+
+
+LONG_OP = {"op": "tool", "name": "memory_recall",
+           "args": {"query": "what does Ada drink in the morning before the standup", "top_k": 5}}
+
+
+def test_the_w2e_rebuild_is_every_step_diff_as_w2e_prints_it(tmp_path):
+    seven = [f".value.results[{i}].score: python 0.{i} vs rust 0.{i + 1}" for i in range(7)]
+    data = {"complete": True, "planned_scenarios": ["recall"], "summary": {"scenarios": 1},
+            "scenarios": [{"scenario": "recall", "mutant": None, "stats": {}, "steps": [
+                {"step": 0, "op": {"op": "init"}, "diffs": []},
+                {"step": 3, "op": LONG_OP, "diffs": seven},
+                {"step": 4, "op": {"op": "sql"}, "diffs": ["db /rows/public.facts/rows: row only in rust: [1]"]}]}]}
+    cut = json.dumps(LONG_OP)[:90]
+    assert len(json.dumps(LONG_OP)) > 90
+    want = [f"DIFF [recall] step 3 {cut}: {d}" for d in seven] + [
+        'DIFF [recall] step 4 {"op": "sql"}: db /rows/public.facts/rows: row only in rust: [1]']
+    log = "\n".join(want[:6] + want[7:]) + "\n"           # w2e prints 6 per step
+    assert _rebuilt(tmp_path, "w2e", data, log) == (want, None)
+    assert forced.harness_lines("w2e", data, capped=True) == want[:6] + want[7:]
+
+
+def test_the_routes_rebuild_is_every_case_db_and_refusal_line(tmp_path):
+    items = [f".json.items[{i}].id: python {i} vs rust {i + 1}" for i in range(5)]
+    db = [f"/rows/public.slot_reads/rows: row only in python: [\"box\", {i}]" for i in range(21)]
+    data = {"summary": {"cases": 2}, "scenarios": [{"scenario": "tokens", "cases": [
+        {"case": "stats", "diffs": items, "declared": False},
+        {"case": "health", "diffs": [], "declared": False}], "db_diffs": db}],
+        "refusals": [{"case": "refusals/oversize-body", "diffs": ["status 413 vs 400"]},
+                     {"case": "refusals/clean", "diffs": []}]}
+    want = ([f"DIFF [tokens] stats: {items}"] + [f"DB DIFF [tokens] {d}" for d in db]
+            + ["DIFF refusals/oversize-body: ['status 413 vs 400']"])
+    log = "\n".join([f"DIFF [tokens] stats: {items[:4]}"] + want[1:21] + want[22:]) + "\n"
+    assert _rebuilt(tmp_path, "routes", data, log) == (want, None)
+    assert "python 4 vs rust 5" in want[0]                 # the item past the 4 printed
+    # Its progress write is {"partial": [...]}, never the full list.
+    assert _rebuilt(tmp_path, "routes", {"partial": data["scenarios"]}, log)[0] is None
+
+
+def test_the_w2d_rebuild_is_every_case_and_db_line(tmp_path):
+    items = [f".entries[{i}].score: python 0.{i} vs rust 0.{i + 1}" for i in range(6)]
+    db = [f"public.retrieval_events[{i}].served[0].components.ce: python 0.1 vs rust 0.2" for i in range(21)]
+    data = {"complete": True, "planned_scenarios": ["rrf-pool"], "summary": {},
+            "results": [{"scenario": "rrf-pool", "declared": {}, "coverage": {}, "db_diffs": db,
+                         "cases": [{"case": "rrf 3", "diffs": items, "notes": ["n"]},
+                                   {"case": "rrf 4", "diffs": [], "notes": []}]}]}
+    want = [f"DIFF [rrf-pool] rrf 3: {items}"] + [f"DB DIFF [rrf-pool] {d}" for d in db]
+    log = "\n".join([f"DIFF [rrf-pool] rrf 3: {items[:5]}", "note [rrf-pool] rrf 3: n"] + want[1:21]) + "\n"
+    assert _rebuilt(tmp_path, "w2d_search", data, log) == (want, None)
+    assert _rebuilt(tmp_path, "w2d_search", {**data, "complete": False}, log)[0] is None
+
+
+def test_the_board_rebuild_is_every_step_state_and_chain_line(tmp_path):
+    items = [f".json.agents[{i}].status: python a vs rust b" for i in range(5)]
+    state = [f"after step 13 (B to A anyone): coordination_wakes: row only in rust: {{\"n\": {i}}}"
+             for i in range(13)]
+    chain = [f"python: created_at: value {i}.5 does not match the captured clock windows" for i in range(13)]
+    data = {"complete": True, "planned_scenarios": ["wake"], "summary": {},
+            "results": [{"scenario": "wake", "state_diffs": state, "chain": chain,
+                         "steps": [{"step": 3, "name": "register", "diffs": items},
+                                   {"step": 4, "name": "list", "diffs": []}]}]}
+    want = ([f"DIFF [wake] #3 register: {items}"] + [f"STATE [wake] {d}" for d in state]
+            + [f"CHAIN [wake] {p}" for p in chain])
+    log = "\n".join([f"DIFF [wake] #3 register: {items[:4]}"] + want[1:13] + want[14:26]
+                    + ["  (CHAIN [wake]: +1 more problems; --out holds them all)"]) + "\n"
+    assert _rebuilt(tmp_path, "board", data, log) == (want, None)
+
+
+def test_the_rebuild_caps_are_the_harnesses_own_print_statements():
+    """The rebuild repeats each harness's DIFF print and its cap; a harness
+    that changes either must change the rebuild too (a mismatch at run time
+    only marks the attempt incomplete)."""
+    printed = {
+        "w2e.py": ["for d in s[\"diffs\"][:6]:",
+                   "print(f\"DIFF [{n}] step {s['step']} {json.dumps(s['op'])[:90]}: {d}\")"],
+        "run.py": ["print(f\"DIFF [{r['scenario']}] {c['case']}: {c['diffs'][:4]}\")",
+                   "for d in r[\"db_diffs\"][:20]:", "print(f\"DB DIFF [{r['scenario']}] {d}\")",
+                   "print(f\"DIFF {r['case']}: {r['diffs']}\")"],
+        "w2d_search.py": ["print(f\"DIFF [{r['scenario']}] {c['case']}: {c['diffs'][:5]}\")",
+                          "for d in r[\"db_diffs\"][:20]:", "print(f\"DB DIFF [{r['scenario']}] {d}\")"],
+        "board/run.py": ["print(f\"DIFF [{r['scenario']}] #{s['step']} {s['name']}: {s['diffs'][:4]}\")",
+                         "for d in r[\"state_diffs\"][:12]:", "print(f\"STATE [{r['scenario']}] {d}\")",
+                         "for p in r[\"chain\"][:12]:", "print(f\"CHAIN [{r['scenario']}] {p}\")"],
+    }
+    # And the --out writes HARNESS_OUT tells apart, whose keys it reads: the
+    # final one, and routes' progress write ({"partial": ...}) it refuses.
+    written = {
+        "w2e.py": ["args.out.write_text(json.dumps({\"complete\": True, \"planned_scenarios\": names,",
+                   "\"summary\": summary, \"scenarios\": results}, indent=1,"],
+        "run.py": ["args.out.write_text(json.dumps({\"summary\": summary, \"scenarios\": results, "
+                   "\"refusals\": refusals},", "json.dumps({\"partial\": results}"],
+        "w2d_search.py": ["args.out.write_text(json.dumps({\"complete\": True, \"planned_scenarios\": names,",
+                          "\"summary\": summary, \"results\": results}, indent=1)"],
+        "board/run.py": ["args.out.write_text(json.dumps({\"complete\": True, \"planned_scenarios\": planned,",
+                         "\"summary\": summary, \"results\": results}, indent=1,"],
+    }
+    for script in printed:
+        source = (forced.HARNESS / script).read_text(encoding="utf-8")
+        for line in printed[script] + written[script]:
+            assert line in source, (script, line)
+
+
+RECORDED = Path(__file__).parent / "fixtures" / "forced_out"
+
+# Each recording's difference lines in full, counted without forced.py: from
+# the JSON's own lists (fixtures/forced_out/README.md), and for board also its
+# summary ("chain_problems": 24) and cut note ("+12 more problems").
+FULL_LINES = {"w2e--console-graph-malformed": 4, "w2d_search--mcp-search-explain": 14,
+              "w2d_search--rrf-pool": 352, "routes--seeded": 8, "routes--trust-bind": 1,
+              "board--identity": 24}
+
+
+def _difference_lists(suite: str, data: dict) -> list[tuple[bool, list]]:
+    """Every difference list a harness wrote, and whether it prints whole on
+    one line (a case's or step's list) rather than one line per item."""
+    if suite == "w2e":
+        return [(False, s["diffs"]) for r in data["scenarios"] for s in r["steps"]]
+    lists = []
+    for r in data["scenarios"] if suite == "routes" else data["results"]:
+        lists += [(True, c["diffs"]) for c in r.get("cases", r.get("steps", []))]
+        lists += [(False, r.get(key, [])) for key in ("db_diffs", "state_diffs", "chain")]
+    if suite == "routes":
+        lists += [(True, r["diffs"]) for r in data["refusals"]]
+    return [(whole, items) for whole, items in lists if items]
+
+
+def _recorded(path: Path):
+    suite = path.name.split("--")[0]
+    printed = forced.outcome(1, path.with_suffix(".log").read_text(encoding="utf-8"))["diffs"]
+    full, why = forced.full_diffs(suite, path, printed)
+    return suite, printed, full, why, json.loads(path.read_text(encoding="utf-8"))
+
+
+@pytest.mark.parametrize("suite", list(forced.HARNESS_OUT))
+def test_a_recorded_harness_run_rebuilds_to_the_lines_it_printed(suite):
+    """Real harness runs on the synthetic bank, each its --out JSON and its
+    log as the runner keeps them (fixtures/forced_out/README.md). The capped
+    rebuild must be the log's DIFF lines in order; the full one must hold
+    every difference the JSON lists, each case's list whole; and one nothing
+    was cut from is the printed lines as a multiset."""
+    cases = sorted(RECORDED.glob(f"{suite}--*.json"))
+    assert cases, f"no recorded {suite} run"
+    for path in cases:
+        _, printed, full, why, data = _recorded(path)
+        assert printed and why is None, (path.name, why)
+        lists = _difference_lists(suite, data)
+        assert len(full) == sum(1 if whole else len(items) for whole, items in lists), path.name
+        assert len(full) == FULL_LINES[path.stem], path.name
+        text = "\n".join(full)
+        for whole, items in lists:
+            if whole:  # its own line ends with the whole list
+                assert any(line.endswith(f": {items}") for line in full), (path.name, str(items)[:80])
+            else:
+                for item in items:
+                    assert str(item) in text, (path.name, str(item)[:80])
+        if forced.harness_lines(suite, data, capped=True) == full:
+            assert collections.Counter(full) == collections.Counter(printed), path.name
+
+
+def test_the_recordings_hold_both_a_cut_and_a_whole_printout():
+    kinds = collections.Counter()
+    for path in RECORDED.glob("*--*.json"):
+        suite, _, full, why, data = _recorded(path)
+        assert why is None, (path.name, why)
+        kinds["whole" if forced.harness_lines(suite, data, capped=True) == full else "cut"] += 1
+    assert kinds["whole"] and kinds["cut"], kinds
+
+
+def test_side_by_side_each_attempt_reads_its_own_out_json(tmp_path):
+    """Conductor (#1446's truncation fix with --jobs): the runner rebuilds an
+    attempt's full differences from its harness's --out JSON, so at --jobs 2
+    each worker must read its own scenario's file. Two recorded routes runs
+    with different full counts (8 and 1) start together; each scenario's
+    attempts keep their own count, from their own file."""
+    import shutil
+    import threading
+    together = threading.Barrier(2, timeout=30)
+    seen = []
+
+    class Recorded(forced.Runner):
+        first = True
+
+        def _run(self, argv, env):
+            name, out = argv[argv.index("--only") + 1], Path(argv[argv.index("--out") + 1])
+            if self.first:  # both first attempts run at once
+                self.first = False
+                together.wait()
+            seen.append((name, out))
+            shutil.copy(RECORDED / f"routes--{name}.json", out)
+            return 1, (RECORDED / f"routes--{name}.log").read_text(encoding="utf-8")
+
+    workers = [Recorded(Path("rust-bin"), tmp_path / "out", 60, tmp_path / "STOP", scratch=tmp_path / f"s{n}",
+                        sweep=lambda attempt: 0, oom_kills=lambda: None) for n in range(2)]
+    _, private = forced.run(workers[0], ["routes"], None, names=lambda s: ["seeded", "trust-bind"],
+                            workers=workers)
+    want = {"seeded": FULL_LINES["routes--seeded"], "trust-bind": FULL_LINES["routes--trust-bind"]}
+    for name, count in want.items():
+        for label in ("real", "real_retry", "synthetic"):
+            attempt = private[f"routes/{name}"][label]
+            assert attempt["diffs_complete"] and len(attempt["diffs"]) == count, (name, label)
+    assert len({out for _, out in seen}) == len({(n, out.parent.name) for n, out in seen})
