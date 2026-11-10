@@ -6655,7 +6655,7 @@ def _run_live(name: str, scn: dict, tag: str, binary: Path, root: Path, record: 
                 tie_proofs.response_proofs(row["diffs"], row.get("python"), row.get("rust"),
                                            text_md5=tie_proofs.bank_text_md5(dsns),
                                            ordered=op.get("name") == "memory_recent" or fired_py or fired_rs,
-                                           tool=op.get("name"))
+                                           tool=tie_proofs.step_tool(op))
                 + tie_proofs.event_proofs(row["diffs"], raw_py, raw_rs, tie_proofs.bank_text_md5(dsns))))
             if proofs:
                 row["tie_proofs"] = proofs

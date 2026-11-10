@@ -1443,7 +1443,10 @@ def run_scenario(scn: Scenario, binary: Path, template: str, mode: str, record: 
                                                  stats=c.get("tool") == "memory_stats", aligned=bodies)
             # Ids and text hashes for the lines that served different entries
             # (forced.py's tie-order rules); none when nothing differs.
-            padded_query = case_query(c) if row["diffs"] and tie_proofs.padded(case_query(c)) else None
+            # Every padded case gets its proof, differing or not: a near-tied
+            # reorder the comparator aligned away can still show in the bank's
+            # served_facts, which the case's proof explains (Codex's review).
+            padded_query = case_query(c) if tie_proofs.padded(case_query(c)) else None
             # The bodies as compared: Rust's entries realigned on ties, as the
             # printed paths index them (Codex's review, 2026-11-11).
             seen_py, seen_rs = bodies.get("python", py_r.get("json")), bodies.get("rust", rs_r.get("json"))

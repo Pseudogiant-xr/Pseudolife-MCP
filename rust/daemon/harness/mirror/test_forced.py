@@ -2919,3 +2919,29 @@ def test_a_timeline_fired_on_either_side_orders_a_search_answer():
     later = state((1, "q", {"timeline": {"fired": True}}), (2, "r", {"timeline": {"fired": False}}))
     assert tie_proofs.new_events_fired(later, seen) == (False, {1, 2})
     assert tie_proofs.new_events_fired(None, {5}) == (False, {5})
+
+
+def test_a_padded_case_whose_answer_aligned_away_still_explains_its_bank_lines():
+    """Codex's review (P2, 2026-11-11): a near-tied reorder the comparator
+    aligned leaves the answer without lines, but the bank's served_facts
+    can still differ; the case's proof (recorded whether or not the answer
+    differed) explains them."""
+    a = padded_attempt()
+    a["diffs"] = [line for line in a["diffs"] if "padded query" not in line]  # no case line
+    assert a["tie_proofs"][f"case {PADDED_CASE}"]
+    assert forced._tie_only(a, rules=("padded-query",))
+    # Without the case's proof the event is no padded case's.
+    del a["tie_proofs"][f"case {PADDED_CASE}"]
+    assert not forced._tie_only(a, rules=("padded-query",))
+
+
+def test_a_w2e_step_names_its_call_for_rules_b_and_d():
+    """Codex's review (P2, 2026-11-11): a w2e http step has no name, so a
+    REST /api/search step could never be a search answer."""
+    assert tie_proofs.step_tool({"op": "tool", "name": "memory_search"}) == "memory_search"
+    assert tie_proofs.step_tool({"op": "http", "method": "GET", "path": "/api/search?q=x&top_k=3"}) == "/api/search"
+    assert tie_proofs.step_tool({"op": "http", "method": "POST", "path": "/api/hook/session-end"}) == "/api/hook/session-end"
+    assert tie_proofs.step_tool({"op": "init"}) is None and tie_proofs.step_tool(None) is None
+    lines = [w2e_line(4, ".entries[2].id: python 69 vs rust 65")]
+    tool = tie_proofs.step_tool({"op": "http", "path": "/api/search?q=x"})
+    assert forced._tie_only(attempt(lines, {"step 4": [pick(".entries[2]", 69, 65, tool=tool)]}))

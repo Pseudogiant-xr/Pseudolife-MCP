@@ -156,6 +156,19 @@ def _served(state: dict | None, event: int) -> list:
     return served if isinstance(served, list) else []
 
 
+def step_tool(op: dict) -> str | None:
+    """The call a w2e step made: an MCP tool's name, or for an http step
+    its route without the query string (as w2d_search names a REST case),
+    so a REST /api/search step is a search answer too (Codex's review,
+    2026-11-11)."""
+    if not isinstance(op, dict):
+        return None
+    if op.get("op") == "http":
+        path = op.get("path")
+        return path.split("?")[0] if isinstance(path, str) else None
+    return op.get("name")
+
+
 def new_events_fired(state: dict | None, seen: set) -> tuple[bool, set]:
     """Whether any retrieval event in ``state`` not in ``seen`` (the ids
     earlier steps logged) fired its timeline, and every event id it holds:
