@@ -2194,9 +2194,11 @@ def w2d_case(case: str, items: list[str]) -> str:
 
 
 def pick(at, py, rs, md5_py=SAME, md5_rs=SAME, via=(None, None), found=(True, True), surprise=(0.5, 0.5),
-         scores=({"score": 0.5}, {"score": 0.5}), ordered=False):
+         scores=({"score": 0.5}, {"score": 0.5}), ordered=False, tool="memory_search"):
     out = {"at": at, "kind": "pick", "python": py, "rust": rs,
            "text_md5": {"python": md5_py, "rust": md5_rs}, "ordered": ordered}
+    if "served[" not in at:
+        out["tool"] = tool
     if "served[" in at:
         out["via"] = {"python": via[0], "rust": via[1]}
         out["found"] = {"python": found[0], "rust": found[1]}
@@ -2324,7 +2326,7 @@ def test_an_access_count_follow_on_is_exactly_the_extra_serves_of_a_tie_pick():
     crafted = [w2d_case("crafted", [".entries[3].id: python 70 vs rust 67"])]
     rerank = [w2d_case("rerank on", [".entries[27].access_count: python 18 vs rust 19"])]
     proofs = {"case crafted": [pick(".entries[3]", 70, 67)],
-              "case rerank on": [{"at": ".entries[27]", "kind": "count", "id": 67, "ordered": False}]}
+              "case rerank on": [{"at": ".entries[27]", "kind": "count", "id": 67, "ordered": False, "tool": "memory_search"}]}
     assert forced._tie_only(attempt(crafted + rerank, proofs))
     assert not forced._tie_only(attempt(crafted + rerank, proofs), rules=("duplicate-pick",))
     # Near misses: a count off by more than the extra serves; the count before
@@ -2332,13 +2334,13 @@ def test_an_access_count_follow_on_is_exactly_the_extra_serves_of_a_tie_pick():
     wrong = [w2d_case("rerank on", [".entries[27].access_count: python 18 vs rust 20"])]
     assert not forced._tie_only(attempt(crafted + wrong, proofs))
     assert not forced._tie_only(attempt(rerank + crafted, proofs))
-    other = {**proofs, "case rerank on": [{"at": ".entries[27]", "kind": "count", "id": 2746, "ordered": False}]}
+    other = {**proofs, "case rerank on": [{"at": ".entries[27]", "kind": "count", "id": 2746, "ordered": False, "tool": "memory_search"}]}
     assert not forced._tie_only(attempt(crafted + rerank, other))
-    unproven = {**proofs, "case rerank on": [{"at": ".entries[27]", "kind": "count", "id": None, "ordered": False}]}
+    unproven = {**proofs, "case rerank on": [{"at": ".entries[27]", "kind": "count", "id": None, "ordered": False, "tool": "memory_search"}]}
     assert not forced._tie_only(attempt(crafted + rerank, unproven))
     # Python's extra serve counts the other way.
     python_side = [w2d_case("rerank on", [".entries[27].access_count: python 29 vs rust 28"])]
-    p70 = {**proofs, "case rerank on": [{"at": ".entries[27]", "kind": "count", "id": 70, "ordered": False}]}
+    p70 = {**proofs, "case rerank on": [{"at": ".entries[27]", "kind": "count", "id": 70, "ordered": False, "tool": "memory_search"}]}
     assert forced._tie_only(attempt(crafted + python_side, p70))
 
 
@@ -2421,18 +2423,20 @@ def test_response_proofs_hash_the_full_text_from_the_banks():
     def banks(ids):
         asked.append(ids)
         return {69: SAME, 65: OTHER}  # equal previews, different full texts
-    out = tie_proofs.response_proofs(lines, python, rust, text_md5=banks)
+    out = tie_proofs.response_proofs(lines, python, rust, text_md5=banks, tool="memory_search")
     assert out[0]["kind"] == "pick" and out[0]["at"] == ".value.entries[1]" and asked == [{65, 69}]
+    assert out[0]["tool"] == "memory_search"
     assert out[0]["text_md5"] == {"python": SAME, "rust": OTHER} and out[0]["ordered"] is False
     assert "pre" not in json.dumps(out)
     # The count's position holds id 1 on Python but 65 on Rust: no id.
-    assert out[1] == {"at": ".value.entries[0]", "kind": "count", "id": None, "ordered": False}
+    assert out[1] == {"at": ".value.entries[0]", "kind": "count", "id": None, "ordered": False,
+                      "tool": "memory_search"}
     assert len(out) == 2  # the db line and a non-entry line get none
     # No bank reader: the pick is unproved, never hashed from the preview.
     assert tie_proofs.response_proofs(lines[:1], python, rust)[0]["text_md5"] == {"python": None, "rust": None}
     rust["value"]["entries"] = [{"id": 1, "text": "x"}, {"id": 65, "text": "other"}]
     out = tie_proofs.response_proofs(lines[:2], python, rust, text_md5=banks)
-    assert out[1] == {"at": ".value.entries[0]", "kind": "count", "id": 1, "ordered": False}
+    assert out[1] == {"at": ".value.entries[0]", "kind": "count", "id": 1, "ordered": False, "tool": None}
 
 
 def test_rules_b_and_d_never_accept_in_an_ordered_response():
@@ -2455,7 +2459,8 @@ def test_rules_b_and_d_never_accept_in_an_ordered_response():
     crafted = [w2d_case("crafted", [".entries[3].id: python 70 vs rust 67"])]
     rerank = [w2d_case("rerank on", [".entries[27].access_count: python 18 vs rust 19"])]
     proofs = {"case crafted": [pick(".entries[3]", 70, 67)],
-              "case rerank on": [{"at": ".entries[27]", "kind": "count", "id": 67, "ordered": True}]}
+              "case rerank on": [{"at": ".entries[27]", "kind": "count", "id": 67, "ordered": True,
+                                  "tool": "memory_search"}]}
     assert not forced._tie_only(attempt(crafted + rerank, proofs))
 
 
@@ -2544,7 +2549,8 @@ PADDED_Q = "   what os does the homelab box run  "
 
 def padded_attempt(cortex=(".cortex: length python 5 vs rust 4",), facts_event=9593, slot=("e1", "a1"),
                    rows=(("python", 7), ("rust", 6)), count=None, case=PADDED_CASE, marked=True,
-                   reads=None, extra_db=(), case_values=None, event_facts=None, event_query=PADDED_Q):
+                   reads=None, extra_db=(), case_values=None, event_facts=None, event_query=PADDED_Q,
+                   case_pins=None, event_pins=None):
     """default's padded-query shape: Python's cortex block serves slot e1/a1
     beside the slots both serve; its event and slot_reads follow."""
     lines = [w2d_case(case, list(cortex)),
@@ -2561,11 +2567,13 @@ def padded_attempt(cortex=(".cortex: length python 5 vs rust 4",), facts_event=9
     facts = event_facts or {"python": {one: "f1", both: "f9"}, "rust": {both: "f9"}}
     lens = lambda m: {"python": len(m["python"]), "rust": len(m["rust"])}  # noqa: E731
     proofs = {"db": [{"at": "public.retrieval_events[9593]", "kind": "padded-event", "event": 9593,
-                      "query_md5": tie_proofs._md5(event_query), "facts": facts, "facts_len": lens(facts)},
+                      "query_md5": tie_proofs._md5(event_query), "facts": facts, "facts_len": lens(facts),
+                      "pinned_at": event_pins or {"python": {}, "rust": {}}},
                      {"at": "", "kind": "slot-reads", "slots": {one: 1} if reads is None else reads}]}
     if marked:
         proofs[f"case {PADDED_CASE}"] = [{"at": "", "kind": "padded-query", "query_md5": tie_proofs._md5(PADDED_Q),
-                                          "cortex": values, "cortex_len": lens(values)}]
+                                          "cortex": values, "cortex_len": lens(values),
+                                          "pinned_at": case_pins or {"python": {}, "rust": {}}}]
     return attempt(lines, proofs)
 
 
@@ -2787,8 +2795,9 @@ def test_count_and_pick_proofs_read_the_lists_as_the_comparator_aligned_them():
     bodies: dict = {}
     diffs, notes = w2d_search.compare(py, rs, aligned=bodies)
     assert diffs == [".entries[0].access_count: python 18 vs rust 19"] and notes
-    assert tie_proofs.response_proofs(diffs, bodies["python"], bodies["rust"]) == [
-        {"at": ".entries[0]", "kind": "count", "id": 67, "ordered": False}]
+    assert tie_proofs.response_proofs(diffs, bodies["python"], bodies["rust"], tool="/api/search") == [
+        {"at": ".entries[0]", "kind": "count", "id": 67, "ordered": False, "tool": "/api/search"}]
+    assert bodies["ordered"] is False
     # The raw bodies would not have proved it.
     assert tie_proofs.response_proofs(diffs, py["json"], rs["json"])[0]["id"] is None
     # Without the argument the comparator behaves as before.
@@ -2819,3 +2828,72 @@ def test_a_served_facts_line_past_the_recorded_lists_stays_new():
     assert not forced._tie_only(a, rules=("padded-query",))
     a = padded_attempt(extra_db=("public.retrieval_events[9593].served_facts[1].score: python 0.5 vs rust 0.6",))
     assert forced._tie_only(a, rules=("padded-query",))
+
+
+def test_rule_b_and_d_read_only_search_answers():
+    """Opus's sweep (2026-11-11): ruling B names search answers. An entries
+    list in another tool's answer (memory_recent, a document search, a
+    trace) is not one, and neither is a proof that names no tool."""
+    lines = [w2e_line(10, ".value.entries[25].id: python 69 vs rust 65")]
+    for tool in ("memory_search", "/api/search"):
+        assert forced._tie_only(attempt(lines, {"step 10": [pick(".value.entries[25]", 69, 65, tool=tool)]}))
+    for tool in ("memory_recent", "search_documents", "/api/trace", None):
+        assert not forced._tie_only(attempt(lines, {"step 10": [pick(".value.entries[25]", 69, 65, tool=tool)]}))
+    crafted = [w2d_case("crafted", [".entries[3].id: python 70 vs rust 67"])]
+    rerank = [w2d_case("rerank on", [".entries[27].access_count: python 18 vs rust 19"])]
+    proofs = {"case crafted": [pick(".entries[3]", 70, 67)],
+              "case rerank on": [{"at": ".entries[27]", "kind": "count", "id": 67, "ordered": False,
+                                  "tool": "/api/trace"}]}
+    assert not forced._tie_only(attempt(crafted + rerank, proofs))
+
+
+def test_a_pinned_fact_both_sides_served_must_keep_its_position():
+    """Opus's sweep (2026-11-11): a pinned constraint fact sits first by
+    policy, not by score, so its position is not the tokenizer's to move."""
+    pin = tie_proofs.slot_md5("e9", "a9")
+    rules = ("padded-query",)
+    assert forced._tie_only(padded_attempt(case_pins={"python": {pin: 0}, "rust": {pin: 0}},
+                                           event_pins={"python": {pin: 0}, "rust": {pin: 0}}), rules=rules)
+    assert not forced._tie_only(padded_attempt(case_pins={"python": {pin: 0}, "rust": {pin: 1}}), rules=rules)
+    assert not forced._tie_only(padded_attempt(event_pins={"python": {pin: 0}, "rust": {pin: 2}}), rules=rules)
+    unpinned = padded_attempt()
+    del unpinned["tie_proofs"][f"case {PADDED_CASE}"][0]["pinned_at"]
+    assert not forced._tie_only(unpinned, rules=rules)
+    fact = {"entity": "E", "attribute": "A", "value": 1, "pinned": True}
+    other = {"entity": "F", "attribute": "B", "value": 2}
+    case = tie_proofs.padded_case_proof("q ", {"cortex": [fact, other]}, {"cortex": [other, fact]})
+    assert case["pinned_at"] == {"python": {tie_proofs.slot_md5("E", "A"): 0}, "rust": {tie_proofs.slot_md5("E", "A"): 1}}
+
+
+def test_a_served_list_holding_a_stream_ordered_item_is_ordered():
+    """Opus's sweep (2026-11-11): align_ties treats a whole list holding a
+    contiguity or timeline item as exact order, so the event proof does."""
+    def events(served):
+        cols = ["id", tie_proofs.EVENT_SERVED]
+        return {"rows": {"public.retrieval_events": {"columns": cols, "rows": [[7, served]]}}}
+    md5 = lambda ids: {69: SAME, 65: SAME}  # noqa: E731
+    line = ["db retrieval_events[7].served[0].entry_id: python 69 vs rust 65"]
+    py = [{"entry_id": 69, "via": "dense"}, {"entry_id": 3, "via": "contiguity"}]
+    rs = [{"entry_id": 65, "via": "dense"}, {"entry_id": 3, "via": "contiguity"}]
+    assert tie_proofs.event_proofs(line, events(py), events(rs), md5)[0]["ordered"] is True
+    assert tie_proofs.event_proofs(line, events(py[:1]), events(rs[:1]), md5)[0]["ordered"] is False
+
+
+def test_a_fired_trace_timeline_orders_its_entries_without_via():
+    """Opus's sweep (2026-11-11): /api/trace entries carry no via, so for a
+    fired trace timeline the comparator's own flag is the only signal; the
+    proofs take it from compare."""
+    import w2d_search
+
+    def response(entries):
+        return {"status": 200, "headers": {"content-type": "application/json"},
+                "json": {"entries": entries, "trace": {"timeline": {"fired": True}}}}
+    py = response([{"id": 69, "score": 0.5, "text": "x"}])
+    rs = response([{"id": 65, "score": 0.5, "text": "x"}])
+    bodies: dict = {}
+    diffs, _ = w2d_search.compare(py, rs, aligned=bodies)
+    assert bodies["ordered"] is True
+    proofs = tie_proofs.response_proofs([d for d in diffs if ".entries[0].id" in d], bodies["python"],
+                                        bodies["rust"], lambda ids: {69: SAME, 65: SAME},
+                                        ordered=bodies["ordered"], tool="/api/search")
+    assert proofs and proofs[0]["ordered"] is True

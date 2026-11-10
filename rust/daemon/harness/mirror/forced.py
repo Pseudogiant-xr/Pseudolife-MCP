@@ -1081,6 +1081,9 @@ TIE_ORDERED_VIA = ("contiguity", "timeline")
 # Rules B and D read a response position only in an entries list (w2d's and
 # MCP's search entries, w2e's step answers); any other id list keeps it new.
 TIE_ENTRIES = re.compile(r"(?:^|\.)entries\[\d+\]$")
+# ...and only in a search answer, the calls ruling B names (Opus's sweep,
+# 2026-11-11): MCP memory_search and REST GET /api/search.
+TIE_SEARCH_TOOLS = ("memory_search", "/api/search")
 
 
 def _tie_items(line: str) -> tuple[str, list[str]] | None:
@@ -1118,6 +1121,14 @@ def _slot_md5(entity, attribute) -> str:
     """tie_proofs.slot_md5, which a forced run cannot import (the runner puts
     only this directory on its path); test_forced pins the two equal."""
     return hashlib.md5(f"{entity}\x1f{attribute}".encode("utf-8")).hexdigest()
+
+
+def _pins_agree(pins) -> bool:
+    """A pinned fact sits where policy puts it, not where its score does
+    (_pin_constraint_facts), so one both sides pinned must sit at the same
+    position on both. Absent records prove nothing."""
+    a, b = (pins or {}).get("python"), (pins or {}).get("rust")
+    return isinstance(a, dict) and isinstance(b, dict) and all(a[k] == b[k] for k in a.keys() & b.keys())
 
 
 def _proven(maps, lens) -> bool:
@@ -1163,7 +1174,7 @@ def _padded_items(attempt: dict, parsed: list) -> set[tuple[int, int]]:
     for ctx, ps in proofs.items():
         for p in ps:
             if (isinstance(p, dict) and p.get("kind") == "padded-query" and isinstance(p.get("query_md5"), str)
-                    and _proven(p.get("cortex"), p.get("cortex_len"))):
+                    and _proven(p.get("cortex"), p.get("cortex_len")) and _pins_agree(p.get("pinned_at"))):
                 cases[ctx] = p["cortex_len"]
                 queries.add(p["query_md5"])
     events, expected, reads = {}, {}, None
@@ -1171,7 +1182,8 @@ def _padded_items(attempt: dict, parsed: list) -> set[tuple[int, int]]:
         if not isinstance(p, dict):
             continue
         if (p.get("kind") == "padded-event" and isinstance(p.get("event"), int)
-                and p.get("query_md5") in queries and _proven(p.get("facts"), p.get("facts_len"))):
+                and p.get("query_md5") in queries and _proven(p.get("facts"), p.get("facts_len"))
+                and _pins_agree(p.get("pinned_at"))):
             events[p["event"]] = p["facts_len"]
             py, rs = set(p["facts"]["python"]), set(p["facts"]["rust"])
             for slot in py - rs:
@@ -1314,7 +1326,8 @@ def _tie_only(attempt: dict, rules=None) -> set[str]:
             ident = "entry_id" if served else "id"
             allowed = TIE_EVENT_FIELDS if served else TIE_RESPONSE_FIELDS
             p = proofs.get(key)
-            if (ident in fields and set(fields) <= allowed and (served or TIE_ENTRIES.search(at))
+            if (ident in fields and set(fields) <= allowed
+                    and (served or (TIE_ENTRIES.search(at) and (p or {}).get("tool") in TIE_SEARCH_TOOLS))
                     and p and p.get("kind") == "pick" and _same_text(p) and p.get("ordered") is False
                     and (str(p.get("python")), str(p.get("rust"))) == fields[ident]
                     and (not served or _found(p))):
@@ -1346,7 +1359,7 @@ def _tie_only(attempt: dict, rules=None) -> set[str]:
             p = proofs.get(key)
             if (key in covered or set(fields) != {"access_count"} or not TIE_ENTRIES.search(at)
                     or not p or p.get("kind") != "count" or not isinstance(p.get("id"), int)
-                    or p.get("ordered") is not False):
+                    or p.get("ordered") is not False or p.get("tool") not in TIE_SEARCH_TOOLS):
                 continue
             try:
                 py, rs = (int(v) for v in fields["access_count"])

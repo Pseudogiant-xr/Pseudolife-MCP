@@ -82,7 +82,8 @@ def _ordered_list(items) -> bool:
     return isinstance(items, list) and any(isinstance(x, dict) and x.get("via") in ORDERED_VIA for x in items)
 
 
-def response_proofs(lines: list[str], python, rust, text_md5=None, ordered: bool = False) -> list[dict]:
+def response_proofs(lines: list[str], python, rust, text_md5=None, ordered: bool = False,
+                    tool: str | None = None) -> list[dict]:
     """Proofs for a response's lines: ``python``/``rust`` are the compared
     values the lines' paths start from (w2e's step answer, w2d's JSON body).
 
@@ -93,7 +94,10 @@ def response_proofs(lines: list[str], python, rust, text_md5=None, ordered: bool
 
     ``text_md5(ids)`` reads each entry's FULL text hash from the banks: a
     response's ``text`` may be a truncated preview, and equal previews are
-    not equal entries. Without it a pick's hashes are None (unproved)."""
+    not equal entries. Without it a pick's hashes are None (unproved).
+
+    ``tool``: the call answered (an MCP tool name, or a REST route), so
+    the runner applies rule B only to search answers."""
     picks = []
     for line in lines:
         if line.startswith("db "):  # w2e's bank lines: event_proofs
@@ -117,7 +121,7 @@ def response_proofs(lines: list[str], python, rust, text_md5=None, ordered: bool
             listed = (_walk(python, head), _walk(rust, head))
             proof = {"at": m["at"], "kind": "pick", "python": int(m["py"]), "rust": int(m["rs"]),
                      "text_md5": {"python": hashes.get(int(m["py"])), "rust": hashes.get(int(m["rs"]))},
-                     "ordered": bool(ordered or any(_ordered_list(x) for x in listed))}
+                     "ordered": bool(ordered or any(_ordered_list(x) for x in listed)), "tool": tool}
             if unavailable:
                 proof["unavailable"] = unavailable
             out.append(proof)
@@ -130,7 +134,8 @@ def response_proofs(lines: list[str], python, rust, text_md5=None, ordered: bool
             ident = item.get("id") if isinstance(item, dict) else None
             out.append({"at": m["at"], "kind": "count",
                         "id": ident if isinstance(other, dict) and other.get("id") == ident else None,
-                        "ordered": bool(ordered or any(_ordered_list(_walk(x, head)) for x in (python, rust)))})
+                        "ordered": bool(ordered or any(_ordered_list(_walk(x, head)) for x in (python, rust))),
+                        "tool": tool})
     return out
 
 
@@ -192,7 +197,12 @@ def event_proofs(lines: list[str], python_events: dict | None, rust_events: dict
                  "surprise": {"python": ((a or {}).get("components") or {}).get("surprise"),
                               "rust": ((b or {}).get("components") or {}).get("surprise")},
                  "scores": {"python": _scores(a), "rust": _scores(b)},
-                 "ordered": _event_ordered(python_events, event) or _event_ordered(rust_events, event),
+                 # The event's timeline flag, or any stream-ordered item in
+                 # either side's served list (align_ties treats such a list
+                 # as exact order).
+                 "ordered": (_event_ordered(python_events, event) or _event_ordered(rust_events, event)
+                             or _ordered_list(_served(python_events, event))
+                             or _ordered_list(_served(rust_events, event))),
                  "found": {"python": a is not None, "rust": b is not None}}
         if unavailable:
             proof["unavailable"] = unavailable
@@ -257,9 +267,13 @@ def padded_case_proof(query: str, python, rust) -> dict:
     if not all(_facts_list(body.get("cortex") if isinstance(body, dict) else None, ("entity", "attribute"))
                for body in (python, rust)):
         return {"at": "", "kind": "padded-query", "unavailable": "malformed cortex block"}
+    def pins(body):  # a pinned constraint fact sits first by policy, not by score
+        return {slot_md5(x.get("entity"), x.get("attribute")): i
+                for i, x in enumerate(items(body)) if x.get("pinned") is True}
     return {"at": "", "kind": "padded-query", "query_md5": _md5(query),
             "cortex": {"python": cortex(python), "rust": cortex(rust)},
-            "cortex_len": {"python": len(items(python)), "rust": len(items(rust))}}
+            "cortex_len": {"python": len(items(python)), "rust": len(items(rust))},
+            "pinned_at": {"python": pins(python), "rust": pins(rust)}}
 
 
 FACT_FIELDS = ("kind", "contested", "pinned")  # a served fact's own fields; rank and score follow the order
@@ -294,9 +308,13 @@ def padded_event_proofs(queries: list[str], python_events: dict | None,
         if not all(_facts_list(x, ("entity_norm", "attribute_norm")) for x in (served, b[event][1])):
             # A null list or an item that is not a fact: no proof, stays new.
             continue
+        def pins(served):
+            return {slot_md5(x.get("entity_norm"), x.get("attribute_norm")): x.get("rank", i)
+                    for i, x in enumerate(rows(served)) if x.get("pinned") is True}
         out.append({"at": f"public.retrieval_events[{event}]", "kind": "padded-event", "event": event,
                     "query_md5": _md5(query), "facts": {"python": facts(served), "rust": facts(b[event][1])},
-                    "facts_len": {"python": len(rows(served)), "rust": len(rows(b[event][1]))}})
+                    "facts_len": {"python": len(rows(served)), "rust": len(rows(b[event][1]))},
+                    "pinned_at": {"python": pins(served), "rust": pins(b[event][1])}})
     return out
 
 

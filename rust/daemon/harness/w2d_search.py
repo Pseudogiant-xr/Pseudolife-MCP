@@ -939,7 +939,10 @@ def compare(py: dict, rs: dict, *, timeline_fired=False, ordered=False,
                                      ordered=(timeline_fired or ordered) and k == "entries")
                 notes += [f"{k}: {x}" for x in n]
     if aligned is not None:
+        # The order the comparison used, after a trace answer's own timeline
+        # flag: a fired trace timeline carries no via on its entries.
         aligned["python"], aligned["rust"] = a, b
+        aligned["ordered"] = bool(timeline_fired or ordered)
     diffs += diff(a, b, tol_keys=("score",) + TRACE_FLOAT_KEYS)
     return diffs, notes
 
@@ -1444,7 +1447,8 @@ def run_scenario(scn: Scenario, binary: Path, template: str, mode: str, record: 
                 tie_proofs.response_proofs(
                     row["diffs"], seen_py, seen_rs,
                     text_md5=tie_proofs.bank_text_md5(case_dsns) if case_dsns else None,
-                    ordered=ordered or c.get("tool") == "memory_recent")
+                    ordered=bodies.get("ordered", True) or c.get("tool") == "memory_recent",
+                    tool=c.get("tool") if "mcp" in c else (c.get("path") or "").split("?")[0])
                 + ([tie_proofs.padded_case_proof(padded_query, seen_py, seen_rs)]
                    if padded_query is not None else [])))
             if proofs:
