@@ -421,3 +421,66 @@ def test_a_sweeps_tombstone_of_an_inherited_deferred_root_keeps_its_old_clock(in
     meta["episode_tombstones"][OLD_ROOT]["ended_at"] = 4.0
     with pytest.raises(RuntimeError, match="outside the arm's captured window"):
         normalize_closes(swept, inherited, 90.0, 110.0)
+
+
+# ---- a session-end dream's graph insight refresh on a real bank's copy ----
+
+WINDOW = [(90.0, 110.0)]
+COMMUNITY_COLUMNS = ["id", "label", "size", "cohesion", "computed_at"]
+
+
+def refreshed(stamp, digest_stamp=None):
+    """state() after a graph insight refresh at ``stamp``: the communities,
+    their memberships, a derived entity source and meta's graph_digest."""
+    s = state()
+    s["rows"]["public.communities"] = {"columns": COMMUNITY_COLUMNS, "rows": [[1, "c", 2, 0.5, stamp]]}
+    s["rows"]["public.entity_communities"] = {"columns": ["entity_id", "community_id", "computed_at"],
+                                              "rows": [[7, 1, stamp]]}
+    s["rows"]["public.entity_sources"] = {
+        "columns": ["entity_id", "source", "count", "origin", "updated_at"],
+        "rows": [[7, "fixture", 1, "derived", stamp]]}
+    s["rows"]["public.meta"]["rows"].append(
+        ["graph_digest", {"computed_at": stamp if digest_stamp is None else digest_stamp,
+                          "communities": [{"id": 1, "size": 2}]}])
+    return s
+
+
+def test_a_graph_insight_refresh_compares_without_each_daemons_clock():
+    """Partial forced run 870fb28fc: on a real bank's copy a session-end
+    dream refreshes graph insight on both daemons, each at its own now();
+    the partition and the counts agreed and only these clocks differed."""
+    from background_sessions import normalize_refresh_clocks
+    a = normalize_refresh_clocks(refreshed(101.0), before(), WINDOW)
+    assert a == normalize_refresh_clocks(refreshed(104.5), before(), WINDOW)
+    assert a["rows"]["public.communities"]["rows"][0][4] == "<computed_at>"
+    # Near misses: the digest's clock outside the window, a different
+    # membership, and another meta row's clock all still differ.
+    assert normalize_refresh_clocks(refreshed(101.0, digest_stamp=120.0), before(), WINDOW) != a
+    other = refreshed(104.5)
+    other["rows"]["public.entity_communities"]["rows"][0][1] = 2
+    assert normalize_refresh_clocks(other, before(), WINDOW) != a
+    kept = refreshed(101.0)
+    kept["rows"]["public.meta"]["rows"].append(["graph_digest_v0", {"computed_at": 101.0}])
+    assert ["graph_digest_v0", {"computed_at": 101.0}] in \
+        normalize_refresh_clocks(kept, before(), WINDOW)["rows"]["public.meta"]["rows"]
+
+
+def test_an_existing_rows_rewritten_refresh_clock_still_differs():
+    """A row ``before`` already held is compared exactly (dbstate.normalize):
+    one arm restamping it is a difference, not a refresh to excuse."""
+    from background_sessions import normalize_refresh_clocks
+    prior = before()
+    prior["rows"]["public.communities"] = {"columns": COMMUNITY_COLUMNS, "rows": [[1, "c", 2, 0.5, 50.0]]}
+    assert normalize_refresh_clocks(refreshed(101.0), prior, WINDOW) != \
+        normalize_refresh_clocks(refreshed(104.5), prior, WINDOW)
+
+
+@pytest.mark.parametrize("name", ["session-reap", "session-sweep", "session-restart",
+                                  "session-tombstone-restart"])
+def test_the_session_scenarios_final_bank_ignores_the_refresh_clocks(name):
+    import run as harness
+    scenario = harness.SCENARIOS[name]()
+    scenario.starts = {"python": 90.0}
+    scenario.clock_windows = {"python": WINDOW}
+    assert scenario.normalize_db(refreshed(101.0), before(), "python") == \
+        scenario.normalize_db(refreshed(104.5), before(), "python")

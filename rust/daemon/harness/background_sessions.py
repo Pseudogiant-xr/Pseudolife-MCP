@@ -131,7 +131,8 @@ svc._storage.close()
                 self.validate_expected(state)
                 self.closed_states[side] = state
                 normalized = normalize_closes(state, self.before, daemon.started_at_unix, captured)
-                scrubbed = harness.scrub_declared_rows(normalized, self.before)["state"]
+                scrubbed = normalize_refresh_clocks(harness.scrub_declared_rows(normalized, self.before)["state"],
+                                                    self.before, [(daemon.started_at_unix, captured)])
                 arms[side] = {"status": 200, "headers": {}, "json": {"db": scrubbed, "events": {"session_end_dream_triggers": triggers}}}
             c = harness.case("bank after idle close" if not self.sweep else "bank after empty sweep", "OBSERVE", "/background/session-state")
             c["_answers"] = (arms["python"], arms["rust"])
@@ -147,18 +148,22 @@ svc._storage.close()
                     self.validate_expected(state)
                     # Restart must preserve the original close times exactly.
                     validate_restart_clocks(state, self.closed_states[side])
-                    normalized = normalize_closes(state, self.before, self.starts[side], time.time())
+                    now = time.time()
+                    normalized = normalize_closes(state, self.before, self.starts[side], now)
                     triggers = daemon.log.read_text(errors="replace").count("session-end dream trigger:")
-                    arms[side] = {"status": 200, "headers": {}, "json": {"db": harness.scrub_declared_rows(normalized, self.before)["state"], "events": {"session_end_dream_triggers": triggers}}}
+                    db = normalize_refresh_clocks(harness.scrub_declared_rows(normalized, self.before)["state"],
+                                                  self.before, [(self.starts[side], now)])
+                    arms[side] = {"status": 200, "headers": {}, "json": {"db": db, "events": {"session_end_dream_triggers": triggers}}}
                 c = harness.case("bank after owned clean stop and restart", "OBSERVE", "/background/session-state")
                 c["_answers"] = (arms["python"], arms["rust"])
                 rows.append(c)
             return rows
 
         def normalize_db(self, state, before, side):
-            return dbstate.normalize(normalize_closes(state, before, self.starts[side], time.time()),
-                                     harness.DB_NONDETERMINISTIC, before,
-                                     windows=self.clock_window(side))
+            state = dbstate.normalize(normalize_closes(state, before, self.starts[side], time.time()),
+                                      harness.DB_NONDETERMINISTIC, before,
+                                      windows=self.clock_window(side))
+            return normalize_refresh_clocks(state, before, self.clock_window(side))
 
         def validate_expected(self, state):
             table = state["rows"]["public.episodes"]
@@ -228,6 +233,36 @@ def validate_restart_clocks(state, closed):
     for key in ("deferred_empty_roots", "episode_tombstones"):
         if a.get(key) != b.get(key):
             raise RuntimeError("restart rewrote close metadata")
+
+
+# A session-end dream refreshes graph insight on each daemon. On a real
+# bank's copy, which holds a graph, that rewrites the communities, their
+# memberships, the derived entity sources and meta's graph_digest at each
+# daemon's own now(): in the partial forced run (870fb28fc) the partition and
+# the counts agreed, and only these clocks differed. A synthetic fixture
+# holds no graph, so nothing is refreshed there.
+REFRESH_CLOCKS = {
+    ("communities", "computed_at"): "clock: graph insight refresh",
+    ("entity_communities", "computed_at"): "clock: graph insight refresh",
+    ("entity_sources", "updated_at"): "clock: derived entity source refresh",
+}
+REFRESH_META_CLOCKS = {"graph_digest": "computed_at"}
+
+
+def normalize_refresh_clocks(state, before, windows):
+    """A refresh's clocks as dbstate's tokens: the columns above as
+    ``dbstate.normalize`` treats a clock (a new row's, or a base row's
+    inside the arm's window), and graph_digest's computed_at inside the
+    window. Every other clock, and every other value, stays raw."""
+    state = dbstate.normalize(state, REFRESH_CLOCKS, before, windows=windows)
+    spans = dbstate._clock_windows(windows)
+    for row in state["rows"].get("public.meta", {}).get("rows", []):
+        field = REFRESH_META_CLOCKS.get(row[0])
+        value = row[1].get(field) if field and isinstance(row[1], dict) else None
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) \
+                and any(lo <= value <= hi for lo, hi in spans):
+            row[1][field] = f"<{field}>"
+    return state
 
 
 def normalize_closes(state, before, start, end):
