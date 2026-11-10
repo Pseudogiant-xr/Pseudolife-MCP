@@ -1,6 +1,7 @@
 """The forced real-data runner's refusal, classification and report, without daemons."""
 from __future__ import annotations
 
+import collections
 import json
 import re
 import sys
@@ -12,7 +13,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import forced  # noqa: E402
 
 PASS = {"status": "pass", "diffs": [], "seconds": 1.0}
-DIFF = {"status": "diff", "diffs": ["DIFF [s] step 1 x: db /rows/public.entries"], "seconds": 1.0}
+DIFF = {"status": "diff", "diffs": ["DIFF [s] step 1 x: db /rows/public.entries"], "seconds": 1.0,
+        "diffs_complete": True}
 
 
 def test_outcome_reads_the_harness_output():
@@ -39,13 +41,30 @@ def test_classification(first, retry, synthetic, want):
 
 
 class FakeRunner(forced.Runner):
+    """An answer is either the attempt itself, or a harness run (``exit``,
+    ``log`` and the ``json`` its ``--out`` holds, None for none) that goes
+    through the real ``invoke``."""
+
     def __init__(self, tmp: Path, answers: dict, stop_after: int | None = None):
-        super().__init__(Path("rust-bin"), tmp, 60, tmp / "STOP")
+        # Its own scratch root: the real invoke reaps processes marked under it.
+        super().__init__(Path("rust-bin"), tmp, 60, tmp / "STOP", scratch=tmp / "scratch",
+                         oom_kills=lambda: 0)
         self.answers, self.calls, self.stop_after = answers, [], stop_after
 
     def invoke(self, suite, name, label, base):
         self.calls.append((suite, name, label, base))
-        return dict(self.answers[name][label])
+        answer = self.answers[name][label]
+        if "log" not in answer:
+            return dict(answer)
+        self.answer = answer
+        return super().invoke(suite, name, label, base)
+
+    def _run(self, argv, env):
+        out = Path(argv[argv.index("--out") + 1])
+        written = self.answer.get("json")
+        if written is not None:
+            out.write_text(written if isinstance(written, str) else json.dumps(written), encoding="utf-8")
+        return self.answer.get("exit", 1), self.answer["log"]
 
     def blocked(self):
         done = len({(s, n) for s, n, _, _ in self.calls})
@@ -95,9 +114,9 @@ def test_every_suite_names_a_live_harness_script():
 
 
 def test_preexisting_needs_the_synthetic_run_to_differ_in_the_same_place():
-    real = {"status": "diff", "diffs": [
+    real = {"status": "diff", "diffs_complete": True, "diffs": [
         'DIFF [store-reaper] step 1 {"op": "tool"}: db /rows/public.episodes/rows: row only in python: [1]']}
-    same = {"status": "diff", "diffs": [
+    same = {"status": "diff", "diffs_complete": True, "diffs": [
         'DIFF [store-reaper] step 1 {"op": "x"}: db /rows/public.episodes/rows: row only in rust: [2]']}
     elsewhere = {"status": "diff", "diffs": ['DIFF [store-reaper] step 2 {}: /json/results: python 1 vs rust 2']}
     broken = {"status": "error", "diffs": [], "error_tail": ["Traceback", "OSError: port in use"]}
@@ -153,12 +172,13 @@ def test_each_case_item_is_a_place_of_its_own():
     its other items had no place of their own. Every printed item counts,
     keys with a hyphen and items that are not paths included. (classify()
     calls a scenario preexisting only when every place is on the synthetic arm.)"""
-    real = {"status": "diff", "diffs": [
+    real = {"status": "diff", "diffs_complete": True, "diffs": [
         "DIFF [mcp-get] get 2: ['status: python 200 vs rust 500', '.json.total: python 1 vs rust 2']"]}
     synthetic = {"status": "diff", "diffs": ["DIFF [mcp-get] get 2: ['.json.total: python 3 vs rust 4']"]}
     assert ("get 2", "status") in forced.signatures(real)
     assert forced.classify(real, real, synthetic) == "new"   # status is not on the synthetic arm
-    alone = {"status": "diff", "diffs": ["DIFF [mcp-get] get 2: ['status: python 200 vs rust 500']"]}
+    alone = {"status": "diff", "diffs_complete": True,
+             "diffs": ["DIFF [mcp-get] get 2: ['status: python 200 vs rust 500']"]}
     assert forced.classify(alone, alone, synthetic) == "new"           # status is not shared
 
 
@@ -168,7 +188,7 @@ def test_a_new_place_does_not_hide_behind_a_shared_one():
     every other difference the real bank showed."""
     shared = 'DIFF [store-reaper] step 1 {"op": "tool"}: db /rows/public.episodes/rows: row only in python: [1]'
     extra = 'DIFF [store-reaper] step 3 {"op": "tool"}: db /rows/public.facts/rows: row only in rust: [2]'
-    real = {"status": "diff", "diffs": [shared, extra]}
+    real = {"status": "diff", "diffs": [shared, extra], "diffs_complete": True}
     synthetic = {"status": "diff", "diffs": [shared.replace("[1]", "[9]")]}
     assert forced.classify(real, real, synthetic) == "new"
     # The near miss: every real place on the synthetic arm (which may differ
@@ -180,7 +200,7 @@ def test_a_new_place_does_not_hide_behind_a_shared_one():
 def test_a_scenario_error_keeps_its_harness_location():
     """Review (Opus): the same exception type raised elsewhere in the
     harness is another place."""
-    one = {"status": "diff", "diffs": [
+    one = {"status": "diff", "diffs_complete": True, "diffs": [
         "DIFF [stamped] scenario error: " + repr(["KeyError: x (case 'seed'; at run.py:12 in prepare_template)"])]}
     other = {"status": "diff", "diffs": [
         "DIFF [stamped] scenario error: ['KeyError: y (at run.py:40 in run_scenario)']"]}
@@ -191,7 +211,7 @@ def test_a_scenario_error_keeps_its_harness_location():
     assert forced.signatures(quoted) == {("", "scenario error KeyError case \"it's\"; run.py prepare_template")}
     # Review (Codex): a message with double quotes makes repr escape the
     # apostrophes around the case; the location must read the same.
-    plain, dq = ({"status": "diff", "diffs": ["DIFF [stamped] scenario error: " + repr(
+    plain, dq = ({"status": "diff", "diffs_complete": True, "diffs": ["DIFF [stamped] scenario error: " + repr(
         [f"UndefinedTable: relation {name} (case 'seed'; at run.py:12 in prepare_template)"])]}
         for name in ("missing", '"missing"'))
     assert forced.signatures(plain) == forced.signatures(dq)
@@ -248,7 +268,7 @@ def test_a_w2e_expect_line_names_its_side_and_query_without_values():
 def test_a_new_response_path_does_not_hide_behind_a_shared_one():
     shared = 'DIFF [s] step 2 {"op": "tool"}: .value.a: python 1 vs rust 2'
     new_path = 'DIFF [s] step 2 {"op": "tool"}: .value.b: python 1 vs rust 2'
-    real = {"status": "diff", "diffs": [shared, new_path]}
+    real = {"status": "diff", "diffs": [shared, new_path], "diffs_complete": True}
     assert forced.classify(real, real, {"status": "diff", "diffs": [shared]}) == "new"
     assert forced.classify(real, real, {"status": "diff", "diffs": [new_path, shared]}) == "preexisting"
 
@@ -259,7 +279,8 @@ def test_every_suites_lines_find_the_same_place_without_their_values(kind):
     read, so it fell back to the line's first 120 characters, values and all:
     a synthetic arm differing in the same place never overlapped, and three
     w2d scenarios read as new (forced run, 2026-11-09)."""
-    real, synthetic = ({"status": "diff", "diffs": [line]} for line in SAME_PLACE[kind])
+    real, synthetic = ({"status": "diff", "diffs": [line], "diffs_complete": True}
+                       for line in SAME_PLACE[kind])
     assert forced.signatures(real) == forced.signatures(synthetic), kind
     assert forced.classify(real, real, synthetic) == "preexisting", kind
     elsewhere = {"status": "diff", "diffs": [ELSEWHERE[kind]]}
@@ -551,7 +572,74 @@ def test_sweep_analyzer_tick_skips_only_its_real_bank_arms(tmp_path):
     counted = forced.counts(report)["w2e"]
     assert counted["excluded"] == 1 and counted["pass"] == 1 and counted["new"] == 1
     assert "every entity" in forced.REAL_BANK_EXCLUDED["w2e/sweep-analyzer-tick"]
-    assert list(forced.REAL_BANK_EXCLUDED) == ["w2e/sweep-analyzer-tick"]
+    assert sorted(forced.REAL_BANK_EXCLUDED) == [
+        "w2d_search/hide-superseded", "w2d_search/mcp-stats", "w2e/candidate-auto",
+        "w2e/sweep-analyzer-tick"]
+
+
+def test_the_maintainers_real_bank_exclusions_have_their_reasons():
+    """Maintainer decision D2, 2026-11-10: three more scenarios whose premise
+    cannot hold on a real bank. candidate-auto-reopen is not excluded: it
+    stays an error unless both real attempts hit the accepted OOM."""
+    for key, word in (("w2d_search/hide-superseded", "ranking"), ("w2d_search/mcp-stats", "graduation"),
+                      ("w2e/candidate-auto", "judged first")):
+        assert word in forced.REAL_BANK_EXCLUDED[key] and "2026-11-10" in forced.REAL_BANK_EXCLUDED[key]
+    assert "w2e/candidate-auto-reopen" not in forced.REAL_BANK_EXCLUDED
+
+
+COMMUNITY_ROWS = "DIFF [graph-writes] step 35 {\"op\": \"tool\"}: db /rows/public.communities/rows: row only in python: [1]"
+COMMUNITY_MISSING = "DIFF [graph-writes] step 35 {\"op\": \"tool\"}: db /rows/public.communities/base_missing/count: python 1 vs rust 0"
+MEMBERSHIP = "DIFF [graph-writes] step 35 {\"op\": \"tool\"}: db /rows/public.entity_communities/rows: row only in rust: [2]"
+NODE_COMMUNITY = "DIFF [graph-writes] step 36 {\"op\": \"tool\"}: .value.nodes[3].community: python 4 vs rust 5"
+INSIGHT = "DIFF [graph-writes] step 36 {\"op\": \"tool\"}: .value.graph_insight.communities: python 9 vs rust 8"
+ROUTES_COMMUNITY = "DB DIFF [reaper] /rows/public.communities/rows: row only in rust: [7, \"x\", 1, 0.5, 2.0]"
+
+
+def _community_rows(tmp_path, first, retry=None, **retry_fields):
+    answers = {"graph-writes": {"real": {"status": "diff", "diffs": first, "seconds": 1.0, "exit": 1,
+                                         "diffs_complete": True},
+                                "real-retry": {"status": "diff", "diffs": retry or first, "seconds": 1.0,
+                                               "exit": 1, "diffs_complete": True, **retry_fields},
+                                "synthetic": PASS}}
+    report, _ = forced.run(FakeRunner(tmp_path, answers), ["w2e"], None, names=lambda s: list(answers))
+    return report["suites"]["w2e"]["rows"][0]
+
+
+def test_a_difference_confined_to_communities_is_accepted(tmp_path):
+    """Maintainer decision D1, 2026-11-10: on a real bank's copy the two
+    daemons' community partitions differ by Louvain's visiting order (Python
+    seed.shuffle, Rust graph order; #1417's divergence entry). A scenario
+    whose every difference is in the community tables or a community field
+    is accepted, with the reason recorded."""
+    row = _community_rows(tmp_path, [COMMUNITY_ROWS, COMMUNITY_MISSING, MEMBERSHIP, NODE_COMMUNITY, INSIGHT])
+    assert (row["class"], row.get("accepted_as")) == ("accepted", "community-partition")
+    row = _community_rows(tmp_path, [ROUTES_COMMUNITY])
+    assert row["class"] == "accepted"
+    assert "visiting order" in forced.ACCEPTED_DIVERGENCES["community-partition"]
+    assert "2026-11-10" in forced.ACCEPTED_DIVERGENCES["community-partition"]
+
+
+@pytest.mark.parametrize("other", [
+    "DIFF [graph-writes] step 35 {\"op\": \"tool\"}: db /rows/public.facts/rows: row only in python: [1]",
+    "DIFF [graph-writes] step 36 {\"op\": \"tool\"}: .value.confirmed: only in rust",
+    "DIFF [graph-writes] step 36 {\"op\": \"tool\"}: .value.community_count: python 1 vs rust 2",
+    "DIFF [graph-writes] step 35 {\"op\": \"tool\"}: db /rows/public.communities_backup/rows: row only in rust: [1]",
+])
+def test_community_plus_any_other_difference_stays_new(tmp_path, other):
+    """The confinement is exact: one difference anywhere else, in the first
+    attempt or the retry, keeps the scenario new."""
+    assert _community_rows(tmp_path, [COMMUNITY_ROWS, NODE_COMMUNITY, other])["class"] == "new"
+    assert _community_rows(tmp_path, [COMMUNITY_ROWS], retry=[COMMUNITY_ROWS, other])["class"] == "new"
+
+
+def test_the_summary_lists_the_accepted_divergences(tmp_path, monkeypatch):
+    _main_env(monkeypatch)
+    monkeypatch.setattr(forced, "scenario_names", lambda suite: ["store-defaults"])
+    monkeypatch.setattr(forced, "run", lambda runner, *a, **k: ({"suites": {}, "not_forced": {},
+                                                                 "complete": True}, {}))
+    forced.main(["--rust-bin", "x", "--out", str(tmp_path / "o"), "--suites", "w2e", "--only", "store-defaults"])
+    summary = json.loads((tmp_path / "o" / "summary.json").read_text())
+    assert summary["accepted_divergences"] == forced.ACCEPTED_DIVERGENCES
 
 
 def test_an_excluded_scenario_whose_synthetic_arm_fails_is_an_error(tmp_path):
@@ -722,25 +810,26 @@ def _rows_for(tmp_path, answers, oom):
 def test_a_known_python_memory_limit_is_accepted_not_an_error(tmp_path):
     """Maintainer decision (c), 2026-11-08: candidate-auto and -reopen
     exceed the runner's memory on Python at the harness's -1.0 floors."""
+    # candidate-auto's real-bank arms are excluded since 2026-11-10 (D2), so
+    # the rule is pinned on candidate-auto-reopen, which still runs them.
     err = {"status": "error", "diffs": [], "error_tail": ["IncompleteRead"], "seconds": 1.0}
-    answers = {"candidate-auto": {"real": err, "real-retry": err, "synthetic": PASS},
-               "dream-deep-dry": {"real": err, "real-retry": err, "synthetic": PASS},
+    answers = {"dream-deep-dry": {"real": err, "real-retry": err, "synthetic": PASS},
                "candidate-auto-reopen": {"real": err, "real-retry": err, "synthetic": PASS}}
-    rows, report = _rows_for(tmp_path, answers, {("candidate-auto", "real"): 1,
-                                                 ("candidate-auto", "real-retry"): 1,
-                                                 ("dream-deep-dry", "real"): 1,
+    rows, report = _rows_for(tmp_path, answers, {("dream-deep-dry", "real"): 1,
                                                  ("dream-deep-dry", "real-retry"): 1,
                                                  ("candidate-auto-reopen", "real"): 1,
-                                                 ("candidate-auto-reopen", "synthetic"): 1})
-    assert rows["candidate-auto"]["class"] == "accepted"
-    # Near misses: an OOM in a scenario not listed, and a listed one whose
-    # real retry failed without an OOM (the first attempt's and the small
-    # synthetic arm's OOM do not excuse it).
+                                                 ("candidate-auto-reopen", "real-retry"): 1})
+    assert rows["candidate-auto-reopen"]["class"] == "accepted"
+    # Near miss: an OOM in a scenario not listed.
     assert rows["dream-deep-dry"]["class"] == "error"
-    assert rows["candidate-auto-reopen"]["class"] == "error"
     counted = forced.counts(report)["w2e"]
-    assert counted["accepted"] == 1 and counted["error"] == 2
-    assert "Python" in forced.ACCEPTED_OOM["w2e/candidate-auto"]
+    assert counted["accepted"] == 1 and counted["error"] == 1
+    assert "Python" in forced.ACCEPTED_OOM["w2e/candidate-auto-reopen"]
+    # Near miss: the listed one whose real retry failed without an OOM (the
+    # first attempt's and the small synthetic arm's OOM do not excuse it).
+    rows, _ = _rows_for(tmp_path, {"candidate-auto-reopen": answers["candidate-auto-reopen"]},
+                        {("candidate-auto-reopen", "real"): 1, ("candidate-auto-reopen", "synthetic"): 1})
+    assert rows["candidate-auto-reopen"]["class"] == "error"
 
 
 def test_real_bank_arms_get_the_longer_dream_rest_timeout(tmp_path, monkeypatch):
@@ -820,7 +909,8 @@ def test_a_real_attempt_with_no_places_is_never_preexisting():
     """An errored first attempt has no places, and the empty set is a subset
     of any synthetic arm's: it must not read as preexisting."""
     errored = {"status": "error", "diffs": [], "error_tail": ["x"]}
-    retried = {"status": "diff", "diffs": ["DIFF [s] step 1 {}: db /rows/public.facts/rows: x"]}
+    retried = {"status": "diff", "diffs": ["DIFF [s] step 1 {}: db /rows/public.facts/rows: x"],
+               "diffs_complete": True}
     synthetic = {"status": "diff", "diffs": ["DIFF [s] step 1 {}: db /rows/public.facts/rows: y"]}
     assert forced.classify(errored, retried, synthetic) == "new"
 
@@ -867,3 +957,316 @@ def test_an_op_whose_text_holds_a_colon_still_finds_its_diff():
         two = f"DIFF [store] step 4 {op}: .value.id: python 1 vs rust 2"
         assert forced.signatures({"diffs": [one]}) == {("4", ".value.stored")}
         assert forced.signatures({"diffs": [one]}) != forced.signatures({"diffs": [two]})
+
+
+@pytest.mark.parametrize("errored", ["real", "real-retry"])
+def test_a_community_difference_beside_an_errored_attempt_stays_new(tmp_path, errored):
+    """Review (Opus confidence 90, Codex P1): with one real attempt showing
+    only community differences and the other errored, the errored one was
+    filtered out and the scenario accepted, hiding a crash or timeout. Both
+    real attempts must complete with community-only differences."""
+    diff = {"status": "diff", "diffs": [COMMUNITY_ROWS], "seconds": 1.0, "exit": 1, "diffs_complete": True}
+    err = {"status": "error", "diffs": [], "error_tail": ["ConnectionRefusedError"], "seconds": 1.0, "exit": 2}
+    answers = {"graph-writes": {"real": diff, "real-retry": diff, "synthetic": PASS}}
+    answers["graph-writes"][errored] = err
+    report, _ = forced.run(FakeRunner(tmp_path, answers), ["w2e"], None, names=lambda s: list(answers))
+    row = report["suites"]["w2e"]["rows"][0]
+    assert row["class"] == "new" and "accepted_as" not in row
+
+
+@pytest.mark.parametrize("cut", [{"exit": None}, {"exit": -9}, {"oom_kills": 1}])
+def test_a_community_difference_from_an_attempt_that_did_not_finish_stays_new(tmp_path, cut):
+    """Review (Opus, confidence 85): an attempt that timed out (exit None),
+    was killed by a signal or by the OOM killer after printing community
+    differences still reads as "diff". Accepting it would hide the cut."""
+    row = _community_rows(tmp_path, [COMMUNITY_ROWS], **cut)
+    assert row["class"] == "new" and "accepted_as" not in row
+
+
+# ---- the printed DIFF lines are capped; --out holds every difference ----
+
+GRAPH_OP = {"op": "tool", "name": "memory_graph_relate", "args": {"source": "Ada", "target": "Bob"}}
+
+
+def _w2e_attempt(scenario: str, steps: list, exit: int = 1) -> dict:
+    """A w2e harness run: its final --out JSON and the log it prints from it,
+    as w2e.py prints (``s["diffs"][:6]`` per step)."""
+    data = {"complete": True, "planned_scenarios": [scenario], "summary": {},
+            "scenarios": [{"scenario": scenario, "mutant": None, "stats": {},
+                           "steps": [{"step": i, "op": op, "diffs": diffs} for i, op, diffs in steps]}]}
+    printed = [f"DIFF [{scenario}] step {s['step']} {json.dumps(s['op'])[:90]}: {d}"
+               for s in data["scenarios"][0]["steps"] for d in s["diffs"][:6]]
+    return {"exit": exit, "log": "\n".join(printed + ['{"scenarios": 1}']) + "\n", "json": data}
+
+
+def _row(tmp_path, answers):
+    report, _ = forced.run(FakeRunner(tmp_path, answers), ["w2e"], None, names=lambda s: list(answers))
+    return report["suites"]["w2e"]["rows"][0]
+
+
+COMMUNITIES = [f"db /rows/public.communities/rows: row only in python: [{i}, \"c{i}\"]" for i in range(7)]
+FACTS = "db /rows/public.facts/rows: row only in rust: [1, \"Ada\", \"drink\"]"
+EPISODES = [f"db /rows/public.episodes/rows: row only in python: [{i}]" for i in range(6)]
+
+
+def test_a_difference_the_printout_cut_keeps_a_community_scenario_new(tmp_path):
+    """w2e prints 6 differences per step. With 7 community differences and a
+    facts one at the same step, the facts line was never printed, so every
+    printed difference was a community one and the scenario was accepted. The
+    runner now reads every difference from the harness's --out JSON."""
+    attempt = _w2e_attempt("graph-writes", [(35, GRAPH_OP, COMMUNITIES + [FACTS])])
+    assert "public.facts" not in attempt["log"] and attempt["log"].count("public.communities") == 6
+    row = _row(tmp_path, {"graph-writes": {"real": attempt, "real-retry": attempt, "synthetic": PASS}})
+    assert row["class"] == "new" and "accepted_as" not in row
+    assert row["differences"] == 8  # every difference, not the 6 printed
+
+
+def test_a_community_only_scenario_beyond_the_printout_is_still_accepted(tmp_path):
+    """The positive control: all 7 differences are community ones, so the
+    full list from --out still accepts it, and counts all 7."""
+    attempt = _w2e_attempt("graph-writes", [(35, GRAPH_OP, COMMUNITIES)])
+    row = _row(tmp_path, {"graph-writes": {"real": attempt, "real-retry": attempt, "synthetic": PASS}})
+    assert (row["class"], row.get("accepted_as"), row["differences"]) == ("accepted", "community-partition", 7)
+
+
+def test_a_real_bank_place_the_printout_cut_is_not_excused_as_preexisting(tmp_path):
+    """The synthetic arm differs in the episodes rows; the real arm also in
+    the facts rows, which its printout cut. Its printed places were all on
+    the synthetic arm, so it read as preexisting."""
+    real = _w2e_attempt("store-reaper", [(1, GRAPH_OP, EPISODES + [FACTS])])
+    synthetic = _w2e_attempt("store-reaper", [(1, GRAPH_OP, EPISODES[:1])])
+    assert "public.facts" not in real["log"]
+    assert _row(tmp_path, {"store-reaper": {"real": real, "real-retry": real,
+                                            "synthetic": synthetic}})["class"] == "new"
+    # Near miss: the synthetic arm differs there too (also beyond its printout).
+    wider = _w2e_attempt("store-reaper", [(1, GRAPH_OP, EPISODES + [FACTS])])
+    assert _row(tmp_path, {"store-reaper": {"real": real, "real-retry": real,
+                                            "synthetic": wider}})["class"] == "preexisting"
+
+
+def test_the_synthetic_arms_full_list_counts_too(tmp_path):
+    """The shared place is beyond the synthetic arm's printout: only its full
+    list shows the real arm's one place on it."""
+    real = _w2e_attempt("store-reaper", [(1, GRAPH_OP, [FACTS])])
+    synthetic = _w2e_attempt("store-reaper", [(1, GRAPH_OP, EPISODES + [FACTS])])
+    assert "public.facts" not in synthetic["log"]
+    assert _row(tmp_path, {"store-reaper": {"real": real, "real-retry": real,
+                                            "synthetic": synthetic}})["class"] == "preexisting"
+
+
+@pytest.mark.parametrize("written", [
+    None,                                                     # no --out file
+    "{\"complete\": true, \"scenarios\": [",                  # cut mid-write
+    {"complete": False, "planned_scenarios": ["x"], "scenarios": []},  # the progress write
+    "stale",                                                  # another run's file
+])
+def test_without_the_full_list_nothing_is_accepted_or_preexisting(tmp_path, written):
+    """With no complete --out JSON the printed lines may be cut, so they
+    neither accept a community difference nor excuse a place as preexisting."""
+    def without(attempt):
+        if written == "stale":
+            other = _w2e_attempt("graph-writes", [(2, GRAPH_OP, [FACTS])])["json"]
+            return {**attempt, "json": other}
+        return {**attempt, "json": written}
+
+    community = without(_w2e_attempt("graph-writes", [(35, GRAPH_OP, COMMUNITIES[:2])]))
+    row = _row(tmp_path / "c", {"graph-writes": {"real": community, "real-retry": community,
+                                                 "synthetic": PASS}})
+    assert row["class"] == "new" and "accepted_as" not in row and row["differences"] == 2
+    real = without(_w2e_attempt("store-reaper", [(1, GRAPH_OP, EPISODES[:2])]))
+    synthetic = _w2e_attempt("store-reaper", [(1, GRAPH_OP, EPISODES[:2])])
+    assert _row(tmp_path / "p", {"store-reaper": {"real": real, "real-retry": real,
+                                                  "synthetic": synthetic}})["class"] == "new"
+
+
+def test_an_earlier_runs_matching_out_file_is_not_this_attempts(tmp_path):
+    """The attempt writes no --out JSON, but an earlier run left one at the
+    same path whose capped lines match this log exactly. The runner deletes
+    it before the harness starts, so the printed lines stay incomplete and
+    the community-only scenario stays new."""
+    attempt = _w2e_attempt("graph-writes", [(35, GRAPH_OP, COMMUNITIES[:2])])
+    for label in ("real", "real-retry"):
+        left = tmp_path / "w2e" / label / "graph-writes.json"
+        left.parent.mkdir(parents=True)
+        left.write_text(json.dumps(attempt["json"]), encoding="utf-8")
+    silent = {**attempt, "json": None}
+    row = _row(tmp_path, {"graph-writes": {"real": silent, "real-retry": silent, "synthetic": PASS}})
+    assert row["class"] == "new" and "accepted_as" not in row
+    # Control: with this attempt's own file the same scenario is accepted.
+    row = _row(tmp_path / "own", {"graph-writes": {"real": attempt, "real-retry": attempt,
+                                                   "synthetic": PASS}})
+    assert row.get("accepted_as") == "community-partition"
+
+
+def _rebuilt(tmp_path, suite, data, log):
+    """Through the runner: the attempt's diffs and completeness."""
+    path = tmp_path / f"{suite}.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    printed = forced.outcome(1, log)["diffs"]
+    return forced.full_diffs(suite, path, printed)
+
+
+LONG_OP = {"op": "tool", "name": "memory_recall",
+           "args": {"query": "what does Ada drink in the morning before the standup", "top_k": 5}}
+
+
+def test_the_w2e_rebuild_is_every_step_diff_as_w2e_prints_it(tmp_path):
+    seven = [f".value.results[{i}].score: python 0.{i} vs rust 0.{i + 1}" for i in range(7)]
+    data = {"complete": True, "planned_scenarios": ["recall"], "summary": {"scenarios": 1},
+            "scenarios": [{"scenario": "recall", "mutant": None, "stats": {}, "steps": [
+                {"step": 0, "op": {"op": "init"}, "diffs": []},
+                {"step": 3, "op": LONG_OP, "diffs": seven},
+                {"step": 4, "op": {"op": "sql"}, "diffs": ["db /rows/public.facts/rows: row only in rust: [1]"]}]}]}
+    cut = json.dumps(LONG_OP)[:90]
+    assert len(json.dumps(LONG_OP)) > 90
+    want = [f"DIFF [recall] step 3 {cut}: {d}" for d in seven] + [
+        'DIFF [recall] step 4 {"op": "sql"}: db /rows/public.facts/rows: row only in rust: [1]']
+    log = "\n".join(want[:6] + want[7:]) + "\n"           # w2e prints 6 per step
+    assert _rebuilt(tmp_path, "w2e", data, log) == (want, None)
+    assert forced.harness_lines("w2e", data, capped=True) == want[:6] + want[7:]
+
+
+def test_the_routes_rebuild_is_every_case_db_and_refusal_line(tmp_path):
+    items = [f".json.items[{i}].id: python {i} vs rust {i + 1}" for i in range(5)]
+    db = [f"/rows/public.slot_reads/rows: row only in python: [\"box\", {i}]" for i in range(21)]
+    data = {"summary": {"cases": 2}, "scenarios": [{"scenario": "tokens", "cases": [
+        {"case": "stats", "diffs": items, "declared": False},
+        {"case": "health", "diffs": [], "declared": False}], "db_diffs": db}],
+        "refusals": [{"case": "refusals/oversize-body", "diffs": ["status 413 vs 400"]},
+                     {"case": "refusals/clean", "diffs": []}]}
+    want = ([f"DIFF [tokens] stats: {items}"] + [f"DB DIFF [tokens] {d}" for d in db]
+            + ["DIFF refusals/oversize-body: ['status 413 vs 400']"])
+    log = "\n".join([f"DIFF [tokens] stats: {items[:4]}"] + want[1:21] + want[22:]) + "\n"
+    assert _rebuilt(tmp_path, "routes", data, log) == (want, None)
+    assert "python 4 vs rust 5" in want[0]                 # the item past the 4 printed
+    # Its progress write is {"partial": [...]}, never the full list.
+    assert _rebuilt(tmp_path, "routes", {"partial": data["scenarios"]}, log)[0] is None
+
+
+def test_the_w2d_rebuild_is_every_case_and_db_line(tmp_path):
+    items = [f".entries[{i}].score: python 0.{i} vs rust 0.{i + 1}" for i in range(6)]
+    db = [f"public.retrieval_events[{i}].served[0].components.ce: python 0.1 vs rust 0.2" for i in range(21)]
+    data = {"complete": True, "planned_scenarios": ["rrf-pool"], "summary": {},
+            "results": [{"scenario": "rrf-pool", "declared": {}, "coverage": {}, "db_diffs": db,
+                         "cases": [{"case": "rrf 3", "diffs": items, "notes": ["n"]},
+                                   {"case": "rrf 4", "diffs": [], "notes": []}]}]}
+    want = [f"DIFF [rrf-pool] rrf 3: {items}"] + [f"DB DIFF [rrf-pool] {d}" for d in db]
+    log = "\n".join([f"DIFF [rrf-pool] rrf 3: {items[:5]}", "note [rrf-pool] rrf 3: n"] + want[1:21]) + "\n"
+    assert _rebuilt(tmp_path, "w2d_search", data, log) == (want, None)
+    assert _rebuilt(tmp_path, "w2d_search", {**data, "complete": False}, log)[0] is None
+
+
+def test_the_board_rebuild_is_every_step_state_and_chain_line(tmp_path):
+    items = [f".json.agents[{i}].status: python a vs rust b" for i in range(5)]
+    state = [f"after step 13 (B to A anyone): coordination_wakes: row only in rust: {{\"n\": {i}}}"
+             for i in range(13)]
+    chain = [f"python: created_at: value {i}.5 does not match the captured clock windows" for i in range(13)]
+    data = {"complete": True, "planned_scenarios": ["wake"], "summary": {},
+            "results": [{"scenario": "wake", "state_diffs": state, "chain": chain,
+                         "steps": [{"step": 3, "name": "register", "diffs": items},
+                                   {"step": 4, "name": "list", "diffs": []}]}]}
+    want = ([f"DIFF [wake] #3 register: {items}"] + [f"STATE [wake] {d}" for d in state]
+            + [f"CHAIN [wake] {p}" for p in chain])
+    log = "\n".join([f"DIFF [wake] #3 register: {items[:4]}"] + want[1:13] + want[14:26]
+                    + ["  (CHAIN [wake]: +1 more problems; --out holds them all)"]) + "\n"
+    assert _rebuilt(tmp_path, "board", data, log) == (want, None)
+
+
+def test_the_rebuild_caps_are_the_harnesses_own_print_statements():
+    """The rebuild repeats each harness's DIFF print and its cap; a harness
+    that changes either must change the rebuild too (a mismatch at run time
+    only marks the attempt incomplete)."""
+    printed = {
+        "w2e.py": ["for d in s[\"diffs\"][:6]:",
+                   "print(f\"DIFF [{n}] step {s['step']} {json.dumps(s['op'])[:90]}: {d}\")"],
+        "run.py": ["print(f\"DIFF [{r['scenario']}] {c['case']}: {c['diffs'][:4]}\")",
+                   "for d in r[\"db_diffs\"][:20]:", "print(f\"DB DIFF [{r['scenario']}] {d}\")",
+                   "print(f\"DIFF {r['case']}: {r['diffs']}\")"],
+        "w2d_search.py": ["print(f\"DIFF [{r['scenario']}] {c['case']}: {c['diffs'][:5]}\")",
+                          "for d in r[\"db_diffs\"][:20]:", "print(f\"DB DIFF [{r['scenario']}] {d}\")"],
+        "board/run.py": ["print(f\"DIFF [{r['scenario']}] #{s['step']} {s['name']}: {s['diffs'][:4]}\")",
+                         "for d in r[\"state_diffs\"][:12]:", "print(f\"STATE [{r['scenario']}] {d}\")",
+                         "for p in r[\"chain\"][:12]:", "print(f\"CHAIN [{r['scenario']}] {p}\")"],
+    }
+    # And the --out writes HARNESS_OUT tells apart, whose keys it reads: the
+    # final one, and routes' progress write ({"partial": ...}) it refuses.
+    written = {
+        "w2e.py": ["args.out.write_text(json.dumps({\"complete\": True, \"planned_scenarios\": names,",
+                   "\"summary\": summary, \"scenarios\": results}, indent=1,"],
+        "run.py": ["args.out.write_text(json.dumps({\"summary\": summary, \"scenarios\": results, "
+                   "\"refusals\": refusals},", "json.dumps({\"partial\": results}"],
+        "w2d_search.py": ["args.out.write_text(json.dumps({\"complete\": True, \"planned_scenarios\": names,",
+                          "\"summary\": summary, \"results\": results}, indent=1)"],
+        "board/run.py": ["args.out.write_text(json.dumps({\"complete\": True, \"planned_scenarios\": planned,",
+                         "\"summary\": summary, \"results\": results}, indent=1,"],
+    }
+    for script in printed:
+        source = (forced.HARNESS / script).read_text(encoding="utf-8")
+        for line in printed[script] + written[script]:
+            assert line in source, (script, line)
+
+
+RECORDED = Path(__file__).parent / "fixtures" / "forced_out"
+
+# Each recording's difference lines in full, counted without forced.py: from
+# the JSON's own lists (fixtures/forced_out/README.md), and for board also its
+# summary ("chain_problems": 24) and cut note ("+12 more problems").
+FULL_LINES = {"w2e--console-graph-malformed": 4, "w2d_search--mcp-search-explain": 14,
+              "w2d_search--rrf-pool": 352, "routes--seeded": 8, "routes--trust-bind": 1,
+              "board--identity": 24}
+
+
+def _difference_lists(suite: str, data: dict) -> list[tuple[bool, list]]:
+    """Every difference list a harness wrote, and whether it prints whole on
+    one line (a case's or step's list) rather than one line per item."""
+    if suite == "w2e":
+        return [(False, s["diffs"]) for r in data["scenarios"] for s in r["steps"]]
+    lists = []
+    for r in data["scenarios"] if suite == "routes" else data["results"]:
+        lists += [(True, c["diffs"]) for c in r.get("cases", r.get("steps", []))]
+        lists += [(False, r.get(key, [])) for key in ("db_diffs", "state_diffs", "chain")]
+    if suite == "routes":
+        lists += [(True, r["diffs"]) for r in data["refusals"]]
+    return [(whole, items) for whole, items in lists if items]
+
+
+def _recorded(path: Path):
+    suite = path.name.split("--")[0]
+    printed = forced.outcome(1, path.with_suffix(".log").read_text(encoding="utf-8"))["diffs"]
+    full, why = forced.full_diffs(suite, path, printed)
+    return suite, printed, full, why, json.loads(path.read_text(encoding="utf-8"))
+
+
+@pytest.mark.parametrize("suite", list(forced.HARNESS_OUT))
+def test_a_recorded_harness_run_rebuilds_to_the_lines_it_printed(suite):
+    """Real harness runs on the synthetic bank, each its --out JSON and its
+    log as the runner keeps them (fixtures/forced_out/README.md). The capped
+    rebuild must be the log's DIFF lines in order; the full one must hold
+    every difference the JSON lists, each case's list whole; and one nothing
+    was cut from is the printed lines as a multiset."""
+    cases = sorted(RECORDED.glob(f"{suite}--*.json"))
+    assert cases, f"no recorded {suite} run"
+    for path in cases:
+        _, printed, full, why, data = _recorded(path)
+        assert printed and why is None, (path.name, why)
+        lists = _difference_lists(suite, data)
+        assert len(full) == sum(1 if whole else len(items) for whole, items in lists), path.name
+        assert len(full) == FULL_LINES[path.stem], path.name
+        text = "\n".join(full)
+        for whole, items in lists:
+            if whole:  # its own line ends with the whole list
+                assert any(line.endswith(f": {items}") for line in full), (path.name, str(items)[:80])
+            else:
+                for item in items:
+                    assert str(item) in text, (path.name, str(item)[:80])
+        if forced.harness_lines(suite, data, capped=True) == full:
+            assert collections.Counter(full) == collections.Counter(printed), path.name
+
+
+def test_the_recordings_hold_both_a_cut_and_a_whole_printout():
+    kinds = collections.Counter()
+    for path in RECORDED.glob("*--*.json"):
+        suite, _, full, why, data = _recorded(path)
+        assert why is None, (path.name, why)
+        kinds["whole" if forced.harness_lines(suite, data, capped=True) == full else "cut"] += 1
+    assert kinds["whole"] and kinds["cut"], kinds

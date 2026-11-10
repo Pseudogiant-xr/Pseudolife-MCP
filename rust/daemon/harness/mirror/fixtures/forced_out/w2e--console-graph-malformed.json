@@ -1,0 +1,4328 @@
+{
+ "complete": true,
+ "planned_scenarios": [
+  "console-graph-malformed"
+ ],
+ "summary": {
+  "scenarios": 1,
+  "steps": 183,
+  "diff_steps": 4,
+  "stats": {}
+ },
+ "scenarios": [
+  {
+   "scenario": "console-graph-malformed",
+   "mutant": null,
+   "steps": [
+    {
+     "step": 0,
+     "op": {
+      "op": "init"
+     },
+     "diffs": []
+    },
+    {
+     "step": 1,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/relate",
+      "body": {
+       "src": "Tide Gauge",
+       "relation": "uses",
+       "dst": "Harbor Host"
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.023904002970084548,
+     "python": {
+      "isError": false,
+      "status": 200,
+      "value": {
+       "src": "Tide Gauge",
+       "relation": "uses",
+       "dst": "Harbor Host",
+       "confidence": 0.8,
+       "warnings": []
+      }
+     },
+     "rust": {
+      "isError": false,
+      "status": 200,
+      "value": {
+       "src": "Tide Gauge",
+       "relation": "uses",
+       "dst": "Harbor Host",
+       "confidence": 0.8,
+       "warnings": []
+      }
+     }
+    },
+    {
+     "step": 2,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.011615321971476078,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 3,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/accept-proposal",
+      "body": {
+       "id": true
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.014709620038047433,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "operator does not exist: bigint = boolean\nLINE 1: ...verdict, judge2_confidence FROM edge_proposals WHERE id = $1\n                                                                   ^\nHINT:  No operator matches the given name and argument types. You might need to add explicit type casts."
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "operator does not exist: bigint = boolean\nLINE 1: ...verdict, judge2_confidence FROM edge_proposals WHERE id = $1\n                                                                   ^\nHINT:  No operator matches the given name and argument types. You might need to add explicit type casts."
+      }
+     }
+    },
+    {
+     "step": 4,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.01189290196634829,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 5,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/accept-proposal",
+      "body": {
+       "id": false
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.013398234965279698,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "operator does not exist: bigint = boolean\nLINE 1: ...verdict, judge2_confidence FROM edge_proposals WHERE id = $1\n                                                                   ^\nHINT:  No operator matches the given name and argument types. You might need to add explicit type casts."
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "operator does not exist: bigint = boolean\nLINE 1: ...verdict, judge2_confidence FROM edge_proposals WHERE id = $1\n                                                                   ^\nHINT:  No operator matches the given name and argument types. You might need to add explicit type casts."
+      }
+     }
+    },
+    {
+     "step": 6,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.011205213842913508,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 7,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/accept-proposal",
+      "body": {
+       "id": []
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.013530104886740446,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "invalid input syntax for type bigint: \"{}\"\nCONTEXT:  unnamed portal parameter $1 = '...'"
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "invalid input syntax for type bigint: \"{}\"\nCONTEXT:  unnamed portal parameter $1 = '...'"
+      }
+     }
+    },
+    {
+     "step": 8,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.011362303979694843,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 9,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/accept-proposal",
+      "body": {
+       "id": [
+        1
+       ]
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.013605165062472224,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "operator does not exist: bigint = smallint[]\nLINE 1: ...verdict, judge2_confidence FROM edge_proposals WHERE id = $1\n                                                                   ^\nHINT:  No operator matches the given name and argument types. You might need to add explicit type casts."
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "operator does not exist: bigint = smallint[]\nLINE 1: ...verdict, judge2_confidence FROM edge_proposals WHERE id = $1\n                                                                   ^\nHINT:  No operator matches the given name and argument types. You might need to add explicit type casts."
+      }
+     }
+    },
+    {
+     "step": 10,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.011290804017335176,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 11,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/accept-proposal",
+      "body": {
+       "id": [
+        32768
+       ]
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.013318225042894483,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "operator does not exist: bigint = integer[]\nLINE 1: ...verdict, judge2_confidence FROM edge_proposals WHERE id = $1\n                                                                   ^\nHINT:  No operator matches the given name and argument types. You might need to add explicit type casts."
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "operator does not exist: bigint = integer[]\nLINE 1: ...verdict, judge2_confidence FROM edge_proposals WHERE id = $1\n                                                                   ^\nHINT:  No operator matches the given name and argument types. You might need to add explicit type casts."
+      }
+     }
+    },
+    {
+     "step": 12,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.01141552277840674,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 13,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/accept-proposal",
+      "body": {
+       "id": [
+        2147483648
+       ]
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.013066767016425729,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "operator does not exist: bigint = bigint[]\nLINE 1: ...verdict, judge2_confidence FROM edge_proposals WHERE id = $1\n                                                                   ^\nHINT:  No operator matches the given name and argument types. You might need to add explicit type casts."
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "operator does not exist: bigint = bigint[]\nLINE 1: ...verdict, judge2_confidence FROM edge_proposals WHERE id = $1\n                                                                   ^\nHINT:  No operator matches the given name and argument types. You might need to add explicit type casts."
+      }
+     }
+    },
+    {
+     "step": 14,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.012545759091153741,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 15,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/accept-proposal",
+      "body": {
+       "id": [
+        1.5
+       ]
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.01323635596781969,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "operator does not exist: bigint = double precision[]\nLINE 1: ...verdict, judge2_confidence FROM edge_proposals WHERE id = $1\n                                                                   ^\nHINT:  No operator matches the given name and argument types. You might need to add explicit type casts."
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "operator does not exist: bigint = double precision[]\nLINE 1: ...verdict, judge2_confidence FROM edge_proposals WHERE id = $1\n                                                                   ^\nHINT:  No operator matches the given name and argument types. You might need to add explicit type casts."
+      }
+     }
+    },
+    {
+     "step": 16,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.01143515296280384,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 17,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/accept-proposal",
+      "body": {
+       "id": [
+        true
+       ]
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.013607654022052884,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "operator does not exist: bigint = boolean[]\nLINE 1: ...verdict, judge2_confidence FROM edge_proposals WHERE id = $1\n                                                                   ^\nHINT:  No operator matches the given name and argument types. You might need to add explicit type casts."
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "operator does not exist: bigint = boolean[]\nLINE 1: ...verdict, judge2_confidence FROM edge_proposals WHERE id = $1\n                                                                   ^\nHINT:  No operator matches the given name and argument types. You might need to add explicit type casts."
+      }
+     }
+    },
+    {
+     "step": 18,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.011347372783347964,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 19,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/accept-proposal",
+      "body": {
+       "id": [
+        "x"
+       ]
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.013904012972489,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "invalid input syntax for type bigint: \"{x}\"\nCONTEXT:  unnamed portal parameter $1 = '...'"
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "invalid input syntax for type bigint: \"{x}\"\nCONTEXT:  unnamed portal parameter $1 = '...'"
+      }
+     }
+    },
+    {
+     "step": 20,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.01157948188483715,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 21,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/accept-proposal",
+      "body": {
+       "id": [
+        null
+       ]
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.013625314924865961,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "invalid input syntax for type bigint: \"{NULL}\"\nCONTEXT:  unnamed portal parameter $1 = '...'"
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "invalid input syntax for type bigint: \"{NULL}\"\nCONTEXT:  unnamed portal parameter $1 = '...'"
+      }
+     }
+    },
+    {
+     "step": 22,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.011163293849676847,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 23,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/accept-proposal",
+      "body": {
+       "id": [
+        [
+         "x"
+        ]
+       ]
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.013271816074848175,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "invalid input syntax for type bigint: \"{{x}}\"\nCONTEXT:  unnamed portal parameter $1 = '...'"
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "invalid input syntax for type bigint: \"{{x}}\"\nCONTEXT:  unnamed portal parameter $1 = '...'"
+      }
+     }
+    },
+    {
+     "step": 24,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.011441042879596353,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 25,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/accept-proposal",
+      "body": {
+       "id": [
+        1,
+        "x"
+       ]
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.013850522926077247,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "cannot dump lists of mixed types; got: int, str"
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "cannot dump lists of mixed types; got: int, str"
+      }
+     }
+    },
+    {
+     "step": 26,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.01178451208397746,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 27,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/accept-proposal",
+      "body": {
+       "id": [
+        1.0,
+        1
+       ]
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.01257632882334292,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "cannot dump lists of mixed types; got: float, int"
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "cannot dump lists of mixed types; got: float, int"
+      }
+     }
+    },
+    {
+     "step": 28,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.011808922048658133,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 29,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/accept-proposal",
+      "body": {
+       "id": [
+        9223372036854775808
+       ]
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.013330026064068079,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "operator does not exist: bigint = numeric[]\nLINE 1: ...verdict, judge2_confidence FROM edge_proposals WHERE id = $1\n                                                                   ^\nHINT:  No operator matches the given name and argument types. You might need to add explicit type casts."
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "operator does not exist: bigint = numeric[]\nLINE 1: ...verdict, judge2_confidence FROM edge_proposals WHERE id = $1\n                                                                   ^\nHINT:  No operator matches the given name and argument types. You might need to add explicit type casts."
+      }
+     }
+    },
+    {
+     "step": 30,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.020991495111957192,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 31,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/accept-proposal",
+      "body": {
+       "id": [
+        {}
+       ]
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.012892586877569556,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "cannot adapt type 'dict' using placeholder '%s' (format: AUTO)"
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "cannot adapt type 'dict' using placeholder '%s' (format: AUTO)"
+      }
+     }
+    },
+    {
+     "step": 32,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.011131095001474023,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 33,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/accept-proposal",
+      "body": {
+       "id": [
+        "a\\b",
+        "NULL",
+        "x y",
+        "\u2003"
+       ]
+      }
+     },
+     "diffs": [
+      ".value.error: python \"invalid input syntax for type bigint: \\\"{\\\"a\\\\\\\\b\\\",\\\"NULL\\\",\\\"x y\\\",\\u2003}\\\"\\nCONTEXT:  unnamed portal parameter $1 = '...'\" vs rust \"invalid input syntax for type bigint: \\\"{\\\"a\\\\\\\\b\\\",\\\"NULL\\\",\\\"x y\\\",\\\"\\u2003\\\"}\\\"\\nCONTEXT:  unnamed portal parameter $1 = '...'\""
+     ],
+     "wall_s": 0.013300125952810049,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "invalid input syntax for type bigint: \"{\"a\\\\b\",\"NULL\",\"x y\",\u2003}\"\nCONTEXT:  unnamed portal parameter $1 = '...'"
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "invalid input syntax for type bigint: \"{\"a\\\\b\",\"NULL\",\"x y\",\"\u2003\"}\"\nCONTEXT:  unnamed portal parameter $1 = '...'"
+      }
+     }
+    },
+    {
+     "step": 34,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.010960925137624145,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 35,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/accept-proposal",
+      "body": {
+       "id": {
+        "id": 1
+       }
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.01299667707644403,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "cannot adapt type 'dict' using placeholder '%s' (format: AUTO)"
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "cannot adapt type 'dict' using placeholder '%s' (format: AUTO)"
+      }
+     }
+    },
+    {
+     "step": 36,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.011262883897870779,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 37,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/accept-proposal",
+      "body": {
+       "id": "\u0661"
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.01319835614413023,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "invalid input syntax for type bigint: \"\u0661\"\nCONTEXT:  unnamed portal parameter $1 = '...'"
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "invalid input syntax for type bigint: \"\u0661\"\nCONTEXT:  unnamed portal parameter $1 = '...'"
+      }
+     }
+    },
+    {
+     "step": 38,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.01163854287005961,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 39,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/reject-proposal",
+      "body": {
+       "id": true
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.020616316003724933,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "operator does not exist: bigint = boolean\nLINE 1: ..._id JOIN entities d ON d.id = p.dst_id WHERE p.id = $1 FOR U...\n                                                             ^\nHINT:  No operator matches the given name and argument types. You might need to add explicit type casts."
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "operator does not exist: bigint = boolean\nLINE 1: ..._id JOIN entities d ON d.id = p.dst_id WHERE p.id = $1 FOR U...\n                                                             ^\nHINT:  No operator matches the given name and argument types. You might need to add explicit type casts."
+      }
+     }
+    },
+    {
+     "step": 40,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.011296463897451758,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 41,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/reject-proposal",
+      "body": {
+       "id": false
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.014519090997055173,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "operator does not exist: bigint = boolean\nLINE 1: ..._id JOIN entities d ON d.id = p.dst_id WHERE p.id = $1 FOR U...\n                                                             ^\nHINT:  No operator matches the given name and argument types. You might need to add explicit type casts."
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "operator does not exist: bigint = boolean\nLINE 1: ..._id JOIN entities d ON d.id = p.dst_id WHERE p.id = $1 FOR U...\n                                                             ^\nHINT:  No operator matches the given name and argument types. You might need to add explicit type casts."
+      }
+     }
+    },
+    {
+     "step": 42,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.011363243917003274,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 43,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/reject-proposal",
+      "body": {
+       "id": []
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.01341276615858078,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "int() argument must be a string, a bytes-like object or a real number, not 'list'"
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "int() argument must be a string, a bytes-like object or a real number, not 'list'"
+      }
+     }
+    },
+    {
+     "step": 44,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.011942420853301883,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 45,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/reject-proposal",
+      "body": {
+       "id": [
+        1
+       ]
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.01253975904546678,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "int() argument must be a string, a bytes-like object or a real number, not 'list'"
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "int() argument must be a string, a bytes-like object or a real number, not 'list'"
+      }
+     }
+    },
+    {
+     "step": 46,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.011595322983339429,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 47,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/reject-proposal",
+      "body": {
+       "id": [
+        32768
+       ]
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.013365985825657845,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "int() argument must be a string, a bytes-like object or a real number, not 'list'"
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "int() argument must be a string, a bytes-like object or a real number, not 'list'"
+      }
+     }
+    },
+    {
+     "step": 48,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.011484782909974456,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 49,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/reject-proposal",
+      "body": {
+       "id": [
+        2147483648
+       ]
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.012440209044143558,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "int() argument must be a string, a bytes-like object or a real number, not 'list'"
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "int() argument must be a string, a bytes-like object or a real number, not 'list'"
+      }
+     }
+    },
+    {
+     "step": 50,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.011323384009301662,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 51,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/reject-proposal",
+      "body": {
+       "id": [
+        1.5
+       ]
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.013363446108996868,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "int() argument must be a string, a bytes-like object or a real number, not 'list'"
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "int() argument must be a string, a bytes-like object or a real number, not 'list'"
+      }
+     }
+    },
+    {
+     "step": 52,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.011168834986165166,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 53,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/reject-proposal",
+      "body": {
+       "id": [
+        true
+       ]
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.012737388024106622,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "int() argument must be a string, a bytes-like object or a real number, not 'list'"
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "int() argument must be a string, a bytes-like object or a real number, not 'list'"
+      }
+     }
+    },
+    {
+     "step": 54,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.011570933042094111,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 55,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/reject-proposal",
+      "body": {
+       "id": [
+        "x"
+       ]
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.012913248036056757,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "int() argument must be a string, a bytes-like object or a real number, not 'list'"
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "int() argument must be a string, a bytes-like object or a real number, not 'list'"
+      }
+     }
+    },
+    {
+     "step": 56,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.012028660858049989,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 57,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/reject-proposal",
+      "body": {
+       "id": [
+        null
+       ]
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.013306595850735903,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "int() argument must be a string, a bytes-like object or a real number, not 'list'"
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "int() argument must be a string, a bytes-like object or a real number, not 'list'"
+      }
+     }
+    },
+    {
+     "step": 58,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.011071785120293498,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 59,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/reject-proposal",
+      "body": {
+       "id": [
+        [
+         "x"
+        ]
+       ]
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.01321000698953867,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "int() argument must be a string, a bytes-like object or a real number, not 'list'"
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "int() argument must be a string, a bytes-like object or a real number, not 'list'"
+      }
+     }
+    },
+    {
+     "step": 60,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.011670062085613608,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 61,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/reject-proposal",
+      "body": {
+       "id": [
+        1,
+        "x"
+       ]
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.013074727030470967,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "int() argument must be a string, a bytes-like object or a real number, not 'list'"
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "int() argument must be a string, a bytes-like object or a real number, not 'list'"
+      }
+     }
+    },
+    {
+     "step": 62,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.011267733993008733,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 63,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/reject-proposal",
+      "body": {
+       "id": [
+        1.0,
+        1
+       ]
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.01248208899050951,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "int() argument must be a string, a bytes-like object or a real number, not 'list'"
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "int() argument must be a string, a bytes-like object or a real number, not 'list'"
+      }
+     }
+    },
+    {
+     "step": 64,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.011333013884723186,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 65,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/reject-proposal",
+      "body": {
+       "id": [
+        9223372036854775808
+       ]
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.013284855987876654,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "int() argument must be a string, a bytes-like object or a real number, not 'list'"
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "int() argument must be a string, a bytes-like object or a real number, not 'list'"
+      }
+     }
+    },
+    {
+     "step": 66,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.011624663136899471,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 67,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/reject-proposal",
+      "body": {
+       "id": [
+        {}
+       ]
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.013145837001502514,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "int() argument must be a string, a bytes-like object or a real number, not 'list'"
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "int() argument must be a string, a bytes-like object or a real number, not 'list'"
+      }
+     }
+    },
+    {
+     "step": 68,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.012341409921646118,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 69,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/reject-proposal",
+      "body": {
+       "id": [
+        "a\\b",
+        "NULL",
+        "x y",
+        "\u2003"
+       ]
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.01283714803867042,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "int() argument must be a string, a bytes-like object or a real number, not 'list'"
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "int() argument must be a string, a bytes-like object or a real number, not 'list'"
+      }
+     }
+    },
+    {
+     "step": 70,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.011616152944043279,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 71,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/reject-proposal",
+      "body": {
+       "id": {
+        "id": 1
+       }
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.01357502513565123,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "int() argument must be a string, a bytes-like object or a real number, not 'dict'"
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "int() argument must be a string, a bytes-like object or a real number, not 'dict'"
+      }
+     }
+    },
+    {
+     "step": 72,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.011427003890275955,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 73,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/reject-proposal",
+      "body": {
+       "id": "\u0661"
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.016282804077491164,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "invalid input syntax for type bigint: \"\u0661\"\nCONTEXT:  unnamed portal parameter $1 = '...'"
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "invalid input syntax for type bigint: \"\u0661\"\nCONTEXT:  unnamed portal parameter $1 = '...'"
+      }
+     }
+    },
+    {
+     "step": 74,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.011221523862332106,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 75,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/accept-entity-merge",
+      "body": {
+       "id": true
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.01385216391645372,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "operator does not exist: bigint = boolean\nLINE 1: ...rdict, judge3_confidence FROM entity_proposals WHERE id = $1\n                                                                   ^\nHINT:  No operator matches the given name and argument types. You might need to add explicit type casts."
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "operator does not exist: bigint = boolean\nLINE 1: ...rdict, judge3_confidence FROM entity_proposals WHERE id = $1\n                                                                   ^\nHINT:  No operator matches the given name and argument types. You might need to add explicit type casts."
+      }
+     }
+    },
+    {
+     "step": 76,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.011746742064133286,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 77,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/accept-entity-merge",
+      "body": {
+       "id": false
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.013482985086739063,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "operator does not exist: bigint = boolean\nLINE 1: ...rdict, judge3_confidence FROM entity_proposals WHERE id = $1\n                                                                   ^\nHINT:  No operator matches the given name and argument types. You might need to add explicit type casts."
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "operator does not exist: bigint = boolean\nLINE 1: ...rdict, judge3_confidence FROM entity_proposals WHERE id = $1\n                                                                   ^\nHINT:  No operator matches the given name and argument types. You might need to add explicit type casts."
+      }
+     }
+    },
+    {
+     "step": 78,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.011288403999060392,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 79,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/accept-entity-merge",
+      "body": {
+       "id": []
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.013104676036164165,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "invalid input syntax for type bigint: \"{}\"\nCONTEXT:  unnamed portal parameter $1 = '...'"
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "invalid input syntax for type bigint: \"{}\"\nCONTEXT:  unnamed portal parameter $1 = '...'"
+      }
+     }
+    },
+    {
+     "step": 80,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.010946115013211966,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 81,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/accept-entity-merge",
+      "body": {
+       "id": [
+        1
+       ]
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.01340378588065505,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "operator does not exist: bigint = smallint[]\nLINE 1: ...rdict, judge3_confidence FROM entity_proposals WHERE id = $1\n                                                                   ^\nHINT:  No operator matches the given name and argument types. You might need to add explicit type casts."
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "operator does not exist: bigint = smallint[]\nLINE 1: ...rdict, judge3_confidence FROM entity_proposals WHERE id = $1\n                                                                   ^\nHINT:  No operator matches the given name and argument types. You might need to add explicit type casts."
+      }
+     }
+    },
+    {
+     "step": 82,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.011377493850886822,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 83,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/accept-entity-merge",
+      "body": {
+       "id": [
+        32768
+       ]
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.013381605967879295,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "operator does not exist: bigint = integer[]\nLINE 1: ...rdict, judge3_confidence FROM entity_proposals WHERE id = $1\n                                                                   ^\nHINT:  No operator matches the given name and argument types. You might need to add explicit type casts."
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "operator does not exist: bigint = integer[]\nLINE 1: ...rdict, judge3_confidence FROM entity_proposals WHERE id = $1\n                                                                   ^\nHINT:  No operator matches the given name and argument types. You might need to add explicit type casts."
+      }
+     }
+    },
+    {
+     "step": 84,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.01125561399385333,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 85,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/accept-entity-merge",
+      "body": {
+       "id": [
+        2147483648
+       ]
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.012630498968064785,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "operator does not exist: bigint = bigint[]\nLINE 1: ...rdict, judge3_confidence FROM entity_proposals WHERE id = $1\n                                                                   ^\nHINT:  No operator matches the given name and argument types. You might need to add explicit type casts."
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "operator does not exist: bigint = bigint[]\nLINE 1: ...rdict, judge3_confidence FROM entity_proposals WHERE id = $1\n                                                                   ^\nHINT:  No operator matches the given name and argument types. You might need to add explicit type casts."
+      }
+     }
+    },
+    {
+     "step": 86,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.011597833130508661,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 87,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/accept-entity-merge",
+      "body": {
+       "id": [
+        1.5
+       ]
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.013342995895072818,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "operator does not exist: bigint = double precision[]\nLINE 1: ...rdict, judge3_confidence FROM entity_proposals WHERE id = $1\n                                                                   ^\nHINT:  No operator matches the given name and argument types. You might need to add explicit type casts."
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "operator does not exist: bigint = double precision[]\nLINE 1: ...rdict, judge3_confidence FROM entity_proposals WHERE id = $1\n                                                                   ^\nHINT:  No operator matches the given name and argument types. You might need to add explicit type casts."
+      }
+     }
+    },
+    {
+     "step": 88,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.011481462977826595,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 89,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/accept-entity-merge",
+      "body": {
+       "id": [
+        true
+       ]
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.013075866969302297,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "operator does not exist: bigint = boolean[]\nLINE 1: ...rdict, judge3_confidence FROM entity_proposals WHERE id = $1\n                                                                   ^\nHINT:  No operator matches the given name and argument types. You might need to add explicit type casts."
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "operator does not exist: bigint = boolean[]\nLINE 1: ...rdict, judge3_confidence FROM entity_proposals WHERE id = $1\n                                                                   ^\nHINT:  No operator matches the given name and argument types. You might need to add explicit type casts."
+      }
+     }
+    },
+    {
+     "step": 90,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.011901911115273833,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 91,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/accept-entity-merge",
+      "body": {
+       "id": [
+        "x"
+       ]
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.014008902944624424,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "invalid input syntax for type bigint: \"{x}\"\nCONTEXT:  unnamed portal parameter $1 = '...'"
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "invalid input syntax for type bigint: \"{x}\"\nCONTEXT:  unnamed portal parameter $1 = '...'"
+      }
+     }
+    },
+    {
+     "step": 92,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.01165354298427701,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 93,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/accept-entity-merge",
+      "body": {
+       "id": [
+        null
+       ]
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.013893624069169164,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "invalid input syntax for type bigint: \"{NULL}\"\nCONTEXT:  unnamed portal parameter $1 = '...'"
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "invalid input syntax for type bigint: \"{NULL}\"\nCONTEXT:  unnamed portal parameter $1 = '...'"
+      }
+     }
+    },
+    {
+     "step": 94,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.011399762937799096,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 95,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/accept-entity-merge",
+      "body": {
+       "id": [
+        [
+         "x"
+        ]
+       ]
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.013583184918388724,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "invalid input syntax for type bigint: \"{{x}}\"\nCONTEXT:  unnamed portal parameter $1 = '...'"
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "invalid input syntax for type bigint: \"{{x}}\"\nCONTEXT:  unnamed portal parameter $1 = '...'"
+      }
+     }
+    },
+    {
+     "step": 96,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.011038705008104444,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 97,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/accept-entity-merge",
+      "body": {
+       "id": [
+        1,
+        "x"
+       ]
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.013034466886892915,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "cannot dump lists of mixed types; got: int, str"
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "cannot dump lists of mixed types; got: int, str"
+      }
+     }
+    },
+    {
+     "step": 98,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.011488364078104496,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 99,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/accept-entity-merge",
+      "body": {
+       "id": [
+        1.0,
+        1
+       ]
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.012778747826814651,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "cannot dump lists of mixed types; got: float, int"
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "cannot dump lists of mixed types; got: float, int"
+      }
+     }
+    },
+    {
+     "step": 100,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.011121395044028759,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 101,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/accept-entity-merge",
+      "body": {
+       "id": [
+        9223372036854775808
+       ]
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.013985782861709595,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "operator does not exist: bigint = numeric[]\nLINE 1: ...rdict, judge3_confidence FROM entity_proposals WHERE id = $1\n                                                                   ^\nHINT:  No operator matches the given name and argument types. You might need to add explicit type casts."
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "operator does not exist: bigint = numeric[]\nLINE 1: ...rdict, judge3_confidence FROM entity_proposals WHERE id = $1\n                                                                   ^\nHINT:  No operator matches the given name and argument types. You might need to add explicit type casts."
+      }
+     }
+    },
+    {
+     "step": 102,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.011930451029911637,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 103,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/accept-entity-merge",
+      "body": {
+       "id": [
+        {}
+       ]
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.013613004004582763,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "cannot adapt type 'dict' using placeholder '%s' (format: AUTO)"
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "cannot adapt type 'dict' using placeholder '%s' (format: AUTO)"
+      }
+     }
+    },
+    {
+     "step": 104,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.011222064029425383,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 105,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/accept-entity-merge",
+      "body": {
+       "id": [
+        "a\\b",
+        "NULL",
+        "x y",
+        "\u2003"
+       ]
+      }
+     },
+     "diffs": [
+      ".value.error: python \"invalid input syntax for type bigint: \\\"{\\\"a\\\\\\\\b\\\",\\\"NULL\\\",\\\"x y\\\",\\u2003}\\\"\\nCONTEXT:  unnamed portal parameter $1 = '...'\" vs rust \"invalid input syntax for type bigint: \\\"{\\\"a\\\\\\\\b\\\",\\\"NULL\\\",\\\"x y\\\",\\\"\\u2003\\\"}\\\"\\nCONTEXT:  unnamed portal parameter $1 = '...'\""
+     ],
+     "wall_s": 0.013318726094439626,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "invalid input syntax for type bigint: \"{\"a\\\\b\",\"NULL\",\"x y\",\u2003}\"\nCONTEXT:  unnamed portal parameter $1 = '...'"
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "invalid input syntax for type bigint: \"{\"a\\\\b\",\"NULL\",\"x y\",\"\u2003\"}\"\nCONTEXT:  unnamed portal parameter $1 = '...'"
+      }
+     }
+    },
+    {
+     "step": 106,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.011964441975578666,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 107,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/accept-entity-merge",
+      "body": {
+       "id": {
+        "id": 1
+       }
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.013417224865406752,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "cannot adapt type 'dict' using placeholder '%s' (format: AUTO)"
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "cannot adapt type 'dict' using placeholder '%s' (format: AUTO)"
+      }
+     }
+    },
+    {
+     "step": 108,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.011270564049482346,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 109,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/accept-entity-merge",
+      "body": {
+       "id": "\u0661"
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.01529879798181355,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "invalid input syntax for type bigint: \"\u0661\"\nCONTEXT:  unnamed portal parameter $1 = '...'"
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "invalid input syntax for type bigint: \"\u0661\"\nCONTEXT:  unnamed portal parameter $1 = '...'"
+      }
+     }
+    },
+    {
+     "step": 110,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.015241648070514202,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 111,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/accept-entity-junk",
+      "body": {
+       "id": true
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.014006264042109251,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "operator does not exist: bigint = boolean\nLINE 1: ...rdict, judge3_confidence FROM entity_proposals WHERE id = $1\n                                                                   ^\nHINT:  No operator matches the given name and argument types. You might need to add explicit type casts."
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "operator does not exist: bigint = boolean\nLINE 1: ...rdict, judge3_confidence FROM entity_proposals WHERE id = $1\n                                                                   ^\nHINT:  No operator matches the given name and argument types. You might need to add explicit type casts."
+      }
+     }
+    },
+    {
+     "step": 112,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.013247455935925245,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 113,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/accept-entity-junk",
+      "body": {
+       "id": false
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.013636084971949458,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "operator does not exist: bigint = boolean\nLINE 1: ...rdict, judge3_confidence FROM entity_proposals WHERE id = $1\n                                                                   ^\nHINT:  No operator matches the given name and argument types. You might need to add explicit type casts."
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "operator does not exist: bigint = boolean\nLINE 1: ...rdict, judge3_confidence FROM entity_proposals WHERE id = $1\n                                                                   ^\nHINT:  No operator matches the given name and argument types. You might need to add explicit type casts."
+      }
+     }
+    },
+    {
+     "step": 114,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.01145580387674272,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 115,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/accept-entity-junk",
+      "body": {
+       "id": []
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.014925049152225256,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "invalid input syntax for type bigint: \"{}\"\nCONTEXT:  unnamed portal parameter $1 = '...'"
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "invalid input syntax for type bigint: \"{}\"\nCONTEXT:  unnamed portal parameter $1 = '...'"
+      }
+     }
+    },
+    {
+     "step": 116,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.012847337871789932,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 117,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/accept-entity-junk",
+      "body": {
+       "id": [
+        1
+       ]
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.013581674080342054,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "operator does not exist: bigint = smallint[]\nLINE 1: ...rdict, judge3_confidence FROM entity_proposals WHERE id = $1\n                                                                   ^\nHINT:  No operator matches the given name and argument types. You might need to add explicit type casts."
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "operator does not exist: bigint = smallint[]\nLINE 1: ...rdict, judge3_confidence FROM entity_proposals WHERE id = $1\n                                                                   ^\nHINT:  No operator matches the given name and argument types. You might need to add explicit type casts."
+      }
+     }
+    },
+    {
+     "step": 118,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.011272204108536243,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 119,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/accept-entity-junk",
+      "body": {
+       "id": [
+        32768
+       ]
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.014015393098816276,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "operator does not exist: bigint = integer[]\nLINE 1: ...rdict, judge3_confidence FROM entity_proposals WHERE id = $1\n                                                                   ^\nHINT:  No operator matches the given name and argument types. You might need to add explicit type casts."
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "operator does not exist: bigint = integer[]\nLINE 1: ...rdict, judge3_confidence FROM entity_proposals WHERE id = $1\n                                                                   ^\nHINT:  No operator matches the given name and argument types. You might need to add explicit type casts."
+      }
+     }
+    },
+    {
+     "step": 120,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.01158857299014926,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 121,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/accept-entity-junk",
+      "body": {
+       "id": [
+        2147483648
+       ]
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.013534674886614084,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "operator does not exist: bigint = bigint[]\nLINE 1: ...rdict, judge3_confidence FROM entity_proposals WHERE id = $1\n                                                                   ^\nHINT:  No operator matches the given name and argument types. You might need to add explicit type casts."
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "operator does not exist: bigint = bigint[]\nLINE 1: ...rdict, judge3_confidence FROM entity_proposals WHERE id = $1\n                                                                   ^\nHINT:  No operator matches the given name and argument types. You might need to add explicit type casts."
+      }
+     }
+    },
+    {
+     "step": 122,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.011903631966561079,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 123,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/accept-entity-junk",
+      "body": {
+       "id": [
+        1.5
+       ]
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.013335846131667495,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "operator does not exist: bigint = double precision[]\nLINE 1: ...rdict, judge3_confidence FROM entity_proposals WHERE id = $1\n                                                                   ^\nHINT:  No operator matches the given name and argument types. You might need to add explicit type casts."
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "operator does not exist: bigint = double precision[]\nLINE 1: ...rdict, judge3_confidence FROM entity_proposals WHERE id = $1\n                                                                   ^\nHINT:  No operator matches the given name and argument types. You might need to add explicit type casts."
+      }
+     }
+    },
+    {
+     "step": 124,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.02027915697544813,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 125,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/accept-entity-junk",
+      "body": {
+       "id": [
+        true
+       ]
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.01339641585946083,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "operator does not exist: bigint = boolean[]\nLINE 1: ...rdict, judge3_confidence FROM entity_proposals WHERE id = $1\n                                                                   ^\nHINT:  No operator matches the given name and argument types. You might need to add explicit type casts."
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "operator does not exist: bigint = boolean[]\nLINE 1: ...rdict, judge3_confidence FROM entity_proposals WHERE id = $1\n                                                                   ^\nHINT:  No operator matches the given name and argument types. You might need to add explicit type casts."
+      }
+     }
+    },
+    {
+     "step": 126,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.01264207810163498,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 127,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/accept-entity-junk",
+      "body": {
+       "id": [
+        "x"
+       ]
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.01518710795789957,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "invalid input syntax for type bigint: \"{x}\"\nCONTEXT:  unnamed portal parameter $1 = '...'"
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "invalid input syntax for type bigint: \"{x}\"\nCONTEXT:  unnamed portal parameter $1 = '...'"
+      }
+     }
+    },
+    {
+     "step": 128,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.013258446007966995,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 129,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/accept-entity-junk",
+      "body": {
+       "id": [
+        null
+       ]
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.013005697168409824,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "invalid input syntax for type bigint: \"{NULL}\"\nCONTEXT:  unnamed portal parameter $1 = '...'"
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "invalid input syntax for type bigint: \"{NULL}\"\nCONTEXT:  unnamed portal parameter $1 = '...'"
+      }
+     }
+    },
+    {
+     "step": 130,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.011282304069027305,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 131,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/accept-entity-junk",
+      "body": {
+       "id": [
+        [
+         "x"
+        ]
+       ]
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.014104432193562388,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "invalid input syntax for type bigint: \"{{x}}\"\nCONTEXT:  unnamed portal parameter $1 = '...'"
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "invalid input syntax for type bigint: \"{{x}}\"\nCONTEXT:  unnamed portal parameter $1 = '...'"
+      }
+     }
+    },
+    {
+     "step": 132,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.012832866981625557,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 133,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/accept-entity-junk",
+      "body": {
+       "id": [
+        1,
+        "x"
+       ]
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.012727578869089484,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "cannot dump lists of mixed types; got: int, str"
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "cannot dump lists of mixed types; got: int, str"
+      }
+     }
+    },
+    {
+     "step": 134,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.011905700899660587,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 135,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/accept-entity-junk",
+      "body": {
+       "id": [
+        1.0,
+        1
+       ]
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.013381924945861101,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "cannot dump lists of mixed types; got: float, int"
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "cannot dump lists of mixed types; got: float, int"
+      }
+     }
+    },
+    {
+     "step": 136,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.013400206109508872,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 137,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/accept-entity-junk",
+      "body": {
+       "id": [
+        9223372036854775808
+       ]
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.013218365842476487,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "operator does not exist: bigint = numeric[]\nLINE 1: ...rdict, judge3_confidence FROM entity_proposals WHERE id = $1\n                                                                   ^\nHINT:  No operator matches the given name and argument types. You might need to add explicit type casts."
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "operator does not exist: bigint = numeric[]\nLINE 1: ...rdict, judge3_confidence FROM entity_proposals WHERE id = $1\n                                                                   ^\nHINT:  No operator matches the given name and argument types. You might need to add explicit type casts."
+      }
+     }
+    },
+    {
+     "step": 138,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.012047610944136977,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 139,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/accept-entity-junk",
+      "body": {
+       "id": [
+        {}
+       ]
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.012616989202797413,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "cannot adapt type 'dict' using placeholder '%s' (format: AUTO)"
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "cannot adapt type 'dict' using placeholder '%s' (format: AUTO)"
+      }
+     }
+    },
+    {
+     "step": 140,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.011236024089157581,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 141,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/accept-entity-junk",
+      "body": {
+       "id": [
+        "a\\b",
+        "NULL",
+        "x y",
+        "\u2003"
+       ]
+      }
+     },
+     "diffs": [
+      ".value.error: python \"invalid input syntax for type bigint: \\\"{\\\"a\\\\\\\\b\\\",\\\"NULL\\\",\\\"x y\\\",\\u2003}\\\"\\nCONTEXT:  unnamed portal parameter $1 = '...'\" vs rust \"invalid input syntax for type bigint: \\\"{\\\"a\\\\\\\\b\\\",\\\"NULL\\\",\\\"x y\\\",\\\"\\u2003\\\"}\\\"\\nCONTEXT:  unnamed portal parameter $1 = '...'\""
+     ],
+     "wall_s": 0.014999689068645239,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "invalid input syntax for type bigint: \"{\"a\\\\b\",\"NULL\",\"x y\",\u2003}\"\nCONTEXT:  unnamed portal parameter $1 = '...'"
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "invalid input syntax for type bigint: \"{\"a\\\\b\",\"NULL\",\"x y\",\"\u2003\"}\"\nCONTEXT:  unnamed portal parameter $1 = '...'"
+      }
+     }
+    },
+    {
+     "step": 142,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.013162655988708138,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 143,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/accept-entity-junk",
+      "body": {
+       "id": {
+        "id": 1
+       }
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.013068177038803697,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "cannot adapt type 'dict' using placeholder '%s' (format: AUTO)"
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "cannot adapt type 'dict' using placeholder '%s' (format: AUTO)"
+      }
+     }
+    },
+    {
+     "step": 144,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.013690014136955142,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 145,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/accept-entity-junk",
+      "body": {
+       "id": "\u0661"
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.015269838040694594,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "invalid input syntax for type bigint: \"\u0661\"\nCONTEXT:  unnamed portal parameter $1 = '...'"
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "invalid input syntax for type bigint: \"\u0661\"\nCONTEXT:  unnamed portal parameter $1 = '...'"
+      }
+     }
+    },
+    {
+     "step": 146,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.011781592154875398,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 147,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/reject-entity-proposal",
+      "body": {
+       "id": true
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.015583025990054011,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "operator does not exist: bigint = boolean\nLINE 1: ...rdict, judge3_confidence FROM entity_proposals WHERE id = $1\n                                                                   ^\nHINT:  No operator matches the given name and argument types. You might need to add explicit type casts."
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "operator does not exist: bigint = boolean\nLINE 1: ...rdict, judge3_confidence FROM entity_proposals WHERE id = $1\n                                                                   ^\nHINT:  No operator matches the given name and argument types. You might need to add explicit type casts."
+      }
+     }
+    },
+    {
+     "step": 148,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.011434742948040366,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 149,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/reject-entity-proposal",
+      "body": {
+       "id": false
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.01531493803486228,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "operator does not exist: bigint = boolean\nLINE 1: ...rdict, judge3_confidence FROM entity_proposals WHERE id = $1\n                                                                   ^\nHINT:  No operator matches the given name and argument types. You might need to add explicit type casts."
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "operator does not exist: bigint = boolean\nLINE 1: ...rdict, judge3_confidence FROM entity_proposals WHERE id = $1\n                                                                   ^\nHINT:  No operator matches the given name and argument types. You might need to add explicit type casts."
+      }
+     }
+    },
+    {
+     "step": 150,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.011318484088405967,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 151,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/reject-entity-proposal",
+      "body": {
+       "id": []
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.015647955937311053,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "invalid input syntax for type bigint: \"{}\"\nCONTEXT:  unnamed portal parameter $1 = '...'"
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "invalid input syntax for type bigint: \"{}\"\nCONTEXT:  unnamed portal parameter $1 = '...'"
+      }
+     }
+    },
+    {
+     "step": 152,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.011806221911683679,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 153,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/reject-entity-proposal",
+      "body": {
+       "id": [
+        1
+       ]
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.013233406003564596,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "operator does not exist: bigint = smallint[]\nLINE 1: ...rdict, judge3_confidence FROM entity_proposals WHERE id = $1\n                                                                   ^\nHINT:  No operator matches the given name and argument types. You might need to add explicit type casts."
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "operator does not exist: bigint = smallint[]\nLINE 1: ...rdict, judge3_confidence FROM entity_proposals WHERE id = $1\n                                                                   ^\nHINT:  No operator matches the given name and argument types. You might need to add explicit type casts."
+      }
+     }
+    },
+    {
+     "step": 154,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.011467112926766276,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 155,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/reject-entity-proposal",
+      "body": {
+       "id": [
+        32768
+       ]
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.01307846698909998,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "operator does not exist: bigint = integer[]\nLINE 1: ...rdict, judge3_confidence FROM entity_proposals WHERE id = $1\n                                                                   ^\nHINT:  No operator matches the given name and argument types. You might need to add explicit type casts."
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "operator does not exist: bigint = integer[]\nLINE 1: ...rdict, judge3_confidence FROM entity_proposals WHERE id = $1\n                                                                   ^\nHINT:  No operator matches the given name and argument types. You might need to add explicit type casts."
+      }
+     }
+    },
+    {
+     "step": 156,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.011365214129909873,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 157,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/reject-entity-proposal",
+      "body": {
+       "id": [
+        2147483648
+       ]
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.015244668116793036,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "operator does not exist: bigint = bigint[]\nLINE 1: ...rdict, judge3_confidence FROM entity_proposals WHERE id = $1\n                                                                   ^\nHINT:  No operator matches the given name and argument types. You might need to add explicit type casts."
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "operator does not exist: bigint = bigint[]\nLINE 1: ...rdict, judge3_confidence FROM entity_proposals WHERE id = $1\n                                                                   ^\nHINT:  No operator matches the given name and argument types. You might need to add explicit type casts."
+      }
+     }
+    },
+    {
+     "step": 158,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.011643202975392342,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 159,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/reject-entity-proposal",
+      "body": {
+       "id": [
+        1.5
+       ]
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.01390850287862122,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "operator does not exist: bigint = double precision[]\nLINE 1: ...rdict, judge3_confidence FROM entity_proposals WHERE id = $1\n                                                                   ^\nHINT:  No operator matches the given name and argument types. You might need to add explicit type casts."
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "operator does not exist: bigint = double precision[]\nLINE 1: ...rdict, judge3_confidence FROM entity_proposals WHERE id = $1\n                                                                   ^\nHINT:  No operator matches the given name and argument types. You might need to add explicit type casts."
+      }
+     }
+    },
+    {
+     "step": 160,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.011182403890416026,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 161,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/reject-entity-proposal",
+      "body": {
+       "id": [
+        true
+       ]
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.015624125953763723,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "operator does not exist: bigint = boolean[]\nLINE 1: ...rdict, judge3_confidence FROM entity_proposals WHERE id = $1\n                                                                   ^\nHINT:  No operator matches the given name and argument types. You might need to add explicit type casts."
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "operator does not exist: bigint = boolean[]\nLINE 1: ...rdict, judge3_confidence FROM entity_proposals WHERE id = $1\n                                                                   ^\nHINT:  No operator matches the given name and argument types. You might need to add explicit type casts."
+      }
+     }
+    },
+    {
+     "step": 162,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.01123837404884398,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 163,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/reject-entity-proposal",
+      "body": {
+       "id": [
+        "x"
+       ]
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.01520307781174779,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "invalid input syntax for type bigint: \"{x}\"\nCONTEXT:  unnamed portal parameter $1 = '...'"
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "invalid input syntax for type bigint: \"{x}\"\nCONTEXT:  unnamed portal parameter $1 = '...'"
+      }
+     }
+    },
+    {
+     "step": 164,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.011484273010864854,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 165,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/reject-entity-proposal",
+      "body": {
+       "id": [
+        null
+       ]
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.013546714093536139,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "invalid input syntax for type bigint: \"{NULL}\"\nCONTEXT:  unnamed portal parameter $1 = '...'"
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "invalid input syntax for type bigint: \"{NULL}\"\nCONTEXT:  unnamed portal parameter $1 = '...'"
+      }
+     }
+    },
+    {
+     "step": 166,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.011127545032650232,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 167,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/reject-entity-proposal",
+      "body": {
+       "id": [
+        [
+         "x"
+        ]
+       ]
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.013564103981480002,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "invalid input syntax for type bigint: \"{{x}}\"\nCONTEXT:  unnamed portal parameter $1 = '...'"
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "invalid input syntax for type bigint: \"{{x}}\"\nCONTEXT:  unnamed portal parameter $1 = '...'"
+      }
+     }
+    },
+    {
+     "step": 168,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.011425324017181993,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 169,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/reject-entity-proposal",
+      "body": {
+       "id": [
+        1,
+        "x"
+       ]
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.013744954019784927,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "cannot dump lists of mixed types; got: int, str"
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "cannot dump lists of mixed types; got: int, str"
+      }
+     }
+    },
+    {
+     "step": 170,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.01303318701684475,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 171,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/reject-entity-proposal",
+      "body": {
+       "id": [
+        1.0,
+        1
+       ]
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.012741677928715944,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "cannot dump lists of mixed types; got: float, int"
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "cannot dump lists of mixed types; got: float, int"
+      }
+     }
+    },
+    {
+     "step": 172,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.01302556716836989,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 173,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/reject-entity-proposal",
+      "body": {
+       "id": [
+        9223372036854775808
+       ]
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.01586797507479787,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "operator does not exist: bigint = numeric[]\nLINE 1: ...rdict, judge3_confidence FROM entity_proposals WHERE id = $1\n                                                                   ^\nHINT:  No operator matches the given name and argument types. You might need to add explicit type casts."
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "operator does not exist: bigint = numeric[]\nLINE 1: ...rdict, judge3_confidence FROM entity_proposals WHERE id = $1\n                                                                   ^\nHINT:  No operator matches the given name and argument types. You might need to add explicit type casts."
+      }
+     }
+    },
+    {
+     "step": 174,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.012607668992131948,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 175,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/reject-entity-proposal",
+      "body": {
+       "id": [
+        {}
+       ]
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.013734454987570643,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "cannot adapt type 'dict' using placeholder '%s' (format: AUTO)"
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "cannot adapt type 'dict' using placeholder '%s' (format: AUTO)"
+      }
+     }
+    },
+    {
+     "step": 176,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.012971197022125125,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 177,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/reject-entity-proposal",
+      "body": {
+       "id": [
+        "a\\b",
+        "NULL",
+        "x y",
+        "\u2003"
+       ]
+      }
+     },
+     "diffs": [
+      ".value.error: python \"invalid input syntax for type bigint: \\\"{\\\"a\\\\\\\\b\\\",\\\"NULL\\\",\\\"x y\\\",\\u2003}\\\"\\nCONTEXT:  unnamed portal parameter $1 = '...'\" vs rust \"invalid input syntax for type bigint: \\\"{\\\"a\\\\\\\\b\\\",\\\"NULL\\\",\\\"x y\\\",\\\"\\u2003\\\"}\\\"\\nCONTEXT:  unnamed portal parameter $1 = '...'\""
+     ],
+     "wall_s": 0.01365930400788784,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "invalid input syntax for type bigint: \"{\"a\\\\b\",\"NULL\",\"x y\",\u2003}\"\nCONTEXT:  unnamed portal parameter $1 = '...'"
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "invalid input syntax for type bigint: \"{\"a\\\\b\",\"NULL\",\"x y\",\"\u2003\"}\"\nCONTEXT:  unnamed portal parameter $1 = '...'"
+      }
+     }
+    },
+    {
+     "step": 178,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.011762142181396484,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 179,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/reject-entity-proposal",
+      "body": {
+       "id": {
+        "id": 1
+       }
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.013527645030990243,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "cannot adapt type 'dict' using placeholder '%s' (format: AUTO)"
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "cannot adapt type 'dict' using placeholder '%s' (format: AUTO)"
+      }
+     }
+    },
+    {
+     "step": 180,
+     "op": {
+      "op": "sql",
+      "sql": "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', '{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", \"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, \"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", \"orbit-station-alpha-two\"]}, \"link:1\": {\"decision_id\": \"d3\", \"seq\": 3, \"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') WHERE key = 'automatic_review_decisions_v1'",
+      "external": true
+     },
+     "diffs": [],
+     "wall_s": 0.011425714008510113,
+     "python": {
+      "isError": false,
+      "value": null
+     },
+     "rust": {
+      "isError": false,
+      "value": null
+     }
+    },
+    {
+     "step": 181,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/reject-entity-proposal",
+      "body": {
+       "id": "\u0661"
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.015174668049439788,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "invalid input syntax for type bigint: \"\u0661\"\nCONTEXT:  unnamed portal parameter $1 = '...'"
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "invalid input syntax for type bigint: \"\u0661\"\nCONTEXT:  unnamed portal parameter $1 = '...'"
+      }
+     }
+    },
+    {
+     "step": 182,
+     "op": {
+      "op": "rest",
+      "method": "POST",
+      "path": "/api/graph/assign-scope",
+      "body": {
+       "entity": "Tide Gauge",
+       "source": {
+        "source": "x"
+       }
+      }
+     },
+     "diffs": [],
+     "wall_s": 0.014209953136742115,
+     "python": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "cannot adapt type 'dict' using placeholder '%s' (format: AUTO)"
+      }
+     },
+     "rust": {
+      "isError": true,
+      "status": 500,
+      "value": {
+       "error": "cannot adapt type 'dict' using placeholder '%s' (format: AUTO)"
+      }
+     }
+    }
+   ],
+   "stats": {}
+  }
+ ]
+}

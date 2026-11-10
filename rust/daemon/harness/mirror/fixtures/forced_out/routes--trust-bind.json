@@ -1,0 +1,27 @@
+{
+ "summary": {
+  "cases": 1,
+  "diff_cases": 1,
+  "declared_cases": 0,
+  "db_state_scenarios": 1,
+  "db_diff_scenarios": 0
+ },
+ "scenarios": [
+  {
+   "scenario": "trust-bind",
+   "cases": [
+    {
+     "case": "scenario error",
+     "diffs": [
+      "RuntimeError: trust-bind requires a debug --features mutants binary: refuse before any wildcard listener (at run.py:2055 in run_scenario)"
+     ],
+     "declared": null
+    }
+   ],
+   "db_diffs": [],
+   "declared_db_writes": {},
+   "seconds": 0.010984935099259019
+  }
+ ],
+ "refusals": []
+}
