@@ -105,6 +105,7 @@ svc._storage.close()
                 deadline = time.monotonic() + 120
                 settle, waiting = StableFor(REFRESH_SETTLE_S), "the session milestone"
                 while True:
+                    waiting = "the session milestone"  # what this pass still lacks
                     state = dbstate.dump(dsn)
                     table = state["rows"]["public.episodes"]
                     episodes = [dict(zip(table["columns"], row)) for row in table["rows"]]
