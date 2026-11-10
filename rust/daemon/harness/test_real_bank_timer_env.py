@@ -93,7 +93,7 @@ def test_the_reaper_scenario_on_a_real_base_closes_no_real_session(monkeypatch):
     import run
     monkeypatch.setenv("PL_HARNESS_BASE_DATABASE", "pl_cf_mir_seed")
     env = run.common_env(run.SCENARIOS["reaper"](), "dsn")
-    assert env[REAP] == "5" and env[IDLE] == "86400" and env[SAVE] == "86400"
+    assert env[REAP] == "5" and env[IDLE] == "315360000" and env[SAVE] == "86400"
     # Only this scenario: another route arm on the base keeps the default.
     assert IDLE not in run.common_env(run.SCENARIOS["tokens"](), "dsn")
 

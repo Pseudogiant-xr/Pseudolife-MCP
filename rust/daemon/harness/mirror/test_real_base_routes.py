@@ -431,20 +431,13 @@ def rollback_base(monkeypatch):
     return start, normalize
 
 
-def test_dream_rollback_clocks_written_in_the_window_compare_equal(rollback_base):
+def test_a_real_revert_still_shows_in_the_rollback_scenarios_bank(rollback_base):
+    """Review (Opus): with the seeded runs the latest, no call reverts a real
+    run, so nothing writes a supersede-back stamp or a supersession log
+    entry. Those clocks are left raw on purpose: if the scenario ever reverts
+    a real run again, each daemon's own stamp makes it differ, as it did in
+    the forced run that exposed this."""
     start, normalize = rollback_base
     python = normalize("python", rollback_arm(start + 1, start + 2))
     rust = normalize("rust", rollback_arm(start + 3, start + 4))
-    assert dbstate.diff(python, rust) == []
-    log = python["rows"]["public.meta"]["rows"][0][1]
-    # The base's own entry keeps its clock; only the run's is a token.
-    assert [e["timestamp"] for e in log] == [1.6e9, "<timestamp>"]
-
-
-def test_dream_rollback_clocks_outside_the_window_still_diff(rollback_base):
-    """The near misses: a base fact's clock set outside the arm's window, or
-    the base's own log entry restamped, is compared exactly."""
-    start, normalize = rollback_base
-    kept = normalize("python", rollback_arm(start + 1, start + 2))
-    assert dbstate.diff(kept, normalize("rust", rollback_arm(1.6e9 + 5, start + 2)))
-    assert dbstate.diff(kept, normalize("rust", rollback_arm(start + 1, start + 2, old_logged_at=1.6e9 + 5)))
+    assert dbstate.diff(python, rust)

@@ -5,11 +5,8 @@ extractor runs. This fixture needs no model and replays the journal boundary.
 """
 
 import json
-import math
 
 from mcp_wire import Session, sse_data
-
-SUPERSESSION_LOG = "cortex_supersession_log"
 
 
 def register(harness):
@@ -60,17 +57,7 @@ def register(harness):
                     ("already rolled back refuses", {"run_id": first}, None)]
 
         def normalize_db(self, state, before, side):
-            windows = self.clock_window(side)
-            # A rollback's supersede-back stamps the facts it displaces and
-            # logs each supersession, each daemon with its own now(). Like
-            # every clock rule, a base row's value is a token only inside
-            # the arm's window. Kept here: DB_NONDETERMINISTIC also feeds
-            # w2e's fact-clock comparison and every golden's header.
-            state = harness.dbstate.normalize(state, {
-                **harness.DB_NONDETERMINISTIC,
-                ("facts", "superseded_at"): "clock: a rollback's supersede-back stamp",
-            }, before, windows=windows)
-            state = supersession_log_clocks(state, before, windows)
+            state = super().normalize_db(state, before, side)
             # Rollback writes this clock on the existing seeded run, whose
             # rolled_back_at starts NULL. Preserve its null/non-null shape.
             return harness.dbstate.normalize(state, {
@@ -111,32 +98,5 @@ def register(harness):
             finally:
                 for session in sessions.values():
                     session.close()
-
-    def supersession_log_clocks(state, before, windows):
-        """The supersession log's entry ``timestamp``s as tokens where this
-        arm wrote them: every finite one in a log row the run created, and
-        in an existing row (``before``'s or the base's) only one inside the
-        arm's clock windows, so a log entry the bank already held, or one
-        restamped outside the window, is still compared exactly."""
-        table = state["rows"].get("public.meta")
-        if not table:
-            return state
-        prior = {json.dumps(r[0], sort_keys=True)
-                 for r in before["rows"].get("public.meta", {}).get("rows", [])}
-        prior |= harness.dbstate.base_keys("public.meta")
-        spans = [(float(lo), float(hi)) for lo, hi in windows or ()]
-        for row in table["rows"]:
-            if row[0] != SUPERSESSION_LOG or not isinstance(row[1], list):
-                continue
-            existing = json.dumps(row[0], sort_keys=True) in prior
-            for entry in row[1]:
-                if not isinstance(entry, dict):
-                    continue
-                value = entry.get("timestamp")
-                if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
-                    continue
-                if not existing or any(lo <= value <= hi for lo, hi in spans):
-                    entry["timestamp"] = "<timestamp>"
-        return state
 
     return [McpDreamRollback]

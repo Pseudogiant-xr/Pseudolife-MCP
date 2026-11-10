@@ -1073,7 +1073,10 @@ class Reaper(Scenario):
             # genuinely idle real session, whose session-end dream Rust
             # finished before the stop and Python's was killed at. The
             # scenario seeds no session, so only the init retry is tested.
-            self.env["PSEUDOLIFE_SESSION_IDLE_SECONDS"] = "86400"
+            # Ten years, not a day: idle is measured from now, so any value
+            # below the seed's age reaps the real open sessions again (the
+            # forced runs' seed was a backup about 4 days old, 2026-11-10).
+            self.env["PSEUDOLIFE_SESSION_IDLE_SECONDS"] = "315360000"
 
     def timeline(self, procs, holders):
         time.sleep(110)  # failures near 0, 5, 15, 35, 75 s: the fifth arms 60 s; warmup stops
