@@ -1188,7 +1188,8 @@ def test_the_rebuild_caps_are_the_harnesses_own_print_statements():
                          "for d in r[\"state_diffs\"][:12]:", "print(f\"STATE [{r['scenario']}] {d}\")",
                          "for p in r[\"chain\"][:12]:", "print(f\"CHAIN [{r['scenario']}] {p}\")"],
     }
-    # And the final --out write HARNESS_OUT recognises, whose keys it reads.
+    # And the --out writes HARNESS_OUT tells apart, whose keys it reads: the
+    # final one, and routes' progress write ({"partial": ...}) it refuses.
     written = {
         "w2e.py": ["args.out.write_text(json.dumps({\"complete\": True, \"planned_scenarios\": names,",
                    "\"summary\": summary, \"scenarios\": results}, indent=1,"],
@@ -1207,32 +1208,65 @@ def test_the_rebuild_caps_are_the_harnesses_own_print_statements():
 
 RECORDED = Path(__file__).parent / "fixtures" / "forced_out"
 
+# Each recording's difference lines in full, counted without forced.py: from
+# the JSON's own lists (fixtures/forced_out/README.md), and for board also its
+# summary ("chain_problems": 24) and cut note ("+12 more problems").
+FULL_LINES = {"w2e--console-graph-malformed": 4, "w2d_search--mcp-search-explain": 14,
+              "w2d_search--rrf-pool": 352, "routes--seeded": 8, "routes--trust-bind": 1,
+              "board--identity": 24}
+
+
+def _difference_lists(suite: str, data: dict) -> list[tuple[bool, list]]:
+    """Every difference list a harness wrote, and whether it prints whole on
+    one line (a case's or step's list) rather than one line per item."""
+    if suite == "w2e":
+        return [(False, s["diffs"]) for r in data["scenarios"] for s in r["steps"]]
+    lists = []
+    for r in data["scenarios"] if suite == "routes" else data["results"]:
+        lists += [(True, c["diffs"]) for c in r.get("cases", r.get("steps", []))]
+        lists += [(False, r.get(key, [])) for key in ("db_diffs", "state_diffs", "chain")]
+    if suite == "routes":
+        lists += [(True, r["diffs"]) for r in data["refusals"]]
+    return [(whole, items) for whole, items in lists if items]
+
+
+def _recorded(path: Path):
+    suite = path.name.split("--")[0]
+    printed = forced.outcome(1, path.with_suffix(".log").read_text(encoding="utf-8"))["diffs"]
+    full, why = forced.full_diffs(suite, path, printed)
+    return suite, printed, full, why, json.loads(path.read_text(encoding="utf-8"))
+
 
 @pytest.mark.parametrize("suite", list(forced.HARNESS_OUT))
 def test_a_recorded_harness_run_rebuilds_to_the_lines_it_printed(suite):
     """Real harness runs on the synthetic bank, each its --out JSON and its
     log as the runner keeps them (fixtures/forced_out/README.md). The capped
-    rebuild must be the log's DIFF lines in order; an attempt nothing was cut
-    from rebuilds in full to the same multiset; a cut one to more."""
+    rebuild must be the log's DIFF lines in order; the full one must hold
+    every difference the JSON lists, each case's list whole; and one nothing
+    was cut from is the printed lines as a multiset."""
     cases = sorted(RECORDED.glob(f"{suite}--*.json"))
     assert cases, f"no recorded {suite} run"
     for path in cases:
-        printed = forced.outcome(1, path.with_suffix(".log").read_text(encoding="utf-8"))["diffs"]
-        assert printed, path.name
-        full, why = forced.full_diffs(suite, path, printed)
-        assert why is None, (path.name, why)
-        if forced.harness_lines(suite, json.loads(path.read_text(encoding="utf-8")), capped=True) == full:
+        _, printed, full, why, data = _recorded(path)
+        assert printed and why is None, (path.name, why)
+        lists = _difference_lists(suite, data)
+        assert len(full) == sum(1 if whole else len(items) for whole, items in lists), path.name
+        assert len(full) == FULL_LINES[path.stem], path.name
+        text = "\n".join(full)
+        for whole, items in lists:
+            if whole:  # its own line ends with the whole list
+                assert any(line.endswith(f": {items}") for line in full), (path.name, str(items)[:80])
+            else:
+                for item in items:
+                    assert str(item) in text, (path.name, str(item)[:80])
+        if forced.harness_lines(suite, data, capped=True) == full:
             assert collections.Counter(full) == collections.Counter(printed), path.name
-        else:
-            assert len("".join(full)) > len("".join(printed)), path.name
 
 
 def test_the_recordings_hold_both_a_cut_and_a_whole_printout():
     kinds = collections.Counter()
     for path in RECORDED.glob("*--*.json"):
-        suite = path.name.split("--")[0]
-        printed = forced.outcome(1, path.with_suffix(".log").read_text(encoding="utf-8"))["diffs"]
-        full, _ = forced.full_diffs(suite, path, printed)
-        data = json.loads(path.read_text(encoding="utf-8"))
+        suite, _, full, why, data = _recorded(path)
+        assert why is None, (path.name, why)
         kinds["whole" if forced.harness_lines(suite, data, capped=True) == full else "cut"] += 1
     assert kinds["whole"] and kinds["cut"], kinds

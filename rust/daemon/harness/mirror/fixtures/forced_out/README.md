@@ -19,4 +19,10 @@ None of the four harnesses changed its DIFF print or its final `--out` write
 between `8eb08c214` and `f52ee4130`;
 `test_the_rebuild_caps_are_the_harnesses_own_print_statements` pins both.
 When either changes, record a new run of that harness here, copying
-`<work>/<suite>/<label>/<scenario>.json` and `.log` as the runner left them.
+`<work>/<suite>/<label>/<scenario>.json` and `.log` as the runner left them,
+and update `FULL_LINES` in the test.
+
+Some line kinds have no recording yet: board step `DIFF` and `STATE` lines,
+routes refusal lines, a routes case list over its cap of 4, routes DB lines
+over 20, and a w2e step over its cap of 6. They
+rest on the hand-built `test_the_*_rebuild_is_*` tests and the print pin.
