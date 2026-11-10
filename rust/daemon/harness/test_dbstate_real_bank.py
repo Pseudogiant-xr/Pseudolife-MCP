@@ -177,6 +177,19 @@ def test_w2e_events_keep_their_score_tolerance():
     assert w2e.events_diff(_events(0.3), _events(0.3 + tol * 10))
 
 
+def test_w2e_events_still_show_a_different_query_or_an_extra_search():
+    """The recall scenarios disable the wall-clock budget so both walks
+    issue the same searches; events_diff itself still matches by id, so a
+    walk that searched something else, or once more, still differs."""
+    import w2e
+    assert w2e.events_diff(_events(0.3), _events(0.3, query="probe two")) == [
+        'retrieval_events[1].query_text: python "probe" vs rust "probe two"']
+    a, b = _events(0.3), _events(0.3)
+    b["rows"]["public.retrieval_events"]["rows"].append(
+        [2, "probe Hub", [], "<created_at>"])
+    assert w2e.events_diff(a, b) == ["retrieval_events[2]: row only in rust"]
+
+
 def test_the_route_harness_passes_each_arms_window_to_normalize(monkeypatch):
     """Review (Opus): passing no windows would keep every other test green."""
     import run

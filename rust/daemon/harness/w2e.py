@@ -2438,6 +2438,9 @@ def recall(query, **kw) -> dict:
     return tool("memory_recall", query=query, **kw)
 
 
+RECALL_NO_BUDGET = "memory:\n  recall:\n    time_budget_seconds: 0\n"
+
+
 RECALL_SEED = [
     store("The web app runs on host-1 in the main rack."),
     store("Host-1 is a Dell server bought in 2021."),
@@ -2485,7 +2488,13 @@ SCENARIOS.update({
         ],
     },
     "recall": {
-        "config": None,
+        # No wall-clock budget (0 is off on both daemons), so both walks
+        # issue the same searches on a real bank's copy too, where Python
+        # spent the 20 s default after 13-17 searches and every later
+        # retrieval event compared a different query. max_total_searches
+        # (31) still bounds the walk. Wall-clock cut-offs are a declared
+        # divergence (memory-recall-2026-10-19/time-budget-seconds-20-s.md).
+        "config": RECALL_NO_BUDGET,
         "seed": RECALL_SEED,
         "ops": [
             # blank: the canned answer, no search

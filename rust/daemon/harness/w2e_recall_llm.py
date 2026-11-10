@@ -24,7 +24,9 @@ from __future__ import annotations
 
 CONFIG = (
     "memory:\n"
-    "  recall:\n    driver: llm\n"
+    # No wall-clock budget, as w2e.py's recall scenario: on a real bank's
+    # copy the 20 s default cut the two walks at different searches.
+    "  recall:\n    driver: llm\n    time_budget_seconds: 0\n"
     "  lessons:\n    enabled: false\n"
     "  graph_insight:\n    enabled: false\n"
     "  dream:\n    enabled: false\n    stall_notice: false\n"
