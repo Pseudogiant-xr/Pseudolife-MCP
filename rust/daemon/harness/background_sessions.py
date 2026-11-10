@@ -122,13 +122,13 @@ svc._storage.close()
                             if "dream_state" in entries["columns"] else None
                         reached &= col is None or all(row[col] != "pending"
                                                       for row in entries["rows"])
-                        # ...and, on a bank with a graph, refreshed it and
+                        # ...and, on a bank with live edges, refreshed it and
                         # finished writing (REFRESH_SETTLE_S).
-                        if reached and graph_held(state, self.before):
-                            if graph_refresh_pending(state, self.before, daemon.started_at_unix):
-                                reached, waiting = False, "its graph insight refresh"
-                            elif not settle(state, time.monotonic()):
-                                reached, waiting = False, "its bank to settle after the refresh"
+                        if reached:
+                            why = refresh_wait(state, daemon.started_at_unix, live_edges(dsn),
+                                               settle, time.monotonic())
+                            if why:
+                                reached, waiting = False, why
                     if self.resume_refusal:
                         # Observe a second failing tick: the first tick's
                         # durable closes survive and neither tick dreams.
@@ -281,16 +281,17 @@ def keyed_meta(state):
     return state
 
 
-def graph_held(state, before):
-    """The bank held a graph before the arm ran, so a session-end dream will
-    refresh it: a graph_digest row in ``before`` or the base, and edges.
-    Both daemons skip a graph with no edges (empty_graph) before writing any
-    digest, so a copy that kept its old digest is not one."""
-    held = any(r[0] == "graph_digest" for r in before["rows"].get("public.meta", {}).get("rows", [])) \
-        or json.dumps("graph_digest") in dbstate.base_keys("public.meta")
-    edged = any(snapshot["rows"].get("public.edges", {}).get("rows") for snapshot in (before, state)) \
-        or bool(dbstate.base_keys("public.edges"))
-    return held and edged
+def live_edges(dsn):
+    """The arm's bank holds a live edge. Both daemons refresh graph insight
+    at the end of every completed dream, the empty-backlog path included
+    (service_dream.py ~1560 and ~2399, dream/run.rs ~1972 and ~2275), over
+    the graph their load_graph reads, and skip it (empty_graph) when that
+    graph has no edges. Asked of the database, not the dump: a base's
+    untouched edges are left out of it."""
+    import psycopg
+    with psycopg.connect(dsn) as conn:
+        return bool(conn.execute("SELECT EXISTS (SELECT 1 FROM edges "
+                                 "WHERE superseded_at IS NULL)").fetchone()[0])
 
 
 # After the digest, both dreams still write: the entity-source backfill and
@@ -316,19 +317,29 @@ class StableFor:
         return now - self.since >= self.seconds
 
 
-def graph_refresh_pending(state, before, start):
-    """True while a bank that held a graph before the arm ran (a
-    graph_digest row in ``before`` or the base) has no digest computed at or
-    after this daemon's ``start``: its session-end dream's graph refresh is
-    still to come. In the partial forced run (870fb28fc) the milestone held
-    once both had acknowledged the dream's entries, but Rust had rewritten
-    every base community row by then and Python none. A bank without a graph
-    is never refreshed, so a synthetic fixture never waits on this."""
-    if not graph_held(state, before):
-        return False
+def graph_refresh_pending(state, start):
+    """True while the bank has no graph digest computed at or after this
+    daemon's ``start``: its session-end dream's graph refresh is still to
+    come. In the partial forced run (870fb28fc) the milestone held once both
+    had acknowledged the dream's entries, but Rust had rewritten every base
+    community row by then and Python none."""
     digest = {r[0]: r[1] for r in state["rows"]["public.meta"]["rows"]}.get("graph_digest")
     at = digest.get("computed_at") if isinstance(digest, dict) else None
     return not (isinstance(at, (int, float)) and not isinstance(at, bool) and at >= start)
+
+
+def refresh_wait(state, start, live, settle, now):
+    """What a capture still waits for after the session milestone, or None:
+    on a bank with live edges (``live``), the graph refresh, then
+    REFRESH_SETTLE_S of unchanged rows. A bank without live edges, a
+    synthetic fixture included, is never refreshed and never waits."""
+    if not live:
+        return None
+    if graph_refresh_pending(state, start):
+        return "its graph insight refresh"
+    if not settle(state, now):
+        return "its bank to settle after the refresh"
+    return None
 
 
 def normalize_refresh_clocks(state, before, windows):
