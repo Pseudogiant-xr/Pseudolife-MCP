@@ -152,17 +152,19 @@ ACCEPTED_DIVERGENCES = {
         "within the 2e-4 score tolerance fall in each engine's own fp32 order. Accepted narrowly, "
         "each rule on its own: a duplicate pick whose two ids have equal text (an md5 the harness "
         "recorded, never the text); an adjacent swap in a retrieval event's served list, neither "
-        "entry contiguity or timeline; and an access_count difference of exactly the extra serves "
+        "entry contiguity or timeline, each entry's surprise crossing and the two entries' scores "
+        "within twice the tolerance on each side and each within it across the engines; and an access_count difference of exactly the extra serves "
         "of an entry an accepted duplicate pick served on one side earlier in the scenario. "
         "Accepted by the conductor under the maintainer's delegation of 2026-11-11"),
     # Ruling E, the same delegation: TIE_RULES "padded-query".
     "padded-query": (
         "a w2d_search case whose own query ends in whitespace (tie_proofs.padded: the cause, so "
         "every such case; today default's, mcp-search's, mcp-search-explain's and trace's padded "
-        "cases) differing only in its response's cortex block (slots both sides served keep one "
-        "value), the served_facts of the event logged with its query (slots both served keep "
-        "their fields) and slot_reads, whose full comparison differs only in slots one side alone "
-        "served: accepted by the conductor under the maintainer's delegation of "
+        "cases) differing only in its response's cortex block (slots both sides served keep the "
+        "whole item less score and age), the served_facts of the event logged with its query "
+        "(slots both served keep their fields) and slot_reads, whose full comparison differs only "
+        "in slots one side alone served, each by its one-sided serves: accepted by the conductor "
+        "under the maintainer's delegation of "
         "2026-11-11: sentence-transformers 5.4.0 stopped stripping text before tokenising; Rust "
         "follows the 5.3.0 contract (w2d-tokenizer-runtime)"),
 }
@@ -1118,10 +1120,26 @@ def _slot_md5(entity, attribute) -> str:
     return hashlib.md5(f"{entity}\x1f{attribute}".encode("utf-8")).hexdigest()
 
 
-def _shared_equal(maps) -> bool:
-    """Two sides' {slot md5: md5} maps agree on every slot both hold."""
+def _proven(maps, lens) -> bool:
+    """Two sides' {slot md5: md5} maps are a proof: each covers its side's
+    whole list (one entry per item, so no slot is missing or repeated), at
+    least one side is not empty, and every slot both hold has one hash. An
+    empty or partial map proves nothing."""
     a, b = (maps or {}).get("python"), (maps or {}).get("rust")
-    return isinstance(a, dict) and isinstance(b, dict) and all(a[k] == b[k] for k in a.keys() & b.keys())
+    la, lb = (lens or {}).get("python"), (lens or {}).get("rust")
+    return (isinstance(a, dict) and isinstance(b, dict) and isinstance(la, int) and isinstance(lb, int)
+            and len(a) == la and len(b) == lb and (la or lb)
+            and all(a[k] == b[k] for k in a.keys() & b.keys()))
+
+
+INDEX_AT = re.compile(r"^[^\[]*\[(\d+)\]")
+
+
+def _within(where: str, prefix_len: int, lens: dict) -> bool:
+    """An indexed line (``.cortex[i]...``, ``served_facts[i]...``) sits on a
+    position the proof's lists hold; an unindexed one (a length) always does."""
+    m = INDEX_AT.match(where[prefix_len:])
+    return m is None or int(m.group(1)) < max(lens["python"], lens["rust"])
 
 
 def _padded_items(attempt: dict, parsed: list) -> set[tuple[int, int]]:
@@ -1129,33 +1147,40 @@ def _padded_items(attempt: dict, parsed: list) -> set[tuple[int, int]]:
     provable consequence of cortex membership or score.
 
     * A case's cortex block, when the harness marked the case padded
-      (``padded-query``: its own query ends in whitespace) and every cortex
-      slot both sides served has the same value hash.
+      (``padded-query``: its own query ends in whitespace) and its cortex
+      maps cover both blocks with every slot both sides served hashing equal
+      (the whole item less the score and age the tokenizer can move).
     * The bank's ``served_facts`` of an event logged with a marked case's
-      query (``padded-event``, matched by the query's md5), when every slot
-      both sides served has the same kind, contested and pinned hash.
+      query (``padded-event``, matched by the query's md5), when its maps
+      cover both lists with every shared slot's kind, contested and pinned
+      equal.
     * ``slot_reads`` rows, base_missing count and digest, when the harness's
       full comparison of the two tables (``slot-reads``; the printed diff
-      caps its rows) differs only in slots one side alone served there."""
+      caps its rows) differs only in slots the events served on one side,
+      each by exactly its one-sided serves (Python's minus Rust's)."""
     proofs = attempt.get("tie_proofs") or {}
-    cases, queries = set(), set()
+    cases, queries = {}, set()
     for ctx, ps in proofs.items():
         for p in ps:
             if (isinstance(p, dict) and p.get("kind") == "padded-query" and isinstance(p.get("query_md5"), str)
-                    and _shared_equal(p.get("cortex"))):
-                cases.add(ctx)
+                    and _proven(p.get("cortex"), p.get("cortex_len"))):
+                cases[ctx] = p["cortex_len"]
                 queries.add(p["query_md5"])
-    events, one_sided, reads = set(), set(), None
+    events, expected, reads = {}, {}, None
     for p in proofs.get("db", []):
         if not isinstance(p, dict):
             continue
         if (p.get("kind") == "padded-event" and isinstance(p.get("event"), int)
-                and p.get("query_md5") in queries and _shared_equal(p.get("facts"))):
-            events.add(p["event"])
-            one_sided |= set(p["facts"]["python"]) ^ set(p["facts"]["rust"])
-        elif p.get("kind") == "slot-reads" and isinstance(p.get("slots"), list):
-            reads = set(p["slots"])
-    reads_ok = bool(reads) and reads <= one_sided
+                and p.get("query_md5") in queries and _proven(p.get("facts"), p.get("facts_len"))):
+            events[p["event"]] = p["facts_len"]
+            py, rs = set(p["facts"]["python"]), set(p["facts"]["rust"])
+            for slot in py - rs:
+                expected[slot] = expected.get(slot, 0) + 1
+            for slot in rs - py:
+                expected[slot] = expected.get(slot, 0) - 1
+        elif p.get("kind") == "slot-reads" and isinstance(p.get("slots"), dict):
+            reads = p["slots"]
+    reads_ok = bool(reads) and all(isinstance(d, int) and d != 0 and expected.get(k) == d for k, d in reads.items())
     out: set[tuple[int, int]] = set()
     for li, entry in enumerate(parsed):
         if entry is None:
@@ -1163,12 +1188,14 @@ def _padded_items(attempt: dict, parsed: list) -> set[tuple[int, int]]:
         ctx, items = entry
         for ii, item in enumerate(items):
             where = item.split(": ", 1)[0]
-            if ctx in cases and PADDED_CORTEX.match(where):
+            if ctx in cases and PADDED_CORTEX.match(where) and _within(where, len(".cortex"), cases[ctx]):
                 out.add((li, ii))
             elif ctx == "db":
                 facts = PADDED_FACTS.match(where)
                 if facts and int(facts.group(1)) in events:
-                    out.add((li, ii))
+                    at = where.index(".served_facts") + len(".served_facts")
+                    if _within(where, at, events[int(facts.group(1))]):
+                        out.add((li, ii))
                     continue
                 if not reads_ok:
                     continue
@@ -1184,6 +1211,42 @@ def _padded_items(attempt: dict, parsed: list) -> set[tuple[int, int]]:
                 elif PADDED_SLOT_COUNT.match(item) or PADDED_SLOT_DIGEST.match(item):
                     out.add((li, ii))
     return out
+
+
+# dbstate.EVENT_SCORE_TOL, which events_diff compares served scores within
+# (test_forced pins the two equal): one engine's noise on one entry.
+TIE_SCORE_TOL = 2e-4
+TIE_SCORE_KEYS = ("score", "dense", "ce", "bm25", "slot", "recency", "margin")
+
+
+def _scores_near(a: dict, b: dict) -> bool:
+    """Rule C (Codex's review, 2026-11-11): a swap is a near-tie only when,
+    for the total score and each component the event records, the two
+    entries sit within twice the tolerance of each other on each side (each
+    engine's noise on one entry is at most the tolerance), and each entry's
+    score agrees across the engines within the tolerance. ``a`` holds
+    position p (Python's entry A, Rust's B), ``b`` position p+1 (Python's B,
+    Rust's A)."""
+    sa, sb = a.get("scores") or {}, b.get("scores") or {}
+    a_py, b_rs, b_py, a_rs = sa.get("python"), sa.get("rust"), sb.get("python"), sb.get("rust")
+    maps = (a_py, b_rs, b_py, a_rs)
+    if not all(isinstance(m, dict) for m in maps) or not isinstance(a_py.get("score"), (int, float)):
+        return False
+    keys = set(a_py)
+    if any(set(m) != keys for m in maps):
+        return False
+    for k in keys:
+        v = [m[k] for m in maps]
+        if all(x is None for x in v):
+            continue
+        if not all(isinstance(x, (int, float)) and not isinstance(x, bool) for x in v):
+            return False
+        ap, br, bp, ar = v
+        if abs(ap - bp) > 2 * TIE_SCORE_TOL or abs(br - ar) > 2 * TIE_SCORE_TOL:
+            return False
+        if abs(ap - ar) > TIE_SCORE_TOL or abs(bp - br) > TIE_SCORE_TOL:
+            return False
+    return True
 
 
 _SURPRISE_TOL: list = []
@@ -1275,7 +1338,7 @@ def _tie_only(attempt: dict, rules=None) -> set[str]:
                     _found(q) and q.get("kind") == "pick"
                     and (str(q.get("python")), str(q.get("rust"))) == groups[k]["entry_id"]
                     and not any((q.get("via") or {}).get(s) in TIE_ORDERED_VIA for s in ("python", "rust"))
-                    for q, k in zip(pair, (key, partner))) and _surprise_crosses(*pair):
+                    for q, k in zip(pair, (key, partner))) and _surprise_crosses(*pair) and _scores_near(*pair):
                 covered.update((key, partner))
     if "access-count-follow-on" in rules:
         for key, fields in groups.items():

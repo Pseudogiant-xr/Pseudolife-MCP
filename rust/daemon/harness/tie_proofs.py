@@ -30,6 +30,12 @@ COUNT_LINE = re.compile(r"^(?P<at>.*\[\d+\])\.access_count: python -?\d+ vs rust
 TOKEN = re.compile(r"\.(\w+)|\[(\d+)\]")
 # A retrieval event's served position, as w2e (events_diff, "db " prefixed)
 # and w2d_search (bank_diff) print it.
+# retrieval_events' columns as pseudolife_memory/storage/schema.py names them
+# (test_forced reads them back from schema.py, so a rename cannot hide).
+EVENT_QUERY, EVENT_SERVED, EVENT_FACTS = "query_text", "served", "served_facts"
+# The served item's float fields (dbstate.EVENT_FLOAT_KEYS less surprise,
+# which rule C checks on its own): the total score and its components.
+SCORE_KEYS = ("score", "dense", "ce", "bm25", "slot", "recency", "margin")
 SERVED_AT = re.compile(r"^(?:db )?(?:public\.)?retrieval_events\[(-?\d+)\]\.served\[(\d+)\]$")
 
 
@@ -98,9 +104,9 @@ def response_proofs(lines: list[str], python, rust) -> list[dict]:
 def _served(state: dict | None, event: int) -> list:
     table = (state or {}).get("rows", {}).get("public.retrieval_events") or {}
     cols = table.get("columns") or []
-    if "id" not in cols or "served" not in cols:
+    if "id" not in cols or EVENT_SERVED not in cols:
         return []
-    i, s = cols.index("id"), cols.index("served")
+    i, s = cols.index("id"), cols.index(EVENT_SERVED)
     for row in table.get("rows") or []:
         if row[i] == event:
             return row[s] if isinstance(row[s], list) else []
@@ -138,10 +144,21 @@ def event_proofs(lines: list[str], python_events: dict | None, rust_events: dict
                  "via": {"python": (a or {}).get("via"), "rust": (b or {}).get("via")},
                  "surprise": {"python": ((a or {}).get("components") or {}).get("surprise"),
                               "rust": ((b or {}).get("components") or {}).get("surprise")},
+                 "scores": {"python": _scores(a), "rust": _scores(b)},
                  "found": {"python": a is not None, "rust": b is not None}}
         if unavailable:
             proof["unavailable"] = unavailable
         out.append(proof)
+    return out
+
+
+def _scores(item) -> dict | None:
+    """A served item's total score and each float component it records."""
+    if not isinstance(item, dict):
+        return None
+    comp = item.get("components") if isinstance(item.get("components"), dict) else {}
+    out = {"score": item.get("score")}
+    out.update({k: comp[k] for k in SCORE_KEYS[1:] if k in comp})
     return out
 
 
@@ -161,17 +178,29 @@ def _json_md5(value) -> str:
     return hashlib.md5(json.dumps(value, sort_keys=True).encode("utf-8")).hexdigest()
 
 
+# A cortex item's fields the tokenizer difference can move: ``score`` (the
+# query's cosine with the fact) and ``age`` (_relative_time of the wall clock
+# at answer time, which the two daemons answer at different moments). Every
+# other field is the fact's own, so a slot both sides served must match in it.
+CORTEX_MOVABLE = ("score", "age")
+
+
 def padded_case_proof(query: str, python, rust) -> dict:
     """A padded case's record: its query's md5 and, per side, each cortex
     slot (entity, attribute) of the response's ``cortex`` block mapped to an
-    md5 of its value, so a slot both sides served with different values is
-    seen without the value leaving the harness."""
+    md5 of the whole item less CORTEX_MOVABLE, with the block's length, so a
+    slot both sides served that differs in anything else is seen without its
+    content leaving the harness."""
+    def items(body):
+        got = body.get("cortex") if isinstance(body, dict) else None
+        return [x for x in (got if isinstance(got, list) else []) if isinstance(x, dict)]
+
     def cortex(body):
-        items = body.get("cortex") if isinstance(body, dict) else None
-        return {slot_md5(x.get("entity"), x.get("attribute")): _json_md5(x.get("value"))
-                for x in (items if isinstance(items, list) else []) if isinstance(x, dict)}
+        return {slot_md5(x.get("entity"), x.get("attribute")):
+                _json_md5({k: v for k, v in x.items() if k not in CORTEX_MOVABLE}) for x in items(body)}
     return {"at": "", "kind": "padded-query", "query_md5": _md5(query),
-            "cortex": {"python": cortex(python), "rust": cortex(rust)}}
+            "cortex": {"python": cortex(python), "rust": cortex(rust)},
+            "cortex_len": {"python": len(items(python)), "rust": len(items(rust))}}
 
 
 FACT_FIELDS = ("kind", "contested", "pinned")  # a served fact's own fields; rank and score follow the order
@@ -187,29 +216,34 @@ def padded_event_proofs(queries: list[str], python_events: dict | None,
     def table(state):
         t = (state or {}).get("rows", {}).get("public.retrieval_events") or {}
         cols = t.get("columns") or []
-        if not {"id", "query", "served_facts"} <= set(cols):
+        if not {"id", EVENT_QUERY, EVENT_FACTS} <= set(cols):
             return {}
-        i, q, f = cols.index("id"), cols.index("query"), cols.index("served_facts")
+        i, q, f = cols.index("id"), cols.index(EVENT_QUERY), cols.index(EVENT_FACTS)
         return {row[i]: (row[q], row[f]) for row in t.get("rows") or []}
+
+    def rows(served):
+        return [x for x in (served if isinstance(served, list) else []) if isinstance(x, dict)]
 
     def facts(served):
         return {slot_md5(x.get("entity_norm"), x.get("attribute_norm")): _json_md5([x.get(k) for k in FACT_FIELDS])
-                for x in (served if isinstance(served, list) else []) if isinstance(x, dict)}
+                for x in rows(served)}
     a, b = table(python_events), table(rust_events)
     out = []
     for event, (query, served) in sorted(a.items()):
         if query not in queries or event not in b or b[event][0] != query:
             continue
         out.append({"at": f"public.retrieval_events[{event}]", "kind": "padded-event", "event": event,
-                    "query_md5": _md5(query), "facts": {"python": facts(served), "rust": facts(b[event][1])}})
+                    "query_md5": _md5(query), "facts": {"python": facts(served), "rust": facts(b[event][1])},
+                    "facts_len": {"python": len(rows(served)), "rust": len(rows(b[event][1]))}})
     return out
 
 
 def slot_reads_proof(dsns: dict, connect=None) -> dict:
-    """Every slot whose ``slot_reads`` row differs between the two banks
-    (read_count, or present on one side only), read in full from both banks:
-    the printed diff caps its rows, so ruling E decides from this. None when
-    a bank cannot be read."""
+    """Every slot whose ``slot_reads`` row differs between the two banks,
+    read in full from both (the printed diff caps its rows), mapped to its
+    read_count delta, Python's minus Rust's (a missing row reads 0): ruling E
+    requires each delta to be the one-sided serves the events record. None
+    when a bank cannot be read."""
     if connect is None:
         import psycopg
         connect = psycopg.connect
@@ -219,7 +253,8 @@ def slot_reads_proof(dsns: dict, connect=None) -> dict:
             with connect(dsns[side]) as conn:
                 rows = conn.execute("SELECT entity_norm, attribute_norm, read_count FROM slot_reads").fetchall()
             seen.append({slot_md5(e, a): n for e, a, n in rows})
-        differ = sorted(k for k in seen[0].keys() | seen[1].keys() if seen[0].get(k) != seen[1].get(k))
+        differ = {k: int(seen[0].get(k) or 0) - int(seen[1].get(k) or 0)
+                  for k in sorted(seen[0].keys() | seen[1].keys()) if seen[0].get(k) != seen[1].get(k)}
     except Exception as e:  # noqa: BLE001 - a proof never changes a run's outcome
         return {"at": "", "kind": "slot-reads", "slots": None, "unavailable": type(e).__name__}
     return {"at": "", "kind": "slot-reads", "slots": differ}

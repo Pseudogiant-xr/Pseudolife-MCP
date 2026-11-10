@@ -16,6 +16,7 @@ import forced  # noqa: E402
 # mirror: pgdisposable reads it once, and main's drops import it.
 import pgdisposable  # noqa: E402
 import database_gate  # noqa: E402
+import dbstate  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -2192,13 +2193,15 @@ def w2d_case(case: str, items: list[str]) -> str:
     return f"DIFF [default] {case}: {items}"
 
 
-def pick(at, py, rs, md5_py=SAME, md5_rs=SAME, via=(None, None), found=(True, True), surprise=(0.5, 0.5)):
+def pick(at, py, rs, md5_py=SAME, md5_rs=SAME, via=(None, None), found=(True, True), surprise=(0.5, 0.5),
+         scores=({"score": 0.5}, {"score": 0.5})):
     out = {"at": at, "kind": "pick", "python": py, "rust": rs,
            "text_md5": {"python": md5_py, "rust": md5_rs}}
     if "served[" in at:
         out["via"] = {"python": via[0], "rust": via[1]}
         out["found"] = {"python": found[0], "rust": found[1]}
         out["surprise"] = {"python": surprise[0], "rust": surprise[1]}
+        out["scores"] = {"python": scores[0], "rust": scores[1]}
     return out
 
 
@@ -2247,16 +2250,24 @@ def test_an_event_duplicate_pick_needs_both_served_items_found():
     assert not forced._tie_only(attempt(lines, {"step 10": [pick(at, 69, 65)]}))
 
 
+# A true near-tie: A and B within twice the tolerance on each side, each
+# entry's score within the tolerance across the engines.
+NEAR = {"a_py": 0.5001, "b_rs": 0.50008, "b_py": 0.5, "a_rs": 0.50003}
+
+
 def swap(event=9583, p=666, a=1056, b=1816, via=("dense", "dense"), md5=(OTHER, THIRD),
-         surprise=((1.0, 0.22029644), (0.22029644, 1.0))):
+         surprise=((1.0, 0.22029644), (0.22029644, 1.0)), scores=None):
     at = [f"db retrieval_events[{event}].served[{p}]", f"db retrieval_events[{event}].served[{p + 1}]"]
     (s0py, s0rs), (s1py, s1rs) = surprise
     lines = [w2e_line(9, f"{at[0]}.components.surprise: python {s0py} vs rust {s0rs}"),
              w2e_line(9, f"{at[0]}.entry_id: python {a} vs rust {b}"),
              w2e_line(9, f"{at[1]}.components.surprise: python {s1py} vs rust {s1rs}"),
              w2e_line(9, f"{at[1]}.entry_id: python {b} vs rust {a}")]
-    proofs = {"step 9": [pick(at[0], a, b, md5[0], md5[1], via, surprise=surprise[0]),
-                         pick(at[1], b, a, md5[1], md5[0], via, surprise=surprise[1])]}
+    sc = NEAR if scores is None else scores
+    p0 = ({"score": sc["a_py"]}, {"score": sc["b_rs"]}) if sc else (None, None)
+    p1 = ({"score": sc["b_py"]}, {"score": sc["a_rs"]}) if sc else (None, None)
+    proofs = {"step 9": [pick(at[0], a, b, md5[0], md5[1], via, surprise=surprise[0], scores=p0),
+                         pick(at[1], b, a, md5[1], md5[0], via, surprise=surprise[1], scores=p1)]}
     return lines, proofs
 
 
@@ -2285,6 +2296,26 @@ def test_an_adjacent_swap_of_distinct_entries_is_a_tie_order_difference():
     assert not forced._tie_only(attempt(*swap(surprise=((1.0, 0.2), (0.21, 1.0)))))
     assert forced._tie_only(attempt(*swap(surprise=((1.0, 0.2), (0.200001, 1.0)))))
     assert not forced._tie_only(attempt(*swap(surprise=((None, 0.2), (0.2, None)))))
+    # Codex's review (P1, 2026-11-11): events_diff compares by position, so a
+    # swap across a real gap shows only ids. Python (A 0.9, B 0.1), Rust (B
+    # 0.9, A 0.1) is a ranking change, not a tie; nor is a gap just over
+    # twice the tolerance, an entry whose score moved more than the tolerance
+    # across the engines, a missing score, or a component that differs.
+    assert not forced._tie_only(attempt(*swap(scores={"a_py": 0.9, "b_rs": 0.9, "b_py": 0.1, "a_rs": 0.1})))
+    assert not forced._tie_only(attempt(*swap(scores={"a_py": 0.50041, "b_rs": 0.5004, "b_py": 0.5,
+                                                      "a_rs": 0.50039})))
+    # At the edge: Python's gap 3e-4 (under twice the tolerance), each entry
+    # within the tolerance across the engines, each side in its own order.
+    assert forced._tie_only(attempt(*swap(scores={"a_py": 0.5003, "b_rs": 0.50015, "b_py": 0.5,
+                                                  "a_rs": 0.50012})))
+    assert not forced._tie_only(attempt(*swap(scores={"a_py": 0.5001, "b_rs": 0.5001, "b_py": 0.5,
+                                                      "a_rs": 0.4998})))
+    assert not forced._tie_only(attempt(*swap(scores={})))
+    lines, proofs = swap()
+    proofs["step 9"][1]["scores"]["python"] = {"score": 0.5, "dense": 0.9}
+    assert not forced._tie_only(attempt(lines, proofs))
+    assert forced.TIE_SCORE_TOL == dbstate.EVENT_SCORE_TOL
+    assert set(forced.TIE_SCORE_KEYS) == set(dbstate.EVENT_FLOAT_KEYS) == set(tie_proofs.SCORE_KEYS)
 
 
 def test_an_access_count_follow_on_is_exactly_the_extra_serves_of_a_tie_pick():
@@ -2398,7 +2429,8 @@ def test_response_proofs_hash_the_two_entries_found_by_id():
 def test_event_proofs_read_via_by_id_and_hashes_from_both_banks():
     def events(served):
         return {"rows": {"public.retrieval_events": {"columns": ["id", "served"], "rows": [[7, served]]}}}
-    py = events([{"entry_id": 69, "via": "dense", "components": {"surprise": 0.9}}, {"entry_id": 3, "via": None}])
+    py = events([{"entry_id": 69, "via": "dense", "score": 0.7, "components": {"surprise": 0.9, "dense": 0.6}},
+                 {"entry_id": 3, "via": None}])
     rs = events([{"entry_id": 65, "via": "dense"}, {"entry_id": 3, "via": None}])
     asked = []
 
@@ -2410,7 +2442,9 @@ def test_event_proofs_read_via_by_id_and_hashes_from_both_banks():
     out = tie_proofs.event_proofs(lines, py, rs, text_md5)
     assert out == [{"at": "db retrieval_events[7].served[0]", "kind": "pick", "python": 69, "rust": 65,
                     "text_md5": {"python": SAME, "rust": SAME}, "via": {"python": "dense", "rust": "dense"},
-                    "surprise": {"python": 0.9, "rust": None}, "found": {"python": True, "rust": True}}]
+                    "surprise": {"python": 0.9, "rust": None},
+                    "scores": {"python": {"score": 0.7, "dense": 0.6}, "rust": {"score": None}},
+                    "found": {"python": True, "rust": True}}]
     assert asked == [{65, 69}]
     # No pick line: no query at all.
     assert tie_proofs.event_proofs(lines[1:], py, rs, text_md5) == [] and len(asked) == 1
@@ -2470,12 +2504,13 @@ def padded_attempt(cortex=(".cortex: length python 5 vs rust 4",), facts_event=9
     one, both = tie_proofs.slot_md5("e1", "a1"), tie_proofs.slot_md5("e9", "a9")
     values = case_values or {"python": {one: "v1", both: "v9"}, "rust": {both: "v9"}}
     facts = event_facts or {"python": {one: "f1", both: "f9"}, "rust": {both: "f9"}}
+    lens = lambda m: {"python": len(m["python"]), "rust": len(m["rust"])}  # noqa: E731
     proofs = {"db": [{"at": "public.retrieval_events[9593]", "kind": "padded-event", "event": 9593,
-                      "query_md5": tie_proofs._md5(event_query), "facts": facts},
-                     {"at": "", "kind": "slot-reads", "slots": [one] if reads is None else reads}]}
+                      "query_md5": tie_proofs._md5(event_query), "facts": facts, "facts_len": lens(facts)},
+                     {"at": "", "kind": "slot-reads", "slots": {one: 1} if reads is None else reads}]}
     if marked:
         proofs[f"case {PADDED_CASE}"] = [{"at": "", "kind": "padded-query", "query_md5": tie_proofs._md5(PADDED_Q),
-                                   "cortex": values}]
+                                          "cortex": values, "cortex_len": lens(values)}]
     return attempt(lines, proofs)
 
 
@@ -2490,7 +2525,13 @@ def test_a_padded_query_differing_only_in_its_cortex_block_is_accepted():
     # The explain case's shape: every field of the cortex block's items.
     explain = padded_attempt(cortex=(".cortex[0].score: python 0.4791 vs rust 0.4874",
                                      ".cortex[2].correct_with: only in rust",
-                                     ".cortex[1].entity: python \"x\" vs rust \"y\""), rows=())
+                                     ".cortex[1].entity: python \"x\" vs rust \"y\""), rows=(),
+                             case_values={"python": {tie_proofs.slot_md5("e1", "a1"): "v1",
+                                                     tie_proofs.slot_md5("e9", "a9"): "v9",
+                                                     tie_proofs.slot_md5("e3", "a3"): "v3"},
+                                          "rust": {tie_proofs.slot_md5("e9", "a9"): "v9",
+                                                   tie_proofs.slot_md5("e4", "a4"): "v4",
+                                                   tie_proofs.slot_md5("e5", "a5"): "v5"}})
     assert forced._tie_only(explain, rules=("padded-query",))
 
 
@@ -2516,12 +2557,25 @@ def test_a_padded_query_rule_covers_nothing_outside_its_case_event_and_slots():
     assert not forced._tie_only(padded_attempt(event_facts={"python": {one: "f1", both: "f9"},
                                                             "rust": {both: "fX"}}), rules=rules)
     assert not forced._tie_only(padded_attempt(event_query="what os does the homelab box run"), rules=rules)
-    assert not forced._tie_only(padded_attempt(reads=[one, both]), rules=rules)
-    assert not forced._tie_only(padded_attempt(reads=[]), rules=rules)
+    assert not forced._tie_only(padded_attempt(reads={one: 1, both: 1}), rules=rules)
+    assert not forced._tie_only(padded_attempt(reads={}), rules=rules)
+    # Review (Opus, 2026-11-11): each slot's read delta must be its one-sided
+    # serves; Python served e1/a1 once alone, so +2 hides another skipped read.
+    assert not forced._tie_only(padded_attempt(reads={one: 2}), rules=rules)
+    assert not forced._tie_only(padded_attempt(reads={one: -1}), rules=rules)
+    # An empty or partial map proves nothing, and a line past both lists'
+    # ends is not on a position the proof holds.
+    empty = padded_attempt(case_values={"python": {}, "rust": {}})
+    assert not forced._tie_only(empty, rules=rules)
+    partial = padded_attempt()
+    partial["tie_proofs"][f"case {PADDED_CASE}"][0]["cortex_len"] = {"python": 3, "rust": 1}
+    assert not forced._tie_only(partial, rules=rules)
+    assert not forced._tie_only(padded_attempt(cortex=(".cortex[7].stale: python true vs rust false",)),
+                                rules=rules)
     unread = padded_attempt()
     unread["tie_proofs"]["db"][1] = {"at": "", "kind": "slot-reads", "slots": None, "unavailable": "OperationalError"}
     assert not forced._tie_only(unread, rules=rules)
-    assert not forced._tie_only(padded_attempt(rows=(("python", 5),), count=(33, 32), reads=[]), rules=rules)
+    assert not forced._tie_only(padded_attempt(rows=(("python", 5),), count=(33, 32), reads={}), rules=rules)
     # Another table's line.
     assert not forced._tie_only(padded_attempt(extra_db=("/rows/public.entries/rows: row only in python: [1]",)),
                                 rules=rules)
@@ -2546,7 +2600,8 @@ def test_padded_queries_are_the_harness_cases_with_trailing_whitespace():
 
 def test_padded_event_proofs_hash_the_slots_one_side_served_alone():
     def events(rows):
-        return {"rows": {"public.retrieval_events": {"columns": ["id", "query", "served_facts"], "rows": rows}}}
+        cols = ["id", tie_proofs.EVENT_QUERY, tie_proofs.EVENT_FACTS]
+        return {"rows": {"public.retrieval_events": {"columns": cols, "rows": rows}}}
     fact = lambda e, a: {"entity_norm": e, "attribute_norm": a}  # noqa: E731
     py = events([[5, "  q  ", [fact("e1", "a1"), fact("e2", "a2")]], [6, "q", [fact("e3", "a3")]],
                  [7, "  q  ", [fact("e4", "a4")]]])
@@ -2556,11 +2611,33 @@ def test_padded_event_proofs_hash_the_slots_one_side_served_alone():
     facts = out[0]["facts"]
     assert set(facts["python"]) == {tie_proofs.slot_md5("e1", "a1"), tie_proofs.slot_md5("e2", "a2")}
     assert set(facts["rust"]) == {tie_proofs.slot_md5("e2", "a2")}
+    assert out[0]["facts_len"] == {"python": 2, "rust": 1}
     assert "e1" not in json.dumps(out)
     case = tie_proofs.padded_case_proof("  q  ", {"cortex": [{"entity": "E", "attribute": "A", "value": "secret"}]},
                                         {"cortex": []})
     assert case["query_md5"] == tie_proofs._md5("  q  ") and "secret" not in json.dumps(case)
     assert list(case["cortex"]["python"]) == [tie_proofs.slot_md5("E", "A")] and case["cortex"]["rust"] == {}
+    assert case["cortex_len"] == {"python": 1, "rust": 0}
+    # Review (Opus, 2026-11-11): the whole item is hashed, less the score and
+    # age the tokenizer difference and the answer's clock move.
+    item = {"entity": "E", "attribute": "A", "value": 1, "confidence": 0.9, "stale": False}
+    def h(x):
+        return tie_proofs.padded_case_proof("q ", {"cortex": [x]}, {"cortex": []})["cortex"]["python"]
+    assert h({**item, "score": 0.1, "age": "2 days ago"}) == h({**item, "score": 0.7, "age": "3 days ago"})
+    assert h({**item, "confidence": 0.5}) != h(item) and h({**item, "stale": True}) != h(item)
+    assert tie_proofs.CORTEX_MOVABLE == ("score", "age")
+
+
+def test_the_proofs_read_retrieval_events_by_the_schemas_own_column_names():
+    """Codex's review (P2, 2026-11-11): the padded-event proof read a column
+    named query, but the schema's is query_text, so it never matched a real
+    event. The names now come from schema.py itself."""
+    schema = (Path(forced.ROOT) / "pseudolife_memory" / "storage" / "schema.py").read_text(encoding="utf-8")
+    table = schema[schema.index("CREATE TABLE IF NOT EXISTS retrieval_events"):]
+    table = table[:table.index(")\n")]
+    for column, kind in ((tie_proofs.EVENT_QUERY, "TEXT"), (tie_proofs.EVENT_SERVED, "JSONB")):
+        assert f"{column} {kind}" in table, column
+    assert f"{tie_proofs.EVENT_FACTS} JSONB" in schema
 
 
 def test_slot_reads_proof_compares_both_tables_in_full_and_fails_soft():
@@ -2587,7 +2664,7 @@ def test_slot_reads_proof_compares_both_tables_in_full_and_fails_soft():
                     return rows
             return Result()
     out = tie_proofs.slot_reads_proof({"python": "py", "rust": "rs"}, Conn)
-    assert out["slots"] == sorted([tie_proofs.slot_md5("e1", "a1"), tie_proofs.slot_md5("e2", "a2")])
+    assert out["slots"] == {tie_proofs.slot_md5("e1", "a1"): 1, tie_proofs.slot_md5("e2", "a2"): -1}
     assert tie_proofs.slot_reads_proof({"python": "py", "rust": "down"}, Conn)["slots"] is None
 
 
