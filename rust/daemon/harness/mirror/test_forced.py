@@ -933,3 +933,18 @@ def test_an_op_whose_text_holds_a_colon_still_finds_its_diff():
         two = f"DIFF [store] step 4 {op}: .value.id: python 1 vs rust 2"
         assert forced.signatures({"diffs": [one]}) == {("4", ".value.stored")}
         assert forced.signatures({"diffs": [one]}) != forced.signatures({"diffs": [two]})
+
+
+@pytest.mark.parametrize("errored", ["real", "real-retry"])
+def test_a_community_difference_beside_an_errored_attempt_stays_new(tmp_path, errored):
+    """Review (Opus confidence 90, Codex P1): with one real attempt showing
+    only community differences and the other errored, the errored one was
+    filtered out and the scenario accepted, hiding a crash or timeout. Both
+    real attempts must complete with community-only differences."""
+    diff = {"status": "diff", "diffs": [COMMUNITY_ROWS], "seconds": 1.0}
+    err = {"status": "error", "diffs": [], "error_tail": ["ConnectionRefusedError"], "seconds": 1.0}
+    answers = {"graph-writes": {"real": diff, "real-retry": diff, "synthetic": PASS}}
+    answers["graph-writes"][errored] = err
+    report, _ = forced.run(FakeRunner(tmp_path, answers), ["w2e"], None, names=lambda s: list(answers))
+    row = report["suites"]["w2e"]["rows"][0]
+    assert row["class"] == "new" and "accepted_as" not in row

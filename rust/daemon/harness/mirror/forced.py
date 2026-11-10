@@ -556,8 +556,10 @@ def run(runner: Runner, suites: list[str], only: list[str] | None,
             if verdict == "error" and f"{suite}/{name}" in ACCEPTED_OOM \
                     and all((a.get("oom_kills") or 0) > 0 for a in (first, retry)):
                 verdict, accepted_as = "accepted", "oom"
-            elif verdict == "new" and all(_community_only(a) for a in (first, retry)
-                                          if a and a["status"] == "diff"):
+            # Every real attempt that ran must have completed, with only
+            # community differences: an errored one is never filtered out.
+            elif verdict == "new" and all(a["status"] == "diff" and _community_only(a)
+                                          for a in (first, retry) if a is not None):
                 verdict, accepted_as = "accepted", "community-partition"
             rows.append({"scenario": name, "class": verdict, "differences": len(first["diffs"]),
                          "seconds": first["seconds"], "base": first.get("base"),
@@ -577,9 +579,6 @@ def _community_place(place: str) -> bool:
     for table in COMMUNITY_TABLES:
         if place == f"/rows/{table}/rows" or place.startswith(f"/rows/{table}/"):
             return True
-    if place.startswith("db ") and place[3:].split("[", 1)[0].split(".", 1)[0] in (
-            t.split(".", 1)[1] for t in COMMUNITY_TABLES):
-        return True
     return place.startswith(".") and place.rsplit(".", 1)[-1].replace("[]", "") in COMMUNITY_FIELDS
 
 
