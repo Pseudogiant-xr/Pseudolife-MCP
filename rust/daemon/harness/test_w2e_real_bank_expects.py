@@ -184,7 +184,11 @@ def load(tmp_path, config):
 
 def slow_walk(monkeypatch, cfg):
     """A three-spoke walk in which every search takes 100 s of a fake clock,
-    run with ``cfg``'s budget and ceiling as ``service.recall`` passes them."""
+    run with ``cfg``'s budget and ceiling as ``service.recall`` passes them.
+    Importing the recall module loads the memory package, which needs torch;
+    the Rust CI lane installs no model stack, so there it is skipped (the
+    batch's local harness run has it)."""
+    pytest.importorskip("torch", reason="the Python memory package needs torch")
     import pseudolife_memory.memory.recall as rc
     now = {"t": 0.0}
     monkeypatch.setattr(rc, "time", types.SimpleNamespace(monotonic=lambda: now["t"]))
@@ -207,10 +211,14 @@ def slow_walk(monkeypatch, cfg):
 
 
 @pytest.mark.parametrize("name", UNBUDGETED)
-def test_the_compared_recall_walks_run_without_the_time_budget(
-        monkeypatch, tmp_path, harness, name):
+def test_the_compared_recall_scenarios_carry_no_time_budget(tmp_path, harness, name):
     cfg = load(tmp_path, harness.SCENARIOS[name]["config"]).memory.recall
     assert cfg.time_budget_seconds == 0
+
+
+@pytest.mark.parametrize("name", UNBUDGETED)
+def test_a_slow_walk_runs_out_under_those_configs(monkeypatch, tmp_path, harness, name):
+    cfg = load(tmp_path, harness.SCENARIOS[name]["config"]).memory.recall
     # However slow each search is, the walk runs out: the seed search and
     # the three spokes' re-queries, nothing cut.
     st = slow_walk(monkeypatch, cfg)
