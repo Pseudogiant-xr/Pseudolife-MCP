@@ -33,7 +33,9 @@ Declared rules, never applied by hand:
 Environment: ORT_DYLIB_PATH, PSEUDOLIFE_DAEMON_ONNX_DIR (Qwen3 export) and
 PSEUDOLIFE_DAEMON_RERANK_DIR (the pinned ``reranker`` directory installed by
 ``pseudolife-daemon provision models``) for the Rust side; arbitrary exports
-are refused. A requested rerank with a disabled Rust reranker fails this harness.
+are refused. A requested rerank with either side's reranker disabled fails this
+harness; the Python oracle needs the cross-encoder in its HF cache, since both
+daemons run with HF_HUB_OFFLINE=1 (``ops/Dockerfile.mirror-runner`` bakes it).
 PSEUDOLIFE_TEST_PG_HOST_PORT / the test login for the bank.
 """
 from __future__ import annotations
@@ -997,12 +999,45 @@ def common_env(dsn: str) -> dict[str, str]:
             "PSEUDOLIFE_MCP_DATABASE_URL": dsn, **real_bank_env()}
 
 
-def require_requested_reranker(cases: list[dict], pairs: list, log: str,
+# Each side's name in a refusal and the one fix for its reranker fallback,
+# in response-pair order (python, rust).
+RERANKER_SIDES = {
+    "python": ("Python oracle",
+               "the oracle loads cross-encoder/ms-marco-MiniLM-L-6-v2 from its HF cache (HF_HOME) "
+               "under HF_HUB_OFFLINE=1, so the model must be cached before the run: rebuild the "
+               "runner image from ops/Dockerfile.mirror-runner, which bakes it, or download "
+               "cross-encoder/ms-marco-MiniLM-L-6-v2 (Python's id, L-6: the cache folder follows "
+               "the requested id) at revision c5ee24cb16019beea0893ab7796b1df96625c6b8 (the Rust "
+               "bundle's pin) into HF_HOME and write that hash, with no trailing newline, to "
+               "HF_HOME/hub/models--cross-encoder--ms-marco-MiniLM-L-6-v2/refs/main, which a "
+               "download by commit does not; the release image carries none (#1403)"),
+    "rust": ("Rust daemon",
+             "point PSEUDOLIFE_DAEMON_RERANK_DIR at the reranker directory "
+             "`pseudolife-daemon provision models` installs"),
+}
+
+
+def reranker_fallback(log: str) -> str | None:
+    """The daemon's own reranker-disabled message, or None. Python's reason
+    (a transformers offline error) can span lines before its "disabling", so
+    the message runs from the first line to the one that says it."""
+    lines = log.splitlines()
+    for i, line in enumerate(lines):
+        if "Cross-encoder reranker" in line and ("disabling" in line or "failed to load" in line):
+            span = lines[i:i + 4]
+            end = next((j for j, text in enumerate(span) if "disabling" in text), 0)
+            return " ".join(span[:end + 1])
+    return None
+
+
+def require_requested_reranker(cases: list[dict], pairs: list, logs: dict[str, str],
                                scenario: Scenario | None = None) -> None:
-    """A fallback is valid service behavior, but cannot prove rerank parity."""
-    disabled = next((line for line in log.splitlines()
-                     if "Cross-encoder reranker" in line and "disabling" in line), None)
-    if not disabled:
+    """A fallback is valid service behavior, but cannot prove rerank parity,
+    on either side: a degraded oracle makes every rerank case look like a
+    Rust gating difference. ``logs`` maps each side that ran to its daemon log."""
+    fallbacks = {side: msg for side in RERANKER_SIDES
+                 if (msg := reranker_fallback(logs.get(side, "")))}
+    if not fallbacks:
         return
     enabled = False
     if scenario is not None:
@@ -1010,7 +1045,12 @@ def require_requested_reranker(cases: list[dict], pairs: list, log: str,
         config = yaml.safe_load(config_for(scenario))
         enabled = (config["memory"].get("reranker") or {}).get("enabled", False)
     for c, pair in zip(cases, pairs):
-        if pair is None or pair[1]["status"] != 200:
+        if pair is None:
+            continue
+        # A side that refused the call itself ranked nothing to compare.
+        degraded = [side for i, side in enumerate(RERANKER_SIDES)
+                    if side in fallbacks and pair[i]["status"] == 200]
+        if not degraded:
             continue
         if "mcp" in c:
             if c.get("tool", "memory_search") != "memory_search":
@@ -1025,7 +1065,9 @@ def require_requested_reranker(cases: list[dict], pairs: list, log: str,
                          else value.strip().lower() in ("true", "1", "yes", "on"))
         requested = enabled if requested is None else requested
         if requested:
-            raise RuntimeError(f"{c['name']}: requested reranking but Rust disabled it: {disabled}")
+            raise RuntimeError(f"{c['name']}: " + "; ".join(
+                f"requested reranking but the {RERANKER_SIDES[side][0]} disabled it: "
+                f"{fallbacks[side]} Fix: {RERANKER_SIDES[side][1]}." for side in degraded))
 
 
 def seed_template(name: str, paragraphs: int) -> None:
@@ -1350,7 +1392,8 @@ def run_scenario(scn: Scenario, binary: Path, template: str, mode: str, record: 
     finally:
         for d in procs.values():
             d.stop()
-    require_requested_reranker(scn.cases(), response_pairs, procs["rust"].log.read_text(errors="replace"), scn)
+    require_requested_reranker(scn.cases(), response_pairs,
+                               {side: d.log.read_text(errors="replace") for side, d in procs.items()}, scn)
     states = {}
     declared = {}
     for side in sides:
