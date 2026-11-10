@@ -227,6 +227,7 @@ import daemons  # noqa: E402
 import dbstate  # noqa: E402
 import pgdisposable  # noqa: E402
 import run as w1a  # noqa: E402
+import tie_proofs  # noqa: E402
 import w2e_documents  # noqa: E402
 from stub_extractor import StubExtractor  # noqa: E402
 import w2e_recall_llm  # noqa: E402
@@ -6642,6 +6643,13 @@ def _run_live(name: str, scn: dict, tag: str, binary: Path, root: Path, record: 
                 row["diffs"] += compare_response(row["python"], row["rust"], tol, stats, ages)
             row["diffs"] += compare_numeric(np_, nr, tol, stats)
             row["diffs"] += [f"db {d}" for d in state_and_events_diff(sp, sr)]
+            # Ids, text hashes and via for the lines that served different
+            # entries (forced.py's tie-order rules); none when nothing differs.
+            proofs = (tie_proofs.response_proofs(row["diffs"], row.get("python"), row.get("rust"))
+                      + tie_proofs.event_proofs(row["diffs"], raw_py, raw_rs,
+                                                tie_proofs.bank_text_md5(dsns)))
+            if proofs:
+                row["tie_proofs"] = proofs
             steps.append(row)
             if record:
                 row["_python_state"], row["_python_numeric"] = sp, np_

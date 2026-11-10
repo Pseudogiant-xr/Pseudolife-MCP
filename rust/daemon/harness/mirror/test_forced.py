@@ -2176,3 +2176,234 @@ def test_side_by_side_each_attempt_reads_its_own_out_json(tmp_path):
             attempt = private[f"routes/{name}"][label]
             assert attempt["diffs_complete"] and len(attempt["diffs"]) == count, (name, label)
     assert len({out for _, out in seen}) == len({(n, out.parent.name) for n, out in seen})
+
+
+# ---- tie-order: the conductor's rulings B, C and D (2026-11-11) ----
+
+SEARCH_OP = {"op": "tool", "name": "memory_search", "args": {"query": "q", "top_k": 30}}
+SAME, OTHER, THIRD = "a" * 32, "b" * 32, "c" * 32
+
+
+def w2e_line(step: int, diff: str) -> str:
+    return f"DIFF [recall] step {step} {json.dumps(SEARCH_OP)[:90]}: {diff}"
+
+
+def w2d_case(case: str, items: list[str]) -> str:
+    return f"DIFF [default] {case}: {items}"
+
+
+def pick(at, py, rs, md5_py=SAME, md5_rs=SAME, via=(None, None), found=(True, True)):
+    out = {"at": at, "kind": "pick", "python": py, "rust": rs,
+           "text_md5": {"python": md5_py, "rust": md5_rs}}
+    if "served[" in at:
+        out["via"] = {"python": via[0], "rust": via[1]}
+        out["found"] = {"python": found[0], "rust": found[1]}
+    return out
+
+
+def attempt(diffs, proofs, **extra):
+    return {"status": "diff", "diffs": diffs, "seconds": 1.0, "exit": 1, "diffs_complete": True,
+            "oom_kills": 0, "tie_proofs": proofs, **extra}
+
+
+CRAFTED = ["'.entries[2].access_count: python 11 vs rust 9'", "'.entries[2].id: python 69 vs rust 65'",
+           "'.entries[2].surprise_score: python 0.9964 vs rust 0.9828'",
+           "'.entries[2].timestamp: python 1781769001.8 vs rust 1781768640.1'"]
+CRAFTED_ITEMS = [c.strip("'") for c in CRAFTED]
+
+
+def test_a_duplicate_pick_is_a_tie_only_when_its_texts_are_proven_equal():
+    """Ruling B: a response position serving two ids whose recorded text
+    hashes are equal is the recorded tie-order divergence."""
+    lines = [w2d_case("crafted", CRAFTED_ITEMS)]
+    proofs = {"case crafted": [pick(".entries[2]", 69, 65)]}
+    assert forced._tie_only(attempt(lines, proofs))
+    # Near misses: different texts; no hash on either side; no proof; a proof
+    # for other ids than the line's; a field beside the counters and stamps.
+    assert not forced._tie_only(attempt(lines, {"case crafted": [pick(".entries[2]", 69, 65, md5_rs=OTHER)]}))
+    assert not forced._tie_only(attempt(lines, {"case crafted": [pick(".entries[2]", 69, 65, None, None)]}))
+    assert not forced._tie_only(attempt(lines, {}))
+    assert not forced._tie_only(attempt(lines, {"case crafted": [pick(".entries[2]", 69, 66)]}))
+    assert not forced._tie_only(attempt(lines, {"case other": [pick(".entries[2]", 69, 65)]}))
+    extra = [w2d_case("crafted", CRAFTED_ITEMS + [".entries[2].source: python \"a\" vs rust \"b\""])]
+    assert not forced._tie_only(attempt(extra, proofs))
+    # An access_count difference with no id line is not a pick.
+    count_only = [w2d_case("crafted", [CRAFTED_ITEMS[0]])]
+    assert not forced._tie_only(attempt(count_only, proofs))
+
+
+def test_an_event_duplicate_pick_needs_both_served_items_found():
+    """Ruling B on a retrieval event's served list (w2e's events_diff)."""
+    at = "db retrieval_events[9582].served[25]"
+    lines = [w2e_line(9, f"{at}.components.surprise: python 0.99637973 vs rust 0.9828261"),
+             w2e_line(9, f"{at}.entry_id: python 69 vs rust 65")]
+    assert forced._tie_only(attempt(lines, {"step 9": [pick(at, 69, 65)]}))
+    assert not forced._tie_only(attempt(lines, {"step 9": [pick(at, 69, 65, found=(True, False))]}))
+    # A score difference at the position is not a tie.
+    scored = lines + [w2e_line(9, f"{at}.score: python 0.5 vs rust 0.6")]
+    assert not forced._tie_only(attempt(scored, {"step 9": [pick(at, 69, 65)]}))
+    # The same proof under another step does not vouch for this one.
+    assert not forced._tie_only(attempt(lines, {"step 10": [pick(at, 69, 65)]}))
+
+
+def swap(event=9583, p=666, a=1056, b=1816, via=("dense", "dense"), md5=(OTHER, THIRD)):
+    at = [f"db retrieval_events[{event}].served[{p}]", f"db retrieval_events[{event}].served[{p + 1}]"]
+    lines = [w2e_line(9, f"{at[0]}.entry_id: python {a} vs rust {b}"),
+             w2e_line(9, f"{at[1]}.entry_id: python {b} vs rust {a}")]
+    proofs = {"step 9": [pick(at[0], a, b, md5[0], md5[1], via), pick(at[1], b, a, md5[1], md5[0], via)]}
+    return lines, proofs
+
+
+def test_an_adjacent_swap_of_distinct_entries_is_a_tie_order_difference():
+    """Ruling C: two adjacent served positions exchanging two ids (texts
+    differ), neither contiguity nor timeline, scores within the tolerance."""
+    lines, proofs = swap()
+    assert forced._tie_only(attempt(lines, proofs))
+    # Rule B alone does not cover it: the rules stay separate.
+    assert not forced._tie_only(attempt(lines, proofs), rules=("duplicate-pick",))
+    assert forced._tie_only(attempt(lines, proofs), rules=("adjacent-swap",))
+    # Near misses: a contiguity or timeline item; positions not adjacent; ids
+    # that do not cross; a proof missing for one position.
+    for via in (("contiguity", "dense"), ("dense", "timeline")):
+        assert not forced._tie_only(attempt(*swap(via=via)))
+    lines2 = [lines[0], lines[1].replace("served[667]", "served[668]")]
+    proofs2 = {"step 9": [proofs["step 9"][0], {**proofs["step 9"][1], "at": proofs["step 9"][1]["at"].replace(
+        "served[667]", "served[668]")}]}
+    assert not forced._tie_only(attempt(lines2, proofs2))
+    crossed = [lines[0], lines[1].replace("rust 1056", "rust 2290")]
+    assert not forced._tie_only(attempt(crossed, proofs))
+    assert not forced._tie_only(attempt(lines, {"step 9": proofs["step 9"][:1]}))
+
+
+def test_an_access_count_follow_on_is_exactly_the_extra_serves_of_a_tie_pick():
+    """Ruling D: default's rerank case reports entry 67 one count higher on
+    Rust because the crafted case served 67 on Rust and 70 on Python."""
+    crafted = [w2d_case("crafted", [".entries[3].id: python 70 vs rust 67"])]
+    rerank = [w2d_case("rerank on", [".entries[27].access_count: python 18 vs rust 19"])]
+    proofs = {"case crafted": [pick(".entries[3]", 70, 67)],
+              "case rerank on": [{"at": ".entries[27]", "kind": "count", "id": 67}]}
+    assert forced._tie_only(attempt(crafted + rerank, proofs))
+    assert not forced._tie_only(attempt(crafted + rerank, proofs), rules=("duplicate-pick",))
+    # Near misses: a count off by more than the extra serves; the count before
+    # the pick; an id no pick served; the count's id unproven.
+    wrong = [w2d_case("rerank on", [".entries[27].access_count: python 18 vs rust 20"])]
+    assert not forced._tie_only(attempt(crafted + wrong, proofs))
+    assert not forced._tie_only(attempt(rerank + crafted, proofs))
+    other = {**proofs, "case rerank on": [{"at": ".entries[27]", "kind": "count", "id": 2746}]}
+    assert not forced._tie_only(attempt(crafted + rerank, other))
+    unproven = {**proofs, "case rerank on": [{"at": ".entries[27]", "kind": "count", "id": None}]}
+    assert not forced._tie_only(attempt(crafted + rerank, unproven))
+    # Python's extra serve counts the other way.
+    python_side = [w2d_case("rerank on", [".entries[27].access_count: python 29 vs rust 28"])]
+    p70 = {**proofs, "case rerank on": [{"at": ".entries[27]", "kind": "count", "id": 70}]}
+    assert forced._tie_only(attempt(crafted + python_side, p70))
+
+
+def test_tie_order_is_accepted_per_scenario_and_never_mixed(tmp_path):
+    lines, proofs = swap()
+    tie = attempt(lines, proofs)
+    padded = attempt(lines + [w2d_case("padded query", [".cortex: length python 5 vs rust 4"])], proofs)
+    mixed = attempt(lines + [COMMUNITY_ROWS], proofs)
+    answers = {"recall": {"real": tie, "real-retry": tie, "synthetic": PASS},
+               "recall-wide": {"real": padded, "real-retry": padded, "synthetic": PASS},
+               "graph-writes": {"real": mixed, "real-retry": mixed, "synthetic": PASS},
+               "recall-caps": {"real": tie, "real-retry": {**tie, "exit": None}, "synthetic": PASS}}
+    report, _ = forced.run(FakeRunner(tmp_path, answers), ["w2e"], None, names=lambda s: list(answers))
+    rows = {r["scenario"]: r for r in report["suites"]["w2e"]["rows"]}
+    assert rows["recall"]["class"] == "accepted" and rows["recall"]["accepted_as"] == "tie-order"
+    # A line no rule proves (padded-query), a community line beside a tie,
+    # and a retry that timed out each keep the scenario new.
+    for name in ("recall-wide", "graph-writes", "recall-caps"):
+        assert rows[name]["class"] == "new" and "accepted_as" not in rows[name], name
+    assert "maintainer's delegation of 2026-11-11" in forced.ACCEPTED_DIVERGENCES["tie-order"]
+    assert forced.TIE_RULES == ("duplicate-pick", "adjacent-swap", "access-count-follow-on")
+
+
+def test_the_runner_reads_the_proofs_the_harness_wrote(tmp_path):
+    w2e_out = tmp_path / "w2e.json"
+    w2e_out.write_text(json.dumps({"complete": True, "scenarios": [{"scenario": "recall", "steps": [
+        {"step": 9, "diffs": ["x"], "tie_proofs": [pick("db e", 1, 2)]}, {"step": 10, "diffs": []}]}]}))
+    assert forced.tie_proofs_of("w2e", w2e_out) == {"step 9": [pick("db e", 1, 2)]}
+    w2d_out = tmp_path / "w2d.json"
+    w2d_out.write_text(json.dumps({"complete": True, "results": [{
+        "scenario": "default", "cases": [{"case": "crafted", "diffs": ["x"], "tie_proofs": [pick(".e", 1, 2)]},
+                                         {"case": "plain", "diffs": []}],
+        "db_diffs": ["y"], "db_tie_proofs": [pick("public.e", 3, 4)]}]}))
+    assert forced.tie_proofs_of("w2d_search", w2d_out) == {"case crafted": [pick(".e", 1, 2)],
+                                                           "db": [pick("public.e", 3, 4)]}
+    assert forced.tie_proofs_of("routes", w2d_out) == {}
+
+
+# ---- tie_proofs.py: what the harnesses record beside their lines ----
+
+import tie_proofs  # noqa: E402
+
+
+def test_response_proofs_hash_the_two_entries_found_by_id():
+    python = {"value": {"entries": [{"id": 1, "text": "x"}, {"id": 69, "text": "dup", "access_count": 3}]}}
+    rust = {"value": {"entries": [{"id": 65, "text": "dup"}, {"id": 1, "text": "x"}]}}
+    lines = [".value.entries[1].id: python 69 vs rust 65", ".value.entries[0].access_count: python 3 vs rust 4",
+             "db retrieval_events[1].served[0].entry_id: python 1 vs rust 2", ".value.count: python 2 vs rust 3"]
+    out = tie_proofs.response_proofs(lines, python, rust)
+    assert out[0]["kind"] == "pick" and out[0]["at"] == ".value.entries[1]"
+    assert out[0]["text_md5"]["python"] == out[0]["text_md5"]["rust"] == tie_proofs._md5("dup")
+    assert "dup" not in json.dumps(out)  # a hash, never the text
+    # The count's position holds id 1 on Python but 65 on Rust: no id.
+    assert out[1] == {"at": ".value.entries[0]", "kind": "count", "id": None}
+    assert len(out) == 2  # the db line and a non-entry line get none
+    rust["value"]["entries"] = [{"id": 1, "text": "x"}, {"id": 65, "text": "other"}]
+    out = tie_proofs.response_proofs(lines[:2], python, rust)
+    assert out[0]["text_md5"]["python"] != out[0]["text_md5"]["rust"]
+    assert out[1] == {"at": ".value.entries[0]", "kind": "count", "id": 1}
+
+
+def test_event_proofs_read_via_by_id_and_hashes_from_both_banks():
+    def events(served):
+        return {"rows": {"public.retrieval_events": {"columns": ["id", "served"], "rows": [[7, served]]}}}
+    py = events([{"entry_id": 69, "via": "dense"}, {"entry_id": 3, "via": None}])
+    rs = events([{"entry_id": 65, "via": "dense"}, {"entry_id": 3, "via": None}])
+    asked = []
+
+    def text_md5(ids):
+        asked.append(ids)
+        return {69: SAME, 65: SAME}
+    lines = ["db retrieval_events[7].served[0].entry_id: python 69 vs rust 65",
+             "db retrieval_events[7].served[0].components.surprise: python 1 vs rust 0.9"]
+    out = tie_proofs.event_proofs(lines, py, rs, text_md5)
+    assert out == [{"at": "db retrieval_events[7].served[0]", "kind": "pick", "python": 69, "rust": 65,
+                    "text_md5": {"python": SAME, "rust": SAME}, "via": {"python": "dense", "rust": "dense"},
+                    "found": {"python": True, "rust": True}}]
+    assert asked == [{65, 69}]
+    # No pick line: no query at all.
+    assert tie_proofs.event_proofs(lines[1:], py, rs, text_md5) == [] and len(asked) == 1
+    w2d = tie_proofs.event_proofs(["public.retrieval_events[7].served[0].entry_id: python 69 vs rust 99"],
+                                  py, rs, lambda ids: {69: SAME})
+    assert w2d[0]["at"] == "public.retrieval_events[7].served[0]"
+    assert w2d[0]["found"] == {"python": True, "rust": False} and w2d[0]["text_md5"]["rust"] is None
+
+
+def test_bank_text_md5_keeps_a_hash_only_when_both_banks_agree():
+    banks = {"py": {1: SAME, 2: OTHER}, "rs": {1: SAME, 2: THIRD}}
+
+    class Conn:
+        def __init__(self, dsn):
+            self.rows = banks[dsn]
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def execute(self, sql, params):
+            assert "md5(text)" in sql and "text," not in sql
+            wanted = params[0]
+
+            class Result:
+                @staticmethod
+                def fetchall():
+                    return [(i, self.rows[i]) for i in wanted if i in self.rows]
+            return Result()
+    read = tie_proofs.bank_text_md5({"python": "py", "rust": "rs"}, Conn)
+    assert read({1, 2, 3}) == {1: SAME, 2: None, 3: None}
+    assert read(set()) == {}

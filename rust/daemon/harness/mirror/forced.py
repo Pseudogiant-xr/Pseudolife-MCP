@@ -140,6 +140,20 @@ ACCEPTED_DIVERGENCES = {
         "differ by betweenness sampling above betweenness_sample nodes (betweenness-above-"
         "betweenness-sample.md; partial run 870fb28fc); and again to the same values in an "
         "observed bank's response-side rows, the digest named by its key (session scenarios)"),
+    # The conductor's rulings B, C and D under the maintainer's delegation of
+    # 2026-11-11 (combined run e4a09212c's findings): TIE_RULES, each proved
+    # from the records the harness writes beside the lines (tie_proofs.py).
+    "tie-order": (
+        "two daemons serving different entries among equal or near-equal scores "
+        "(rust/daemon/divergences/w2-d-get-api-search/tie-order-among-equal-scores.md): Python "
+        "picks among exact ties by torch.topk's unspecified order (miras/band.py::retrieve, then "
+        "cms.py's seen_texts) and Rust by resident order (search.rs::top_k), and distinct entries "
+        "within the 2e-4 score tolerance fall in each engine's own fp32 order. Accepted narrowly, "
+        "each rule on its own: a duplicate pick whose two ids have equal text (an md5 the harness "
+        "recorded, never the text); an adjacent swap in a retrieval event's served list, neither "
+        "entry contiguity or timeline; and an access_count difference of exactly the extra serves "
+        "of an entry an accepted duplicate pick served on one side earlier in the scenario. "
+        "Accepted by the conductor under the maintainer's delegation of 2026-11-11"),
 }
 COMMUNITY_TABLES = ("public.communities", "public.entity_communities")
 COMMUNITY_FIELDS = ("community", "communities")
@@ -304,6 +318,27 @@ def full_diffs(suite: str, path: Path, printed: list[str]) -> tuple[list[str] | 
     if [line for line in "\n".join(shown).splitlines() if DIFF_LINE.match(line)] != printed:
         return None, "its --out JSON does not match the printed DIFF lines"
     return full, None
+
+
+def tie_proofs_of(suite: str, path: Path) -> dict[str, list]:
+    """The tie-order proofs (tie_proofs.py) a w2e or w2d_search harness wrote
+    beside its lines, by context: "step N", "case <name>" or "db". Read only
+    after full_diffs accepted the same file; another suite writes none."""
+    data = json.loads(path.read_text(encoding="utf-8"))
+    out: dict[str, list] = {}
+    if suite == "w2e":
+        for r in data["scenarios"]:
+            for st in r["steps"]:
+                if st.get("tie_proofs"):
+                    out.setdefault(f"step {st['step']}", []).extend(st["tie_proofs"])
+    elif suite == "w2d_search":
+        for r in data["results"]:
+            for c in r["cases"]:
+                if c.get("tie_proofs"):
+                    out.setdefault(f"case {c['case']}", []).extend(c["tie_proofs"])
+            if r.get("db_tie_proofs"):
+                out.setdefault("db", []).extend(r["db_tie_proofs"])
+    return out
 
 
 # The other suites' lines: board STATE (after step N (label): table: ...),
@@ -604,6 +639,7 @@ class Runner:
                 result["diffs_note"] = why
             else:
                 result["diffs"], result["diffs_complete"] = full, True
+                result["tie_proofs"] = tie_proofs_of(suite, written)
         return {**result, "exit": code, "seconds": round(time.monotonic() - started, 1),
                 "oom_kills": kills, "base": which}
 
@@ -792,6 +828,11 @@ def _scenario(runner: Runner, suite: str, name: str) -> tuple[dict, dict | None,
     elif verdict == "new" and all(_finished(a) and _complete(a) and _community_only(a)
                                   for a in (first, retry) if a is not None):
         verdict, accepted_as = "accepted", "community-partition"
+    # Its own rule, not mixed with the community one: an attempt with both
+    # kinds of difference, or any line neither proves, stays new.
+    elif verdict == "new" and all(_finished(a) and _complete(a) and _tie_only(a)
+                                  for a in (first, retry) if a is not None):
+        verdict, accepted_as = "accepted", "tie-order"
     row = {"scenario": name, "class": verdict, "differences": len(first["diffs"]),
            "seconds": first["seconds"], "base": first.get("base"),
            "oom_kills": _oom_total(first, retry, synthetic),
@@ -997,6 +1038,127 @@ def _community_only(attempt: dict) -> bool:
     for another recorded reason."""
     kinds = [_community_line(line) for line in attempt["diffs"]]
     return bool(kinds) and None not in kinds and "partition" in kinds
+
+
+# The tie-order rules (ACCEPTED_DIVERGENCES "tie-order"), each separate so
+# any subset can be applied (the conductor's rulings B, C and D of
+# 2026-11-11). A rule reads a difference's position from its line and its
+# proof from the harness's record (tie_proofs.py), never a value it guessed.
+TIE_RULES = ("duplicate-pick", "adjacent-swap", "access-count-follow-on")
+# What a different entry at one position may change beside its id, as each
+# side's own row: a served item's surprise (the scores agree within the
+# tolerance, or their lines would show), a response entry's counters and
+# stamps. Any other field (text, source, bank, tags, supersession) keeps it new.
+TIE_EVENT_FIELDS = frozenset({"entry_id", "components.surprise"})
+TIE_RESPONSE_FIELDS = frozenset({"id", "access_count", "surprise_score", "timestamp"})
+TIE_ITEM = re.compile(r"^(?P<at>.*\[\d+\])\.(?P<field>[\w.]+): python (?P<py>\S+) vs rust (?P<rs>\S+)$")
+TIE_SERVED = re.compile(r"^(?:db )?(?:public\.)?retrieval_events\[(-?\d+)\]\.served\[(\d+)\]$")
+TIE_ORDERED_VIA = ("contiguity", "timeline")
+
+
+def _tie_items(line: str) -> tuple[str, list[str]] | None:
+    """A w2e or w2d_search line's context ("step N", "case <name>", "db") and
+    its difference items, or None for a line of another shape."""
+    m = W2E_STEP.match(line)
+    if m:
+        diff = _w2e_diff(line[m.end():])
+        return (f"step {m.group(1)}", [diff]) if diff is not None else None
+    rest = HEAD.sub("", line, count=1)
+    if line.startswith("DB DIFF "):
+        return "db", [rest]
+    case = CASE.match(rest)
+    if case:
+        try:
+            items = ast.literal_eval(case.group(2))
+        except (ValueError, SyntaxError):
+            return None
+        if isinstance(items, list) and items and all(isinstance(i, str) for i in items):
+            return f"case {case.group(1)}", items
+    return None
+
+
+def _same_text(proof: dict) -> bool:
+    md5 = proof.get("text_md5") or {}
+    return md5.get("python") is not None and md5.get("python") == md5.get("rust")
+
+
+def _found(proof: dict | None) -> bool:
+    """Both sides' served item was found by id in its own event."""
+    return bool(proof) and all((proof.get("found") or {}).get(s) for s in ("python", "rust"))
+
+
+def _tie_only(attempt: dict, rules=None) -> bool:
+    """Every difference of an attempt is a tie the enabled ``rules`` prove
+    (TIE_RULES when None), with at least one difference. Lines are grouped by
+    position (context and path); a position is covered whole or not at all."""
+    rules = TIE_RULES if rules is None else rules
+    proofs = {(ctx, p.get("at")): p for ctx, ps in (attempt.get("tie_proofs") or {}).items()
+              for p in ps if isinstance(p, dict)}
+    groups: dict[tuple[str, str], dict[str, tuple[str, str]]] = {}
+    order: dict[str, int] = {}
+    for line in attempt["diffs"]:
+        parsed = _tie_items(line)
+        if parsed is None:
+            return False
+        ctx, items = parsed
+        order.setdefault(ctx, len(order))
+        for item in items:
+            m = TIE_ITEM.match(item)
+            if not m:
+                return False
+            groups.setdefault((ctx, m["at"]), {})[m["field"]] = (m["py"], m["rs"])
+    if not groups:
+        return False
+    covered: set = set()
+    picks = []  # response-side duplicate picks: (context order, python id, rust id)
+    if "duplicate-pick" in rules:
+        for key, fields in groups.items():
+            ctx, at = key
+            served = TIE_SERVED.match(at)
+            ident = "entry_id" if served else "id"
+            allowed = TIE_EVENT_FIELDS if served else TIE_RESPONSE_FIELDS
+            p = proofs.get(key)
+            if (ident in fields and set(fields) <= allowed
+                    and p and p.get("kind") == "pick" and _same_text(p)
+                    and (str(p.get("python")), str(p.get("rust"))) == fields[ident]
+                    and (not served or _found(p))):
+                covered.add(key)
+                if not served:
+                    picks.append((order[ctx], p["python"], p["rust"]))
+    if "adjacent-swap" in rules:
+        for key, fields in groups.items():
+            ctx, at = key
+            served = TIE_SERVED.match(at)
+            if key in covered or not served or set(fields) - TIE_EVENT_FIELDS or "entry_id" not in fields:
+                continue
+            partner = (ctx, f"{at[:at.rindex('[')]}[{int(served.group(2)) + 1}]")
+            other = groups.get(partner)
+            if (other is None or partner in covered or set(other) - TIE_EVENT_FIELDS
+                    or "entry_id" not in other):
+                continue
+            (a_py, a_rs), (b_py, b_rs) = fields["entry_id"], other["entry_id"]
+            pair = [proofs.get(key), proofs.get(partner)]
+            if a_py == b_rs and a_rs == b_py and all(
+                    _found(q) and q.get("kind") == "pick"
+                    and (str(q.get("python")), str(q.get("rust"))) == groups[k]["entry_id"]
+                    and not any((q.get("via") or {}).get(s) in TIE_ORDERED_VIA for s in ("python", "rust"))
+                    for q, k in zip(pair, (key, partner))):
+                covered.update((key, partner))
+    if "access-count-follow-on" in rules:
+        for key, fields in groups.items():
+            ctx, at = key
+            p = proofs.get(key)
+            if (key in covered or set(fields) != {"access_count"} or TIE_SERVED.match(at)
+                    or not p or p.get("kind") != "count" or not isinstance(p.get("id"), int)):
+                continue
+            try:
+                py, rs = (int(v) for v in fields["access_count"])
+            except ValueError:
+                continue
+            extra = sum((r == p["id"]) - (q == p["id"]) for when, q, r in picks if when < order[ctx])
+            if extra and rs - py == extra:
+                covered.add(key)
+    return covered == set(groups)
 
 
 def _oom_total(*attempts) -> int | None:

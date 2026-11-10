@@ -55,6 +55,7 @@ sys.path.insert(0, str(HERE))
 import daemons  # noqa: E402
 import dbstate  # noqa: E402
 import pgdisposable  # noqa: E402
+import tie_proofs  # noqa: E402
 from run import DB_DECLARED, bearer, call, real_bank_env, settled, wait_settled  # noqa: E402,F401
 
 REPO = HERE.parents[2]
@@ -1415,6 +1416,11 @@ def run_scenario(scn: Scenario, binary: Path, template: str, mode: str, record: 
             row["diffs"], row["notes"] = compare(py_r, rs_r, timeline_fired=ordered,
                                                  ordered=c.get("tool") == "memory_recent",
                                                  stats=c.get("tool") == "memory_stats")
+            # Ids and text hashes for the lines that served different entries
+            # (forced.py's tie-order rules); none when nothing differs.
+            proofs = tie_proofs.response_proofs(row["diffs"], py_r.get("json"), rs_r.get("json"))
+            if proofs:
+                row["tie_proofs"] = proofs
     cov = coverage(py_seen, py_state)
     # The credit under test: the successor entry, labelled by a get (not a
     # stray label the warmup search's pointer session could earn).
@@ -1438,7 +1444,14 @@ def run_scenario(scn: Scenario, binary: Path, template: str, mode: str, record: 
         nums = {side: normalize_stores(states[side]) for side in sides}
         if "python" in nums:
             numeric_diffs = w2e.compare_numeric(nums["python"], nums["rust"], tol, {})
+    # bank_diff pops the events it compares: the proofs read them first.
+    events = {side: {"rows": {"public.retrieval_events": json.loads(json.dumps(
+        st["rows"].get("public.retrieval_events")))}}
+        for side, st in (("python", py_state), ("rust", states["rust"]))}
     db_diffs = bank_diff(json.loads(json.dumps(py_state)), states["rust"]) + numeric_diffs
+    db_proofs = (tie_proofs.event_proofs(db_diffs, events["python"], events["rust"],
+                                         tie_proofs.bank_text_md5({k: pg.dsn(dbs[k]) for k in sides}))
+                 if "python" in sides else [])
     if record:
         GOLDENS.mkdir(parents=True, exist_ok=True)
         (GOLDENS / f"{scn.name}.json").write_text(json.dumps({
@@ -1454,7 +1467,7 @@ def run_scenario(scn: Scenario, binary: Path, template: str, mode: str, record: 
     if derived:
         pg.drop(derived)
     return {"scenario": scn.name, "cases": rows, "db_diffs": db_diffs + cov_fail, "declared": declared,
-            "coverage": cov}
+            "coverage": cov, **({"db_tie_proofs": db_proofs} if db_proofs else {})}
 
 
 def default_scenarios(mode: str) -> list[str]:
