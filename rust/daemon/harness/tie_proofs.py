@@ -178,6 +178,12 @@ def _json_md5(value) -> str:
     return hashlib.md5(json.dumps(value, sort_keys=True).encode("utf-8")).hexdigest()
 
 
+def _facts_list(items, keys) -> bool:
+    """A list whose every item is a dict holding each of ``keys`` (not None)."""
+    return isinstance(items, list) and all(
+        isinstance(x, dict) and all(x.get(k) is not None for k in keys) for x in items)
+
+
 # A cortex item's fields the tokenizer difference can move: ``score`` (the
 # query's cosine with the fact) and ``age`` (_relative_time of the wall clock
 # at answer time, which the two daemons answer at different moments). Every
@@ -192,12 +198,17 @@ def padded_case_proof(query: str, python, rust) -> dict:
     slot both sides served that differs in anything else is seen without its
     content leaving the harness."""
     def items(body):
-        got = body.get("cortex") if isinstance(body, dict) else None
-        return [x for x in (got if isinstance(got, list) else []) if isinstance(x, dict)]
+        return body["cortex"]
 
     def cortex(body):
         return {slot_md5(x.get("entity"), x.get("attribute")):
                 _json_md5({k: v for k, v in x.items() if k not in CORTEX_MOVABLE}) for x in items(body)}
+    # Codex's review (2026-11-11): only two well-formed blocks are a proof. A
+    # missing or null block, or an item that is not a fact, is a structural
+    # difference, not the tokenizer's, so it gets no proof and stays new.
+    if not all(_facts_list(body.get("cortex") if isinstance(body, dict) else None, ("entity", "attribute"))
+               for body in (python, rust)):
+        return {"at": "", "kind": "padded-query", "unavailable": "malformed cortex block"}
     return {"at": "", "kind": "padded-query", "query_md5": _md5(query),
             "cortex": {"python": cortex(python), "rust": cortex(rust)},
             "cortex_len": {"python": len(items(python)), "rust": len(items(rust))}}
@@ -231,6 +242,9 @@ def padded_event_proofs(queries: list[str], python_events: dict | None,
     out = []
     for event, (query, served) in sorted(a.items()):
         if query not in queries or event not in b or b[event][0] != query:
+            continue
+        if not all(_facts_list(x, ("entity_norm", "attribute_norm")) for x in (served, b[event][1])):
+            # A null list or an item that is not a fact: no proof, stays new.
             continue
         out.append({"at": f"public.retrieval_events[{event}]", "kind": "padded-event", "event": event,
                     "query_md5": _md5(query), "facts": {"python": facts(served), "rust": facts(b[event][1])},

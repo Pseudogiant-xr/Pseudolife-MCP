@@ -882,10 +882,12 @@ def align_worst_sources(a: dict, b: dict) -> dict:
 
 
 def compare(py: dict, rs: dict, *, timeline_fired=False, ordered=False,
-            stats=False) -> tuple[list[str], list[str]]:
+            stats=False, aligned: dict | None = None) -> tuple[list[str], list[str]]:
     """``ordered``: the answer's entries are in an exact order with no scores
     (memory_recent), so no tie alignment applies. ``stats``: a memory_stats
-    answer, compared key order too, with worst_sources ties aligned."""
+    answer, compared key order too, with worst_sources ties aligned.
+    ``aligned`` (a dict) receives the two bodies as compared, after the tie
+    alignment, so a proof reads the lists the printed paths index."""
     diffs, notes = [], []
     if py["status"] != rs["status"]:
         diffs.append(f"status: python {py['status']} vs rust {rs['status']}")
@@ -936,6 +938,8 @@ def compare(py: dict, rs: dict, *, timeline_fired=False, ordered=False,
                 b[k], n = align_ties(a[k], b[k], key,
                                      ordered=(timeline_fired or ordered) and k == "entries")
                 notes += [f"{k}: {x}" for x in n]
+    if aligned is not None:
+        aligned["python"], aligned["rust"] = a, b
     diffs += diff(a, b, tol_keys=("score",) + TRACE_FLOAT_KEYS)
     return diffs, notes
 
@@ -1423,15 +1427,19 @@ def run_scenario(scn: Scenario, binary: Path, template: str, mode: str, record: 
             py_r, rs_r = pair
             body = py_r.get("json")
             ordered = isinstance(body, dict) and body.get("query") in ordered_queries
+            bodies: dict = {}
             row["diffs"], row["notes"] = compare(py_r, rs_r, timeline_fired=ordered,
                                                  ordered=c.get("tool") == "memory_recent",
-                                                 stats=c.get("tool") == "memory_stats")
+                                                 stats=c.get("tool") == "memory_stats", aligned=bodies)
             # Ids and text hashes for the lines that served different entries
             # (forced.py's tie-order rules); none when nothing differs.
             padded_query = case_query(c) if row["diffs"] and tie_proofs.padded(case_query(c)) else None
+            # The bodies as compared: Rust's entries realigned on ties, as the
+            # printed paths index them (Codex's review, 2026-11-11).
+            seen_py, seen_rs = bodies.get("python", py_r.get("json")), bodies.get("rust", rs_r.get("json"))
             proofs = tie_proofs.safely(lambda: (
-                tie_proofs.response_proofs(row["diffs"], py_r.get("json"), rs_r.get("json"))
-                + ([tie_proofs.padded_case_proof(padded_query, py_r.get("json"), rs_r.get("json"))]
+                tie_proofs.response_proofs(row["diffs"], seen_py, seen_rs)
+                + ([tie_proofs.padded_case_proof(padded_query, seen_py, seen_rs)]
                    if padded_query is not None else [])))
             if proofs:
                 row["tie_proofs"] = proofs

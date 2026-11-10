@@ -2689,3 +2689,78 @@ def test_rule_b_reads_only_entries_lists():
     assert not forced._tie_only(attempt(lines, {"case crafted": [pick(".sources[0]", 69, 65)]}))
     lines = [w2e_line(10, ".value.entries[25].id: python 69 vs rust 65")]
     assert forced._tie_only(attempt(lines, {"step 10": [pick(".value.entries[25]", 69, 65)]}))
+
+
+def test_a_malformed_cortex_block_or_fact_list_gets_no_padded_proof():
+    """Codex's review (P2, 2026-11-11): a missing or null block, or an item
+    that is not a fact, is a structural difference, not the tokenizer's."""
+    fact = {"entity": "E", "attribute": "A", "value": 1}
+    good = tie_proofs.padded_case_proof("q ", {"cortex": [fact]}, {"cortex": []})
+    assert "query_md5" in good
+    for rust in ({"cortex": None}, {}, {"cortex": [fact, None]}, {"cortex": [{"entity": "E", "value": 1}]},
+                 {"cortex": [fact, "x"]}, None):
+        out = tie_proofs.padded_case_proof("q ", {"cortex": [fact]}, rust)
+        assert out.get("unavailable") and "query_md5" not in out and "cortex" not in out, rust
+    # The runner then has no proof for the case, so its cortex lines stay new.
+    a = padded_attempt()
+    a["tie_proofs"][f"case {PADDED_CASE}"] = [{"at": "", "kind": "padded-query", "unavailable": "malformed cortex block"}]
+    assert not forced._tie_only(a, rules=("padded-query",))
+
+    def events(served):
+        cols = ["id", tie_proofs.EVENT_QUERY, tie_proofs.EVENT_FACTS]
+        return {"rows": {"public.retrieval_events": {"columns": cols, "rows": [[5, "q ", served]]}}}
+    ok = [{"entity_norm": "e", "attribute_norm": "a"}]
+    assert tie_proofs.padded_event_proofs(["q "], events(ok), events([]))
+    for bad in (None, [None], ok + [{"entity_norm": "e"}], "x"):
+        assert tie_proofs.padded_event_proofs(["q "], events(ok), events(bad)) == [], bad
+
+
+def test_count_and_pick_proofs_read_the_lists_as_the_comparator_aligned_them():
+    """Codex's review (P2, 2026-11-11): w2d_search.compare realigns Rust's
+    tied entries before diffing, so the printed path indexes the aligned
+    list. Python [67, 1] against Rust [1, 67] at one score prints a count
+    difference at entries[0]; read from the raw Rust body the proof found no
+    shared id, and a valid follow-on stayed new."""
+    import w2d_search
+
+    def response(entries):
+        return {"status": 200, "headers": {"content-type": "application/json"}, "json": {"entries": entries}}
+    py = response([{"id": 67, "score": 0.5, "access_count": 18, "text": "x"},
+                   {"id": 1, "score": 0.5, "access_count": 3, "text": "y"}])
+    rs = response([{"id": 1, "score": 0.5, "access_count": 3, "text": "y"},
+                   {"id": 67, "score": 0.5, "access_count": 19, "text": "x"}])
+    bodies: dict = {}
+    diffs, notes = w2d_search.compare(py, rs, aligned=bodies)
+    assert diffs == [".entries[0].access_count: python 18 vs rust 19"] and notes
+    assert tie_proofs.response_proofs(diffs, bodies["python"], bodies["rust"]) == [
+        {"at": ".entries[0]", "kind": "count", "id": 67}]
+    # The raw bodies would not have proved it.
+    assert tie_proofs.response_proofs(diffs, py["json"], rs["json"])[0]["id"] is None
+    # Without the argument the comparator behaves as before.
+    assert w2d_search.compare(py, rs) == (diffs, notes)
+
+
+def test_rule_c_refuses_a_component_none_on_one_side_or_a_bool():
+    lines, proofs = swap()
+    proofs["step 9"][0]["scores"]["python"] = {"score": 0.5001, "ce": None}
+    for q, side in ((0, "rust"), (1, "python"), (1, "rust")):
+        proofs["step 9"][q]["scores"][side] = {**proofs["step 9"][q]["scores"][side], "ce": 0.3}
+    assert not forced._tie_only(attempt(lines, proofs))
+    lines, proofs = swap()
+    for q in (0, 1):
+        for side in ("python", "rust"):
+            proofs["step 9"][q]["scores"][side] = {**proofs["step 9"][q]["scores"][side], "margin": True}
+    assert not forced._tie_only(attempt(lines, proofs))
+    # A component None on every side is not recorded, so it does not block.
+    lines, proofs = swap()
+    for q in (0, 1):
+        for side in ("python", "rust"):
+            proofs["step 9"][q]["scores"][side] = {**proofs["step 9"][q]["scores"][side], "ce": None}
+    assert forced._tie_only(attempt(lines, proofs))
+
+
+def test_a_served_facts_line_past_the_recorded_lists_stays_new():
+    a = padded_attempt(extra_db=("public.retrieval_events[9593].served_facts[9].score: python 0.5 vs rust 0.6",))
+    assert not forced._tie_only(a, rules=("padded-query",))
+    a = padded_attempt(extra_db=("public.retrieval_events[9593].served_facts[1].score: python 0.5 vs rust 0.6",))
+    assert forced._tie_only(a, rules=("padded-query",))
