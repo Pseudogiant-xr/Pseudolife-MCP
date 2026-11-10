@@ -10,7 +10,22 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import forced  # noqa: E402
+# Imported before any test points PSEUDOLIFE_TEST_PG_HOST_PORT at the box's
+# mirror: pgdisposable reads it once, and main's drops import it.
+import pgdisposable  # noqa: E402
+import database_gate  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _no_database_drops(monkeypatch):
+    """main's dropper drains through pgdisposable; these tests have no bank,
+    so a run's tombstone drops are recorded instead (the database tests at
+    the end use the real ones)."""
+    calls = []
+    monkeypatch.setattr(forced, "drop_tombstones", lambda token: calls.append(token) or 0)
+    return calls
 
 PASS = {"status": "pass", "diffs": [], "seconds": 1.0}
 DIFF = {"status": "diff", "diffs": ["DIFF [s] step 1 x: db /rows/public.entries"], "seconds": 1.0,
@@ -345,7 +360,7 @@ def test_a_timeout_stops_the_whole_group_and_sweeps(tmp_path, monkeypatch):
     monkeypatch.setenv("PL_HARNESS_STUB_DEFAULT_CONTENT", "[]")
     swept = []
     runner = forced.Runner(Path("rust-bin"), tmp_path / "out", 3, tmp_path / "STOP",
-                           sweep=lambda: swept.append(1) or 2, scratch=tmp_path / "scratch")
+                           sweep=lambda attempt: swept.append(1) or 2, scratch=tmp_path / "scratch")
     got = runner.invoke("w2e", "slow", "synthetic", base=False)
     assert got["exit"] is None and got["status"] == "diff" and swept == [1]
     log = (tmp_path / "out" / "w2e" / "synthetic" / "slow.log").read_text()
@@ -445,7 +460,7 @@ def test_every_attempt_sweeps_the_databases_a_failed_harness_left(tmp_path):
             return 1, "Traceback\nConnectionRefusedError\n"
 
     runner = Quits(Path("rust-bin"), tmp_path / "out", 60, tmp_path / "STOP", scratch=tmp_path / "s",
-                   sweep=lambda: swept.append(1) or 2, oom_kills=lambda: 0)
+                   sweep=lambda attempt: swept.append(1) or 2, oom_kills=lambda: 0)
     runner.invoke("w2e", "x", "real", base=True)
     assert swept == [1]
     assert "swept 2 leftover disposable databases" in (tmp_path / "out" / "w2e" / "real" / "x.log").read_text()
@@ -959,6 +974,664 @@ def test_an_op_whose_text_holds_a_colon_still_finds_its_diff():
         assert forced.signatures({"diffs": [one]}) != forced.signatures({"diffs": [two]})
 
 
+# ---- background drops: a scenario's databases are renamed away and dropped
+# ---- while the next scenario runs
+
+def test_each_attempt_hands_its_drops_to_the_dropper_after_its_sweep(tmp_path):
+    """The harness gets the run's token, and the dropper starts only after
+    the sweep, which must not drop the tombstones itself (it waits)."""
+    events, seen = [], {}
+
+    class Records(forced.Runner):
+        def _run(self, argv, env):
+            seen.update(env)
+            return 0, ""
+
+    class Dropper:
+        def kick(self):
+            events.append("kick")
+
+    runner = Records(Path("rust-bin"), tmp_path / "out", 60, tmp_path / "STOP", scratch=tmp_path / "s",
+                     sweep=lambda attempt: events.append("sweep") or 0, oom_kills=lambda: 0,
+                     drop_token="abcd1234ef", dropper=Dropper())
+    runner.invoke("w2e", "x", "real", base=True)
+    assert seen[forced.DROP_LATER_ENV] == "abcd1234ef"
+    assert events == ["sweep", "kick"]
+
+
+def test_without_a_dropper_the_harness_drops_as_before(tmp_path):
+    seen = {}
+
+    class Records(forced.Runner):
+        def _run(self, argv, env):
+            seen.update(env)
+            return 0, ""
+
+    Records(Path("rust-bin"), tmp_path / "out", 60, tmp_path / "STOP", scratch=tmp_path / "s",
+            oom_kills=lambda: 0).invoke("w2e", "x", "real", base=True)
+    assert forced.DROP_LATER_ENV not in seen
+
+
+def test_the_dropper_waits_for_its_last_pass_and_drains_before_returning():
+    """No two passes overlap (a pass that listed the tombstones before the
+    last scenario's renames would miss them), and the drain's own pass runs
+    after every background one has ended."""
+    import threading
+    import time
+    started, release, passes = threading.Event(), threading.Event(), []
+    lock, running, most = threading.Lock(), [0], [0]
+
+    def drop():
+        with lock:
+            running[0] += 1
+            most[0] = max(most[0], running[0])
+            passes.append(len(passes))
+        if len(passes) == 1:
+            started.set()
+            release.wait(5)
+        elif len(passes) == 2:
+            time.sleep(0.3)  # still running when the drain starts its own pass
+        with lock:
+            running[0] -= 1
+
+    dropper = forced.Dropper(drop)
+    dropper.kick()
+    assert started.wait(5)
+    threading.Timer(0.3, release.set).start()
+    dropper.kick()
+    dropper.drain()
+    assert passes == [0, 1, 2] and most[0] == 1 and running[0] == 0
+
+
+def test_every_drop_ends_before_the_summary_is_written(tmp_path, monkeypatch, _no_database_drops):
+    """A stopped run's too: the summary of a run that left databases behind
+    would hide them."""
+    _main_env(monkeypatch)
+    out = tmp_path / "o"
+    order = []
+
+    def drops(token):
+        order.append(("drops", (out / "summary.json").exists()))
+        return 0
+    monkeypatch.setattr(forced, "drop_tombstones", drops)
+    monkeypatch.setattr(forced, "scenario_names", lambda suite: ["store-defaults"])
+    monkeypatch.setattr(forced, "run", lambda runner, *a, **k: (
+        {"suites": {}, "not_forced": {}, "complete": False, "stopped": "before w2e/x: STOP file present"},
+        {}))
+    forced.main(["--rust-bin", "x", "--out", str(out), "--suites", "w2e", "--only", "store-defaults"])
+    assert order == [("drops", False)]
+    assert (out / "summary.json").exists()
+
+
+def test_a_run_that_raises_still_drops_its_databases(tmp_path, monkeypatch, _no_database_drops):
+    _main_env(monkeypatch)
+    monkeypatch.setattr(forced, "scenario_names", lambda suite: ["store-defaults"])
+
+    def boom(runner, *a, **k):
+        raise KeyboardInterrupt
+    monkeypatch.setattr(forced, "run", boom)
+    with pytest.raises(KeyboardInterrupt):
+        forced.main(["--rust-bin", "x", "--out", str(tmp_path / "o"), "--suites", "w2e",
+                     "--only", "store-defaults"])
+    assert len(_no_database_drops) == 1
+
+
+def _bench():
+    if not pgdisposable.LOGIN_FILE.exists():
+        database_gate.unavailable("no disposable-bank login here",
+                                  "create it once on the daemon host with `pseudolife-mcp test-login "
+                                  "create`, or point PSEUDOLIFE_TEST_PG_LOGIN_FILE at it")
+    return pgdisposable
+
+
+def _databases(pgdisposable, prefix: str) -> list[str]:
+    with pgdisposable._admin() as conn:
+        return sorted(r[0] for r in conn.execute(
+            "SELECT datname FROM pg_database WHERE starts_with(datname, %s)", (prefix,)))
+
+
+def test_a_drop_under_a_run_token_frees_the_name_and_leaves_a_tombstone(monkeypatch):
+    """The name is free at once (the scenario may create it again), and the
+    run's tombstone drop removes the database; without the token a drop
+    drops, as it always has."""
+    import uuid
+    pgdisposable = _bench()
+    pg = pgdisposable.Slice("mir")
+    token = uuid.uuid4().hex[:12]
+    tombs = pgdisposable.tombstone_prefix(token)
+    name = pg.name("pl_cf_mir_droplater")
+    try:
+        pg.create(name)
+        monkeypatch.setenv(pgdisposable.DROP_LATER_ENV, token)
+        pg.drop(name)
+        assert name not in _databases(pgdisposable, name)
+        assert len(_databases(pgdisposable, tombs)) == 1
+        pg.create(name)  # the name is free again
+        pg.drop(name)
+        assert len(_databases(pgdisposable, tombs)) == 2
+        assert pgdisposable.drop_tombstones(token) == 2
+        assert _databases(pgdisposable, tombs) == []
+        monkeypatch.delenv(pgdisposable.DROP_LATER_ENV)
+        pg.create(name)
+        pg.drop(name)
+        assert _databases(pgdisposable, name) == [] and _databases(pgdisposable, tombs) == []
+    finally:
+        monkeypatch.delenv(pgdisposable.DROP_LATER_ENV, raising=False)
+        pg.drop(name)
+        pgdisposable.drop_tombstones(token)
+
+
+def test_a_database_still_in_use_is_dropped_at_once(monkeypatch):
+    """A rename cannot end another session (FORCE can): the drop falls back
+    to dropping, and leaves no tombstone behind."""
+    import uuid
+    import psycopg
+    pgdisposable = _bench()
+    pg = pgdisposable.Slice("mir")
+    token = uuid.uuid4().hex[:12]
+    name = pg.name("pl_cf_mir_dropbusy")
+    try:
+        dsn = pg.create(name)
+        monkeypatch.setenv(pgdisposable.DROP_LATER_ENV, token)
+        with psycopg.connect(dsn, autocommit=True) as held:
+            held.execute("SELECT 1")
+            started = forced.time.monotonic()
+            pg.drop(name)
+            # Review (Opus): a rename would wait 5 s for the session first.
+            assert forced.time.monotonic() - started < 3
+        assert _databases(pgdisposable, name) == []
+        assert _databases(pgdisposable, pgdisposable.tombstone_prefix(token)) == []
+    finally:
+        monkeypatch.delenv(pgdisposable.DROP_LATER_ENV, raising=False)
+        pg.drop(name)
+        pgdisposable.drop_tombstones(token)
+
+
+def test_the_sweep_leaves_the_runs_tombstones_to_its_dropper(monkeypatch):
+    """Sweeping them would make every scenario wait for its drops again;
+    another run's tombstones (a killed run's) are leftovers it sweeps."""
+    import uuid
+    pgdisposable = _bench()
+    pg = pgdisposable.Slice("mir")
+    live = pgdisposable.Slice("w2f")  # the sweep spares pl_cf_mir_* (the banks)
+    mine, other = uuid.uuid4().hex[:12], uuid.uuid4().hex[:12]
+    names = [pg.name("pl_cf_mir_sweepmine"), pg.name("pl_cf_mir_sweepother")]
+    leftover = live.name("pl_cf_w2f_sweeplive")
+    try:
+        for n in names:
+            pg.create(n)
+        live.create(leftover)
+        monkeypatch.setenv(pgdisposable.DROP_LATER_ENV, mine)
+        pg.drop(names[0])
+        monkeypatch.setenv(pgdisposable.DROP_LATER_ENV, other)
+        pg.drop(names[1])
+        monkeypatch.delenv(pgdisposable.DROP_LATER_ENV)
+        with pgdisposable._admin() as conn:  # read only: the bench is shared
+            listed = set(forced.leftover_names(conn, spare=pgdisposable.tombstone_prefix(mine)))
+        assert not any(n.startswith(pgdisposable.tombstone_prefix(mine)) for n in listed)
+        assert any(n.startswith(pgdisposable.tombstone_prefix(other)) for n in listed)
+        assert leftover in listed and not set(names) & listed
+        # The run's drops are its own: another run's tombstone stays for its sweep.
+        assert pgdisposable.drop_tombstones(mine) == 1
+        assert len(_databases(pgdisposable, pgdisposable.tombstone_prefix(other))) == 1
+    finally:
+        monkeypatch.delenv(pgdisposable.DROP_LATER_ENV, raising=False)
+        for n in names:
+            pg.drop(n)
+        live.drop(leftover)
+        pgdisposable.drop_tombstones(mine)
+        pgdisposable.drop_tombstones(other)
+
+
+def test_a_stopped_run_leaves_none_of_its_tombstones(tmp_path, monkeypatch):
+    """A tombstone an earlier scenario left is dropped before a stopped
+    run's summary exists."""
+    import uuid
+    pgdisposable = _bench()
+    pg = pgdisposable.Slice("mir")
+    token = uuid.uuid4().hex[:12]  # its own: the bench is shared
+    monkeypatch.setattr(forced, "new_drop_token", lambda: token)
+    monkeypatch.setattr(forced, "drop_tombstones", pgdisposable.drop_tombstones)
+    name = pg.name("pl_cf_mir_dropstop")
+    try:
+        pg.create(name)
+        monkeypatch.setenv(pgdisposable.DROP_LATER_ENV, token)
+        pg.drop(name)
+        monkeypatch.delenv(pgdisposable.DROP_LATER_ENV)
+        assert len(_databases(pgdisposable, pgdisposable.tombstone_prefix(token))) == 1
+        _main_env(monkeypatch)
+        monkeypatch.setattr(forced, "scenario_names", lambda suite: ["store-defaults"])
+        (tmp_path / "STOP").write_text("")
+        forced.main(["--rust-bin", "x", "--out", str(tmp_path / "o"), "--suites", "w2e",
+                     "--only", "store-defaults", "--stop-file", str(tmp_path / "STOP")])
+        assert _databases(pgdisposable, pgdisposable.tombstone_prefix(token)) == []
+        assert "STOP" in json.loads((tmp_path / "o" / "summary.json").read_text())["stopped"]
+    finally:
+        monkeypatch.delenv(pgdisposable.DROP_LATER_ENV, raising=False)
+        pg.drop(name)
+        pgdisposable.drop_tombstones(token)
+
+
+@pytest.mark.skipif(not hasattr(forced.os, "killpg"), reason="the runner is Linux; process groups are POSIX")
+def test_an_interrupted_run_stops_its_harness_before_the_drops_drain(tmp_path, monkeypatch):
+    """Review (Codex): Ctrl-C reaches forced.py only (the harness has a
+    session of its own), so the harness is stopped as a timeout stops it, and
+    its cleanup (its renames) runs before the interrupt reaches main's drain."""
+    script, marker = tmp_path / "harness.py", tmp_path / "cleaned"
+    script.write_text(
+        "import signal, sys, time\n"
+        f"def cleanup(*_):\n    open({str(marker)!r}, 'w').write('renamed')\n    sys.exit(130)\n"
+        "signal.signal(signal.SIGINT, cleanup)\n"
+        "print('started', flush=True)\n"
+        "time.sleep(600)\n")
+    real = forced.subprocess.Popen.communicate
+    calls = []
+
+    def communicate(self, *a, **k):
+        calls.append(1)
+        if len(calls) == 1:
+            forced.time.sleep(1.0)  # the harness is up and has its handler
+            raise KeyboardInterrupt
+        return real(self, *a, **k)
+    monkeypatch.setattr(forced.subprocess.Popen, "communicate", communicate)
+    runner = forced.Runner(Path("rust-bin"), tmp_path / "out", 60, tmp_path / "STOP", scratch=tmp_path / "s")
+    with pytest.raises(KeyboardInterrupt):
+        runner._run([sys.executable, str(script)], dict(forced.os.environ))
+    assert marker.read_text() == "renamed"
+
+
+def test_tombstone_drops_retry_a_session_force_cannot_end(monkeypatch):
+    """Review (Codex): FORCE cannot end an autovacuum worker on a just-used
+    bank; the tombstone drop retries it as every other drop does."""
+    import psycopg
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    tries = []
+
+    class Conn:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def execute(self, query, params=None):
+            if isinstance(query, str) and query.startswith("SELECT datname"):
+                return type("R", (), {"fetchall": lambda s: [("pl_cf_gone_abcd1234_ffff",)]})()
+            tries.append(1)
+            if len(tries) == 1:
+                raise psycopg.errors.InsufficientPrivilege("autovacuum worker")
+
+    monkeypatch.setattr(pgdisposable, "_admin", lambda: Conn())
+    monkeypatch.setattr(pgdisposable, "assert_disposable_database", lambda conn: "postgres")
+    monkeypatch.setattr(pgdisposable.time, "sleep", lambda s: None)
+    assert pgdisposable.drop_tombstones("abcd1234") == 1
+    assert len(tries) == 2
+
+
+def test_a_final_drop_that_fails_keeps_the_results_and_fails_the_run(tmp_path, monkeypatch):
+    """Review (Opus): hours of results are not thrown away for one drop; the
+    summary says which drops failed and the run exits non-zero."""
+    _main_env(monkeypatch)
+
+    def drops(token):
+        raise RuntimeError("autovacuum held the database")
+    monkeypatch.setattr(forced, "drop_tombstones", drops)
+    monkeypatch.setattr(forced, "scenario_names", lambda suite: ["store-defaults"])
+    monkeypatch.setattr(forced, "run", lambda runner, *a, **k: ({"suites": {}, "not_forced": {},
+                                                                 "complete": True}, {}))
+    out = tmp_path / "o"
+    assert forced.main(["--rust-bin", "x", "--out", str(out), "--suites", "w2e",
+                        "--only", "store-defaults"]) == 1
+    summary = json.loads((out / "summary.json").read_text())
+    assert "autovacuum held the database" in summary["drops_failed"]
+    assert (out / "private.json").exists()
+
+
+def test_a_session_that_arrives_after_the_check_still_gets_dropped(monkeypatch):
+    """The activity check passed, then a session connected before the
+    rename: the rename refuses (ObjectInUse) and the drop falls back to
+    FORCE rather than fail."""
+    import psycopg
+
+    class Conn:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def execute(self, query, params=None):
+            text = query if isinstance(query, str) else ""
+            if text.startswith("SELECT 1 FROM pg_database"):
+                return type("R", (), {"fetchone": lambda s: (1,)})()
+            if text.startswith("SELECT count(*) FROM pg_stat_activity"):
+                return type("R", (), {"fetchone": lambda s: (0,)})()
+            raise psycopg.errors.ObjectInUse("database is being accessed by other users")
+
+    space = type("Space", (), {"_admin": staticmethod(lambda: Conn()),
+                               "assert_disposable_database": staticmethod(lambda conn: "postgres")})()
+    assert pgdisposable._rename_away(space, "pl_cf_mir_x_0123456789abcdef", "abcd1234") is False
+
+
+# ---- --jobs N: scenarios side by side, each on its own worker
+
+class SlowRunner(forced.Runner):
+    """A worker whose answers take a set time, recording what it ran."""
+
+    def __init__(self, tmp: Path, answers: dict, delays: dict, ran: list, stop=None):
+        super().__init__(Path("rust-bin"), tmp, 60, tmp / "STOP")
+        self.answers, self.delays, self.ran, self.stop_when = answers, delays, ran, stop
+
+    def invoke(self, suite, name, label, base):
+        self.ran.append((id(self), name, label))
+        forced.time.sleep(self.delays.get(name, 0))
+        return dict(self.answers[name][label])
+
+    def blocked(self):
+        return self.stop_when() if self.stop_when else None
+
+
+def test_side_by_side_rows_keep_the_plan_order(tmp_path):
+    """The first scenario finishes last; its row still comes first, every
+    scenario runs once with its own retries on one worker, and the work is
+    shared."""
+    answers = {"a": {"real": PASS}, "b": {"real": DIFF, "real-retry": PASS}, "c": {"real": PASS},
+               "d": {"real": DIFF, "real-retry": DIFF, "synthetic": DIFF}}
+    ran = []
+    workers = [SlowRunner(tmp_path, answers, {"a": 0.6}, ran) for _ in range(3)]
+    report, private = forced.run(workers[0], ["w2e"], None, names=lambda s: list(answers),
+                                 workers=workers)
+    rows = report["suites"]["w2e"]["rows"]
+    assert [r["scenario"] for r in rows] == ["a", "b", "c", "d"] and report["complete"]
+    assert [r["class"] for r in rows] == ["pass", "transient", "pass", "preexisting"]
+    by_scenario = {}
+    for worker, name, label in ran:
+        by_scenario.setdefault(name, set()).add(worker)
+    assert all(len(w) == 1 for w in by_scenario.values()), "a scenario's attempts split over workers"
+    assert len({w for w, _, _ in ran}) > 1
+    assert sorted(n for _, n, label in ran if label == "real") == ["a", "b", "c", "d"]
+    assert set(private) == {"w2e/b", "w2e/d"}
+
+
+def test_a_stop_side_by_side_starts_nothing_more(tmp_path):
+    answers = {n: {"real": PASS} for n in "abcdef"}
+    ran = []
+
+    def stop():
+        return "STOP file present" if len(ran) >= 2 else None
+    workers = [SlowRunner(tmp_path, answers, {n: 0.3 for n in "abcdef"}, ran, stop) for _ in range(2)]
+    report, _ = forced.run(workers[0], ["w2e"], None, names=lambda s: list(answers), workers=workers)
+    assert not report["complete"] and "STOP file present" in report["stopped"]
+    assert [r["scenario"] for r in report["suites"]["w2e"]["rows"]] == ["a", "b"]
+    assert len(ran) == 2
+
+
+def test_a_worker_that_raises_ends_the_run_with_its_error(tmp_path):
+    class Raises(SlowRunner):
+        def invoke(self, suite, name, label, base):
+            if name == "b":
+                raise RuntimeError("worker broke")
+            return super().invoke(suite, name, label, base)
+
+    answers = {n: {"real": PASS} for n in "abcd"}
+    ran = []
+    workers = [Raises(tmp_path, answers, {}, ran) for _ in range(2)]
+    with pytest.raises(RuntimeError, match="worker broke"):
+        forced.run(workers[0], ["w2e"], None, names=lambda s: list(answers), workers=workers)
+
+
+def test_one_job_keeps_the_one_at_a_time_path(tmp_path):
+    """--jobs 1 plans each suite when it reaches it, as every run before: a
+    stop in the first suite never lists the second."""
+    listed = []
+
+    def names(suite):
+        listed.append(suite)
+        return ["clean", "flaky"]
+    runner = FakeRunner(tmp_path, ANSWERS, stop_after=1)
+    report, _ = forced.run(runner, ["w2e", "board"], None, names=names, workers=[runner])
+    assert listed == ["w2e"] and "stopped" in report
+
+
+def test_main_gives_each_job_its_own_worker(tmp_path, monkeypatch):
+    _main_env(monkeypatch)
+    monkeypatch.setattr(forced, "scenario_names", lambda suite: ["store-defaults"])
+    seen, swept = {}, []
+    monkeypatch.setattr(forced, "sweep_leftovers",
+                        lambda spare="", attempt="": swept.append(attempt) or 0)
+
+    def capture(runner, *a, workers=None, **k):
+        seen["workers"] = workers
+        return {"suites": {}, "not_forced": {}, "complete": True}, {}
+    monkeypatch.setattr(forced, "run", capture)
+    args = ["--rust-bin", "x", "--out", str(tmp_path / "o"), "--suites", "w2e", "--only", "store-defaults"]
+    assert forced.main(args + ["--jobs", "3"]) == 0
+    ws = seen["workers"]
+    assert len(ws) == 3 and len({w.scratch for w in ws}) == 3 and len({w.base_cache for w in ws}) == 1
+    assert all(w.oom_kills() is None for w in ws) and len({id(w.dropper) for w in ws}) == 1
+    assert swept == [""], "once every worker stopped, the run sweeps run-wide once"
+    ws[1].sweep("0a1b2c3d")
+    assert swept == ["", "0a1b2c3d"], "an attempt's sweep is scoped to its token"
+    assert json.loads((tmp_path / "o" / "summary.json").read_text())["jobs"] == 3
+    swept.clear()
+    assert forced.main(args) == 0
+    (one,) = seen["workers"]
+    one.sweep("0a1b2c3d")
+    assert swept == [""], "one at a time, the sweep is the run-wide one"
+    assert forced.main(args + ["--jobs", "0"]) == 2
+
+
+def test_each_attempt_names_its_databases_with_its_own_token(tmp_path):
+    seen, swept = [], []
+
+    class Records(forced.Runner):
+        def _run(self, argv, env):
+            seen.append(env[forced.ATTEMPT_ENV])
+            return 0, ""
+
+    runner = Records(Path("rust-bin"), tmp_path / "out", 60, tmp_path / "STOP", scratch=tmp_path / "s",
+                     sweep=lambda attempt: swept.append(attempt) or 0, oom_kills=lambda: 0)
+    runner.invoke("w2e", "x", "real", base=True)
+    runner.invoke("w2e", "x", "real-retry", base=True)
+    assert all(forced.re.fullmatch(r"[0-9a-f]{8}", a) for a in seen) and seen[0] != seen[1]
+    assert swept == seen
+
+
+def test_a_harness_suffix_starts_with_its_attempts_token():
+    import subprocess
+    code = ("import sys; sys.path.insert(0, sys.argv[1]); from rust.cli_harness.run_names import RunNames; "
+            "print(RunNames().name('pl_cf_w2e_x', max_length=40))")
+    root = str(Path(__file__).resolve().parents[4])
+    env = dict(forced.os.environ, PL_HARNESS_ATTEMPT="0a1b2c3d")
+    names = [subprocess.run([sys.executable, "-c", code, root], env=env, capture_output=True,
+                            text=True, check=True).stdout.strip() for _ in range(2)]
+    suffixes = [n.rsplit("_", 1)[1] for n in names]
+    assert all(s.startswith("0a1b2c3d") and len(s) == 16 for s in suffixes)
+    assert suffixes[0] != suffixes[1], "two processes of one attempt share a name"
+    env.pop("PL_HARNESS_ATTEMPT")
+    other = subprocess.run([sys.executable, "-c", code, root], env=env, capture_output=True,
+                           text=True, check=True).stdout.strip()
+    assert len(other.rsplit("_", 1)[1]) == 16
+
+
+def test_a_scoped_sweep_lists_only_its_attempts_databases():
+    """Another worker's live copies are not leftovers; read only but for the
+    two databases it makes (the bench is shared), named as two attempts'
+    harnesses name theirs."""
+    import secrets
+    from psycopg import sql
+    _bench()
+    mine, theirs = secrets.token_hex(4), secrets.token_hex(4)
+    names = [f"pl_cf_w2f_scoped_{mine}{secrets.token_hex(4)}",
+             f"pl_cf_w2f_scoped_{theirs}{secrets.token_hex(4)}"]
+    with pgdisposable._admin() as conn:
+        pgdisposable.assert_disposable_database(conn)
+        try:
+            for n in names:
+                conn.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(n)))
+            assert names[0] in forced.leftover_names(conn, attempt=mine)
+            assert names[1] not in forced.leftover_names(conn, attempt=mine)
+            assert set(names) <= set(forced.leftover_names(conn))
+            with pytest.raises(ValueError):
+                forced.leftover_names(conn, attempt="not-hex!")
+        finally:
+            for n in names:
+                conn.execute(sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(sql.Identifier(n)))
+
+
+@pytest.mark.skipif(not hasattr(forced.os, "killpg"), reason="the runner is Linux; process groups are POSIX")
+def test_an_interrupt_side_by_side_stops_every_running_harness(tmp_path):
+    """Ctrl-C reaches forced.py only: each worker's running harness gets
+    SIGINT (its cleanup renames its databases) before the interrupt reaches
+    main's drain, and no further scenario starts."""
+    import signal
+    import threading
+    script = tmp_path / "harness.py"
+    script.write_text(
+        "import signal, sys, time, os\n"
+        "def cleanup(*_):\n"
+        "    open(os.environ['MARK'] + '.' + str(os.getpid()), 'w').write('cleaned')\n"
+        "    sys.exit(130)\n"
+        "signal.signal(signal.SIGINT, cleanup)\n"
+        "open(os.environ['MARK'] + '.start.' + str(os.getpid()), 'w').write('started')\n"
+        "print('started', flush=True)\n"
+        "time.sleep(600)\n")
+    marks = tmp_path / "mark"
+
+    class Real(forced.Runner):
+        def invoke(self, suite, name, label, base):
+            # Review (Opus, Codex): an interrupted harness exits non-zero, so
+            # the attempt is an error and the scenario would go on to its retry.
+            code, log = self._run([sys.executable, str(script)], dict(forced.os.environ, MARK=str(marks)))
+            return {"status": "pass" if code == 0 else "error", "diffs": [], "seconds": 0, "exit": code}
+
+    # A timeout far past the test's own bound: only the interrupt can stop them.
+    workers = [Real(Path("rust-bin"), tmp_path / "out", 600, tmp_path / "STOP", scratch=tmp_path / f"s{n}")
+               for n in range(2)]
+    threading.Timer(1.5, lambda: signal.raise_signal(signal.SIGINT)).start()
+    started = forced.time.monotonic()
+    with pytest.raises(KeyboardInterrupt):
+        forced.run(workers[0], ["w2e"], None, names=lambda s: ["a", "b", "c", "d"], workers=workers)
+    assert forced.time.monotonic() - started < 30
+    assert len(list(tmp_path.glob("mark.start.*"))) == 2, "an interrupted run started another attempt"
+    assert len([p for p in tmp_path.glob("mark.*") if ".start." not in p.name]) == 2
+
+
+def test_an_interrupted_worker_starts_no_further_attempt(tmp_path):
+    """Review (Opus, Codex): the interrupt lands while an attempt runs; its
+    harness exits non-zero and the scenario would retry. A worker that was
+    interrupted refuses to start another attempt, retry or synthetic."""
+    runs = []
+
+    class Interrupted(forced.Runner):
+        def _run(self, argv, env):
+            runs.append(argv)
+            self.interrupt()  # arrives during this attempt (no harness to signal here)
+            return 130, "KeyboardInterrupt\n"
+
+    runner = Interrupted(Path("rust-bin"), tmp_path / "out", 60, tmp_path / "STOP", scratch=tmp_path / "s",
+                         oom_kills=lambda: 0)
+    with pytest.raises(forced.Cancelled):
+        forced._scenario(runner, "w2e", "x")
+    assert len(runs) == 1
+
+
+def test_an_interrupt_before_an_attempt_starts_no_harness(tmp_path):
+    """Between attempts, or before a worker's first: the interrupt leaves no
+    harness to signal, and the next one never starts."""
+    popened = []
+
+    class Records(forced.Runner):
+        pass
+
+    runner = Records(Path("rust-bin"), tmp_path / "out", 60, tmp_path / "STOP", scratch=tmp_path / "s",
+                     oom_kills=lambda: 0)
+    runner.interrupt()
+    real_popen = forced.subprocess.Popen
+    try:
+        forced.subprocess.Popen = lambda *a, **k: popened.append(a) or pytest.fail("a harness started")
+        with pytest.raises(forced.Cancelled):
+            runner.invoke("w2e", "x", "real", base=True)
+    finally:
+        forced.subprocess.Popen = real_popen
+    assert popened == []
+
+
+def test_a_worker_whose_admission_check_raises_ends_the_run(tmp_path):
+    """Review (Codex): an exception outside the scenario itself (the STOP
+    or disk check) must not read as a complete run with rows missing."""
+    class Broken(SlowRunner):
+        def blocked(self):
+            raise OSError("disk probe failed")
+
+    answers = {n: {"real": PASS} for n in "ab"}
+    workers = [Broken(tmp_path, answers, {}, []) for _ in range(2)]
+    with pytest.raises(OSError, match="disk probe failed"):
+        forced.run(workers[0], ["w2e"], None, names=lambda s: list(answers), workers=workers)
+
+
+def test_a_copy_of_the_base_waits_out_a_reader(monkeypatch):
+    """Review (Codex, Opus): with --jobs another worker's harness may be
+    reading the shared base (its row hashes) when this one copies it; the
+    copy gives up after about 5 s with ObjectInUse, so it is retried."""
+    import psycopg
+    calls = []
+
+    class Conn:
+        def execute(self, statement, params=None):
+            calls.append(statement)
+            if len(calls) < 3:
+                raise psycopg.errors.ObjectInUse('source database "pl_cf_mir_seed" is being accessed by other users')
+
+    monkeypatch.setattr(pgdisposable.time, "sleep", lambda s: None)
+    pgdisposable._copy_retrying(Conn(), "CREATE DATABASE x TEMPLATE pl_cf_mir_seed")
+    assert len(calls) == 3
+    calls.clear()
+
+    class Busy(Conn):
+        def execute(self, statement, params=None):
+            calls.append(statement)
+            raise psycopg.errors.ObjectInUse("still in use")
+
+    with pytest.raises(psycopg.errors.ObjectInUse):
+        pgdisposable._copy_retrying(Busy(), "CREATE DATABASE x TEMPLATE pl_cf_mir_seed", attempts=3)
+    assert len(calls) == 3
+
+
+def test_an_interrupt_racing_the_start_still_stops_the_harness_starting(tmp_path):
+    """The interrupt lands after invoke's check but before the harness
+    starts: _run checks again under the lock that guards the running one."""
+    runner = forced.Runner(Path("rust-bin"), tmp_path / "out", 60, tmp_path / "STOP", scratch=tmp_path / "s")
+    runner.cancelled = True
+    with pytest.raises(forced.Cancelled):
+        runner._run([sys.executable, "-c", "raise SystemExit('a harness started')"], dict(forced.os.environ))
+    assert runner._proc is None
+
+
+@pytest.mark.skipif(not hasattr(forced.os, "killpg"), reason="the runner is Linux; process groups are POSIX")
+def test_an_interrupt_kills_a_harness_that_ignores_it(tmp_path):
+    """As a timeout does: SIGINT, then SIGKILL to the group after the grace,
+    so a harness stuck in its cleanup cannot outlive the run."""
+    import threading
+    script = tmp_path / "stubborn.py"
+    script.write_text("import signal, time\nsignal.signal(signal.SIGINT, signal.SIG_IGN)\n"
+                      "print('started', flush=True)\ntime.sleep(600)\n")
+    runner = forced.Runner(Path("rust-bin"), tmp_path / "out", 600, tmp_path / "STOP", scratch=tmp_path / "s")
+    result = {}
+    worker = threading.Thread(target=lambda: result.update(
+        out=runner._run([sys.executable, str(script)], dict(forced.os.environ))), daemon=True)
+    worker.start()
+    for _ in range(100):
+        if runner._proc is not None:
+            break
+        forced.time.sleep(0.05)
+    started = forced.time.monotonic()
+    runner.interrupt(grace=1.0)
+    worker.join(30)
+    assert not worker.is_alive() and result["out"][0] is not None
+    assert forced.time.monotonic() - started < 15
+
+
 @pytest.mark.parametrize("errored", ["real", "real-retry"])
 def test_a_community_difference_beside_an_errored_attempt_stays_new(tmp_path, errored):
     """Review (Opus confidence 90, Codex P1): with one real attempt showing
@@ -1270,3 +1943,38 @@ def test_the_recordings_hold_both_a_cut_and_a_whole_printout():
         assert why is None, (path.name, why)
         kinds["whole" if forced.harness_lines(suite, data, capped=True) == full else "cut"] += 1
     assert kinds["whole"] and kinds["cut"], kinds
+
+
+def test_side_by_side_each_attempt_reads_its_own_out_json(tmp_path):
+    """Conductor (#1446's truncation fix with --jobs): the runner rebuilds an
+    attempt's full differences from its harness's --out JSON, so at --jobs 2
+    each worker must read its own scenario's file. Two recorded routes runs
+    with different full counts (8 and 1) start together; each scenario's
+    attempts keep their own count, from their own file."""
+    import shutil
+    import threading
+    together = threading.Barrier(2, timeout=30)
+    seen = []
+
+    class Recorded(forced.Runner):
+        first = True
+
+        def _run(self, argv, env):
+            name, out = argv[argv.index("--only") + 1], Path(argv[argv.index("--out") + 1])
+            if self.first:  # both first attempts run at once
+                self.first = False
+                together.wait()
+            seen.append((name, out))
+            shutil.copy(RECORDED / f"routes--{name}.json", out)
+            return 1, (RECORDED / f"routes--{name}.log").read_text(encoding="utf-8")
+
+    workers = [Recorded(Path("rust-bin"), tmp_path / "out", 60, tmp_path / "STOP", scratch=tmp_path / f"s{n}",
+                        sweep=lambda attempt: 0, oom_kills=lambda: None) for n in range(2)]
+    _, private = forced.run(workers[0], ["routes"], None, names=lambda s: ["seeded", "trust-bind"],
+                            workers=workers)
+    want = {"seeded": FULL_LINES["routes--seeded"], "trust-bind": FULL_LINES["routes--trust-bind"]}
+    for name, count in want.items():
+        for label in ("real", "real_retry", "synthetic"):
+            attempt = private[f"routes/{name}"][label]
+            assert attempt["diffs_complete"] and len(attempt["diffs"]) == count, (name, label)
+    assert len({out for _, out in seen}) == len({(n, out.parent.name) for n, out in seen})
