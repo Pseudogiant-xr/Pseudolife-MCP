@@ -85,6 +85,22 @@ def test_signal_termination_is_not_a_controlled_clean_exit():
     with pytest.raises(RuntimeError): graceful_stop(daemon)
 
 
+def test_a_daemon_gone_before_its_clean_stop_names_its_exit():
+    """Partial forced run 870fb28fc: the restart pair failed with "owned
+    daemon already exited before clean stop" and no record of which daemon
+    or how it ended. The error now names the side and its exit code or
+    signal (-9 is SIGKILL, as the OOM killer sends)."""
+    from types import SimpleNamespace
+    gone = SimpleNamespace(poll=lambda: -9, returncode=-9)
+    daemon = SimpleNamespace(kind="rust", proc=gone, log=Path("rs.log"), stop=lambda: None)
+    with pytest.raises(RuntimeError, match=r"rust daemon already exited \(code -9, SIGKILL\) before clean stop"):
+        graceful_stop(daemon)
+    gone = SimpleNamespace(poll=lambda: 3, returncode=3)
+    daemon = SimpleNamespace(kind="python", proc=gone, log=Path("py.log"), stop=lambda: None)
+    with pytest.raises(RuntimeError, match=r"python daemon already exited \(code 3\) before clean stop"):
+        graceful_stop(daemon)
+
+
 def pruning_state():
     return {"catalog": {"sequences": [["public", "retrieval_events_id_seq", "bigint", 1, 1, 2]]},
             "rows": {"public.retrieval_events": {
@@ -484,3 +500,29 @@ def test_the_session_scenarios_final_bank_ignores_the_refresh_clocks(name):
     scenario.clock_windows = {"python": WINDOW}
     assert scenario.normalize_db(refreshed(101.0), before(), "python") == \
         scenario.normalize_db(refreshed(104.5), before(), "python")
+
+
+def test_a_bank_that_held_a_graph_waits_for_the_dreams_graph_refresh(monkeypatch):
+    """Partial forced run 870fb28fc: at the session milestone Rust had
+    rewritten every base community row and Python none; Python's graph
+    refresh had not run yet. On a bank that held a graph the capture also
+    waits for a digest computed at or after this daemon's start."""
+    import dbstate
+    from background_sessions import graph_refresh_pending
+    start = 100.0
+    without = state()
+    assert not graph_refresh_pending(without, before(), start)        # no graph: never waits
+    held = before()
+    held["rows"]["public.meta"]["rows"].append(["graph_digest", {"computed_at": 50.0}])
+    assert graph_refresh_pending(without, held, start)               # the digest not yet rewritten
+    stale = state()
+    stale["rows"]["public.meta"]["rows"].append(["graph_digest", {"computed_at": 50.0}])
+    assert graph_refresh_pending(stale, held, start)                 # the copy's old digest
+    done = state()
+    done["rows"]["public.meta"]["rows"].append(["graph_digest", {"computed_at": 101.0}])
+    assert not graph_refresh_pending(done, held, start)
+    # Under a base, the digest row is the base's, so before leaves it out.
+    monkeypatch.setattr(dbstate, "base_keys",
+                        lambda qualified: {'"graph_digest"'} if qualified == "public.meta" else set())
+    assert graph_refresh_pending(without, before(), start)
+    assert not graph_refresh_pending(done, before(), start)

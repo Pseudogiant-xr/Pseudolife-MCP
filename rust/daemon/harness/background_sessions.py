@@ -7,6 +7,7 @@ against that arm's own invocation window before normalization.
 from __future__ import annotations
 
 import copy
+import json
 import math
 import os
 import signal
@@ -119,6 +120,8 @@ svc._storage.close()
                             if "dream_state" in entries["columns"] else None
                         reached &= col is None or all(row[col] != "pending"
                                                       for row in entries["rows"])
+                        # ...and, on a bank with a graph, refreshed it.
+                        reached &= not graph_refresh_pending(state, self.before, daemon.started_at_unix)
                     if self.resume_refusal:
                         # Observe a second failing tick: the first tick's
                         # durable closes survive and neither tick dreams.
@@ -249,6 +252,23 @@ REFRESH_CLOCKS = {
 REFRESH_META_CLOCKS = {"graph_digest": "computed_at"}
 
 
+def graph_refresh_pending(state, before, start):
+    """True while a bank that held a graph before the arm ran (a
+    graph_digest row in ``before`` or the base) has no digest computed at or
+    after this daemon's ``start``: its session-end dream's graph refresh is
+    still to come. In the partial forced run (870fb28fc) the milestone held
+    once both had acknowledged the dream's entries, but Rust had rewritten
+    every base community row by then and Python none. A bank without a graph
+    is never refreshed, so a synthetic fixture never waits on this."""
+    held = any(r[0] == "graph_digest" for r in before["rows"].get("public.meta", {}).get("rows", [])) \
+        or json.dumps("graph_digest") in dbstate.base_keys("public.meta")
+    if not held:
+        return False
+    digest = {r[0]: r[1] for r in state["rows"]["public.meta"]["rows"]}.get("graph_digest")
+    at = digest.get("computed_at") if isinstance(digest, dict) else None
+    return not (isinstance(at, (int, float)) and not isinstance(at, bool) and at >= start)
+
+
 def normalize_refresh_clocks(state, before, windows):
     """A refresh's clocks as dbstate's tokens: the columns above as
     ``dbstate.normalize`` treats a clock (a new row's, or a base row's
@@ -344,7 +364,19 @@ def prior_close_maps(state, before):
 def graceful_stop(daemon):
     """Signal only the Popen-owned process/group, then observe its exit."""
     if daemon.proc is None or daemon.proc.poll() is not None:
-        raise RuntimeError("owned daemon already exited before clean stop")
+        # Which side, and how it ended: a negative code is the signal (-9 is
+        # the OOM killer's SIGKILL), so a crash and a kill read apart.
+        kind = getattr(daemon, "kind", "owned")
+        code = None if daemon.proc is None else daemon.proc.returncode
+        how = "no process" if code is None else f"code {code}"
+        if isinstance(code, int) and code < 0:
+            try:
+                name = signal.Signals(-code).name
+            except ValueError:  # Windows defines no SIGKILL; the runner is Linux
+                name = {6: "SIGABRT", 9: "SIGKILL", 11: "SIGSEGV", 15: "SIGTERM"}.get(-code)
+            if name:
+                how += f", {name}"
+        raise RuntimeError(f"{kind} daemon already exited ({how}) before clean stop; log {daemon.log}")
     daemon.proc.send_signal(signal.CTRL_BREAK_EVENT if os.name == "nt" else signal.SIGTERM)
     code = daemon.proc.wait(timeout=120)
     if code != 0:
