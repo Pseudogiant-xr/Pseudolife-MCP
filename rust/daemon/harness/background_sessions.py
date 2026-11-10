@@ -7,6 +7,7 @@ against that arm's own invocation window before normalization.
 from __future__ import annotations
 
 import copy
+import json
 import math
 import os
 import signal
@@ -102,7 +103,9 @@ svc._storage.close()
             for side, daemon in procs.items():
                 dsn = daemon.env["PSEUDOLIFE_MCP_DATABASE_URL"]
                 deadline = time.monotonic() + 120
+                settle, waiting = StableFor(REFRESH_SETTLE_S), "the session milestone"
                 while True:
+                    waiting = "the session milestone"  # what this pass still lacks
                     state = dbstate.dump(dsn)
                     table = state["rows"]["public.episodes"]
                     episodes = [dict(zip(table["columns"], row)) for row in table["rows"]]
@@ -119,19 +122,29 @@ svc._storage.close()
                             if "dream_state" in entries["columns"] else None
                         reached &= col is None or all(row[col] != "pending"
                                                       for row in entries["rows"])
+                        # ...and, on a bank with live edges, refreshed it and
+                        # finished writing (REFRESH_SETTLE_S).
+                        if reached:
+                            why = refresh_wait(state, daemon.started_at_unix, live_edges(dsn),
+                                               settle, time.monotonic())
+                            if why:
+                                reached, waiting = False, why
                     if self.resume_refusal:
                         # Observe a second failing tick: the first tick's
                         # durable closes survive and neither tick dreams.
                         reached &= daemon.log.read_text(errors="replace").count("session reaper error:") >= 2
                     if reached: break
                     if time.monotonic() > deadline:
-                        raise RuntimeError(f"{side} did not reach {self.name} milestone; log {daemon.log}")
+                        raise RuntimeError(f"{side} did not reach {self.name} milestone (waiting for "
+                                           f"{waiting}); log {daemon.log}")
                     time.sleep(0.1)
                 captured = time.time()
                 self.validate_expected(state)
                 self.closed_states[side] = state
                 normalized = normalize_closes(state, self.before, daemon.started_at_unix, captured)
-                scrubbed = harness.scrub_declared_rows(normalized, self.before)["state"]
+                scrubbed = keyed_meta(normalize_refresh_clocks(
+                    harness.scrub_declared_rows(normalized, self.before)["state"],
+                    self.before, [(daemon.started_at_unix, captured)]))
                 arms[side] = {"status": 200, "headers": {}, "json": {"db": scrubbed, "events": {"session_end_dream_triggers": triggers}}}
             c = harness.case("bank after idle close" if not self.sweep else "bank after empty sweep", "OBSERVE", "/background/session-state")
             c["_answers"] = (arms["python"], arms["rust"])
@@ -147,18 +160,23 @@ svc._storage.close()
                     self.validate_expected(state)
                     # Restart must preserve the original close times exactly.
                     validate_restart_clocks(state, self.closed_states[side])
-                    normalized = normalize_closes(state, self.before, self.starts[side], time.time())
+                    now = time.time()
+                    normalized = normalize_closes(state, self.before, self.starts[side], now)
                     triggers = daemon.log.read_text(errors="replace").count("session-end dream trigger:")
-                    arms[side] = {"status": 200, "headers": {}, "json": {"db": harness.scrub_declared_rows(normalized, self.before)["state"], "events": {"session_end_dream_triggers": triggers}}}
+                    db = keyed_meta(normalize_refresh_clocks(
+                        harness.scrub_declared_rows(normalized, self.before)["state"],
+                        self.before, [(self.starts[side], now)]))
+                    arms[side] = {"status": 200, "headers": {}, "json": {"db": db, "events": {"session_end_dream_triggers": triggers}}}
                 c = harness.case("bank after owned clean stop and restart", "OBSERVE", "/background/session-state")
                 c["_answers"] = (arms["python"], arms["rust"])
                 rows.append(c)
             return rows
 
         def normalize_db(self, state, before, side):
-            return dbstate.normalize(normalize_closes(state, before, self.starts[side], time.time()),
-                                     harness.DB_NONDETERMINISTIC, before,
-                                     windows=self.clock_window(side))
+            state = dbstate.normalize(normalize_closes(state, before, self.starts[side], time.time()),
+                                      harness.DB_NONDETERMINISTIC, before,
+                                      windows=self.clock_window(side))
+            return normalize_refresh_clocks(state, before, self.clock_window(side))
 
         def validate_expected(self, state):
             table = state["rows"]["public.episodes"]
@@ -228,6 +246,116 @@ def validate_restart_clocks(state, closed):
     for key in ("deferred_empty_roots", "episode_tombstones"):
         if a.get(key) != b.get(key):
             raise RuntimeError("restart rewrote close metadata")
+
+
+# A session-end dream refreshes graph insight on each daemon. On a real
+# bank's copy, which holds a graph, that rewrites the communities, their
+# memberships, the derived entity sources and meta's graph_digest at each
+# daemon's own now(): in the partial forced run (870fb28fc) the partition and
+# the counts agreed, and only these clocks differed. A synthetic fixture
+# holds no graph, so nothing is refreshed there.
+REFRESH_CLOCKS = {
+    ("communities", "computed_at"): "clock: graph insight refresh",
+    ("entity_communities", "computed_at"): "clock: graph insight refresh",
+    ("entity_sources", "updated_at"): "clock: derived entity source refresh",
+}
+REFRESH_META_CLOCKS = {"graph_digest": "computed_at"}
+
+
+def keyed_meta(state):
+    """An observed bank with meta as ``by_key`` ({key: value}) instead of
+    rows: a meta difference then prints its row's key
+    (.json.db.rows.public.meta.by_key.graph_digest...), never an index whose
+    row only its value could identify, and row order no longer matters. Used
+    only for the session observations; the final DB comparison keeps rows."""
+    meta = state["rows"].get("public.meta")
+    if not meta or "rows" not in meta:
+        return state
+    state = copy.deepcopy(state)
+    key, value = meta["columns"].index("key"), meta["columns"].index("value")
+    state["rows"]["public.meta"] = {
+        "columns": meta["columns"],
+        "by_key": {row[key]: row[value] for row in meta["rows"]},
+        **{k: v for k, v in meta.items() if k not in ("columns", "rows")},
+    }
+    return state
+
+
+def live_edges(dsn):
+    """The arm's bank holds a live edge. Both daemons refresh graph insight
+    at the end of every completed dream, the empty-backlog path included
+    (service_dream.py ~1560 and ~2399, dream/run.rs ~1972 and ~2275), over
+    the graph their load_graph reads, and skip it (empty_graph) when that
+    graph has no edges. Asked of the database, not the dump: a base's
+    untouched edges are left out of it."""
+    import psycopg
+    with psycopg.connect(dsn) as conn:
+        return bool(conn.execute("SELECT EXISTS (SELECT 1 FROM edges "
+                                 "WHERE superseded_at IS NULL)").fetchone()[0])
+
+
+# After the digest, both dreams still write: the entity-source backfill and
+# the link retype (service_dream.py ~2399, dream/run.rs ~2275), in a
+# transaction of their own, and neither daemon logs the dream's end. On a
+# bank with a graph the capture therefore also needs the dumped rows to stay
+# the same this long. That narrows the race; a completion signal from both
+# daemons would close it.
+REFRESH_SETTLE_S = 3.0
+
+
+class StableFor:
+    """True once the same dumped rows have been seen for ``seconds``."""
+
+    def __init__(self, seconds):
+        self.seconds, self.sig, self.since = seconds, None, None
+
+    def __call__(self, state, now):
+        sig = json.dumps(state["rows"], sort_keys=True, default=str)
+        if sig != self.sig:
+            self.sig, self.since = sig, now
+            return False
+        return now - self.since >= self.seconds
+
+
+def graph_refresh_pending(state, start):
+    """True while the bank has no graph digest computed at or after this
+    daemon's ``start``: its session-end dream's graph refresh is still to
+    come. In the partial forced run (870fb28fc) the milestone held once both
+    had acknowledged the dream's entries, but Rust had rewritten every base
+    community row by then and Python none."""
+    digest = {r[0]: r[1] for r in state["rows"]["public.meta"]["rows"]}.get("graph_digest")
+    at = digest.get("computed_at") if isinstance(digest, dict) else None
+    return not (isinstance(at, (int, float)) and not isinstance(at, bool) and at >= start)
+
+
+def refresh_wait(state, start, live, settle, now):
+    """What a capture still waits for after the session milestone, or None:
+    on a bank with live edges (``live``), the graph refresh, then
+    REFRESH_SETTLE_S of unchanged rows. A bank without live edges, a
+    synthetic fixture included, is never refreshed and never waits."""
+    if not live:
+        return None
+    if graph_refresh_pending(state, start):
+        return "its graph insight refresh"
+    if not settle(state, now):
+        return "its bank to settle after the refresh"
+    return None
+
+
+def normalize_refresh_clocks(state, before, windows):
+    """A refresh's clocks as dbstate's tokens: the columns above as
+    ``dbstate.normalize`` treats a clock (a new row's, or a base row's
+    inside the arm's window), and graph_digest's computed_at inside the
+    window. Every other clock, and every other value, stays raw."""
+    state = dbstate.normalize(state, REFRESH_CLOCKS, before, windows=windows)
+    spans = dbstate._clock_windows(windows)
+    for row in state["rows"].get("public.meta", {}).get("rows", []):
+        field = REFRESH_META_CLOCKS.get(row[0])
+        value = row[1].get(field) if field and isinstance(row[1], dict) else None
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) \
+                and any(lo <= value <= hi for lo, hi in spans):
+            row[1][field] = f"<{field}>"
+    return state
 
 
 def normalize_closes(state, before, start, end):
@@ -309,7 +437,19 @@ def prior_close_maps(state, before):
 def graceful_stop(daemon):
     """Signal only the Popen-owned process/group, then observe its exit."""
     if daemon.proc is None or daemon.proc.poll() is not None:
-        raise RuntimeError("owned daemon already exited before clean stop")
+        # Which side, and how it ended: a negative code is the signal (-9 is
+        # the OOM killer's SIGKILL), so a crash and a kill read apart.
+        kind = getattr(daemon, "kind", "owned")
+        code = None if daemon.proc is None else daemon.proc.returncode
+        how = "no process" if code is None else f"code {code}"
+        if isinstance(code, int) and code < 0:
+            try:
+                name = signal.Signals(-code).name
+            except ValueError:  # Windows defines no SIGKILL; the runner is Linux
+                name = {6: "SIGABRT", 9: "SIGKILL", 11: "SIGSEGV", 15: "SIGTERM"}.get(-code)
+            if name:
+                how += f", {name}"
+        raise RuntimeError(f"{kind} daemon already exited ({how}) before clean stop; log {daemon.log}")
     daemon.proc.send_signal(signal.CTRL_BREAK_EVENT if os.name == "nt" else signal.SIGTERM)
     code = daemon.proc.wait(timeout=120)
     if code != 0:
