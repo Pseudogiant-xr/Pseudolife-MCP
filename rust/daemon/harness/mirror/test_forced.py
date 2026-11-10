@@ -551,7 +551,72 @@ def test_sweep_analyzer_tick_skips_only_its_real_bank_arms(tmp_path):
     counted = forced.counts(report)["w2e"]
     assert counted["excluded"] == 1 and counted["pass"] == 1 and counted["new"] == 1
     assert "every entity" in forced.REAL_BANK_EXCLUDED["w2e/sweep-analyzer-tick"]
-    assert list(forced.REAL_BANK_EXCLUDED) == ["w2e/sweep-analyzer-tick"]
+    assert sorted(forced.REAL_BANK_EXCLUDED) == [
+        "w2d_search/hide-superseded", "w2d_search/mcp-stats", "w2e/candidate-auto",
+        "w2e/sweep-analyzer-tick"]
+
+
+def test_the_maintainers_real_bank_exclusions_have_their_reasons():
+    """Maintainer decision D2, 2026-11-10: three more scenarios whose premise
+    cannot hold on a real bank. candidate-auto-reopen is not excluded: it
+    stays an error unless both real attempts hit the accepted OOM."""
+    for key, word in (("w2d_search/hide-superseded", "ranking"), ("w2d_search/mcp-stats", "graduation"),
+                      ("w2e/candidate-auto", "judged first")):
+        assert word in forced.REAL_BANK_EXCLUDED[key] and "2026-11-10" in forced.REAL_BANK_EXCLUDED[key]
+    assert "w2e/candidate-auto-reopen" not in forced.REAL_BANK_EXCLUDED
+
+
+COMMUNITY_ROWS = "DIFF [graph-writes] step 35 {\"op\": \"tool\"}: db /rows/public.communities/rows: row only in python: [1]"
+COMMUNITY_MISSING = "DIFF [graph-writes] step 35 {\"op\": \"tool\"}: db /rows/public.communities/base_missing/count: python 1 vs rust 0"
+MEMBERSHIP = "DIFF [graph-writes] step 35 {\"op\": \"tool\"}: db /rows/public.entity_communities/rows: row only in rust: [2]"
+NODE_COMMUNITY = "DIFF [graph-writes] step 36 {\"op\": \"tool\"}: .value.nodes[3].community: python 4 vs rust 5"
+INSIGHT = "DIFF [graph-writes] step 36 {\"op\": \"tool\"}: .value.graph_insight.communities: python 9 vs rust 8"
+ROUTES_COMMUNITY = "DB DIFF [reaper] /rows/public.communities/rows: row only in rust: [7, \"x\", 1, 0.5, 2.0]"
+
+
+def _community_rows(tmp_path, first, retry=None):
+    answers = {"graph-writes": {"real": {"status": "diff", "diffs": first, "seconds": 1.0},
+                                "real-retry": {"status": "diff", "diffs": retry or first, "seconds": 1.0},
+                                "synthetic": PASS}}
+    report, _ = forced.run(FakeRunner(tmp_path, answers), ["w2e"], None, names=lambda s: list(answers))
+    return report["suites"]["w2e"]["rows"][0]
+
+
+def test_a_difference_confined_to_communities_is_accepted(tmp_path):
+    """Maintainer decision D1, 2026-11-10: on a real bank's copy the two
+    daemons' community partitions differ by Louvain's visiting order (Python
+    seed.shuffle, Rust graph order; #1417's divergence entry). A scenario
+    whose every difference is in the community tables or a community field
+    is accepted, with the reason recorded."""
+    row = _community_rows(tmp_path, [COMMUNITY_ROWS, COMMUNITY_MISSING, MEMBERSHIP, NODE_COMMUNITY, INSIGHT])
+    assert (row["class"], row.get("accepted_as")) == ("accepted", "community-partition")
+    row = _community_rows(tmp_path, [ROUTES_COMMUNITY])
+    assert row["class"] == "accepted"
+    assert "visiting order" in forced.ACCEPTED_DIVERGENCES["community-partition"]
+    assert "2026-11-10" in forced.ACCEPTED_DIVERGENCES["community-partition"]
+
+
+@pytest.mark.parametrize("other", [
+    "DIFF [graph-writes] step 35 {\"op\": \"tool\"}: db /rows/public.facts/rows: row only in python: [1]",
+    "DIFF [graph-writes] step 36 {\"op\": \"tool\"}: .value.confirmed: only in rust",
+    "DIFF [graph-writes] step 36 {\"op\": \"tool\"}: .value.community_count: python 1 vs rust 2",
+    "DIFF [graph-writes] step 35 {\"op\": \"tool\"}: db /rows/public.communities_backup/rows: row only in rust: [1]",
+])
+def test_community_plus_any_other_difference_stays_new(tmp_path, other):
+    """The confinement is exact: one difference anywhere else, in the first
+    attempt or the retry, keeps the scenario new."""
+    assert _community_rows(tmp_path, [COMMUNITY_ROWS, NODE_COMMUNITY, other])["class"] == "new"
+    assert _community_rows(tmp_path, [COMMUNITY_ROWS], retry=[COMMUNITY_ROWS, other])["class"] == "new"
+
+
+def test_the_summary_lists_the_accepted_divergences(tmp_path, monkeypatch):
+    _main_env(monkeypatch)
+    monkeypatch.setattr(forced, "scenario_names", lambda suite: ["store-defaults"])
+    monkeypatch.setattr(forced, "run", lambda runner, *a, **k: ({"suites": {}, "not_forced": {},
+                                                                 "complete": True}, {}))
+    forced.main(["--rust-bin", "x", "--out", str(tmp_path / "o"), "--suites", "w2e", "--only", "store-defaults"])
+    summary = json.loads((tmp_path / "o" / "summary.json").read_text())
+    assert summary["accepted_divergences"] == forced.ACCEPTED_DIVERGENCES
 
 
 def test_an_excluded_scenario_whose_synthetic_arm_fails_is_an_error(tmp_path):
@@ -722,25 +787,26 @@ def _rows_for(tmp_path, answers, oom):
 def test_a_known_python_memory_limit_is_accepted_not_an_error(tmp_path):
     """Maintainer decision (c), 2026-11-08: candidate-auto and -reopen
     exceed the runner's memory on Python at the harness's -1.0 floors."""
+    # candidate-auto's real-bank arms are excluded since 2026-11-10 (D2), so
+    # the rule is pinned on candidate-auto-reopen, which still runs them.
     err = {"status": "error", "diffs": [], "error_tail": ["IncompleteRead"], "seconds": 1.0}
-    answers = {"candidate-auto": {"real": err, "real-retry": err, "synthetic": PASS},
-               "dream-deep-dry": {"real": err, "real-retry": err, "synthetic": PASS},
+    answers = {"dream-deep-dry": {"real": err, "real-retry": err, "synthetic": PASS},
                "candidate-auto-reopen": {"real": err, "real-retry": err, "synthetic": PASS}}
-    rows, report = _rows_for(tmp_path, answers, {("candidate-auto", "real"): 1,
-                                                 ("candidate-auto", "real-retry"): 1,
-                                                 ("dream-deep-dry", "real"): 1,
+    rows, report = _rows_for(tmp_path, answers, {("dream-deep-dry", "real"): 1,
                                                  ("dream-deep-dry", "real-retry"): 1,
                                                  ("candidate-auto-reopen", "real"): 1,
-                                                 ("candidate-auto-reopen", "synthetic"): 1})
-    assert rows["candidate-auto"]["class"] == "accepted"
-    # Near misses: an OOM in a scenario not listed, and a listed one whose
-    # real retry failed without an OOM (the first attempt's and the small
-    # synthetic arm's OOM do not excuse it).
+                                                 ("candidate-auto-reopen", "real-retry"): 1})
+    assert rows["candidate-auto-reopen"]["class"] == "accepted"
+    # Near miss: an OOM in a scenario not listed.
     assert rows["dream-deep-dry"]["class"] == "error"
-    assert rows["candidate-auto-reopen"]["class"] == "error"
     counted = forced.counts(report)["w2e"]
-    assert counted["accepted"] == 1 and counted["error"] == 2
-    assert "Python" in forced.ACCEPTED_OOM["w2e/candidate-auto"]
+    assert counted["accepted"] == 1 and counted["error"] == 1
+    assert "Python" in forced.ACCEPTED_OOM["w2e/candidate-auto-reopen"]
+    # Near miss: the listed one whose real retry failed without an OOM (the
+    # first attempt's and the small synthetic arm's OOM do not excuse it).
+    rows, _ = _rows_for(tmp_path, {"candidate-auto-reopen": answers["candidate-auto-reopen"]},
+                        {("candidate-auto-reopen", "real"): 1, ("candidate-auto-reopen", "synthetic"): 1})
+    assert rows["candidate-auto-reopen"]["class"] == "error"
 
 
 def test_real_bank_arms_get_the_longer_dream_rest_timeout(tmp_path, monkeypatch):

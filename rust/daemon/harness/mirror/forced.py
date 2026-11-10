@@ -86,7 +86,34 @@ REAL_BANK_EXCLUDED = {
         "its seeded entities are the newest, and each daemon's analyzer walks 50 per tick from the "
         "copied cursor on its own timer, so the two arms compare at different stages (the settle "
         "also never went quiet: forced run, 2026-11-08)"),
+    # Maintainer decision D2, 2026-11-10 (forced run 8eb08c214's findings).
+    "w2d_search/hide-superseded": (
+        "its hidden and served sets depend on the bank's ranking: on a real bank the seeded "
+        "entries compete with the real ones for the top places, so the result reflects the data, "
+        "not the daemon (forced run 8eb08c214); excluded by the maintainer, 2026-11-10"),
+    "w2d_search/mcp-stats": (
+        "its coverage check needs the stats graduation floor reached, which a real bank's "
+        "distribution does not reach (coverage stats.graduation below the floor, forced run "
+        "8eb08c214); excluded by the maintainer, 2026-11-10"),
+    "w2e/candidate-auto": (
+        "its expects assume the candidate judge's pairs are its own and are judged first; on a real "
+        "graph the judge's top pairs are real ones, and the retry then hits the accepted Python "
+        "memory limit (forced run 8eb08c214); excluded by the maintainer, 2026-11-10"),
 }
+# Differences the maintainer accepted on real-bank arms, by name: a scenario
+# whose every difference place (in the first attempt and the retry) is one
+# of these is classified "accepted" with the reason, not "new". One place
+# anywhere else keeps it new.
+ACCEPTED_DIVERGENCES = {
+    "community-partition": (
+        "the community partition of a real graph differs by Louvain's visiting order (Python "
+        "seed.shuffle with random.Random(42), Rust graph order; rust/daemon/divergences/"
+        "write-path-w2-e/memory-dream-run-the-graph/louvain-s-visiting-order.md, #1417): on a "
+        "real bank's copy Python re-partitions the copied communities after graph writes and Rust "
+        "reproduces the base's. Accepted by the maintainer for real-bank arms, 2026-11-10 (D1)"),
+}
+COMMUNITY_TABLES = ("public.communities", "public.entity_communities")
+COMMUNITY_FIELDS = ("community", "communities")
 # Known limits the maintainer accepted, by scenario: an error where both real
 # attempts each saw the runner's cgroup OOM counter rise is classified
 # "accepted" with this reason, not "error". Any other error in these
@@ -525,18 +552,41 @@ def run(runner: Runner, suites: list[str], only: list[str] | None,
             # Each failing real attempt must itself have been OOM-killed: an
             # unrelated failure stays an error, and the small synthetic arm's
             # kills are not the accepted limit.
+            accepted_as = None
             if verdict == "error" and f"{suite}/{name}" in ACCEPTED_OOM \
                     and all((a.get("oom_kills") or 0) > 0 for a in (first, retry)):
-                verdict = "accepted"
+                verdict, accepted_as = "accepted", "oom"
+            elif verdict == "new" and all(_community_only(a) for a in (first, retry)
+                                          if a and a["status"] == "diff"):
+                verdict, accepted_as = "accepted", "community-partition"
             rows.append({"scenario": name, "class": verdict, "differences": len(first["diffs"]),
                          "seconds": first["seconds"], "base": first.get("base"),
-                         "oom_kills": _oom_total(first, retry, synthetic)})
+                         "oom_kills": _oom_total(first, retry, synthetic),
+                         **({"accepted_as": accepted_as} if accepted_as else {})})
             if verdict != "pass":
                 private[f"{suite}/{name}"] = {"real": first, "real_retry": retry, "synthetic": synthetic}
             print(f"{suite}/{name}: {verdict} ({len(first['diffs'])} differences, {first['seconds']}s)",
                   flush=True)
     report["complete"] = True
     return report, private
+
+
+def _community_place(place: str) -> bool:
+    """A difference place in the community tables (a db path under one of
+    them) or a community field (a response path whose last key is one)."""
+    for table in COMMUNITY_TABLES:
+        if place == f"/rows/{table}/rows" or place.startswith(f"/rows/{table}/"):
+            return True
+    if place.startswith("db ") and place[3:].split("[", 1)[0].split(".", 1)[0] in (
+            t.split(".", 1)[1] for t in COMMUNITY_TABLES):
+        return True
+    return place.startswith(".") and place.rsplit(".", 1)[-1].replace("[]", "") in COMMUNITY_FIELDS
+
+
+def _community_only(attempt: dict) -> bool:
+    """Every difference of an attempt is in the community tables or fields."""
+    places = signatures(attempt)
+    return bool(places) and all(_community_place(where) for _, where in places)
 
 
 def _oom_total(*attempts) -> int | None:
@@ -674,6 +724,7 @@ def main(argv: list[str] | None = None) -> int:
                "not_forced": report["not_forced"], "quiet_base": quiet_base_use(report),
                "curation_base": curation_base_use(report),
                "accepted_limits": ACCEPTED_OOM,
+               "accepted_divergences": ACCEPTED_DIVERGENCES,
                "real_bank_exclusions": REAL_BANK_EXCLUDED,
                "fixture_notes": FIXTURE_NOTES,
                "counts": counts(report)}
