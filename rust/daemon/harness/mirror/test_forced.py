@@ -736,6 +736,38 @@ def test_the_response_side_acceptance_is_confined_to_the_partition_and_digest(tm
     assert _community_rows(tmp_path, [line])["class"] == "new"
 
 
+def _observation(membership, digest, meta_by_key=True):
+    """One side's session observation as background_sessions builds it:
+    {"db": <state>}, meta keyed by key (keyed_meta) or as dbstate's rows."""
+    meta = ({"columns": ["key", "value"], "by_key": {"graph_digest": digest}} if meta_by_key
+            else {"columns": ["key", "value"], "rows": [["graph_digest", digest]]})
+    return {"status": 200, "headers": {}, "json": {"db": {"rows": {
+        "public.communities": {"columns": ["id", "label", "size", "cohesion", "computed_at"],
+                               "rows": [[1, "a", len(membership), 0.5, "<computed_at>"]]},
+        "public.entity_communities": {"columns": ["entity_id", "community_id", "computed_at"],
+                                      "rows": [[7, membership[0], "<computed_at>"]]},
+        "public.meta": meta}}}}
+
+
+def test_the_comparators_own_output_for_an_observation_is_classified(tmp_path):
+    """Review (Codex P2): the acceptance must match what run.py's comparator
+    really prints for a session observation, not only hand-written paths.
+    The keyed meta (background_sessions.keyed_meta, a companion change)
+    names the digest; dbstate's positional rows do not, so they stay new."""
+    sys.path.insert(0, str(forced.HARNESS))
+    import run
+    py = _observation([1, 2], {"totals": {"communities": 3}, "surprises": [{"src": 1}]})
+    rs = _observation([2, 2, 2], {"totals": {"communities": 2}, "surprises": [{"src": 4}]})
+    items = run.diff_values(py, rs)
+    assert any(".json.db.rows.public.meta.by_key.graph_digest." in i for i in items), items
+    line = f"DIFF [session-reap] bank after idle close: {items}"
+    assert _community_rows(tmp_path, [line])["class"] == "accepted"
+    positional = run.diff_values(_observation([1, 2], {"totals": {"communities": 3}}, False),
+                                 _observation([2, 2, 2], {"totals": {"communities": 2}}, False))
+    line = f"DIFF [session-reap] bank after idle close: {positional}"
+    assert _community_rows(tmp_path / "p", [line])["class"] == "new"
+
+
 def test_a_response_side_digest_alone_is_not_accepted(tmp_path):
     assert _community_rows(tmp_path, [_observed(*RESPONSE_DIGEST)])["class"] == "new"
     assert _community_rows(tmp_path / "b", [_observed(*RESPONSE_DIGEST), ROUTES_DIGEST])["class"] == "new"
