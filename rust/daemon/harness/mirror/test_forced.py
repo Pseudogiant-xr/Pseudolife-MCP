@@ -693,6 +693,54 @@ def test_the_graph_digest_acceptance_covers_that_meta_row_only(tmp_path, other):
     assert _community_rows(tmp_path, [COMMUNITY_ROWS, DIGEST_PY, DIGEST_RS, other])["class"] == "new"
 
 
+def _observed(*items):
+    """A routes session observation's case line (run.py prints a case's
+    diff list as its repr): response-side bank paths, one per value."""
+    return f"DIFF [session-reap] bank after idle close: {list(items)}"
+
+
+RESPONSE_PARTITION = (".json.db.rows.public.entity_communities.rows[3][1]: python 5 vs rust 6",
+                      ".json.db.rows.public.communities.rows[0][2]: python 4 vs rust 3",
+                      ".json.db.rows.public.communities.rows: python [[1, 2]] vs rust [[1, 2], [2, 1]]")
+RESPONSE_DIGEST = (".json.db.rows.public.meta.by_key.graph_digest.surprises[0].src: python 1 vs rust 2",
+                   ".json.db.rows.public.meta.by_key.graph_digest.totals.communities: python 9 vs rust 8")
+
+
+def test_the_response_side_partition_and_digest_are_accepted_like_the_bank_side(tmp_path):
+    """Maintainer decision, 2026-11-10 (box check of the session scenarios):
+    the observed bank's partition values (communities rows, a membership's
+    community_id) and the graph_digest value, named by its key, are the same
+    D1 difference on the response side. A routes DB line beside them too."""
+    line = _observed(*RESPONSE_PARTITION, *RESPONSE_DIGEST)
+    row = _community_rows(tmp_path, [line, ROUTES_COMMUNITY, ROUTES_DIGEST])
+    assert (row["class"], row.get("accepted_as")) == ("accepted", "community-partition")
+    assert _community_rows(tmp_path / "p", [_observed(*RESPONSE_PARTITION)])["class"] == "accepted"
+    assert "response-side" in forced.ACCEPTED_DIVERGENCES["community-partition"]
+
+
+@pytest.mark.parametrize("other", [
+    # Another meta key, and a meta value named only by its row index.
+    ".json.db.rows.public.meta.by_key.dream_cursor: python 1 vs rust 2",
+    ".json.db.rows.public.meta.rows[5][1].surprises[0].src: python 1 vs rust 2",
+    # Columns outside the partition on those tables.
+    ".json.db.rows.public.communities.rows[0][4]: python 1.0 vs rust 2.0",          # computed_at
+    ".json.db.rows.public.entity_communities.rows[3][2]: python 1.0 vs rust 2.0",   # computed_at
+    ".json.db.rows.public.entity_communities.rows[3][0]: python 7 vs rust 8",       # entity_id
+    # Another table, and a non-bank field of the answer.
+    ".json.db.rows.public.entity_sources.rows[0][4]: python 1.0 vs rust 2.0",
+    ".json.events.session_end_dream_triggers: python 1 vs rust 0",
+])
+def test_the_response_side_acceptance_is_confined_to_the_partition_and_digest(tmp_path, other):
+    """The near misses: one other response-side value keeps it new."""
+    line = _observed(*RESPONSE_PARTITION, *RESPONSE_DIGEST, other)
+    assert _community_rows(tmp_path, [line])["class"] == "new"
+
+
+def test_a_response_side_digest_alone_is_not_accepted(tmp_path):
+    assert _community_rows(tmp_path, [_observed(*RESPONSE_DIGEST)])["class"] == "new"
+    assert _community_rows(tmp_path / "b", [_observed(*RESPONSE_DIGEST), ROUTES_DIGEST])["class"] == "new"
+
+
 def test_the_digest_row_alone_is_not_a_community_difference(tmp_path):
     """The maintainer accepted the digest beside the partition it is written
     with. Alone it also holds god_nodes, which differ for another recorded
