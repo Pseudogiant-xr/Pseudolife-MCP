@@ -260,6 +260,17 @@ def slot_md5(entity, attribute) -> str:
     return hashlib.md5(f"{entity}\x1f{attribute}".encode("utf-8")).hexdigest()
 
 
+_KEY_SEP = re.compile(r"[\s._\-/]+")
+
+
+def norm_key(s) -> str:
+    """pseudolife_memory.memory.cortex._norm_key (and Rust's
+    stores::cortex::norm_key): casefold, collapse separator runs to one
+    hyphen. The slot identity a retrieval event's served_facts logs;
+    test_forced pins the two equal."""
+    return _KEY_SEP.sub("-", (s or "").strip().casefold()).strip("-")
+
+
 def _json_md5(value) -> str:
     return hashlib.md5(json.dumps(value, sort_keys=True).encode("utf-8")).hexdigest()
 
@@ -298,10 +309,13 @@ def padded_case_proof(query: str, python, rust) -> dict:
     def pins(body):  # a pinned constraint fact sits first by policy, not by score
         return {slot_md5(x.get("entity"), x.get("attribute")): i
                 for i, x in enumerate(items(body)) if x.get("pinned") is True}
+    def logged(body):  # the slots this side answered, as its event logs them
+        return sorted({slot_md5(norm_key(x.get("entity")), norm_key(x.get("attribute"))) for x in items(body)})
     return {"at": "", "kind": "padded-query", "query_md5": _md5(query),
             "cortex": {"python": cortex(python), "rust": cortex(rust)},
             "cortex_len": {"python": len(items(python)), "rust": len(items(rust))},
-            "pinned_at": {"python": pins(python), "rust": pins(rust)}}
+            "pinned_at": {"python": pins(python), "rust": pins(rust)},
+            "cortex_slots": {"python": logged(python), "rust": logged(rust)}}
 
 
 FACT_FIELDS = ("kind", "contested", "pinned")  # a served fact's own fields; rank and score follow the order

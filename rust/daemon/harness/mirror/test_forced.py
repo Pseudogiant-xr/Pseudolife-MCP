@@ -2550,7 +2550,7 @@ PADDED_Q = "   what os does the homelab box run  "
 def padded_attempt(cortex=(".cortex: length python 5 vs rust 4",), facts_event=9593, slot=("e1", "a1"),
                    rows=(("python", 7), ("rust", 6)), count=None, case=PADDED_CASE, marked=True,
                    reads=None, extra_db=(), case_values=None, event_facts=None, event_query=PADDED_Q,
-                   case_pins=None, event_pins=None):
+                   case_pins=None, event_pins=None, case_slots=None):
     """default's padded-query shape: Python's cortex block serves slot e1/a1
     beside the slots both serve; its event and slot_reads follow."""
     lines = [w2d_case(case, list(cortex)),
@@ -2573,7 +2573,9 @@ def padded_attempt(cortex=(".cortex: length python 5 vs rust 4",), facts_event=9
     if marked:
         proofs[f"case {PADDED_CASE}"] = [{"at": "", "kind": "padded-query", "query_md5": tie_proofs._md5(PADDED_Q),
                                           "cortex": values, "cortex_len": lens(values),
-                                          "pinned_at": case_pins or {"python": {}, "rust": {}}}]
+                                          "pinned_at": case_pins or {"python": {}, "rust": {}},
+                                          "cortex_slots": case_slots or {side: sorted(facts[side])
+                                                                         for side in ("python", "rust")}}]
     return attempt(lines, proofs)
 
 
@@ -2945,3 +2947,32 @@ def test_a_w2e_step_names_its_call_for_rules_b_and_d():
     lines = [w2e_line(4, ".entries[2].id: python 69 vs rust 65")]
     tool = tie_proofs.step_tool({"op": "http", "path": "/api/search?q=x"})
     assert forced._tie_only(attempt(lines, {"step 4": [pick(".entries[2]", 69, 65, tool=tool)]}))
+
+
+def test_an_events_logged_facts_must_be_what_its_side_answered():
+    """Opus's review (2026-11-11): both answers list {S1, S2} with no
+    response lines, but Rust's event logs only {S1} and skips S2's read.
+    The tokenizer did not cause that, so it stays new; the event must log,
+    on each side, exactly the slots that side's cortex block answered."""
+    one, both = tie_proofs.slot_md5("e1", "a1"), tie_proofs.slot_md5("e9", "a9")
+    rules = ("padded-query",)
+    assert forced._tie_only(padded_attempt(), rules=rules)
+    same_answers = {"python": sorted([one, both]), "rust": sorted([one, both])}
+    assert not forced._tie_only(padded_attempt(case_slots=same_answers), rules=rules)
+    assert not forced._tie_only(padded_attempt(case_slots={"python": [one, both], "rust": []}), rules=rules)
+    gone = padded_attempt()
+    del gone["tie_proofs"][f"case {PADDED_CASE}"][0]["cortex_slots"]
+    assert not forced._tie_only(gone, rules=rules)
+    # The case proof records each side's slots in the event's normalised form.
+    case = tie_proofs.padded_case_proof("q ", {"cortex": [{"entity": "Home Lab", "attribute": "OS_name"}]},
+                                        {"cortex": []})
+    assert case["cortex_slots"] == {"python": [tie_proofs.slot_md5("home-lab", "os-name")], "rust": []}
+
+
+def test_norm_key_is_the_cortex_slot_identity():
+    for raw, want in (("Home Lab", "home-lab"), ("  OS_name ", "os-name"), ("a/b.c--d", "a-b-c-d"), ("", ""),
+                      (None, ""), ("--x--", "x")):
+        assert tie_proofs.norm_key(raw) == want, raw
+    cortex = pytest.importorskip("pseudolife_memory.memory.cortex")
+    for raw in ("Home Lab", "  OS_name ", "a/b.c--d", "\u00c4\u00d6 \u00df", "x\tY"):
+        assert tie_proofs.norm_key(raw) == cortex._norm_key(raw), raw

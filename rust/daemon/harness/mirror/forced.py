@@ -1123,6 +1123,17 @@ def _slot_md5(entity, attribute) -> str:
     return hashlib.md5(f"{entity}\x1f{attribute}".encode("utf-8")).hexdigest()
 
 
+def _answered(facts: dict, slots) -> bool:
+    """Opus's review (2026-11-11): the bank side follows from the answer, per
+    side. An event's logged slots must be, on each side, exactly the slots
+    that side's cortex block answered, so a fact the event dropped or added
+    on its own (the answers equal or not) is no tokenizer consequence."""
+    if not isinstance(slots, dict):
+        return False
+    return all(isinstance(slots.get(side), list) and set(facts[side]) == set(slots[side])
+               for side in ("python", "rust"))
+
+
 def _pins_agree(pins) -> bool:
     """A pinned fact sits where policy puts it, not where its score does
     (_pin_constraint_facts), so one both sides pinned must sit at the same
@@ -1170,20 +1181,21 @@ def _padded_items(attempt: dict, parsed: list) -> set[tuple[int, int]]:
       caps its rows) differs only in slots the events served on one side,
       each by exactly its one-sided serves (Python's minus Rust's)."""
     proofs = attempt.get("tie_proofs") or {}
-    cases, queries = {}, set()
+    cases, queries = {}, {}
     for ctx, ps in proofs.items():
         for p in ps:
             if (isinstance(p, dict) and p.get("kind") == "padded-query" and isinstance(p.get("query_md5"), str)
                     and _proven(p.get("cortex"), p.get("cortex_len")) and _pins_agree(p.get("pinned_at"))):
                 cases[ctx] = p["cortex_len"]
-                queries.add(p["query_md5"])
+                queries.setdefault(p["query_md5"], []).append(p.get("cortex_slots"))
     events, expected, reads = {}, {}, None
     for p in proofs.get("db", []):
         if not isinstance(p, dict):
             continue
         if (p.get("kind") == "padded-event" and isinstance(p.get("event"), int)
                 and p.get("query_md5") in queries and _proven(p.get("facts"), p.get("facts_len"))
-                and _pins_agree(p.get("pinned_at"))):
+                and _pins_agree(p.get("pinned_at"))
+                and any(_answered(p["facts"], slots) for slots in queries[p["query_md5"]])):
             events[p["event"]] = p["facts_len"]
             py, rs = set(p["facts"]["python"]), set(p["facts"]["rust"])
             for slot in py - rs:
