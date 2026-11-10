@@ -970,6 +970,12 @@ def timeline_queries(state: dict) -> set[str]:
             if ((r.get("params") or {}).get("timeline") or {}).get("fired")}
 
 
+def fired_queries(*states) -> set[str]:
+    """The queries whose timeline fired on EITHER side (Opus's review,
+    2026-11-11): a timeline that fired only on Rust also orders the answer."""
+    return set().union(*(timeline_queries(st) for st in states if st))
+
+
 def bank_diff(py_state: dict, rs_state: dict) -> list[str]:
     out = []
     ev = "public.retrieval_events"
@@ -1424,7 +1430,7 @@ def run_scenario(scn: Scenario, binary: Path, template: str, mode: str, record: 
         py_state = golden["db_state"]
     else:
         py_state = states["python"]
-    ordered_queries = timeline_queries(py_state)
+    ordered_queries = fired_queries(py_state, states.get("rust"))
     case_dsns = {k: pg.dsn(dbs[k]) for k in sides} if "python" in sides else None
     for row, pair, c in zip(rows, response_pairs, scn.cases()):
         if pair is not None:

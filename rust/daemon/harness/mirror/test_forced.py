@@ -2897,3 +2897,25 @@ def test_a_fired_trace_timeline_orders_its_entries_without_via():
                                         bodies["rust"], lambda ids: {69: SAME, 65: SAME},
                                         ordered=bodies["ordered"], tool="/api/search")
     assert proofs and proofs[0]["ordered"] is True
+
+
+def test_a_timeline_fired_on_either_side_orders_a_search_answer():
+    """Opus's review (2026-11-11): w2d read the timeline flag from Python's
+    events only, and w2e response proofs never read the step's events. A
+    timeline that fired on either side, even with no via timeline entry,
+    orders the answer."""
+    import w2d_search
+
+    def state(*rows):
+        cols = ["id", "query_text", "params"]
+        return {"rows": {"public.retrieval_events": {"columns": cols, "rows": [list(r) for r in rows]}}}
+    py = state((1, "q", {"timeline": {"fired": False}}))
+    rs = state((1, "q", {"timeline": {"fired": True}}))
+    assert w2d_search.fired_queries(py, rs) == {"q"} and w2d_search.fired_queries(py, None) == set()
+    fired, seen = tie_proofs.new_events_fired(rs, set())
+    assert fired is True and seen == {1}
+    # The same event in a later step's dump is not that step's.
+    assert tie_proofs.new_events_fired(rs, seen) == (False, {1})
+    later = state((1, "q", {"timeline": {"fired": True}}), (2, "r", {"timeline": {"fired": False}}))
+    assert tie_proofs.new_events_fired(later, seen) == (False, {1, 2})
+    assert tie_proofs.new_events_fired(None, {5}) == (False, {5})

@@ -6551,6 +6551,7 @@ def _run_live(name: str, scn: dict, tag: str, binary: Path, root: Path, record: 
         tokens: dict[str, str | None] = {"python": None, "rust": None}
         max_wall = 0.0
         run_start = time.time()  # a record written during this run is anchored after it
+        seen_events: dict = {"python": set(), "rust": set()}  # retrieval events earlier steps logged
         for i, op in enumerate([{"op": "init"}] + scn["ops"]):
             row = {"step": i, "op": op, "diffs": [] if i else list(warmup_diffs)}
             if op["op"] == "init" and scn.get("init_settle"):
@@ -6645,10 +6646,15 @@ def _run_live(name: str, scn: dict, tag: str, binary: Path, root: Path, record: 
             row["diffs"] += [f"db {d}" for d in state_and_events_diff(sp, sr)]
             # Ids, text hashes and via for the lines that served different
             # entries (forced.py's tie-order rules); none when nothing differs.
+            # The events this step logged, on either side: a fired timeline
+            # orders the step's search answer by stream position even when
+            # no entry carries via timeline (Opus's review, 2026-11-11).
+            fired_py, seen_events["python"] = tie_proofs.new_events_fired(raw_py, seen_events["python"])
+            fired_rs, seen_events["rust"] = tie_proofs.new_events_fired(raw_rs, seen_events["rust"])
             proofs = tie_proofs.safely(lambda: (
                 tie_proofs.response_proofs(row["diffs"], row.get("python"), row.get("rust"),
                                            text_md5=tie_proofs.bank_text_md5(dsns),
-                                           ordered=op.get("name") == "memory_recent",
+                                           ordered=op.get("name") == "memory_recent" or fired_py or fired_rs,
                                            tool=op.get("name"))
                 + tie_proofs.event_proofs(row["diffs"], raw_py, raw_rs, tie_proofs.bank_text_md5(dsns))))
             if proofs:

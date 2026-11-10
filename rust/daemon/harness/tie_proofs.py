@@ -156,6 +156,21 @@ def _served(state: dict | None, event: int) -> list:
     return served if isinstance(served, list) else []
 
 
+def new_events_fired(state: dict | None, seen: set) -> tuple[bool, set]:
+    """Whether any retrieval event in ``state`` not in ``seen`` (the ids
+    earlier steps logged) fired its timeline, and every event id it holds:
+    a step's search answer is in stream order when the event it logged
+    fired, even when no entry says via timeline."""
+    table = (state or {}).get("rows", {}).get("public.retrieval_events") or {}
+    cols = table.get("columns") or []
+    if "id" not in cols:
+        return False, set(seen)
+    rows = [dict(zip(cols, row)) for row in table.get("rows") or []]
+    ids = {r["id"] for r in rows}
+    fired = any(_event_ordered(state, r["id"]) for r in rows if r["id"] not in seen)
+    return fired, ids | set(seen)
+
+
 def _event_ordered(state: dict | None, event: int) -> bool:
     """The event's own ordering flag: a fired timeline orders its served
     list by stream position (w2d_search's timeline_queries and bank_diff
