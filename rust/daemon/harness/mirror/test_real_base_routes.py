@@ -440,4 +440,7 @@ def test_a_real_revert_still_shows_in_the_rollback_scenarios_bank(rollback_base)
     start, normalize = rollback_base
     python = normalize("python", rollback_arm(start + 1, start + 2))
     rust = normalize("rust", rollback_arm(start + 3, start + 4))
-    assert dbstate.diff(python, rust)
+    diffs = dbstate.diff(python, rust)
+    # Each clock on its own: neither rule may come back alone.
+    assert any("public.facts" in d for d in diffs), diffs
+    assert any("public.meta" in d for d in diffs), diffs
