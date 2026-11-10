@@ -19,13 +19,13 @@ class RerankerAvailabilityTests(unittest.TestCase):
                      search.case("trace", "/api/trace?q=x&rerank=1"),
                      search.mcp_case("MCP", {"query": "x", "rerank": True})]:
             with self.subTest(case=case["name"]), self.assertRaisesRegex(RuntimeError, "requested reranking.*checksum mismatch"):
-                search.require_requested_reranker([case], [({}, {"status": 200})], log)
+                search.require_requested_reranker([case], [({}, {"status": 200})], {"rust": log})
 
     def test_default_search_does_not_request_reranking(self):
         log = "Cross-encoder reranker cache unavailable (missing) — disabling."
         cases = [search.case("default", "/api/search?q=x"),
                  search.mcp_case("MCP default", {"query": "x"})]
-        search.require_requested_reranker(cases, [({}, {"status": 200})] * 2, log)
+        search.require_requested_reranker(cases, [({}, {"status": 200})] * 2, {"rust": log})
 
     def test_inherited_and_explicit_reranking_follow_scenario_config(self):
         log = "Cross-encoder reranker cache unavailable (missing) — disabling."
@@ -41,20 +41,68 @@ class RerankerAvailabilityTests(unittest.TestCase):
                 with self.subTest(enabled=enabled, case=case["name"]):
                     if enabled:
                         with self.assertRaisesRegex(RuntimeError, "requested reranking"):
-                            search.require_requested_reranker([case], [({}, {"status": 200})], log, scenario)
+                            search.require_requested_reranker([case], [({}, {"status": 200})], {"rust": log}, scenario)
                     else:
-                        search.require_requested_reranker([case], [({}, {"status": 200})], log, scenario)
+                        search.require_requested_reranker([case], [({}, {"status": 200})], {"rust": log}, scenario)
             off = [search.case("off", "/api/search?q=x&rerank=false"),
                    search.mcp_case("MCP off", {"query": "x", "rerank": False})]
-            search.require_requested_reranker(off, [({}, {"status": 200})] * 2, log, scenario)
+            search.require_requested_reranker(off, [({}, {"status": 200})] * 2, {"rust": log}, scenario)
 
     def test_explicitly_disabled_or_refused_requests_are_not_rerank_proof(self):
         log = "Cross-encoder reranker cache unavailable (missing) — disabling."
         cases = [search.case("off", "/api/search?q=x&rerank=false"),
                  search.mcp_case("MCP off", {"query": "x", "rerank": False})]
-        search.require_requested_reranker(cases, [({}, {"status": 200})] * 2, log)
+        search.require_requested_reranker(cases, [({}, {"status": 200})] * 2, {"rust": log})
         search.require_requested_reranker([search.case("unauth", "/api/search?q=x")],
-                                         [({}, {"status": 401})], log)
+                                         [({}, {"status": 401})], {"rust": log})
+
+    # The Python oracle's own line (reranker.py) in its daemon's log format,
+    # offline with no cross-encoder in HF_HOME: transformers' reason spans two lines.
+    PYTHON_OFFLINE = (
+        "[2026-11-10 12:00:00,000] pseudolife_memory.memory.reranker WARNING: Cross-encoder reranker failed to load "
+        "(We couldn't connect to 'https://huggingface.co' to load the files, and couldn't "
+        "find them in the cached files.\n"
+        "Check your internet connection or see how to run the library in offline mode at "
+        "'https://huggingface.co/docs/transformers/installation#offline-mode'.) — disabling. "
+        "Memory will fall back to bi-encoder scoring.\n")
+    LOADED = "[2026-11-10 12:00:00,000] pseudolife_memory.memory.reranker INFO: Cross-encoder reranker loaded.\n"
+
+    def test_a_degraded_python_oracle_refuses_requested_reranking(self):
+        cases = [search.case("REST explicit", "/api/search?q=x&rerank=true"),
+                 search.case("trace", "/api/trace?q=x&rerank=1"),
+                 search.mcp_case("MCP", {"query": "x", "rerank": True})]
+        for case in cases:
+            with self.subTest(case=case["name"]), self.assertRaisesRegex(
+                    RuntimeError, r"(?s)requested reranking but the Python oracle disabled it"
+                                  r".*couldn't connect.*HF_HOME.*Dockerfile\.mirror-runner"):
+                search.require_requested_reranker([case], [({"status": 200}, {"status": 200})],
+                                                  {"python": self.PYTHON_OFFLINE, "rust": ""})
+
+    def test_either_side_degraded_refuses_and_names_that_side(self):
+        rust = "Cross-encoder reranker cache unavailable (missing) — disabling."
+        case = search.case("REST explicit", "/api/search?q=x&rerank=true")
+        for logs, side in (({"python": self.LOADED, "rust": rust}, "Rust daemon"),
+                           ({"python": self.PYTHON_OFFLINE, "rust": ""}, "Python oracle")):
+            with self.subTest(side=side), self.assertRaisesRegex(
+                    RuntimeError, f"requested reranking but the {side} disabled it"):
+                search.require_requested_reranker([case], [({"status": 200}, {"status": 200})], logs)
+        with self.assertRaisesRegex(RuntimeError, "PSEUDOLIFE_DAEMON_RERANK_DIR"):
+            search.require_requested_reranker([case], [({"status": 200}, {"status": 200})],
+                                              {"python": self.LOADED, "rust": rust})
+
+    def test_both_loaded_and_unrequested_reranking_pass(self):
+        requested = [search.case("REST explicit", "/api/search?q=x&rerank=true"),
+                     search.mcp_case("MCP", {"query": "x", "rerank": True})]
+        search.require_requested_reranker(requested, [({"status": 200}, {"status": 200})] * 2,
+                                          {"python": self.LOADED, "rust": ""})
+        unrequested = [search.case("default", "/api/search?q=x"),
+                       search.case("off", "/api/search?q=x&rerank=false"),
+                       search.mcp_case("MCP off", {"query": "x", "rerank": False})]
+        search.require_requested_reranker(unrequested, [({"status": 200}, {"status": 200})] * 3,
+                                          {"python": self.PYTHON_OFFLINE, "rust": ""})
+        # The oracle refused the call itself: no ranking to compare, no proof claimed.
+        search.require_requested_reranker(requested[:1], [({"status": 401}, {"status": 200})],
+                                          {"python": self.PYTHON_OFFLINE, "rust": ""})
 
 
 class Scenario:
