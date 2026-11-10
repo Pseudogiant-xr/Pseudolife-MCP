@@ -1889,9 +1889,10 @@ fn want_float(
     }
 }
 
-/// A cap Python reads as `value or None`, where a YAML null (stored as
-/// `None`) and 0 both turn it off: null reads as 0, which every Rust reader
-/// of such a cap takes as off. Anything else is `want_int`'s read. The raw
+/// A cap, trigger or threshold Python reads as off for both a YAML null
+/// (stored as `None`) and 0 (`value or None`, `int(value or 0)` with
+/// `<= 0` as off, or a plain truthiness check): null reads as 0, which every
+/// Rust reader of such a key takes as off. Anything else is `want_int`'s read. The raw
 /// null still reaches `user_leaves`, so the Console serves it as Python does.
 fn want_int_cap(
     entries: &[(Node, Node)],
