@@ -124,6 +124,16 @@ REAL_BANK_EXCLUDED = {
         "response diffs cannot be read as Python-vs-Rust differences (partial run 870fb28fc); "
         "excluded by the maintainer, 2026-11-10"),
 }
+# Cases a scenario's real-bank arms skip while the scenario still runs, by
+# suite, with the reason (ruling E2 of 2026-11-11). Each attempt records the
+# names it skipped, and each row shows how many (``skipped_cases``).
+REAL_BANK_SKIPPED_CASES = {
+    "w2d_search": (
+        "every case whose own query ends in whitespace (tie_proofs.padded): excluded on real-bank "
+        "arms by the conductor under the maintainer's delegation of 2026-11-11: sentence-transformers "
+        "5.4.0 stopped stripping text before tokenising and Rust follows the 5.3.0 contract "
+        "(w2d-tokenizer-runtime); the case runs in full on the synthetic arm"),
+}
 # Differences the maintainer accepted on real-bank arms, by name: a scenario
 # whose every difference place (in the first attempt and the retry) is one
 # of these is classified "accepted" with the reason, not "new". One place
@@ -320,6 +330,18 @@ def full_diffs(suite: str, path: Path, printed: list[str]) -> tuple[list[str] | 
     if [line for line in "\n".join(shown).splitlines() if DIFF_LINE.match(line)] != printed:
         return None, "its --out JSON does not match the printed DIFF lines"
     return full, None
+
+
+def skipped_cases_of(suite: str, path: Path) -> list[str]:
+    """The cases a w2d_search harness skipped on a real-bank arm (ruling E2,
+    w2d_search.REAL_BANK_SKIP_REASON), by name; another suite skips none."""
+    if suite != "w2d_search":
+        return []
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    return [s["case"] for r in data.get("results") or [] for s in r.get("skipped_cases") or []]
 
 
 def tie_proofs_of(suite: str, path: Path) -> dict[str, list]:
@@ -635,6 +657,7 @@ class Runner:
         # difference from its --out JSON, and without that it keeps the
         # printed ones, marked incomplete (no preexisting, no acceptance).
         result["diffs_complete"] = result["status"] == "pass"
+        result["skipped_cases"] = skipped_cases_of(suite, written)
         if result["status"] == "diff":
             full, why = full_diffs(suite, written, result["diffs"])
             if full is None:
@@ -840,7 +863,10 @@ def _scenario(runner: Runner, suite: str, name: str) -> tuple[dict, dict | None,
     row = {"scenario": name, "class": verdict, "differences": len(first["diffs"]),
            "seconds": first["seconds"], "base": first.get("base"),
            "oom_kills": _oom_total(first, retry, synthetic),
-           **({"accepted_as": accepted_as} if accepted_as else {})}
+           **({"accepted_as": accepted_as} if accepted_as else {}),
+           # The cases the real arm skipped (ruling E2), so each run's
+           # summary shows the exclusion.
+           **({"skipped_cases": len(first["skipped_cases"])} if first.get("skipped_cases") else {})}
     entry = None if verdict == "pass" else {"real": first, "real_retry": retry, "synthetic": synthetic}
     return row, entry, f"{suite}/{name}: {verdict} ({len(first['diffs'])} differences, {first['seconds']}s)"
 
@@ -1474,6 +1500,7 @@ def main(argv: list[str] | None = None) -> int:
                "accepted_limits": ACCEPTED_OOM,
                "accepted_divergences": ACCEPTED_DIVERGENCES,
                "real_bank_exclusions": REAL_BANK_EXCLUDED,
+               "real_bank_skipped_cases": REAL_BANK_SKIPPED_CASES,
                "fixture_notes": FIXTURE_NOTES,
                "counts": counts(report),
                # Above 1, attempts report no OOM count (the cgroup's counts every

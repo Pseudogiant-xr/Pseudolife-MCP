@@ -2685,3 +2685,52 @@ def test_a_w2e_step_names_its_call_for_rules_b_and_d():
     assert forced._tie_only(attempt(lines, {"step 4": [pick(".entries[2]", 69, 65, tool=tool)]}))
 
 
+# ---- ruling E2: padded cases are skipped on real-bank arms (2026-11-11) ----
+
+def test_a_real_bank_arm_skips_exactly_the_cases_whose_query_ends_in_whitespace(monkeypatch):
+    """Ruling E2: on a copy of a real bank, a w2d_search case whose own query
+    ends in whitespace is not sent; without a base (the synthetic arm, CI)
+    every case runs."""
+    import w2d_search
+    scenarios = (w2d_search.Default(), w2d_search.McpSearch(), w2d_search.McpExplain(), w2d_search.Trace())
+    cases = [c for scn in scenarios for c in scn.cases()]
+    monkeypatch.delenv("PL_HARNESS_BASE_DATABASE", raising=False)
+    assert w2d_search.real_bank_skips(cases) == set()
+    monkeypatch.setenv("PL_HARNESS_BASE_DATABASE", "pl_cf_mir_seed")
+    skipped = w2d_search.real_bank_skips(cases)
+    assert skipped == {"padded query (cortex sees the raw q)", "padded query", "trace padded query", "trace padded q"}
+    # Near misses: an unpadded case with the same words still runs, and so
+    # do a blank query and a leading-space-only one.
+    words = {"deploy the daemon", "what os does the homelab box run", "PLX-4471"}
+    same_words = [c["name"] for c in cases if (w2d_search.case_query(c) or "").strip() in words
+                  and c["name"] not in skipped]
+    assert same_words and not set(same_words) & skipped
+    assert not w2d_search.real_bank_skips([{"name": "blank", "path": "/api/search?q=+++"},
+                                           {"name": "leading", "mcp": {"query": "  x"}}])
+    assert "maintainer's delegation of 2026-11-11" in w2d_search.REAL_BANK_SKIP_REASON
+    assert "synthetic arm" in w2d_search.REAL_BANK_SKIP_REASON
+    # The explain scenario's real-bank floor drops by the one traced response
+    # it skips, and only there.
+    assert w2d_search.McpExplain.real_bank_require == {"trace.responses": 8}
+    assert w2d_search.McpExplain.require["trace.responses"] == 9
+    assert not getattr(w2d_search.Default, "real_bank_require", {})
+
+
+def test_the_runner_reports_the_cases_a_real_arm_skipped(tmp_path):
+    out = tmp_path / "w2d.json"
+    out.write_text(json.dumps({"complete": True, "results": [{
+        "scenario": "default", "cases": [], "db_diffs": [],
+        "skipped_cases": [{"case": "padded query (cortex sees the raw q)", "reason": "r"}]}]}))
+    assert forced.skipped_cases_of("w2d_search", out) == ["padded query (cortex sees the raw q)"]
+    assert forced.skipped_cases_of("routes", out) == []
+    assert forced.skipped_cases_of("w2d_search", tmp_path / "missing.json") == []
+    passed = {**PASS, "skipped_cases": ["padded query (cortex sees the raw q)"]}
+    report, _ = forced.run(FakeRunner(tmp_path, {"default": {"real": passed}}), ["w2d_search"], None,
+                           names=lambda s: ["default"])
+    row = report["suites"]["w2d_search"]["rows"][0]
+    assert row["class"] == "pass" and row["skipped_cases"] == 1
+    assert "maintainer's delegation of 2026-11-11" in forced.REAL_BANK_SKIPPED_CASES["w2d_search"]
+    # Nothing skipped: no field.
+    report, _ = forced.run(FakeRunner(tmp_path, {"default": {"real": PASS}}), ["w2d_search"], None,
+                           names=lambda s: ["default"])
+    assert "skipped_cases" not in report["suites"]["w2d_search"]["rows"][0]

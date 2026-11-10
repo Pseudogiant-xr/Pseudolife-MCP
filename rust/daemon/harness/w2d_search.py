@@ -194,6 +194,25 @@ def case_query(c: dict):
     return values[0] if values else None
 
 
+# Ruling E2 (the conductor, under the maintainer's delegation of
+# 2026-11-11): on a copy of a real bank only, a case whose own query ends in
+# whitespace is not sent to either daemon. The divergence it shows is
+# accepted (w2d-tokenizer-runtime), but on real data no proof can tell it
+# from another; the case runs in full on synthetic banks and in CI.
+REAL_BANK_SKIP_REASON = (
+    "excluded on real-bank arms by the conductor under the maintainer's delegation of 2026-11-11: "
+    "sentence-transformers 5.4.0 stopped stripping text before tokenising and Rust follows the "
+    "5.3.0 contract (w2d-tokenizer-runtime); the case runs in full on the synthetic arm")
+
+
+def real_bank_skips(cases) -> set[str]:
+    """The names of the cases a real-bank arm skips: every case whose own
+    query ends in whitespace (tie_proofs.padded), and none without a base."""
+    if not os.environ.get(pgdisposable.BASE_ENV):
+        return set()
+    return {c["name"] for c in cases if tie_proofs.padded(case_query(c))}
+
+
 def mcp_case(name, args, headers=(), tool="memory_search"):
     """A tools/call (memory_search unless named); "<seed-episode>" in a list
     becomes the seeded session's episode id."""
@@ -492,6 +511,10 @@ class McpExplain(Scenario):
     """
     name = "mcp-search-explain"
     require = {"trace.responses": 9, "trace.final": 3, "with_entries": 5}
+    # A real-bank arm skips "trace padded query" (ruling E2), one of the nine
+    # traced responses; the combined forced run e4a09212c's real arm had
+    # exactly nine.
+    real_bank_require = {"trace.responses": 8}
 
     def cases(self):
         def explain(name, **args):
@@ -1390,7 +1413,15 @@ def run_scenario(scn: Scenario, binary: Path, template: str, mode: str, record: 
         py_seen = []
         response_pairs = []
         transport = {side: [] for side in sides}
+        skips = real_bank_skips(scn.cases()) if mode != "golden" else set()
         for i, c in enumerate(scn.cases()):
+            if c["name"] in skips:
+                py_seen.append({"skipped": True})
+                response_pairs.append(None)
+                rows.append({"case": c["name"], "path": c["path"][:140], "python_status": None,
+                             "rust_status": None, "diffs": [], "notes": [], "_python": None,
+                             "skipped": REAL_BANK_SKIP_REASON})
+                continue
             if c.get("disconnect"):
                 for d in procs.values():
                     disconnect(d.port, c["path"], c["headers"])
@@ -1472,7 +1503,9 @@ def run_scenario(scn: Scenario, binary: Path, template: str, mode: str, record: 
     cov["recent"]["nonempty"] = sum(
         1 for c, r in zip(scn.cases(), py_seen)
         if c.get("nonempty") and ((r.get("json") or {}).get("entries") or []))
-    cov_fail = unmet(cov, scn.require)
+    # A skipped case's coverage is gone on that arm too; a scenario whose
+    # floor it fills names the real-bank floor (real_bank_require).
+    cov_fail = unmet(cov, {**scn.require, **(getattr(scn, "real_bank_require", {}) if skips else {})})
     numeric_diffs = []
     if getattr(scn, "stores", False):
         w2e = import_w2e()
@@ -1506,7 +1539,9 @@ def run_scenario(scn: Scenario, binary: Path, template: str, mode: str, record: 
     if derived:
         pg.drop(derived)
     return {"scenario": scn.name, "cases": rows, "db_diffs": db_diffs + cov_fail, "declared": declared,
-            "coverage": cov, **({"db_tie_proofs": db_proofs} if db_proofs else {})}
+            "coverage": cov, **({"db_tie_proofs": db_proofs} if db_proofs else {}),
+            **({"skipped_cases": [{"case": n, "reason": REAL_BANK_SKIP_REASON} for n in sorted(skips)]}
+               if skips else {})}
 
 
 def default_scenarios(mode: str) -> list[str]:
