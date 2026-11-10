@@ -580,18 +580,24 @@ fn hold_lock_like_a_racing_publisher(lock: &Path) -> std::fs::File {
 
 #[cfg(windows)]
 #[test]
-fn lock_open_waits_out_a_racing_publishers_delete_handle() {
+fn a_racing_publishers_delete_handle_refuses_the_lock_open_with_a_sharing_violation() {
+    // The OS fact the lock's retry rests on (#1469): setup's open does not
+    // share delete, so it fails with ERROR_SHARING_VIOLATION (32) while a
+    // publisher's delete-access handle is open.
     let home = Home::new();
     register_once(&home.0).unwrap();
-    let held = hold_lock_like_a_racing_publisher(&home.0.join(".pseudolife-setup.lock"));
-    let releaser = std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_millis(100));
-        drop(held);
-    });
-    let result = register_once(&home.0);
-    releaser.join().unwrap();
-    // Before the fix this loser was told to repair the lock file (#1469).
-    result.unwrap();
+    let lock = home.0.join(".pseudolife-setup.lock");
+    let held = hold_lock_like_a_racing_publisher(&lock);
+    let refused = pseudolife_stdio::board::state::open_detailed(&lock);
+    drop(held);
+    match refused {
+        Err(pseudolife_stdio::board::state::OpenError::Io(error)) => {
+            assert_eq!(error.raw_os_error(), Some(32), "{error}")
+        }
+        Err(other) => panic!("expected a sharing violation, got {other}"),
+        Ok(_) => panic!("expected a sharing violation, the open succeeded"),
+    }
+    pseudolife_stdio::board::state::open_detailed(&lock).unwrap();
 }
 
 #[cfg(windows)]
