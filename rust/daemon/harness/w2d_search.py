@@ -1443,10 +1443,6 @@ def run_scenario(scn: Scenario, binary: Path, template: str, mode: str, record: 
                                                  stats=c.get("tool") == "memory_stats", aligned=bodies)
             # Ids and text hashes for the lines that served different entries
             # (forced.py's tie-order rules); none when nothing differs.
-            # Every padded case gets its proof, differing or not: a near-tied
-            # reorder the comparator aligned away can still show in the bank's
-            # served_facts, which the case's proof explains (Codex's review).
-            padded_query = case_query(c) if tie_proofs.padded(case_query(c)) else None
             # The bodies as compared: Rust's entries realigned on ties, as the
             # printed paths index them (Codex's review, 2026-11-11).
             seen_py, seen_rs = bodies.get("python", py_r.get("json")), bodies.get("rust", rs_r.get("json"))
@@ -1458,8 +1454,7 @@ def run_scenario(scn: Scenario, binary: Path, template: str, mode: str, record: 
                     text_md5=tie_proofs.bank_text_md5(case_dsns) if case_dsns else None,
                     ordered=bodies.get("ordered", True) or c.get("tool") == "memory_recent",
                     tool=c.get("tool") if "mcp" in c else (c.get("path") or "").split("?")[0])
-                + ([tie_proofs.padded_case_proof(padded_query, seen_py, seen_rs)]
-                   if padded_query is not None else [])))
+))
             if proofs:
                 row["tie_proofs"] = proofs
     cov = coverage(py_seen, py_state)
@@ -1490,14 +1485,11 @@ def run_scenario(scn: Scenario, binary: Path, template: str, mode: str, record: 
         st["rows"].get("public.retrieval_events")))}}
         for side, st in (("python", py_state), ("rust", states["rust"]))}
     db_diffs = bank_diff(json.loads(json.dumps(py_state)), states["rust"]) + numeric_diffs
-    padded_queries = [q for q in map(case_query, scn.cases()) if tie_proofs.padded(q)]
     bank_dsns = {k: pg.dsn(dbs[k]) for k in sides}
     db_proofs = (tie_proofs.safely(lambda: (
         tie_proofs.event_proofs(db_diffs, events["python"], events["rust"],
                                 tie_proofs.bank_text_md5(bank_dsns))
-        + tie_proofs.padded_event_proofs(padded_queries, events["python"], events["rust"])
-        + ([tie_proofs.slot_reads_proof(bank_dsns)]
-           if padded_queries and any("public.slot_reads" in d for d in db_diffs) else [])))
+))
         if "python" in sides and db_diffs else [])
     if record:
         GOLDENS.mkdir(parents=True, exist_ok=True)

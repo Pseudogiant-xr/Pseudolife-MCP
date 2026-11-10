@@ -27,7 +27,6 @@ from __future__ import annotations
 
 import argparse
 import ast
-import hashlib
 import json
 import os
 import re
@@ -156,17 +155,6 @@ ACCEPTED_DIVERGENCES = {
         "within twice the tolerance on each side and each within it across the engines; and an access_count difference of exactly the extra serves "
         "of an entry an accepted duplicate pick served on one side earlier in the scenario. "
         "Accepted by the conductor under the maintainer's delegation of 2026-11-11"),
-    # Ruling E, the same delegation: TIE_RULES "padded-query".
-    "padded-query": (
-        "a w2d_search case whose own query ends in whitespace (tie_proofs.padded: the cause, so "
-        "every such case; today default's, mcp-search's, mcp-search-explain's and trace's padded "
-        "cases) differing only in its response's cortex block (slots both sides served keep the "
-        "whole item less score and age), the served_facts of the event logged with its query "
-        "(slots both served keep their fields) and slot_reads, whose full comparison differs only "
-        "in slots one side alone served, each by its one-sided serves: accepted by the conductor "
-        "under the maintainer's delegation of "
-        "2026-11-11: sentence-transformers 5.4.0 stopped stripping text before tokenising; Rust "
-        "follows the 5.3.0 contract (w2d-tokenizer-runtime)"),
 }
 COMMUNITY_TABLES = ("public.communities", "public.entity_communities")
 COMMUNITY_FIELDS = ("community", "communities")
@@ -842,7 +830,7 @@ def _scenario(runner: Runner, suite: str, name: str) -> tuple[dict, dict | None,
     elif verdict == "new" and all(_finished(a) and _complete(a) and _community_only(a)
                                   for a in (first, retry) if a is not None):
         verdict, accepted_as = "accepted", "community-partition"
-    # The tie and padded-query rules, alone or composed with the community
+    # The tie rules, alone or composed with the community
     # one (ruling F): every line of every real attempt covered by one rule
     # holding in full on its own terms; one line covered by none stays new.
     elif verdict == "new" and all(_finished(a) and _complete(a) and _composed(a)
@@ -1060,15 +1048,7 @@ def _community_only(attempt: dict) -> bool:
 # any subset can be applied (the conductor's rulings B, C and D of
 # 2026-11-11). A rule reads a difference's position from its line and its
 # proof from the harness's record (tie_proofs.py), never a value it guessed.
-TIE_RULES = ("duplicate-pick", "adjacent-swap", "access-count-follow-on", "padded-query")
-# Ruling E's places: a padded case's cortex block, its event's served facts,
-# and slot_reads rows and counts (the row's printed list is read in memory to
-# hash its slot, never printed).
-PADDED_CORTEX = re.compile(r"^\.cortex(?:$|[.\[])")
-PADDED_FACTS = re.compile(r"^public\.retrieval_events\[(-?\d+)\]\.served_facts(?:$|[.\[])")
-PADDED_SLOT_ROW = re.compile(r"^/rows/public\.slot_reads/rows: row only in (python|rust): (\[.*\])$", re.S)
-PADDED_SLOT_COUNT = re.compile(r"^/rows/public\.slot_reads/base_missing/count: python (-?\d+) vs rust (-?\d+)$")
-PADDED_SLOT_DIGEST = re.compile(r"^/rows/public\.slot_reads/base_missing/digest: ")
+TIE_RULES = ("duplicate-pick", "adjacent-swap", "access-count-follow-on")
 # What a different entry at one position may change beside its id, as each
 # side's own row: a served item's surprise (the scores agree within the
 # tolerance, or their lines would show), a response entry's counters and
@@ -1115,126 +1095,6 @@ def _same_text(proof: dict) -> bool:
 def _found(proof: dict | None) -> bool:
     """Both sides' served item was found by id in its own event."""
     return bool(proof) and all((proof.get("found") or {}).get(s) for s in ("python", "rust"))
-
-
-def _slot_md5(entity, attribute) -> str:
-    """tie_proofs.slot_md5, which a forced run cannot import (the runner puts
-    only this directory on its path); test_forced pins the two equal."""
-    return hashlib.md5(f"{entity}\x1f{attribute}".encode("utf-8")).hexdigest()
-
-
-def _answered(facts: dict, slots) -> bool:
-    """Opus's review (2026-11-11): the bank side follows from the answer, per
-    side. An event's logged slots must be, on each side, exactly the slots
-    that side's cortex block answered, so a fact the event dropped or added
-    on its own (the answers equal or not) is no tokenizer consequence."""
-    if not isinstance(slots, dict):
-        return False
-    return all(isinstance(slots.get(side), list) and set(facts[side]) == set(slots[side])
-               for side in ("python", "rust"))
-
-
-def _pins_agree(pins) -> bool:
-    """A pinned fact sits where policy puts it, not where its score does
-    (_pin_constraint_facts), so one both sides pinned must sit at the same
-    position on both. Absent records prove nothing."""
-    a, b = (pins or {}).get("python"), (pins or {}).get("rust")
-    return isinstance(a, dict) and isinstance(b, dict) and all(a[k] == b[k] for k in a.keys() & b.keys())
-
-
-def _proven(maps, lens) -> bool:
-    """Two sides' {slot md5: md5} maps are a proof: each covers its side's
-    whole list (one entry per item, so no slot is missing or repeated), at
-    least one side is not empty, and every slot both hold has one hash. An
-    empty or partial map proves nothing."""
-    a, b = (maps or {}).get("python"), (maps or {}).get("rust")
-    la, lb = (lens or {}).get("python"), (lens or {}).get("rust")
-    return (isinstance(a, dict) and isinstance(b, dict) and isinstance(la, int) and isinstance(lb, int)
-            and len(a) == la and len(b) == lb and (la or lb)
-            and all(a[k] == b[k] for k in a.keys() & b.keys()))
-
-
-INDEX_AT = re.compile(r"^[^\[]*\[(\d+)\]")
-
-
-def _within(where: str, prefix_len: int, lens: dict) -> bool:
-    """An indexed line (``.cortex[i]...``, ``served_facts[i]...``) sits on a
-    position the proof's lists hold; an unindexed one (a length) always does."""
-    m = INDEX_AT.match(where[prefix_len:])
-    return m is None or int(m.group(1)) < max(lens["python"], lens["rust"])
-
-
-def _padded_items(attempt: dict, parsed: list) -> set[tuple[int, int]]:
-    """Ruling E: the (line, item) indexes a padded case explains, each a
-    provable consequence of cortex membership or score.
-
-    * A case's cortex block, when the harness marked the case padded
-      (``padded-query``: its own query ends in whitespace) and its cortex
-      maps cover both blocks with every slot both sides served hashing equal
-      (the whole item less the score and age the tokenizer can move).
-    * The bank's ``served_facts`` of an event logged with a marked case's
-      query (``padded-event``, matched by the query's md5), when its maps
-      cover both lists with every shared slot's kind, contested and pinned
-      equal.
-    * ``slot_reads`` rows, base_missing count and digest, when the harness's
-      full comparison of the two tables (``slot-reads``; the printed diff
-      caps its rows) differs only in slots the events served on one side,
-      each by exactly its one-sided serves (Python's minus Rust's)."""
-    proofs = attempt.get("tie_proofs") or {}
-    cases, queries = {}, {}
-    for ctx, ps in proofs.items():
-        for p in ps:
-            if (isinstance(p, dict) and p.get("kind") == "padded-query" and isinstance(p.get("query_md5"), str)
-                    and _proven(p.get("cortex"), p.get("cortex_len")) and _pins_agree(p.get("pinned_at"))):
-                cases[ctx] = p["cortex_len"]
-                queries.setdefault(p["query_md5"], []).append(p.get("cortex_slots"))
-    events, expected, reads = {}, {}, None
-    for p in proofs.get("db", []):
-        if not isinstance(p, dict):
-            continue
-        if (p.get("kind") == "padded-event" and isinstance(p.get("event"), int)
-                and p.get("query_md5") in queries and _proven(p.get("facts"), p.get("facts_len"))
-                and _pins_agree(p.get("pinned_at"))
-                and any(_answered(p["facts"], slots) for slots in queries[p["query_md5"]])):
-            events[p["event"]] = p["facts_len"]
-            py, rs = set(p["facts"]["python"]), set(p["facts"]["rust"])
-            for slot in py - rs:
-                expected[slot] = expected.get(slot, 0) + 1
-            for slot in rs - py:
-                expected[slot] = expected.get(slot, 0) - 1
-        elif p.get("kind") == "slot-reads" and isinstance(p.get("slots"), dict):
-            reads = p["slots"]
-    reads_ok = bool(reads) and all(isinstance(d, int) and d != 0 and expected.get(k) == d for k, d in reads.items())
-    out: set[tuple[int, int]] = set()
-    for li, entry in enumerate(parsed):
-        if entry is None:
-            continue
-        ctx, items = entry
-        for ii, item in enumerate(items):
-            where = item.split(": ", 1)[0]
-            if ctx in cases and PADDED_CORTEX.match(where) and _within(where, len(".cortex"), cases[ctx]):
-                out.add((li, ii))
-            elif ctx == "db":
-                facts = PADDED_FACTS.match(where)
-                if facts and int(facts.group(1)) in events:
-                    at = where.index(".served_facts") + len(".served_facts")
-                    if _within(where, at, events[int(facts.group(1))]):
-                        out.add((li, ii))
-                    continue
-                if not reads_ok:
-                    continue
-                row = PADDED_SLOT_ROW.match(item)
-                if row:
-                    try:
-                        values = ast.literal_eval(row.group(2))
-                    except (ValueError, SyntaxError):
-                        continue
-                    if (isinstance(values, list) and len(values) >= 2
-                            and _slot_md5(values[0], values[1]) in reads):
-                        out.add((li, ii))
-                elif PADDED_SLOT_COUNT.match(item) or PADDED_SLOT_DIGEST.match(item):
-                    out.add((li, ii))
-    return out
 
 
 # dbstate.EVENT_SCORE_TOL, which events_diff compares served scores within
@@ -1301,7 +1161,7 @@ def _surprise_crosses(a: dict, b: dict) -> bool:
 
 
 def _tie_only(attempt: dict, rules=None) -> set[str]:
-    """The ACCEPTED_DIVERGENCES names ("tie-order", "padded-query") under
+    """The ACCEPTED_DIVERGENCES names ("tie-order") under
     which every difference of an attempt is proved by the enabled ``rules``
     (TIE_RULES when None), or an empty set: no difference, or one no rule
     proves. Lines are grouped by position (context and path); a position is
@@ -1312,7 +1172,6 @@ def _tie_only(attempt: dict, rules=None) -> set[str]:
     groups: dict[tuple[str, str], dict[str, tuple[str, str]]] = {}
     order: dict[str, int] = {}
     parsed = [_tie_items(line) for line in attempt["diffs"]]
-    padded = _padded_items(attempt, parsed) if "padded-query" in rules else set()
     if not attempt["diffs"]:
         return set()
     for li, entry in enumerate(parsed):
@@ -1321,14 +1180,12 @@ def _tie_only(attempt: dict, rules=None) -> set[str]:
         ctx, items = entry
         order.setdefault(ctx, len(order))
         for ii, item in enumerate(items):
-            if (li, ii) in padded:
-                continue
             m = TIE_ITEM.match(item)
             if not m:
                 return set()
             groups.setdefault((ctx, m["at"]), {})[m["field"]] = (m["py"], m["rs"])
     if not groups:
-        return {"padded-query"}  # every item was a padded case's (ruling E)
+        return set()
     covered: set = set()
     picks = []  # response-side duplicate picks: (context order, python id, rust id)
     if "duplicate-pick" in rules:
@@ -1382,7 +1239,7 @@ def _tie_only(attempt: dict, rules=None) -> set[str]:
                 covered.add(key)
     if covered != set(groups):
         return set()
-    return {"tie-order"} | ({"padded-query"} if padded else set())
+    return {"tie-order"}
 
 
 def _composed(attempt: dict) -> set[str]:
@@ -1390,7 +1247,7 @@ def _composed(attempt: dict) -> set[str]:
     2026-11-11): the ACCEPTED_DIVERGENCES names under which every line of
     an attempt is covered, or an empty set. Its community lines must pass
     the community rule unchanged (at least one partition line among them);
-    every other line must be a position the tie or padded-query rules prove.
+    every other line must be a position the tie rules prove.
     It accepts no new kind of difference, only the sum of accepted ones."""
     kinds = [_community_line(line) for line in attempt["diffs"]]
     rest = [line for line, kind in zip(attempt["diffs"], kinds) if kind is None]
