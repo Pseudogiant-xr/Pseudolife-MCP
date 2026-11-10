@@ -12,12 +12,21 @@ fn require(free: u64, location: &str) -> Result<()> {
 }
 
 pub(super) fn host(path: &Path) -> Result<()> {
+    host_with(path, crate::runtime::available_space)
+}
+
+/// `host` with the free-space probe passed in, so a test checks which
+/// filesystem is probed without depending on how full its machine is.
+fn host_with<E>(
+    path: &Path,
+    probe: impl FnOnce(&Path) -> std::result::Result<u64, E>,
+) -> Result<()> {
     let absolute = std::path::absolute(path).map_err(|_| UpdateError::usage("cannot resolve the destination filesystem; restore its directory and retry. Nothing was changed"))?;
     let mut target = absolute.as_path();
     while !target.exists() {
         target = target.parent().ok_or_else(|| UpdateError::usage("cannot find the destination filesystem; restore its directory and retry. Nothing was changed"))?;
     }
-    let available = crate::runtime::available_space(target).map_err(|_| UpdateError::usage(format!(
+    let available = probe(target).map_err(|_| UpdateError::usage(format!(
         "cannot check free space for {}; restore access to that filesystem and retry. Nothing was changed", path.display()
     )))?;
     require(available, &path.display().to_string())
@@ -123,10 +132,22 @@ mod tests {
     use super::*;
     #[test]
     fn missing_relative_destination_uses_the_current_filesystem() {
+        // The probe stands in for the real one: how much disk a hosted
+        // runner has left after its build is not this test's subject (#1449).
         let path = PathBuf::from(format!("missing-backups-{}", uuid::Uuid::new_v4().simple()));
         assert!(!path.exists());
-        host(&path).unwrap();
+        let mut probed = None;
+        host_with(&path, |target| {
+            probed = Some(target.to_path_buf());
+            Ok::<u64, ()>(MIN_FREE)
+        })
+        .unwrap();
+        assert_eq!(probed, Some(std::env::current_dir().unwrap()));
         assert!(!path.exists());
+        // The floor still decides on the probed filesystem's free space.
+        assert!(host_with(&path, |_| Ok::<u64, ()>(MIN_FREE - 1)).is_err());
+        // The real probe answers for that filesystem, whatever it holds.
+        assert!(crate::runtime::available_space(&std::env::current_dir().unwrap()).is_ok());
     }
 
     #[test]
