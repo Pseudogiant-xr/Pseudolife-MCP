@@ -101,7 +101,8 @@ Normalizers (declared, spec "Free for W1 and W2"):
   its signature, which covers the wall-clock timestamp; ``idle_seconds``
   must be >= 0 on both sides and within the longest step's wall time (plus
   ``IDLE_SLACK_S``) of each other (``idle_diffs``), then compares as
-  null-or-not; a run's ``finished_at`` may not precede its ``started_at``,
+  null-or-not, and so does the Console's ``GET /api/dream/status`` read's
+  (``idle_tokens``; its other values compare as they are); a run's ``finished_at`` may not precede its ``started_at``,
   in the bank or an answer (``run_clock_diffs``); a stall record's ``since``,
   ``last_success_at`` and ``recovered_at``, the extractor record's ``at``
   and a run row's ``finished_at`` and ``rolled_back_at``; a run row's
@@ -5430,6 +5431,17 @@ def idle_diffs(py, rs, bound: float) -> list[str]:
     return out
 
 
+def idle_tokens(value):
+    """Only ``idle_seconds`` as ``dream_tokens`` leaves it (null-or-not), for
+    an answer such as the Console's dream status read whose other values
+    compare as they are. Idempotent, so a recorded answer can pass again."""
+    if isinstance(value, dict):
+        return {k: _clock(x) if k == "idle_seconds" else idle_tokens(x) for k, x in value.items()}
+    if isinstance(value, list):
+        return [idle_tokens(x) for x in value]
+    return value
+
+
 def _run_clock_pairs(v):
     """(started_at, finished_at) of every run record in an answer."""
     if isinstance(v, dict):
@@ -6602,6 +6614,12 @@ def _run_live(name: str, scn: dict, tag: str, binary: Path, root: Path, record: 
                     row["diffs"] += orphan_age_diffs(row["python"], row["rust"])
                     row["python"] = dream_tokens(row["python"], tsm_py)
                     row["rust"] = dream_tokens(row["rust"], tsm_rs)
+                elif w2e_console_dream.is_dream_status(op):
+                    # The same idle_seconds memory_dream's status answers
+                    # (partial forced run 870fb28fc: 0.03 s apart).
+                    row["diffs"] += idle_diffs(row["python"], row["rust"],
+                                               max_wall + IDLE_SLACK_S)
+                    row["python"], row["rust"] = idle_tokens(row["python"]), idle_tokens(row["rust"])
                 if w2e_documents.is_search(op):
                     row["python"] = w2e_documents.answer_tokens(row["python"], clock_ranks(raw_py))
                     row["rust"] = w2e_documents.answer_tokens(row["rust"], clock_ranks(raw_rs))
@@ -6750,8 +6768,12 @@ def run_golden(name: str, binary: Path, root: Path, tol: dict, owned: list[str])
                 if console_dream and (w2e_console_dream.is_dream(op)
                                       or op.get("name") == "memory_dream"):
                     rs = dream_tokens(rs, ts_tokens(raw))
+                expected = rec["python"]
+                if w2e_console_dream.is_dream_status(op):
+                    # As live: a golden recorded before or after this rule.
+                    rs, expected = idle_tokens(rs), idle_tokens(expected)
                 row["rust"] = rename_prefixes(rs, er)
-                row["diffs"] += compare_response(rec["python"], row["rust"], tol, stats)
+                row["diffs"] += compare_response(expected, row["rust"], tol, stats)
             unpack_numeric(rec["numeric_new"], numeric)
             row["diffs"] += compare_numeric(numeric, nr, tol, stats)
             got = pack(sr, full=i == 0)
