@@ -76,6 +76,15 @@ def is_dream(op):
     return op.get("path") == PATH or op["op"] == "console_dream_concurrent"
 
 
+STATUS_PATH = "/api/dream/status"
+
+
+def is_dream_status(op):
+    """The Console's dream status read: svc.dream_status() (web/routes.py),
+    whose idle_seconds each side computes at its own call."""
+    return op.get("op") == "rest" and op.get("method") == "GET" and op.get("path") == STATUS_PATH
+
+
 def register(h):
     cases = {}
     # Reuse the real dream scenarios and their extractor scripts, changing
