@@ -838,11 +838,12 @@ def _scenario(runner: Runner, suite: str, name: str) -> tuple[dict, dict | None,
     elif verdict == "new" and all(_finished(a) and _complete(a) and _community_only(a)
                                   for a in (first, retry) if a is not None):
         verdict, accepted_as = "accepted", "community-partition"
-    # Its own rule, not mixed with the community one: an attempt with both
-    # kinds of difference, or any line neither proves, stays new.
-    elif verdict == "new" and all(_finished(a) and _complete(a) and _tie_only(a)
+    # The tie and padded-query rules, alone or composed with the community
+    # one (ruling F): every line of every real attempt covered by one rule
+    # holding in full on its own terms; one line covered by none stays new.
+    elif verdict == "new" and all(_finished(a) and _complete(a) and _composed(a)
                                   for a in (first, retry) if a is not None):
-        used = set().union(*(_tie_only(a) for a in (first, retry) if a is not None))
+        used = set().union(*(_composed(a) for a in (first, retry) if a is not None))
         verdict, accepted_as = "accepted", "+".join(sorted(used))
     row = {"scenario": name, "class": verdict, "differences": len(first["diffs"]),
            "seconds": first["seconds"], "base": first.get("base"),
@@ -1246,6 +1247,28 @@ def _tie_only(attempt: dict, rules=None) -> set[str]:
     if covered != set(groups):
         return set()
     return {"tie-order"} | ({"padded-query"} if padded else set())
+
+
+def _composed(attempt: dict) -> set[str]:
+    """Ruling F (the conductor, under the maintainer's delegation of
+    2026-11-11): the ACCEPTED_DIVERGENCES names under which every line of
+    an attempt is covered, or an empty set. Its community lines must pass
+    the community rule unchanged (at least one partition line among them);
+    every other line must be a position the tie or padded-query rules prove.
+    It accepts no new kind of difference, only the sum of accepted ones."""
+    kinds = [_community_line(line) for line in attempt["diffs"]]
+    rest = [line for line, kind in zip(attempt["diffs"], kinds) if kind is None]
+    used: set[str] = set()
+    if len(rest) < len(kinds):
+        if "partition" not in kinds:
+            return set()
+        used.add("community-partition")
+    if rest:
+        proved = _tie_only({**attempt, "diffs": rest})
+        if not proved:
+            return set()
+        used |= proved
+    return used
 
 
 def _oom_total(*attempts) -> int | None:

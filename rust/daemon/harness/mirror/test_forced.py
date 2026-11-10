@@ -2299,21 +2299,37 @@ def test_an_access_count_follow_on_is_exactly_the_extra_serves_of_a_tie_pick():
     assert forced._tie_only(attempt(crafted + python_side, p70))
 
 
-def test_tie_order_is_accepted_per_scenario_and_never_mixed(tmp_path):
+def test_tie_order_is_accepted_per_scenario_and_composes_with_community(tmp_path):
+    """Ruling F (2026-11-11): an attempt whose every line one accepted rule
+    covers is accepted, listing every divergence used; recall-ungated in the
+    targeted run had community-partition lines beside two duplicate picks."""
     lines, proofs = swap()
     tie = attempt(lines, proofs)
     padded = attempt(lines + [w2d_case("padded query", [".cortex: length python 5 vs rust 4"])], proofs)
     mixed = attempt(lines + [COMMUNITY_ROWS], proofs)
+    unproven = attempt(lines + [COMMUNITY_ROWS], {})
+    other_meta = attempt(lines + [COMMUNITY_ROWS, "DIFF [graph-writes] step 35 {\"op\": \"tool\"}: db "
+                                  "/rows/public.meta/rows: row only in python: [\"dream_cursor\", 5]"], proofs)
+    digest_only = attempt(lines + [DIGEST_PY], proofs)
     answers = {"recall": {"real": tie, "real-retry": tie, "synthetic": PASS},
                "recall-wide": {"real": padded, "real-retry": padded, "synthetic": PASS},
                "graph-writes": {"real": mixed, "real-retry": mixed, "synthetic": PASS},
+               "graph-read": {"real": unproven, "real-retry": unproven, "synthetic": PASS},
+               "graph-meta": {"real": other_meta, "real-retry": other_meta, "synthetic": PASS},
+               "graph-digest": {"real": digest_only, "real-retry": digest_only, "synthetic": PASS},
+               "graph-cut": {"real": mixed, "real-retry": {**mixed, "diffs_complete": False}, "synthetic": PASS},
                "recall-caps": {"real": tie, "real-retry": {**tie, "exit": None}, "synthetic": PASS}}
     report, _ = forced.run(FakeRunner(tmp_path, answers), ["w2e"], None, names=lambda s: list(answers))
     rows = {r["scenario"]: r for r in report["suites"]["w2e"]["rows"]}
     assert rows["recall"]["class"] == "accepted" and rows["recall"]["accepted_as"] == "tie-order"
-    # A line no rule proves (padded-query), a community line beside a tie,
-    # and a retry that timed out each keep the scenario new.
-    for name in ("recall-wide", "graph-writes", "recall-caps"):
+    assert rows["graph-writes"]["class"] == "accepted"
+    assert rows["graph-writes"]["accepted_as"] == "community-partition+tie-order"
+    # Near misses: a line no rule proves (padded-query in an unmarked case);
+    # a community line beside an unproven id difference; a proven tie beside
+    # a meta row whose key is not a community key; the digest without a
+    # partition line; a composed attempt whose retry is incomplete; a retry
+    # that timed out.
+    for name in ("recall-wide", "graph-read", "graph-meta", "graph-digest", "graph-cut", "recall-caps"):
         assert rows[name]["class"] == "new" and "accepted_as" not in rows[name], name
     both = attempt(padded_attempt()["diffs"] + lines, {**padded_attempt()["tie_proofs"], **proofs})
     report, _ = forced.run(FakeRunner(tmp_path, {"default": {"real": both, "real-retry": both, "synthetic": PASS},
