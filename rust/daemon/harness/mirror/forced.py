@@ -129,7 +129,8 @@ ACCEPTED_DIVERGENCES = {
         "extended the same day to meta's graph_digest row beside a partition difference: the "
         "snapshot _refresh_graph_insight writes with the partition, whose god_nodes can also "
         "differ by betweenness sampling above betweenness_sample nodes (betweenness-above-"
-        "betweenness-sample.md; partial run 870fb28fc)"),
+        "betweenness-sample.md; partial run 870fb28fc); and again to the same values in an "
+        "observed bank's response-side rows, the digest named by its key (session scenarios)"),
 }
 COMMUNITY_TABLES = ("public.communities", "public.entity_communities")
 COMMUNITY_FIELDS = ("community", "communities")
@@ -137,6 +138,15 @@ COMMUNITY_FIELDS = ("community", "communities")
 # community one only when its line names one of these keys. A meta place
 # names no key (/rows/public.meta/rows, or base_missing), so the line does.
 COMMUNITY_META_KEYS = ("graph_digest",)
+# The same difference in an observed bank's rows (a routes session
+# observation, .json.db.rows.public.<table>...): the partition columns by
+# position (pseudolife_memory/storage/schema.py), so a clock or an id
+# column stays a difference. Maintainer decision, 2026-11-10.
+RESPONSE_ROW = re.compile(r"^\.json\.db\.rows\.public\.(\w+)\.(.+)$")
+RESPONSE_PARTITION_COLUMNS = {
+    "communities": {0, 1, 2, 3},     # id, label, size, cohesion (not computed_at)
+    "entity_communities": {1},       # community_id (not entity_id, computed_at)
+}
 META_ROW = re.compile(r"/rows/public\.meta/rows: row only in (?:python|rust): \[([\"'])(\w+)\1")
 # Known limits the maintainer accepted, by scenario: an error where both real
 # attempts each saw the runner's cgroup OOM counter rise is classified
@@ -918,13 +928,49 @@ def _complete(attempt: dict) -> bool:
     return attempt.get("diffs_complete") is True
 
 
+def _response_community(item) -> str | None:
+    """One case item of an observed bank (``.json.db.rows.public.<table>...``,
+    a routes session observation): "partition" for a community table's
+    partition column or row set, "meta" for the graph_digest value named by
+    its key (``meta.by_key.<key>``, background_sessions.keyed_meta), else
+    None. A meta value named only by its row index is not one."""
+    m = RESPONSE_ROW.match(str(item).split(": ", 1)[0])
+    if not m:
+        return None
+    table, rest = m.groups()
+    if table == "meta":
+        key = re.match(r"by_key\.(\w+)(?:[.\[]|$)", rest)
+        return "meta" if key and key.group(1) in COMMUNITY_META_KEYS else None
+    columns = RESPONSE_PARTITION_COLUMNS.get(table)
+    if columns is None:
+        return None
+    if rest == "rows" or rest.startswith("base_missing"):
+        return "partition"
+    cell = re.fullmatch(r"rows\[\d+\](?:\[(\d+)\])?", rest)
+    if cell and (cell.group(1) is None or int(cell.group(1)) in columns):
+        return "partition"
+    return None
+
+
 def _community_line(line: str) -> str | None:
     """How one difference line is a community one: "partition" when every
     place is in the community tables or a community field, "meta" when it is
     a meta row whose key COMMUNITY_META_KEYS names, else None. The key is
     read from the line, so a meta row counts only on a line of one place
     (dbstate prints one row per line); a case line listing several does not
-    vouch for each."""
+    vouch for each. A case line of an observed bank's values is read item
+    by item (_response_community), each naming its own table and key."""
+    case = CASE.match(HEAD.sub("", line, count=1))
+    if case and ".json.db.rows." in case.group(2):
+        try:
+            items = ast.literal_eval(case.group(2))
+        except (ValueError, SyntaxError):
+            items = None
+        if isinstance(items, list) and items:
+            kinds = [_response_community(i) for i in items]
+            if None in kinds:
+                return None
+            return "partition" if "partition" in kinds else "meta"
     places = _places(line)
     if all(_community_place(where) for _, where in places):
         return "partition"
