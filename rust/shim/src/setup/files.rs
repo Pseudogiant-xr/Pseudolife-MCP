@@ -30,7 +30,7 @@ impl TransactionLock {
         #[cfg(unix)]
         let created = state::create(&path);
         let opened = created
-            .or_else(|_| state::open_with_write(&path, true))
+            .or_else(|_| open_published_lock(&path))
             .map_err(|cause| file_error(&path, cause))?;
         opened.file.try_lock().map_err(|_| {
             SetupError("Another Codex setup is in progress; retry after it finishes.")
@@ -44,6 +44,40 @@ impl TransactionLock {
         }
         Ok(Self(opened.file))
     }
+}
+
+/// Open the lock file another installer has already published.
+///
+/// On Windows the publisher's `MoveFileW` still holds its delete-access handle
+/// for a moment after the lock name appears, and this open shares read and
+/// write but not delete, so it is refused with a sharing violation until that
+/// handle closes (#1469). Retry only that error, briefly: the POSIX link
+/// publish has no such window, so its loser always opens the lock and gets
+/// `try_lock`'s verdict, and this keeps Windows to the same answer. Every
+/// other error, and a sharing violation that outlasts the bound, still reports
+/// the lock file as unopenable.
+fn open_published_lock(path: &Path) -> Result<state::PrivateFile, &'static str> {
+    #[cfg(windows)]
+    {
+        const ERROR_SHARING_VIOLATION: i32 = 32;
+        // Not measured: the window is one handle close. The bound only caps
+        // how long a persistent sharing violation (another program holding
+        // the file) delays the refusal.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(500);
+        loop {
+            match state::open_detailed_with_write(path, true) {
+                Err(state::OpenError::Io(error))
+                    if error.raw_os_error() == Some(ERROR_SHARING_VIOLATION)
+                        && std::time::Instant::now() < deadline =>
+                {
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
+                result => return result.map_err(|error| error.code()),
+            }
+        }
+    }
+    #[cfg(unix)]
+    state::open_with_write(path, true)
 }
 
 #[cfg(windows)]

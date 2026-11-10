@@ -97,7 +97,7 @@ pub enum OpenError {
     InvalidState,
 }
 impl OpenError {
-    fn code(&self) -> &'static str {
+    pub(crate) fn code(&self) -> &'static str {
         match self {
             Self::Io(_) => "state_unavailable",
             Self::InvalidState => "invalid_state",
@@ -165,7 +165,7 @@ pub fn open_with_write(path: &Path, write: bool) -> Result<PrivateFile> {
 pub fn open_detailed(path: &Path) -> std::result::Result<PrivateFile, OpenError> {
     open_detailed_with_write(path, false)
 }
-fn open_detailed_with_write(
+pub(crate) fn open_detailed_with_write(
     path: &Path,
     write: bool,
 ) -> std::result::Result<PrivateFile, OpenError> {
