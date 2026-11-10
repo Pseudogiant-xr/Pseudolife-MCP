@@ -942,8 +942,8 @@ def test_a_community_difference_beside_an_errored_attempt_stays_new(tmp_path, er
     only community differences and the other errored, the errored one was
     filtered out and the scenario accepted, hiding a crash or timeout. Both
     real attempts must complete with community-only differences."""
-    diff = {"status": "diff", "diffs": [COMMUNITY_ROWS], "seconds": 1.0}
-    err = {"status": "error", "diffs": [], "error_tail": ["ConnectionRefusedError"], "seconds": 1.0}
+    diff = {"status": "diff", "diffs": [COMMUNITY_ROWS], "seconds": 1.0, "exit": 1}
+    err = {"status": "error", "diffs": [], "error_tail": ["ConnectionRefusedError"], "seconds": 1.0, "exit": 2}
     answers = {"graph-writes": {"real": diff, "real-retry": diff, "synthetic": PASS}}
     answers["graph-writes"][errored] = err
     report, _ = forced.run(FakeRunner(tmp_path, answers), ["w2e"], None, names=lambda s: list(answers))
