@@ -103,6 +103,7 @@ svc._storage.close()
             for side, daemon in procs.items():
                 dsn = daemon.env["PSEUDOLIFE_MCP_DATABASE_URL"]
                 deadline = time.monotonic() + 120
+                settle, waiting = StableFor(REFRESH_SETTLE_S), "the session milestone"
                 while True:
                     state = dbstate.dump(dsn)
                     table = state["rows"]["public.episodes"]
@@ -120,15 +121,21 @@ svc._storage.close()
                             if "dream_state" in entries["columns"] else None
                         reached &= col is None or all(row[col] != "pending"
                                                       for row in entries["rows"])
-                        # ...and, on a bank with a graph, refreshed it.
-                        reached &= not graph_refresh_pending(state, self.before, daemon.started_at_unix)
+                        # ...and, on a bank with a graph, refreshed it and
+                        # finished writing (REFRESH_SETTLE_S).
+                        if reached and graph_held(state, self.before):
+                            if graph_refresh_pending(state, self.before, daemon.started_at_unix):
+                                reached, waiting = False, "its graph insight refresh"
+                            elif not settle(state, time.monotonic()):
+                                reached, waiting = False, "its bank to settle after the refresh"
                     if self.resume_refusal:
                         # Observe a second failing tick: the first tick's
                         # durable closes survive and neither tick dreams.
                         reached &= daemon.log.read_text(errors="replace").count("session reaper error:") >= 2
                     if reached: break
                     if time.monotonic() > deadline:
-                        raise RuntimeError(f"{side} did not reach {self.name} milestone; log {daemon.log}")
+                        raise RuntimeError(f"{side} did not reach {self.name} milestone (waiting for "
+                                           f"{waiting}); log {daemon.log}")
                     time.sleep(0.1)
                 captured = time.time()
                 self.validate_expected(state)
@@ -273,6 +280,41 @@ def keyed_meta(state):
     return state
 
 
+def graph_held(state, before):
+    """The bank held a graph before the arm ran, so a session-end dream will
+    refresh it: a graph_digest row in ``before`` or the base, and edges.
+    Both daemons skip a graph with no edges (empty_graph) before writing any
+    digest, so a copy that kept its old digest is not one."""
+    held = any(r[0] == "graph_digest" for r in before["rows"].get("public.meta", {}).get("rows", [])) \
+        or json.dumps("graph_digest") in dbstate.base_keys("public.meta")
+    edged = any(snapshot["rows"].get("public.edges", {}).get("rows") for snapshot in (before, state)) \
+        or bool(dbstate.base_keys("public.edges"))
+    return held and edged
+
+
+# After the digest, both dreams still write: the entity-source backfill and
+# the link retype (service_dream.py ~2399, dream/run.rs ~2275), in a
+# transaction of their own, and neither daemon logs the dream's end. On a
+# bank with a graph the capture therefore also needs the dumped rows to stay
+# the same this long. That narrows the race; a completion signal from both
+# daemons would close it.
+REFRESH_SETTLE_S = 3.0
+
+
+class StableFor:
+    """True once the same dumped rows have been seen for ``seconds``."""
+
+    def __init__(self, seconds):
+        self.seconds, self.sig, self.since = seconds, None, None
+
+    def __call__(self, state, now):
+        sig = json.dumps(state["rows"], sort_keys=True, default=str)
+        if sig != self.sig:
+            self.sig, self.since = sig, now
+            return False
+        return now - self.since >= self.seconds
+
+
 def graph_refresh_pending(state, before, start):
     """True while a bank that held a graph before the arm ran (a
     graph_digest row in ``before`` or the base) has no digest computed at or
@@ -281,13 +323,7 @@ def graph_refresh_pending(state, before, start):
     once both had acknowledged the dream's entries, but Rust had rewritten
     every base community row by then and Python none. A bank without a graph
     is never refreshed, so a synthetic fixture never waits on this."""
-    held = any(r[0] == "graph_digest" for r in before["rows"].get("public.meta", {}).get("rows", [])) \
-        or json.dumps("graph_digest") in dbstate.base_keys("public.meta")
-    # Both daemons skip a graph with no edges (empty_graph) before writing
-    # any digest, so a copy that kept its old digest waits for nothing.
-    edged = any(snapshot["rows"].get("public.edges", {}).get("rows") for snapshot in (before, state)) \
-        or bool(dbstate.base_keys("public.edges"))
-    if not (held and edged):
+    if not graph_held(state, before):
         return False
     digest = {r[0]: r[1] for r in state["rows"]["public.meta"]["rows"]}.get("graph_digest")
     at = digest.get("computed_at") if isinstance(digest, dict) else None

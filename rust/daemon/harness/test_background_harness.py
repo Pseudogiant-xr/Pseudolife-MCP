@@ -567,3 +567,18 @@ def test_the_observed_banks_meta_rows_are_keyed_so_a_difference_names_its_row():
     diffs = harness.diff_values(ka, kb)
     assert diffs and all(".by_key.graph_digest." in d for d in diffs), diffs   # row order no longer matters
     assert harness.diff_values(keyed_meta(state()), keyed_meta(state())) == []
+
+
+def test_a_refreshed_bank_is_captured_only_once_its_rows_stop_changing():
+    """Review (Opus): the digest is not the dream's last write; the
+    entity-source backfill and the link retype follow it. On a bank with a
+    graph the capture also needs the same dumped rows for REFRESH_SETTLE_S."""
+    from background_sessions import StableFor
+    settle = StableFor(3.0)
+    a, b = state(), state()
+    b["rows"]["public.meta"]["rows"].append(["graph_digest", {"computed_at": 1.0}])
+    assert not settle(a, 0.0)          # first sight
+    assert not settle(a, 2.9)          # not yet long enough
+    assert not settle(b, 3.0)          # a write in between restarts it
+    assert not settle(b, 5.9)
+    assert settle(b, 6.0)              # the same rows for 3 s
