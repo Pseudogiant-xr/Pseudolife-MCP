@@ -1068,6 +1068,12 @@ class Reaper(Scenario):
 
     def __init__(self):
         self.env = {"PSEUDOLIFE_SESSION_REAP_SECONDS": "5"}
+        if os.environ.get("PL_HARNESS_BASE_DATABASE"):
+            # Its 5 s tick, which overrides real_bank_env's, also closed a
+            # genuinely idle real session, whose session-end dream Rust
+            # finished before the stop and Python's was killed at. The
+            # scenario seeds no session, so only the init retry is tested.
+            self.env["PSEUDOLIFE_SESSION_IDLE_SECONDS"] = "86400"
 
     def timeline(self, procs, holders):
         time.sleep(110)  # failures near 0, 5, 15, 35, 75 s: the fifth arms 60 s; warmup stops

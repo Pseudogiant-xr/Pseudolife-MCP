@@ -78,3 +78,28 @@ def test_a_route_scenarios_own_autosave_wins(monkeypatch):
 
     monkeypatch.setenv("PL_HARNESS_BASE_DATABASE", "pl_cf_mir_seed")
     assert run.common_env(Saves(), "dsn")[SAVE] == "1"
+
+
+IDLE = "PSEUDOLIFE_SESSION_IDLE_SECONDS"
+
+
+def test_the_reaper_scenario_on_a_real_base_closes_no_real_session(monkeypatch):
+    """The route ``reaper`` scenario keeps its 5 s tick, which retries init
+    after the held lease is released, but on a real base that tick also
+    closed a genuinely idle real session: Rust's session-end dream finished
+    its graph refresh before the stop, Python's dream thread was killed at
+    the stop. The real arm's idle threshold is out of reach; the scenario
+    seeds no session of its own, so the tick has nothing else to close."""
+    import run
+    monkeypatch.setenv("PL_HARNESS_BASE_DATABASE", "pl_cf_mir_seed")
+    env = run.common_env(run.SCENARIOS["reaper"](), "dsn")
+    assert env[REAP] == "5" and env[IDLE] == "86400" and env[SAVE] == "86400"
+    # Only this scenario: another route arm on the base keeps the default.
+    assert IDLE not in run.common_env(run.SCENARIOS["tokens"](), "dsn")
+
+
+def test_the_reaper_scenarios_synthetic_arm_is_unchanged(monkeypatch):
+    import run
+    monkeypatch.delenv("PL_HARNESS_BASE_DATABASE", raising=False)
+    env = run.common_env(run.SCENARIOS["reaper"](), "dsn")
+    assert env[REAP] == "5" and IDLE not in env and SAVE not in env
