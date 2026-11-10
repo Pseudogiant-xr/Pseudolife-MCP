@@ -778,6 +778,25 @@ def test_the_comparators_own_output_for_an_observation_is_classified(tmp_path):
     assert _community_rows(tmp_path / "p", [line])["class"] == "new"
 
 
+def test_a_whole_row_on_a_community_table_is_the_partition(tmp_path):
+    """Review (conductor): a whole-row place (rows[i], no column index), as
+    diff_values prints it when one row's width differs, counts as partition
+    on a community table and covers every column; on another table it
+    stays a difference."""
+    whole = ".json.db.rows.public.entity_communities.rows[3]: python [7, 1] vs rust [7, 1, 2.0]"
+    assert _community_rows(tmp_path, [_observed(whole, *RESPONSE_DIGEST)])["class"] == "accepted"
+    other = ".json.db.rows.public.entity_sources.rows[3]: python [7, \"x\"] vs rust [7, \"x\", 1]"
+    assert _community_rows(tmp_path / "o", [_observed(whole, other)])["class"] == "new"
+
+
+def test_a_response_side_digest_only_retry_keeps_it_new(tmp_path):
+    """Each real attempt needs its own partition difference on the response
+    side too: a retry whose observation differs only in the digest stays new."""
+    first = _observed(*RESPONSE_PARTITION, *RESPONSE_DIGEST)
+    assert _community_rows(tmp_path, [first], retry=[_observed(*RESPONSE_DIGEST)])["class"] == "new"
+    assert _community_rows(tmp_path / "b", [first], retry=[first])["class"] == "accepted"
+
+
 def test_a_response_side_digest_alone_is_not_accepted(tmp_path):
     assert _community_rows(tmp_path, [_observed(*RESPONSE_DIGEST)])["class"] == "new"
     assert _community_rows(tmp_path / "b", [_observed(*RESPONSE_DIGEST), ROUTES_DIGEST])["class"] == "new"
