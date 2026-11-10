@@ -180,6 +180,89 @@ def outcome(exit_code: int | None, log: str) -> dict:
     return {"status": status, "diffs": diffs, "error_tail": tail}
 
 
+# Every harness caps the DIFF lines it prints (w2e 6 per step; routes 4 items
+# per case and 20 db lines; w2d 5 and 20; board 4 items per step, 12 state
+# and 12 chain lines), so a difference past a cap is in no printed line. Its
+# final --out JSON holds them all: harness_lines rebuilds each harness's
+# printed lines from it, capped as printed or in full.
+def _w2e_lines(data: dict, capped: bool):  # w2e.py main(): DIFF per step diff
+    for r in data["scenarios"]:
+        for s in r["steps"]:
+            for d in s["diffs"][:6 if capped else None]:
+                yield f"DIFF [{r['scenario']}] step {s['step']} {json.dumps(s['op'])[:90]}: {d}"
+
+
+def _routes_lines(data: dict, capped: bool):  # run.py main(): cases, db, refusals
+    for r in data["scenarios"]:
+        for c in r["cases"]:
+            if c["diffs"]:
+                yield f"DIFF [{r['scenario']}] {c['case']}: {c['diffs'][:4 if capped else None]}"
+        for d in r["db_diffs"][:20 if capped else None]:
+            yield f"DB DIFF [{r['scenario']}] {d}"
+    for r in data["refusals"]:
+        if r["diffs"]:
+            yield f"DIFF {r['case']}: {r['diffs']}"
+
+
+def _w2d_lines(data: dict, capped: bool):  # w2d_search.py main(): cases, db
+    for r in data["results"]:
+        for c in r["cases"]:
+            if c["diffs"]:
+                yield f"DIFF [{r['scenario']}] {c['case']}: {c['diffs'][:5 if capped else None]}"
+        for d in r["db_diffs"][:20 if capped else None]:
+            yield f"DB DIFF [{r['scenario']}] {d}"
+
+
+def _board_lines(data: dict, capped: bool):  # board/run.py main(): steps, state, chain
+    for r in data["results"]:
+        for s in r["steps"]:
+            if s["diffs"]:
+                yield f"DIFF [{r['scenario']}] #{s['step']} {s['name']}: {s['diffs'][:4 if capped else None]}"
+        for d in r["state_diffs"][:12 if capped else None]:
+            yield f"STATE [{r['scenario']}] {d}"
+        for p in r["chain"][:12 if capped else None]:
+            yield f"CHAIN [{r['scenario']}] {p}"
+
+
+# suite -> (is this the harness's final, complete --out write, its lines).
+# Routes' progress write is {"partial": [...]}; the others mark theirs
+# "complete": false.
+HARNESS_OUT = {
+    "w2e": (lambda d: d.get("complete") is True and "scenarios" in d, _w2e_lines),
+    "routes": (lambda d: "summary" in d and "scenarios" in d and "refusals" in d, _routes_lines),
+    "w2d_search": (lambda d: d.get("complete") is True and "results" in d, _w2d_lines),
+    "board": (lambda d: d.get("complete") is True and "results" in d, _board_lines),
+}
+
+
+def harness_lines(suite: str, data: dict, capped: bool) -> list[str]:
+    """The DIFF lines ``suite``'s harness prints from its --out ``data``:
+    as printed when ``capped``, else every difference in the same format."""
+    return list(HARNESS_OUT[suite][1](data, capped))
+
+
+def full_diffs(suite: str, path: Path, printed: list[str]) -> tuple[list[str] | None, str | None]:
+    """Every difference line of an attempt, from its --out JSON, or None and
+    why not: no file, unparseable, not the final write, or capped lines that
+    are not the ones the log printed (another run's file, a changed format)."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None, "the harness wrote no --out JSON"
+    except (OSError, ValueError) as e:
+        return None, f"its --out JSON is unreadable: {str(e)[:120]}"
+    try:
+        if not (isinstance(data, dict) and HARNESS_OUT[suite][0](data)):
+            return None, "its --out JSON is not the harness's final, complete write"
+        shown, full = harness_lines(suite, data, True), harness_lines(suite, data, False)
+    except Exception as e:  # any shape the rebuild does not know; never fatal to the run
+        return None, f"its --out JSON has an unexpected shape: {type(e).__name__}: {str(e)[:120]}"
+    # The log read: a difference holding a newline prints as several lines.
+    if [line for line in "\n".join(shown).splitlines() if DIFF_LINE.match(line)] != printed:
+        return None, "its --out JSON does not match the printed DIFF lines"
+    return full, None
+
+
 # The other suites' lines: board STATE (after step N (label): table: ...),
 # board CHAIN (side: key: ...), routes DB (a leading /rows/... path), w2d
 # fields (public.table[i].field: python ... vs rust ...), w2d coverage
@@ -312,7 +395,9 @@ def classify(first: dict, retry: dict | None, synthetic: dict | None) -> str:
     """``preexisting`` only when the synthetic run differs in every place the
     real bank does: an unrelated synthetic failure does not excuse a
     real-bank difference, and neither does one shared place excuse the
-    others (conductor decision, 2026-11-10)."""
+    others (conductor decision, 2026-11-10). The first attempt's places must
+    be its full list: a place past the harness's printed cap is in no
+    printed line."""
     if first["status"] == "pass":
         return "pass"
     if retry is not None and retry["status"] == "pass":
@@ -320,7 +405,7 @@ def classify(first: dict, retry: dict | None, synthetic: dict | None) -> str:
     if first["status"] == "error" and (retry is None or retry["status"] == "error"):
         return "error"  # no comparison completed: never a pass, never preexisting
     places = signatures(first)
-    if synthetic is not None and synthetic["status"] == "diff" \
+    if synthetic is not None and synthetic["status"] == "diff" and _complete(first) \
             and places and places <= signatures(synthetic):  # an empty set excuses nothing
         return "preexisting"
     return "new"
@@ -422,8 +507,10 @@ class Runner:
         reaped = self.reap_leftovers()
         before = self.oom_kills()
         started = time.monotonic()
+        written = work / f"{safe}.json"
+        written.unlink(missing_ok=True)  # an earlier run's file is not this attempt's
         code, log = self._run([sys.executable, str(script), "live", "--rust-bin", str(self.rust_bin),
-                               "--only", name, "--out", str(work / f"{safe}.json")], env)
+                               "--only", name, "--out", str(written)], env)
         after = self.oom_kills()
         # Scenarios run one at a time, so no disposable database should
         # outlive its attempt; a harness that raised never reached its drops.
@@ -441,7 +528,18 @@ class Runner:
             shutil.rmtree(env["PL_HARNESS_SCRATCH"], ignore_errors=True)
         (work / f"{safe}.log").write_text(log, encoding="utf-8")
         kills = after - before if before is not None and after is not None else None
-        return {**outcome(code, log), "exit": code, "seconds": round(time.monotonic() - started, 1),
+        result = outcome(code, log)
+        # The printed lines are capped: a differing attempt takes every
+        # difference from its --out JSON, and without that it keeps the
+        # printed ones, marked incomplete (no preexisting, no acceptance).
+        result["diffs_complete"] = result["status"] == "pass"
+        if result["status"] == "diff":
+            full, why = full_diffs(suite, written, result["diffs"])
+            if full is None:
+                result["diffs_note"] = why
+            else:
+                result["diffs"], result["diffs_complete"] = full, True
+        return {**result, "exit": code, "seconds": round(time.monotonic() - started, 1),
                 "oom_kills": kills, "base": which}
 
     def _run(self, argv: list[str], env: dict) -> tuple[int | None, str]:
@@ -558,8 +656,9 @@ def run(runner: Runner, suites: list[str], only: list[str] | None,
                 verdict, accepted_as = "accepted", "oom"
             # Every real attempt that ran must have finished (an exit code,
             # not a timeout, signal or OOM kill) with only community
-            # differences: an errored or cut one is never filtered out.
-            elif verdict == "new" and all(_finished(a) and _community_only(a)
+            # differences, read from its full list: an errored or cut one is
+            # never filtered out.
+            elif verdict == "new" and all(_finished(a) and _complete(a) and _community_only(a)
                                           for a in (first, retry) if a is not None):
                 verdict, accepted_as = "accepted", "community-partition"
             rows.append({"scenario": name, "class": verdict, "differences": len(first["diffs"]),
@@ -591,6 +690,12 @@ def _finished(attempt: dict) -> bool:
     code = attempt.get("exit")
     return (attempt.get("status") == "diff" and isinstance(code, int) and code >= 0
             and not (attempt.get("oom_kills") or 0))
+
+
+def _complete(attempt: dict) -> bool:
+    """Its diffs are every difference (read from the harness's --out JSON),
+    not just the capped printed lines; a missing mark is not complete."""
+    return attempt.get("diffs_complete") is True
 
 
 def _community_only(attempt: dict) -> bool:

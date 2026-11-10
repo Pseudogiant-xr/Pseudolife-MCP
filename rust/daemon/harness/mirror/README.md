@@ -87,6 +87,13 @@ harness's synthetic bank. Its class follows from those runs:
 | `accepted` | A difference the maintainer accepted, with its reason (`accepted_as` on the row): both real-bank attempts saw the runner's OOM counter rise in a scenario listed in `ACCEPTED_OOM` (`"oom"`), or every difference place of both real attempts is in the community tables or a community field (`"community-partition"`, `ACCEPTED_DIVERGENCES`; one place anywhere else keeps it `new`). The summary lists both as `accepted_limits` and `accepted_divergences` |
 | `excluded` | Its real-bank arms do not run, because its premise cannot hold on a real bank (`REAL_BANK_EXCLUDED` in `forced.py`, with each reason; the summary lists them as `real_bank_exclusions`); its synthetic arm ran and passed |
 
+Every harness caps the DIFF lines it prints, so the places come from each
+attempt's `--out` JSON, rebuilt in the printed format with no cap. An
+attempt without a complete one, or whose JSON does not match its printed
+lines, keeps its printed lines with `diffs_complete: false` (and
+`diffs_note` saying why). A scenario's real attempts are then never
+`preexisting` or community-`accepted`.
+
 `summary.json` holds counts and names only. `private.json` quotes bank text
 and stays on the host.
 
