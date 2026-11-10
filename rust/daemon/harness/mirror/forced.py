@@ -104,14 +104,16 @@ REAL_BANK_EXCLUDED = {
         "memory limit (forced run 8eb08c214); excluded by the maintainer, 2026-11-10"),
     # Maintainer decision, 2026-11-10 (partial run 870fb28fc's findings).
     "routes/stamped": (
-        "its template step deletes a builtin relation no fact references, as the tripwire the "
-        "stamped startup must catch; a real bank references every builtin relation, so the "
-        "scenario refuses before it starts (run.py prepare_template, partial run 870fb28fc); "
-        "excluded by the maintainer, 2026-11-10"),
+        "its template deletes a builtin relation nothing references (no edge, edge proposal or "
+        "inverse_of points at it), so a startup that wrongly re-seeds builtins shows it again; a "
+        "real bank references every builtin relation, so prepare_template refuses before the "
+        "scenario runs (run.py unreferenced_builtin_relation, partial run 870fb28fc); excluded by "
+        "the maintainer, 2026-11-10"),
     "w2e/search-after-restart": (
-        "its access-count expect counts the seeded entries' access_count after a restart, and on "
-        "a real bank's copy it fails on both daemons alike, so the run compares no Python-vs-Rust "
-        "behaviour (partial run 870fb28fc); excluded by the maintainer, 2026-11-10"),
+        "its access-count expect, already narrowed to the entries the scenario stores itself, "
+        "still fails on both daemons alike on a real bank's copy, so the arm's state and "
+        "response diffs cannot be read as Python-vs-Rust differences (partial run 870fb28fc); "
+        "excluded by the maintainer, 2026-11-10"),
 }
 # Differences the maintainer accepted on real-bank arms, by name: a scenario
 # whose every difference place (in the first attempt and the retry) is one
@@ -124,8 +126,9 @@ ACCEPTED_DIVERGENCES = {
         "write-path-w2-e/memory-dream-run-the-graph/louvain-s-visiting-order.md, #1417): on a "
         "real bank's copy Python re-partitions the copied communities after graph writes and Rust "
         "reproduces the base's. Accepted by the maintainer for real-bank arms, 2026-11-10 (D1); "
-        "extended the same day to meta's graph_digest row, the snapshot _refresh_graph_insight "
-        "writes with the partition (partial run 870fb28fc)"),
+        "extended the same day to meta's graph_digest row beside a partition difference: the "
+        "snapshot _refresh_graph_insight writes with the partition, whose god_nodes also differ "
+        "by betweenness sampling (betweenness-above-betweenness-sample.md; partial run 870fb28fc)"),
 }
 COMMUNITY_TABLES = ("public.communities", "public.entity_communities")
 COMMUNITY_FIELDS = ("community", "communities")
@@ -914,21 +917,30 @@ def _complete(attempt: dict) -> bool:
     return attempt.get("diffs_complete") is True
 
 
-def _community_line(line: str) -> bool:
-    """Every place of one difference line is a community one: the tables,
-    a community field, or a meta row whose key COMMUNITY_META_KEYS names."""
-    for _, where in _places(line):
-        if _community_place(where):
-            continue
-        key = META_ROW.search(line) if where == "/rows/public.meta/rows" else None
-        if not (key and key.group(2) in COMMUNITY_META_KEYS):
-            return False
-    return True
+def _community_line(line: str) -> str | None:
+    """How one difference line is a community one: "partition" when every
+    place is in the community tables or a community field, "meta" when it is
+    a meta row whose key COMMUNITY_META_KEYS names, else None. The key is
+    read from the line, so a meta row counts only on a line of one place
+    (dbstate prints one row per line); a case line listing several does not
+    vouch for each."""
+    places = _places(line)
+    if all(_community_place(where) for _, where in places):
+        return "partition"
+    if len(places) == 1 and places[0][1] == "/rows/public.meta/rows":
+        key = META_ROW.search(line)
+        if key and key.group(2) in COMMUNITY_META_KEYS:
+            return "meta"
+    return None
 
 
 def _community_only(attempt: dict) -> bool:
-    """Every difference of an attempt is in the community tables or fields."""
-    return bool(attempt["diffs"]) and all(_community_line(line) for line in attempt["diffs"])
+    """Every difference of an attempt is in the community tables or fields,
+    or a meta row written with the partition, and at least one is the
+    partition itself: the digest alone also holds god_nodes, which differ
+    for another recorded reason."""
+    kinds = [_community_line(line) for line in attempt["diffs"]]
+    return bool(kinds) and None not in kinds and "partition" in kinds
 
 
 def _oom_total(*attempts) -> int | None:

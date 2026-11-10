@@ -604,10 +604,10 @@ def test_the_maintainers_real_bank_exclusions_have_their_reasons():
 
 def test_the_premises_a_real_bank_breaks_are_excluded_with_their_reasons():
     """Maintainer decision, 2026-11-10 (partial run 870fb28fc): stamped needs
-    an unreferenced builtin relation to delete as its tripwire, and a real
-    bank references them all; search-after-restart's access-count expect
-    fails on both daemons alike, so it compares no Python-vs-Rust behaviour."""
-    for key, word in (("routes/stamped", "tripwire"), ("w2e/search-after-restart", "both daemons")):
+    an unreferenced builtin relation to delete, and a real bank references
+    them all; search-after-restart's narrowed access-count expect still fails
+    on both daemons alike there."""
+    for key, word in (("routes/stamped", "re-seeds builtins"), ("w2e/search-after-restart", "both daemons")):
         assert word in forced.REAL_BANK_EXCLUDED[key] and "2026-11-10" in forced.REAL_BANK_EXCLUDED[key]
 
 
@@ -682,11 +682,24 @@ def test_the_graph_digest_row_joins_the_community_acceptance(tmp_path):
     "DIFF [graph-writes] step 35 {\"op\": \"tool\"}: db /rows/public.meta/base_missing/count: python 1 vs rust 0",
     # The digest's key in another table is not the meta row.
     "DIFF [graph-writes] step 35 {\"op\": \"tool\"}: db /rows/public.facts/rows: row only in python: [\"graph_digest\", 1]",
+    # One line carrying several meta rows: the digest's key in it does not
+    # vouch for the others (dbstate prints one row per line).
+    "DIFF [reaper] bank after idle close: ['/rows/public.meta/rows: row only in python: "
+    "[\"graph_digest\", {}]', '/rows/public.meta/rows: row only in python: [\"dream_cursor\", 5]']",
 ])
 def test_the_graph_digest_acceptance_covers_that_meta_row_only(tmp_path, other):
     """The near misses: with the digest row and community rows, one other
     place keeps the scenario new."""
     assert _community_rows(tmp_path, [COMMUNITY_ROWS, DIGEST_PY, DIGEST_RS, other])["class"] == "new"
+
+
+def test_the_digest_row_alone_is_not_a_community_difference(tmp_path):
+    """The maintainer accepted the digest beside the partition it is written
+    with. Alone it also holds god_nodes, which differ for another recorded
+    reason (betweenness-above-betweenness-sample.md) even when the two
+    partitions agree, so a digest-only attempt stays new."""
+    assert _community_rows(tmp_path, [DIGEST_PY, DIGEST_RS])["class"] == "new"
+    assert _community_rows(tmp_path, [MEMBERSHIP, DIGEST_PY, DIGEST_RS])["class"] == "accepted"
 
 
 def test_the_summary_lists_the_accepted_divergences(tmp_path, monkeypatch):
