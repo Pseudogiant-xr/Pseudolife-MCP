@@ -14,6 +14,11 @@ Each SQL test runs on a disposable bench database with the schema, some
 pre-existing rows of the kind a real bank holds, and the scenario's own
 rows: the old expect fails there, the scenario's current one holds, and
 the state the expect guards against still fails it.
+
+search-after-restart's narrowed expect still failed on both daemons in the
+partial forced run (870fb28fc), and the maintainer excluded its real-bank
+arm (REAL_BANK_EXCLUDED in mirror/forced.py); its test below still guards
+the narrowing on a bench database.
 """
 import importlib
 import sys

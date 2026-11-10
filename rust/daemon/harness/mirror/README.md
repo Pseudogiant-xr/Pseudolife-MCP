@@ -84,7 +84,7 @@ harness's synthetic bank. Its class follows from those runs:
 | `transient` | The second real-bank run was clean |
 | `preexisting` | It also differs on the synthetic bank |
 | `new` | It differs on real data only |
-| `accepted` | A difference the maintainer accepted, with its reason (`accepted_as` on the row): both real-bank attempts saw the runner's OOM counter rise in a scenario listed in `ACCEPTED_OOM` (`"oom"`), or every difference place of both real attempts is in the community tables or a community field (`"community-partition"`, `ACCEPTED_DIVERGENCES`; one place anywhere else keeps it `new`). The summary lists both as `accepted_limits` and `accepted_divergences` |
+| `accepted` | A difference the maintainer accepted, with its reason (`accepted_as` on the row): both real-bank attempts saw the runner's OOM counter rise in a scenario listed in `ACCEPTED_OOM` (`"oom"`), or every difference place of both real attempts is in the community tables or a community field, with meta's `graph_digest` row (on a line of its own, as dbstate prints it) allowed beside them (`"community-partition"`, `ACCEPTED_DIVERGENCES`, `COMMUNITY_META_KEYS`; the digest alone, or one place anywhere else, another meta row included, keeps it `new`). The summary lists both as `accepted_limits` and `accepted_divergences` |
 | `excluded` | Its real-bank arms do not run, because its premise cannot hold on a real bank (`REAL_BANK_EXCLUDED` in `forced.py`, with each reason; the summary lists them as `real_bank_exclusions`); its synthetic arm ran and passed |
 
 Every harness caps the DIFF lines it prints, so the places come from each
