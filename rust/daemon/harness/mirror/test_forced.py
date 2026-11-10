@@ -2315,8 +2315,18 @@ def test_tie_order_is_accepted_per_scenario_and_never_mixed(tmp_path):
     # and a retry that timed out each keep the scenario new.
     for name in ("recall-wide", "graph-writes", "recall-caps"):
         assert rows[name]["class"] == "new" and "accepted_as" not in rows[name], name
+    both = attempt(padded_attempt()["diffs"] + lines, {**padded_attempt()["tie_proofs"], **proofs})
+    report, _ = forced.run(FakeRunner(tmp_path, {"default": {"real": both, "real-retry": both, "synthetic": PASS},
+                                                 "mcp-search": {"real": padded_attempt(),
+                                                                "real-retry": padded_attempt(), "synthetic": PASS}}),
+                           ["w2d_search"], None, names=lambda s: ["default", "mcp-search"])
+    rows = {r["scenario"]: r for r in report["suites"]["w2d_search"]["rows"]}
+    assert rows["default"]["accepted_as"] == "padded-query+tie-order"
+    assert rows["mcp-search"]["accepted_as"] == "padded-query"
     assert "maintainer's delegation of 2026-11-11" in forced.ACCEPTED_DIVERGENCES["tie-order"]
-    assert forced.TIE_RULES == ("duplicate-pick", "adjacent-swap", "access-count-follow-on")
+    assert forced.TIE_RULES == ("duplicate-pick", "adjacent-swap", "access-count-follow-on", "padded-query")
+    assert "5.3.0 contract" in forced.ACCEPTED_DIVERGENCES["padded-query"]
+    assert "maintainer's delegation of 2026-11-11" in forced.ACCEPTED_DIVERGENCES["padded-query"]
 
 
 def test_the_runner_reads_the_proofs_the_harness_wrote(tmp_path):
@@ -2407,3 +2417,89 @@ def test_bank_text_md5_keeps_a_hash_only_when_both_banks_agree():
     read = tie_proofs.bank_text_md5({"python": "py", "rust": "rs"}, Conn)
     assert read({1, 2, 3}) == {1: SAME, 2: None, 3: None}
     assert read(set()) == {}
+
+
+# ---- ruling E: a padded query's cortex block (2026-11-11) ----
+
+PADDED_CASE = "padded query (cortex sees the raw q)"
+
+
+def padded_attempt(cortex=(".cortex: length python 5 vs rust 4",), facts_event=9593, slot=("e1", "a1"),
+                   rows=(("python", 7), ("rust", 6)), count=None, case=PADDED_CASE, marked=True,
+                   proof_slots=None, extra_db=()):
+    lines = [w2d_case(case, list(cortex)),
+             f"DB DIFF [default] public.retrieval_events[{facts_event}].served_facts: length python 5 vs rust 4"]
+    for side, n in rows:
+        lines.append(f"DB DIFF [default] /rows/public.slot_reads/rows: row only in {side}: "
+                     f"{json.dumps([slot[0], slot[1], n, '<last_read_at>'])}")
+    if count is not None:
+        lines += [f"DB DIFF [default] /rows/public.slot_reads/base_missing/count: python {count[0]} vs rust {count[1]}",
+                  "DB DIFF [default] /rows/public.slot_reads/base_missing/digest: python \"d1\" vs rust \"d2\""]
+    lines += [f"DB DIFF [default] {d}" for d in extra_db]
+    proofs = {"db": [{"at": "public.retrieval_events[9593]", "kind": "padded-event", "event": 9593,
+                      "slots": proof_slots if proof_slots is not None else [tie_proofs.slot_md5("e1", "a1")]}]}
+    if marked:
+        proofs[f"case {PADDED_CASE}"] = [{"at": "", "kind": "padded-query"}]
+    return attempt(lines, proofs)
+
+
+def test_a_padded_query_differing_only_in_its_cortex_block_is_accepted():
+    """Ruling E: the padded case's cortex length, its event's served facts and
+    the slot_reads rows of the slot one side served and the other did not."""
+    a = padded_attempt()
+    assert forced._tie_only(a, rules=("padded-query",))
+    assert not forced._tie_only(a, rules=("duplicate-pick", "adjacent-swap", "access-count-follow-on"))
+    # mcp-search's shape: Python rewrote the slot's base row, Rust did not.
+    assert forced._tie_only(padded_attempt(rows=(("python", 5),), count=(33, 32)), rules=("padded-query",))
+    # The explain case's shape: every field of the cortex block's items.
+    explain = padded_attempt(cortex=(".cortex[0].score: python 0.4791 vs rust 0.4874",
+                                     ".cortex[2].correct_with: only in rust",
+                                     ".cortex[1].entity: python \"x\" vs rust \"y\""), rows=())
+    assert forced._tie_only(explain, rules=("padded-query",))
+
+
+def test_a_padded_query_rule_covers_nothing_outside_its_case_event_and_slots():
+    rules = ("padded-query",)
+    # A cortex difference in an unmarked case; a case not marked padded.
+    assert not forced._tie_only(padded_attempt(case="plain query"), rules=rules)
+    assert not forced._tie_only(padded_attempt(marked=False), rules=rules)
+    # Another field of the padded case's response.
+    assert not forced._tie_only(padded_attempt(cortex=(".cortex: length python 5 vs rust 4",
+                                                       ".entries[0].id: python 1 vs rust 2")), rules=rules)
+    # Another event's served facts; a slot row for a slot no cortex block disagreed on.
+    assert not forced._tie_only(padded_attempt(facts_event=9600), rules=rules)
+    assert not forced._tie_only(padded_attempt(slot=("e2", "a2")), rules=rules)
+    assert not forced._tie_only(padded_attempt(proof_slots=[]), rules=rules)
+    # A base_missing count the rows do not explain.
+    assert not forced._tie_only(padded_attempt(rows=(("python", 5),), count=(34, 32)), rules=rules)
+    # Another table's line.
+    assert not forced._tie_only(padded_attempt(extra_db=("/rows/public.entries/rows: row only in python: [1]",)),
+                                rules=rules)
+
+
+def test_padded_queries_are_the_harness_cases_with_trailing_whitespace():
+    assert tie_proofs.padded("   what os does the homelab box run  ")
+    assert tie_proofs.padded("  deploy the daemon  ")
+    for query in ("   ", "", "deploy", "   leading only", None, 3):
+        assert not tie_proofs.padded(query), query
+    import w2d_search
+    names = {c["name"] for scn in (w2d_search.Default(), w2d_search.McpSearch(), w2d_search.McpExplain())
+             for c in scn.cases() if tie_proofs.padded(w2d_search.case_query(c))}
+    assert names == {PADDED_CASE, "padded query", "trace padded query"}
+    assert w2d_search.case_query({"path": "/api/search?q=+a+b+&top_k=3"}) == " a b "
+    assert w2d_search.case_query({"mcp": {"query": " x "}}) == " x "
+    assert w2d_search.case_query({"path": "/api/stats"}) is None
+    assert forced._slot_md5("e", "a") == tie_proofs.slot_md5("e", "a")
+
+
+def test_padded_event_proofs_hash_the_slots_one_side_served_alone():
+    def events(rows):
+        return {"rows": {"public.retrieval_events": {"columns": ["id", "query", "served_facts"], "rows": rows}}}
+    fact = lambda e, a: {"entity_norm": e, "attribute_norm": a}  # noqa: E731
+    py = events([[5, "  q  ", [fact("e1", "a1"), fact("e2", "a2")]], [6, "q", [fact("e3", "a3")]],
+                 [7, "  q  ", [fact("e4", "a4")]]])
+    rs = events([[5, "  q  ", [fact("e2", "a2")]], [6, "q", []], [7, "q", [fact("e4", "a4")]]])
+    out = tie_proofs.padded_event_proofs(["  q  "], py, rs)
+    assert out == [{"at": "public.retrieval_events[5]", "kind": "padded-event", "event": 5,
+                    "slots": [tie_proofs.slot_md5("e1", "a1")]}]
+    assert "e1" not in json.dumps(out)

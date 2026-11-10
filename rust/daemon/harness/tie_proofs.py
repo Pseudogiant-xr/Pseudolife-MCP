@@ -133,6 +133,45 @@ def event_proofs(lines: list[str], python_events: dict | None, rust_events: dict
     return out
 
 
+def padded(query) -> bool:
+    """A query with trailing whitespace around real words: the case shape
+    ruling E covers (sentence-transformers 5.4.0 stopped stripping text
+    before tokenising; Rust keeps the 5.3.0 strip). A blank query is not."""
+    return isinstance(query, str) and query.strip() != "" and query != query.rstrip()
+
+
+def slot_md5(entity, attribute) -> str:
+    return hashlib.md5(f"{entity}\x1f{attribute}".encode("utf-8")).hexdigest()
+
+
+def padded_event_proofs(queries: list[str], python_events: dict | None,
+                        rust_events: dict | None) -> list[dict]:
+    """For each retrieval event both sides logged with one of the padded
+    ``queries`` (exactly as given; the event logs the query unstripped), the
+    md5 of every cortex slot (entity_norm, attribute_norm) its served facts
+    hold on one side only. An event whose query differs between the sides,
+    or that one side lacks, gets no record."""
+    def table(state):
+        t = (state or {}).get("rows", {}).get("public.retrieval_events") or {}
+        cols = t.get("columns") or []
+        if not {"id", "query", "served_facts"} <= set(cols):
+            return {}
+        i, q, f = cols.index("id"), cols.index("query"), cols.index("served_facts")
+        return {row[i]: (row[q], row[f]) for row in t.get("rows") or []}
+    a, b = table(python_events), table(rust_events)
+    out = []
+    for event, (query, facts) in sorted(a.items()):
+        if query not in queries or event not in b or b[event][0] != query:
+            continue
+
+        def slots(served):
+            return {slot_md5(x.get("entity_norm"), x.get("attribute_norm"))
+                    for x in (served if isinstance(served, list) else []) if isinstance(x, dict)}
+        out.append({"at": f"public.retrieval_events[{event}]", "kind": "padded-event", "event": event,
+                    "slots": sorted(slots(facts) ^ slots(b[event][1]))})
+    return out
+
+
 def bank_text_md5(dsns: dict, connect=None) -> "callable":
     """``text_md5`` over both banks: ``connect(dsn)`` opens a connection
     (psycopg's by default). Only the hash leaves the database."""

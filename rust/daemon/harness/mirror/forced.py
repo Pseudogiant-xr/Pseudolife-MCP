@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import hashlib
 import json
 import os
 import re
@@ -154,6 +155,14 @@ ACCEPTED_DIVERGENCES = {
         "entry contiguity or timeline; and an access_count difference of exactly the extra serves "
         "of an entry an accepted duplicate pick served on one side earlier in the scenario. "
         "Accepted by the conductor under the maintainer's delegation of 2026-11-11"),
+    # Ruling E, the same delegation: TIE_RULES "padded-query".
+    "padded-query": (
+        "a w2d_search case whose query carries trailing whitespace (tie_proofs.padded, from the "
+        "case's own query) differing only in its response's cortex block, the served_facts of the "
+        "retrieval event it logged, and the slot_reads rows of the cortex slots one side served "
+        "and the other did not: accepted by the conductor under the maintainer's delegation of "
+        "2026-11-11: sentence-transformers 5.4.0 stopped stripping text before tokenising; Rust "
+        "follows the 5.3.0 contract (w2d-tokenizer-runtime)"),
 }
 COMMUNITY_TABLES = ("public.communities", "public.entity_communities")
 COMMUNITY_FIELDS = ("community", "communities")
@@ -174,7 +183,8 @@ META_ROW = re.compile(r"/rows/public\.meta/rows: row only in (?:python|rust): \[
 # Known limits the maintainer accepted, by scenario: an error where both real
 # attempts each saw the runner's cgroup OOM counter rise is classified
 # "accepted" with this reason, not "error". Any other error in these
-# scenarios still counts.
+# scenarios still counts. Both scenarios are now in REAL_BANK_EXCLUDED, so the
+# rule is dormant until a real arm runs again.
 ACCEPTED_OOM = {
     name: ("a known Python memory limit at the harness's worst-case -1.0 floors: Python peaks at "
            "14.5 GiB in deep apply plus the candidate judge (3.3 GiB at production floors) while "
@@ -832,7 +842,8 @@ def _scenario(runner: Runner, suite: str, name: str) -> tuple[dict, dict | None,
     # kinds of difference, or any line neither proves, stays new.
     elif verdict == "new" and all(_finished(a) and _complete(a) and _tie_only(a)
                                   for a in (first, retry) if a is not None):
-        verdict, accepted_as = "accepted", "tie-order"
+        used = set().union(*(_tie_only(a) for a in (first, retry) if a is not None))
+        verdict, accepted_as = "accepted", "+".join(sorted(used))
     row = {"scenario": name, "class": verdict, "differences": len(first["diffs"]),
            "seconds": first["seconds"], "base": first.get("base"),
            "oom_kills": _oom_total(first, retry, synthetic),
@@ -1044,7 +1055,15 @@ def _community_only(attempt: dict) -> bool:
 # any subset can be applied (the conductor's rulings B, C and D of
 # 2026-11-11). A rule reads a difference's position from its line and its
 # proof from the harness's record (tie_proofs.py), never a value it guessed.
-TIE_RULES = ("duplicate-pick", "adjacent-swap", "access-count-follow-on")
+TIE_RULES = ("duplicate-pick", "adjacent-swap", "access-count-follow-on", "padded-query")
+# Ruling E's places: a padded case's cortex block, its event's served facts,
+# and slot_reads rows and counts (the row's printed list is read in memory to
+# hash its slot, never printed).
+PADDED_CORTEX = re.compile(r"^\.cortex(?:$|[.\[])")
+PADDED_FACTS = re.compile(r"^public\.retrieval_events\[(-?\d+)\]\.served_facts(?:$|[.\[])")
+PADDED_SLOT_ROW = re.compile(r"^/rows/public\.slot_reads/rows: row only in (python|rust): (\[.*\])$", re.S)
+PADDED_SLOT_COUNT = re.compile(r"^/rows/public\.slot_reads/base_missing/count: python (-?\d+) vs rust (-?\d+)$")
+PADDED_SLOT_DIGEST = re.compile(r"^/rows/public\.slot_reads/base_missing/digest: ")
 # What a different entry at one position may change beside its id, as each
 # side's own row: a served item's surprise (the scores agree within the
 # tolerance, or their lines would show), a response entry's counters and
@@ -1087,28 +1106,94 @@ def _found(proof: dict | None) -> bool:
     return bool(proof) and all((proof.get("found") or {}).get(s) for s in ("python", "rust"))
 
 
-def _tie_only(attempt: dict, rules=None) -> bool:
-    """Every difference of an attempt is a tie the enabled ``rules`` prove
-    (TIE_RULES when None), with at least one difference. Lines are grouped by
-    position (context and path); a position is covered whole or not at all."""
+def _slot_md5(entity, attribute) -> str:
+    """tie_proofs.slot_md5, which a forced run cannot import (the runner puts
+    only this directory on its path); test_forced pins the two equal."""
+    return hashlib.md5(f"{entity}\x1f{attribute}".encode("utf-8")).hexdigest()
+
+
+def _padded_items(attempt: dict, parsed: list) -> set[tuple[int, int]]:
+    """Ruling E: the (line, item) indexes a padded case explains. A padded
+    case is one whose harness record says so (``padded-query``); its event
+    and the slots the two cortex blocks disagree on are the harness's
+    ``padded-event`` records."""
+    proofs = attempt.get("tie_proofs") or {}
+    cases = {ctx for ctx, ps in proofs.items()
+             if any(isinstance(p, dict) and p.get("kind") == "padded-query" for p in ps)}
+    events, slots = set(), set()
+    for p in proofs.get("db", []):
+        if isinstance(p, dict) and p.get("kind") == "padded-event" and isinstance(p.get("event"), int):
+            events.add(p["event"])
+            slots.update(s for s in p.get("slots") or [] if isinstance(s, str))
+    out: set[tuple[int, int]] = set()
+    rows = {"python": [], "rust": []}
+    count = digest = None
+    for li, entry in enumerate(parsed):
+        if entry is None:
+            continue
+        ctx, items = entry
+        for ii, item in enumerate(items):
+            where = item.split(": ", 1)[0]
+            if ctx in cases and PADDED_CORTEX.match(where):
+                out.add((li, ii))
+            elif ctx == "db":
+                facts = PADDED_FACTS.match(where)
+                row = PADDED_SLOT_ROW.match(item)
+                if facts and int(facts.group(1)) in events:
+                    out.add((li, ii))
+                elif row:
+                    try:
+                        values = ast.literal_eval(row.group(2))
+                    except (ValueError, SyntaxError):
+                        continue
+                    if (isinstance(values, list) and len(values) >= 2
+                            and _slot_md5(values[0], values[1]) in slots):
+                        rows[row.group(1)].append((li, ii))
+                elif PADDED_SLOT_COUNT.match(item):
+                    count = ((li, ii), PADDED_SLOT_COUNT.match(item))
+                elif PADDED_SLOT_DIGEST.match(item):
+                    digest = (li, ii)
+    out.update(rows["python"] + rows["rust"])
+    # The base rows each side rewrote: one per slot row it holds that the
+    # base also held, so the counts may differ by the rows' own difference.
+    if count is not None:
+        (at, m) = count
+        if int(m.group(1)) - int(m.group(2)) == len(rows["python"]) - len(rows["rust"]):
+            out.add(at)
+            if digest is not None:
+                out.add(digest)
+    return out
+
+
+def _tie_only(attempt: dict, rules=None) -> set[str]:
+    """The ACCEPTED_DIVERGENCES names ("tie-order", "padded-query") under
+    which every difference of an attempt is proved by the enabled ``rules``
+    (TIE_RULES when None), or an empty set: no difference, or one no rule
+    proves. Lines are grouped by position (context and path); a position is
+    covered whole or not at all."""
     rules = TIE_RULES if rules is None else rules
     proofs = {(ctx, p.get("at")): p for ctx, ps in (attempt.get("tie_proofs") or {}).items()
               for p in ps if isinstance(p, dict)}
     groups: dict[tuple[str, str], dict[str, tuple[str, str]]] = {}
     order: dict[str, int] = {}
-    for line in attempt["diffs"]:
-        parsed = _tie_items(line)
-        if parsed is None:
-            return False
-        ctx, items = parsed
+    parsed = [_tie_items(line) for line in attempt["diffs"]]
+    padded = _padded_items(attempt, parsed) if "padded-query" in rules else set()
+    if not attempt["diffs"]:
+        return set()
+    for li, entry in enumerate(parsed):
+        if entry is None:
+            return set()
+        ctx, items = entry
         order.setdefault(ctx, len(order))
-        for item in items:
+        for ii, item in enumerate(items):
+            if (li, ii) in padded:
+                continue
             m = TIE_ITEM.match(item)
             if not m:
-                return False
+                return set()
             groups.setdefault((ctx, m["at"]), {})[m["field"]] = (m["py"], m["rs"])
     if not groups:
-        return False
+        return {"padded-query"}  # every item was a padded case's (ruling E)
     covered: set = set()
     picks = []  # response-side duplicate picks: (context order, python id, rust id)
     if "duplicate-pick" in rules:
@@ -1158,7 +1243,9 @@ def _tie_only(attempt: dict, rules=None) -> bool:
             extra = sum((r == p["id"]) - (q == p["id"]) for when, q, r in picks if when < order[ctx])
             if extra and rs - py == extra:
                 covered.add(key)
-    return covered == set(groups)
+    if covered != set(groups):
+        return set()
+    return {"tie-order"} | ({"padded-query"} if padded else set())
 
 
 def _oom_total(*attempts) -> int | None:

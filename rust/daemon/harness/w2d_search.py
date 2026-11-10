@@ -184,6 +184,16 @@ def case(name, path, headers=(), declared=None):
     return {"name": name, "method": "GET", "path": path, "headers": list(headers), "declared": declared}
 
 
+def case_query(c: dict):
+    """The query a case sends: an MCP case's ``query`` argument, a REST
+    case's ``q`` parameter (None when it has neither)."""
+    if "mcp" in c:
+        return (c["mcp"] or {}).get("query")
+    values = urllib.parse.parse_qs(urllib.parse.urlsplit(c.get("path") or "").query,
+                                   keep_blank_values=True).get("q")
+    return values[0] if values else None
+
+
 def mcp_case(name, args, headers=(), tool="memory_search"):
     """A tools/call (memory_search unless named); "<seed-episode>" in a list
     becomes the seeded session's episode id."""
@@ -1419,6 +1429,8 @@ def run_scenario(scn: Scenario, binary: Path, template: str, mode: str, record: 
             # Ids and text hashes for the lines that served different entries
             # (forced.py's tie-order rules); none when nothing differs.
             proofs = tie_proofs.response_proofs(row["diffs"], py_r.get("json"), rs_r.get("json"))
+            if row["diffs"] and tie_proofs.padded(case_query(c)):
+                proofs.append({"at": "", "kind": "padded-query"})
             if proofs:
                 row["tie_proofs"] = proofs
     cov = coverage(py_seen, py_state)
@@ -1451,7 +1463,10 @@ def run_scenario(scn: Scenario, binary: Path, template: str, mode: str, record: 
     db_diffs = bank_diff(json.loads(json.dumps(py_state)), states["rust"]) + numeric_diffs
     db_proofs = (tie_proofs.event_proofs(db_diffs, events["python"], events["rust"],
                                          tie_proofs.bank_text_md5({k: pg.dsn(dbs[k]) for k in sides}))
-                 if "python" in sides else [])
+                 + tie_proofs.padded_event_proofs(
+                     [q for q in map(case_query, scn.cases()) if tie_proofs.padded(q)],
+                     events["python"], events["rust"])
+                 if "python" in sides and db_diffs else [])
     if record:
         GOLDENS.mkdir(parents=True, exist_ok=True)
         (GOLDENS / f"{scn.name}.json").write_text(json.dumps({
