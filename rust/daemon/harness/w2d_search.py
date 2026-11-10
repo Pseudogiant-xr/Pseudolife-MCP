@@ -1005,8 +1005,9 @@ RERANKER_SIDES = {
     "python": ("Python oracle",
                "the oracle loads cross-encoder/ms-marco-MiniLM-L-6-v2 from its HF cache (HF_HOME) "
                "under HF_HUB_OFFLINE=1, so the model must be cached before the run: rebuild the "
-               "runner image from ops/Dockerfile.mirror-runner, which bakes it, or download it "
-               "into HF_HOME"),
+               "runner image from ops/Dockerfile.mirror-runner, which bakes it, or download "
+               "revision c5ee24cb16019beea0893ab7796b1df96625c6b8 (the Rust bundle's pin) into "
+               "HF_HOME; the release image carries none (#1403)"),
     "rust": ("Rust daemon",
              "point PSEUDOLIFE_DAEMON_RERANK_DIR at the reranker directory "
              "`pseudolife-daemon provision models` installs"),

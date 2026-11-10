@@ -78,6 +78,15 @@ class RerankerAvailabilityTests(unittest.TestCase):
                 search.require_requested_reranker([case], [({"status": 200}, {"status": 200})],
                                                   {"python": self.PYTHON_OFFLINE, "rust": ""})
 
+    def test_pythons_fallback_message_is_read_across_its_lines(self):
+        """Its reason (a transformers offline error) spans lines before the
+        "disabling": the whole message is quoted, up to that line."""
+        message = search.reranker_fallback(self.PYTHON_OFFLINE)
+        self.assertIn("offline mode", message)          # the second line's text
+        self.assertIn("disabling", message)
+        self.assertNotIn("bi-encoder", message.split("disabling", 1)[0])
+        self.assertIsNone(search.reranker_fallback(self.LOADED))
+
     def test_either_side_degraded_refuses_and_names_that_side(self):
         rust = "Cross-encoder reranker cache unavailable (missing) — disabling."
         case = search.case("REST explicit", "/api/search?q=x&rerank=true")

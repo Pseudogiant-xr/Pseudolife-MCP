@@ -12,7 +12,7 @@ FROM ${PYTHON_IMAGE}
 RUN python -m pip install --no-cache-dir "pytest==9.2.0"
 # The oracle's cross-encoder (memory.reranker.model_name's default), baked into
 # the release image's HF cache (HF_HOME=/opt/hf) the way ops/Dockerfile.daemon
-# bakes the embedding models. The release image carries no cross-encoder and
+# bakes the embedding models. The release image carries no cross-encoder (#1403) and
 # the harness runs both daemons with HF_HUB_OFFLINE=1, so without it the
 # oracle disables reranking and every rerank case compares that fallback with
 # the Rust reranker. The revision is the one rust/daemon/src/model_provision.rs
@@ -22,7 +22,8 @@ RUN python -m pip install --no-cache-dir "pytest==9.2.0"
 # the offline predict fails the build when the baked model does not load.
 ARG RERANKER_MODEL=cross-encoder/ms-marco-MiniLM-L-6-v2
 ARG RERANKER_REVISION=c5ee24cb16019beea0893ab7796b1df96625c6b8
-RUN HF_HUB_OFFLINE=0 TRANSFORMERS_OFFLINE=0 python -c "import sys; from huggingface_hub import snapshot_download; snapshot_download(sys.argv[1], revision=sys.argv[2], allow_patterns=['config.json', 'model.safetensors', 'special_tokens_map.json', 'tokenizer.json', 'tokenizer_config.json', 'vocab.txt'])" "$RERANKER_MODEL" "$RERANKER_REVISION" \
+RUN : "${HF_HOME:?the Python image sets no HF_HOME, the cache the oracle reads offline}" \
+    && HF_HUB_OFFLINE=0 TRANSFORMERS_OFFLINE=0 python -c "import sys; from huggingface_hub import snapshot_download; snapshot_download(sys.argv[1], revision=sys.argv[2], allow_patterns=['config.json', 'model.safetensors', 'special_tokens_map.json', 'tokenizer.json', 'tokenizer_config.json', 'vocab.txt'])" "$RERANKER_MODEL" "$RERANKER_REVISION" \
     && ref="$HF_HOME/hub/models--$(echo "$RERANKER_MODEL" | sed 's#/#--#')/refs" \
     && mkdir -p "$ref" && printf '%s' "$RERANKER_REVISION" > "$ref/main" \
     && python -c "import sys; from sentence_transformers import CrossEncoder; assert len(CrossEncoder(sys.argv[1]).predict([('q', 'c')])) == 1" "$RERANKER_MODEL" \
