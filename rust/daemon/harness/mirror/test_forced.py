@@ -588,8 +588,8 @@ def test_sweep_analyzer_tick_skips_only_its_real_bank_arms(tmp_path):
     assert counted["excluded"] == 1 and counted["pass"] == 1 and counted["new"] == 1
     assert "every entity" in forced.REAL_BANK_EXCLUDED["w2e/sweep-analyzer-tick"]
     assert sorted(forced.REAL_BANK_EXCLUDED) == [
-        "w2d_search/hide-superseded", "w2d_search/mcp-stats", "w2e/candidate-auto",
-        "w2e/sweep-analyzer-tick"]
+        "routes/stamped", "w2d_search/hide-superseded", "w2d_search/mcp-stats", "w2e/candidate-auto",
+        "w2e/search-after-restart", "w2e/sweep-analyzer-tick"]
 
 
 def test_the_maintainers_real_bank_exclusions_have_their_reasons():
@@ -600,6 +600,15 @@ def test_the_maintainers_real_bank_exclusions_have_their_reasons():
                       ("w2e/candidate-auto", "judged first")):
         assert word in forced.REAL_BANK_EXCLUDED[key] and "2026-11-10" in forced.REAL_BANK_EXCLUDED[key]
     assert "w2e/candidate-auto-reopen" not in forced.REAL_BANK_EXCLUDED
+
+
+def test_the_premises_a_real_bank_breaks_are_excluded_with_their_reasons():
+    """Maintainer decision, 2026-11-10 (partial run 870fb28fc): stamped needs
+    an unreferenced builtin relation to delete as its tripwire, and a real
+    bank references them all; search-after-restart's access-count expect
+    fails on both daemons alike, so it compares no Python-vs-Rust behaviour."""
+    for key, word in (("routes/stamped", "tripwire"), ("w2e/search-after-restart", "both daemons")):
+        assert word in forced.REAL_BANK_EXCLUDED[key] and "2026-11-10" in forced.REAL_BANK_EXCLUDED[key]
 
 
 COMMUNITY_ROWS = "DIFF [graph-writes] step 35 {\"op\": \"tool\"}: db /rows/public.communities/rows: row only in python: [1]"
@@ -645,6 +654,39 @@ def test_community_plus_any_other_difference_stays_new(tmp_path, other):
     attempt or the retry, keeps the scenario new."""
     assert _community_rows(tmp_path, [COMMUNITY_ROWS, NODE_COMMUNITY, other])["class"] == "new"
     assert _community_rows(tmp_path, [COMMUNITY_ROWS], retry=[COMMUNITY_ROWS, other])["class"] == "new"
+
+
+DIGEST_PY = ("DIFF [graph-writes] step 35 {\"op\": \"tool\"}: db /rows/public.meta/rows: row only in python: "
+             "[\"graph_digest\", {\"communities\": [{\"id\": 1, \"size\": 2}], \"computed_at\": 1.0}]")
+DIGEST_RS = ("DIFF [graph-writes] step 35 {\"op\": \"tool\"}: db /rows/public.meta/rows: row only in rust: "
+             "[\"graph_digest\", {\"communities\": [{\"id\": 1, \"size\": 3}], \"computed_at\": 2.0}]")
+ROUTES_DIGEST = "DB DIFF [reaper] /rows/public.meta/rows: row only in rust: [\"graph_digest\", {\"computed_at\": 2.0}]"
+
+
+def test_the_graph_digest_row_joins_the_community_acceptance(tmp_path):
+    """Maintainer decision, 2026-11-10 (partial run 870fb28fc): meta's
+    graph_digest row is the snapshot written with the partition
+    (_refresh_graph_insight), so a scenario whose differences are the
+    community tables and fields plus that row is accepted."""
+    row = _community_rows(tmp_path, [COMMUNITY_ROWS, MEMBERSHIP, INSIGHT, DIGEST_PY, DIGEST_RS])
+    assert (row["class"], row.get("accepted_as")) == ("accepted", "community-partition")
+    assert _community_rows(tmp_path / "r", [ROUTES_COMMUNITY, ROUTES_DIGEST])["class"] == "accepted"
+    assert "graph_digest" in forced.ACCEPTED_DIVERGENCES["community-partition"]
+
+
+@pytest.mark.parametrize("other", [
+    # Another meta row, and one whose key only starts like the digest's.
+    "DIFF [graph-writes] step 35 {\"op\": \"tool\"}: db /rows/public.meta/rows: row only in python: [\"dream_cursor\", 5]",
+    "DB DIFF [reaper] /rows/public.meta/rows: row only in rust: [\"graph_digest_backup\", {}]",
+    # A meta row gone from the base names no key, so it is not the digest's.
+    "DIFF [graph-writes] step 35 {\"op\": \"tool\"}: db /rows/public.meta/base_missing/count: python 1 vs rust 0",
+    # The digest's key in another table is not the meta row.
+    "DIFF [graph-writes] step 35 {\"op\": \"tool\"}: db /rows/public.facts/rows: row only in python: [\"graph_digest\", 1]",
+])
+def test_the_graph_digest_acceptance_covers_that_meta_row_only(tmp_path, other):
+    """The near misses: with the digest row and community rows, one other
+    place keeps the scenario new."""
+    assert _community_rows(tmp_path, [COMMUNITY_ROWS, DIGEST_PY, DIGEST_RS, other])["class"] == "new"
 
 
 def test_the_summary_lists_the_accepted_divergences(tmp_path, monkeypatch):

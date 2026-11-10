@@ -102,6 +102,16 @@ REAL_BANK_EXCLUDED = {
         "its expects assume the candidate judge's pairs are its own and are judged first; on a real "
         "graph the judge's top pairs are real ones, and the retry then hits the accepted Python "
         "memory limit (forced run 8eb08c214); excluded by the maintainer, 2026-11-10"),
+    # Maintainer decision, 2026-11-10 (partial run 870fb28fc's findings).
+    "routes/stamped": (
+        "its template step deletes a builtin relation no fact references, as the tripwire the "
+        "stamped startup must catch; a real bank references every builtin relation, so the "
+        "scenario refuses before it starts (run.py prepare_template, partial run 870fb28fc); "
+        "excluded by the maintainer, 2026-11-10"),
+    "w2e/search-after-restart": (
+        "its access-count expect counts the seeded entries' access_count after a restart, and on "
+        "a real bank's copy it fails on both daemons alike, so the run compares no Python-vs-Rust "
+        "behaviour (partial run 870fb28fc); excluded by the maintainer, 2026-11-10"),
 }
 # Differences the maintainer accepted on real-bank arms, by name: a scenario
 # whose every difference place (in the first attempt and the retry) is one
@@ -113,10 +123,17 @@ ACCEPTED_DIVERGENCES = {
         "seed.shuffle with random.Random(42), Rust graph order; rust/daemon/divergences/"
         "write-path-w2-e/memory-dream-run-the-graph/louvain-s-visiting-order.md, #1417): on a "
         "real bank's copy Python re-partitions the copied communities after graph writes and Rust "
-        "reproduces the base's. Accepted by the maintainer for real-bank arms, 2026-11-10 (D1)"),
+        "reproduces the base's. Accepted by the maintainer for real-bank arms, 2026-11-10 (D1); "
+        "extended the same day to meta's graph_digest row, the snapshot _refresh_graph_insight "
+        "writes with the partition (partial run 870fb28fc)"),
 }
 COMMUNITY_TABLES = ("public.communities", "public.entity_communities")
 COMMUNITY_FIELDS = ("community", "communities")
+# Meta rows written with the partition, by key: a meta row difference is a
+# community one only when its line names one of these keys. A meta place
+# names no key (/rows/public.meta/rows, or base_missing), so the line does.
+COMMUNITY_META_KEYS = ("graph_digest",)
+META_ROW = re.compile(r"/rows/public\.meta/rows: row only in (?:python|rust): \[([\"'])(\w+)\1")
 # Known limits the maintainer accepted, by scenario: an error where both real
 # attempts each saw the runner's cgroup OOM counter rise is classified
 # "accepted" with this reason, not "error". Any other error in these
@@ -897,10 +914,21 @@ def _complete(attempt: dict) -> bool:
     return attempt.get("diffs_complete") is True
 
 
+def _community_line(line: str) -> bool:
+    """Every place of one difference line is a community one: the tables,
+    a community field, or a meta row whose key COMMUNITY_META_KEYS names."""
+    for _, where in _places(line):
+        if _community_place(where):
+            continue
+        key = META_ROW.search(line) if where == "/rows/public.meta/rows" else None
+        if not (key and key.group(2) in COMMUNITY_META_KEYS):
+            return False
+    return True
+
+
 def _community_only(attempt: dict) -> bool:
     """Every difference of an attempt is in the community tables or fields."""
-    places = signatures(attempt)
-    return bool(places) and all(_community_place(where) for _, where in places)
+    return bool(attempt["diffs"]) and all(_community_line(line) for line in attempt["diffs"])
 
 
 def _oom_total(*attempts) -> int | None:
