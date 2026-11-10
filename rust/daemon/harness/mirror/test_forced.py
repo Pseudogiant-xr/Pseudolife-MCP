@@ -601,13 +601,15 @@ def test_the_maintainers_real_bank_exclusions_have_their_reasons():
 
 
 def test_candidate_auto_reopen_is_excluded_beside_candidate_auto(tmp_path):
-    """Proposed, pending the maintainer's decision (combined run e4a09212c):
-    candidate-auto-reopen waits on the same judge as candidate-auto, so on a
-    real bank's copy neither real attempt compares. Its real arms do not run
-    and its synthetic arm must pass."""
+    """The conductor's ruling A under the maintainer's delegation of
+    2026-11-11 (combined run e4a09212c): candidate-auto-reopen has its
+    sibling candidate-auto's accepted Python memory limit, so on a real
+    bank's copy neither real attempt compares. Its real arms do not run and
+    its synthetic arm must pass."""
     reason = forced.REAL_BANK_EXCLUDED["w2e/candidate-auto-reopen"]
-    for word in ("candidate-auto's premise", "its own seeded pair", "e4a09212c", "settle never held",
-                 "OOM-killed", "synthetic arm passed", "pending the maintainer's decision"):
+    for word in ("w2e/candidate-auto", "Python memory limit", "e4a09212c", "settle timeout",
+                 "OOM kill", "synthetic arm passed",
+                 "accepted by the conductor under the maintainer's delegation of 2026-11-11"):
         assert word in reason
     answers = {"candidate-auto-reopen": {"synthetic": PASS},
                "candidate-shadow": {"real": PASS}}
