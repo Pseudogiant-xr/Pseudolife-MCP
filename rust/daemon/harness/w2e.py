@@ -102,8 +102,10 @@ Normalizers (declared, spec "Free for W1 and W2"):
   must be >= 0 on both sides and within the longest step's wall time (plus
   ``IDLE_SLACK_S``) of each other (``idle_diffs``), then compares as
   null-or-not, and so does the Console's ``GET /api/dream/status`` read's
-  (``idle_tokens``; its other values compare as they are); a run's ``finished_at`` may not precede its ``started_at``,
-  in the bank or an answer (``run_clock_diffs``); a stall record's ``since``,
+  in live mode (``idle_tokens``; its other values compare as they are; its
+  scenario is seeded, so it has no golden replay); a run's ``finished_at``
+  may not precede its ``started_at``, in the bank or an answer
+  (``run_clock_diffs``); a stall record's ``since``,
   ``last_success_at`` and ``recovered_at``, the extractor record's ``at``
   and a run row's ``finished_at`` and ``rolled_back_at``; a run row's
   ``cursor_before`` and ``cursor_after`` map to ``<ts:ENTRY_ID>`` like a
@@ -6768,12 +6770,8 @@ def run_golden(name: str, binary: Path, root: Path, tol: dict, owned: list[str])
                 if console_dream and (w2e_console_dream.is_dream(op)
                                       or op.get("name") == "memory_dream"):
                     rs = dream_tokens(rs, ts_tokens(raw))
-                expected = rec["python"]
-                if w2e_console_dream.is_dream_status(op):
-                    # As live: a golden recorded before or after this rule.
-                    rs, expected = idle_tokens(rs), idle_tokens(expected)
                 row["rust"] = rename_prefixes(rs, er)
-                row["diffs"] += compare_response(expected, row["rust"], tol, stats)
+                row["diffs"] += compare_response(rec["python"], row["rust"], tol, stats)
             unpack_numeric(rec["numeric_new"], numeric)
             row["diffs"] += compare_numeric(numeric, nr, tol, stats)
             got = pack(sr, full=i == 0)
