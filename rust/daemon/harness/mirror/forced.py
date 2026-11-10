@@ -102,6 +102,14 @@ REAL_BANK_EXCLUDED = {
         "its expects assume the candidate judge's pairs are its own and are judged first; on a real "
         "graph the judge's top pairs are real ones, and the retry then hits the accepted Python "
         "memory limit (forced run 8eb08c214); excluded by the maintainer, 2026-11-10"),
+    "w2e/candidate-auto-reopen": (
+        "candidate-auto's premise again: it waits for the candidate judge to dismiss, then reopen, "
+        "its own seeded pair, and on a real graph the judge's slices hold the real pairs first, "
+        "while the deep apply before it is the accepted Python memory limit. On a real bank's copy "
+        "neither real attempt compares: in combined run e4a09212c (--jobs 1, 18 GiB runner) the "
+        "first attempt's Python settle never held (567 s, no OOM kill) and the retry was "
+        "OOM-killed (184 s), while the synthetic arm passed; proposed beside candidate-auto, "
+        "pending the maintainer's decision"),
     # Maintainer decision, 2026-11-10 (partial run 870fb28fc's findings).
     "routes/stamped": (
         "its template deletes a builtin relation nothing references (no edge, edge proposal or "
