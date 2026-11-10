@@ -715,6 +715,10 @@ def test_the_response_side_partition_and_digest_are_accepted_like_the_bank_side(
     row = _community_rows(tmp_path, [line, ROUTES_COMMUNITY, ROUTES_DIGEST])
     assert (row["class"], row.get("accepted_as")) == ("accepted", "community-partition")
     assert _community_rows(tmp_path / "p", [_observed(*RESPONSE_PARTITION)])["class"] == "accepted"
+    # As on the bank side, a community table's base_missing is the partition too.
+    missing = _observed(".json.db.rows.public.communities.base_missing.count: python 0 vs rust 2788",
+                        ".json.db.rows.public.entity_communities.base_missing.digest: python \"a\" vs rust \"b\"")
+    assert _community_rows(tmp_path / "m", [missing])["class"] == "accepted"
     assert "response-side" in forced.ACCEPTED_DIVERGENCES["community-partition"]
 
 
@@ -729,6 +733,12 @@ def test_the_response_side_partition_and_digest_are_accepted_like_the_bank_side(
     # Another table, and a non-bank field of the answer.
     ".json.db.rows.public.entity_sources.rows[0][4]: python 1.0 vs rust 2.0",
     ".json.events.session_end_dream_triggers: python 1 vs rust 0",
+    # A key that only starts like the digest's.
+    ".json.db.rows.public.meta.by_key.graph_digest_v2.totals: python 1 vs rust 2",
+    # base_missing and a row-count line on a table outside the partition.
+    ".json.db.rows.public.meta.base_missing.count: python 3 vs rust 4",
+    ".json.db.rows.public.entity_sources.base_missing.count: python 0 vs rust 2751",
+    ".json.db.rows.public.entity_sources.rows: python [[1]] vs rust [[1], [2]]",
 ])
 def test_the_response_side_acceptance_is_confined_to_the_partition_and_digest(tmp_path, other):
     """The near misses: one other response-side value keeps it new."""
