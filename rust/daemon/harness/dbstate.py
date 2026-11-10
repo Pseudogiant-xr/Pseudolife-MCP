@@ -19,6 +19,10 @@ normalizers, which replace nondeterministic values by rule, never by hand:
   null-or-not (two inserts may share a clock tick on one side and not the
   other); any other rule also keeps equality between values in the same
   dump, so a write that changes WHICH rows share an identifier still shows.
+  An existing row's clock is compared exactly, except a base row's clock
+  inside the arm's captured clock window (``normalize``'s ``windows``).
+* ``event_scores_free`` compares the scores a retrieval event's served
+  entries carry within ``EVENT_SCORE_TOL``, as the search harnesses do.
 """
 from __future__ import annotations
 
@@ -27,6 +31,7 @@ from contextvars import ContextVar
 import hashlib
 import json
 from collections import Counter
+import math
 import os
 import re
 import time as clock
@@ -326,7 +331,7 @@ def _base_hashes(dsn: str) -> dict[str, Counter] | None:
 def base_keys(qualified: str) -> set[str]:
     """The base's first-column values of a table (as ``normalize`` keys a
     row), or none without a base: a base row a run rewrites is an existing
-    row, whose clocks are compared exactly."""
+    row, whose clocks are compared exactly outside the arm's clock window."""
     return _BASE_KEYS.get(os.environ.get("PL_HARNESS_BASE_DATABASE") or "", {}).get(qualified, set())
 
 
@@ -591,23 +596,52 @@ def _dump_tables(conn, tables, base, prefetched, out) -> None:
         }
 
 
+def _finite_number(value) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+
+
+def _clock_windows(windows) -> list[tuple[float, float]]:
+    """``windows`` (None, or (start, end) pairs) checked: two finite
+    times each, start first."""
+    out = []
+    for pair in windows or ():
+        start, end = pair
+        if not (_finite_number(start) and _finite_number(end)) or start > end:
+            raise ValueError(f"a clock window is two finite times, start first: {pair!r}")
+        out.append((float(start), float(end)))
+    return out
+
+
 def normalize(state: dict, rules: dict[tuple[str, str], str] | None = None,
-              before: dict | None = None) -> dict:
+              before: dict | None = None, windows=None) -> dict:
     """Replace every declared nondeterministic value with a shape token.
 
     With ``before`` (the bank's state before the run), a row that already
     existed keeps its exact values: a clock column may change only on rows
     the run created, so a rewritten existing timestamp still diffs. A new
-    clock value must be a finite number, or it is left raw and diffs."""
+    clock value must be a finite number, or it is left raw and diffs.
+
+    Under a base, a row whose key the base holds existed too, but a step may
+    rewrite it with a fresh clock (a reaper's close, a slot read's
+    ``last_read_at``), and each daemon writes its own now(). ``windows``
+    lists the arm's captured clock windows, ``(start, end)`` in wall-clock
+    seconds, from its daemon's first start until its dump: a base row's
+    clock inside one was written during the run and becomes a new row's
+    token; outside every window it stays raw and is compared exactly, so a
+    base clock one arm keeps and the other restamps still diffs. A row only
+    ``before`` holds (a synthetic seed) is compared exactly, as without
+    windows."""
     rules = NONDETERMINISTIC if rules is None else rules
+    spans = _clock_windows(windows)
     state = json.loads(json.dumps(state))
     for qualified, table in state["rows"].items():
         name = qualified.split(".", 1)[1]
-        prior = set()
+        prior, held = set(), set()
         if before is not None:
             prior = {json.dumps(r[0], sort_keys=True)
                      for r in before["rows"].get(qualified, {}).get("rows", [])}
-            prior |= base_keys(qualified)  # rows equal to the base are not dumped
+            held = base_keys(qualified)
+            prior |= held  # rows equal to the base are not dumped
         for idx, col in enumerate(table["columns"]):
             if (name, col) not in rules:
                 continue
@@ -618,15 +652,68 @@ def normalize(state: dict, rules: dict[tuple[str, str], str] | None = None,
                 if value is None:
                     continue
                 if clock:
-                    if json.dumps(row[0], sort_keys=True) in prior:
-                        continue  # an existing row: compared exactly
-                    if isinstance(value, (int, float)) and not isinstance(value, bool) \
-                            and value == value and abs(value) != float("inf"):
+                    key = json.dumps(row[0], sort_keys=True)
+                    if key in prior:
+                        # An existing row: compared exactly, unless a base
+                        # row's clock was written during the run.
+                        if key in held and _finite_number(value) \
+                                and any(lo <= value <= hi for lo, hi in spans):
+                            row[idx] = f"<{col}>"
+                        continue
+                    if _finite_number(value):
                         row[idx] = f"<{col}>"
                     continue
                 key = json.dumps(value, sort_keys=True)
                 row[idx] = seen.setdefault(key, f"<{col}#{len(seen)}>")
     return state
+
+
+# Search telemetry: a retrieval event's served entries carry their score and
+# fusion inputs, which rest on the embeddings and so on float32 arithmetic.
+# They compare within w2d_search.py's SCORE_TOL, as w2e.py's events_diff
+# already compared them; on a copy of a real bank the arms' dense components
+# differed by 1.2e-7 to 1.4e-6 (forced real-data run, reported 2026-11-10).
+EVENT_FLOAT_KEYS = frozenset({"score", "dense", "ce", "bm25", "slot", "recency", "margin"})
+EVENT_SCORE_TOL = 2e-4
+EVENT_TOLERANCES = {k: EVENT_SCORE_TOL for k in EVENT_FLOAT_KEYS}
+
+
+def pair_floats(x, y, tolerances: dict[str, float]) -> None:
+    """In place: wherever ``x`` and ``y`` hold numbers under the same key
+    that ``tolerances`` names, within its tolerance of each other, both
+    become ``<key>``; everything else is left for an exact comparison."""
+    if isinstance(x, dict) and isinstance(y, dict):
+        for k in x.keys() & y.keys():
+            a, b = x[k], y[k]
+            numbers = (isinstance(a, (int, float)) and isinstance(b, (int, float))
+                       and not isinstance(a, bool) and not isinstance(b, bool))
+            if numbers and k in tolerances and abs(a - b) <= tolerances[k]:
+                x[k] = y[k] = f"<{k}>"
+            else:
+                pair_floats(a, b, tolerances)
+    elif isinstance(x, list) and isinstance(y, list):
+        for a, b in zip(x, y):
+            pair_floats(a, b, tolerances)
+
+
+def event_scores_free(a: dict, b: dict) -> tuple[dict, dict]:
+    """Copies of two normalized dumps in which each retrieval event both
+    hold (matched by id) has its served entries' ``EVENT_FLOAT_KEYS``
+    within ``EVENT_SCORE_TOL`` replaced by tokens on both sides. Every other
+    column, field and table is left for ``diff`` to compare exactly."""
+    a, b = json.loads(json.dumps(a)), json.loads(json.dumps(b))
+    ea = a.get("rows", {}).get("public.retrieval_events")
+    eb = b.get("rows", {}).get("public.retrieval_events")
+    if not (isinstance(ea, dict) and isinstance(eb, dict)) or ea.get("columns") != eb.get("columns") \
+            or "served" not in (ea.get("columns") or []):
+        return a, b
+    at = ea["columns"].index("served")
+    by_id = {json.dumps(r[0], sort_keys=True): r for r in eb.get("rows", [])}
+    for ra in ea.get("rows", []):
+        rb = by_id.get(json.dumps(ra[0], sort_keys=True))
+        if rb is not None:
+            pair_floats(ra[at], rb[at], EVENT_TOLERANCES)
+    return a, b
 
 
 def diff(a: dict, b: dict, path: str = "") -> list[str]:

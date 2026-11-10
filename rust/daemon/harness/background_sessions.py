@@ -157,7 +157,8 @@ svc._storage.close()
 
         def normalize_db(self, state, before, side):
             return dbstate.normalize(normalize_closes(state, before, self.starts[side], time.time()),
-                                     harness.DB_NONDETERMINISTIC, before)
+                                     harness.DB_NONDETERMINISTIC, before,
+                                     windows=self.clock_window(side))
 
         def validate_expected(self, state):
             table = state["rows"]["public.episodes"]
@@ -179,8 +180,16 @@ svc._storage.close()
                 if next(ep for ep in episodes if ep["title"] == "child")["parent_id"] != work["id"]:
                     raise RuntimeError("reaper changed child attribution")
             meta = {row[0]: row[1] for row in state["rows"]["public.meta"]["rows"]}
-            if self.sweep and not meta.get("episode_tombstones"):
-                raise RuntimeError("empty sweep did not persist a tombstone")
+            if self.sweep:
+                # A real bank's copy already holds tombstones, and a sweep also
+                # tombstones its expired deferred roots: the new one must be
+                # this scenario's own empty session's.
+                old = (prior_close_maps(state, self.before)["episode_tombstones"]
+                       if hasattr(self, "before") else {})
+                tombs = meta.get("episode_tombstones") or {}
+                if not any(isinstance(tombs[k], dict) and tombs[k].get("session_key") == "empty"
+                           for k in set(tombs) - set(old)):
+                    raise RuntimeError("empty sweep did not persist a tombstone")
 
     class SessionSweep(SessionReap):
         name = "session-sweep"
@@ -231,6 +240,15 @@ def normalize_closes(state, before, start, end):
         before, "public.episodes", state["rows"]["public.episodes"]["rows"]))}
     close_times = {}
     meta = {r[0]: r[1] for r in state["rows"]["public.meta"]["rows"]}
+    # Close clocks the bank held before this arm ran. On a copy of a real
+    # bank they predate both daemons; an entry carrying one (unchanged, or a
+    # sweep's tombstone of an old deferred root) is compared exactly, not
+    # window-checked. Any other value is this arm's write.
+    carried = {id: value for id, value in prior.items() if value is not None}
+    maps = prior_close_maps(state, before)
+    carried.update(maps["deferred_empty_roots"])
+    carried.update((id, item.get("ended_at")) for id, item in maps["episode_tombstones"].items()
+                   if isinstance(item, dict))
     for ep in records(state, "episodes"):
         if ep["ended_at"] is not None and prior.get(ep["id"]) is None:
             close_times[ep["id"]] = ep["ended_at"]
@@ -243,6 +261,8 @@ def normalize_closes(state, before, start, end):
             value = item if key == "deferred_empty_roots" else item["ended_at"]
             if id in close_times and close_times[id] != value:
                 raise RuntimeError("episode and metadata disagree on close time")
+            if id in carried and carried[id] == value and id not in close_times:
+                continue
             close_times[id] = value
     for value in close_times.values():
         if isinstance(value, bool) or not isinstance(value, float) or not math.isfinite(value) or not start <= value <= end:
@@ -270,9 +290,20 @@ def normalize_closes(state, before, start, end):
                 row[idx] = f"<close:{id}>"
     for key in ("deferred_empty_roots", "episode_tombstones"):
         for id, item in meta.get(key, {}).items():
+            if id not in close_times: continue
             if key == "deferred_empty_roots": meta[key][id] = f"<close:{id}>"
             else: item["ended_at"] = f"<close:{id}>"
     return state
+
+
+def prior_close_maps(state, before):
+    """The close metadata maps the bank held before the arm ran: ``before``'s,
+    or under ``PL_HARNESS_BASE_DATABASE`` the base's, since a dump leaves out
+    a meta row equal to the base."""
+    rows = dbstate.prior_rows(before, "public.meta", state["rows"]["public.meta"]["rows"])
+    meta = {r[0]: r[1] for r in rows}
+    return {key: meta.get(key) if isinstance(meta.get(key), dict) else {}
+            for key in ("deferred_empty_roots", "episode_tombstones")}
 
 
 def graceful_stop(daemon):
