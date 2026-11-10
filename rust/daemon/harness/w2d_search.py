@@ -1428,9 +1428,11 @@ def run_scenario(scn: Scenario, binary: Path, template: str, mode: str, record: 
                                                  stats=c.get("tool") == "memory_stats")
             # Ids and text hashes for the lines that served different entries
             # (forced.py's tie-order rules); none when nothing differs.
-            proofs = tie_proofs.response_proofs(row["diffs"], py_r.get("json"), rs_r.get("json"))
-            if row["diffs"] and tie_proofs.padded(case_query(c)):
-                proofs.append({"at": "", "kind": "padded-query"})
+            padded_query = case_query(c) if row["diffs"] and tie_proofs.padded(case_query(c)) else None
+            proofs = tie_proofs.safely(lambda: (
+                tie_proofs.response_proofs(row["diffs"], py_r.get("json"), rs_r.get("json"))
+                + ([tie_proofs.padded_case_proof(padded_query, py_r.get("json"), rs_r.get("json"))]
+                   if padded_query is not None else [])))
             if proofs:
                 row["tie_proofs"] = proofs
     cov = coverage(py_seen, py_state)
@@ -1461,12 +1463,15 @@ def run_scenario(scn: Scenario, binary: Path, template: str, mode: str, record: 
         st["rows"].get("public.retrieval_events")))}}
         for side, st in (("python", py_state), ("rust", states["rust"]))}
     db_diffs = bank_diff(json.loads(json.dumps(py_state)), states["rust"]) + numeric_diffs
-    db_proofs = (tie_proofs.event_proofs(db_diffs, events["python"], events["rust"],
-                                         tie_proofs.bank_text_md5({k: pg.dsn(dbs[k]) for k in sides}))
-                 + tie_proofs.padded_event_proofs(
-                     [q for q in map(case_query, scn.cases()) if tie_proofs.padded(q)],
-                     events["python"], events["rust"])
-                 if "python" in sides and db_diffs else [])
+    padded_queries = [q for q in map(case_query, scn.cases()) if tie_proofs.padded(q)]
+    bank_dsns = {k: pg.dsn(dbs[k]) for k in sides}
+    db_proofs = (tie_proofs.safely(lambda: (
+        tie_proofs.event_proofs(db_diffs, events["python"], events["rust"],
+                                tie_proofs.bank_text_md5(bank_dsns))
+        + tie_proofs.padded_event_proofs(padded_queries, events["python"], events["rust"])
+        + ([tie_proofs.slot_reads_proof(bank_dsns)]
+           if padded_queries and any("public.slot_reads" in d for d in db_diffs) else [])))
+        if "python" in sides and db_diffs else [])
     if record:
         GOLDENS.mkdir(parents=True, exist_ok=True)
         (GOLDENS / f"{scn.name}.json").write_text(json.dumps({

@@ -157,10 +157,12 @@ ACCEPTED_DIVERGENCES = {
         "Accepted by the conductor under the maintainer's delegation of 2026-11-11"),
     # Ruling E, the same delegation: TIE_RULES "padded-query".
     "padded-query": (
-        "a w2d_search case whose query carries trailing whitespace (tie_proofs.padded, from the "
-        "case's own query) differing only in its response's cortex block, the served_facts of the "
-        "retrieval event it logged, and the slot_reads rows of the cortex slots one side served "
-        "and the other did not: accepted by the conductor under the maintainer's delegation of "
+        "a w2d_search case whose own query ends in whitespace (tie_proofs.padded: the cause, so "
+        "every such case; today default's, mcp-search's, mcp-search-explain's and trace's padded "
+        "cases) differing only in its response's cortex block (slots both sides served keep one "
+        "value), the served_facts of the event logged with its query (slots both served keep "
+        "their fields) and slot_reads, whose full comparison differs only in slots one side alone "
+        "served: accepted by the conductor under the maintainer's delegation of "
         "2026-11-11: sentence-transformers 5.4.0 stopped stripping text before tokenising; Rust "
         "follows the 5.3.0 contract (w2d-tokenizer-runtime)"),
 }
@@ -1074,6 +1076,9 @@ TIE_RESPONSE_FIELDS = frozenset({"id", "access_count", "surprise_score", "timest
 TIE_ITEM = re.compile(r"^(?P<at>.*\[\d+\])\.(?P<field>[\w.]+): python (?P<py>\S+) vs rust (?P<rs>\S+)$")
 TIE_SERVED = re.compile(r"^(?:db )?(?:public\.)?retrieval_events\[(-?\d+)\]\.served\[(\d+)\]$")
 TIE_ORDERED_VIA = ("contiguity", "timeline")
+# Rules B and D read a response position only in an entries list (w2d's and
+# MCP's search entries, w2e's step answers); any other id list keeps it new.
+TIE_ENTRIES = re.compile(r"(?:^|\.)entries\[\d+\]$")
 
 
 def _tie_items(line: str) -> tuple[str, list[str]] | None:
@@ -1113,22 +1118,45 @@ def _slot_md5(entity, attribute) -> str:
     return hashlib.md5(f"{entity}\x1f{attribute}".encode("utf-8")).hexdigest()
 
 
+def _shared_equal(maps) -> bool:
+    """Two sides' {slot md5: md5} maps agree on every slot both hold."""
+    a, b = (maps or {}).get("python"), (maps or {}).get("rust")
+    return isinstance(a, dict) and isinstance(b, dict) and all(a[k] == b[k] for k in a.keys() & b.keys())
+
+
 def _padded_items(attempt: dict, parsed: list) -> set[tuple[int, int]]:
-    """Ruling E: the (line, item) indexes a padded case explains. A padded
-    case is one whose harness record says so (``padded-query``); its event
-    and the slots the two cortex blocks disagree on are the harness's
-    ``padded-event`` records."""
+    """Ruling E: the (line, item) indexes a padded case explains, each a
+    provable consequence of cortex membership or score.
+
+    * A case's cortex block, when the harness marked the case padded
+      (``padded-query``: its own query ends in whitespace) and every cortex
+      slot both sides served has the same value hash.
+    * The bank's ``served_facts`` of an event logged with a marked case's
+      query (``padded-event``, matched by the query's md5), when every slot
+      both sides served has the same kind, contested and pinned hash.
+    * ``slot_reads`` rows, base_missing count and digest, when the harness's
+      full comparison of the two tables (``slot-reads``; the printed diff
+      caps its rows) differs only in slots one side alone served there."""
     proofs = attempt.get("tie_proofs") or {}
-    cases = {ctx for ctx, ps in proofs.items()
-             if any(isinstance(p, dict) and p.get("kind") == "padded-query" for p in ps)}
-    events, slots = set(), set()
+    cases, queries = set(), set()
+    for ctx, ps in proofs.items():
+        for p in ps:
+            if (isinstance(p, dict) and p.get("kind") == "padded-query" and isinstance(p.get("query_md5"), str)
+                    and _shared_equal(p.get("cortex"))):
+                cases.add(ctx)
+                queries.add(p["query_md5"])
+    events, one_sided, reads = set(), set(), None
     for p in proofs.get("db", []):
-        if isinstance(p, dict) and p.get("kind") == "padded-event" and isinstance(p.get("event"), int):
+        if not isinstance(p, dict):
+            continue
+        if (p.get("kind") == "padded-event" and isinstance(p.get("event"), int)
+                and p.get("query_md5") in queries and _shared_equal(p.get("facts"))):
             events.add(p["event"])
-            slots.update(s for s in p.get("slots") or [] if isinstance(s, str))
+            one_sided |= set(p["facts"]["python"]) ^ set(p["facts"]["rust"])
+        elif p.get("kind") == "slot-reads" and isinstance(p.get("slots"), list):
+            reads = set(p["slots"])
+    reads_ok = bool(reads) and reads <= one_sided
     out: set[tuple[int, int]] = set()
-    rows = {"python": [], "rust": []}
-    count = digest = None
     for li, entry in enumerate(parsed):
         if entry is None:
             continue
@@ -1139,31 +1167,50 @@ def _padded_items(attempt: dict, parsed: list) -> set[tuple[int, int]]:
                 out.add((li, ii))
             elif ctx == "db":
                 facts = PADDED_FACTS.match(where)
-                row = PADDED_SLOT_ROW.match(item)
                 if facts and int(facts.group(1)) in events:
                     out.add((li, ii))
-                elif row:
+                    continue
+                if not reads_ok:
+                    continue
+                row = PADDED_SLOT_ROW.match(item)
+                if row:
                     try:
                         values = ast.literal_eval(row.group(2))
                     except (ValueError, SyntaxError):
                         continue
                     if (isinstance(values, list) and len(values) >= 2
-                            and _slot_md5(values[0], values[1]) in slots):
-                        rows[row.group(1)].append((li, ii))
-                elif PADDED_SLOT_COUNT.match(item):
-                    count = ((li, ii), PADDED_SLOT_COUNT.match(item))
-                elif PADDED_SLOT_DIGEST.match(item):
-                    digest = (li, ii)
-    out.update(rows["python"] + rows["rust"])
-    # The base rows each side rewrote: one per slot row it holds that the
-    # base also held, so the counts may differ by the rows' own difference.
-    if count is not None:
-        (at, m) = count
-        if int(m.group(1)) - int(m.group(2)) == len(rows["python"]) - len(rows["rust"]):
-            out.add(at)
-            if digest is not None:
-                out.add(digest)
+                            and _slot_md5(values[0], values[1]) in reads):
+                        out.add((li, ii))
+                elif PADDED_SLOT_COUNT.match(item) or PADDED_SLOT_DIGEST.match(item):
+                    out.add((li, ii))
     return out
+
+
+_SURPRISE_TOL: list = []
+
+
+def _surprise_tol() -> float | None:
+    """w2e's stored surprise tolerance (goldens/w2e-tolerance.json), the
+    one events_diff compares served surprise within; None when unreadable,
+    so no swap is accepted."""
+    if not _SURPRISE_TOL:
+        try:
+            _SURPRISE_TOL.append(float(json.loads((HARNESS / "goldens" / "w2e-tolerance.json")
+                                                  .read_text(encoding="utf-8"))["surprise_abs"]))
+        except (OSError, ValueError, KeyError, TypeError):
+            _SURPRISE_TOL.append(None)
+    return _SURPRISE_TOL[0]
+
+
+def _surprise_crosses(a: dict, b: dict) -> bool:
+    """Rule C: each entry carries its own surprise to its new position, so
+    Python's at p matches Rust's at p+1 and the other way round."""
+    tol = _surprise_tol()
+    sa, sb = a.get("surprise") or {}, b.get("surprise") or {}
+    vals = (sa.get("python"), sa.get("rust"), sb.get("python"), sb.get("rust"))
+    if tol is None or not all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in vals):
+        return False
+    return abs(sa["python"] - sb["rust"]) <= tol and abs(sa["rust"] - sb["python"]) <= tol
 
 
 def _tie_only(attempt: dict, rules=None) -> set[str]:
@@ -1204,7 +1251,7 @@ def _tie_only(attempt: dict, rules=None) -> set[str]:
             ident = "entry_id" if served else "id"
             allowed = TIE_EVENT_FIELDS if served else TIE_RESPONSE_FIELDS
             p = proofs.get(key)
-            if (ident in fields and set(fields) <= allowed
+            if (ident in fields and set(fields) <= allowed and (served or TIE_ENTRIES.search(at))
                     and p and p.get("kind") == "pick" and _same_text(p)
                     and (str(p.get("python")), str(p.get("rust"))) == fields[ident]
                     and (not served or _found(p))):
@@ -1228,13 +1275,13 @@ def _tie_only(attempt: dict, rules=None) -> set[str]:
                     _found(q) and q.get("kind") == "pick"
                     and (str(q.get("python")), str(q.get("rust"))) == groups[k]["entry_id"]
                     and not any((q.get("via") or {}).get(s) in TIE_ORDERED_VIA for s in ("python", "rust"))
-                    for q, k in zip(pair, (key, partner))):
+                    for q, k in zip(pair, (key, partner))) and _surprise_crosses(*pair):
                 covered.update((key, partner))
     if "access-count-follow-on" in rules:
         for key, fields in groups.items():
             ctx, at = key
             p = proofs.get(key)
-            if (key in covered or set(fields) != {"access_count"} or TIE_SERVED.match(at)
+            if (key in covered or set(fields) != {"access_count"} or not TIE_ENTRIES.search(at)
                     or not p or p.get("kind") != "count" or not isinstance(p.get("id"), int)):
                 continue
             try:

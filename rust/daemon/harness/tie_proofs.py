@@ -19,6 +19,7 @@ and nothing here changes what is compared.
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 
 # "<at>.id: python 69 vs rust 65" (a response's entries) and
@@ -111,7 +112,9 @@ def event_proofs(lines: list[str], python_events: dict | None, rust_events: dict
     """Proofs for retrieval-event lines. ``*_events`` are each side's dump
     holding ``public.retrieval_events`` (raw, before any alignment);
     ``text_md5(ids)`` returns ``{id: md5}`` read in both banks, an id whose
-    two banks disagree or that either lacks mapped to None."""
+    two banks disagree or that either lacks mapped to None. A bank that
+    cannot be read leaves every hash None (``unavailable``): the lines keep
+    their class, never an error."""
     picks = []
     for line in lines:
         prefix = "db " if line.startswith("db ") else ""
@@ -120,23 +123,33 @@ def event_proofs(lines: list[str], python_events: dict | None, rust_events: dict
             picks.append((prefix, m))
     if not picks:
         return []
-    hashes = text_md5({int(m[k]) for _, m in picks for k in ("py", "rs")})
+    unavailable = None
+    try:
+        hashes = text_md5({int(m[k]) for _, m in picks for k in ("py", "rs")})
+    except Exception as e:  # noqa: BLE001 - a proof never changes a run's outcome
+        hashes, unavailable = {}, type(e).__name__
     out = []
     for prefix, m in picks:
         event = int(SERVED_AT.match(m["at"])[1])
         a = _by_id(_served(python_events, event), "entry_id", int(m["py"]))
         b = _by_id(_served(rust_events, event), "entry_id", int(m["rs"]))
-        out.append({"at": prefix + m["at"], "kind": "pick", "python": int(m["py"]), "rust": int(m["rs"]),
-                    "text_md5": {"python": hashes.get(int(m["py"])), "rust": hashes.get(int(m["rs"]))},
-                    "via": {"python": (a or {}).get("via"), "rust": (b or {}).get("via")},
-                    "found": {"python": a is not None, "rust": b is not None}})
+        proof = {"at": prefix + m["at"], "kind": "pick", "python": int(m["py"]), "rust": int(m["rs"]),
+                 "text_md5": {"python": hashes.get(int(m["py"])), "rust": hashes.get(int(m["rs"]))},
+                 "via": {"python": (a or {}).get("via"), "rust": (b or {}).get("via")},
+                 "surprise": {"python": ((a or {}).get("components") or {}).get("surprise"),
+                              "rust": ((b or {}).get("components") or {}).get("surprise")},
+                 "found": {"python": a is not None, "rust": b is not None}}
+        if unavailable:
+            proof["unavailable"] = unavailable
+        out.append(proof)
     return out
 
 
 def padded(query) -> bool:
-    """A query with trailing whitespace around real words: the case shape
-    ruling E covers (sentence-transformers 5.4.0 stopped stripping text
-    before tokenising; Rust keeps the 5.3.0 strip). A blank query is not."""
+    """A query ending in whitespace around real words: the cause ruling E
+    names (sentence-transformers 5.4.0 stopped stripping text before
+    tokenising; Rust keeps the 5.3.0 strip) applies to any such query. A
+    blank query is not one."""
     return isinstance(query, str) and query.strip() != "" and query != query.rstrip()
 
 
@@ -144,13 +157,33 @@ def slot_md5(entity, attribute) -> str:
     return hashlib.md5(f"{entity}\x1f{attribute}".encode("utf-8")).hexdigest()
 
 
+def _json_md5(value) -> str:
+    return hashlib.md5(json.dumps(value, sort_keys=True).encode("utf-8")).hexdigest()
+
+
+def padded_case_proof(query: str, python, rust) -> dict:
+    """A padded case's record: its query's md5 and, per side, each cortex
+    slot (entity, attribute) of the response's ``cortex`` block mapped to an
+    md5 of its value, so a slot both sides served with different values is
+    seen without the value leaving the harness."""
+    def cortex(body):
+        items = body.get("cortex") if isinstance(body, dict) else None
+        return {slot_md5(x.get("entity"), x.get("attribute")): _json_md5(x.get("value"))
+                for x in (items if isinstance(items, list) else []) if isinstance(x, dict)}
+    return {"at": "", "kind": "padded-query", "query_md5": _md5(query),
+            "cortex": {"python": cortex(python), "rust": cortex(rust)}}
+
+
+FACT_FIELDS = ("kind", "contested", "pinned")  # a served fact's own fields; rank and score follow the order
+
+
 def padded_event_proofs(queries: list[str], python_events: dict | None,
                         rust_events: dict | None) -> list[dict]:
     """For each retrieval event both sides logged with one of the padded
-    ``queries`` (exactly as given; the event logs the query unstripped), the
-    md5 of every cortex slot (entity_norm, attribute_norm) its served facts
-    hold on one side only. An event whose query differs between the sides,
-    or that one side lacks, gets no record."""
+    ``queries`` (exactly as given; the event logs the query unstripped): the
+    query's md5 and, per side, each served fact's slot (entity_norm,
+    attribute_norm) mapped to an md5 of FACT_FIELDS. An event whose query
+    differs between the sides, or that one side lacks, gets no record."""
     def table(state):
         t = (state or {}).get("rows", {}).get("public.retrieval_events") or {}
         cols = t.get("columns") or []
@@ -158,18 +191,38 @@ def padded_event_proofs(queries: list[str], python_events: dict | None,
             return {}
         i, q, f = cols.index("id"), cols.index("query"), cols.index("served_facts")
         return {row[i]: (row[q], row[f]) for row in t.get("rows") or []}
+
+    def facts(served):
+        return {slot_md5(x.get("entity_norm"), x.get("attribute_norm")): _json_md5([x.get(k) for k in FACT_FIELDS])
+                for x in (served if isinstance(served, list) else []) if isinstance(x, dict)}
     a, b = table(python_events), table(rust_events)
     out = []
-    for event, (query, facts) in sorted(a.items()):
+    for event, (query, served) in sorted(a.items()):
         if query not in queries or event not in b or b[event][0] != query:
             continue
-
-        def slots(served):
-            return {slot_md5(x.get("entity_norm"), x.get("attribute_norm"))
-                    for x in (served if isinstance(served, list) else []) if isinstance(x, dict)}
         out.append({"at": f"public.retrieval_events[{event}]", "kind": "padded-event", "event": event,
-                    "slots": sorted(slots(facts) ^ slots(b[event][1]))})
+                    "query_md5": _md5(query), "facts": {"python": facts(served), "rust": facts(b[event][1])}})
     return out
+
+
+def slot_reads_proof(dsns: dict, connect=None) -> dict:
+    """Every slot whose ``slot_reads`` row differs between the two banks
+    (read_count, or present on one side only), read in full from both banks:
+    the printed diff caps its rows, so ruling E decides from this. None when
+    a bank cannot be read."""
+    if connect is None:
+        import psycopg
+        connect = psycopg.connect
+    try:
+        seen = []
+        for side in ("python", "rust"):
+            with connect(dsns[side]) as conn:
+                rows = conn.execute("SELECT entity_norm, attribute_norm, read_count FROM slot_reads").fetchall()
+            seen.append({slot_md5(e, a): n for e, a, n in rows})
+        differ = sorted(k for k in seen[0].keys() | seen[1].keys() if seen[0].get(k) != seen[1].get(k))
+    except Exception as e:  # noqa: BLE001 - a proof never changes a run's outcome
+        return {"at": "", "kind": "slot-reads", "slots": None, "unavailable": type(e).__name__}
+    return {"at": "", "kind": "slot-reads", "slots": differ}
 
 
 def bank_text_md5(dsns: dict, connect=None) -> "callable":
@@ -190,3 +243,12 @@ def bank_text_md5(dsns: dict, connect=None) -> "callable":
             seen.append({int(i): h for i, h in rows})
         return {i: (seen[0].get(i) if seen[0].get(i) == seen[1].get(i) else None) for i in ids}
     return read
+
+
+def safely(build) -> list[dict]:
+    """``build()``'s records, or one ``unavailable`` record when building
+    them raised: the harness's lines and exit status never depend on it."""
+    try:
+        return build()
+    except Exception as e:  # noqa: BLE001
+        return [{"at": "", "kind": "unavailable", "why": type(e).__name__}]
