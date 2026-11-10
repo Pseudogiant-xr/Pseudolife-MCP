@@ -1889,6 +1889,35 @@ fn want_float(
     }
 }
 
+/// A cap Python reads as `value or None`, where a YAML null (stored as
+/// `None`) and 0 both turn it off: null reads as 0, which every Rust reader
+/// of such a cap takes as off. Anything else is `want_int`'s read. The raw
+/// null still reaches `user_leaves`, so the Console serves it as Python does.
+fn want_int_cap(
+    entries: &[(Node, Node)],
+    key: &str,
+    path: &str,
+    default: i64,
+) -> Result<i64, ConfigError> {
+    match lookup(entries, key)? {
+        Some(Node::Null) => Ok(0),
+        _ => want_int(entries, key, path, default),
+    }
+}
+
+/// `want_int_cap` for a float cap: null reads as 0.0, which is off.
+fn want_float_cap(
+    entries: &[(Node, Node)],
+    key: &str,
+    path: &str,
+    default: f64,
+) -> Result<f64, ConfigError> {
+    match lookup(entries, key)? {
+        Some(Node::Null) => Ok(0.0),
+        _ => want_float(entries, key, path, default),
+    }
+}
+
 fn want_str(
     entries: &[(Node, Node)],
     key: &str,
@@ -2191,8 +2220,10 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
                 want_int(l, "signal_retry_days", "memory.lessons", 30)?;
             memory.lessons_synthesis_dedup_min_similarity =
                 want_float(l, "synthesis_dedup_min_similarity", "memory.lessons", 0.88)?;
+            // `cfg.synthesis_max_signals or None` (service_dream.py:806): a
+            // null drains everything, as 0 does.
             memory.lessons_synthesis_max_signals =
-                want_int(l, "synthesis_max_signals", "memory.lessons", 200)?;
+                want_int_cap(l, "synthesis_max_signals", "memory.lessons", 200)?;
             memory.lessons_rule_mode = want_bool(l, "rule_mode", "memory.lessons", false)?;
         }
         if let Some(g) = section(m, "graph_insight", "memory.")? {
@@ -2260,15 +2291,17 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
                 hub_gate: want_bool(r, "hub_gate", p, d.hub_gate)?,
                 hub_percentile: want_float(r, "hub_percentile", p, d.hub_percentile)?,
                 hub_floor: want_int(r, "hub_floor", p, d.hub_floor)?,
-                expand_budget: want_int(r, "expand_budget", p, d.expand_budget)?,
-                max_searches_per_hop: want_int(
+                // The four caps: `cfg.<cap> or None` (service.py:9401-9407),
+                // so a null is off, as 0 is.
+                expand_budget: want_int_cap(r, "expand_budget", p, d.expand_budget)?,
+                max_searches_per_hop: want_int_cap(
                     r,
                     "max_searches_per_hop",
                     p,
                     d.max_searches_per_hop,
                 )?,
-                max_total_searches: want_int(r, "max_total_searches", p, d.max_total_searches)?,
-                time_budget_seconds: want_float(
+                max_total_searches: want_int_cap(r, "max_total_searches", p, d.max_total_searches)?,
+                time_budget_seconds: want_float_cap(
                     r,
                     "time_budget_seconds",
                     p,
@@ -2356,7 +2389,9 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
                 )?,
                 auto_apply_safe: want_bool(r, "auto_apply_safe", p, d.auto_apply_safe)?,
                 min_entity_mentions: want_int(r, "min_entity_mentions", p, d.min_entity_mentions)?,
-                max_fallback_mentions: want_int(
+                // `cfg.max_fallback_mentions or None` (service_dream.py:3459,
+                // 4400): a null is no cap, as 0 is.
+                max_fallback_mentions: want_int_cap(
                     r,
                     "max_fallback_mentions",
                     p,
@@ -3201,6 +3236,85 @@ mod tests {
         assert!(!cfg("time:\n  relative_age: false\n").time.relative_age);
         assert!(!cfg("time:\n  relative_age: null\n").time.relative_age);
         assert!(cfg("time:\n  relative_age: yes please\n").time.relative_age);
+    }
+
+    /// Python stores a YAML null on these caps as `None` and reads each as
+    /// `x or None`, which is "off" (recall: service.py:9401-9407 into
+    /// recall.py:195 and 262-264; deep dream: service_dream.py:3459 and
+    /// 4400 into graph_consolidation.py:132; lessons: service_dream.py:806),
+    /// so a config that sets them null starts and runs with no cap.
+    #[test]
+    fn null_caps_read_as_off_like_python() {
+        const LEAVES: [&str; 6] = [
+            "memory.recall.expand_budget",
+            "memory.recall.max_searches_per_hop",
+            "memory.recall.max_total_searches",
+            "memory.recall.time_budget_seconds",
+            "memory.deep_dream.max_fallback_mentions",
+            "memory.lessons.synthesis_max_signals",
+        ];
+        for null in ["null", "~", ""] {
+            let c = cfg(&format!(
+                "memory:\n  recall:\n    expand_budget: {null}\n    \
+                 max_searches_per_hop: {null}\n    max_total_searches: {null}\n    \
+                 time_budget_seconds: {null}\n  deep_dream:\n    \
+                 max_fallback_mentions: {null}\n  lessons:\n    \
+                 synthesis_max_signals: {null}\n"
+            ));
+            let r = &c.memory.recall;
+            assert_eq!(
+                (
+                    r.expand_budget,
+                    r.max_searches_per_hop,
+                    r.max_total_searches
+                ),
+                (0, 0, 0),
+                "{null:?}"
+            );
+            assert_eq!(r.time_budget_seconds, 0.0, "{null:?}");
+            assert_eq!(c.memory.deep_dream.max_fallback_mentions, 0, "{null:?}");
+            assert_eq!(c.memory.lessons_synthesis_max_signals, 0, "{null:?}");
+            // Python keeps the None itself where it serves the value: the
+            // Console's running value and the signed `asdict` view.
+            for leaf in LEAVES {
+                assert_eq!(
+                    c.user_leaves.get(leaf),
+                    Some(&Value::Null),
+                    "{leaf} {null:?}"
+                );
+            }
+            assert_eq!(
+                c.memory.deep_dream.as_dict["max_fallback_mentions"],
+                Value::Null
+            );
+        }
+        // Near misses: an absent key keeps its default, a number is read as
+        // written, and a non-number still refuses with the same message.
+        let d = cfg("memory:\n  recall:\n    driver: mechanical\n")
+            .memory
+            .recall;
+        assert_eq!(d, RecallConfig::default());
+        let r =
+            cfg("memory:\n  recall:\n    time_budget_seconds: 2.5\n    max_total_searches: 4\n")
+                .memory
+                .recall;
+        assert_eq!((r.time_budget_seconds, r.max_total_searches), (2.5, 4));
+        for (section, key, want) in [
+            ("recall", "time_budget_seconds", "a number"),
+            ("recall", "expand_budget", "an integer"),
+            ("recall", "max_searches_per_hop", "an integer"),
+            ("recall", "max_total_searches", "an integer"),
+            ("deep_dream", "max_fallback_mentions", "an integer"),
+            ("lessons", "synthesis_max_signals", "an integer"),
+        ] {
+            match load_str(&format!("memory:\n  {section}:\n    {key}: abc\n")) {
+                Err(ConfigError::Refused(msg)) => assert_eq!(
+                    msg,
+                    format!("memory.{section}.{key} must be {want}, got a string")
+                ),
+                Ok(_) => panic!("memory.{section}.{key}: abc started"),
+            }
+        }
     }
 
     #[test]
