@@ -81,10 +81,10 @@ class RerankerAvailabilityTests(unittest.TestCase):
     def test_pythons_fallback_message_is_read_across_its_lines(self):
         """Its reason (a transformers offline error) spans lines before the
         "disabling": the whole message is quoted, up to that line."""
-        message = search.reranker_fallback(self.PYTHON_OFFLINE)
+        message = search.reranker_fallback(self.PYTHON_OFFLINE + "[2026-11-10 12:00:01,000] next log line\n")
         self.assertIn("offline mode", message)          # the second line's text
         self.assertIn("disabling", message)
-        self.assertNotIn("bi-encoder", message.split("disabling", 1)[0])
+        self.assertNotIn("next log line", message)      # it stops at the "disabling" line
         self.assertIsNone(search.reranker_fallback(self.LOADED))
 
     def test_either_side_degraded_refuses_and_names_that_side(self):
