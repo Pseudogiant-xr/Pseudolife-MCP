@@ -2242,7 +2242,14 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
                 god_nodes_top_n: want_int(g, "god_nodes_top_n", path, d.god_nodes_top_n)?,
                 surprises_top_n: want_int(g, "surprises_top_n", path, d.surprises_top_n)?,
                 questions_top_n: want_int(g, "questions_top_n", path, d.questions_top_n)?,
-                betweenness_sample: want_int(g, "betweenness_sample", path, d.betweenness_sample)?,
+                // `sample and ...` (graph_insight.py:28): a null is exact,
+                // as 0 is.
+                betweenness_sample: want_int_cap(
+                    g,
+                    "betweenness_sample",
+                    path,
+                    d.betweenness_sample,
+                )?,
             };
         }
         if let Some(sc) = section(m, "scopes", "memory.")? {
@@ -3288,6 +3295,13 @@ mod tests {
                 Value::Null
             );
         }
+        // `betweenness_sample` is `sample and ...` (graph_insight.py:28): a
+        // null runs exact betweenness, as 0 does and as this daemon always
+        // does.
+        let g = cfg("memory:\n  graph_insight:\n    betweenness_sample: null\n")
+            .memory
+            .graph_insight;
+        assert_eq!(g.betweenness_sample, 0);
         // Near misses: an absent key keeps its default, a number is read as
         // written, and a non-number still refuses with the same message.
         let d = cfg("memory:\n  recall:\n    driver: mechanical\n")
@@ -3306,6 +3320,7 @@ mod tests {
             ("recall", "max_total_searches", "an integer"),
             ("deep_dream", "max_fallback_mentions", "an integer"),
             ("lessons", "synthesis_max_signals", "an integer"),
+            ("graph_insight", "betweenness_sample", "an integer"),
         ] {
             match load_str(&format!("memory:\n  {section}:\n    {key}: abc\n")) {
                 Err(ConfigError::Refused(msg)) => assert_eq!(
