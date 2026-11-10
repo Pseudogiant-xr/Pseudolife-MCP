@@ -263,7 +263,7 @@
     "ops/install.sh": "c96916dcf81674b9ee92dbe16ac19c84d729965345ba78c276e6abfc52749a14",
     "ops/installer_engine.py": "1b83c360e5b7e02f0b56681f23dc8c88ac4803cebd88d2bb28c30c751141ec6e",
     "ops/installer_state.py": "3f53fa5268be9ab4e0dc7fc6df563f1cec306f4c0f9a92e6ec4e1500124c519a",
-    "ops/integrate.py": "749327ced594d10fbc2c02bc69aeb7c8515da73452e778ceb13c7cd9aa30fc39",
+    "ops/integrate.py": "1e01c025bf0c8ddf67ef5c41624486ca4728fb189c0d609fa727d5cfa3bc2daf",
     "ops/measure_reverify_population.py": "413ff8baa0e0b25b8a727b6bead248df753d4d26e7c697aa6a0542b68715cfa5",
     "ops/migrate-pg18.ps1": "a2a8bd96ab754249395a9d42b26bfd8e6b5ecf8d6da1cd72383ebf745c0acde8",
     "ops/migrate_drop_age.py": "bad14579affef14699a3e1898afd4ba6326944f5db1e9b5c0486ee2b23153eac",
@@ -47467,7 +47467,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/integrate.py:1676",
+          "location": "ops/integrate.py:1678",
           "shape": {
             "channel": "environment",
             "complete": true,

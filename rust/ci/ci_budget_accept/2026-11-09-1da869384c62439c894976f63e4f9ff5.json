@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "rust",
+  "before": "e03a7a511b2bf9f6",
+  "fingerprint": "791d81f81c4d4405",
+  "reason": "Adds rust/daemon/harness/test_dbstate_real_bank.py to the existing board/mirror harness step: no new job, shard or setup; its database cases skip without a login and the rest are pure-data checks that finish in well under a second"
+}
