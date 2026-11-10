@@ -589,17 +589,45 @@ def test_sweep_analyzer_tick_skips_only_its_real_bank_arms(tmp_path):
     assert "every entity" in forced.REAL_BANK_EXCLUDED["w2e/sweep-analyzer-tick"]
     assert sorted(forced.REAL_BANK_EXCLUDED) == [
         "routes/stamped", "w2d_search/hide-superseded", "w2d_search/mcp-stats", "w2e/candidate-auto",
-        "w2e/search-after-restart", "w2e/sweep-analyzer-tick"]
+        "w2e/candidate-auto-reopen", "w2e/search-after-restart", "w2e/sweep-analyzer-tick"]
 
 
 def test_the_maintainers_real_bank_exclusions_have_their_reasons():
     """Maintainer decision D2, 2026-11-10: three more scenarios whose premise
-    cannot hold on a real bank. candidate-auto-reopen is not excluded: it
-    stays an error unless both real attempts hit the accepted OOM."""
+    cannot hold on a real bank."""
     for key, word in (("w2d_search/hide-superseded", "ranking"), ("w2d_search/mcp-stats", "graduation"),
                       ("w2e/candidate-auto", "judged first")):
         assert word in forced.REAL_BANK_EXCLUDED[key] and "2026-11-10" in forced.REAL_BANK_EXCLUDED[key]
-    assert "w2e/candidate-auto-reopen" not in forced.REAL_BANK_EXCLUDED
+
+
+def test_candidate_auto_reopen_is_excluded_beside_candidate_auto(tmp_path):
+    """The conductor's ruling A under the maintainer's delegation of
+    2026-11-11 (combined run e4a09212c): candidate-auto-reopen has its
+    sibling candidate-auto's accepted Python memory limit, so on a real
+    bank's copy neither real attempt compares. Its real arms do not run and
+    its synthetic arm must pass."""
+    reason = forced.REAL_BANK_EXCLUDED["w2e/candidate-auto-reopen"]
+    for word in ("w2e/candidate-auto", "Python memory limit", "e4a09212c", "settle timeout",
+                 "OOM kill", "synthetic arm passed",
+                 "accepted by the conductor under the maintainer's delegation of 2026-11-11"):
+        assert word in reason
+    answers = {"candidate-auto-reopen": {"synthetic": PASS},
+               "candidate-shadow": {"real": PASS}}
+    runner = FakeRunner(tmp_path, answers)
+    report, private = forced.run(runner, ["w2e"], None, names=lambda s: list(answers))
+    rows = {r["scenario"]: r for r in report["suites"]["w2e"]["rows"]}
+    assert rows["candidate-auto-reopen"]["class"] == "excluded"
+    assert [c for c in runner.calls if c[1] == "candidate-auto-reopen"] == [
+        ("w2e", "candidate-auto-reopen", "synthetic", False)]
+    # Near miss: its sibling that is not listed still runs its real arm.
+    assert rows["candidate-shadow"]["class"] == "pass"
+    assert ("w2e", "candidate-shadow", "real", True) in runner.calls
+    # Near miss: a failing synthetic arm is an error, not an exclusion.
+    answers = {"candidate-auto-reopen": {"synthetic": {"status": "diff", "diffs": ["DIFF [x] step 1: y"],
+                                                       "seconds": 1.0}}}
+    report, private = forced.run(FakeRunner(tmp_path, answers), ["w2e"], None, names=lambda s: list(answers))
+    assert report["suites"]["w2e"]["rows"][0]["class"] == "error"
+    assert private["w2e/candidate-auto-reopen"]["real"] is None
 
 
 def test_the_premises_a_real_bank_breaks_are_excluded_with_their_reasons():
@@ -990,11 +1018,13 @@ def _rows_for(tmp_path, answers, oom):
     return {r["scenario"]: r for r in report["suites"]["w2e"]["rows"]}, report
 
 
-def test_a_known_python_memory_limit_is_accepted_not_an_error(tmp_path):
+def test_a_known_python_memory_limit_is_accepted_not_an_error(tmp_path, monkeypatch):
     """Maintainer decision (c), 2026-11-08: candidate-auto and -reopen
     exceed the runner's memory on Python at the harness's -1.0 floors."""
-    # candidate-auto's real-bank arms are excluded since 2026-11-10 (D2), so
-    # the rule is pinned on candidate-auto-reopen, which still runs them.
+    # Both scenarios' real-bank arms are excluded (candidate-auto since
+    # 2026-11-10, D2), so the rule is pinned on candidate-auto-reopen with
+    # its exclusion lifted: the rule stays for when real arms run again.
+    monkeypatch.delitem(forced.REAL_BANK_EXCLUDED, "w2e/candidate-auto-reopen", raising=False)
     err = {"status": "error", "diffs": [], "error_tail": ["IncompleteRead"], "seconds": 1.0}
     answers = {"dream-deep-dry": {"real": err, "real-retry": err, "synthetic": PASS},
                "candidate-auto-reopen": {"real": err, "real-retry": err, "synthetic": PASS}}
