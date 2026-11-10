@@ -223,13 +223,28 @@ def _dsn(space, name: str) -> str:
             f"@{host}:{port}/{space._check(name)}")
 
 
+def _copy_retrying(conn, statement, attempts: int = 12) -> None:
+    """Copy the base, waiting out a session that reads it: a copy needs the
+    template to itself and gives up after about 5 s, and with the forced
+    runner's --jobs another worker's harness reads the shared base (its row
+    hashes) while this one copies it."""
+    for i in range(attempts):
+        try:
+            conn.execute(statement)
+            return
+        except psycopg.errors.ObjectInUse:
+            if i == attempts - 1:
+                raise
+            time.sleep(1)
+
+
 def _create(space, name: str, template: str | None) -> str:
     space.drop(name)
     base = space.base_database() if template is None else None
     with space._admin() as conn:
         space.assert_disposable_database(conn)
         if base is not None:
-            conn.execute(sql.SQL("CREATE DATABASE {} TEMPLATE {}").format(
+            _copy_retrying(conn, sql.SQL("CREATE DATABASE {} TEMPLATE {}").format(
                 sql.Identifier(space._check(name)), sql.Identifier(base)))
         elif template is None:
             space.create_from_default_template(conn, sql.SQL("CREATE DATABASE {}").format(

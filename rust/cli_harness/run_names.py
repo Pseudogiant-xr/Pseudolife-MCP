@@ -8,10 +8,20 @@ import re
 import secrets
 
 
+# Set by the forced runner (rust/daemon/harness/mirror/forced.py) to one
+# attempt's token: it starts every suffix this process allocates, so a sweep
+# scoped to that attempt drops its databases and no other worker's (--jobs).
+# The rest of the suffix stays random, so two processes never share a name.
+ATTEMPT_ENV = "PL_HARNESS_ATTEMPT"
+_ATTEMPT = re.compile(r"[0-9a-f]{8}")
+
+
 class RunNames:
     def __init__(self):
         self._pid = os.getpid()
-        self._suffix = secrets.token_hex(8)
+        attempt = os.environ.get(ATTEMPT_ENV, "")
+        lead = attempt if _ATTEMPT.fullmatch(attempt) else secrets.token_hex(4)
+        self._suffix = lead + secrets.token_hex(4)
         self.labels: dict[str, str] = {}
 
     def require_process(self) -> None:
