@@ -526,3 +526,22 @@ def test_a_bank_that_held_a_graph_waits_for_the_dreams_graph_refresh(monkeypatch
                         lambda qualified: {'"graph_digest"'} if qualified == "public.meta" else set())
     assert graph_refresh_pending(without, before(), start)
     assert not graph_refresh_pending(done, before(), start)
+
+
+def test_the_observed_banks_meta_rows_are_keyed_so_a_difference_names_its_row():
+    """A response-side meta difference printed the row by index
+    (.json.db.rows.public.meta.rows[5][1]...), so nothing could tell the
+    graph_digest row from another without reading its value. The observed
+    bank gives meta as a map by key, the same on both sides."""
+    import run as harness
+    from background_sessions import keyed_meta
+    a = state()
+    a["rows"]["public.meta"]["rows"].append(["graph_digest", {"totals": {"communities": 3}}])
+    b = state()
+    b["rows"]["public.meta"]["rows"].insert(0, ["graph_digest", {"totals": {"communities": 4}}])
+    ka, kb = keyed_meta(a), keyed_meta(b)
+    assert ka["rows"]["public.meta"]["by_key"]["graph_digest"] == {"totals": {"communities": 3}}
+    assert ka["rows"]["public.episodes"] == a["rows"]["public.episodes"]       # other tables as they were
+    diffs = harness.diff_values(ka, kb)
+    assert diffs and all(".by_key.graph_digest." in d for d in diffs), diffs   # row order no longer matters
+    assert harness.diff_values(keyed_meta(state()), keyed_meta(state())) == []

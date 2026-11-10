@@ -134,8 +134,9 @@ svc._storage.close()
                 self.validate_expected(state)
                 self.closed_states[side] = state
                 normalized = normalize_closes(state, self.before, daemon.started_at_unix, captured)
-                scrubbed = normalize_refresh_clocks(harness.scrub_declared_rows(normalized, self.before)["state"],
-                                                    self.before, [(daemon.started_at_unix, captured)])
+                scrubbed = keyed_meta(normalize_refresh_clocks(
+                    harness.scrub_declared_rows(normalized, self.before)["state"],
+                    self.before, [(daemon.started_at_unix, captured)]))
                 arms[side] = {"status": 200, "headers": {}, "json": {"db": scrubbed, "events": {"session_end_dream_triggers": triggers}}}
             c = harness.case("bank after idle close" if not self.sweep else "bank after empty sweep", "OBSERVE", "/background/session-state")
             c["_answers"] = (arms["python"], arms["rust"])
@@ -154,8 +155,9 @@ svc._storage.close()
                     now = time.time()
                     normalized = normalize_closes(state, self.before, self.starts[side], now)
                     triggers = daemon.log.read_text(errors="replace").count("session-end dream trigger:")
-                    db = normalize_refresh_clocks(harness.scrub_declared_rows(normalized, self.before)["state"],
-                                                  self.before, [(self.starts[side], now)])
+                    db = keyed_meta(normalize_refresh_clocks(
+                        harness.scrub_declared_rows(normalized, self.before)["state"],
+                        self.before, [(self.starts[side], now)]))
                     arms[side] = {"status": 200, "headers": {}, "json": {"db": db, "events": {"session_end_dream_triggers": triggers}}}
                 c = harness.case("bank after owned clean stop and restart", "OBSERVE", "/background/session-state")
                 c["_answers"] = (arms["python"], arms["rust"])
@@ -250,6 +252,25 @@ REFRESH_CLOCKS = {
     ("entity_sources", "updated_at"): "clock: derived entity source refresh",
 }
 REFRESH_META_CLOCKS = {"graph_digest": "computed_at"}
+
+
+def keyed_meta(state):
+    """An observed bank with meta as ``by_key`` ({key: value}) instead of
+    rows: a meta difference then prints its row's key
+    (.json.db.rows.public.meta.by_key.graph_digest...), never an index whose
+    row only its value could identify, and row order no longer matters. Used
+    only for the session observations; the final DB comparison keeps rows."""
+    meta = state["rows"].get("public.meta")
+    if not meta or "rows" not in meta:
+        return state
+    state = copy.deepcopy(state)
+    key, value = meta["columns"].index("key"), meta["columns"].index("value")
+    state["rows"]["public.meta"] = {
+        "columns": meta["columns"],
+        "by_key": {row[key]: row[value] for row in meta["rows"]},
+        **{k: v for k, v in meta.items() if k not in ("columns", "rows")},
+    }
+    return state
 
 
 def graph_refresh_pending(state, before, start):
