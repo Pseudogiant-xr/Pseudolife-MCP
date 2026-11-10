@@ -1005,6 +1005,7 @@ def test_the_init_snapshot_waits_for_both_warmups(harness, monkeypatch, tmp_path
             pass
 
         def launch(self):  # daemons.start_all launches every arm, then waits
+            self.started_at_unix = 0.0  # as Daemon.launch stamps it
             return self
 
         def wait(self, timeout, stages=None):
