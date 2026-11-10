@@ -547,6 +547,81 @@ fn concurrent_first_lock_publication_is_private_and_never_replaces_the_winner() 
     }
 }
 
+/// One first-time registration against `home`, as each racing installer runs.
+fn register_once(home: &Path) -> Result<(), SetupError> {
+    let mut client = Fake::new(home);
+    let plan = plan_registration(
+        &client.config,
+        home,
+        &home.join("pseudolife-mcp"),
+        &[],
+        &Map::new(),
+    )
+    .unwrap();
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    runtime.block_on(plan.apply(&mut client, home)).map(|_| ())
+}
+
+/// Open the published lock the way a racing publisher's `MoveFileW` holds it
+/// for a moment after the name appears: delete access, sharing everything.
+/// Setup's own open does not share delete, so it meets a sharing violation.
+#[cfg(windows)]
+fn hold_lock_like_a_racing_publisher(lock: &Path) -> std::fs::File {
+    use std::os::windows::fs::OpenOptionsExt;
+    std::fs::OpenOptions::new()
+        .access_mode(0x0001_0000) // DELETE
+        .share_mode(0x7)
+        .open(lock)
+        .unwrap()
+}
+
+#[cfg(windows)]
+#[test]
+fn lock_open_waits_out_a_racing_publishers_delete_handle() {
+    let home = Home::new();
+    register_once(&home.0).unwrap();
+    let held = hold_lock_like_a_racing_publisher(&home.0.join(".pseudolife-setup.lock"));
+    let releaser = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        drop(held);
+    });
+    let result = register_once(&home.0);
+    releaser.join().unwrap();
+    // Before the fix this loser was told to repair the lock file (#1469).
+    result.unwrap();
+}
+
+#[cfg(windows)]
+#[test]
+fn lock_held_without_delete_sharing_past_the_bound_still_says_repair() {
+    let home = Home::new();
+    register_once(&home.0).unwrap();
+    let lock = home.0.join(".pseudolife-setup.lock");
+    let held = hold_lock_like_a_racing_publisher(&lock);
+    let error = register_once(&home.0).unwrap_err().to_string();
+    drop(held);
+    assert!(error.contains(".pseudolife-setup.lock"), "{error}");
+    assert!(
+        error.ends_with("could not be opened; repair that file and retry."),
+        "{error}"
+    );
+}
+
+#[test]
+fn directory_at_the_lock_path_still_says_repair() {
+    let home = Home::new();
+    std::fs::create_dir(home.0.join(".pseudolife-setup.lock")).unwrap();
+    let error = register_once(&home.0).unwrap_err().to_string();
+    assert!(error.contains(".pseudolife-setup.lock"), "{error}");
+    assert!(
+        error.ends_with("could not be opened; repair that file and retry."),
+        "{error}"
+    );
+}
+
 struct Home(std::path::PathBuf);
 fn assert_same_file(left: &Path, right: &Path) {
     assert_eq!(
