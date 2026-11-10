@@ -574,9 +574,10 @@ INSIGHT = "DIFF [graph-writes] step 36 {\"op\": \"tool\"}: .value.graph_insight.
 ROUTES_COMMUNITY = "DB DIFF [reaper] /rows/public.communities/rows: row only in rust: [7, \"x\", 1, 0.5, 2.0]"
 
 
-def _community_rows(tmp_path, first, retry=None):
-    answers = {"graph-writes": {"real": {"status": "diff", "diffs": first, "seconds": 1.0},
-                                "real-retry": {"status": "diff", "diffs": retry or first, "seconds": 1.0},
+def _community_rows(tmp_path, first, retry=None, **retry_fields):
+    answers = {"graph-writes": {"real": {"status": "diff", "diffs": first, "seconds": 1.0, "exit": 1},
+                                "real-retry": {"status": "diff", "diffs": retry or first, "seconds": 1.0,
+                                               "exit": 1, **retry_fields},
                                 "synthetic": PASS}}
     report, _ = forced.run(FakeRunner(tmp_path, answers), ["w2e"], None, names=lambda s: list(answers))
     return report["suites"]["w2e"]["rows"][0]
@@ -947,4 +948,13 @@ def test_a_community_difference_beside_an_errored_attempt_stays_new(tmp_path, er
     answers["graph-writes"][errored] = err
     report, _ = forced.run(FakeRunner(tmp_path, answers), ["w2e"], None, names=lambda s: list(answers))
     row = report["suites"]["w2e"]["rows"][0]
+    assert row["class"] == "new" and "accepted_as" not in row
+
+
+@pytest.mark.parametrize("cut", [{"exit": None}, {"exit": -9}, {"oom_kills": 1}])
+def test_a_community_difference_from_an_attempt_that_did_not_finish_stays_new(tmp_path, cut):
+    """Review (Opus, confidence 85): an attempt that timed out (exit None),
+    was killed by a signal or by the OOM killer after printing community
+    differences still reads as "diff". Accepting it would hide the cut."""
+    row = _community_rows(tmp_path, [COMMUNITY_ROWS], **cut)
     assert row["class"] == "new" and "accepted_as" not in row

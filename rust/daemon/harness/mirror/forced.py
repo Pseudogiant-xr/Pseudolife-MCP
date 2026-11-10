@@ -556,9 +556,10 @@ def run(runner: Runner, suites: list[str], only: list[str] | None,
             if verdict == "error" and f"{suite}/{name}" in ACCEPTED_OOM \
                     and all((a.get("oom_kills") or 0) > 0 for a in (first, retry)):
                 verdict, accepted_as = "accepted", "oom"
-            # Every real attempt that ran must have completed, with only
-            # community differences: an errored one is never filtered out.
-            elif verdict == "new" and all(a["status"] == "diff" and _community_only(a)
+            # Every real attempt that ran must have finished (an exit code,
+            # not a timeout, signal or OOM kill) with only community
+            # differences: an errored or cut one is never filtered out.
+            elif verdict == "new" and all(_finished(a) and _community_only(a)
                                           for a in (first, retry) if a is not None):
                 verdict, accepted_as = "accepted", "community-partition"
             rows.append({"scenario": name, "class": verdict, "differences": len(first["diffs"]),
@@ -580,6 +581,16 @@ def _community_place(place: str) -> bool:
         if place == f"/rows/{table}/rows" or place.startswith(f"/rows/{table}/"):
             return True
     return place.startswith(".") and place.rsplit(".", 1)[-1].replace("[]", "") in COMMUNITY_FIELDS
+
+
+def _finished(attempt: dict) -> bool:
+    """The harness ran to its end and compared: it printed differences and
+    exited with a code (a timeout leaves none, a signal a negative one), and
+    the runner's cgroup saw no OOM kill. A harness that raised after printing
+    also exits with a code; the attempt alone cannot tell it apart."""
+    code = attempt.get("exit")
+    return (attempt.get("status") == "diff" and isinstance(code, int) and code >= 0
+            and not (attempt.get("oom_kills") or 0))
 
 
 def _community_only(attempt: dict) -> bool:
