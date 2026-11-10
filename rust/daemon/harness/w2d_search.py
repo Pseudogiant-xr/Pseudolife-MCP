@@ -1004,8 +1004,9 @@ def common_env(dsn: str) -> dict[str, str]:
 RERANKER_SIDES = {
     "python": ("Python oracle",
                "the oracle loads cross-encoder/ms-marco-MiniLM-L-6-v2 from its HF cache (HF_HOME) "
-               "under HF_HUB_OFFLINE=1, so the model must be cached before the run: use the runner "
-               "built from ops/Dockerfile.mirror-runner, which bakes it, or download it into HF_HOME"),
+               "under HF_HUB_OFFLINE=1, so the model must be cached before the run: rebuild the "
+               "runner image from ops/Dockerfile.mirror-runner, which bakes it, or download it "
+               "into HF_HOME"),
     "rust": ("Rust daemon",
              "point PSEUDOLIFE_DAEMON_RERANK_DIR at the reranker directory "
              "`pseudolife-daemon provision models` installs"),
