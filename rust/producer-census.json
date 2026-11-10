@@ -224,7 +224,7 @@
     "ops/Dockerfile.daemon": "91924b87f19bf50e14e6764687ee13b0dc3aa2ba3edd89dba521203260e91166",
     "ops/Dockerfile.daemon-rust": "3ffe59cad566abc20f86a2e3220b991c7cd59bb0d6a572f1cebbb973a637d56e",
     "ops/Dockerfile.extractor": "cfd9068d7ba58aad49e00b000ca82ebe83add0e4d8ba7f75043c424243e3451d",
-    "ops/Dockerfile.mirror-runner": "58f81a9b127e9ffc415ffdf78fac3d8039ccfcd7e0ea7494262fb219130b57bc",
+    "ops/Dockerfile.mirror-runner": "4f13ae99afde62580aacb88008c98ca2755a61bc889d6b7b607e6c0c4a1d7aae",
     "ops/Dockerfile.pg": "06308c96aaa3ceedf2fc988c1fccfe8573e4ae1836143546ce1fb7d996707201",
     "ops/assemble_changelog.py": "5462bfcb97a59e280311f0a1628e406fd3a47a45ed3ef39418e1e263b422fb38",
     "ops/backfill_edge_confidence.py": "4ebb4ebd55c853c3d146a98dd2a5bc140ba1ab630c5a3545eae4a639de4081ea",
@@ -20584,6 +20584,22 @@
               }
             }
           }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "ops/Dockerfile.mirror-runner:13",
+          "shape": {
+            "channel": "config",
+            "complete": false,
+            "omitted_optional": null,
+            "parameters": {
+              "model_name": {
+                "expression": "field reference"
+              }
+            }
+          },
+          "usage": "reference"
         }
       ]
     },
@@ -20663,6 +20679,19 @@
       "name": "RerankerConfig.model_name",
       "optional_parameters": [],
       "producers": [
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "ops/Dockerfile.mirror-runner:13",
+          "shape": {
+            "channel": "config",
+            "complete": false,
+            "expression": "config access/reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
         {
           "evidence": "documented",
           "location": "docs/guide/retrieval.md:59",
@@ -31416,7 +31445,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/Dockerfile.mirror-runner:19",
+          "location": "ops/Dockerfile.mirror-runner:37",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -77355,7 +77384,7 @@
     {
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/Dockerfile.mirror-runner:17",
+      "location": "ops/Dockerfile.mirror-runner:35",
       "name": "PSEUDOLIFE_DAEMON_PDFIUM_DIR",
       "shape": {
         "channel": "environment",
@@ -77371,7 +77400,7 @@
     {
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/Dockerfile.mirror-runner:18",
+      "location": "ops/Dockerfile.mirror-runner:36",
       "name": "PSEUDOLIFE_DAEMON_ORT_THREADS",
       "shape": {
         "channel": "environment",
@@ -93963,6 +93992,18 @@
       "dynamic": "unresolved",
       "location": "ops/Dockerfile.extractor:26",
       "reason": "request target supplied dynamically or external"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/Dockerfile.mirror-runner:13",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "config:RerankerConfig"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/Dockerfile.mirror-runner:13",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "config:RerankerConfig.model_name"
     },
     {
       "dynamic": "unresolved",
