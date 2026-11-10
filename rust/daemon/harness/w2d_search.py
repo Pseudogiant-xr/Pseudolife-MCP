@@ -1422,6 +1422,7 @@ def run_scenario(scn: Scenario, binary: Path, template: str, mode: str, record: 
     else:
         py_state = states["python"]
     ordered_queries = timeline_queries(py_state)
+    case_dsns = {k: pg.dsn(dbs[k]) for k in sides} if "python" in sides else None
     for row, pair, c in zip(rows, response_pairs, scn.cases()):
         if pair is not None:
             py_r, rs_r = pair
@@ -1437,8 +1438,13 @@ def run_scenario(scn: Scenario, binary: Path, template: str, mode: str, record: 
             # The bodies as compared: Rust's entries realigned on ties, as the
             # printed paths index them (Codex's review, 2026-11-11).
             seen_py, seen_rs = bodies.get("python", py_r.get("json")), bodies.get("rust", rs_r.get("json"))
+            # Full-text hashes from the banks (a response's text may be a
+            # truncated preview), and the comparator's own ordering context.
             proofs = tie_proofs.safely(lambda: (
-                tie_proofs.response_proofs(row["diffs"], seen_py, seen_rs)
+                tie_proofs.response_proofs(
+                    row["diffs"], seen_py, seen_rs,
+                    text_md5=tie_proofs.bank_text_md5(case_dsns) if case_dsns else None,
+                    ordered=ordered or c.get("tool") == "memory_recent")
                 + ([tie_proofs.padded_case_proof(padded_query, seen_py, seen_rs)]
                    if padded_query is not None else [])))
             if proofs:

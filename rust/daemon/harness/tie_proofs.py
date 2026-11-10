@@ -75,42 +75,89 @@ def _by_id(items, key: str, wanted: int):
     return None
 
 
-def response_proofs(lines: list[str], python, rust) -> list[dict]:
+ORDERED_VIA = ("contiguity", "timeline")  # entries ordered by stream position, never by score
+
+
+def _ordered_list(items) -> bool:
+    return isinstance(items, list) and any(isinstance(x, dict) and x.get("via") in ORDERED_VIA for x in items)
+
+
+def response_proofs(lines: list[str], python, rust, text_md5=None, ordered: bool = False) -> list[dict]:
     """Proofs for a response's lines: ``python``/``rust`` are the compared
-    values the lines' paths start from (w2e's step answer, w2d's JSON body)."""
-    out = []
+    values the lines' paths start from (w2e's step answer, w2d's JSON body).
+
+    ``ordered``: the comparator compares this response in an exact order
+    (memory_recent, a fired timeline); a list holding a contiguity or
+    timeline entry is ordered too. Each record says so, and rules B and D
+    never accept in an ordered list.
+
+    ``text_md5(ids)`` reads each entry's FULL text hash from the banks: a
+    response's ``text`` may be a truncated preview, and equal previews are
+    not equal entries. Without it a pick's hashes are None (unproved)."""
+    picks = []
     for line in lines:
         if line.startswith("db "):  # w2e's bank lines: event_proofs
             continue
         m = PICK_LINE.match(line)
         if m and not SERVED_AT.match(m["at"]):
+            picks.append(m)
+    hashes, unavailable = {}, None
+    if picks and text_md5 is not None:
+        try:
+            hashes = text_md5({int(m[k]) for m in picks for k in ("py", "rs")})
+        except Exception as e:  # noqa: BLE001 - a proof never changes a run's outcome
+            unavailable = type(e).__name__
+    out = []
+    for line in lines:
+        if line.startswith("db "):
+            continue
+        m = PICK_LINE.match(line)
+        if m and not SERVED_AT.match(m["at"]):
             head, _ = _parent(m["at"])
-            a = _by_id(_walk(python, head), "id", int(m["py"]))
-            b = _by_id(_walk(rust, head), "id", int(m["rs"]))
-            out.append({"at": m["at"], "kind": "pick", "python": int(m["py"]), "rust": int(m["rs"]),
-                        "text_md5": {"python": _md5((a or {}).get("text")),
-                                     "rust": _md5((b or {}).get("text"))}})
+            listed = (_walk(python, head), _walk(rust, head))
+            proof = {"at": m["at"], "kind": "pick", "python": int(m["py"]), "rust": int(m["rs"]),
+                     "text_md5": {"python": hashes.get(int(m["py"])), "rust": hashes.get(int(m["rs"]))},
+                     "ordered": bool(ordered or any(_ordered_list(x) for x in listed))}
+            if unavailable:
+                proof["unavailable"] = unavailable
+            out.append(proof)
             continue
         m = COUNT_LINE.match(line)
         if m:
+            head, _ = _parent(m["at"])
             item = _walk(python, m["at"])
             other = _walk(rust, m["at"])
             ident = item.get("id") if isinstance(item, dict) else None
             out.append({"at": m["at"], "kind": "count",
-                        "id": ident if isinstance(other, dict) and other.get("id") == ident else None})
+                        "id": ident if isinstance(other, dict) and other.get("id") == ident else None,
+                        "ordered": bool(ordered or any(_ordered_list(_walk(x, head)) for x in (python, rust)))})
     return out
 
 
-def _served(state: dict | None, event: int) -> list:
+def _event_row(state: dict | None, event: int) -> dict:
     table = (state or {}).get("rows", {}).get("public.retrieval_events") or {}
     cols = table.get("columns") or []
-    if "id" not in cols or EVENT_SERVED not in cols:
-        return []
-    i, s = cols.index("id"), cols.index(EVENT_SERVED)
+    if "id" not in cols:
+        return {}
+    i = cols.index("id")
     for row in table.get("rows") or []:
         if row[i] == event:
-            return row[s] if isinstance(row[s], list) else []
-    return []
+            return dict(zip(cols, row))
+    return {}
+
+
+def _served(state: dict | None, event: int) -> list:
+    served = _event_row(state, event).get(EVENT_SERVED)
+    return served if isinstance(served, list) else []
+
+
+def _event_ordered(state: dict | None, event: int) -> bool:
+    """The event's own ordering flag: a fired timeline orders its served
+    list by stream position (w2d_search's timeline_queries and bank_diff
+    already treat it so), whatever each item's via says."""
+    params = _event_row(state, event).get("params")
+    return isinstance(params, dict) and isinstance(params.get("timeline"), dict) \
+        and params["timeline"].get("fired") is True
 
 
 def event_proofs(lines: list[str], python_events: dict | None, rust_events: dict | None,
@@ -145,6 +192,7 @@ def event_proofs(lines: list[str], python_events: dict | None, rust_events: dict
                  "surprise": {"python": ((a or {}).get("components") or {}).get("surprise"),
                               "rust": ((b or {}).get("components") or {}).get("surprise")},
                  "scores": {"python": _scores(a), "rust": _scores(b)},
+                 "ordered": _event_ordered(python_events, event) or _event_ordered(rust_events, event),
                  "found": {"python": a is not None, "rust": b is not None}}
         if unavailable:
             proof["unavailable"] = unavailable

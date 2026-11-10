@@ -1315,7 +1315,7 @@ def _tie_only(attempt: dict, rules=None) -> set[str]:
             allowed = TIE_EVENT_FIELDS if served else TIE_RESPONSE_FIELDS
             p = proofs.get(key)
             if (ident in fields and set(fields) <= allowed and (served or TIE_ENTRIES.search(at))
-                    and p and p.get("kind") == "pick" and _same_text(p)
+                    and p and p.get("kind") == "pick" and _same_text(p) and p.get("ordered") is False
                     and (str(p.get("python")), str(p.get("rust"))) == fields[ident]
                     and (not served or _found(p))):
                 covered.add(key)
@@ -1335,7 +1335,7 @@ def _tie_only(attempt: dict, rules=None) -> set[str]:
             (a_py, a_rs), (b_py, b_rs) = fields["entry_id"], other["entry_id"]
             pair = [proofs.get(key), proofs.get(partner)]
             if a_py == b_rs and a_rs == b_py and all(
-                    _found(q) and q.get("kind") == "pick"
+                    _found(q) and q.get("kind") == "pick" and q.get("ordered") is False
                     and (str(q.get("python")), str(q.get("rust"))) == groups[k]["entry_id"]
                     and not any((q.get("via") or {}).get(s) in TIE_ORDERED_VIA for s in ("python", "rust"))
                     for q, k in zip(pair, (key, partner))) and _surprise_crosses(*pair) and _scores_near(*pair):
@@ -1345,7 +1345,8 @@ def _tie_only(attempt: dict, rules=None) -> set[str]:
             ctx, at = key
             p = proofs.get(key)
             if (key in covered or set(fields) != {"access_count"} or not TIE_ENTRIES.search(at)
-                    or not p or p.get("kind") != "count" or not isinstance(p.get("id"), int)):
+                    or not p or p.get("kind") != "count" or not isinstance(p.get("id"), int)
+                    or p.get("ordered") is not False):
                 continue
             try:
                 py, rs = (int(v) for v in fields["access_count"])

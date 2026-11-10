@@ -6646,7 +6646,9 @@ def _run_live(name: str, scn: dict, tag: str, binary: Path, root: Path, record: 
             # Ids, text hashes and via for the lines that served different
             # entries (forced.py's tie-order rules); none when nothing differs.
             proofs = tie_proofs.safely(lambda: (
-                tie_proofs.response_proofs(row["diffs"], row.get("python"), row.get("rust"))
+                tie_proofs.response_proofs(row["diffs"], row.get("python"), row.get("rust"),
+                                           text_md5=tie_proofs.bank_text_md5(dsns),
+                                           ordered=op.get("name") == "memory_recent")
                 + tie_proofs.event_proofs(row["diffs"], raw_py, raw_rs, tie_proofs.bank_text_md5(dsns))))
             if proofs:
                 row["tie_proofs"] = proofs
