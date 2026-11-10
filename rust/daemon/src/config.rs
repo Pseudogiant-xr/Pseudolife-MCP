@@ -2119,7 +2119,9 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
     if let Some(m) = section(entries, "memory", "")? {
         let p = "memory";
         memory.top_k = want_int(m, "top_k", p, memory.top_k)?;
-        memory.delete_confirm_threshold = want_int(
+        // `int(... or 0)`, `<= 0` is off (service.py:3487-3489): a null is
+        // no confirmation threshold, as 0 is.
+        memory.delete_confirm_threshold = want_int_cap(
             m,
             "delete_confirm_threshold",
             p,
@@ -2333,20 +2335,27 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
                     p,
                     d.analyzer_file_duplicates,
                 )?,
-                auto_min_new_entities: want_int(
+                // Truthiness tests (service_dream.py:3750, 3753, 3800,
+                // 3815): a null is off, as 0 is.
+                auto_min_new_entities: want_int_cap(
                     r,
                     "auto_min_new_entities",
                     p,
                     d.auto_min_new_entities,
                 )?,
-                auto_interval_days: want_float(r, "auto_interval_days", p, d.auto_interval_days)?,
-                review_queue_alert_pending: want_int(
+                auto_interval_days: want_float_cap(
+                    r,
+                    "auto_interval_days",
+                    p,
+                    d.auto_interval_days,
+                )?,
+                review_queue_alert_pending: want_int_cap(
                     r,
                     "review_queue_alert_pending",
                     p,
                     d.review_queue_alert_pending,
                 )?,
-                review_queue_alert_age_days: want_float(
+                review_queue_alert_age_days: want_float_cap(
                     r,
                     "review_queue_alert_age_days",
                     p,
@@ -3246,28 +3255,56 @@ mod tests {
     }
 
     /// Python stores a YAML null on these caps as `None` and reads each as
-    /// `x or None`, which is "off" (recall: service.py:9401-9407 into
+    /// off, as it reads 0 (recall: `x or None`, service.py:9401-9407 into
     /// recall.py:195 and 262-264; deep dream: service_dream.py:3459 and
-    /// 4400 into graph_consolidation.py:132; lessons: service_dream.py:806),
-    /// so a config that sets them null starts and runs with no cap.
+    /// 4400 into graph_consolidation.py:132, and truthiness at
+    /// service_dream.py:3750, 3753, 3800 and 3815; lessons:
+    /// service_dream.py:806; `delete_confirm_threshold`: service.py:3487-3489;
+    /// `betweenness_sample`: graph_insight.py:28), so a config that sets
+    /// them null starts and runs with that cap off.
     #[test]
     fn null_caps_read_as_off_like_python() {
-        const LEAVES: [&str; 6] = [
+        const LEAVES: [&str; 12] = [
+            "memory.delete_confirm_threshold",
             "memory.recall.expand_budget",
             "memory.recall.max_searches_per_hop",
             "memory.recall.max_total_searches",
             "memory.recall.time_budget_seconds",
             "memory.deep_dream.max_fallback_mentions",
+            "memory.deep_dream.auto_min_new_entities",
+            "memory.deep_dream.auto_interval_days",
+            "memory.deep_dream.review_queue_alert_pending",
+            "memory.deep_dream.review_queue_alert_age_days",
             "memory.lessons.synthesis_max_signals",
+            "memory.graph_insight.betweenness_sample",
         ];
         for null in ["null", "~", ""] {
             let c = cfg(&format!(
-                "memory:\n  recall:\n    expand_budget: {null}\n    \
+                "memory:\n  delete_confirm_threshold: {null}\n  recall:\n    \
+                 expand_budget: {null}\n    \
                  max_searches_per_hop: {null}\n    max_total_searches: {null}\n    \
                  time_budget_seconds: {null}\n  deep_dream:\n    \
-                 max_fallback_mentions: {null}\n  lessons:\n    \
-                 synthesis_max_signals: {null}\n"
+                 max_fallback_mentions: {null}\n    auto_min_new_entities: {null}\n    \
+                 auto_interval_days: {null}\n    review_queue_alert_pending: {null}\n    \
+                 review_queue_alert_age_days: {null}\n  lessons:\n    \
+                 synthesis_max_signals: {null}\n  graph_insight:\n    \
+                 betweenness_sample: {null}\n"
             ));
+            assert_eq!(c.memory.delete_confirm_threshold, 0, "{null:?}");
+            let dd = &c.memory.deep_dream;
+            assert_eq!(
+                (dd.auto_min_new_entities, dd.review_queue_alert_pending),
+                (0, 0),
+                "{null:?}"
+            );
+            assert_eq!(
+                (dd.auto_interval_days, dd.review_queue_alert_age_days),
+                (0.0, 0.0),
+                "{null:?}"
+            );
+            // `betweenness_sample` is `sample and ...`: a null runs exact
+            // betweenness, as 0 does and as this daemon always does.
+            assert_eq!(c.memory.graph_insight.betweenness_sample, 0, "{null:?}");
             let r = &c.memory.recall;
             assert_eq!(
                 (
@@ -3290,20 +3327,34 @@ mod tests {
                     "{leaf} {null:?}"
                 );
             }
-            assert_eq!(
-                c.memory.deep_dream.as_dict["max_fallback_mentions"],
-                Value::Null
-            );
+            for key in [
+                "max_fallback_mentions",
+                "auto_min_new_entities",
+                "auto_interval_days",
+                "review_queue_alert_pending",
+                "review_queue_alert_age_days",
+            ] {
+                assert_eq!(dd.as_dict[key], Value::Null, "{key} {null:?}");
+            }
         }
-        // `betweenness_sample` is `sample and ...` (graph_insight.py:28): a
-        // null runs exact betweenness, as 0 does and as this daemon always
-        // does.
-        let g = cfg("memory:\n  graph_insight:\n    betweenness_sample: null\n")
-            .memory
-            .graph_insight;
-        assert_eq!(g.betweenness_sample, 0);
         // Near misses: an absent key keeps its default, a number is read as
         // written, and a non-number still refuses with the same message.
+        // `review_queue_alert_min_pending` is no cap: Python compares
+        // `merge >= None` (service_dream.py:3817), so its null still refuses.
+        match load_str("memory:\n  deep_dream:\n    review_queue_alert_min_pending: null\n") {
+            Err(ConfigError::Refused(msg)) => assert_eq!(
+                msg,
+                "memory.deep_dream.review_queue_alert_min_pending must be an integer, got null"
+            ),
+            Ok(_) => panic!("review_queue_alert_min_pending: null started"),
+        }
+        match load_str("memory:\n  delete_confirm_threshold: abc\n") {
+            Err(ConfigError::Refused(msg)) => assert_eq!(
+                msg,
+                "memory.delete_confirm_threshold must be an integer, got a string"
+            ),
+            Ok(_) => panic!("delete_confirm_threshold: abc started"),
+        }
         let d = cfg("memory:\n  recall:\n    driver: mechanical\n")
             .memory
             .recall;
@@ -3321,6 +3372,10 @@ mod tests {
             ("deep_dream", "max_fallback_mentions", "an integer"),
             ("lessons", "synthesis_max_signals", "an integer"),
             ("graph_insight", "betweenness_sample", "an integer"),
+            ("deep_dream", "auto_min_new_entities", "an integer"),
+            ("deep_dream", "auto_interval_days", "a number"),
+            ("deep_dream", "review_queue_alert_pending", "an integer"),
+            ("deep_dream", "review_queue_alert_age_days", "a number"),
         ] {
             match load_str(&format!("memory:\n  {section}:\n    {key}: abc\n")) {
                 Err(ConfigError::Refused(msg)) => assert_eq!(
