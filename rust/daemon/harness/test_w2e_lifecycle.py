@@ -791,6 +791,30 @@ def test_idle_seconds_compare_within_the_longest_step(harness):
                               {"value": {"idle_seconds": 0.0}}, 0.0) == []
 
 
+def test_the_consoles_dream_status_read_compares_idle_like_the_dream_tool(harness):
+    """GET /api/dream/status answers svc.dream_status() (web/routes.py),
+    whose idle_seconds is now minus the newest entry's ts, read a step apart
+    on each side. On a real bank's copy it differed by 0.03 s (partial forced
+    run 870fb28fc), so it compares as memory_dream's does: within the longest
+    step, then null-or-not. Nothing else in the answer changes."""
+    import w2e_console_dream
+    assert w2e_console_dream.is_dream_status({"op": "rest", "method": "GET", "path": "/api/dream/status"})
+    for other in ({"op": "rest", "method": "GET", "path": "/api/graph"},
+                  {"op": "rest", "method": "POST", "path": "/api/dream/status"},
+                  {"op": "rest", "method": "GET", "path": "/api/dream/status?x=1"},
+                  {"op": "tool", "name": "memory_dream", "args": {"action": "status"}}):
+        assert not w2e_console_dream.is_dream_status(other)
+    py = {"status": 200, "value": {"backlog": 3, "idle_seconds": 12.5, "dream_cursor": 1700000000.5}}
+    rs = {"status": 200, "value": {"backlog": 3, "idle_seconds": 12.53, "dream_cursor": 1700000000.5}}
+    assert harness.idle_tokens(py) == harness.idle_tokens(rs)
+    assert harness.idle_tokens(py)["value"] == {"backlog": 3, "idle_seconds": "<clock>",
+                                               "dream_cursor": 1700000000.5}
+    assert harness.idle_tokens(harness.idle_tokens(py)) == harness.idle_tokens(py)  # a re-recorded golden
+    assert harness.idle_tokens({"value": {"idle_seconds": None}}) == {"value": {"idle_seconds": None}}
+    # Near miss: another key of the answer still compares exactly.
+    assert harness.idle_tokens(py) != harness.idle_tokens({**py, "value": {**py["value"], "backlog": 4}})
+
+
 def test_run_clocks_never_finish_before_they_start(harness):
     raw = {"rows": {"public.dream_runs": {"columns": ["id", "started_at", "finished_at"],
                                           "rows": [[1, 10.0, 12.0], [2, 20.0, None],

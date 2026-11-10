@@ -85,6 +85,22 @@ def test_signal_termination_is_not_a_controlled_clean_exit():
     with pytest.raises(RuntimeError): graceful_stop(daemon)
 
 
+def test_a_daemon_gone_before_its_clean_stop_names_its_exit():
+    """Partial forced run 870fb28fc: the restart pair failed with "owned
+    daemon already exited before clean stop" and no record of which daemon
+    or how it ended. The error now names the side and its exit code or
+    signal (-9 is SIGKILL, as the OOM killer sends)."""
+    from types import SimpleNamespace
+    gone = SimpleNamespace(poll=lambda: -9, returncode=-9)
+    daemon = SimpleNamespace(kind="rust", proc=gone, log=Path("rs.log"), stop=lambda: None)
+    with pytest.raises(RuntimeError, match=r"rust daemon already exited \(code -9, SIGKILL\) before clean stop"):
+        graceful_stop(daemon)
+    gone = SimpleNamespace(poll=lambda: 3, returncode=3)
+    daemon = SimpleNamespace(kind="python", proc=gone, log=Path("py.log"), stop=lambda: None)
+    with pytest.raises(RuntimeError, match=r"python daemon already exited \(code 3\) before clean stop"):
+        graceful_stop(daemon)
+
+
 def pruning_state():
     return {"catalog": {"sequences": [["public", "retrieval_events_id_seq", "bigint", 1, 1, 2]]},
             "rows": {"public.retrieval_events": {
@@ -421,3 +437,165 @@ def test_a_sweeps_tombstone_of_an_inherited_deferred_root_keeps_its_old_clock(in
     meta["episode_tombstones"][OLD_ROOT]["ended_at"] = 4.0
     with pytest.raises(RuntimeError, match="outside the arm's captured window"):
         normalize_closes(swept, inherited, 90.0, 110.0)
+
+
+# ---- a session-end dream's graph insight refresh on a real bank's copy ----
+
+WINDOW = [(90.0, 110.0)]
+COMMUNITY_COLUMNS = ["id", "label", "size", "cohesion", "computed_at"]
+
+
+def refreshed(stamp, digest_stamp=None):
+    """state() after a graph insight refresh at ``stamp``: the communities,
+    their memberships, a derived entity source and meta's graph_digest."""
+    s = state()
+    s["rows"]["public.communities"] = {"columns": COMMUNITY_COLUMNS, "rows": [[1, "c", 2, 0.5, stamp]]}
+    s["rows"]["public.entity_communities"] = {"columns": ["entity_id", "community_id", "computed_at"],
+                                              "rows": [[7, 1, stamp]]}
+    s["rows"]["public.entity_sources"] = {
+        "columns": ["entity_id", "source", "count", "origin", "updated_at"],
+        "rows": [[7, "fixture", 1, "derived", stamp]]}
+    s["rows"]["public.meta"]["rows"].append(
+        ["graph_digest", {"computed_at": stamp if digest_stamp is None else digest_stamp,
+                          "communities": [{"id": 1, "size": 2}]}])
+    return s
+
+
+def test_a_graph_insight_refresh_compares_without_each_daemons_clock():
+    """Partial forced run 870fb28fc: on a real bank's copy a session-end
+    dream refreshes graph insight on both daemons, each at its own now();
+    the partition and the counts agreed and only these clocks differed."""
+    from background_sessions import normalize_refresh_clocks
+    a = normalize_refresh_clocks(refreshed(101.0), before(), WINDOW)
+    assert a == normalize_refresh_clocks(refreshed(104.5), before(), WINDOW)
+    assert a["rows"]["public.communities"]["rows"][0][4] == "<computed_at>"
+    # Near misses: the digest's clock outside the window, a different
+    # membership, and another meta row's clock all still differ.
+    assert normalize_refresh_clocks(refreshed(101.0, digest_stamp=120.0), before(), WINDOW) != a
+    other = refreshed(104.5)
+    other["rows"]["public.entity_communities"]["rows"][0][1] = 2
+    assert normalize_refresh_clocks(other, before(), WINDOW) != a
+    kept = refreshed(101.0)
+    kept["rows"]["public.meta"]["rows"].append(["graph_digest_v0", {"computed_at": 101.0}])
+    assert ["graph_digest_v0", {"computed_at": 101.0}] in \
+        normalize_refresh_clocks(kept, before(), WINDOW)["rows"]["public.meta"]["rows"]
+
+
+def test_an_existing_rows_rewritten_refresh_clock_still_differs():
+    """A row ``before`` already held is compared exactly (dbstate.normalize):
+    one arm restamping it is a difference, not a refresh to excuse."""
+    from background_sessions import normalize_refresh_clocks
+    prior = before()
+    prior["rows"]["public.communities"] = {"columns": COMMUNITY_COLUMNS, "rows": [[1, "c", 2, 0.5, 50.0]]}
+    assert normalize_refresh_clocks(refreshed(101.0), prior, WINDOW) != \
+        normalize_refresh_clocks(refreshed(104.5), prior, WINDOW)
+
+
+@pytest.mark.parametrize("name", ["session-reap", "session-sweep", "session-restart",
+                                  "session-tombstone-restart"])
+def test_the_session_scenarios_final_bank_ignores_the_refresh_clocks(name):
+    import run as harness
+    scenario = harness.SCENARIOS[name]()
+    scenario.starts = {"python": 90.0}
+    scenario.clock_windows = {"python": WINDOW}
+    assert scenario.normalize_db(refreshed(101.0), before(), "python") == \
+        scenario.normalize_db(refreshed(104.5), before(), "python")
+
+
+def test_a_bank_with_live_edges_waits_for_the_dreams_refresh_then_its_rows():
+    """Partial forced run 870fb28fc: at the session milestone Rust had
+    rewritten every base community row and Python none; Python's graph
+    refresh had not run yet. On a bank with live edges the capture waits for
+    a digest computed at or after the daemon's start, then for unchanged
+    rows. Review (conductor): a bank with live edges and no digest yet is
+    refreshed too, so the wait keys on live edges alone."""
+    from background_sessions import StableFor, refresh_wait
+    start = 100.0
+    without = state()                                   # no digest at all
+    stale = state()
+    stale["rows"]["public.meta"]["rows"].append(["graph_digest", {"computed_at": 50.0}])
+    done = state()
+    done["rows"]["public.meta"]["rows"].append(["graph_digest", {"computed_at": 101.0}])
+    # No live edges (a synthetic fixture, a superseded-only graph): never waits.
+    for snapshot in (without, stale, done):
+        assert refresh_wait(snapshot, start, False, StableFor(3.0), 0.0) is None
+    # Live edges: the refresh first, with or without an earlier digest.
+    assert refresh_wait(without, start, True, StableFor(3.0), 0.0) == "its graph insight refresh"
+    assert refresh_wait(stale, start, True, StableFor(3.0), 0.0) == "its graph insight refresh"
+    # Then the rows must stay the same for the settle time.
+    settle = StableFor(3.0)
+    assert refresh_wait(done, start, True, settle, 0.0) == "its bank to settle after the refresh"
+    assert refresh_wait(done, start, True, settle, 3.0) is None
+
+
+@pytest.fixture
+def edges_bank():
+    """A disposable database with the edges table's liveness column."""
+    import pgdisposable
+    import database_gate
+    if not pgdisposable.LOGIN_FILE.exists():
+        database_gate.unavailable("no disposable-bank login here",
+                                  "create it once on the daemon host with `pseudolife-mcp test-login "
+                                  "create`, or point PSEUDOLIFE_TEST_PG_LOGIN_FILE at it")
+    pg = pgdisposable.Slice("mir")
+    name = pg.name("pl_cf_mir_bgedges")
+    dsn = pg.create(name)
+    import psycopg
+    with psycopg.connect(dsn, autocommit=True) as conn:
+        conn.execute("CREATE TABLE edges (id INT PRIMARY KEY, superseded_at DOUBLE PRECISION)")
+    try:
+        yield dsn
+    finally:
+        pg.drop(name)
+
+
+def test_only_a_live_edge_makes_a_bank_refresh(edges_bank):
+    """Review (Codex P2, conductor): both daemons' load_graph reads only
+    edges with superseded_at IS NULL and return empty_graph without them,
+    so a bank whose edges are all superseded never refreshes and must not
+    wait out the deadline."""
+    import psycopg
+    from background_sessions import live_edges
+    # Each answer is taken first, so a failure prints a boolean, never the DSN.
+    empty = live_edges(edges_bank)
+    with psycopg.connect(edges_bank, autocommit=True) as conn:
+        conn.execute("INSERT INTO edges VALUES (1, 50.0)")
+    superseded_only = live_edges(edges_bank)
+    with psycopg.connect(edges_bank, autocommit=True) as conn:
+        conn.execute("INSERT INTO edges VALUES (2, NULL)")
+    live = live_edges(edges_bank)
+    assert (empty, superseded_only, live) == (False, False, True)
+
+
+def test_the_observed_banks_meta_rows_are_keyed_so_a_difference_names_its_row():
+    """A response-side meta difference printed the row by index
+    (.json.db.rows.public.meta.rows[5][1]...), so nothing could tell the
+    graph_digest row from another without reading its value. The observed
+    bank gives meta as a map by key, the same on both sides."""
+    import run as harness
+    from background_sessions import keyed_meta
+    a = state()
+    a["rows"]["public.meta"]["rows"].append(["graph_digest", {"totals": {"communities": 3}}])
+    b = state()
+    b["rows"]["public.meta"]["rows"].insert(0, ["graph_digest", {"totals": {"communities": 4}}])
+    ka, kb = keyed_meta(a), keyed_meta(b)
+    assert ka["rows"]["public.meta"]["by_key"]["graph_digest"] == {"totals": {"communities": 3}}
+    assert ka["rows"]["public.episodes"] == a["rows"]["public.episodes"]       # other tables as they were
+    diffs = harness.diff_values(ka, kb)
+    assert diffs and all(".by_key.graph_digest." in d for d in diffs), diffs   # row order no longer matters
+    assert harness.diff_values(keyed_meta(state()), keyed_meta(state())) == []
+
+
+def test_a_refreshed_bank_is_captured_only_once_its_rows_stop_changing():
+    """Review (Opus): the digest is not the dream's last write; the
+    entity-source backfill and the link retype follow it. On a bank with a
+    graph the capture also needs the same dumped rows for REFRESH_SETTLE_S."""
+    from background_sessions import StableFor
+    settle = StableFor(3.0)
+    a, b = state(), state()
+    b["rows"]["public.meta"]["rows"].append(["graph_digest", {"computed_at": 1.0}])
+    assert not settle(a, 0.0)          # first sight
+    assert not settle(a, 2.9)          # not yet long enough
+    assert not settle(b, 3.0)          # a write in between restarts it
+    assert not settle(b, 5.9)
+    assert settle(b, 6.0)              # the same rows for 3 s

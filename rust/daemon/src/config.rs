@@ -1889,6 +1889,36 @@ fn want_float(
     }
 }
 
+/// A cap, trigger or threshold Python reads as off for both a YAML null
+/// (stored as `None`) and 0 (`value or None`, `int(value or 0)` with
+/// `<= 0` as off, or a plain truthiness check): null reads as 0, which every
+/// Rust reader of such a key takes as off. Anything else is `want_int`'s read. The raw
+/// null still reaches `user_leaves`, so the Console serves it as Python does.
+fn want_int_cap(
+    entries: &[(Node, Node)],
+    key: &str,
+    path: &str,
+    default: i64,
+) -> Result<i64, ConfigError> {
+    match lookup(entries, key)? {
+        Some(Node::Null) => Ok(0),
+        _ => want_int(entries, key, path, default),
+    }
+}
+
+/// `want_int_cap` for a float cap: null reads as 0.0, which is off.
+fn want_float_cap(
+    entries: &[(Node, Node)],
+    key: &str,
+    path: &str,
+    default: f64,
+) -> Result<f64, ConfigError> {
+    match lookup(entries, key)? {
+        Some(Node::Null) => Ok(0.0),
+        _ => want_float(entries, key, path, default),
+    }
+}
+
 fn want_str(
     entries: &[(Node, Node)],
     key: &str,
@@ -2090,7 +2120,9 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
     if let Some(m) = section(entries, "memory", "")? {
         let p = "memory";
         memory.top_k = want_int(m, "top_k", p, memory.top_k)?;
-        memory.delete_confirm_threshold = want_int(
+        // `int(... or 0)`, `<= 0` is off (service.py:3487-3489): a null is
+        // no confirmation threshold, as 0 is.
+        memory.delete_confirm_threshold = want_int_cap(
             m,
             "delete_confirm_threshold",
             p,
@@ -2191,8 +2223,10 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
                 want_int(l, "signal_retry_days", "memory.lessons", 30)?;
             memory.lessons_synthesis_dedup_min_similarity =
                 want_float(l, "synthesis_dedup_min_similarity", "memory.lessons", 0.88)?;
+            // `cfg.synthesis_max_signals or None` (service_dream.py:806): a
+            // null drains everything, as 0 does.
             memory.lessons_synthesis_max_signals =
-                want_int(l, "synthesis_max_signals", "memory.lessons", 200)?;
+                want_int_cap(l, "synthesis_max_signals", "memory.lessons", 200)?;
             memory.lessons_rule_mode = want_bool(l, "rule_mode", "memory.lessons", false)?;
         }
         if let Some(g) = section(m, "graph_insight", "memory.")? {
@@ -2211,7 +2245,14 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
                 god_nodes_top_n: want_int(g, "god_nodes_top_n", path, d.god_nodes_top_n)?,
                 surprises_top_n: want_int(g, "surprises_top_n", path, d.surprises_top_n)?,
                 questions_top_n: want_int(g, "questions_top_n", path, d.questions_top_n)?,
-                betweenness_sample: want_int(g, "betweenness_sample", path, d.betweenness_sample)?,
+                // `sample and ...` (graph_insight.py:28): a null is exact,
+                // as 0 is.
+                betweenness_sample: want_int_cap(
+                    g,
+                    "betweenness_sample",
+                    path,
+                    d.betweenness_sample,
+                )?,
             };
         }
         if let Some(sc) = section(m, "scopes", "memory.")? {
@@ -2260,15 +2301,17 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
                 hub_gate: want_bool(r, "hub_gate", p, d.hub_gate)?,
                 hub_percentile: want_float(r, "hub_percentile", p, d.hub_percentile)?,
                 hub_floor: want_int(r, "hub_floor", p, d.hub_floor)?,
-                expand_budget: want_int(r, "expand_budget", p, d.expand_budget)?,
-                max_searches_per_hop: want_int(
+                // The four caps: `cfg.<cap> or None` (service.py:9401-9407),
+                // so a null is off, as 0 is.
+                expand_budget: want_int_cap(r, "expand_budget", p, d.expand_budget)?,
+                max_searches_per_hop: want_int_cap(
                     r,
                     "max_searches_per_hop",
                     p,
                     d.max_searches_per_hop,
                 )?,
-                max_total_searches: want_int(r, "max_total_searches", p, d.max_total_searches)?,
-                time_budget_seconds: want_float(
+                max_total_searches: want_int_cap(r, "max_total_searches", p, d.max_total_searches)?,
+                time_budget_seconds: want_float_cap(
                     r,
                     "time_budget_seconds",
                     p,
@@ -2293,20 +2336,27 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
                     p,
                     d.analyzer_file_duplicates,
                 )?,
-                auto_min_new_entities: want_int(
+                // Truthiness tests (service_dream.py:3750, 3753, 3800,
+                // 3815): a null is off, as 0 is.
+                auto_min_new_entities: want_int_cap(
                     r,
                     "auto_min_new_entities",
                     p,
                     d.auto_min_new_entities,
                 )?,
-                auto_interval_days: want_float(r, "auto_interval_days", p, d.auto_interval_days)?,
-                review_queue_alert_pending: want_int(
+                auto_interval_days: want_float_cap(
+                    r,
+                    "auto_interval_days",
+                    p,
+                    d.auto_interval_days,
+                )?,
+                review_queue_alert_pending: want_int_cap(
                     r,
                     "review_queue_alert_pending",
                     p,
                     d.review_queue_alert_pending,
                 )?,
-                review_queue_alert_age_days: want_float(
+                review_queue_alert_age_days: want_float_cap(
                     r,
                     "review_queue_alert_age_days",
                     p,
@@ -2356,7 +2406,9 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
                 )?,
                 auto_apply_safe: want_bool(r, "auto_apply_safe", p, d.auto_apply_safe)?,
                 min_entity_mentions: want_int(r, "min_entity_mentions", p, d.min_entity_mentions)?,
-                max_fallback_mentions: want_int(
+                // `cfg.max_fallback_mentions or None` (service_dream.py:3459,
+                // 4400): a null is no cap, as 0 is.
+                max_fallback_mentions: want_int_cap(
                     r,
                     "max_fallback_mentions",
                     p,
@@ -3201,6 +3253,139 @@ mod tests {
         assert!(!cfg("time:\n  relative_age: false\n").time.relative_age);
         assert!(!cfg("time:\n  relative_age: null\n").time.relative_age);
         assert!(cfg("time:\n  relative_age: yes please\n").time.relative_age);
+    }
+
+    /// Python stores a YAML null on these caps as `None` and reads each as
+    /// off, as it reads 0 (recall: `x or None`, service.py:9401-9407 into
+    /// recall.py:195 and 262-264; deep dream: service_dream.py:3459 and
+    /// 4400 into graph_consolidation.py:132, and truthiness at
+    /// service_dream.py:3750, 3753, 3800 and 3815; lessons:
+    /// service_dream.py:806; `delete_confirm_threshold`: service.py:3487-3489;
+    /// `betweenness_sample`: graph_insight.py:28), so a config that sets
+    /// them null starts and runs with that cap off.
+    #[test]
+    fn null_caps_read_as_off_like_python() {
+        const LEAVES: [&str; 12] = [
+            "memory.delete_confirm_threshold",
+            "memory.recall.expand_budget",
+            "memory.recall.max_searches_per_hop",
+            "memory.recall.max_total_searches",
+            "memory.recall.time_budget_seconds",
+            "memory.deep_dream.max_fallback_mentions",
+            "memory.deep_dream.auto_min_new_entities",
+            "memory.deep_dream.auto_interval_days",
+            "memory.deep_dream.review_queue_alert_pending",
+            "memory.deep_dream.review_queue_alert_age_days",
+            "memory.lessons.synthesis_max_signals",
+            "memory.graph_insight.betweenness_sample",
+        ];
+        for null in ["null", "~", ""] {
+            let c = cfg(&format!(
+                "memory:\n  delete_confirm_threshold: {null}\n  recall:\n    \
+                 expand_budget: {null}\n    \
+                 max_searches_per_hop: {null}\n    max_total_searches: {null}\n    \
+                 time_budget_seconds: {null}\n  deep_dream:\n    \
+                 max_fallback_mentions: {null}\n    auto_min_new_entities: {null}\n    \
+                 auto_interval_days: {null}\n    review_queue_alert_pending: {null}\n    \
+                 review_queue_alert_age_days: {null}\n  lessons:\n    \
+                 synthesis_max_signals: {null}\n  graph_insight:\n    \
+                 betweenness_sample: {null}\n"
+            ));
+            assert_eq!(c.memory.delete_confirm_threshold, 0, "{null:?}");
+            let dd = &c.memory.deep_dream;
+            assert_eq!(
+                (dd.auto_min_new_entities, dd.review_queue_alert_pending),
+                (0, 0),
+                "{null:?}"
+            );
+            assert_eq!(
+                (dd.auto_interval_days, dd.review_queue_alert_age_days),
+                (0.0, 0.0),
+                "{null:?}"
+            );
+            // `betweenness_sample` is `sample and ...`: a null runs exact
+            // betweenness, as 0 does and as this daemon always does.
+            assert_eq!(c.memory.graph_insight.betweenness_sample, 0, "{null:?}");
+            let r = &c.memory.recall;
+            assert_eq!(
+                (
+                    r.expand_budget,
+                    r.max_searches_per_hop,
+                    r.max_total_searches
+                ),
+                (0, 0, 0),
+                "{null:?}"
+            );
+            assert_eq!(r.time_budget_seconds, 0.0, "{null:?}");
+            assert_eq!(c.memory.deep_dream.max_fallback_mentions, 0, "{null:?}");
+            assert_eq!(c.memory.lessons_synthesis_max_signals, 0, "{null:?}");
+            // Python keeps the None itself where it serves the value: the
+            // Console's running value and the signed `asdict` view.
+            for leaf in LEAVES {
+                assert_eq!(
+                    c.user_leaves.get(leaf),
+                    Some(&Value::Null),
+                    "{leaf} {null:?}"
+                );
+            }
+            for key in [
+                "max_fallback_mentions",
+                "auto_min_new_entities",
+                "auto_interval_days",
+                "review_queue_alert_pending",
+                "review_queue_alert_age_days",
+            ] {
+                assert_eq!(dd.as_dict[key], Value::Null, "{key} {null:?}");
+            }
+        }
+        // Near misses: an absent key keeps its default, a number is read as
+        // written, and a non-number still refuses with the same message.
+        // `review_queue_alert_min_pending` is no cap: Python compares
+        // `merge >= None` (service_dream.py:3817), so its null still refuses.
+        match load_str("memory:\n  deep_dream:\n    review_queue_alert_min_pending: null\n") {
+            Err(ConfigError::Refused(msg)) => assert_eq!(
+                msg,
+                "memory.deep_dream.review_queue_alert_min_pending must be an integer, got null"
+            ),
+            Ok(_) => panic!("review_queue_alert_min_pending: null started"),
+        }
+        match load_str("memory:\n  delete_confirm_threshold: abc\n") {
+            Err(ConfigError::Refused(msg)) => assert_eq!(
+                msg,
+                "memory.delete_confirm_threshold must be an integer, got a string"
+            ),
+            Ok(_) => panic!("delete_confirm_threshold: abc started"),
+        }
+        let d = cfg("memory:\n  recall:\n    driver: mechanical\n")
+            .memory
+            .recall;
+        assert_eq!(d, RecallConfig::default());
+        let r =
+            cfg("memory:\n  recall:\n    time_budget_seconds: 2.5\n    max_total_searches: 4\n")
+                .memory
+                .recall;
+        assert_eq!((r.time_budget_seconds, r.max_total_searches), (2.5, 4));
+        for (section, key, want) in [
+            ("recall", "time_budget_seconds", "a number"),
+            ("recall", "expand_budget", "an integer"),
+            ("recall", "max_searches_per_hop", "an integer"),
+            ("recall", "max_total_searches", "an integer"),
+            ("deep_dream", "max_fallback_mentions", "an integer"),
+            ("lessons", "synthesis_max_signals", "an integer"),
+            ("graph_insight", "betweenness_sample", "an integer"),
+            ("deep_dream", "auto_min_new_entities", "an integer"),
+            ("deep_dream", "auto_interval_days", "a number"),
+            ("deep_dream", "review_queue_alert_pending", "an integer"),
+            ("deep_dream", "review_queue_alert_age_days", "a number"),
+        ] {
+            match load_str(&format!("memory:\n  {section}:\n    {key}: abc\n")) {
+                Err(ConfigError::Refused(msg)) => assert_eq!(
+                    msg,
+                    format!("memory.{section}.{key} must be {want}, got a string")
+                ),
+                Ok(_) => panic!("memory.{section}.{key}: abc started"),
+            }
+        }
     }
 
     #[test]

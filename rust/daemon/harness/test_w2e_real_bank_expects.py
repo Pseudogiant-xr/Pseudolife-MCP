@@ -15,6 +15,11 @@ pre-existing rows of the kind a real bank holds, and the scenario's own
 rows: the old expect fails there, the scenario's current one holds, and
 the state the expect guards against still fails it.
 
+search-after-restart's narrowed expect still failed on both daemons in the
+partial forced run (870fb28fc), and the maintainer excluded its real-bank
+arm (REAL_BANK_EXCLUDED in mirror/forced.py); its test below still guards
+the narrowing on a bench database.
+
 In recall and recall-llm the Python walk spent the 20 s recall time budget
 after 13-17 searches on the larger bank, so the two sides' retrieval events
 compared different queries from there on. Those scenarios now run with no

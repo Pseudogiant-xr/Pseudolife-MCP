@@ -10,7 +10,9 @@ proposals. The synthetic arms passed while these errored on that copy:
 * ``dim-mismatch`` created ``entries`` over the existing table;
 * ``stamped`` deleted the ``uses`` relation that edge proposals reference;
 * ``json-float-shortest-ties`` asked for the top 3 "memory" hits, and the
-  bank's own entries took a place from a fixture row.
+  bank's own entries took a place from a fixture row;
+* ``mcp-dream-rollback`` seeded runs 1 and 2 below the bank's own newer
+  committed runs, so its first and last refusals reverted real runs.
 
 Each case seeds a disposable bank with the kind of rows a real bank holds,
 and its near miss keeps the empty-bank behaviour or the check that matters.
@@ -318,3 +320,127 @@ def test_reaper_closes_on_a_base_still_show_a_rewritten_base_entry(close_base, m
     kept = normalize_closes(*arm_after_close(close_base, monkeypatch, "closekept"))
     rewrote = normalize_closes(*arm_after_close(close_base, monkeypatch, "closerw", rewrite_old=True))
     assert dbstate.diff(kept, rewrote)
+
+
+# --- mcp-dream-rollback on a real base ---------------------------------------
+
+def rollback_decision(storage, run_id=None):
+    """What ``memory_dream`` rollback does with ``run_id`` on this bank,
+    in the order both daemons check it (service_dream.py dream_rollback,
+    rust/daemon/src/dream/rollback.rs rollback): no committed run, a stale
+    id, a newer failed or running run; otherwise it reverts the target."""
+    target = storage.latest_committed_dream_run()
+    if target is None:
+        return {"error": "no_committed_run"}
+    if run_id is not None and run_id != target["id"]:
+        return {"error": "stale_run_id", "latest": target["id"]}
+    blocking = [{"id": r["id"], "status": r["status"]} for r in storage.dream_runs_newer_than(target["id"])
+                if r["status"] in ("failed", "running")]
+    if blocking:
+        return {"error": "newer_unjournaled_runs", "runs": blocking}
+    return {"reverts": target["id"]}
+
+
+def walk_rollback_calls(dsn):
+    """The scenario's template on ``dsn``, then each of its calls' decision,
+    applying its pre-call SQL and a revert's own status change as it goes."""
+    import psycopg
+    import run
+    from pseudolife_memory.storage.postgres import PostgresStorage
+    scenario = run.SCENARIOS["mcp-dream-rollback"]()
+    scenario.prepare_template(dsn)
+    storage = PostgresStorage(dsn, writer_lease=False)
+    out = {}
+    try:
+        for label, args, setup in scenario.calls():
+            if setup:
+                with psycopg.connect(dsn, autocommit=True) as conn:
+                    conn.execute(*setup)
+            out[label] = rollback_decision(storage, args.get("run_id"))
+            if "reverts" in out[label]:
+                storage.mark_dream_run_rolled_back(out[label]["reverts"], time.time())
+    finally:
+        storage.close()
+    return scenario, out
+
+
+def test_dream_rollback_refusals_still_refuse_on_a_bank_with_its_own_runs(route_bank):
+    """A real bank's own newer committed runs were the latest, so the
+    scenario's first and last calls reverted real runs instead of refusing."""
+    import psycopg
+    with psycopg.connect(route_bank, autocommit=True) as conn:
+        conn.execute("INSERT INTO dream_runs (id,started_at,finished_at,cursor_before,cursor_after,status) "
+                     "VALUES (500,1.6e9,1.6e9+5,0,7,'committed'), (501,1.6e9+10,1.6e9+15,7,9,'committed')")
+        conn.execute("INSERT INTO dream_run_slots (run_id,seq,entity,attribute,entity_norm,attribute_norm,"
+                     "kind,new_value,action,at) VALUES (501,1,'Real','note','real','note',"
+                     "'scalar','kept','inserted',1.6e9+12)")
+    scenario, decided = walk_rollback_calls(route_bank)
+    assert decided == {
+        "newer failed run refuses": {"error": "newer_unjournaled_runs", "runs": [{"id": 503, "status": "failed"}]},
+        "stale run id refuses": {"error": "stale_run_id", "latest": 502},
+        "large run id refuses": {"error": "stale_run_id", "latest": 502},
+        "rollback committed journal": {"reverts": 502},
+        # The bank's own run 501 is the latest committed one again.
+        "already rolled back refuses": {"error": "stale_run_id", "latest": 501},
+    }
+    assert scenario.first_run == 502
+
+
+def test_dream_rollback_on_an_empty_bank_keeps_the_recorded_answers(route_bank):
+    """The near miss: with no runs of the bank's own, the seeded runs are 1
+    and 2 and each call decides what the committed golden recorded."""
+    scenario, decided = walk_rollback_calls(route_bank)
+    assert scenario.first_run == 1
+    golden = [r["json"]["structuredContent"] for r in run_golden("mcp-dream-rollback")["responses"][:5]]
+    labels = [label for label, _, _ in scenario.calls()]
+    assert decided == {
+        **{label: answer for label, answer in zip(labels, golden) if "error" in answer},
+        "rollback committed journal": {"reverts": golden[3]["run_id"]},
+    }
+
+
+def rollback_arm(superseded_at, logged_at, old_logged_at=1.6e9):
+    """A normalized copy of a real bank as one rollback arm dumps it: base
+    fact 7 re-stamped, fact 9 written new, and one supersession appended
+    to the base's log after its own old entry."""
+    state = {"catalog": {}, "rows": {
+        "public.facts": {"columns": ["id", "superseded_at"],
+                         "rows": [[7, superseded_at], [9, logged_at]]},
+        "public.meta": {"columns": ["key", "value"], "rows": [[
+            "cortex_supersession_log",
+            [{"timestamp": old_logged_at, "reason": "newer_wins"},
+             {"timestamp": logged_at, "reason": "rollback"}]]]}}}
+    return state
+
+
+@pytest.fixture
+def rollback_base(monkeypatch):
+    """A base holding fact 7 and the supersession log, which a dump under it
+    leaves out of ``before``."""
+    held = {"public.facts": {"7"}, "public.meta": {json.dumps("cortex_supersession_log")}}
+    monkeypatch.setattr(dbstate, "base_keys", lambda qualified: held.get(qualified, set()))
+    import run
+    scenario = run.SCENARIOS["mcp-dream-rollback"]()
+    start = time.time()
+    scenario.clock_windows = {"python": [(start, start + 60)], "rust": [(start, start + 60)]}
+    before = {"catalog": {}, "rows": {"public.facts": {"columns": ["id", "superseded_at"], "rows": []},
+                                      "public.meta": {"columns": ["key", "value"], "rows": []}}}
+
+    def normalize(side, state):
+        return scenario.normalize_db(state, before, side)
+    return start, normalize
+
+
+def test_a_real_revert_still_shows_in_the_rollback_scenarios_bank(rollback_base):
+    """Review (Opus): with the seeded runs the latest, no call reverts a real
+    run, so nothing writes a supersede-back stamp or a supersession log
+    entry. Those clocks are left raw on purpose: if the scenario ever reverts
+    a real run again, each daemon's own stamp makes it differ, as it did in
+    the forced run that exposed this."""
+    start, normalize = rollback_base
+    python = normalize("python", rollback_arm(start + 1, start + 2))
+    rust = normalize("rust", rollback_arm(start + 3, start + 4))
+    diffs = dbstate.diff(python, rust)
+    # Each clock on its own: neither rule may come back alone.
+    assert any("public.facts" in d for d in diffs), diffs
+    assert any("public.meta" in d for d in diffs), diffs
