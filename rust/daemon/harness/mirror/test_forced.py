@@ -1,6 +1,7 @@
 """The forced real-data runner's refusal, classification and report, without daemons."""
 from __future__ import annotations
 
+import collections
 import json
 import re
 import sys
@@ -1078,6 +1079,25 @@ def test_without_the_full_list_nothing_is_accepted_or_preexisting(tmp_path, writ
                                                   "synthetic": synthetic}})["class"] == "new"
 
 
+def test_an_earlier_runs_matching_out_file_is_not_this_attempts(tmp_path):
+    """The attempt writes no --out JSON, but an earlier run left one at the
+    same path whose capped lines match this log exactly. The runner deletes
+    it before the harness starts, so the printed lines stay incomplete and
+    the community-only scenario stays new."""
+    attempt = _w2e_attempt("graph-writes", [(35, GRAPH_OP, COMMUNITIES[:2])])
+    for label in ("real", "real-retry"):
+        left = tmp_path / "w2e" / label / "graph-writes.json"
+        left.parent.mkdir(parents=True)
+        left.write_text(json.dumps(attempt["json"]), encoding="utf-8")
+    silent = {**attempt, "json": None}
+    row = _row(tmp_path, {"graph-writes": {"real": silent, "real-retry": silent, "synthetic": PASS}})
+    assert row["class"] == "new" and "accepted_as" not in row
+    # Control: with this attempt's own file the same scenario is accepted.
+    row = _row(tmp_path / "own", {"graph-writes": {"real": attempt, "real-retry": attempt,
+                                                   "synthetic": PASS}})
+    assert row.get("accepted_as") == "community-partition"
+
+
 def _rebuilt(tmp_path, suite, data, log):
     """Through the runner: the attempt's diffs and completeness."""
     path = tmp_path / f"{suite}.json"
@@ -1168,7 +1188,51 @@ def test_the_rebuild_caps_are_the_harnesses_own_print_statements():
                          "for d in r[\"state_diffs\"][:12]:", "print(f\"STATE [{r['scenario']}] {d}\")",
                          "for p in r[\"chain\"][:12]:", "print(f\"CHAIN [{r['scenario']}] {p}\")"],
     }
-    for script, lines in printed.items():
+    # And the final --out write HARNESS_OUT recognises, whose keys it reads.
+    written = {
+        "w2e.py": ["args.out.write_text(json.dumps({\"complete\": True, \"planned_scenarios\": names,",
+                   "\"summary\": summary, \"scenarios\": results}, indent=1,"],
+        "run.py": ["args.out.write_text(json.dumps({\"summary\": summary, \"scenarios\": results, "
+                   "\"refusals\": refusals},", "json.dumps({\"partial\": results}"],
+        "w2d_search.py": ["args.out.write_text(json.dumps({\"complete\": True, \"planned_scenarios\": names,",
+                          "\"summary\": summary, \"results\": results}, indent=1)"],
+        "board/run.py": ["args.out.write_text(json.dumps({\"complete\": True, \"planned_scenarios\": planned,",
+                         "\"summary\": summary, \"results\": results}, indent=1,"],
+    }
+    for script in printed:
         source = (forced.HARNESS / script).read_text(encoding="utf-8")
-        for line in lines:
+        for line in printed[script] + written[script]:
             assert line in source, (script, line)
+
+
+RECORDED = Path(__file__).parent / "fixtures" / "forced_out"
+
+
+@pytest.mark.parametrize("suite", list(forced.HARNESS_OUT))
+def test_a_recorded_harness_run_rebuilds_to_the_lines_it_printed(suite):
+    """Real harness runs on the synthetic bank, each its --out JSON and its
+    log as the runner keeps them (fixtures/forced_out/README.md). The capped
+    rebuild must be the log's DIFF lines in order; an attempt nothing was cut
+    from rebuilds in full to the same multiset; a cut one to more."""
+    cases = sorted(RECORDED.glob(f"{suite}--*.json"))
+    assert cases, f"no recorded {suite} run"
+    for path in cases:
+        printed = forced.outcome(1, path.with_suffix(".log").read_text(encoding="utf-8"))["diffs"]
+        assert printed, path.name
+        full, why = forced.full_diffs(suite, path, printed)
+        assert why is None, (path.name, why)
+        if forced.harness_lines(suite, json.loads(path.read_text(encoding="utf-8")), capped=True) == full:
+            assert collections.Counter(full) == collections.Counter(printed), path.name
+        else:
+            assert len("".join(full)) > len("".join(printed)), path.name
+
+
+def test_the_recordings_hold_both_a_cut_and_a_whole_printout():
+    kinds = collections.Counter()
+    for path in RECORDED.glob("*--*.json"):
+        suite = path.name.split("--")[0]
+        printed = forced.outcome(1, path.with_suffix(".log").read_text(encoding="utf-8"))["diffs"]
+        full, _ = forced.full_diffs(suite, path, printed)
+        data = json.loads(path.read_text(encoding="utf-8"))
+        kinds["whole" if forced.harness_lines(suite, data, capped=True) == full else "cut"] += 1
+    assert kinds["whole"] and kinds["cut"], kinds

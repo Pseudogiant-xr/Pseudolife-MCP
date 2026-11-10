@@ -1,0 +1,72 @@
+{
+ "summary": {
+  "cases": 4,
+  "diff_cases": 0,
+  "declared_cases": 0,
+  "db_state_scenarios": 1,
+  "db_diff_scenarios": 1
+ },
+ "scenarios": [
+  {
+   "scenario": "seeded",
+   "cases": [
+    {
+     "case": "seeded search 0",
+     "method": "GET",
+     "path": "/api/search?q=how+do+I+deploy+the+daemon&top_k=5&disable_recency_boost=true",
+     "python_status": 200,
+     "rust_status": 200,
+     "diffs": [],
+     "declared": null,
+     "declared_omissions": []
+    },
+    {
+     "case": "seeded search 1",
+     "method": "GET",
+     "path": "/api/search?q=what+is+a+contender&top_k=5&disable_recency_boost=true",
+     "python_status": 200,
+     "rust_status": 200,
+     "diffs": [],
+     "declared": null,
+     "declared_omissions": []
+    },
+    {
+     "case": "seeded search 2",
+     "method": "GET",
+     "path": "/api/search?q=bearer+tokens+for+remote+clients&top_k=5&disable_recency_boost=true",
+     "python_status": 200,
+     "rust_status": 200,
+     "diffs": [],
+     "declared": null,
+     "declared_omissions": []
+    },
+    {
+     "case": "seeded search 3",
+     "method": "GET",
+     "path": "/api/search?q=schema+version+bump&top_k=5&disable_recency_boost=true",
+     "python_status": 200,
+     "rust_status": 200,
+     "diffs": [],
+     "declared": null,
+     "declared_omissions": []
+    }
+   ],
+   "db_diffs": [
+    "/rows/public.retrieval_events/rows: row only in python: [2, \"how do I deploy the daemon\", \"search\", null, null, [{\"bank\": \"flat\", \"components\": {\"band\": \"flat\", \"band_depth\": 0, \"bm25\": 1.0, \"channel\": \"dense\", \"dense\": 0.5301904678344727, \"recency\": 0.0, \"recency_boost\": 0.0, \"source_mult\": 1.0, \"supersession_mult\": 1.0, \"surprise\": 1.0}, \"entry_id\": 1,",
+    "/rows/public.retrieval_events/rows: row only in python: [3, \"what is a contender\", \"search\", null, null, [{\"bank\": \"flat\", \"components\": {\"band\": \"flat\", \"band_depth\": 0, \"bm25\": 1.0, \"channel\": \"dense\", \"dense\": 0.721158504486084, \"recency\": 0.0, \"recency_boost\": 0.0, \"source_mult\": 1.0, \"supersession_mult\": 1.0, \"surprise\": 0.66701746}, \"entry_id\": 2, ",
+    "/rows/public.retrieval_events/rows: row only in python: [4, \"bearer tokens for remote clients\", \"search\", null, null, [{\"bank\": \"flat\", \"components\": {\"band\": \"flat\", \"band_depth\": 0, \"bm25\": 1.0, \"channel\": \"dense\", \"dense\": 0.721135139465332, \"recency\": 0.0, \"recency_boost\": 0.0, \"source_mult\": 0.85, \"supersession_mult\": 1.0, \"surprise\": 0.7047634}, \"e",
+    "/rows/public.retrieval_events/rows: row only in python: [5, \"schema version bump\", \"search\", null, null, [{\"bank\": \"flat\", \"components\": {\"band\": \"flat\", \"band_depth\": 0, \"bm25\": 1.0, \"channel\": \"dense\", \"dense\": 0.7928837537765503, \"recency\": 0.0, \"recency_boost\": 0.0, \"source_mult\": 1.0, \"supersession_mult\": 1.0, \"surprise\": 0.6303845}, \"entry_id\": 4, ",
+    "/rows/public.retrieval_events/rows: row only in rust: [2, \"how do I deploy the daemon\", \"search\", null, null, [{\"bank\": \"flat\", \"components\": {\"band\": \"flat\", \"band_depth\": 0, \"bm25\": 1.0, \"channel\": \"dense\", \"dense\": 0.5301907658576965, \"recency\": 0.0, \"recency_boost\": 0.0, \"source_mult\": 1.0, \"supersession_mult\": 1.0, \"surprise\": 1.0}, \"entry_id\": 1,",
+    "/rows/public.retrieval_events/rows: row only in rust: [3, \"what is a contender\", \"search\", null, null, [{\"bank\": \"flat\", \"components\": {\"band\": \"flat\", \"band_depth\": 0, \"bm25\": 1.0, \"channel\": \"dense\", \"dense\": 0.7211593389511108, \"recency\": 0.0, \"recency_boost\": 0.0, \"source_mult\": 1.0, \"supersession_mult\": 1.0, \"surprise\": 0.66701746}, \"entry_id\": 2,",
+    "/rows/public.retrieval_events/rows: row only in rust: [4, \"bearer tokens for remote clients\", \"search\", null, null, [{\"bank\": \"flat\", \"components\": {\"band\": \"flat\", \"band_depth\": 0, \"bm25\": 1.0, \"channel\": \"dense\", \"dense\": 0.7211350202560425, \"recency\": 0.0, \"recency_boost\": 0.0, \"source_mult\": 0.85, \"supersession_mult\": 1.0, \"surprise\": 0.7047634}, \"",
+    "/rows/public.retrieval_events/rows: row only in rust: [5, \"schema version bump\", \"search\", null, null, [{\"bank\": \"flat\", \"components\": {\"band\": \"flat\", \"band_depth\": 0, \"bm25\": 1.0, \"channel\": \"dense\", \"dense\": 0.7928850054740906, \"recency\": 0.0, \"recency_boost\": 0.0, \"source_mult\": 1.0, \"supersession_mult\": 1.0, \"surprise\": 0.6303845}, \"entry_id\": 4, "
+   ],
+   "declared_db_writes": {
+    "python": [],
+    "rust": []
+   },
+   "seconds": 15.576281395973638
+  }
+ ],
+ "refusals": []
+}
