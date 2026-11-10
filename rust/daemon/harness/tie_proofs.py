@@ -297,9 +297,19 @@ def padded_case_proof(query: str, python, rust) -> dict:
     def items(body):
         return body["cortex"]
 
+    def movable(k, v):
+        # Codex's review (2026-11-11): the tokenizer moves a score's value and
+        # the clock an age's, never their presence or type, so only a numeric
+        # score and a string age become a placeholder; a missing one stays
+        # missing and any other value stays as it is.
+        if k == "score":
+            return isinstance(v, (int, float)) and not isinstance(v, bool)
+        return k == "age" and isinstance(v, str)
+
     def cortex(body):
         return {slot_md5(x.get("entity"), x.get("attribute")):
-                _json_md5({k: v for k, v in x.items() if k not in CORTEX_MOVABLE}) for x in items(body)}
+                _json_md5({k: (f"<{k}>" if k in CORTEX_MOVABLE and movable(k, v) else v) for k, v in x.items()})
+                for x in items(body)}
     # Codex's review (2026-11-11): only two well-formed blocks are a proof. A
     # missing or null block, or an item that is not a fact, is a structural
     # difference, not the tokenizer's, so it gets no proof and stays new.
@@ -350,6 +360,10 @@ def padded_event_proofs(queries: list[str], python_events: dict | None,
         if not all(_facts_list(x, ("entity_norm", "attribute_norm")) for x in (served, b[event][1])):
             # A null list or an item that is not a fact: no proof, stays new.
             continue
+        if not all(x.get("rank") == i for side in (served, b[event][1]) for i, x in enumerate(side)):
+            # Both writers rank by the served list's order, so a rank off its
+            # position is no tokenizer effect (Codex's review): no proof.
+            continue
         def pins(served):
             return {slot_md5(x.get("entity_norm"), x.get("attribute_norm")): x.get("rank", i)
                     for i, x in enumerate(rows(served)) if x.get("pinned") is True}
@@ -364,8 +378,10 @@ def slot_reads_proof(dsns: dict, connect=None) -> dict:
     """Every slot whose ``slot_reads`` row differs between the two banks,
     read in full from both (the printed diff caps its rows), mapped to its
     read_count delta, Python's minus Rust's (a missing row reads 0): ruling E
-    requires each delta to be the one-sided serves the events record. None
-    when a bank cannot be read."""
+    requires each delta to be the one-sided serves the events record. A slot
+    whose last_read_at differs in NULL-or-set state (not its clock value)
+    maps to None, which no delta matches (Codex's review). None when a bank
+    cannot be read."""
     if connect is None:
         import psycopg
         connect = psycopg.connect
@@ -373,10 +389,18 @@ def slot_reads_proof(dsns: dict, connect=None) -> dict:
         seen = []
         for side in ("python", "rust"):
             with connect(dsns[side]) as conn:
-                rows = conn.execute("SELECT entity_norm, attribute_norm, read_count FROM slot_reads").fetchall()
-            seen.append({slot_md5(e, a): n for e, a, n in rows})
-        differ = {k: int(seen[0].get(k) or 0) - int(seen[1].get(k) or 0)
-                  for k in sorted(seen[0].keys() | seen[1].keys()) if seen[0].get(k) != seen[1].get(k)}
+                rows = conn.execute("SELECT entity_norm, attribute_norm, read_count, last_read_at IS NULL "
+                                    "FROM slot_reads").fetchall()
+            seen.append({slot_md5(e, a): (n, unset) for e, a, n, unset in rows})
+        differ = {}
+        for k in sorted(seen[0].keys() | seen[1].keys()):
+            a, b = seen[0].get(k), seen[1].get(k)
+            if a == b:
+                continue
+            if a is not None and b is not None and a[1] != b[1]:
+                differ[k] = None  # a read clock set on one side only
+            else:
+                differ[k] = int((a or (0, None))[0] or 0) - int((b or (0, None))[0] or 0)
     except Exception as e:  # noqa: BLE001 - a proof never changes a run's outcome
         return {"at": "", "kind": "slot-reads", "slots": None, "unavailable": type(e).__name__}
     return {"at": "", "kind": "slot-reads", "slots": differ}

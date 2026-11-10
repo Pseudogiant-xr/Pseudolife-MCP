@@ -2667,8 +2667,8 @@ def test_padded_event_proofs_hash_the_slots_one_side_served_alone():
     def events(rows):
         cols = ["id", tie_proofs.EVENT_QUERY, tie_proofs.EVENT_FACTS]
         return {"rows": {"public.retrieval_events": {"columns": cols, "rows": rows}}}
-    fact = lambda e, a: {"entity_norm": e, "attribute_norm": a}  # noqa: E731
-    py = events([[5, "  q  ", [fact("e1", "a1"), fact("e2", "a2")]], [6, "q", [fact("e3", "a3")]],
+    fact = lambda e, a, rank=0: {"entity_norm": e, "attribute_norm": a, "rank": rank}  # noqa: E731
+    py = events([[5, "  q  ", [fact("e1", "a1"), fact("e2", "a2", 1)]], [6, "q", [fact("e3", "a3")]],
                  [7, "  q  ", [fact("e4", "a4")]]])
     rs = events([[5, "  q  ", [fact("e2", "a2")]], [6, "q", []], [7, "q", [fact("e4", "a4")]]])
     out = tie_proofs.padded_event_proofs(["  q  "], py, rs)
@@ -2678,6 +2678,10 @@ def test_padded_event_proofs_hash_the_slots_one_side_served_alone():
     assert set(facts["rust"]) == {tie_proofs.slot_md5("e2", "a2")}
     assert out[0]["facts_len"] == {"python": 2, "rust": 1}
     assert "e1" not in json.dumps(out)
+    # Codex's review (2026-11-11): a rank off its list position (Rust's first
+    # fact ranked 999) is no tokenizer effect, so the event gets no proof.
+    off = events([[5, "  q  ", [fact("e2", "a2", 999)]]])
+    assert tie_proofs.padded_event_proofs(["  q  "], py, off) == []
     case = tie_proofs.padded_case_proof("  q  ", {"cortex": [{"entity": "E", "attribute": "A", "value": "secret"}]},
                                         {"cortex": []})
     assert case["query_md5"] == tie_proofs._md5("  q  ") and "secret" not in json.dumps(case)
@@ -2690,6 +2694,14 @@ def test_padded_event_proofs_hash_the_slots_one_side_served_alone():
         return tie_proofs.padded_case_proof("q ", {"cortex": [x]}, {"cortex": []})["cortex"]["python"]
     assert h({**item, "score": 0.1, "age": "2 days ago"}) == h({**item, "score": 0.7, "age": "3 days ago"})
     assert h({**item, "confidence": 0.5}) != h(item) and h({**item, "stale": True}) != h(item)
+    # Codex's review (2026-11-11): only a numeric score's value and a string
+    # age's are left out; a missing, null, string or bool score, or a
+    # non-string age, does not hash like a numeric one.
+    scored = h({**item, "score": 0.4})
+    for score in (None, "0.4", True):
+        assert h({**item, "score": score}) != scored, score
+    assert h(item) != scored
+    assert h({**item, "age": None}) != h({**item, "age": "2 days ago"})
     assert tie_proofs.CORTEX_MOVABLE == ("score", "age")
 
 
@@ -2706,7 +2718,9 @@ def test_the_proofs_read_retrieval_events_by_the_schemas_own_column_names():
 
 
 def test_slot_reads_proof_compares_both_tables_in_full_and_fails_soft():
-    tables = {"py": [("e1", "a1", 7), ("e9", "a9", 3)], "rs": [("e1", "a1", 6), ("e9", "a9", 3), ("e2", "a2", 1)]}
+    tables = {"py": [("e1", "a1", 7, False), ("e9", "a9", 3, False), ("e5", "a5", 2, False)],
+              "rs": [("e1", "a1", 6, False), ("e9", "a9", 3, False), ("e2", "a2", 1, False),
+                     ("e5", "a5", 2, True)]}
 
     class Conn:
         def __init__(self, dsn):
@@ -2729,7 +2743,12 @@ def test_slot_reads_proof_compares_both_tables_in_full_and_fails_soft():
                     return rows
             return Result()
     out = tie_proofs.slot_reads_proof({"python": "py", "rust": "rs"}, Conn)
-    assert out["slots"] == {tie_proofs.slot_md5("e1", "a1"): 1, tie_proofs.slot_md5("e2", "a2"): -1}
+    # Codex's review (2026-11-11): e5's count agrees but its read clock is
+    # unset on Rust only, which no delta explains.
+    assert out["slots"] == {tie_proofs.slot_md5("e1", "a1"): 1, tie_proofs.slot_md5("e2", "a2"): -1,
+                            tie_proofs.slot_md5("e5", "a5"): None}
+    a = padded_attempt(reads={tie_proofs.slot_md5("e1", "a1"): 1, tie_proofs.slot_md5("e5", "a5"): None})
+    assert not forced._tie_only(a, rules=("padded-query",))
     assert tie_proofs.slot_reads_proof({"python": "py", "rust": "down"}, Conn)["slots"] is None
 
 
@@ -2774,7 +2793,7 @@ def test_a_malformed_cortex_block_or_fact_list_gets_no_padded_proof():
     def events(served):
         cols = ["id", tie_proofs.EVENT_QUERY, tie_proofs.EVENT_FACTS]
         return {"rows": {"public.retrieval_events": {"columns": cols, "rows": [[5, "q ", served]]}}}
-    ok = [{"entity_norm": "e", "attribute_norm": "a"}]
+    ok = [{"entity_norm": "e", "attribute_norm": "a", "rank": 0}]
     assert tie_proofs.padded_event_proofs(["q "], events(ok), events([]))
     for bad in (None, [None], ok + [{"entity_norm": "e"}], "x"):
         assert tie_proofs.padded_event_proofs(["q "], events(ok), events(bad)) == [], bad
