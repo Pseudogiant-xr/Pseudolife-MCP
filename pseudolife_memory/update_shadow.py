@@ -16,6 +16,9 @@ from pseudolife_memory.client_config import _write_private
 SERVICE = "pseudolife-rust-shadow"
 CONFIG_LABEL = "org.pseudolife.shadow.configuration"
 PASSWORD = "PSEUDOLIFE_SHADOW_DB_PASSWORD"
+# The role script's first line names that variable for psql. It is spelled out
+# here so the script is built from public text only; the value is never in it.
+ROLE_SCRIPT_HEADER = "\\getenv shadow_password PSEUDOLIFE_SHADOW_DB_PASSWORD\n"
 REMOVE = "update --engine python --shadow --checkout <repo>"
 RETRY = "update --engine rust --shadow --checkout <repo>"
 
@@ -126,7 +129,7 @@ class ShadowUpdate:
         e = self.e
         with tempfile.TemporaryDirectory(prefix="pseudolife-shadow-") as tmp:
             script = Path(tmp) / "role.sql"
-            script.write_bytes(("\\getenv shadow_password " + PASSWORD + "\n" +
+            script.write_bytes((ROLE_SCRIPT_HEADER +
                                 (e.ops / "sql/shadow_reader_role.sql").read_text(encoding="utf-8")).encode())
             os.chmod(script, 0o644)
             code, out = e.command(["exec", e.pg, "mktemp", "-d", "/tmp/pseudolife-shadow-XXXXXXXX"], timeout=60)
