@@ -1327,7 +1327,7 @@ def cases() -> list[core.Case]:
 MUTANTS = [
     Mutant("audit-iso-conversion-admitted", "audit", "shim/src/cli/board_audit/args.rs",
            "None => iso(value),", "None => iso(value).or(Some(0.0)),",
-           ("export-iso-week-date", "export-iso-hour")),
+           ("export-invalid-nonnumeric",)),
     Mutant("audit-repeat-first-wins", "audit", "shim/src/cli/board_audit/args.rs",
            "slot.1 = value;", "let _ = value;", ("input-repeated", "export-repeated-abbreviated")),
     Mutant("audit-create-message", "audit", "shim/src/cli/board_audit/bank.rs",
