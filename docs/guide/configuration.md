@@ -3963,7 +3963,7 @@ the Qwen3 embedding backbone is the bulk of it. Encode bursts add up to
 ~1 GB on top. Those daemon figures are the Python daemon's. The Rust
 daemon runs the embedder in fp32 and refuses an explicit `bf16` at startup
 (`embedding.cpu_dtype: auto` means fp32 there); it peaked at 4.2 GiB under
-write load (measured 2026-11-06 on a 20 GB Linux host).
+write load (measured 2026-11-06).
 Cap the VM by copying `ops/wslconfig.example` to
 `%USERPROFILE%\.wslconfig`, tuning `memory=`, then `wsl --shutdown`.
 

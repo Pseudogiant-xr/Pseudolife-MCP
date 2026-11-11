@@ -42,7 +42,7 @@ again. `--engine python` keeps Python for good, and `--engine rust` refuses
 an unsupported configuration before the backup instead of falling back.
 The updater that deploys the daemon is the one already installed, so an
 update started from a release older than 0.23.0 installs the new release
-on the Python daemon; the next `pseudolife-mcp update` moves the host. A
+on the Python daemon; the next attended `pseudolife-mcp update` moves the host. A
 bank whose counters were never imported takes one extra step inside the
 same update: it first runs the new release on Python once to import them,
 then switches.

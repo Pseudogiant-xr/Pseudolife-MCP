@@ -48,7 +48,7 @@ again. `--engine python` keeps Python for good, and `--engine rust` refuses
 an unsupported configuration before the backup instead of falling back.
 The updater that deploys the daemon is the one already installed, so an
 update started from a release older than 0.23.0 installs the new release
-on the Python daemon; the next `pseudolife-mcp update` moves the host. A
+on the Python daemon; the next attended `pseudolife-mcp update` moves the host. A
 bank whose counters were never imported takes one extra step inside the
 same update: it first runs the new release on Python once to import them,
 then switches.
@@ -1064,7 +1064,7 @@ checked the configuration, downloaded the models and backed the bank up;
 if anything refuses before the backup the update continues on Python and
 says why. The scheduled `--unattended` update never changes the engine,
 `--engine python` keeps the Python daemon for good, and an update started
-from a release older than 0.23.0 moves the host on the run after it
+from a release older than 0.23.0 moves the host on the next attended run
 ([Daemon engine](docs/guide/install-and-move.md)).
 
 Docker update, backup and restore require at least **8 GiB free** on the
@@ -1754,7 +1754,7 @@ mistaken for a real bank.
 | Episodes + tags | Session episodes daemon-owned, keyed by a resolved five-tier session identity; hook eager-open or lazy-open on first store + idle reaper + prune-empty + resume-after-reap; nested sub-episodes with subtree-expanded recall; multi-valued `tags=[...]` |
 | Session briefing | SessionStart hook injects lessons + verified world facts + last-session recap once per conversation (resume/compact get the episode handle only); the plugin's per-turn note speaks only when lessons or other sessions' status notes changed (`pseudolife-mcp briefing` adds the unsure-graph section) |
 | Consolidation | `memory_consolidation_candidates` + `memory_consolidate` |
-| Optional components | Cross-encoder reranker (`rerank=True`, ~80 MB, downloaded on first use; the offline daemon image does not include it; a configured reranker model other than the default keeps a host on the Python engine); ONNX embedding backend (`pip install .[onnx]` — load-only, and auto-selected when installed and the configured model's artifact is already on disk, ~3x faster CPU encode on MiniLM. The configured artifact must already exist locally: the daemon image provisions MiniLM's while building, while a pip install stays on torch until you provision it yourself. Models whose Transformer module loads from a subfolder use torch on native Windows, and the default Qwen3-Embedding-0.6B has no ONNX export at all); NLI contradiction scorer (`pip install .[nli]`, ~278 MB) |
+| Optional components | Cross-encoder reranker (`rerank=True`, ~80 MB, downloaded on first use by the Python daemon, whose offline image does not include it; the Rust daemon provisions its one pinned reranker with its models, and a configured reranker model other than that default keeps a host on the Python engine); ONNX embedding backend (`pip install .[onnx]` — load-only, and auto-selected when installed and the configured model's artifact is already on disk, ~3x faster CPU encode on MiniLM. The configured artifact must already exist locally: the daemon image provisions MiniLM's while building, while a pip install stays on torch until you provision it yourself. Models whose Transformer module loads from a subfolder use torch on native Windows, and the default Qwen3-Embedding-0.6B has no ONNX export at all); NLI contradiction scorer (`pip install .[nli]`, ~278 MB) |
 | Web console | Cortex Console at `/ui/` — health/stats, fact review + history, 3D graph and review queue, search/trace, coordination board, config editor (read-mostly, token-gated like `/mcp`) |
 | Schema version | v59 (Postgres meta version) — additive `ADD COLUMN IF NOT EXISTS` migrations on daemon start, **except v25**: the `vector(384)`→`vector(1024)` move is not additive, so the daemon refuses to start against an older-dimensioned bank until you run [`ops/migrate_embeddings.py`](docs/runbooks/embedding-v25-migration.md); legacy file-mode `.pt` banks auto-migrate into Postgres; [full version history](docs/guide/configuration.md#schema-version-history) |
 
@@ -9115,7 +9115,7 @@ the Qwen3 embedding backbone is the bulk of it. Encode bursts add up to
 ~1 GB on top. Those daemon figures are the Python daemon's. The Rust
 daemon runs the embedder in fp32 and refuses an explicit `bf16` at startup
 (`embedding.cpu_dtype: auto` means fp32 there); it peaked at 4.2 GiB under
-write load (measured 2026-11-06 on a 20 GB Linux host).
+write load (measured 2026-11-06).
 Cap the VM by copying `ops/wslconfig.example` to
 `%USERPROFILE%\.wslconfig`, tuning `memory=`, then `wsl --shutdown`.
 
