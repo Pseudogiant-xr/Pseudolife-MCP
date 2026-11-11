@@ -456,11 +456,28 @@ class RuntimeAccountTest(unittest.TestCase):
     """The Rust daemon runs as the Python image's account with no capabilities."""
 
     def test_default_engine_drops_root_after_the_ownership_bootstrap(self):
-        import yaml
+        # Text checks only: the CI step runs this file on the standard library.
+        def service(path):
+            lines = path.read_text(encoding="utf-8").splitlines()
+            start = lines.index("  pseudolife-daemon:")
+            block = []
+            for line in lines[start + 1:]:
+                if re.match(r"  \S", line):
+                    break
+                block.append(line)
+            return block
 
-        class Compose(yaml.SafeLoader):
-            pass
-        Compose.add_constructor("!reset", lambda loader, node: None)
+        def items(block, key):
+            start = block.index(f"    {key}:")
+            found = []
+            for line in block[start + 1:]:
+                if line.strip().startswith("#"):
+                    continue
+                entry = re.fullmatch(r"      - (\S+)", line)
+                if entry is None:
+                    break
+                found.append(entry[1])
+            return found
         entry = (ROOT / "ops/provision-daemon-models.sh").read_text(encoding="utf-8")
         dockerfile = (ROOT / "ops/Dockerfile.daemon-rust").read_text(encoding="utf-8")
         account = re.search(r"useradd --uid (\d+) --gid (\d+)", (ROOT / "ops/Dockerfile.daemon").read_text(encoding="utf-8"))
@@ -478,15 +495,14 @@ class RuntimeAccountTest(unittest.TestCase):
         self.assertEqual(overlays[0].read_bytes().replace(b"\r\n", b"\n"), overlays[1].read_bytes().replace(b"\r\n", b"\n"))
         for base_path, overlay_path in ((ROOT / "ops/docker-compose.yml", overlays[0]),
                                         (ROOT / "pseudolife_memory/compose/docker-compose.yml", overlays[1])):
-            base = yaml.load(base_path.read_text(encoding="utf-8"), Compose)["services"]["pseudolife-daemon"]
-            overlay = yaml.load(overlay_path.read_text(encoding="utf-8"), Compose)["services"]["pseudolife-daemon"]
+            base, overlay = service(base_path), service(overlay_path)
             # A `user:` would skip the bootstrap and fail on root-owned volumes;
             # the bootstrap needs exactly the base file's four capabilities.
             for key in ("user", "cap_add", "cap_drop", "security_opt", "entrypoint"):
-                self.assertNotIn(key, overlay, overlay_path)
-            self.assertEqual(base["cap_drop"], ["ALL"])
-            self.assertEqual(sorted(base["cap_add"]), ["CHOWN", "DAC_OVERRIDE", "SETGID", "SETUID"])
-            self.assertIn("no-new-privileges:true", base["security_opt"])
+                self.assertNotIn(f"    {key}:", [line.split(":")[0] + ":" for line in overlay], overlay_path)
+            self.assertEqual(items(base, "cap_drop"), ["ALL"])
+            self.assertEqual(sorted(items(base, "cap_add")), ["CHOWN", "DAC_OVERRIDE", "SETGID", "SETUID"])
+            self.assertIn("no-new-privileges:true", items(base, "security_opt"))
 
     @unittest.skipIf(os.name == "nt", "the image entrypoint runs on Linux")
     def test_bootstrap_transfers_root_owned_state_then_execs_as_the_daemon_account(self):
