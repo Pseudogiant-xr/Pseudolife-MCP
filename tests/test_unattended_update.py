@@ -968,3 +968,18 @@ def test_the_cli_routes_the_flags(scheduler, monkeypatch, capsys):
     assert up.main(["--schedule", "04:00", "--allow-no-bearer"]) == 0
     assert up.main(["--unschedule"]) == 0
     assert seen == [("schedule", "04:00", False), ("schedule", "04:00", True), ("unschedule", None)]
+
+
+def test_a_notice_whose_lazy_import_fails_is_a_step_line_not_a_failed_update(monkeypatch):
+    """The notice runs after the update finished, and imports lazily: a
+    runtime removed under the updater must not turn a done update into an
+    ImportError (0.22.1 to 0.23.0, 2026-11-12)."""
+    import pseudolife_memory
+    from types import SimpleNamespace
+    from pseudolife_memory import unattended_update as uu
+    monkeypatch.setitem(sys.modules, "pseudolife_memory.daemon_url", None)
+    monkeypatch.delattr(pseudolife_memory, "daemon_url", raising=False)
+    lines: list[str] = []
+    update = SimpleNamespace(o=SimpleNamespace(daemon_url="http://127.0.0.1:9"), step=lines.append)
+    uu.post_notice(update, "updated")
+    assert len(lines) == 1 and lines[0].startswith("board notice not posted (")

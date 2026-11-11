@@ -470,13 +470,16 @@ def _installed_release(rt, layout, source: str, notes: list[str] | None = None):
     return current
 
 
-def update_shim(source, repo: Path | None = None, reinstall: bool = False) -> dict:
+def update_shim(source, repo: Path | None = None, reinstall: bool = False,
+                invoker: tuple[int, str | None] | None = None) -> dict:
     """Install ``source`` (a checkout path, or a requirement such as
     ``pseudolife-mcp==0.15.1``) as a new shim runtime and move the
     registrations to the launcher. ``repo`` is the checkout whose ``.venv``
     counts as an editable install; it defaults to ``source`` when that is a
     directory. A release the current runtime was installed from is not
-    installed again unless ``reinstall``."""
+    installed again unless ``reinstall``. ``invoker`` is the updater that
+    handed this run its client steps (``runtimes.remove_unused``): the
+    runtime it runs from is never pruned under it."""
     source = str(source)
     if repo is None and Path(source).is_dir():
         repo = Path(source)
@@ -624,7 +627,8 @@ def update_shim(source, repo: Path | None = None, reinstall: bool = False) -> di
     if exposed["state"] != "skipped":
         detail.append(exposed["detail"] + (f"; {exposed['hint']}" if exposed.get("hint") else ""))
     pinned = rt.pinned_runtimes(layout, rt.find_registrations(env))
-    pruned = rt.remove_unused(layout, pinned=pinned, processes=list_processes, tunnels=rt.default_tunnel_root(env))
+    pruned = rt.remove_unused(layout, pinned=pinned, processes=list_processes, tunnels=rt.default_tunnel_root(env),
+                              **({"invoker": invoker} if invoker is not None else {}))
     if pruned["error"]:
         detail.append(f"older runtimes kept: {pruned['error']}")
     for entry in pruned["held"]:
@@ -1896,17 +1900,20 @@ def update_tunnels(shim: dict | None) -> dict | None:
 
 
 def run_steps(steps, *, repo: Path | None, source: str, daemon_digest: str | None = None,
-              reinstall: bool = False, after_shim=None) -> dict:
+              reinstall: bool = False, after_shim=None,
+              invoker: tuple[int, str | None] | None = None) -> dict:
     """The client-side ladder as a report: ``shim``, ``plugin``, ``codex``
     (those in ``steps``), ``autostart`` when a checkout is known, and
     ``ok``. ``reinstall`` installs a release the shim already runs.
 
     ``after_shim`` is called with the shim step's result; when it returns a
     report, that report is the ladder's and no later step runs here (the
-    release updater hands them to the runtime just installed)."""
+    release updater hands them to the runtime just installed). ``invoker``
+    is that release updater, in the run it handed them to (``update_shim``)."""
     report: dict = {}
     if "shim" in steps:
-        report["shim"] = update_shim(source, repo, reinstall)
+        report["shim"] = update_shim(source, repo, reinstall,
+                                     **({"invoker": invoker} if invoker is not None else {}))
         if after_shim is not None:
             taken = after_shim(report["shim"])
             if taken is not None:
