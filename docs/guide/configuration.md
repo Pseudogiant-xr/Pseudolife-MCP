@@ -78,6 +78,21 @@ user unless passed `--user`: inspect the running daemon's UID to check its
 runtime identity. Backup/restore tools deliberately bypass the bootstrap
 using `--entrypoint` for administrative operations.
 
+The PostgreSQL container (`pseudolife-mcp-postgres`) runs entirely as the
+image's `postgres` account, UID/GID `999:999`, with every capability dropped
+and `no-new-privileges`. Compose sets that user, so the image's root
+bootstrap (ownership fix-up, then a privilege drop) never runs and nothing in
+the container runs as root: not the server, not its healthcheck, and not the
+`docker exec` calls that backup, restore and update make. The existing data
+directory is already owned by that account, so it is used as it is, with no
+ownership change. The healthcheck calls the server's own `pg_isready` binary
+rather than Debian's Perl wrapper in `/usr/bin`. A data directory bind-mounted
+from the host must be owned by UID 999. The image no longer carries `gosu`:
+a root start (an older Compose file) drops to `postgres` through `setpriv`
+instead. Rerunning the installer applies these settings to an existing
+container; `pseudolife-mcp update` recreates only the daemon, so until then
+the old container keeps its root bootstrap, which every tool still supports.
+
 ## Experimental agent coordination
 
 Coordination adds peer awareness and addressed mail within one bank. It is on

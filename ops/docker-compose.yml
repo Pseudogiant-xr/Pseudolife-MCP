@@ -61,6 +61,15 @@ services:
     image: pseudolife-pg:18
     container_name: pseudolife-mcp-postgres
     restart: unless-stopped
+    # Nothing in this container runs as root: the image's entrypoint skips its
+    # root bootstrap (chown + privilege drop) when started as the image's
+    # postgres account (uid/gid 999), which already owns the data directory,
+    # so every capability can go. Every `docker exec` the tooling makes runs
+    # as this user too.
+    user: "999:999"
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
     logging: *default-logging
     environment:
       POSTGRES_USER: pseudolife
@@ -77,7 +86,10 @@ services:
       # the parent, exactly as the image intends.
       - pseudolife_pgdata:/var/lib/postgresql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U pseudolife -d pseudolife_memory"]
+      # The real binary, not /usr/bin/pg_isready: that is Debian's Perl
+      # pg_wrapper, which reads system account files on every probe. PG_MAJOR
+      # is set by the image, so this follows a major-version bump.
+      test: ["CMD-SHELL", "exec /usr/lib/postgresql/$$PG_MAJOR/bin/pg_isready -U pseudolife -d pseudolife_memory"]
       interval: 10s
       timeout: 5s
       retries: 5

@@ -92,7 +92,13 @@ fi
 
 stamp="$(date +%Y%m%d-%H%M%S)"
 tmp="/tmp/pl_restore-$stamp.sql.gz"
-docker cp "$BACKUP_FILE" "$CONTAINER:$tmp"
+# Streamed in as the container's own user, not `docker cp`: that creates a
+# root-owned file, which the non-root PostgreSQL container (uid 999) can
+# neither read (the backup is private) nor remove from sticky /tmp.
+if ! docker exec -i "$CONTAINER" sh -c 'umask 077 && cat > "$1"' _ "$tmp" < "$BACKUP_FILE"; then
+    echo "could not copy the backup into $CONTAINER; check that it is running and has free space in /tmp. Nothing was restored." >&2
+    exit 1
+fi
 
 tables="entries facts world_facts lessons entities edges episodes"
 
