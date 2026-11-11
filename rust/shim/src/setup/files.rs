@@ -30,7 +30,7 @@ impl TransactionLock {
         #[cfg(unix)]
         let created = state::create(&path);
         let opened = created
-            .or_else(|_| state::open_with_write(&path, true))
+            .or_else(|_| open_published_lock(&path))
             .map_err(|cause| file_error(&path, cause))?;
         opened.file.try_lock().map_err(|_| {
             SetupError("Another Codex setup is in progress; retry after it finishes.")
@@ -43,6 +43,60 @@ impl TransactionLock {
             return Err(file_error(&path, "changed"));
         }
         Ok(Self(opened.file))
+    }
+}
+
+/// Open the lock file another installer has already published.
+///
+/// On Windows the publisher's `MoveFileW` still holds its delete-access handle
+/// for a moment after the lock name appears, and this open shares read and
+/// write but not delete, so it is refused with a sharing violation until that
+/// handle closes (#1469). Retry only that error, briefly: the POSIX link
+/// publish has no such window, so its loser always opens the lock and gets
+/// `try_lock`'s verdict, and this keeps Windows to the same answer. Every
+/// other error, and a sharing violation that outlasts the bound, still reports
+/// the lock file as unopenable.
+fn open_published_lock(path: &Path) -> Result<state::PrivateFile, &'static str> {
+    #[cfg(windows)]
+    {
+        // Not measured: the window is one handle close. The bound only caps
+        // how long a persistent sharing violation (another program holding
+        // the file) delays the refusal.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(500);
+        retry_sharing_violation(
+            || state::open_detailed_with_write(path, true),
+            || std::time::Instant::now() >= deadline,
+            || std::thread::sleep(std::time::Duration::from_millis(5)),
+        )
+        .map_err(|error| error.code())
+    }
+    #[cfg(unix)]
+    state::open_with_write(path, true)
+}
+
+/// Windows `ERROR_SHARING_VIOLATION`.
+#[cfg(any(windows, test))]
+const ERROR_SHARING_VIOLATION: i32 = 32;
+
+/// Call `open` again after `pause` while it fails with a sharing violation
+/// and `expired` is false; return its first other result, or the sharing
+/// violation once `expired` is true. The clock and the pause are parameters
+/// so the policy is tested without real time.
+#[cfg(any(windows, test))]
+fn retry_sharing_violation<T>(
+    mut open: impl FnMut() -> Result<T, state::OpenError>,
+    mut expired: impl FnMut() -> bool,
+    mut pause: impl FnMut(),
+) -> Result<T, state::OpenError> {
+    loop {
+        match open() {
+            Err(state::OpenError::Io(error))
+                if error.raw_os_error() == Some(ERROR_SHARING_VIOLATION) && !expired() =>
+            {
+                pause();
+            }
+            result => return result,
+        }
     }
 }
 
@@ -401,6 +455,90 @@ pub(crate) fn read_config(path: &Path) -> Result<Option<Vec<u8>>, SetupError> {
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
         _ => Err(file_error(path, "metadata")),
+    }
+}
+
+#[cfg(test)]
+mod lock_retry_tests {
+    use super::*;
+    use std::cell::Cell;
+
+    fn io(code: i32) -> state::OpenError {
+        state::OpenError::Io(std::io::Error::from_raw_os_error(code))
+    }
+    fn raw(result: &Result<u8, state::OpenError>) -> Option<i32> {
+        match result {
+            Err(state::OpenError::Io(error)) => error.raw_os_error(),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn a_transient_sharing_violation_is_retried_until_the_open_succeeds() {
+        let (opens, pauses) = (Cell::new(0), Cell::new(0));
+        let result = retry_sharing_violation(
+            || {
+                opens.set(opens.get() + 1);
+                if opens.get() <= 3 {
+                    Err(io(ERROR_SHARING_VIOLATION))
+                } else {
+                    Ok(7u8)
+                }
+            },
+            || false,
+            || pauses.set(pauses.get() + 1),
+        );
+        assert_eq!(result.ok(), Some(7));
+        assert_eq!((opens.get(), pauses.get()), (4, 3));
+    }
+
+    #[test]
+    fn a_sharing_violation_past_the_deadline_is_returned_unchanged() {
+        let (opens, checks) = (Cell::new(0), Cell::new(0));
+        let result: Result<u8, _> = retry_sharing_violation(
+            || {
+                opens.set(opens.get() + 1);
+                Err(io(ERROR_SHARING_VIOLATION))
+            },
+            || {
+                checks.set(checks.get() + 1);
+                checks.get() > 2
+            },
+            || {},
+        );
+        assert_eq!(raw(&result), Some(ERROR_SHARING_VIOLATION));
+        assert_eq!(
+            result.err().map(|error| error.code()),
+            Some("state_unavailable")
+        );
+        assert_eq!(opens.get(), 3);
+    }
+
+    #[test]
+    fn every_other_open_error_returns_at_once() {
+        // 5 is access denied (also a directory at the lock path on Windows),
+        // 2 is a missing file; InvalidState is a lock that is not private.
+        for (error, code) in [
+            (io(5), "state_unavailable"),
+            (io(2), "state_unavailable"),
+            (state::OpenError::InvalidState, "invalid_state"),
+        ] {
+            let (opens, checks, pauses) = (Cell::new(0), Cell::new(0), Cell::new(0));
+            let mut error = Some(error);
+            let result: Result<u8, _> = retry_sharing_violation(
+                || {
+                    opens.set(opens.get() + 1);
+                    Err(error.take().expect("opened twice"))
+                },
+                || {
+                    checks.set(checks.get() + 1);
+                    false
+                },
+                || pauses.set(pauses.get() + 1),
+            );
+            assert_eq!(result.err().map(|error| error.code()), Some(code));
+            assert_eq!((opens.get(), checks.get(), pauses.get()), (1, 0, 0));
+        }
     }
 }
 
