@@ -1,0 +1,285 @@
+"""Proof records for the forced mirror run's tie-order acceptance
+(mirror/forced.py ``TIE_RULES``), written beside a step's or case's diffs.
+
+A harness that compares two daemons' served entries prints a difference
+wherever the two sides served a different entry at one position. Whether
+that is a tie the spec leaves free cannot be read from the line: it names
+two ids, never their texts. The harness can prove it while both disposable
+banks still exist, so it records, for each such line only:
+
+* ``pick``: the line's two ids and an md5 of each entry's text (from the
+  response's own entries, or ``md5(text)`` computed in SQL in both banks),
+  never the text itself; and each side's ``via`` for a served list.
+* ``count``: for an ``access_count`` difference at a position where both
+  sides served the same entry, that entry's id.
+
+Positions that do not differ get no record, so a passing step writes none,
+and nothing here changes what is compared.
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+import re
+
+# "<at>.id: python 69 vs rust 65" (a response's entries) and
+# "<at>.entry_id: python 69 vs rust 65" (a retrieval event's served list),
+# "<at>" ending in the position's index.
+PICK_LINE = re.compile(r"^(?P<at>.*\[\d+\])\.(?:id|entry_id): python (?P<py>-?\d+) vs rust (?P<rs>-?\d+)$")
+COUNT_LINE = re.compile(r"^(?P<at>.*\[\d+\])\.access_count: python -?\d+ vs rust -?\d+$")
+TOKEN = re.compile(r"\.(\w+)|\[(\d+)\]")
+# A retrieval event's served position, as w2e (events_diff, "db " prefixed)
+# and w2d_search (bank_diff) print it.
+# retrieval_events' columns as pseudolife_memory/storage/schema.py names them
+# (test_forced reads them back from schema.py, so a rename cannot hide).
+EVENT_QUERY, EVENT_SERVED, EVENT_FACTS = "query_text", "served", "served_facts"
+# The served item's float fields (dbstate.EVENT_FLOAT_KEYS less surprise,
+# which rule C checks on its own): the total score and its components.
+SCORE_KEYS = ("score", "dense", "ce", "bm25", "slot", "recency", "margin")
+SERVED_AT = re.compile(r"^(?:db )?(?:public\.)?retrieval_events\[(-?\d+)\]\.served\[(\d+)\]$")
+
+
+def _md5(text) -> str | None:
+    return hashlib.md5(text.encode("utf-8")).hexdigest() if isinstance(text, str) else None
+
+
+def _walk(value, path: str):
+    """The value at a printed path (".value.entries[2]"), or None."""
+    pos = 0
+    for m in TOKEN.finditer(path):
+        if m.start() != pos:
+            return None
+        pos = m.end()
+        key, index = m.groups()
+        if key is not None:
+            value = value.get(key) if isinstance(value, dict) else None
+        else:
+            i = int(index)
+            value = value[i] if isinstance(value, list) and i < len(value) else None
+        if value is None:
+            return None
+    return value if pos == len(path) else None
+
+
+def _parent(at: str) -> tuple[str, int]:
+    head, _, index = at.rpartition("[")
+    return head, int(index.rstrip("]"))
+
+
+def _by_id(items, key: str, wanted: int):
+    """The dict in ``items`` whose ``key`` is ``wanted`` (the tie alignment
+    may have moved it, so a position alone does not find it)."""
+    for item in items if isinstance(items, list) else ():
+        if isinstance(item, dict) and item.get(key) == wanted:
+            return item
+    return None
+
+
+ORDERED_VIA = ("contiguity", "timeline")  # entries ordered by stream position, never by score
+
+
+def _ordered_list(items) -> bool:
+    return isinstance(items, list) and any(isinstance(x, dict) and x.get("via") in ORDERED_VIA for x in items)
+
+
+def response_proofs(lines: list[str], python, rust, text_md5=None, ordered: bool = False,
+                    tool: str | None = None) -> list[dict]:
+    """Proofs for a response's lines: ``python``/``rust`` are the compared
+    values the lines' paths start from (w2e's step answer, w2d's JSON body).
+
+    ``ordered``: the comparator compares this response in an exact order
+    (memory_recent, a fired timeline); a list holding a contiguity or
+    timeline entry is ordered too. Each record says so, and rules B and D
+    never accept in an ordered list.
+
+    ``text_md5(ids)`` reads each entry's FULL text hash from the banks: a
+    response's ``text`` may be a truncated preview, and equal previews are
+    not equal entries. Without it a pick's hashes are None (unproved).
+
+    ``tool``: the call answered (an MCP tool name, or a REST route), so
+    the runner applies rule B only to search answers."""
+    picks = []
+    for line in lines:
+        if line.startswith("db "):  # w2e's bank lines: event_proofs
+            continue
+        m = PICK_LINE.match(line)
+        if m and not SERVED_AT.match(m["at"]):
+            picks.append(m)
+    hashes, unavailable = {}, None
+    if picks and text_md5 is not None:
+        try:
+            hashes = text_md5({int(m[k]) for m in picks for k in ("py", "rs")})
+        except Exception as e:  # noqa: BLE001 - a proof never changes a run's outcome
+            unavailable = type(e).__name__
+    out = []
+    for line in lines:
+        if line.startswith("db "):
+            continue
+        m = PICK_LINE.match(line)
+        if m and not SERVED_AT.match(m["at"]):
+            head, _ = _parent(m["at"])
+            listed = (_walk(python, head), _walk(rust, head))
+            proof = {"at": m["at"], "kind": "pick", "python": int(m["py"]), "rust": int(m["rs"]),
+                     "text_md5": {"python": hashes.get(int(m["py"])), "rust": hashes.get(int(m["rs"]))},
+                     "ordered": bool(ordered or any(_ordered_list(x) for x in listed)), "tool": tool}
+            if unavailable:
+                proof["unavailable"] = unavailable
+            out.append(proof)
+            continue
+        m = COUNT_LINE.match(line)
+        if m:
+            head, _ = _parent(m["at"])
+            item = _walk(python, m["at"])
+            other = _walk(rust, m["at"])
+            ident = item.get("id") if isinstance(item, dict) else None
+            out.append({"at": m["at"], "kind": "count",
+                        "id": ident if isinstance(other, dict) and other.get("id") == ident else None,
+                        "ordered": bool(ordered or any(_ordered_list(_walk(x, head)) for x in (python, rust))),
+                        "tool": tool})
+    return out
+
+
+def _event_row(state: dict | None, event: int) -> dict:
+    table = (state or {}).get("rows", {}).get("public.retrieval_events") or {}
+    cols = table.get("columns") or []
+    if "id" not in cols:
+        return {}
+    i = cols.index("id")
+    for row in table.get("rows") or []:
+        if row[i] == event:
+            return dict(zip(cols, row))
+    return {}
+
+
+def _served(state: dict | None, event: int) -> list:
+    served = _event_row(state, event).get(EVENT_SERVED)
+    return served if isinstance(served, list) else []
+
+
+def step_tool(op: dict) -> str | None:
+    """The call a w2e step made: an MCP tool's name, or for an http step
+    its route without the query string (as w2d_search names a REST case),
+    so a REST /api/search step is a search answer too (Codex's review,
+    2026-11-11)."""
+    if not isinstance(op, dict):
+        return None
+    if op.get("op") == "http":
+        path = op.get("path")
+        return path.split("?")[0] if isinstance(path, str) else None
+    return op.get("name")
+
+
+def new_events_fired(state: dict | None, seen: set) -> tuple[bool, set]:
+    """Whether any retrieval event in ``state`` not in ``seen`` (the ids
+    earlier steps logged) fired its timeline, and every event id it holds:
+    a step's search answer is in stream order when the event it logged
+    fired, even when no entry says via timeline."""
+    table = (state or {}).get("rows", {}).get("public.retrieval_events") or {}
+    cols = table.get("columns") or []
+    if "id" not in cols:
+        return False, set(seen)
+    rows = [dict(zip(cols, row)) for row in table.get("rows") or []]
+    ids = {r["id"] for r in rows}
+    fired = any(_event_ordered(state, r["id"]) for r in rows if r["id"] not in seen)
+    return fired, ids | set(seen)
+
+
+def _event_ordered(state: dict | None, event: int) -> bool:
+    """The event's own ordering flag: a fired timeline orders its served
+    list by stream position (w2d_search's timeline_queries and bank_diff
+    already treat it so), whatever each item's via says."""
+    params = _event_row(state, event).get("params")
+    return isinstance(params, dict) and isinstance(params.get("timeline"), dict) \
+        and params["timeline"].get("fired") is True
+
+
+def event_proofs(lines: list[str], python_events: dict | None, rust_events: dict | None,
+                 text_md5) -> list[dict]:
+    """Proofs for retrieval-event lines. ``*_events`` are each side's dump
+    holding ``public.retrieval_events`` (raw, before any alignment);
+    ``text_md5(ids)`` returns ``{id: md5}`` read in both banks, an id whose
+    two banks disagree or that either lacks mapped to None. A bank that
+    cannot be read leaves every hash None (``unavailable``): the lines keep
+    their class, never an error."""
+    picks = []
+    for line in lines:
+        prefix = "db " if line.startswith("db ") else ""
+        m = PICK_LINE.match(line[len(prefix):])
+        if m and SERVED_AT.match(m["at"]):
+            picks.append((prefix, m))
+    if not picks:
+        return []
+    unavailable = None
+    try:
+        hashes = text_md5({int(m[k]) for _, m in picks for k in ("py", "rs")})
+    except Exception as e:  # noqa: BLE001 - a proof never changes a run's outcome
+        hashes, unavailable = {}, type(e).__name__
+    out = []
+    for prefix, m in picks:
+        event = int(SERVED_AT.match(m["at"])[1])
+        a = _by_id(_served(python_events, event), "entry_id", int(m["py"]))
+        b = _by_id(_served(rust_events, event), "entry_id", int(m["rs"]))
+        proof = {"at": prefix + m["at"], "kind": "pick", "python": int(m["py"]), "rust": int(m["rs"]),
+                 "text_md5": {"python": hashes.get(int(m["py"])), "rust": hashes.get(int(m["rs"]))},
+                 "via": {"python": (a or {}).get("via"), "rust": (b or {}).get("via")},
+                 "surprise": {"python": ((a or {}).get("components") or {}).get("surprise"),
+                              "rust": ((b or {}).get("components") or {}).get("surprise")},
+                 "scores": {"python": _scores(a), "rust": _scores(b)},
+                 # The event's timeline flag, or any stream-ordered item in
+                 # either side's served list (align_ties treats such a list
+                 # as exact order).
+                 "ordered": (_event_ordered(python_events, event) or _event_ordered(rust_events, event)
+                             or _ordered_list(_served(python_events, event))
+                             or _ordered_list(_served(rust_events, event))),
+                 "found": {"python": a is not None, "rust": b is not None}}
+        if unavailable:
+            proof["unavailable"] = unavailable
+        out.append(proof)
+    return out
+
+
+def _scores(item) -> dict | None:
+    """A served item's total score and each float component it records."""
+    if not isinstance(item, dict):
+        return None
+    comp = item.get("components") if isinstance(item.get("components"), dict) else {}
+    out = {"score": item.get("score")}
+    out.update({k: comp[k] for k in SCORE_KEYS[1:] if k in comp})
+    return out
+
+
+def padded(query) -> bool:
+    """A query ending in whitespace around real words: the cause ruling E
+    names (sentence-transformers 5.4.0 stopped stripping text before
+    tokenising; Rust keeps the 5.3.0 strip) applies to any such query. A
+    blank query is not one."""
+    return isinstance(query, str) and query.strip() != "" and query != query.rstrip()
+
+
+def bank_text_md5(dsns: dict, connect=None) -> "callable":
+    """``text_md5`` over both banks: ``connect(dsn)`` opens a connection
+    (psycopg's by default). Only the hash leaves the database."""
+    if connect is None:
+        import psycopg
+        connect = psycopg.connect
+
+    def read(ids: set[int]) -> dict:
+        if not ids:
+            return {}
+        seen = []
+        for side in ("python", "rust"):
+            with connect(dsns[side]) as conn:
+                rows = conn.execute("SELECT id, md5(text) FROM entries WHERE id = ANY(%s)",
+                                    (sorted(ids),)).fetchall()
+            seen.append({int(i): h for i, h in rows})
+        return {i: (seen[0].get(i) if seen[0].get(i) == seen[1].get(i) else None) for i in ids}
+    return read
+
+
+def safely(build) -> list[dict]:
+    """``build()``'s records, or one ``unavailable`` record when building
+    them raised: the harness's lines and exit status never depend on it."""
+    try:
+        return build()
+    except Exception as e:  # noqa: BLE001
+        return [{"at": "", "kind": "unavailable", "why": type(e).__name__}]

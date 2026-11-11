@@ -55,6 +55,7 @@ sys.path.insert(0, str(HERE))
 import daemons  # noqa: E402
 import dbstate  # noqa: E402
 import pgdisposable  # noqa: E402
+import tie_proofs  # noqa: E402
 from run import DB_DECLARED, bearer, call, real_bank_env, settled, wait_settled  # noqa: E402,F401
 
 REPO = HERE.parents[2]
@@ -181,6 +182,35 @@ def default_cases() -> list[dict]:
 
 def case(name, path, headers=(), declared=None):
     return {"name": name, "method": "GET", "path": path, "headers": list(headers), "declared": declared}
+
+
+def case_query(c: dict):
+    """The query a case sends: an MCP case's ``query`` argument, a REST
+    case's ``q`` parameter (None when it has neither)."""
+    if "mcp" in c:
+        return (c["mcp"] or {}).get("query")
+    values = urllib.parse.parse_qs(urllib.parse.urlsplit(c.get("path") or "").query,
+                                   keep_blank_values=True).get("q")
+    return values[0] if values else None
+
+
+# Ruling E2 (the conductor, under the maintainer's delegation of
+# 2026-11-11): on a copy of a real bank only, a case whose own query ends in
+# whitespace is not sent to either daemon. The divergence it shows is
+# accepted (w2d-tokenizer-runtime), but on real data no proof can tell it
+# from another; the case runs in full on synthetic banks and in CI.
+REAL_BANK_SKIP_REASON = (
+    "excluded on real-bank arms by the conductor under the maintainer's delegation of 2026-11-11: "
+    "sentence-transformers 5.4.0 stopped stripping text before tokenising and Rust follows the "
+    "5.3.0 contract (w2d-tokenizer-runtime); the case runs in full on the synthetic arm")
+
+
+def real_bank_skips(cases) -> set[str]:
+    """The names of the cases a real-bank arm skips: every case whose own
+    query ends in whitespace (tie_proofs.padded), and none without a base."""
+    if not os.environ.get(pgdisposable.BASE_ENV):
+        return set()
+    return {c["name"] for c in cases if tie_proofs.padded(case_query(c))}
 
 
 def mcp_case(name, args, headers=(), tool="memory_search"):
@@ -481,6 +511,10 @@ class McpExplain(Scenario):
     """
     name = "mcp-search-explain"
     require = {"trace.responses": 9, "trace.final": 3, "with_entries": 5}
+    # A real-bank arm skips "trace padded query" (ruling E2), one of the nine
+    # traced responses; the combined forced run e4a09212c's real arm had
+    # exactly nine.
+    real_bank_require = {"trace.responses": 8}
 
     def cases(self):
         def explain(name, **args):
@@ -871,10 +905,12 @@ def align_worst_sources(a: dict, b: dict) -> dict:
 
 
 def compare(py: dict, rs: dict, *, timeline_fired=False, ordered=False,
-            stats=False) -> tuple[list[str], list[str]]:
+            stats=False, aligned: dict | None = None) -> tuple[list[str], list[str]]:
     """``ordered``: the answer's entries are in an exact order with no scores
     (memory_recent), so no tie alignment applies. ``stats``: a memory_stats
-    answer, compared key order too, with worst_sources ties aligned."""
+    answer, compared key order too, with worst_sources ties aligned.
+    ``aligned`` (a dict) receives the two bodies as compared, after the tie
+    alignment, so a proof reads the lists the printed paths index."""
     diffs, notes = [], []
     if py["status"] != rs["status"]:
         diffs.append(f"status: python {py['status']} vs rust {rs['status']}")
@@ -925,6 +961,11 @@ def compare(py: dict, rs: dict, *, timeline_fired=False, ordered=False,
                 b[k], n = align_ties(a[k], b[k], key,
                                      ordered=(timeline_fired or ordered) and k == "entries")
                 notes += [f"{k}: {x}" for x in n]
+    if aligned is not None:
+        # The order the comparison used, after a trace answer's own timeline
+        # flag: a fired trace timeline carries no via on its entries.
+        aligned["python"], aligned["rust"] = a, b
+        aligned["ordered"] = bool(timeline_fired or ordered)
     diffs += diff(a, b, tol_keys=("score",) + TRACE_FLOAT_KEYS)
     return diffs, notes
 
@@ -950,6 +991,12 @@ def timeline_queries(state: dict) -> set[str]:
     records = [dict(zip(events.get("columns", []), row)) for row in events.get("rows", [])]
     return {r["query_text"] for r in records
             if ((r.get("params") or {}).get("timeline") or {}).get("fired")}
+
+
+def fired_queries(*states) -> set[str]:
+    """The queries whose timeline fired on EITHER side (Opus's review,
+    2026-11-11): a timeline that fired only on Rust also orders the answer."""
+    return set().union(*(timeline_queries(st) for st in states if st))
 
 
 def bank_diff(py_state: dict, rs_state: dict) -> list[str]:
@@ -1366,7 +1413,15 @@ def run_scenario(scn: Scenario, binary: Path, template: str, mode: str, record: 
         py_seen = []
         response_pairs = []
         transport = {side: [] for side in sides}
+        skips = real_bank_skips(scn.cases()) if mode != "golden" else set()
         for i, c in enumerate(scn.cases()):
+            if c["name"] in skips:
+                py_seen.append({"skipped": True})
+                response_pairs.append(None)
+                rows.append({"case": c["name"], "path": c["path"][:140], "python_status": None,
+                             "rust_status": None, "diffs": [], "notes": [], "_python": None,
+                             "skipped": REAL_BANK_SKIP_REASON})
+                continue
             if c.get("disconnect"):
                 for d in procs.values():
                     disconnect(d.port, c["path"], c["headers"])
@@ -1406,15 +1461,33 @@ def run_scenario(scn: Scenario, binary: Path, template: str, mode: str, record: 
         py_state = golden["db_state"]
     else:
         py_state = states["python"]
-    ordered_queries = timeline_queries(py_state)
+    ordered_queries = fired_queries(py_state, states.get("rust"))
+    case_dsns = {k: pg.dsn(dbs[k]) for k in sides} if "python" in sides else None
     for row, pair, c in zip(rows, response_pairs, scn.cases()):
         if pair is not None:
             py_r, rs_r = pair
             body = py_r.get("json")
             ordered = isinstance(body, dict) and body.get("query") in ordered_queries
+            bodies: dict = {}
             row["diffs"], row["notes"] = compare(py_r, rs_r, timeline_fired=ordered,
                                                  ordered=c.get("tool") == "memory_recent",
-                                                 stats=c.get("tool") == "memory_stats")
+                                                 stats=c.get("tool") == "memory_stats", aligned=bodies)
+            # Ids and text hashes for the lines that served different entries
+            # (forced.py's tie-order rules); none when nothing differs.
+            # The bodies as compared: Rust's entries realigned on ties, as the
+            # printed paths index them (Codex's review, 2026-11-11).
+            seen_py, seen_rs = bodies.get("python", py_r.get("json")), bodies.get("rust", rs_r.get("json"))
+            # Full-text hashes from the banks (a response's text may be a
+            # truncated preview), and the comparator's own ordering context.
+            proofs = tie_proofs.safely(lambda: (
+                tie_proofs.response_proofs(
+                    row["diffs"], seen_py, seen_rs,
+                    text_md5=tie_proofs.bank_text_md5(case_dsns) if case_dsns else None,
+                    ordered=bodies.get("ordered", True) or c.get("tool") == "memory_recent",
+                    tool=c.get("tool") if "mcp" in c else (c.get("path") or "").split("?")[0])
+))
+            if proofs:
+                row["tie_proofs"] = proofs
     cov = coverage(py_seen, py_state)
     # The credit under test: the successor entry, labelled by a get (not a
     # stray label the warmup search's pointer session could earn).
@@ -1430,7 +1503,9 @@ def run_scenario(scn: Scenario, binary: Path, template: str, mode: str, record: 
     cov["recent"]["nonempty"] = sum(
         1 for c, r in zip(scn.cases(), py_seen)
         if c.get("nonempty") and ((r.get("json") or {}).get("entries") or []))
-    cov_fail = unmet(cov, scn.require)
+    # A skipped case's coverage is gone on that arm too; a scenario whose
+    # floor it fills names the real-bank floor (real_bank_require).
+    cov_fail = unmet(cov, {**scn.require, **(getattr(scn, "real_bank_require", {}) if skips else {})})
     numeric_diffs = []
     if getattr(scn, "stores", False):
         w2e = import_w2e()
@@ -1438,7 +1513,17 @@ def run_scenario(scn: Scenario, binary: Path, template: str, mode: str, record: 
         nums = {side: normalize_stores(states[side]) for side in sides}
         if "python" in nums:
             numeric_diffs = w2e.compare_numeric(nums["python"], nums["rust"], tol, {})
+    # bank_diff pops the events it compares: the proofs read them first.
+    events = {side: {"rows": {"public.retrieval_events": json.loads(json.dumps(
+        st["rows"].get("public.retrieval_events")))}}
+        for side, st in (("python", py_state), ("rust", states["rust"]))}
     db_diffs = bank_diff(json.loads(json.dumps(py_state)), states["rust"]) + numeric_diffs
+    bank_dsns = {k: pg.dsn(dbs[k]) for k in sides}
+    db_proofs = (tie_proofs.safely(lambda: (
+        tie_proofs.event_proofs(db_diffs, events["python"], events["rust"],
+                                tie_proofs.bank_text_md5(bank_dsns))
+))
+        if "python" in sides and db_diffs else [])
     if record:
         GOLDENS.mkdir(parents=True, exist_ok=True)
         (GOLDENS / f"{scn.name}.json").write_text(json.dumps({
@@ -1454,7 +1539,9 @@ def run_scenario(scn: Scenario, binary: Path, template: str, mode: str, record: 
     if derived:
         pg.drop(derived)
     return {"scenario": scn.name, "cases": rows, "db_diffs": db_diffs + cov_fail, "declared": declared,
-            "coverage": cov}
+            "coverage": cov, **({"db_tie_proofs": db_proofs} if db_proofs else {}),
+            **({"skipped_cases": [{"case": n, "reason": REAL_BANK_SKIP_REASON} for n in sorted(skips)]}
+               if skips else {})}
 
 
 def default_scenarios(mode: str) -> list[str]:
