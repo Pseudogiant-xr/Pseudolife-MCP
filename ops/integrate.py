@@ -96,6 +96,10 @@ CENSUS_SUBJECT = "Regenerate producer census and CI metadata for this batch"
 # naming the cause and the fix, when it finds no bench login or no Docker
 # engine (rust/conftest.py, rust/daemon/harness/database_gate.py), so a
 # skipped database case cannot pass unseen.
+# Harness unit tests that other jobs' pytest steps run (the background
+# pruning, W2-D controls and recall-llm wiring tests) are here too, so a
+# harness change cannot reach a batch without them running locally; every
+# path here is still one a CI pytest step names (a test pins that too).
 RUST_HARNESS = (
     "rust/test_contract_inventory.py", "rust/test_producer_census.py",
     "rust/daemon/harness/test_w2e_lifecycle.py", "rust/daemon/harness/test_w2e_own_decisions.py",
@@ -110,6 +114,8 @@ RUST_HARNESS = (
     "rust/daemon/harness/test_dbstate_real_bank.py",
     "rust/daemon/harness/mirror/test_seed_keys.py",
     "rust/daemon/harness/mirror/test_real_base_routes.py",
+    "rust/daemon/harness/test_w2e_recall_llm.py",
+    "rust/daemon/harness/test_background_harness.py", "rust/daemon/harness/test_w2d_controls.py",
     "rust/ci",
 )
 RUST_HARNESS_COMMAND = ("python -m pytest -q -p no:cacheprovider --require-databases "
