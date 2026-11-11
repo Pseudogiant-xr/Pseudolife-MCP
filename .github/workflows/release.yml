@@ -193,8 +193,9 @@ jobs:
           docker buildx imagetools inspect "ghcr.io/${OWNER_LC}/pseudolife-daemon:${VERSION}"
           docker buildx imagetools inspect "ghcr.io/${OWNER_LC}/pseudolife-pg:18-${VERSION}"
 
-  # Leave the repository variable unset until the maintainer enables this artifact.
-  # This does not select Rust in install or update; that is a separate decision.
+  # The repository variable gates publishing this image. Since 0.23.0 install and
+  # update select it by default on Docker hosts, so every release publishes it:
+  # keep the variable set.
   rust-image:
     if: ${{ github.event_name == 'release' && vars.PSEUDOLIFE_PUBLISH_RUST_DAEMON == 'true' }}
     needs: publish
@@ -220,7 +221,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push the opt-in Rust daemon image
+      - name: Build and push the Rust daemon image
         # Cold, fresh BuildKit builder (no Cargo/layer cache), Linux dev box,
         # 2026-11-02 at 5c680dfa: 266s including load. Bound the hosted build
         # at 35m, leaving 10m of the job timeout for setup/login/inspection.
