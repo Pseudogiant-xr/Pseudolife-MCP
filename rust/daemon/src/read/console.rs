@@ -651,7 +651,9 @@ async fn facts_dump(svc: &Service, ready: &Ready) -> anyhow::Result<Vec<Value>> 
         for c in snap.records.iter().filter(|c| c.status == "contested") {
             parked.entry(&c.key).or_default().push(c);
         }
-        snap.current_records()
+        // Sessions' handoffs are served by key (`memory_fact_get`) and the
+        // SessionStart hook only.
+        snap.retrievable_records()
             .map(|r| {
                 let mut d = record_to_dict_age(r, &knobs.stale_policy, now, relative_age);
                 let conts = parked.get(&r.key).map_or(&[][..], Vec::as_slice);

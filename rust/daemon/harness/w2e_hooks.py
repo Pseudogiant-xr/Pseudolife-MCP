@@ -95,6 +95,38 @@ def _cursor(value, port: int, before: float, after: float) -> str:
     return "<cursor>\n" + rest
 
 
+# The continued-session pointer paragraph (a compaction or resume): Python's
+# one line, and Rust's handoff paragraph for a registered session with no
+# handoff yet, which names the session's reserved slot (declared:
+# divergences/write-path-w2-e/hooks-and-the-cli-s-episode/the-session-handoff-slot-entity-session.md).
+# Each matches a whole paragraph exactly and becomes the same token, so any
+# other difference in it still shows.
+_CONTINUED_TAIL = (r"Recall with `memory_search` and `memory_lesson_search`; the full briefing "
+                   r"is `pseudolife-mcp briefing` or GET /api/briefing\.")
+_HANDLE = r"(Keep passing the episode handle above to every tool that accepts it\. )?"
+_PY_CONTINUED = re.compile(
+    r"Pseudolife-MCP: (resumed|compacted) session, so the startup memory briefing is not "
+    r"re-sent\. " + _HANDLE + _CONTINUED_TAIL)
+_RS_NO_HANDOFF = re.compile(
+    r"Pseudolife-MCP: (resumed|compacted) session\. This session has no handoff yet: keep what "
+    r"it is doing and what it still owes in its handoff slot with "
+    r'memory_fact_set\(entity="session:[0-9a-f]{32}", attribute="handoff", value=\.\.\.\); '
+    r"each write replaces the last, and the next compaction or resume prints it here\. "
+    + _HANDLE + _CONTINUED_TAIL)
+
+
+def _continued_token(value):
+    """A session-start answer's continued-session paragraph, either side's
+    declared form, as ``<continued-note:kind:handle>``."""
+    if not isinstance(value, str):
+        return value
+    out = []
+    for para in value.split("\n\n"):
+        m = _PY_CONTINUED.fullmatch(para) or _RS_NO_HANDOFF.fullmatch(para)
+        out.append(f"<continued-note:{m.group(1)}:{bool(m.group(2))}>" if m else para)
+    return "\n\n".join(out)
+
+
 def run(op: dict, port: int, dsn: str, harness) -> dict:
     body = None
     if "body" in op:
@@ -112,6 +144,8 @@ def run(op: dict, port: int, dsn: str, harness) -> dict:
     value = r.get("json", r.get("bytes"))
     if op.get("cursor"):
         value = _cursor(value, port, before, after)
+    if op["path"].startswith("/api/hook/session-start"):
+        value = _continued_token(value)
     return {"isError": r["status"] != 200, "status": r["status"],
             "headers": {k: r["headers"].get(k) for k in _HEADERS},
             "value": value}

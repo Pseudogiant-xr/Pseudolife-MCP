@@ -431,14 +431,26 @@ async fn session_start_context(
     parts.join("\n\n")
 }
 
+/// What the hook knows of a registered session's handoff
+/// (`crate::session_handoff`): its current root episode id and the
+/// handoff found under it or an earlier root of the same key, as
+/// `(that root, the value)`.
+pub(crate) struct HandoffState {
+    pub root: String,
+    pub found: Option<(String, String)>,
+}
+
 /// `_continued_context`: what a resumed or compacted session still needs:
 /// one pointer line and, after a compaction, the daemon-side custom
-/// instructions.
+/// instructions. For an authorized caller whose session registered
+/// (`handoff`), the pointer carries the session's handoff, or how to write
+/// one, naming its slot (Rust only; Python keeps the one line).
 fn continued_context(
     app: &App,
     source: &str,
     authorized: bool,
     has_handle: bool,
+    handoff: Option<&HandoffState>,
     max_bytes: i64,
 ) -> String {
     let kind = if source == "resume" {
@@ -451,13 +463,20 @@ fn continued_context(
     } else {
         ""
     };
+    let tail = "Recall with `memory_search` and `memory_lesson_search`; the full briefing is \
+                `pseudolife-mcp briefing` or GET /api/briefing.";
     let note = format!(
         "Pseudolife-MCP: {kind} session, so the startup memory briefing is not re-sent. \
-         {handle}Recall with `memory_search` and `memory_lesson_search`; the full briefing \
-         is `pseudolife-mcp briefing` or GET /api/briefing."
+         {handle}{tail}"
     );
     let mut parts: Vec<String> = Vec::new();
-    if note.len() as i64 <= max_bytes {
+    let handoff_note = handoff.filter(|_| authorized).and_then(|h| {
+        let found = h.found.as_ref().map(|(r, v)| (r.as_str(), v.as_str()));
+        crate::session_handoff::hook_note(kind, handle, tail, &h.root, found, max_bytes)
+    });
+    if let Some(note) = handoff_note {
+        parts.push(note);
+    } else if note.len() as i64 <= max_bytes {
         parts.push(note);
     }
     if authorized && source == "compact" {
@@ -475,13 +494,14 @@ fn continued_context(
 
 /// `_episode_advertisement`: register the session (its episode, the
 /// `client_sessions` row with the policy variant served, the active-session
-/// pointer) and return the episode-handle line; empty on any failure.
+/// pointer) and return the episode-handle line, with the session's root
+/// episode id; empty and None on any failure.
 async fn episode_advertisement(
     app: &App,
     ready: &Arc<Ready>,
     session_id: &str,
     principal: Option<&str>,
-) -> String {
+) -> (String, Option<String>) {
     let variant = memory_policy_variant(&app.service.config.memory_policy, Some(session_id));
     let (r2, id, principal) = (
         ready.clone(),
@@ -503,17 +523,28 @@ async fn episode_advertisement(
         )
         .await?;
         crate::session_register::set_active_session(&r2, &id).await?;
-        Ok::<_, String>(ep)
+        let root = {
+            let ws = r2.write.lock().await;
+            let leaf = ep
+                .get("id")
+                .and_then(|v| v.as_str())
+                .and_then(|i| ws.log.index(i));
+            leaf.map(|i| {
+                let r = crate::session_register::root_index(&ws.log, i);
+                ws.log.episodes[r].id.clone()
+            })
+        };
+        Ok::<_, String>((ep, root))
     });
-    let ep = match task.await {
-        Ok(Ok(ep)) => ep,
+    let (ep, root) = match task.await {
+        Ok(Ok(found)) => found,
         Ok(Err(e)) => {
             eprintln!("session-start identity registration failed: {e}");
-            return String::new();
+            return (String::new(), None);
         }
         Err(e) => {
             eprintln!("session-start identity registration failed: {e}");
-            return String::new();
+            return (String::new(), None);
         }
     };
     let short: String = ep
@@ -524,13 +555,37 @@ async fn episode_advertisement(
         .take(12)
         .collect();
     if short.is_empty() {
-        return String::new();
+        return (String::new(), None);
     }
-    format!(
+    let line = format!(
         "Session episode: {short} — pass episode=\"{short}\" to every memory tool that accepts \
          it, including memory_episode_start/end and memory_session_title (keeps attribution \
          correct even when other sessions are open)."
-    )
+    );
+    (line, root)
+}
+
+/// The handoff state of a continued session whose root is known: the
+/// current root's handoff, else the newest earlier root of the same session
+/// key (`client_sessions.episode_ids`, read only when the current root has
+/// none). Reads the cortex snapshot and that one row; writes nothing.
+async fn handoff_state(ready: &Ready, session_id: &str, root: String) -> HandoffState {
+    let lookup = |roots: &[String]| {
+        let snap = ready.cortex.snapshot();
+        crate::session_handoff::find(&snap, roots).map(|(r, v)| (r, v.to_string()))
+    };
+    let mut found = lookup(std::slice::from_ref(&root));
+    if found.is_none() {
+        let earlier: Vec<String> = crate::session_register::registered_roots(ready, session_id)
+            .await
+            .into_iter()
+            .filter(|r| *r != root)
+            .collect();
+        if !earlier.is_empty() {
+            found = lookup(&earlier);
+        }
+    }
+    HandoffState { root, found }
 }
 
 /// The query of `GET /api/hook/session-start`.
@@ -626,8 +681,12 @@ pub async fn hook_session_start(app: &App, q: SessionStartQuery<'_>) -> String {
         }
     }
     let mut has_handle = false;
+    let mut handoff: Option<HandoffState> = None;
     if let (Some(id), Some(ready)) = (q.session_id.filter(|s| !s.is_empty()), &ready) {
-        let ad = episode_advertisement(app, ready, id, q.principal).await;
+        let (ad, root) = episode_advertisement(app, ready, id, q.principal).await;
+        if let Some(root) = root.filter(|_| authorized && is_continued(q.source)) {
+            handoff = Some(handoff_state(ready, id, root).await);
+        }
         if !ad.is_empty() {
             prefix.push(ad);
             has_handle = true;
@@ -639,7 +698,14 @@ pub async fn hook_session_start(app: &App, q: SessionStartQuery<'_>) -> String {
     let budget =
         HOOK_CONTEXT_MAX_CHARS as i64 - prefix.len() as i64 - if prefix.is_empty() { 0 } else { 2 };
     let body = match q.source.filter(|s| CONTINUED_SOURCES.contains(s)) {
-        Some(source) => continued_context(app, source, authorized, has_handle, budget),
+        Some(source) => continued_context(
+            app,
+            source,
+            authorized,
+            has_handle,
+            handoff.as_ref(),
+            budget,
+        ),
         None => {
             let session = if authorized { q.session_id } else { None };
             session_start_context(app, ready.as_ref(), authorized, session, budget).await
@@ -830,5 +896,129 @@ mod tests {
         assert_eq!(split_paragraphs("a\nb"), ["a\nb"]);
         assert_eq!(split_paragraphs("a\n\x1f\nb\n"), ["a", "b\n"]);
         assert_eq!(split_paragraphs("\n\na"), ["", "a"]);
+    }
+
+    const ROOT_A: &str = "0123456789abcdef0123456789abcdef";
+    const ROOT_B: &str = "fedcba9876543210fedcba9876543210";
+    const OLD_LINE: &str = "Pseudolife-MCP: compacted session, so the startup memory briefing \
+        is not re-sent. Keep passing the episode handle above to every tool that accepts it. \
+        Recall with `memory_search` and `memory_lesson_search`; the full briefing is \
+        `pseudolife-mcp briefing` or GET /api/briefing.";
+
+    /// The handoff state the hook builds for `root` from a store holding
+    /// `facts` (entity, value) at the handoff attribute, as `handoff_state`
+    /// does for the current root.
+    fn state(root: &str, facts: &[(&str, &str)]) -> HandoffState {
+        let s = crate::stores::cortex::tests::store(
+            facts
+                .iter()
+                .map(|(e, v)| crate::stores::cortex::tests::rec(e, "handoff", v))
+                .collect(),
+        );
+        let found =
+            crate::session_handoff::find(&s, &[root.to_string()]).map(|(r, v)| (r, v.to_string()));
+        HandoffState {
+            root: root.into(),
+            found,
+        }
+    }
+
+    fn entity(root: &str) -> String {
+        crate::session_handoff::entity_for(root)
+    }
+
+    #[test]
+    fn compact_without_a_handoff_names_the_slot_instead_of_not_re_sent() {
+        let app = crate::http::tests::mcp_refusal_app();
+        let st = state(ROOT_A, &[]);
+        let out = continued_context(&app, "compact", true, true, Some(&st), 9_000);
+        assert!(!out.contains("not re-sent"), "{out}");
+        assert!(
+            out.starts_with("Pseudolife-MCP: compacted session. This session has no handoff yet"),
+            "{out}"
+        );
+        assert!(out.contains(&format!(
+            "memory_fact_set(entity=\"{}\", attribute=\"handoff\", value=...)",
+            entity(ROOT_A)
+        )));
+        assert!(out.contains("Keep passing the episode handle above"));
+        assert!(out.ends_with("`pseudolife-mcp briefing` or GET /api/briefing."));
+    }
+
+    #[test]
+    fn compact_and_resume_with_a_handoff_print_it_under_its_slot() {
+        let app = crate::http::tests::mcp_refusal_app();
+        let st = state(
+            ROOT_A,
+            &[(&entity(ROOT_A), "Porting the hook; owe the PR a review.")],
+        );
+        for (source, kind) in [("compact", "compacted"), ("resume", "resumed")] {
+            let out = continued_context(&app, source, true, true, Some(&st), 9_000);
+            let head = format!(
+                "Pseudolife-MCP: {kind} session. This session's handoff (entity=\"{}\", \
+                 attribute=\"handoff\";",
+                entity(ROOT_A)
+            );
+            assert!(out.starts_with(&head), "{out}");
+            assert!(
+                out.contains("\n\nPorting the hook; owe the PR a review.\n\n"),
+                "{out}"
+            );
+            assert!(!out.contains("not re-sent"), "{out}");
+        }
+    }
+
+    #[test]
+    fn a_long_handoff_is_capped_with_the_call_for_the_rest() {
+        let app = crate::http::tests::mcp_refusal_app();
+        let value = "é".repeat(2_000);
+        let st = state(ROOT_A, &[(&entity(ROOT_A), &value)]);
+        let out = continued_context(&app, "compact", true, true, Some(&st), 9_000);
+        assert!(out.contains(&"é".repeat(750)));
+        assert!(!out.contains(&"é".repeat(751)));
+        let marker = format!(
+            "[handoff cut at 1500 of 4000 bytes; the rest: memory_fact_get(entity=\"{}\", \
+             attribute=\"handoff\")]",
+            entity(ROOT_A)
+        );
+        assert!(out.contains(&marker), "{out}");
+    }
+
+    #[test]
+    fn a_second_session_never_sees_the_first_ones_handoff() {
+        let app = crate::http::tests::mcp_refusal_app();
+        let st = state(ROOT_B, &[(&entity(ROOT_A), "session A's private state")]);
+        assert!(st.found.is_none());
+        let out = continued_context(&app, "compact", true, true, Some(&st), 9_000);
+        assert!(!out.contains("session A's private state"), "{out}");
+        assert!(out.contains(&entity(ROOT_B)));
+        assert!(!out.contains(ROOT_A));
+    }
+
+    #[test]
+    fn a_resume_finds_the_handoff_under_an_earlier_root_of_its_key() {
+        let app = crate::http::tests::mcp_refusal_app();
+        let st = HandoffState {
+            root: ROOT_B.into(),
+            found: Some((ROOT_A.into(), "written before the reaper closed it".into())),
+        };
+        let out = continued_context(&app, "resume", true, true, Some(&st), 9_000);
+        assert!(out.contains("written before the reaper closed it"));
+        assert!(out.contains(&format!(
+            "write the next one to entity=\"{}\"",
+            entity(ROOT_B)
+        )));
+    }
+
+    #[test]
+    fn without_a_registered_root_or_authorization_the_python_line_stays() {
+        let app = crate::http::tests::mcp_refusal_app();
+        assert_eq!(
+            continued_context(&app, "compact", true, true, None, 9_000),
+            OLD_LINE
+        );
+        let st = state(ROOT_A, &[(&entity(ROOT_A), "secret state")]);
+        let out = continued_context(&app, "compact", false, true, Some(&st), 9_000);
+        assert_eq!(out, OLD_LINE);
     }
 }

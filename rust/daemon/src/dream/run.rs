@@ -600,7 +600,7 @@ fn key_text(r: &CortexRecord) -> String {
 
 /// `CortexStore.vocab(limit)`: current slot keys, sorted.
 pub(super) fn vocab_alpha(s: &CortexStore, limit: usize) -> Vec<String> {
-    let keys: BTreeSet<String> = s.current_records().map(key_text).collect();
+    let keys: BTreeSet<String> = s.retrievable_records().map(key_text).collect();
     keys.into_iter().take(limit).collect()
 }
 
@@ -623,7 +623,7 @@ fn ranked(with: &[&CortexRecord], q: &[f32]) -> Vec<usize> {
 
 /// `CortexStore.vocab_ranked` (`cortex.py:1544-1573`).
 pub(super) fn vocab_ranked(s: &CortexStore, q: &[f32], limit: usize) -> Vec<String> {
-    let cur: Vec<&CortexRecord> = s.current_records().collect();
+    let cur: Vec<&CortexRecord> = s.retrievable_records().collect();
     let with: Vec<&CortexRecord> = cur
         .iter()
         .copied()
@@ -665,7 +665,7 @@ pub(super) fn facts_ranked(s: &CortexStore, q: &[f32], limit: usize) -> Vec<Fact
         };
         (r.entity.clone(), r.attribute.clone(), v)
     };
-    let cur: Vec<&CortexRecord> = s.current_records().collect();
+    let cur: Vec<&CortexRecord> = s.retrievable_records().collect();
     let with: Vec<&CortexRecord> = cur
         .iter()
         .copied()
@@ -729,7 +729,7 @@ fn resolve_slot(s: &CortexStore, q: &[f32], threshold: f64) -> Option<(String, S
         return None;
     }
     let cands: Vec<&CortexRecord> = s
-        .current_records()
+        .retrievable_records()
         .filter(|r| r.slot_embedding.is_some())
         .collect();
     if cands.is_empty() {
@@ -2131,7 +2131,7 @@ async fn run_locked(
     let known: std::collections::HashSet<String> = ready
         .cortex
         .snapshot()
-        .current_records()
+        .retrievable_records()
         .map(|r| r.key().0.clone())
         .collect();
     let mut new_entities: Vec<(String, String)> = Vec::new();
@@ -2332,6 +2332,32 @@ fn counters_tail(m: &mut Map<String, Value>, c: &Counts, _committed: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The dream's extraction hints and slot resolution never see a
+    /// session's handoff; a "session"-named ordinary fact stays in them.
+    #[test]
+    fn dream_inputs_skip_handoff_slots() {
+        use crate::stores::cortex::tests::{axis, rec, store};
+        let mut h = rec(
+            "session:0123456789abcdef0123456789abcdef",
+            "handoff",
+            "doing X",
+        );
+        h.slot_embedding = Some(axis(1, 1.0).into());
+        let mut near = rec("session hook", "port", "8080");
+        near.slot_embedding = Some(axis(1, 0.9).into());
+        let s = store(vec![h, near]);
+        assert_eq!(vocab_alpha(&s, 10), ["session-hook.port"]);
+        let q = axis(1, 1.0);
+        assert_eq!(vocab_ranked(&s, &q, 10), ["session-hook.port"]);
+        let facts = facts_ranked(&s, &q, 10);
+        assert_eq!(facts.len(), 1);
+        assert_eq!(facts[0].0, "session hook");
+        assert_eq!(
+            resolve_slot(&s, &q, 0.5),
+            Some(("session hook".to_string(), "port".to_string()))
+        );
+    }
 
     #[test]
     fn stall_opens_on_the_second_failure_and_closes_on_success() {

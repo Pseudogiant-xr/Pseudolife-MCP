@@ -40,6 +40,11 @@ pub(super) async fn promote(
     };
     let mut written = 0;
     for slot in crate::slots::extract_slots(a.text, None) {
+        // A session's handoff slot is written only by name, never derived
+        // from stored text.
+        if crate::session_handoff::is_handoff_entity(&slot.entity) {
+            continue;
+        }
         let value = if slot.polarity == "-" {
             format!("NOT {}", slot.value)
         } else {

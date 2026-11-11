@@ -76,6 +76,7 @@ mod routes;
 mod search;
 mod service;
 mod session_close;
+mod session_handoff;
 mod session_hook;
 mod session_register;
 mod session_title;

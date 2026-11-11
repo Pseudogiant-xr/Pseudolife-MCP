@@ -1063,7 +1063,7 @@ async fn annotate(
     let mut resolved: HashMap<(String, String, String), (Slot, f64)> = HashMap::new();
     {
         let cortex = ready.cortex.snapshot();
-        for rec in cortex.current_records() {
+        for rec in cortex.retrievable_records() {
             let n = norm_name(&rec.entity);
             let key = (
                 amap.get(&n).cloned().unwrap_or(n),

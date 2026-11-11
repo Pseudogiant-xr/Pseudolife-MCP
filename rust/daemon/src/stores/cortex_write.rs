@@ -288,6 +288,12 @@ impl CortexStore {
     /// `_should_supersede` (`cortex.py:715`): HLC order first, the wall
     /// clock only to break an HLC tie, then the confidence margin.
     fn should_supersede(&self, cur: &CortexRecord, conf: f64, hlc: (i64, i64), t: f64) -> bool {
+        self.not_older(cur, hlc, t) && conf >= cur.confidence - self.supersede_confidence_margin
+    }
+
+    /// The write's stamp is not older than the current record's: a later
+    /// HLC, or the same HLC and a wall clock not before its assertion.
+    fn not_older(&self, cur: &CortexRecord, hlc: (i64, i64), t: f64) -> bool {
         let cur_hlc = (
             cur.hlc_phys.unwrap_or(0),
             i64::from(cur.hlc_logical.unwrap_or(0)),
@@ -295,10 +301,7 @@ impl CortexStore {
         if hlc < cur_hlc {
             return false;
         }
-        if hlc == cur_hlc && t < cur.asserted_at {
-            return false;
-        }
-        conf >= cur.confidence - self.supersede_confidence_margin
+        !(hlc == cur_hlc && t < cur.asserted_at)
     }
 
     /// `_log` (`cortex.py:731`): one audit row, capped in place.
@@ -643,6 +646,15 @@ impl CortexStore {
         if norm_value(&self.records[idx].value) == norm_value(w.value) {
             return Ok(self.confirm(idx, w, w.support));
         }
+        if !w.dream
+            && crate::session_handoff::is_handoff_key(&key)
+            && self.not_older(&self.records[idx], w.hlc, w.now)
+        {
+            // A session's handoff is its own latest state: a shorter
+            // rewrite is not a compression echo, and neither origin tier
+            // nor confidence can park it behind the old one.
+            return Ok(self.supersede(idx, key, w));
+        }
         if is_compression_echo(w.value, &self.records[idx].value) {
             self.log(
                 idx,
@@ -686,33 +698,7 @@ impl CortexStore {
             && self.should_supersede(&self.records[idx], w.confidence, w.hlc, w.now)
             && !crate::mutants::active("mcp-fact-set-no-supersede")
         {
-            let cur = &mut self.records[idx];
-            cur.status = "superseded".into();
-            cur.superseded_at = Some(w.now);
-            cur.superseded_by_value = Some(w.value.to_string());
-            cur.raw.insert(
-                "superseded_by_value".into(),
-                w.raw
-                    .get("value")
-                    .cloned()
-                    .unwrap_or_else(|| json!(w.value)),
-            );
-            let old = cur.value.clone();
-            self.log(
-                idx,
-                w.value,
-                w.confidence,
-                w.now,
-                "supersede",
-                "newer_wins",
-                w,
-            );
-            let new = self.insert(w, Some(old), Some(idx));
-            self.settle_matching_contender(&key, new, w);
-            return Ok(WriteOutcome {
-                action: "superseded",
-                record: new,
-            });
+            return Ok(self.supersede(idx, key, w));
         }
         let reason = if tier_ok {
             "below_confidence_margin"
@@ -728,6 +714,38 @@ impl CortexStore {
             });
         }
         Ok(self.contend(Some(idx), w, reason))
+    }
+
+    /// The supersede branch of `write_fact`: the current record at `idx`
+    /// becomes `superseded` by `w`, which is inserted current.
+    fn supersede(&mut self, idx: usize, key: SlotKey, w: &FactWrite<'_>) -> WriteOutcome {
+        let cur = &mut self.records[idx];
+        cur.status = "superseded".into();
+        cur.superseded_at = Some(w.now);
+        cur.superseded_by_value = Some(w.value.to_string());
+        cur.raw.insert(
+            "superseded_by_value".into(),
+            w.raw
+                .get("value")
+                .cloned()
+                .unwrap_or_else(|| json!(w.value)),
+        );
+        let old = cur.value.clone();
+        self.log(
+            idx,
+            w.value,
+            w.confidence,
+            w.now,
+            "supersede",
+            "newer_wins",
+            w,
+        );
+        let new = self.insert(w, Some(old), Some(idx));
+        self.settle_matching_contender(&key, new, w);
+        WriteOutcome {
+            action: "superseded",
+            record: new,
+        }
     }
 }
 
@@ -906,6 +924,66 @@ mod tests {
         assert_eq!(c.hlc_phys, Some(20000));
         assert_eq!(s.dirty_slots.len(), 1);
         assert!(!s.meta_dirty);
+    }
+
+    /// A session's handoff always supersedes: a shorter rewrite is not an
+    /// echo, and an assistant or lower-confidence rewrite over a user value
+    /// does not park. The same writes at an ordinary slot whose entity only
+    /// says "session" keep the ordinary rules; an older stamp still loses.
+    #[test]
+    fn handoff_writes_always_supersede_and_a_near_miss_keeps_the_rules() {
+        const H: &str = "session:0123456789abcdef0123456789abcdef";
+        let long = "the deploy pipeline runs nightly on the bench box";
+        let short = "deploy pipeline runs nightly";
+        for (entity, want) in [
+            (H, ["superseded"; 3]),
+            ("session hook", ["confirmed", "contested", "contested"]),
+        ] {
+            let mut s = CortexStore::default();
+            s.write_fact(&write(entity, "handoff", long, "user", 0.9, 1.0))
+                .unwrap();
+            let echo = s
+                .write_fact(&write(entity, "handoff", short, "agent", 0.9, 2.0))
+                .unwrap();
+            let assistant = s
+                .write_fact(&write(
+                    entity,
+                    "handoff",
+                    "a new state entirely",
+                    "assistant",
+                    0.9,
+                    3.0,
+                ))
+                .unwrap();
+            let low = s
+                .write_fact(&write(
+                    entity,
+                    "handoff",
+                    "a later state at low confidence",
+                    "agent",
+                    0.1,
+                    4.0,
+                ))
+                .unwrap();
+            assert_eq!(
+                [echo.action, assistant.action, low.action],
+                want,
+                "{entity}"
+            );
+        }
+        let mut s = CortexStore::default();
+        s.write_fact(&write(H, "handoff", "newer", "user", 0.9, 5.0))
+            .unwrap();
+        let stale = s
+            .write_fact(&write(H, "handoff", "older", "agent", 0.9, 4.0))
+            .unwrap();
+        assert_ne!(stale.action, "superseded");
+        assert_eq!(s.lookup(H, "handoff").unwrap().value, "newer");
+        // A dream claim at the slot keeps the ordinary guards (here: never
+        // over a direct user value).
+        let mut d = write(H, "handoff", "dreamed", "agent", 0.9, 6.0);
+        d.dream = true;
+        assert_ne!(s.write_fact(&d).unwrap().action, "superseded");
     }
 
     #[test]
