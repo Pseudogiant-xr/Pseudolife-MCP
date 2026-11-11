@@ -426,8 +426,9 @@ file runs entirely on defaults).
 
 A memory engine exposed over MCP. There's no chat UI and no LLM doing the
 thinking — your coding agent is the intelligence; these are tools it calls to store and
-recall what matters. (Models *are* bundled as plumbing: baked embedding
-weights for retrieval, and the optional CPU extractor sidecar that
+recall what matters. (Models *are* bundled as plumbing: embedding
+weights for retrieval, baked into the Python daemon image and downloaded
+once by the Rust daemon, and the optional CPU extractor sidecar that
 consolidates memories into facts while you sleep.)
 
 Where it sits among the common approaches to agent memory — each column
@@ -607,13 +608,18 @@ flattening YAML loses that context. For a stack manager, use the
 [supported external-stack path](docs/guide/install-and-move.md#running-under-portainer-or-another-stack-manager).
 
 The whole stack — Postgres **and** the memory daemon — runs in Docker.
-No host Python, no torch install, no version skew; the daemon image bakes
+No host Python, no torch install, no version skew. A new install runs the
+Rust daemon: a small image (about 0.3 GB, measured 2026-11-10) that
+downloads its pinned models once (about 2.4 GB) into their own volume;
+`--engine python` (Windows: `-Engine python`) installs the Python daemon
+instead, and the installer says why when it takes Python by itself
+([Daemon engine](docs/guide/install-and-move.md)). The Python daemon image bakes
 in CPU-only torch and the embedding weights — `Qwen/Qwen3-Embedding-0.6B`
 (the default retrieval backbone since schema v25) plus `all-MiniLM-L6-v2`
 (kept baked for the ONNX-parity test path) — so it runs identically on
 Windows / macOS / Linux. Requires only Docker (with the compose v2 and
-buildx plugins, which Docker Desktop bundles); built once: ~5.0 GB daemon
-image (measured 2026-07-29 on the deployed build) + ~0.6 GB Postgres +
+buildx plugins, which Docker Desktop bundles); built once: ~5.0 GB Python
+daemon image (measured 2026-07-29 on the deployed build) + ~0.6 GB Postgres +
 ~11.8 GB extractor sidecar (measured 2026-08-20 with the v3 multi-task
 bake; skip the sidecar entirely with the installer's `claude-only` mode).
 The ~12.6 GB and ~10.4 GB figures published before
@@ -656,8 +662,10 @@ see [Updating](#updating)), not a bare `pull` + `up -d`.
 > cap: [Configuration — Windows / WSL2 memory](docs/guide/configuration.md#windows--wsl2-memory-docker-tier).
 
 The daemon serves MCP at `http://127.0.0.1:8765/mcp` and restarts with
-Docker — no logon task needed. First build downloads the model into the
-image (once); every container start after that is offline and fast. Wire
+Docker — no logon task needed. The models are fetched once (into the
+Python image at its first build, or into the Rust daemon's model volume
+before its first start); every container start after that is offline and
+fast. Wire
 Claude Code in via the stdio shim (installer default) or directly over
 HTTP (both below). Where the data actually lives, and
 how to back it up:
@@ -739,6 +747,15 @@ runs from wherever it was registered, so use its full path when
 `pseudolife-mcp` is not on `PATH`. On a **pip / lite** install it upgrades
 the package in the interpreter that holds it (pip, or pipx) and restarts
 nothing: it says what to restart.
+
+A Docker host that never chose a daemon engine moves to the Rust daemon on
+an update to a release that publishes its image, after the update has
+checked the configuration, downloaded the models and backed the bank up;
+if anything refuses before the backup the update continues on Python and
+says why. The scheduled `--unattended` update never changes the engine,
+`--engine python` keeps the Python daemon for good, and an update started
+from a release older than 0.23.0 moves the host on the next attended run
+([Daemon engine](docs/guide/install-and-move.md)).
 
 Docker update, backup and restore require at least **8 GiB free** on the
 filesystems their preflight checks; a low-space refusal leaves the bank
@@ -1427,7 +1444,7 @@ mistaken for a real bank.
 | Episodes + tags | Session episodes daemon-owned, keyed by a resolved five-tier session identity; hook eager-open or lazy-open on first store + idle reaper + prune-empty + resume-after-reap; nested sub-episodes with subtree-expanded recall; multi-valued `tags=[...]` |
 | Session briefing | SessionStart hook injects lessons + verified world facts + last-session recap once per conversation (resume/compact get the episode handle only); the plugin's per-turn note speaks only when lessons or other sessions' status notes changed (`pseudolife-mcp briefing` adds the unsure-graph section) |
 | Consolidation | `memory_consolidation_candidates` + `memory_consolidate` |
-| Optional components | Cross-encoder reranker (`rerank=True`, ~80 MB, downloaded on first use; the offline daemon image does not include it); ONNX embedding backend (`pip install .[onnx]` — load-only, and auto-selected when installed and the configured model's artifact is already on disk, ~3x faster CPU encode on MiniLM. The configured artifact must already exist locally: the daemon image provisions MiniLM's while building, while a pip install stays on torch until you provision it yourself. Models whose Transformer module loads from a subfolder use torch on native Windows, and the default Qwen3-Embedding-0.6B has no ONNX export at all); NLI contradiction scorer (`pip install .[nli]`, ~278 MB) |
+| Optional components | Cross-encoder reranker (`rerank=True`, ~80 MB, downloaded on first use by the Python daemon, whose offline image does not include it; the Rust daemon provisions its one pinned reranker with its models, and a configured reranker model other than that default keeps a host on the Python engine); ONNX embedding backend (`pip install .[onnx]` — load-only, and auto-selected when installed and the configured model's artifact is already on disk, ~3x faster CPU encode on MiniLM. The configured artifact must already exist locally: the daemon image provisions MiniLM's while building, while a pip install stays on torch until you provision it yourself. Models whose Transformer module loads from a subfolder use torch on native Windows, and the default Qwen3-Embedding-0.6B has no ONNX export at all); NLI contradiction scorer (`pip install .[nli]`, ~278 MB) |
 | Web console | Cortex Console at `/ui/` — health/stats, fact review + history, 3D graph and review queue, search/trace, coordination board, config editor (read-mostly, token-gated like `/mcp`) |
 | Schema version | v59 (Postgres meta version) — additive `ADD COLUMN IF NOT EXISTS` migrations on daemon start, **except v25**: the `vector(384)`→`vector(1024)` move is not additive, so the daemon refuses to start against an older-dimensioned bank until you run [`ops/migrate_embeddings.py`](docs/runbooks/embedding-v25-migration.md); legacy file-mode `.pt` banks auto-migrate into Postgres; [full version history](docs/guide/configuration.md#schema-version-history) |
 
@@ -1459,7 +1476,8 @@ pseudolife-mcp-daemon`).
   directory. Set `PSEUDOLIFE_MCP_DATA_DIR` to one (e.g.
   `C:\pseudolife-data`) —
   [Configuration](docs/guide/configuration.md#connection--deployment-env-vars).
-- **First build is slow / big.** The daemon image (~5.0 GB, several
+- **First build is slow / big.** The Rust daemon downloads about 2.4 GB of
+  models once, before its first start. The Python daemon image (~5.0 GB, several
   minutes to build) bakes in CPU torch and the embedding weights (Qwen3-Embedding-0.6B
   plus MiniLM); the extractor sidecar
   adds a ~5.3 GB model download on its first build. Every start after that is

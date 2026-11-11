@@ -12,8 +12,9 @@ Never hand-write or flatten a compose file to install or move a bank.
 
 A new Docker install runs the Rust daemon, from the image the checkout's
 release publishes: it checks free disk space, pulls that image and
-downloads the pinned models into their own volume before any container
-starts, and records the selection once the daemon reports ready at that
+downloads the pinned models (about 2.4 GB, once, into their own
+`pseudolife_rust_models` volume, which stays out of every backup) before
+any container starts, and records the selection once the daemon reports ready at that
 release. With no `--engine`, the install takes the Python daemon instead,
 saying why, when it has no bearer token (`--no-token`, `--transport http`
 with no token set, or a host that cannot install the shim and so mints
@@ -39,6 +40,12 @@ removes what it pulled for the move, warns with the refusal and its fix,
 and continues on Python; nothing is recorded, so the next update tries
 again. `--engine python` keeps Python for good, and `--engine rust` refuses
 an unsupported configuration before the backup instead of falling back.
+The updater that deploys the daemon is the one already installed, so an
+update started from a release older than 0.23.0 installs the new release
+on the Python daemon; the next attended `pseudolife-mcp update` moves the host. A
+bank whose counters were never imported takes one extra step inside the
+same update: it first runs the new release on Python once to import them,
+then switches.
 
 A rerun keeps the engine already installed, also after `docker compose
 down`. A Rust daemon stays on the release it was installed or last updated

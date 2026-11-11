@@ -1,2 +1,0 @@
-### Fixed (2026-11-07 — an exact duplicate is always reported as one)
-- At a positive `memory.surprise_threshold`, storing a memory a second time with the same text was reported either as `filtered_meta` (with its exact-duplicate note, and no cortex auto-promotion) or as `below_surprise_threshold`, depending only on float32 rounding of the vector's similarity to itself. Both the Python and the Rust daemon now treat a surprise below 1e-5 as exactly 0, so an exact duplicate is always `filtered_meta`. Measured on 3,000 random unit vectors, the rounding error was at most 1.8e-6.
