@@ -136,9 +136,8 @@ def docker_bank(tmp_path, monkeypatch):
     world.original_run_cli = up.run_cli
     monkeypatch.setattr(up, "run_cli", world.run)
     monkeypatch.setattr(module, "copy_from_container", lambda docker, source, target: world.run([docker, "cp", source, str(target)]))
-    if hasattr(module, "copy_into_container"):
-        monkeypatch.setattr(module, "copy_into_container", lambda docker, source, container, remote: world.run(
-            [docker, "exec", "-i", container, "sh", "-c", module.STREAM_INTO, "_", remote, "<", str(source)]))
+    monkeypatch.setattr(module, "copy_into_container", lambda docker, source, container, remote: world.run(
+        [docker, "exec", "-i", container, "sh", "-c", module.STREAM_INTO, "_", remote, "<", str(source)]))
     monkeypatch.setattr(up, "home", lambda: tmp_path / "home")
     monkeypatch.setattr(up, "data_dir", lambda: tmp_path / "clone" / "data")
     monkeypatch.setattr(up, "fetch_json", lambda *a, **kw: {"status": "ok", "ready": True})

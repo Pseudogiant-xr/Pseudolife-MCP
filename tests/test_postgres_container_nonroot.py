@@ -59,7 +59,9 @@ def test_image_replaces_gosu_with_a_setpriv_shim_and_prefers_real_clients():
 def test_restore_sh_streams_the_backup_in_as_the_container_user():
     script = (ROOT / "ops/restore.sh").read_text(encoding="utf-8")
     assert 'docker cp "$BACKUP_FILE"' not in script
-    assert re.search(r'docker exec -i "\$CONTAINER" sh -c \'umask 077 && cat > "\$1"\' _ "\$tmp" < "\$BACKUP_FILE"',
+    # The same command checks the byte count, so a short copy fails before any DROP.
+    assert re.search(r'docker exec -i "\$CONTAINER" sh -c \'umask 077 && cat > "\$1" && '
+                     r'\[ "\$\(wc -c < "\$1"\)" -eq "\$2" \]\' _ "\$tmp" "\$sent" < "\$BACKUP_FILE"',
                      script)
 
 

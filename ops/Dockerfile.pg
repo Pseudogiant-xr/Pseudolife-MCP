@@ -30,10 +30,14 @@ RUN rm -f /usr/local/bin/gosu \
       '# gosu-compatible shim: gosu USER COMMAND [ARGS...]' \
       'set -e' \
       'user="$1"; shift' \
+      '# gosu sets HOME to the account home; setpriv keeps the caller HOME.' \
+      'home="$(getent passwd "$user" | cut -d: -f6)"' \
+      '[ -z "$home" ] || export HOME="$home"' \
       'exec setpriv --reuid="$user" --regid="$user" --init-groups -- "$@"' \
       > /usr/local/bin/gosu \
  && chmod 0755 /usr/local/bin/gosu \
- && gosu postgres id -u | grep -qx 999
+ && gosu postgres id -u | grep -qx 999 \
+ && gosu postgres sh -c 'test "$HOME" = /var/lib/postgresql'
 
 # Put the server's own client binaries ahead of /usr/bin, whose psql,
 # pg_dump and pg_isready are Debian's Perl pg_wrapper, so `docker exec`

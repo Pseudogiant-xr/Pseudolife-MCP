@@ -95,8 +95,13 @@ tmp="/tmp/pl_restore-$stamp.sql.gz"
 # Streamed in as the container's own user, not `docker cp`: that creates a
 # root-owned file, which the non-root PostgreSQL container (uid 999) can
 # neither read (the backup is private) nor remove from sticky /tmp.
-if ! docker exec -i "$CONTAINER" sh -c 'umask 077 && cat > "$1"' _ "$tmp" < "$BACKUP_FILE"; then
-    echo "could not copy the backup into $CONTAINER; check that it is running and has free space in /tmp. Nothing was restored." >&2
+cleanup() { docker exec "$CONTAINER" rm -f "$tmp" >/dev/null 2>&1 || true; }
+trap cleanup EXIT
+# A stream that ends early still lets cat exit 0, so the same command checks
+# the byte count: a short copy fails here, before anything is dropped.
+sent="$(wc -c < "$BACKUP_FILE" | tr -d '[:space:]')"
+if ! docker exec -i "$CONTAINER" sh -c 'umask 077 && cat > "$1" && [ "$(wc -c < "$1")" -eq "$2" ]' _ "$tmp" "$sent" < "$BACKUP_FILE"; then
+    echo "could not copy the whole backup into $CONTAINER; check that it is running and has free space in /tmp. Nothing was restored." >&2
     exit 1
 fi
 
@@ -106,9 +111,6 @@ count_rows() { # $1 = database, $2 = table; prints -1 when the query fails
     docker exec "$CONTAINER" psql -tA -U "$DB_USER" -d "$1" \
         -c "SELECT count(*) FROM $2" 2>/dev/null || echo "-1"
 }
-
-cleanup() { docker exec "$CONTAINER" rm -f "$tmp" >/dev/null 2>&1 || true; }
-trap cleanup EXIT
 
 if [ "$APPLY" -eq 0 ]; then
     # ── REHEARSAL: restore into a scratch db, compare, drop ──────────────
