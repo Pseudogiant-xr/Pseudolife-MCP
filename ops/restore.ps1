@@ -92,9 +92,21 @@ if ($StateArchive) {
 }
 
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
-$tmp = "/tmp/pl_restore-$stamp.sql.gz"
+# Staged in a directory the container's own user creates: `docker cp`
+# writes a root-owned file, which the non-root PostgreSQL container (uid 999)
+# could not remove from sticky /tmp. The read check runs before anything
+# destructive, because a private source file arrives unreadable to it.
+$stage = "/tmp/pl_restore-$stamp"
+$tmp = "$stage/bank.sql.gz"
+docker exec $Container mkdir -m 700 $stage
+if ($LASTEXITCODE -ne 0) { throw "could not stage the backup in $Container; check that it is running and has free space in /tmp. Nothing was restored." }
 docker cp $BackupFile "${Container}:$tmp"
-if ($LASTEXITCODE -ne 0) { throw "docker cp into $Container failed" }
+if ($LASTEXITCODE -ne 0) { docker exec $Container rm -rf -- $stage *> $null; throw "docker cp into $Container failed. Nothing was restored." }
+docker exec $Container test -r $tmp
+if ($LASTEXITCODE -ne 0) {
+    docker exec $Container rm -rf -- $stage *> $null
+    throw "the PostgreSQL container's user cannot read the copied backup (a private file copied from a Linux or macOS host); restore it with pseudolife-mcp restore or ops/restore.sh, which stream it in. Nothing was restored."
+}
 
 $tables = @("entries", "facts", "world_facts", "lessons", "entities", "edges", "episodes")
 
@@ -267,5 +279,5 @@ try {
     }
 }
 finally {
-    docker exec $Container rm -f $tmp
+    docker exec $Container rm -rf -- $stage
 }

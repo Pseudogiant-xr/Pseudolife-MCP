@@ -17,3 +17,29 @@ FROM pgvector/pgvector:pg18
 # Only updates Debian libraries — the Postgres server, the pgvector extension,
 # and the data (which lives in the external volume, not the image) are untouched.
 RUN apt-get update && apt-get -y upgrade && rm -rf /var/lib/apt/lists/*
+
+# Drop gosu, the image's only Go binary (its bundled Go standard library is
+# what image scanners flag). The compose files start this container as the
+# postgres account (uid/gid 999), so the entrypoint never reaches its
+# `gosu postgres` re-exec. A root start (an older compose file pulling this
+# image) still works: the shim does the same privilege drop with util-linux
+# setpriv, which the base image already carries.
+RUN rm -f /usr/local/bin/gosu \
+ && printf '%s\n' \
+      '#!/bin/sh' \
+      '# gosu-compatible shim: gosu USER COMMAND [ARGS...]' \
+      'set -e' \
+      'user="$1"; shift' \
+      '# gosu sets HOME to the account home; setpriv keeps the caller HOME.' \
+      'home="$(getent passwd "$user" | cut -d: -f6)"' \
+      '[ -z "$home" ] || export HOME="$home"' \
+      'exec setpriv --reuid="$user" --regid="$user" --init-groups -- "$@"' \
+      > /usr/local/bin/gosu \
+ && chmod 0755 /usr/local/bin/gosu \
+ && gosu postgres id -u | grep -qx 999 \
+ && gosu postgres sh -c 'test "$HOME" = /var/lib/postgresql'
+
+# Put the server's own client binaries ahead of /usr/bin, whose psql,
+# pg_dump and pg_isready are Debian's Perl pg_wrapper, so `docker exec`
+# tooling runs the real binaries directly.
+ENV PATH=/usr/lib/postgresql/${PG_MAJOR}/bin:$PATH

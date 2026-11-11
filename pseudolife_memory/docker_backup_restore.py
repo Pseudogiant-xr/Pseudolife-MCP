@@ -119,6 +119,29 @@ def copy_from_container(docker: str, source: str, target: Path) -> None:
                              "then retry backup before restoring anything") from exc
 
 
+
+# Written by the container's own user: ``docker cp`` into a container creates
+# root-owned files, which the non-root PostgreSQL container (uid 999) can
+# neither delete from sticky /tmp nor read when the host file is private.
+STREAM_INTO = 'umask 077 && cat > "$1"'
+
+
+def copy_into_container(docker: str, source: Path, container: str, remote: str) -> None:
+    """Stream ``source`` into ``container:remote`` through ``docker exec -i``
+    so the file belongs to whichever user the container runs as."""
+    try:
+        with open(source, "rb") as stream:
+            proc = subprocess.run([docker, "exec", "-i", container, "sh", "-c", STREAM_INTO, "_", remote],
+                                  stdin=stream, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                                  timeout=3600, check=False)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise up.UpdateError(f"the backup file could not be copied into {container}; check Docker and the "
+                             "container's free space, then retry. Nothing was restored") from exc
+    if proc.returncode:
+        raise up.UpdateError(f"the backup file could not be copied into {container}; check Docker and the "
+                             "container's free space, then retry. Nothing was restored")
+
+
 class DockerBank:
     def __init__(self, *, container: str | None = None, daemon_container: str | None = None,
                  db: str | None = None, user: str | None = None, db_port: int | None = None,
@@ -391,7 +414,7 @@ class DockerBank:
             self.log(f"Safety backup: {safety['dump']} + {safety['state']}" if exists else
                      f"Safety state backup: {safety['state']} (destination database was absent)")
             self._backup_space(safety_dir)
-            self.command("cp", str(backup_file), f"{self.pg}:{remote}")
+            copy_into_container(self.docker, Path(backup_file), self.pg, remote)
             # Stage the complete SQL before any destructive query; decompression
             # can consume the last free space even when the compressed dump fits.
             self.command("exec", self.pg, "sh", "-c", 'gunzip -c "$1" > "$2"', "_", remote, sql_tmp)

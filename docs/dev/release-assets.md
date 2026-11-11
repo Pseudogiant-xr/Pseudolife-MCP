@@ -1,9 +1,11 @@
 # Native release assets
 
-The native CLI and Rust daemon image are opt-in. Publishing requires the
+Publishing the native CLI and the Rust daemon image requires the
 existing human-approved `publish` job in `.github/workflows/release.yml`
-and an explicitly enabled repository variable. This contract does not
-change the default engine or authorize a release.
+and an explicitly enabled repository variable for each. The Rust daemon
+image is the default Docker engine since 0.23.0, so its variable stays
+enabled; the native CLI archives remain opt-in. This contract does not
+authorize a release.
 
 ## Names and targets
 

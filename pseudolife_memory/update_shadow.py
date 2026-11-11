@@ -16,6 +16,9 @@ from pseudolife_memory.client_config import _write_private
 SERVICE = "pseudolife-rust-shadow"
 CONFIG_LABEL = "org.pseudolife.shadow.configuration"
 PASSWORD = "PSEUDOLIFE_SHADOW_DB_PASSWORD"
+# The role script's first line names that variable for psql. It is spelled out
+# here so the script is built from public text only; the value is never in it.
+ROLE_SCRIPT_HEADER = "\\getenv shadow_password PSEUDOLIFE_SHADOW_DB_PASSWORD\n"
 REMOVE = "update --engine python --shadow --checkout <repo>"
 RETRY = "update --engine rust --shadow --checkout <repo>"
 
@@ -118,23 +121,33 @@ class ShadowUpdate:
         self.existing = self.container()
 
     def apply_role(self):
+        # The password never touches argv or a file: docker exec -e passes the
+        # name only and psql reads the value with \getenv. The copied script
+        # is the public role SQL, staged in a directory the container's own
+        # user creates, so a non-root PostgreSQL container (uid 999) can read
+        # docker cp's root-owned file and remove it afterwards.
         e = self.e
-        remote = "/tmp/pseudolife-shadow-" + secrets.token_hex(12) + ".sql"
         with tempfile.TemporaryDirectory(prefix="pseudolife-shadow-") as tmp:
             script = Path(tmp) / "role.sql"
-            _write_private(script, ("\\set shadow_password '" + self.password + "'\n" +
-                                    (e.ops / "sql/shadow_reader_role.sql").read_text(encoding="utf-8")).encode())
+            script.write_bytes((ROLE_SCRIPT_HEADER +
+                                (e.ops / "sql/shadow_reader_role.sql").read_text(encoding="utf-8")).encode())
+            os.chmod(script, 0o644)
+            code, out = e.command(["exec", e.pg, "mktemp", "-d", "/tmp/pseudolife-shadow-XXXXXXXX"], timeout=60)
+            remote_dir = out.strip()
+            if code or not remote_dir.startswith("/tmp/pseudolife-shadow-"):
+                raise up.UpdateError("could not stage the shadow role script in the PostgreSQL container; check that it is running and has free space in /tmp, then retry")
+            remote = remote_dir + "/role.sql"
             try:
                 code, _ = e.command(["cp", str(script), f"{e.pg}:{remote}"], timeout=60)
                 if not code:
-                    code, _ = e.command(["exec", e.pg, "psql", "-X", "-v", "ON_ERROR_STOP=1", "-U", e.pg_user,
-                                         "-d", e.pg_db, "-f", remote], timeout=60)
+                    code, _ = e.command(["exec", "-e", PASSWORD, e.pg, "psql", "-X", "-v", "ON_ERROR_STOP=1",
+                                         "-U", e.pg_user, "-d", e.pg_db, "-f", remote], env=self.env, timeout=60)
                 if code:
                     raise up.UpdateError("could not apply the SELECT-only shadow role; check PostgreSQL access and the role script's prerequisites, then retry")
             finally:
-                code, _ = e.command(["exec", e.pg, "rm", "-f", remote], timeout=60)
+                code, _ = e.command(["exec", e.pg, "rm", "-rf", "--", remote_dir], timeout=60)
                 if code:
-                    raise up.UpdateError(f"could not remove the private role script from the PostgreSQL container; remove {remote} there before retrying")
+                    raise up.UpdateError(f"could not remove the shadow role script from the PostgreSQL container; remove {remote_dir} there before retrying")
 
     def persist_password(self):
         addition = ("\n" + PASSWORD + "=" + self.password + "\n").encode()

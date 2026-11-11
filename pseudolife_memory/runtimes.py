@@ -1254,11 +1254,13 @@ def _path_forms(path) -> set[str]:
     return forms
 
 
-def processes_inside(rows: list[tuple[int, int, str]], path: Path) -> list[int]:
-    """The pids whose image is ``path`` or lies under it, this process and
-    its parent excluded (an update may run from the runtime it inspects)."""
+def processes_inside(rows: list[tuple[int, int, str]], path: Path,
+                     exclude: Iterable[int] | None = None) -> list[int]:
+    """The pids whose image is ``path`` or lies under it, those in
+    ``exclude`` left out (default: this process and its parent, which on
+    Windows is the runtime's ``python.exe`` redirector of this very run)."""
     held = _path_forms(path)
-    own = {os.getpid(), os.getppid()}
+    own = {os.getpid(), os.getppid()} if exclude is None else set(exclude)
 
     def inside(image: str) -> bool:
         return any(form == p or form.startswith(p.rstrip(os.sep) + os.sep)
@@ -1416,10 +1418,24 @@ def _autostart_interpreters(*, windows: bool | None = None) -> list[str] | None:
         return None
 
 
+def _ancestry(rows: list[tuple[int, int, str]], pid: int) -> list[str]:
+    """The images of ``pid`` and its ancestors, nearest first."""
+    table = {row_pid: (ppid, image) for row_pid, ppid, image in rows}
+    images: list[str] = []
+    seen: set[int] = set()
+    while pid in table and pid not in seen and len(seen) < 64:
+        seen.add(pid)
+        ppid, image = table[pid]
+        images.append(image)
+        pid = ppid
+    return images
+
+
 def remove_unused(layout: Layout, *, pinned: Iterable[Path] = (),
                   processes: Callable = list_processes,
                   log: Callable[[str], None] = lambda _line: None,
-                  tunnels: Path | None = None) -> dict:
+                  tunnels: Path | None = None,
+                  invoker: tuple[int, str | None] | None = None) -> dict:
     """Remove every runtime that is not the newest complete one, is not in
     ``pinned`` (a registration still names it), is not used by a running
     tunnel saved under ``tunnels``, is not the one this interpreter runs
@@ -1429,7 +1445,14 @@ def remove_unused(layout: Layout, *, pinned: Iterable[Path] = (),
     for its own updater or explicit recovery. Where the process table or a
     tunnel record cannot be read, nothing is removed and ``error`` says why; where the
     platform has no process table, only the newest is kept and everything
-    else is left, named under ``unverified``."""
+    else is left, named under ``unverified``.
+
+    ``invoker`` is ``(pid, sys.prefix or None)`` of the updater that handed
+    this run its client steps and waits for it: while that pid is alive, the
+    runtime it names is held, and when it names none (an updater through
+    0.23.0 sends only its pid) and neither it nor an ancestor shows an image
+    inside a runtime, every complete runtime is held, since which one it
+    runs from cannot be told."""
     result: dict = {"removed": [], "held": [], "kept": [], "unverified": [], "error": None}
     current = current_runtime(layout)
     # An update the launcher started runs from an older runtime than the one
@@ -1454,6 +1477,14 @@ def remove_unused(layout: Layout, *, pinned: Iterable[Path] = (),
             result["error"] = (f"saved tunnel records under {tunnels} could not be read "
                                f"({type(exc).__name__}: {exc}); no runtime was removed")
             return result
+    invoked_from: set[str] = set()
+    if invoker is not None and rows is not None and any(pid == invoker[0] for pid, _ppid, _image in rows):
+        prefix = invoker[1]
+        named = next((r for r in list_runtimes(layout) if prefix and _same_path(prefix, str(r.path))), None)
+        if named is not None:
+            invoked_from = {os.path.normcase(str(named.path))}
+        elif not any(_under(image, layout.root) for image in _ancestry(rows, invoker[0]) if image):
+            invoked_from = set(complete)
     if complete - keep:
         interpreters = _autostart_interpreters()
         if interpreters is None:
@@ -1500,10 +1531,19 @@ def remove_unused(layout: Layout, *, pinned: Iterable[Path] = (),
             others = processes_inside(rows, path) if rows is not None else []
             result["held"].append({"path": str(path), "processes": len(others) + 1})
             continue
+        if os.path.normcase(str(path)) in invoked_from:
+            others = processes_inside(rows, path, exclude={os.getpid(), invoker[0]})
+            result["held"].append({"path": str(path), "processes": len(others) + 1})
+            continue
         if rows is None:
             result["unverified"].append(str(path))
             continue
-        pids = processes_inside(rows, path)
+        # Only this process is left out here. Its parent may be an updater
+        # of an older runtime that handed it the client steps: that parent
+        # still runs from this one and imports lazily after it, and leaving
+        # it out as "this helper" deleted its runtime under it (0.22.1 to
+        # 0.23.0, Linux, 2026-11-12).
+        pids = processes_inside(rows, path, exclude={os.getpid()})
         if pids:
             result["held"].append({"path": str(path), "processes": len(pids)})
             continue

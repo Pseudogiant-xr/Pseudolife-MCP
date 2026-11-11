@@ -136,6 +136,8 @@ def docker_bank(tmp_path, monkeypatch):
     world.original_run_cli = up.run_cli
     monkeypatch.setattr(up, "run_cli", world.run)
     monkeypatch.setattr(module, "copy_from_container", lambda docker, source, target: world.run([docker, "cp", source, str(target)]))
+    monkeypatch.setattr(module, "copy_into_container", lambda docker, source, container, remote: world.run(
+        [docker, "exec", "-i", container, "sh", "-c", module.STREAM_INTO, "_", remote, "<", str(source)]))
     monkeypatch.setattr(up, "home", lambda: tmp_path / "home")
     monkeypatch.setattr(up, "data_dir", lambda: tmp_path / "clone" / "data")
     monkeypatch.setattr(up, "fetch_json", lambda *a, **kw: {"status": "ok", "ready": True})
@@ -1001,3 +1003,37 @@ def test_file_mode_daemon_requires_explicit_standalone_target(docker_bank, tmp_p
     assert not (tmp_path / "artifacts").exists()
     bank = DockerBank(container=up.PG_CONTAINER, db="chosen_bank", user="chosen_role", db_port=6543)
     assert (bank.user, bank.db, bank.db_port) == ("chosen_role", "chosen_bank", 6543)
+
+
+def test_restore_streams_the_dump_into_postgres_as_the_container_user(docker_bank, tmp_path):
+    # docker cp creates root-owned files: the non-root PostgreSQL container
+    # (uid 999) could not delete one from sticky /tmp, nor read a private
+    # (0600) host backup, so the dump arrives through docker exec -i instead.
+    bank, world = docker_bank
+    dump = _input_dump(tmp_path)
+    bank.restore(dump, safety_dir=tmp_path / "safety")
+    pg = world.pg_name + ":"
+    assert not [c for c in world.calls if c[0] == "cp" and c[-1].startswith(pg)]
+    streamed = [c for c in world.calls if c[:3] == ["exec", "-i", world.pg_name] and "<" in c]
+    assert len(streamed) == 1 and streamed[0][-1] == str(dump)
+    remote = streamed[0][-3]
+    assert ["exec", world.pg_name, "rm", "-f", remote, remote + ".sql"] in world.calls
+
+
+def test_copy_into_container_streams_stdin_through_docker_exec(tmp_path, monkeypatch):
+    from pseudolife_memory import docker_backup_restore as module
+    source = tmp_path / "private.sql.gz"
+    source.write_bytes(b"payload")
+    seen = []
+
+    def fake_run(argv, **kwargs):
+        seen.append((argv, kwargs["stdin"].read()))
+        return types.SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+    module.copy_into_container("docker", source, "pg", "/tmp/x.sql.gz")
+    assert seen == [(["docker", "exec", "-i", "pg", "sh", "-c", 'umask 077 && cat > "$1"', "_", "/tmp/x.sql.gz"],
+                     b"payload")]
+    monkeypatch.setattr(module.subprocess, "run", lambda argv, **kwargs: types.SimpleNamespace(returncode=1))
+    with pytest.raises(up.UpdateError, match="could not be copied into pg"):
+        module.copy_into_container("docker", source, "pg", "/tmp/x.sql.gz")

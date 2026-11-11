@@ -1,4 +1,5 @@
-# Opt-in Rust image. Build from the repository root; publication is gated separately.
+# The Rust daemon image, the default Docker engine since 0.23.0. Build from the
+# repository root; publication is gated separately.
 # Models are provisioned on first start into the persistent model cache.
 FROM rust:1.94-bookworm AS builder
 WORKDIR /build
