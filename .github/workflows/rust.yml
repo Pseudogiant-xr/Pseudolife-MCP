@@ -2070,6 +2070,9 @@ jobs:
         run: |
           project="w3j-ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           mkdir -p "$W3J_MODELS_CACHE"
+          # The image's daemon runs as 10001:10001 and the model tree is
+          # owner-only; cleanup hands the cache back for actions/cache.
+          sudo chown -R 10001:10001 "$W3J_MODELS_CACHE"
           cat > "$RUNNER_TEMP/model-cache.yml" <<'YAML'
           volumes:
             models:
@@ -2099,6 +2102,9 @@ jobs:
         if: steps.image-inputs.outputs.needed == 'true'
         run: |
           python -m pip install --no-compile 'psycopg[binary]>=3.2.4'
+          # The daemon account reads the owner-only model tree; hand it back after.
+          sudo chown -R 10001:10001 "$RUNNER_TEMP/daemon-models"
+          trap 'sudo chown -R "$(id -u):$(id -g)" "$RUNNER_TEMP/daemon-models"' EXIT
           python rust/daemon/harness/image_model_proof.py --image w3j-daemon-rust:prep --postgres-image pgvector/pgvector:pg18 --models "$RUNNER_TEMP/daemon-models" --out "$RUNNER_TEMP/image-model-proof.json"
       - name: Retain network-disabled model proof
         if: always() && steps.image-inputs.outputs.needed == 'true'

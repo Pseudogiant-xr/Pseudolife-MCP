@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "daemon-image",
+  "before": "028fd79f06c19794",
+  "fingerprint": "0c0adfbcb5b53ced",
+  "reason": "The change adds two ownership steps over the restored model cache, each a single chown that takes seconds; the image build and the container contract steps are unchanged, so the measured minutes still hold."
+}

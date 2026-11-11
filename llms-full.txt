@@ -5213,22 +5213,31 @@ the launching shell's environment is preserved after the deployment command.
 
 ## Docker runtime account
 
-The Python Docker image starts with a short ownership bootstrap for `/data`,
-then clears supplementary groups and permanently switches to UID/GID
-`10001:10001` before executing the daemon. Existing root-owned state is
-transferred automatically; file contents, non-root ownership, application
-code and baked models are preserved, and symbolic links are not followed.
-Install and both update modes run this entrypoint on every container start,
-including daemon-only `--no-deps` recreates. No host account changes are
-needed. Compose also enables `no-new-privileges` and restricts bootstrap
-capabilities; the running daemon has no effective or permitted capabilities.
+Both daemon images run the daemon as UID/GID `10001:10001` with no effective
+or permitted capabilities. Each starts with a short ownership bootstrap as
+root, then clears supplementary groups and permanently switches to that
+account before the daemon starts: the Python image's entrypoint does this for
+`/data`; the Rust image's entrypoint does it for `/data` and its model cache
+`/models` (using `setpriv`), before it provisions the pinned models. Existing
+root-owned state is transferred automatically, including files an earlier
+root-run Rust daemon, a restore or update's model provisioning left; file
+contents, non-root ownership, application code and baked models are
+preserved, and symbolic links and other mounts are not followed. A volume
+whose root-owned files cannot be transferred (for example one mounted
+read-only) stops the start with a message naming the directory. Install and
+both update modes run these entrypoints on every container start, including
+daemon-only `--no-deps` recreates and a switch between engines. No host
+account changes are needed. Compose also enables `no-new-privileges` and
+restricts bootstrap capabilities; the running daemon has no effective or
+permitted capabilities.
 
-An explicit Docker `--user` override skips ownership migration; that account
-must already have access to its data and a writable home. Container metadata
-still names root for the bootstrap, and `docker exec` uses that configured
-user unless passed `--user`: inspect the running daemon's UID to check its
-runtime identity. Backup/restore tools deliberately bypass the bootstrap
-using `--entrypoint` for administrative operations.
+An explicit Docker `--user` override skips ownership migration (the Rust
+shadow and mirror run that way); that account must already have access to
+its data and a writable home. Container metadata still names root for the
+bootstrap, and `docker exec` uses that configured user unless passed
+`--user`: inspect the running daemon's UID to check its runtime identity.
+Backup/restore tools deliberately bypass the bootstrap using `--entrypoint`
+for administrative operations.
 
 The PostgreSQL container (`pseudolife-mcp-postgres`) runs entirely as the
 image's `postgres` account, UID/GID `999:999`, with every capability dropped

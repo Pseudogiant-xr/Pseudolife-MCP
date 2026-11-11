@@ -53,9 +53,11 @@ ENV CUDA_VISIBLE_DEVICES=-1 \
     PSEUDOLIFE_DAEMON_PDFIUM_DIR=/opt/pdfium \
     PSEUDOLIFE_PLUGIN_DIR=/app/plugin \
     PSEUDOLIFE_DAEMON_STATIC_DIR=/app/static
-# The read-only shadow runs as the Python writer's uid 10001; a new model
-# cache volume takes this ownership. The root writer is unaffected.
-RUN mkdir /data /models && chown 10001:10001 /models
+# The daemon runs as UID/GID 10001, the Python image's account: new volumes
+# take this ownership. Only the entrypoint uses root, to transfer root-owned
+# state before it drops root and every capability for good (setpriv, from
+# util-linux in the Debian base).
+RUN mkdir /data /models && chown 10001:10001 /models /data
 VOLUME ["/data"]
 ARG GIT_SHA=unknown
 ARG GIT_DIRTY=unknown
