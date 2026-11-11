@@ -125,4 +125,8 @@ docker run -d --network pseudolife-mirror_mirror --memory 10g --memory-swap 10g 
   dump whole again. Compare same-schema pairs.
 - **Not forced:** `dream_cursors.py` admits only the bench PostgreSQL;
   the CLI harness drives a fixture daemon or synthetic databases; golden
-  and mutant modes replay recordings of synthetic banks.
+  and mutant modes replay recordings of synthetic banks. The routes
+  scenarios `security-remote-open`, `security-remote-auth` and `trust-bind`
+  need the debug `--features mutants` bind fixture, which the release image
+  lacks, so none of their arms runs (`NOT_FORCED_SCENARIOS`, ruling G of
+  2026-11-11); each suite lists the scenarios it left out.
