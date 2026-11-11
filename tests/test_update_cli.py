@@ -2365,3 +2365,31 @@ def test_the_sign_in_line_is_quiet_otherwise(monkeypatch, health, sessions, toke
     up, lines, _ = _notes_update(monkeypatch, sessions=sessions, token=token)
     up.console_notes(health)
     assert lines == []
+
+
+def test_a_closing_hint_that_cannot_import_never_fails_the_update(monkeypatch):
+    """A release-mode update finished its whole job and exited 1 (0.22.1 to
+    0.23.0, Linux): the handed-off client step had pruned the runtime this
+    updater ran from, so the Console sign-in hint's lazy import of
+    console_cli raised ImportError outside its try block."""
+    import pseudolife_memory
+    up, lines, _ = _notes_update(monkeypatch, names_json={"principals": []}, sessions=[])
+    monkeypatch.setitem(sys.modules, "pseudolife_memory.console_cli", None)   # import raises ImportError
+    monkeypatch.delattr(pseudolife_memory, "console_cli", raising=False)
+    up.schema_before = 59
+    health = {"schema": 59, "console_signin": {"link": True}}
+    monkeypatch.setattr(up, "_run", lambda: up.console_notes(health))
+    assert up.run() == 0 and up.report.ok
+    assert not [x for x in lines if "pseudolife-mcp console" in x]
+
+
+def test_any_failing_closing_note_is_a_warning_not_a_failed_update(monkeypatch):
+    up, lines, _ = _notes_update(monkeypatch, names_json={"principals": []})
+
+    def broken():
+        raise ImportError("cannot import name 'child_python'")
+    monkeypatch.setattr(up, "_owner_names", broken)
+    up.schema_before = 58
+    monkeypatch.setattr(up, "_run", lambda: up.console_notes({"schema": 59}))
+    assert up.run() == 0 and up.report.ok
+    assert [x for x in lines if x.startswith("WARNING: ") and "the update itself succeeded" in x]

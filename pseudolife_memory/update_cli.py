@@ -92,6 +92,10 @@ CLIENT_HANDOFF = "client-handoff-v1"
 CLIENT_HANDOFF_PROTOCOLS = (CLIENT_HANDOFF,)
 HANDOFF_ENV = "PSEUDOLIFE_UPDATE_HANDOFF"
 HANDOFF_REPORT_ENV = "PSEUDOLIFE_UPDATE_HANDOFF_REPORT"
+# The handing-off updater's sys.prefix (from 0.23.1): the child's prune holds
+# exactly that runtime while the updater lives. A child of an updater through
+# 0.23.0 has only HANDOFF_ENV's pid, and holds every runtime it cannot rule out.
+HANDOFF_RUNTIME_ENV = "PSEUDOLIFE_UPDATE_HANDOFF_RUNTIME"
 # Run by the new runtime's interpreter in isolated mode (-I), so neither the
 # working directory nor PYTHONPATH can answer for it: its version, then the
 # hand-off protocols its updater accepts. A release old enough to have no
@@ -377,6 +381,7 @@ class Options:
     # lock for it; the report goes to this file.
     handoff_from: str | None = None
     handoff_report: Path | None = None
+    handoff_runtime: str | None = None   # HANDOFF_RUNTIME_ENV: that updater's sys.prefix
 
 
 @dataclass
@@ -1255,7 +1260,9 @@ class Update:
         self._shim_printed = False
         report = client_updates.run_steps(("shim", "plugin", "codex"), repo=checkout, source=source,
                                           daemon_digest=(health or {}).get("hooks_digest"),
-                                          reinstall=self.o.reinstall, after_shim=after_shim)
+                                          reinstall=self.o.reinstall, after_shim=after_shim,
+                                          **({"invoker": (int(self.o.handoff_from), self.o.handoff_runtime)}
+                                             if self.o.handoff_from else {}))
         self.report.clients = report
         handoff = self._handoff
         if handoff is not None:
@@ -1355,7 +1362,8 @@ class Update:
         env = {key: value for key, value in os.environ.items()
                if not key.upper().startswith("PYTHON") or key.upper() == "PYTHONUTF8"}
         env.update({"PYTHONIOENCODING": "utf-8", "PYTHONUNBUFFERED": "1",
-                    HANDOFF_ENV: str(os.getpid()), HANDOFF_REPORT_ENV: str(report_file)})
+                    HANDOFF_ENV: str(os.getpid()), HANDOFF_REPORT_ENV: str(report_file),
+                    HANDOFF_RUNTIME_ENV: sys.prefix})
         argv = [python, "-c", _HANDOFF_BOOTSTRAP, "pseudolife_memory.cli", "update", "--clients-only",
                 "--tag", version, "--daemon-url", self.o.daemon_url]
         if self.o.allow_downgrade:
@@ -1793,7 +1801,15 @@ class Update:
         the bank to schema v59, that every principal is now treated as the
         owner's (naming them, and the two ways to say one is not); and when
         the daemon offers Console sign-in but no browser is signed in yet,
-        the command that opens the Console signed in."""
+        the command that opens the Console signed in. Never fails the
+        update: it runs after the deploy and the clients succeeded."""
+        try:
+            self._console_notes(health)
+        except Exception as exc:  # noqa: BLE001 - a closing note only; the update itself succeeded
+            self.warn(f"a closing note after the update could not be shown ({type(exc).__name__}: {exc}); "
+                      f"the update itself succeeded")
+
+    def _console_notes(self, health: dict | None) -> None:
         before, after = self.schema_before, (health or {}).get("schema")
         if type(before) is int and type(after) is int and before < OWNER_SCOPE_SCHEMA <= after:
             names = self._owner_names()
@@ -1830,8 +1846,10 @@ class Update:
     def _no_console_signin(self) -> bool:
         """Whether the daemon answers that no browser is signed in, asked
         with this machine's token; False when that cannot be told."""
-        from pseudolife_memory import console_cli
         try:
+            # Inside the try: the runtime this process was started from may
+            # be gone by now, and a hint never fails an update.
+            from pseudolife_memory import console_cli
             _origin, token, _source = console_cli.credentials()
             if not token:
                 return False
@@ -2252,6 +2270,7 @@ def main(argv: list[str] | None = None) -> int:
     # tunnel refresh) inherits them.
     handoff_from = os.environ.pop(HANDOFF_ENV, None)
     handoff_report = os.environ.pop(HANDOFF_REPORT_ENV, None)
+    handoff_runtime = os.environ.pop(HANDOFF_RUNTIME_ENV, None)
     args = build_parser().parse_args(argv)
     if args.clients_only and args.daemon_only:
         print("--clients-only and --daemon-only exclude each other", file=sys.stderr)
@@ -2260,6 +2279,7 @@ def main(argv: list[str] | None = None) -> int:
     if handoff_from and handoff_from.isdigit():
         options.handoff_from = handoff_from
         options.handoff_report = Path(handoff_report) if handoff_report else None
+        options.handoff_runtime = handoff_runtime or None
     return Update(options).run()
 
 

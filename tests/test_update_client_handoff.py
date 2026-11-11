@@ -55,9 +55,11 @@ class Side:
         self.in_process: list[str] = []
         self.probes: list[list[str]] = []
         self.handoffs: list[dict] = []
+        self.invokers: list = []
 
-    def update_shim(self, source, repo=None, reinstall=False):
+    def update_shim(self, source, repo=None, reinstall=False, invoker=None):
         self.in_process.append("shim")
+        self.invokers.append(invoker)
         return dict(self.shim)
 
     def update_plugin(self, repo=None):
@@ -98,6 +100,7 @@ def side(tmp_path, monkeypatch):
     monkeypatch.setenv("PSEUDOLIFE_SHIM_LAUNCHER",
                        str(tmp_path / "bin" / ("pseudolife-mcp.exe" if os.name == "nt" else "pseudolife-mcp")))
     monkeypatch.delenv(up.HANDOFF_ENV, raising=False)
+    monkeypatch.delenv(up.HANDOFF_RUNTIME_ENV, raising=False)
     return s
 
 
@@ -133,6 +136,10 @@ def test_a_new_runtime_runs_the_steps_after_the_shim_with_its_own_code(side, mon
     assert call["cwd"] is None
     env = call["env"]
     assert env[up.HANDOFF_ENV] == str(os.getpid())
+    # The runtime this updater runs from, which the child's prune must keep
+    # while this process lives (0.22.1 to 0.23.0 deleted it under it).
+    assert env[up.HANDOFF_RUNTIME_ENV] == sys.prefix
+    assert side.invokers == [None], "the run that hands off was handed nothing"
     assert "PYTHONPATH" not in env and env["HTTPS_PROXY"] == "http://proxy.example.com:3128"
     # The probe imports nothing from the working directory or PYTHONPATH.
     assert side.probes and side.probes[0][:2] == [str(side.python), "-I"]
@@ -204,6 +211,16 @@ def test_a_handed_off_run_never_hands_off_again(side):
     assert side.in_process == ["shim", "plugin", "codex"]
 
 
+@pytest.mark.parametrize("runtime", [None, "/runtimes/000021"])
+def test_a_handed_off_shim_step_never_prunes_the_runtime_its_parent_runs_from(side, runtime):
+    """The parent waits on the child and imports lazily afterwards: its pid
+    (all an updater through 0.23.0 sends) and its runtime (from 0.23.1)
+    reach the shim step's prune, which holds that runtime while it lives."""
+    update = _update(clients_only=True, tag=TARGET, handoff_from="4242", handoff_runtime=runtime)
+    update.clients(None, SOURCE, HEALTH)
+    assert side.invokers == [(4242, runtime)]
+
+
 def test_main_takes_the_marker_out_of_the_environment(side, monkeypatch):
     """Read once and removed, so nothing the child starts (pip, claude, a
     tunnel refresh) inherits it."""
@@ -211,14 +228,18 @@ def test_main_takes_the_marker_out_of_the_environment(side, monkeypatch):
 
     def run(self):
         seen["from"], seen["report"] = self.o.handoff_from, self.o.handoff_report
-        seen["env"] = os.environ.get(up.HANDOFF_ENV), os.environ.get(up.HANDOFF_REPORT_ENV)
+        seen["runtime"] = self.o.handoff_runtime
+        seen["env"] = (os.environ.get(up.HANDOFF_ENV), os.environ.get(up.HANDOFF_REPORT_ENV),
+                       os.environ.get(up.HANDOFF_RUNTIME_ENV))
         return 0
 
     monkeypatch.setattr(up.Update, "run", run)
     monkeypatch.setenv(up.HANDOFF_ENV, "4242")
     monkeypatch.setenv(up.HANDOFF_REPORT_ENV, str(side.tmp / "r.json"))
+    monkeypatch.setenv(up.HANDOFF_RUNTIME_ENV, str(side.tmp / "rt" / "000001"))
     assert up.main(["--clients-only", "--tag", TARGET]) == 0
-    assert seen == {"from": "4242", "report": side.tmp / "r.json", "env": (None, None)}
+    assert seen == {"from": "4242", "report": side.tmp / "r.json", "runtime": str(side.tmp / "rt" / "000001"),
+                    "env": (None, None, None)}
 
 
 def test_an_older_target_without_the_hand_off_is_finished_here(side):

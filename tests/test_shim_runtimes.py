@@ -568,14 +568,41 @@ def test_native_markers_are_never_used_to_build_a_python_launcher(tmp_path, shap
         assert Path(tools.calls[0][0]) == _scripts(python.path, shape) / _python_name(shape)
 
 
-def test_the_helper_itself_never_counts_as_holding_a_runtime(tmp_path, shape, tools):
+def test_the_helper_and_its_parent_count_once_in_the_runtime_it_runs_from(tmp_path, shape, tools, monkeypatch):
+    """On Windows a runtime's ``python.exe`` is a redirector whose child is
+    the interpreter: this process and its parent are one run of the helper."""
     layout = _layout(tmp_path, shape)
     old = _install(layout, tools, "0.15.0")
     _install(layout, tools, "0.15.1")
+    monkeypatch.setattr(rt.sys, "prefix", str(old.path))
     rows = [(os.getpid(), os.getppid(), str(_scripts(old.path, shape) / _python_name(shape))),
             (os.getppid(), 1, str(_scripts(old.path, shape) / _python_name(shape)))]
     result = rt.remove_unused(layout, processes=lambda: rows)
-    assert result["removed"] == [str(old.path)]
+    assert result["removed"] == [] and result["held"] == [{"path": str(old.path), "processes": 1}]
+
+
+def test_a_handed_off_pruner_keeps_the_runtime_its_parent_updater_runs_from(tmp_path, shape, tools, monkeypatch):
+    """A release-mode update from 0.22.1 to 0.23.0 (Linux) ran from runtime
+    000021, installed 000022 and handed the client steps after the shim to a
+    child running 000022's interpreter. The child's prune left out its own
+    parent as "this helper", deleted 000021 while the parent still ran from
+    it, and the parent's next lazy import failed after a finished update.
+    The parent is the updater of an older runtime, not part of this run."""
+    layout = _layout(tmp_path, shape)
+    old = _install(layout, tools, "0.22.1")
+    new = _install(layout, tools, "0.23.0")
+    monkeypatch.setattr(rt.sys, "prefix", str(new.path))       # the child runs from the newest runtime
+    # The child's interpreter resolves outside its runtime (a venv's
+    # bin/python links to the base interpreter); its parent, the updater,
+    # is seen by the path it was started as, inside the older runtime.
+    base = tmp_path / "base" / _python_name(shape)
+    rows = [(os.getpid(), os.getppid(), str(base)),
+            (os.getppid(), 1, str(_scripts(old.path, shape) / _python_name(shape)))]
+    result = rt.remove_unused(layout, processes=lambda: rows)
+    assert result["removed"] == [] and old.path.is_dir() and new.path.is_dir()
+    assert result["held"] == [{"path": str(old.path), "processes": 1}]
+    # once the parent has exited, a later prune removes it
+    assert rt.remove_unused(layout, processes=lambda: rows[:1])["removed"] == [str(old.path)]
 
 
 def test_the_runtime_the_caller_runs_from_is_never_removed(tmp_path, shape, tools, monkeypatch):
@@ -594,6 +621,49 @@ def test_the_runtime_the_caller_runs_from_is_never_removed(tmp_path, shape, tool
     # once the update runs from elsewhere, the idle runtime goes
     monkeypatch.setattr(rt.sys, "prefix", str(new.path))
     assert rt.remove_unused(layout, processes=lambda: [])["removed"] == [str(old.path)]
+
+
+
+def test_a_handed_off_pruner_holds_every_runtime_while_a_pid_only_invoker_cannot_be_placed(
+        tmp_path, shape, tools, monkeypatch):
+    """The same hand-off where the updater's own image resolves outside every
+    runtime (a virtualenv interpreter seen as the base one it links to) and,
+    as an updater through 0.23.0 does, it names only its pid: which runtime
+    it runs from cannot be told, so none is removed while it lives."""
+    layout = _layout(tmp_path, shape)
+    old = _install(layout, tools, "0.22.1")
+    middle = _install(layout, tools, "0.22.2")
+    new = _install(layout, tools, "0.23.0")
+    monkeypatch.setattr(rt.sys, "prefix", str(new.path))
+    base = str(tmp_path / "base" / _python_name(shape))
+    parent = 4242
+    rows = [(os.getpid(), parent, base), (parent, 1, base), (1, 0, "/sbin/init")]
+    result = rt.remove_unused(layout, processes=lambda: rows, invoker=(parent, None))
+    assert result["removed"] == [] and old.path.is_dir() and middle.path.is_dir()
+    assert result["held"] == [{"path": str(old.path), "processes": 1}, {"path": str(middle.path), "processes": 1}]
+    # an invoker that names its runtime (0.23.1 on) holds only that one
+    result = rt.remove_unused(layout, processes=lambda: rows, invoker=(parent, str(middle.path)))
+    assert result["removed"] == [str(old.path)] and result["held"] == [{"path": str(middle.path), "processes": 1}]
+    # once it has exited, nothing is held for it
+    gone = [row for row in rows if row[0] != parent]
+    assert rt.remove_unused(layout, processes=lambda: gone, invoker=(parent, None))["removed"] == [str(middle.path)]
+
+
+def test_a_pid_only_invoker_placed_through_its_ancestry_holds_only_that_runtime(tmp_path, shape, tools, monkeypatch):
+    """On Windows the updater is the base interpreter, a child of its
+    runtime's ``python.exe`` redirector: that ancestor places it, and the
+    runtimes nothing runs from still go."""
+    layout = _layout(tmp_path, shape)
+    old = _install(layout, tools, "0.22.1")
+    middle = _install(layout, tools, "0.22.2")
+    new = _install(layout, tools, "0.23.0")
+    monkeypatch.setattr(rt.sys, "prefix", str(new.path))
+    base = str(tmp_path / "base" / _python_name(shape))
+    redirector = str(_scripts(middle.path, shape) / _python_name(shape))
+    rows = [(os.getpid(), 900, base), (900, 4242, redirector), (4242, 4241, base), (4241, 1, redirector)]
+    result = rt.remove_unused(layout, processes=lambda: rows, invoker=(4242, None))
+    assert result["removed"] == [str(old.path)] and middle.path.is_dir()
+    assert result["held"] == [{"path": str(middle.path), "processes": 2}]
 
 
 def _tunnel_record(home: Path, monkeypatch, runtime: Path, pid: int | None = None, supervisor: int = 4200) -> Path:

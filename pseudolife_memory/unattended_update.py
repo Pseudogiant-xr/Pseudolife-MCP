@@ -141,7 +141,12 @@ def post_notice(update, text: str) -> None:
     """A board notice from the daemon's reserved principal to every attached
     session; best effort, one step line either way."""
     text = text[:NOTICE_LIMIT]
-    reply = post_json(update.o.daemon_url.rstrip("/") + "/api/daemon-notice", bearer(), {"text": text}) or {}
+    try:
+        # Its imports are lazy, and it runs after the update finished.
+        reply = post_json(update.o.daemon_url.rstrip("/") + "/api/daemon-notice", bearer(), {"text": text}) or {}
+    except Exception as exc:  # noqa: BLE001 - best effort; the update's own result stands
+        update.step(f"board notice not posted ({type(exc).__name__}: {exc}); the log carries the same text")
+        return
     recipients = reply.get("recipients")
     error = str(reply.get("error") or "")
     if isinstance(recipients, int):
