@@ -62,6 +62,28 @@ NOT_FORCED = {
                    "databases, not a bank a restore can replace",
     "golden and mutant modes": "they compare against recordings made on synthetic banks",
 }
+_BIND_FIXTURE = (
+    "needs the debug mutants bind fixture (run.py's capability probe); the forced runner uses the "
+    "release image, whose binary rightly refuses; not forced by the conductor under the "
+    "maintainer's delegation of 2026-11-11. security-remote-open and security-remote-auth run "
+    "live in CI with the debug binary (rust.yml 'run.py live --only security-remote-open "
+    "security-remote-auth'); trust-bind has no live CI step (issue #1473)")
+# Scenarios this run does not force, by scenario, and why: no arm of theirs
+# can compare anything here, so none is invoked (ruling G of 2026-11-11).
+# Each suite lists the ones it left out, and the summary's not_forced
+# carries the reasons beside the harnesses above.
+NOT_FORCED_SCENARIOS = {
+    "routes/security-remote-open": _BIND_FIXTURE,
+    "routes/security-remote-auth": _BIND_FIXTURE,
+    "routes/trust-bind": _BIND_FIXTURE,
+}
+
+
+def _forced_plan(suite: str, names: list[str], only: list[str] | None) -> tuple[list[str], list[str]]:
+    """A suite's scenarios to run and the ones it does not force, in plan order."""
+    chosen = [n for n in names if not only or n in only]
+    left = [n for n in chosen if f"{suite}/{n}" in NOT_FORCED_SCENARIOS]
+    return [n for n in chosen if n not in left], left
 # The summary lines every live harness prints, one per difference: "DIFF
 # [scenario]" and "DB DIFF [...]", run.py's refusal rows "DIFF <case>:", and
 # the board's "STATE [...]" and "CHAIN [...]". Indented progress lines repeat
@@ -877,16 +899,16 @@ def run(runner: Runner, suites: list[str], only: list[str] | None,
     on ``workers`` (``--jobs``), with the rows in plan order either way."""
     if workers and len(workers) > 1:
         return _run_side_by_side(workers, suites, only, names)
-    report = {"suites": {}, "not_forced": NOT_FORCED, "complete": False}
+    report = {"suites": {}, "not_forced": {**NOT_FORCED, **NOT_FORCED_SCENARIOS}, "complete": False}
     private: dict = {}
     for suite in suites:
         try:
-            planned = [n for n in names(suite) if not only or n in only]
+            planned, left = _forced_plan(suite, names(suite), only)
         except (subprocess.SubprocessError, ValueError, IndexError) as e:
             report["suites"][suite] = {"planned": 0, "rows": [], "error": str(e)[:300]}
             continue
         rows = []
-        report["suites"][suite] = {"planned": len(planned), "rows": rows}
+        report["suites"][suite] = {"planned": len(planned), "rows": rows, "not_forced": left}
         for name in planned:
             reason = runner.blocked()
             if reason:
@@ -908,16 +930,16 @@ def _run_side_by_side(workers: "list[Runner]", suites: list[str], only: list[str
     planned first. A stop (the STOP file, the disk floor, an interrupt or a
     worker that raised) starts no further scenario, lets the running ones
     finish and reports the rows of every scenario that ran."""
-    report = {"suites": {}, "not_forced": NOT_FORCED, "complete": False}
+    report = {"suites": {}, "not_forced": {**NOT_FORCED, **NOT_FORCED_SCENARIOS}, "complete": False}
     private: dict = {}
     plan = []
     for suite in suites:
         try:
-            planned = [n for n in names(suite) if not only or n in only]
+            planned, left = _forced_plan(suite, names(suite), only)
         except (subprocess.SubprocessError, ValueError, IndexError) as e:
             report["suites"][suite] = {"planned": 0, "rows": [], "error": str(e)[:300]}
             continue
-        report["suites"][suite] = {"planned": len(planned), "rows": []}
+        report["suites"][suite] = {"planned": len(planned), "rows": [], "not_forced": left}
         plan += [(suite, n) for n in planned]
     lock = threading.Lock()
     state: dict = {"next": 0, "stopped": None, "raised": None}
@@ -1341,6 +1363,8 @@ def counts(report: dict) -> dict:
                       **{c: classes.count(c) for c in ("pass", "transient", "preexisting", "new",
                                                         "accepted", "excluded", "error")},
                       "differences": sum(r["differences"] for r in body["rows"]),
+                      # Left out by NOT_FORCED_SCENARIOS: never invoked, so in no class.
+                      "not_forced": list(body.get("not_forced", [])),
                       # Errors whose attempts saw the runner's cgroup kill a process.
                       # Null when no attempt could read the cgroup: not measured is not none.
                       "errors_with_oom": None if all(r.get("oom_kills") is None for r in body["rows"])
