@@ -162,6 +162,12 @@ impl CortexRecord {
         &self.key
     }
 
+    /// A record in a session's reserved handoff slot
+    /// (`crate::session_handoff`), served only by key and the hook.
+    pub fn is_session_handoff(&self) -> bool {
+        crate::session_handoff::is_handoff_key(&self.key)
+    }
+
     /// `CortexRecord.origin`: the strongest tier in `support`, or "".
     pub fn origin(&self) -> &'static str {
         SUPPORT_PRECEDENCE
@@ -375,6 +381,15 @@ impl CortexStore {
         self.records.iter().filter(|r| r.status == "current")
     }
 
+    /// Every `current` record a read may rank, list or consume without
+    /// naming its slot: [`Self::current_records`] without the sessions'
+    /// handoff slots, which only a keyed read and the SessionStart hook
+    /// serve. Persistence, compaction, rollback and keyed reads keep using
+    /// `current_records` and `lookup`.
+    pub fn retrievable_records(&self) -> impl Iterator<Item = &CortexRecord> {
+        self.current_records().filter(|r| !r.is_session_handoff())
+    }
+
     /// `members(entity, attribute)`: current members of a set slot, in
     /// insertion order.
     #[allow(dead_code)] // read API for the write slice (W2-E) and the tests
@@ -444,7 +459,7 @@ impl CortexStore {
     ) -> Vec<serde_json::Value> {
         let (key_ent, key_attr) = slot_key(entity, attribute);
         let mut same: Vec<&CortexRecord> = self
-            .current_records()
+            .retrievable_records()
             .filter(|r| r.key.0 == key_ent && r.key.1 != key_attr)
             .collect();
         // Stable, by -max(asserted_at, last_confirmed).
@@ -508,12 +523,13 @@ impl CortexStore {
     /// assistant-origin records are multiplied by
     /// [`ASSISTANT_FACT_SCORE_MULT`]; `min_score` applies after that
     /// penalty; stable descending sort; cut to `top_k`. Returns
-    /// `(record index, score)`.
+    /// `(record index, score)`. Sessions' handoff slots never rank
+    /// (`crate::session_handoff`).
     pub fn search(&self, q: &[f32], top_k: usize, min_score: f64) -> Vec<(usize, f64)> {
         let qn = unit_f32(q);
         let mut scored: Vec<(usize, f64)> = Vec::new();
         for (i, r) in self.records.iter().enumerate() {
-            if r.status != "current" {
+            if r.status != "current" || r.is_session_handoff() {
                 continue;
             }
             let Some(unit) = r.unit.as_deref() else {
@@ -683,6 +699,50 @@ pub(crate) mod tests {
             Some("Debian 13")
         );
         assert!(s.lookup("dev box", "kernel").is_none());
+    }
+
+    #[test]
+    fn handoff_slots_are_served_by_key_only() {
+        let h = rec(
+            "session:0123456789abcdef0123456789abcdef",
+            "handoff",
+            "doing X",
+        );
+        let other_attr = rec(
+            "session:0123456789abcdef0123456789abcdef",
+            "note",
+            "an ordinary attribute",
+        );
+        let near = rec("session hook", "handoff", "ordinary");
+        let mut emb = vec![0.0_f32; DIM];
+        emb[0] = 1.0;
+        let mut h = h;
+        h.embedding = Some(emb.clone().into());
+        let mut near = near;
+        near.embedding = Some(emb.clone().into());
+        let s = store(vec![h, other_attr, near]);
+        // The key read still finds it.
+        assert_eq!(
+            s.lookup("session:0123456789abcdef0123456789abcdef", "Handoff")
+                .map(|r| r.value.as_str()),
+            Some("doing X")
+        );
+        let listed: Vec<&str> = s.retrievable_records().map(|r| r.value.as_str()).collect();
+        assert_eq!(listed, ["an ordinary attribute", "ordinary"]);
+        assert_eq!(s.current_records().count(), 3);
+        // Nearby-slot candidates for an empty lookup never offer a handoff,
+        // by entity or by embedding.
+        let cands = s.candidates_for(
+            "session:0123456789abcdef0123456789abcdef",
+            "status",
+            Some(&emb),
+            5,
+            0.0,
+        );
+        let values: Vec<&str> = cands.iter().map(|c| c["value"].as_str().unwrap()).collect();
+        assert_eq!(values, ["an ordinary attribute", "ordinary"]);
+        let cands = s.candidates_for("elsewhere", "x", Some(&emb), 5, 0.0);
+        assert!(cands.iter().all(|c| c["value"] != "doing X"), "{cands:?}");
     }
 
     #[test]

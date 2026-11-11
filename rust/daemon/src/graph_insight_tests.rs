@@ -447,3 +447,31 @@ fn graph_insight_bank_scale_timing() {
         started.elapsed()
     );
 }
+
+/// A contested handoff never surfaces as a graph-insight question; an
+/// ordinary contested fact still does.
+#[test]
+fn contested_facts_skip_handoff_slots() {
+    use crate::stores::cortex::tests::{rec, store};
+    let mut parked_h = rec(
+        "session:0123456789abcdef0123456789abcdef",
+        "handoff",
+        "rival",
+    );
+    parked_h.status = "contested".into();
+    let mut parked = rec("session hook", "port", "9090");
+    parked.status = "contested".into();
+    let s = store(vec![
+        rec(
+            "session:0123456789abcdef0123456789abcdef",
+            "handoff",
+            "doing X",
+        ),
+        parked_h,
+        rec("session hook", "port", "8080"),
+        parked,
+    ]);
+    let got = contested_facts(&s);
+    assert_eq!(got.len(), 1);
+    assert_eq!(got[0].entity, "session hook");
+}

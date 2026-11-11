@@ -96,15 +96,7 @@ async fn register_client_session(
         return;
     }
     let log = &ws.log;
-    let mut root = leaf;
-    let mut seen = vec![log.episodes[leaf].id.clone()];
-    while let Some(parent) = log.episodes[root].parent_id.as_deref()
-        && let Some(p) = log.index(parent)
-        && !seen.iter().any(|s| s == parent)
-    {
-        root = p;
-        seen.push(log.episodes[p].id.clone());
-    }
+    let root = root_index(log, leaf);
     let now = crate::episodes::now();
     let ids = json!([log.episodes[root].id]);
     let times = json!([now]);
@@ -133,6 +125,53 @@ async fn register_client_session(
     .await;
     if let Err(e) = res {
         eprintln!("client-session registration failed: {e}");
+    }
+}
+
+/// The root of `leaf`'s episode tree: its parent chain followed while each
+/// parent is in the log, stopping at a cycle.
+pub fn root_index(log: &crate::episodes::EpisodeLog, leaf: usize) -> usize {
+    let mut root = leaf;
+    let mut seen = vec![log.episodes[leaf].id.clone()];
+    while let Some(parent) = log.episodes[root].parent_id.as_deref()
+        && let Some(p) = log.index(parent)
+        && !seen.iter().any(|s| s == parent)
+    {
+        root = p;
+        seen.push(log.episodes[p].id.clone());
+    }
+    root
+}
+
+/// The roots a session key has registered (`client_sessions.episode_ids`),
+/// newest first; empty when the key has no row or the read fails (logged).
+pub async fn registered_roots(ready: &Ready, key: &str) -> Vec<String> {
+    let res = crate::txn::with_client(ready.storage.client(), |c| async move {
+        c.query_opt(
+            "SELECT episode_ids FROM client_sessions WHERE session_key = $1",
+            &[&key],
+        )
+        .await
+    })
+    .await;
+    match res {
+        Ok(Some(row)) => {
+            let ids: Option<Value> = row.get(0);
+            let mut out: Vec<String> = ids
+                .as_ref()
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|v| v.as_str().map(str::to_string))
+                .collect();
+            out.reverse();
+            out
+        }
+        Ok(None) => Vec::new(),
+        Err(e) => {
+            eprintln!("client-session roots read failed: {e:#}");
+            Vec::new()
+        }
     }
 }
 
