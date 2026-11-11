@@ -487,9 +487,11 @@ def _render_compose(text, env):
         if isinstance(node, list):
             return [walk(v) for v in node]
         if isinstance(node, str):
-            # Forms this helper does not implement must not appear.
-            assert "$$" not in node and not re.search(r"\$\{[A-Za-z0-9_]+(-|\?|\+|:\+)", node), node
-            return re.sub(r"\$\{([A-Za-z0-9_]+)(:-|:\?)?([^}]*)\}", value, node)
+            # Forms this helper does not implement must not appear. "$$" is
+            # Compose's escape for a literal "$" (left for the container shell).
+            escaped = node.replace("$$", "\0")
+            assert not re.search(r"\$\{[A-Za-z0-9_]+(-|\?|\+|:\+)", escaped), node
+            return re.sub(r"\$\{([A-Za-z0-9_]+)(:-|:\?)?([^}]*)\}", value, escaped).replace("\0", "$")
         return node
     return walk(yaml.safe_load(text))
 
@@ -568,6 +570,8 @@ def engine_host(tmp_path, monkeypatch):
             return 1, "Error response from daemon: No such image"
         if "df" in argv:
             return 0, "Filesystem 1024-blocks Used Available Capacity Mounted on\noverlay 99999999 1 99999998 1% /\n"
+        if argv[1:2] == ["exec"] and "mktemp" in argv:
+            return 0, argv[-1].replace("XXXXXXXX", "fixture1") + "\n"
         if argv[:2] == ["docker", "compose"]:
             if "config" in argv:
                 if any(not Path(argv[i + 1]).is_file() for i, a in enumerate(argv[:-1]) if a == "-f"):
@@ -912,6 +916,29 @@ def test_shadow_uses_only_shadow_service_and_keeps_password_on_rerun(shadow_host
         assert "shadow_password" not in " ".join(a)
 
 
+def test_shadow_role_script_works_in_a_non_root_postgres_container(shadow_host):
+    # docker cp creates root-owned files: a uid-999 PostgreSQL container can
+    # neither read a private one nor delete one from sticky /tmp. The role
+    # script is therefore public (the password arrives through docker exec -e
+    # and psql's \getenv) and staged in a directory the container user owns.
+    from pseudolife_memory import update_engine as eng
+    s = shadow_host
+    eng.deploy_engine(s["update"](shadow=True), s["repo"])
+    password = next(line.split("=", 1)[1] for line in (s["repo"] / "ops/.env").read_text().splitlines()
+                    if line.startswith("PSEUDOLIFE_SHADOW_DB_PASSWORD="))
+    staged = "/tmp/pseudolife-shadow-fixture1"
+    copies = [a for a in s["calls"] if a[1:2] == ["cp"]]
+    assert len(copies) == 1 and copies[0][-1] == f"fixture-pg:{staged}/role.sql"
+    text, mode = s["copied"]
+    assert password not in text and text.startswith("\\getenv shadow_password PSEUDOLIFE_SHADOW_DB_PASSWORD\n")
+    if os.name != "nt":
+        assert mode == 0o644
+    apply = next(a for a in s["calls"] if a[1:2] == ["exec"] and "psql" in a and "-f" in a)
+    assert apply[2:5] == ["-e", "PSEUDOLIFE_SHADOW_DB_PASSWORD", "fixture-pg"] and apply[-1] == f"{staged}/role.sql"
+    assert s["role_env"] == password
+    assert ["docker", "exec", "fixture-pg", "rm", "-rf", "--", staged] in s["calls"]
+
+
 @pytest.fixture
 def shadow_host(engine_host, monkeypatch):
     from pseudolife_memory import update_engine as eng
@@ -953,6 +980,10 @@ def shadow_host(engine_host, monkeypatch):
                 "org.pseudolife.shadow.configuration": env.get("PSEUDOLIFE_SHADOW_CONFIGURATION")}}}
         if "rm" in args and args[-1] == eng.SHADOW_SERVICE:
             s["shadow"] = None
+        if args[1:2] == ["cp"] and Path(args[2]).is_file():
+            s["copied"] = (Path(args[2]).read_text(encoding="utf-8"), Path(args[2]).stat().st_mode & 0o777)
+        if args[1:2] == ["exec"] and "psql" in args and "-f" in args:
+            s["role_env"] = env.get("PSEUDOLIFE_SHADOW_DB_PASSWORD")
         return original_run(argv, **kw)
 
     monkeypatch.setattr(up, "run_cli", run)

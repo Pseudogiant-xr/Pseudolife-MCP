@@ -51,7 +51,7 @@ services:
     oom_score_adj: 1000
     healthcheck:
       # Over TCP: the image's first-start server listens only on its socket.
-      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U pseudolife -d pl_cf_mir_home"]
+      test: ["CMD-SHELL", "exec /usr/lib/postgresql/$$PG_MAJOR/bin/pg_isready -h 127.0.0.1 -U pseudolife -d pl_cf_mir_home"]
       interval: 5s
       timeout: 5s
       retries: 30

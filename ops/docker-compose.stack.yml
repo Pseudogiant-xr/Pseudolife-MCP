@@ -17,6 +17,11 @@ services:
     image: ghcr.io/pseudogiant-xr/pseudolife-pg:18
     container_name: pseudolife-mcp-postgres
     restart: unless-stopped
+    user: 999:999
+    cap_drop:
+    - ALL
+    security_opt:
+    - no-new-privileges:true
     logging: *id001
     environment:
       POSTGRES_USER: pseudolife
@@ -29,7 +34,7 @@ services:
     healthcheck:
       test:
       - CMD-SHELL
-      - pg_isready -U pseudolife -d pseudolife_memory
+      - exec /usr/lib/postgresql/$$PG_MAJOR/bin/pg_isready -U pseudolife -d pseudolife_memory
       interval: 10s
       timeout: 5s
       retries: 5

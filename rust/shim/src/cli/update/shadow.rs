@@ -437,55 +437,7 @@ pub(super) fn start(
         if save {
             save_password(&path, original.as_deref(), &password)?;
         }
-        let temporary = std::env::temp_dir().join(format!(
-            "pseudolife-shadow-{}.sql",
-            uuid::Uuid::new_v4().simple()
-        ));
-        let remote = format!(
-            "/tmp/pseudolife-shadow-{}.sql",
-            uuid::Uuid::new_v4().simple()
-        );
-        let mut script = format!("\\set shadow_password '{password}'\n").into_bytes();
-        script.extend(fs::read(ops.join("sql/shadow_reader_role.sql"))?);
-        seams::write_atomic(&temporary, &script)?;
-        let copied = u
-            .docker_call(&[
-                "cp",
-                &temporary.to_string_lossy(),
-                &format!("{pg}:{remote}"),
-            ])
-            .0;
-        let applied = if copied == 0 {
-            u.docker_call(&[
-                "exec",
-                pg,
-                "psql",
-                "-X",
-                "-v",
-                "ON_ERROR_STOP=1",
-                "-U",
-                user,
-                "-d",
-                db,
-                "-f",
-                &remote,
-            ])
-            .0
-        } else {
-            1
-        };
-        let cleaned = u.docker_call(&["exec", pg, "rm", "-f", &remote]).0;
-        let local_cleaned = fs::remove_file(&temporary).is_ok();
-        if cleaned != 0 || !local_cleaned {
-            return Err(UpdateError::new(
-                "could not remove the private shadow role script; remove the owned temporary script before retrying",
-            ));
-        }
-        if applied != 0 {
-            return Err(UpdateError::new(
-                "could not apply the SELECT-only shadow role; check PostgreSQL access and the role script's prerequisites, then retry",
-            ));
-        }
+        apply_role(u, ops, pg, user, db, &env)?;
         Ok(())
     })();
     setup.map_err(|e| {
@@ -530,6 +482,97 @@ pub(super) fn start(
     let retries = u.o.health_retries;
     let health = gate(u, &url, token, version, schema, retries);
     finish_start(u, &compose, &env, &url, cleanup, health)
+}
+
+/// Create or refresh the SELECT-only shadow role in the writer's PostgreSQL
+/// container.
+pub(super) fn apply_role(
+    u: &Update,
+    ops: &Path,
+    pg: &str,
+    user: &str,
+    db: &str,
+    env: &Environment,
+) -> Result<()> {
+    // The password never touches argv or a file: `docker exec -e` passes
+    // the name only and psql reads the value with \getenv. The copied
+    // script is the public role SQL, staged in a directory the
+    // container's own user creates, so a non-root PostgreSQL container
+    // (uid 999) can read docker cp's root-owned file and remove it.
+    let temporary = std::env::temp_dir().join(format!(
+        "pseudolife-shadow-{}.sql",
+        uuid::Uuid::new_v4().simple()
+    ));
+    let mut script = format!("\\getenv shadow_password {PASSWORD}\n").into_bytes();
+    script.extend(fs::read(ops.join("sql/shadow_reader_role.sql"))?);
+    seams::write_atomic(&temporary, &script)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&temporary, fs::Permissions::from_mode(0o644))?;
+    }
+    let (made, staged) = u.docker_call(&[
+        "exec",
+        pg,
+        "mktemp",
+        "-d",
+        "/tmp/pseudolife-shadow-XXXXXXXX",
+    ]);
+    let staged = staged.trim().to_string();
+    if made != 0 || !staged.starts_with("/tmp/pseudolife-shadow-") {
+        let _ = fs::remove_file(&temporary);
+        return Err(UpdateError::new(
+            "could not stage the shadow role script in the PostgreSQL container; check that it is running and has free space in /tmp, then retry",
+        ));
+    }
+    let remote = format!("{staged}/role.sql");
+    let copied = u
+        .docker_call(&[
+            "cp",
+            &temporary.to_string_lossy(),
+            &format!("{pg}:{remote}"),
+        ])
+        .0;
+    let applied = if copied == 0 {
+        u.command(
+            &[
+                "exec",
+                "-e",
+                PASSWORD,
+                pg,
+                "psql",
+                "-X",
+                "-v",
+                "ON_ERROR_STOP=1",
+                "-U",
+                user,
+                "-d",
+                db,
+                "-f",
+                &remote,
+            ]
+            .map(String::from),
+            Some(env),
+            60,
+            false,
+        )
+        .0
+    } else {
+        1
+    };
+    let cleaned = u.docker_call(&["exec", pg, "rm", "-rf", "--", &staged]).0;
+    let local_cleaned = fs::remove_file(&temporary).is_ok();
+    if cleaned != 0 || !local_cleaned {
+        return Err(UpdateError::new(format!(
+            "could not remove the shadow role script; remove {staged} from the PostgreSQL container and the host's temporary script before retrying"
+        )));
+    }
+    if applied != 0 {
+        return Err(UpdateError::new(
+            "could not apply the SELECT-only shadow role; check PostgreSQL access and the role script's prerequisites, then retry",
+        ));
+    }
+    Ok(())
 }
 
 fn finish_start(
