@@ -631,6 +631,12 @@ impl CortexStore {
             return Err(SET_SLOT_REFUSAL);
         }
         self.dirty_slots.insert(key.clone());
+        if w.dream && crate::session_handoff::is_handoff_key(&key) {
+            // Only the session writes its handoff; a dream claim at the
+            // slot parks, whatever the current value's origin.
+            let cur = self.current.get(&key).copied();
+            return Ok(self.contend(cur, w, "handoff_slot"));
+        }
         let Some(idx) = self.current.get(&key).copied() else {
             if w.force_contend {
                 // Quarantine: even a new slot's first value parks, currentless.
@@ -979,11 +985,30 @@ mod tests {
             .unwrap();
         assert_ne!(stale.action, "superseded");
         assert_eq!(s.lookup(H, "handoff").unwrap().value, "newer");
-        // A dream claim at the slot keeps the ordinary guards (here: never
-        // over a direct user value).
+        // A dream claim at the slot never becomes current, even over an
+        // agent-origin value the ordinary rules would let it replace.
+        let mut s = CortexStore::default();
+        s.write_fact(&write(
+            H,
+            "handoff",
+            "the session's own state",
+            "agent",
+            0.5,
+            1.0,
+        ))
+        .unwrap();
         let mut d = write(H, "handoff", "dreamed", "agent", 0.9, 6.0);
         d.dream = true;
-        assert_ne!(s.write_fact(&d).unwrap().action, "superseded");
+        assert_eq!(s.write_fact(&d).unwrap().action, "contested");
+        assert_eq!(
+            s.lookup(H, "handoff").unwrap().value,
+            "the session's own state"
+        );
+        let mut fresh = CortexStore::default();
+        let mut d = write(H, "handoff", "dreamed", "agent", 0.9, 6.0);
+        d.dream = true;
+        fresh.write_fact(&d).unwrap();
+        assert!(fresh.lookup(H, "handoff").is_none());
     }
 
     #[test]
