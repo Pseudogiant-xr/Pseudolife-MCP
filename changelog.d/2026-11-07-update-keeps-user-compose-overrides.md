@@ -1,2 +1,0 @@
-### Fixed (2026-11-07 — update keeps a user's Compose override named like an engine overlay)
-- Release-mode `pseudolife-mcp update` (Python and native updaters) dropped any Compose file of the running project whose name began with `docker-compose.engine` or `docker-compose.rollback`, wherever it lived, as if it were one of the updater's own overlays, so a user's override with such a name lost its settings on recreation. Only files in the updaters' own `update-engine` directory are treated as theirs now.

@@ -1762,7 +1762,7 @@ dependencies = [
 
 [[package]]
 name = "pseudolife-daemon"
-version = "0.22.1"
+version = "0.23.0"
 dependencies = [
  "anyhow",
  "aws-lc-rs",
@@ -1814,7 +1814,7 @@ version = "0.1.0"
 
 [[package]]
 name = "pseudolife-stdio"
-version = "0.22.1"
+version = "0.23.0"
 dependencies = [
  "bytes",
  "chrono",
