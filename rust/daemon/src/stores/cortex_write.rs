@@ -649,17 +649,19 @@ impl CortexStore {
                 record: new,
             });
         };
+        // A session's handoff is its own latest state: a rewrite that differs
+        // at all, even only in case or surrounding space, replaces it; a
+        // shorter one is not a compression echo, and neither origin tier nor
+        // confidence can park it behind the old one.
+        let handoff_rewrite = !w.dream
+            && crate::session_handoff::is_handoff_key(&key)
+            && self.records[idx].value != w.value
+            && self.not_older(&self.records[idx], w.hlc, w.now);
+        if handoff_rewrite {
+            return Ok(self.supersede(idx, key, w));
+        }
         if norm_value(&self.records[idx].value) == norm_value(w.value) {
             return Ok(self.confirm(idx, w, w.support));
-        }
-        if !w.dream
-            && crate::session_handoff::is_handoff_key(&key)
-            && self.not_older(&self.records[idx], w.hlc, w.now)
-        {
-            // A session's handoff is its own latest state: a shorter
-            // rewrite is not a compression echo, and neither origin tier
-            // nor confidence can park it behind the old one.
-            return Ok(self.supersede(idx, key, w));
         }
         if is_compression_echo(w.value, &self.records[idx].value) {
             self.log(
@@ -985,6 +987,50 @@ mod tests {
             .unwrap();
         assert_ne!(stale.action, "superseded");
         assert_eq!(s.lookup(H, "handoff").unwrap().value, "newer");
+        // A rewrite that differs only in case replaces a handoff (a command
+        // or path in it may be case-sensitive); the identical text confirms.
+        // The ordinary slot confirms both, keeping its first spelling.
+        for (entity, want, kept) in [
+            (H, ["superseded", "confirmed"], "next run ./fix.sh"),
+            (
+                "session hook",
+                ["confirmed", "confirmed"],
+                "Next run ./Fix.sh",
+            ),
+        ] {
+            let mut s = CortexStore::default();
+            s.write_fact(&write(
+                entity,
+                "handoff",
+                "Next run ./Fix.sh",
+                "agent",
+                0.9,
+                1.0,
+            ))
+            .unwrap();
+            let recased = s
+                .write_fact(&write(
+                    entity,
+                    "handoff",
+                    "next run ./fix.sh",
+                    "agent",
+                    0.9,
+                    2.0,
+                ))
+                .unwrap();
+            let same = s
+                .write_fact(&write(
+                    entity,
+                    "handoff",
+                    "next run ./fix.sh",
+                    "agent",
+                    0.9,
+                    3.0,
+                ))
+                .unwrap();
+            assert_eq!([recased.action, same.action], want, "{entity}");
+            assert_eq!(s.lookup(entity, "handoff").unwrap().value, kept, "{entity}");
+        }
         // A dream claim at the slot never becomes current, even over an
         // agent-origin value the ordinary rules would let it replace.
         let mut s = CortexStore::default();
