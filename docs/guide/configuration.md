@@ -3003,7 +3003,13 @@ every variant.
   structure ships. The **`continuum` preset is retained** as an optional layout: the 8-tier `working … forever` layout with promotion
   thresholds, per-tier retention policies, and the 2026-07-25 demotion
   cascade (a full band demotes into the next; only overflow past
-  `forever` drops).
+  `forever` drops). The multi-band presets (`continuum`, `titans`,
+  `moneta`, `yaad`, `memora`, and a `custom` list of more than one band)
+  and every band `retention_policy` other than `balanced` were retired on
+  2026-11-02: the Python daemon still runs them, and the Rust daemon
+  refuses to start on them, naming the setting and the fix. A
+  `pseudolife-mcp update` checks this before it moves a host to the Rust
+  daemon and keeps such a host on Python until the bank is flattened.
   **Moving an existing bank to flat:** first rehearse restoring the exact
   bank **and its config** with your own tooling. An automatic paired restore
   for an explicit database URL is not available. Stop the daemon and use
@@ -3019,11 +3025,11 @@ every variant.
   fields stay unchanged, including rows in unrecognized bands. Capacity
   is at least the old total, the complete row count and 5,250; larger banks
   use the single-band custom layout below. Banks that have not run this
-  migration still accept existing presets. A migrated bank must keep its
+  migration still accept existing presets on the Python daemon. A migrated bank must keep its
   matching flat layout: changing its preset back to continuum is refused
   before hydration. A bank that has never been migrated can still switch
-  from flat to continuum through the existing startup rebalance; that is
-  not an inverse of this migration.
+  from flat to continuum through the existing startup rebalance on the
+  Python daemon; that is not an inverse of this migration.
 
   The command commits its data migration before atomically replacing the
   config. If interrupted, keep the daemon stopped and repeat the same
@@ -3954,7 +3960,10 @@ fp32, the extractor sidecar's ~5.3 GB mmapped model plus its context, and
 Postgres — the whole stack wants ~9 GB under dream load with the default
 sidecar (~10 GB with fp32), or ~3 GB in `claude-only` mode (~4.5 GB), where
 the Qwen3 embedding backbone is the bulk of it. Encode bursts add up to
-~1 GB on top.
+~1 GB on top. Those daemon figures are the Python daemon's. The Rust
+daemon runs the embedder in fp32 and refuses an explicit `bf16` at startup
+(`embedding.cpu_dtype: auto` means fp32 there); it peaked at 4.2 GiB under
+write load (measured 2026-11-06 on a 20 GB Linux host).
 Cap the VM by copying `ops/wslconfig.example` to
 `%USERPROFILE%\.wslconfig`, tuning `memory=`, then `wsl --shutdown`.
 
@@ -4276,10 +4285,11 @@ installer and the session notices print.
 
 | command | what it does |
 |---|---|
-| `pseudolife-mcp update` | Docker tier: pull `ghcr.io/pseudogiant-xr/pseudolife-daemon:<newest release on PyPI>`, back the bank up, tag the running image `…-pre-update-<stamp>`, recreate only the daemon container, wait for `/health` at that version, then the client side. Pip / lite: upgrade the package where it is installed; restart nothing. |
+| `pseudolife-mcp update` | Docker tier: pull the daemon image of the newest release on PyPI (`ghcr.io/pseudogiant-xr/pseudolife-daemon-rust:<version>` for the Rust engine, `ghcr.io/pseudogiant-xr/pseudolife-daemon:<version>` for the Python one; a host that never chose an engine moves to Rust, see [Daemon engine](install-and-move.md)), back the bank up, tag the running image `…-pre-update-<stamp>`, recreate only the daemon container, wait for `/health` at that version, then the client side. Pip / lite: upgrade the package where it is installed; restart nothing. |
 | `pseudolife-mcp update --tag 0.15.1` | the same for a pinned release |
 | `pseudolife-mcp update --check` | report only: exit 0 when a newer release exists, 3 when current, 2 when PyPI or the daemon did not answer |
 | `--clients-only` / `--daemon-only` | one half: the shim runtime + plugin cache + Codex step (+ refreshing running saved tunnels), or the daemon; the steps after a newly installed shim runtime run in that runtime ([below](#the-client-steps-after-a-new-shim-runtime)). On a client-only machine (run from a shim runtime, no daemon container here) plain `update` and `--clients-only` both move the clients to the daemon's release; a silent or unversioned endpoint is refused, and `--daemon-only` is refused naming the daemon's host |
+| `--engine rust` / `--engine python` | Docker tier: select the daemon engine on the same bank, `/data` volume, port and bearer settings, and record the choice so later updates keep it. `--engine rust` needs a release that publishes the Rust image and refuses, before the backup, a configuration the Rust daemon does not support; `--engine python` switches back. An explicit engine change moves only the daemon, never the clients: run `pseudolife-mcp update --clients-only` afterwards if the clients are behind. Details: [Daemon engine](install-and-move.md) |
 | `--reinstall` | recreate the daemon at the version it already runs, and install the shim runtime again when the current one is already that release (without it the shim step reports `current`, unless one of that runtime's installed requirements is outside the range its own `pseudolife-mcp` declares, as an mcp 2.1 runtime left by a 0.18.1 update is: then it installs again and says why); with `--clients-only`, install the release even over a checkout-built shim runtime of the same version |
 | `--allow-downgrade` | with `--tag`, allow a release older than the one the daemon runs (refused otherwise: the bank's schema may be newer than that release knows) |
 | `--env-file <path>` | the compose env file, when the one the container was created with is gone (without it the recreate would reset the Postgres password, the volume names and the bearer, so it stops instead) |

@@ -1,2 +1,0 @@
-### Fixed (2026-11-07 — engine overlays no longer break the next release update)
-- A release update after an engine change no longer refuses because Compose still lists the deleted candidate or rollback overlay of the earlier run, and the Python updater no longer mistakes a Rust release host for a checkout-mode selection. Both updaters record the Rust activation again on every release update of a Rust host; before, the native updater dropped it on a plain rerun and its next run refused.

@@ -1,2 +1,0 @@
-### Fixed (2026-11-07 — the counters-import leg checks free disk space before it pulls)
-- `pseudolife-mcp update --engine rust` on a bank whose counters still need the Python daemon's import pulled the Rust daemon image before checking the 8 GiB free-space floor, in both the Python and native updaters, so a nearly full disk could fill further before the update refused. The floor is now checked first, as before every other pull.

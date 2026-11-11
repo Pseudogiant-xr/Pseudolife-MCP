@@ -1,6 +1,0 @@
-### Added (2026-11-07 — a private Rust mirror seeded from a nightly backup)
-- `ops/docker-compose.rust-mirror.yml` is an opt-in Compose project, `pseudolife-mirror`, that runs a Rust writer on its own copy of the bank. It has its own PostgreSQL and volume and sits on an `internal: true` network with no route out and no published port. Memory caps and `oom_score_adj: 1000` make it the kernel's first choice under memory pressure, never the live writer. It mounts the provisioned models read-only, and runs as the writer's uid with the writer's `TZ` and writer id. The live stack is unchanged.
-- `rust/daemon/harness/mirror/seed.py` restores a nightly backup into the mirror, from a read-only mount. It never rotates or deletes a backup.
-  - **Credentials:** it rewrites every principal token and board agent credential to a replay-only value derived from a mirror secret. It clears pairing codes, Console sessions, the maintainer's passkey and sign-in rows, and the two meta secrets.
-  - **Refusals:** it refuses the live PostgreSQL service, container or port 5433, any server whose cluster holds `pseudolife_memory`, a disk below 8 GiB free, and an incomplete dump.
-  - **Other commands:** `tokens`, `config` and `health` write the mirror's bearer map and its outbound-off config, then wait for a ready writer (docs/specs/2026-11-06-full-rust-shadow.md §4.2).
