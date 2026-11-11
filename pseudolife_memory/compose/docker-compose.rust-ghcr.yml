@@ -1,4 +1,5 @@
-# Opt-in Rust release image; apply after docker-compose.ghcr.yml.
+# Rust release image, the default engine since 0.23.0; apply after
+# docker-compose.ghcr.yml.
 # The updater supplies an explicit version and uses --no-build --no-deps.
 services:
   pseudolife-daemon:

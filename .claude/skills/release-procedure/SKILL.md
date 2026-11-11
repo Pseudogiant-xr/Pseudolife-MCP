@@ -160,19 +160,21 @@ them in this order (first done 2026-07-16, v0.8.0; GHCR images added
    "denied". Verify:
    `docker manifest inspect ghcr.io/pseudogiant-xr/pseudolife-daemon:<version>`.
 
-   **Opt-in Rust artifacts.** Before the release, the maintainer chooses
-   whether to enable `PSEUDOLIFE_PUBLISH_RUST_DAEMON=true` (the separate
-   `pseudolife-daemon-rust:<version>` image) and
+   **Rust artifacts.** Two repository variables, disabled when unset, gate
+   them, and all publication remains downstream of the human-approved
+   `publish` job. `PSEUDOLIFE_PUBLISH_RUST_DAEMON=true` publishes the
+   separate `pseudolife-daemon-rust:<version>` image. Since 0.23.0 the Rust
+   daemon is the default Docker engine, so confirm before the release that
+   this variable is still `true`: with the image published, install and
+   release-mode `pseudolife-mcp update` select it (`--engine python` keeps
+   or switches back to Python); without it, a host that never chose an
+   engine stays on Python and `--engine rust` stops at its `docker pull`
+   with nothing changed. The Rust image gets only the explicit version
+   tag; the workflow pushes no `latest` for it.
    `PSEUDOLIFE_PUBLISH_RUST_ASSETS=true` (the five native CLI archives,
-   `SHA256SUMS`, and `pseudolife-compose-<version>.tar.gz`). Both are
-   repository variables, disabled when unset, and all publication remains
-   downstream of the human-approved `publish` job. The Rust image gets
-   only the explicit version tag, never `latest`, until the default switch
-   is separately approved. Neither variable switches a host's engine:
-   with the image published, release-mode `pseudolife-mcp update --engine
-   rust` can select it for that release (and `--engine python` switches
-   back); without it, that command stops at its `docker pull` with nothing
-   changed. Verify a published image with
+   `SHA256SUMS`, and `pseudolife-compose-<version>.tar.gz`) remains the
+   maintainer's choice before each release and switches nothing on a
+   host. Verify a published image with
    `docker manifest inspect ghcr.io/pseudogiant-xr/pseudolife-daemon-rust:<version>`
    and flip its GHCR package to public after the first release that runs
    the job, as for the Python image.
