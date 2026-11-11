@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "rust",
+  "before": "a10b8ae98297d538",
+  "fingerprint": "a997568b94cb7b6f",
+  "reason": "adds the 5 offline tests of rust/daemon/harness/test_w2e_recall_llm.py (no daemon, database or binary; 0.16 s of test time locally on Windows, 2026-11-11) to the existing 'Check port inventories and producer census' pytest command; no other step changed"
+}

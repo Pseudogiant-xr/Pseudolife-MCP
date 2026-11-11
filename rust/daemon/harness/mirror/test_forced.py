@@ -103,7 +103,8 @@ def test_run_classifies_each_scenario_and_reruns_only_what_differs(tmp_path):
     assert set(private) == {"w2e/flaky", "w2e/old", "w2e/fresh"} and report["complete"]
     counts = forced.counts(report)["w2e"]
     assert counts == {"planned": 4, "run": 4, "pass": 1, "transient": 1, "preexisting": 1, "new": 1, "accepted": 0, "excluded": 0,
-                      "error": 0, "differences": 3, "errors_with_oom": None, "new_scenarios": ["fresh"]}
+                      "error": 0, "differences": 3, "not_forced": [], "errors_with_oom": None,
+                      "new_scenarios": ["fresh"]}
     assert "DIFF" not in json.dumps(counts)  # counts and names only
 
 
@@ -629,6 +630,51 @@ def test_candidate_auto_reopen_is_excluded_beside_candidate_auto(tmp_path):
     report, private = forced.run(FakeRunner(tmp_path, answers), ["w2e"], None, names=lambda s: list(answers))
     assert report["suites"]["w2e"]["rows"][0]["class"] == "error"
     assert private["w2e/candidate-auto-reopen"]["real"] is None
+
+
+BIND_FIXTURE = ["security-remote-open", "security-remote-auth", "trust-bind"]
+
+
+@pytest.mark.parametrize("jobs", [1, 2])
+def test_the_bind_fixture_scenarios_are_not_forced_and_invoke_nothing(tmp_path, jobs):
+    """The conductor's ruling G under the maintainer's delegation of
+    2026-11-11 (remainder run e2f6057ee): the three routes scenarios that
+    need the debug mutants bind fixture refuse before any listener on the
+    release binary the forced runner uses, so no arm of theirs runs. They
+    are listed as not forced, in no class."""
+    answers = {"seeded": {"real": PASS}, "static-build": {"real": PASS}}
+    workers = [FakeRunner(tmp_path / f"w{n}", answers) for n in range(jobs)]
+    report, private = forced.run(workers[0], ["routes"], None,
+                                 names=lambda s: ["seeded", *BIND_FIXTURE, "static-build"],
+                                 workers=workers)
+    calls = [c for w in workers for c in w.calls]
+    assert not [c for c in calls if c[1] in BIND_FIXTURE]
+    body = report["suites"]["routes"]
+    assert body["not_forced"] == BIND_FIXTURE and body["planned"] == 2
+    assert [r["scenario"] for r in body["rows"]] == ["seeded", "static-build"]
+    assert report["complete"] and private == {}
+    counted = forced.counts(report)["routes"]
+    assert counted["not_forced"] == BIND_FIXTURE and counted["run"] == 2 and counted["pass"] == 2
+    assert counted["preexisting"] == 0 and counted["error"] == 0
+    # Near miss: another routes scenario, the debug binary's other user
+    # included, still runs its real arm.
+    assert ("routes", "seeded", "real", True) in calls and ("routes", "static-build", "real", True) in calls
+    for name in BIND_FIXTURE:
+        reason = report["not_forced"][f"routes/{name}"]
+        for word in ("debug mutants bind fixture", "release image",
+                     "conductor under the maintainer's delegation of 2026-11-11",
+                     "run.py live --only security-remote-open security-remote-auth", "issue #1473"):
+            assert word in reason, (name, word)
+    # The harness-level entries stay beside them.
+    assert set(forced.NOT_FORCED) <= set(report["not_forced"])
+
+
+def test_only_naming_a_not_forced_scenario_runs_nothing_for_it(tmp_path):
+    runner = FakeRunner(tmp_path, {"seeded": {"real": PASS}})
+    report, _ = forced.run(runner, ["routes"], ["trust-bind", "seeded"],
+                           names=lambda s: ["seeded", "trust-bind", "security-remote-open"])
+    assert [c[1] for c in runner.calls] == ["seeded"]
+    assert report["suites"]["routes"]["not_forced"] == ["trust-bind"]
 
 
 def test_the_premises_a_real_bank_breaks_are_excluded_with_their_reasons():
@@ -2144,7 +2190,7 @@ def test_the_recordings_hold_both_a_cut_and_a_whole_printout():
     assert kinds["whole"] and kinds["cut"], kinds
 
 
-def test_side_by_side_each_attempt_reads_its_own_out_json(tmp_path):
+def test_side_by_side_each_attempt_reads_its_own_out_json(tmp_path, monkeypatch):
     """Conductor (#1446's truncation fix with --jobs): the runner rebuilds an
     attempt's full differences from its harness's --out JSON, so at --jobs 2
     each worker must read its own scenario's file. Two recorded routes runs
@@ -2167,6 +2213,9 @@ def test_side_by_side_each_attempt_reads_its_own_out_json(tmp_path):
             shutil.copy(RECORDED / f"routes--{name}.json", out)
             return 1, (RECORDED / f"routes--{name}.log").read_text(encoding="utf-8")
 
+    # The recorded trust-bind run is used only as a one-line routes result:
+    # lift ruling G so it runs.
+    monkeypatch.setattr(forced, "NOT_FORCED_SCENARIOS", {})
     workers = [Recorded(Path("rust-bin"), tmp_path / "out", 60, tmp_path / "STOP", scratch=tmp_path / f"s{n}",
                         sweep=lambda attempt: 0, oom_kills=lambda: None) for n in range(2)]
     _, private = forced.run(workers[0], ["routes"], None, names=lambda s: ["seeded", "trust-bind"],
