@@ -23,16 +23,30 @@ pub struct Served {
     pub cache: &'static str,
 }
 
-/// Types of the committed Console build, including its vendor notice.
-/// Python obtains optional mappings from the platform MIME database.
-fn guess_type(path: &Path) -> Option<String> {
+/// The `Content-Type` of a served file (`web/api.py::_serve_static`).
+fn content_type(path: &Path) -> String {
     #[cfg(windows)]
     let platform = registry_type;
     #[cfg(target_os = "linux")]
     let platform = |ext: &str| linux_type(ext, Path::new("/etc/mime.types"));
     #[cfg(not(any(windows, target_os = "linux")))]
     let platform = |_: &str| None;
-    guess_type_with(path, platform)
+    content_type_with(path, platform)
+}
+
+/// The guessed type, or octet-stream, with Python's UTF-8 charset rule.
+fn content_type_with(path: &Path, platform: impl Fn(&str) -> Option<String>) -> String {
+    let mut ctype =
+        guess_type_with(path, platform).unwrap_or_else(|| "application/octet-stream".into());
+    if ctype.starts_with("text/")
+        || matches!(
+            ctype.as_str(),
+            "application/javascript" | "image/svg+xml" | "application/json"
+        )
+    {
+        ctype.push_str("; charset=utf-8");
+    }
+    ctype
 }
 
 #[cfg(target_os = "linux")]
@@ -42,8 +56,14 @@ fn linux_type(ext: &str, table: &Path) -> Option<String> {
 
 fn guess_type_with(path: &Path, platform: impl Fn(&str) -> Option<String>) -> Option<String> {
     let ext = path.extension()?.to_str()?.to_ascii_lowercase();
-    if matches!(ext.as_str(), "md" | "webp") {
-        return platform(&ext);
+    // CPython 3.12 (the shipped Python image) applies the platform table over
+    // its builtin one, which maps Markdown but not WebP. Images without a
+    // platform table (both shipped ones) thus serve text/markdown and
+    // octet-stream respectively.
+    match ext.as_str() {
+        "md" => return platform(&ext).or_else(|| Some("text/markdown".into())),
+        "webp" => return platform(&ext),
+        _ => {}
     }
     Some(
         match ext.as_str() {
@@ -69,7 +89,7 @@ fn guess_type_with(path: &Path, platform: impl Fn(&str) -> Option<String>) -> Op
 }
 
 /// The Windows oracle reads REG_SZ Content Type values under HKCR.
-/// WebP and Markdown have no built-in mapping in the supported Python.
+/// WebP has no builtin mapping in CPython 3.12; Markdown falls back to one.
 ///
 /// Exception to the crate's safe-code rule: `RegGetValueW` has no safe
 /// binding; both calls pass terminated strings and a bounded owned buffer.
@@ -400,18 +420,11 @@ fn serve_with_resolver(
             cache: "no-store",
         });
     }
-    let mut ctype = guess_type(&target).unwrap_or_else(|| "application/octet-stream".into());
-    if crate::mutants::active("static-wrong-type") {
-        ctype = "application/octet-stream".into();
-    }
-    if ctype.starts_with("text/")
-        || matches!(
-            ctype.as_str(),
-            "application/javascript" | "image/svg+xml" | "application/json"
-        )
-    {
-        ctype.push_str("; charset=utf-8");
-    }
+    let ctype = if crate::mutants::active("static-wrong-type") {
+        "application/octet-stream".into()
+    } else {
+        content_type(&target)
+    };
     let cache = if ctype.starts_with("font/") || ctype.starts_with("image/") {
         "max-age=86400"
     } else {
@@ -471,6 +484,77 @@ mod tests {
             Some("application/octet-stream")
         );
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// Content types the shipped Python image (CPython 3.12.16, no platform
+    /// MIME table) serves, read from `_serve_static` in the 0.22.1 image on
+    /// 2026-11-11: its builtin table plus `web/api.py`'s four `add_type`
+    /// overrides and the UTF-8 charset rule.
+    const PY312_SHIPPED_TYPES: [(&str, &str); 8] = [
+        ("css", "text/css; charset=utf-8"),
+        ("html", "text/html; charset=utf-8"),
+        ("js", "application/javascript; charset=utf-8"),
+        ("md", "text/markdown; charset=utf-8"),
+        ("png", "image/png"),
+        ("txt", "text/plain; charset=utf-8"),
+        // CPython 3.12 has no builtin WebP type: platform table or nothing.
+        ("webp", "application/octet-stream"),
+        ("woff2", "font/woff2"),
+    ];
+
+    fn shipped_files(dir: &Path, out: &mut Vec<PathBuf>) {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                shipped_files(&path, out);
+            } else {
+                out.push(path);
+            }
+        }
+    }
+
+    #[test]
+    fn shipped_assets_match_python_312_without_a_platform_table() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../pseudolife_memory/web/static");
+        let mut files = Vec::new();
+        shipped_files(&root, &mut files);
+        assert!(files.len() > 5, "the committed Console build is missing");
+        for file in files {
+            let ext = file
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+            let want = PY312_SHIPPED_TYPES
+                .iter()
+                .find(|(e, _)| *e == ext)
+                .map(|(_, t)| *t)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "{}: pin the shipped Python 3.12 image's type for .{ext}",
+                        file.display()
+                    )
+                });
+            assert_eq!(
+                content_type_with(&file, |_| None),
+                want,
+                "{}",
+                file.display()
+            );
+        }
+    }
+
+    #[test]
+    fn markdown_prefers_the_platform_table_then_the_python_312_builtin() {
+        let path = Path::new("vendor/README.md");
+        assert_eq!(
+            guess_type_with(path, |_| None).as_deref(),
+            Some("text/markdown")
+        );
+        assert_eq!(
+            guess_type_with(path, |_| Some("text/x-markdown".into())).as_deref(),
+            Some("text/x-markdown")
+        );
     }
 
     #[test]

@@ -1627,9 +1627,12 @@ class StaticBuild(Scenario):
         c += [case("static " + path, "GET", path) for path in
               ("/ui", "/ui/", "/ui/assets/", "/ui/next/", "/ui/graph/view",
                "/ui/%2e%2e/pyproject.toml", "/ui/../pyproject.toml", "/ui/a%00b")]
-        c += [case("built " + p.relative_to(root).as_posix(), "GET",
-                   "/ui/" + urllib.parse.quote(p.relative_to(root).as_posix()))
-              for p in sorted(root.rglob("*")) if p.is_file()]
+        built = [case("built " + p.relative_to(root).as_posix(), "GET",
+                      "/ui/" + urllib.parse.quote(p.relative_to(root).as_posix()))
+                 for p in sorted(root.rglob("*")) if p.is_file()]
+        for b in built:
+            b["static_contract"] = True
+        c += built
         c += [case("static " + method, method, "/ui/theme.js") for method in ("POST", "HEAD")]
         return c
 
@@ -2027,6 +2030,8 @@ def compare_case(c: dict, py: dict | None, rs: dict, *, golden: bool = False) ->
            "python_status": py and py["status"], "rust_status": rs["status"], "diffs": [], "declared": None}
     if replays:
         row["transport_replays"] = replays
+    if c.get("static_contract") and py is not None and not golden:
+        py = python312_static_contract(c, py, row)
     if c["method"] == "GET" and urllib.parse.unquote(c["path"].split("?")[0]) == "/api/stats":
         for side, response in (("python", py), ("rust", rs)):
             for parent, leaf in stats_clocks(response or {}):
@@ -2401,18 +2406,58 @@ def load_golden(name: str) -> dict:
     return data
 
 
-def platform_static_type(c: dict, response: dict) -> None:
-    """Replay the oracle's two platform MIME mappings, leaving bytes exact."""
-    if response["status"] != 200 or not c["path"].endswith((".webp", ".md")):
-        return
+# Builtin types CPython 3.12 added for which 3.11 has no mapping (diff of
+# MimeTypes(filenames=()).types_map, 3.11.15 vs 3.12.11, 2026-11-11), so a
+# 3.11 oracle on a host without them in its platform table answers
+# octet-stream where the shipped 3.12 image does not. The shipped Console
+# reaches only ".md"; ".markdown" and ".rst" are listed for completeness.
+PY312_ADDED_BUILTIN_TYPES = {".md": "text/markdown", ".markdown": "text/markdown",
+                             ".rst": "text/x-rst"}
+PLATFORM_STATIC_SUFFIXES = (".webp", ".md")
+
+
+def static_contract_type(path: str, *, version: tuple[int, ...] | None = None) -> tuple[str, str]:
+    """(content-type, cache-control) the shipped Python 3.12 image would serve
+    for ``path`` on this host (CUTOVER D7, 2026-11-07: the 3.12 image is the
+    oracle contract), given the oracle interpreter ``version`` (default: this
+    one). Platform tables override builtins in both versions, so on 3.12 or
+    later this is exactly the interpreter's own answer."""
     sys.path.insert(0, str(REPO))
     from pseudolife_memory.web.api import mimetypes
-    kind = mimetypes.guess_type(c["path"])[0] or "application/octet-stream"
+    kind = mimetypes.guess_type(path)[0]
+    if kind is None and (version or tuple(sys.version_info)) < (3, 12):
+        kind = PY312_ADDED_BUILTIN_TYPES.get(os.path.splitext(urllib.parse.unquote(path))[1].lower())
+    kind = kind or "application/octet-stream"
     if kind.startswith("text/") and "charset" not in kind:
         kind += "; charset=utf-8"
+    return kind, "max-age=86400" if kind.startswith(("font/", "image/")) else "no-store"
+
+
+def platform_static_type(c: dict, response: dict) -> None:
+    """Replay the 3.12 contract's two platform MIME mappings, leaving bytes exact."""
+    if response["status"] != 200 or not c["path"].endswith(PLATFORM_STATIC_SUFFIXES):
+        return
+    kind, cache = static_contract_type(c["path"])
     response["headers"]["content-type"] = kind
-    response["headers"]["cache-control"] = ("max-age=86400" if kind.startswith(("font/", "image/"))
-                                             else "no-store")
+    response["headers"]["cache-control"] = cache
+
+
+def python312_static_contract(c: dict, py: dict, row: dict) -> dict:
+    """A live oracle older than 3.12 lacks 3.12's builtin Markdown type; the
+    candidate is compared against the 3.12 contract instead, and only after
+    the oracle answered exactly what its own interpreter predicts."""
+    if py["status"] != 200 or not c["path"].endswith(PLATFORM_STATIC_SUFFIXES):
+        return py
+    want, cache = static_contract_type(c["path"])
+    if py["headers"].get("content-type") == want:
+        return py
+    # The interpreter's own table: no 3.12 additions are applied at 3.12.
+    own, own_cache = static_contract_type(c["path"], version=(3, 12))
+    if (py["headers"].get("content-type"), py["headers"].get("cache-control")) != (own, own_cache):
+        row["diffs"].append(f"oracle content type {py['headers'].get('content-type')!r} "
+                            f"differs from its interpreter's {own!r}")
+    row["substitution"] = "python-3.12-static-type"
+    return {**py, "headers": {**py["headers"], "content-type": want, "cache-control": cache}}
 
 
 def _machine_paths() -> list[str]:

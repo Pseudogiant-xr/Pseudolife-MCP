@@ -46,6 +46,44 @@ def test_platform_golden_checks_mime_and_cache_without_changing_bytes(kind, cach
     assert run.compare_case({**c, "name": "mapping", "method": "GET", "declared": None}, response, wrong)["diffs"]
 
 
+@pytest.mark.parametrize("platform,version,want", [
+    (None, (3, 11), "text/markdown; charset=utf-8"),
+    (None, (3, 12), "application/octet-stream"),
+    ("text/x-markdown", (3, 11), "text/x-markdown; charset=utf-8"),
+    ("text/x-markdown", (3, 12), "text/x-markdown; charset=utf-8"),
+])
+def test_static_contract_adds_only_python_312_builtins_missing_from_the_oracle(platform, version, want):
+    # On 3.12 the contract is the interpreter's own answer, so the 3.11
+    # emulation goes dead once the oracle moves (CUTOVER D7).
+    with patch("pseudolife_memory.web.api.mimetypes.guess_type", return_value=(platform, None)):
+        assert run.static_contract_type("/ui/vendor/README.md", version=version) == (want, "no-store")
+        if platform is None:  # 3.12 has no builtin WebP type either
+            assert run.static_contract_type("/ui/a.webp", version=version) == \
+                ("application/octet-stream", "no-store")
+
+
+def _markdown_row(oracle_type: str, rust_type: str) -> dict:
+    c = {**next(c for c in run.StaticBuild().cases() if c["path"].endswith("/README.md"))}
+    assert c["static_contract"]
+
+    def answer(kind):
+        return {"status": 200, "bytes": "# notice", "headers": {
+            "content-type": kind, "cache-control": "no-store", "content-length": "8"}}
+    with patch("pseudolife_memory.web.api.mimetypes.guess_type", return_value=(None, None)), \
+            patch.object(run.sys, "version_info", (3, 11, 9)):
+        return run.compare_case(c, answer(oracle_type), answer(rust_type))
+
+
+def test_live_markdown_compares_rust_with_the_python_312_contract():
+    # A 3.11 oracle with no platform Markdown type (the hosted Windows runner).
+    row = _markdown_row("application/octet-stream", "text/markdown; charset=utf-8")
+    assert row["diffs"] == [] and row["substitution"] == "python-3.12-static-type"
+    # The shipped-image regression: Rust falling back to octet-stream.
+    assert _markdown_row("application/octet-stream", "application/octet-stream")["diffs"]
+    # An oracle answering something its interpreter would not is reported.
+    assert _markdown_row("text/plain", "text/markdown; charset=utf-8")["diffs"]
+
+
 @pytest.mark.skipif(os.name == "nt", reason="file-link fixtures run on POSIX")
 def test_directory_index_parity_compares_oracle_response():
     c = next(c for c in run.StaticPaths().cases() if c["path"] == "/ui/linked-index")
