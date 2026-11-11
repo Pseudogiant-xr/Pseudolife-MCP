@@ -233,6 +233,9 @@ class ContainerTests(unittest.TestCase):
                               'else test ! -e "$TMPDIR/pseudolife-model-provisioning" || exit 9; fi\n'
                               'printf "%s\\n" "$*" >> "$CALLS"\n')
             daemon.chmod(0o755)
+            # Never the root bootstrap here, even when the suite runs as root.
+            (root / "id").write_text("#!/bin/sh\necho 10001\n")
+            (root / "id").chmod(0o755)
             env = dict(os.environ, PATH=str(root) + os.pathsep + os.environ["PATH"], CALLS=str(calls), TMPDIR=str(root))
             env.pop("PSEUDOLIFE_DAEMON_ONNX_DIR", None)
             entrypoint = str(ROOT / "ops/provision-daemon-models.sh")
@@ -447,6 +450,94 @@ class ContainerTests(unittest.TestCase):
             server.shutdown()
             server.server_close()
             thread.join()
+
+
+class RuntimeAccountTest(unittest.TestCase):
+    """The Rust daemon runs as the Python image's account with no capabilities."""
+
+    def test_default_engine_drops_root_after_the_ownership_bootstrap(self):
+        import yaml
+
+        class Compose(yaml.SafeLoader):
+            pass
+        Compose.add_constructor("!reset", lambda loader, node: None)
+        entry = (ROOT / "ops/provision-daemon-models.sh").read_text(encoding="utf-8")
+        dockerfile = (ROOT / "ops/Dockerfile.daemon-rust").read_text(encoding="utf-8")
+        account = re.search(r"useradd --uid (\d+) --gid (\d+)", (ROOT / "ops/Dockerfile.daemon").read_text(encoding="utf-8"))
+        uid, gid = account.groups()
+        # Root only until the drop: supplementary groups, gid, uid and the
+        # inheritable set all go; setuid from root clears permitted/effective.
+        self.assertIn(f"exec setpriv --reuid={uid} --regid={gid} --clear-groups --inh-caps=-all -- /bin/sh \"$0\" \"$@\"",
+                      entry)
+        self.assertIn(f"-uid 0 -exec chown -h {uid}:{gid} {{}} +", entry)
+        self.assertLess(entry.index("--healthcheck"), entry.index("exec setpriv"))
+        self.assertLess(entry.index("exec setpriv"), entry.index("provision models --if-missing"))
+        self.assertIn(f"chown {uid}:{gid} /models /data", dockerfile)
+        self.assertIn('ENTRYPOINT ["/usr/local/bin/provision-daemon-models"]', dockerfile)
+        overlays = [ROOT / "ops/docker-compose.rust-ghcr.yml", ROOT / "pseudolife_memory/compose/docker-compose.rust-ghcr.yml"]
+        self.assertEqual(overlays[0].read_bytes().replace(b"\r\n", b"\n"), overlays[1].read_bytes().replace(b"\r\n", b"\n"))
+        for base_path, overlay_path in ((ROOT / "ops/docker-compose.yml", overlays[0]),
+                                        (ROOT / "pseudolife_memory/compose/docker-compose.yml", overlays[1])):
+            base = yaml.load(base_path.read_text(encoding="utf-8"), Compose)["services"]["pseudolife-daemon"]
+            overlay = yaml.load(overlay_path.read_text(encoding="utf-8"), Compose)["services"]["pseudolife-daemon"]
+            # A `user:` would skip the bootstrap and fail on root-owned volumes;
+            # the bootstrap needs exactly the base file's four capabilities.
+            for key in ("user", "cap_add", "cap_drop", "security_opt", "entrypoint"):
+                self.assertNotIn(key, overlay, overlay_path)
+            self.assertEqual(base["cap_drop"], ["ALL"])
+            self.assertEqual(sorted(base["cap_add"]), ["CHOWN", "DAC_OVERRIDE", "SETGID", "SETUID"])
+            self.assertIn("no-new-privileges:true", base["security_opt"])
+
+    @unittest.skipIf(os.name == "nt", "the image entrypoint runs on Linux")
+    def test_bootstrap_transfers_root_owned_state_then_execs_as_the_daemon_account(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            calls = root / "calls"
+            stubs = {
+                "id": 'echo "${FAKE_UID:-0}"',
+                "find": 'echo "find $*" >> "$CALLS"; test "${FIND_FAIL:-0}" = 0',
+                "setpriv": 'echo "setpriv $* HOME=$HOME" >> "$CALLS"; test "${SETPRIV_FAIL:-0}" = 0 || exit 5\n'
+                           'while [ "$1" != -- ]; do shift; done; shift\nFAKE_UID=10001 exec "$@"',
+                "pseudolife-daemon": 'echo "daemon $* uid=$(id -u)" >> "$CALLS"',
+            }
+            for name, script in stubs.items():
+                (root / name).write_text("#!/bin/sh\n" + script + "\n")
+                (root / name).chmod(0o755)
+            state, models = root / "data", root / "models"
+            state.mkdir()
+            models.mkdir()
+            env = dict(os.environ, PATH=str(root) + os.pathsep + os.environ["PATH"], CALLS=str(calls),
+                       TMPDIR=str(root), HOME="/root", PSEUDOLIFE_ENTRYPOINT_STATE_DIRS=f"{state} {models} {root}/absent")
+            env.pop("PSEUDOLIFE_DAEMON_ONNX_DIR", None)
+            entrypoint = str(ROOT / "ops/provision-daemon-models.sh")
+
+            def run(**extra):
+                calls.unlink(missing_ok=True)
+                result = subprocess.run(["sh", entrypoint], env=dict(env, **extra), capture_output=True, text=True,
+                                        timeout=30)
+                return result, (calls.read_text(encoding="utf-8").splitlines() if calls.exists() else [])
+
+            result, seen = run()
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(seen, [
+                f"find {state} -xdev -uid 0 -exec chown -h 10001:10001 {{}} +",
+                f"find {models} -xdev -uid 0 -exec chown -h 10001:10001 {{}} +",
+                f"setpriv --reuid=10001 --regid=10001 --clear-groups --inh-caps=-all -- /bin/sh {entrypoint} HOME=/",
+                "daemon provision models --if-missing uid=10001",
+                "daemon  uid=10001",
+            ])
+            # A transfer or drop that fails never runs anything as root.
+            result, seen = run(FIND_FAIL="1")
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("startup refused", result.stderr)
+            self.assertEqual([line for line in seen if not line.startswith("find ")], [])
+            result, seen = run(SETPRIV_FAIL="1")
+            self.assertEqual(result.returncode, 5)
+            self.assertFalse(any(line.startswith("daemon ") for line in seen))
+            # An explicit non-root `user:` (mirror, shadow) changes nothing.
+            result, seen = run(FAKE_UID="10001")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(seen, ["daemon provision models --if-missing uid=10001", "daemon  uid=10001"])
 
 
 if __name__ == "__main__":
