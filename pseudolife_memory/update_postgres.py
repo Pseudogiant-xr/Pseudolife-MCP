@@ -428,6 +428,19 @@ def pull(update, p: Plan) -> None:
         _check_pgdata(default, p.pgdata, f"{p.image}'s default")
 
 
+def _rollback_reference(image: str, suffix: str) -> str:
+    """The tag the running image is kept under: the release image's
+    repository and tag, with ``suffix``. A digest is not a tag
+    (``repo@sha256:...-suffix`` is no reference Docker accepts), so a stack
+    that pins the image by digest, with or without a tag, has it dropped
+    first; a colon inside a registry's ``host:port`` is not a tag either."""
+    name = image.split("@", 1)[0]
+    repository, _, tag = name.rpartition(":")
+    if not repository or "/" in tag:
+        repository, tag = name, "latest"
+    return f"{repository}:{tag}-{suffix}"
+
+
 def _verify_cluster(update, p: Plan) -> str:
     """'' when the container now running serves the bank's cluster: the
     identifier in the control file of the data directory it names itself,
@@ -457,11 +470,7 @@ def apply(update, p: Plan) -> None:
     if container != p.container_id or status != "running":
         raise up.UpdateError(f"{up.PG_CONTAINER} changed during the backup (it is now {status or 'gone'}); "
                              "rerun pseudolife-mcp update. Nothing was deployed")
-    repository, _, tag = p.image.rpartition(":")
-    if not repository or "/" in tag:
-        repository, tag = p.image, "latest"
-    suffix = update.o.rollback_suffix or f"pre-update-{up._stamp()}"
-    p.rollback_tag = f"{repository}:{tag}-{suffix}"
+    p.rollback_tag = _rollback_reference(p.image, update.o.rollback_suffix or f"pre-update-{up._stamp()}")
     code, prior = _docker(update, "image", "inspect", "-f", "{{.Id}}", p.rollback_tag, timeout=60)
     if code == 0 and prior.strip() and prior.strip() != p.image_id and not update.o.force_rollback_tag:
         raise up.UpdateError(f"the rollback tag {p.rollback_tag} already names another image; choose a new "

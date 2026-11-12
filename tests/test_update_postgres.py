@@ -746,3 +746,17 @@ def test_release_files_take_the_packaged_files_places_so_an_override_keeps_its_p
     # A file of the same name outside a packaged directory is the stack's own.
     foreign = tmp_path / "elsewhere" / "docker-compose.ghcr.yml"
     assert update_postgres._release_order([base, foreign], release) == [release[0], release[1], foreign]
+
+
+@pytest.mark.parametrize("image, expected", [
+    ("ghcr.io/pseudogiant-xr/pseudolife-pg:18", "ghcr.io/pseudogiant-xr/pseudolife-pg:18-pre"),
+    # A digest is not a tag: "repo@sha256:...-pre" is no reference Docker accepts.
+    ("ghcr.io/pseudogiant-xr/pseudolife-pg@sha256:" + "a" * 64, "ghcr.io/pseudogiant-xr/pseudolife-pg:latest-pre"),
+    ("ghcr.io/pseudogiant-xr/pseudolife-pg:18@sha256:" + "a" * 64, "ghcr.io/pseudogiant-xr/pseudolife-pg:18-pre"),
+    # A registry's host:port is not a tag either.
+    ("registry.example.com:5000/pg", "registry.example.com:5000/pg:latest-pre"),
+    ("registry.example.com:5000/pg@sha256:" + "b" * 64, "registry.example.com:5000/pg:latest-pre"),
+    ("pg", "pg:latest-pre"),
+])
+def test_the_rollback_tag_is_a_valid_reference_for_a_digest_pinned_image(image, expected):
+    assert update_postgres._rollback_reference(image, "pre") == expected
