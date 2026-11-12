@@ -149,20 +149,25 @@ fn classify(raw: &str) -> Option<Class<'_>> {
     Some(Class::Unknown)
 }
 
-/// Python's `str.isspace` over ASCII.
+/// C `isspace`, which `PyLong_FromString` strips. An ASCII str reaches it
+/// unchanged, so the separators U+001C..U+001F (`str.isspace`, not C
+/// `isspace`) are not stripped and make `int()` raise.
 fn python_space(byte: u8) -> bool {
-    matches!(
-        byte,
-        b'\t' | b'\n' | 0x0b | 0x0c | b'\r' | 0x1c..=0x1f | b' '
-    )
+    matches!(byte, b'\t' | b'\n' | 0x0b | 0x0c | b'\r' | b' ')
 }
+
+/// CPython applies its integer digit limit (4300 by default, moved by
+/// `PYTHONINTMAXSTRDIGITS`) only to texts longer than this many characters
+/// (`_PY_LONG_MAX_STR_DIGITS_THRESHOLD`); a longer value is not decided here.
+const INT_LIMIT_FREE: usize = 640;
 
 /// `int(value)` for an ASCII value: `Some(Ok(n))`, `Some(Err(()))` for a
 /// ValueError, `None` when the value is not ASCII (Python also reads
-/// Unicode digits and spaces there). Values past i128 saturate; every one of
-/// them is outside the port range, the only use made of the number.
+/// Unicode digits and spaces there) or long enough for the digit limit to
+/// apply. Values past i128 saturate; every one of them is outside the port
+/// range, the only use made of the number.
 pub(super) fn python_int(value: &str) -> Option<Result<i128, ()>> {
-    if !value.is_ascii() {
+    if !value.is_ascii() || value.len() > INT_LIMIT_FREE {
         return None;
     }
     let bytes = value.as_bytes();
@@ -329,7 +334,11 @@ mod tests {
         for (value, expected) in [
             ("8765", Ok(8765)),
             (" 5432\t", Ok(5432)),
-            ("\x1c7\x1f", Ok(7)),
+            ("\x0b7\x0c", Ok(7)),
+            // An ASCII str reaches `PyLong_FromString` unchanged, which strips
+            // C `isspace` only: the separators U+001C..U+001F stay and fail.
+            ("\x1c7\x1f", Err(())),
+            ("\x1f7", Err(())),
             ("+7", Ok(7)),
             ("-1", Ok(-1)),
             ("1_0", Ok(10)),
@@ -348,6 +357,10 @@ mod tests {
             assert_eq!(python_int(value), Some(expected), "{value:?}");
         }
         assert_eq!(python_int("\u{0661}"), None);
+        // Past 640 characters CPython's integer digit limit (4300 unless the
+        // environment moves it) may refuse the value: not decided here.
+        assert!(python_int(&"1".repeat(640)).is_some());
+        assert_eq!(python_int(&"1".repeat(641)), None);
     }
 
     #[test]
