@@ -9,7 +9,8 @@ mod prompt;
 use super::pyjson;
 mod sqlstate;
 mod token_file;
-mod url;
+// Also console's (`normalize_origin`).
+pub(super) mod url;
 
 /// Shared pairing operations used by the native connect workflow.
 #[allow(dead_code)] // The connect consumer lands independently of this transport seam.

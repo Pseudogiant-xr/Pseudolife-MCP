@@ -7,6 +7,7 @@ mod backup;
 pub mod board_audit;
 mod briefing_hook;
 mod connect;
+mod console;
 pub mod coordination_recovery;
 mod doctor;
 mod doorbell_seen;
@@ -207,6 +208,11 @@ pub fn dispatch(mode: Option<&str>) -> Option<ExitCode> {
     }
     if mode == "restore"
         && let Some(code) = restore_cli::run(std::env::args_os().skip(2).collect())
+    {
+        return Some(code);
+    }
+    if mode == "console"
+        && let Some(code) = console::run(std::env::args_os().skip(2).collect())
     {
         return Some(code);
     }
