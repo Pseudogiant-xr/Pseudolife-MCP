@@ -1,5 +1,7 @@
 """The opt-in, backup-first retirement migration; no runtime retirement yet."""
 
+import time
+
 import pytest
 import yaml
 
@@ -364,6 +366,27 @@ def test_service_loaded_before_migration_cannot_hydrate_stale_bands(pg_conn, pg_
             service._storage.close()
 
 
+def _wait_for_session_locks_released(conn, backend_pid, timeout=10.0):
+    """Wait until the server has ended a closed session and dropped its locks.
+
+    ``close()`` returns once the client has sent its goodbye; the server
+    releases the session's advisory locks a moment later. Measured on the
+    bench PostgreSQL on 2026-11-12: a try-lock sent straight after the
+    holder's ``close()`` lost 799 of 2000 times, and the lock was free within
+    18 ms every time. ``pg_locks`` reads the live lock table on every query.
+    """
+    deadline = time.monotonic() + timeout
+    while True:
+        held = conn.execute(
+            "SELECT 1 FROM pg_locks WHERE locktype = 'advisory' AND pid = %s", (backend_pid,)
+        ).fetchone()
+        conn.commit()
+        if not held:
+            return
+        assert time.monotonic() < deadline, f"backend {backend_pid} still holds an advisory lock after {timeout}s"
+        time.sleep(0.01)
+
+
 def test_reconnecting_resident_writer_observes_migration(pg_conn, pg_url, tmp_path, monkeypatch):
     from pseudolife_memory.service import MemoryService
     config = tmp_path / "config.yaml"
@@ -372,7 +395,9 @@ def test_reconnecting_resident_writer_observes_migration(pg_conn, pg_url, tmp_pa
     service = MemoryService(data_dir=tmp_path)
     service._ensure_init()
     epoch = service._storage._lease_epoch
+    writer_pid = service._storage._conn.info.backend_pid
     service._storage._conn.close()
+    _wait_for_session_locks_released(pg_conn, writer_pid)
     try:
         migration.migrate(pg_conn, tmp_path, backup=lambda _: {"dump": "bank.sql.gz", "state": "state.tgz"})
         assert pg_conn.execute("SELECT value FROM meta WHERE key='writer_lease_epoch'").fetchone()[0] == epoch + 1
