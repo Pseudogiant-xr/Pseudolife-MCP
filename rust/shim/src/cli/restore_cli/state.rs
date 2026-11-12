@@ -647,17 +647,17 @@ mod tests {
     fn header(name: &[u8], kind: u8, size: usize, linkname: &[u8]) -> Vec<u8> {
         let mut buf = vec![0u8; 512];
         buf[..name.len()].copy_from_slice(name);
-        buf[100..108].copy_from_slice(b"0000644 ");
-        buf[108..116].copy_from_slice(b"0000000 ");
-        buf[116..124].copy_from_slice(b"0000000 ");
-        buf[124..136].copy_from_slice(format!("{size:011o} ").as_bytes());
-        buf[136..148].copy_from_slice(b"00000000000 ");
+        buf[100..108].copy_from_slice(b"0000644\0");
+        buf[108..116].copy_from_slice(b"0000000\0");
+        buf[116..124].copy_from_slice(b"0000000\0");
+        buf[124..136].copy_from_slice(format!("{size:011o}\0").as_bytes());
+        buf[136..148].copy_from_slice(b"00000000000\0");
         buf[156] = kind;
         buf[157..157 + linkname.len()].copy_from_slice(linkname);
-        buf[257..265].copy_from_slice(b"ustar 00");
+        buf[257..265].copy_from_slice(b"ustar\000");
         buf[148..156].copy_from_slice(b"        ");
         let sum: u32 = buf.iter().map(|b| u32::from(*b)).sum();
-        buf[148..156].copy_from_slice(format!("{sum:06o}  ").as_bytes());
+        buf[148..156].copy_from_slice(format!("{sum:06o}\0 ").as_bytes());
         buf
     }
 
@@ -719,7 +719,7 @@ mod tests {
 
     #[test]
     fn a_long_name_is_cut_at_its_first_nul_and_outermost_wins() {
-        let mut content = b"first rest".to_vec();
+        let mut content = b"first\0rest".to_vec();
         content.push(0);
         let mut record = header(b"././@LongLink", b'L', content.len(), b"");
         record.extend(data(&content));
