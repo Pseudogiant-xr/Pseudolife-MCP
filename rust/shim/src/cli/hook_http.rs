@@ -240,6 +240,45 @@ fn ended_early(error: &hyper::Error) -> bool {
 trait Stream: AsyncRead + AsyncWrite + Send + Unpin {}
 impl<T: AsyncRead + AsyncWrite + Send + Unpin> Stream for T {}
 
+/// Why [`call_json`] has no reply.
+#[derive(Debug)]
+pub(super) enum NoReply {
+    /// Every resolved address failed to connect: the last one's error, as
+    /// `socket.create_connection` raises it, or `None` where that connect
+    /// timed out. No request byte was sent.
+    Connect(Option<io::Error>),
+    /// Anything else: an unusable URL, name resolution, TLS, or a failure
+    /// once connected (the request may have reached the server).
+    Other,
+}
+
+/// One request as `urlopen(Request(url, data, headers={"Authorization": ...,
+/// "Content-Type": "application/json"}))` through a no-redirect opener sends
+/// it: [`get`]'s connection, timeouts and fields, `Content-Type:
+/// application/json` on every method (a GET too, as the headers dict sets
+/// it), a POST when `body` is given, and a 3xx returned unfollowed. Bodies
+/// are read as [`get_bounded`] reads them (`limits`, `body_failed`).
+pub(super) async fn call_json(
+    origin: &str,
+    target: &str,
+    authorization: Option<&[u8]>,
+    body: Option<&[u8]>,
+    timeout: Duration,
+    limits: Limits,
+) -> Result<Reply, NoReply> {
+    exchange(
+        &format!("{origin}{target}"),
+        authorization,
+        body,
+        timeout,
+        limits,
+        true,
+        None,
+        true,
+    )
+    .await
+}
+
 async fn once(
     url: &str,
     authorization: Option<&[u8]>,
@@ -249,10 +288,40 @@ async fn once(
     short_reads: bool,
     tls: Option<Arc<rustls::ClientConfig>>,
 ) -> Option<Reply> {
+    exchange(
+        url,
+        authorization,
+        body,
+        timeout,
+        limits,
+        short_reads,
+        tls,
+        body.is_some(),
+    )
+    .await
+    .ok()
+}
+
+/// Any failure that is not a connect failure.
+fn other<E>(_: E) -> NoReply {
+    NoReply::Other
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn exchange(
+    url: &str,
+    authorization: Option<&[u8]>,
+    body: Option<&[u8]>,
+    timeout: Duration,
+    limits: Limits,
+    short_reads: bool,
+    tls: Option<Arc<rustls::ClientConfig>>,
+    content_type: bool,
+) -> Result<Reply, NoReply> {
     let (secure, rest) = if let Some(rest) = url.strip_prefix("https://") {
         (true, rest)
     } else {
-        (false, url.strip_prefix("http://")?)
+        (false, url.strip_prefix("http://").ok_or(NoReply::Other)?)
     };
     let split = rest.find(['/', '?']).unwrap_or(rest.len());
     let (authority, path) = rest.split_at(split);
@@ -260,25 +329,40 @@ async fn once(
         Some('/') => path.to_owned(),
         _ => format!("/{path}"),
     };
-    let parsed = reqwest::Url::parse(url).ok()?;
-    let host = parsed.host_str()?.trim_matches(['[', ']']).to_owned();
-    let port = parsed.port_or_known_default()?;
+    let parsed = reqwest::Url::parse(url).map_err(other)?;
+    let host = parsed
+        .host_str()
+        .ok_or(NoReply::Other)?
+        .trim_matches(['[', ']'])
+        .to_owned();
+    let port = parsed.port_or_known_default().ok_or(NoReply::Other)?;
     let mut connected = None;
-    for address in tokio::net::lookup_host((host.as_str(), port)).await.ok()? {
-        if let Ok(Ok(stream)) =
-            tokio::time::timeout(timeout, tokio::net::TcpStream::connect(address)).await
-        {
-            connected = Some(stream);
-            break;
+    let mut last = None;
+    for address in tokio::net::lookup_host((host.as_str(), port))
+        .await
+        .map_err(other)?
+    {
+        match tokio::time::timeout(timeout, tokio::net::TcpStream::connect(address)).await {
+            Ok(Ok(stream)) => {
+                connected = Some(stream);
+                break;
+            }
+            Ok(Err(error)) => last = Some(Some(error)),
+            Err(_) => last = Some(None),
         }
     }
-    let socket = connected?;
+    let socket = match (connected, last) {
+        (Some(socket), _) => socket,
+        // getaddrinfo answered no address: Python's own OSError text.
+        (None, None) => return Err(NoReply::Other),
+        (None, Some(error)) => return Err(NoReply::Connect(error)),
+    };
     let stream: Box<dyn Stream> = if secure {
         let config = match tls {
             Some(config) => config,
-            None => system_tls()?,
+            None => system_tls().ok_or(NoReply::Other)?,
         };
-        let name = rustls::pki_types::ServerName::try_from(host).ok()?;
+        let name = rustls::pki_types::ServerName::try_from(host).map_err(other)?;
         // CPython bounds the whole handshake by the socket timeout, then each
         // SSL read by its own deadline until plaintext arrives: the timer goes
         // above TLS, so encrypted fragments alone do not count as progress.
@@ -287,8 +371,8 @@ async fn once(
             tokio_rustls::TlsConnector::from(config).connect(name, socket),
         )
         .await
-        .ok()?
-        .ok()?;
+        .map_err(other)?
+        .map_err(other)?;
         Box::new(Inactivity::new(RaggedEof(tls), timeout))
     } else {
         Box::new(Inactivity::new(socket, timeout))
@@ -300,7 +384,7 @@ async fn once(
             .title_case_headers(true)
             .handshake(hyper_util::rt::TokioIo::new(stream))
             .await
-            .ok()?;
+            .map_err(other)?;
     let driver = tokio::spawn(connection);
     let method = if body.is_some() {
         http::Method::POST
@@ -314,16 +398,22 @@ async fn once(
         .header("Host", authority)
         .header("User-Agent", "Python-urllib/3.11");
     if let Some(value) = authorization {
-        request = request.header("Authorization", http::HeaderValue::from_bytes(value).ok()?);
+        request = request.header(
+            "Authorization",
+            http::HeaderValue::from_bytes(value).map_err(other)?,
+        );
+    }
+    if content_type {
+        request = request.header("Content-Type", "application/json");
     }
     let payload: BoxBody<Bytes, std::convert::Infallible> = match body {
-        Some(data) => {
-            request = request.header("Content-Type", "application/json");
-            Full::new(Bytes::copy_from_slice(data)).boxed()
-        }
+        Some(data) => Full::new(Bytes::copy_from_slice(data)).boxed(),
         None => Empty::<Bytes>::new().boxed(),
     };
-    let request = request.header("Connection", "close").body(payload).ok()?;
+    let request = request
+        .header("Connection", "close")
+        .body(payload)
+        .map_err(other)?;
     let reply = async {
         let response = sender.send_request(request).await.ok()?;
         let status = response.status().as_u16();
@@ -366,7 +456,7 @@ async fn once(
     }
     .await;
     driver.abort();
-    reply
+    reply.ok_or(NoReply::Other)
 }
 
 /// CPython's default context: the system trust store (or `SSL_CERT_FILE` /

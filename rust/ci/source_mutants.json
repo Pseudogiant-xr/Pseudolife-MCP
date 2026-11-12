@@ -69,6 +69,16 @@
     "connect-user-agent-changed",
     "connect-verify-reverse-order"
   ],
+  "console": [
+    "console-405-not-old",
+    "console-get-without-content-type",
+    "console-hint-over-message",
+    "console-null-cell-empty",
+    "console-paired-note-always",
+    "console-plain-sign-in-admitted",
+    "console-stamp-rounded",
+    "console-winerror-full-stop"
+  ],
   "coordination_recovery": [
     "recovery-stop-gate-dropped"
   ],

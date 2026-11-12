@@ -167,6 +167,16 @@ pub(super) fn run(values: Vec<OsString>) -> Option<ExitCode> {
     ))
 }
 
+/// The environment overrides a registration supplies, and its source label.
+pub(super) type Registration = (Vec<(String, String)>, Option<String>);
+
+/// `doctor_cli.registration_credentials(os.environ)` for another command
+/// (`console`): the overrides to apply and the source label, or `None`
+/// where doctor's reproduced domain ends (that command then defers).
+pub(super) fn registration_credentials() -> Option<Registration> {
+    clients::registration_credentials(&Env::default()).ok()
+}
+
 /// Python truthiness of a JSON value.
 pub(super) fn truthy(value: &Value) -> bool {
     match value {

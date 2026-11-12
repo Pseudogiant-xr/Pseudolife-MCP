@@ -46,7 +46,7 @@ def test_unknown_runtime_inputs_select_every_row(path):
 
 def test_a_mapped_doctor_source_reaches_its_row():
     assert precheck.rows_for("pseudolife_memory/doctor_cli.py", {"pseudolife_memory/doctor_cli.py": ("doctor",)}) == ("doctor",)
-    assert precheck.rows_for("rust/shim/src/cli/doctor/mod.rs", {}) == ("doctor",)
+    assert precheck.rows_for("rust/shim/src/cli/doctor/mod.rs", {}) == ("doctor", "console")
     assert precheck.rows_for("rust/cli_harness/goldens/doctor.windows.json", {}) == ("doctor",)
 
 

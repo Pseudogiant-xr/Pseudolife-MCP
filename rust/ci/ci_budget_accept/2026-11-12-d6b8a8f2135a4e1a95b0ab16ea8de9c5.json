@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "parity-checks",
+  "before": "930cb80745ed6a02",
+  "fingerprint": "71cde5ebe83b5b36",
+  "reason": "Adds the console CLI harness row (CLI-CONSOLE-PRINT, 101 cases) to the existing w1c-connection shard's live and golden passes and one console-0 source-mutant shard to the nightly-only source-mutants job; no other suite, case or step changes. Measured locally on the Windows workstation 2026-11-12: live pass 2.2 min, golden pass 0.7 min, so the windows-latest w1c-connection shard grows by about 3 to 5 minutes hosted (11.8 to about 16.5, inside its 26-minute step and 50-minute job limits) and the ubuntu one by less (its closed-port cases fail at once); the full run stays under its 410 runner-minute limit (385.3 plus about 7). Re-measure from the first hosted runs."
+}

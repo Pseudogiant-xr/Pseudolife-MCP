@@ -260,13 +260,13 @@ fn posix_utf8_argv(var: impl Fn(&str) -> Option<String>) -> bool {
 }
 
 /// Windows hands CPython the wide command line, so argv is exact there.
-fn utf8_argv() -> bool {
+pub(super) fn utf8_argv() -> bool {
     cfg!(windows) || posix_utf8_argv(|name| std::env::var(name).ok())
 }
 
 /// argparse colours its help and usage on a terminal, or as `FORCE_COLOR`,
 /// `PYTHON_COLORS` and `NO_COLOR` say (newer CPython); any of them set defers.
-fn colour_env(var: impl Fn(&str) -> bool) -> bool {
+pub(super) fn colour_env(var: impl Fn(&str) -> bool) -> bool {
     ["FORCE_COLOR", "PYTHON_COLORS", "NO_COLOR"]
         .into_iter()
         .any(var)
@@ -344,7 +344,7 @@ pub(super) fn decide(arguments: &[String], context: &Context<'_>) -> Decision {
 }
 
 /// Writes `bytes`; on failure, how many bytes the stream took first.
-fn emit(out: &mut impl Write, bytes: &[u8]) -> Result<(), usize> {
+pub(super) fn emit(out: &mut impl Write, bytes: &[u8]) -> Result<(), usize> {
     let mut written = 0;
     while written < bytes.len() {
         match out.write(&bytes[written..]) {
@@ -360,7 +360,7 @@ fn emit(out: &mut impl Write, bytes: &[u8]) -> Result<(), usize> {
 /// A write that failed before any byte left defers: nothing was answered
 /// yet. One that failed part-way exits 1, where CPython raises from
 /// `print` (its traceback write fails too; the exit is 1 or 120).
-fn settle(code: u8, written: Result<(), usize>) -> Option<u8> {
+pub(super) fn settle(code: u8, written: Result<(), usize>) -> Option<u8> {
     match written {
         Ok(()) => Some(code),
         Err(0) => None,

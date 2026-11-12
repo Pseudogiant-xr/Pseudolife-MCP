@@ -5,7 +5,7 @@
 use super::Defer;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
-pub(super) struct Split {
+pub(in crate::cli) struct Split {
     pub scheme: String,
     pub netloc: String,
     pub path: String,
@@ -16,7 +16,7 @@ pub(super) struct Split {
 const SCHEME_CHARS: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-.";
 
 /// `Ok(Err(()))` is Python's ValueError.
-pub(super) fn urlsplit(url: &str) -> Result<Result<Split, ()>, Defer> {
+pub(in crate::cli) fn urlsplit(url: &str) -> Result<Result<Split, ()>, Defer> {
     if !url.chars().all(|c| ('!'..='~').contains(&c)) {
         return Err(Defer);
     }
@@ -82,7 +82,7 @@ impl Split {
         (hostname, (!port.is_empty()).then_some(port))
     }
 
-    pub(super) fn hostname(&self) -> Option<String> {
+    pub(in crate::cli) fn hostname(&self) -> Option<String> {
         let (hostname, _) = self.hostinfo();
         // A zone after `%` keeps its case.
         (!hostname.is_empty()).then(|| match hostname.split_once('%') {
@@ -92,7 +92,7 @@ impl Split {
     }
 
     /// `Err(())` is Python's ValueError from `.port`.
-    pub(super) fn port(&self) -> Result<Option<u32>, ()> {
+    pub(in crate::cli) fn port(&self) -> Result<Option<u32>, ()> {
         match self.hostinfo().1 {
             None => Ok(None),
             Some(port) => {
