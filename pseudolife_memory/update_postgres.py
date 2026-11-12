@@ -188,7 +188,9 @@ def plan(update, project: str, env_files, environment: dict, target: str) -> Pla
                        f"{labels.get('com.docker.compose.service')!r}, not this stack's {project!r} {PG_SERVICE!r}")
         return None
     labelled = [Path(p) for p in (labels.get("com.docker.compose.project.config_files") or "").split(",") if p]
-    original = [p for p in labelled if not transient_overlay(p) and not p.name.startswith("docker-compose.rollback-pg")]
+    # transient_overlay covers this step's own rollback overlay (by name, in
+    # the updaters' directory); a stack file of that name elsewhere is kept.
+    original = [p for p in labelled if not transient_overlay(p)]
     base = next((p for p in original if p.name == "docker-compose.yml"), None)
     if base is None or not _packaged_dir(base.parent):
         _leave(update, "it was created from a stack file this update does not manage "
@@ -490,7 +492,9 @@ def apply(update, p: Plan) -> None:
         raise up.UpdateError(f"cannot write the PostgreSQL rollback overlay in {directory} "
                              f"({exc.strerror or exc}); restore write access and rerun. Nothing was changed") from exc
     restore_args = [*p.previous_args, "-f", str(p.rollback_overlay)]
-    restore = _compose_line(restore_args, f"up -d --no-deps --no-build --force-recreate {PG_SERVICE}")
+    # --pull never: the rollback tag exists only on this host, and a stack
+    # override's pull_policy: always would otherwise try the registry for it.
+    restore = _compose_line(restore_args, f"up -d --no-deps --no-build --pull never --force-recreate {PG_SERVICE}")
     update.step(f"tagged the PostgreSQL rollback image: {p.rollback_tag}")
     update.step(f"recreating the PostgreSQL container on {p.image}"
                 + (f" as {p.user}" if p.user else "") + " (same bank volume; the daemon waits)...")
@@ -512,8 +516,9 @@ def apply(update, p: Plan) -> None:
     update.warn(f"the new PostgreSQL container did not come up: {why}" + (f" (last log line: {detail})" if detail else "")
                 + "; restoring the previous one...")
     _new_id, _status, _health = _state(update)
-    code, out = _docker(update, "compose", *restore_args, "up", "-d", "--no-deps", "--no-build", "--force-recreate",
-                        PG_SERVICE, timeout=1800, env=p.environment, stream=not update.o.as_json)
+    code, out = _docker(update, "compose", *restore_args, "up", "-d", "--no-deps", "--no-build", "--pull", "never",
+                        "--force-recreate", PG_SERVICE, timeout=1800, env=p.environment,
+                        stream=not update.o.as_json)
     back = (f"docker compose up failed" + (f" ({up._last_line(out)})" if out.strip() else "")) if code else ""
     if not back:
         back = _wait_healthy(update, _new_id)

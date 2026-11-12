@@ -264,7 +264,7 @@ def test_a_failed_recreate_restores_the_previous_container_and_fails_the_update(
     # the previous definition: its own files, plus the image it ran
     assert f"-f {pg.ops / 'docker-compose.yml'} -f " in restore and "docker-compose.rollback-pg-" in restore
     assert "compose/0.15.1-" not in restore.replace("\\", "/")
-    assert restore.endswith("up -d --no-deps --no-build --force-recreate pseudolife-pg")
+    assert restore.endswith("up -d --no-deps --no-build --pull never --force-recreate pseudolife-pg")
     assert not any(_daemon_up(c) for c in calls)        # the daemon was not changed
     assert pg.container["Id"].startswith("pg-restored")
     _never_destructive(calls)
@@ -280,7 +280,7 @@ def test_a_failed_restore_says_postgres_is_down_and_how_to_bring_it_back(pg, wor
     err = capsys.readouterr().err
     assert "restoring its previous container failed too" in err
     assert "The bank volume is unchanged and the backup above holds it" in err
-    assert "up -d --no-deps --no-build --force-recreate pseudolife-pg" in err
+    assert "up -d --no-deps --no-build --pull never --force-recreate pseudolife-pg" in err
 
 
 @pytest.mark.parametrize("owner", ["0", "70"])
@@ -760,3 +760,15 @@ def test_release_files_take_the_packaged_files_places_so_an_override_keeps_its_p
 ])
 def test_the_rollback_tag_is_a_valid_reference_for_a_digest_pinned_image(image, expected):
     assert update_postgres._rollback_reference(image, "pre") == expected
+
+
+def test_a_stack_file_named_like_the_rollback_overlay_is_kept(pg, world, clients):
+    # Only this step's own overlay, in the updaters' directory, is left out. A
+    # stack's override that happens to share the name carries its settings
+    # into the new container.
+    override = pg.ops / "docker-compose.rollback-pg-custom.yml"
+    override.write_text("services: {}\n", encoding="utf-8")
+    pg.labels["com.docker.compose.project.config_files"] += f",{override}"
+    assert up.main(["--health-delay-ms", "1"]) == 0
+    calls = _calls(world)
+    assert f"-f {override} " in calls[_index(calls, _pg_up)]
