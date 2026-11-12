@@ -154,6 +154,11 @@ def _python_tar(fmt: int, name: str) -> bytes:
     return out.getvalue()
 
 
+def _long(kind: bytes, value: bytes) -> bytes:
+    """A GNU long name (``L``) or link (``K``) record, as GNU tar writes it."""
+    return _header(b"././@LongLink", kind, size=len(value) + 1) + _data(value + b"\0")
+
+
 def _bad_checksum_header() -> bytes:
     raw = bytearray(_header(b"x"))
     raw[148:156] = b"0000001\0"
@@ -195,6 +200,11 @@ STATES: dict[str, bytes] = {
     "prefix-join": _tar(_header(b"x", prefix=b"sub")),
     "octal-prefix-fields": _tar(_header(b"x", mode=b"0o_644\0\0", size_field=b"  0o1\0\0\0\0\0\0\0") + _data(b"x")),
     "signed-checksum": _signed_checksum_name(),
+    "gnu-long-name": _python_tar(1, "x" * 120),
+    "gnu-long-records": _tar(_long(b"L", b"d" * 120 + b"//"), _header(b"short/", b"5"),
+                             _long(b"K", b"e" * 110), _long(b"L", b"d" * 120 + b"/l"),
+                             _header(b"l", b"2", linkname=b"short-target")),
+    "gnu-long-cut-at-nul": _tar(_header(b"././@LongLink", b"L", size=9) + _data(b"ok\0/../x"), _file(b"../x")),
     "multi-member-gzip": None,  # built from "plain" below
     "trailing-zeros-gzip": None,
     # validate_state refuses
@@ -222,9 +232,12 @@ STATES: dict[str, bytes] = {
     "transient-link": _tar(_file(b"a/x"), _sym(b"a", b"."), _sym(b"a/x", b"a/.."), _sym(b"a", b"b")),
     "member-data-truncated": _header(b"a", size=1000) + b"x" * 700,
     "member-padding-truncated": _header(b"a", size=10) + b"x" * 10,
+    "gnu-long-name-escape": _tar(_long(b"L", b"../" + b"x" * 120), _file(b"short")),
+    "gnu-long-link-escape": _tar(_long(b"K", b"../../" + b"y" * 120), _sym(b"l", b"short")),
+    "gnu-long-then-end": _file(b"a") + _long(b"L", b"x" * 120) + END,
+    "gnu-long-data-cut": _file(b"a") + _long(b"L", b"x" * 600)[:700],
     # the oracle answers; this leaf defers
     "pax-name": _python_tar(2, "x" * 120),
-    "gnu-long-name": _python_tar(1, "x" * 120),
     "negative-size": _tar(_header(b"x", size_field=b"\xff" * 12)),
     "deep-link-chain": _deep_chain(450),
     "corrupt-deflate-gzip": None,
@@ -414,14 +427,16 @@ DUMP_REFUSE = ("no-marker", "in-copy", "copy-crlf", "trailing-space", "vertical-
 STATE_PASS = ("plain", "links-inside", "link-loop", "loop-ends-walk","self-loop-hides-escape", "only-zero-blocks",
               "bad-later-header", "short-later-header", "later-header-absent", "directory-with-size",
               "v7-directory-slash", "unknown-type-skips", "prefix-join", "octal-prefix-fields",
-              "signed-checksum", "multi-member-gzip", "trailing-zeros-gzip")
+              "signed-checksum", "gnu-long-name", "gnu-long-records", "gnu-long-cut-at-nul",
+              "multi-member-gzip", "trailing-zeros-gzip")
 STATE_REFUSE = ("not-gzip", "truncated-gzip", "bad-crc-gzip", "empty-file", "empty-gzip",
                 "garbage-first-header", "invalid-mode-field", "absolute-path", "dotdot-path", "dotdot-leading",
                 "backslash-path", "prefix-escape", "fifo", "character-device", "block-device",
                 "symlink-absolute", "symlink-backslash", "symlink-escape", "symlink-chain-escape",
                 "symlink-through-link", "hardlink-escape", "transient-link", "member-data-truncated",
-                "member-padding-truncated", "directory-size-skips-nothing")
-STATE_DEFER = ("pax-name", "gnu-long-name", "negative-size", "deep-link-chain")
+                "member-padding-truncated", "directory-size-skips-nothing", "gnu-long-name-escape",
+                "gnu-long-link-escape", "gnu-long-then-end", "gnu-long-data-cut")
+STATE_DEFER = ("pax-name", "negative-size", "deep-link-chain")
 
 
 # The oracle refuses a CRC or length mismatch; this leaf defers there, as a
@@ -558,6 +573,20 @@ MUTANTS = [
     Mutant("restore-signed-checksum", "restore", STATERS, "stored != unsigned && stored != signed",
            "stored != unsigned && stored != signed + 1",
            ("state-signed-checksum",)),
+    Mutant("restore-long-name-ignored", "restore", STATERS,
+           "                    if kind == b'L' {\n                        member.name = data;",
+           "                    if kind == b'L' {\n                        let _ = data;", ("state-gnu-long-name-escape",)),
+    Mutant("restore-long-link-ignored", "restore", STATERS,
+           "                    } else {\n                        member.linkname = data;",
+           "                    } else {\n                        let _ = data;", ("state-gnu-long-link-escape",)),
+    Mutant("restore-long-end-quiet", "restore", STATERS,
+           "self.end = if subsequent { End::Error } else { End::Done };", "self.end = End::Done;",
+           ("state-gnu-long-then-end",)),
+    Mutant("restore-long-short-read-quiet", "restore", STATERS,
+           "        if self.long.is_some() || !self.pending.is_empty() {", "        if false {",
+           ("state-gnu-long-data-cut",)),
+    Mutant("restore-long-keeps-after-nul", "restore", STATERS, "                            long.ended = true;",
+           "                            long.data.extend_from_slice(&part[at..]);", ("state-gnu-long-cut-at-nul",)),
     Mutant("restore-octal-prefix", "restore", STATERS, "    if prefixed {", "    if prefixed && false {",
            ("state-octal-prefix-fields",)),
 ]

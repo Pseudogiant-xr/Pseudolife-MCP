@@ -36,7 +36,7 @@ before any of that, in the oracle's order:
 | Repeated options: the last value wins; `--opt=value` | argparse |
 | Paths are pathlib's spelling (`dump.sql.gz/` and `./dump.sql.gz` name the file, `''` is `.`) | `type=Path` |
 | The dump: every gzip member read as Python's `gzip` reads it (padding, trailing bytes, truncation); lines split on `\n`, `\r\n` and a lone `\r`; the marker counts only outside `COPY ... FROM stdin;` data, with `\S` read as Python's `str.isspace` complement | `_dump_complete`, `gzip._GzipReader` |
-| The state archive: the gzip check, then members as CPython 3.11 `tarfile` reads them (`frombuf`, `nti` with Python `int(..., 8)`, both checksums, the ustar prefix, the V7 trailing-slash directory, a bad or short header after the first ending the archive quietly, a member's data present to the end of its last block, non-regular supported types skipping no data, unknown types skipping theirs), then every `validate_state` check: absolute, `..` or backslash names, devices and FIFOs, absolute or backslash link targets, escaping links through the final and the transient link graph, and a link loop ending the walk | `validate_state` |
+| The state archive: the gzip check, then members as CPython 3.11 `tarfile` reads them (`frombuf`, `nti` with Python `int(..., 8)`, both checksums, the ustar prefix, the V7 trailing-slash directory, GNU long names and links (`L`, `K`: each record's data up to its first NUL patches the header after it, a directory losing one trailing slash per record, and any header problem after a record a `ReadError`), a bad or short header after the first ending the archive quietly, a member's data present to the end of its last block, non-regular supported types skipping no data, unknown types skipping theirs), then every `validate_state` check: absolute, `..` or backslash names, devices and FIFOs, absolute or backslash link targets, escaping links through the final and the transient link graph, and a link loop ending the walk | `validate_state` |
 | The confirmation gate: on Windows a character device counts as a terminal (the CRT's `isatty`, so `NUL` does) | `update_cli.interactive` |
 | Streams: Python text streams, CRLF on Windows | `print(..., file=sys.stderr)` |
 
@@ -59,9 +59,9 @@ before any of that, in the oracle's order:
   before the start of a member's output, so a stream zlib stops on with a
   traceback reaches the trailer here with the wrong bytes; this leaf cannot
   tell the two apart.
-- State archives with PAX headers (`x`, `g`, `X`), GNU long names or links
-  (`L`, `K`), sparse members (`S`), a negative size on a member that skips
-  data, a link walk deeper than 400 levels or longer than 50 million steps
+- State archives with PAX headers (`x`, `g`, `X`), sparse members (`S`),
+  a negative size on a member that skips data or on a GNU long record, more
+  than 32 GNU long records before one header, a link walk deeper than 400 levels or longer than 50 million steps
   (CPython's recursion limit decides there).
 
 ## Declared divergence
@@ -100,9 +100,10 @@ the leaf's non-test source for process, network, lock and write APIs.
 
 ## Mutants
 
-22 source mutants, one per decision the row pins (exit code, `--yes`, the
+27 source mutants, one per decision the row pins (exit code, `--yes`, the
 state check and its order after the dump check, argparse's error order and
 negative numbers, the 80-column guard, the COPY pattern, lone `\r`, gzip
 padding, the CRC check and its deferral, the zlib deferral, tar header and data handling, the
-transient pass, FIFOs, loop handling, the ustar prefix, the signed checksum
-and `int`'s base prefix); each is caught by a named case.
+transient pass, FIFOs, loop handling, the ustar prefix, the signed checksum,
+`int`'s base prefix, and GNU long records: the name and link patches, the end
+block and short read after a record, and the cut at the first NUL); each is caught by a named case.

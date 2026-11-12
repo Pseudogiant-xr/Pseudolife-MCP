@@ -5,10 +5,12 @@
 //! `_proc_builtin`, `TarFile.next`): a bad or short header past the first
 //! one ends the archive quietly, a member's data must be present to the end
 //! of its last block, non-regular supported types skip no data, and names are
-//! the raw header bytes (`surrogateescape` keeps them one-to-one). Members
-//! this leaf does not read (PAX, GNU long names, sparse files, a negative
-//! size) and link graphs deep enough to near Python's recursion limit are
-//! `Unsure`. A deflate error is too (`zlib.error` escapes the oracle).
+//! the raw header bytes (`surrogateescape` keeps them one-to-one). GNU long
+//! names and links (`L`, `K`, which GNU tar writes for any path over 100
+//! bytes) patch the header after them as `_proc_gnulong` does. Members this
+//! leaf does not read (PAX, sparse files, a negative size), long-name chains
+//! and link graphs deep enough to near Python's recursion limit are `Unsure`.
+//! A deflate error is too (`zlib.error` escapes the oracle).
 use std::{collections::HashMap, path::Path};
 
 use super::{
@@ -64,7 +66,23 @@ struct Reader {
     header: Vec<u8>,
     members: Vec<Member>,
     end: End,
+    /// GNU long records read so far for the header after them, outermost
+    /// first: the record's kind and its data up to the first NUL.
+    pending: Vec<(u8, Vec<u8>)>,
+    /// The current long record: data bytes still to read, its kind, and
+    /// whether its NUL was seen (later bytes are read but not kept).
+    long: Option<Long>,
 }
+
+struct Long {
+    kind: u8,
+    left: u128,
+    data: Vec<u8>,
+    ended: bool,
+}
+
+/// GNU long records before one header; CPython recurses once per record.
+const MAX_LONG_CHAIN: usize = 32;
 
 /// `nts`: up to the first NUL.
 fn nts(field: &[u8]) -> &[u8] {
@@ -149,6 +167,9 @@ fn round_up(count: u128) -> u128 {
 
 enum Header {
     Member(Member, u128),
+    /// A GNU long name (`L`) or link (`K`) record and its data length
+    /// (`_block(size)`), before the V7, prefix and directory rules.
+    Long(u8, u128),
     /// `InvalidHeaderError`.
     Invalid,
     Unsure,
@@ -187,9 +208,16 @@ fn parse_header(header: &[u8], offset: u128) -> Header {
     let mut name = nts(&header[..100]).to_vec();
     let linkname = nts(&header[157..257]).to_vec();
     let prefix = nts(&header[345..500]);
-    // PAX headers, GNU long names and sparse members are not read here.
-    if matches!(kind, b'x' | b'g' | b'X' | b'L' | b'K' | b'S') {
+    // PAX headers and sparse members are not read here.
+    if matches!(kind, b'x' | b'g' | b'X' | b'S') {
         return Header::Unsure;
+    }
+    if matches!(kind, b'L' | b'K') {
+        // A negative size reads to the end of the stream (`read(-n)`).
+        let Ok(size) = u128::try_from(size) else {
+            return Header::Unsure;
+        };
+        return Header::Long(kind, round_up(size));
     }
     if kind == 0 && name.ends_with(b"/") {
         kind = b'5';
@@ -242,23 +270,61 @@ impl Reader {
             header: Vec::with_capacity(512),
             members: Vec::new(),
             end: End::Open,
+            pending: Vec::new(),
+            long: None,
         }
     }
 
     /// The header at `self.next` is complete: decide it.
     fn take_header(&mut self) {
         let header = std::mem::take(&mut self.header);
+        // After a long record any header error is `SubsequentHeaderError`,
+        // a `ReadError` wherever it occurs.
+        let subsequent = !self.pending.is_empty();
         if header.iter().all(|byte| *byte == 0) {
             // EOFHeaderError: the end, even at offset 0.
-            self.end = End::Done;
+            self.end = if subsequent { End::Error } else { End::Done };
             return;
         }
         match parse_header(&header, self.next) {
-            Header::Member(member, next) => {
+            Header::Member(mut member, next) => {
+                // `_proc_gnulong` patches on the way out of its recursion:
+                // the record nearest the header first, each followed by
+                // `removesuffix("/")` on a directory's name.
+                for (kind, data) in self.pending.drain(..).rev() {
+                    if kind == b'L' {
+                        member.name = data;
+                    } else {
+                        member.linkname = data;
+                    }
+                    if member.kind == b'5' && member.name.last() == Some(&b'/') {
+                        member.name.pop();
+                    }
+                }
                 self.members.push(member);
                 self.skipped = next != self.next + BLOCK;
                 self.next = next;
             }
+            Header::Long(kind, length) => {
+                if self.pending.len() >= MAX_LONG_CHAIN {
+                    self.end = End::Unsure;
+                    return;
+                }
+                // The record's data is read in sequence (`fileobj.read`),
+                // and the header it patches follows it directly.
+                self.next += BLOCK;
+                self.skipped = false;
+                self.long = Some(Long {
+                    kind,
+                    left: length,
+                    data: Vec::new(),
+                    ended: false,
+                });
+                if length == 0 {
+                    self.end_long();
+                }
+            }
+            Header::Invalid if subsequent => self.end = End::Error,
             Header::Invalid => {
                 self.end = if self.next == 0 {
                     End::Error
@@ -270,8 +336,35 @@ impl Reader {
         }
     }
 
+    /// The long record's data is read: it waits for the next header.
+    fn end_long(&mut self) {
+        let long = self.long.take().expect("a long record is being read");
+        self.pending.push((long.kind, long.data));
+    }
+
     fn feed(&mut self, mut bytes: &[u8]) {
         while self.end == End::Open && !bytes.is_empty() {
+            if let Some(long) = &mut self.long {
+                let take = long.left.min(bytes.len() as u128) as usize;
+                if !long.ended {
+                    let part = &bytes[..take];
+                    match part.iter().position(|byte| *byte == 0) {
+                        Some(at) => {
+                            long.data.extend_from_slice(&part[..at]);
+                            long.ended = true;
+                        }
+                        None => long.data.extend_from_slice(part),
+                    }
+                }
+                long.left -= take as u128;
+                self.seen += take as u128;
+                self.next = self.seen;
+                bytes = &bytes[take..];
+                if long.left == 0 {
+                    self.end_long();
+                }
+                continue;
+            }
             let start = self.seen;
             if start < self.next {
                 // Data being skipped.
@@ -294,6 +387,12 @@ impl Reader {
     /// The stream ended: settle the header being read.
     fn finish(&mut self) {
         if self.end != End::Open {
+            return;
+        }
+        if self.long.is_some() || !self.pending.is_empty() {
+            // A short read of a long record's data is quiet, but the header
+            // after it is then empty or short: `SubsequentHeaderError`.
+            self.end = End::Error;
             return;
         }
         if self.seen < self.next {
@@ -542,6 +641,125 @@ mod tests {
         assert_eq!(nti(&[0o377, 0xff, 0xff, 0xff, 0xff]), Ok(-1));
         assert_eq!(nti(b"12\x0034"), Ok(0o12));
         assert_eq!(nti(b"\xe9"), Err(()));
+    }
+
+    /// A ustar header (checksum computed), as the harness row builds them.
+    fn header(name: &[u8], kind: u8, size: usize, linkname: &[u8]) -> Vec<u8> {
+        let mut buf = vec![0u8; 512];
+        buf[..name.len()].copy_from_slice(name);
+        buf[100..108].copy_from_slice(b"0000644 ");
+        buf[108..116].copy_from_slice(b"0000000 ");
+        buf[116..124].copy_from_slice(b"0000000 ");
+        buf[124..136].copy_from_slice(format!("{size:011o} ").as_bytes());
+        buf[136..148].copy_from_slice(b"00000000000 ");
+        buf[156] = kind;
+        buf[157..157 + linkname.len()].copy_from_slice(linkname);
+        buf[257..265].copy_from_slice(b"ustar 00");
+        buf[148..156].copy_from_slice(b"        ");
+        let sum: u32 = buf.iter().map(|b| u32::from(*b)).sum();
+        buf[148..156].copy_from_slice(format!("{sum:06o}  ").as_bytes());
+        buf
+    }
+
+    fn data(content: &[u8]) -> Vec<u8> {
+        let mut out = content.to_vec();
+        out.resize(content.len().div_ceil(512) * 512, 0);
+        out
+    }
+
+    fn long(kind: u8, value: &[u8]) -> Vec<u8> {
+        let mut record = header(b"././@LongLink", kind, value.len() + 1, b"");
+        let mut content = value.to_vec();
+        content.push(0);
+        record.extend(data(&content));
+        record
+    }
+
+    fn read(parts: &[Vec<u8>]) -> Reader {
+        let mut reader = Reader::new();
+        // Fed in uneven chunks: records may straddle any boundary.
+        let stream = parts.concat();
+        for chunk in stream.chunks(77) {
+            reader.feed(chunk);
+        }
+        reader.finish();
+        reader
+    }
+
+    const END: [u8; 1024] = [0; 1024];
+
+    #[test]
+    fn gnu_long_names_and_links_patch_the_next_header() {
+        let name = vec![b'n'; 150];
+        let target = vec![b't'; 130];
+        let reader = read(&[
+            long(b'L', &name),
+            header(b"short", b'0', 1, b""),
+            data(b"x"),
+            long(b'K', &target),
+            long(b'L', b"dir//"),
+            header(b"d/", b'5', 0, b"ignored"),
+            END.to_vec(),
+        ]);
+        assert_eq!(reader.end, End::Done);
+        let names: Vec<_> = reader
+            .members
+            .iter()
+            .map(|m| (m.kind, m.name.clone(), m.linkname.clone()))
+            .collect();
+        assert_eq!(
+            names,
+            vec![
+                (b'0', name, Vec::new()),
+                // Each level removes one slash from a directory's name.
+                (b'5', b"dir".to_vec(), target),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_long_name_is_cut_at_its_first_nul_and_outermost_wins() {
+        let mut content = b"first rest".to_vec();
+        content.push(0);
+        let mut record = header(b"././@LongLink", b'L', content.len(), b"");
+        record.extend(data(&content));
+        let reader = read(&[
+            record,
+            long(b'L', b"second"),
+            header(b"x", b'0', 0, b""),
+            END.to_vec(),
+        ]);
+        assert_eq!(reader.end, End::Done);
+        assert_eq!(reader.members[0].name, b"first");
+    }
+
+    #[test]
+    fn any_header_problem_after_a_long_record_is_a_read_error() {
+        let name = b"a-long-name".to_vec();
+        for (case, parts) in [
+            ("end blocks", vec![long(b'L', &name), END.to_vec()]),
+            ("stream ends", vec![long(b'L', &name)]),
+            (
+                "data cut short",
+                vec![long(b'L', &vec![b'n'; 600])[..700].to_vec()],
+            ),
+            ("short header", vec![long(b'L', &name), vec![1u8; 100]]),
+            (
+                "bad checksum",
+                vec![long(b'L', &name), {
+                    let mut h = header(b"x", b'0', 0, b"");
+                    h[148] = b'7';
+                    h
+                }],
+            ),
+        ] {
+            // Not the first member: a bare bad header there ends quietly.
+            let mut all = vec![header(b"first", b'0', 0, b"")];
+            all.extend(parts);
+            assert_eq!(read(&all).end, End::Error, "{case}");
+        }
+        let chain: Vec<_> = (0..=MAX_LONG_CHAIN).map(|_| long(b'L', b"n")).collect();
+        assert_eq!(read(&chain).end, End::Unsure);
     }
 
     #[test]
