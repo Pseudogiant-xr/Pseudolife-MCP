@@ -5,6 +5,7 @@
 use std::{
     io::Read,
     process::{Command, Stdio},
+    sync::mpsc,
     time::{Duration, Instant},
 };
 
@@ -85,42 +86,60 @@ impl Docker for Real {
             Ok(child) => child,
             Err(_) => return failed,
         };
+        let deadline = Instant::now() + timeout;
         let mut stdout = child.stdout.take().expect("piped stdout");
         let mut stderr = child.stderr.take().expect("piped stderr");
-        let out = std::thread::spawn(move || {
+        // The readers report over a channel, never through a join: a
+        // descendant that inherited a pipe keeps it open after the child has
+        // gone, and a join would then wait on that descendant, not on the
+        // timeout. A reader left behind ends when its pipe closes.
+        let (sender, receiver) = mpsc::channel();
+        let out = sender.clone();
+        std::thread::spawn(move || {
             let mut bytes = Vec::new();
             let _ = stdout.read_to_end(&mut bytes);
-            bytes
+            let _ = out.send((true, bytes));
         });
-        let err = std::thread::spawn(move || {
+        std::thread::spawn(move || {
             let mut bytes = Vec::new();
             let _ = stderr.read_to_end(&mut bytes);
-            bytes
+            let _ = sender.send((false, bytes));
         });
-        let deadline = Instant::now() + timeout;
+        // subprocess.run kills the direct child at its timeout and reaps it.
+        let stop = |child: &mut std::process::Child| {
+            let _ = child.kill();
+            let _ = child.wait();
+        };
+        // `communicate(timeout=...)`: both streams to their end, then the
+        // child, all inside the one deadline.
+        let (mut stdout, mut stderr) = (None, None);
+        while stdout.is_none() || stderr.is_none() {
+            let left = deadline.saturating_duration_since(Instant::now());
+            match receiver.recv_timeout(left) {
+                Ok((true, bytes)) => stdout = Some(bytes),
+                Ok((false, bytes)) => stderr = Some(bytes),
+                Err(_) => {
+                    stop(&mut child);
+                    return failed;
+                }
+            }
+        }
         let status = loop {
             match child.try_wait() {
-                Ok(Some(status)) => break Some(status),
+                Ok(Some(status)) => break status,
                 Ok(None) if Instant::now() >= deadline => {
-                    // subprocess.run kills the direct child at its timeout.
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    break None;
+                    stop(&mut child);
+                    return failed;
                 }
                 Ok(None) => std::thread::sleep(Duration::from_millis(5)),
-                Err(_) => break None,
+                Err(_) => return failed,
             }
         };
-        let stdout = out.join().unwrap_or_default();
-        let stderr = err.join().unwrap_or_default();
-        match status {
-            Some(status) => Ran {
-                code: exit_code(status),
-                stdout,
-                stderr,
-                failed: false,
-            },
-            None => failed,
+        Ran {
+            code: exit_code(status),
+            stdout: stdout.unwrap_or_default(),
+            stderr: stderr.unwrap_or_default(),
+            failed: false,
         }
     }
 }
@@ -208,6 +227,50 @@ mod tests {
         };
         assert_eq!(failed.output(true), b"outerr");
         assert_eq!(failed.output(false), b"out");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_finished_command_returns_its_code_and_both_streams() {
+        let mut runner = Real {
+            program: "sh".to_owned(),
+        };
+        let ran = runner.run(
+            &[
+                "-c".to_owned(),
+                "printf out; printf err >&2; exit 3".to_owned(),
+            ],
+            Duration::from_secs(30),
+        );
+        assert!(!ran.failed);
+        assert_eq!(
+            (ran.code, &ran.stdout[..], &ran.stderr[..]),
+            (3, &b"out"[..], &b"err"[..])
+        );
+    }
+
+    /// A descendant that inherited the pipes keeps them open after the
+    /// direct child has gone. `subprocess.run` still raises at the timeout
+    /// (it kills and reaps the child, then stops reading), so the call is
+    /// bounded by the timeout, not by the descendant.
+    #[cfg(unix)]
+    #[test]
+    fn a_timeout_is_not_held_open_by_a_descendant_with_the_pipes() {
+        let mut runner = Real {
+            program: "sh".to_owned(),
+        };
+        let started = Instant::now();
+        let ran = runner.run(
+            &["-c".to_owned(), "sleep 3 & exit 0".to_owned()],
+            Duration::from_millis(200),
+        );
+        assert!(ran.failed, "{ran:?}");
+        assert_eq!(ran.code, 1);
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "{:?}",
+            started.elapsed()
+        );
     }
 
     #[test]
