@@ -287,5 +287,28 @@
   ],
   "update": [
     "update-current-exit"
+  ],
+  "restore": [
+    "restore-copy-loose",
+    "restore-directory-skips",
+    "restore-dump-after-state",
+    "restore-fifo-allowed",
+    "restore-gzip-crc",
+    "restore-gzip-padding",
+    "restore-help-any-width",
+    "restore-later-header-error",
+    "restore-lone-cr",
+    "restore-loop-continues",
+    "restore-negative-as-option",
+    "restore-no-transient-pass",
+    "restore-octal-prefix",
+    "restore-padding-unchecked",
+    "restore-prefix-ignored",
+    "restore-refusal-exit",
+    "restore-required-before-type",
+    "restore-signed-checksum",
+    "restore-state-skipped",
+    "restore-yes-ignored",
+    "restore-zlib-answered"
   ]
 }

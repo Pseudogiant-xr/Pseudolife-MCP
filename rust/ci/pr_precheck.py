@@ -31,6 +31,7 @@ PYTHON_ROOTS = {
     "pair": ("pair_cli",),
     "move": ("move_cli",),
     "tunnel": ("tunnel_cli",),
+    "restore": ("restore_cli", "docker_backup_restore"),
     "update": ("update_cli",),
     "audit": ("board_audit_cli",),
     "backup": ("backup_cli",),

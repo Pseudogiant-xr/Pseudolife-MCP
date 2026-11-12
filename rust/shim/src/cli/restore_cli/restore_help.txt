@@ -1,0 +1,34 @@
+usage: pseudolife-mcp restore [-h] --backup-file BACKUP_FILE
+                              [--state-archive STATE_ARCHIVE] [--yes]
+                              [--leave-stopped] [--container CONTAINER]
+                              [--daemon-container DAEMON_CONTAINER] [--db DB]
+                              [--user USER] [--db-port DB_PORT]
+                              [--daemon-url DAEMON_URL]
+                              [--safety-dir SAFETY_DIR]
+
+Replace a Docker bank from its backup.
+
+options:
+  -h, --help            show this help message and exit
+  --backup-file BACKUP_FILE
+                        complete plain-format .sql.gz database dump
+  --state-archive STATE_ARCHIVE
+                        matching state-volume .tgz backup
+  --yes                 confirm replacing the existing bank without a prompt
+  --leave-stopped       leave the daemon stopped after restoring
+  --container CONTAINER
+                        PostgreSQL container (default: pseudolife-mcp-
+                        postgres)
+  --daemon-container DAEMON_CONTAINER
+                        daemon container (default: pseudolife-mcp-daemon)
+  --db DB               database name (default: the running daemon's
+                        configuration)
+  --user USER           database role (default: the running daemon's
+                        configuration)
+  --db-port DB_PORT     PostgreSQL port inside its container (default: daemon
+                        configuration)
+  --daemon-url DAEMON_URL
+                        health endpoint (default: the daemon's published port)
+  --safety-dir SAFETY_DIR
+                        safety backup directory outside any checkout (default:
+                        per-user backups)

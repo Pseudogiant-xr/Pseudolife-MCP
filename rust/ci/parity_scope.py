@@ -75,7 +75,7 @@ SHARDS = [
     # 40047950017 (2026-10-24; live + golden: test_login 7.3, connect 6.3,
     # maintainer 3.5, tunnel 1.9, move 1.2), so they split in two: 10.4 and
     # 9.8 min. test_login stays here with its container image and record.
-    {"suite": "w1c-connection", "w1c_rows": "'test_login', 'move', 'tunnel'",
+    {"suite": "w1c-connection", "w1c_rows": "'test_login', 'move', 'tunnel', 'restore'",
      "w1c_timeout": 26, "job_timeout": 50},
     {"suite": "w1c-connect", "w1c_rows": "'connect', 'maintainer', 'coordination_recovery', 'maintainer_setup'", "w1c_timeout": 25,
      "job_timeout": 29},
@@ -138,7 +138,7 @@ ROW_SUITES = {
     "transfer": "w1c-pairing", "invite": "w1c-pairing", "pair": "w1c-pairing",
     "test_login": "w1c-connection", "connect": "w1c-connect", "maintainer": "w1c-connect",
     "coordination_recovery": "w1c-connect", "maintainer_setup": "w1c-connect",
-    "move": "w1c-connection", "tunnel": "w1c-connection",
+    "move": "w1c-connection", "tunnel": "w1c-connection", "restore": "w1c-connection",
     "audit": "h5-audit", "backup": "h5-backup", "migrate_flat": "h5-backup",
 }
 # The pseudolife-stdio binary: every CLI row, plus the differential judges,
@@ -156,8 +156,8 @@ DAEMON = ("cli", "cli-store", "cli-startup", "cli-live", "eval", "h5-w1a", "h5-b
 SHIM_COMMANDS = {
     # The conservative import scan also sees update's private backup module.
     # Doctor shares update's Codex hook checks; its dependencies inherit that row.
-    "backup": ("backup", "migrate_flat", "update", "doctor"),
-    "backup_help.txt": ("backup", "migrate_flat", "update", "doctor"),
+    "backup": ("backup", "migrate_flat", "update", "doctor", "restore"),
+    "backup_help.txt": ("backup", "migrate_flat", "update", "doctor", "restore"),
     "board_audit": ("audit", "coordination_recovery"),
     "migrate_flat.rs": ("migrate_flat",),
     "update": ("update", "doctor"),
@@ -166,6 +166,7 @@ SHIM_COMMANDS = {
     "coordination_recovery": ("coordination_recovery",),
     "move_cli.rs": ("move",), "test_login": ("test_login",),
     "transfer": ("transfer",), "transfer.rs": ("transfer",), "tunnel": ("tunnel",),
+    "restore_cli": ("restore",),
     "episode.rs": ("episode",), "episode_input.rs": ("episode",),
     "briefing_hook.rs": ("hook",), "briefing_help.txt": ("hook",),
 }

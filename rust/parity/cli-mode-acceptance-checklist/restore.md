@@ -1,0 +1,3 @@
+| Mode | Phase | Status | Native | Evidence |
+|---|---|---|---|---|
+| restore | 2 | deferred | partly | The gates before Docker ported as CLI-RESTORE-GATES (harness row `restore`): argparse help and errors at 80 columns, the dump-completeness and state-archive refusals, the refusal without `--yes` off a terminal; every argv that passes them, the interactive prompt, PAX/GNU-long/sparse archives and a deflate error (the oracle's `zlib.error` traceback) defer by name before any effect; the Docker restore itself (CLI-RESTORE-DOCKER: `DockerBank`, the update lock, the safety backup, drop and replay) defers; `restore_cli.py`, `docker_backup_restore.py`; `tests/test_docker_backup_restore.py` |

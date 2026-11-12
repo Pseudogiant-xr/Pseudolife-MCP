@@ -20,6 +20,7 @@ mod migrate_flat;
 mod move_cli;
 mod pairing;
 mod pyjson;
+mod restore_cli;
 mod test_login;
 mod transfer;
 mod tunnel;
@@ -201,6 +202,11 @@ pub fn dispatch(mode: Option<&str>) -> Option<ExitCode> {
     }
     if mode == "tunnel"
         && let Some(code) = tunnel::run(std::env::args_os().skip(2).collect())
+    {
+        return Some(code);
+    }
+    if mode == "restore"
+        && let Some(code) = restore_cli::run(std::env::args_os().skip(2).collect())
     {
         return Some(code);
     }
