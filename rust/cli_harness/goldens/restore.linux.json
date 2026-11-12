@@ -1,0 +1,2328 @@
+{
+ "row": "CLI-RESTORE-GATES",
+ "platform": "linux",
+ "oracle_commit": "0408f8bd1f507be14e2fe3cfd2a7407ab327801a",
+ "oracle_commit_source": "git",
+ "cases": {
+  "help": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIHJlc3RvcmUgWy1oXSAtLWJhY2t1cC1maWxlIEJBQ0tVUF9GSUxFCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIFstLXN0YXRlLWFyY2hpdmUgU1RBVEVfQVJDSElWRV0gWy0teWVzXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1sZWF2ZS1zdG9wcGVkXSBbLS1jb250YWluZXIgQ09OVEFJTkVSXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1kYWVtb24tY29udGFpbmVyIERBRU1PTl9DT05UQUlORVJdIFstLWRiIERCXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS11c2VyIFVTRVJdIFstLWRiLXBvcnQgREJfUE9SVF0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tZGFlbW9uLXVybCBEQUVNT05fVVJMXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1zYWZldHktZGlyIFNBRkVUWV9ESVJdCgpSZXBsYWNlIGEgRG9ja2VyIGJhbmsgZnJvbSBpdHMgYmFja3VwLgoKb3B0aW9uczoKICAtaCwgLS1oZWxwICAgICAgICAgICAgc2hvdyB0aGlzIGhlbHAgbWVzc2FnZSBhbmQgZXhpdAogIC0tYmFja3VwLWZpbGUgQkFDS1VQX0ZJTEUKICAgICAgICAgICAgICAgICAgICAgICAgY29tcGxldGUgcGxhaW4tZm9ybWF0IC5zcWwuZ3ogZGF0YWJhc2UgZHVtcAogIC0tc3RhdGUtYXJjaGl2ZSBTVEFURV9BUkNISVZFCiAgICAgICAgICAgICAgICAgICAgICAgIG1hdGNoaW5nIHN0YXRlLXZvbHVtZSAudGd6IGJhY2t1cAogIC0teWVzICAgICAgICAgICAgICAgICBjb25maXJtIHJlcGxhY2luZyB0aGUgZXhpc3RpbmcgYmFuayB3aXRob3V0IGEgcHJvbXB0CiAgLS1sZWF2ZS1zdG9wcGVkICAgICAgIGxlYXZlIHRoZSBkYWVtb24gc3RvcHBlZCBhZnRlciByZXN0b3JpbmcKICAtLWNvbnRhaW5lciBDT05UQUlORVIKICAgICAgICAgICAgICAgICAgICAgICAgUG9zdGdyZVNRTCBjb250YWluZXIgKGRlZmF1bHQ6IHBzZXVkb2xpZmUtbWNwLQogICAgICAgICAgICAgICAgICAgICAgICBwb3N0Z3JlcykKICAtLWRhZW1vbi1jb250YWluZXIgREFFTU9OX0NPTlRBSU5FUgogICAgICAgICAgICAgICAgICAgICAgICBkYWVtb24gY29udGFpbmVyIChkZWZhdWx0OiBwc2V1ZG9saWZlLW1jcC1kYWVtb24pCiAgLS1kYiBEQiAgICAgICAgICAgICAgIGRhdGFiYXNlIG5hbWUgKGRlZmF1bHQ6IHRoZSBydW5uaW5nIGRhZW1vbidzCiAgICAgICAgICAgICAgICAgICAgICAgIGNvbmZpZ3VyYXRpb24pCiAgLS11c2VyIFVTRVIgICAgICAgICAgIGRhdGFiYXNlIHJvbGUgKGRlZmF1bHQ6IHRoZSBydW5uaW5nIGRhZW1vbidzCiAgICAgICAgICAgICAgICAgICAgICAgIGNvbmZpZ3VyYXRpb24pCiAgLS1kYi1wb3J0IERCX1BPUlQgICAgIFBvc3RncmVTUUwgcG9ydCBpbnNpZGUgaXRzIGNvbnRhaW5lciAoZGVmYXVsdDogZGFlbW9uCiAgICAgICAgICAgICAgICAgICAgICAgIGNvbmZpZ3VyYXRpb24pCiAgLS1kYWVtb24tdXJsIERBRU1PTl9VUkwKICAgICAgICAgICAgICAgICAgICAgICAgaGVhbHRoIGVuZHBvaW50IChkZWZhdWx0OiB0aGUgZGFlbW9uJ3MgcHVibGlzaGVkIHBvcnQpCiAgLS1zYWZldHktZGlyIFNBRkVUWV9ESVIKICAgICAgICAgICAgICAgICAgICAgICAgc2FmZXR5IGJhY2t1cCBkaXJlY3Rvcnkgb3V0c2lkZSBhbnkgY2hlY2tvdXQgKGRlZmF1bHQ6CiAgICAgICAgICAgICAgICAgICAgICAgIHBlci11c2VyIGJhY2t1cHMpCg==",
+   "stderr": "",
+   "window": [
+    1794508969.6630073,
+    1794508969.9887557
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "help-short": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIHJlc3RvcmUgWy1oXSAtLWJhY2t1cC1maWxlIEJBQ0tVUF9GSUxFCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIFstLXN0YXRlLWFyY2hpdmUgU1RBVEVfQVJDSElWRV0gWy0teWVzXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1sZWF2ZS1zdG9wcGVkXSBbLS1jb250YWluZXIgQ09OVEFJTkVSXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1kYWVtb24tY29udGFpbmVyIERBRU1PTl9DT05UQUlORVJdIFstLWRiIERCXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS11c2VyIFVTRVJdIFstLWRiLXBvcnQgREJfUE9SVF0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tZGFlbW9uLXVybCBEQUVNT05fVVJMXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1zYWZldHktZGlyIFNBRkVUWV9ESVJdCgpSZXBsYWNlIGEgRG9ja2VyIGJhbmsgZnJvbSBpdHMgYmFja3VwLgoKb3B0aW9uczoKICAtaCwgLS1oZWxwICAgICAgICAgICAgc2hvdyB0aGlzIGhlbHAgbWVzc2FnZSBhbmQgZXhpdAogIC0tYmFja3VwLWZpbGUgQkFDS1VQX0ZJTEUKICAgICAgICAgICAgICAgICAgICAgICAgY29tcGxldGUgcGxhaW4tZm9ybWF0IC5zcWwuZ3ogZGF0YWJhc2UgZHVtcAogIC0tc3RhdGUtYXJjaGl2ZSBTVEFURV9BUkNISVZFCiAgICAgICAgICAgICAgICAgICAgICAgIG1hdGNoaW5nIHN0YXRlLXZvbHVtZSAudGd6IGJhY2t1cAogIC0teWVzICAgICAgICAgICAgICAgICBjb25maXJtIHJlcGxhY2luZyB0aGUgZXhpc3RpbmcgYmFuayB3aXRob3V0IGEgcHJvbXB0CiAgLS1sZWF2ZS1zdG9wcGVkICAgICAgIGxlYXZlIHRoZSBkYWVtb24gc3RvcHBlZCBhZnRlciByZXN0b3JpbmcKICAtLWNvbnRhaW5lciBDT05UQUlORVIKICAgICAgICAgICAgICAgICAgICAgICAgUG9zdGdyZVNRTCBjb250YWluZXIgKGRlZmF1bHQ6IHBzZXVkb2xpZmUtbWNwLQogICAgICAgICAgICAgICAgICAgICAgICBwb3N0Z3JlcykKICAtLWRhZW1vbi1jb250YWluZXIgREFFTU9OX0NPTlRBSU5FUgogICAgICAgICAgICAgICAgICAgICAgICBkYWVtb24gY29udGFpbmVyIChkZWZhdWx0OiBwc2V1ZG9saWZlLW1jcC1kYWVtb24pCiAgLS1kYiBEQiAgICAgICAgICAgICAgIGRhdGFiYXNlIG5hbWUgKGRlZmF1bHQ6IHRoZSBydW5uaW5nIGRhZW1vbidzCiAgICAgICAgICAgICAgICAgICAgICAgIGNvbmZpZ3VyYXRpb24pCiAgLS11c2VyIFVTRVIgICAgICAgICAgIGRhdGFiYXNlIHJvbGUgKGRlZmF1bHQ6IHRoZSBydW5uaW5nIGRhZW1vbidzCiAgICAgICAgICAgICAgICAgICAgICAgIGNvbmZpZ3VyYXRpb24pCiAgLS1kYi1wb3J0IERCX1BPUlQgICAgIFBvc3RncmVTUUwgcG9ydCBpbnNpZGUgaXRzIGNvbnRhaW5lciAoZGVmYXVsdDogZGFlbW9uCiAgICAgICAgICAgICAgICAgICAgICAgIGNvbmZpZ3VyYXRpb24pCiAgLS1kYWVtb24tdXJsIERBRU1PTl9VUkwKICAgICAgICAgICAgICAgICAgICAgICAgaGVhbHRoIGVuZHBvaW50IChkZWZhdWx0OiB0aGUgZGFlbW9uJ3MgcHVibGlzaGVkIHBvcnQpCiAgLS1zYWZldHktZGlyIFNBRkVUWV9ESVIKICAgICAgICAgICAgICAgICAgICAgICAgc2FmZXR5IGJhY2t1cCBkaXJlY3Rvcnkgb3V0c2lkZSBhbnkgY2hlY2tvdXQgKGRlZmF1bHQ6CiAgICAgICAgICAgICAgICAgICAgICAgIHBlci11c2VyIGJhY2t1cHMpCg==",
+   "stderr": "",
+   "window": [
+    1794508969.9893327,
+    1794508970.200148
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "help-after-flags": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIHJlc3RvcmUgWy1oXSAtLWJhY2t1cC1maWxlIEJBQ0tVUF9GSUxFCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIFstLXN0YXRlLWFyY2hpdmUgU1RBVEVfQVJDSElWRV0gWy0teWVzXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1sZWF2ZS1zdG9wcGVkXSBbLS1jb250YWluZXIgQ09OVEFJTkVSXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1kYWVtb24tY29udGFpbmVyIERBRU1PTl9DT05UQUlORVJdIFstLWRiIERCXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS11c2VyIFVTRVJdIFstLWRiLXBvcnQgREJfUE9SVF0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tZGFlbW9uLXVybCBEQUVNT05fVVJMXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1zYWZldHktZGlyIFNBRkVUWV9ESVJdCgpSZXBsYWNlIGEgRG9ja2VyIGJhbmsgZnJvbSBpdHMgYmFja3VwLgoKb3B0aW9uczoKICAtaCwgLS1oZWxwICAgICAgICAgICAgc2hvdyB0aGlzIGhlbHAgbWVzc2FnZSBhbmQgZXhpdAogIC0tYmFja3VwLWZpbGUgQkFDS1VQX0ZJTEUKICAgICAgICAgICAgICAgICAgICAgICAgY29tcGxldGUgcGxhaW4tZm9ybWF0IC5zcWwuZ3ogZGF0YWJhc2UgZHVtcAogIC0tc3RhdGUtYXJjaGl2ZSBTVEFURV9BUkNISVZFCiAgICAgICAgICAgICAgICAgICAgICAgIG1hdGNoaW5nIHN0YXRlLXZvbHVtZSAudGd6IGJhY2t1cAogIC0teWVzICAgICAgICAgICAgICAgICBjb25maXJtIHJlcGxhY2luZyB0aGUgZXhpc3RpbmcgYmFuayB3aXRob3V0IGEgcHJvbXB0CiAgLS1sZWF2ZS1zdG9wcGVkICAgICAgIGxlYXZlIHRoZSBkYWVtb24gc3RvcHBlZCBhZnRlciByZXN0b3JpbmcKICAtLWNvbnRhaW5lciBDT05UQUlORVIKICAgICAgICAgICAgICAgICAgICAgICAgUG9zdGdyZVNRTCBjb250YWluZXIgKGRlZmF1bHQ6IHBzZXVkb2xpZmUtbWNwLQogICAgICAgICAgICAgICAgICAgICAgICBwb3N0Z3JlcykKICAtLWRhZW1vbi1jb250YWluZXIgREFFTU9OX0NPTlRBSU5FUgogICAgICAgICAgICAgICAgICAgICAgICBkYWVtb24gY29udGFpbmVyIChkZWZhdWx0OiBwc2V1ZG9saWZlLW1jcC1kYWVtb24pCiAgLS1kYiBEQiAgICAgICAgICAgICAgIGRhdGFiYXNlIG5hbWUgKGRlZmF1bHQ6IHRoZSBydW5uaW5nIGRhZW1vbidzCiAgICAgICAgICAgICAgICAgICAgICAgIGNvbmZpZ3VyYXRpb24pCiAgLS11c2VyIFVTRVIgICAgICAgICAgIGRhdGFiYXNlIHJvbGUgKGRlZmF1bHQ6IHRoZSBydW5uaW5nIGRhZW1vbidzCiAgICAgICAgICAgICAgICAgICAgICAgIGNvbmZpZ3VyYXRpb24pCiAgLS1kYi1wb3J0IERCX1BPUlQgICAgIFBvc3RncmVTUUwgcG9ydCBpbnNpZGUgaXRzIGNvbnRhaW5lciAoZGVmYXVsdDogZGFlbW9uCiAgICAgICAgICAgICAgICAgICAgICAgIGNvbmZpZ3VyYXRpb24pCiAgLS1kYWVtb24tdXJsIERBRU1PTl9VUkwKICAgICAgICAgICAgICAgICAgICAgICAgaGVhbHRoIGVuZHBvaW50IChkZWZhdWx0OiB0aGUgZGFlbW9uJ3MgcHVibGlzaGVkIHBvcnQpCiAgLS1zYWZldHktZGlyIFNBRkVUWV9ESVIKICAgICAgICAgICAgICAgICAgICAgICAgc2FmZXR5IGJhY2t1cCBkaXJlY3Rvcnkgb3V0c2lkZSBhbnkgY2hlY2tvdXQgKGRlZmF1bHQ6CiAgICAgICAgICAgICAgICAgICAgICAgIHBlci11c2VyIGJhY2t1cHMpCg==",
+   "stderr": "",
+   "window": [
+    1794508970.2006304,
+    1794508970.3895962
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "no-arguments": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIHJlc3RvcmUgWy1oXSAtLWJhY2t1cC1maWxlIEJBQ0tVUF9GSUxFCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIFstLXN0YXRlLWFyY2hpdmUgU1RBVEVfQVJDSElWRV0gWy0teWVzXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1sZWF2ZS1zdG9wcGVkXSBbLS1jb250YWluZXIgQ09OVEFJTkVSXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1kYWVtb24tY29udGFpbmVyIERBRU1PTl9DT05UQUlORVJdIFstLWRiIERCXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS11c2VyIFVTRVJdIFstLWRiLXBvcnQgREJfUE9SVF0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tZGFlbW9uLXVybCBEQUVNT05fVVJMXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1zYWZldHktZGlyIFNBRkVUWV9ESVJdCnBzZXVkb2xpZmUtbWNwIHJlc3RvcmU6IGVycm9yOiB0aGUgZm9sbG93aW5nIGFyZ3VtZW50cyBhcmUgcmVxdWlyZWQ6IC0tYmFja3VwLWZpbGUK",
+   "window": [
+    1794508970.3901148,
+    1794508970.5851133
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "missing-backup-file": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIHJlc3RvcmUgWy1oXSAtLWJhY2t1cC1maWxlIEJBQ0tVUF9GSUxFCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIFstLXN0YXRlLWFyY2hpdmUgU1RBVEVfQVJDSElWRV0gWy0teWVzXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1sZWF2ZS1zdG9wcGVkXSBbLS1jb250YWluZXIgQ09OVEFJTkVSXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1kYWVtb24tY29udGFpbmVyIERBRU1PTl9DT05UQUlORVJdIFstLWRiIERCXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS11c2VyIFVTRVJdIFstLWRiLXBvcnQgREJfUE9SVF0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tZGFlbW9uLXVybCBEQUVNT05fVVJMXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1zYWZldHktZGlyIFNBRkVUWV9ESVJdCnBzZXVkb2xpZmUtbWNwIHJlc3RvcmU6IGVycm9yOiB0aGUgZm9sbG93aW5nIGFyZ3VtZW50cyBhcmUgcmVxdWlyZWQ6IC0tYmFja3VwLWZpbGUK",
+   "window": [
+    1794508970.585542,
+    1794508970.7719238
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "missing-value": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIHJlc3RvcmUgWy1oXSAtLWJhY2t1cC1maWxlIEJBQ0tVUF9GSUxFCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIFstLXN0YXRlLWFyY2hpdmUgU1RBVEVfQVJDSElWRV0gWy0teWVzXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1sZWF2ZS1zdG9wcGVkXSBbLS1jb250YWluZXIgQ09OVEFJTkVSXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1kYWVtb24tY29udGFpbmVyIERBRU1PTl9DT05UQUlORVJdIFstLWRiIERCXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS11c2VyIFVTRVJdIFstLWRiLXBvcnQgREJfUE9SVF0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tZGFlbW9uLXVybCBEQUVNT05fVVJMXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1zYWZldHktZGlyIFNBRkVUWV9ESVJdCnBzZXVkb2xpZmUtbWNwIHJlc3RvcmU6IGVycm9yOiBhcmd1bWVudCAtLWJhY2t1cC1maWxlOiBleHBlY3RlZCBvbmUgYXJndW1lbnQK",
+   "window": [
+    1794508970.772365,
+    1794508970.9666576
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "missing-value-before-option": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIHJlc3RvcmUgWy1oXSAtLWJhY2t1cC1maWxlIEJBQ0tVUF9GSUxFCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIFstLXN0YXRlLWFyY2hpdmUgU1RBVEVfQVJDSElWRV0gWy0teWVzXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1sZWF2ZS1zdG9wcGVkXSBbLS1jb250YWluZXIgQ09OVEFJTkVSXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1kYWVtb24tY29udGFpbmVyIERBRU1PTl9DT05UQUlORVJdIFstLWRiIERCXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS11c2VyIFVTRVJdIFstLWRiLXBvcnQgREJfUE9SVF0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tZGFlbW9uLXVybCBEQUVNT05fVVJMXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1zYWZldHktZGlyIFNBRkVUWV9ESVJdCnBzZXVkb2xpZmUtbWNwIHJlc3RvcmU6IGVycm9yOiBhcmd1bWVudCAtLWJhY2t1cC1maWxlOiBleHBlY3RlZCBvbmUgYXJndW1lbnQK",
+   "window": [
+    1794508970.9670906,
+    1794508971.1671154
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "port-letters": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIHJlc3RvcmUgWy1oXSAtLWJhY2t1cC1maWxlIEJBQ0tVUF9GSUxFCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIFstLXN0YXRlLWFyY2hpdmUgU1RBVEVfQVJDSElWRV0gWy0teWVzXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1sZWF2ZS1zdG9wcGVkXSBbLS1jb250YWluZXIgQ09OVEFJTkVSXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1kYWVtb24tY29udGFpbmVyIERBRU1PTl9DT05UQUlORVJdIFstLWRiIERCXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS11c2VyIFVTRVJdIFstLWRiLXBvcnQgREJfUE9SVF0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tZGFlbW9uLXVybCBEQUVNT05fVVJMXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1zYWZldHktZGlyIFNBRkVUWV9ESVJdCnBzZXVkb2xpZmUtbWNwIHJlc3RvcmU6IGVycm9yOiBhcmd1bWVudCAtLWRiLXBvcnQ6IGludmFsaWQgaW50IHZhbHVlOiAnYWJjJwo=",
+   "window": [
+    1794508971.1675773,
+    1794508971.377125
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "port-empty-joined": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIHJlc3RvcmUgWy1oXSAtLWJhY2t1cC1maWxlIEJBQ0tVUF9GSUxFCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIFstLXN0YXRlLWFyY2hpdmUgU1RBVEVfQVJDSElWRV0gWy0teWVzXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1sZWF2ZS1zdG9wcGVkXSBbLS1jb250YWluZXIgQ09OVEFJTkVSXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1kYWVtb24tY29udGFpbmVyIERBRU1PTl9DT05UQUlORVJdIFstLWRiIERCXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS11c2VyIFVTRVJdIFstLWRiLXBvcnQgREJfUE9SVF0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tZGFlbW9uLXVybCBEQUVNT05fVVJMXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1zYWZldHktZGlyIFNBRkVUWV9ESVJdCnBzZXVkb2xpZmUtbWNwIHJlc3RvcmU6IGVycm9yOiBhcmd1bWVudCAtLWRiLXBvcnQ6IGludmFsaWQgaW50IHZhbHVlOiAnJwo=",
+   "window": [
+    1794508971.3776786,
+    1794508971.5778213
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "port-spaced": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIHJlc3RvcmUgWy1oXSAtLWJhY2t1cC1maWxlIEJBQ0tVUF9GSUxFCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIFstLXN0YXRlLWFyY2hpdmUgU1RBVEVfQVJDSElWRV0gWy0teWVzXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1sZWF2ZS1zdG9wcGVkXSBbLS1jb250YWluZXIgQ09OVEFJTkVSXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1kYWVtb24tY29udGFpbmVyIERBRU1PTl9DT05UQUlORVJdIFstLWRiIERCXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS11c2VyIFVTRVJdIFstLWRiLXBvcnQgREJfUE9SVF0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tZGFlbW9uLXVybCBEQUVNT05fVVJMXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1zYWZldHktZGlyIFNBRkVUWV9ESVJdCnBzZXVkb2xpZmUtbWNwIHJlc3RvcmU6IGVycm9yOiBhcmd1bWVudCAtLWRiLXBvcnQ6IGludmFsaWQgaW50IHZhbHVlOiAnIDEgMicK",
+   "window": [
+    1794508971.5782914,
+    1794508971.776051
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "port-hex": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIHJlc3RvcmUgWy1oXSAtLWJhY2t1cC1maWxlIEJBQ0tVUF9GSUxFCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIFstLXN0YXRlLWFyY2hpdmUgU1RBVEVfQVJDSElWRV0gWy0teWVzXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1sZWF2ZS1zdG9wcGVkXSBbLS1jb250YWluZXIgQ09OVEFJTkVSXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1kYWVtb24tY29udGFpbmVyIERBRU1PTl9DT05UQUlORVJdIFstLWRiIERCXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS11c2VyIFVTRVJdIFstLWRiLXBvcnQgREJfUE9SVF0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tZGFlbW9uLXVybCBEQUVNT05fVVJMXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1zYWZldHktZGlyIFNBRkVUWV9ESVJdCnBzZXVkb2xpZmUtbWNwIHJlc3RvcmU6IGVycm9yOiBhcmd1bWVudCAtLWRiLXBvcnQ6IGludmFsaWQgaW50IHZhbHVlOiAnMHgxMCcK",
+   "window": [
+    1794508971.776493,
+    1794508971.983517
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "port-control": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIHJlc3RvcmUgWy1oXSAtLWJhY2t1cC1maWxlIEJBQ0tVUF9GSUxFCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIFstLXN0YXRlLWFyY2hpdmUgU1RBVEVfQVJDSElWRV0gWy0teWVzXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1sZWF2ZS1zdG9wcGVkXSBbLS1jb250YWluZXIgQ09OVEFJTkVSXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1kYWVtb24tY29udGFpbmVyIERBRU1PTl9DT05UQUlORVJdIFstLWRiIERCXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS11c2VyIFVTRVJdIFstLWRiLXBvcnQgREJfUE9SVF0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tZGFlbW9uLXVybCBEQUVNT05fVVJMXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1zYWZldHktZGlyIFNBRkVUWV9ESVJdCnBzZXVkb2xpZmUtbWNwIHJlc3RvcmU6IGVycm9yOiBhcmd1bWVudCAtLWRiLXBvcnQ6IGludmFsaWQgaW50IHZhbHVlOiAnXHgwMScK",
+   "window": [
+    1794508971.984005,
+    1794508972.1730793
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "port-before-help": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIHJlc3RvcmUgWy1oXSAtLWJhY2t1cC1maWxlIEJBQ0tVUF9GSUxFCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIFstLXN0YXRlLWFyY2hpdmUgU1RBVEVfQVJDSElWRV0gWy0teWVzXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1sZWF2ZS1zdG9wcGVkXSBbLS1jb250YWluZXIgQ09OVEFJTkVSXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1kYWVtb24tY29udGFpbmVyIERBRU1PTl9DT05UQUlORVJdIFstLWRiIERCXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS11c2VyIFVTRVJdIFstLWRiLXBvcnQgREJfUE9SVF0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tZGFlbW9uLXVybCBEQUVNT05fVVJMXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1zYWZldHktZGlyIFNBRkVUWV9ESVJdCnBzZXVkb2xpZmUtbWNwIHJlc3RvcmU6IGVycm9yOiBhcmd1bWVudCAtLWRiLXBvcnQ6IGludmFsaWQgaW50IHZhbHVlOiAneCcK",
+   "window": [
+    1794508972.1735048,
+    1794508972.3734338
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "port-before-unknown": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIHJlc3RvcmUgWy1oXSAtLWJhY2t1cC1maWxlIEJBQ0tVUF9GSUxFCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIFstLXN0YXRlLWFyY2hpdmUgU1RBVEVfQVJDSElWRV0gWy0teWVzXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1sZWF2ZS1zdG9wcGVkXSBbLS1jb250YWluZXIgQ09OVEFJTkVSXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1kYWVtb24tY29udGFpbmVyIERBRU1PTl9DT05UQUlORVJdIFstLWRiIERCXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS11c2VyIFVTRVJdIFstLWRiLXBvcnQgREJfUE9SVF0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tZGFlbW9uLXVybCBEQUVNT05fVVJMXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1zYWZldHktZGlyIFNBRkVUWV9ESVJdCnBzZXVkb2xpZmUtbWNwIHJlc3RvcmU6IGVycm9yOiBhcmd1bWVudCAtLWRiLXBvcnQ6IGludmFsaWQgaW50IHZhbHVlOiAnYWJjJwo=",
+   "window": [
+    1794508972.3738835,
+    1794508972.5690782
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "unknown-option": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIHJlc3RvcmUgWy1oXSAtLWJhY2t1cC1maWxlIEJBQ0tVUF9GSUxFCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIFstLXN0YXRlLWFyY2hpdmUgU1RBVEVfQVJDSElWRV0gWy0teWVzXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1sZWF2ZS1zdG9wcGVkXSBbLS1jb250YWluZXIgQ09OVEFJTkVSXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1kYWVtb24tY29udGFpbmVyIERBRU1PTl9DT05UQUlORVJdIFstLWRiIERCXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS11c2VyIFVTRVJdIFstLWRiLXBvcnQgREJfUE9SVF0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tZGFlbW9uLXVybCBEQUVNT05fVVJMXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1zYWZldHktZGlyIFNBRkVUWV9ESVJdCnBzZXVkb2xpZmUtbWNwIHJlc3RvcmU6IGVycm9yOiB1bnJlY29nbml6ZWQgYXJndW1lbnRzOiAtLWJvZ3VzIHkK",
+   "window": [
+    1794508972.569505,
+    1794508972.7609618
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "unknown-single-dash": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIHJlc3RvcmUgWy1oXSAtLWJhY2t1cC1maWxlIEJBQ0tVUF9GSUxFCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIFstLXN0YXRlLWFyY2hpdmUgU1RBVEVfQVJDSElWRV0gWy0teWVzXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1sZWF2ZS1zdG9wcGVkXSBbLS1jb250YWluZXIgQ09OVEFJTkVSXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1kYWVtb24tY29udGFpbmVyIERBRU1PTl9DT05UQUlORVJdIFstLWRiIERCXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS11c2VyIFVTRVJdIFstLWRiLXBvcnQgREJfUE9SVF0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tZGFlbW9uLXVybCBEQUVNT05fVVJMXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1zYWZldHktZGlyIFNBRkVUWV9ESVJdCnBzZXVkb2xpZmUtbWNwIHJlc3RvcmU6IGVycm9yOiB1bnJlY29nbml6ZWQgYXJndW1lbnRzOiAteAo=",
+   "window": [
+    1794508972.7613988,
+    1794508972.9495971
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "positional": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIHJlc3RvcmUgWy1oXSAtLWJhY2t1cC1maWxlIEJBQ0tVUF9GSUxFCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIFstLXN0YXRlLWFyY2hpdmUgU1RBVEVfQVJDSElWRV0gWy0teWVzXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1sZWF2ZS1zdG9wcGVkXSBbLS1jb250YWluZXIgQ09OVEFJTkVSXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1kYWVtb24tY29udGFpbmVyIERBRU1PTl9DT05UQUlORVJdIFstLWRiIERCXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS11c2VyIFVTRVJdIFstLWRiLXBvcnQgREJfUE9SVF0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tZGFlbW9uLXVybCBEQUVNT05fVVJMXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1zYWZldHktZGlyIFNBRkVUWV9ESVJdCnBzZXVkb2xpZmUtbWNwIHJlc3RvcmU6IGVycm9yOiB1bnJlY29nbml6ZWQgYXJndW1lbnRzOiBleHRyYQo=",
+   "window": [
+    1794508972.9500935,
+    1794508973.1469352
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "ambiguous-prefix": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIHJlc3RvcmUgWy1oXSAtLWJhY2t1cC1maWxlIEJBQ0tVUF9GSUxFCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIFstLXN0YXRlLWFyY2hpdmUgU1RBVEVfQVJDSElWRV0gWy0teWVzXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1sZWF2ZS1zdG9wcGVkXSBbLS1jb250YWluZXIgQ09OVEFJTkVSXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1kYWVtb24tY29udGFpbmVyIERBRU1PTl9DT05UQUlORVJdIFstLWRiIERCXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS11c2VyIFVTRVJdIFstLWRiLXBvcnQgREJfUE9SVF0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tZGFlbW9uLXVybCBEQUVNT05fVVJMXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1zYWZldHktZGlyIFNBRkVUWV9ESVJdCnBzZXVkb2xpZmUtbWNwIHJlc3RvcmU6IGVycm9yOiBhbWJpZ3VvdXMgb3B0aW9uOiAtLWQgY291bGQgbWF0Y2ggLS1kYWVtb24tY29udGFpbmVyLCAtLWRiLCAtLWRiLXBvcnQsIC0tZGFlbW9uLXVybAo=",
+   "window": [
+    1794508973.147359,
+    1794508973.3484387
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "ambiguous-joined": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIHJlc3RvcmUgWy1oXSAtLWJhY2t1cC1maWxlIEJBQ0tVUF9GSUxFCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIFstLXN0YXRlLWFyY2hpdmUgU1RBVEVfQVJDSElWRV0gWy0teWVzXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1sZWF2ZS1zdG9wcGVkXSBbLS1jb250YWluZXIgQ09OVEFJTkVSXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1kYWVtb24tY29udGFpbmVyIERBRU1PTl9DT05UQUlORVJdIFstLWRiIERCXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS11c2VyIFVTRVJdIFstLWRiLXBvcnQgREJfUE9SVF0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tZGFlbW9uLXVybCBEQUVNT05fVVJMXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1zYWZldHktZGlyIFNBRkVUWV9ESVJdCnBzZXVkb2xpZmUtbWNwIHJlc3RvcmU6IGVycm9yOiBhbWJpZ3VvdXMgb3B0aW9uOiAtLWRhZW1vbj14IGNvdWxkIG1hdGNoIC0tZGFlbW9uLWNvbnRhaW5lciwgLS1kYWVtb24tdXJsCg==",
+   "window": [
+    1794508973.3488555,
+    1794508973.5515692
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "flag-explicit": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIHJlc3RvcmUgWy1oXSAtLWJhY2t1cC1maWxlIEJBQ0tVUF9GSUxFCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIFstLXN0YXRlLWFyY2hpdmUgU1RBVEVfQVJDSElWRV0gWy0teWVzXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1sZWF2ZS1zdG9wcGVkXSBbLS1jb250YWluZXIgQ09OVEFJTkVSXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1kYWVtb24tY29udGFpbmVyIERBRU1PTl9DT05UQUlORVJdIFstLWRiIERCXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS11c2VyIFVTRVJdIFstLWRiLXBvcnQgREJfUE9SVF0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tZGFlbW9uLXVybCBEQUVNT05fVVJMXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1zYWZldHktZGlyIFNBRkVUWV9ESVJdCnBzZXVkb2xpZmUtbWNwIHJlc3RvcmU6IGVycm9yOiBhcmd1bWVudCAtLXllczogaWdub3JlZCBleHBsaWNpdCBhcmd1bWVudCAnMScK",
+   "window": [
+    1794508973.5522056,
+    1794508973.7486413
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "help-explicit-empty": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIHJlc3RvcmUgWy1oXSAtLWJhY2t1cC1maWxlIEJBQ0tVUF9GSUxFCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIFstLXN0YXRlLWFyY2hpdmUgU1RBVEVfQVJDSElWRV0gWy0teWVzXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1sZWF2ZS1zdG9wcGVkXSBbLS1jb250YWluZXIgQ09OVEFJTkVSXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1kYWVtb24tY29udGFpbmVyIERBRU1PTl9DT05UQUlORVJdIFstLWRiIERCXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS11c2VyIFVTRVJdIFstLWRiLXBvcnQgREJfUE9SVF0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tZGFlbW9uLXVybCBEQUVNT05fVVJMXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1zYWZldHktZGlyIFNBRkVUWV9ESVJdCnBzZXVkb2xpZmUtbWNwIHJlc3RvcmU6IGVycm9yOiBhcmd1bWVudCAtaC8tLWhlbHA6IGlnbm9yZWQgZXhwbGljaXQgYXJndW1lbnQgJycK",
+   "window": [
+    1794508973.7490683,
+    1794508973.9367971
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "port-negative": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHRoZSBiYWNrdXAgaXMgdW5yZWFkYWJsZSBvciBpbmNvbXBsZXRlOyB1c2UgYSBjb21wbGV0ZSAuc3FsLmd6IGR1bXAuIE5vdGhpbmcgd2FzIHJlc3RvcmVkCg==",
+   "window": [
+    1794508973.9372127,
+    1794508974.1462948
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "port-underscore": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHRoZSBiYWNrdXAgaXMgdW5yZWFkYWJsZSBvciBpbmNvbXBsZXRlOyB1c2UgYSBjb21wbGV0ZSAuc3FsLmd6IGR1bXAuIE5vdGhpbmcgd2FzIHJlc3RvcmVkCg==",
+   "window": [
+    1794508974.1467726,
+    1794508974.335228
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "backup-file-negative-number": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHRoZSBiYWNrdXAgaXMgdW5yZWFkYWJsZSBvciBpbmNvbXBsZXRlOyB1c2UgYSBjb21wbGV0ZSAuc3FsLmd6IGR1bXAuIE5vdGhpbmcgd2FzIHJlc3RvcmVkCg==",
+   "window": [
+    1794508974.3356903,
+    1794508974.5293026
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "backup-file-empty": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHRoZSBiYWNrdXAgaXMgdW5yZWFkYWJsZSBvciBpbmNvbXBsZXRlOyB1c2UgYSBjb21wbGV0ZSAuc3FsLmd6IGR1bXAuIE5vdGhpbmcgd2FzIHJlc3RvcmVkCg==",
+   "window": [
+    1794508974.5297203,
+    1794508974.7124465
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "backup-file-joined": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHRoZSBiYWNrdXAgaXMgdW5yZWFkYWJsZSBvciBpbmNvbXBsZXRlOyB1c2UgYSBjb21wbGV0ZSAuc3FsLmd6IGR1bXAuIE5vdGhpbmcgd2FzIHJlc3RvcmVkCg==",
+   "window": [
+    1794508974.712875,
+    1794508974.9070094
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "backup-file-directory": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHRoZSBiYWNrdXAgaXMgdW5yZWFkYWJsZSBvciBpbmNvbXBsZXRlOyB1c2UgYSBjb21wbGV0ZSAuc3FsLmd6IGR1bXAuIE5vdGhpbmcgd2FzIHJlc3RvcmVkCg==",
+   "window": [
+    1794508974.9074342,
+    1794508975.096819
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "dump-good": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHJlc3RvcmUgcmVwbGFjZXMgdGhlIGV4aXN0aW5nIGJhbms7IHJlcnVuIHdpdGggLS15ZXMgdG8gY29uZmlybS4gTm90aGluZyB3YXMgcmVzdG9yZWQK",
+   "window": [
+    1794508975.0972426,
+    1794508975.2970908
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "dump-copy-closed": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHJlc3RvcmUgcmVwbGFjZXMgdGhlIGV4aXN0aW5nIGJhbms7IHJlcnVuIHdpdGggLS15ZXMgdG8gY29uZmlybS4gTm90aGluZyB3YXMgcmVzdG9yZWQK",
+   "window": [
+    1794508975.2975264,
+    1794508975.48942
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "dump-copy-no-token": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHJlc3RvcmUgcmVwbGFjZXMgdGhlIGV4aXN0aW5nIGJhbms7IHJlcnVuIHdpdGggLS15ZXMgdG8gY29uZmlybS4gTm90aGluZyB3YXMgcmVzdG9yZWQK",
+   "window": [
+    1794508975.4898589,
+    1794508975.6761363
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "dump-copy-separator": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHJlc3RvcmUgcmVwbGFjZXMgdGhlIGV4aXN0aW5nIGJhbms7IHJlcnVuIHdpdGggLS15ZXMgdG8gY29uZmlybS4gTm90aGluZyB3YXMgcmVzdG9yZWQK",
+   "window": [
+    1794508975.676564,
+    1794508975.8859823
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "dump-crlf": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHJlc3RvcmUgcmVwbGFjZXMgdGhlIGV4aXN0aW5nIGJhbms7IHJlcnVuIHdpdGggLS15ZXMgdG8gY29uZmlybS4gTm90aGluZyB3YXMgcmVzdG9yZWQK",
+   "window": [
+    1794508975.8865929,
+    1794508976.0831363
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "dump-lone-cr": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHJlc3RvcmUgcmVwbGFjZXMgdGhlIGV4aXN0aW5nIGJhbms7IHJlcnVuIHdpdGggLS15ZXMgdG8gY29uZmlybS4gTm90aGluZyB3YXMgcmVzdG9yZWQK",
+   "window": [
+    1794508976.0835783,
+    1794508976.3012955
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "dump-no-final-newline": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHJlc3RvcmUgcmVwbGFjZXMgdGhlIGV4aXN0aW5nIGJhbms7IHJlcnVuIHdpdGggLS15ZXMgdG8gY29uZmlybS4gTm90aGluZyB3YXMgcmVzdG9yZWQK",
+   "window": [
+    1794508976.3017266,
+    1794508976.4918945
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "dump-invalid-utf8": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHJlc3RvcmUgcmVwbGFjZXMgdGhlIGV4aXN0aW5nIGJhbms7IHJlcnVuIHdpdGggLS15ZXMgdG8gY29uZmlybS4gTm90aGluZyB3YXMgcmVzdG9yZWQK",
+   "window": [
+    1794508976.4923368,
+    1794508976.6938026
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "dump-multi-member": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHJlc3RvcmUgcmVwbGFjZXMgdGhlIGV4aXN0aW5nIGJhbms7IHJlcnVuIHdpdGggLS15ZXMgdG8gY29uZmlybS4gTm90aGluZyB3YXMgcmVzdG9yZWQK",
+   "window": [
+    1794508976.6943421,
+    1794508976.8858914
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "dump-trailing-zeros": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHJlc3RvcmUgcmVwbGFjZXMgdGhlIGV4aXN0aW5nIGJhbms7IHJlcnVuIHdpdGggLS15ZXMgdG8gY29uZmlybS4gTm90aGluZyB3YXMgcmVzdG9yZWQK",
+   "window": [
+    1794508976.886314,
+    1794508977.0749123
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "dump-no-marker": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHRoZSBiYWNrdXAgaXMgdW5yZWFkYWJsZSBvciBpbmNvbXBsZXRlOyB1c2UgYSBjb21wbGV0ZSAuc3FsLmd6IGR1bXAuIE5vdGhpbmcgd2FzIHJlc3RvcmVkCg==",
+   "window": [
+    1794508977.075323,
+    1794508977.2588828
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "dump-in-copy": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHRoZSBiYWNrdXAgaXMgdW5yZWFkYWJsZSBvciBpbmNvbXBsZXRlOyB1c2UgYSBjb21wbGV0ZSAuc3FsLmd6IGR1bXAuIE5vdGhpbmcgd2FzIHJlc3RvcmVkCg==",
+   "window": [
+    1794508977.2592983,
+    1794508977.447958
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "dump-copy-crlf": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHRoZSBiYWNrdXAgaXMgdW5yZWFkYWJsZSBvciBpbmNvbXBsZXRlOyB1c2UgYSBjb21wbGV0ZSAuc3FsLmd6IGR1bXAuIE5vdGhpbmcgd2FzIHJlc3RvcmVkCg==",
+   "window": [
+    1794508977.4483948,
+    1794508977.6384788
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "dump-trailing-space": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHRoZSBiYWNrdXAgaXMgdW5yZWFkYWJsZSBvciBpbmNvbXBsZXRlOyB1c2UgYSBjb21wbGV0ZSAuc3FsLmd6IGR1bXAuIE5vdGhpbmcgd2FzIHJlc3RvcmVkCg==",
+   "window": [
+    1794508977.6388986,
+    1794508977.832917
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "dump-vertical-tab": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHRoZSBiYWNrdXAgaXMgdW5yZWFkYWJsZSBvciBpbmNvbXBsZXRlOyB1c2UgYSBjb21wbGV0ZSAuc3FsLmd6IGR1bXAuIE5vdGhpbmcgd2FzIHJlc3RvcmVkCg==",
+   "window": [
+    1794508977.833334,
+    1794508978.025979
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "dump-line-separator": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHRoZSBiYWNrdXAgaXMgdW5yZWFkYWJsZSBvciBpbmNvbXBsZXRlOyB1c2UgYSBjb21wbGV0ZSAuc3FsLmd6IGR1bXAuIE5vdGhpbmcgd2FzIHJlc3RvcmVkCg==",
+   "window": [
+    1794508978.026538,
+    1794508978.2238615
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "dump-invalid-utf8-marker": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHRoZSBiYWNrdXAgaXMgdW5yZWFkYWJsZSBvciBpbmNvbXBsZXRlOyB1c2UgYSBjb21wbGV0ZSAuc3FsLmd6IGR1bXAuIE5vdGhpbmcgd2FzIHJlc3RvcmVkCg==",
+   "window": [
+    1794508978.224301,
+    1794508978.419195
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "dump-trailing-junk": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHRoZSBiYWNrdXAgaXMgdW5yZWFkYWJsZSBvciBpbmNvbXBsZXRlOyB1c2UgYSBjb21wbGV0ZSAuc3FsLmd6IGR1bXAuIE5vdGhpbmcgd2FzIHJlc3RvcmVkCg==",
+   "window": [
+    1794508978.4196153,
+    1794508978.616224
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "dump-bad-crc": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHRoZSBiYWNrdXAgaXMgdW5yZWFkYWJsZSBvciBpbmNvbXBsZXRlOyB1c2UgYSBjb21wbGV0ZSAuc3FsLmd6IGR1bXAuIE5vdGhpbmcgd2FzIHJlc3RvcmVkCg==",
+   "window": [
+    1794508978.6166983,
+    1794508978.8010411
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "dump-truncated": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHRoZSBiYWNrdXAgaXMgdW5yZWFkYWJsZSBvciBpbmNvbXBsZXRlOyB1c2UgYSBjb21wbGV0ZSAuc3FsLmd6IGR1bXAuIE5vdGhpbmcgd2FzIHJlc3RvcmVkCg==",
+   "window": [
+    1794508978.8014693,
+    1794508978.9879704
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "dump-plain-sql": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHRoZSBiYWNrdXAgaXMgdW5yZWFkYWJsZSBvciBpbmNvbXBsZXRlOyB1c2UgYSBjb21wbGV0ZSAuc3FsLmd6IGR1bXAuIE5vdGhpbmcgd2FzIHJlc3RvcmVkCg==",
+   "window": [
+    1794508978.9885268,
+    1794508979.188235
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "dump-empty": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHRoZSBiYWNrdXAgaXMgdW5yZWFkYWJsZSBvciBpbmNvbXBsZXRlOyB1c2UgYSBjb21wbGV0ZSAuc3FsLmd6IGR1bXAuIE5vdGhpbmcgd2FzIHJlc3RvcmVkCg==",
+   "window": [
+    1794508979.1886613,
+    1794508979.3755229
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "state-plain": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHJlc3RvcmUgcmVwbGFjZXMgdGhlIGV4aXN0aW5nIGJhbms7IHJlcnVuIHdpdGggLS15ZXMgdG8gY29uZmlybS4gTm90aGluZyB3YXMgcmVzdG9yZWQK",
+   "window": [
+    1794508979.3759477,
+    1794508979.5737514
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "state-links-inside": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHJlc3RvcmUgcmVwbGFjZXMgdGhlIGV4aXN0aW5nIGJhbms7IHJlcnVuIHdpdGggLS15ZXMgdG8gY29uZmlybS4gTm90aGluZyB3YXMgcmVzdG9yZWQK",
+   "window": [
+    1794508979.5742218,
+    1794508979.7639022
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "state-link-loop": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHJlc3RvcmUgcmVwbGFjZXMgdGhlIGV4aXN0aW5nIGJhbms7IHJlcnVuIHdpdGggLS15ZXMgdG8gY29uZmlybS4gTm90aGluZyB3YXMgcmVzdG9yZWQK",
+   "window": [
+    1794508979.7643557,
+    1794508979.9508722
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "state-loop-ends-walk": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHJlc3RvcmUgcmVwbGFjZXMgdGhlIGV4aXN0aW5nIGJhbms7IHJlcnVuIHdpdGggLS15ZXMgdG8gY29uZmlybS4gTm90aGluZyB3YXMgcmVzdG9yZWQK",
+   "window": [
+    1794508979.951386,
+    1794508980.1445172
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "state-self-loop-hides-escape": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHJlc3RvcmUgcmVwbGFjZXMgdGhlIGV4aXN0aW5nIGJhbms7IHJlcnVuIHdpdGggLS15ZXMgdG8gY29uZmlybS4gTm90aGluZyB3YXMgcmVzdG9yZWQK",
+   "window": [
+    1794508980.144953,
+    1794508980.3287072
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "state-only-zero-blocks": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHJlc3RvcmUgcmVwbGFjZXMgdGhlIGV4aXN0aW5nIGJhbms7IHJlcnVuIHdpdGggLS15ZXMgdG8gY29uZmlybS4gTm90aGluZyB3YXMgcmVzdG9yZWQK",
+   "window": [
+    1794508980.3291442,
+    1794508980.5138452
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "state-bad-later-header": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHJlc3RvcmUgcmVwbGFjZXMgdGhlIGV4aXN0aW5nIGJhbms7IHJlcnVuIHdpdGggLS15ZXMgdG8gY29uZmlybS4gTm90aGluZyB3YXMgcmVzdG9yZWQK",
+   "window": [
+    1794508980.5142815,
+    1794508980.7118719
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "state-short-later-header": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHJlc3RvcmUgcmVwbGFjZXMgdGhlIGV4aXN0aW5nIGJhbms7IHJlcnVuIHdpdGggLS15ZXMgdG8gY29uZmlybS4gTm90aGluZyB3YXMgcmVzdG9yZWQK",
+   "window": [
+    1794508980.7123878,
+    1794508980.952934
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "state-later-header-absent": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHJlc3RvcmUgcmVwbGFjZXMgdGhlIGV4aXN0aW5nIGJhbms7IHJlcnVuIHdpdGggLS15ZXMgdG8gY29uZmlybS4gTm90aGluZyB3YXMgcmVzdG9yZWQK",
+   "window": [
+    1794508980.9540057,
+    1794508981.192921
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "state-directory-with-size": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHJlc3RvcmUgcmVwbGFjZXMgdGhlIGV4aXN0aW5nIGJhbms7IHJlcnVuIHdpdGggLS15ZXMgdG8gY29uZmlybS4gTm90aGluZyB3YXMgcmVzdG9yZWQK",
+   "window": [
+    1794508981.1935248,
+    1794508981.3938704
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "state-v7-directory-slash": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHJlc3RvcmUgcmVwbGFjZXMgdGhlIGV4aXN0aW5nIGJhbms7IHJlcnVuIHdpdGggLS15ZXMgdG8gY29uZmlybS4gTm90aGluZyB3YXMgcmVzdG9yZWQK",
+   "window": [
+    1794508981.3944201,
+    1794508981.5847259
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "state-unknown-type-skips": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHJlc3RvcmUgcmVwbGFjZXMgdGhlIGV4aXN0aW5nIGJhbms7IHJlcnVuIHdpdGggLS15ZXMgdG8gY29uZmlybS4gTm90aGluZyB3YXMgcmVzdG9yZWQK",
+   "window": [
+    1794508981.5852056,
+    1794508981.7706585
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "state-prefix-join": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHJlc3RvcmUgcmVwbGFjZXMgdGhlIGV4aXN0aW5nIGJhbms7IHJlcnVuIHdpdGggLS15ZXMgdG8gY29uZmlybS4gTm90aGluZyB3YXMgcmVzdG9yZWQK",
+   "window": [
+    1794508981.771238,
+    1794508981.989504
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "state-octal-prefix-fields": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHJlc3RvcmUgcmVwbGFjZXMgdGhlIGV4aXN0aW5nIGJhbms7IHJlcnVuIHdpdGggLS15ZXMgdG8gY29uZmlybS4gTm90aGluZyB3YXMgcmVzdG9yZWQK",
+   "window": [
+    1794508981.9901373,
+    1794508982.1860595
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "state-signed-checksum": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHJlc3RvcmUgcmVwbGFjZXMgdGhlIGV4aXN0aW5nIGJhbms7IHJlcnVuIHdpdGggLS15ZXMgdG8gY29uZmlybS4gTm90aGluZyB3YXMgcmVzdG9yZWQK",
+   "window": [
+    1794508982.1865048,
+    1794508982.4095666
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "state-multi-member-gzip": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHJlc3RvcmUgcmVwbGFjZXMgdGhlIGV4aXN0aW5nIGJhbms7IHJlcnVuIHdpdGggLS15ZXMgdG8gY29uZmlybS4gTm90aGluZyB3YXMgcmVzdG9yZWQK",
+   "window": [
+    1794508982.410131,
+    1794508982.6053321
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "state-trailing-zeros-gzip": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHJlc3RvcmUgcmVwbGFjZXMgdGhlIGV4aXN0aW5nIGJhbms7IHJlcnVuIHdpdGggLS15ZXMgdG8gY29uZmlybS4gTm90aGluZyB3YXMgcmVzdG9yZWQK",
+   "window": [
+    1794508982.6057687,
+    1794508982.8141513
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "state-not-gzip": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHRoZSBzdGF0ZSBhcmNoaXZlIGlzIHVucmVhZGFibGUgb3IgY29udGFpbnMgdW5zYWZlIHBhdGhzOyB1c2UgYSBjb21wbGV0ZSwgdW5tb2RpZmllZCBzdGF0ZSBiYWNrdXAuIE5vdGhpbmcgd2FzIHJlc3RvcmVkCg==",
+   "window": [
+    1794508982.8147497,
+    1794508983.0304303
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "state-truncated-gzip": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHRoZSBzdGF0ZSBhcmNoaXZlIGlzIHVucmVhZGFibGUgb3IgY29udGFpbnMgdW5zYWZlIHBhdGhzOyB1c2UgYSBjb21wbGV0ZSwgdW5tb2RpZmllZCBzdGF0ZSBiYWNrdXAuIE5vdGhpbmcgd2FzIHJlc3RvcmVkCg==",
+   "window": [
+    1794508983.0308762,
+    1794508983.2170858
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "state-bad-crc-gzip": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHRoZSBzdGF0ZSBhcmNoaXZlIGlzIHVucmVhZGFibGUgb3IgY29udGFpbnMgdW5zYWZlIHBhdGhzOyB1c2UgYSBjb21wbGV0ZSwgdW5tb2RpZmllZCBzdGF0ZSBiYWNrdXAuIE5vdGhpbmcgd2FzIHJlc3RvcmVkCg==",
+   "window": [
+    1794508983.21756,
+    1794508983.4154327
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "state-empty-file": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHRoZSBzdGF0ZSBhcmNoaXZlIGlzIHVucmVhZGFibGUgb3IgY29udGFpbnMgdW5zYWZlIHBhdGhzOyB1c2UgYSBjb21wbGV0ZSwgdW5tb2RpZmllZCBzdGF0ZSBiYWNrdXAuIE5vdGhpbmcgd2FzIHJlc3RvcmVkCg==",
+   "window": [
+    1794508983.4158697,
+    1794508983.6046588
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "state-empty-gzip": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHRoZSBzdGF0ZSBhcmNoaXZlIGlzIHVucmVhZGFibGUgb3IgY29udGFpbnMgdW5zYWZlIHBhdGhzOyB1c2UgYSBjb21wbGV0ZSwgdW5tb2RpZmllZCBzdGF0ZSBiYWNrdXAuIE5vdGhpbmcgd2FzIHJlc3RvcmVkCg==",
+   "window": [
+    1794508983.6050851,
+    1794508983.7890902
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "state-garbage-first-header": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHRoZSBzdGF0ZSBhcmNoaXZlIGlzIHVucmVhZGFibGUgb3IgY29udGFpbnMgdW5zYWZlIHBhdGhzOyB1c2UgYSBjb21wbGV0ZSwgdW5tb2RpZmllZCBzdGF0ZSBiYWNrdXAuIE5vdGhpbmcgd2FzIHJlc3RvcmVkCg==",
+   "window": [
+    1794508983.7895298,
+    1794508983.9850657
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "state-invalid-mode-field": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHRoZSBzdGF0ZSBhcmNoaXZlIGlzIHVucmVhZGFibGUgb3IgY29udGFpbnMgdW5zYWZlIHBhdGhzOyB1c2UgYSBjb21wbGV0ZSwgdW5tb2RpZmllZCBzdGF0ZSBiYWNrdXAuIE5vdGhpbmcgd2FzIHJlc3RvcmVkCg==",
+   "window": [
+    1794508983.9855077,
+    1794508984.175203
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "state-absolute-path": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHRoZSBzdGF0ZSBhcmNoaXZlIGlzIHVucmVhZGFibGUgb3IgY29udGFpbnMgdW5zYWZlIHBhdGhzOyB1c2UgYSBjb21wbGV0ZSwgdW5tb2RpZmllZCBzdGF0ZSBiYWNrdXAuIE5vdGhpbmcgd2FzIHJlc3RvcmVkCg==",
+   "window": [
+    1794508984.1757061,
+    1794508984.3616297
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "state-dotdot-path": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHRoZSBzdGF0ZSBhcmNoaXZlIGlzIHVucmVhZGFibGUgb3IgY29udGFpbnMgdW5zYWZlIHBhdGhzOyB1c2UgYSBjb21wbGV0ZSwgdW5tb2RpZmllZCBzdGF0ZSBiYWNrdXAuIE5vdGhpbmcgd2FzIHJlc3RvcmVkCg==",
+   "window": [
+    1794508984.362051,
+    1794508984.5519383
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "state-dotdot-leading": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHRoZSBzdGF0ZSBhcmNoaXZlIGlzIHVucmVhZGFibGUgb3IgY29udGFpbnMgdW5zYWZlIHBhdGhzOyB1c2UgYSBjb21wbGV0ZSwgdW5tb2RpZmllZCBzdGF0ZSBiYWNrdXAuIE5vdGhpbmcgd2FzIHJlc3RvcmVkCg==",
+   "window": [
+    1794508984.5523903,
+    1794508984.7374015
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "state-backslash-path": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHRoZSBzdGF0ZSBhcmNoaXZlIGlzIHVucmVhZGFibGUgb3IgY29udGFpbnMgdW5zYWZlIHBhdGhzOyB1c2UgYSBjb21wbGV0ZSwgdW5tb2RpZmllZCBzdGF0ZSBiYWNrdXAuIE5vdGhpbmcgd2FzIHJlc3RvcmVkCg==",
+   "window": [
+    1794508984.7378135,
+    1794508984.9198031
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "state-prefix-escape": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHRoZSBzdGF0ZSBhcmNoaXZlIGlzIHVucmVhZGFibGUgb3IgY29udGFpbnMgdW5zYWZlIHBhdGhzOyB1c2UgYSBjb21wbGV0ZSwgdW5tb2RpZmllZCBzdGF0ZSBiYWNrdXAuIE5vdGhpbmcgd2FzIHJlc3RvcmVkCg==",
+   "window": [
+    1794508984.9202688,
+    1794508985.1067846
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "state-fifo": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHRoZSBzdGF0ZSBhcmNoaXZlIGlzIHVucmVhZGFibGUgb3IgY29udGFpbnMgdW5zYWZlIHBhdGhzOyB1c2UgYSBjb21wbGV0ZSwgdW5tb2RpZmllZCBzdGF0ZSBiYWNrdXAuIE5vdGhpbmcgd2FzIHJlc3RvcmVkCg==",
+   "window": [
+    1794508985.1072197,
+    1794508985.291585
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "state-character-device": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHRoZSBzdGF0ZSBhcmNoaXZlIGlzIHVucmVhZGFibGUgb3IgY29udGFpbnMgdW5zYWZlIHBhdGhzOyB1c2UgYSBjb21wbGV0ZSwgdW5tb2RpZmllZCBzdGF0ZSBiYWNrdXAuIE5vdGhpbmcgd2FzIHJlc3RvcmVkCg==",
+   "window": [
+    1794508985.292018,
+    1794508985.4832213
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "state-block-device": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHRoZSBzdGF0ZSBhcmNoaXZlIGlzIHVucmVhZGFibGUgb3IgY29udGFpbnMgdW5zYWZlIHBhdGhzOyB1c2UgYSBjb21wbGV0ZSwgdW5tb2RpZmllZCBzdGF0ZSBiYWNrdXAuIE5vdGhpbmcgd2FzIHJlc3RvcmVkCg==",
+   "window": [
+    1794508985.48366,
+    1794508985.686125
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "state-symlink-absolute": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHRoZSBzdGF0ZSBhcmNoaXZlIGlzIHVucmVhZGFibGUgb3IgY29udGFpbnMgdW5zYWZlIHBhdGhzOyB1c2UgYSBjb21wbGV0ZSwgdW5tb2RpZmllZCBzdGF0ZSBiYWNrdXAuIE5vdGhpbmcgd2FzIHJlc3RvcmVkCg==",
+   "window": [
+    1794508985.6866825,
+    1794508985.8754108
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "state-symlink-backslash": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHRoZSBzdGF0ZSBhcmNoaXZlIGlzIHVucmVhZGFibGUgb3IgY29udGFpbnMgdW5zYWZlIHBhdGhzOyB1c2UgYSBjb21wbGV0ZSwgdW5tb2RpZmllZCBzdGF0ZSBiYWNrdXAuIE5vdGhpbmcgd2FzIHJlc3RvcmVkCg==",
+   "window": [
+    1794508985.875843,
+    1794508986.0592353
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "state-symlink-escape": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHRoZSBzdGF0ZSBhcmNoaXZlIGlzIHVucmVhZGFibGUgb3IgY29udGFpbnMgdW5zYWZlIHBhdGhzOyB1c2UgYSBjb21wbGV0ZSwgdW5tb2RpZmllZCBzdGF0ZSBiYWNrdXAuIE5vdGhpbmcgd2FzIHJlc3RvcmVkCg==",
+   "window": [
+    1794508986.05971,
+    1794508986.2438781
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "state-symlink-chain-escape": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHRoZSBzdGF0ZSBhcmNoaXZlIGlzIHVucmVhZGFibGUgb3IgY29udGFpbnMgdW5zYWZlIHBhdGhzOyB1c2UgYSBjb21wbGV0ZSwgdW5tb2RpZmllZCBzdGF0ZSBiYWNrdXAuIE5vdGhpbmcgd2FzIHJlc3RvcmVkCg==",
+   "window": [
+    1794508986.2443836,
+    1794508986.427494
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "state-symlink-through-link": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHRoZSBzdGF0ZSBhcmNoaXZlIGlzIHVucmVhZGFibGUgb3IgY29udGFpbnMgdW5zYWZlIHBhdGhzOyB1c2UgYSBjb21wbGV0ZSwgdW5tb2RpZmllZCBzdGF0ZSBiYWNrdXAuIE5vdGhpbmcgd2FzIHJlc3RvcmVkCg==",
+   "window": [
+    1794508986.4279668,
+    1794508986.6176345
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "state-hardlink-escape": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHRoZSBzdGF0ZSBhcmNoaXZlIGlzIHVucmVhZGFibGUgb3IgY29udGFpbnMgdW5zYWZlIHBhdGhzOyB1c2UgYSBjb21wbGV0ZSwgdW5tb2RpZmllZCBzdGF0ZSBiYWNrdXAuIE5vdGhpbmcgd2FzIHJlc3RvcmVkCg==",
+   "window": [
+    1794508986.618293,
+    1794508986.8015811
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "state-transient-link": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHRoZSBzdGF0ZSBhcmNoaXZlIGlzIHVucmVhZGFibGUgb3IgY29udGFpbnMgdW5zYWZlIHBhdGhzOyB1c2UgYSBjb21wbGV0ZSwgdW5tb2RpZmllZCBzdGF0ZSBiYWNrdXAuIE5vdGhpbmcgd2FzIHJlc3RvcmVkCg==",
+   "window": [
+    1794508986.8020148,
+    1794508986.9882717
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "state-member-data-truncated": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHRoZSBzdGF0ZSBhcmNoaXZlIGlzIHVucmVhZGFibGUgb3IgY29udGFpbnMgdW5zYWZlIHBhdGhzOyB1c2UgYSBjb21wbGV0ZSwgdW5tb2RpZmllZCBzdGF0ZSBiYWNrdXAuIE5vdGhpbmcgd2FzIHJlc3RvcmVkCg==",
+   "window": [
+    1794508986.9887679,
+    1794508987.1773348
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "state-member-padding-truncated": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHRoZSBzdGF0ZSBhcmNoaXZlIGlzIHVucmVhZGFibGUgb3IgY29udGFpbnMgdW5zYWZlIHBhdGhzOyB1c2UgYSBjb21wbGV0ZSwgdW5tb2RpZmllZCBzdGF0ZSBiYWNrdXAuIE5vdGhpbmcgd2FzIHJlc3RvcmVkCg==",
+   "window": [
+    1794508987.1777925,
+    1794508987.3711004
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "state-directory-size-skips-nothing": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHRoZSBzdGF0ZSBhcmNoaXZlIGlzIHVucmVhZGFibGUgb3IgY29udGFpbnMgdW5zYWZlIHBhdGhzOyB1c2UgYSBjb21wbGV0ZSwgdW5tb2RpZmllZCBzdGF0ZSBiYWNrdXAuIE5vdGhpbmcgd2FzIHJlc3RvcmVkCg==",
+   "window": [
+    1794508987.3715923,
+    1794508987.5565546
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "defer-state-pax-name": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHJlc3RvcmUgcmVwbGFjZXMgdGhlIGV4aXN0aW5nIGJhbms7IHJlcnVuIHdpdGggLS15ZXMgdG8gY29uZmlybS4gTm90aGluZyB3YXMgcmVzdG9yZWQK",
+   "window": [
+    1794508987.556987,
+    1794508987.740656
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "defer-state-gnu-long-name": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHJlc3RvcmUgcmVwbGFjZXMgdGhlIGV4aXN0aW5nIGJhbms7IHJlcnVuIHdpdGggLS15ZXMgdG8gY29uZmlybS4gTm90aGluZyB3YXMgcmVzdG9yZWQK",
+   "window": [
+    1794508987.741088,
+    1794508987.9257662
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "defer-state-negative-size": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHRoZSBzdGF0ZSBhcmNoaXZlIGlzIHVucmVhZGFibGUgb3IgY29udGFpbnMgdW5zYWZlIHBhdGhzOyB1c2UgYSBjb21wbGV0ZSwgdW5tb2RpZmllZCBzdGF0ZSBiYWNrdXAuIE5vdGhpbmcgd2FzIHJlc3RvcmVkCg==",
+   "window": [
+    1794508987.926205,
+    1794508988.1124334
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "defer-state-deep-link-chain": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHJlc3RvcmUgcmVwbGFjZXMgdGhlIGV4aXN0aW5nIGJhbms7IHJlcnVuIHdpdGggLS15ZXMgdG8gY29uZmlybS4gTm90aGluZyB3YXMgcmVzdG9yZWQK",
+   "window": [
+    1794508988.1128643,
+    1794508988.569104
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "state-before-confirmation": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHRoZSBzdGF0ZSBhcmNoaXZlIGlzIHVucmVhZGFibGUgb3IgY29udGFpbnMgdW5zYWZlIHBhdGhzOyB1c2UgYSBjb21wbGV0ZSwgdW5tb2RpZmllZCBzdGF0ZSBiYWNrdXAuIE5vdGhpbmcgd2FzIHJlc3RvcmVkCg==",
+   "window": [
+    1794508988.569539,
+    1794508988.7527132
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "dump-before-state": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHRoZSBiYWNrdXAgaXMgdW5yZWFkYWJsZSBvciBpbmNvbXBsZXRlOyB1c2UgYSBjb21wbGV0ZSAuc3FsLmd6IGR1bXAuIE5vdGhpbmcgd2FzIHJlc3RvcmVkCg==",
+   "window": [
+    1794508988.7532127,
+    1794508988.9437056
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "dump-normalized-path": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHJlc3RvcmUgcmVwbGFjZXMgdGhlIGV4aXN0aW5nIGJhbms7IHJlcnVuIHdpdGggLS15ZXMgdG8gY29uZmlybS4gTm90aGluZyB3YXMgcmVzdG9yZWQK",
+   "window": [
+    1794508988.9441528,
+    1794508989.1362803
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "dump-trailing-slash": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHJlc3RvcmUgcmVwbGFjZXMgdGhlIGV4aXN0aW5nIGJhbms7IHJlcnVuIHdpdGggLS15ZXMgdG8gY29uZmlybS4gTm90aGluZyB3YXMgcmVzdG9yZWQK",
+   "window": [
+    1794508989.136701,
+    1794508989.320141
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "no-yes": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHJlc3RvcmUgcmVwbGFjZXMgdGhlIGV4aXN0aW5nIGJhbms7IHJlcnVuIHdpdGggLS15ZXMgdG8gY29uZmlybS4gTm90aGluZyB3YXMgcmVzdG9yZWQK",
+   "window": [
+    1794508989.3205552,
+    1794508989.5062747
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "no-yes-every-option": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHJlc3RvcmUgcmVwbGFjZXMgdGhlIGV4aXN0aW5nIGJhbms7IHJlcnVuIHdpdGggLS15ZXMgdG8gY29uZmlybS4gTm90aGluZyB3YXMgcmVzdG9yZWQK",
+   "window": [
+    1794508989.506704,
+    1794508989.706091
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "defer-help-columns": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIHJlc3RvcmUgWy1oXSAtLWJhY2t1cC1maWxlIEJBQ0tVUF9GSUxFIFstLXN0YXRlLWFyY2hpdmUgU1RBVEVfQVJDSElWRV0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0teWVzXSBbLS1sZWF2ZS1zdG9wcGVkXSBbLS1jb250YWluZXIgQ09OVEFJTkVSXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1kYWVtb24tY29udGFpbmVyIERBRU1PTl9DT05UQUlORVJdIFstLWRiIERCXSBbLS11c2VyIFVTRVJdCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIFstLWRiLXBvcnQgREJfUE9SVF0gWy0tZGFlbW9uLXVybCBEQUVNT05fVVJMXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1zYWZldHktZGlyIFNBRkVUWV9ESVJdCgpSZXBsYWNlIGEgRG9ja2VyIGJhbmsgZnJvbSBpdHMgYmFja3VwLgoKb3B0aW9uczoKICAtaCwgLS1oZWxwICAgICAgICAgICAgc2hvdyB0aGlzIGhlbHAgbWVzc2FnZSBhbmQgZXhpdAogIC0tYmFja3VwLWZpbGUgQkFDS1VQX0ZJTEUKICAgICAgICAgICAgICAgICAgICAgICAgY29tcGxldGUgcGxhaW4tZm9ybWF0IC5zcWwuZ3ogZGF0YWJhc2UgZHVtcAogIC0tc3RhdGUtYXJjaGl2ZSBTVEFURV9BUkNISVZFCiAgICAgICAgICAgICAgICAgICAgICAgIG1hdGNoaW5nIHN0YXRlLXZvbHVtZSAudGd6IGJhY2t1cAogIC0teWVzICAgICAgICAgICAgICAgICBjb25maXJtIHJlcGxhY2luZyB0aGUgZXhpc3RpbmcgYmFuayB3aXRob3V0IGEgcHJvbXB0CiAgLS1sZWF2ZS1zdG9wcGVkICAgICAgIGxlYXZlIHRoZSBkYWVtb24gc3RvcHBlZCBhZnRlciByZXN0b3JpbmcKICAtLWNvbnRhaW5lciBDT05UQUlORVIKICAgICAgICAgICAgICAgICAgICAgICAgUG9zdGdyZVNRTCBjb250YWluZXIgKGRlZmF1bHQ6IHBzZXVkb2xpZmUtbWNwLXBvc3RncmVzKQogIC0tZGFlbW9uLWNvbnRhaW5lciBEQUVNT05fQ09OVEFJTkVSCiAgICAgICAgICAgICAgICAgICAgICAgIGRhZW1vbiBjb250YWluZXIgKGRlZmF1bHQ6IHBzZXVkb2xpZmUtbWNwLWRhZW1vbikKICAtLWRiIERCICAgICAgICAgICAgICAgZGF0YWJhc2UgbmFtZSAoZGVmYXVsdDogdGhlIHJ1bm5pbmcgZGFlbW9uJ3MgY29uZmlndXJhdGlvbikKICAtLXVzZXIgVVNFUiAgICAgICAgICAgZGF0YWJhc2Ugcm9sZSAoZGVmYXVsdDogdGhlIHJ1bm5pbmcgZGFlbW9uJ3MgY29uZmlndXJhdGlvbikKICAtLWRiLXBvcnQgREJfUE9SVCAgICAgUG9zdGdyZVNRTCBwb3J0IGluc2lkZSBpdHMgY29udGFpbmVyIChkZWZhdWx0OiBkYWVtb24gY29uZmlndXJhdGlvbikKICAtLWRhZW1vbi11cmwgREFFTU9OX1VSTAogICAgICAgICAgICAgICAgICAgICAgICBoZWFsdGggZW5kcG9pbnQgKGRlZmF1bHQ6IHRoZSBkYWVtb24ncyBwdWJsaXNoZWQgcG9ydCkKICAtLXNhZmV0eS1kaXIgU0FGRVRZX0RJUgogICAgICAgICAgICAgICAgICAgICAgICBzYWZldHkgYmFja3VwIGRpcmVjdG9yeSBvdXRzaWRlIGFueSBjaGVja291dCAoZGVmYXVsdDogcGVyLXVzZXIgYmFja3VwcykK",
+   "stderr": "",
+   "window": [
+    1794508989.7198966,
+    1794508989.9045627
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "defer-usage-columns": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIHJlc3RvcmUgWy1oXSAtLWJhY2t1cC1maWxlIEJBQ0tVUF9GSUxFIFstLXN0YXRlLWFyY2hpdmUgU1RBVEVfQVJDSElWRV0gWy0teWVzXSBbLS1sZWF2ZS1zdG9wcGVkXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1jb250YWluZXIgQ09OVEFJTkVSXSBbLS1kYWVtb24tY29udGFpbmVyIERBRU1PTl9DT05UQUlORVJdIFstLWRiIERCXSBbLS11c2VyIFVTRVJdCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIFstLWRiLXBvcnQgREJfUE9SVF0gWy0tZGFlbW9uLXVybCBEQUVNT05fVVJMXSBbLS1zYWZldHktZGlyIFNBRkVUWV9ESVJdCnBzZXVkb2xpZmUtbWNwIHJlc3RvcmU6IGVycm9yOiB0aGUgZm9sbG93aW5nIGFyZ3VtZW50cyBhcmUgcmVxdWlyZWQ6IC0tYmFja3VwLWZpbGUK",
+   "window": [
+    1794508989.9184523,
+    1794508990.1062133
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "defer-abbreviation": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHRoZSBiYWNrdXAgaXMgdW5yZWFkYWJsZSBvciBpbmNvbXBsZXRlOyB1c2UgYSBjb21wbGV0ZSAuc3FsLmd6IGR1bXAuIE5vdGhpbmcgd2FzIHJlc3RvcmVkCg==",
+   "window": [
+    1794508990.106627,
+    1794508990.292219
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "defer-double-dash": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIHJlc3RvcmUgWy1oXSAtLWJhY2t1cC1maWxlIEJBQ0tVUF9GSUxFCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIFstLXN0YXRlLWFyY2hpdmUgU1RBVEVfQVJDSElWRV0gWy0teWVzXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1sZWF2ZS1zdG9wcGVkXSBbLS1jb250YWluZXIgQ09OVEFJTkVSXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1kYWVtb24tY29udGFpbmVyIERBRU1PTl9DT05UQUlORVJdIFstLWRiIERCXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS11c2VyIFVTRVJdIFstLWRiLXBvcnQgREJfUE9SVF0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tZGFlbW9uLXVybCBEQUVNT05fVVJMXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1zYWZldHktZGlyIFNBRkVUWV9ESVJdCnBzZXVkb2xpZmUtbWNwIHJlc3RvcmU6IGVycm9yOiB1bnJlY29nbml6ZWQgYXJndW1lbnRzOiAtLQo=",
+   "window": [
+    1794508990.2927005,
+    1794508990.4753263
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "defer-help-cluster": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIHJlc3RvcmUgWy1oXSAtLWJhY2t1cC1maWxlIEJBQ0tVUF9GSUxFCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIFstLXN0YXRlLWFyY2hpdmUgU1RBVEVfQVJDSElWRV0gWy0teWVzXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1sZWF2ZS1zdG9wcGVkXSBbLS1jb250YWluZXIgQ09OVEFJTkVSXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1kYWVtb24tY29udGFpbmVyIERBRU1PTl9DT05UQUlORVJdIFstLWRiIERCXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS11c2VyIFVTRVJdIFstLWRiLXBvcnQgREJfUE9SVF0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tZGFlbW9uLXVybCBEQUVNT05fVVJMXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1zYWZldHktZGlyIFNBRkVUWV9ESVJdCgpSZXBsYWNlIGEgRG9ja2VyIGJhbmsgZnJvbSBpdHMgYmFja3VwLgoKb3B0aW9uczoKICAtaCwgLS1oZWxwICAgICAgICAgICAgc2hvdyB0aGlzIGhlbHAgbWVzc2FnZSBhbmQgZXhpdAogIC0tYmFja3VwLWZpbGUgQkFDS1VQX0ZJTEUKICAgICAgICAgICAgICAgICAgICAgICAgY29tcGxldGUgcGxhaW4tZm9ybWF0IC5zcWwuZ3ogZGF0YWJhc2UgZHVtcAogIC0tc3RhdGUtYXJjaGl2ZSBTVEFURV9BUkNISVZFCiAgICAgICAgICAgICAgICAgICAgICAgIG1hdGNoaW5nIHN0YXRlLXZvbHVtZSAudGd6IGJhY2t1cAogIC0teWVzICAgICAgICAgICAgICAgICBjb25maXJtIHJlcGxhY2luZyB0aGUgZXhpc3RpbmcgYmFuayB3aXRob3V0IGEgcHJvbXB0CiAgLS1sZWF2ZS1zdG9wcGVkICAgICAgIGxlYXZlIHRoZSBkYWVtb24gc3RvcHBlZCBhZnRlciByZXN0b3JpbmcKICAtLWNvbnRhaW5lciBDT05UQUlORVIKICAgICAgICAgICAgICAgICAgICAgICAgUG9zdGdyZVNRTCBjb250YWluZXIgKGRlZmF1bHQ6IHBzZXVkb2xpZmUtbWNwLQogICAgICAgICAgICAgICAgICAgICAgICBwb3N0Z3JlcykKICAtLWRhZW1vbi1jb250YWluZXIgREFFTU9OX0NPTlRBSU5FUgogICAgICAgICAgICAgICAgICAgICAgICBkYWVtb24gY29udGFpbmVyIChkZWZhdWx0OiBwc2V1ZG9saWZlLW1jcC1kYWVtb24pCiAgLS1kYiBEQiAgICAgICAgICAgICAgIGRhdGFiYXNlIG5hbWUgKGRlZmF1bHQ6IHRoZSBydW5uaW5nIGRhZW1vbidzCiAgICAgICAgICAgICAgICAgICAgICAgIGNvbmZpZ3VyYXRpb24pCiAgLS11c2VyIFVTRVIgICAgICAgICAgIGRhdGFiYXNlIHJvbGUgKGRlZmF1bHQ6IHRoZSBydW5uaW5nIGRhZW1vbidzCiAgICAgICAgICAgICAgICAgICAgICAgIGNvbmZpZ3VyYXRpb24pCiAgLS1kYi1wb3J0IERCX1BPUlQgICAgIFBvc3RncmVTUUwgcG9ydCBpbnNpZGUgaXRzIGNvbnRhaW5lciAoZGVmYXVsdDogZGFlbW9uCiAgICAgICAgICAgICAgICAgICAgICAgIGNvbmZpZ3VyYXRpb24pCiAgLS1kYWVtb24tdXJsIERBRU1PTl9VUkwKICAgICAgICAgICAgICAgICAgICAgICAgaGVhbHRoIGVuZHBvaW50IChkZWZhdWx0OiB0aGUgZGFlbW9uJ3MgcHVibGlzaGVkIHBvcnQpCiAgLS1zYWZldHktZGlyIFNBRkVUWV9ESVIKICAgICAgICAgICAgICAgICAgICAgICAgc2FmZXR5IGJhY2t1cCBkaXJlY3Rvcnkgb3V0c2lkZSBhbnkgY2hlY2tvdXQgKGRlZmF1bHQ6CiAgICAgICAgICAgICAgICAgICAgICAgIHBlci11c2VyIGJhY2t1cHMpCg==",
+   "stderr": "",
+   "window": [
+    1794508990.4757352,
+    1794508990.6653762
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "defer-unicode-port": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHJlc3RvcmUgcmVwbGFjZXMgdGhlIGV4aXN0aW5nIGJhbms7IHJlcnVuIHdpdGggLS15ZXMgdG8gY29uZmlybS4gTm90aGluZyB3YXMgcmVzdG9yZWQK",
+   "window": [
+    1794508990.6658645,
+    1794508990.852406
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "defer-unicode-unknown": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIHJlc3RvcmUgWy1oXSAtLWJhY2t1cC1maWxlIEJBQ0tVUF9GSUxFCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIFstLXN0YXRlLWFyY2hpdmUgU1RBVEVfQVJDSElWRV0gWy0teWVzXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1sZWF2ZS1zdG9wcGVkXSBbLS1jb250YWluZXIgQ09OVEFJTkVSXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1kYWVtb24tY29udGFpbmVyIERBRU1PTl9DT05UQUlORVJdIFstLWRiIERCXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS11c2VyIFVTRVJdIFstLWRiLXBvcnQgREJfUE9SVF0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tZGFlbW9uLXVybCBEQUVNT05fVVJMXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1zYWZldHktZGlyIFNBRkVUWV9ESVJdCnBzZXVkb2xpZmUtbWNwIHJlc3RvcmU6IGVycm9yOiB1bnJlY29nbml6ZWQgYXJndW1lbnRzOiAtLWLDqQo=",
+   "window": [
+    1794508990.8528464,
+    1794508991.0463755
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "defer-dump-corrupt-deflate": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 1,
+   "stdout": "",
+   "stderr": "VHJhY2ViYWNrIChtb3N0IHJlY2VudCBjYWxsIGxhc3QpOgogIEZpbGUgIjxmcm96ZW4gcnVucHk+IiwgbGluZSAxOTgsIGluIF9ydW5fbW9kdWxlX2FzX21haW4KICBGaWxlICI8ZnJvemVuIHJ1bnB5PiIsIGxpbmUgODgsIGluIF9ydW5fY29kZQogIEZpbGUgIntPUkFDTEV9L3BzZXVkb2xpZmVfbWVtb3J5L2NsaS5weSIsIGxpbmUgMjY3LCBpbiA8bW9kdWxlPgogICAgbWFpbigpCiAgRmlsZSAie09SQUNMRX0vcHNldWRvbGlmZV9tZW1vcnkvY2xpLnB5IiwgbGluZSAyMzYsIGluIG1haW4KICAgIHN5cy5leGl0KHJlc3RvcmVfbWFpbihzeXMuYXJndlsyOl0pKQogICAgICAgICAgICAgXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl4KICBGaWxlICJ7T1JBQ0xFfS9wc2V1ZG9saWZlX21lbW9yeS9yZXN0b3JlX2NsaS5weSIsIGxpbmUgMjcsIGluIG1haW4KICAgIGlmIG5vdCB1cC5fZHVtcF9jb21wbGV0ZShhcmdzLmJhY2t1cF9maWxlKToKICAgICAgICAgICBeXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXgogIEZpbGUgIntPUkFDTEV9L3BzZXVkb2xpZmVfbWVtb3J5L3VwZGF0ZV9jbGkucHkiLCBsaW5lIDIyNDQsIGluIF9kdW1wX2NvbXBsZXRlCiAgICBmb3IgbGluZSBpbiBoYW5kbGU6CiAgRmlsZSAie1BZVEhPTn0vbGliL3B5dGhvbjMuMTEvZ3ppcC5weSIsIGxpbmUgMzE0LCBpbiByZWFkMQogICAgcmV0dXJuIHNlbGYuX2J1ZmZlci5yZWFkMShzaXplKQogICAgICAgICAgIF5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXgogIEZpbGUgIntQWVRIT059L2xpYi9weXRob24zLjExL19jb21wcmVzc2lvbi5weSIsIGxpbmUgNjgsIGluIHJlYWRpbnRvCiAgICBkYXRhID0gc2VsZi5yZWFkKGxlbihieXRlX3ZpZXcpKQogICAgICAgICAgIF5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl4KICBGaWxlICJ7UFlUSE9OfS9saWIvcHl0aG9uMy4xMS9nemlwLnB5IiwgbGluZSA1MDcsIGluIHJlYWQKICAgIHVuY29tcHJlc3MgPSBzZWxmLl9kZWNvbXByZXNzb3IuZGVjb21wcmVzcyhidWYsIHNpemUpCiAgICAgICAgICAgICAgICAgXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXgp6bGliLmVycm9yOiBFcnJvciAtMyB3aGlsZSBkZWNvbXByZXNzaW5nIGRhdGE6IGludmFsaWQgc3RvcmVkIGJsb2NrIGxlbmd0aHMK",
+   "window": [
+    1794508991.0468006,
+    1794508991.2320898
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "defer-state-corrupt-deflate": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 1,
+   "stdout": "",
+   "stderr": "VHJhY2ViYWNrIChtb3N0IHJlY2VudCBjYWxsIGxhc3QpOgogIEZpbGUgIjxmcm96ZW4gcnVucHk+IiwgbGluZSAxOTgsIGluIF9ydW5fbW9kdWxlX2FzX21haW4KICBGaWxlICI8ZnJvemVuIHJ1bnB5PiIsIGxpbmUgODgsIGluIF9ydW5fY29kZQogIEZpbGUgIntPUkFDTEV9L3BzZXVkb2xpZmVfbWVtb3J5L2NsaS5weSIsIGxpbmUgMjY3LCBpbiA8bW9kdWxlPgogICAgbWFpbigpCiAgRmlsZSAie09SQUNMRX0vcHNldWRvbGlmZV9tZW1vcnkvY2xpLnB5IiwgbGluZSAyMzYsIGluIG1haW4KICAgIHN5cy5leGl0KHJlc3RvcmVfbWFpbihzeXMuYXJndlsyOl0pKQogICAgICAgICAgICAgXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl4KICBGaWxlICJ7T1JBQ0xFfS9wc2V1ZG9saWZlX21lbW9yeS9yZXN0b3JlX2NsaS5weSIsIGxpbmUgMzAsIGluIG1haW4KICAgIHZhbGlkYXRlX3N0YXRlKGFyZ3Muc3RhdGVfYXJjaGl2ZSkKICBGaWxlICJ7T1JBQ0xFfS9wc2V1ZG9saWZlX21lbW9yeS9kb2NrZXJfYmFja3VwX3Jlc3RvcmUucHkiLCBsaW5lIDI4LCBpbiB2YWxpZGF0ZV9zdGF0ZQogICAgd2hpbGUgc3RyZWFtLnJlYWQoMTAyNCAqIDEwMjQpOgogICAgICAgICAgXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eCiAgRmlsZSAie1BZVEhPTn0vbGliL3B5dGhvbjMuMTEvZ3ppcC5weSIsIGxpbmUgMzAxLCBpbiByZWFkCiAgICByZXR1cm4gc2VsZi5fYnVmZmVyLnJlYWQoc2l6ZSkKICAgICAgICAgICBeXl5eXl5eXl5eXl5eXl5eXl5eXl5eXgogIEZpbGUgIntQWVRIT059L2xpYi9weXRob24zLjExL19jb21wcmVzc2lvbi5weSIsIGxpbmUgNjgsIGluIHJlYWRpbnRvCiAgICBkYXRhID0gc2VsZi5yZWFkKGxlbihieXRlX3ZpZXcpKQogICAgICAgICAgIF5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl4KICBGaWxlICJ7UFlUSE9OfS9saWIvcHl0aG9uMy4xMS9nemlwLnB5IiwgbGluZSA1MDcsIGluIHJlYWQKICAgIHVuY29tcHJlc3MgPSBzZWxmLl9kZWNvbXByZXNzb3IuZGVjb21wcmVzcyhidWYsIHNpemUpCiAgICAgICAgICAgICAgICAgXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXgp6bGliLmVycm9yOiBFcnJvciAtMyB3aGlsZSBkZWNvbXByZXNzaW5nIGRhdGE6IGludmFsaWQgc3RvcmVkIGJsb2NrIGxlbmd0aHMK",
+   "window": [
+    1794508991.2325237,
+    1794508991.4205492
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "valid-yes": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSByb3c6IHRoZSBvcmFjbGUgd2FzIG5vdCBydW4gZm9yIHRoaXMgYXJndgo=",
+   "window": [
+    1794508991.4476473,
+    1794508991.496759
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "valid-yes-state": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSByb3c6IHRoZSBvcmFjbGUgd2FzIG5vdCBydW4gZm9yIHRoaXMgYXJndgo=",
+   "window": [
+    1794508991.4971642,
+    1794508991.5459387
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "valid-every-option": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSByb3c6IHRoZSBvcmFjbGUgd2FzIG5vdCBydW4gZm9yIHRoaXMgYXJndgo=",
+   "window": [
+    1794508991.5463607,
+    1794508991.5950701
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "valid-yes-repeated": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSByb3c6IHRoZSBvcmFjbGUgd2FzIG5vdCBydW4gZm9yIHRoaXMgYXJndgo=",
+   "window": [
+    1794508991.5954878,
+    1794508991.6435833
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "valid-port-out-of-range": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSByb3c6IHRoZSBvcmFjbGUgd2FzIG5vdCBydW4gZm9yIHRoaXMgYXJndgo=",
+   "window": [
+    1794508991.6439738,
+    1794508991.6918504
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "valid-dump-trailing-slash": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "",
+   "stderr": "cmVzdG9yZSByb3c6IHRoZSBvcmFjbGUgd2FzIG5vdCBydW4gZm9yIHRoaXMgYXJndgo=",
+   "window": [
+    1794508991.6923625,
+    1794508991.7401083
+   ],
+   "arm": "python",
+   "docker": [],
+   "fixtures": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  }
+ }
+}
