@@ -953,7 +953,8 @@ class ReleaseEngineUpdate:
         u.rollback_lines = [*rollback_commands(restore_compose, context["env_file"], rollback_file, release_accepted(),
                                                self.target),
                             *u._schema_rollback_note(None), *u.postgres_rollback_lines]
-        u.report.rollback = {"tag": rollback, "state": "tagged", "overlay": str(rollback_file)}
+        u.report.rollback = {"tag": rollback, "state": "tagged", "overlay": str(rollback_file),
+                             **({"postgres": u.postgres_rollback} if u.postgres_rollback else {})}
         u.prune_rollbacks(context["checkout"], up.GHCR_IMAGE)
         activation = secrets.token_hex(16)
         service = {"image": image, "labels": {ENGINE_LABEL: self.engine, ACTIVATION_LABEL: activation,

@@ -510,6 +510,11 @@ def apply(update, p: Plan) -> None:
         # Added to the daemon's rollback text once the daemon step writes it.
         update.postgres_rollback_lines = ["      PostgreSQL's previous container, if it is wanted back too:",
                                           f"      {restore}"]
+        # --json prints no lines: the report carries the same details, beside
+        # the daemon's own rollback entry when both moved.
+        update.postgres_rollback = {"tag": p.rollback_tag, "overlay": str(p.rollback_overlay),
+                                    "restore": restore}
+        update.report.rollback["postgres"] = update.postgres_rollback
         return
     _code, logs = _docker(update, "logs", "--tail", "5", up.PG_CONTAINER, timeout=60)
     detail = up._last_line(logs) if (logs or "").strip() else ""

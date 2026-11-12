@@ -590,6 +590,8 @@ class Update:
         # Set once this run recreated PostgreSQL (update_postgres.apply):
         # the command that brings its previous container back.
         self.postgres_rollback_lines: list[str] = []
+        # The same, for the JSON report (its rollback's "postgres" entry).
+        self.postgres_rollback: dict = {}
         # The bank's schema version on the daemon this run replaces, when
         # /health said; a deploy that moves it changes what a rollback takes.
         self.schema_before: int | None = None

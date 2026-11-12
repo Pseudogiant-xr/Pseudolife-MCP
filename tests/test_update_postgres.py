@@ -812,3 +812,22 @@ def test_a_stack_file_named_like_the_rollback_overlay_is_kept(pg, world, clients
     assert up.main(["--health-delay-ms", "1"]) == 0
     calls = _calls(world)
     assert f"-f {override} " in calls[_index(calls, _pg_up)]
+
+
+def test_the_json_report_carries_the_postgres_rollback_beside_the_daemons(pg, world, clients, capsys):
+    # --json prints no rollback lines: the same details are in the report.
+    assert up.main(["--json", "--health-delay-ms", "1"]) == 0
+    rollback = json.loads(capsys.readouterr().out)["rollback"]
+    assert rollback["state"] == "tagged" and rollback["tag"]         # the daemon's own, kept
+    postgres = rollback["postgres"]
+    assert postgres["tag"].startswith(f"{RELEASE_IMAGE}-pre-update-")
+    assert postgres["restore"].endswith("up -d --no-deps --no-build --pull never --force-recreate pseudolife-pg")
+    assert Path(postgres["overlay"]).is_file()
+
+
+def test_the_json_report_carries_the_postgres_rollback_when_only_postgres_moves(pg, world, clients, capsys):
+    world.health = [{"status": "ok", "version": "0.15.1", "schema": 49, "persist_errors": 0, "hooks_digest": "d" * 64}]
+    assert up.main(["--json"]) == 0
+    postgres = json.loads(capsys.readouterr().out)["rollback"]["postgres"]
+    assert postgres["restore"].endswith("up -d --no-deps --no-build --pull never --force-recreate pseudolife-pg")
+    assert Path(postgres["overlay"]).is_file()
