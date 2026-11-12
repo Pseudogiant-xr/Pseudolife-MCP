@@ -32,6 +32,7 @@ PYTHON_ROOTS = {
     "move": ("move_cli",),
     "tunnel": ("tunnel_cli",),
     "console": ("console_cli",),
+    "conductor_watch": ("conductor_watch_cli",),
     "update": ("update_cli",),
     "audit": ("board_audit_cli",),
     "backup": ("backup_cli",),

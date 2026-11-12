@@ -41,8 +41,8 @@ or `defers` (every invocation prints the deferral and exits 1: the mode is in
 sub-rows' own status is in Parity rows. Audited at `75a8015e` (2026-11-01): 9
 modes native, 15 partly and 5 defer. The count is of 29 logical modes, with
 `conductor-watch` and its deprecated `delegate-watch` spelling sharing the
-existing `delegate-watch` row; both defer and have no native leaf or scoped
-sub-row yet. Check `shim/src/main.rs` as well as `shim/src/cli.rs`: the former
+existing `delegate-watch` row; both deferred with no native leaf at that audit,
+and both are partly native since CLI-CONDUCTOR-WATCH-SETUP (2026-11-13). Check `shim/src/main.rs` as well as `shim/src/cli.rs`: the former
 dispatches the native lease, board-audit, maintainer and sent-serve paths
 before the latter's deferral list.
 
