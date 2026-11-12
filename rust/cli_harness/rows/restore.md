@@ -35,7 +35,7 @@ before any of that, in the oracle's order:
 | A value after an option may be a negative number (`-1`, `-.5`) or `-`: argparse takes it as the value | `_negative_number_matcher` |
 | Repeated options: the last value wins; `--opt=value` | argparse |
 | Paths are pathlib's spelling (`dump.sql.gz/` and `./dump.sql.gz` name the file, `''` is `.`) | `type=Path` |
-| The dump: every gzip member read as Python's `gzip` reads it (padding, trailing bytes, CRC and length, truncation); lines split on `\n`, `\r\n` and a lone `\r`; the marker counts only outside `COPY ... FROM stdin;` data, with `\S` read as Python's `str.isspace` complement | `_dump_complete`, `gzip._GzipReader` |
+| The dump: every gzip member read as Python's `gzip` reads it (padding, trailing bytes, truncation); lines split on `\n`, `\r\n` and a lone `\r`; the marker counts only outside `COPY ... FROM stdin;` data, with `\S` read as Python's `str.isspace` complement | `_dump_complete`, `gzip._GzipReader` |
 | The state archive: the gzip check, then members as CPython 3.11 `tarfile` reads them (`frombuf`, `nti` with Python `int(..., 8)`, both checksums, the ustar prefix, the V7 trailing-slash directory, a bad or short header after the first ending the archive quietly, a member's data present to the end of its last block, non-regular supported types skipping no data, unknown types skipping theirs), then every `validate_state` check: absolute, `..` or backslash names, devices and FIFOs, absolute or backslash link targets, escaping links through the final and the transient link graph, and a link loop ending the walk | `validate_state` |
 | The confirmation gate: on Windows a character device counts as a terminal (the CRT's `isatty`, so `NUL` does) | `update_cli.interactive` |
 | Streams: Python text streams, CRLF on Windows | `print(..., file=sys.stderr)` |
@@ -54,10 +54,23 @@ before any of that, in the oracle's order:
   other wrap width.
 - A deflate error in either file: the oracle's `zlib.error` escapes both
   checks and it prints a traceback (exit 1).
+- A gzip CRC or length mismatch in either file. The oracle refuses it
+  (`BadGzipFile`), but miniz_oxide, unlike zlib, decodes a back-reference
+  before the start of a member's output, so a stream zlib stops on with a
+  traceback reaches the trailer here with the wrong bytes; this leaf cannot
+  tell the two apart.
 - State archives with PAX headers (`x`, `g`, `X`), GNU long names or links
   (`L`, `K`), sparse members (`S`), a negative size on a member that skips
   data, a link walk deeper than 400 levels or longer than 50 million steps
   (CPython's recursion limit decides there).
+
+## Declared divergence
+
+A stream holding a corruption miniz_oxide decodes and zlib rejects (a
+back-reference before the member's start) that is also cut off before its
+trailer: the oracle prints its `zlib.error` traceback (exit 1), this leaf
+refuses the file as incomplete (exit 2). Both stop before any effect. Not
+in the harness: no fixture is known whose two outcomes are this pair.
 
 ## Named rules
 
@@ -66,7 +79,8 @@ before any of that, in the oracle's order:
   fixtures intact), whose observation becomes the deferral.
 - `restore-declared-deferral`: the oracle answers before any Docker command
   (exit 0 or 2, no docker call, fixtures intact) where this leaf defers by
-  design; the expectation becomes the deferral.
+  design (including `dump-bad-crc` and `state-bad-crc-gzip`); the
+  expectation becomes the deferral.
 - `restore-zlib-traceback`: the oracle's uncaught `zlib.error` traceback
   (exit 1, nothing on stdout, last line `zlib.error: Error -3 while
   decompressing data: ...`, no docker call) becomes the deferral.
@@ -86,9 +100,9 @@ the leaf's non-test source for process, network, lock and write APIs.
 
 ## Mutants
 
-21 source mutants, one per decision the row pins (exit code, `--yes`, the
+22 source mutants, one per decision the row pins (exit code, `--yes`, the
 state check and its order after the dump check, argparse's error order and
 negative numbers, the 80-column guard, the COPY pattern, lone `\r`, gzip
-padding, CRC and the zlib deferral, tar header and data handling, the
+padding, the CRC check and its deferral, the zlib deferral, tar header and data handling, the
 transient pass, FIFOs, loop handling, the ustar prefix, the signed checksum
 and `int`'s base prefix); each is caught by a named case.

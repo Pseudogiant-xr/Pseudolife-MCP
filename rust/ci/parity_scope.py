@@ -161,7 +161,7 @@ SHIM_COMMANDS = {
     "board_audit": ("audit", "coordination_recovery"),
     "migrate_flat.rs": ("migrate_flat",),
     "update": ("update", "doctor"),
-    "connect": ("connect",), "doctor": ("doctor",),
+    "connect": ("connect", "restore"), "doctor": ("doctor",),
     "maintainer": ("maintainer", "maintainer_setup", "update", "doctor"),
     "coordination_recovery": ("coordination_recovery",),
     "move_cli.rs": ("move",), "test_login": ("test_login",),

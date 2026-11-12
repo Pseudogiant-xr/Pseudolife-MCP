@@ -442,6 +442,21 @@ mod tests {
     }
 
     #[test]
+    fn echoed_values_are_quoted_as_python_repr() {
+        // Expected strings printed by CPython 3.11 `repr(value)`.
+        for (value, expected) in [
+            ("\x7f\x0bab", r"'\x7f\x0bab'"),
+            ("it's", r#""it's""#),
+            ("say \"hi\"", r#"'say "hi"'"#),
+            ("both ' and \"", r#"'both \' and "'"#),
+            ("back\\slash", r"'back\\slash'"),
+            ("\x00\x1f\t\n\r", r"'\x00\x1f\t\n\r'"),
+        ] {
+            assert_eq!(super::super::super::mode_repr(value), expected, "{value:?}");
+        }
+    }
+
+    #[test]
     fn usage_is_the_help_paragraph() {
         assert!(
             usage().starts_with("usage: pseudolife-mcp restore [-h] --backup-file BACKUP_FILE\n")

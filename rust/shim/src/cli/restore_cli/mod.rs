@@ -47,41 +47,6 @@ fn refuse(message: &str) -> Option<ExitCode> {
     Some(ExitCode::from(2))
 }
 
-/// `update_cli.interactive()`: `sys.stdin.isatty() and sys.stdout.isatty()`.
-/// On Windows the CRT's `isatty` is true for any character device (`NUL`
-/// included), so a character device counts as a terminal here too.
-fn interactive() -> bool {
-    #[cfg(windows)]
-    {
-        windows::is_character_device(true) && windows::is_character_device(false)
-    }
-    #[cfg(not(windows))]
-    {
-        use std::io::IsTerminal;
-        io::stdin().is_terminal() && io::stdout().is_terminal()
-    }
-}
-
-#[cfg(windows)]
-#[allow(unsafe_code)]
-mod windows {
-    use std::os::windows::io::AsRawHandle;
-    use windows_sys::Win32::Storage::FileSystem::{FILE_TYPE_CHAR, GetFileType};
-
-    pub(super) fn is_character_device(stdin: bool) -> bool {
-        let handle = if stdin {
-            std::io::stdin().as_raw_handle()
-        } else {
-            std::io::stdout().as_raw_handle()
-        };
-        if handle.is_null() {
-            return false;
-        }
-        // SAFETY: GetFileType only inspects the borrowed standard handle.
-        unsafe { GetFileType(handle) == FILE_TYPE_CHAR }
-    }
-}
-
 /// `None` defers to the dispatcher before any effect.
 pub(super) fn run(arguments: Vec<OsString>) -> Option<ExitCode> {
     let args = match args::parse(&arguments)? {
@@ -118,7 +83,7 @@ pub(super) fn run(arguments: Vec<OsString>) -> Option<ExitCode> {
     }
     if !args.yes {
         // A person at a terminal is asked; the prompt path defers.
-        if interactive() {
+        if super::connect::interactive() {
             return None;
         }
         return refuse(NEEDS_YES);

@@ -290,6 +290,7 @@
   ],
   "restore": [
     "restore-copy-loose",
+    "restore-crc-answered",
     "restore-directory-skips",
     "restore-dump-after-state",
     "restore-fifo-allowed",

@@ -1,8 +1,0 @@
-{
-  "schema": 1,
-  "workflow": "rust.yml",
-  "job": "parity-checks",
-  "before": "930cb80745ed6a02",
-  "fingerprint": "357ba30961d3e4a0",
-  "reason": "Adds the restore CLI row (CLI-RESTORE-GATES, 116 cases) to the w1c-connection shard's live and golden harness steps; no other shard's steps changed. Measured locally on Windows (2026-11-13): the row's live pass took 35 s and its golden replay 3 s, inside that shard's 26-minute harness step budget, so its measured minutes still hold within that margin until the batch run re-measures them."
-}

@@ -45,12 +45,27 @@ pub(super) fn parent_pid(_table: &Table) -> Option<u32> {
 pub(super) fn stdin_is_tty() -> bool {
     #[cfg(windows)]
     {
-        windows::stdin_is_character_device()
+        use std::os::windows::io::AsRawHandle;
+        windows::is_character_device(std::io::stdin().as_raw_handle())
     }
     #[cfg(not(windows))]
     {
         use std::io::IsTerminal;
         std::io::stdin().is_terminal()
+    }
+}
+
+/// `sys.stdout.isatty()`, by the same rule as `stdin_is_tty`.
+pub(super) fn stdout_is_tty() -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::io::AsRawHandle;
+        windows::is_character_device(std::io::stdout().as_raw_handle())
+    }
+    #[cfg(not(windows))]
+    {
+        use std::io::IsTerminal;
+        std::io::stdout().is_terminal()
     }
 }
 
@@ -132,7 +147,7 @@ fn ps_processes() -> Result<Table, ()> {
 #[allow(unsafe_code)]
 mod windows {
     use super::Table;
-    use std::{ffi::OsString, os::windows::ffi::OsStringExt, os::windows::io::AsRawHandle};
+    use std::{ffi::OsString, os::windows::ffi::OsStringExt};
     use windows_sys::Win32::{
         Foundation::{CloseHandle, INVALID_HANDLE_VALUE},
         Storage::FileSystem::{FILE_TYPE_CHAR, GetFileType},
@@ -189,8 +204,7 @@ mod windows {
         Ok(rows)
     }
 
-    pub(super) fn stdin_is_character_device() -> bool {
-        let handle = std::io::stdin().as_raw_handle();
+    pub(super) fn is_character_device(handle: std::os::windows::io::RawHandle) -> bool {
         if handle.is_null() {
             return false;
         }

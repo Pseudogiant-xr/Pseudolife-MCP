@@ -92,6 +92,11 @@ DUMPS: dict[str, bytes] = {
     "plain-sql": GOOD_SQL,
     "empty": b"",
     "corrupt-deflate": _corrupt_deflate(),
+    # zlib: "invalid distance too far back"; miniz_oxide decodes it and the
+    # CRC then disagrees (the bytes are pinned: a compressor could change them).
+    "distance-too-far": bytes.fromhex(
+        "1f8b08004efbf56a02ff0b76f571755b5130b4e6d2d55508c82f2e492f4a0d0ef45148492c494c4a2c4e554829cd"
+        "2d5048cecf2dc8492d49e50a1e553eaa7c54f9a8f251e5a3ca47958f2a1f59ca010f13ac8a2e090000"),
 }
 
 
@@ -419,12 +424,18 @@ STATE_REFUSE = ("not-gzip", "truncated-gzip", "bad-crc-gzip", "empty-file", "emp
 STATE_DEFER = ("pax-name", "gnu-long-name", "negative-size", "deep-link-chain")
 
 
+# The oracle refuses a CRC or length mismatch; this leaf defers there, as a
+# corruption zlib rejects but miniz_oxide decodes ends the same way.
+CRC_DEFER = ("bad-crc", "bad-crc-gzip")
+
+
 def _gate_cases() -> list[Case]:
     out = []
+    crc = ("restore-declared-deferral",)
     for name in DUMP_PASS + DUMP_REFUSE:
-        out.append(_case(f"dump-{name}", DUMP, dump=name))
+        out.append(_case(f"dump-{name}", DUMP, dump=name, rules=crc if name in CRC_DEFER else ()))
     for name in STATE_PASS + STATE_REFUSE:
-        out.append(_case(f"state-{name}", DUMP + STATE, state=name))
+        out.append(_case(f"state-{name}", DUMP + STATE, state=name, rules=crc if name in CRC_DEFER else ()))
     for name in STATE_DEFER:
         out.append(_deferred(f"defer-state-{name}", DUMP + STATE, state=name))
     return out
@@ -484,6 +495,7 @@ def cases() -> list[Case]:
         _deferred("defer-unicode-port", DUMP + ["--db-port", "١"]),
         _deferred("defer-unicode-unknown", DUMP + ["--bé"]),
         _case("defer-dump-corrupt-deflate", DUMP, dump="corrupt-deflate", rules=("restore-zlib-traceback",)),
+        _case("defer-dump-distance-too-far", DUMP, dump="distance-too-far", rules=("restore-zlib-traceback",)),
         _case("defer-state-corrupt-deflate", DUMP + STATE, state="corrupt-deflate-gzip",
               rules=("restore-zlib-traceback",)),
         # argv that passes every gate: the candidate defers; the oracle is never run
@@ -523,6 +535,9 @@ MUTANTS = [
            "                b'\\r' => {\n                    self.line.push(byte);", ("dump-lone-cr",)),
     Mutant("restore-gzip-padding", "restore", GZIPRS, "                Some(0) => {}\n", "", ("dump-trailing-zeros",)),
     Mutant("restore-gzip-crc", "restore", GZIPRS, "stored_crc != crc.sum()", "stored_crc == crc.sum().wrapping_add(1)", ("dump-bad-crc",)),
+    Mutant("restore-crc-answered", "restore", GZIPRS,
+           "            return Err(Stop::Unsure);\n        }\n        // Zero padding",
+           "            return Err(Stop::Refuse);\n        }\n        // Zero padding", ("defer-dump-distance-too-far",)),
     Mutant("restore-zlib-answered", "restore", GZIPRS, ".map_err(|_| Stop::Unsure)?;", ".map_err(|_| Stop::Refuse)?;",
            ("defer-dump-corrupt-deflate",)),
     Mutant("restore-later-header-error", "restore", STATERS,
