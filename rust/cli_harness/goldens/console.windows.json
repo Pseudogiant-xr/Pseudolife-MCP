@@ -1,0 +1,2617 @@
+{
+ "row": "CLI-CONSOLE-PRINT",
+ "platform": "windows",
+ "oracle_commit": "ca803afd58cb1cd7f2e37ea3863770f9131a8370",
+ "oracle_commit_source": "verified-tree",
+ "cases": {
+  "help": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGNvbnNvbGUgWy1oXSBbLS1uby1vcGVuXSBbLS10byBQQUdFXSBbLS1saXN0XQ0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tcmV2b2tlIFNFU1NJT05fSURdIFstLXVubGVzcy1zaWduZWQtaW5dDQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1qc29uXQ0KDQpPcGVuIHRoZSBDb25zb2xlIGluIGEgYnJvd3Nlciwgc2lnbmVkIGluLiBUaGUgbGluayBsYXN0cyA1IG1pbnV0ZXMgYW5kIHdvcmtzDQpvbmNlLg0KDQpvcHRpb25zOg0KICAtaCwgLS1oZWxwICAgICAgICAgICBzaG93IHRoaXMgaGVscCBtZXNzYWdlIGFuZCBleGl0DQogIC0tbm8tb3BlbiAgICAgICAgICAgIHByaW50IHRoZSBsaW5rIGFuZCB0aGUgY29kZSB3aXRob3V0IG9wZW5pbmcgYSBicm93c2VyDQogIC0tdG8gUEFHRSAgICAgICAgICAgIHRoZSBDb25zb2xlIHBhZ2UgdG8gbGFuZCBvbiwgc3VjaCBhcyBib2FyZA0KICAtLWxpc3QgICAgICAgICAgICAgICBsaXN0IHRoZSBicm93c2VycyBzaWduZWQgaW4gdG8gdGhpcyBiYW5rDQogIC0tcmV2b2tlIFNFU1NJT05fSUQgIHNpZ24gb25lIGJyb3dzZXIgb3V0IChhbiBpZCBmcm9tIC0tbGlzdCkNCiAgLS11bmxlc3Mtc2lnbmVkLWluICAgZG8gbm90aGluZyB3aGVuIGEgYnJvd3NlciBpcyBhbHJlYWR5IHNpZ25lZCBpbiB0byB0aGlzDQogICAgICAgICAgICAgICAgICAgICAgIGJhbmsgKHdoYXQgaW5zdGFsbCBydW5zLCBzbyBhIHJlcnVuIG9wZW5zIG5vIG5ldyB0YWIpDQogIC0tanNvbiAgICAgICAgICAgICAgIHByaW50IG9uZSBKU09OIG9iamVjdA0K",
+   "stderr": "",
+   "window": [
+    1794472029.8909981,
+    1794472030.1675382
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "help-short": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGNvbnNvbGUgWy1oXSBbLS1uby1vcGVuXSBbLS10byBQQUdFXSBbLS1saXN0XQ0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tcmV2b2tlIFNFU1NJT05fSURdIFstLXVubGVzcy1zaWduZWQtaW5dDQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1qc29uXQ0KDQpPcGVuIHRoZSBDb25zb2xlIGluIGEgYnJvd3Nlciwgc2lnbmVkIGluLiBUaGUgbGluayBsYXN0cyA1IG1pbnV0ZXMgYW5kIHdvcmtzDQpvbmNlLg0KDQpvcHRpb25zOg0KICAtaCwgLS1oZWxwICAgICAgICAgICBzaG93IHRoaXMgaGVscCBtZXNzYWdlIGFuZCBleGl0DQogIC0tbm8tb3BlbiAgICAgICAgICAgIHByaW50IHRoZSBsaW5rIGFuZCB0aGUgY29kZSB3aXRob3V0IG9wZW5pbmcgYSBicm93c2VyDQogIC0tdG8gUEFHRSAgICAgICAgICAgIHRoZSBDb25zb2xlIHBhZ2UgdG8gbGFuZCBvbiwgc3VjaCBhcyBib2FyZA0KICAtLWxpc3QgICAgICAgICAgICAgICBsaXN0IHRoZSBicm93c2VycyBzaWduZWQgaW4gdG8gdGhpcyBiYW5rDQogIC0tcmV2b2tlIFNFU1NJT05fSUQgIHNpZ24gb25lIGJyb3dzZXIgb3V0IChhbiBpZCBmcm9tIC0tbGlzdCkNCiAgLS11bmxlc3Mtc2lnbmVkLWluICAgZG8gbm90aGluZyB3aGVuIGEgYnJvd3NlciBpcyBhbHJlYWR5IHNpZ25lZCBpbiB0byB0aGlzDQogICAgICAgICAgICAgICAgICAgICAgIGJhbmsgKHdoYXQgaW5zdGFsbCBydW5zLCBzbyBhIHJlcnVuIG9wZW5zIG5vIG5ldyB0YWIpDQogIC0tanNvbiAgICAgICAgICAgICAgIHByaW50IG9uZSBKU09OIG9iamVjdA0K",
+   "stderr": "",
+   "window": [
+    1794472030.1690938,
+    1794472030.4327953
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "help-after-list": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGNvbnNvbGUgWy1oXSBbLS1uby1vcGVuXSBbLS10byBQQUdFXSBbLS1saXN0XQ0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tcmV2b2tlIFNFU1NJT05fSURdIFstLXVubGVzcy1zaWduZWQtaW5dDQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1qc29uXQ0KDQpPcGVuIHRoZSBDb25zb2xlIGluIGEgYnJvd3Nlciwgc2lnbmVkIGluLiBUaGUgbGluayBsYXN0cyA1IG1pbnV0ZXMgYW5kIHdvcmtzDQpvbmNlLg0KDQpvcHRpb25zOg0KICAtaCwgLS1oZWxwICAgICAgICAgICBzaG93IHRoaXMgaGVscCBtZXNzYWdlIGFuZCBleGl0DQogIC0tbm8tb3BlbiAgICAgICAgICAgIHByaW50IHRoZSBsaW5rIGFuZCB0aGUgY29kZSB3aXRob3V0IG9wZW5pbmcgYSBicm93c2VyDQogIC0tdG8gUEFHRSAgICAgICAgICAgIHRoZSBDb25zb2xlIHBhZ2UgdG8gbGFuZCBvbiwgc3VjaCBhcyBib2FyZA0KICAtLWxpc3QgICAgICAgICAgICAgICBsaXN0IHRoZSBicm93c2VycyBzaWduZWQgaW4gdG8gdGhpcyBiYW5rDQogIC0tcmV2b2tlIFNFU1NJT05fSUQgIHNpZ24gb25lIGJyb3dzZXIgb3V0IChhbiBpZCBmcm9tIC0tbGlzdCkNCiAgLS11bmxlc3Mtc2lnbmVkLWluICAgZG8gbm90aGluZyB3aGVuIGEgYnJvd3NlciBpcyBhbHJlYWR5IHNpZ25lZCBpbiB0byB0aGlzDQogICAgICAgICAgICAgICAgICAgICAgIGJhbmsgKHdoYXQgaW5zdGFsbCBydW5zLCBzbyBhIHJlcnVuIG9wZW5zIG5vIG5ldyB0YWIpDQogIC0tanNvbiAgICAgICAgICAgICAgIHByaW50IG9uZSBKU09OIG9iamVjdA0K",
+   "stderr": "",
+   "window": [
+    1794472030.4342985,
+    1794472030.7029288
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "help-after-extras": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGNvbnNvbGUgWy1oXSBbLS1uby1vcGVuXSBbLS10byBQQUdFXSBbLS1saXN0XQ0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tcmV2b2tlIFNFU1NJT05fSURdIFstLXVubGVzcy1zaWduZWQtaW5dDQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1qc29uXQ0KDQpPcGVuIHRoZSBDb25zb2xlIGluIGEgYnJvd3Nlciwgc2lnbmVkIGluLiBUaGUgbGluayBsYXN0cyA1IG1pbnV0ZXMgYW5kIHdvcmtzDQpvbmNlLg0KDQpvcHRpb25zOg0KICAtaCwgLS1oZWxwICAgICAgICAgICBzaG93IHRoaXMgaGVscCBtZXNzYWdlIGFuZCBleGl0DQogIC0tbm8tb3BlbiAgICAgICAgICAgIHByaW50IHRoZSBsaW5rIGFuZCB0aGUgY29kZSB3aXRob3V0IG9wZW5pbmcgYSBicm93c2VyDQogIC0tdG8gUEFHRSAgICAgICAgICAgIHRoZSBDb25zb2xlIHBhZ2UgdG8gbGFuZCBvbiwgc3VjaCBhcyBib2FyZA0KICAtLWxpc3QgICAgICAgICAgICAgICBsaXN0IHRoZSBicm93c2VycyBzaWduZWQgaW4gdG8gdGhpcyBiYW5rDQogIC0tcmV2b2tlIFNFU1NJT05fSUQgIHNpZ24gb25lIGJyb3dzZXIgb3V0IChhbiBpZCBmcm9tIC0tbGlzdCkNCiAgLS11bmxlc3Mtc2lnbmVkLWluICAgZG8gbm90aGluZyB3aGVuIGEgYnJvd3NlciBpcyBhbHJlYWR5IHNpZ25lZCBpbiB0byB0aGlzDQogICAgICAgICAgICAgICAgICAgICAgIGJhbmsgKHdoYXQgaW5zdGFsbCBydW5zLCBzbyBhIHJlcnVuIG9wZW5zIG5vIG5ldyB0YWIpDQogIC0tanNvbiAgICAgICAgICAgICAgIHByaW50IG9uZSBKU09OIG9iamVjdA0K",
+   "stderr": "",
+   "window": [
+    1794472030.7044327,
+    1794472030.9766152
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "to-missing-value": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGNvbnNvbGUgWy1oXSBbLS1uby1vcGVuXSBbLS10byBQQUdFXSBbLS1saXN0XQ0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tcmV2b2tlIFNFU1NJT05fSURdIFstLXVubGVzcy1zaWduZWQtaW5dDQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1qc29uXQ0KcHNldWRvbGlmZS1tY3AgY29uc29sZTogZXJyb3I6IGFyZ3VtZW50IC0tdG86IGV4cGVjdGVkIG9uZSBhcmd1bWVudA0K",
+   "window": [
+    1794472030.9786198,
+    1794472031.2372143
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "revoke-missing-value": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGNvbnNvbGUgWy1oXSBbLS1uby1vcGVuXSBbLS10byBQQUdFXSBbLS1saXN0XQ0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tcmV2b2tlIFNFU1NJT05fSURdIFstLXVubGVzcy1zaWduZWQtaW5dDQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1qc29uXQ0KcHNldWRvbGlmZS1tY3AgY29uc29sZTogZXJyb3I6IGFyZ3VtZW50IC0tcmV2b2tlOiBleHBlY3RlZCBvbmUgYXJndW1lbnQNCg==",
+   "window": [
+    1794472031.2382174,
+    1794472031.5161915
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "json-explicit": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGNvbnNvbGUgWy1oXSBbLS1uby1vcGVuXSBbLS10byBQQUdFXSBbLS1saXN0XQ0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tcmV2b2tlIFNFU1NJT05fSURdIFstLXVubGVzcy1zaWduZWQtaW5dDQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1qc29uXQ0KcHNldWRvbGlmZS1tY3AgY29uc29sZTogZXJyb3I6IGFyZ3VtZW50IC0tanNvbjogaWdub3JlZCBleHBsaWNpdCBhcmd1bWVudCAnMScNCg==",
+   "window": [
+    1794472031.5177722,
+    1794472031.7885668
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "no-open-explicit-empty": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGNvbnNvbGUgWy1oXSBbLS1uby1vcGVuXSBbLS10byBQQUdFXSBbLS1saXN0XQ0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tcmV2b2tlIFNFU1NJT05fSURdIFstLXVubGVzcy1zaWduZWQtaW5dDQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1qc29uXQ0KcHNldWRvbGlmZS1tY3AgY29uc29sZTogZXJyb3I6IGFyZ3VtZW50IC0tbm8tb3BlbjogaWdub3JlZCBleHBsaWNpdCBhcmd1bWVudCAnJw0K",
+   "window": [
+    1794472031.790567,
+    1794472032.0628464
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "list-explicit": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGNvbnNvbGUgWy1oXSBbLS1uby1vcGVuXSBbLS10byBQQUdFXSBbLS1saXN0XQ0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tcmV2b2tlIFNFU1NJT05fSURdIFstLXVubGVzcy1zaWduZWQtaW5dDQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1qc29uXQ0KcHNldWRvbGlmZS1tY3AgY29uc29sZTogZXJyb3I6IGFyZ3VtZW50IC0tbGlzdDogaWdub3JlZCBleHBsaWNpdCBhcmd1bWVudCAneWVzJw0K",
+   "window": [
+    1794472032.06435,
+    1794472032.3365533
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "unrecognized": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGNvbnNvbGUgWy1oXSBbLS1uby1vcGVuXSBbLS10byBQQUdFXSBbLS1saXN0XQ0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tcmV2b2tlIFNFU1NJT05fSURdIFstLXVubGVzcy1zaWduZWQtaW5dDQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1qc29uXQ0KcHNldWRvbGlmZS1tY3AgY29uc29sZTogZXJyb3I6IHVucmVjb2duaXplZCBhcmd1bWVudHM6IHp6DQo=",
+   "window": [
+    1794472032.3375523,
+    1794472032.6012807
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "unrecognized-several": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGNvbnNvbGUgWy1oXSBbLS1uby1vcGVuXSBbLS10byBQQUdFXSBbLS1saXN0XQ0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tcmV2b2tlIFNFU1NJT05fSURdIFstLXVubGVzcy1zaWduZWQtaW5dDQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1qc29uXQ0KcHNldWRvbGlmZS1tY3AgY29uc29sZTogZXJyb3I6IHVucmVjb2duaXplZCBhcmd1bWVudHM6IGEgYiBjDQo=",
+   "window": [
+    1794472032.602782,
+    1794472032.864234
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "extras-then-missing": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGNvbnNvbGUgWy1oXSBbLS1uby1vcGVuXSBbLS10byBQQUdFXSBbLS1saXN0XQ0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tcmV2b2tlIFNFU1NJT05fSURdIFstLXVubGVzcy1zaWduZWQtaW5dDQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1qc29uXQ0KcHNldWRvbGlmZS1tY3AgY29uc29sZTogZXJyb3I6IGFyZ3VtZW50IC0tdG86IGV4cGVjdGVkIG9uZSBhcmd1bWVudA0K",
+   "window": [
+    1794472032.8662348,
+    1794472033.1326263
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "list-and-revoke": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "LS1saXN0IGFuZCAtLXJldm9rZSBhcmUgc2VwYXJhdGUgY29tbWFuZHM7IGdpdmUgb25lDQo=",
+   "window": [
+    1794472033.1341302,
+    1794472033.3972542
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "list-and-revoke-joined": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "LS1saXN0IGFuZCAtLXJldm9rZSBhcmUgc2VwYXJhdGUgY29tbWFuZHM7IGdpdmUgb25lDQo=",
+   "window": [
+    1794472033.398256,
+    1794472033.6663759
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "to-invalid": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "LS10byB0YWtlcyBhIENvbnNvbGUgcGFnZSBpZCBzdWNoIGFzIGJvYXJkLCBub3QgJ0JhZCcNCg==",
+   "window": [
+    1794472033.6673748,
+    1794472033.9964147
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "to-invalid-plain": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "LS10byB0YWtlcyBhIENvbnNvbGUgcGFnZSBpZCBzdWNoIGFzIGJvYXJkLCBub3QgJ0JhZCcNCg==",
+   "window": [
+    1794472033.9991176,
+    1794472034.259893
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "to-empty": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "LS10byB0YWtlcyBhIENvbnNvbGUgcGFnZSBpZCBzdWNoIGFzIGJvYXJkLCBub3QgJycNCg==",
+   "window": [
+    1794472034.2608929,
+    1794472034.5294027
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "to-too-long": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "LS10byB0YWtlcyBhIENvbnNvbGUgcGFnZSBpZCBzdWNoIGFzIGJvYXJkLCBub3QgJ2FhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYScNCg==",
+   "window": [
+    1794472034.5313997,
+    1794472034.7922716
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "to-quote": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "LS10byB0YWtlcyBhIENvbnNvbGUgcGFnZSBpZCBzdWNoIGFzIGJvYXJkLCBub3QgIml0J3MiDQo=",
+   "window": [
+    1794472034.7942772,
+    1794472035.0605295
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "to-unicode": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "LS10byB0YWtlcyBhIENvbnNvbGUgcGFnZSBpZCBzdWNoIGFzIGJvYXJkLCBub3QgJ2NhZsOpXHQnDQo=",
+   "window": [
+    1794472035.0630398,
+    1794472035.3239682
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "defer-plain": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 3,
+   "stdout": "",
+   "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogbm8gZGFlbW9uIGFuc3dlcmVkIGF0IGh0dHA6Ly8xMjcuMC4wLjE6OSAoW1dpbkVycm9yIDEwMDYxXSBObyBjb25uZWN0aW9uIGNvdWxkIGJlIG1hZGUgYmVjYXVzZSB0aGUgdGFyZ2V0IG1hY2hpbmUgYWN0aXZlbHkgcmVmdXNlZCBpdCk7IGNoZWNrIGl0IHJ1bnMgKGBwc2V1ZG9saWZlLW1jcCBkb2N0b3JgKQ0K",
+   "window": [
+    1794472035.3249729,
+    1794472037.7728224
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "defer-to-board": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 3,
+   "stdout": "",
+   "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogbm8gZGFlbW9uIGFuc3dlcmVkIGF0IGh0dHA6Ly8xMjcuMC4wLjE6OSAoW1dpbkVycm9yIDEwMDYxXSBObyBjb25uZWN0aW9uIGNvdWxkIGJlIG1hZGUgYmVjYXVzZSB0aGUgdGFyZ2V0IG1hY2hpbmUgYWN0aXZlbHkgcmVmdXNlZCBpdCk7IGNoZWNrIGl0IHJ1bnMgKGBwc2V1ZG9saWZlLW1jcCBkb2N0b3JgKQ0K",
+   "window": [
+    1794472037.7743447,
+    1794472040.1764283
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "defer-json": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 3,
+   "stdout": "eyJzdGF0ZSI6ICJub19kYWVtb24iLCAiZXJyb3IiOiAiW1dpbkVycm9yIDEwMDYxXSBObyBjb25uZWN0aW9uIGNvdWxkIGJlIG1hZGUgYmVjYXVzZSB0aGUgdGFyZ2V0IG1hY2hpbmUgYWN0aXZlbHkgcmVmdXNlZCBpdCJ9DQo=",
+   "stderr": "",
+   "window": [
+    1794472040.1785762,
+    1794472042.5823107
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "defer-unless-signed-in": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 3,
+   "stdout": "",
+   "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogbm8gZGFlbW9uIGFuc3dlcmVkIGF0IGh0dHA6Ly8xMjcuMC4wLjE6OSAoW1dpbkVycm9yIDEwMDYxXSBObyBjb25uZWN0aW9uIGNvdWxkIGJlIG1hZGUgYmVjYXVzZSB0aGUgdGFyZ2V0IG1hY2hpbmUgYWN0aXZlbHkgcmVmdXNlZCBpdCk7IGNoZWNrIGl0IHJ1bnMgKGBwc2V1ZG9saWZlLW1jcCBkb2N0b3JgKQ0K",
+   "window": [
+    1794472042.58432,
+    1794472044.9531054
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "defer-unless-signed-in-plain": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 3,
+   "stdout": "",
+   "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogbm8gZGFlbW9uIGFuc3dlcmVkIGF0IGh0dHA6Ly8xMjcuMC4wLjE6OSAoW1dpbkVycm9yIDEwMDYxXSBObyBjb25uZWN0aW9uIGNvdWxkIGJlIG1hZGUgYmVjYXVzZSB0aGUgdGFyZ2V0IG1hY2hpbmUgYWN0aXZlbHkgcmVmdXNlZCBpdCk7IGNoZWNrIGl0IHJ1bnMgKGBwc2V1ZG9saWZlLW1jcCBkb2N0b3JgKQ0K",
+   "window": [
+    1794472044.9551065,
+    1794472047.5201719
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "defer-empty-revoke": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 3,
+   "stdout": "",
+   "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogbm8gZGFlbW9uIGFuc3dlcmVkIGF0IGh0dHA6Ly8xMjcuMC4wLjE6OSAoW1dpbkVycm9yIDEwMDYxXSBObyBjb25uZWN0aW9uIGNvdWxkIGJlIG1hZGUgYmVjYXVzZSB0aGUgdGFyZ2V0IG1hY2hpbmUgYWN0aXZlbHkgcmVmdXNlZCBpdCk7IGNoZWNrIGl0IHJ1bnMgKGBwc2V1ZG9saWZlLW1jcCBkb2N0b3JgKQ0K",
+   "window": [
+    1794472047.5211718,
+    1794472049.8895435
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "defer-empty-revoke-no-open": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 3,
+   "stdout": "",
+   "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogbm8gZGFlbW9uIGFuc3dlcmVkIGF0IGh0dHA6Ly8xMjcuMC4wLjE6OSAoW1dpbkVycm9yIDEwMDYxXSBObyBjb25uZWN0aW9uIGNvdWxkIGJlIG1hZGUgYmVjYXVzZSB0aGUgdGFyZ2V0IG1hY2hpbmUgYWN0aXZlbHkgcmVmdXNlZCBpdCk7IGNoZWNrIGl0IHJ1bnMgKGBwc2V1ZG9saWZlLW1jcCBkb2N0b3JgKQ0K",
+   "window": [
+    1794472049.8905435,
+    1794472052.270151
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "defer-abbreviation": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 3,
+   "stdout": "",
+   "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogbm8gZGFlbW9uIGFuc3dlcmVkIGF0IGh0dHA6Ly8xMjcuMC4wLjE6OSAoW1dpbkVycm9yIDEwMDYxXSBObyBjb25uZWN0aW9uIGNvdWxkIGJlIG1hZGUgYmVjYXVzZSB0aGUgdGFyZ2V0IG1hY2hpbmUgYWN0aXZlbHkgcmVmdXNlZCBpdCk7IGNoZWNrIGl0IHJ1bnMgKGBwc2V1ZG9saWZlLW1jcCBkb2N0b3JgKQ0K",
+   "window": [
+    1794472052.2711563,
+    1794472054.7259927
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "defer-dash-value": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGNvbnNvbGUgWy1oXSBbLS1uby1vcGVuXSBbLS10byBQQUdFXSBbLS1saXN0XQ0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tcmV2b2tlIFNFU1NJT05fSURdIFstLXVubGVzcy1zaWduZWQtaW5dDQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1qc29uXQ0KcHNldWRvbGlmZS1tY3AgY29uc29sZTogZXJyb3I6IGFyZ3VtZW50IC0tdG86IGV4cGVjdGVkIG9uZSBhcmd1bWVudA0K",
+   "window": [
+    1794472054.7279947,
+    1794472054.9961932
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "defer-double-dash": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGNvbnNvbGUgWy1oXSBbLS1uby1vcGVuXSBbLS10byBQQUdFXSBbLS1saXN0XQ0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tcmV2b2tlIFNFU1NJT05fSURdIFstLXVubGVzcy1zaWduZWQtaW5dDQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1qc29uXQ0KcHNldWRvbGlmZS1tY3AgY29uc29sZTogZXJyb3I6IHVucmVjb2duaXplZCBhcmd1bWVudHM6IC0tDQo=",
+   "window": [
+    1794472054.9976969,
+    1794472055.2621343
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "defer-help-explicit": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGNvbnNvbGUgWy1oXSBbLS1uby1vcGVuXSBbLS10byBQQUdFXSBbLS1saXN0XQ0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tcmV2b2tlIFNFU1NJT05fSURdIFstLXVubGVzcy1zaWduZWQtaW5dDQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1qc29uXQ0KcHNldWRvbGlmZS1tY3AgY29uc29sZTogZXJyb3I6IGFyZ3VtZW50IC1oLy0taGVscDogaWdub3JlZCBleHBsaWNpdCBhcmd1bWVudCAneCcNCg==",
+   "window": [
+    1794472055.264405,
+    1794472055.5337393
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "defer-help-width": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGNvbnNvbGUgWy1oXSBbLS1uby1vcGVuXSBbLS10byBQQUdFXSBbLS1saXN0XSBbLS1yZXZva2UgU0VTU0lPTl9JRF0NCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIFstLXVubGVzcy1zaWduZWQtaW5dIFstLWpzb25dDQoNCk9wZW4gdGhlIENvbnNvbGUgaW4gYSBicm93c2VyLCBzaWduZWQgaW4uIFRoZSBsaW5rIGxhc3RzIDUgbWludXRlcyBhbmQgd29ya3Mgb25jZS4NCg0Kb3B0aW9uczoNCiAgLWgsIC0taGVscCAgICAgICAgICAgc2hvdyB0aGlzIGhlbHAgbWVzc2FnZSBhbmQgZXhpdA0KICAtLW5vLW9wZW4gICAgICAgICAgICBwcmludCB0aGUgbGluayBhbmQgdGhlIGNvZGUgd2l0aG91dCBvcGVuaW5nIGEgYnJvd3Nlcg0KICAtLXRvIFBBR0UgICAgICAgICAgICB0aGUgQ29uc29sZSBwYWdlIHRvIGxhbmQgb24sIHN1Y2ggYXMgYm9hcmQNCiAgLS1saXN0ICAgICAgICAgICAgICAgbGlzdCB0aGUgYnJvd3NlcnMgc2lnbmVkIGluIHRvIHRoaXMgYmFuaw0KICAtLXJldm9rZSBTRVNTSU9OX0lEICBzaWduIG9uZSBicm93c2VyIG91dCAoYW4gaWQgZnJvbSAtLWxpc3QpDQogIC0tdW5sZXNzLXNpZ25lZC1pbiAgIGRvIG5vdGhpbmcgd2hlbiBhIGJyb3dzZXIgaXMgYWxyZWFkeSBzaWduZWQgaW4gdG8gdGhpcyBiYW5rICh3aGF0IGluc3RhbGwNCiAgICAgICAgICAgICAgICAgICAgICAgcnVucywgc28gYSByZXJ1biBvcGVucyBubyBuZXcgdGFiKQ0KICAtLWpzb24gICAgICAgICAgICAgICBwcmludCBvbmUgSlNPTiBvYmplY3QNCg==",
+   "stderr": "",
+   "window": [
+    1794472055.5347457,
+    1794472055.7965372
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "defer-int-digits": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 3,
+   "stdout": "",
+   "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogbm8gZGFlbW9uIGFuc3dlcmVkIGF0IGh0dHA6Ly8xMjcuMC4wLjE6OSAoW1dpbkVycm9yIDEwMDYxXSBObyBjb25uZWN0aW9uIGNvdWxkIGJlIG1hZGUgYmVjYXVzZSB0aGUgdGFyZ2V0IG1hY2hpbmUgYWN0aXZlbHkgcmVmdXNlZCBpdCk7IGNoZWNrIGl0IHJ1bnMgKGBwc2V1ZG9saWZlLW1jcCBkb2N0b3JgKQ0K",
+   "window": [
+    1794472055.7980409,
+    1794472058.1760964
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "no-token": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 3,
+   "stdout": "",
+   "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogbm8gdG9rZW4gZm91bmQ6IHNldCBQU0VVRE9MSUZFX01DUF9UT0tFTl9GSUxFIChvciBQU0VVRE9MSUZFX01DUF9UT0tFTiksIG9yIHJ1biB0aGlzIG9uIGEgbWFjaGluZSB3aGVyZSBDbGF1ZGUgQ29kZSBvciBDb2RleCBhbHJlYWR5IHVzZXMgUHNldWRvbGlmZQ0K",
+   "window": [
+    1794472058.1770945,
+    1794472058.5062711
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "no-token-json": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 3,
+   "stdout": "eyJzdGF0ZSI6ICJub19jcmVkZW50aWFscyIsICJlcnJvciI6ICJubyB0b2tlbiBmb3VuZDogc2V0IFBTRVVET0xJRkVfTUNQX1RPS0VOX0ZJTEUgKG9yIFBTRVVET0xJRkVfTUNQX1RPS0VOKSwgb3IgcnVuIHRoaXMgb24gYSBtYWNoaW5lIHdoZXJlIENsYXVkZSBDb2RlIG9yIENvZGV4IGFscmVhZHkgdXNlcyBQc2V1ZG9saWZlIn0NCg==",
+   "stderr": "",
+   "window": [
+    1794472058.5082707,
+    1794472058.8371334
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "token-invalid": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 3,
+   "stdout": "",
+   "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogdGhpcyBtYWNoaW5lJ3MgdG9rZW4gaXMgdW51c2FibGUgKGNyZWRlbnRpYWwgZmlsZSBjb250YWlucyBhbiBpbnZhbGlkIGJlYXJlciB0b2tlbikNCg==",
+   "window": [
+    1794472058.8391373,
+    1794472059.162357
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "token-file-empty-path": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 3,
+   "stdout": "",
+   "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogdGhpcyBtYWNoaW5lJ3MgdG9rZW4gaXMgdW51c2FibGUgKGNvbmZpZ3VyZWQgY3JlZGVudGlhbCBmaWxlIHBhdGggaXMgZW1wdHkpDQo=",
+   "window": [
+    1794472059.1648648,
+    1794472059.4868119
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "token-file-missing": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 3,
+   "stdout": "eyJzdGF0ZSI6ICJub19jcmVkZW50aWFscyIsICJlcnJvciI6ICJ0aGlzIG1hY2hpbmUncyB0b2tlbiBpcyB1bnVzYWJsZSAoY29uZmlndXJlZCBjcmVkZW50aWFsIGZpbGUgaXMgbWlzc2luZykifQ0K",
+   "stderr": "",
+   "window": [
+    1794472059.4888103,
+    1794472059.830259
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "url-not-http": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 3,
+   "stdout": "",
+   "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogUFNFVURPTElGRV9NQ1BfREFFTU9OX1VSTCBpcyBub3QgYW4gaHR0cChzKSBhZGRyZXNzIChzY2hlbWUsIGhvc3QgYW5kIG9wdGlvbmFsIHBvcnQgb25seSkNCg==",
+   "window": [
+    1794472059.8323064,
+    1794472060.2297194
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "url-with-path": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 3,
+   "stdout": "",
+   "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogUFNFVURPTElGRV9NQ1BfREFFTU9OX1VSTCBpcyBub3QgYW4gaHR0cChzKSBhZGRyZXNzIChzY2hlbWUsIGhvc3QgYW5kIG9wdGlvbmFsIHBvcnQgb25seSkNCg==",
+   "window": [
+    1794472060.2307217,
+    1794472060.5600033
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "url-not-http-json": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 3,
+   "stdout": "eyJzdGF0ZSI6ICJub19jcmVkZW50aWFscyIsICJlcnJvciI6ICJQU0VVRE9MSUZFX01DUF9EQUVNT05fVVJMIGlzIG5vdCBhbiBodHRwKHMpIGFkZHJlc3MgKHNjaGVtZSwgaG9zdCBhbmQgb3B0aW9uYWwgcG9ydCBvbmx5KSJ9DQo=",
+   "stderr": "",
+   "window": [
+    1794472060.5620043,
+    1794472060.895831
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "unreachable-list": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 3,
+   "stdout": "",
+   "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogbm8gZGFlbW9uIGFuc3dlcmVkIGF0IGh0dHA6Ly8xMjcuMC4wLjE6OSAoW1dpbkVycm9yIDEwMDYxXSBObyBjb25uZWN0aW9uIGNvdWxkIGJlIG1hZGUgYmVjYXVzZSB0aGUgdGFyZ2V0IG1hY2hpbmUgYWN0aXZlbHkgcmVmdXNlZCBpdCk7IGNoZWNrIGl0IHJ1bnMgKGBwc2V1ZG9saWZlLW1jcCBkb2N0b3JgKQ0K",
+   "window": [
+    1794472060.8968306,
+    1794472063.2902515
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "unreachable-list-json": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 3,
+   "stdout": "eyJzdGF0ZSI6ICJub19kYWVtb24iLCAiZXJyb3IiOiAiW1dpbkVycm9yIDEwMDYxXSBObyBjb25uZWN0aW9uIGNvdWxkIGJlIG1hZGUgYmVjYXVzZSB0aGUgdGFyZ2V0IG1hY2hpbmUgYWN0aXZlbHkgcmVmdXNlZCBpdCJ9DQo=",
+   "stderr": "",
+   "window": [
+    1794472063.2912517,
+    1794472065.6891797
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "unreachable-revoke": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 3,
+   "stdout": "",
+   "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogbm8gZGFlbW9uIGFuc3dlcmVkIGF0IGh0dHA6Ly8xMjcuMC4wLjE6OSAoW1dpbkVycm9yIDEwMDYxXSBObyBjb25uZWN0aW9uIGNvdWxkIGJlIG1hZGUgYmVjYXVzZSB0aGUgdGFyZ2V0IG1hY2hpbmUgYWN0aXZlbHkgcmVmdXNlZCBpdCk7IGNoZWNrIGl0IHJ1bnMgKGBwc2V1ZG9saWZlLW1jcCBkb2N0b3JgKQ0K",
+   "window": [
+    1794472065.6918678,
+    1794472068.072874
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "unreachable-no-open": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 3,
+   "stdout": "",
+   "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogbm8gZGFlbW9uIGFuc3dlcmVkIGF0IGh0dHA6Ly8xMjcuMC4wLjE6OSAoW1dpbkVycm9yIDEwMDYxXSBObyBjb25uZWN0aW9uIGNvdWxkIGJlIG1hZGUgYmVjYXVzZSB0aGUgdGFyZ2V0IG1hY2hpbmUgYWN0aXZlbHkgcmVmdXNlZCBpdCk7IGNoZWNrIGl0IHJ1bnMgKGBwc2V1ZG9saWZlLW1jcCBkb2N0b3JgKQ0K",
+   "window": [
+    1794472068.0746195,
+    1794472070.452477
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "link": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "T3BlbiB0aGlzIGxpbmsgdG8gc2lnbiBpbiB0byB0aGUgQ29uc29sZToNCiAge0RBRU1PTn0vdWkvIy9zaWduaW4/Y29kZT1BQkNELTEyMzQNCk9yIHR5cGUgdGhlIGNvZGUgQUJDRC0xMjM0IGludG8gdGhlIENvbnNvbGUncyBzaWduLWluIGRpYWxvZyBhdCB7REFFTU9OfS91aS8uIEl0IHdvcmtzIG9uY2UsIHdpdGhpbiA1IG1pbnV0ZXMuDQo=",
+   "stderr": "",
+   "window": [
+    1794472070.4630408,
+    1794472070.8158092
+   ],
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "36",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "link-json": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "eyJzdGF0ZSI6ICJwcmludGVkIiwgInVybCI6ICJ7REFFTU9OfS91aS8jL3NpZ25pbj9jb2RlPUFCQ0QtMTIzNCIsICJjb2RlIjogIkFCQ0QtMTIzNCIsICJvcmlnaW4iOiAie0RBRU1PTn0iLCAicHJpbmNpcGFsIjogImZpeHR1cmUiLCAiZXhwaXJlc19pbiI6IDMwMH0NCg==",
+   "stderr": "",
+   "window": [
+    1794472071.3168669,
+    1794472071.6779866
+   ],
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "36",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "link-to-board": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "eyJzdGF0ZSI6ICJwcmludGVkIiwgInVybCI6ICJ7REFFTU9OfS91aS8jL3NpZ25pbj9jb2RlPUFCQ0QtMTIzNCIsICJjb2RlIjogIkFCQ0QtMTIzNCIsICJvcmlnaW4iOiAie0RBRU1PTn0iLCAicHJpbmNpcGFsIjogImZpeHR1cmUiLCAiZXhwaXJlc19pbiI6IDMwMH0NCg==",
+   "stderr": "",
+   "window": [
+    1794472072.172026,
+    1794472072.5140693
+   ],
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "51",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\", \"to\": \"board\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "link-expires-fraction": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "T3BlbiB0aGlzIGxpbmsgdG8gc2lnbiBpbiB0byB0aGUgQ29uc29sZToNCiAge0RBRU1PTn0vdWkvIy9zaWduaW4/Y29kZT1BQkNELTEyMzQNCk9yIHR5cGUgdGhlIGNvZGUgQUJDRC0xMjM0IGludG8gdGhlIENvbnNvbGUncyBzaWduLWluIGRpYWxvZyBhdCB7REFFTU9OfS91aS8uIEl0IHdvcmtzIG9uY2UsIHdpdGhpbiAxIG1pbnV0ZXMuDQo=",
+   "stderr": "",
+   "window": [
+    1794472073.0149171,
+    1794472073.3683538
+   ],
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "36",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "link-expires-text": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "T3BlbiB0aGlzIGxpbmsgdG8gc2lnbiBpbiB0byB0aGUgQ29uc29sZToNCiAge0RBRU1PTn0vdWkvIy9zaWduaW4/Y29kZT1BQkNELTEyMzQNCk9yIHR5cGUgdGhlIGNvZGUgQUJDRC0xMjM0IGludG8gdGhlIENvbnNvbGUncyBzaWduLWluIGRpYWxvZyBhdCB7REFFTU9OfS91aS8uIEl0IHdvcmtzIG9uY2UsIHdpdGhpbiA1IG1pbnV0ZXMuDQo=",
+   "stderr": "",
+   "window": [
+    1794472073.8580556,
+    1794472074.2699008
+   ],
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "36",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "link-expires-true": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "T3BlbiB0aGlzIGxpbmsgdG8gc2lnbiBpbiB0byB0aGUgQ29uc29sZToNCiAge0RBRU1PTn0vdWkvIy9zaWduaW4/Y29kZT1BQkNELTEyMzQNCk9yIHR5cGUgdGhlIGNvZGUgQUJDRC0xMjM0IGludG8gdGhlIENvbnNvbGUncyBzaWduLWluIGRpYWxvZyBhdCB7REFFTU9OfS91aS8uIEl0IHdvcmtzIG9uY2UsIHdpdGhpbiAxIG1pbnV0ZXMuDQo=",
+   "stderr": "",
+   "window": [
+    1794472074.7717357,
+    1794472075.105301
+   ],
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "36",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "link-expires-null": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "T3BlbiB0aGlzIGxpbmsgdG8gc2lnbiBpbiB0byB0aGUgQ29uc29sZToNCiAge0RBRU1PTn0vdWkvIy9zaWduaW4/Y29kZT1BQkNELTEyMzQNCk9yIHR5cGUgdGhlIGNvZGUgQUJDRC0xMjM0IGludG8gdGhlIENvbnNvbGUncyBzaWduLWluIGRpYWxvZyBhdCB7REFFTU9OfS91aS8uIEl0IHdvcmtzIG9uY2UsIHdpdGhpbiA1IG1pbnV0ZXMuDQo=",
+   "stderr": "",
+   "window": [
+    1794472075.6032178,
+    1794472075.9682326
+   ],
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "36",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "link-expires-zero": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "T3BlbiB0aGlzIGxpbmsgdG8gc2lnbiBpbiB0byB0aGUgQ29uc29sZToNCiAge0RBRU1PTn0vdWkvIy9zaWduaW4/Y29kZT1BQkNELTEyMzQNCk9yIHR5cGUgdGhlIGNvZGUgQUJDRC0xMjM0IGludG8gdGhlIENvbnNvbGUncyBzaWduLWluIGRpYWxvZyBhdCB7REFFTU9OfS91aS8uIEl0IHdvcmtzIG9uY2UsIHdpdGhpbiA1IG1pbnV0ZXMuDQo=",
+   "stderr": "",
+   "window": [
+    1794472076.4566004,
+    1794472076.8564553
+   ],
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "36",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "link-expires-negative": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "T3BlbiB0aGlzIGxpbmsgdG8gc2lnbiBpbiB0byB0aGUgQ29uc29sZToNCiAge0RBRU1PTn0vdWkvIy9zaWduaW4/Y29kZT1BQkNELTEyMzQNCk9yIHR5cGUgdGhlIGNvZGUgQUJDRC0xMjM0IGludG8gdGhlIENvbnNvbGUncyBzaWduLWluIGRpYWxvZyBhdCB7REFFTU9OfS91aS8uIEl0IHdvcmtzIG9uY2UsIHdpdGhpbiAxIG1pbnV0ZXMuDQo=",
+   "stderr": "",
+   "window": [
+    1794472077.3620095,
+    1794472077.713898
+   ],
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "36",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "link-expires-hours": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "T3BlbiB0aGlzIGxpbmsgdG8gc2lnbiBpbiB0byB0aGUgQ29uc29sZToNCiAge0RBRU1PTn0vdWkvIy9zaWduaW4/Y29kZT1BQkNELTEyMzQNCk9yIHR5cGUgdGhlIGNvZGUgQUJDRC0xMjM0IGludG8gdGhlIENvbnNvbGUncyBzaWduLWluIGRpYWxvZyBhdCB7REFFTU9OfS91aS8uIEl0IHdvcmtzIG9uY2UsIHdpdGhpbiAxMjAgbWludXRlcy4NCg==",
+   "stderr": "",
+   "window": [
+    1794472078.2012098,
+    1794472078.5430646
+   ],
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "36",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "link-principal-object": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "eyJzdGF0ZSI6ICJwcmludGVkIiwgInVybCI6ICJ7REFFTU9OfS91aS8jL3NpZ25pbj9jb2RlPUFCQ0QtMTIzNCIsICJjb2RlIjogIlx1MDBmYy0xIiwgIm9yaWdpbiI6ICJ7REFFTU9OfSIsICJwcmluY2lwYWwiOiB7ImEiOiBbMSwgbnVsbF19LCAiZXhwaXJlc19pbiI6IDMwMH0NCg==",
+   "stderr": "",
+   "window": [
+    1794472079.0405173,
+    1794472079.3749866
+   ],
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "36",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "link-unicode-code": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "T3BlbiB0aGlzIGxpbmsgdG8gc2lnbiBpbiB0byB0aGUgQ29uc29sZToNCiAge0RBRU1PTn0vdWkvIy9zaWduaW4/Y29kZT1BQkNELTEyMzQNCk9yIHR5cGUgdGhlIGNvZGUgbsOkbWUg4pyTIGludG8gdGhlIENvbnNvbGUncyBzaWduLWluIGRpYWxvZyBhdCB7REFFTU9OfS91aS8uIEl0IHdvcmtzIG9uY2UsIHdpdGhpbiA1IG1pbnV0ZXMuDQo=",
+   "stderr": "",
+   "window": [
+    1794472079.8690624,
+    1794472080.208195
+   ],
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "36",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "link-bad-no-code": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 4,
+   "stdout": "",
+   "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogdGhlIGRhZW1vbidzIGFuc3dlciBoYWQgbm8gc2lnbi1pbiBsaW5rDQo=",
+   "window": [
+    1794472080.708221,
+    1794472081.077485
+   ],
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "36",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "link-bad-code-number": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 4,
+   "stdout": "",
+   "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogdGhlIGRhZW1vbidzIGFuc3dlciBoYWQgbm8gc2lnbi1pbiBsaW5rDQo=",
+   "window": [
+    1794472081.5511417,
+    1794472081.9380634
+   ],
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "36",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "link-bad-other-origin": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 4,
+   "stdout": "",
+   "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogdGhlIGRhZW1vbidzIGFuc3dlciBoYWQgbm8gc2lnbi1pbiBsaW5rDQo=",
+   "window": [
+    1794472082.4401088,
+    1794472082.8727796
+   ],
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "36",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "link-bad-control-url": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 4,
+   "stdout": "",
+   "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogdGhlIGRhZW1vbidzIGFuc3dlciBoYWQgbm8gc2lnbi1pbiBsaW5rDQo=",
+   "window": [
+    1794472083.362896,
+    1794472083.7133176
+   ],
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "36",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "link-bad-origin-not-http": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 4,
+   "stdout": "",
+   "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogdGhlIGRhZW1vbidzIGFuc3dlciBoYWQgbm8gc2lnbi1pbiBsaW5rDQo=",
+   "window": [
+    1794472084.2049117,
+    1794472084.5429792
+   ],
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "36",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "link-bad-no-url": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 4,
+   "stdout": "",
+   "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogdGhlIGRhZW1vbidzIGFuc3dlciBoYWQgbm8gc2lnbi1pbiBsaW5rDQo=",
+   "window": [
+    1794472085.0458655,
+    1794472085.445599
+   ],
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "36",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "link-bad-json": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 4,
+   "stdout": "eyJzdGF0ZSI6ICJyZWZ1c2VkIiwgImVycm9yIjogImJhZF9hbnN3ZXIifQ0K",
+   "stderr": "",
+   "window": [
+    1794472085.9487498,
+    1794472086.3519099
+   ],
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "36",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "refused-unauthorized": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 4,
+   "stdout": "",
+   "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogdGhlIGRhZW1vbiByZWZ1c2VkIHRoaXMgbWFjaGluZSdzIHRva2VuOiBjaGVjayB0aGF0IFBTRVVET0xJRkVfTUNQX1RPS0VOX0ZJTEUgKG9yIFBTRVVET0xJRkVfTUNQX1RPS0VOKSBob2xkcyB0aGUgdG9rZW4gdGhpcyBtYWNoaW5lJ3MgY2xpZW50cyB1c2U7IGEgcGFpcmVkIG1hY2hpbmUgd2hvc2UgdG9rZW4gd2FzIHJldm9rZWQgcGFpcnMgYWdhaW4gd2l0aCBgcHNldWRvbGlmZS1tY3AgcGFpcmANCg==",
+   "window": [
+    1794472086.855165,
+    1794472087.2429926
+   ],
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "36",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "refused-unauthorized-json": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 4,
+   "stdout": "eyJzdGF0ZSI6ICJyZWZ1c2VkIiwgInN0YXR1cyI6IDQwMSwgImVycm9yIjogInVuYXV0aG9yaXplZCIsICJkZXRhaWwiOiAidGhlIGRhZW1vbiByZWZ1c2VkIHRoaXMgbWFjaGluZSdzIHRva2VuOiBjaGVjayB0aGF0IFBTRVVET0xJRkVfTUNQX1RPS0VOX0ZJTEUgKG9yIFBTRVVET0xJRkVfTUNQX1RPS0VOKSBob2xkcyB0aGUgdG9rZW4gdGhpcyBtYWNoaW5lJ3MgY2xpZW50cyB1c2U7IGEgcGFpcmVkIG1hY2hpbmUgd2hvc2UgdG9rZW4gd2FzIHJldm9rZWQgcGFpcnMgYWdhaW4gd2l0aCBgcHNldWRvbGlmZS1tY3AgcGFpcmAifQ0K",
+   "stderr": "",
+   "window": [
+    1794472087.742783,
+    1794472088.1295037
+   ],
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "36",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "refused-principals": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 4,
+   "stdout": "",
+   "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogdGhlIGRhZW1vbiBjYW5ub3QgY2hlY2sgdG9rZW5zIHJpZ2h0IG5vdyAoaXRzIGJhbmsgaXMgdW5yZWFjaGFibGUpOyB0cnkgYWdhaW4gaW4gYSBtaW51dGUNCg==",
+   "window": [
+    1794472088.6029932,
+    1794472088.938229
+   ],
+   "requests": [
+    {
+     "method": "GET",
+     "target": "/api/console/sessions",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "refused-hinted": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 4,
+   "stdout": "",
+   "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogb3BlbiB0aGUgQ29uc29sZSBvdmVyIGh0dHBzDQo=",
+   "window": [
+    1794472089.4610255,
+    1794472089.7940361
+   ],
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "36",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "refused-unhinted": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 4,
+   "stdout": "",
+   "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogc2Vzc2lvbl9jYW5ub3RfaXNzdWUNCg==",
+   "window": [
+    1794472090.3001423,
+    1794472090.6495676
+   ],
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "36",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "refused-hint-number": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 4,
+   "stdout": "eyJzdGF0ZSI6ICJyZWZ1c2VkIiwgInN0YXR1cyI6IDQwMywgImVycm9yIjogIm9wZXJhdG9yX3ByaW5jaXBhbF9yZXF1aXJlZCIsICJkZXRhaWwiOiA3fQ0K",
+   "stderr": "",
+   "window": [
+    1794472091.1448338,
+    1794472091.490338
+   ],
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "36",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "refused-unknown-code": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 4,
+   "stdout": "",
+   "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogdGhlIGRhZW1vbiBhbnN3ZXJlZCBIVFRQIDQwOSAoenopDQo=",
+   "window": [
+    1794472091.990659,
+    1794472092.3205206
+   ],
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "36",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "refused-code-number": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 4,
+   "stdout": "",
+   "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogdGhlIGRhZW1vbiBhbnN3ZXJlZCBIVFRQIDUwMCAoMS4wKQ0K",
+   "window": [
+    1794472092.8149326,
+    1794472093.1441529
+   ],
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/sessions/revoke",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "21",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"session_id\": \"s-1\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "refused-hint-other": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 4,
+   "stdout": "eyJzdGF0ZSI6ICJyZWZ1c2VkIiwgInN0YXR1cyI6IDQyOSwgImVycm9yIjogbnVsbCwgImRldGFpbCI6ICJsYXRlciJ9DQo=",
+   "stderr": "",
+   "window": [
+    1794472093.6458502,
+    1794472093.99479
+   ],
+   "requests": [
+    {
+     "method": "GET",
+     "target": "/api/console/sessions",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "refused-old-daemon": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 4,
+   "stdout": "",
+   "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogdGhpcyBkYWVtb24gZG9lcyBub3Qgb2ZmZXIgQ29uc29sZSBzaWduLWluIHlldCAoSFRUUCA0MDQpOiB1cGRhdGUgaXQgd2l0aCBgcHNldWRvbGlmZS1tY3AgdXBkYXRlYCwgb3Igb3BlbiB0aGUgQ29uc29sZSBhbmQgcGFzdGUgYSB0b2tlbiB1bmRlciBBZHZhbmNlZA0K",
+   "window": [
+    1794472094.4863014,
+    1794472094.8382401
+   ],
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "36",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "refused-old-daemon-json": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 4,
+   "stdout": "eyJzdGF0ZSI6ICJyZWZ1c2VkIiwgInN0YXR1cyI6IDQwNCwgImVycm9yIjogbnVsbCwgImRldGFpbCI6ICJ0aGlzIGRhZW1vbiBkb2VzIG5vdCBvZmZlciBDb25zb2xlIHNpZ24taW4geWV0IChIVFRQIDQwNCk6IHVwZGF0ZSBpdCB3aXRoIGBwc2V1ZG9saWZlLW1jcCB1cGRhdGVgLCBvciBvcGVuIHRoZSBDb25zb2xlIGFuZCBwYXN0ZSBhIHRva2VuIHVuZGVyIEFkdmFuY2VkIn0NCg==",
+   "stderr": "",
+   "window": [
+    1794472095.311359,
+    1794472095.6620018
+   ],
+   "requests": [
+    {
+     "method": "GET",
+     "target": "/api/console/sessions",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "refused-405": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 4,
+   "stdout": "",
+   "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogdGhpcyBkYWVtb24gZG9lcyBub3Qgb2ZmZXIgQ29uc29sZSBzaWduLWluIHlldCAoSFRUUCA0MDUpOiB1cGRhdGUgaXQgd2l0aCBgcHNldWRvbGlmZS1tY3AgdXBkYXRlYCwgb3Igb3BlbiB0aGUgQ29uc29sZSBhbmQgcGFzdGUgYSB0b2tlbiB1bmRlciBBZHZhbmNlZA0K",
+   "window": [
+    1794472096.1499133,
+    1794472096.4781525
+   ],
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/sessions/revoke",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "21",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"session_id\": \"s-1\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "refused-not-json": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 4,
+   "stdout": "",
+   "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogdGhlIGRhZW1vbiBhbnN3ZXJlZCBIVFRQIDUwMg0K",
+   "window": [
+    1794472096.975729,
+    1794472097.3095245
+   ],
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "36",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "refused-200-not-json": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 4,
+   "stdout": "",
+   "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogdGhlIGRhZW1vbiBhbnN3ZXJlZCBIVFRQIDIwMA0K",
+   "window": [
+    1794472097.8027923,
+    1794472098.155598
+   ],
+   "requests": [
+    {
+     "method": "GET",
+     "target": "/api/console/sessions",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "refused-200-array": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 4,
+   "stdout": "eyJzdGF0ZSI6ICJyZWZ1c2VkIiwgInN0YXR1cyI6IDIwMCwgImVycm9yIjogbnVsbCwgImRldGFpbCI6ICJ0aGUgZGFlbW9uIGFuc3dlcmVkIEhUVFAgMjAwIn0NCg==",
+   "stderr": "",
+   "window": [
+    1794472098.630406,
+    1794472098.9547958
+   ],
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "36",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "refused-201": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 4,
+   "stdout": "",
+   "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogdGhlIGRhZW1vbiBhbnN3ZXJlZCBIVFRQIDIwMQ0K",
+   "window": [
+    1794472099.4612482,
+    1794472099.7879853
+   ],
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "36",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "refused-redirect": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 4,
+   "stdout": "eyJzdGF0ZSI6ICJyZWZ1c2VkIiwgInN0YXR1cyI6IDMwNywgImVycm9yIjogbnVsbCwgImRldGFpbCI6ICJ0aGUgZGFlbW9uIGFuc3dlcmVkIEhUVFAgMzA3In0NCg==",
+   "stderr": "",
+   "window": [
+    1794472100.2852118,
+    1794472100.6107268
+   ],
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "36",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "refused-surrogate-hint": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 4,
+   "stdout": "",
+   "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogXHVkYzgwIHgNCg==",
+   "window": [
+    1794472101.1117496,
+    1794472101.4508948
+   ],
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "36",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "list": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "SUQgICAgICAgICAgICAgICAgU0lHTkVEIElOIEFTICAgICAgICAgSE9XICAgICAgU0lOQ0UgICAgICAgICAgICAgTEFTVCBVU0VEICAgICAgICAgQlJPV1NFUg0Kcy0wMTIzNDU2Nzg5YWIgICAgYWxpY2UgICAgICAgICAgICAgICAgbGluayAgICAgMjAyMy0xMS0xNSAwODoxMyAgMjAyMy0xMS0xNSAwODoxMyAgRmlyZWZveCBvbiBib3gNCk5vbmUgICAgICAgICAgICAgIDEuNSAgICAgICAgICAgICAgICAgICAgICAgICAgIDE5NzAtMDEtMDEgMTA6MDAgIC0gICAgICAgICAgICAgICAgIC0NCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIHBhc3NrZXkgIC0gICAgICAgICAgICAgICAgIDIwMjUtMTEtMDEgMjI6MjYgIFsxLCAnbmHDr3ZlJ10NCnMtw7wgICAgICAgICAgICAgICBib2IgICAgICAgICAgICAgICAgICAgICAgICAgICAtICAgICAgICAgICAgICAgICAtICAgICAgICAgICAgICAgICBFZGdlIOKAlCB3b3JrDQo=",
+   "stderr": "",
+   "window": [
+    1794472101.9389973,
+    1794472102.273936
+   ],
+   "requests": [
+    {
+     "method": "GET",
+     "target": "/api/console/sessions",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "list-json": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "eyJzdGF0ZSI6ICJsaXN0ZWQiLCAic2Vzc2lvbnMiOiBbeyJzZXNzaW9uX2lkIjogInMtMDEyMzQ1Njc4OWFiIiwgInByaW5jaXBhbCI6ICJhbGljZSIsICJtZXRob2QiOiAibGluayIsICJjcmVhdGVkX2F0IjogMTcwMDAwMDAwMCwgImxhc3RfdXNlZF9hdCI6IDE3MDAwMDAwMzkuNiwgImxhYmVsIjogIkZpcmVmb3ggb24gYm94In0sIHsic2Vzc2lvbl9pZCI6IG51bGwsICJwcmluY2lwYWwiOiAxLjUsICJjcmVhdGVkX2F0IjogdHJ1ZSwgImxhYmVsIjogIiJ9LCAibm90IGEgcm93IiwgeyJsYWJlbCI6IFsxLCAibmFcdTAwZWZ2ZSJdLCAibWV0aG9kIjogInBhc3NrZXkiLCAibGFzdF91c2VkX2F0IjogMTc2MjAwMDAwMH0sIHsic2Vzc2lvbl9pZCI6ICJzLVx1MDBmYyIsICJwcmluY2lwYWwiOiAiYm9iIiwgImNyZWF0ZWRfYXQiOiBudWxsLCAibGFiZWwiOiAiRWRnZSBcdTIwMTQgd29yayJ9XSwgIm9wZXJhdG9yIjogdHJ1ZX0NCg==",
+   "stderr": "",
+   "window": [
+    1794472102.7643147,
+    1794472103.1212254
+   ],
+   "requests": [
+    {
+     "method": "GET",
+     "target": "/api/console/sessions",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "list-paired": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "SUQgICAgICAgICAgICAgICAgU0lHTkVEIElOIEFTICAgICAgICAgSE9XICAgICAgU0lOQ0UgICAgICAgICAgICAgTEFTVCBVU0VEICAgICAgICAgQlJPV1NFUg0Kcy0wMTIzNDU2Nzg5YWIgICAgYWxpY2UgICAgICAgICAgICAgICAgbGluayAgICAgMjAyMy0xMS0xNSAwODoxMyAgMjAyMy0xMS0xNSAwODoxMyAgRmlyZWZveCBvbiBib3gNCk5vbmUgICAgICAgICAgICAgIDEuNSAgICAgICAgICAgICAgICAgICAgICAgICAgIDE5NzAtMDEtMDEgMTA6MDAgIC0gICAgICAgICAgICAgICAgIC0NCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIHBhc3NrZXkgIC0gICAgICAgICAgICAgICAgIDIwMjUtMTEtMDEgMjI6MjYgIFsxLCAnbmHDr3ZlJ10NCnMtw7wgICAgICAgICAgICAgICBib2IgICAgICAgICAgICAgICAgICAgICAgICAgICAtICAgICAgICAgICAgICAgICAtICAgICAgICAgICAgICAgICBFZGdlIOKAlCB3b3JrDQooT25seSB5b3VyIG93biBzaWduLWlucyBhcmUgc2hvd246IHRoaXMgbWFjaGluZSdzIHRva2VuIGlzIGEgcGFpcmVkIG9uZS4pDQo=",
+   "stderr": "",
+   "window": [
+    1794472103.6103737,
+    1794472103.9531183
+   ],
+   "requests": [
+    {
+     "method": "GET",
+     "target": "/api/console/sessions",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "list-empty": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "Tm8gYnJvd3NlcnMgYXJlIHNpZ25lZCBpbi4gYHBzZXVkb2xpZmUtbWNwIGNvbnNvbGVgIHNpZ25zIG9uZSBpbi4NCg==",
+   "stderr": "",
+   "window": [
+    1794472104.4719694,
+    1794472104.8419113
+   ],
+   "requests": [
+    {
+     "method": "GET",
+     "target": "/api/console/sessions",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "list-not-a-list": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "Tm8gYnJvd3NlcnMgYXJlIHNpZ25lZCBpbi4gYHBzZXVkb2xpZmUtbWNwIGNvbnNvbGVgIHNpZ25zIG9uZSBpbi4NCg==",
+   "stderr": "",
+   "window": [
+    1794472105.3147762,
+    1794472105.6824772
+   ],
+   "requests": [
+    {
+     "method": "GET",
+     "target": "/api/console/sessions",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "list-only-non-rows": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "SUQgICAgICAgICAgICAgICAgU0lHTkVEIElOIEFTICAgICAgICAgSE9XICAgICAgU0lOQ0UgICAgICAgICAgICAgTEFTVCBVU0VEICAgICAgICAgQlJPV1NFUg0KKE9ubHkgeW91ciBvd24gc2lnbi1pbnMgYXJlIHNob3duOiB0aGlzIG1hY2hpbmUncyB0b2tlbiBpcyBhIHBhaXJlZCBvbmUuKQ0K",
+   "stderr": "",
+   "window": [
+    1794472106.1555011,
+    1794472106.501558
+   ],
+   "requests": [
+    {
+     "method": "GET",
+     "target": "/api/console/sessions",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "list-empty-json": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "eyJzdGF0ZSI6ICJsaXN0ZWQiLCAic2Vzc2lvbnMiOiBbXSwgIm9wZXJhdG9yIjogbnVsbH0NCg==",
+   "stderr": "",
+   "window": [
+    1794472106.9975295,
+    1794472107.4293737
+   ],
+   "requests": [
+    {
+     "method": "GET",
+     "target": "/api/console/sessions",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "revoke": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "U2lnbmVkIG91dCBzLTAxMjM0NTY3ODlhYi4NCg==",
+   "stderr": "",
+   "window": [
+    1794472107.902066,
+    1794472108.2551491
+   ],
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/sessions/revoke",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "32",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"session_id\": \"s-0123456789ab\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "revoke-json": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "eyJzdGF0ZSI6ICJyZXZva2VkIn0NCg==",
+   "stderr": "",
+   "window": [
+    1794472108.7446604,
+    1794472109.0960772
+   ],
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/sessions/revoke",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "21",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"session_id\": \"s-1\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "revoke-not-found": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 4,
+   "stdout": "",
+   "stderr": "Tm8gc2lnbmVkLWluIGJyb3dzZXIgcy0xIHRoYXQgeW91IG1heSBzaWduIG91dDsgc2VlIC0tbGlzdC4NCg==",
+   "window": [
+    1794472109.5957131,
+    1794472109.9516828
+   ],
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/sessions/revoke",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "21",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"session_id\": \"s-1\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "revoke-not-found-json": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 4,
+   "stdout": "eyJzdGF0ZSI6ICJub3RfZm91bmQifQ0K",
+   "stderr": "",
+   "window": [
+    1794472110.4257803,
+    1794472110.7774954
+   ],
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/sessions/revoke",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "21",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"session_id\": \"s-1\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "revoke-unicode-id": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "U2lnbmVkIG91dCBzLcO8IOKcky4NCg==",
+   "stderr": "",
+   "window": [
+    1794472111.2653406,
+    1794472111.611438
+   ],
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/sessions/revoke",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "33",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"session_id\": \"s-\\u00fc \\u2713\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "token-file": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "Tm8gYnJvd3NlcnMgYXJlIHNpZ25lZCBpbi4gYHBzZXVkb2xpZmUtbWNwIGNvbnNvbGVgIHNpZ25zIG9uZSBpbi4NCg==",
+   "stderr": "",
+   "window": [
+    1794472112.1449134,
+    1794472112.517622
+   ],
+   "requests": [
+    {
+     "method": "GET",
+     "target": "/api/console/sessions",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-file-token",
+      "connection": "close",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "console.token": "file:Y29uc29sZS1maWxlLXRva2Vu",
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "registration-token": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "eyJzdGF0ZSI6ICJsaXN0ZWQiLCAic2Vzc2lvbnMiOiBbXSwgIm9wZXJhdG9yIjogdHJ1ZX0NCg==",
+   "stderr": "",
+   "window": [
+    1794472113.0112016,
+    1794472113.3660822
+   ],
+   "requests": [
+    {
+     "method": "GET",
+     "target": "/api/console/sessions",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer registered-token",
+      "connection": "close",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    }
+   ],
+   "arm": "python",
+   "files": {
+    ".claude.json": "file:eyJtY3BTZXJ2ZXJzIjogeyJwc2V1ZG9saWZlLW1lbW9yeSI6IHsiY29tbWFuZCI6ICJwc2V1ZG9saWZlLW1jcCIsICJlbnYiOiB7IlBTRVVET0xJRkVfTUNQX1RPS0VOIjogInJlZ2lzdGVyZWQtdG9rZW4ifX19fQ==",
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "list-https": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "SUQgICAgICAgICAgICAgICAgU0lHTkVEIElOIEFTICAgICAgICAgSE9XICAgICAgU0lOQ0UgICAgICAgICAgICAgTEFTVCBVU0VEICAgICAgICAgQlJPV1NFUg0Kcy0wMTIzNDU2Nzg5YWIgICAgYWxpY2UgICAgICAgICAgICAgICAgbGluayAgICAgMjAyMy0xMS0xNSAwODoxMyAgMjAyMy0xMS0xNSAwODoxMyAgRmlyZWZveCBvbiBib3gNCk5vbmUgICAgICAgICAgICAgIDEuNSAgICAgICAgICAgICAgICAgICAgICAgICAgIDE5NzAtMDEtMDEgMTA6MDAgIC0gICAgICAgICAgICAgICAgIC0NCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIHBhc3NrZXkgIC0gICAgICAgICAgICAgICAgIDIwMjUtMTEtMDEgMjI6MjYgIFsxLCAnbmHDr3ZlJ10NCnMtw7wgICAgICAgICAgICAgICBib2IgICAgICAgICAgICAgICAgICAgICAgICAgICAtICAgICAgICAgICAgICAgICAtICAgICAgICAgICAgICAgICBFZGdlIOKAlCB3b3JrDQo=",
+   "stderr": "",
+   "window": [
+    1794472113.8726509,
+    1794472116.3352828
+   ],
+   "requests": [
+    {
+     "method": "GET",
+     "target": "/api/console/sessions",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "link-https": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "eyJzdGF0ZSI6ICJwcmludGVkIiwgInVybCI6ICJ7REFFTU9OfS91aS8jL3NpZ25pbj9jb2RlPUFCQ0QtMTIzNCIsICJjb2RlIjogIkFCQ0QtMTIzNCIsICJvcmlnaW4iOiAie0RBRU1PTn0iLCAicHJpbmNpcGFsIjogImZpeHR1cmUiLCAiZXhwaXJlc19pbiI6IDMwMH0NCg==",
+   "stderr": "",
+   "window": [
+    1794472116.8334794,
+    1794472119.2703428
+   ],
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "37",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "defer-https-untrusted": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 3,
+   "stdout": "",
+   "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogbm8gZGFlbW9uIGFuc3dlcmVkIGF0IHtEQUVNT059IChbU1NMOiBDRVJUSUZJQ0FURV9WRVJJRllfRkFJTEVEXSBjZXJ0aWZpY2F0ZSB2ZXJpZnkgZmFpbGVkOiB1bmFibGUgdG8gZ2V0IGxvY2FsIGlzc3VlciBjZXJ0aWZpY2F0ZSAoX3NzbC5jOjEwMDYpKTsgY2hlY2sgaXQgcnVucyAoYHBzZXVkb2xpZmUtbWNwIGRvY3RvcmApDQo=",
+   "window": [
+    1794472119.7920454,
+    1794472122.284031
+   ],
+   "requests": [],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "crash-unhashable-error": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 1,
+   "stdout": "",
+   "stderr": "VHJhY2ViYWNrIChtb3N0IHJlY2VudCBjYWxsIGxhc3QpOg0KICBGaWxlICI8ZnJvemVuIHJ1bnB5PiIsIGxpbmUgMTk4LCBpbiBfcnVuX21vZHVsZV9hc19tYWluDQogIEZpbGUgIjxmcm96ZW4gcnVucHk+IiwgbGluZSA4OCwgaW4gX3J1bl9jb2RlDQogIEZpbGUgIntPUkFDTEV9XHBzZXVkb2xpZmVfbWVtb3J5XGNsaS5weSIsIGxpbmUgMjY3LCBpbiA8bW9kdWxlPg0KICAgIG1haW4oKQ0KICBGaWxlICJ7T1JBQ0xFfVxwc2V1ZG9saWZlX21lbW9yeVxjbGkucHkiLCBsaW5lIDIxOCwgaW4gbWFpbg0KICAgIHN5cy5leGl0KGNvbnNvbGVfbWFpbihzeXMuYXJndlsyOl0pKQ0KICAgICAgICAgICAgIF5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eDQogIEZpbGUgIntPUkFDTEV9XHBzZXVkb2xpZmVfbWVtb3J5XGNvbnNvbGVfY2xpLnB5IiwgbGluZSAyNDIsIGluIG1haW4NCiAgICB0ZXh0ID0gX3JlZnVzYWwoc3RhdHVzLCBwYXlsb2FkKQ0KICAgICAgICAgICBeXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eDQogIEZpbGUgIntPUkFDTEV9XHBzZXVkb2xpZmVfbWVtb3J5XGNvbnNvbGVfY2xpLnB5IiwgbGluZSAxODUsIGluIF9yZWZ1c2FsDQogICAgaWYgY29kZSBpbiBfUkVGVVNBTFM6DQogICAgICAgXl5eXl5eXl5eXl5eXl5eXl4NClR5cGVFcnJvcjogdW5oYXNoYWJsZSB0eXBlOiAnbGlzdCcNCg==",
+   "window": [
+    1794472122.7848349,
+    1794472123.1257877
+   ],
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "36",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "crash-expires-text": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 1,
+   "stdout": "",
+   "stderr": "VHJhY2ViYWNrIChtb3N0IHJlY2VudCBjYWxsIGxhc3QpOg0KICBGaWxlICI8ZnJvemVuIHJ1bnB5PiIsIGxpbmUgMTk4LCBpbiBfcnVuX21vZHVsZV9hc19tYWluDQogIEZpbGUgIjxmcm96ZW4gcnVucHk+IiwgbGluZSA4OCwgaW4gX3J1bl9jb2RlDQogIEZpbGUgIntPUkFDTEV9XHBzZXVkb2xpZmVfbWVtb3J5XGNsaS5weSIsIGxpbmUgMjY3LCBpbiA8bW9kdWxlPg0KICAgIG1haW4oKQ0KICBGaWxlICJ7T1JBQ0xFfVxwc2V1ZG9saWZlX21lbW9yeVxjbGkucHkiLCBsaW5lIDIxOCwgaW4gbWFpbg0KICAgIHN5cy5leGl0KGNvbnNvbGVfbWFpbihzeXMuYXJndlsyOl0pKQ0KICAgICAgICAgICAgIF5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eDQogIEZpbGUgIntPUkFDTEV9XHBzZXVkb2xpZmVfbWVtb3J5XGNvbnNvbGVfY2xpLnB5IiwgbGluZSAyNTQsIGluIG1haW4NCiAgICByZXR1cm4gX29wZW5lZChwYXlsb2FkLCBhcmdzLCBlbnZpcm9uKQ0KICAgICAgICAgICBeXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eDQogIEZpbGUgIntPUkFDTEV9XHBzZXVkb2xpZmVfbWVtb3J5XGNvbnNvbGVfY2xpLnB5IiwgbGluZSAzMDYsIGluIF9vcGVuZWQNCiAgICBtaW51dGVzID0gbWF4KDEsIGludChwYXlsb2FkLmdldCgiZXhwaXJlc19pbiIpIG9yIDMwMCkgLy8gNjApDQogICAgICAgICAgICAgICAgICAgICBeXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eDQpWYWx1ZUVycm9yOiBpbnZhbGlkIGxpdGVyYWwgZm9yIGludCgpIHdpdGggYmFzZSAxMDogJ2FiYycNCg==",
+   "window": [
+    1794472123.6275845,
+    1794472123.9739075
+   ],
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "36",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "crash-stamp-nan": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 1,
+   "stdout": "SUQgICAgICAgICAgICAgICAgU0lHTkVEIElOIEFTICAgICAgICAgSE9XICAgICAgU0lOQ0UgICAgICAgICAgICAgTEFTVCBVU0VEICAgICAgICAgQlJPV1NFUg0K",
+   "stderr": "VHJhY2ViYWNrIChtb3N0IHJlY2VudCBjYWxsIGxhc3QpOg0KICBGaWxlICI8ZnJvemVuIHJ1bnB5PiIsIGxpbmUgMTk4LCBpbiBfcnVuX21vZHVsZV9hc19tYWluDQogIEZpbGUgIjxmcm96ZW4gcnVucHk+IiwgbGluZSA4OCwgaW4gX3J1bl9jb2RlDQogIEZpbGUgIntPUkFDTEV9XHBzZXVkb2xpZmVfbWVtb3J5XGNsaS5weSIsIGxpbmUgMjY3LCBpbiA8bW9kdWxlPg0KICAgIG1haW4oKQ0KICBGaWxlICJ7T1JBQ0xFfVxwc2V1ZG9saWZlX21lbW9yeVxjbGkucHkiLCBsaW5lIDIxOCwgaW4gbWFpbg0KICAgIHN5cy5leGl0KGNvbnNvbGVfbWFpbihzeXMuYXJndlsyOl0pKQ0KICAgICAgICAgICAgIF5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eDQogIEZpbGUgIntPUkFDTEV9XHBzZXVkb2xpZmVfbWVtb3J5XGNvbnNvbGVfY2xpLnB5IiwgbGluZSAyNDcsIGluIG1haW4NCiAgICByZXR1cm4gX2xpc3QocGF5bG9hZCwgYXJncy5qc29uKQ0KICAgICAgICAgICBeXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eDQogIEZpbGUgIntPUkFDTEV9XHBzZXVkb2xpZmVfbWVtb3J5XGNvbnNvbGVfY2xpLnB5IiwgbGluZSAyNzEsIGluIF9saXN0DQogICAgZiJ7c3RyKHJvdy5nZXQoJ21ldGhvZCcsICcnKSk6PDh9IHtfc3RhbXAocm93LmdldCgnY3JlYXRlZF9hdCcpKTo8MTd9ICINCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIF5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eDQogIEZpbGUgIntPUkFDTEV9XHBzZXVkb2xpZmVfbWVtb3J5XGNvbnNvbGVfY2xpLnB5IiwgbGluZSAxOTUsIGluIF9zdGFtcA0KICAgIHJldHVybiB0aW1lLnN0cmZ0aW1lKCIlWS0lbS0lZCAlSDolTSIsIHRpbWUubG9jYWx0aW1lKHZhbHVlKSkNCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBeXl5eXl5eXl5eXl5eXl5eXl5eXl4NClZhbHVlRXJyb3I6IEludmFsaWQgdmFsdWUgTmFOIChub3QgYSBudW1iZXIpDQo=",
+   "window": [
+    1794472124.4706824,
+    1794472124.9225478
+   ],
+   "requests": [
+    {
+     "method": "GET",
+     "target": "/api/console/sessions",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "crash-stamp-overflow": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 1,
+   "stdout": "SUQgICAgICAgICAgICAgICAgU0lHTkVEIElOIEFTICAgICAgICAgSE9XICAgICAgU0lOQ0UgICAgICAgICAgICAgTEFTVCBVU0VEICAgICAgICAgQlJPV1NFUg0K",
+   "stderr": "VHJhY2ViYWNrIChtb3N0IHJlY2VudCBjYWxsIGxhc3QpOg0KICBGaWxlICI8ZnJvemVuIHJ1bnB5PiIsIGxpbmUgMTk4LCBpbiBfcnVuX21vZHVsZV9hc19tYWluDQogIEZpbGUgIjxmcm96ZW4gcnVucHk+IiwgbGluZSA4OCwgaW4gX3J1bl9jb2RlDQogIEZpbGUgIntPUkFDTEV9XHBzZXVkb2xpZmVfbWVtb3J5XGNsaS5weSIsIGxpbmUgMjY3LCBpbiA8bW9kdWxlPg0KICAgIG1haW4oKQ0KICBGaWxlICJ7T1JBQ0xFfVxwc2V1ZG9saWZlX21lbW9yeVxjbGkucHkiLCBsaW5lIDIxOCwgaW4gbWFpbg0KICAgIHN5cy5leGl0KGNvbnNvbGVfbWFpbihzeXMuYXJndlsyOl0pKQ0KICAgICAgICAgICAgIF5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eDQogIEZpbGUgIntPUkFDTEV9XHBzZXVkb2xpZmVfbWVtb3J5XGNvbnNvbGVfY2xpLnB5IiwgbGluZSAyNDcsIGluIG1haW4NCiAgICByZXR1cm4gX2xpc3QocGF5bG9hZCwgYXJncy5qc29uKQ0KICAgICAgICAgICBeXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eDQogIEZpbGUgIntPUkFDTEV9XHBzZXVkb2xpZmVfbWVtb3J5XGNvbnNvbGVfY2xpLnB5IiwgbGluZSAyNzIsIGluIF9saXN0DQogICAgZiJ7X3N0YW1wKHJvdy5nZXQoJ2xhc3RfdXNlZF9hdCcpKTo8MTd9IHtyb3cuZ2V0KCdsYWJlbCcpIG9yICctJ30iKQ0KICAgICAgIF5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl4NCiAgRmlsZSAie09SQUNMRX1ccHNldWRvbGlmZV9tZW1vcnlcY29uc29sZV9jbGkucHkiLCBsaW5lIDE5NSwgaW4gX3N0YW1wDQogICAgcmV0dXJuIHRpbWUuc3RyZnRpbWUoIiVZLSVtLSVkICVIOiVNIiwgdGltZS5sb2NhbHRpbWUodmFsdWUpKQ0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIF5eXl5eXl5eXl5eXl5eXl5eXl5eXg0KT3ZlcmZsb3dFcnJvcjogdGltZXN0YW1wIG91dCBvZiByYW5nZSBmb3IgcGxhdGZvcm0gdGltZV90DQo=",
+   "window": [
+    1794472125.39107,
+    1794472125.8470335
+   ],
+   "requests": [
+    {
+     "method": "GET",
+     "target": "/api/console/sessions",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "crash-stamp-negative": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 1,
+   "stdout": "SUQgICAgICAgICAgICAgICAgU0lHTkVEIElOIEFTICAgICAgICAgSE9XICAgICAgU0lOQ0UgICAgICAgICAgICAgTEFTVCBVU0VEICAgICAgICAgQlJPV1NFUg0K",
+   "stderr": "VHJhY2ViYWNrIChtb3N0IHJlY2VudCBjYWxsIGxhc3QpOg0KICBGaWxlICI8ZnJvemVuIHJ1bnB5PiIsIGxpbmUgMTk4LCBpbiBfcnVuX21vZHVsZV9hc19tYWluDQogIEZpbGUgIjxmcm96ZW4gcnVucHk+IiwgbGluZSA4OCwgaW4gX3J1bl9jb2RlDQogIEZpbGUgIntPUkFDTEV9XHBzZXVkb2xpZmVfbWVtb3J5XGNsaS5weSIsIGxpbmUgMjY3LCBpbiA8bW9kdWxlPg0KICAgIG1haW4oKQ0KICBGaWxlICJ7T1JBQ0xFfVxwc2V1ZG9saWZlX21lbW9yeVxjbGkucHkiLCBsaW5lIDIxOCwgaW4gbWFpbg0KICAgIHN5cy5leGl0KGNvbnNvbGVfbWFpbihzeXMuYXJndlsyOl0pKQ0KICAgICAgICAgICAgIF5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eDQogIEZpbGUgIntPUkFDTEV9XHBzZXVkb2xpZmVfbWVtb3J5XGNvbnNvbGVfY2xpLnB5IiwgbGluZSAyNDcsIGluIG1haW4NCiAgICByZXR1cm4gX2xpc3QocGF5bG9hZCwgYXJncy5qc29uKQ0KICAgICAgICAgICBeXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eDQogIEZpbGUgIntPUkFDTEV9XHBzZXVkb2xpZmVfbWVtb3J5XGNvbnNvbGVfY2xpLnB5IiwgbGluZSAyNzEsIGluIF9saXN0DQogICAgZiJ7c3RyKHJvdy5nZXQoJ21ldGhvZCcsICcnKSk6PDh9IHtfc3RhbXAocm93LmdldCgnY3JlYXRlZF9hdCcpKTo8MTd9ICINCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIF5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eDQogIEZpbGUgIntPUkFDTEV9XHBzZXVkb2xpZmVfbWVtb3J5XGNvbnNvbGVfY2xpLnB5IiwgbGluZSAxOTUsIGluIF9zdGFtcA0KICAgIHJldHVybiB0aW1lLnN0cmZ0aW1lKCIlWS0lbS0lZCAlSDolTSIsIHRpbWUubG9jYWx0aW1lKHZhbHVlKSkNCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBeXl5eXl5eXl5eXl5eXl5eXl5eXl4NCk9TRXJyb3I6IFtFcnJubyAyMl0gSW52YWxpZCBhcmd1bWVudA0K",
+   "window": [
+    1794472126.3447778,
+    1794472126.9775138
+   ],
+   "requests": [
+    {
+     "method": "GET",
+     "target": "/api/console/sessions",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "crash-surrogate-label": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 1,
+   "stdout": "SUQgICAgICAgICAgICAgICAgU0lHTkVEIElOIEFTICAgICAgICAgSE9XICAgICAgU0lOQ0UgICAgICAgICAgICAgTEFTVCBVU0VEICAgICAgICAgQlJPV1NFUg0K",
+   "stderr": "VHJhY2ViYWNrIChtb3N0IHJlY2VudCBjYWxsIGxhc3QpOg0KICBGaWxlICI8ZnJvemVuIHJ1bnB5PiIsIGxpbmUgMTk4LCBpbiBfcnVuX21vZHVsZV9hc19tYWluDQogIEZpbGUgIjxmcm96ZW4gcnVucHk+IiwgbGluZSA4OCwgaW4gX3J1bl9jb2RlDQogIEZpbGUgIntPUkFDTEV9XHBzZXVkb2xpZmVfbWVtb3J5XGNsaS5weSIsIGxpbmUgMjY3LCBpbiA8bW9kdWxlPg0KICAgIG1haW4oKQ0KICBGaWxlICJ7T1JBQ0xFfVxwc2V1ZG9saWZlX21lbW9yeVxjbGkucHkiLCBsaW5lIDIxOCwgaW4gbWFpbg0KICAgIHN5cy5leGl0KGNvbnNvbGVfbWFpbihzeXMuYXJndlsyOl0pKQ0KICAgICAgICAgICAgIF5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eDQogIEZpbGUgIntPUkFDTEV9XHBzZXVkb2xpZmVfbWVtb3J5XGNvbnNvbGVfY2xpLnB5IiwgbGluZSAyNDcsIGluIG1haW4NCiAgICByZXR1cm4gX2xpc3QocGF5bG9hZCwgYXJncy5qc29uKQ0KICAgICAgICAgICBeXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eDQogIEZpbGUgIntPUkFDTEV9XHBzZXVkb2xpZmVfbWVtb3J5XGNvbnNvbGVfY2xpLnB5IiwgbGluZSAyNzAsIGluIF9saXN0DQogICAgcHJpbnQoZiJ7c3RyKHJvdy5nZXQoJ3Nlc3Npb25faWQnLCAnJykpOjwxN30ge3N0cihyb3cuZ2V0KCdwcmluY2lwYWwnLCAnJykpOjwyMH0gIg0KVW5pY29kZUVuY29kZUVycm9yOiAndXRmLTgnIGNvZGVjIGNhbid0IGVuY29kZSBjaGFyYWN0ZXIgJ1x1ZGM4MCcgaW4gcG9zaXRpb24gODQ6IHN1cnJvZ2F0ZXMgbm90IGFsbG93ZWQNCg==",
+   "window": [
+    1794472127.449936,
+    1794472127.860178
+   ],
+   "requests": [
+    {
+     "method": "GET",
+     "target": "/api/console/sessions",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  }
+ }
+}
