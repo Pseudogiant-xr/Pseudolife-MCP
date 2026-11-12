@@ -203,7 +203,7 @@ fn a_confirmed_restore_without_docker_refuses_under_the_lock() {
     )
     .unwrap();
     let before = listing(&home.0);
-    for args in [&[
+    let args = [
         "--backup-file",
         "good.sql.gz",
         "--yes",
@@ -222,11 +222,9 @@ fn a_confirmed_restore_without_docker_refuses_under_the_lock() {
         "http://127.0.0.1:9",
         "--safety-dir",
         "safety",
-    ][..]]
-    {
-        // The first inspect cannot start: the oracle's UpdateError, exit 1.
-        assert_answer(&run(&home.0, "80", args), 1, "", NO_DOCKER);
-    }
+    ];
+    // The first inspect cannot start: the oracle's UpdateError, exit 1.
+    assert_answer(&run(&home.0, "80", &args), 1, "", NO_DOCKER);
     // The update lock file stays, as the oracle's does; its pid file and
     // no safety directory remain.
     let mut after = before.clone();
