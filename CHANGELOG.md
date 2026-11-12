@@ -6,6 +6,73 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.23.1] - 2026-11-12 — Nothing in the Rust daemon or PostgreSQL containers runs as root, a release update no longer deletes the shim runtime it is still running from, and a compacted or resumed session on the Rust daemon gets its own handoff back
+
+### Fixed (2026-11-12 — a release update no longer deletes the shim runtime it is still running from)
+- A release-mode `pseudolife-mcp update` that installed a new shim runtime
+  could finish the whole update and then exit 1 with `ImportError: cannot
+  import name 'console_cli'` (seen on Linux, 0.22.1 to 0.23.0). The new
+  runtime runs the client steps after the shim as a child of the updater, and
+  that child's runtime prune left out its own parent process as "this
+  helper", so it removed the older runtime the waiting updater still ran from.
+  The prune now holds any runtime a live process runs from, except the pruning
+  process itself. A handed-off run also holds the runtime of the updater that
+  started it: from this release the updater passes its runtime explicitly,
+  and when an older updater passes only its pid and cannot be placed in a
+  runtime, no runtime is removed while it lives.
+- The closing notes after a successful update (the schema v59 owner note and
+  the Console sign-in hint) and the unattended run's board notice can no
+  longer fail the update: an error there is a warning or a step line, and the
+  update's own result stands.
+
+### Added (2026-11-12 — a compacted or resumed session gets its own handoff back)
+- Rust daemon: each session has one reserved cortex slot, entity `session:<root episode id>`, attribute `handoff`, written with the ordinary `memory_fact_set`. After a compaction or resume, the SessionStart hook prints that session's handoff (cut at 1,500 bytes, with the `memory_fact_get` call for the rest), or, when there is none, one line naming the slot and how to write it. The slot is found by the session's own key; a session the reaper closed and that came back under a new root still gets its earlier handoff.
+- A write to the slot always replaces the previous value, even one that differs only in case (no compression-echo, tier or confidence parking), and records no correction signal. The slot holds one value: `memory_set_add` at it is refused with the `memory_fact_set` call to use. A dream claim at the slot only ever parks as a contender; a dream's set add there is dropped, and the consolidation quarantine never promotes a parked claim there. Handoffs are served only by key and through the hook: cortex search, recall, the graph and its review queues, graph insight, the dream's extraction hints, auto-promotion and the Console's facts list skip them, and no graph node is minted for the entity.
+- No setup: a Rust-engine host gets it with its next daemon update, and the plugin's hook definitions are unchanged. The Python daemon is unchanged and keeps its one-line pointer (declared divergence: the session handoff slot).
+
+### Security (2026-11-12 — the Rust daemon container no longer runs as root)
+
+- Since 0.23.0 the default Rust daemon image ran the daemon as root, keeping
+  the `CHOWN`, `DAC_OVERRIDE`, `SETUID` and `SETGID` capabilities Compose
+  grants only for the ownership bootstrap. Its entrypoint now does what the
+  Python image's does: it transfers root-owned entries in `/data` and the
+  model cache `/models` to UID/GID `10001:10001` (no symbolic links or other
+  mounts are followed), then drops root, supplementary groups and every
+  effective and permitted capability with `setpriv` before it provisions
+  models and starts the daemon. Existing hosts get it at their next
+  `pseudolife-mcp update`; files earlier root-run daemons, restores or
+  update's model provisioning left are transferred on that first start, and
+  an untransferable volume (for example a read-only one holding root-owned
+  files) stops the start with a message naming the directory. The Rust
+  shadow and mirror, which already run as `10001:10001`, are unchanged.
+
+### Security (2026-11-12 — nothing in the PostgreSQL container runs as root)
+- The PostgreSQL container now runs as the image's `postgres` account
+  (UID/GID `999:999`) with every capability dropped and `no-new-privileges`,
+  so its startup bootstrap, its healthcheck and every `docker exec` the
+  backup, restore and update tooling makes run without root. The existing
+  data directory is already owned by that account and is used unchanged; no
+  ownership is rewritten.
+- The healthcheck calls the server's own `pg_isready` instead of Debian's
+  Perl wrapper in `/usr/bin`, which read system account files on every probe
+  (host monitors logged thousands of sensitive-file reads a day). The image
+  also puts the server's client binaries ahead of the wrapper on `PATH`.
+- The image no longer ships `gosu`, its only Go binary and the source of the
+  Go standard-library findings image scanners reported. A root start from an
+  older Compose file still works: a small `setpriv` shim performs the same
+  privilege drop.
+- `pseudolife-mcp restore`, `ops/restore.sh` and the Rust shadow's role setup
+  no longer depend on root inside the container: the restore streams the
+  backup in as the container user, `ops/restore.ps1` stages it in a
+  directory that user owns and checks it can read it before anything is
+  dropped, and the shadow role script carries no password (psql reads it from
+  the environment). Previously a private backup copied from a Linux host
+  would have been unreadable to a non-root container.
+- Existing hosts pick the settings up the next time the installer runs
+  (`docker compose up -d` recreates the PostgreSQL container); `pseudolife-mcp
+  update` still recreates only the daemon, and every tool works with either
+  container.
+
 ## [0.23.0] - 2026-11-11 — The Rust daemon becomes the default Docker engine: new installs run it, a release update moves a host that never chose an engine after checking its configuration and backing the bank up, and `--engine python` keeps or restores the Python daemon; the Rust daemon signs the Console in with the maintainer passkey, refuses retired multi-band layouts with the fix named, and closes several parity differences with Python, whose differentials can now run on a copy of a real bank; updates keep a stack's own Compose files and overrides; and board wakes survive a failed turn
 
 ### Fixed (2026-11-11 — a second Codex setup on Windows no longer calls the setup lock broken) [#1469]
