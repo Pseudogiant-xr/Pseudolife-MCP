@@ -236,7 +236,9 @@ pseudolife-mcp update --env-file "$HOME/pseudolife-stack/.env"
 ```
 
 It backs up, tags the previous image for rollback, recreates only the daemon,
-checks health, then updates clients. It recognizes the compose project from
+checks health, then updates clients. The PostgreSQL container belongs to the
+stack, so update leaves it as it is and says so; redeploy the stack from the
+release's `ops/docker-compose.stack.yml` to pick up a change to it. It recognizes the compose project from
 container labels when the original compose files exist on the host (for
 example, a plain compose folder or a manager with a shared compose
 directory). Keep that env file available and identical to the manager's
