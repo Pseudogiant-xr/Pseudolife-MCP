@@ -458,3 +458,94 @@ def test_restoring_reads_the_files_the_previous_container_was_created_from(pg, w
     assert f"-f {first / 'docker-compose.yml'} " not in ups[0]
     assert (first / "docker-compose.yml").read_bytes() == created_from
     assert "its previous container is restored and healthy" in capsys.readouterr().err
+
+
+def test_no_backup_leaves_an_out_of_line_postgres_alone_with_the_fix(pg, world, clients, capsys):
+    assert up.main(["--no-backup", "--health-delay-ms", "1"]) == 0
+    calls = _calls(world)
+    assert f"pull {RELEASE_IMAGE}" not in calls and not any(_pg_up(c) for c in calls)
+    assert any(_daemon_up(c) for c in calls)
+    out = capsys.readouterr().out
+    assert "this run takes no backup (--no-backup)" in out and "without --no-backup" in out
+
+
+def test_a_current_daemon_is_checked_and_restarted_once_after_postgres_moved(pg, world, clients, capsys):
+    current = {"status": "ok", "version": "0.15.1", "schema": 49, "persist_errors": 0, "hooks_digest": "d" * 64}
+    # /health: the no-op read, then silent until the restart, then healthy.
+    world.health = [current, None, None, None, current]
+    restarts = []
+    original = pg.docker
+
+    def docker(a):
+        if a[:1] == ["restart"]:
+            restarts.append(a)
+            world.health[:] = [current]
+            return 0, a[-1]
+        return original(a)
+
+    pg.docker = docker
+    assert up.main(["--health-retries", "2", "--health-delay-ms", "1"]) == 0
+    assert restarts == [["restart", up.DAEMON_CONTAINER]]
+    out = capsys.readouterr().out
+    assert "restarting pseudolife-mcp-daemon (same container and image)..." in out
+    assert "the daemon reports healthy on the recreated PostgreSQL container" in out
+
+
+def test_a_current_daemon_that_never_recovers_fails_with_the_logs_to_read(pg, world, clients, capsys):
+    current = {"status": "ok", "version": "0.15.1", "schema": 49, "persist_errors": 0, "hooks_digest": "d" * 64}
+    world.health = [current, None]
+    original = pg.docker
+    pg.docker = lambda a: (0, a[-1]) if a[:1] == ["restart"] else original(a)
+    assert up.main(["--health-retries", "1", "--health-delay-ms", "1"]) == 1
+    err = capsys.readouterr().err
+    assert "PostgreSQL is in line with this release, but the daemon still does not report healthy after a restart" in err
+    assert f"docker logs {up.DAEMON_CONTAINER}" in err
+
+
+# ── unattended ──────────────────────────────────────────────────────────────
+
+@pytest.fixture
+def unattended(pg, world, monkeypatch):
+    from pseudolife_memory import unattended_update as uu
+    state = {"activity": [([], 0, "")], "notices": []}
+
+    def activity(url, token):
+        return state["activity"].pop(0) if len(state["activity"]) > 1 else state["activity"][0]
+
+    monkeypatch.setattr(uu, "board_activity", activity)
+    monkeypatch.setattr(uu, "bearer", lambda: "tok")
+    monkeypatch.setattr(uu, "post_json", lambda url, token, body, timeout=10.0: (
+        state["notices"].append(body["text"]) or {"recipients": 1}))
+    knob = {"status": "ok", "version": "0.15.0", "schema": 49, "persist_errors": 0, "hooks_digest": "d" * 64,
+            "updates": {"unattended_daemon": True, "unattended_clients": False}}
+    world.health = [knob, knob, {"status": "ok", "version": "0.15.1", "schema": 49, "persist_errors": 0,
+                                 "hooks_digest": "d" * 64}]
+    return state
+
+
+def test_an_unattended_hold_off_after_the_backup_leaves_postgres_alone(unattended, world, clients):
+    # Idle before the lock, a session active once the backup is done.
+    unattended["activity"] = [([], 0, ""), ([{"agent_id": "a1", "label": "claude-code", "task": "x"}], 0, "")]
+    assert up.main(["--unattended", "--health-delay-ms", "1"]) == 4
+    calls = _calls(world)
+    assert any("pg_dump" in c for c in calls)
+    assert f"pull {RELEASE_IMAGE}" not in calls
+    assert not any(_pg_up(c) or _daemon_up(c) or c.startswith("tag ") for c in calls)
+    assert "held off after the backup" in unattended["notices"][-1]
+
+
+def test_an_unattended_postgres_failure_is_restored_and_told(unattended, pg, world, clients):
+    pg.new.update(health="unhealthy")
+    assert up.main(["--unattended", "--health-delay-ms", "1"]) == 1
+    assert not any(_daemon_up(c) for c in _calls(world))
+    assert pg.container["Id"].startswith("pg-restored")
+    text = unattended["notices"][-1]
+    assert text.startswith("Pseudolife-MCP: the unattended update to 0.15.1 FAILED")
+    assert "its previous container is restored and healthy" in text
+
+
+def test_an_unattended_update_brings_postgres_in_line(unattended, pg, world, clients):
+    assert up.main(["--unattended", "--health-delay-ms", "1"]) == 0
+    calls = _calls(world)
+    assert _index(calls, lambda c: "pg_dump" in c) < _index(calls, _pg_up) < _index(calls, _daemon_up)
+    assert pg.container["Id"].startswith("pg-new")

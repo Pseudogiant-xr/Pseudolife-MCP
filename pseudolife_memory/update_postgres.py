@@ -181,7 +181,12 @@ def plan(update, project: str, env_files, environment: dict, target: str) -> Pla
                        f"{PG_SERVICE}); check the stack's env file, then rerun pseudolife-mcp update")
         return None
     if found[-1] == current_hash:
-        update.step(f"PostgreSQL container already matches this release's definition; nothing to change")
+        update.step("PostgreSQL container already matches this release's definition; nothing to change")
+        return None
+    if update.o.no_backup:
+        _leave(update, "it differs from this release's definition, but this run takes no backup (--no-backup) "
+                       "and PostgreSQL is recreated only after one; rerun pseudolife-mcp update without "
+                       "--no-backup to apply it")
         return None
     code, out = up.run_cli([update.docker, "compose", *release_args, "config", "--format", "json"],
                            timeout=60, env=environment, stdout_only=True)
@@ -364,8 +369,13 @@ def apply(update, p: Plan) -> None:
             f"PostgreSQL did not start on this release's definition ({why}), and restoring its previous container "
             f"failed too ({back}). The bank volume is unchanged and the backup above holds it. Bring the previous "
             f"container back with:\n      {restore}\nthen rerun pseudolife-mcp update; the daemon was not changed")
+    daemon = ""
+    try:
+        update.daemon_after_postgres()      # the daemon was not recreated: it must still answer
+    except up.UpdateError as exc:
+        daemon = f" The daemon did not recover on the restored container: {str(exc).splitlines()[0]}."
     raise up.UpdateError(
         f"PostgreSQL did not start on this release's definition ({why}); its previous container is restored and "
-        f"healthy, and the daemon was not changed. Nothing else was deployed. See docker logs "
+        f"healthy, and the daemon was not changed.{daemon} Nothing else was deployed. See docker logs "
         f"{up.PG_CONTAINER} for the restored server, and report the cause above at "
         "https://github.com/Pseudogiant-xr/Pseudolife-MCP/issues before rerunning pseudolife-mcp update")

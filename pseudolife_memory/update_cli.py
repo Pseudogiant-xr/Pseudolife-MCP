@@ -1774,8 +1774,9 @@ class Update:
         from pseudolife_memory import update_postgres
         try:
             context = self.compose_context()
-        except UpdateError as exc:
-            self.step(f"PostgreSQL container left as it is: {str(exc).split('; ')[0]}")
+        except UpdateError:
+            # No Compose project this update can resolve, so no PostgreSQL
+            # container it owns; the line above already said nothing to do.
             return
         environment = compose_environment(context["env_file"], {"PSEUDOLIFE_IMAGE_TAG": target})
         postgres = update_postgres.plan(self, context["project"], context["env_file"], environment, target)
@@ -1784,6 +1785,29 @@ class Update:
         self.preflight_disk(data_dir())
         self.backup(context["checkout"])
         update_postgres.apply(self, postgres)
+        self.daemon_after_postgres()
+
+    def daemon_after_postgres(self) -> None:
+        """PostgreSQL was recreated under a daemon this run does not
+        recreate: the daemon must answer healthy again, restarted once (same
+        container, same image) if it does not."""
+        for attempt in range(2):
+            for retry in range(self.o.health_retries):
+                health = self.daemon_health()
+                if health and health.get("status") == "ok":
+                    self.step("the daemon reports healthy on the recreated PostgreSQL container")
+                    return
+                if retry < self.o.health_retries - 1:
+                    sleep(self.o.health_delay_ms / 1000.0)
+            if attempt == 0:
+                self.step(f"the daemon did not report healthy after PostgreSQL was recreated; restarting "
+                          f"{DAEMON_CONTAINER} (same container and image)...")
+                code, out = run_cli([self.docker, "restart", DAEMON_CONTAINER], timeout=300)
+                if code != 0:
+                    raise UpdateError(f"PostgreSQL is in line with this release, but restarting {DAEMON_CONTAINER} "
+                                      f"failed ({_last_line(out)}); run docker restart {DAEMON_CONTAINER}")
+        raise UpdateError(f"PostgreSQL is in line with this release, but the daemon still does not report healthy "
+                          f"after a restart. Logs: docker logs {DAEMON_CONTAINER}\n" + self._health_endpoint_hint())
 
     def image_pin_hint(self, context: dict, target: str) -> None:
         """Compare the manager's persistent image with the release just

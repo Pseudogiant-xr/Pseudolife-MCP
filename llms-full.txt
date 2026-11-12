@@ -5297,7 +5297,11 @@ fails with the cause. It never runs `down`, removes a volume or changes
 ownership. A container update does not own (another Compose project, a stack
 manager's stack, a database outside Docker) is left as it is, with one line
 saying why; a stack manager's PostgreSQL follows the stack file it is deployed
-from.
+from. The definition applied is the one in the running updater's own package,
+and the update that installs 0.23.1 still runs the older updater, so a host
+coming from 0.23.0 or earlier gets the change on its next attended
+`pseudolife-mcp update` (which applies it even with no newer release, backing
+the bank up first) or, unattended, with the next release.
 
 ## Experimental agent coordination
 

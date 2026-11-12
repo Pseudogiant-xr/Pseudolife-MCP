@@ -25,3 +25,10 @@
   the daemon is already current still applies a PostgreSQL change, backing the
   bank up first. Checkout mode (`ops/update.ps1`, `ops/update.sh`) and the
   opt-in native updater are unchanged.
+- The definition applied is the one in the running updater's own package. The
+  update that installs this release runs the previous release's updater, so a
+  host coming from 0.23.0 or earlier gets the PostgreSQL change on its next
+  attended `pseudolife-mcp update`, or unattended with the next release.
+- `--no-backup` leaves an out-of-line PostgreSQL container alone and says how
+  to apply it. When only PostgreSQL moved, update checks the daemon still
+  reports healthy, restarting it once if not.
