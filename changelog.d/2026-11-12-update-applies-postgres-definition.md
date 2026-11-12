@@ -38,4 +38,6 @@
   attended `pseudolife-mcp update`, or unattended with the next release.
 - `--no-backup` leaves an out-of-line PostgreSQL container alone and says how
   to apply it. When only PostgreSQL moved, update checks the daemon still
-  reports healthy, restarting it once if not.
+  reports healthy, restarting it once if not. The command that brings
+  PostgreSQL's previous container back is printed with the rollback lines and
+  is in the `--json` report (`rollback.postgres`).
