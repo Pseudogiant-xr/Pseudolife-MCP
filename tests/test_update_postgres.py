@@ -246,7 +246,8 @@ def test_a_failed_postgres_pull_changes_nothing(pg, world, clients, capsys):
     assert not any(_pg_up(c) or _daemon_up(c) or c.startswith("tag ") or "pg_dump" in c for c in calls)
     assert pg.container["Id"] == "pg-old"
     err = capsys.readouterr().err
-    assert f"docker pull {RELEASE_IMAGE} failed" in err and "nothing was changed" in err and "ghcr.io" in err
+    assert f"docker pull {RELEASE_IMAGE} failed" in err and "nothing was changed" in err
+    assert "Check this host reaches" in err         # the next step: the registry, then a rerun
 
 
 @pytest.mark.parametrize("failure", ["unhealthy", "exited", "up", "other-cluster"])
