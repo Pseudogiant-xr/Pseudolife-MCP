@@ -9757,8 +9757,8 @@ The scheduled run applies a new release only when BOTH hold: the daemon's
 `/health`, so installing the timer alone changes nothing), and the agent
 board lists no active session. It then takes the same path as an attended
 `pseudolife-mcp update`: the image pulls, backup (the checkout's script or
-the built-in `pg_dump` + state tar), PostgreSQL brought in line with the
-release's definition when it differs, the rollback tag, recreate the daemon,
+the built-in `pg_dump` + state tar), the rollback tag, PostgreSQL brought in
+line with the release's definition when it differs, recreate the daemon,
 wait for `/health` at the new version, then the client side; the board is
 read once more after the backup, right before PostgreSQL or the daemon is
 recreated, since the backup can take minutes, and a session that started

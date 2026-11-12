@@ -1726,10 +1726,6 @@ class Update:
             # Before the rollback tag moves: a hold-off here leaves only the
             # backup behind, and never counts toward rollback retention.
             before_recreate()
-        if postgres is not None:
-            # After the backup, before the daemon: the new daemon starts
-            # against the PostgreSQL it will run with.
-            update_postgres.apply(self, postgres)
         running_id, ref = self.running_image()
         if not running_id:
             raise UpdateError(f"the {DAEMON_CONTAINER} container vanished during the backup; nothing was deployed")
@@ -1748,6 +1744,12 @@ class Update:
                  f"      (PowerShell: {self._rollback_compose_command(powershell, powershell=True)})"]
         self.tag_rollback(ref or GHCR_IMAGE, None, running_id, source=running_id, rollback=rollback,
                           rollback_lines=lines)
+        if postgres is not None:
+            # After every refusal the daemon's rollback tag can raise (a
+            # vanished container, a tag that names another image): those say
+            # nothing was deployed, which must stay true. Before the daemon:
+            # the new daemon starts against the PostgreSQL it will run with.
+            update_postgres.apply(self, postgres)
         self.rollback_lines += self.postgres_rollback_lines
         self.prune_rollbacks(context["checkout"], GHCR_IMAGE)
         self.step(f"recreating the daemon container on {image} ({self.untouched_services()})...")
@@ -1794,7 +1796,19 @@ class Update:
         if before_recreate is not None:
             before_recreate()
         update_postgres.apply(self, postgres)
-        self.daemon_after_postgres()
+        # Only PostgreSQL moved, so its restore command is this run's whole
+        # rollback: shown when the daemon does not recover, and kept in the
+        # report either way.
+        self.rollback_lines = list(self.postgres_rollback_lines)
+        try:
+            self.daemon_after_postgres()
+        except UpdateError as exc:
+            raise UpdateError(f"{exc}\nto roll back:\n" + "\n".join(self.rollback_lines), exc.exit_code) from None
+        if not self.o.as_json:
+            print("    Rolled-back PostgreSQL if ever needed:")
+            for line in self.rollback_lines:
+                print(line)
+            sys.stdout.flush()
 
     def daemon_after_postgres(self) -> None:
         """PostgreSQL was recreated under a daemon this run does not

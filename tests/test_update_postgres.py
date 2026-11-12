@@ -203,8 +203,10 @@ def test_an_out_of_line_postgres_is_pulled_before_the_backup_and_recreated_befor
     daemon_tag = _index(calls, lambda c: c.startswith("tag sha256:running "))
     daemon_up = _index(calls, _daemon_up)
     # Both pulls before the backup: nothing slow sits between the unattended
-    # run's board re-check (after the backup) and the recreate.
-    assert daemon_pull < pg_pull < dump < pg_tag < pg_up < daemon_tag < daemon_up, calls
+    # run's board re-check (after the backup) and the recreate. The daemon's
+    # rollback tag comes first: every refusal it can raise says nothing was
+    # deployed, so PostgreSQL must not have moved yet.
+    assert daemon_pull < pg_pull < dump < daemon_tag < pg_tag < pg_up < daemon_up, calls
     release = _release_dir(tmp_path)
     assert calls[pg_up].startswith(f"compose -p pseudolife-mcp --project-directory {pg.ops} --env-file {pg.ops / '.env'} "
                                    f"-f {release / 'docker-compose.yml'} -f {release / 'docker-compose.ghcr.yml'} "
@@ -359,6 +361,9 @@ def test_the_daemon_already_current_still_brings_postgres_in_line_after_a_backup
     out = capsys.readouterr().out
     assert "the daemon already runs 0.15.1; nothing to do" in out
     assert "PostgreSQL is healthy on this release's definition" in out
+    # Only PostgreSQL moved: its restore command is shown, not left in a file.
+    assert "Rolled-back PostgreSQL if ever needed:" in out
+    assert "up -d --no-deps --no-build --pull never --force-recreate pseudolife-pg" in out
 
 
 def test_the_daemon_already_current_and_postgres_in_line_takes_no_backup(pg, world, clients, capsys):
@@ -404,9 +409,11 @@ def test_a_rerun_after_the_recreate_is_quiet(pg, world, clients, capsys):
 
 
 @pytest.mark.parametrize("refused", [False, True])
-def test_the_engine_release_path_plans_before_the_pull_and_applies_after_the_backup(monkeypatch, refused):
+def test_the_engine_release_path_plans_before_the_pull_and_applies_after_the_backup(monkeypatch, tmp_path,
+                                                                                   refused):
     from pseudolife_memory import update_engine as eng
     events: list[str] = []
+    monkeypatch.setattr(up, "data_dir", lambda: tmp_path / "data")
     update = up.Update(up.Options(daemon_url="http://127.0.0.1:18765"), log=lambda s: None)
     monkeypatch.setattr(update, "compose_context", lambda **kw: {
         "args": ["-p", "pseudolife-mcp"], "env_file": [], "checkout": None, "project": "pseudolife-mcp",
@@ -420,14 +427,23 @@ def test_the_engine_release_path_plans_before_the_pull_and_applies_after_the_bac
 
     def running_image():
         events.append("daemon")
+        return "sha256:d", "ref"
+
+    def prune(*args, **kwargs):
         raise Stop
 
     monkeypatch.setattr(update, "running_image", running_image)
+    monkeypatch.setattr(update, "prune_rollbacks", prune)
     release = eng.ReleaseEngineUpdate(update, "0.23.1", "0.23.0", None, "python")
 
     def command(args, **kw):
         if args[:1] == ["pull"]:
             events.append("pull")
+            return 0, ""
+        if args[:2] == ["image", "inspect"]:
+            return 1, ""            # no image under the rollback tag yet
+        if args[:1] == ["tag"]:
+            events.append("daemon tag")
             return 0, ""
         if "config" in args:
             return 0, json.dumps(_engine_config())
@@ -455,9 +471,12 @@ def test_the_engine_release_path_plans_before_the_pull_and_applies_after_the_bac
     else:
         with pytest.raises(Stop):
             release.run(lambda: events.append("before_recreate"))
-        # Both pulls before the backup, so the board re-check (before_recreate)
-        # is immediately followed by the PostgreSQL recreate.
-        assert events == ["plan", "pull", "pull the plan", "backup", "before_recreate", "apply the plan", "daemon"]
+        # Both pulls before the backup, so nothing slow sits between the board
+        # re-check (before_recreate) and the PostgreSQL recreate; and the
+        # daemon's rollback tag, whose refusals say nothing was deployed,
+        # comes before PostgreSQL moves.
+        assert events == ["plan", "pull", "pull the plan", "backup", "before_recreate", "daemon", "daemon tag",
+                          "apply the plan"]
 
 
 def _engine_config() -> dict:
@@ -538,6 +557,27 @@ def test_a_current_daemon_that_never_recovers_fails_with_the_logs_to_read(pg, wo
     err = capsys.readouterr().err
     assert "PostgreSQL is in line with this release, but the daemon still does not report healthy after a restart" in err
     assert f"docker logs {up.DAEMON_CONTAINER}" in err
+    # The way back to the previous PostgreSQL container is in the error.
+    assert "to roll back:" in err
+    assert "up -d --no-deps --no-build --pull never --force-recreate pseudolife-pg" in err
+
+
+def test_a_daemon_that_vanished_during_the_backup_refuses_before_postgres_moves(pg, world, clients, monkeypatch,
+                                                                              capsys):
+    # The refusal says nothing was deployed, so it must come before the
+    # PostgreSQL recreate, not after it.
+    real = up.Update.running_image
+
+    def running_image(self):
+        if any("pg_dump" in c for c in _calls(world)):
+            return None, None
+        return real(self)
+
+    monkeypatch.setattr(up.Update, "running_image", running_image)
+    assert up.main(["--health-delay-ms", "1"]) == 1
+    calls = _calls(world)
+    assert not any(_pg_up(c) or c.startswith("tag sha256:pg-old") for c in calls), calls
+    assert "nothing was deployed" in capsys.readouterr().err
 
 
 # ── the cluster the new container serves (PGDATA) ──────────────────────────

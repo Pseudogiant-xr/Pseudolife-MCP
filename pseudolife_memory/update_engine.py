@@ -909,8 +909,6 @@ class ReleaseEngineUpdate:
         self.started = True
         if before_recreate is not None:
             before_recreate()
-        if postgres is not None:
-            update_postgres.apply(u, postgres)
         running_id, _ref = u.running_image()
         if not running_id:
             raise up.UpdateError(f"the {up.DAEMON_CONTAINER} container vanished during the backup; nothing was deployed")
@@ -944,6 +942,10 @@ class ReleaseEngineUpdate:
         except OSError as exc:
             raise up.UpdateError(f"cannot write the rollback overlay in {directory}; restore write access and retry. "
                                  f"The running image is tagged {rollback}; nothing was deployed") from exc
+        if postgres is not None:
+            # After every refusal above that says nothing was deployed (as in
+            # update_cli.deploy_release), before the daemon recreate.
+            update_postgres.apply(u, postgres)
         restore_compose = list(compose)
         if old_engine == "rust" and self.engine != "rust":
             # The restored Rust daemon needs its overlay's model volume again.
