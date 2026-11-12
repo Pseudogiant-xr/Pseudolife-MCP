@@ -207,8 +207,8 @@ def test_an_out_of_line_postgres_is_pulled_before_the_backup_and_recreated_befor
     assert daemon_pull < pg_pull < dump < pg_tag < pg_up < daemon_tag < daemon_up, calls
     release = _release_dir(tmp_path)
     assert calls[pg_up].startswith(f"compose -p pseudolife-mcp --project-directory {pg.ops} --env-file {pg.ops / '.env'} "
-                                   f"-f {release / 'docker-compose.yml'} -f {override} "
-                                   f"-f {release / 'docker-compose.ghcr.yml'} ")
+                                   f"-f {release / 'docker-compose.yml'} -f {release / 'docker-compose.ghcr.yml'} "
+                                   f"-f {override} ")
     assert calls[pg_up].endswith("up -d --no-deps --no-build pseudolife-pg")
     # the release's own definition, not the clone's old file
     assert (release / "docker-compose.yml").read_bytes() == (up.BUNDLED_COMPOSE / "docker-compose.yml").read_bytes()
@@ -727,3 +727,22 @@ def test_an_unattended_update_brings_postgres_in_line(unattended, pg, world, cli
     calls = _calls(world)
     assert _index(calls, lambda c: "pg_dump" in c) < _index(calls, _pg_up) < _index(calls, _daemon_up)
     assert pg.container["Id"].startswith("pg-new")
+
+
+def test_release_files_take_the_packaged_files_places_so_an_override_keeps_its_precedence(tmp_path):
+    # Compose lets a later file win. A stack created from base, GHCR overlay,
+    # then its own override must keep that order, or the overlay would replace
+    # an image the override pins.
+    ops = tmp_path / "clone" / "ops"
+    ops.mkdir(parents=True)
+    (ops.parent / "pyproject.toml").write_text("", encoding="utf-8")
+    base, overlay, own = (ops / "docker-compose.yml", ops / "docker-compose.ghcr.yml",
+                          ops / "docker-compose.override.yml")
+    release = [tmp_path / "release" / "docker-compose.yml", tmp_path / "release" / "docker-compose.ghcr.yml"]
+    assert update_postgres._release_order([base, overlay, own], release) == [release[0], release[1], own]
+    # No overlay yet (an installer's clone): it goes straight after the base.
+    assert update_postgres._release_order([base, own], release) == [release[0], release[1], own]
+    assert update_postgres._release_order([base], release) == release
+    # A file of the same name outside a packaged directory is the stack's own.
+    foreign = tmp_path / "elsewhere" / "docker-compose.ghcr.yml"
+    assert update_postgres._release_order([base, foreign], release) == [release[0], release[1], foreign]

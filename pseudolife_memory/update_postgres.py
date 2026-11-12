@@ -113,6 +113,29 @@ def _release_files() -> list[Path]:
     return files
 
 
+def _release_order(original: list[Path], release: list[Path]) -> list[Path]:
+    """The stack's files with this release's base and GHCR overlay in place
+    of the packaged ones, every other file where it was. Compose lets a later
+    file win, so the stack's own override files must stay after the overlay
+    they follow: an override that pins the PostgreSQL image keeps its pin. A
+    stack with no overlay yet (an installer's clone builds its image) gets
+    the overlay straight after the base, ahead of every override."""
+    base, overlay = release
+    ordered, has_overlay = [], False
+    for path in original:
+        packaged = path.name in PACKAGED_FILES and _packaged_dir(path.parent)
+        if packaged and path.name == overlay.name:
+            ordered.append(overlay)
+            has_overlay = True
+        elif packaged:
+            ordered.append(base)
+        else:
+            ordered.append(path)
+    if not has_overlay:
+        ordered.insert(ordered.index(base) + 1, overlay)
+    return ordered
+
+
 def _args(project: str, working_dir: str | None, env_files, files) -> list[str]:
     args = ["-p", project]
     if working_dir:
@@ -180,9 +203,7 @@ def plan(update, project: str, env_files, environment: dict, target: str) -> Pla
         return None
     current_hash = labels.get("com.docker.compose.config-hash")
     working_dir = labels.get("com.docker.compose.project.working_dir")
-    kept = [p for p in original if not (p.name in PACKAGED_FILES and _packaged_dir(p.parent))]
-    release = _release_files()
-    release_args = _args(project, working_dir, env_files, [release[0], *kept, release[1]])
+    release_args = _args(project, working_dir, env_files, _release_order(original, _release_files()))
     previous_args = _args(project, working_dir, env_files, labelled)
     code, out = up.run_cli([update.docker, "compose", *release_args, "config", "--hash", PG_SERVICE],
                            timeout=60, env=environment, stdout_only=True)
