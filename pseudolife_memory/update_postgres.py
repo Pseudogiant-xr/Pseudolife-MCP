@@ -12,16 +12,26 @@ only updates. This step does, in two halves:
   packaged compose files whose originals are still on disk), whether it
   differs (Compose's own ``com.docker.compose.config-hash`` label against
   ``docker compose config --hash`` for the service under the release's
-  files), and whether the new definition can start on the existing data:
-  the same volume at the same mount, and a data directory owned by the
-  account the definition runs PostgreSQL as. A host already in line, or
-  one whose container is not this update's, gets one line and ``None``.
-* :func:`apply` runs after the bank backup: pull the release's image, tag
-  the running image for rollback, write an overlay that restores it, then
-  ``docker compose ... up -d --no-deps --no-build pseudolife-pg`` and wait
-  until the new container is healthy on the same cluster (the control
-  file's system identifier). On any failure after the recreate started it
-  recreates the previous container from its own files and the rollback
+  files), whether the files it was created from still render the
+  definition it runs (the same hash over its labelled files, so a restore
+  brings back what was running), and whether the new definition can start
+  on the existing data: the same volume, or the same bind directory as its
+  own files render, at the same mount, the same data directory (PGDATA)
+  when the definition sets one, and a data directory owned by the account
+  the definition runs PostgreSQL as. A host already in line, or one whose
+  container is not this update's, gets one line and ``None``.
+* :func:`pull` runs before the backup, beside the daemon image pull (a pull
+  changes nothing on the host, and an unattended run's board re-check after
+  the backup must be the last thing before the recreate): pull the
+  release's image and, when the definition leaves PGDATA to the image,
+  refuse an image whose default differs from the running cluster's.
+* :func:`apply` runs after the backup: tag the running image for rollback,
+  write an overlay that restores it, then ``docker compose ... up -d
+  --no-deps --no-build pseudolife-pg`` and wait until the new container is
+  healthy on the same cluster: the system identifier in the control file
+  of the data directory the new container itself names (its PGDATA), not
+  the directory the old one used. On any failure after the recreate started
+  it recreates the previous container from its own files and the rollback
   tag, waits for it to be healthy, and fails the update with the cause.
 
 Nothing here runs ``down``, removes a volume or changes ownership.
@@ -32,7 +42,7 @@ import hashlib
 import json
 import re
 import secrets
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 from pseudolife_memory import __version__
@@ -62,9 +72,11 @@ class Plan:
     release_args: list[str]
     previous_args: list[str]
     environment: dict
+    # The definition leaves PGDATA to the image: :func:`pull` reads the
+    # pulled image's default before anything changes.
+    pgdata_from_image: bool = False
     rollback_tag: str = ""
     rollback_overlay: Path | None = None
-    lines: list[str] = field(default_factory=list)
 
 
 def _docker(update, *argv, timeout: int = 120, env: dict | None = None, stream: bool = False) -> tuple[int, str]:
@@ -188,20 +200,36 @@ def plan(update, project: str, env_files, environment: dict, target: str) -> Pla
                        "and PostgreSQL is recreated only after one; rerun pseudolife-mcp update without "
                        "--no-backup to apply it")
         return None
-    code, out = up.run_cli([update.docker, "compose", *release_args, "config", "--format", "json"],
+    # A restore recreates from the labelled files: they must still render the
+    # definition the container runs (a clone edited by hand, or an env file
+    # changed, since it was created would restore something else).
+    code, out = up.run_cli([update.docker, "compose", *previous_args, "config", "--hash", PG_SERVICE],
                            timeout=60, env=environment, stdout_only=True)
-    try:
-        rendered = json.loads(out) if code == 0 else None
-        service = rendered["services"][PG_SERVICE]
-        image = service["image"]
-    except (ValueError, KeyError, TypeError):
-        raise up.UpdateError(f"cannot render this release's {PG_SERVICE} definition (docker compose config); check "
-                             "the stack's env file and override files, then rerun. Nothing was changed", 2) from None
-    _check_mounts(running, rendered, service)
-    pgdata = next((e.split("=", 1)[1] for e in config.get("Env") or [] if e.startswith("PGDATA=")), "")
+    found = re.findall(rf"^{re.escape(PG_SERVICE)}\s+([0-9a-f]{{16,}})\s*$", out or "", re.M) if code == 0 else []
+    if not found or found[-1] != current_hash:
+        _leave(update, "the compose files it was created from no longer render the definition it was created "
+                       "with (their docker compose config --hash differs from its com.docker.compose.config-hash "
+                       "label: they or the env file changed since, or this Docker Compose hashes differently from "
+                       "the one that created it), so a restore could not bring back the container that is running. "
+                       "Recreate it once from its current files ("
+                       + _compose_line(previous_args, f"up -d --no-deps --no-build {PG_SERVICE}")
+                       + "), or put back the files it was created from, then rerun pseudolife-mcp update")
+        return None
+    rendered, service = _render(update, release_args, environment, "this release's")
+    previous, _previous_service = _render(update, previous_args, environment, "the running container's")
+    image = service.get("image")
+    if not image:
+        raise up.UpdateError(f"this release's {PG_SERVICE} definition names no image (docker compose config); "
+                             "check the stack's override files, then rerun. Nothing was changed", 2)
+    _check_mounts(running, rendered, service, previous)
+    pgdata = _pgdata(config.get("Env"))
     if not pgdata:
         raise up.UpdateError(f"{up.PG_CONTAINER} does not name its data directory (PGDATA); this update cannot "
                              "check the new definition can start on it. Nothing was changed", 2)
+    environment_set = service.get("environment") if isinstance(service.get("environment"), dict) else {}
+    wanted = environment_set.get("PGDATA")
+    if wanted:
+        _check_pgdata(str(wanted), pgdata, "set by its definition")
     user = str(service.get("user") or "")
     account = user.split(":", 1)[0]
     if account and account not in ("0", "root"):
@@ -224,13 +252,43 @@ def plan(update, project: str, env_files, environment: dict, target: str) -> Pla
                              "pseudolife-mcp update. Nothing was changed", 2)
     return Plan(container_id=str(running.get("Id") or ""), image_id=str(running.get("Image") or ""), image=image,
                 user=user, pgdata=pgdata, identity=identity, release_args=release_args,
-                previous_args=previous_args, environment=environment)
+                previous_args=previous_args, environment=environment, pgdata_from_image=not wanted)
 
 
-def _check_mounts(running: dict, rendered: dict, service: dict) -> None:
-    """Every persistent mount the running container has must come back from
-    the same source at the same place: a changed volume name would start a
-    healthy PostgreSQL on other (or empty) data."""
+def _render(update, args: list[str], environment: dict, whose: str) -> tuple[dict, dict]:
+    code, out = up.run_cli([update.docker, "compose", *args, "config", "--format", "json"],
+                           timeout=60, env=environment, stdout_only=True)
+    try:
+        rendered = json.loads(out) if code == 0 else None
+        service = rendered["services"][PG_SERVICE]
+        if not isinstance(service, dict):
+            raise TypeError
+    except (ValueError, KeyError, TypeError):
+        # Compose errors can carry interpolated credentials: never print them.
+        raise up.UpdateError(f"cannot render {whose} {PG_SERVICE} definition (docker compose config); check "
+                             "the stack's env file and override files, then rerun. Nothing was changed", 2) from None
+    return rendered, service
+
+
+def _pgdata(env) -> str:
+    return next((e.split("=", 1)[1] for e in env or [] if isinstance(e, str) and e.startswith("PGDATA=")), "")
+
+
+def _check_pgdata(wanted: str, pgdata: str, source: str) -> None:
+    """PostgreSQL initialises an empty cluster in a data directory that has
+    none, inside the same volume, while the old directory keeps the old
+    cluster: a different PGDATA is refused before anything changes."""
+    if wanted.rstrip("/") != pgdata.rstrip("/"):
+        raise up.UpdateError(
+            f"this release's {PG_SERVICE} definition runs PostgreSQL on the data directory {wanted} (PGDATA, "
+            f"{source}), but the bank's cluster is in {pgdata}; recreating it would start PostgreSQL on a new, "
+            f"empty cluster. Nothing was changed. Set PGDATA: {pgdata} for {PG_SERVICE} in the stack's override "
+            "file (or remove the override that moves it), then rerun pseudolife-mcp update", 2)
+
+
+def _mounts(rendered: dict, service: dict) -> dict:
+    """``{target: (type, source)}`` as Compose renders the service, a named
+    volume by its real name."""
     names = {key: (value or {}).get("name") or key for key, value in (rendered.get("volumes") or {}).items()}
     planned = {}
     for volume in service.get("volumes") or []:
@@ -238,6 +296,24 @@ def _check_mounts(running: dict, rendered: dict, service: dict) -> None:
             source = volume.get("source")
             planned[volume["target"]] = (volume.get("type"), names.get(source, source) if volume.get("type") == "volume"
                                          else source)
+    return planned
+
+
+def _check_mounts(running: dict, rendered: dict, service: dict, previous: dict) -> None:
+    """Every persistent mount the running container has must come back from
+    the same source at the same place: a changed volume name, or a bind from
+    another host directory (a copied cluster keeps its system identifier, so
+    the check after the recreate cannot tell), would start a healthy
+    PostgreSQL on other (or empty) data.
+
+    A volume is compared by name, which inspect reports as Compose created
+    it. A bind is compared Compose against Compose: the release's rendering
+    against the rendering of the files the container was created from, which
+    :func:`plan` has checked still hash to its label. Inspect's
+    ``Mounts[].Source`` is never compared: Docker Desktop can report it
+    translated (``/run/desktop/mnt/host/c/...``), not as Compose spelled it."""
+    planned = _mounts(rendered, service)
+    before = _mounts(previous, (previous.get("services") or {}).get(PG_SERVICE) or {})
     for mount in running.get("Mounts") or []:
         kind, target = mount.get("Type"), mount.get("Destination")
         if kind == "volume":
@@ -249,12 +325,20 @@ def _check_mounts(running: dict, rendered: dict, service: dict) -> None:
         if kind == "volume" and re.fullmatch(r"[0-9a-f]{64}", source or "") and target not in planned:
             continue        # an image VOLUME the named mount above it covers
         want = planned.get(target)
-        if want is None or want[0] != kind or (kind == "volume" and want[1] != source):
+        had = before.get(target)
+        if kind == "bind" and had is not None and had[0] == "bind":
+            source = had[1]     # the running bind as Compose spells it
+        if (want is None or want[0] != kind or (kind == "volume" and want[1] != source)
+                or (kind == "bind" and (had is None or had[0] != "bind" or want[1] != had[1]))):
             got = f"{want[0]} {want[1]}" if want else "nothing"
+            fix = ("Check PSEUDOLIFE_BANK_VOLUME in the stack's env file (it must name the bank volume)"
+                   if kind == "volume" else
+                   f"Check the host directory the stack's override files bind at {target} (it must be the one the "
+                   "running container uses)")
             raise up.UpdateError(
                 f"this release's {PG_SERVICE} definition mounts {got} at {target}, where the running container has "
-                f"{kind} {source}; recreating it would start PostgreSQL on other data. Nothing was changed. Check "
-                "PSEUDOLIFE_BANK_VOLUME in the stack's env file (it must name the bank volume), then rerun", 2)
+                f"{kind} {source}; recreating it would start PostgreSQL on other data. Nothing was changed. "
+                f"{fix}, then rerun", 2)
 
 
 def _identity(update, pgdata: str) -> str:
@@ -297,20 +381,61 @@ def _compose_line(args: list[str], tail: str) -> str:
     return f"docker compose {shown} {tail}"
 
 
-def apply(update, p: Plan) -> None:
-    """After the backup. Raises ``UpdateError`` with the cause; PostgreSQL is
-    left running on its previous container unless the restore failed too,
-    which the error then says with the command that restores it."""
-    container, status, _health = _state(update)
-    if container != p.container_id or status != "running":
-        raise up.UpdateError(f"{up.PG_CONTAINER} changed during the backup (it is now {status or 'gone'}); "
-                             "rerun pseudolife-mcp update. Nothing was deployed")
+def pull(update, p: Plan) -> None:
+    """Before the backup, beside the daemon image pull: nothing on the host
+    changes, so a failure or refusal here leaves everything as it was, and
+    nothing slow sits between an unattended run's board re-check (after the
+    backup) and the recreate. When the definition leaves PGDATA to the image,
+    the pulled image's default is compared with the running cluster's; an
+    image whose environment cannot be read leaves that to the check after
+    the recreate, which reads the new container's own PGDATA."""
     update.step(f"pulling {p.image} (this release's PostgreSQL image)...")
     code, out = _docker(update, "pull", p.image, timeout=7200, stream=not update.o.as_json)
     if code != 0:
         raise up.UpdateError(f"docker pull {p.image} failed" + (f" ({up._last_line(out)})" if out.strip() else "")
                              + "; nothing was changed. Check this host reaches ghcr.io, then rerun "
                                "pseudolife-mcp update")
+    if not p.pgdata_from_image:
+        return
+    code, out = _docker(update, "image", "inspect", "-f", "{{json .Config.Env}}", p.image, timeout=60)
+    try:
+        env = json.loads(out.strip().splitlines()[-1]) if code == 0 and out.strip() else []
+    except ValueError:
+        env = []
+    default = _pgdata(env if isinstance(env, list) else [])
+    if default:
+        _check_pgdata(default, p.pgdata, f"{p.image}'s default")
+
+
+def _verify_cluster(update, p: Plan) -> str:
+    """'' when the container now running serves the bank's cluster: the
+    identifier in the control file of the data directory it names itself,
+    since a different PGDATA in the same volume starts an empty cluster
+    while the old directory still holds the old identifier."""
+    code, out = _docker(update, "inspect", "-f", "{{json .}}", up.PG_CONTAINER, timeout=60)
+    try:
+        now = json.loads(out.strip().splitlines()[-1]) if code == 0 and out.strip() else {}
+    except ValueError:
+        now = {}
+    pgdata = _pgdata(((now if isinstance(now, dict) else {}).get("Config") or {}).get("Env"))
+    if not pgdata:
+        return "its data directory (PGDATA) could not be read"
+    if pgdata.rstrip("/") != p.pgdata.rstrip("/"):
+        return f"it runs PostgreSQL on {pgdata}, not {p.pgdata} where the bank's cluster is"
+    if _identity(update, pgdata) != p.identity:
+        return "it came up on a different cluster than the one it replaced"
+    return ""
+
+
+def apply(update, p: Plan) -> None:
+    """After the backup (and :func:`pull` before it). Raises ``UpdateError``
+    with the cause; PostgreSQL is left running on its previous container
+    unless the restore failed too, which the error then says with the
+    command that restores it."""
+    container, status, _health = _state(update)
+    if container != p.container_id or status != "running":
+        raise up.UpdateError(f"{up.PG_CONTAINER} changed during the backup (it is now {status or 'gone'}); "
+                             "rerun pseudolife-mcp update. Nothing was deployed")
     repository, _, tag = p.image.rpartition(":")
     if not repository or "/" in tag:
         repository, tag = p.image, "latest"
@@ -344,8 +469,8 @@ def apply(update, p: Plan) -> None:
     why = (f"docker compose up failed" + (f" ({up._last_line(out)})" if out.strip() else "")) if code else ""
     if not why:
         why = _wait_healthy(update, p.container_id)
-    if not why and _identity(update, p.pgdata) != p.identity:
-        why = "it came up on a different cluster than the one it replaced"
+    if not why:
+        why = _verify_cluster(update, p)
     if not why:
         update.step("PostgreSQL is healthy on this release's definition (same cluster)")
         # Added to the daemon's rollback text once the daemon step writes it.
@@ -362,8 +487,8 @@ def apply(update, p: Plan) -> None:
     back = (f"docker compose up failed" + (f" ({up._last_line(out)})" if out.strip() else "")) if code else ""
     if not back:
         back = _wait_healthy(update, _new_id)
-    if not back and _identity(update, p.pgdata) != p.identity:
-        back = "it came up on a different cluster"
+    if not back:
+        back = _verify_cluster(update, p)
     if back:
         raise up.UpdateError(
             f"PostgreSQL did not start on this release's definition ({why}), and restoring its previous container "

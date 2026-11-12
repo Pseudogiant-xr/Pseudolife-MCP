@@ -899,6 +899,10 @@ class ReleaseEngineUpdate:
             # Before provisioning: a configuration Rust refuses downloads no models.
             self.check_config(image, config)
             self.provision_models(image, config)
+        if postgres is not None:
+            # Before the backup, as in update_cli.deploy_release: the board
+            # re-check below stays the last thing before the recreate.
+            update_postgres.pull(u, postgres)
         # A backup changes nothing on the host: a refused one still lets a
         # defaulted move fall back to the ordinary update.
         self.backup(context["checkout"])

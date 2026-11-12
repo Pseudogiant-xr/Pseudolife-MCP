@@ -9,13 +9,20 @@
   against `docker compose config --hash` for the service under the release's
   files, with the stack's env file and override files), so a host already in
   line changes nothing and says so in one line. Before anything changes it
-  checks that the new definition mounts the same bank volume at the same
-  place and that the data directory is owned by the account it runs
-  PostgreSQL as, and refuses with the fix if not.
-- After the bank backup it pulls the release's PostgreSQL image, tags the
-  running one for rollback, recreates only that service and waits until it
-  is healthy on the same cluster (the control file's system identifier)
-  before the daemon moves. If the new container does not come up, update
+  checks that the new definition mounts the same bank volume, or the same
+  bind-mounted host directory, at the same place, runs PostgreSQL on the
+  same data directory (`PGDATA`, from the definition or the release image's
+  default) and that the data directory is owned by the account it runs
+  PostgreSQL as, and refuses with the fix if not. When the files the
+  container was created from no longer render the definition it runs (edited
+  since, or another env file), a restore could not bring it back, so it is
+  left as it is with one line naming the command that brings it in line.
+- It pulls the release's PostgreSQL image beside the daemon's, before the
+  bank backup, so an unattended run's board check after the backup stays the
+  last thing before anything is recreated. After the backup it tags the
+  running image for rollback, recreates only that service and waits until it
+  is healthy on the same cluster (the system identifier in the data
+  directory the new container itself names) before the daemon moves. If the new container does not come up, update
   recreates the previous one from its own files and image, waits for it to be
   healthy and fails with the cause; the daemon is not touched. It never runs
   `down`, removes a volume or changes ownership.

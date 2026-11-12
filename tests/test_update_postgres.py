@@ -24,37 +24,62 @@ IDENTITY = "7431000000000000001"
 
 
 class Postgres:
-    """The PostgreSQL container and what Compose does to it."""
+    """The PostgreSQL container and what Compose does to it.
+
+    Clusters live on the bank volume, keyed by data directory, so a container
+    started with another PGDATA finds another (or no) cluster there, and the
+    old directory keeps answering with the old identifier. Compose's config
+    hash is keyed by the files it renders: the labelled files give
+    ``previous_hash`` (the label's own value unless a test changes the files
+    after the container was created), any other set the release's."""
 
     def __init__(self, world: World, ops: Path):
         self.world = world
         self.ops = ops
         self.exists = True
+        self.env = ["PG_MAJOR=18", "PGDATA=/var/lib/postgresql/18/docker"]
         self.container = {"Id": "pg-old", "Image": "sha256:pg-old", "status": "running", "health": "healthy",
-                          "identity": IDENTITY}
+                          "env": self.env}
+        self.clusters = {"/var/lib/postgresql/18/docker": IDENTITY}
         self.labels = {"com.docker.compose.project": "pseudolife-mcp",
                        "com.docker.compose.service": "pseudolife-pg",
                        "com.docker.compose.config-hash": "a" * 64,
                        "com.docker.compose.project.config_files": str(ops / "docker-compose.yml"),
                        "com.docker.compose.project.working_dir": str(ops),
                        "com.docker.compose.project.environment_file": str(ops / ".env")}
-        self.env = ["PG_MAJOR=18", "PGDATA=/var/lib/postgresql/18/docker"]
         self.mounts = [{"Type": "volume", "Name": "pseudolife-mcp-bank", "Destination": "/var/lib/postgresql"}]
         self.release_hash = "b" * 64
+        self.previous_hash: str | None = None       # None: the label's value
         self.volume_name = "pseudolife-mcp-bank"
+        # What each side's files render for the data mount, and PGDATA.
+        self.release_volumes = [{"type": "volume", "source": "pseudolife_pgdata", "target": "/var/lib/postgresql"}]
+        self.previous_volumes: list | None = None   # None: the same as the release's
+        self.release_environment: dict = {}
+        self.image_env = ["PG_MAJOR=18", "PGDATA=/var/lib/postgresql/18/docker"]
         self.owner = "999"
         self.pull_rc = 0
-        self.new = {"up_rc": 0, "status": "running", "health": "healthy", "identity": IDENTITY}
-        self.restore = {"up_rc": 0, "status": "running", "health": "healthy", "identity": IDENTITY}
+        self.on_pull = None
+        # What a recreate starts: its environment and, for a test that moves
+        # the bank, the identifier its data directory then holds.
+        self.new = {"up_rc": 0, "status": "running", "health": "healthy", "env": None, "identity": None}
+        self.restore = {"up_rc": 0, "status": "running", "health": "healthy", "env": None, "identity": None}
         self.calls: list[list[str]] = []
         self.counter = 0
 
-    def config(self) -> dict:
+    def _files(self, a: list[str]) -> list[str]:
+        return [a[i + 1] for i, v in enumerate(a[:-1]) if v == "-f"]
+
+    def _previous(self, a: list[str]) -> bool:
+        labelled = [f for f in self.labels.get("com.docker.compose.project.config_files", "").split(",") if f]
+        return self._files(a) == labelled
+
+    def config(self, previous: bool = False) -> dict:
+        volumes = self.previous_volumes if previous and self.previous_volumes is not None else self.release_volumes
         return {"name": "pseudolife-mcp",
                 "services": {up.DAEMON_SERVICE: {"environment": {}},
                              "pseudolife-pg": {"image": RELEASE_IMAGE, "user": "999:999",
-                                               "volumes": [{"type": "volume", "source": "pseudolife_pgdata",
-                                                            "target": "/var/lib/postgresql"}]}},
+                                               "environment": {} if previous else dict(self.release_environment),
+                                               "volumes": volumes}},
                 "volumes": {"pseudolife_pgdata": {"name": self.volume_name, "external": True}}}
 
     def docker(self, a: list[str]):
@@ -66,25 +91,32 @@ class Postgres:
             # from it) plus what a real inspect also carries.
             _code, base = self.world.docker(a)
             return 0, json.dumps({**json.loads(base), "Id": c["Id"], "Image": c["Image"],
-                                  "Config": {"Labels": self.labels, "Env": self.env}, "Mounts": self.mounts})
+                                  "Config": {"Labels": self.labels, "Env": c["env"]}, "Mounts": self.mounts})
         if a[:2] == ["inspect", "-f"] and a[-1] == PG and "State.Status" in a[2]:
             return 0, f"{c['Id']}|{c['status']}|{c['health']}\n"
+        if a[:2] == ["image", "inspect"] and a[-1] == RELEASE_IMAGE and "Config.Env" in a[3]:
+            return 0, json.dumps(self.image_env) + "\n"
         if a[:2] == ["exec", PG]:
             if "stat" in a:
                 return 0, self.owner + "\n"
             if "pg_controldata" in " ".join(a):
-                return 0, c["identity"] + "\n"
+                identity = c.get("identity") or self.clusters.get(a[-1], "")
+                return 0, identity + "\n" if identity else ""
             if "pg_isready" in a:
                 return 0, ""
             return None         # the backup and disk probes: the base world's
         if a[:2] == ["logs", "--tail"]:
             return 0, "FATAL:  data directory has wrong ownership\n"
         if a[:1] == ["pull"] and a[-1] == RELEASE_IMAGE:
+            if self.on_pull:
+                self.on_pull()
             return self.pull_rc, "" if self.pull_rc == 0 else "Error response from daemon: Get https://ghcr.io: timeout"
         if a[:1] == ["compose"] and "--hash" in a:
+            if self._previous(a):
+                return 0, f"pseudolife-pg {self.previous_hash or self.labels['com.docker.compose.config-hash']}\n"
             return 0, f"pseudolife-pg {self.release_hash}\n"
         if a[:1] == ["compose"] and "config" in a:
-            return 0, json.dumps(self.config())
+            return 0, json.dumps(self.config(previous=self._previous(a)))
         if a[:1] == ["compose"] and a[-1] == "pseudolife-pg" and "up" in a:
             restoring = any("docker-compose.rollback-pg-" in v for v in a)
             outcome = self.restore if restoring else self.new
@@ -94,6 +126,7 @@ class Postgres:
             self.container = {"Id": f"pg-{'restored' if restoring else 'new'}-{self.counter}",
                               "Image": "sha256:pg-old" if restoring else "sha256:pg-new",
                               "status": outcome["status"], "health": outcome["health"],
+                              "env": outcome["env"] or (self.env if restoring else self.image_env),
                               "identity": outcome["identity"]}
             return 0, ""
         return None
@@ -155,7 +188,7 @@ def _never_destructive(calls) -> None:
         assert "chown" not in words, c
 
 
-def test_an_out_of_line_postgres_is_pulled_and_recreated_after_the_backup_and_before_the_daemon(
+def test_an_out_of_line_postgres_is_pulled_before_the_backup_and_recreated_before_the_daemon(
         pg, world, clients, tmp_path, capsys):
     override = pg.ops / "docker-compose.override.yml"
     override.write_text("services: {}\n", encoding="utf-8")
@@ -169,7 +202,9 @@ def test_an_out_of_line_postgres_is_pulled_and_recreated_after_the_backup_and_be
     pg_up = _index(calls, _pg_up)
     daemon_tag = _index(calls, lambda c: c.startswith("tag sha256:running "))
     daemon_up = _index(calls, _daemon_up)
-    assert daemon_pull < dump < pg_pull < pg_tag < pg_up < daemon_tag < daemon_up, calls
+    # Both pulls before the backup: nothing slow sits between the unattended
+    # run's board re-check (after the backup) and the recreate.
+    assert daemon_pull < pg_pull < dump < pg_tag < pg_up < daemon_tag < daemon_up, calls
     release = _release_dir(tmp_path)
     assert calls[pg_up].startswith(f"compose -p pseudolife-mcp --project-directory {pg.ops} --env-file {pg.ops / '.env'} "
                                    f"-f {release / 'docker-compose.yml'} -f {override} "
@@ -206,7 +241,7 @@ def test_a_failed_postgres_pull_changes_nothing(pg, world, clients, capsys):
     pg.pull_rc = 1
     assert up.main(["--health-delay-ms", "1"]) == 1
     calls = _calls(world)
-    assert not any(_pg_up(c) or _daemon_up(c) or c.startswith("tag ") for c in calls)
+    assert not any(_pg_up(c) or _daemon_up(c) or c.startswith("tag ") or "pg_dump" in c for c in calls)
     assert pg.container["Id"] == "pg-old"
     err = capsys.readouterr().err
     assert f"docker pull {RELEASE_IMAGE} failed" in err and "nothing was changed" in err and "ghcr.io" in err
@@ -217,7 +252,7 @@ def test_a_failed_recreate_restores_the_previous_container_and_fails_the_update(
     if failure == "up":
         pg.new["up_rc"] = 1
     elif failure == "other-cluster":
-        pg.new["identity"] = "9999"
+        pg.new["identity"] = "9999"         # the same path on other data
     else:
         pg.new.update(status="running" if failure == "unhealthy" else "exited",
                       health="unhealthy" if failure == "unhealthy" else "")
@@ -319,7 +354,7 @@ def test_the_daemon_already_current_still_brings_postgres_in_line_after_a_backup
     assert up.main([]) == 0
     calls = _calls(world)
     dump = _index(calls, lambda c: "pg_dump" in c)
-    assert dump < calls.index(f"pull {RELEASE_IMAGE}") < _index(calls, _pg_up)
+    assert calls.index(f"pull {RELEASE_IMAGE}") < dump < _index(calls, _pg_up)
     assert not any(_daemon_up(c) or c.startswith(f"pull {up.GHCR_IMAGE}:") for c in calls)
     out = capsys.readouterr().out
     assert "the daemon already runs 0.15.1; nothing to do" in out
@@ -411,6 +446,7 @@ def test_the_engine_release_path_plans_before_the_pull_and_applies_after_the_bac
         return "the plan"
 
     monkeypatch.setattr(update_postgres, "plan", plan)
+    monkeypatch.setattr(update_postgres, "pull", lambda u, p: events.append(f"pull {p}"))
     monkeypatch.setattr(update_postgres, "apply", lambda u, p: events.append(f"apply {p}"))
     if refused:
         with pytest.raises(up.UpdateError, match="refused"):
@@ -419,7 +455,9 @@ def test_the_engine_release_path_plans_before_the_pull_and_applies_after_the_bac
     else:
         with pytest.raises(Stop):
             release.run(lambda: events.append("before_recreate"))
-        assert events == ["plan", "pull", "backup", "before_recreate", "apply the plan", "daemon"]
+        # Both pulls before the backup, so the board re-check (before_recreate)
+        # is immediately followed by the PostgreSQL recreate.
+        assert events == ["plan", "pull", "pull the plan", "backup", "before_recreate", "apply the plan", "daemon"]
 
 
 def _engine_config() -> dict:
@@ -502,6 +540,119 @@ def test_a_current_daemon_that_never_recovers_fails_with_the_logs_to_read(pg, wo
     assert f"docker logs {up.DAEMON_CONTAINER}" in err
 
 
+# ── the cluster the new container serves (PGDATA) ──────────────────────────
+
+OTHER_PGDATA = "/var/lib/postgresql/18/other"
+
+
+def test_a_definition_that_sets_another_data_directory_is_refused_before_anything_changes(pg, world, clients,
+                                                                                         capsys):
+    # An override setting PGDATA inside the same volume: PostgreSQL would
+    # initialise an empty cluster there while the old directory still holds
+    # the old identifier.
+    pg.release_environment = {"PGDATA": OTHER_PGDATA}
+    assert up.main(["--health-delay-ms", "1"]) == 2
+    calls = _calls(world)
+    assert not any(c.startswith(("pull ", "tag ")) or "pg_dump" in c or " up " in c for c in calls), calls
+    err = capsys.readouterr().err
+    assert f"runs PostgreSQL on the data directory {OTHER_PGDATA} (PGDATA, set by its definition)" in err
+    assert "/var/lib/postgresql/18/docker" in err and "Nothing was changed" in err
+
+
+def test_an_image_whose_default_data_directory_differs_is_refused_after_the_pull_and_before_the_backup(
+        pg, world, clients, capsys):
+    pg.image_env = ["PG_MAJOR=18", f"PGDATA={OTHER_PGDATA}"]
+    assert up.main(["--health-delay-ms", "1"]) == 2
+    calls = _calls(world)
+    assert f"pull {RELEASE_IMAGE}" in calls
+    assert not any(c.startswith("tag ") or "pg_dump" in c or " up " in c for c in calls), calls
+    err = capsys.readouterr().err
+    assert f"(PGDATA, {RELEASE_IMAGE}'s default)" in err and "Nothing was changed" in err
+
+
+def test_the_same_data_directory_spelled_by_the_definition_is_accepted(pg, world, clients):
+    # Near miss: a definition that names the directory the cluster is in.
+    pg.release_environment = {"PGDATA": "/var/lib/postgresql/18/docker"}
+    assert up.main(["--health-delay-ms", "1"]) == 0
+    assert pg.container["Id"].startswith("pg-new")
+
+
+def test_a_new_container_on_another_data_directory_is_restored_not_declared_healthy(pg, world, clients, capsys):
+    # Neither the definition nor the image says beforehand (the image's
+    # environment is unreadable): the check after the recreate reads the new
+    # container's own PGDATA, where an empty cluster was initialised, instead
+    # of the old directory, which still holds the old identifier.
+    pg.image_env = []
+    pg.clusters[OTHER_PGDATA] = "7431999999999999999"
+    pg.new["env"] = ["PG_MAJOR=18", f"PGDATA={OTHER_PGDATA}"]
+    assert up.main(["--health-delay-ms", "1"]) == 1
+    assert pg.container["Id"].startswith("pg-restored")
+    assert not any(_daemon_up(c) for c in _calls(world))
+    err = capsys.readouterr().err
+    assert f"it runs PostgreSQL on {OTHER_PGDATA}, not /var/lib/postgresql/18/docker" in err
+    assert "its previous container is restored and healthy" in err
+
+
+# ── the definition a restore would apply ───────────────────────────────────
+
+def test_files_that_no_longer_render_the_running_definition_leave_postgres_alone(pg, world, clients, capsys):
+    # The clone's compose file was edited after PostgreSQL was created: a
+    # restore from it would not bring back the container that was running.
+    pg.previous_hash = "e" * 64
+    assert up.main(["--health-delay-ms", "1"]) == 0
+    calls = _calls(world)
+    assert f"pull {RELEASE_IMAGE}" not in calls and not any(_pg_up(c) or c.startswith("tag sha256:pg-old")
+                                                           for c in calls)
+    assert any(_daemon_up(c) for c in calls)
+    lines = [line for line in capsys.readouterr().out.splitlines() if "PostgreSQL container left as it is" in line]
+    assert len(lines) == 1
+    assert "no longer render the definition it was created with" in lines[0]
+    assert f"-f {pg.ops / 'docker-compose.yml'} up -d --no-deps --no-build pseudolife-pg" in lines[0]
+
+
+def test_unchanged_files_render_the_running_definition_and_the_update_proceeds(pg, world, clients):
+    # Near miss: the labelled files hash to the container's own label.
+    pg.previous_hash = pg.labels["com.docker.compose.config-hash"]
+    assert up.main(["--health-delay-ms", "1"]) == 0
+    calls = _calls(world)
+    previous = [c for c in calls if "--hash" in c and "compose/0.15.1-" not in c.replace("\\", "/")]
+    assert previous, calls
+    assert pg.container["Id"].startswith("pg-new")
+
+
+# ── bind-mounted banks ─────────────────────────────────────────────────────
+
+# Docker Desktop reports a bind's source translated; Compose renders the host
+# path. Each side's own spelling of one directory.
+BANK_DIR = r"D:\stacks\pseudolife-bank"
+TRANSLATED = "/run/desktop/mnt/host/d/stacks/pseudolife-bank"
+
+
+def _bind(pg, running: str, previous: str, release: str) -> None:
+    pg.mounts = [{"Type": "bind", "Source": running, "Destination": "/var/lib/postgresql"}]
+    pg.previous_volumes = [{"type": "bind", "source": previous, "target": "/var/lib/postgresql", "bind": {}}]
+    pg.release_volumes = [{"type": "bind", "source": release, "target": "/var/lib/postgresql", "bind": {}}]
+
+
+def test_a_bind_mounted_bank_moving_to_another_directory_is_refused(pg, world, clients, capsys):
+    _bind(pg, TRANSLATED, BANK_DIR, BANK_DIR + "-copy")
+    assert up.main(["--health-delay-ms", "1"]) == 2
+    calls = _calls(world)
+    assert not any(c.startswith(("pull ", "tag ")) or "pg_dump" in c or " up " in c for c in calls), calls
+    err = capsys.readouterr().err
+    assert f"mounts bind {BANK_DIR}-copy at /var/lib/postgresql" in err
+    assert "would start PostgreSQL on other data" in err and "Nothing was changed" in err
+
+
+@pytest.mark.parametrize("running", [TRANSLATED, BANK_DIR])
+def test_the_same_bind_directory_spelled_by_each_side_is_accepted(pg, world, clients, running):
+    # Near miss: inspect's translated (or verbatim) source and Compose's host
+    # path name one directory; the comparison is Compose against Compose.
+    _bind(pg, running, BANK_DIR, BANK_DIR)
+    assert up.main(["--health-delay-ms", "1"]) == 0
+    assert pg.container["Id"].startswith("pg-new")
+
+
 # ── unattended ──────────────────────────────────────────────────────────────
 
 @pytest.fixture
@@ -528,9 +679,23 @@ def test_an_unattended_hold_off_after_the_backup_leaves_postgres_alone(unattende
     unattended["activity"] = [([], 0, ""), ([{"agent_id": "a1", "label": "claude-code", "task": "x"}], 0, "")]
     assert up.main(["--unattended", "--health-delay-ms", "1"]) == 4
     calls = _calls(world)
-    assert any("pg_dump" in c for c in calls)
-    assert f"pull {RELEASE_IMAGE}" not in calls
+    assert calls.index(f"pull {RELEASE_IMAGE}") < _index(calls, lambda c: "pg_dump" in c)
     assert not any(_pg_up(c) or _daemon_up(c) or c.startswith("tag ") for c in calls)
+    assert "held off after the backup" in unattended["notices"][-1]
+
+
+def test_an_unattended_session_that_starts_during_the_postgres_pull_holds_the_recreate_off(
+        unattended, pg, world, clients):
+    # The board re-check must be the last thing before PostgreSQL moves: a
+    # session that starts while its image downloads keeps its services.
+    def session_starts():
+        unattended["activity"][:] = [([{"agent_id": "a1", "label": "claude-code", "task": "x"}], 0, "")]
+
+    pg.on_pull = session_starts
+    assert up.main(["--unattended", "--health-delay-ms", "1"]) == 4
+    calls = _calls(world)
+    assert not any(_pg_up(c) or _daemon_up(c) or c.startswith("tag ") for c in calls), calls
+    assert pg.container["Id"] == "pg-old"
     assert "held off after the backup" in unattended["notices"][-1]
 
 

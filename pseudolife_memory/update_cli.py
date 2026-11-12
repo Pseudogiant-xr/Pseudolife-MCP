@@ -1681,7 +1681,7 @@ class Update:
                               "move this host to the default engine")
             self.step(f"the daemon already runs {target}; nothing to do (--reinstall to recreate it anyway, "
                       f"--clients-only for the shim and plugin)")
-            self.postgres_alone(target)
+            self.postgres_alone(target, before_recreate)
             return
         if self.o.engine or choice == "rust":
             # Engine selection, and every update of a Rust host, record an
@@ -1698,7 +1698,7 @@ class Update:
                           f"update tries again (--engine {selected} keeps it)")
                 if current == target and not self.o.reinstall:
                     self.step(f"the daemon already runs {target}; nothing to do")
-                    self.postgres_alone(target)
+                    self.postgres_alone(target, before_recreate)
                     return
         context = self.compose_context()
         compose = context["args"]
@@ -1717,6 +1717,10 @@ class Update:
         if code != 0:
             raise UpdateError(f"docker pull {image} failed" + (f" ({_last_line(out)})" if out.strip() else "")
                               + f"; nothing was changed. Is {target} a published release?")
+        if postgres is not None:
+            # Beside the daemon's pull, before the backup: nothing slow sits
+            # between the board re-check below and the recreate.
+            update_postgres.pull(self, postgres)
         self.backup(context["checkout"])
         if before_recreate is not None:
             # Before the rollback tag moves: a hold-off here leaves only the
@@ -1767,10 +1771,12 @@ class Update:
         return ("the extractor untouched; PostgreSQL was brought in line above" if self.postgres_rollback_lines
                 else "Postgres + extractor untouched")
 
-    def postgres_alone(self, target: str) -> None:
+    def postgres_alone(self, target: str, before_recreate: Callable[[], None] | None = None) -> None:
         """The daemon already runs ``target``: still bring PostgreSQL in line
         (an earlier update predates this step, or refused it for a reason
-        since fixed), backing the bank up first when it differs."""
+        since fixed), backing the bank up first when it differs. An
+        unattended run never reaches this (it stops when the daemon is
+        current), but a ``before_recreate`` it passes still runs last."""
         from pseudolife_memory import update_postgres
         try:
             context = self.compose_context()
@@ -1783,7 +1789,10 @@ class Update:
         if postgres is None:
             return
         self.preflight_disk(data_dir())
+        update_postgres.pull(self, postgres)
         self.backup(context["checkout"])
+        if before_recreate is not None:
+            before_recreate()
         update_postgres.apply(self, postgres)
         self.daemon_after_postgres()
 
