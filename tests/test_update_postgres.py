@@ -593,6 +593,19 @@ def test_a_new_container_on_another_data_directory_is_restored_not_declared_heal
     assert "its previous container is restored and healthy" in err
 
 
+def test_a_restore_on_another_data_directory_is_not_declared_healthy(pg, world, clients, capsys):
+    # The restore is checked the same way: a restored container naming
+    # another PGDATA is a failed restore, with the command that brings the
+    # previous container back.
+    pg.new.update(health="unhealthy")
+    pg.clusters[OTHER_PGDATA] = "7431999999999999999"
+    pg.restore["env"] = ["PG_MAJOR=18", f"PGDATA={OTHER_PGDATA}"]
+    assert up.main(["--health-delay-ms", "1"]) == 1
+    err = capsys.readouterr().err
+    assert "restoring its previous container failed too" in err
+    assert f"it runs PostgreSQL on {OTHER_PGDATA}" in err
+
+
 # ── the definition a restore would apply ───────────────────────────────────
 
 def test_files_that_no_longer_render_the_running_definition_leave_postgres_alone(pg, world, clients, capsys):
