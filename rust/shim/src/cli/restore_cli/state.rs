@@ -654,7 +654,7 @@ mod tests {
         buf[136..148].copy_from_slice(b"00000000000\0");
         buf[156] = kind;
         buf[157..157 + linkname.len()].copy_from_slice(linkname);
-        buf[257..265].copy_from_slice(b"ustar\000");
+        buf[257..265].copy_from_slice(b"ustar\x0000");
         buf[148..156].copy_from_slice(b"        ");
         let sum: u32 = buf.iter().map(|b| u32::from(*b)).sum();
         buf[148..156].copy_from_slice(format!("{sum:06o}\0 ").as_bytes());
