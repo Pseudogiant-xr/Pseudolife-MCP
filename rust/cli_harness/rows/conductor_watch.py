@@ -138,12 +138,15 @@ def _agent_file(body: bytes | None = None, kind: str = "file"):
     return setup
 
 
-def _steps(*steps):
+def _steps(*steps, keep: bool = False):
+    """Run ``steps``; ``keep`` (deferral cases) snapshots the home they leave,
+    which the deferral rule expects the candidate to leave untouched."""
     def setup(arm):
         for step in steps:
             step(arm)
-        arm.state["setup_files"] = core.snapshot(arm.home)
-        arm.state["setup_modes"] = core.modes(arm.home)
+        if keep:
+            arm.state["setup_files"] = core.snapshot(arm.home)
+            arm.state["setup_modes"] = core.modes(arm.home)
     return setup
 
 
@@ -154,8 +157,8 @@ def _after(arm, obs):
     for path, data in arm.state.get("live_records", {}).items():
         assert path.read_bytes() == data, f"{path} changed"
         path.unlink()
-        arm.state["setup_files"].pop(path.relative_to(arm.home).as_posix(), None)
-        arm.state["setup_modes"].pop(path.relative_to(arm.home).as_posix(), None)
+        for field in ("setup_files", "setup_modes"):
+            arm.state.get(field, {}).pop(path.relative_to(arm.home).as_posix(), None)
     if "setup_files" in arm.state:
         obs["setup_files"] = arm.state["setup_files"]
         obs["setup_modes"] = arm.state["setup_modes"]
@@ -170,7 +173,8 @@ def case(case_id: str, argv: list[str], *, env=None, steps=(), rules=(), mode="c
                    "PSEUDOLIFE_DIGEST_DIR": None, "PSEUDOLIFE_MCP_TOKEN": None,
                    "PSEUDOLIFE_MCP_TOKEN_FILE": None, **(env or {})}
     return Case(case_id, [mode, *argv], env=environment,
-                setup=_steps(lambda arm: (arm.home / "nobin").mkdir(), *steps),
+                setup=_steps(lambda arm: (arm.home / "nobin").mkdir(), *steps,
+                             keep="conductor-watch-deferral" in rules),
                 after=_after, rules=rules, platforms=platforms, programs=PROGRAMS)
 
 
