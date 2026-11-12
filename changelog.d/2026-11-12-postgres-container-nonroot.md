@@ -20,7 +20,7 @@
   dropped, and the shadow role script carries no password (psql reads it from
   the environment). Previously a private backup copied from a Linux host
   would have been unreadable to a non-root container.
-- Existing hosts pick the settings up the next time the installer runs
-  (`docker compose up -d` recreates the PostgreSQL container); `pseudolife-mcp
-  update` still recreates only the daemon, and every tool works with either
-  container.
+- Existing hosts pick the settings up on their next `pseudolife-mcp update`,
+  which now brings the PostgreSQL container in line with the release (see the
+  entry on update applying PostgreSQL changes), or when the installer runs;
+  every tool works with either container meanwhile.

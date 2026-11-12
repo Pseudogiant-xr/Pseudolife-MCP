@@ -788,6 +788,9 @@ class ReleaseEngineUpdate:
         except (ValueError, IndexError, TypeError, KeyError) as exc:
             raise up.UpdateError("cannot inspect the daemon's Compose project; start it and retry; nothing was changed", 2) from exc
         token, running_token = self.verify_project(config, running)
+        from pseudolife_memory import update_postgres
+        # Read-only, before anything changes (update_cli.deploy_release).
+        postgres = update_postgres.plan(u, context["project"], context["env_file"], environment, self.target)
         before = u.daemon_health() or {}
         # The running daemon still holds its own bearer (--allow-auth-change
         # replaces it); the configured one is checked after recreation.
@@ -902,6 +905,8 @@ class ReleaseEngineUpdate:
         self.started = True
         if before_recreate is not None:
             before_recreate()
+        if postgres is not None:
+            update_postgres.apply(u, postgres)
         running_id, _ref = u.running_image()
         if not running_id:
             raise up.UpdateError(f"the {up.DAEMON_CONTAINER} container vanished during the backup; nothing was deployed")
@@ -941,7 +946,7 @@ class ReleaseEngineUpdate:
             restore_compose += ["-f", context["rust_overlay"]]
         u.rollback_lines = [*rollback_commands(restore_compose, context["env_file"], rollback_file, release_accepted(),
                                                self.target),
-                            *u._schema_rollback_note(None)]
+                            *u._schema_rollback_note(None), *u.postgres_rollback_lines]
         u.report.rollback = {"tag": rollback, "state": "tagged", "overlay": str(rollback_file)}
         u.prune_rollbacks(context["checkout"], up.GHCR_IMAGE)
         activation = secrets.token_hex(16)
@@ -950,7 +955,7 @@ class ReleaseEngineUpdate:
         candidate = directory / f"docker-compose.engine-candidate-{activation}.json"
         try:
             _write_overlay(candidate, service)
-            u.step(f"recreating the daemon container on {image} (Postgres + extractor untouched)...")
+            u.step(f"recreating the daemon container on {image} ({u.untouched_services()})...")
             code, out = self.command(["compose", *compose, "-f", str(candidate), "up", "-d", "--no-deps", "--no-build",
                                       up.DAEMON_SERVICE], env=environment, timeout=3600, stream=not o.as_json)
             if code:

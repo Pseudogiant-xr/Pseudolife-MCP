@@ -587,6 +587,9 @@ class Update:
         self._shim_printed = False
         self.docker = docker_cmd()
         self.rollback_lines: list[str] = []
+        # Set once this run recreated PostgreSQL (update_postgres.apply):
+        # the command that brings its previous container back.
+        self.postgres_rollback_lines: list[str] = []
         # The bank's schema version on the daemon this run replaces, when
         # /health said; a deploy that moves it changes what a rollback takes.
         self.schema_before: int | None = None
@@ -1678,6 +1681,7 @@ class Update:
                               "move this host to the default engine")
             self.step(f"the daemon already runs {target}; nothing to do (--reinstall to recreate it anyway, "
                       f"--clients-only for the shim and plugin)")
+            self.postgres_alone(target)
             return
         if self.o.engine or choice == "rust":
             # Engine selection, and every update of a Rust host, record an
@@ -1694,6 +1698,7 @@ class Update:
                           f"update tries again (--engine {selected} keeps it)")
                 if current == target and not self.o.reinstall:
                     self.step(f"the daemon already runs {target}; nothing to do")
+                    self.postgres_alone(target)
                     return
         context = self.compose_context()
         compose = context["args"]
@@ -1702,6 +1707,10 @@ class Update:
         self.verify_compose_authentication(compose, environment)
         self._compose_clear_bearers = _env_file_sets_credentials(context["env_file"])
         image = f"{GHCR_IMAGE}:{target}"
+        from pseudolife_memory import update_postgres
+        # Read-only, before anything changes: a PostgreSQL definition that
+        # cannot start on this bank refuses the update here.
+        postgres = update_postgres.plan(self, context["project"], context["env_file"], environment, target)
         self.preflight_disk(data_dir())
         self.step(f"pulling {image}...")
         code, out = run_cli([self.docker, "pull", image], timeout=7200, stream=not self.o.as_json)
@@ -1713,6 +1722,10 @@ class Update:
             # Before the rollback tag moves: a hold-off here leaves only the
             # backup behind, and never counts toward rollback retention.
             before_recreate()
+        if postgres is not None:
+            # After the backup, before the daemon: the new daemon starts
+            # against the PostgreSQL it will run with.
+            update_postgres.apply(self, postgres)
         running_id, ref = self.running_image()
         if not running_id:
             raise UpdateError(f"the {DAEMON_CONTAINER} container vanished during the backup; nothing was deployed")
@@ -1731,8 +1744,9 @@ class Update:
                  f"      (PowerShell: {self._rollback_compose_command(powershell, powershell=True)})"]
         self.tag_rollback(ref or GHCR_IMAGE, None, running_id, source=running_id, rollback=rollback,
                           rollback_lines=lines)
+        self.rollback_lines += self.postgres_rollback_lines
         self.prune_rollbacks(context["checkout"], GHCR_IMAGE)
-        self.step(f"recreating the daemon container on {image} (Postgres + extractor untouched)...")
+        self.step(f"recreating the daemon container on {image} ({self.untouched_services()})...")
         code, out = run_cli([self.docker, "compose", *compose, "up", "-d", "--no-deps", DAEMON_SERVICE],
                             timeout=3600, env=environment,
                             stream=not self.o.as_json)
@@ -1747,6 +1761,29 @@ class Update:
             self.hooks_changed_note(previous_digest, health)
         self.console_notes(health)
         # No cache prune: nothing was built.
+
+    def untouched_services(self) -> str:
+        """What the daemon recreate leaves, for its step line."""
+        return ("the extractor untouched; PostgreSQL was brought in line above" if self.postgres_rollback_lines
+                else "Postgres + extractor untouched")
+
+    def postgres_alone(self, target: str) -> None:
+        """The daemon already runs ``target``: still bring PostgreSQL in line
+        (an earlier update predates this step, or refused it for a reason
+        since fixed), backing the bank up first when it differs."""
+        from pseudolife_memory import update_postgres
+        try:
+            context = self.compose_context()
+        except UpdateError as exc:
+            self.step(f"PostgreSQL container left as it is: {str(exc).split('; ')[0]}")
+            return
+        environment = compose_environment(context["env_file"], {"PSEUDOLIFE_IMAGE_TAG": target})
+        postgres = update_postgres.plan(self, context["project"], context["env_file"], environment, target)
+        if postgres is None:
+            return
+        self.preflight_disk(data_dir())
+        self.backup(context["checkout"])
+        update_postgres.apply(self, postgres)
 
     def image_pin_hint(self, context: dict, target: str) -> None:
         """Compare the manager's persistent image with the release just

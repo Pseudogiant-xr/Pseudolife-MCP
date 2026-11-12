@@ -242,7 +242,9 @@ pseudolife-mcp update --env-file "$HOME/pseudolife-stack/.env"
 ```
 
 It backs up, tags the previous image for rollback, recreates only the daemon,
-checks health, then updates clients. It recognizes the compose project from
+checks health, then updates clients. The PostgreSQL container belongs to the
+stack, so update leaves it as it is and says so; redeploy the stack from the
+release's `ops/docker-compose.stack.yml` to pick up a change to it. It recognizes the compose project from
 container labels when the original compose files exist on the host (for
 example, a plain compose folder or a manager with a shared compose
 directory). Keep that env file available and identical to the manager's
@@ -5283,9 +5285,19 @@ ownership change. The healthcheck calls the server's own `pg_isready` binary
 rather than Debian's Perl wrapper in `/usr/bin`. A data directory bind-mounted
 from the host must be owned by UID 999. The image no longer carries `gosu`:
 a root start (an older Compose file) drops to `postgres` through `setpriv`
-instead. Rerunning the installer applies these settings to an existing
-container; `pseudolife-mcp update` recreates only the daemon, so until then
-the old container keeps its root bootstrap, which every tool still supports.
+instead. On an existing install, `pseudolife-mcp update` applies these
+settings itself: when the PostgreSQL container differs from the release's
+Compose definition (Compose's own configuration hash for the service), it
+checks first that the new definition mounts the same bank volume and that the
+data directory is owned by UID 999, then, after the bank backup, pulls the
+release's PostgreSQL image, recreates that one service and waits for it to be
+healthy on the same cluster before the daemon moves. If the new container does
+not come up, update restores the previous one, waits for it to be healthy and
+fails with the cause. It never runs `down`, removes a volume or changes
+ownership. A container update does not own (another Compose project, a stack
+manager's stack, a database outside Docker) is left as it is, with one line
+saying why; a stack manager's PostgreSQL follows the stack file it is deployed
+from.
 
 ## Experimental agent coordination
 
@@ -9505,7 +9517,7 @@ installer and the session notices print.
 
 | command | what it does |
 |---|---|
-| `pseudolife-mcp update` | Docker tier: pull the daemon image of the newest release on PyPI (`ghcr.io/pseudogiant-xr/pseudolife-daemon-rust:<version>` for the Rust engine, `ghcr.io/pseudogiant-xr/pseudolife-daemon:<version>` for the Python one; a host that never chose an engine moves to Rust, see [Daemon engine](install-and-move.md)), back the bank up, tag the running image `…-pre-update-<stamp>`, recreate only the daemon container, wait for `/health` at that version, then the client side. Pip / lite: upgrade the package where it is installed; restart nothing. |
+| `pseudolife-mcp update` | Docker tier: pull the daemon image of the newest release on PyPI (`ghcr.io/pseudogiant-xr/pseudolife-daemon-rust:<version>` for the Rust engine, `ghcr.io/pseudogiant-xr/pseudolife-daemon:<version>` for the Python one; a host that never chose an engine moves to Rust, see [Daemon engine](install-and-move.md)), back the bank up, bring the PostgreSQL container in line with the release's definition when it differs (pull, recreate that service, wait until it is healthy; the previous one is restored on failure), tag the running image `…-pre-update-<stamp>`, recreate the daemon container, wait for `/health` at that version, then the client side. Pip / lite: upgrade the package where it is installed; restart nothing. |
 | `pseudolife-mcp update --tag 0.15.1` | the same for a pinned release |
 | `pseudolife-mcp update --check` | report only: exit 0 when a newer release exists, 3 when current, 2 when PyPI or the daemon did not answer |
 | `--clients-only` / `--daemon-only` | one half: the shim runtime + plugin cache + Codex step (+ refreshing running saved tunnels), or the daemon; the steps after a newly installed shim runtime run in that runtime ([below](#the-client-steps-after-a-new-shim-runtime)). On a client-only machine (run from a shim runtime, no daemon container here) plain `update` and `--clients-only` both move the clients to the daemon's release; a silent or unversioned endpoint is refused, and `--daemon-only` is refused naming the daemon's host |
@@ -9735,7 +9747,8 @@ The scheduled run applies a new release only when BOTH hold: the daemon's
 `/health`, so installing the timer alone changes nothing), and the agent
 board lists no active session. It then takes the same path as an attended
 `pseudolife-mcp update`: backup (the checkout's script or the built-in
-`pg_dump` + state tar), the rollback tag, recreate only the daemon, wait
+`pg_dump` + state tar), PostgreSQL brought in line with the release's
+definition when it differs, the rollback tag, recreate the daemon, wait
 for `/health` at the new version, then the client side; the board is
 read once more right before the daemon is recreated, since the backup
 can take minutes, and a session that started meanwhile holds the
