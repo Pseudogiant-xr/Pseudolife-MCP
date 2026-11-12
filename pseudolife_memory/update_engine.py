@@ -788,6 +788,9 @@ class ReleaseEngineUpdate:
         except (ValueError, IndexError, TypeError, KeyError) as exc:
             raise up.UpdateError("cannot inspect the daemon's Compose project; start it and retry; nothing was changed", 2) from exc
         token, running_token = self.verify_project(config, running)
+        from pseudolife_memory import update_postgres
+        # Read-only, before anything changes (update_cli.deploy_release).
+        postgres = update_postgres.plan(u, context["project"], context["env_file"], environment, self.target)
         before = u.daemon_health() or {}
         # The running daemon still holds its own bearer (--allow-auth-change
         # replaces it); the configured one is checked after recreation.
@@ -896,6 +899,10 @@ class ReleaseEngineUpdate:
             # Before provisioning: a configuration Rust refuses downloads no models.
             self.check_config(image, config)
             self.provision_models(image, config)
+        if postgres is not None:
+            # Before the backup, as in update_cli.deploy_release: the board
+            # re-check below stays the last thing before the recreate.
+            update_postgres.pull(u, postgres)
         # A backup changes nothing on the host: a refused one still lets a
         # defaulted move fall back to the ordinary update.
         self.backup(context["checkout"])
@@ -935,14 +942,19 @@ class ReleaseEngineUpdate:
         except OSError as exc:
             raise up.UpdateError(f"cannot write the rollback overlay in {directory}; restore write access and retry. "
                                  f"The running image is tagged {rollback}; nothing was deployed") from exc
+        if postgres is not None:
+            # After every refusal above that says nothing was deployed (as in
+            # update_cli.deploy_release), before the daemon recreate.
+            update_postgres.apply(u, postgres)
         restore_compose = list(compose)
         if old_engine == "rust" and self.engine != "rust":
             # The restored Rust daemon needs its overlay's model volume again.
             restore_compose += ["-f", context["rust_overlay"]]
         u.rollback_lines = [*rollback_commands(restore_compose, context["env_file"], rollback_file, release_accepted(),
                                                self.target),
-                            *u._schema_rollback_note(None)]
-        u.report.rollback = {"tag": rollback, "state": "tagged", "overlay": str(rollback_file)}
+                            *u._schema_rollback_note(None), *u.postgres_rollback_lines]
+        u.report.rollback = {"tag": rollback, "state": "tagged", "overlay": str(rollback_file),
+                             **({"postgres": u.postgres_rollback} if u.postgres_rollback else {})}
         u.prune_rollbacks(context["checkout"], up.GHCR_IMAGE)
         activation = secrets.token_hex(16)
         service = {"image": image, "labels": {ENGINE_LABEL: self.engine, ACTIVATION_LABEL: activation,
@@ -950,7 +962,7 @@ class ReleaseEngineUpdate:
         candidate = directory / f"docker-compose.engine-candidate-{activation}.json"
         try:
             _write_overlay(candidate, service)
-            u.step(f"recreating the daemon container on {image} (Postgres + extractor untouched)...")
+            u.step(f"recreating the daemon container on {image} ({u.untouched_services()})...")
             code, out = self.command(["compose", *compose, "-f", str(candidate), "up", "-d", "--no-deps", "--no-build",
                                       up.DAEMON_SERVICE], env=environment, timeout=3600, stream=not o.as_json)
             if code:
