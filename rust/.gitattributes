@@ -16,3 +16,5 @@ daemon/harness/goldens/memory-loop-block.txt text eol=lf
 daemon/harness/goldens/startup-memory-core.txt text eol=lf
 daemon/harness/goldens/onboarding-block.txt text eol=lf
 shim/src/cli/transfer/*.txt text eol=lf
+# The conductor-watch help asset is translated to platform newlines by the dispatcher.
+shim/src/cli/conductor_watch/help.txt text eol=lf

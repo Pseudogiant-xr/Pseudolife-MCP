@@ -1,0 +1,43 @@
+usage: pseudolife-mcp conductor-watch [-h] [--owner OWNER] [--detach] [--stop]
+                                      [--until-lease NAME] [--repo REPO]
+                                      [--author AUTHOR]
+                                      [--quiet-after QUIET_AFTER]
+                                      [--max-age MAX_AGE]
+                                      [--interval INTERVAL] [--settle SETTLE]
+                                      [--state STATE]
+                                      [--suite-results SUITE_RESULTS]
+                                      [--lease LEASE] [--lease-cli LEASE_CLI]
+
+Wake the conductor session with board mail only when something needs a
+decision.
+
+options:
+  -h, --help            show this help message and exit
+  --owner OWNER         the board agent id to send to (32 lowercase hex;
+                        default: this session's, from the .agent file beside
+                        its digest)
+  --detach              start the watcher as a detached process and print its
+                        board id
+  --stop                ask the watcher for --state to exit at its next poll
+  --until-lease NAME    exit once the owner no longer holds this board lease
+  --repo REPO           OWNER/NAME for gh (default: the current checkout's)
+  --author AUTHOR       watch only pull requests by this author
+  --quiet-after QUIET_AFTER
+                        seconds without a message before a quiet line (default
+                        3300)
+  --max-age MAX_AGE     how long to run: 90, 90s, 20m, 2h or 7d (default 14d)
+  --interval INTERVAL   seconds between polls (default 60)
+  --settle SETTLE       seconds to keep collecting after the first event
+                        (default 45)
+  --state STATE         state file (default: <session digest>.dwatch.json,
+                        else ~/.pseudolife-mcp/watch/<owner>.json); .pid,
+                        .lock, .stop, .log and .ledger files go beside it
+  --suite-results SUITE_RESULTS
+  --lease LEASE         full-suite lease to watch, repeatable (default: full-
+                        suite, full-suite@box)
+  --lease-cli LEASE_CLI
+
+Start it from the conductor session with --detach; it prints its board id.
+Then park waiting_peer with park_needs="decision events" and
+park_clear_by=<that id>. Stop it with --stop. delegate-watch, its older name,
+still works and is deprecated.

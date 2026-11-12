@@ -26,6 +26,7 @@ ROWS = {
     "move": "CLI-MOVE-REFUSALS",
     "tunnel": "CLI-TUNNEL-STATUS",
     "console": "CLI-CONSOLE-PRINT",
+    "conductor_watch": "CLI-CONDUCTOR-WATCH-SETUP",
     "update": "CLI-UPDATE",
 }
 

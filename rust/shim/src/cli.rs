@@ -6,6 +6,7 @@ use std::process::ExitCode;
 mod backup;
 pub mod board_audit;
 mod briefing_hook;
+mod conductor_watch;
 mod connect;
 mod console;
 pub mod coordination_recovery;
@@ -207,6 +208,11 @@ pub fn dispatch(mode: Option<&str>) -> Option<ExitCode> {
     }
     if mode == "console"
         && let Some(code) = console::run(std::env::args_os().skip(2).collect())
+    {
+        return Some(code);
+    }
+    if matches!(mode, "conductor-watch" | "delegate-watch")
+        && let Some(code) = conductor_watch::run(mode, std::env::args_os().skip(2).collect())
     {
         return Some(code);
     }
