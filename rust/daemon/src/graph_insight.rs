@@ -972,7 +972,7 @@ fn contested_facts(store: &crate::stores::cortex::CortexStore) -> Vec<Contested>
     let mut parked: HashMap<&crate::stores::cortex::SlotKey, &crate::stores::cortex::CortexRecord> =
         HashMap::new();
     for c in store.records() {
-        if c.status == "contested" {
+        if c.status == "contested" && !c.is_session_handoff() {
             parked.entry(c.key()).or_insert(c);
         }
     }
@@ -980,7 +980,7 @@ fn contested_facts(store: &crate::stores::cortex::CortexStore) -> Vec<Contested>
         return Vec::new();
     }
     store
-        .current_records()
+        .retrievable_records()
         .filter_map(|r| {
             parked.get(r.key()).map(|c| Contested {
                 entity: r.entity.clone(),

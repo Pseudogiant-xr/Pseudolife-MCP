@@ -60,6 +60,15 @@ impl CortexStore {
                 record: c,
             });
         }
+        if accept && dream && crate::session_handoff::is_handoff_key(&key) {
+            // Only the session writes its handoff: the quarantine's
+            // promotion never makes a parked dream claim current there,
+            // whatever the current value's origin, or with none.
+            return Some(WriteOutcome {
+                action: "refused_direct",
+                record: c,
+            });
+        }
         if accept
             && dream
             && self.protect_provenance
@@ -163,6 +172,80 @@ mod tests {
         assert_eq!(r.hlc_phys, None);
         assert_eq!(r.supersedes_value.as_deref(), Some("a"));
         assert_eq!(s.records[0].status, "superseded");
+    }
+
+    /// A dream promotion never makes a parked claim current at a session's
+    /// handoff slot, over an agent-origin value or an empty slot; a human's
+    /// accept still does, and so does a dream promotion at an ordinary slot
+    /// whose entity only says "session".
+    #[test]
+    fn a_dream_promotion_never_replaces_a_handoff() {
+        const H: &str = "session:0123456789abcdef0123456789abcdef";
+        let parked = |entity: &str| {
+            let mut c = rec(entity, "handoff", "dreamed");
+            c.status = "contested".into();
+            c
+        };
+        // An agent-origin current value, which the direct-write guard below
+        // does not protect.
+        let current = |entity: &str, value: &str| {
+            let mut r = rec(entity, "handoff", value);
+            r.support = vec!["agent".into()];
+            r
+        };
+        let mut s = store(vec![current(H, "the session's own"), parked(H)]);
+        let got = s
+            .resolve(
+                H,
+                "handoff",
+                true,
+                50.0,
+                "agent",
+                None,
+                true,
+                Some("dreamed"),
+            )
+            .unwrap();
+        assert_eq!((got.action, got.record), ("refused_direct", 1));
+        assert_eq!(s.lookup(H, "handoff").unwrap().value, "the session's own");
+        assert_eq!(s.records[1].status, "contested");
+        let mut empty = store(vec![parked(H)]);
+        let got = empty
+            .resolve(
+                H,
+                "handoff",
+                true,
+                50.0,
+                "agent",
+                None,
+                true,
+                Some("dreamed"),
+            )
+            .unwrap();
+        assert_eq!(got.action, "refused_direct");
+        assert!(empty.lookup(H, "handoff").is_none());
+        // The human's accept (`memory_fact_resolve`) is not a dream's.
+        let got = s
+            .resolve(H, "handoff", true, 51.0, "user", None, false, None)
+            .unwrap();
+        assert_eq!(got.action, "superseded");
+        let mut near = store(vec![
+            current("session hook", "ordinary"),
+            parked("session hook"),
+        ]);
+        let got = near
+            .resolve(
+                "session hook",
+                "handoff",
+                true,
+                50.0,
+                "agent",
+                None,
+                true,
+                Some("dreamed"),
+            )
+            .unwrap();
+        assert_eq!(got.action, "superseded");
     }
 
     #[test]

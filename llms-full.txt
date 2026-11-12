@@ -4862,7 +4862,9 @@ reliably — without the agent having to remember:
    hook's size budget, so even a cold bank's session starts with the core.
    A resumed or compacted session is not served the block again: it gets
    the episode-handle line and a pointer to the full briefing (after a
-   compaction, also a daemon-side `hook-instructions.md`).
+   compaction, also a daemon-side `hook-instructions.md`). On the Rust
+   daemon it also gets its
+   [session handoff](#session-handoff-rust-daemon).
 2. **Episode lifecycle is owned by the daemon, keyed by a resolved session
    identity — hooks make that identity precise, but nothing about opening
    or closing an episode requires them.** Five tiers, strict precedence
@@ -5017,6 +5019,37 @@ gets no row, and an operator's manual prune of an open root
 (`include_open`) leaves that session open on record. Postgres only;
 operational data, left out of `pseudolife-mcp export` like the retrieval
 log.
+
+### Session handoff (Rust daemon)
+
+A long session is compacted many times, and the harness's summary can drop
+what the session was doing. Each session has one reserved slot to keep that
+state in: entity `session:<root episode id>` (the full 32-character id of the
+session's root episode), attribute `handoff`. Write it with the ordinary
+`memory_fact_set`; every write replaces the previous value, so there is
+always one current handoff.
+
+After a compaction or resume, the SessionStart hook prints the handoff,
+cut at 1,500 bytes with the exact `memory_fact_get` call that returns the
+rest. When the session has none yet, it prints one line naming the slot and
+how to write it, so the hook itself teaches the convention:
+
+```text
+Pseudolife-MCP: compacted session. This session has no handoff yet: keep what it is doing and what it still owes in its handoff slot with memory_fact_set(entity="session:<root id>", attribute="handoff", value=...); each write replaces the last, and the next compaction or resume prints it here. ...
+```
+
+The slot is found by the session's own key, never by the last-started
+session, so a second session never sees the first one's handoff. A session
+the idle reaper closed and that came back under a new root still gets the
+handoff it wrote under its earlier root. A resume under a different session
+id starts a new session and has no link to the old one's handoff.
+
+Handoffs are served only by key (`memory_fact_get`) and through the hook:
+`memory_search`, `memory_recall`, the briefing, the Console's facts list,
+the graph and its review queues, and the dream's extraction input never
+show them, and no graph node is created for the entity. The Python daemon
+has no handoff: it prints its one-line pointer, and the slot is an ordinary
+fact there.
 
 ## Inferred outcomes at session close
 
@@ -5213,22 +5246,31 @@ the launching shell's environment is preserved after the deployment command.
 
 ## Docker runtime account
 
-The Python Docker image starts with a short ownership bootstrap for `/data`,
-then clears supplementary groups and permanently switches to UID/GID
-`10001:10001` before executing the daemon. Existing root-owned state is
-transferred automatically; file contents, non-root ownership, application
-code and baked models are preserved, and symbolic links are not followed.
-Install and both update modes run this entrypoint on every container start,
-including daemon-only `--no-deps` recreates. No host account changes are
-needed. Compose also enables `no-new-privileges` and restricts bootstrap
-capabilities; the running daemon has no effective or permitted capabilities.
+Both daemon images run the daemon as UID/GID `10001:10001` with no effective
+or permitted capabilities. Each starts with a short ownership bootstrap as
+root, then clears supplementary groups and permanently switches to that
+account before the daemon starts: the Python image's entrypoint does this for
+`/data`; the Rust image's entrypoint does it for `/data` and its model cache
+`/models` (using `setpriv`), before it provisions the pinned models. Existing
+root-owned state is transferred automatically, including files an earlier
+root-run Rust daemon, a restore or update's model provisioning left; file
+contents, non-root ownership, application code and baked models are
+preserved, and symbolic links and other mounts are not followed. A volume
+whose root-owned files cannot be transferred (for example one mounted
+read-only) stops the start with a message naming the directory. Install and
+both update modes run these entrypoints on every container start, including
+daemon-only `--no-deps` recreates and a switch between engines. No host
+account changes are needed. Compose also enables `no-new-privileges` and
+restricts bootstrap capabilities; the running daemon has no effective or
+permitted capabilities.
 
-An explicit Docker `--user` override skips ownership migration; that account
-must already have access to its data and a writable home. Container metadata
-still names root for the bootstrap, and `docker exec` uses that configured
-user unless passed `--user`: inspect the running daemon's UID to check its
-runtime identity. Backup/restore tools deliberately bypass the bootstrap
-using `--entrypoint` for administrative operations.
+An explicit Docker `--user` override skips ownership migration (the Rust
+shadow and mirror run that way); that account must already have access to
+its data and a writable home. Container metadata still names root for the
+bootstrap, and `docker exec` uses that configured user unless passed
+`--user`: inspect the running daemon's UID to check its runtime identity.
+Backup/restore tools deliberately bypass the bootstrap using `--entrypoint`
+for administrative operations.
 
 The PostgreSQL container (`pseudolife-mcp-postgres`) runs entirely as the
 image's `postgres` account, UID/GID `999:999`, with every capability dropped

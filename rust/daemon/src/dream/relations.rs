@@ -524,7 +524,7 @@ async fn alias_candidates(
         let _ws = ready.write.lock().await;
         let snap = ready.cortex.snapshot();
         let mut out: Vec<(String, String)> = Vec::new();
-        for r in snap.current_records() {
+        for r in snap.retrievable_records() {
             let k = &r.key().0;
             if known.contains(k) && !out.iter().any(|(e, _)| e == k) {
                 out.push((k.clone(), r.entity.clone()));

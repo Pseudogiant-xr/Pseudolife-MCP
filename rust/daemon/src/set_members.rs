@@ -45,6 +45,20 @@ fn set_note(action: &str) -> Option<String> {
     })
 }
 
+/// The refusal `memory_set_add` gives at a session's handoff slot
+/// (`crate::session_handoff`), which holds one value: the reason and the
+/// call that writes it. None for every other slot.
+fn handoff_slot_refusal(entity: &str, attribute: &str) -> Option<String> {
+    let key = crate::stores::cortex::slot_key(entity, attribute);
+    crate::session_handoff::is_handoff_key(&key).then(|| {
+        format!(
+            "a session's handoff slot holds one value, not a set: write it with \
+             memory_fact_set(entity=\"{entity}\", attribute=\"{attribute}\", value=...); \
+             each write replaces the last"
+        )
+    })
+}
+
 /// The three arguments both MCP tools bind, as plain strings.
 struct Args {
     entity: String,
@@ -195,6 +209,13 @@ pub(crate) async fn set_add(
     writer: String,
     a: SetAddArgs,
 ) -> Result<Value, ToolError> {
+    // A dream's add at the slot is dropped by the store instead
+    // (`add_member`), so a consolidation run never fails on it.
+    if !a.dream
+        && let Some(refusal) = handoff_slot_refusal(&a.entity, &a.attribute)
+    {
+        return Err(ToolError::Invalid(refusal));
+    }
     let db = ready.storage.client();
     let ws = ready.write.lock().await;
     // Embedded even for a blank member, as Python does.
@@ -278,6 +299,20 @@ pub(crate) async fn set_remove(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_set_add_at_a_handoff_slot_is_refused_with_the_call_that_writes_it() {
+        let h = "Session:0123456789ABCDEF0123456789abcdef";
+        let refusal = handoff_slot_refusal(h, "Handoff").unwrap();
+        assert!(refusal.starts_with("a session's handoff slot holds one value, not a set"));
+        assert!(refusal.contains(&format!(
+            "memory_fact_set(entity=\"{h}\", attribute=\"Handoff\", value=...)"
+        )));
+        // Near misses are ordinary slots.
+        assert_eq!(handoff_slot_refusal(h, "tags"), None);
+        assert_eq!(handoff_slot_refusal("session hook", "handoff"), None);
+        assert_eq!(handoff_slot_refusal("session:abc", "handoff"), None);
+    }
 
     #[test]
     fn the_mcp_binding_passes_the_neutral_dream_inputs() {

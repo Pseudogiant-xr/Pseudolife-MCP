@@ -166,7 +166,7 @@ fn facts_by_canonical(
 ) -> BTreeMap<String, Vec<Value>> {
     let cortex = ready.cortex.snapshot();
     let mut out: BTreeMap<String, Vec<Value>> = BTreeMap::new();
-    for rec in cortex.current_records() {
+    for rec in cortex.retrievable_records() {
         let mut fd = Map::new();
         fd.insert("attribute".into(), json!(rec.attribute));
         fd.insert("value".into(), json!(rec.value));

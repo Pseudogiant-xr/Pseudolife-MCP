@@ -277,6 +277,12 @@ impl CortexStore {
             // Rejected before touching any state.
             return outcome("member_invalid", None);
         }
+        if crate::session_handoff::is_handoff_key(&key) {
+            // A session's handoff holds one value: no add, a dream's
+            // included, may turn the slot into a set or park against it.
+            // `memory_set_add` refuses with the reason before it gets here.
+            return outcome("member_invalid", None);
+        }
         let sup = w.sup();
         if let Some(idx) = self.current.get(&key).copied() {
             if is_aggregate_value(&self.records[idx].value) {
@@ -540,6 +546,37 @@ mod tests {
         let r = s.remove_member("box", "tags", "x", 2.0, None, false);
         assert_eq!(r, outcome("member_not_found", None));
         assert!(s.records.is_empty() && s.dirty_slots.is_empty() && !s.meta_dirty);
+    }
+
+    /// No add turns a session's handoff into a set, a dream's included; the
+    /// same add at an ordinary slot whose entity only says "session" does.
+    #[test]
+    fn a_handoff_slot_never_takes_a_member() {
+        const H: &str = "session:0123456789abcdef0123456789abcdef";
+        for dream in [false, true] {
+            let mut s = store(vec![rec(H, "handoff", "doing X")]);
+            let mut w = add(H, "Handoff", "a member", vec![1.0, 0.0], 5.0);
+            w.dream = dream;
+            assert_eq!(s.add_member(&w), outcome("member_invalid", None));
+            assert!(s.members(H, "handoff").is_empty());
+            assert_eq!(s.lookup(H, "handoff").unwrap().value, "doing X");
+            assert_eq!(s.records.len(), 1);
+            assert!(s.dirty_slots.is_empty());
+            // An empty handoff slot takes none either.
+            let mut empty = CortexStore::default();
+            assert_eq!(empty.add_member(&w), outcome("member_invalid", None));
+            assert!(empty.records.is_empty());
+        }
+        let mut s = store(vec![rec("session hook", "handoff", "doing X")]);
+        let r = s.add_member(&add(
+            "session hook",
+            "handoff",
+            "a member",
+            vec![1.0, 0.0],
+            5.0,
+        ));
+        assert_ne!(r.action, "member_invalid");
+        assert!(!s.members("session hook", "handoff").is_empty());
     }
 
     #[test]

@@ -284,8 +284,10 @@ pub(crate) async fn cortex_write(
     save_cortex(svc, ready).await?;
     let snap = ready.cortex.snapshot();
     let record = &snap.records[outcome.record];
+    // A handoff rewrite is the session's own progress, not a correction.
     if outcome.action == "superseded"
         && !a.dream
+        && !record.is_session_handoff()
         && py_strip(a.support.as_deref().unwrap_or("")).to_lowercase() == "user"
         && !crate::mutants::active("mcp-fact-set-no-correction-signal")
     {
@@ -325,7 +327,11 @@ pub(crate) async fn ensure_subject_entity(
     db: &Client,
     entity: &str,
 ) -> anyhow::Result<Option<i64>> {
-    if crate::junk_names::junk_name_reason(entity).is_some() {
+    // A session's handoff entity is a slot key, not a subject: no node, so
+    // no graph view, review queue or deep dream ever sees it.
+    if crate::junk_names::junk_name_reason(entity).is_some()
+        || crate::session_handoff::is_handoff_entity(entity)
+    {
         return Ok(None);
     }
     let n = crate::storage::graph::norm_name(entity);

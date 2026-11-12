@@ -461,7 +461,7 @@ async fn wiki(
     let mut facts: Vec<Value> = ready
         .cortex
         .snapshot()
-        .current_records()
+        .retrievable_records()
         .filter(|r| belongs(&r.entity))
         .map(|r| {
             json!({

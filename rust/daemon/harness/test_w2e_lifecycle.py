@@ -1126,3 +1126,31 @@ def test_only_a_valid_backup_filename_is_normalized(harness, backup):
 def test_live_config_refusal_keeps_the_status_and_error_body(harness):
     assert harness.w2e_live_config.run(harness.w2e_live_config.patch(bad=1), 1, live_config_answer({"error": "unknown knob: bad"}, 400)) == {
         "isError": True, "status": 400, "value": {"error": "unknown knob: bad"}}
+
+def test_continued_session_paragraphs_normalize_only_on_an_exact_match(monkeypatch):
+    """The declared session-start divergence (the session handoff slot):
+    Python's continued-session line and Rust's no-handoff paragraph become
+    one token; a handoff value, or any other drift, stays visible."""
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parent))
+    hooks = importlib.import_module("w2e_hooks")
+    tail = ("Recall with `memory_search` and `memory_lesson_search`; the full briefing is "
+            "`pseudolife-mcp briefing` or GET /api/briefing.")
+    keep = "Keep passing the episode handle above to every tool that accepts it. "
+    py = f"Pseudolife-MCP: compacted session, so the startup memory briefing is not re-sent. {keep}{tail}"
+    rs = ("Pseudolife-MCP: compacted session. This session has no handoff yet: keep what it is "
+          "doing and what it still owes in its handoff slot with memory_fact_set(entity=\"session:"
+          + "a" * 32 + "\", attribute=\"handoff\", value=...); each write replaces the last, and "
+          f"the next compaction or resume prints it here. {keep}{tail}")
+    head = "Session episode: <ep#1>"
+    sep = "\n\n"
+    assert hooks._continued_token(head + sep + py) == hooks._continued_token(head + sep + rs)
+    assert hooks._continued_token(py) == "<continued-note:compacted:True>"
+    # Python's resumed line without a handle keeps its kind and handle flag.
+    bare = f"Pseudolife-MCP: resumed session, so the startup memory briefing is not re-sent. {tail}"
+    assert hooks._continued_token(bare) == "<continued-note:resumed:False>"
+    # Near misses: a short root id, a served handoff, trailing drift.
+    for other in (rs.replace("a" * 32, "a" * 12),
+                  rs.replace("has no handoff yet", "has a handoff"),
+                  py + " Extra."):
+        assert hooks._continued_token(other) == other
+    assert hooks._continued_token(None) is None

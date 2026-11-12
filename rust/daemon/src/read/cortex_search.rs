@@ -392,7 +392,7 @@ fn bm25_fuse(
         .records
         .iter()
         .enumerate()
-        .filter(|(_, r)| r.status == "current")
+        .filter(|(_, r)| r.status == "current" && !r.is_session_handoff())
         .map(|(i, r)| {
             (
                 i,
@@ -670,7 +670,7 @@ async fn pin_constraint_facts(
     now: f64,
 ) -> Result<Vec<Map<String, Value>>> {
     let pins: Vec<&CortexRecord> = store
-        .current_records()
+        .retrievable_records()
         .filter(|r| {
             r.kind == "scalar"
                 && r.distortion_tolerance.as_deref() == Some("constraint")
@@ -1293,5 +1293,32 @@ mod tests {
         assert_eq!(fused.len(), 2);
         assert_eq!(fused[0].0, 0);
         assert_eq!(fused[1], (1, 0.3));
+    }
+
+    /// A session's handoff never ranks, densely or lexically; an ordinary
+    /// fact whose entity merely says "session" still does.
+    #[test]
+    fn handoff_slots_never_rank_but_a_session_named_fact_does() {
+        let mut h = rec(
+            "session:0123456789abcdef0123456789abcdef",
+            "handoff",
+            "zeta_identifier state",
+        );
+        h.embedding = Some(axis(3, 0.99).into());
+        let mut near = rec("session hook", "handoff", "zeta_identifier state");
+        near.embedding = Some(axis(3, 0.98).into());
+        let s = store(vec![h, near]);
+        let q = axis(3, 1.0);
+        let dense = s.search(&q, 5, 0.2);
+        assert_eq!(dense.iter().map(|d| d.0).collect::<Vec<_>>(), vec![1]);
+        let knobs = Bm25Knobs {
+            k1: 1.5,
+            b: 0.75,
+            weight: 0.3,
+            top_n: 20,
+            min_norm: 0.0,
+        };
+        let fused = bm25_fuse(&s, "zeta_identifier", Vec::new(), knobs, 5);
+        assert_eq!(fused.iter().map(|d| d.0).collect::<Vec<_>>(), vec![1]);
     }
 }
