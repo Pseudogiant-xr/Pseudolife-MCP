@@ -1,8 +1,9 @@
 #![forbid(unsafe_code)]
-//! `restore` before Docker: argparse help and usage, the dump, state-archive
-//! and confirmation refusals, and the deferral of every argv that passes
-//! them. The differential proof against the Python oracle is the CLI
-//! harness (`rust/cli_harness --row restore`).
+//! `restore`: argparse help and usage, the dump, state-archive and
+//! confirmation refusals, the deferral of shapes the leaf does not read, and,
+//! confirmed, a Docker that cannot run refused under the update lock. The
+//! differential proof against the Python oracle is the CLI harness
+//! (`rust/cli_harness --row restore`).
 #[path = "common/cli.rs"]
 mod cli;
 use std::{
@@ -191,8 +192,10 @@ fn the_gates_refuse_in_order_and_write_nothing() {
     assert_eq!(listing(&home.0), before);
 }
 
+const NO_DOCKER: &str = "restore failed: Docker inspect failed for the backup/restore; check the containers with docker logs pg and docker logs daemon, then retry\n";
+
 #[test]
-fn every_argv_that_passes_the_gates_defers_before_any_effect() {
+fn a_confirmed_restore_without_docker_refuses_under_the_lock() {
     let home = Home::new("valid");
     fs::write(
         home.0.join("good.sql.gz"),
@@ -200,30 +203,53 @@ fn every_argv_that_passes_the_gates_defers_before_any_effect() {
     )
     .unwrap();
     let before = listing(&home.0);
+    for args in [&[
+        "--backup-file",
+        "good.sql.gz",
+        "--yes",
+        "--leave-stopped",
+        "--container",
+        "pg",
+        "--daemon-container",
+        "daemon",
+        "--db",
+        "bank",
+        "--user",
+        "role",
+        "--db-port",
+        "5432",
+        "--daemon-url",
+        "http://127.0.0.1:9",
+        "--safety-dir",
+        "safety",
+    ][..]]
+    {
+        // The first inspect cannot start: the oracle's UpdateError, exit 1.
+        assert_answer(&run(&home.0, "80", args), 1, "", NO_DOCKER);
+    }
+    // The update lock file stays, as the oracle's does; its pid file and
+    // no safety directory remain.
+    let mut after = before.clone();
+    after.push(".pseudolife-mcp".to_owned());
+    after.sort();
+    assert_eq!(listing(&home.0), after);
+    assert_eq!(
+        listing(&home.0.join(".pseudolife-mcp")),
+        vec!["update.lock"]
+    );
+}
+
+#[test]
+fn shapes_the_leaf_does_not_read_defer_before_any_effect() {
+    let home = Home::new("shapes");
+    fs::write(
+        home.0.join("good.sql.gz"),
+        gz(b"-- PostgreSQL database dump complete\n"),
+    )
+    .unwrap();
+    let before = listing(&home.0);
     for args in [
-        &["--backup-file", "good.sql.gz", "--yes"][..],
-        &[
-            "--backup-file",
-            "good.sql.gz",
-            "--yes",
-            "--leave-stopped",
-            "--container",
-            "pg",
-            "--daemon-container",
-            "daemon",
-            "--db",
-            "bank",
-            "--user",
-            "role",
-            "--db-port",
-            "5432",
-            "--daemon-url",
-            "http://127.0.0.1:9",
-            "--safety-dir",
-            "safety",
-        ],
-        // Shapes this leaf does not decide.
-        &["--back", "good.sql.gz"],
+        &["--back", "good.sql.gz"][..],
         &["--backup-file", "good.sql.gz", "--"],
         &["-hx"],
     ] {
@@ -234,7 +260,7 @@ fn every_argv_that_passes_the_gates_defers_before_any_effect() {
 }
 
 #[test]
-fn the_leaf_source_runs_no_process_or_network_code() {
+fn the_leaf_source_runs_processes_and_writes_only_where_ported() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/cli/restore_cli");
     for entry in fs::read_dir(&root).unwrap() {
         let path = entry.unwrap().path();
@@ -244,6 +270,14 @@ fn the_leaf_source_runs_no_process_or_network_code() {
         let text = fs::read_to_string(&path).unwrap();
         // Test modules may write scratch files; the leaf itself writes none.
         let text = text.split("#[cfg(test)]").next().unwrap();
+        let file = path.file_name().unwrap().to_str().unwrap();
+        // docker.rs runs the docker program; mod.rs holds the update lock
+        // and its pid file around a refusal. Nothing else does either.
+        let allowed: &[&str] = match file {
+            "docker.rs" => &["std::process", "Command"],
+            "mod.rs" => &["fs::write", "remove_file"],
+            _ => &[],
+        };
         for name in [
             "std::process",
             "Command",
@@ -259,6 +293,9 @@ fn the_leaf_source_runs_no_process_or_network_code() {
             "OpenOptions",
             "remove_file",
         ] {
+            if allowed.contains(&name) {
+                continue;
+            }
             let hits: Vec<_> = text
                 .lines()
                 .filter(|line| line.contains(name) && !line.trim_start().starts_with("//"))

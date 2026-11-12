@@ -64,7 +64,9 @@ def diff(python: dict, rust: dict, rules: tuple[str, ...]) -> list[str]:
             out += _stream_diff(f"file {rel}", va[5:], vb[5:])
         else:
             out.append(f"file {rel}: python {va[:80]!r} rust {vb[:80]!r}")
-    for field in ("requests", "db", "listener", "modes", "restore"):
+    # docker: a row's recording stand-in call log; unscripted: the calls its
+    # script refused (rows/restore.py).
+    for field in ("requests", "db", "listener", "modes", "restore", "docker", "unscripted"):
         if not _equal(a.get(field), b.get(field)):
             ja = json.dumps(a.get(field), indent=1, sort_keys=False).splitlines()
             jb = json.dumps(b.get(field), indent=1, sort_keys=False).splitlines()
