@@ -1,8 +1,8 @@
 {
  "row": "CLI-CONSOLE-PRINT",
  "platform": "linux",
- "oracle_commit": "ca803afd58cb1cd7f2e37ea3863770f9131a8370",
- "oracle_commit_source": "declared",
+ "oracle_commit": "72e2abd21e74f3333c223369a25750cd3f4d8b0e",
+ "oracle_commit_source": "git",
  "cases": {
   "help": {
    "home": null,
@@ -11,8 +11,8 @@
    "stdout": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGNvbnNvbGUgWy1oXSBbLS1uby1vcGVuXSBbLS10byBQQUdFXSBbLS1saXN0XQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1yZXZva2UgU0VTU0lPTl9JRF0gWy0tdW5sZXNzLXNpZ25lZC1pbl0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tanNvbl0KCk9wZW4gdGhlIENvbnNvbGUgaW4gYSBicm93c2VyLCBzaWduZWQgaW4uIFRoZSBsaW5rIGxhc3RzIDUgbWludXRlcyBhbmQgd29ya3MKb25jZS4KCm9wdGlvbnM6CiAgLWgsIC0taGVscCAgICAgICAgICAgc2hvdyB0aGlzIGhlbHAgbWVzc2FnZSBhbmQgZXhpdAogIC0tbm8tb3BlbiAgICAgICAgICAgIHByaW50IHRoZSBsaW5rIGFuZCB0aGUgY29kZSB3aXRob3V0IG9wZW5pbmcgYSBicm93c2VyCiAgLS10byBQQUdFICAgICAgICAgICAgdGhlIENvbnNvbGUgcGFnZSB0byBsYW5kIG9uLCBzdWNoIGFzIGJvYXJkCiAgLS1saXN0ICAgICAgICAgICAgICAgbGlzdCB0aGUgYnJvd3NlcnMgc2lnbmVkIGluIHRvIHRoaXMgYmFuawogIC0tcmV2b2tlIFNFU1NJT05fSUQgIHNpZ24gb25lIGJyb3dzZXIgb3V0IChhbiBpZCBmcm9tIC0tbGlzdCkKICAtLXVubGVzcy1zaWduZWQtaW4gICBkbyBub3RoaW5nIHdoZW4gYSBicm93c2VyIGlzIGFscmVhZHkgc2lnbmVkIGluIHRvIHRoaXMKICAgICAgICAgICAgICAgICAgICAgICBiYW5rICh3aGF0IGluc3RhbGwgcnVucywgc28gYSByZXJ1biBvcGVucyBubyBuZXcgdGFiKQogIC0tanNvbiAgICAgICAgICAgICAgIHByaW50IG9uZSBKU09OIG9iamVjdAo=",
    "stderr": "",
    "window": [
-    1794472600.9357245,
-    1794472601.1236825
+    1794538079.305635,
+    1794538079.5730982
    ],
    "arm": "python",
    "files": {
@@ -29,8 +29,8 @@
    "stdout": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGNvbnNvbGUgWy1oXSBbLS1uby1vcGVuXSBbLS10byBQQUdFXSBbLS1saXN0XQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1yZXZva2UgU0VTU0lPTl9JRF0gWy0tdW5sZXNzLXNpZ25lZC1pbl0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tanNvbl0KCk9wZW4gdGhlIENvbnNvbGUgaW4gYSBicm93c2VyLCBzaWduZWQgaW4uIFRoZSBsaW5rIGxhc3RzIDUgbWludXRlcyBhbmQgd29ya3MKb25jZS4KCm9wdGlvbnM6CiAgLWgsIC0taGVscCAgICAgICAgICAgc2hvdyB0aGlzIGhlbHAgbWVzc2FnZSBhbmQgZXhpdAogIC0tbm8tb3BlbiAgICAgICAgICAgIHByaW50IHRoZSBsaW5rIGFuZCB0aGUgY29kZSB3aXRob3V0IG9wZW5pbmcgYSBicm93c2VyCiAgLS10byBQQUdFICAgICAgICAgICAgdGhlIENvbnNvbGUgcGFnZSB0byBsYW5kIG9uLCBzdWNoIGFzIGJvYXJkCiAgLS1saXN0ICAgICAgICAgICAgICAgbGlzdCB0aGUgYnJvd3NlcnMgc2lnbmVkIGluIHRvIHRoaXMgYmFuawogIC0tcmV2b2tlIFNFU1NJT05fSUQgIHNpZ24gb25lIGJyb3dzZXIgb3V0IChhbiBpZCBmcm9tIC0tbGlzdCkKICAtLXVubGVzcy1zaWduZWQtaW4gICBkbyBub3RoaW5nIHdoZW4gYSBicm93c2VyIGlzIGFscmVhZHkgc2lnbmVkIGluIHRvIHRoaXMKICAgICAgICAgICAgICAgICAgICAgICBiYW5rICh3aGF0IGluc3RhbGwgcnVucywgc28gYSByZXJ1biBvcGVucyBubyBuZXcgdGFiKQogIC0tanNvbiAgICAgICAgICAgICAgIHByaW50IG9uZSBKU09OIG9iamVjdAo=",
    "stderr": "",
    "window": [
-    1794472601.1240811,
-    1794472601.2951326
+    1794538079.5735595,
+    1794538079.8330803
    ],
    "arm": "python",
    "files": {
@@ -47,8 +47,8 @@
    "stdout": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGNvbnNvbGUgWy1oXSBbLS1uby1vcGVuXSBbLS10byBQQUdFXSBbLS1saXN0XQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1yZXZva2UgU0VTU0lPTl9JRF0gWy0tdW5sZXNzLXNpZ25lZC1pbl0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tanNvbl0KCk9wZW4gdGhlIENvbnNvbGUgaW4gYSBicm93c2VyLCBzaWduZWQgaW4uIFRoZSBsaW5rIGxhc3RzIDUgbWludXRlcyBhbmQgd29ya3MKb25jZS4KCm9wdGlvbnM6CiAgLWgsIC0taGVscCAgICAgICAgICAgc2hvdyB0aGlzIGhlbHAgbWVzc2FnZSBhbmQgZXhpdAogIC0tbm8tb3BlbiAgICAgICAgICAgIHByaW50IHRoZSBsaW5rIGFuZCB0aGUgY29kZSB3aXRob3V0IG9wZW5pbmcgYSBicm93c2VyCiAgLS10byBQQUdFICAgICAgICAgICAgdGhlIENvbnNvbGUgcGFnZSB0byBsYW5kIG9uLCBzdWNoIGFzIGJvYXJkCiAgLS1saXN0ICAgICAgICAgICAgICAgbGlzdCB0aGUgYnJvd3NlcnMgc2lnbmVkIGluIHRvIHRoaXMgYmFuawogIC0tcmV2b2tlIFNFU1NJT05fSUQgIHNpZ24gb25lIGJyb3dzZXIgb3V0IChhbiBpZCBmcm9tIC0tbGlzdCkKICAtLXVubGVzcy1zaWduZWQtaW4gICBkbyBub3RoaW5nIHdoZW4gYSBicm93c2VyIGlzIGFscmVhZHkgc2lnbmVkIGluIHRvIHRoaXMKICAgICAgICAgICAgICAgICAgICAgICBiYW5rICh3aGF0IGluc3RhbGwgcnVucywgc28gYSByZXJ1biBvcGVucyBubyBuZXcgdGFiKQogIC0tanNvbiAgICAgICAgICAgICAgIHByaW50IG9uZSBKU09OIG9iamVjdAo=",
    "stderr": "",
    "window": [
-    1794472601.2954552,
-    1794472601.4704132
+    1794538079.8336415,
+    1794538080.062776
    ],
    "arm": "python",
    "files": {
@@ -65,8 +65,8 @@
    "stdout": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGNvbnNvbGUgWy1oXSBbLS1uby1vcGVuXSBbLS10byBQQUdFXSBbLS1saXN0XQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1yZXZva2UgU0VTU0lPTl9JRF0gWy0tdW5sZXNzLXNpZ25lZC1pbl0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tanNvbl0KCk9wZW4gdGhlIENvbnNvbGUgaW4gYSBicm93c2VyLCBzaWduZWQgaW4uIFRoZSBsaW5rIGxhc3RzIDUgbWludXRlcyBhbmQgd29ya3MKb25jZS4KCm9wdGlvbnM6CiAgLWgsIC0taGVscCAgICAgICAgICAgc2hvdyB0aGlzIGhlbHAgbWVzc2FnZSBhbmQgZXhpdAogIC0tbm8tb3BlbiAgICAgICAgICAgIHByaW50IHRoZSBsaW5rIGFuZCB0aGUgY29kZSB3aXRob3V0IG9wZW5pbmcgYSBicm93c2VyCiAgLS10byBQQUdFICAgICAgICAgICAgdGhlIENvbnNvbGUgcGFnZSB0byBsYW5kIG9uLCBzdWNoIGFzIGJvYXJkCiAgLS1saXN0ICAgICAgICAgICAgICAgbGlzdCB0aGUgYnJvd3NlcnMgc2lnbmVkIGluIHRvIHRoaXMgYmFuawogIC0tcmV2b2tlIFNFU1NJT05fSUQgIHNpZ24gb25lIGJyb3dzZXIgb3V0IChhbiBpZCBmcm9tIC0tbGlzdCkKICAtLXVubGVzcy1zaWduZWQtaW4gICBkbyBub3RoaW5nIHdoZW4gYSBicm93c2VyIGlzIGFscmVhZHkgc2lnbmVkIGluIHRvIHRoaXMKICAgICAgICAgICAgICAgICAgICAgICBiYW5rICh3aGF0IGluc3RhbGwgcnVucywgc28gYSByZXJ1biBvcGVucyBubyBuZXcgdGFiKQogIC0tanNvbiAgICAgICAgICAgICAgIHByaW50IG9uZSBKU09OIG9iamVjdAo=",
    "stderr": "",
    "window": [
-    1794472601.4707277,
-    1794472601.642578
+    1794538080.0631788,
+    1794538080.2974684
    ],
    "arm": "python",
    "files": {
@@ -83,8 +83,8 @@
    "stdout": "",
    "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGNvbnNvbGUgWy1oXSBbLS1uby1vcGVuXSBbLS10byBQQUdFXSBbLS1saXN0XQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1yZXZva2UgU0VTU0lPTl9JRF0gWy0tdW5sZXNzLXNpZ25lZC1pbl0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tanNvbl0KcHNldWRvbGlmZS1tY3AgY29uc29sZTogZXJyb3I6IGFyZ3VtZW50IC0tdG86IGV4cGVjdGVkIG9uZSBhcmd1bWVudAo=",
    "window": [
-    1794472601.6428862,
-    1794472601.8094878
+    1794538080.2979627,
+    1794538080.5395312
    ],
    "arm": "python",
    "files": {
@@ -101,8 +101,8 @@
    "stdout": "",
    "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGNvbnNvbGUgWy1oXSBbLS1uby1vcGVuXSBbLS10byBQQUdFXSBbLS1saXN0XQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1yZXZva2UgU0VTU0lPTl9JRF0gWy0tdW5sZXNzLXNpZ25lZC1pbl0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tanNvbl0KcHNldWRvbGlmZS1tY3AgY29uc29sZTogZXJyb3I6IGFyZ3VtZW50IC0tcmV2b2tlOiBleHBlY3RlZCBvbmUgYXJndW1lbnQK",
    "window": [
-    1794472601.810023,
-    1794472601.9808652
+    1794538080.5399091,
+    1794538080.7674448
    ],
    "arm": "python",
    "files": {
@@ -119,8 +119,8 @@
    "stdout": "",
    "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGNvbnNvbGUgWy1oXSBbLS1uby1vcGVuXSBbLS10byBQQUdFXSBbLS1saXN0XQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1yZXZva2UgU0VTU0lPTl9JRF0gWy0tdW5sZXNzLXNpZ25lZC1pbl0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tanNvbl0KcHNldWRvbGlmZS1tY3AgY29uc29sZTogZXJyb3I6IGFyZ3VtZW50IC0tanNvbjogaWdub3JlZCBleHBsaWNpdCBhcmd1bWVudCAnMScK",
    "window": [
-    1794472601.9811525,
-    1794472602.1493785
+    1794538080.7679536,
+    1794538080.98745
    ],
    "arm": "python",
    "files": {
@@ -137,8 +137,8 @@
    "stdout": "",
    "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGNvbnNvbGUgWy1oXSBbLS1uby1vcGVuXSBbLS10byBQQUdFXSBbLS1saXN0XQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1yZXZva2UgU0VTU0lPTl9JRF0gWy0tdW5sZXNzLXNpZ25lZC1pbl0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tanNvbl0KcHNldWRvbGlmZS1tY3AgY29uc29sZTogZXJyb3I6IGFyZ3VtZW50IC0tbm8tb3BlbjogaWdub3JlZCBleHBsaWNpdCBhcmd1bWVudCAnJwo=",
    "window": [
-    1794472602.1496663,
-    1794472602.321791
+    1794538080.9877698,
+    1794538081.231594
    ],
    "arm": "python",
    "files": {
@@ -155,8 +155,8 @@
    "stdout": "",
    "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGNvbnNvbGUgWy1oXSBbLS1uby1vcGVuXSBbLS10byBQQUdFXSBbLS1saXN0XQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1yZXZva2UgU0VTU0lPTl9JRF0gWy0tdW5sZXNzLXNpZ25lZC1pbl0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tanNvbl0KcHNldWRvbGlmZS1tY3AgY29uc29sZTogZXJyb3I6IGFyZ3VtZW50IC0tbGlzdDogaWdub3JlZCBleHBsaWNpdCBhcmd1bWVudCAneWVzJwo=",
    "window": [
-    1794472602.3220575,
-    1794472602.489032
+    1794538081.2320478,
+    1794538081.413435
    ],
    "arm": "python",
    "files": {
@@ -173,8 +173,8 @@
    "stdout": "",
    "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGNvbnNvbGUgWy1oXSBbLS1uby1vcGVuXSBbLS10byBQQUdFXSBbLS1saXN0XQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1yZXZva2UgU0VTU0lPTl9JRF0gWy0tdW5sZXNzLXNpZ25lZC1pbl0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tanNvbl0KcHNldWRvbGlmZS1tY3AgY29uc29sZTogZXJyb3I6IHVucmVjb2duaXplZCBhcmd1bWVudHM6IHp6Cg==",
    "window": [
-    1794472602.4893622,
-    1794472602.653801
+    1794538081.413814,
+    1794538081.6124704
    ],
    "arm": "python",
    "files": {
@@ -191,8 +191,8 @@
    "stdout": "",
    "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGNvbnNvbGUgWy1oXSBbLS1uby1vcGVuXSBbLS10byBQQUdFXSBbLS1saXN0XQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1yZXZva2UgU0VTU0lPTl9JRF0gWy0tdW5sZXNzLXNpZ25lZC1pbl0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tanNvbl0KcHNldWRvbGlmZS1tY3AgY29uc29sZTogZXJyb3I6IHVucmVjb2duaXplZCBhcmd1bWVudHM6IGEgYiBjCg==",
    "window": [
-    1794472602.6541088,
-    1794472602.8214135
+    1794538081.6128042,
+    1794538081.82748
    ],
    "arm": "python",
    "files": {
@@ -209,8 +209,8 @@
    "stdout": "",
    "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGNvbnNvbGUgWy1oXSBbLS1uby1vcGVuXSBbLS10byBQQUdFXSBbLS1saXN0XQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1yZXZva2UgU0VTU0lPTl9JRF0gWy0tdW5sZXNzLXNpZ25lZC1pbl0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tanNvbl0KcHNldWRvbGlmZS1tY3AgY29uc29sZTogZXJyb3I6IGFyZ3VtZW50IC0tdG86IGV4cGVjdGVkIG9uZSBhcmd1bWVudAo=",
    "window": [
-    1794472602.8216863,
-    1794472603.0018964
+    1794538081.8278394,
+    1794538082.0196939
    ],
    "arm": "python",
    "files": {
@@ -227,8 +227,8 @@
    "stdout": "",
    "stderr": "LS1saXN0IGFuZCAtLXJldm9rZSBhcmUgc2VwYXJhdGUgY29tbWFuZHM7IGdpdmUgb25lCg==",
    "window": [
-    1794472603.0021727,
-    1794472603.1757207
+    1794538082.0201273,
+    1794538082.2129555
    ],
    "arm": "python",
    "files": {
@@ -245,8 +245,8 @@
    "stdout": "",
    "stderr": "LS1saXN0IGFuZCAtLXJldm9rZSBhcmUgc2VwYXJhdGUgY29tbWFuZHM7IGdpdmUgb25lCg==",
    "window": [
-    1794472603.176053,
-    1794472603.344078
+    1794538082.213325,
+    1794538082.4387097
    ],
    "arm": "python",
    "files": {
@@ -263,8 +263,8 @@
    "stdout": "",
    "stderr": "LS10byB0YWtlcyBhIENvbnNvbGUgcGFnZSBpZCBzdWNoIGFzIGJvYXJkLCBub3QgJ0JhZCcK",
    "window": [
-    1794472603.344351,
-    1794472603.5198374
+    1794538082.4390829,
+    1794538082.6555414
    ],
    "arm": "python",
    "files": {
@@ -281,8 +281,8 @@
    "stdout": "",
    "stderr": "LS10byB0YWtlcyBhIENvbnNvbGUgcGFnZSBpZCBzdWNoIGFzIGJvYXJkLCBub3QgJ0JhZCcK",
    "window": [
-    1794472603.5201898,
-    1794472603.688419
+    1794538082.65587,
+    1794538082.8428962
    ],
    "arm": "python",
    "files": {
@@ -299,8 +299,8 @@
    "stdout": "",
    "stderr": "LS10byB0YWtlcyBhIENvbnNvbGUgcGFnZSBpZCBzdWNoIGFzIGJvYXJkLCBub3QgJycK",
    "window": [
-    1794472603.6886866,
-    1794472603.8606443
+    1794538082.843188,
+    1794538083.0621996
    ],
    "arm": "python",
    "files": {
@@ -317,8 +317,8 @@
    "stdout": "",
    "stderr": "LS10byB0YWtlcyBhIENvbnNvbGUgcGFnZSBpZCBzdWNoIGFzIGJvYXJkLCBub3QgJ2FhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYScK",
    "window": [
-    1794472603.8609135,
-    1794472604.0355995
+    1794538083.0625048,
+    1794538083.262757
    ],
    "arm": "python",
    "files": {
@@ -335,8 +335,8 @@
    "stdout": "",
    "stderr": "LS10byB0YWtlcyBhIENvbnNvbGUgcGFnZSBpZCBzdWNoIGFzIGJvYXJkLCBub3QgIml0J3MiCg==",
    "window": [
-    1794472604.035983,
-    1794472604.2028503
+    1794538083.2631252,
+    1794538083.4567697
    ],
    "arm": "python",
    "files": {
@@ -353,134 +353,8 @@
    "stdout": "",
    "stderr": "LS10byB0YWtlcyBhIENvbnNvbGUgcGFnZSBpZCBzdWNoIGFzIGJvYXJkLCBub3QgJ2NhZsOpXHQnCg==",
    "window": [
-    1794472604.2031543,
-    1794472604.37231
-   ],
-   "arm": "python",
-   "files": {
-    "cwd": "dir"
-   },
-   "modes": {
-    "cwd": "0o755"
-   }
-  },
-  "defer-plain": {
-   "home": null,
-   "utc_offset": 39600,
-   "exit": 3,
-   "stdout": "",
-   "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogbm8gZGFlbW9uIGFuc3dlcmVkIGF0IGh0dHA6Ly8xMjcuMC4wLjE6OSAoW0Vycm5vIDExMV0gQ29ubmVjdGlvbiByZWZ1c2VkKTsgY2hlY2sgaXQgcnVucyAoYHBzZXVkb2xpZmUtbWNwIGRvY3RvcmApCg==",
-   "window": [
-    1794472604.3725615,
-    1794472604.5946274
-   ],
-   "arm": "python",
-   "files": {
-    "cwd": "dir"
-   },
-   "modes": {
-    "cwd": "0o755"
-   }
-  },
-  "defer-to-board": {
-   "home": null,
-   "utc_offset": 39600,
-   "exit": 3,
-   "stdout": "",
-   "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogbm8gZGFlbW9uIGFuc3dlcmVkIGF0IGh0dHA6Ly8xMjcuMC4wLjE6OSAoW0Vycm5vIDExMV0gQ29ubmVjdGlvbiByZWZ1c2VkKTsgY2hlY2sgaXQgcnVucyAoYHBzZXVkb2xpZmUtbWNwIGRvY3RvcmApCg==",
-   "window": [
-    1794472604.5948932,
-    1794472604.8088245
-   ],
-   "arm": "python",
-   "files": {
-    "cwd": "dir"
-   },
-   "modes": {
-    "cwd": "0o755"
-   }
-  },
-  "defer-json": {
-   "home": null,
-   "utc_offset": 39600,
-   "exit": 3,
-   "stdout": "eyJzdGF0ZSI6ICJub19kYWVtb24iLCAiZXJyb3IiOiAiW0Vycm5vIDExMV0gQ29ubmVjdGlvbiByZWZ1c2VkIn0K",
-   "stderr": "",
-   "window": [
-    1794472604.8091016,
-    1794472605.0335286
-   ],
-   "arm": "python",
-   "files": {
-    "cwd": "dir"
-   },
-   "modes": {
-    "cwd": "0o755"
-   }
-  },
-  "defer-unless-signed-in": {
-   "home": null,
-   "utc_offset": 39600,
-   "exit": 3,
-   "stdout": "",
-   "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogbm8gZGFlbW9uIGFuc3dlcmVkIGF0IGh0dHA6Ly8xMjcuMC4wLjE6OSAoW0Vycm5vIDExMV0gQ29ubmVjdGlvbiByZWZ1c2VkKTsgY2hlY2sgaXQgcnVucyAoYHBzZXVkb2xpZmUtbWNwIGRvY3RvcmApCg==",
-   "window": [
-    1794472605.0338576,
-    1794472605.2597797
-   ],
-   "arm": "python",
-   "files": {
-    "cwd": "dir"
-   },
-   "modes": {
-    "cwd": "0o755"
-   }
-  },
-  "defer-unless-signed-in-plain": {
-   "home": null,
-   "utc_offset": 39600,
-   "exit": 3,
-   "stdout": "",
-   "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogbm8gZGFlbW9uIGFuc3dlcmVkIGF0IGh0dHA6Ly8xMjcuMC4wLjE6OSAoW0Vycm5vIDExMV0gQ29ubmVjdGlvbiByZWZ1c2VkKTsgY2hlY2sgaXQgcnVucyAoYHBzZXVkb2xpZmUtbWNwIGRvY3RvcmApCg==",
-   "window": [
-    1794472605.2601643,
-    1794472605.4858186
-   ],
-   "arm": "python",
-   "files": {
-    "cwd": "dir"
-   },
-   "modes": {
-    "cwd": "0o755"
-   }
-  },
-  "defer-empty-revoke": {
-   "home": null,
-   "utc_offset": 39600,
-   "exit": 3,
-   "stdout": "",
-   "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogbm8gZGFlbW9uIGFuc3dlcmVkIGF0IGh0dHA6Ly8xMjcuMC4wLjE6OSAoW0Vycm5vIDExMV0gQ29ubmVjdGlvbiByZWZ1c2VkKTsgY2hlY2sgaXQgcnVucyAoYHBzZXVkb2xpZmUtbWNwIGRvY3RvcmApCg==",
-   "window": [
-    1794472605.4861474,
-    1794472605.7060547
-   ],
-   "arm": "python",
-   "files": {
-    "cwd": "dir"
-   },
-   "modes": {
-    "cwd": "0o755"
-   }
-  },
-  "defer-empty-revoke-no-open": {
-   "home": null,
-   "utc_offset": 39600,
-   "exit": 3,
-   "stdout": "",
-   "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogbm8gZGFlbW9uIGFuc3dlcmVkIGF0IGh0dHA6Ly8xMjcuMC4wLjE6OSAoW0Vycm5vIDExMV0gQ29ubmVjdGlvbiByZWZ1c2VkKTsgY2hlY2sgaXQgcnVucyAoYHBzZXVkb2xpZmUtbWNwIGRvY3RvcmApCg==",
-   "window": [
-    1794472605.7064059,
-    1794472605.9286788
+    1794538083.4570646,
+    1794538083.6735783
    ],
    "arm": "python",
    "files": {
@@ -497,8 +371,8 @@
    "stdout": "",
    "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogbm8gZGFlbW9uIGFuc3dlcmVkIGF0IGh0dHA6Ly8xMjcuMC4wLjE6OSAoW0Vycm5vIDExMV0gQ29ubmVjdGlvbiByZWZ1c2VkKTsgY2hlY2sgaXQgcnVucyAoYHBzZXVkb2xpZmUtbWNwIGRvY3RvcmApCg==",
    "window": [
-    1794472605.9290404,
-    1794472606.1412485
+    1794538083.6740065,
+    1794538083.9387767
    ],
    "arm": "python",
    "files": {
@@ -515,8 +389,8 @@
    "stdout": "",
    "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGNvbnNvbGUgWy1oXSBbLS1uby1vcGVuXSBbLS10byBQQUdFXSBbLS1saXN0XQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1yZXZva2UgU0VTU0lPTl9JRF0gWy0tdW5sZXNzLXNpZ25lZC1pbl0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tanNvbl0KcHNldWRvbGlmZS1tY3AgY29uc29sZTogZXJyb3I6IGFyZ3VtZW50IC0tdG86IGV4cGVjdGVkIG9uZSBhcmd1bWVudAo=",
    "window": [
-    1794472606.141609,
-    1794472606.3128998
+    1794538083.939154,
+    1794538084.1537404
    ],
    "arm": "python",
    "files": {
@@ -533,8 +407,8 @@
    "stdout": "",
    "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGNvbnNvbGUgWy1oXSBbLS1uby1vcGVuXSBbLS10byBQQUdFXSBbLS1saXN0XQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1yZXZva2UgU0VTU0lPTl9JRF0gWy0tdW5sZXNzLXNpZ25lZC1pbl0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tanNvbl0KcHNldWRvbGlmZS1tY3AgY29uc29sZTogZXJyb3I6IHVucmVjb2duaXplZCBhcmd1bWVudHM6IC0tCg==",
    "window": [
-    1794472606.3132374,
-    1794472606.49017
+    1794538084.1541479,
+    1794538084.361129
    ],
    "arm": "python",
    "files": {
@@ -551,8 +425,8 @@
    "stdout": "",
    "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGNvbnNvbGUgWy1oXSBbLS1uby1vcGVuXSBbLS10byBQQUdFXSBbLS1saXN0XQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1yZXZva2UgU0VTU0lPTl9JRF0gWy0tdW5sZXNzLXNpZ25lZC1pbl0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tanNvbl0KcHNldWRvbGlmZS1tY3AgY29uc29sZTogZXJyb3I6IGFyZ3VtZW50IC1oLy0taGVscDogaWdub3JlZCBleHBsaWNpdCBhcmd1bWVudCAneCcK",
    "window": [
-    1794472606.4904587,
-    1794472606.6667824
+    1794538084.3614187,
+    1794538084.5939693
    ],
    "arm": "python",
    "files": {
@@ -569,8 +443,8 @@
    "stdout": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGNvbnNvbGUgWy1oXSBbLS1uby1vcGVuXSBbLS10byBQQUdFXSBbLS1saXN0XSBbLS1yZXZva2UgU0VTU0lPTl9JRF0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tdW5sZXNzLXNpZ25lZC1pbl0gWy0tanNvbl0KCk9wZW4gdGhlIENvbnNvbGUgaW4gYSBicm93c2VyLCBzaWduZWQgaW4uIFRoZSBsaW5rIGxhc3RzIDUgbWludXRlcyBhbmQgd29ya3Mgb25jZS4KCm9wdGlvbnM6CiAgLWgsIC0taGVscCAgICAgICAgICAgc2hvdyB0aGlzIGhlbHAgbWVzc2FnZSBhbmQgZXhpdAogIC0tbm8tb3BlbiAgICAgICAgICAgIHByaW50IHRoZSBsaW5rIGFuZCB0aGUgY29kZSB3aXRob3V0IG9wZW5pbmcgYSBicm93c2VyCiAgLS10byBQQUdFICAgICAgICAgICAgdGhlIENvbnNvbGUgcGFnZSB0byBsYW5kIG9uLCBzdWNoIGFzIGJvYXJkCiAgLS1saXN0ICAgICAgICAgICAgICAgbGlzdCB0aGUgYnJvd3NlcnMgc2lnbmVkIGluIHRvIHRoaXMgYmFuawogIC0tcmV2b2tlIFNFU1NJT05fSUQgIHNpZ24gb25lIGJyb3dzZXIgb3V0IChhbiBpZCBmcm9tIC0tbGlzdCkKICAtLXVubGVzcy1zaWduZWQtaW4gICBkbyBub3RoaW5nIHdoZW4gYSBicm93c2VyIGlzIGFscmVhZHkgc2lnbmVkIGluIHRvIHRoaXMgYmFuayAod2hhdCBpbnN0YWxsCiAgICAgICAgICAgICAgICAgICAgICAgcnVucywgc28gYSByZXJ1biBvcGVucyBubyBuZXcgdGFiKQogIC0tanNvbiAgICAgICAgICAgICAgIHByaW50IG9uZSBKU09OIG9iamVjdAo=",
    "stderr": "",
    "window": [
-    1794472606.6671154,
-    1794472606.8422825
+    1794538084.5943577,
+    1794538084.8224995
    ],
    "arm": "python",
    "files": {
@@ -587,8 +461,8 @@
    "stdout": "",
    "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogbm8gZGFlbW9uIGFuc3dlcmVkIGF0IGh0dHA6Ly8xMjcuMC4wLjE6OSAoW0Vycm5vIDExMV0gQ29ubmVjdGlvbiByZWZ1c2VkKTsgY2hlY2sgaXQgcnVucyAoYHBzZXVkb2xpZmUtbWNwIGRvY3RvcmApCg==",
    "window": [
-    1794472606.8425746,
-    1794472607.0598633
+    1794538084.8228629,
+    1794538085.0771127
    ],
    "arm": "python",
    "files": {
@@ -605,8 +479,8 @@
    "stdout": "",
    "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogbm8gdG9rZW4gZm91bmQ6IHNldCBQU0VVRE9MSUZFX01DUF9UT0tFTl9GSUxFIChvciBQU0VVRE9MSUZFX01DUF9UT0tFTiksIG9yIHJ1biB0aGlzIG9uIGEgbWFjaGluZSB3aGVyZSBDbGF1ZGUgQ29kZSBvciBDb2RleCBhbHJlYWR5IHVzZXMgUHNldWRvbGlmZQo=",
    "window": [
-    1794472607.0601904,
-    1794472607.271498
+    1794538085.0774975,
+    1794538085.3690867
    ],
    "arm": "python",
    "files": {
@@ -623,8 +497,8 @@
    "stdout": "eyJzdGF0ZSI6ICJub19jcmVkZW50aWFscyIsICJlcnJvciI6ICJubyB0b2tlbiBmb3VuZDogc2V0IFBTRVVET0xJRkVfTUNQX1RPS0VOX0ZJTEUgKG9yIFBTRVVET0xJRkVfTUNQX1RPS0VOKSwgb3IgcnVuIHRoaXMgb24gYSBtYWNoaW5lIHdoZXJlIENsYXVkZSBDb2RlIG9yIENvZGV4IGFscmVhZHkgdXNlcyBQc2V1ZG9saWZlIn0K",
    "stderr": "",
    "window": [
-    1794472607.2717822,
-    1794472607.4857075
+    1794538085.3694553,
+    1794538085.609796
    ],
    "arm": "python",
    "files": {
@@ -641,8 +515,8 @@
    "stdout": "",
    "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogdGhpcyBtYWNoaW5lJ3MgdG9rZW4gaXMgdW51c2FibGUgKGNyZWRlbnRpYWwgZmlsZSBjb250YWlucyBhbiBpbnZhbGlkIGJlYXJlciB0b2tlbikK",
    "window": [
-    1794472607.485983,
-    1794472607.6921701
+    1794538085.610145,
+    1794538085.893025
    ],
    "arm": "python",
    "files": {
@@ -659,8 +533,8 @@
    "stdout": "",
    "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogdGhpcyBtYWNoaW5lJ3MgdG9rZW4gaXMgdW51c2FibGUgKGNvbmZpZ3VyZWQgY3JlZGVudGlhbCBmaWxlIHBhdGggaXMgZW1wdHkpCg==",
    "window": [
-    1794472607.6924481,
-    1794472607.9113247
+    1794538085.8934617,
+    1794538086.1972735
    ],
    "arm": "python",
    "files": {
@@ -677,8 +551,8 @@
    "stdout": "eyJzdGF0ZSI6ICJub19jcmVkZW50aWFscyIsICJlcnJvciI6ICJ0aGlzIG1hY2hpbmUncyB0b2tlbiBpcyB1bnVzYWJsZSAoY29uZmlndXJlZCBjcmVkZW50aWFsIGZpbGUgaXMgbWlzc2luZykifQo=",
    "stderr": "",
    "window": [
-    1794472607.9116044,
-    1794472608.1234324
+    1794538086.1976316,
+    1794538086.4897647
    ],
    "arm": "python",
    "files": {
@@ -695,8 +569,8 @@
    "stdout": "",
    "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogUFNFVURPTElGRV9NQ1BfREFFTU9OX1VSTCBpcyBub3QgYW4gaHR0cChzKSBhZGRyZXNzIChzY2hlbWUsIGhvc3QgYW5kIG9wdGlvbmFsIHBvcnQgb25seSkK",
    "window": [
-    1794472608.123849,
-    1794472608.3727493
+    1794538086.4900825,
+    1794538086.7553005
    ],
    "arm": "python",
    "files": {
@@ -713,8 +587,8 @@
    "stdout": "",
    "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogUFNFVURPTElGRV9NQ1BfREFFTU9OX1VSTCBpcyBub3QgYW4gaHR0cChzKSBhZGRyZXNzIChzY2hlbWUsIGhvc3QgYW5kIG9wdGlvbmFsIHBvcnQgb25seSkK",
    "window": [
-    1794472608.3731003,
-    1794472608.6328292
+    1794538086.7555938,
+    1794538087.0306764
    ],
    "arm": "python",
    "files": {
@@ -731,8 +605,8 @@
    "stdout": "eyJzdGF0ZSI6ICJub19jcmVkZW50aWFscyIsICJlcnJvciI6ICJQU0VVRE9MSUZFX01DUF9EQUVNT05fVVJMIGlzIG5vdCBhbiBodHRwKHMpIGFkZHJlc3MgKHNjaGVtZSwgaG9zdCBhbmQgb3B0aW9uYWwgcG9ydCBvbmx5KSJ9Cg==",
    "stderr": "",
    "window": [
-    1794472608.633161,
-    1794472608.860009
+    1794538087.0310154,
+    1794538087.3366354
    ],
    "arm": "python",
    "files": {
@@ -749,8 +623,8 @@
    "stdout": "",
    "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogbm8gZGFlbW9uIGFuc3dlcmVkIGF0IGh0dHA6Ly8xMjcuMC4wLjE6OSAoW0Vycm5vIDExMV0gQ29ubmVjdGlvbiByZWZ1c2VkKTsgY2hlY2sgaXQgcnVucyAoYHBzZXVkb2xpZmUtbWNwIGRvY3RvcmApCg==",
    "window": [
-    1794472608.8602948,
-    1794472609.0799317
+    1794538087.336965,
+    1794538087.6241436
    ],
    "arm": "python",
    "files": {
@@ -767,8 +641,8 @@
    "stdout": "eyJzdGF0ZSI6ICJub19kYWVtb24iLCAiZXJyb3IiOiAiW0Vycm5vIDExMV0gQ29ubmVjdGlvbiByZWZ1c2VkIn0K",
    "stderr": "",
    "window": [
-    1794472609.0803454,
-    1794472609.2949367
+    1794538087.624462,
+    1794538087.9651551
    ],
    "arm": "python",
    "files": {
@@ -785,8 +659,8 @@
    "stdout": "",
    "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogbm8gZGFlbW9uIGFuc3dlcmVkIGF0IGh0dHA6Ly8xMjcuMC4wLjE6OSAoW0Vycm5vIDExMV0gQ29ubmVjdGlvbiByZWZ1c2VkKTsgY2hlY2sgaXQgcnVucyAoYHBzZXVkb2xpZmUtbWNwIGRvY3RvcmApCg==",
    "window": [
-    1794472609.2954028,
-    1794472609.508721
+    1794538087.9655814,
+    1794538088.238853
    ],
    "arm": "python",
    "files": {
@@ -803,8 +677,8 @@
    "stdout": "",
    "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogbm8gZGFlbW9uIGFuc3dlcmVkIGF0IGh0dHA6Ly8xMjcuMC4wLjE6OSAoW0Vycm5vIDExMV0gQ29ubmVjdGlvbiByZWZ1c2VkKTsgY2hlY2sgaXQgcnVucyAoYHBzZXVkb2xpZmUtbWNwIGRvY3RvcmApCg==",
    "window": [
-    1794472609.5089989,
-    1794472609.7208128
+    1794538088.2391446,
+    1794538088.5253072
    ],
    "arm": "python",
    "files": {
@@ -821,8 +695,8 @@
    "stdout": "T3BlbiB0aGlzIGxpbmsgdG8gc2lnbiBpbiB0byB0aGUgQ29uc29sZToKICB7REFFTU9OfS91aS8jL3NpZ25pbj9jb2RlPUFCQ0QtMTIzNApPciB0eXBlIHRoZSBjb2RlIEFCQ0QtMTIzNCBpbnRvIHRoZSBDb25zb2xlJ3Mgc2lnbi1pbiBkaWFsb2cgYXQge0RBRU1PTn0vdWkvLiBJdCB3b3JrcyBvbmNlLCB3aXRoaW4gNSBtaW51dGVzLgo=",
    "stderr": "",
    "window": [
-    1794472609.7235794,
-    1794472609.9418733
+    1794538088.5288,
+    1794538088.8014224
    ],
    "requests": [
     {
@@ -855,8 +729,8 @@
    "stdout": "eyJzdGF0ZSI6ICJwcmludGVkIiwgInVybCI6ICJ7REFFTU9OfS91aS8jL3NpZ25pbj9jb2RlPUFCQ0QtMTIzNCIsICJjb2RlIjogIkFCQ0QtMTIzNCIsICJvcmlnaW4iOiAie0RBRU1PTn0iLCAicHJpbmNpcGFsIjogImZpeHR1cmUiLCAiZXhwaXJlc19pbiI6IDMwMH0K",
    "stderr": "",
    "window": [
-    1794472610.434003,
-    1794472610.6461697
+    1794538089.2888772,
+    1794538089.5717182
    ],
    "requests": [
     {
@@ -889,8 +763,8 @@
    "stdout": "eyJzdGF0ZSI6ICJwcmludGVkIiwgInVybCI6ICJ7REFFTU9OfS91aS8jL3NpZ25pbj9jb2RlPUFCQ0QtMTIzNCIsICJjb2RlIjogIkFCQ0QtMTIzNCIsICJvcmlnaW4iOiAie0RBRU1PTn0iLCAicHJpbmNpcGFsIjogImZpeHR1cmUiLCAiZXhwaXJlc19pbiI6IDMwMH0K",
    "stderr": "",
    "window": [
-    1794472611.138988,
-    1794472611.36086
+    1794538090.0624785,
+    1794538090.362621
    ],
    "requests": [
     {
@@ -923,8 +797,8 @@
    "stdout": "T3BlbiB0aGlzIGxpbmsgdG8gc2lnbiBpbiB0byB0aGUgQ29uc29sZToKICB7REFFTU9OfS91aS8jL3NpZ25pbj9jb2RlPUFCQ0QtMTIzNApPciB0eXBlIHRoZSBjb2RlIEFCQ0QtMTIzNCBpbnRvIHRoZSBDb25zb2xlJ3Mgc2lnbi1pbiBkaWFsb2cgYXQge0RBRU1PTn0vdWkvLiBJdCB3b3JrcyBvbmNlLCB3aXRoaW4gMSBtaW51dGVzLgo=",
    "stderr": "",
    "window": [
-    1794472611.8530653,
-    1794472612.0844526
+    1794538090.8520873,
+    1794538091.13156
    ],
    "requests": [
     {
@@ -957,8 +831,8 @@
    "stdout": "T3BlbiB0aGlzIGxpbmsgdG8gc2lnbiBpbiB0byB0aGUgQ29uc29sZToKICB7REFFTU9OfS91aS8jL3NpZ25pbj9jb2RlPUFCQ0QtMTIzNApPciB0eXBlIHRoZSBjb2RlIEFCQ0QtMTIzNCBpbnRvIHRoZSBDb25zb2xlJ3Mgc2lnbi1pbiBkaWFsb2cgYXQge0RBRU1PTn0vdWkvLiBJdCB3b3JrcyBvbmNlLCB3aXRoaW4gNSBtaW51dGVzLgo=",
    "stderr": "",
    "window": [
-    1794472612.5744214,
-    1794472612.790403
+    1794538091.6219969,
+    1794538091.8943632
    ],
    "requests": [
     {
@@ -991,8 +865,8 @@
    "stdout": "T3BlbiB0aGlzIGxpbmsgdG8gc2lnbiBpbiB0byB0aGUgQ29uc29sZToKICB7REFFTU9OfS91aS8jL3NpZ25pbj9jb2RlPUFCQ0QtMTIzNApPciB0eXBlIHRoZSBjb2RlIEFCQ0QtMTIzNCBpbnRvIHRoZSBDb25zb2xlJ3Mgc2lnbi1pbiBkaWFsb2cgYXQge0RBRU1PTn0vdWkvLiBJdCB3b3JrcyBvbmNlLCB3aXRoaW4gMSBtaW51dGVzLgo=",
    "stderr": "",
    "window": [
-    1794472613.2831316,
-    1794472613.544472
+    1794538092.3858628,
+    1794538092.6280553
    ],
    "requests": [
     {
@@ -1025,8 +899,8 @@
    "stdout": "T3BlbiB0aGlzIGxpbmsgdG8gc2lnbiBpbiB0byB0aGUgQ29uc29sZToKICB7REFFTU9OfS91aS8jL3NpZ25pbj9jb2RlPUFCQ0QtMTIzNApPciB0eXBlIHRoZSBjb2RlIEFCQ0QtMTIzNCBpbnRvIHRoZSBDb25zb2xlJ3Mgc2lnbi1pbiBkaWFsb2cgYXQge0RBRU1PTn0vdWkvLiBJdCB3b3JrcyBvbmNlLCB3aXRoaW4gNSBtaW51dGVzLgo=",
    "stderr": "",
    "window": [
-    1794472614.0311334,
-    1794472614.259836
+    1794538093.1190867,
+    1794538093.398048
    ],
    "requests": [
     {
@@ -1059,8 +933,8 @@
    "stdout": "T3BlbiB0aGlzIGxpbmsgdG8gc2lnbiBpbiB0byB0aGUgQ29uc29sZToKICB7REFFTU9OfS91aS8jL3NpZ25pbj9jb2RlPUFCQ0QtMTIzNApPciB0eXBlIHRoZSBjb2RlIEFCQ0QtMTIzNCBpbnRvIHRoZSBDb25zb2xlJ3Mgc2lnbi1pbiBkaWFsb2cgYXQge0RBRU1PTn0vdWkvLiBJdCB3b3JrcyBvbmNlLCB3aXRoaW4gNSBtaW51dGVzLgo=",
    "stderr": "",
    "window": [
-    1794472614.7515094,
-    1794472615.0783212
+    1794538093.886572,
+    1794538094.1462557
    ],
    "requests": [
     {
@@ -1093,8 +967,8 @@
    "stdout": "T3BlbiB0aGlzIGxpbmsgdG8gc2lnbiBpbiB0byB0aGUgQ29uc29sZToKICB7REFFTU9OfS91aS8jL3NpZ25pbj9jb2RlPUFCQ0QtMTIzNApPciB0eXBlIHRoZSBjb2RlIEFCQ0QtMTIzNCBpbnRvIHRoZSBDb25zb2xlJ3Mgc2lnbi1pbiBkaWFsb2cgYXQge0RBRU1PTn0vdWkvLiBJdCB3b3JrcyBvbmNlLCB3aXRoaW4gMSBtaW51dGVzLgo=",
    "stderr": "",
    "window": [
-    1794472615.5666342,
-    1794472615.7838414
+    1794538094.6365547,
+    1794538094.8759258
    ],
    "requests": [
     {
@@ -1127,8 +1001,8 @@
    "stdout": "T3BlbiB0aGlzIGxpbmsgdG8gc2lnbiBpbiB0byB0aGUgQ29uc29sZToKICB7REFFTU9OfS91aS8jL3NpZ25pbj9jb2RlPUFCQ0QtMTIzNApPciB0eXBlIHRoZSBjb2RlIEFCQ0QtMTIzNCBpbnRvIHRoZSBDb25zb2xlJ3Mgc2lnbi1pbiBkaWFsb2cgYXQge0RBRU1PTn0vdWkvLiBJdCB3b3JrcyBvbmNlLCB3aXRoaW4gMTIwIG1pbnV0ZXMuCg==",
    "stderr": "",
    "window": [
-    1794472616.276033,
-    1794472616.4990785
+    1794538095.3676112,
+    1794538095.5899947
    ],
    "requests": [
     {
@@ -1161,8 +1035,8 @@
    "stdout": "eyJzdGF0ZSI6ICJwcmludGVkIiwgInVybCI6ICJ7REFFTU9OfS91aS8jL3NpZ25pbj9jb2RlPUFCQ0QtMTIzNCIsICJjb2RlIjogIlx1MDBmYy0xIiwgIm9yaWdpbiI6ICJ7REFFTU9OfSIsICJwcmluY2lwYWwiOiB7ImEiOiBbMSwgbnVsbF19LCAiZXhwaXJlc19pbiI6IDMwMH0K",
    "stderr": "",
    "window": [
-    1794472616.9909809,
-    1794472617.205986
+    1794538096.0823302,
+    1794538096.3291183
    ],
    "requests": [
     {
@@ -1195,8 +1069,8 @@
    "stdout": "T3BlbiB0aGlzIGxpbmsgdG8gc2lnbiBpbiB0byB0aGUgQ29uc29sZToKICB7REFFTU9OfS91aS8jL3NpZ25pbj9jb2RlPUFCQ0QtMTIzNApPciB0eXBlIHRoZSBjb2RlIG7DpG1lIOKckyBpbnRvIHRoZSBDb25zb2xlJ3Mgc2lnbi1pbiBkaWFsb2cgYXQge0RBRU1PTn0vdWkvLiBJdCB3b3JrcyBvbmNlLCB3aXRoaW4gNSBtaW51dGVzLgo=",
    "stderr": "",
    "window": [
-    1794472617.6978834,
-    1794472617.915482
+    1794538096.8203242,
+    1794538097.0587525
    ],
    "requests": [
     {
@@ -1229,8 +1103,8 @@
    "stdout": "",
    "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogdGhlIGRhZW1vbidzIGFuc3dlciBoYWQgbm8gc2lnbi1pbiBsaW5rCg==",
    "window": [
-    1794472618.407727,
-    1794472618.6265337
+    1794538097.550684,
+    1794538097.8057199
    ],
    "requests": [
     {
@@ -1263,8 +1137,8 @@
    "stdout": "",
    "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogdGhlIGRhZW1vbidzIGFuc3dlciBoYWQgbm8gc2lnbi1pbiBsaW5rCg==",
    "window": [
-    1794472619.119179,
-    1794472619.3366394
+    1794538098.2953174,
+    1794538098.5321803
    ],
    "requests": [
     {
@@ -1297,8 +1171,8 @@
    "stdout": "",
    "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogdGhlIGRhZW1vbidzIGFuc3dlciBoYWQgbm8gc2lnbi1pbiBsaW5rCg==",
    "window": [
-    1794472619.8292234,
-    1794472620.0494633
+    1794538099.0238528,
+    1794538099.2684112
    ],
    "requests": [
     {
@@ -1331,8 +1205,8 @@
    "stdout": "",
    "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogdGhlIGRhZW1vbidzIGFuc3dlciBoYWQgbm8gc2lnbi1pbiBsaW5rCg==",
    "window": [
-    1794472620.5418003,
-    1794472620.7561102
+    1794538099.760845,
+    1794538099.9957168
    ],
    "requests": [
     {
@@ -1365,8 +1239,8 @@
    "stdout": "",
    "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogdGhlIGRhZW1vbidzIGFuc3dlciBoYWQgbm8gc2lnbi1pbiBsaW5rCg==",
    "window": [
-    1794472621.2486644,
-    1794472621.4632156
+    1794538100.4880366,
+    1794538100.7153475
    ],
    "requests": [
     {
@@ -1399,8 +1273,8 @@
    "stdout": "",
    "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogdGhlIGRhZW1vbidzIGFuc3dlciBoYWQgbm8gc2lnbi1pbiBsaW5rCg==",
    "window": [
-    1794472621.9553444,
-    1794472622.1727834
+    1794538101.2072065,
+    1794538101.4261844
    ],
    "requests": [
     {
@@ -1433,8 +1307,8 @@
    "stdout": "eyJzdGF0ZSI6ICJyZWZ1c2VkIiwgImVycm9yIjogImJhZF9hbnN3ZXIifQo=",
    "stderr": "",
    "window": [
-    1794472622.6654687,
-    1794472622.8761382
+    1794538101.9176493,
+    1794538102.13288
    ],
    "requests": [
     {
@@ -1467,8 +1341,8 @@
    "stdout": "",
    "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogdGhlIGRhZW1vbiByZWZ1c2VkIHRoaXMgbWFjaGluZSdzIHRva2VuOiBjaGVjayB0aGF0IFBTRVVET0xJRkVfTUNQX1RPS0VOX0ZJTEUgKG9yIFBTRVVET0xJRkVfTUNQX1RPS0VOKSBob2xkcyB0aGUgdG9rZW4gdGhpcyBtYWNoaW5lJ3MgY2xpZW50cyB1c2U7IGEgcGFpcmVkIG1hY2hpbmUgd2hvc2UgdG9rZW4gd2FzIHJldm9rZWQgcGFpcnMgYWdhaW4gd2l0aCBgcHNldWRvbGlmZS1tY3AgcGFpcmAK",
    "window": [
-    1794472623.3690665,
-    1794472623.5846305
+    1794538102.6254275,
+    1794538102.8488848
    ],
    "requests": [
     {
@@ -1501,8 +1375,8 @@
    "stdout": "eyJzdGF0ZSI6ICJyZWZ1c2VkIiwgInN0YXR1cyI6IDQwMSwgImVycm9yIjogInVuYXV0aG9yaXplZCIsICJkZXRhaWwiOiAidGhlIGRhZW1vbiByZWZ1c2VkIHRoaXMgbWFjaGluZSdzIHRva2VuOiBjaGVjayB0aGF0IFBTRVVET0xJRkVfTUNQX1RPS0VOX0ZJTEUgKG9yIFBTRVVET0xJRkVfTUNQX1RPS0VOKSBob2xkcyB0aGUgdG9rZW4gdGhpcyBtYWNoaW5lJ3MgY2xpZW50cyB1c2U7IGEgcGFpcmVkIG1hY2hpbmUgd2hvc2UgdG9rZW4gd2FzIHJldm9rZWQgcGFpcnMgYWdhaW4gd2l0aCBgcHNldWRvbGlmZS1tY3AgcGFpcmAifQo=",
    "stderr": "",
    "window": [
-    1794472624.0767937,
-    1794472624.2873764
+    1794538103.3413904,
+    1794538103.5580854
    ],
    "requests": [
     {
@@ -1535,8 +1409,8 @@
    "stdout": "",
    "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogdGhlIGRhZW1vbiBjYW5ub3QgY2hlY2sgdG9rZW5zIHJpZ2h0IG5vdyAoaXRzIGJhbmsgaXMgdW5yZWFjaGFibGUpOyB0cnkgYWdhaW4gaW4gYSBtaW51dGUK",
    "window": [
-    1794472624.7804544,
-    1794472624.9957573
+    1794538104.0495672,
+    1794538104.2699819
    ],
    "requests": [
     {
@@ -1568,8 +1442,8 @@
    "stdout": "",
    "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogb3BlbiB0aGUgQ29uc29sZSBvdmVyIGh0dHBzCg==",
    "window": [
-    1794472625.4883757,
-    1794472625.6989245
+    1794538104.7624028,
+    1794538104.9885721
    ],
    "requests": [
     {
@@ -1602,8 +1476,8 @@
    "stdout": "",
    "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogc2Vzc2lvbl9jYW5ub3RfaXNzdWUK",
    "window": [
-    1794472626.1917899,
-    1794472626.4046316
+    1794538105.480754,
+    1794538105.6973014
    ],
    "requests": [
     {
@@ -1636,8 +1510,8 @@
    "stdout": "eyJzdGF0ZSI6ICJyZWZ1c2VkIiwgInN0YXR1cyI6IDQwMywgImVycm9yIjogIm9wZXJhdG9yX3ByaW5jaXBhbF9yZXF1aXJlZCIsICJkZXRhaWwiOiA3fQo=",
    "stderr": "",
    "window": [
-    1794472626.897247,
-    1794472627.1057055
+    1794538106.1886928,
+    1794538106.403613
    ],
    "requests": [
     {
@@ -1670,8 +1544,8 @@
    "stdout": "",
    "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogdGhlIGRhZW1vbiBhbnN3ZXJlZCBIVFRQIDQwOSAoenopCg==",
    "window": [
-    1794472627.5987241,
-    1794472627.812587
+    1794538106.896089,
+    1794538107.1216059
    ],
    "requests": [
     {
@@ -1704,8 +1578,8 @@
    "stdout": "",
    "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogdGhlIGRhZW1vbiBhbnN3ZXJlZCBIVFRQIDUwMCAoMS4wKQo=",
    "window": [
-    1794472628.3049364,
-    1794472628.511743
+    1794538107.6138713,
+    1794538107.8393168
    ],
    "requests": [
     {
@@ -1738,8 +1612,8 @@
    "stdout": "eyJzdGF0ZSI6ICJyZWZ1c2VkIiwgInN0YXR1cyI6IDQyOSwgImVycm9yIjogbnVsbCwgImRldGFpbCI6ICJsYXRlciJ9Cg==",
    "stderr": "",
    "window": [
-    1794472629.0051184,
-    1794472629.2140625
+    1794538108.3316212,
+    1794538108.5431044
    ],
    "requests": [
     {
@@ -1771,8 +1645,8 @@
    "stdout": "",
    "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogdGhpcyBkYWVtb24gZG9lcyBub3Qgb2ZmZXIgQ29uc29sZSBzaWduLWluIHlldCAoSFRUUCA0MDQpOiB1cGRhdGUgaXQgd2l0aCBgcHNldWRvbGlmZS1tY3AgdXBkYXRlYCwgb3Igb3BlbiB0aGUgQ29uc29sZSBhbmQgcGFzdGUgYSB0b2tlbiB1bmRlciBBZHZhbmNlZAo=",
    "window": [
-    1794472629.7077746,
-    1794472629.922331
+    1794538109.0350146,
+    1794538109.2641144
    ],
    "requests": [
     {
@@ -1805,8 +1679,8 @@
    "stdout": "eyJzdGF0ZSI6ICJyZWZ1c2VkIiwgInN0YXR1cyI6IDQwNCwgImVycm9yIjogbnVsbCwgImRldGFpbCI6ICJ0aGlzIGRhZW1vbiBkb2VzIG5vdCBvZmZlciBDb25zb2xlIHNpZ24taW4geWV0IChIVFRQIDQwNCk6IHVwZGF0ZSBpdCB3aXRoIGBwc2V1ZG9saWZlLW1jcCB1cGRhdGVgLCBvciBvcGVuIHRoZSBDb25zb2xlIGFuZCBwYXN0ZSBhIHRva2VuIHVuZGVyIEFkdmFuY2VkIn0K",
    "stderr": "",
    "window": [
-    1794472630.4149716,
-    1794472630.6229446
+    1794538109.7561982,
+    1794538110.2959135
    ],
    "requests": [
     {
@@ -1838,8 +1712,8 @@
    "stdout": "",
    "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogdGhpcyBkYWVtb24gZG9lcyBub3Qgb2ZmZXIgQ29uc29sZSBzaWduLWluIHlldCAoSFRUUCA0MDUpOiB1cGRhdGUgaXQgd2l0aCBgcHNldWRvbGlmZS1tY3AgdXBkYXRlYCwgb3Igb3BlbiB0aGUgQ29uc29sZSBhbmQgcGFzdGUgYSB0b2tlbiB1bmRlciBBZHZhbmNlZAo=",
    "window": [
-    1794472631.1149669,
-    1794472631.334578
+    1794538110.777504,
+    1794538111.3386202
    ],
    "requests": [
     {
@@ -1872,8 +1746,8 @@
    "stdout": "",
    "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogdGhlIGRhZW1vbiBhbnN3ZXJlZCBIVFRQIDUwMgo=",
    "window": [
-    1794472631.8266463,
-    1794472632.0379922
+    1794538111.8045623,
+    1794538112.050347
    ],
    "requests": [
     {
@@ -1906,8 +1780,8 @@
    "stdout": "",
    "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogdGhlIGRhZW1vbiBhbnN3ZXJlZCBIVFRQIDIwMAo=",
    "window": [
-    1794472632.530939,
-    1794472632.7429876
+    1794538112.5390928,
+    1794538112.7569323
    ],
    "requests": [
     {
@@ -1939,8 +1813,8 @@
    "stdout": "eyJzdGF0ZSI6ICJyZWZ1c2VkIiwgInN0YXR1cyI6IDIwMCwgImVycm9yIjogbnVsbCwgImRldGFpbCI6ICJ0aGUgZGFlbW9uIGFuc3dlcmVkIEhUVFAgMjAwIn0K",
    "stderr": "",
    "window": [
-    1794472633.2363343,
-    1794472633.456719
+    1794538113.249225,
+    1794538113.5069282
    ],
    "requests": [
     {
@@ -1973,8 +1847,8 @@
    "stdout": "",
    "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogdGhlIGRhZW1vbiBhbnN3ZXJlZCBIVFRQIDIwMQo=",
    "window": [
-    1794472633.9493382,
-    1794472634.1755888
+    1794538113.996782,
+    1794538114.2289233
    ],
    "requests": [
     {
@@ -2007,8 +1881,8 @@
    "stdout": "eyJzdGF0ZSI6ICJyZWZ1c2VkIiwgInN0YXR1cyI6IDMwNywgImVycm9yIjogbnVsbCwgImRldGFpbCI6ICJ0aGUgZGFlbW9uIGFuc3dlcmVkIEhUVFAgMzA3In0K",
    "stderr": "",
    "window": [
-    1794472634.667753,
-    1794472634.8780007
+    1794538114.7213726,
+    1794538114.9436715
    ],
    "requests": [
     {
@@ -2041,8 +1915,8 @@
    "stdout": "",
    "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogXHVkYzgwIHgK",
    "window": [
-    1794472635.3689904,
-    1794472635.5786023
+    1794538115.4362345,
+    1794538115.6558824
    ],
    "requests": [
     {
@@ -2075,8 +1949,8 @@
    "stdout": "SUQgICAgICAgICAgICAgICAgU0lHTkVEIElOIEFTICAgICAgICAgSE9XICAgICAgU0lOQ0UgICAgICAgICAgICAgTEFTVCBVU0VEICAgICAgICAgQlJPV1NFUgpzLTAxMjM0NTY3ODlhYiAgICBhbGljZSAgICAgICAgICAgICAgICBsaW5rICAgICAyMDIzLTExLTE1IDA4OjEzICAyMDIzLTExLTE1IDA4OjEzICBGaXJlZm94IG9uIGJveApOb25lICAgICAgICAgICAgICAxLjUgICAgICAgICAgICAgICAgICAgICAgICAgICAxOTcwLTAxLTAxIDEwOjAwICAtICAgICAgICAgICAgICAgICAtCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIHBhc3NrZXkgIC0gICAgICAgICAgICAgICAgIDIwMjUtMTEtMDEgMjI6MjYgIFsxLCAnbmHDr3ZlJ10Kcy3DvCAgICAgICAgICAgICAgIGJvYiAgICAgICAgICAgICAgICAgICAgICAgICAgIC0gICAgICAgICAgICAgICAgIC0gICAgICAgICAgICAgICAgIEVkZ2Ug4oCUIHdvcmsK",
    "stderr": "",
    "window": [
-    1794472636.0709727,
-    1794472636.2757776
+    1794538116.148373,
+    1794538116.3601716
    ],
    "requests": [
     {
@@ -2108,8 +1982,8 @@
    "stdout": "eyJzdGF0ZSI6ICJsaXN0ZWQiLCAic2Vzc2lvbnMiOiBbeyJzZXNzaW9uX2lkIjogInMtMDEyMzQ1Njc4OWFiIiwgInByaW5jaXBhbCI6ICJhbGljZSIsICJtZXRob2QiOiAibGluayIsICJjcmVhdGVkX2F0IjogMTcwMDAwMDAwMCwgImxhc3RfdXNlZF9hdCI6IDE3MDAwMDAwMzkuNiwgImxhYmVsIjogIkZpcmVmb3ggb24gYm94In0sIHsic2Vzc2lvbl9pZCI6IG51bGwsICJwcmluY2lwYWwiOiAxLjUsICJjcmVhdGVkX2F0IjogdHJ1ZSwgImxhYmVsIjogIiJ9LCAibm90IGEgcm93IiwgeyJsYWJlbCI6IFsxLCAibmFcdTAwZWZ2ZSJdLCAibWV0aG9kIjogInBhc3NrZXkiLCAibGFzdF91c2VkX2F0IjogMTc2MjAwMDAwMH0sIHsic2Vzc2lvbl9pZCI6ICJzLVx1MDBmYyIsICJwcmluY2lwYWwiOiAiYm9iIiwgImNyZWF0ZWRfYXQiOiBudWxsLCAibGFiZWwiOiAiRWRnZSBcdTIwMTQgd29yayJ9XSwgIm9wZXJhdG9yIjogdHJ1ZX0K",
    "stderr": "",
    "window": [
-    1794472636.7688127,
-    1794472636.9882765
+    1794538116.8524003,
+    1794538117.0953176
    ],
    "requests": [
     {
@@ -2141,8 +2015,8 @@
    "stdout": "SUQgICAgICAgICAgICAgICAgU0lHTkVEIElOIEFTICAgICAgICAgSE9XICAgICAgU0lOQ0UgICAgICAgICAgICAgTEFTVCBVU0VEICAgICAgICAgQlJPV1NFUgpzLTAxMjM0NTY3ODlhYiAgICBhbGljZSAgICAgICAgICAgICAgICBsaW5rICAgICAyMDIzLTExLTE1IDA4OjEzICAyMDIzLTExLTE1IDA4OjEzICBGaXJlZm94IG9uIGJveApOb25lICAgICAgICAgICAgICAxLjUgICAgICAgICAgICAgICAgICAgICAgICAgICAxOTcwLTAxLTAxIDEwOjAwICAtICAgICAgICAgICAgICAgICAtCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIHBhc3NrZXkgIC0gICAgICAgICAgICAgICAgIDIwMjUtMTEtMDEgMjI6MjYgIFsxLCAnbmHDr3ZlJ10Kcy3DvCAgICAgICAgICAgICAgIGJvYiAgICAgICAgICAgICAgICAgICAgICAgICAgIC0gICAgICAgICAgICAgICAgIC0gICAgICAgICAgICAgICAgIEVkZ2Ug4oCUIHdvcmsKKE9ubHkgeW91ciBvd24gc2lnbi1pbnMgYXJlIHNob3duOiB0aGlzIG1hY2hpbmUncyB0b2tlbiBpcyBhIHBhaXJlZCBvbmUuKQo=",
    "stderr": "",
    "window": [
-    1794472637.4806213,
-    1794472637.697005
+    1794538117.578641,
+    1794538117.8147247
    ],
    "requests": [
     {
@@ -2174,8 +2048,8 @@
    "stdout": "Tm8gYnJvd3NlcnMgYXJlIHNpZ25lZCBpbi4gYHBzZXVkb2xpZmUtbWNwIGNvbnNvbGVgIHNpZ25zIG9uZSBpbi4K",
    "stderr": "",
    "window": [
-    1794472638.1898687,
-    1794472638.4010327
+    1794538118.3072076,
+    1794538118.5506983
    ],
    "requests": [
     {
@@ -2207,8 +2081,8 @@
    "stdout": "Tm8gYnJvd3NlcnMgYXJlIHNpZ25lZCBpbi4gYHBzZXVkb2xpZmUtbWNwIGNvbnNvbGVgIHNpZ25zIG9uZSBpbi4K",
    "stderr": "",
    "window": [
-    1794472638.8940017,
-    1794472639.1104486
+    1794538119.0423508,
+    1794538119.4111958
    ],
    "requests": [
     {
@@ -2240,8 +2114,8 @@
    "stdout": "SUQgICAgICAgICAgICAgICAgU0lHTkVEIElOIEFTICAgICAgICAgSE9XICAgICAgU0lOQ0UgICAgICAgICAgICAgTEFTVCBVU0VEICAgICAgICAgQlJPV1NFUgooT25seSB5b3VyIG93biBzaWduLWlucyBhcmUgc2hvd246IHRoaXMgbWFjaGluZSdzIHRva2VuIGlzIGEgcGFpcmVkIG9uZS4pCg==",
    "stderr": "",
    "window": [
-    1794472639.6033509,
-    1794472639.8197906
+    1794538119.8994908,
+    1794538120.1231928
    ],
    "requests": [
     {
@@ -2273,8 +2147,8 @@
    "stdout": "eyJzdGF0ZSI6ICJsaXN0ZWQiLCAic2Vzc2lvbnMiOiBbXSwgIm9wZXJhdG9yIjogbnVsbH0K",
    "stderr": "",
    "window": [
-    1794472640.3131566,
-    1794472640.524971
+    1794538120.615556,
+    1794538120.8349822
    ],
    "requests": [
     {
@@ -2306,8 +2180,8 @@
    "stdout": "SUQgICAgICAgICAgICAgICAgU0lHTkVEIElOIEFTICAgICAgICAgSE9XICAgICAgU0lOQ0UgICAgICAgICAgICAgTEFTVCBVU0VEICAgICAgICAgQlJPV1NFUgogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAxOTcwLTAxLTAxIDA5OjU5ICAtICAgICAgICAgICAgICAgICAtCg==",
    "stderr": "",
    "window": [
-    1794472641.017369,
-    1794472641.2282674
+    1794538121.327648,
+    1794538121.545284
    ],
    "requests": [
     {
@@ -2339,8 +2213,8 @@
    "stdout": "U2lnbmVkIG91dCBzLTAxMjM0NTY3ODlhYi4K",
    "stderr": "",
    "window": [
-    1794472641.7209003,
-    1794472641.9372258
+    1794538122.0375402,
+    1794538122.2557948
    ],
    "requests": [
     {
@@ -2373,8 +2247,8 @@
    "stdout": "eyJzdGF0ZSI6ICJyZXZva2VkIn0K",
    "stderr": "",
    "window": [
-    1794472642.4283748,
-    1794472642.6405132
+    1794538122.7481318,
+    1794538122.9578285
    ],
    "requests": [
     {
@@ -2407,8 +2281,8 @@
    "stdout": "",
    "stderr": "Tm8gc2lnbmVkLWluIGJyb3dzZXIgcy0xIHRoYXQgeW91IG1heSBzaWduIG91dDsgc2VlIC0tbGlzdC4K",
    "window": [
-    1794472643.1334534,
-    1794472643.3454804
+    1794538123.4509487,
+    1794538123.6685047
    ],
    "requests": [
     {
@@ -2441,8 +2315,8 @@
    "stdout": "eyJzdGF0ZSI6ICJub3RfZm91bmQifQo=",
    "stderr": "",
    "window": [
-    1794472643.8390114,
-    1794472644.0463016
+    1794538124.1607826,
+    1794538124.3845954
    ],
    "requests": [
     {
@@ -2475,8 +2349,8 @@
    "stdout": "U2lnbmVkIG91dCBzLcO8IOKcky4K",
    "stderr": "",
    "window": [
-    1794472644.539709,
-    1794472644.7520227
+    1794538124.8770094,
+    1794538125.0962827
    ],
    "requests": [
     {
@@ -2509,8 +2383,8 @@
    "stdout": "Tm8gYnJvd3NlcnMgYXJlIHNpZ25lZCBpbi4gYHBzZXVkb2xpZmUtbWNwIGNvbnNvbGVgIHNpZ25zIG9uZSBpbi4K",
    "stderr": "",
    "window": [
-    1794472645.2631176,
-    1794472645.482306
+    1794538125.6065218,
+    1794538125.8290079
    ],
    "requests": [
     {
@@ -2544,8 +2418,8 @@
    "stdout": "eyJzdGF0ZSI6ICJsaXN0ZWQiLCAic2Vzc2lvbnMiOiBbXSwgIm9wZXJhdG9yIjogdHJ1ZX0K",
    "stderr": "",
    "window": [
-    1794472645.9750123,
-    1794472646.1841047
+    1794538126.3212826,
+    1794538126.5459163
    ],
    "requests": [
     {
@@ -2579,8 +2453,8 @@
    "stdout": "SUQgICAgICAgICAgICAgICAgU0lHTkVEIElOIEFTICAgICAgICAgSE9XICAgICAgU0lOQ0UgICAgICAgICAgICAgTEFTVCBVU0VEICAgICAgICAgQlJPV1NFUgpzLTAxMjM0NTY3ODlhYiAgICBhbGljZSAgICAgICAgICAgICAgICBsaW5rICAgICAyMDIzLTExLTE1IDA4OjEzICAyMDIzLTExLTE1IDA4OjEzICBGaXJlZm94IG9uIGJveApOb25lICAgICAgICAgICAgICAxLjUgICAgICAgICAgICAgICAgICAgICAgICAgICAxOTcwLTAxLTAxIDEwOjAwICAtICAgICAgICAgICAgICAgICAtCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIHBhc3NrZXkgIC0gICAgICAgICAgICAgICAgIDIwMjUtMTEtMDEgMjI6MjYgIFsxLCAnbmHDr3ZlJ10Kcy3DvCAgICAgICAgICAgICAgIGJvYiAgICAgICAgICAgICAgICAgICAgICAgICAgIC0gICAgICAgICAgICAgICAgIC0gICAgICAgICAgICAgICAgIEVkZ2Ug4oCUIHdvcmsK",
    "stderr": "",
    "window": [
-    1794472646.684293,
-    1794472646.895562
+    1794538127.041783,
+    1794538127.2554536
    ],
    "requests": [
     {
@@ -2612,8 +2486,8 @@
    "stdout": "eyJzdGF0ZSI6ICJwcmludGVkIiwgInVybCI6ICJ7REFFTU9OfS91aS8jL3NpZ25pbj9jb2RlPUFCQ0QtMTIzNCIsICJjb2RlIjogIkFCQ0QtMTIzNCIsICJvcmlnaW4iOiAie0RBRU1PTn0iLCAicHJpbmNpcGFsIjogImZpeHR1cmUiLCAiZXhwaXJlc19pbiI6IDMwMH0K",
    "stderr": "",
    "window": [
-    1794472647.3907967,
-    1794472647.6169958
+    1794538127.7497172,
+    1794538127.9804502
    ],
    "requests": [
     {
@@ -2646,8 +2520,8 @@
    "stdout": "",
    "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogbm8gZGFlbW9uIGFuc3dlcmVkIGF0IHtEQUVNT059IChbU1NMOiBDRVJUSUZJQ0FURV9WRVJJRllfRkFJTEVEXSBjZXJ0aWZpY2F0ZSB2ZXJpZnkgZmFpbGVkOiB1bmFibGUgdG8gZ2V0IGxvY2FsIGlzc3VlciBjZXJ0aWZpY2F0ZSAoX3NzbC5jOjEwMTYpKTsgY2hlY2sgaXQgcnVucyAoYHBzZXVkb2xpZmUtbWNwIGRvY3RvcmApCg==",
    "window": [
-    1794472648.1115205,
-    1794472648.3188858
+    1794538128.4744651,
+    1794538128.707733
    ],
    "requests": [],
    "arm": "python",
@@ -2665,8 +2539,8 @@
    "stdout": "",
    "stderr": "VHJhY2ViYWNrIChtb3N0IHJlY2VudCBjYWxsIGxhc3QpOgogIEZpbGUgIjxmcm96ZW4gcnVucHk+IiwgbGluZSAxOTgsIGluIF9ydW5fbW9kdWxlX2FzX21haW4KICBGaWxlICI8ZnJvemVuIHJ1bnB5PiIsIGxpbmUgODgsIGluIF9ydW5fY29kZQogIEZpbGUgIntPUkFDTEV9L3BzZXVkb2xpZmVfbWVtb3J5L2NsaS5weSIsIGxpbmUgMjY3LCBpbiA8bW9kdWxlPgogICAgbWFpbigpCiAgRmlsZSAie09SQUNMRX0vcHNldWRvbGlmZV9tZW1vcnkvY2xpLnB5IiwgbGluZSAyMTgsIGluIG1haW4KICAgIHN5cy5leGl0KGNvbnNvbGVfbWFpbihzeXMuYXJndlsyOl0pKQogICAgICAgICAgICAgXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl4KICBGaWxlICJ7T1JBQ0xFfS9wc2V1ZG9saWZlX21lbW9yeS9jb25zb2xlX2NsaS5weSIsIGxpbmUgMjQyLCBpbiBtYWluCiAgICB0ZXh0ID0gX3JlZnVzYWwoc3RhdHVzLCBwYXlsb2FkKQogICAgICAgICAgIF5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl4KICBGaWxlICJ7T1JBQ0xFfS9wc2V1ZG9saWZlX21lbW9yeS9jb25zb2xlX2NsaS5weSIsIGxpbmUgMTg1LCBpbiBfcmVmdXNhbAogICAgaWYgY29kZSBpbiBfUkVGVVNBTFM6CiAgICAgICBeXl5eXl5eXl5eXl5eXl5eXgpUeXBlRXJyb3I6IHVuaGFzaGFibGUgdHlwZTogJ2xpc3QnCg==",
    "window": [
-    1794472648.8129098,
-    1794472649.028696
+    1794538129.199415,
+    1794538129.4510157
    ],
    "requests": [
     {
@@ -2699,8 +2573,8 @@
    "stdout": "",
    "stderr": "VHJhY2ViYWNrIChtb3N0IHJlY2VudCBjYWxsIGxhc3QpOgogIEZpbGUgIjxmcm96ZW4gcnVucHk+IiwgbGluZSAxOTgsIGluIF9ydW5fbW9kdWxlX2FzX21haW4KICBGaWxlICI8ZnJvemVuIHJ1bnB5PiIsIGxpbmUgODgsIGluIF9ydW5fY29kZQogIEZpbGUgIntPUkFDTEV9L3BzZXVkb2xpZmVfbWVtb3J5L2NsaS5weSIsIGxpbmUgMjY3LCBpbiA8bW9kdWxlPgogICAgbWFpbigpCiAgRmlsZSAie09SQUNMRX0vcHNldWRvbGlmZV9tZW1vcnkvY2xpLnB5IiwgbGluZSAyMTgsIGluIG1haW4KICAgIHN5cy5leGl0KGNvbnNvbGVfbWFpbihzeXMuYXJndlsyOl0pKQogICAgICAgICAgICAgXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl4KICBGaWxlICJ7T1JBQ0xFfS9wc2V1ZG9saWZlX21lbW9yeS9jb25zb2xlX2NsaS5weSIsIGxpbmUgMjU0LCBpbiBtYWluCiAgICByZXR1cm4gX29wZW5lZChwYXlsb2FkLCBhcmdzLCBlbnZpcm9uKQogICAgICAgICAgIF5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl4KICBGaWxlICJ7T1JBQ0xFfS9wc2V1ZG9saWZlX21lbW9yeS9jb25zb2xlX2NsaS5weSIsIGxpbmUgMzA2LCBpbiBfb3BlbmVkCiAgICBtaW51dGVzID0gbWF4KDEsIGludChwYXlsb2FkLmdldCgiZXhwaXJlc19pbiIpIG9yIDMwMCkgLy8gNjApCiAgICAgICAgICAgICAgICAgICAgIF5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl4KVmFsdWVFcnJvcjogaW52YWxpZCBsaXRlcmFsIGZvciBpbnQoKSB3aXRoIGJhc2UgMTA6ICdhYmMnCg==",
    "window": [
-    1794472649.5214975,
-    1794472649.7293007
+    1794538129.941004,
+    1794538130.1815617
    ],
    "requests": [
     {
@@ -2726,6 +2600,1612 @@
     "cwd": "0o755"
    }
   },
+  "crash-expires-list": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 1,
+   "stdout": "",
+   "stderr": "VHJhY2ViYWNrIChtb3N0IHJlY2VudCBjYWxsIGxhc3QpOgogIEZpbGUgIjxmcm96ZW4gcnVucHk+IiwgbGluZSAxOTgsIGluIF9ydW5fbW9kdWxlX2FzX21haW4KICBGaWxlICI8ZnJvemVuIHJ1bnB5PiIsIGxpbmUgODgsIGluIF9ydW5fY29kZQogIEZpbGUgIntPUkFDTEV9L3BzZXVkb2xpZmVfbWVtb3J5L2NsaS5weSIsIGxpbmUgMjY3LCBpbiA8bW9kdWxlPgogICAgbWFpbigpCiAgRmlsZSAie09SQUNMRX0vcHNldWRvbGlmZV9tZW1vcnkvY2xpLnB5IiwgbGluZSAyMTgsIGluIG1haW4KICAgIHN5cy5leGl0KGNvbnNvbGVfbWFpbihzeXMuYXJndlsyOl0pKQogICAgICAgICAgICAgXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl4KICBGaWxlICJ7T1JBQ0xFfS9wc2V1ZG9saWZlX21lbW9yeS9jb25zb2xlX2NsaS5weSIsIGxpbmUgMjU0LCBpbiBtYWluCiAgICByZXR1cm4gX29wZW5lZChwYXlsb2FkLCBhcmdzLCBlbnZpcm9uKQogICAgICAgICAgIF5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl4KICBGaWxlICJ7T1JBQ0xFfS9wc2V1ZG9saWZlX21lbW9yeS9jb25zb2xlX2NsaS5weSIsIGxpbmUgMzA2LCBpbiBfb3BlbmVkCiAgICBtaW51dGVzID0gbWF4KDEsIGludChwYXlsb2FkLmdldCgiZXhwaXJlc19pbiIpIG9yIDMwMCkgLy8gNjApCiAgICAgICAgICAgICAgICAgICAgIF5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl4KVHlwZUVycm9yOiBpbnQoKSBhcmd1bWVudCBtdXN0IGJlIGEgc3RyaW5nLCBhIGJ5dGVzLWxpa2Ugb2JqZWN0IG9yIGEgcmVhbCBudW1iZXIsIG5vdCAnZGljdCcK",
+   "window": [
+    1794538130.6731372,
+    1794538130.904643
+   ],
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "36",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "crash-expires-nan": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 1,
+   "stdout": "",
+   "stderr": "VHJhY2ViYWNrIChtb3N0IHJlY2VudCBjYWxsIGxhc3QpOgogIEZpbGUgIjxmcm96ZW4gcnVucHk+IiwgbGluZSAxOTgsIGluIF9ydW5fbW9kdWxlX2FzX21haW4KICBGaWxlICI8ZnJvemVuIHJ1bnB5PiIsIGxpbmUgODgsIGluIF9ydW5fY29kZQogIEZpbGUgIntPUkFDTEV9L3BzZXVkb2xpZmVfbWVtb3J5L2NsaS5weSIsIGxpbmUgMjY3LCBpbiA8bW9kdWxlPgogICAgbWFpbigpCiAgRmlsZSAie09SQUNMRX0vcHNldWRvbGlmZV9tZW1vcnkvY2xpLnB5IiwgbGluZSAyMTgsIGluIG1haW4KICAgIHN5cy5leGl0KGNvbnNvbGVfbWFpbihzeXMuYXJndlsyOl0pKQogICAgICAgICAgICAgXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl4KICBGaWxlICJ7T1JBQ0xFfS9wc2V1ZG9saWZlX21lbW9yeS9jb25zb2xlX2NsaS5weSIsIGxpbmUgMjU0LCBpbiBtYWluCiAgICByZXR1cm4gX29wZW5lZChwYXlsb2FkLCBhcmdzLCBlbnZpcm9uKQogICAgICAgICAgIF5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl4KICBGaWxlICJ7T1JBQ0xFfS9wc2V1ZG9saWZlX21lbW9yeS9jb25zb2xlX2NsaS5weSIsIGxpbmUgMzA2LCBpbiBfb3BlbmVkCiAgICBtaW51dGVzID0gbWF4KDEsIGludChwYXlsb2FkLmdldCgiZXhwaXJlc19pbiIpIG9yIDMwMCkgLy8gNjApCiAgICAgICAgICAgICAgICAgICAgIF5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl4KVmFsdWVFcnJvcjogY2Fubm90IGNvbnZlcnQgZmxvYXQgTmFOIHRvIGludGVnZXIK",
+   "window": [
+    1794538131.395874,
+    1794538131.6097934
+   ],
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "36",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "crash-surrogate-code": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 1,
+   "stdout": "T3BlbiB0aGlzIGxpbmsgdG8gc2lnbiBpbiB0byB0aGUgQ29uc29sZToKICB7REFFTU9OfS91aS8jL3NpZ25pbj9jb2RlPUFCQ0QtMTIzNAo=",
+   "stderr": "VHJhY2ViYWNrIChtb3N0IHJlY2VudCBjYWxsIGxhc3QpOgogIEZpbGUgIjxmcm96ZW4gcnVucHk+IiwgbGluZSAxOTgsIGluIF9ydW5fbW9kdWxlX2FzX21haW4KICBGaWxlICI8ZnJvemVuIHJ1bnB5PiIsIGxpbmUgODgsIGluIF9ydW5fY29kZQogIEZpbGUgIntPUkFDTEV9L3BzZXVkb2xpZmVfbWVtb3J5L2NsaS5weSIsIGxpbmUgMjY3LCBpbiA8bW9kdWxlPgogICAgbWFpbigpCiAgRmlsZSAie09SQUNMRX0vcHNldWRvbGlmZV9tZW1vcnkvY2xpLnB5IiwgbGluZSAyMTgsIGluIG1haW4KICAgIHN5cy5leGl0KGNvbnNvbGVfbWFpbihzeXMuYXJndlsyOl0pKQogICAgICAgICAgICAgXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl4KICBGaWxlICJ7T1JBQ0xFfS9wc2V1ZG9saWZlX21lbW9yeS9jb25zb2xlX2NsaS5weSIsIGxpbmUgMjU0LCBpbiBtYWluCiAgICByZXR1cm4gX29wZW5lZChwYXlsb2FkLCBhcmdzLCBlbnZpcm9uKQogICAgICAgICAgIF5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl4KICBGaWxlICJ7T1JBQ0xFfS9wc2V1ZG9saWZlX21lbW9yeS9jb25zb2xlX2NsaS5weSIsIGxpbmUgMzExLCBpbiBfb3BlbmVkCiAgICBwcmludChmIk9yIHR5cGUgdGhlIGNvZGUge2NvZGV9IGludG8gdGhlIENvbnNvbGUncyBzaWduLWluIGRpYWxvZyBhdCAiClVuaWNvZGVFbmNvZGVFcnJvcjogJ3V0Zi04JyBjb2RlYyBjYW4ndCBlbmNvZGUgY2hhcmFjdGVycyBpbiBwb3NpdGlvbiAxOC0xOTogc3Vycm9nYXRlcyBub3QgYWxsb3dlZAo=",
+   "window": [
+    1794538132.102271,
+    1794538132.3160214
+   ],
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "36",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "link-expires-digits": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "T3BlbiB0aGlzIGxpbmsgdG8gc2lnbiBpbiB0byB0aGUgQ29uc29sZToKICB7REFFTU9OfS91aS8jL3NpZ25pbj9jb2RlPUFCQ0QtMTIzNApPciB0eXBlIHRoZSBjb2RlIEFCQ0QtMTIzNCBpbnRvIHRoZSBDb25zb2xlJ3Mgc2lnbi1pbiBkaWFsb2cgYXQge0RBRU1PTn0vdWkvLiBJdCB3b3JrcyBvbmNlLCB3aXRoaW4gMjAgbWludXRlcy4K",
+   "stderr": "",
+   "window": [
+    1794538132.8087626,
+    1794538133.0280194
+   ],
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "36",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "link-expires-huge": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "T3BlbiB0aGlzIGxpbmsgdG8gc2lnbiBpbiB0byB0aGUgQ29uc29sZToKICB7REFFTU9OfS91aS8jL3NpZ25pbj9jb2RlPUFCQ0QtMTIzNApPciB0eXBlIHRoZSBjb2RlIEFCQ0QtMTIzNCBpbnRvIHRoZSBDb25zb2xlJ3Mgc2lnbi1pbiBkaWFsb2cgYXQge0RBRU1PTn0vdWkvLiBJdCB3b3JrcyBvbmNlLCB3aXRoaW4gMjUwMDAwMDAwMDAwMDAwMDAyNzQ0NzY1OTA3MzYwMTEzODU0MzUxMjMwNzc0MTkzMjc5NjE1ODQyMDI2NzA3MjU3ODkzOTYzNTEyMjc4NzI4ODQyOTA4MzIyNDQ2MjM2NzIyMjQ3NjUzMTI0MTc0MzAyOTMxMjg5MDI4OTc1NzA5MzU3ODUwMjIwODIwNzY3NTIyOTk1MzY1MTE1MDc4MTc5MTYxMjU3MzMyNTY3OTY0MjQzNzI0MjQ4OTcxMzk3NjA4MzQ1OTYxMTY1NDEyNTAyOTQ2MDY3MjQ0MDY1NTMyMzYyOTQ0MDcwMjI3OTg5NDY2NzY4NjQ1MzA2OTU5OTI1NDI5NDYxMDM3NzYzMjI5NTA3MjMzMDE5NjgzMTgyNDM3MjE0Mjg4NTc1NTU3Nzk1OCBtaW51dGVzLgo=",
+   "stderr": "",
+   "window": [
+    1794538133.52037,
+    1794538133.7301397
+   ],
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "36",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "link-surrogate-code-json": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "eyJzdGF0ZSI6ICJwcmludGVkIiwgInVybCI6ICJ7REFFTU9OfS91aS8jL3NpZ25pbj9jb2RlPUFCQ0QtMTIzNCIsICJjb2RlIjogIlx1ZGM4MCIsICJvcmlnaW4iOiAie0RBRU1PTn0iLCAicHJpbmNpcGFsIjogImZpeHR1cmUiLCAiZXhwaXJlc19pbiI6IDMwMH0K",
+   "stderr": "",
+   "window": [
+    1794538134.2204437,
+    1794538134.4312801
+   ],
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "36",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "open": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "T3BlbmVkIHRoZSBDb25zb2xlIGluIHlvdXIgYnJvd3NlcjogY29uZmlybSB0aGUgc2lnbi1pbiB0aGVyZS4KICB7REFFTU9OfS91aS8jL3NpZ25pbj9jb2RlPUFCQ0QtMTIzNApPciB0eXBlIHRoZSBjb2RlIEFCQ0QtMTIzNCBpbnRvIHRoZSBDb25zb2xlJ3Mgc2lnbi1pbiBkaWFsb2cgYXQge0RBRU1PTn0vdWkvLiBJdCB3b3JrcyBvbmNlLCB3aXRoaW4gNSBtaW51dGVzLgo=",
+   "stderr": "",
+   "window": [
+    1794538134.9353073,
+    1794538135.1723893
+   ],
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "36",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "bin": "dir",
+    "cwd": "dir",
+    "launched": "dir",
+    "launched/launch-1.json": "file:WyJ7REFFTU9OfS91aS8jL3NpZ25pbj9jb2RlPUFCQ0QtMTIzNCJd",
+    "bin/stand-in.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMsIHRpbWUKaG9tZSA9IG9zLnBhdGguZGlybmFtZShvcy5wYXRoLmRpcm5hbWUob3MucGF0aC5hYnNwYXRoKF9fZmlsZV9fKSkpCnN0YXRlID0gb3MucGF0aC5qb2luKGhvbWUsICIuc3RhbmRpbiIpCm9zLm1ha2VkaXJzKHN0YXRlLCBleGlzdF9vaz1UcnVlKQpuID0gMQp3aGlsZSBUcnVlOgogICAgdHJ5OgogICAgICAgIGZkID0gb3Mub3Blbihvcy5wYXRoLmpvaW4oc3RhdGUsICJzdGFydGVkLSVkIiAlIG4pLCBvcy5PX0NSRUFUIHwgb3MuT19FWENMIHwgb3MuT19XUk9OTFkpCiAgICAgICAgYnJlYWsKICAgIGV4Y2VwdCBGaWxlRXhpc3RzRXJyb3I6CiAgICAgICAgbiArPSAxCm9zLndyaXRlKGZkLCBzdHIob3MuZ2V0cGlkKCkpLmVuY29kZSgpKQpvcy5jbG9zZShmZCkKbGF1bmNoZWQgPSBvcy5wYXRoLmpvaW4oaG9tZSwgImxhdW5jaGVkIikKb3MubWFrZWRpcnMobGF1bmNoZWQsIGV4aXN0X29rPVRydWUpCndpdGggb3Blbihvcy5wYXRoLmpvaW4obGF1bmNoZWQsICJsYXVuY2gtJWQuanNvbiIgJSBuKSwgInciLCBlbmNvZGluZz0idXRmLTgiKSBhcyBvdXQ6CiAgICBqc29uLmR1bXAoc3lzLmFyZ3ZbMTpdLCBvdXQpCmRlYWRsaW5lID0gdGltZS5tb25vdG9uaWMoKSArIDMwCndoaWxlIG5vdCBvcy5wYXRoLmV4aXN0cyhvcy5wYXRoLmpvaW4oc3RhdGUsICJyZWxlYXNlIikpIGFuZCB0aW1lLm1vbm90b25pYygpIDwgZGVhZGxpbmU6CiAgICB0aW1lLnNsZWVwKDAuMDIpCm9wZW4ob3MucGF0aC5qb2luKHN0YXRlLCAiZG9uZS0lZCIgJSBuKSwgInciKS5jbG9zZSgpCg=="
+   },
+   "modes": {
+    "bin": "0o755",
+    "bin/stand-in.py": "0o644",
+    "cwd": "0o755",
+    "launched": "0o755",
+    "launched/launch-1.json": "0o644"
+   }
+  },
+  "open-json": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "eyJzdGF0ZSI6ICJvcGVuZWQiLCAidXJsIjogIntEQUVNT059L3VpLyMvc2lnbmluP2NvZGU9QUJDRC0xMjM0IiwgImNvZGUiOiAiQUJDRC0xMjM0IiwgIm9yaWdpbiI6ICJ7REFFTU9OfSIsICJwcmluY2lwYWwiOiAiZml4dHVyZSIsICJleHBpcmVzX2luIjogMzAwfQo=",
+   "stderr": "",
+   "window": [
+    1794538135.6509626,
+    1794538135.8935664
+   ],
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "36",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "bin": "dir",
+    "cwd": "dir",
+    "launched": "dir",
+    "launched/launch-1.json": "file:WyJ7REFFTU9OfS91aS8jL3NpZ25pbj9jb2RlPUFCQ0QtMTIzNCJd",
+    "bin/stand-in.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMsIHRpbWUKaG9tZSA9IG9zLnBhdGguZGlybmFtZShvcy5wYXRoLmRpcm5hbWUob3MucGF0aC5hYnNwYXRoKF9fZmlsZV9fKSkpCnN0YXRlID0gb3MucGF0aC5qb2luKGhvbWUsICIuc3RhbmRpbiIpCm9zLm1ha2VkaXJzKHN0YXRlLCBleGlzdF9vaz1UcnVlKQpuID0gMQp3aGlsZSBUcnVlOgogICAgdHJ5OgogICAgICAgIGZkID0gb3Mub3Blbihvcy5wYXRoLmpvaW4oc3RhdGUsICJzdGFydGVkLSVkIiAlIG4pLCBvcy5PX0NSRUFUIHwgb3MuT19FWENMIHwgb3MuT19XUk9OTFkpCiAgICAgICAgYnJlYWsKICAgIGV4Y2VwdCBGaWxlRXhpc3RzRXJyb3I6CiAgICAgICAgbiArPSAxCm9zLndyaXRlKGZkLCBzdHIob3MuZ2V0cGlkKCkpLmVuY29kZSgpKQpvcy5jbG9zZShmZCkKbGF1bmNoZWQgPSBvcy5wYXRoLmpvaW4oaG9tZSwgImxhdW5jaGVkIikKb3MubWFrZWRpcnMobGF1bmNoZWQsIGV4aXN0X29rPVRydWUpCndpdGggb3Blbihvcy5wYXRoLmpvaW4obGF1bmNoZWQsICJsYXVuY2gtJWQuanNvbiIgJSBuKSwgInciLCBlbmNvZGluZz0idXRmLTgiKSBhcyBvdXQ6CiAgICBqc29uLmR1bXAoc3lzLmFyZ3ZbMTpdLCBvdXQpCmRlYWRsaW5lID0gdGltZS5tb25vdG9uaWMoKSArIDMwCndoaWxlIG5vdCBvcy5wYXRoLmV4aXN0cyhvcy5wYXRoLmpvaW4oc3RhdGUsICJyZWxlYXNlIikpIGFuZCB0aW1lLm1vbm90b25pYygpIDwgZGVhZGxpbmU6CiAgICB0aW1lLnNsZWVwKDAuMDIpCm9wZW4ob3MucGF0aC5qb2luKHN0YXRlLCAiZG9uZS0lZCIgJSBuKSwgInciKS5jbG9zZSgpCg=="
+   },
+   "modes": {
+    "bin": "0o755",
+    "bin/stand-in.py": "0o644",
+    "cwd": "0o755",
+    "launched": "0o755",
+    "launched/launch-1.json": "0o644"
+   }
+  },
+  "open-to-board": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "eyJzdGF0ZSI6ICJvcGVuZWQiLCAidXJsIjogIntEQUVNT059L3VpLyMvc2lnbmluP2NvZGU9QUJDRC0xMjM0IiwgImNvZGUiOiAiQUJDRC0xMjM0IiwgIm9yaWdpbiI6ICJ7REFFTU9OfSIsICJwcmluY2lwYWwiOiAiZml4dHVyZSIsICJleHBpcmVzX2luIjogMzAwfQo=",
+   "stderr": "",
+   "window": [
+    1794538136.3711066,
+    1794538136.6072435
+   ],
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "51",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\", \"to\": \"board\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "bin": "dir",
+    "cwd": "dir",
+    "launched": "dir",
+    "launched/launch-1.json": "file:WyJ7REFFTU9OfS91aS8jL3NpZ25pbj9jb2RlPUFCQ0QtMTIzNCJd",
+    "bin/stand-in.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMsIHRpbWUKaG9tZSA9IG9zLnBhdGguZGlybmFtZShvcy5wYXRoLmRpcm5hbWUob3MucGF0aC5hYnNwYXRoKF9fZmlsZV9fKSkpCnN0YXRlID0gb3MucGF0aC5qb2luKGhvbWUsICIuc3RhbmRpbiIpCm9zLm1ha2VkaXJzKHN0YXRlLCBleGlzdF9vaz1UcnVlKQpuID0gMQp3aGlsZSBUcnVlOgogICAgdHJ5OgogICAgICAgIGZkID0gb3Mub3Blbihvcy5wYXRoLmpvaW4oc3RhdGUsICJzdGFydGVkLSVkIiAlIG4pLCBvcy5PX0NSRUFUIHwgb3MuT19FWENMIHwgb3MuT19XUk9OTFkpCiAgICAgICAgYnJlYWsKICAgIGV4Y2VwdCBGaWxlRXhpc3RzRXJyb3I6CiAgICAgICAgbiArPSAxCm9zLndyaXRlKGZkLCBzdHIob3MuZ2V0cGlkKCkpLmVuY29kZSgpKQpvcy5jbG9zZShmZCkKbGF1bmNoZWQgPSBvcy5wYXRoLmpvaW4oaG9tZSwgImxhdW5jaGVkIikKb3MubWFrZWRpcnMobGF1bmNoZWQsIGV4aXN0X29rPVRydWUpCndpdGggb3Blbihvcy5wYXRoLmpvaW4obGF1bmNoZWQsICJsYXVuY2gtJWQuanNvbiIgJSBuKSwgInciLCBlbmNvZGluZz0idXRmLTgiKSBhcyBvdXQ6CiAgICBqc29uLmR1bXAoc3lzLmFyZ3ZbMTpdLCBvdXQpCmRlYWRsaW5lID0gdGltZS5tb25vdG9uaWMoKSArIDMwCndoaWxlIG5vdCBvcy5wYXRoLmV4aXN0cyhvcy5wYXRoLmpvaW4oc3RhdGUsICJyZWxlYXNlIikpIGFuZCB0aW1lLm1vbm90b25pYygpIDwgZGVhZGxpbmU6CiAgICB0aW1lLnNsZWVwKDAuMDIpCm9wZW4ob3MucGF0aC5qb2luKHN0YXRlLCAiZG9uZS0lZCIgJSBuKSwgInciKS5jbG9zZSgpCg=="
+   },
+   "modes": {
+    "bin": "0o755",
+    "bin/stand-in.py": "0o644",
+    "cwd": "0o755",
+    "launched": "0o755",
+    "launched/launch-1.json": "0o644"
+   }
+  },
+  "open-args": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "T3BlbmVkIHRoZSBDb25zb2xlIGluIHlvdXIgYnJvd3NlcjogY29uZmlybSB0aGUgc2lnbi1pbiB0aGVyZS4KICB7REFFTU9OfS91aS8jL3NpZ25pbj9jb2RlPUFCQ0QtMTIzNApPciB0eXBlIHRoZSBjb2RlIEFCQ0QtMTIzNCBpbnRvIHRoZSBDb25zb2xlJ3Mgc2lnbi1pbiBkaWFsb2cgYXQge0RBRU1PTn0vdWkvLiBJdCB3b3JrcyBvbmNlLCB3aXRoaW4gNSBtaW51dGVzLgo=",
+   "stderr": "",
+   "window": [
+    1794538137.087647,
+    1794538137.322682
+   ],
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "36",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "bin": "dir",
+    "cwd": "dir",
+    "launched": "dir",
+    "launched/launch-1.json": "file:WyItLW5ldy10YWIiLCAiLS11cmw9e0RBRU1PTn0vdWkvIy9zaWduaW4/Y29kZT1BQkNELTEyMzQiXQ==",
+    "bin/stand-in.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMsIHRpbWUKaG9tZSA9IG9zLnBhdGguZGlybmFtZShvcy5wYXRoLmRpcm5hbWUob3MucGF0aC5hYnNwYXRoKF9fZmlsZV9fKSkpCnN0YXRlID0gb3MucGF0aC5qb2luKGhvbWUsICIuc3RhbmRpbiIpCm9zLm1ha2VkaXJzKHN0YXRlLCBleGlzdF9vaz1UcnVlKQpuID0gMQp3aGlsZSBUcnVlOgogICAgdHJ5OgogICAgICAgIGZkID0gb3Mub3Blbihvcy5wYXRoLmpvaW4oc3RhdGUsICJzdGFydGVkLSVkIiAlIG4pLCBvcy5PX0NSRUFUIHwgb3MuT19FWENMIHwgb3MuT19XUk9OTFkpCiAgICAgICAgYnJlYWsKICAgIGV4Y2VwdCBGaWxlRXhpc3RzRXJyb3I6CiAgICAgICAgbiArPSAxCm9zLndyaXRlKGZkLCBzdHIob3MuZ2V0cGlkKCkpLmVuY29kZSgpKQpvcy5jbG9zZShmZCkKbGF1bmNoZWQgPSBvcy5wYXRoLmpvaW4oaG9tZSwgImxhdW5jaGVkIikKb3MubWFrZWRpcnMobGF1bmNoZWQsIGV4aXN0X29rPVRydWUpCndpdGggb3Blbihvcy5wYXRoLmpvaW4obGF1bmNoZWQsICJsYXVuY2gtJWQuanNvbiIgJSBuKSwgInciLCBlbmNvZGluZz0idXRmLTgiKSBhcyBvdXQ6CiAgICBqc29uLmR1bXAoc3lzLmFyZ3ZbMTpdLCBvdXQpCmRlYWRsaW5lID0gdGltZS5tb25vdG9uaWMoKSArIDMwCndoaWxlIG5vdCBvcy5wYXRoLmV4aXN0cyhvcy5wYXRoLmpvaW4oc3RhdGUsICJyZWxlYXNlIikpIGFuZCB0aW1lLm1vbm90b25pYygpIDwgZGVhZGxpbmU6CiAgICB0aW1lLnNsZWVwKDAuMDIpCm9wZW4ob3MucGF0aC5qb2luKHN0YXRlLCAiZG9uZS0lZCIgJSBuKSwgInciKS5jbG9zZSgpCg=="
+   },
+   "modes": {
+    "bin": "0o755",
+    "bin/stand-in.py": "0o644",
+    "cwd": "0o755",
+    "launched": "0o755",
+    "launched/launch-1.json": "0o644"
+   }
+  },
+  "open-quoted-ampersand": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "eyJzdGF0ZSI6ICJvcGVuZWQiLCAidXJsIjogIntEQUVNT059L3VpLyMvc2lnbmluP2NvZGU9QUJDRC0xMjM0IiwgImNvZGUiOiAiQUJDRC0xMjM0IiwgIm9yaWdpbiI6ICJ7REFFTU9OfSIsICJwcmluY2lwYWwiOiAiZml4dHVyZSIsICJleHBpcmVzX2luIjogMzAwfQo=",
+   "stderr": "",
+   "window": [
+    1794538137.8021696,
+    1794538138.0270538
+   ],
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "36",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "bin": "dir",
+    "cwd": "dir",
+    "launched": "dir",
+    "launched/launch-1.json": "file:WyJ7REFFTU9OfS91aS8jL3NpZ25pbj9jb2RlPUFCQ0QtMTIzNCJd",
+    "bin/stand-in.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMsIHRpbWUKaG9tZSA9IG9zLnBhdGguZGlybmFtZShvcy5wYXRoLmRpcm5hbWUob3MucGF0aC5hYnNwYXRoKF9fZmlsZV9fKSkpCnN0YXRlID0gb3MucGF0aC5qb2luKGhvbWUsICIuc3RhbmRpbiIpCm9zLm1ha2VkaXJzKHN0YXRlLCBleGlzdF9vaz1UcnVlKQpuID0gMQp3aGlsZSBUcnVlOgogICAgdHJ5OgogICAgICAgIGZkID0gb3Mub3Blbihvcy5wYXRoLmpvaW4oc3RhdGUsICJzdGFydGVkLSVkIiAlIG4pLCBvcy5PX0NSRUFUIHwgb3MuT19FWENMIHwgb3MuT19XUk9OTFkpCiAgICAgICAgYnJlYWsKICAgIGV4Y2VwdCBGaWxlRXhpc3RzRXJyb3I6CiAgICAgICAgbiArPSAxCm9zLndyaXRlKGZkLCBzdHIob3MuZ2V0cGlkKCkpLmVuY29kZSgpKQpvcy5jbG9zZShmZCkKbGF1bmNoZWQgPSBvcy5wYXRoLmpvaW4oaG9tZSwgImxhdW5jaGVkIikKb3MubWFrZWRpcnMobGF1bmNoZWQsIGV4aXN0X29rPVRydWUpCndpdGggb3Blbihvcy5wYXRoLmpvaW4obGF1bmNoZWQsICJsYXVuY2gtJWQuanNvbiIgJSBuKSwgInciLCBlbmNvZGluZz0idXRmLTgiKSBhcyBvdXQ6CiAgICBqc29uLmR1bXAoc3lzLmFyZ3ZbMTpdLCBvdXQpCmRlYWRsaW5lID0gdGltZS5tb25vdG9uaWMoKSArIDMwCndoaWxlIG5vdCBvcy5wYXRoLmV4aXN0cyhvcy5wYXRoLmpvaW4oc3RhdGUsICJyZWxlYXNlIikpIGFuZCB0aW1lLm1vbm90b25pYygpIDwgZGVhZGxpbmU6CiAgICB0aW1lLnNsZWVwKDAuMDIpCm9wZW4ob3MucGF0aC5qb2luKHN0YXRlLCAiZG9uZS0lZCIgJSBuKSwgInciKS5jbG9zZSgpCg=="
+   },
+   "modes": {
+    "bin": "0o755",
+    "bin/stand-in.py": "0o644",
+    "cwd": "0o755",
+    "launched": "0o755",
+    "launched/launch-1.json": "0o644"
+   }
+  },
+  "open-first-entry": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "eyJzdGF0ZSI6ICJvcGVuZWQiLCAidXJsIjogIntEQUVNT059L3VpLyMvc2lnbmluP2NvZGU9QUJDRC0xMjM0IiwgImNvZGUiOiAiQUJDRC0xMjM0IiwgIm9yaWdpbiI6ICJ7REFFTU9OfSIsICJwcmluY2lwYWwiOiAiZml4dHVyZSIsICJleHBpcmVzX2luIjogMzAwfQo=",
+   "stderr": "",
+   "window": [
+    1794538138.5242233,
+    1794538138.7655635
+   ],
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "36",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "bin": "dir",
+    "cwd": "dir",
+    "launched": "dir",
+    "launched/launch-1.json": "file:WyJ7REFFTU9OfS91aS8jL3NpZ25pbj9jb2RlPUFCQ0QtMTIzNCJd",
+    "bin/stand-in.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMsIHRpbWUKaG9tZSA9IG9zLnBhdGguZGlybmFtZShvcy5wYXRoLmRpcm5hbWUob3MucGF0aC5hYnNwYXRoKF9fZmlsZV9fKSkpCnN0YXRlID0gb3MucGF0aC5qb2luKGhvbWUsICIuc3RhbmRpbiIpCm9zLm1ha2VkaXJzKHN0YXRlLCBleGlzdF9vaz1UcnVlKQpuID0gMQp3aGlsZSBUcnVlOgogICAgdHJ5OgogICAgICAgIGZkID0gb3Mub3Blbihvcy5wYXRoLmpvaW4oc3RhdGUsICJzdGFydGVkLSVkIiAlIG4pLCBvcy5PX0NSRUFUIHwgb3MuT19FWENMIHwgb3MuT19XUk9OTFkpCiAgICAgICAgYnJlYWsKICAgIGV4Y2VwdCBGaWxlRXhpc3RzRXJyb3I6CiAgICAgICAgbiArPSAxCm9zLndyaXRlKGZkLCBzdHIob3MuZ2V0cGlkKCkpLmVuY29kZSgpKQpvcy5jbG9zZShmZCkKbGF1bmNoZWQgPSBvcy5wYXRoLmpvaW4oaG9tZSwgImxhdW5jaGVkIikKb3MubWFrZWRpcnMobGF1bmNoZWQsIGV4aXN0X29rPVRydWUpCndpdGggb3Blbihvcy5wYXRoLmpvaW4obGF1bmNoZWQsICJsYXVuY2gtJWQuanNvbiIgJSBuKSwgInciLCBlbmNvZGluZz0idXRmLTgiKSBhcyBvdXQ6CiAgICBqc29uLmR1bXAoc3lzLmFyZ3ZbMTpdLCBvdXQpCmRlYWRsaW5lID0gdGltZS5tb25vdG9uaWMoKSArIDMwCndoaWxlIG5vdCBvcy5wYXRoLmV4aXN0cyhvcy5wYXRoLmpvaW4oc3RhdGUsICJyZWxlYXNlIikpIGFuZCB0aW1lLm1vbm90b25pYygpIDwgZGVhZGxpbmU6CiAgICB0aW1lLnNsZWVwKDAuMDIpCm9wZW4ob3MucGF0aC5qb2luKHN0YXRlLCAiZG9uZS0lZCIgJSBuKSwgInciKS5jbG9zZSgpCg=="
+   },
+   "modes": {
+    "bin": "0o755",
+    "bin/stand-in.py": "0o644",
+    "cwd": "0o755",
+    "launched": "0o755",
+    "launched/launch-1.json": "0o644"
+   }
+  },
+  "open-empty-revoke": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "T3BlbmVkIHRoZSBDb25zb2xlIGluIHlvdXIgYnJvd3NlcjogY29uZmlybSB0aGUgc2lnbi1pbiB0aGVyZS4KICB7REFFTU9OfS91aS8jL3NpZ25pbj9jb2RlPUFCQ0QtMTIzNApPciB0eXBlIHRoZSBjb2RlIEFCQ0QtMTIzNCBpbnRvIHRoZSBDb25zb2xlJ3Mgc2lnbi1pbiBkaWFsb2cgYXQge0RBRU1PTn0vdWkvLiBJdCB3b3JrcyBvbmNlLCB3aXRoaW4gNSBtaW51dGVzLgo=",
+   "stderr": "",
+   "window": [
+    1794538139.2439358,
+    1794538139.4894943
+   ],
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "36",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "bin": "dir",
+    "cwd": "dir",
+    "launched": "dir",
+    "launched/launch-1.json": "file:WyJ7REFFTU9OfS91aS8jL3NpZ25pbj9jb2RlPUFCQ0QtMTIzNCJd",
+    "bin/stand-in.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMsIHRpbWUKaG9tZSA9IG9zLnBhdGguZGlybmFtZShvcy5wYXRoLmRpcm5hbWUob3MucGF0aC5hYnNwYXRoKF9fZmlsZV9fKSkpCnN0YXRlID0gb3MucGF0aC5qb2luKGhvbWUsICIuc3RhbmRpbiIpCm9zLm1ha2VkaXJzKHN0YXRlLCBleGlzdF9vaz1UcnVlKQpuID0gMQp3aGlsZSBUcnVlOgogICAgdHJ5OgogICAgICAgIGZkID0gb3Mub3Blbihvcy5wYXRoLmpvaW4oc3RhdGUsICJzdGFydGVkLSVkIiAlIG4pLCBvcy5PX0NSRUFUIHwgb3MuT19FWENMIHwgb3MuT19XUk9OTFkpCiAgICAgICAgYnJlYWsKICAgIGV4Y2VwdCBGaWxlRXhpc3RzRXJyb3I6CiAgICAgICAgbiArPSAxCm9zLndyaXRlKGZkLCBzdHIob3MuZ2V0cGlkKCkpLmVuY29kZSgpKQpvcy5jbG9zZShmZCkKbGF1bmNoZWQgPSBvcy5wYXRoLmpvaW4oaG9tZSwgImxhdW5jaGVkIikKb3MubWFrZWRpcnMobGF1bmNoZWQsIGV4aXN0X29rPVRydWUpCndpdGggb3Blbihvcy5wYXRoLmpvaW4obGF1bmNoZWQsICJsYXVuY2gtJWQuanNvbiIgJSBuKSwgInciLCBlbmNvZGluZz0idXRmLTgiKSBhcyBvdXQ6CiAgICBqc29uLmR1bXAoc3lzLmFyZ3ZbMTpdLCBvdXQpCmRlYWRsaW5lID0gdGltZS5tb25vdG9uaWMoKSArIDMwCndoaWxlIG5vdCBvcy5wYXRoLmV4aXN0cyhvcy5wYXRoLmpvaW4oc3RhdGUsICJyZWxlYXNlIikpIGFuZCB0aW1lLm1vbm90b25pYygpIDwgZGVhZGxpbmU6CiAgICB0aW1lLnNsZWVwKDAuMDIpCm9wZW4ob3MucGF0aC5qb2luKHN0YXRlLCAiZG9uZS0lZCIgJSBuKSwgInciKS5jbG9zZSgpCg=="
+   },
+   "modes": {
+    "bin": "0o755",
+    "bin/stand-in.py": "0o644",
+    "cwd": "0o755",
+    "launched": "0o755",
+    "launched/launch-1.json": "0o644"
+   }
+  },
+  "open-unicode-code": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "T3BlbmVkIHRoZSBDb25zb2xlIGluIHlvdXIgYnJvd3NlcjogY29uZmlybSB0aGUgc2lnbi1pbiB0aGVyZS4KICB7REFFTU9OfS91aS8jL3NpZ25pbj9jb2RlPUFCQ0QtMTIzNApPciB0eXBlIHRoZSBjb2RlIG7DpG1lIOKckyBpbnRvIHRoZSBDb25zb2xlJ3Mgc2lnbi1pbiBkaWFsb2cgYXQge0RBRU1PTn0vdWkvLiBJdCB3b3JrcyBvbmNlLCB3aXRoaW4gMTIwIG1pbnV0ZXMuCg==",
+   "stderr": "",
+   "window": [
+    1794538139.9695938,
+    1794538140.1934004
+   ],
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "36",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "bin": "dir",
+    "cwd": "dir",
+    "launched": "dir",
+    "launched/launch-1.json": "file:WyJ7REFFTU9OfS91aS8jL3NpZ25pbj9jb2RlPUFCQ0QtMTIzNCJd",
+    "bin/stand-in.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMsIHRpbWUKaG9tZSA9IG9zLnBhdGguZGlybmFtZShvcy5wYXRoLmRpcm5hbWUob3MucGF0aC5hYnNwYXRoKF9fZmlsZV9fKSkpCnN0YXRlID0gb3MucGF0aC5qb2luKGhvbWUsICIuc3RhbmRpbiIpCm9zLm1ha2VkaXJzKHN0YXRlLCBleGlzdF9vaz1UcnVlKQpuID0gMQp3aGlsZSBUcnVlOgogICAgdHJ5OgogICAgICAgIGZkID0gb3Mub3Blbihvcy5wYXRoLmpvaW4oc3RhdGUsICJzdGFydGVkLSVkIiAlIG4pLCBvcy5PX0NSRUFUIHwgb3MuT19FWENMIHwgb3MuT19XUk9OTFkpCiAgICAgICAgYnJlYWsKICAgIGV4Y2VwdCBGaWxlRXhpc3RzRXJyb3I6CiAgICAgICAgbiArPSAxCm9zLndyaXRlKGZkLCBzdHIob3MuZ2V0cGlkKCkpLmVuY29kZSgpKQpvcy5jbG9zZShmZCkKbGF1bmNoZWQgPSBvcy5wYXRoLmpvaW4oaG9tZSwgImxhdW5jaGVkIikKb3MubWFrZWRpcnMobGF1bmNoZWQsIGV4aXN0X29rPVRydWUpCndpdGggb3Blbihvcy5wYXRoLmpvaW4obGF1bmNoZWQsICJsYXVuY2gtJWQuanNvbiIgJSBuKSwgInciLCBlbmNvZGluZz0idXRmLTgiKSBhcyBvdXQ6CiAgICBqc29uLmR1bXAoc3lzLmFyZ3ZbMTpdLCBvdXQpCmRlYWRsaW5lID0gdGltZS5tb25vdG9uaWMoKSArIDMwCndoaWxlIG5vdCBvcy5wYXRoLmV4aXN0cyhvcy5wYXRoLmpvaW4oc3RhdGUsICJyZWxlYXNlIikpIGFuZCB0aW1lLm1vbm90b25pYygpIDwgZGVhZGxpbmU6CiAgICB0aW1lLnNsZWVwKDAuMDIpCm9wZW4ob3MucGF0aC5qb2luKHN0YXRlLCAiZG9uZS0lZCIgJSBuKSwgInciKS5jbG9zZSgpCg=="
+   },
+   "modes": {
+    "bin": "0o755",
+    "bin/stand-in.py": "0o644",
+    "cwd": "0o755",
+    "launched": "0o755",
+    "launched/launch-1.json": "0o644"
+   }
+  },
+  "open-generic": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "T3BlbiB0aGlzIGxpbmsgdG8gc2lnbiBpbiB0byB0aGUgQ29uc29sZToKICB7REFFTU9OfS91aS8jL3NpZ25pbj9jb2RlPUFCQ0QtMTIzNApPciB0eXBlIHRoZSBjb2RlIEFCQ0QtMTIzNCBpbnRvIHRoZSBDb25zb2xlJ3Mgc2lnbi1pbiBkaWFsb2cgYXQge0RBRU1PTn0vdWkvLiBJdCB3b3JrcyBvbmNlLCB3aXRoaW4gNSBtaW51dGVzLgo=",
+   "stderr": "",
+   "window": [
+    1794538140.6913893,
+    1794538140.9039876
+   ],
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "36",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "bin": "dir",
+    "cwd": "dir",
+    "bin/stand-in.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMsIHRpbWUKaG9tZSA9IG9zLnBhdGguZGlybmFtZShvcy5wYXRoLmRpcm5hbWUob3MucGF0aC5hYnNwYXRoKF9fZmlsZV9fKSkpCnN0YXRlID0gb3MucGF0aC5qb2luKGhvbWUsICIuc3RhbmRpbiIpCm9zLm1ha2VkaXJzKHN0YXRlLCBleGlzdF9vaz1UcnVlKQpuID0gMQp3aGlsZSBUcnVlOgogICAgdHJ5OgogICAgICAgIGZkID0gb3Mub3Blbihvcy5wYXRoLmpvaW4oc3RhdGUsICJzdGFydGVkLSVkIiAlIG4pLCBvcy5PX0NSRUFUIHwgb3MuT19FWENMIHwgb3MuT19XUk9OTFkpCiAgICAgICAgYnJlYWsKICAgIGV4Y2VwdCBGaWxlRXhpc3RzRXJyb3I6CiAgICAgICAgbiArPSAxCm9zLndyaXRlKGZkLCBzdHIob3MuZ2V0cGlkKCkpLmVuY29kZSgpKQpvcy5jbG9zZShmZCkKbGF1bmNoZWQgPSBvcy5wYXRoLmpvaW4oaG9tZSwgImxhdW5jaGVkIikKb3MubWFrZWRpcnMobGF1bmNoZWQsIGV4aXN0X29rPVRydWUpCndpdGggb3Blbihvcy5wYXRoLmpvaW4obGF1bmNoZWQsICJsYXVuY2gtJWQuanNvbiIgJSBuKSwgInciLCBlbmNvZGluZz0idXRmLTgiKSBhcyBvdXQ6CiAgICBqc29uLmR1bXAoc3lzLmFyZ3ZbMTpdLCBvdXQpCmRlYWRsaW5lID0gdGltZS5tb25vdG9uaWMoKSArIDMwCndoaWxlIG5vdCBvcy5wYXRoLmV4aXN0cyhvcy5wYXRoLmpvaW4oc3RhdGUsICJyZWxlYXNlIikpIGFuZCB0aW1lLm1vbm90b25pYygpIDwgZGVhZGxpbmU6CiAgICB0aW1lLnNsZWVwKDAuMDIpCm9wZW4ob3MucGF0aC5qb2luKHN0YXRlLCAiZG9uZS0lZCIgJSBuKSwgInciKS5jbG9zZSgpCg=="
+   },
+   "modes": {
+    "bin": "0o755",
+    "bin/stand-in.py": "0o644",
+    "cwd": "0o755"
+   }
+  },
+  "open-generic-name": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "eyJzdGF0ZSI6ICJwcmludGVkIiwgInVybCI6ICJ7REFFTU9OfS91aS8jL3NpZ25pbj9jb2RlPUFCQ0QtMTIzNCIsICJjb2RlIjogIkFCQ0QtMTIzNCIsICJvcmlnaW4iOiAie0RBRU1PTn0iLCAicHJpbmNpcGFsIjogImZpeHR1cmUiLCAiZXhwaXJlc19pbiI6IDMwMH0K",
+   "stderr": "",
+   "window": [
+    1794538141.405661,
+    1794538141.6167002
+   ],
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "36",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "bin": "dir",
+    "cwd": "dir",
+    "bin/stand-in.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMsIHRpbWUKaG9tZSA9IG9zLnBhdGguZGlybmFtZShvcy5wYXRoLmRpcm5hbWUob3MucGF0aC5hYnNwYXRoKF9fZmlsZV9fKSkpCnN0YXRlID0gb3MucGF0aC5qb2luKGhvbWUsICIuc3RhbmRpbiIpCm9zLm1ha2VkaXJzKHN0YXRlLCBleGlzdF9vaz1UcnVlKQpuID0gMQp3aGlsZSBUcnVlOgogICAgdHJ5OgogICAgICAgIGZkID0gb3Mub3Blbihvcy5wYXRoLmpvaW4oc3RhdGUsICJzdGFydGVkLSVkIiAlIG4pLCBvcy5PX0NSRUFUIHwgb3MuT19FWENMIHwgb3MuT19XUk9OTFkpCiAgICAgICAgYnJlYWsKICAgIGV4Y2VwdCBGaWxlRXhpc3RzRXJyb3I6CiAgICAgICAgbiArPSAxCm9zLndyaXRlKGZkLCBzdHIob3MuZ2V0cGlkKCkpLmVuY29kZSgpKQpvcy5jbG9zZShmZCkKbGF1bmNoZWQgPSBvcy5wYXRoLmpvaW4oaG9tZSwgImxhdW5jaGVkIikKb3MubWFrZWRpcnMobGF1bmNoZWQsIGV4aXN0X29rPVRydWUpCndpdGggb3Blbihvcy5wYXRoLmpvaW4obGF1bmNoZWQsICJsYXVuY2gtJWQuanNvbiIgJSBuKSwgInciLCBlbmNvZGluZz0idXRmLTgiKSBhcyBvdXQ6CiAgICBqc29uLmR1bXAoc3lzLmFyZ3ZbMTpdLCBvdXQpCmRlYWRsaW5lID0gdGltZS5tb25vdG9uaWMoKSArIDMwCndoaWxlIG5vdCBvcy5wYXRoLmV4aXN0cyhvcy5wYXRoLmpvaW4oc3RhdGUsICJyZWxlYXNlIikpIGFuZCB0aW1lLm1vbm90b25pYygpIDwgZGVhZGxpbmU6CiAgICB0aW1lLnNsZWVwKDAuMDIpCm9wZW4ob3MucGF0aC5qb2luKHN0YXRlLCAiZG9uZS0lZCIgJSBuKSwgInciKS5jbG9zZSgpCg=="
+   },
+   "modes": {
+    "bin": "0o755",
+    "bin/stand-in.py": "0o644",
+    "cwd": "0o755"
+   }
+  },
+  "open-missing-program": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "T3BlbiB0aGlzIGxpbmsgdG8gc2lnbiBpbiB0byB0aGUgQ29uc29sZToKICB7REFFTU9OfS91aS8jL3NpZ25pbj9jb2RlPUFCQ0QtMTIzNApPciB0eXBlIHRoZSBjb2RlIEFCQ0QtMTIzNCBpbnRvIHRoZSBDb25zb2xlJ3Mgc2lnbi1pbiBkaWFsb2cgYXQge0RBRU1PTn0vdWkvLiBJdCB3b3JrcyBvbmNlLCB3aXRoaW4gNSBtaW51dGVzLgo=",
+   "stderr": "",
+   "window": [
+    1794538142.1185703,
+    1794538142.3379781
+   ],
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "36",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "bin": "dir",
+    "cwd": "dir",
+    "bin/stand-in.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMsIHRpbWUKaG9tZSA9IG9zLnBhdGguZGlybmFtZShvcy5wYXRoLmRpcm5hbWUob3MucGF0aC5hYnNwYXRoKF9fZmlsZV9fKSkpCnN0YXRlID0gb3MucGF0aC5qb2luKGhvbWUsICIuc3RhbmRpbiIpCm9zLm1ha2VkaXJzKHN0YXRlLCBleGlzdF9vaz1UcnVlKQpuID0gMQp3aGlsZSBUcnVlOgogICAgdHJ5OgogICAgICAgIGZkID0gb3Mub3Blbihvcy5wYXRoLmpvaW4oc3RhdGUsICJzdGFydGVkLSVkIiAlIG4pLCBvcy5PX0NSRUFUIHwgb3MuT19FWENMIHwgb3MuT19XUk9OTFkpCiAgICAgICAgYnJlYWsKICAgIGV4Y2VwdCBGaWxlRXhpc3RzRXJyb3I6CiAgICAgICAgbiArPSAxCm9zLndyaXRlKGZkLCBzdHIob3MuZ2V0cGlkKCkpLmVuY29kZSgpKQpvcy5jbG9zZShmZCkKbGF1bmNoZWQgPSBvcy5wYXRoLmpvaW4oaG9tZSwgImxhdW5jaGVkIikKb3MubWFrZWRpcnMobGF1bmNoZWQsIGV4aXN0X29rPVRydWUpCndpdGggb3Blbihvcy5wYXRoLmpvaW4obGF1bmNoZWQsICJsYXVuY2gtJWQuanNvbiIgJSBuKSwgInciLCBlbmNvZGluZz0idXRmLTgiKSBhcyBvdXQ6CiAgICBqc29uLmR1bXAoc3lzLmFyZ3ZbMTpdLCBvdXQpCmRlYWRsaW5lID0gdGltZS5tb25vdG9uaWMoKSArIDMwCndoaWxlIG5vdCBvcy5wYXRoLmV4aXN0cyhvcy5wYXRoLmpvaW4oc3RhdGUsICJyZWxlYXNlIikpIGFuZCB0aW1lLm1vbm90b25pYygpIDwgZGVhZGxpbmU6CiAgICB0aW1lLnNsZWVwKDAuMDIpCm9wZW4ob3MucGF0aC5qb2luKHN0YXRlLCAiZG9uZS0lZCIgJSBuKSwgInciKS5jbG9zZSgpCg=="
+   },
+   "modes": {
+    "bin": "0o755",
+    "bin/stand-in.py": "0o644",
+    "cwd": "0o755"
+   }
+  },
+  "open-shlex-error": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "eyJzdGF0ZSI6ICJwcmludGVkIiwgInVybCI6ICJ7REFFTU9OfS91aS8jL3NpZ25pbj9jb2RlPUFCQ0QtMTIzNCIsICJjb2RlIjogIkFCQ0QtMTIzNCIsICJvcmlnaW4iOiAie0RBRU1PTn0iLCAicHJpbmNpcGFsIjogImZpeHR1cmUiLCAiZXhwaXJlc19pbiI6IDMwMH0K",
+   "stderr": "",
+   "window": [
+    1794538142.839682,
+    1794538143.0695798
+   ],
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "36",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "bin": "dir",
+    "cwd": "dir",
+    "bin/stand-in.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMsIHRpbWUKaG9tZSA9IG9zLnBhdGguZGlybmFtZShvcy5wYXRoLmRpcm5hbWUob3MucGF0aC5hYnNwYXRoKF9fZmlsZV9fKSkpCnN0YXRlID0gb3MucGF0aC5qb2luKGhvbWUsICIuc3RhbmRpbiIpCm9zLm1ha2VkaXJzKHN0YXRlLCBleGlzdF9vaz1UcnVlKQpuID0gMQp3aGlsZSBUcnVlOgogICAgdHJ5OgogICAgICAgIGZkID0gb3Mub3Blbihvcy5wYXRoLmpvaW4oc3RhdGUsICJzdGFydGVkLSVkIiAlIG4pLCBvcy5PX0NSRUFUIHwgb3MuT19FWENMIHwgb3MuT19XUk9OTFkpCiAgICAgICAgYnJlYWsKICAgIGV4Y2VwdCBGaWxlRXhpc3RzRXJyb3I6CiAgICAgICAgbiArPSAxCm9zLndyaXRlKGZkLCBzdHIob3MuZ2V0cGlkKCkpLmVuY29kZSgpKQpvcy5jbG9zZShmZCkKbGF1bmNoZWQgPSBvcy5wYXRoLmpvaW4oaG9tZSwgImxhdW5jaGVkIikKb3MubWFrZWRpcnMobGF1bmNoZWQsIGV4aXN0X29rPVRydWUpCndpdGggb3Blbihvcy5wYXRoLmpvaW4obGF1bmNoZWQsICJsYXVuY2gtJWQuanNvbiIgJSBuKSwgInciLCBlbmNvZGluZz0idXRmLTgiKSBhcyBvdXQ6CiAgICBqc29uLmR1bXAoc3lzLmFyZ3ZbMTpdLCBvdXQpCmRlYWRsaW5lID0gdGltZS5tb25vdG9uaWMoKSArIDMwCndoaWxlIG5vdCBvcy5wYXRoLmV4aXN0cyhvcy5wYXRoLmpvaW4oc3RhdGUsICJyZWxlYXNlIikpIGFuZCB0aW1lLm1vbm90b25pYygpIDwgZGVhZGxpbmU6CiAgICB0aW1lLnNsZWVwKDAuMDIpCm9wZW4ob3MucGF0aC5qb2luKHN0YXRlLCAiZG9uZS0lZCIgJSBuKSwgInciKS5jbG9zZSgpCg=="
+   },
+   "modes": {
+    "bin": "0o755",
+    "bin/stand-in.py": "0o644",
+    "cwd": "0o755"
+   }
+  },
+  "open-whitespace-entry": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "T3BlbiB0aGlzIGxpbmsgdG8gc2lnbiBpbiB0byB0aGUgQ29uc29sZToKICB7REFFTU9OfS91aS8jL3NpZ25pbj9jb2RlPUFCQ0QtMTIzNApPciB0eXBlIHRoZSBjb2RlIEFCQ0QtMTIzNCBpbnRvIHRoZSBDb25zb2xlJ3Mgc2lnbi1pbiBkaWFsb2cgYXQge0RBRU1PTn0vdWkvLiBJdCB3b3JrcyBvbmNlLCB3aXRoaW4gNSBtaW51dGVzLgo=",
+   "stderr": "",
+   "window": [
+    1794538143.5697985,
+    1794538143.791459
+   ],
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "36",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "bin": "dir",
+    "cwd": "dir",
+    "bin/stand-in.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMsIHRpbWUKaG9tZSA9IG9zLnBhdGguZGlybmFtZShvcy5wYXRoLmRpcm5hbWUob3MucGF0aC5hYnNwYXRoKF9fZmlsZV9fKSkpCnN0YXRlID0gb3MucGF0aC5qb2luKGhvbWUsICIuc3RhbmRpbiIpCm9zLm1ha2VkaXJzKHN0YXRlLCBleGlzdF9vaz1UcnVlKQpuID0gMQp3aGlsZSBUcnVlOgogICAgdHJ5OgogICAgICAgIGZkID0gb3Mub3Blbihvcy5wYXRoLmpvaW4oc3RhdGUsICJzdGFydGVkLSVkIiAlIG4pLCBvcy5PX0NSRUFUIHwgb3MuT19FWENMIHwgb3MuT19XUk9OTFkpCiAgICAgICAgYnJlYWsKICAgIGV4Y2VwdCBGaWxlRXhpc3RzRXJyb3I6CiAgICAgICAgbiArPSAxCm9zLndyaXRlKGZkLCBzdHIob3MuZ2V0cGlkKCkpLmVuY29kZSgpKQpvcy5jbG9zZShmZCkKbGF1bmNoZWQgPSBvcy5wYXRoLmpvaW4oaG9tZSwgImxhdW5jaGVkIikKb3MubWFrZWRpcnMobGF1bmNoZWQsIGV4aXN0X29rPVRydWUpCndpdGggb3Blbihvcy5wYXRoLmpvaW4obGF1bmNoZWQsICJsYXVuY2gtJWQuanNvbiIgJSBuKSwgInciLCBlbmNvZGluZz0idXRmLTgiKSBhcyBvdXQ6CiAgICBqc29uLmR1bXAoc3lzLmFyZ3ZbMTpdLCBvdXQpCmRlYWRsaW5lID0gdGltZS5tb25vdG9uaWMoKSArIDMwCndoaWxlIG5vdCBvcy5wYXRoLmV4aXN0cyhvcy5wYXRoLmpvaW4oc3RhdGUsICJyZWxlYXNlIikpIGFuZCB0aW1lLm1vbm90b25pYygpIDwgZGVhZGxpbmU6CiAgICB0aW1lLnNsZWVwKDAuMDIpCm9wZW4ob3MucGF0aC5qb2luKHN0YXRlLCAiZG9uZS0lZCIgJSBuKSwgInciKS5jbG9zZSgpCg=="
+   },
+   "modes": {
+    "bin": "0o755",
+    "bin/stand-in.py": "0o644",
+    "cwd": "0o755"
+   }
+  },
+  "open-no-display": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "eyJzdGF0ZSI6ICJwcmludGVkIiwgInVybCI6ICJ7REFFTU9OfS91aS8jL3NpZ25pbj9jb2RlPUFCQ0QtMTIzNCIsICJjb2RlIjogIkFCQ0QtMTIzNCIsICJvcmlnaW4iOiAie0RBRU1PTn0iLCAicHJpbmNpcGFsIjogImZpeHR1cmUiLCAiZXhwaXJlc19pbiI6IDMwMH0K",
+   "stderr": "",
+   "window": [
+    1794538144.2932,
+    1794538144.5067205
+   ],
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "36",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "bin": "dir",
+    "cwd": "dir",
+    "bin/stand-in.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMsIHRpbWUKaG9tZSA9IG9zLnBhdGguZGlybmFtZShvcy5wYXRoLmRpcm5hbWUob3MucGF0aC5hYnNwYXRoKF9fZmlsZV9fKSkpCnN0YXRlID0gb3MucGF0aC5qb2luKGhvbWUsICIuc3RhbmRpbiIpCm9zLm1ha2VkaXJzKHN0YXRlLCBleGlzdF9vaz1UcnVlKQpuID0gMQp3aGlsZSBUcnVlOgogICAgdHJ5OgogICAgICAgIGZkID0gb3Mub3Blbihvcy5wYXRoLmpvaW4oc3RhdGUsICJzdGFydGVkLSVkIiAlIG4pLCBvcy5PX0NSRUFUIHwgb3MuT19FWENMIHwgb3MuT19XUk9OTFkpCiAgICAgICAgYnJlYWsKICAgIGV4Y2VwdCBGaWxlRXhpc3RzRXJyb3I6CiAgICAgICAgbiArPSAxCm9zLndyaXRlKGZkLCBzdHIob3MuZ2V0cGlkKCkpLmVuY29kZSgpKQpvcy5jbG9zZShmZCkKbGF1bmNoZWQgPSBvcy5wYXRoLmpvaW4oaG9tZSwgImxhdW5jaGVkIikKb3MubWFrZWRpcnMobGF1bmNoZWQsIGV4aXN0X29rPVRydWUpCndpdGggb3Blbihvcy5wYXRoLmpvaW4obGF1bmNoZWQsICJsYXVuY2gtJWQuanNvbiIgJSBuKSwgInciLCBlbmNvZGluZz0idXRmLTgiKSBhcyBvdXQ6CiAgICBqc29uLmR1bXAoc3lzLmFyZ3ZbMTpdLCBvdXQpCmRlYWRsaW5lID0gdGltZS5tb25vdG9uaWMoKSArIDMwCndoaWxlIG5vdCBvcy5wYXRoLmV4aXN0cyhvcy5wYXRoLmpvaW4oc3RhdGUsICJyZWxlYXNlIikpIGFuZCB0aW1lLm1vbm90b25pYygpIDwgZGVhZGxpbmU6CiAgICB0aW1lLnNsZWVwKDAuMDIpCm9wZW4ob3MucGF0aC5qb2luKHN0YXRlLCAiZG9uZS0lZCIgJSBuKSwgInciKS5jbG9zZSgpCg=="
+   },
+   "modes": {
+    "bin": "0o755",
+    "bin/stand-in.py": "0o644",
+    "cwd": "0o755"
+   }
+  },
+  "open-no-display-text": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "T3BlbiB0aGlzIGxpbmsgdG8gc2lnbiBpbiB0byB0aGUgQ29uc29sZToKICB7REFFTU9OfS91aS8jL3NpZ25pbj9jb2RlPUFCQ0QtMTIzNApPciB0eXBlIHRoZSBjb2RlIEFCQ0QtMTIzNCBpbnRvIHRoZSBDb25zb2xlJ3Mgc2lnbi1pbiBkaWFsb2cgYXQge0RBRU1PTn0vdWkvLiBJdCB3b3JrcyBvbmNlLCB3aXRoaW4gNSBtaW51dGVzLgo=",
+   "stderr": "",
+   "window": [
+    1794538145.0106876,
+    1794538145.2363687
+   ],
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "36",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "bin": "dir",
+    "cwd": "dir",
+    "bin/stand-in.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMsIHRpbWUKaG9tZSA9IG9zLnBhdGguZGlybmFtZShvcy5wYXRoLmRpcm5hbWUob3MucGF0aC5hYnNwYXRoKF9fZmlsZV9fKSkpCnN0YXRlID0gb3MucGF0aC5qb2luKGhvbWUsICIuc3RhbmRpbiIpCm9zLm1ha2VkaXJzKHN0YXRlLCBleGlzdF9vaz1UcnVlKQpuID0gMQp3aGlsZSBUcnVlOgogICAgdHJ5OgogICAgICAgIGZkID0gb3Mub3Blbihvcy5wYXRoLmpvaW4oc3RhdGUsICJzdGFydGVkLSVkIiAlIG4pLCBvcy5PX0NSRUFUIHwgb3MuT19FWENMIHwgb3MuT19XUk9OTFkpCiAgICAgICAgYnJlYWsKICAgIGV4Y2VwdCBGaWxlRXhpc3RzRXJyb3I6CiAgICAgICAgbiArPSAxCm9zLndyaXRlKGZkLCBzdHIob3MuZ2V0cGlkKCkpLmVuY29kZSgpKQpvcy5jbG9zZShmZCkKbGF1bmNoZWQgPSBvcy5wYXRoLmpvaW4oaG9tZSwgImxhdW5jaGVkIikKb3MubWFrZWRpcnMobGF1bmNoZWQsIGV4aXN0X29rPVRydWUpCndpdGggb3Blbihvcy5wYXRoLmpvaW4obGF1bmNoZWQsICJsYXVuY2gtJWQuanNvbiIgJSBuKSwgInciLCBlbmNvZGluZz0idXRmLTgiKSBhcyBvdXQ6CiAgICBqc29uLmR1bXAoc3lzLmFyZ3ZbMTpdLCBvdXQpCmRlYWRsaW5lID0gdGltZS5tb25vdG9uaWMoKSArIDMwCndoaWxlIG5vdCBvcy5wYXRoLmV4aXN0cyhvcy5wYXRoLmpvaW4oc3RhdGUsICJyZWxlYXNlIikpIGFuZCB0aW1lLm1vbm90b25pYygpIDwgZGVhZGxpbmU6CiAgICB0aW1lLnNsZWVwKDAuMDIpCm9wZW4ob3MucGF0aC5qb2luKHN0YXRlLCAiZG9uZS0lZCIgJSBuKSwgInciKS5jbG9zZSgpCg=="
+   },
+   "modes": {
+    "bin": "0o755",
+    "bin/stand-in.py": "0o644",
+    "cwd": "0o755"
+   }
+  },
+  "open-unsafe-link": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 4,
+   "stdout": "",
+   "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogdGhlIGRhZW1vbidzIGFuc3dlciBoYWQgbm8gc2lnbi1pbiBsaW5rCg==",
+   "window": [
+    1794538145.7398453,
+    1794538145.9547126
+   ],
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "36",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "bin": "dir",
+    "cwd": "dir",
+    "bin/stand-in.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMsIHRpbWUKaG9tZSA9IG9zLnBhdGguZGlybmFtZShvcy5wYXRoLmRpcm5hbWUob3MucGF0aC5hYnNwYXRoKF9fZmlsZV9fKSkpCnN0YXRlID0gb3MucGF0aC5qb2luKGhvbWUsICIuc3RhbmRpbiIpCm9zLm1ha2VkaXJzKHN0YXRlLCBleGlzdF9vaz1UcnVlKQpuID0gMQp3aGlsZSBUcnVlOgogICAgdHJ5OgogICAgICAgIGZkID0gb3Mub3Blbihvcy5wYXRoLmpvaW4oc3RhdGUsICJzdGFydGVkLSVkIiAlIG4pLCBvcy5PX0NSRUFUIHwgb3MuT19FWENMIHwgb3MuT19XUk9OTFkpCiAgICAgICAgYnJlYWsKICAgIGV4Y2VwdCBGaWxlRXhpc3RzRXJyb3I6CiAgICAgICAgbiArPSAxCm9zLndyaXRlKGZkLCBzdHIob3MuZ2V0cGlkKCkpLmVuY29kZSgpKQpvcy5jbG9zZShmZCkKbGF1bmNoZWQgPSBvcy5wYXRoLmpvaW4oaG9tZSwgImxhdW5jaGVkIikKb3MubWFrZWRpcnMobGF1bmNoZWQsIGV4aXN0X29rPVRydWUpCndpdGggb3Blbihvcy5wYXRoLmpvaW4obGF1bmNoZWQsICJsYXVuY2gtJWQuanNvbiIgJSBuKSwgInciLCBlbmNvZGluZz0idXRmLTgiKSBhcyBvdXQ6CiAgICBqc29uLmR1bXAoc3lzLmFyZ3ZbMTpdLCBvdXQpCmRlYWRsaW5lID0gdGltZS5tb25vdG9uaWMoKSArIDMwCndoaWxlIG5vdCBvcy5wYXRoLmV4aXN0cyhvcy5wYXRoLmpvaW4oc3RhdGUsICJyZWxlYXNlIikpIGFuZCB0aW1lLm1vbm90b25pYygpIDwgZGVhZGxpbmU6CiAgICB0aW1lLnNsZWVwKDAuMDIpCm9wZW4ob3MucGF0aC5qb2luKHN0YXRlLCAiZG9uZS0lZCIgJSBuKSwgInciKS5jbG9zZSgpCg=="
+   },
+   "modes": {
+    "bin": "0o755",
+    "bin/stand-in.py": "0o644",
+    "cwd": "0o755"
+   }
+  },
+  "open-file-link": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 4,
+   "stdout": "eyJzdGF0ZSI6ICJyZWZ1c2VkIiwgImVycm9yIjogImJhZF9hbnN3ZXIifQo=",
+   "stderr": "",
+   "window": [
+    1794538146.4585748,
+    1794538146.6678257
+   ],
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "36",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "bin": "dir",
+    "cwd": "dir",
+    "bin/stand-in.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMsIHRpbWUKaG9tZSA9IG9zLnBhdGguZGlybmFtZShvcy5wYXRoLmRpcm5hbWUob3MucGF0aC5hYnNwYXRoKF9fZmlsZV9fKSkpCnN0YXRlID0gb3MucGF0aC5qb2luKGhvbWUsICIuc3RhbmRpbiIpCm9zLm1ha2VkaXJzKHN0YXRlLCBleGlzdF9vaz1UcnVlKQpuID0gMQp3aGlsZSBUcnVlOgogICAgdHJ5OgogICAgICAgIGZkID0gb3Mub3Blbihvcy5wYXRoLmpvaW4oc3RhdGUsICJzdGFydGVkLSVkIiAlIG4pLCBvcy5PX0NSRUFUIHwgb3MuT19FWENMIHwgb3MuT19XUk9OTFkpCiAgICAgICAgYnJlYWsKICAgIGV4Y2VwdCBGaWxlRXhpc3RzRXJyb3I6CiAgICAgICAgbiArPSAxCm9zLndyaXRlKGZkLCBzdHIob3MuZ2V0cGlkKCkpLmVuY29kZSgpKQpvcy5jbG9zZShmZCkKbGF1bmNoZWQgPSBvcy5wYXRoLmpvaW4oaG9tZSwgImxhdW5jaGVkIikKb3MubWFrZWRpcnMobGF1bmNoZWQsIGV4aXN0X29rPVRydWUpCndpdGggb3Blbihvcy5wYXRoLmpvaW4obGF1bmNoZWQsICJsYXVuY2gtJWQuanNvbiIgJSBuKSwgInciLCBlbmNvZGluZz0idXRmLTgiKSBhcyBvdXQ6CiAgICBqc29uLmR1bXAoc3lzLmFyZ3ZbMTpdLCBvdXQpCmRlYWRsaW5lID0gdGltZS5tb25vdG9uaWMoKSArIDMwCndoaWxlIG5vdCBvcy5wYXRoLmV4aXN0cyhvcy5wYXRoLmpvaW4oc3RhdGUsICJyZWxlYXNlIikpIGFuZCB0aW1lLm1vbm90b25pYygpIDwgZGVhZGxpbmU6CiAgICB0aW1lLnNsZWVwKDAuMDIpCm9wZW4ob3MucGF0aC5qb2luKHN0YXRlLCAiZG9uZS0lZCIgJSBuKSwgInciKS5jbG9zZSgpCg=="
+   },
+   "modes": {
+    "bin": "0o755",
+    "bin/stand-in.py": "0o644",
+    "cwd": "0o755"
+   }
+  },
+  "open-refused": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 4,
+   "stdout": "",
+   "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogdGhlIGRhZW1vbiByZWZ1c2VkIHRoaXMgbWFjaGluZSdzIHRva2VuOiBjaGVjayB0aGF0IFBTRVVET0xJRkVfTUNQX1RPS0VOX0ZJTEUgKG9yIFBTRVVET0xJRkVfTUNQX1RPS0VOKSBob2xkcyB0aGUgdG9rZW4gdGhpcyBtYWNoaW5lJ3MgY2xpZW50cyB1c2U7IGEgcGFpcmVkIG1hY2hpbmUgd2hvc2UgdG9rZW4gd2FzIHJldm9rZWQgcGFpcnMgYWdhaW4gd2l0aCBgcHNldWRvbGlmZS1tY3AgcGFpcmAK",
+   "window": [
+    1794538147.1711395,
+    1794538147.3841393
+   ],
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "36",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "bin": "dir",
+    "cwd": "dir",
+    "bin/stand-in.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMsIHRpbWUKaG9tZSA9IG9zLnBhdGguZGlybmFtZShvcy5wYXRoLmRpcm5hbWUob3MucGF0aC5hYnNwYXRoKF9fZmlsZV9fKSkpCnN0YXRlID0gb3MucGF0aC5qb2luKGhvbWUsICIuc3RhbmRpbiIpCm9zLm1ha2VkaXJzKHN0YXRlLCBleGlzdF9vaz1UcnVlKQpuID0gMQp3aGlsZSBUcnVlOgogICAgdHJ5OgogICAgICAgIGZkID0gb3Mub3Blbihvcy5wYXRoLmpvaW4oc3RhdGUsICJzdGFydGVkLSVkIiAlIG4pLCBvcy5PX0NSRUFUIHwgb3MuT19FWENMIHwgb3MuT19XUk9OTFkpCiAgICAgICAgYnJlYWsKICAgIGV4Y2VwdCBGaWxlRXhpc3RzRXJyb3I6CiAgICAgICAgbiArPSAxCm9zLndyaXRlKGZkLCBzdHIob3MuZ2V0cGlkKCkpLmVuY29kZSgpKQpvcy5jbG9zZShmZCkKbGF1bmNoZWQgPSBvcy5wYXRoLmpvaW4oaG9tZSwgImxhdW5jaGVkIikKb3MubWFrZWRpcnMobGF1bmNoZWQsIGV4aXN0X29rPVRydWUpCndpdGggb3Blbihvcy5wYXRoLmpvaW4obGF1bmNoZWQsICJsYXVuY2gtJWQuanNvbiIgJSBuKSwgInciLCBlbmNvZGluZz0idXRmLTgiKSBhcyBvdXQ6CiAgICBqc29uLmR1bXAoc3lzLmFyZ3ZbMTpdLCBvdXQpCmRlYWRsaW5lID0gdGltZS5tb25vdG9uaWMoKSArIDMwCndoaWxlIG5vdCBvcy5wYXRoLmV4aXN0cyhvcy5wYXRoLmpvaW4oc3RhdGUsICJyZWxlYXNlIikpIGFuZCB0aW1lLm1vbm90b25pYygpIDwgZGVhZGxpbmU6CiAgICB0aW1lLnNsZWVwKDAuMDIpCm9wZW4ob3MucGF0aC5qb2luKHN0YXRlLCAiZG9uZS0lZCIgJSBuKSwgInciKS5jbG9zZSgpCg=="
+   },
+   "modes": {
+    "bin": "0o755",
+    "bin/stand-in.py": "0o644",
+    "cwd": "0o755"
+   }
+  },
+  "open-unreachable": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 3,
+   "stdout": "",
+   "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogbm8gZGFlbW9uIGFuc3dlcmVkIGF0IGh0dHA6Ly8xMjcuMC4wLjE6OSAoW0Vycm5vIDExMV0gQ29ubmVjdGlvbiByZWZ1c2VkKTsgY2hlY2sgaXQgcnVucyAoYHBzZXVkb2xpZmUtbWNwIGRvY3RvcmApCg==",
+   "window": [
+    1794538147.8875487,
+    1794538148.0967839
+   ],
+   "arm": "python",
+   "files": {
+    "bin": "dir",
+    "cwd": "dir",
+    "bin/stand-in.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMsIHRpbWUKaG9tZSA9IG9zLnBhdGguZGlybmFtZShvcy5wYXRoLmRpcm5hbWUob3MucGF0aC5hYnNwYXRoKF9fZmlsZV9fKSkpCnN0YXRlID0gb3MucGF0aC5qb2luKGhvbWUsICIuc3RhbmRpbiIpCm9zLm1ha2VkaXJzKHN0YXRlLCBleGlzdF9vaz1UcnVlKQpuID0gMQp3aGlsZSBUcnVlOgogICAgdHJ5OgogICAgICAgIGZkID0gb3Mub3Blbihvcy5wYXRoLmpvaW4oc3RhdGUsICJzdGFydGVkLSVkIiAlIG4pLCBvcy5PX0NSRUFUIHwgb3MuT19FWENMIHwgb3MuT19XUk9OTFkpCiAgICAgICAgYnJlYWsKICAgIGV4Y2VwdCBGaWxlRXhpc3RzRXJyb3I6CiAgICAgICAgbiArPSAxCm9zLndyaXRlKGZkLCBzdHIob3MuZ2V0cGlkKCkpLmVuY29kZSgpKQpvcy5jbG9zZShmZCkKbGF1bmNoZWQgPSBvcy5wYXRoLmpvaW4oaG9tZSwgImxhdW5jaGVkIikKb3MubWFrZWRpcnMobGF1bmNoZWQsIGV4aXN0X29rPVRydWUpCndpdGggb3Blbihvcy5wYXRoLmpvaW4obGF1bmNoZWQsICJsYXVuY2gtJWQuanNvbiIgJSBuKSwgInciLCBlbmNvZGluZz0idXRmLTgiKSBhcyBvdXQ6CiAgICBqc29uLmR1bXAoc3lzLmFyZ3ZbMTpdLCBvdXQpCmRlYWRsaW5lID0gdGltZS5tb25vdG9uaWMoKSArIDMwCndoaWxlIG5vdCBvcy5wYXRoLmV4aXN0cyhvcy5wYXRoLmpvaW4oc3RhdGUsICJyZWxlYXNlIikpIGFuZCB0aW1lLm1vbm90b25pYygpIDwgZGVhZGxpbmU6CiAgICB0aW1lLnNsZWVwKDAuMDIpCm9wZW4ob3MucGF0aC5qb2luKHN0YXRlLCAiZG9uZS0lZCIgJSBuKSwgInciKS5jbG9zZSgpCg=="
+   },
+   "modes": {
+    "bin": "0o755",
+    "bin/stand-in.py": "0o644",
+    "cwd": "0o755"
+   }
+  },
+  "open-crash-expires": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 1,
+   "stdout": "",
+   "stderr": "VHJhY2ViYWNrIChtb3N0IHJlY2VudCBjYWxsIGxhc3QpOgogIEZpbGUgIjxmcm96ZW4gcnVucHk+IiwgbGluZSAxOTgsIGluIF9ydW5fbW9kdWxlX2FzX21haW4KICBGaWxlICI8ZnJvemVuIHJ1bnB5PiIsIGxpbmUgODgsIGluIF9ydW5fY29kZQogIEZpbGUgIntPUkFDTEV9L3BzZXVkb2xpZmVfbWVtb3J5L2NsaS5weSIsIGxpbmUgMjY3LCBpbiA8bW9kdWxlPgogICAgbWFpbigpCiAgRmlsZSAie09SQUNMRX0vcHNldWRvbGlmZV9tZW1vcnkvY2xpLnB5IiwgbGluZSAyMTgsIGluIG1haW4KICAgIHN5cy5leGl0KGNvbnNvbGVfbWFpbihzeXMuYXJndlsyOl0pKQogICAgICAgICAgICAgXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl4KICBGaWxlICJ7T1JBQ0xFfS9wc2V1ZG9saWZlX21lbW9yeS9jb25zb2xlX2NsaS5weSIsIGxpbmUgMjU0LCBpbiBtYWluCiAgICByZXR1cm4gX29wZW5lZChwYXlsb2FkLCBhcmdzLCBlbnZpcm9uKQogICAgICAgICAgIF5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl4KICBGaWxlICJ7T1JBQ0xFfS9wc2V1ZG9saWZlX21lbW9yeS9jb25zb2xlX2NsaS5weSIsIGxpbmUgMzA2LCBpbiBfb3BlbmVkCiAgICBtaW51dGVzID0gbWF4KDEsIGludChwYXlsb2FkLmdldCgiZXhwaXJlc19pbiIpIG9yIDMwMCkgLy8gNjApCiAgICAgICAgICAgICAgICAgICAgIF5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl4KVmFsdWVFcnJvcjogaW52YWxpZCBsaXRlcmFsIGZvciBpbnQoKSB3aXRoIGJhc2UgMTA6ICc1IG1pbnV0ZXMnCg==",
+   "window": [
+    1794538148.120314,
+    1794538148.3581126
+   ],
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "36",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "bin": "dir",
+    "cwd": "dir",
+    "launched": "dir",
+    "launched/launch-1.json": "file:WyJ7REFFTU9OfS91aS8jL3NpZ25pbj9jb2RlPUFCQ0QtMTIzNCJd",
+    "bin/stand-in.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMsIHRpbWUKaG9tZSA9IG9zLnBhdGguZGlybmFtZShvcy5wYXRoLmRpcm5hbWUob3MucGF0aC5hYnNwYXRoKF9fZmlsZV9fKSkpCnN0YXRlID0gb3MucGF0aC5qb2luKGhvbWUsICIuc3RhbmRpbiIpCm9zLm1ha2VkaXJzKHN0YXRlLCBleGlzdF9vaz1UcnVlKQpuID0gMQp3aGlsZSBUcnVlOgogICAgdHJ5OgogICAgICAgIGZkID0gb3Mub3Blbihvcy5wYXRoLmpvaW4oc3RhdGUsICJzdGFydGVkLSVkIiAlIG4pLCBvcy5PX0NSRUFUIHwgb3MuT19FWENMIHwgb3MuT19XUk9OTFkpCiAgICAgICAgYnJlYWsKICAgIGV4Y2VwdCBGaWxlRXhpc3RzRXJyb3I6CiAgICAgICAgbiArPSAxCm9zLndyaXRlKGZkLCBzdHIob3MuZ2V0cGlkKCkpLmVuY29kZSgpKQpvcy5jbG9zZShmZCkKbGF1bmNoZWQgPSBvcy5wYXRoLmpvaW4oaG9tZSwgImxhdW5jaGVkIikKb3MubWFrZWRpcnMobGF1bmNoZWQsIGV4aXN0X29rPVRydWUpCndpdGggb3Blbihvcy5wYXRoLmpvaW4obGF1bmNoZWQsICJsYXVuY2gtJWQuanNvbiIgJSBuKSwgInciLCBlbmNvZGluZz0idXRmLTgiKSBhcyBvdXQ6CiAgICBqc29uLmR1bXAoc3lzLmFyZ3ZbMTpdLCBvdXQpCmRlYWRsaW5lID0gdGltZS5tb25vdG9uaWMoKSArIDMwCndoaWxlIG5vdCBvcy5wYXRoLmV4aXN0cyhvcy5wYXRoLmpvaW4oc3RhdGUsICJyZWxlYXNlIikpIGFuZCB0aW1lLm1vbm90b25pYygpIDwgZGVhZGxpbmU6CiAgICB0aW1lLnNsZWVwKDAuMDIpCm9wZW4ob3MucGF0aC5qb2luKHN0YXRlLCAiZG9uZS0lZCIgJSBuKSwgInciKS5jbG9zZSgpCg=="
+   },
+   "modes": {
+    "bin": "0o755",
+    "bin/stand-in.py": "0o644",
+    "cwd": "0o755",
+    "launched": "0o755",
+    "launched/launch-1.json": "0o644"
+   }
+  },
+  "open-crash-surrogate-code": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 1,
+   "stdout": "T3BlbmVkIHRoZSBDb25zb2xlIGluIHlvdXIgYnJvd3NlcjogY29uZmlybSB0aGUgc2lnbi1pbiB0aGVyZS4KICB7REFFTU9OfS91aS8jL3NpZ25pbj9jb2RlPUFCQ0QtMTIzNAo=",
+   "stderr": "VHJhY2ViYWNrIChtb3N0IHJlY2VudCBjYWxsIGxhc3QpOgogIEZpbGUgIjxmcm96ZW4gcnVucHk+IiwgbGluZSAxOTgsIGluIF9ydW5fbW9kdWxlX2FzX21haW4KICBGaWxlICI8ZnJvemVuIHJ1bnB5PiIsIGxpbmUgODgsIGluIF9ydW5fY29kZQogIEZpbGUgIntPUkFDTEV9L3BzZXVkb2xpZmVfbWVtb3J5L2NsaS5weSIsIGxpbmUgMjY3LCBpbiA8bW9kdWxlPgogICAgbWFpbigpCiAgRmlsZSAie09SQUNMRX0vcHNldWRvbGlmZV9tZW1vcnkvY2xpLnB5IiwgbGluZSAyMTgsIGluIG1haW4KICAgIHN5cy5leGl0KGNvbnNvbGVfbWFpbihzeXMuYXJndlsyOl0pKQogICAgICAgICAgICAgXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl4KICBGaWxlICJ7T1JBQ0xFfS9wc2V1ZG9saWZlX21lbW9yeS9jb25zb2xlX2NsaS5weSIsIGxpbmUgMjU0LCBpbiBtYWluCiAgICByZXR1cm4gX29wZW5lZChwYXlsb2FkLCBhcmdzLCBlbnZpcm9uKQogICAgICAgICAgIF5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl4KICBGaWxlICJ7T1JBQ0xFfS9wc2V1ZG9saWZlX21lbW9yeS9jb25zb2xlX2NsaS5weSIsIGxpbmUgMzExLCBpbiBfb3BlbmVkCiAgICBwcmludChmIk9yIHR5cGUgdGhlIGNvZGUge2NvZGV9IGludG8gdGhlIENvbnNvbGUncyBzaWduLWluIGRpYWxvZyBhdCAiClVuaWNvZGVFbmNvZGVFcnJvcjogJ3V0Zi04JyBjb2RlYyBjYW4ndCBlbmNvZGUgY2hhcmFjdGVyICdcdWRjODAnIGluIHBvc2l0aW9uIDE4OiBzdXJyb2dhdGVzIG5vdCBhbGxvd2VkCg==",
+   "window": [
+    1794538148.8378518,
+    1794538149.0748112
+   ],
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "36",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "bin": "dir",
+    "cwd": "dir",
+    "launched": "dir",
+    "launched/launch-1.json": "file:WyJ7REFFTU9OfS91aS8jL3NpZ25pbj9jb2RlPUFCQ0QtMTIzNCJd",
+    "bin/stand-in.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMsIHRpbWUKaG9tZSA9IG9zLnBhdGguZGlybmFtZShvcy5wYXRoLmRpcm5hbWUob3MucGF0aC5hYnNwYXRoKF9fZmlsZV9fKSkpCnN0YXRlID0gb3MucGF0aC5qb2luKGhvbWUsICIuc3RhbmRpbiIpCm9zLm1ha2VkaXJzKHN0YXRlLCBleGlzdF9vaz1UcnVlKQpuID0gMQp3aGlsZSBUcnVlOgogICAgdHJ5OgogICAgICAgIGZkID0gb3Mub3Blbihvcy5wYXRoLmpvaW4oc3RhdGUsICJzdGFydGVkLSVkIiAlIG4pLCBvcy5PX0NSRUFUIHwgb3MuT19FWENMIHwgb3MuT19XUk9OTFkpCiAgICAgICAgYnJlYWsKICAgIGV4Y2VwdCBGaWxlRXhpc3RzRXJyb3I6CiAgICAgICAgbiArPSAxCm9zLndyaXRlKGZkLCBzdHIob3MuZ2V0cGlkKCkpLmVuY29kZSgpKQpvcy5jbG9zZShmZCkKbGF1bmNoZWQgPSBvcy5wYXRoLmpvaW4oaG9tZSwgImxhdW5jaGVkIikKb3MubWFrZWRpcnMobGF1bmNoZWQsIGV4aXN0X29rPVRydWUpCndpdGggb3Blbihvcy5wYXRoLmpvaW4obGF1bmNoZWQsICJsYXVuY2gtJWQuanNvbiIgJSBuKSwgInciLCBlbmNvZGluZz0idXRmLTgiKSBhcyBvdXQ6CiAgICBqc29uLmR1bXAoc3lzLmFyZ3ZbMTpdLCBvdXQpCmRlYWRsaW5lID0gdGltZS5tb25vdG9uaWMoKSArIDMwCndoaWxlIG5vdCBvcy5wYXRoLmV4aXN0cyhvcy5wYXRoLmpvaW4oc3RhdGUsICJyZWxlYXNlIikpIGFuZCB0aW1lLm1vbm90b25pYygpIDwgZGVhZGxpbmU6CiAgICB0aW1lLnNsZWVwKDAuMDIpCm9wZW4ob3MucGF0aC5qb2luKHN0YXRlLCAiZG9uZS0lZCIgJSBuKSwgInciKS5jbG9zZSgpCg=="
+   },
+   "modes": {
+    "bin": "0o755",
+    "bin/stand-in.py": "0o644",
+    "cwd": "0o755",
+    "launched": "0o755",
+    "launched/launch-1.json": "0o644"
+   }
+  },
+  "unless-signed-in": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "Q29uc29sZTogYSBicm93c2VyIGlzIGFscmVhZHkgc2lnbmVkIGluICh0byBzaWduIGluIGFub3RoZXI6IHBzZXVkb2xpZmUtbWNwIGNvbnNvbGUpLgo=",
+   "stderr": "",
+   "window": [
+    1794538149.5541415,
+    1794538149.776501
+   ],
+   "requests": [
+    {
+     "method": "GET",
+     "target": "/api/console/sessions",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "bin": "dir",
+    "cwd": "dir",
+    "bin/stand-in.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMsIHRpbWUKaG9tZSA9IG9zLnBhdGguZGlybmFtZShvcy5wYXRoLmRpcm5hbWUob3MucGF0aC5hYnNwYXRoKF9fZmlsZV9fKSkpCnN0YXRlID0gb3MucGF0aC5qb2luKGhvbWUsICIuc3RhbmRpbiIpCm9zLm1ha2VkaXJzKHN0YXRlLCBleGlzdF9vaz1UcnVlKQpuID0gMQp3aGlsZSBUcnVlOgogICAgdHJ5OgogICAgICAgIGZkID0gb3Mub3Blbihvcy5wYXRoLmpvaW4oc3RhdGUsICJzdGFydGVkLSVkIiAlIG4pLCBvcy5PX0NSRUFUIHwgb3MuT19FWENMIHwgb3MuT19XUk9OTFkpCiAgICAgICAgYnJlYWsKICAgIGV4Y2VwdCBGaWxlRXhpc3RzRXJyb3I6CiAgICAgICAgbiArPSAxCm9zLndyaXRlKGZkLCBzdHIob3MuZ2V0cGlkKCkpLmVuY29kZSgpKQpvcy5jbG9zZShmZCkKbGF1bmNoZWQgPSBvcy5wYXRoLmpvaW4oaG9tZSwgImxhdW5jaGVkIikKb3MubWFrZWRpcnMobGF1bmNoZWQsIGV4aXN0X29rPVRydWUpCndpdGggb3Blbihvcy5wYXRoLmpvaW4obGF1bmNoZWQsICJsYXVuY2gtJWQuanNvbiIgJSBuKSwgInciLCBlbmNvZGluZz0idXRmLTgiKSBhcyBvdXQ6CiAgICBqc29uLmR1bXAoc3lzLmFyZ3ZbMTpdLCBvdXQpCmRlYWRsaW5lID0gdGltZS5tb25vdG9uaWMoKSArIDMwCndoaWxlIG5vdCBvcy5wYXRoLmV4aXN0cyhvcy5wYXRoLmpvaW4oc3RhdGUsICJyZWxlYXNlIikpIGFuZCB0aW1lLm1vbm90b25pYygpIDwgZGVhZGxpbmU6CiAgICB0aW1lLnNsZWVwKDAuMDIpCm9wZW4ob3MucGF0aC5qb2luKHN0YXRlLCAiZG9uZS0lZCIgJSBuKSwgInciKS5jbG9zZSgpCg=="
+   },
+   "modes": {
+    "bin": "0o755",
+    "bin/stand-in.py": "0o644",
+    "cwd": "0o755"
+   }
+  },
+  "unless-signed-in-json": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "eyJzdGF0ZSI6ICJhbHJlYWR5X3NpZ25lZF9pbiJ9Cg==",
+   "stderr": "",
+   "window": [
+    1794538150.2795026,
+    1794538150.4943025
+   ],
+   "requests": [
+    {
+     "method": "GET",
+     "target": "/api/console/sessions",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "bin": "dir",
+    "cwd": "dir",
+    "bin/stand-in.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMsIHRpbWUKaG9tZSA9IG9zLnBhdGguZGlybmFtZShvcy5wYXRoLmRpcm5hbWUob3MucGF0aC5hYnNwYXRoKF9fZmlsZV9fKSkpCnN0YXRlID0gb3MucGF0aC5qb2luKGhvbWUsICIuc3RhbmRpbiIpCm9zLm1ha2VkaXJzKHN0YXRlLCBleGlzdF9vaz1UcnVlKQpuID0gMQp3aGlsZSBUcnVlOgogICAgdHJ5OgogICAgICAgIGZkID0gb3Mub3Blbihvcy5wYXRoLmpvaW4oc3RhdGUsICJzdGFydGVkLSVkIiAlIG4pLCBvcy5PX0NSRUFUIHwgb3MuT19FWENMIHwgb3MuT19XUk9OTFkpCiAgICAgICAgYnJlYWsKICAgIGV4Y2VwdCBGaWxlRXhpc3RzRXJyb3I6CiAgICAgICAgbiArPSAxCm9zLndyaXRlKGZkLCBzdHIob3MuZ2V0cGlkKCkpLmVuY29kZSgpKQpvcy5jbG9zZShmZCkKbGF1bmNoZWQgPSBvcy5wYXRoLmpvaW4oaG9tZSwgImxhdW5jaGVkIikKb3MubWFrZWRpcnMobGF1bmNoZWQsIGV4aXN0X29rPVRydWUpCndpdGggb3Blbihvcy5wYXRoLmpvaW4obGF1bmNoZWQsICJsYXVuY2gtJWQuanNvbiIgJSBuKSwgInciLCBlbmNvZGluZz0idXRmLTgiKSBhcyBvdXQ6CiAgICBqc29uLmR1bXAoc3lzLmFyZ3ZbMTpdLCBvdXQpCmRlYWRsaW5lID0gdGltZS5tb25vdG9uaWMoKSArIDMwCndoaWxlIG5vdCBvcy5wYXRoLmV4aXN0cyhvcy5wYXRoLmpvaW4oc3RhdGUsICJyZWxlYXNlIikpIGFuZCB0aW1lLm1vbm90b25pYygpIDwgZGVhZGxpbmU6CiAgICB0aW1lLnNsZWVwKDAuMDIpCm9wZW4ob3MucGF0aC5qb2luKHN0YXRlLCAiZG9uZS0lZCIgJSBuKSwgInciKS5jbG9zZSgpCg=="
+   },
+   "modes": {
+    "bin": "0o755",
+    "bin/stand-in.py": "0o644",
+    "cwd": "0o755"
+   }
+  },
+  "unless-none": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "T3BlbmVkIHRoZSBDb25zb2xlIGluIHlvdXIgYnJvd3NlcjogY29uZmlybSB0aGUgc2lnbi1pbiB0aGVyZS4KICB7REFFTU9OfS91aS8jL3NpZ25pbj9jb2RlPUFCQ0QtMTIzNApPciB0eXBlIHRoZSBjb2RlIEFCQ0QtMTIzNCBpbnRvIHRoZSBDb25zb2xlJ3Mgc2lnbi1pbiBkaWFsb2cgYXQge0RBRU1PTn0vdWkvLiBJdCB3b3JrcyBvbmNlLCB3aXRoaW4gNSBtaW51dGVzLgo=",
+   "stderr": "",
+   "window": [
+    1794538150.9982793,
+    1794538151.233959
+   ],
+   "requests": [
+    {
+     "method": "GET",
+     "target": "/api/console/sessions",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    },
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "36",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "bin": "dir",
+    "cwd": "dir",
+    "launched": "dir",
+    "launched/launch-1.json": "file:WyJ7REFFTU9OfS91aS8jL3NpZ25pbj9jb2RlPUFCQ0QtMTIzNCJd",
+    "bin/stand-in.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMsIHRpbWUKaG9tZSA9IG9zLnBhdGguZGlybmFtZShvcy5wYXRoLmRpcm5hbWUob3MucGF0aC5hYnNwYXRoKF9fZmlsZV9fKSkpCnN0YXRlID0gb3MucGF0aC5qb2luKGhvbWUsICIuc3RhbmRpbiIpCm9zLm1ha2VkaXJzKHN0YXRlLCBleGlzdF9vaz1UcnVlKQpuID0gMQp3aGlsZSBUcnVlOgogICAgdHJ5OgogICAgICAgIGZkID0gb3Mub3Blbihvcy5wYXRoLmpvaW4oc3RhdGUsICJzdGFydGVkLSVkIiAlIG4pLCBvcy5PX0NSRUFUIHwgb3MuT19FWENMIHwgb3MuT19XUk9OTFkpCiAgICAgICAgYnJlYWsKICAgIGV4Y2VwdCBGaWxlRXhpc3RzRXJyb3I6CiAgICAgICAgbiArPSAxCm9zLndyaXRlKGZkLCBzdHIob3MuZ2V0cGlkKCkpLmVuY29kZSgpKQpvcy5jbG9zZShmZCkKbGF1bmNoZWQgPSBvcy5wYXRoLmpvaW4oaG9tZSwgImxhdW5jaGVkIikKb3MubWFrZWRpcnMobGF1bmNoZWQsIGV4aXN0X29rPVRydWUpCndpdGggb3Blbihvcy5wYXRoLmpvaW4obGF1bmNoZWQsICJsYXVuY2gtJWQuanNvbiIgJSBuKSwgInciLCBlbmNvZGluZz0idXRmLTgiKSBhcyBvdXQ6CiAgICBqc29uLmR1bXAoc3lzLmFyZ3ZbMTpdLCBvdXQpCmRlYWRsaW5lID0gdGltZS5tb25vdG9uaWMoKSArIDMwCndoaWxlIG5vdCBvcy5wYXRoLmV4aXN0cyhvcy5wYXRoLmpvaW4oc3RhdGUsICJyZWxlYXNlIikpIGFuZCB0aW1lLm1vbm90b25pYygpIDwgZGVhZGxpbmU6CiAgICB0aW1lLnNsZWVwKDAuMDIpCm9wZW4ob3MucGF0aC5qb2luKHN0YXRlLCAiZG9uZS0lZCIgJSBuKSwgInciKS5jbG9zZSgpCg=="
+   },
+   "modes": {
+    "bin": "0o755",
+    "bin/stand-in.py": "0o644",
+    "cwd": "0o755",
+    "launched": "0o755",
+    "launched/launch-1.json": "0o644"
+   }
+  },
+  "unless-none-json": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "eyJzdGF0ZSI6ICJvcGVuZWQiLCAidXJsIjogIntEQUVNT059L3VpLyMvc2lnbmluP2NvZGU9QUJDRC0xMjM0IiwgImNvZGUiOiAiQUJDRC0xMjM0IiwgIm9yaWdpbiI6ICJ7REFFTU9OfSIsICJwcmluY2lwYWwiOiAiZml4dHVyZSIsICJleHBpcmVzX2luIjogMzAwfQo=",
+   "stderr": "",
+   "window": [
+    1794538151.7136605,
+    1794538151.9503293
+   ],
+   "requests": [
+    {
+     "method": "GET",
+     "target": "/api/console/sessions",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    },
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "36",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "bin": "dir",
+    "cwd": "dir",
+    "launched": "dir",
+    "launched/launch-1.json": "file:WyJ7REFFTU9OfS91aS8jL3NpZ25pbj9jb2RlPUFCQ0QtMTIzNCJd",
+    "bin/stand-in.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMsIHRpbWUKaG9tZSA9IG9zLnBhdGguZGlybmFtZShvcy5wYXRoLmRpcm5hbWUob3MucGF0aC5hYnNwYXRoKF9fZmlsZV9fKSkpCnN0YXRlID0gb3MucGF0aC5qb2luKGhvbWUsICIuc3RhbmRpbiIpCm9zLm1ha2VkaXJzKHN0YXRlLCBleGlzdF9vaz1UcnVlKQpuID0gMQp3aGlsZSBUcnVlOgogICAgdHJ5OgogICAgICAgIGZkID0gb3Mub3Blbihvcy5wYXRoLmpvaW4oc3RhdGUsICJzdGFydGVkLSVkIiAlIG4pLCBvcy5PX0NSRUFUIHwgb3MuT19FWENMIHwgb3MuT19XUk9OTFkpCiAgICAgICAgYnJlYWsKICAgIGV4Y2VwdCBGaWxlRXhpc3RzRXJyb3I6CiAgICAgICAgbiArPSAxCm9zLndyaXRlKGZkLCBzdHIob3MuZ2V0cGlkKCkpLmVuY29kZSgpKQpvcy5jbG9zZShmZCkKbGF1bmNoZWQgPSBvcy5wYXRoLmpvaW4oaG9tZSwgImxhdW5jaGVkIikKb3MubWFrZWRpcnMobGF1bmNoZWQsIGV4aXN0X29rPVRydWUpCndpdGggb3Blbihvcy5wYXRoLmpvaW4obGF1bmNoZWQsICJsYXVuY2gtJWQuanNvbiIgJSBuKSwgInciLCBlbmNvZGluZz0idXRmLTgiKSBhcyBvdXQ6CiAgICBqc29uLmR1bXAoc3lzLmFyZ3ZbMTpdLCBvdXQpCmRlYWRsaW5lID0gdGltZS5tb25vdG9uaWMoKSArIDMwCndoaWxlIG5vdCBvcy5wYXRoLmV4aXN0cyhvcy5wYXRoLmpvaW4oc3RhdGUsICJyZWxlYXNlIikpIGFuZCB0aW1lLm1vbm90b25pYygpIDwgZGVhZGxpbmU6CiAgICB0aW1lLnNsZWVwKDAuMDIpCm9wZW4ob3MucGF0aC5qb2luKHN0YXRlLCAiZG9uZS0lZCIgJSBuKSwgInciKS5jbG9zZSgpCg=="
+   },
+   "modes": {
+    "bin": "0o755",
+    "bin/stand-in.py": "0o644",
+    "cwd": "0o755",
+    "launched": "0o755",
+    "launched/launch-1.json": "0o644"
+   }
+  },
+  "unless-refused": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "T3BlbmVkIHRoZSBDb25zb2xlIGluIHlvdXIgYnJvd3NlcjogY29uZmlybSB0aGUgc2lnbi1pbiB0aGVyZS4KICB7REFFTU9OfS91aS8jL3NpZ25pbj9jb2RlPUFCQ0QtMTIzNApPciB0eXBlIHRoZSBjb2RlIEFCQ0QtMTIzNCBpbnRvIHRoZSBDb25zb2xlJ3Mgc2lnbi1pbiBkaWFsb2cgYXQge0RBRU1PTn0vdWkvLiBJdCB3b3JrcyBvbmNlLCB3aXRoaW4gNSBtaW51dGVzLgo=",
+   "stderr": "",
+   "window": [
+    1794538152.4302104,
+    1794538152.6681337
+   ],
+   "requests": [
+    {
+     "method": "GET",
+     "target": "/api/console/sessions",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    },
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "36",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "bin": "dir",
+    "cwd": "dir",
+    "launched": "dir",
+    "launched/launch-1.json": "file:WyJ7REFFTU9OfS91aS8jL3NpZ25pbj9jb2RlPUFCQ0QtMTIzNCJd",
+    "bin/stand-in.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMsIHRpbWUKaG9tZSA9IG9zLnBhdGguZGlybmFtZShvcy5wYXRoLmRpcm5hbWUob3MucGF0aC5hYnNwYXRoKF9fZmlsZV9fKSkpCnN0YXRlID0gb3MucGF0aC5qb2luKGhvbWUsICIuc3RhbmRpbiIpCm9zLm1ha2VkaXJzKHN0YXRlLCBleGlzdF9vaz1UcnVlKQpuID0gMQp3aGlsZSBUcnVlOgogICAgdHJ5OgogICAgICAgIGZkID0gb3Mub3Blbihvcy5wYXRoLmpvaW4oc3RhdGUsICJzdGFydGVkLSVkIiAlIG4pLCBvcy5PX0NSRUFUIHwgb3MuT19FWENMIHwgb3MuT19XUk9OTFkpCiAgICAgICAgYnJlYWsKICAgIGV4Y2VwdCBGaWxlRXhpc3RzRXJyb3I6CiAgICAgICAgbiArPSAxCm9zLndyaXRlKGZkLCBzdHIob3MuZ2V0cGlkKCkpLmVuY29kZSgpKQpvcy5jbG9zZShmZCkKbGF1bmNoZWQgPSBvcy5wYXRoLmpvaW4oaG9tZSwgImxhdW5jaGVkIikKb3MubWFrZWRpcnMobGF1bmNoZWQsIGV4aXN0X29rPVRydWUpCndpdGggb3Blbihvcy5wYXRoLmpvaW4obGF1bmNoZWQsICJsYXVuY2gtJWQuanNvbiIgJSBuKSwgInciLCBlbmNvZGluZz0idXRmLTgiKSBhcyBvdXQ6CiAgICBqc29uLmR1bXAoc3lzLmFyZ3ZbMTpdLCBvdXQpCmRlYWRsaW5lID0gdGltZS5tb25vdG9uaWMoKSArIDMwCndoaWxlIG5vdCBvcy5wYXRoLmV4aXN0cyhvcy5wYXRoLmpvaW4oc3RhdGUsICJyZWxlYXNlIikpIGFuZCB0aW1lLm1vbm90b25pYygpIDwgZGVhZGxpbmU6CiAgICB0aW1lLnNsZWVwKDAuMDIpCm9wZW4ob3MucGF0aC5qb2luKHN0YXRlLCAiZG9uZS0lZCIgJSBuKSwgInciKS5jbG9zZSgpCg=="
+   },
+   "modes": {
+    "bin": "0o755",
+    "bin/stand-in.py": "0o644",
+    "cwd": "0o755",
+    "launched": "0o755",
+    "launched/launch-1.json": "0o644"
+   }
+  },
+  "unless-not-json": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "eyJzdGF0ZSI6ICJvcGVuZWQiLCAidXJsIjogIntEQUVNT059L3VpLyMvc2lnbmluP2NvZGU9QUJDRC0xMjM0IiwgImNvZGUiOiAiQUJDRC0xMjM0IiwgIm9yaWdpbiI6ICJ7REFFTU9OfSIsICJwcmluY2lwYWwiOiAiZml4dHVyZSIsICJleHBpcmVzX2luIjogMzAwfQo=",
+   "stderr": "",
+   "window": [
+    1794538153.1477354,
+    1794538153.383635
+   ],
+   "requests": [
+    {
+     "method": "GET",
+     "target": "/api/console/sessions",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    },
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "36",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "bin": "dir",
+    "cwd": "dir",
+    "launched": "dir",
+    "launched/launch-1.json": "file:WyJ7REFFTU9OfS91aS8jL3NpZ25pbj9jb2RlPUFCQ0QtMTIzNCJd",
+    "bin/stand-in.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMsIHRpbWUKaG9tZSA9IG9zLnBhdGguZGlybmFtZShvcy5wYXRoLmRpcm5hbWUob3MucGF0aC5hYnNwYXRoKF9fZmlsZV9fKSkpCnN0YXRlID0gb3MucGF0aC5qb2luKGhvbWUsICIuc3RhbmRpbiIpCm9zLm1ha2VkaXJzKHN0YXRlLCBleGlzdF9vaz1UcnVlKQpuID0gMQp3aGlsZSBUcnVlOgogICAgdHJ5OgogICAgICAgIGZkID0gb3Mub3Blbihvcy5wYXRoLmpvaW4oc3RhdGUsICJzdGFydGVkLSVkIiAlIG4pLCBvcy5PX0NSRUFUIHwgb3MuT19FWENMIHwgb3MuT19XUk9OTFkpCiAgICAgICAgYnJlYWsKICAgIGV4Y2VwdCBGaWxlRXhpc3RzRXJyb3I6CiAgICAgICAgbiArPSAxCm9zLndyaXRlKGZkLCBzdHIob3MuZ2V0cGlkKCkpLmVuY29kZSgpKQpvcy5jbG9zZShmZCkKbGF1bmNoZWQgPSBvcy5wYXRoLmpvaW4oaG9tZSwgImxhdW5jaGVkIikKb3MubWFrZWRpcnMobGF1bmNoZWQsIGV4aXN0X29rPVRydWUpCndpdGggb3Blbihvcy5wYXRoLmpvaW4obGF1bmNoZWQsICJsYXVuY2gtJWQuanNvbiIgJSBuKSwgInciLCBlbmNvZGluZz0idXRmLTgiKSBhcyBvdXQ6CiAgICBqc29uLmR1bXAoc3lzLmFyZ3ZbMTpdLCBvdXQpCmRlYWRsaW5lID0gdGltZS5tb25vdG9uaWMoKSArIDMwCndoaWxlIG5vdCBvcy5wYXRoLmV4aXN0cyhvcy5wYXRoLmpvaW4oc3RhdGUsICJyZWxlYXNlIikpIGFuZCB0aW1lLm1vbm90b25pYygpIDwgZGVhZGxpbmU6CiAgICB0aW1lLnNsZWVwKDAuMDIpCm9wZW4ob3MucGF0aC5qb2luKHN0YXRlLCAiZG9uZS0lZCIgJSBuKSwgInciKS5jbG9zZSgpCg=="
+   },
+   "modes": {
+    "bin": "0o755",
+    "bin/stand-in.py": "0o644",
+    "cwd": "0o755",
+    "launched": "0o755",
+    "launched/launch-1.json": "0o644"
+   }
+  },
+  "unless-old-daemon": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "T3BlbmVkIHRoZSBDb25zb2xlIGluIHlvdXIgYnJvd3NlcjogY29uZmlybSB0aGUgc2lnbi1pbiB0aGVyZS4KICB7REFFTU9OfS91aS8jL3NpZ25pbj9jb2RlPUFCQ0QtMTIzNApPciB0eXBlIHRoZSBjb2RlIEFCQ0QtMTIzNCBpbnRvIHRoZSBDb25zb2xlJ3Mgc2lnbi1pbiBkaWFsb2cgYXQge0RBRU1PTn0vdWkvLiBJdCB3b3JrcyBvbmNlLCB3aXRoaW4gNSBtaW51dGVzLgo=",
+   "stderr": "",
+   "window": [
+    1794538153.8637748,
+    1794538154.1177251
+   ],
+   "requests": [
+    {
+     "method": "GET",
+     "target": "/api/console/sessions",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    },
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "36",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "bin": "dir",
+    "cwd": "dir",
+    "launched": "dir",
+    "launched/launch-1.json": "file:WyJ7REFFTU9OfS91aS8jL3NpZ25pbj9jb2RlPUFCQ0QtMTIzNCJd",
+    "bin/stand-in.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMsIHRpbWUKaG9tZSA9IG9zLnBhdGguZGlybmFtZShvcy5wYXRoLmRpcm5hbWUob3MucGF0aC5hYnNwYXRoKF9fZmlsZV9fKSkpCnN0YXRlID0gb3MucGF0aC5qb2luKGhvbWUsICIuc3RhbmRpbiIpCm9zLm1ha2VkaXJzKHN0YXRlLCBleGlzdF9vaz1UcnVlKQpuID0gMQp3aGlsZSBUcnVlOgogICAgdHJ5OgogICAgICAgIGZkID0gb3Mub3Blbihvcy5wYXRoLmpvaW4oc3RhdGUsICJzdGFydGVkLSVkIiAlIG4pLCBvcy5PX0NSRUFUIHwgb3MuT19FWENMIHwgb3MuT19XUk9OTFkpCiAgICAgICAgYnJlYWsKICAgIGV4Y2VwdCBGaWxlRXhpc3RzRXJyb3I6CiAgICAgICAgbiArPSAxCm9zLndyaXRlKGZkLCBzdHIob3MuZ2V0cGlkKCkpLmVuY29kZSgpKQpvcy5jbG9zZShmZCkKbGF1bmNoZWQgPSBvcy5wYXRoLmpvaW4oaG9tZSwgImxhdW5jaGVkIikKb3MubWFrZWRpcnMobGF1bmNoZWQsIGV4aXN0X29rPVRydWUpCndpdGggb3Blbihvcy5wYXRoLmpvaW4obGF1bmNoZWQsICJsYXVuY2gtJWQuanNvbiIgJSBuKSwgInciLCBlbmNvZGluZz0idXRmLTgiKSBhcyBvdXQ6CiAgICBqc29uLmR1bXAoc3lzLmFyZ3ZbMTpdLCBvdXQpCmRlYWRsaW5lID0gdGltZS5tb25vdG9uaWMoKSArIDMwCndoaWxlIG5vdCBvcy5wYXRoLmV4aXN0cyhvcy5wYXRoLmpvaW4oc3RhdGUsICJyZWxlYXNlIikpIGFuZCB0aW1lLm1vbm90b25pYygpIDwgZGVhZGxpbmU6CiAgICB0aW1lLnNsZWVwKDAuMDIpCm9wZW4ob3MucGF0aC5qb2luKHN0YXRlLCAiZG9uZS0lZCIgJSBuKSwgInciKS5jbG9zZSgpCg=="
+   },
+   "modes": {
+    "bin": "0o755",
+    "bin/stand-in.py": "0o644",
+    "cwd": "0o755",
+    "launched": "0o755",
+    "launched/launch-1.json": "0o644"
+   }
+  },
+  "unless-unreachable": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 3,
+   "stdout": "eyJzdGF0ZSI6ICJub19kYWVtb24iLCAiZXJyb3IiOiAiW0Vycm5vIDExMV0gQ29ubmVjdGlvbiByZWZ1c2VkIn0K",
+   "stderr": "",
+   "window": [
+    1794538154.5868,
+    1794538154.800165
+   ],
+   "arm": "python",
+   "files": {
+    "bin": "dir",
+    "cwd": "dir",
+    "bin/stand-in.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMsIHRpbWUKaG9tZSA9IG9zLnBhdGguZGlybmFtZShvcy5wYXRoLmRpcm5hbWUob3MucGF0aC5hYnNwYXRoKF9fZmlsZV9fKSkpCnN0YXRlID0gb3MucGF0aC5qb2luKGhvbWUsICIuc3RhbmRpbiIpCm9zLm1ha2VkaXJzKHN0YXRlLCBleGlzdF9vaz1UcnVlKQpuID0gMQp3aGlsZSBUcnVlOgogICAgdHJ5OgogICAgICAgIGZkID0gb3Mub3Blbihvcy5wYXRoLmpvaW4oc3RhdGUsICJzdGFydGVkLSVkIiAlIG4pLCBvcy5PX0NSRUFUIHwgb3MuT19FWENMIHwgb3MuT19XUk9OTFkpCiAgICAgICAgYnJlYWsKICAgIGV4Y2VwdCBGaWxlRXhpc3RzRXJyb3I6CiAgICAgICAgbiArPSAxCm9zLndyaXRlKGZkLCBzdHIob3MuZ2V0cGlkKCkpLmVuY29kZSgpKQpvcy5jbG9zZShmZCkKbGF1bmNoZWQgPSBvcy5wYXRoLmpvaW4oaG9tZSwgImxhdW5jaGVkIikKb3MubWFrZWRpcnMobGF1bmNoZWQsIGV4aXN0X29rPVRydWUpCndpdGggb3Blbihvcy5wYXRoLmpvaW4obGF1bmNoZWQsICJsYXVuY2gtJWQuanNvbiIgJSBuKSwgInciLCBlbmNvZGluZz0idXRmLTgiKSBhcyBvdXQ6CiAgICBqc29uLmR1bXAoc3lzLmFyZ3ZbMTpdLCBvdXQpCmRlYWRsaW5lID0gdGltZS5tb25vdG9uaWMoKSArIDMwCndoaWxlIG5vdCBvcy5wYXRoLmV4aXN0cyhvcy5wYXRoLmpvaW4oc3RhdGUsICJyZWxlYXNlIikpIGFuZCB0aW1lLm1vbm90b25pYygpIDwgZGVhZGxpbmU6CiAgICB0aW1lLnNsZWVwKDAuMDIpCm9wZW4ob3MucGF0aC5qb2luKHN0YXRlLCAiZG9uZS0lZCIgJSBuKSwgInciKS5jbG9zZSgpCg=="
+   },
+   "modes": {
+    "bin": "0o755",
+    "bin/stand-in.py": "0o644",
+    "cwd": "0o755"
+   }
+  },
+  "unless-no-open": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "T3BlbiB0aGlzIGxpbmsgdG8gc2lnbiBpbiB0byB0aGUgQ29uc29sZToKICB7REFFTU9OfS91aS8jL3NpZ25pbj9jb2RlPUFCQ0QtMTIzNApPciB0eXBlIHRoZSBjb2RlIEFCQ0QtMTIzNCBpbnRvIHRoZSBDb25zb2xlJ3Mgc2lnbi1pbiBkaWFsb2cgYXQge0RBRU1PTn0vdWkvLiBJdCB3b3JrcyBvbmNlLCB3aXRoaW4gNSBtaW51dGVzLgo=",
+   "stderr": "",
+   "window": [
+    1794538154.8089104,
+    1794538155.022725
+   ],
+   "requests": [
+    {
+     "method": "GET",
+     "target": "/api/console/sessions",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    },
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "36",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "unless-no-open-signed-in": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "eyJzdGF0ZSI6ICJhbHJlYWR5X3NpZ25lZF9pbiJ9Cg==",
+   "stderr": "",
+   "window": [
+    1794538155.5155945,
+    1794538155.7361374
+   ],
+   "requests": [
+    {
+     "method": "GET",
+     "target": "/api/console/sessions",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "empty-revoke-no-open": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "T3BlbiB0aGlzIGxpbmsgdG8gc2lnbiBpbiB0byB0aGUgQ29uc29sZToKICB7REFFTU9OfS91aS8jL3NpZ25pbj9jb2RlPUFCQ0QtMTIzNApPciB0eXBlIHRoZSBjb2RlIEFCQ0QtMTIzNCBpbnRvIHRoZSBDb25zb2xlJ3Mgc2lnbi1pbiBkaWFsb2cgYXQge0RBRU1PTn0vdWkvLiBJdCB3b3JrcyBvbmNlLCB3aXRoaW4gNSBtaW51dGVzLgo=",
+   "stderr": "",
+   "window": [
+    1794538156.2279108,
+    1794538156.4587135
+   ],
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "36",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "defer-browser-standard-name": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 3,
+   "stdout": "",
+   "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogbm8gZGFlbW9uIGFuc3dlcmVkIGF0IGh0dHA6Ly8xMjcuMC4wLjE6OSAoW0Vycm5vIDExMV0gQ29ubmVjdGlvbiByZWZ1c2VkKTsgY2hlY2sgaXQgcnVucyAoYHBzZXVkb2xpZmUtbWNwIGRvY3RvcmApCg==",
+   "window": [
+    1794538156.9613745,
+    1794538157.1811974
+   ],
+   "arm": "python",
+   "files": {
+    "bin": "dir",
+    "cwd": "dir",
+    "bin/stand-in.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMsIHRpbWUKaG9tZSA9IG9zLnBhdGguZGlybmFtZShvcy5wYXRoLmRpcm5hbWUob3MucGF0aC5hYnNwYXRoKF9fZmlsZV9fKSkpCnN0YXRlID0gb3MucGF0aC5qb2luKGhvbWUsICIuc3RhbmRpbiIpCm9zLm1ha2VkaXJzKHN0YXRlLCBleGlzdF9vaz1UcnVlKQpuID0gMQp3aGlsZSBUcnVlOgogICAgdHJ5OgogICAgICAgIGZkID0gb3Mub3Blbihvcy5wYXRoLmpvaW4oc3RhdGUsICJzdGFydGVkLSVkIiAlIG4pLCBvcy5PX0NSRUFUIHwgb3MuT19FWENMIHwgb3MuT19XUk9OTFkpCiAgICAgICAgYnJlYWsKICAgIGV4Y2VwdCBGaWxlRXhpc3RzRXJyb3I6CiAgICAgICAgbiArPSAxCm9zLndyaXRlKGZkLCBzdHIob3MuZ2V0cGlkKCkpLmVuY29kZSgpKQpvcy5jbG9zZShmZCkKbGF1bmNoZWQgPSBvcy5wYXRoLmpvaW4oaG9tZSwgImxhdW5jaGVkIikKb3MubWFrZWRpcnMobGF1bmNoZWQsIGV4aXN0X29rPVRydWUpCndpdGggb3Blbihvcy5wYXRoLmpvaW4obGF1bmNoZWQsICJsYXVuY2gtJWQuanNvbiIgJSBuKSwgInciLCBlbmNvZGluZz0idXRmLTgiKSBhcyBvdXQ6CiAgICBqc29uLmR1bXAoc3lzLmFyZ3ZbMTpdLCBvdXQpCmRlYWRsaW5lID0gdGltZS5tb25vdG9uaWMoKSArIDMwCndoaWxlIG5vdCBvcy5wYXRoLmV4aXN0cyhvcy5wYXRoLmpvaW4oc3RhdGUsICJyZWxlYXNlIikpIGFuZCB0aW1lLm1vbm90b25pYygpIDwgZGVhZGxpbmU6CiAgICB0aW1lLnNsZWVwKDAuMDIpCm9wZW4ob3MucGF0aC5qb2luKHN0YXRlLCAiZG9uZS0lZCIgJSBuKSwgInciKS5jbG9zZSgpCg=="
+   },
+   "modes": {
+    "bin": "0o755",
+    "bin/stand-in.py": "0o644",
+    "cwd": "0o755"
+   }
+  },
+  "defer-browser-clone": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 3,
+   "stdout": "eyJzdGF0ZSI6ICJub19kYWVtb24iLCAiZXJyb3IiOiAiW0Vycm5vIDExMV0gQ29ubmVjdGlvbiByZWZ1c2VkIn0K",
+   "stderr": "",
+   "window": [
+    1794538157.1939871,
+    1794538157.41417
+   ],
+   "arm": "python",
+   "files": {
+    "bin": "dir",
+    "cwd": "dir",
+    "bin/stand-in.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMsIHRpbWUKaG9tZSA9IG9zLnBhdGguZGlybmFtZShvcy5wYXRoLmRpcm5hbWUob3MucGF0aC5hYnNwYXRoKF9fZmlsZV9fKSkpCnN0YXRlID0gb3MucGF0aC5qb2luKGhvbWUsICIuc3RhbmRpbiIpCm9zLm1ha2VkaXJzKHN0YXRlLCBleGlzdF9vaz1UcnVlKQpuID0gMQp3aGlsZSBUcnVlOgogICAgdHJ5OgogICAgICAgIGZkID0gb3Mub3Blbihvcy5wYXRoLmpvaW4oc3RhdGUsICJzdGFydGVkLSVkIiAlIG4pLCBvcy5PX0NSRUFUIHwgb3MuT19FWENMIHwgb3MuT19XUk9OTFkpCiAgICAgICAgYnJlYWsKICAgIGV4Y2VwdCBGaWxlRXhpc3RzRXJyb3I6CiAgICAgICAgbiArPSAxCm9zLndyaXRlKGZkLCBzdHIob3MuZ2V0cGlkKCkpLmVuY29kZSgpKQpvcy5jbG9zZShmZCkKbGF1bmNoZWQgPSBvcy5wYXRoLmpvaW4oaG9tZSwgImxhdW5jaGVkIikKb3MubWFrZWRpcnMobGF1bmNoZWQsIGV4aXN0X29rPVRydWUpCndpdGggb3Blbihvcy5wYXRoLmpvaW4obGF1bmNoZWQsICJsYXVuY2gtJWQuanNvbiIgJSBuKSwgInciLCBlbmNvZGluZz0idXRmLTgiKSBhcyBvdXQ6CiAgICBqc29uLmR1bXAoc3lzLmFyZ3ZbMTpdLCBvdXQpCmRlYWRsaW5lID0gdGltZS5tb25vdG9uaWMoKSArIDMwCndoaWxlIG5vdCBvcy5wYXRoLmV4aXN0cyhvcy5wYXRoLmpvaW4oc3RhdGUsICJyZWxlYXNlIikpIGFuZCB0aW1lLm1vbm90b25pYygpIDwgZGVhZGxpbmU6CiAgICB0aW1lLnNsZWVwKDAuMDIpCm9wZW4ob3MucGF0aC5qb2luKHN0YXRlLCAiZG9uZS0lZCIgJSBuKSwgInciKS5jbG9zZSgpCg=="
+   },
+   "modes": {
+    "bin": "0o755",
+    "bin/stand-in.py": "0o644",
+    "cwd": "0o755"
+   }
+  },
+  "defer-browser-unless": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "T3BlbiB0aGlzIGxpbmsgdG8gc2lnbiBpbiB0byB0aGUgQ29uc29sZToKICB7REFFTU9OfS91aS8jL3NpZ25pbj9jb2RlPUFCQ0QtMTIzNApPciB0eXBlIHRoZSBjb2RlIEFCQ0QtMTIzNCBpbnRvIHRoZSBDb25zb2xlJ3Mgc2lnbi1pbiBkaWFsb2cgYXQge0RBRU1PTn0vdWkvLiBJdCB3b3JrcyBvbmNlLCB3aXRoaW4gNSBtaW51dGVzLgo=",
+   "stderr": "",
+   "window": [
+    1794538157.426737,
+    1794538157.6458154
+   ],
+   "requests": [
+    {
+     "method": "GET",
+     "target": "/api/console/sessions",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    },
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "36",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\"}"
+    }
+   ],
+   "arm": "python",
+   "files": {
+    "bin": "dir",
+    "cwd": "dir",
+    "bin/stand-in.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMsIHRpbWUKaG9tZSA9IG9zLnBhdGguZGlybmFtZShvcy5wYXRoLmRpcm5hbWUob3MucGF0aC5hYnNwYXRoKF9fZmlsZV9fKSkpCnN0YXRlID0gb3MucGF0aC5qb2luKGhvbWUsICIuc3RhbmRpbiIpCm9zLm1ha2VkaXJzKHN0YXRlLCBleGlzdF9vaz1UcnVlKQpuID0gMQp3aGlsZSBUcnVlOgogICAgdHJ5OgogICAgICAgIGZkID0gb3Mub3Blbihvcy5wYXRoLmpvaW4oc3RhdGUsICJzdGFydGVkLSVkIiAlIG4pLCBvcy5PX0NSRUFUIHwgb3MuT19FWENMIHwgb3MuT19XUk9OTFkpCiAgICAgICAgYnJlYWsKICAgIGV4Y2VwdCBGaWxlRXhpc3RzRXJyb3I6CiAgICAgICAgbiArPSAxCm9zLndyaXRlKGZkLCBzdHIob3MuZ2V0cGlkKCkpLmVuY29kZSgpKQpvcy5jbG9zZShmZCkKbGF1bmNoZWQgPSBvcy5wYXRoLmpvaW4oaG9tZSwgImxhdW5jaGVkIikKb3MubWFrZWRpcnMobGF1bmNoZWQsIGV4aXN0X29rPVRydWUpCndpdGggb3Blbihvcy5wYXRoLmpvaW4obGF1bmNoZWQsICJsYXVuY2gtJWQuanNvbiIgJSBuKSwgInciLCBlbmNvZGluZz0idXRmLTgiKSBhcyBvdXQ6CiAgICBqc29uLmR1bXAoc3lzLmFyZ3ZbMTpdLCBvdXQpCmRlYWRsaW5lID0gdGltZS5tb25vdG9uaWMoKSArIDMwCndoaWxlIG5vdCBvcy5wYXRoLmV4aXN0cyhvcy5wYXRoLmpvaW4oc3RhdGUsICJyZWxlYXNlIikpIGFuZCB0aW1lLm1vbm90b25pYygpIDwgZGVhZGxpbmU6CiAgICB0aW1lLnNsZWVwKDAuMDIpCm9wZW4ob3MucGF0aC5qb2luKHN0YXRlLCAiZG9uZS0lZCIgJSBuKSwgInciKS5jbG9zZSgpCg=="
+   },
+   "modes": {
+    "bin": "0o755",
+    "bin/stand-in.py": "0o644",
+    "cwd": "0o755"
+   }
+  },
   "crash-stamp-nan": {
    "home": null,
    "utc_offset": 39600,
@@ -2733,8 +4213,8 @@
    "stdout": "SUQgICAgICAgICAgICAgICAgU0lHTkVEIElOIEFTICAgICAgICAgSE9XICAgICAgU0lOQ0UgICAgICAgICAgICAgTEFTVCBVU0VEICAgICAgICAgQlJPV1NFUgo=",
    "stderr": "VHJhY2ViYWNrIChtb3N0IHJlY2VudCBjYWxsIGxhc3QpOgogIEZpbGUgIjxmcm96ZW4gcnVucHk+IiwgbGluZSAxOTgsIGluIF9ydW5fbW9kdWxlX2FzX21haW4KICBGaWxlICI8ZnJvemVuIHJ1bnB5PiIsIGxpbmUgODgsIGluIF9ydW5fY29kZQogIEZpbGUgIntPUkFDTEV9L3BzZXVkb2xpZmVfbWVtb3J5L2NsaS5weSIsIGxpbmUgMjY3LCBpbiA8bW9kdWxlPgogICAgbWFpbigpCiAgRmlsZSAie09SQUNMRX0vcHNldWRvbGlmZV9tZW1vcnkvY2xpLnB5IiwgbGluZSAyMTgsIGluIG1haW4KICAgIHN5cy5leGl0KGNvbnNvbGVfbWFpbihzeXMuYXJndlsyOl0pKQogICAgICAgICAgICAgXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl4KICBGaWxlICJ7T1JBQ0xFfS9wc2V1ZG9saWZlX21lbW9yeS9jb25zb2xlX2NsaS5weSIsIGxpbmUgMjQ3LCBpbiBtYWluCiAgICByZXR1cm4gX2xpc3QocGF5bG9hZCwgYXJncy5qc29uKQogICAgICAgICAgIF5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl4KICBGaWxlICJ7T1JBQ0xFfS9wc2V1ZG9saWZlX21lbW9yeS9jb25zb2xlX2NsaS5weSIsIGxpbmUgMjcxLCBpbiBfbGlzdAogICAgZiJ7c3RyKHJvdy5nZXQoJ21ldGhvZCcsICcnKSk6PDh9IHtfc3RhbXAocm93LmdldCgnY3JlYXRlZF9hdCcpKTo8MTd9ICIKICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl4KICBGaWxlICJ7T1JBQ0xFfS9wc2V1ZG9saWZlX21lbW9yeS9jb25zb2xlX2NsaS5weSIsIGxpbmUgMTk1LCBpbiBfc3RhbXAKICAgIHJldHVybiB0aW1lLnN0cmZ0aW1lKCIlWS0lbS0lZCAlSDolTSIsIHRpbWUubG9jYWx0aW1lKHZhbHVlKSkKICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIF5eXl5eXl5eXl5eXl5eXl5eXl5eXgpWYWx1ZUVycm9yOiBJbnZhbGlkIHZhbHVlIE5hTiAobm90IGEgbnVtYmVyKQo=",
    "window": [
-    1794472650.221955,
-    1794472650.435529
+    1794538158.1363707,
+    1794538158.3538358
    ],
    "requests": [
     {
@@ -2766,8 +4246,8 @@
    "stdout": "SUQgICAgICAgICAgICAgICAgU0lHTkVEIElOIEFTICAgICAgICAgSE9XICAgICAgU0lOQ0UgICAgICAgICAgICAgTEFTVCBVU0VEICAgICAgICAgQlJPV1NFUgo=",
    "stderr": "VHJhY2ViYWNrIChtb3N0IHJlY2VudCBjYWxsIGxhc3QpOgogIEZpbGUgIjxmcm96ZW4gcnVucHk+IiwgbGluZSAxOTgsIGluIF9ydW5fbW9kdWxlX2FzX21haW4KICBGaWxlICI8ZnJvemVuIHJ1bnB5PiIsIGxpbmUgODgsIGluIF9ydW5fY29kZQogIEZpbGUgIntPUkFDTEV9L3BzZXVkb2xpZmVfbWVtb3J5L2NsaS5weSIsIGxpbmUgMjY3LCBpbiA8bW9kdWxlPgogICAgbWFpbigpCiAgRmlsZSAie09SQUNMRX0vcHNldWRvbGlmZV9tZW1vcnkvY2xpLnB5IiwgbGluZSAyMTgsIGluIG1haW4KICAgIHN5cy5leGl0KGNvbnNvbGVfbWFpbihzeXMuYXJndlsyOl0pKQogICAgICAgICAgICAgXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl4KICBGaWxlICJ7T1JBQ0xFfS9wc2V1ZG9saWZlX21lbW9yeS9jb25zb2xlX2NsaS5weSIsIGxpbmUgMjQ3LCBpbiBtYWluCiAgICByZXR1cm4gX2xpc3QocGF5bG9hZCwgYXJncy5qc29uKQogICAgICAgICAgIF5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl4KICBGaWxlICJ7T1JBQ0xFfS9wc2V1ZG9saWZlX21lbW9yeS9jb25zb2xlX2NsaS5weSIsIGxpbmUgMjcyLCBpbiBfbGlzdAogICAgZiJ7X3N0YW1wKHJvdy5nZXQoJ2xhc3RfdXNlZF9hdCcpKTo8MTd9IHtyb3cuZ2V0KCdsYWJlbCcpIG9yICctJ30iKQogICAgICAgXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXgogIEZpbGUgIntPUkFDTEV9L3BzZXVkb2xpZmVfbWVtb3J5L2NvbnNvbGVfY2xpLnB5IiwgbGluZSAxOTUsIGluIF9zdGFtcAogICAgcmV0dXJuIHRpbWUuc3RyZnRpbWUoIiVZLSVtLSVkICVIOiVNIiwgdGltZS5sb2NhbHRpbWUodmFsdWUpKQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgXl5eXl5eXl5eXl5eXl5eXl5eXl5eCk92ZXJmbG93RXJyb3I6IHRpbWVzdGFtcCBvdXQgb2YgcmFuZ2UgZm9yIHBsYXRmb3JtIHRpbWVfdAo=",
    "window": [
-    1794472650.928092,
-    1794472651.1401215
+    1794538158.8451257,
+    1794538159.0576017
    ],
    "requests": [
     {
@@ -2799,8 +4279,8 @@
    "stdout": "SUQgICAgICAgICAgICAgICAgU0lHTkVEIElOIEFTICAgICAgICAgSE9XICAgICAgU0lOQ0UgICAgICAgICAgICAgTEFTVCBVU0VEICAgICAgICAgQlJPV1NFUgo=",
    "stderr": "VHJhY2ViYWNrIChtb3N0IHJlY2VudCBjYWxsIGxhc3QpOgogIEZpbGUgIjxmcm96ZW4gcnVucHk+IiwgbGluZSAxOTgsIGluIF9ydW5fbW9kdWxlX2FzX21haW4KICBGaWxlICI8ZnJvemVuIHJ1bnB5PiIsIGxpbmUgODgsIGluIF9ydW5fY29kZQogIEZpbGUgIntPUkFDTEV9L3BzZXVkb2xpZmVfbWVtb3J5L2NsaS5weSIsIGxpbmUgMjY3LCBpbiA8bW9kdWxlPgogICAgbWFpbigpCiAgRmlsZSAie09SQUNMRX0vcHNldWRvbGlmZV9tZW1vcnkvY2xpLnB5IiwgbGluZSAyMTgsIGluIG1haW4KICAgIHN5cy5leGl0KGNvbnNvbGVfbWFpbihzeXMuYXJndlsyOl0pKQogICAgICAgICAgICAgXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl4KICBGaWxlICJ7T1JBQ0xFfS9wc2V1ZG9saWZlX21lbW9yeS9jb25zb2xlX2NsaS5weSIsIGxpbmUgMjQ3LCBpbiBtYWluCiAgICByZXR1cm4gX2xpc3QocGF5bG9hZCwgYXJncy5qc29uKQogICAgICAgICAgIF5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl4KICBGaWxlICJ7T1JBQ0xFfS9wc2V1ZG9saWZlX21lbW9yeS9jb25zb2xlX2NsaS5weSIsIGxpbmUgMjcwLCBpbiBfbGlzdAogICAgcHJpbnQoZiJ7c3RyKHJvdy5nZXQoJ3Nlc3Npb25faWQnLCAnJykpOjwxN30ge3N0cihyb3cuZ2V0KCdwcmluY2lwYWwnLCAnJykpOjwyMH0gIgpVbmljb2RlRW5jb2RlRXJyb3I6ICd1dGYtOCcgY29kZWMgY2FuJ3QgZW5jb2RlIGNoYXJhY3RlciAnXHVkYzgwJyBpbiBwb3NpdGlvbiA4NDogc3Vycm9nYXRlcyBub3QgYWxsb3dlZAo=",
    "window": [
-    1794472651.6330488,
-    1794472651.8439038
+    1794538159.5500867,
+    1794538159.770853
    ],
    "requests": [
     {

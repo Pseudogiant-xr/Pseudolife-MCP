@@ -17,6 +17,11 @@ fn argv(items: &[&str]) -> Vec<String> {
     items.iter().map(|item| (*item).to_owned()).collect()
 }
 
+/// A chooser for calls that must never ask which browser to start.
+fn no_browser() -> Result<browser::Plan, browser::Unsupported> {
+    panic!("this call chooses no browser")
+}
+
 fn read(text: &str) -> Dict {
     match pyjson::loads(text, DEPTH).unwrap() {
         J::Dict(dict) => dict,
@@ -162,22 +167,19 @@ fn help_and_usage_need_the_reproduced_width_and_no_colour() {
 }
 
 #[test]
-fn the_sign_in_path_defers_unless_it_only_prints() {
-    for items in [
-        &[][..],
-        &["--to", "board"],
-        &["--json"],
-        &["--no-open", "--unless-signed-in"],
-        &["--no-open", "--revoke="],
-        &["--revoke", ""],
-    ] {
-        assert!(plan(&argv(items), &context()).is_err(), "{items:?}");
-    }
-    let calls: [(&[&str], &str); 5] = [
+fn every_sign_in_shape_makes_its_call() {
+    let calls: [(&[&str], &str); 11] = [
+        (&[], "link open"),
+        (&["--to", "board"], "link board open"),
+        (&["--json"], "link open json"),
         (&["--no-open"], "link"),
         (&["--no-open", "--to", "board", "--json"], "link board json"),
+        (&["--no-open", "--unless-signed-in"], "link unless"),
+        (&["--unless-signed-in"], "link open unless"),
+        // `elif args.revoke:` is false for an empty id.
+        (&["--revoke", ""], "link open"),
+        (&["--no-open", "--revoke="], "link"),
         (&["--list", "--revoke="], "list"),
-        (&["--list", "--unless-signed-in"], "list"),
         (&["--revoke", "s-1", "--to", "board"], "revoke s-1"),
     ];
     for (items, want) in calls {
@@ -188,14 +190,47 @@ fn the_sign_in_path_defers_unless_it_only_prints() {
         let mut shown = match call {
             Call::List => "list".to_owned(),
             Call::Revoke(id) => format!("revoke {id}"),
-            Call::Link(None) => "link".to_owned(),
-            Call::Link(Some(to)) => format!("link {to}"),
+            Call::Link { to, open, unless } => {
+                let mut shown = "link".to_owned();
+                if let Some(to) = to {
+                    shown.push_str(&format!(" {to}"));
+                }
+                if open {
+                    shown.push_str(" open");
+                }
+                if unless {
+                    shown.push_str(" unless");
+                }
+                shown
+            }
         };
         if json {
             shown.push_str(" json");
         }
         assert_eq!(shown, want, "{items:?}");
     }
+    let (call, _) = match plan(&argv(&["--list", "--unless-signed-in"]), &context()) {
+        Ok(Err(call)) => call,
+        _ => panic!("no call"),
+    };
+    assert!(matches!(call, Call::List));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_launcher_this_port_lacks_defers_before_any_request() {
+    // The choice comes first: no connection is attempted (were one, the
+    // closed loopback port would answer `no_daemon`, not a deferral).
+    let link = Call::Link {
+        to: None,
+        open: true,
+        unless: false,
+    };
+    let unsupported = || Err(browser::Unsupported);
+    assert!(
+        answer(link, "http://127.0.0.1:9", "t", false, &unsupported)
+            .await
+            .is_err()
+    );
 }
 
 #[test]
@@ -310,6 +345,7 @@ fn a_printed_link_matches_the_oracle() {
         ("", 5),
         (r#", "expires_in": 300"#, 5),
         (r#", "expires_in": "300""#, 5),
+        (r#", "expires_in": " 300""#, 5),
         (r#", "expires_in": 59.9"#, 1),
         (r#", "expires_in": true"#, 1),
         (r#", "expires_in": 0"#, 5),
@@ -317,25 +353,37 @@ fn a_printed_link_matches_the_oracle() {
         (r#", "expires_in": 7200"#, 120),
     ] {
         assert_eq!(
-            printed(&link(extra), false).unwrap(),
+            opened(&link(extra), false, None),
             Out::stdout(text(minutes), 0),
             "{extra}"
         );
     }
     assert_eq!(
-        printed(&link(r#", "expires_in": 300"#), true).unwrap().text,
+        opened(&link(r#", "expires_in": 300"#), true, None).text,
         "{\"state\": \"printed\", \"url\": \"http://127.0.0.1:1/ui/#/signin?code=ABCD\", \"code\": \"ABCD\", \"origin\": \"http://127.0.0.1:1\", \"principal\": \"p\", \"expires_in\": 300}\n"
     );
-    // int() raises on these.
-    for extra in [
-        r#", "expires_in": "abc""#,
-        r#", "expires_in": [1]"#,
-        r#", "expires_in": NaN"#,
-        r#", "expires_in": " 300""#,
+    // int() raises on these: nothing is printed, the exception ends it.
+    for (extra, line) in [
+        (
+            r#", "expires_in": "abc""#,
+            "ValueError: invalid literal for int() with base 10: 'abc'",
+        ),
+        (
+            r#", "expires_in": [1]"#,
+            "TypeError: int() argument must be a string, a bytes-like object or a real number, not 'list'",
+        ),
+        (
+            r#", "expires_in": NaN"#,
+            "ValueError: cannot convert float NaN to integer",
+        ),
     ] {
-        assert!(printed(&link(extra), false).is_err(), "{extra}");
+        assert_eq!(
+            opened(&link(extra), false, None),
+            Out::crashed(String::new(), line.to_owned()),
+            "{extra}"
+        );
         // The JSON answer never converts it.
-        assert!(printed(&link(extra), true).is_ok(), "{extra}");
+        assert_eq!(opened(&link(extra), true, None).code, 0, "{extra}");
     }
     let refused = Out::stderr(format!("{NO_LINK}\n"), 4);
     for body in [
@@ -344,13 +392,100 @@ fn a_printed_link_matches_the_oracle() {
         r#"{"url": "http://127.0.0.1:1/ui/#/signin?code=A B", "code": "A", "origin": "http://127.0.0.1:1"}"#,
         r#"{"url": "http://127.0.0.1:1/ui/#/signin?code=A", "code": "A", "origin": "ftp://h"}"#,
         r#"{"url": 5, "code": "A", "origin": "http://127.0.0.1:1"}"#,
+        // Declared: refused where the oracle may accept (fail-safe).
+        r#"{"url": "http://é/ui/#/signin?code=A", "code": "A", "origin": "http://é"}"#,
+        r#"{"url": "http://127.0.0.1:1/ui/#/signin?code=\udc80", "code": "A", "origin": "http://127.0.0.1:1"}"#,
     ] {
-        assert_eq!(printed(&read(body), false).unwrap(), refused, "{body}");
+        assert_eq!(opened(&read(body), false, None), refused, "{body}");
     }
     assert_eq!(
-        printed(&read(r#"{"code": 1}"#), true).unwrap().text,
+        opened(&read(r#"{"code": 1}"#), true, None).text,
         "{\"state\": \"refused\", \"error\": \"bad_answer\"}\n"
     );
+}
+
+#[test]
+fn the_browser_starts_only_for_a_safe_link_and_before_anything_prints() {
+    let link = |extra: &str| {
+        read(&format!(
+            r#"{{"url": "http://127.0.0.1:1/ui/#/signin?code=AB", "code": "AB", "origin": "http://127.0.0.1:1"{extra}}}"#
+        ))
+    };
+    let started = std::cell::RefCell::new(Vec::new());
+    let start = |answer: bool| {
+        let started = &started;
+        move |url: &str| {
+            started.borrow_mut().push(url.to_owned());
+            answer
+        }
+    };
+    let out = opened(&link(""), false, Some(&mut start(true)));
+    assert_eq!(
+        out,
+        Out::stdout(
+            "Opened the Console in your browser: confirm the sign-in there.\n  http://127.0.0.1:1/ui/#/signin?code=AB\nOr type the code AB into the Console's sign-in dialog at http://127.0.0.1:1/ui/. It works once, within 5 minutes.\n".into(),
+            0
+        )
+    );
+    let out = opened(&link(""), true, Some(&mut start(false)));
+    assert!(
+        out.text.starts_with("{\"state\": \"printed\", "),
+        "{}",
+        out.text
+    );
+    let out = opened(&link(""), true, Some(&mut start(true)));
+    assert!(
+        out.text.starts_with("{\"state\": \"opened\", "),
+        "{}",
+        out.text
+    );
+    // The oracle opens the browser, then dies converting expires_in.
+    let out = opened(
+        &link(r#", "expires_in": "x""#),
+        false,
+        Some(&mut start(true)),
+    );
+    assert_eq!(out.code, 1);
+    // An unsafe link starts nothing.
+    let out = opened(
+        &read(r#"{"url": "file:///etc/passwd", "code": "AB", "origin": "http://127.0.0.1:1"}"#),
+        false,
+        Some(&mut start(true)),
+    );
+    assert_eq!(out.code, 4);
+    assert_eq!(
+        started.into_inner(),
+        vec!["http://127.0.0.1:1/ui/#/signin?code=AB"; 4],
+        "one start per safe link"
+    );
+}
+
+#[test]
+fn a_lone_surrogate_in_the_code_kills_the_printout_where_the_oracle_dies() {
+    let body = |code: &str| {
+        read(&format!(
+            r#"{{"url": "http://127.0.0.1:1/ui/#/signin?code=A", "code": "{code}", "origin": "http://127.0.0.1:1"}}"#
+        ))
+    };
+    let printed =
+        "Open this link to sign in to the Console:\n  http://127.0.0.1:1/ui/#/signin?code=A\n";
+    assert_eq!(
+        opened(&body(r"x\udc80y"), false, None),
+        Out::crashed(
+            printed.into(),
+            "UnicodeEncodeError: 'utf-8' codec can't encode character '\\udc80' in position 18: surrogates not allowed".into()
+        )
+    );
+    // Code points, not UTF-16 units, count; a run is reported whole.
+    assert_eq!(
+        opened(&body(r"😀\ud800\udbff"), false, None),
+        Out::crashed(
+            printed.into(),
+            "UnicodeEncodeError: 'utf-8' codec can't encode characters in position 18-19: surrogates not allowed".into()
+        )
+    );
+    // JSON escapes it.
+    assert_eq!(opened(&body(r"x\udc80"), true, None).code, 0);
 }
 
 #[test]
@@ -413,7 +548,7 @@ async fn a_list_request_carries_the_oracle_headers() {
         b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 16\r\nConnection: close\r\n\r\n{\"sessions\": []}",
     )
     .await;
-    let out = answer(Call::List, &origin, "fixture-token", true)
+    let out = answer(Call::List, &origin, "fixture-token", true, &no_browser)
         .await
         .unwrap();
     let request = String::from_utf8(task.await.unwrap()).unwrap();
@@ -445,9 +580,12 @@ async fn a_link_request_posts_the_oracle_body_and_reads_a_refusal() {
         b"HTTP/1.1 403 Forbidden\r\nContent-Length: 42\r\nConnection: close\r\n\r\n{\"error\": \"signin_unavailable\", \"hint\": 5}",
     )
     .await;
-    let out = answer(Call::Link(Some("board".into())), &origin, "t", true)
-        .await
-        .unwrap();
+    let link = Call::Link {
+        to: Some("board".into()),
+        open: false,
+        unless: false,
+    };
+    let out = answer(link, &origin, "t", true, &no_browser).await.unwrap();
     let request = String::from_utf8(task.await.unwrap()).unwrap();
     assert!(
         request.starts_with("POST /api/console/link HTTP/1.1\r\n"),

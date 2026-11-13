@@ -1,17 +1,23 @@
-//! `console`: the shapes of `pseudolife-mcp console` that open no browser.
+//! `console`: `pseudolife-mcp console`, every shape the oracle answers.
 //!
 //! Oracle: `pseudolife_memory/console_cli.py` (`main`, `credentials`,
-//! `request`, `_refusal`, `_list`, `_opened`). Answered natively: help and
-//! argparse's errors (at `COLUMNS=80`), `--list [--json]`, `--revoke ID
-//! [--json]`, `--no-open [--to PAGE] [--json]`, and every refusal those reach
-//! (the argument checks, missing or unusable credentials, a daemon that
-//! cannot be reached or refuses). A sign-in that would open a browser (no
-//! `--no-open`), `--unless-signed-in` and an empty `--revoke` on the sign-in
-//! path defer before any request, as does anything outside the reproduced
-//! domain that can be decided before it; an answer the oracle would crash on
-//! (or print something this port does not reproduce) defers after it
+//! `request`, `_refusal`, `_list`, `_opened`, `open_browser`,
+//! `has_display`) with CPython 3.11's `webbrowser`. Answered natively: help
+//! and argparse's errors (at `COLUMNS=80`), `--list [--json]`, `--revoke ID
+//! [--json]`, the sign-in (`[--no-open] [--to PAGE] [--json]
+//! [--unless-signed-in]`, an empty `--revoke` included) and every refusal
+//! those reach. Which browser the sign-in would start is decided before the
+//! code is minted (`browser.rs`), so a launcher this port does not
+//! reproduce defers before any effect; once the daemon answers the sign-in
+//! with a 200 object the command answers every branch itself, an oracle
+//! crash included (its terminal exception line on stderr, exit 1).
+//! Anything else outside the reproduced domain that can be decided before a
+//! request defers before it
 //! (`rust/cli_harness/rows/console.md`).
 mod args;
+mod browser;
+mod launch;
+mod pyint;
 mod stamp;
 
 // urllib.parse.urlsplit (CPython 3.11) for printable ASCII.
@@ -97,6 +103,11 @@ struct Out {
     stdout: bool,
     text: String,
     code: u8,
+    /// An oracle crash after `text` (on stdout): the terminal
+    /// `ExceptionType: message` line it writes to stderr (exit 1). Only its
+    /// traceback header and frames are not reproduced
+    /// (`python-traceback-not-contract`).
+    crash: Option<String>,
 }
 
 impl Out {
@@ -105,6 +116,7 @@ impl Out {
             stdout: true,
             text,
             code,
+            crash: None,
         }
     }
 
@@ -113,6 +125,17 @@ impl Out {
             stdout: false,
             text,
             code,
+            crash: None,
+        }
+    }
+
+    /// What reached stdout, then the uncaught exception.
+    fn crashed(text: String, line: String) -> Self {
+        Self {
+            stdout: true,
+            text,
+            code: 1,
+            crash: Some(line),
         }
     }
 }
@@ -274,7 +297,13 @@ fn credentials() -> Res<Result<(String, String), String>> {
 enum Call {
     List,
     Revoke(String),
-    Link(Option<String>),
+    /// The sign-in: the `--to` page, whether a browser may open (no
+    /// `--no-open`), and `--unless-signed-in`.
+    Link {
+        to: Option<String>,
+        open: bool,
+        unless: bool,
+    },
 }
 
 /// Everything decided before the first request: an answer, or the call.
@@ -334,13 +363,13 @@ fn plan(argv: &[String], context: &Context) -> Res<Result<Out, (Call, bool)>> {
         Call::List
     } else if let Some(id) = revoke {
         Call::Revoke(id)
-    } else if args.no_open && !args.unless_signed_in && args.revoke.is_none() {
-        Call::Link(args.to)
     } else {
-        // A browser would open, `--unless-signed-in` reads the session list
-        // first, and an empty `--revoke` takes the sign-in path: each
-        // defers before any request.
-        return Err(Defer);
+        // `elif args.revoke:` is false for an empty id: the sign-in path.
+        Call::Link {
+            to: args.to,
+            open: !args.no_open,
+            unless: args.unless_signed_in,
+        }
     };
     Ok(Err((call, args.json)))
 }
@@ -561,97 +590,170 @@ fn listed(payload: &Dict, as_json: bool) -> Res<Out> {
     Ok(Out::stdout(stdout_text(&text)?, EXIT_OK))
 }
 
-/// `link_is_safe(url, origin)`.
-fn link_is_safe(url: Option<&J>, origin: Option<&J>) -> Res<bool> {
+/// `link_is_safe(url, origin)`. An origin this port cannot split (one
+/// holding a non-ASCII character or a lone surrogate) and a URL holding a
+/// lone surrogate read as unsafe: the link is refused where the oracle
+/// might accept it (a declared, fail-safe divergence; only a daemon that
+/// does not echo the request's ASCII origin answers so).
+fn link_is_safe(url: Option<&J>, origin: Option<&J>) -> bool {
     let origin = match origin {
-        Some(J::Str(origin)) => normalize_origin(origin)?,
-        Some(J::Wtf(_)) => return Err(Defer),
+        Some(J::Str(origin)) => normalize_origin(origin).ok().flatten(),
         _ => None,
     };
     let Some(origin) = origin else {
-        return Ok(false);
+        return false;
     };
-    Ok(match url {
+    match url {
         Some(J::Str(url)) => {
             !url.chars().any(|c| (c as u32) < 33 || c as u32 == 127)
                 && url.starts_with(&format!("{origin}/ui/#/signin?code="))
         }
-        Some(J::Wtf(_)) => return Err(Defer),
         _ => false,
-    })
-}
-
-/// `int(value)` for the `expires_in` the oracle converts without raising.
-fn expires(value: Option<&J>) -> Res<i128> {
-    let Some(value) = value.filter(|value| value.truthy()) else {
-        return Ok(300);
-    };
-    match value {
-        J::Bool(_) => Ok(1),
-        J::Int(text) => text.parse().map_err(|_| Defer),
-        J::Float(value) if value.is_finite() && value.abs() < 1e30 => Ok(value.trunc() as i128),
-        J::Str(text) => {
-            let digits = text.strip_prefix(['+', '-']).unwrap_or(text);
-            if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
-                return Err(Defer);
-            }
-            text.parse().map_err(|_| Defer)
-        }
-        _ => Err(Defer),
     }
 }
 
-/// `_opened(payload, args, environ)` under `--no-open`.
-fn printed(payload: &Dict, as_json: bool) -> Res<Out> {
+/// `print(line)` to strict UTF-8 stdout: the line and its newline, or the
+/// `UnicodeEncodeError` line a lone surrogate raises (positions in code
+/// points of the line; a run of surrogates is reported whole).
+fn print_line(out: &mut String, line: &[u16]) -> Result<(), String> {
+    let items: Vec<Result<char, u16>> = char::decode_utf16(line.iter().copied())
+        .map(|item| item.map_err(|error| error.unpaired_surrogate()))
+        .collect();
+    if let Some(start) = items.iter().position(Result::is_err) {
+        let run = items[start..]
+            .iter()
+            .take_while(|item| item.is_err())
+            .count();
+        let what = match items[start] {
+            Err(unit) if run == 1 => format!("character '\\u{unit:04x}' in position {start}"),
+            _ => format!("characters in position {start}-{}", start + run - 1),
+        };
+        return Err(format!(
+            "UnicodeEncodeError: 'utf-8' codec can't encode {what}: surrogates not allowed"
+        ));
+    }
+    out.extend(items.into_iter().flatten());
+    out.push('\n');
+    Ok(())
+}
+
+/// `_opened(payload, args, environ)`. `launch` is `open_browser` when a
+/// browser may open (no `--no-open`, and `has_display`); it runs only once
+/// the link has passed `link_is_safe`, before anything is printed, as in
+/// the oracle.
+fn opened(payload: &Dict, as_json: bool, launch: Option<&mut dyn FnMut(&str) -> bool>) -> Out {
     let url = pyjson::get(payload, "url");
     let code = pyjson::get(payload, "code");
     let origin = pyjson::get(payload, "origin");
-    if !matches!(code, Some(J::Str(_) | J::Wtf(_))) || !link_is_safe(url, origin)? {
-        return emit(
-            dict(vec![
-                ("state", J::from("refused")),
-                ("error", J::from("bad_answer")),
-            ]),
-            as_json,
-            &units(NO_LINK),
-            EXIT_REFUSED,
-        );
-    }
+    let safe = matches!(code, Some(J::Str(_) | J::Wtf(_))) && link_is_safe(url, origin);
+    let (true, Some(J::Str(link)), Some(J::Str(at)), Some(code)) = (safe, url, origin, code) else {
+        return if as_json {
+            Out::stdout(
+                "{\"state\": \"refused\", \"error\": \"bad_answer\"}\n".to_owned(),
+                EXIT_REFUSED,
+            )
+        } else {
+            Out::stderr(format!("{NO_LINK}\n"), EXIT_REFUSED)
+        };
+    };
+    let opened = match launch {
+        Some(launch) => launch(link),
+        None => false,
+    };
     let expires_in = pyjson::get(payload, "expires_in");
     if as_json {
         let out = dict(vec![
-            ("state", J::from("printed")),
-            ("url", or_null(url)),
-            ("code", or_null(code)),
-            ("origin", or_null(origin)),
+            ("state", J::from(if opened { "opened" } else { "printed" })),
+            ("url", J::Str(link.clone())),
+            ("code", code.clone()),
+            ("origin", J::Str(at.clone())),
             ("principal", or_null(pyjson::get(payload, "principal"))),
             ("expires_in", or_null(expires_in)),
         ]);
-        return Ok(Out::stdout(pyjson::dumps_line(&out) + "\n", EXIT_OK));
+        return Out::stdout(pyjson::dumps_line(&out) + "\n", EXIT_OK);
     }
-    let minutes = expires(expires_in)?.div_euclid(60).max(1);
-    let (Some(J::Str(url)), Some(code), Some(J::Str(origin))) = (url, code, origin) else {
-        return Err(Defer);
+    let minutes = match pyint::minutes(expires_in) {
+        Ok(minutes) => minutes,
+        Err(line) => return Out::crashed(String::new(), line),
     };
-    let mut text = units(&format!(
-        "Open this link to sign in to the Console:\n  {url}\nOr type the code "
-    ));
-    text.extend(code.py_str_units());
-    text.extend(units(&format!(
-        " into the Console's sign-in dialog at {origin}/ui/. It works once, within {minutes} minutes.\n"
+    let lead = if opened {
+        "Opened the Console in your browser: confirm the sign-in there."
+    } else {
+        "Open this link to sign in to the Console:"
+    };
+    let mut code_line = units("Or type the code ");
+    code_line.extend(code.py_str_units());
+    code_line.extend(units(&format!(
+        " into the Console's sign-in dialog at {at}/ui/. It works once, within {minutes} minutes."
     )));
-    Ok(Out::stdout(stdout_text(&text)?, EXIT_OK))
+    let mut text = String::new();
+    for line in [units(lead), units(&format!("  {link}")), code_line] {
+        if let Err(crash) = print_line(&mut text, &line) {
+            return Out::crashed(text, crash);
+        }
+    }
+    Out::stdout(text, EXIT_OK)
 }
 
+/// The `no_daemon` answer: no HTTP answer arrived.
+fn no_daemon(origin: &str, reason: &str, as_json: bool) -> Res<Out> {
+    emit(
+        dict(vec![
+            ("state", J::from("no_daemon")),
+            ("error", J::Str(reason.to_owned())),
+        ]),
+        as_json,
+        &units(&format!(
+            "pseudolife-mcp console: no daemon answered at {origin} ({reason}); check it runs (`pseudolife-mcp doctor`)"
+        )),
+        EXIT_NO_DAEMON,
+    )
+}
+
+/// What `open_browser` would start, decided before the code is minted.
+type Chooser<'a> = &'a dyn Fn() -> Result<browser::Plan, browser::Unsupported>;
+
 /// `main` from the first request on.
-async fn answer(call: Call, origin: &str, token: &str, as_json: bool) -> Res<Out> {
+async fn answer(
+    call: Call,
+    origin: &str,
+    token: &str,
+    as_json: bool,
+    browser: Chooser<'_>,
+) -> Res<Out> {
+    let mut plan = None;
     let (target, body) = match &call {
         Call::List => ("/api/console/sessions", None),
         Call::Revoke(id) => (
             "/api/console/sessions/revoke",
             Some(dict(vec![("session_id", J::Str(id.clone()))])),
         ),
-        Call::Link(to) => {
+        Call::Link { to, open, unless } => {
+            if *unless {
+                // A read: whatever defers here comes before any code is minted.
+                match request(origin, "/api/console/sessions", token, None).await? {
+                    Err(reason) => return no_daemon(origin, &reason, as_json),
+                    Ok((200, Some(listed)))
+                        if matches!(
+                            pyjson::get(&listed, "sessions"),
+                            Some(J::List(rows)) if !rows.is_empty()
+                        ) =>
+                    {
+                        return emit(
+                            dict(vec![("state", J::from("already_signed_in"))]),
+                            as_json,
+                            &units(
+                                "Console: a browser is already signed in (to sign in another: pseudolife-mcp console).",
+                            ),
+                            EXIT_OK,
+                        );
+                    }
+                    Ok(_) => {}
+                }
+            }
+            if *open {
+                plan = Some(browser().map_err(|_| Defer)?);
+            }
             let mut body = vec![("origin", J::Str(origin.to_owned()))];
             if let Some(to) = to {
                 body.push(("to", J::Str(to.clone())));
@@ -661,19 +763,7 @@ async fn answer(call: Call, origin: &str, token: &str, as_json: bool) -> Res<Out
     };
     let (status, payload) = match request(origin, target, token, body.as_ref()).await? {
         Ok(answer) => answer,
-        Err(reason) => {
-            return emit(
-                dict(vec![
-                    ("state", J::from("no_daemon")),
-                    ("error", J::Str(reason.clone())),
-                ]),
-                as_json,
-                &units(&format!(
-                    "pseudolife-mcp console: no daemon answered at {origin} ({reason}); check it runs (`pseudolife-mcp doctor`)"
-                )),
-                EXIT_NO_DAEMON,
-            );
-        }
+        Err(reason) => return no_daemon(origin, &reason, as_json),
     };
     let payload = match payload {
         Some(payload) if status == 200 => payload,
@@ -719,7 +809,15 @@ async fn answer(call: Call, origin: &str, token: &str, as_json: bool) -> Res<Out
                 code,
             )
         }
-        Call::Link(_) => printed(&payload, as_json),
+        Call::Link { .. } => Ok(match plan {
+            // `open_browser` returns False without starting anything.
+            None | Some(browser::Plan::Refused) => opened(&payload, as_json, None),
+            Some(plan) => opened(
+                &payload,
+                as_json,
+                Some(&mut |url: &str| launch::open(&plan, url)),
+            ),
+        }),
     }
 }
 
@@ -735,7 +833,15 @@ fn decide(argv: &[String], context: &Context) -> Res<Out> {
             .enable_all()
             .build()
             .map_err(|_| Defer)?
-            .block_on(answer(call, &origin, &token, json)),
+            .block_on(answer(call, &origin, &token, json, &|| {
+                let host = launch::Machine;
+                if browser::has_display(&host, browser::Platform::HERE) {
+                    browser::choose(&host, browser::Platform::HERE)
+                } else {
+                    // `open_browser` is never called: the link is printed.
+                    Ok(browser::Plan::Refused)
+                }
+            })),
     }
 }
 
@@ -765,6 +871,11 @@ pub(super) fn run(values: Vec<OsString>) -> Option<ExitCode> {
     } else {
         super::move_cli::emit(&mut io::stderr().lock(), &bytes)
     };
+    if let Some(line) = &out.crash {
+        // The uncaught exception's last line, after whatever stdout took.
+        let line = super::text_bytes(&format!("{line}\n"));
+        let _ = super::move_cli::emit(&mut io::stderr().lock(), &line);
+    }
     super::move_cli::settle(out.code, written).map(ExitCode::from)
 }
 

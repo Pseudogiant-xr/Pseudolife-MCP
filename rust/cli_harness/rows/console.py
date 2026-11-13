@@ -1,24 +1,33 @@
-"""CLI-CONSOLE-PRINT: the shapes of ``pseudolife-mcp console`` that open no browser.
+"""CLI-CONSOLE-PRINT: ``pseudolife-mcp console``, every shape the oracle answers.
 
-Canonical argv: ``console --help``, ``console --no-open [--to PAGE]
-[--json]``, ``console --list [--json]``, ``console --revoke SESSION_ID
-[--json]``, and argparse's and ``main``'s errors on those options. The
-daemon is a fixture serving ``/api/console/link``, ``/api/console/sessions``
-and ``/api/console/sessions/revoke`` in the shapes ``console_cli`` reads;
-both arms see identical bytes and the requests each arm sends are compared.
+Canonical argv: ``console --help``, ``console [--no-open] [--to PAGE]
+[--json] [--unless-signed-in]``, ``console --list [--json]``, ``console
+--revoke SESSION_ID [--json]``, and argparse's and ``main``'s errors on those
+options. The daemon is a fixture serving ``/api/console/link``,
+``/api/console/sessions`` and ``/api/console/sessions/revoke`` in the shapes
+``console_cli`` reads; both arms see identical bytes and the requests each
+arm sends are compared.
 
-No case lets the oracle open a browser: every case with a daemon passes
-``--no-open``, ``--list`` or a non-empty ``--revoke`` (checked when the
-row loads), and the deferral cases, which the oracle answers on its own
-path, run against the closed loopback port, where no sign-in link can come
-back. Scope and deferrals: ``rows/console.md``.
+No case lets either arm open a real browser: every case with a daemon that
+reaches ``open_browser`` runs with BROWSER naming a recording stand-in in
+the case's home and PATH holding only the home's ``bin`` (checked when the
+row loads), so ``webbrowser.get()`` never falls back to ``os.startfile`` or
+``xdg-open``; the stand-in's argv is compared. Scope and deferrals:
+``rows/console.md``.
 """
 
 from __future__ import annotations
 
 import base64
+import functools
 import json
+import os
 import re
+import shlex
+import shutil
+import sys
+import time
+from pathlib import Path
 
 from .. import core, normalize
 from ..core import Case
@@ -62,8 +71,6 @@ HEADER = "ID                SIGNED IN AS         HOW      SINCE             LAST
 DECLARED_CRASHES = {
     # `code in _REFUSALS` with a list or dict code.
     "console-unhashable-traceback": (rb"TypeError: unhashable type: ", ""),
-    # `int(payload.get("expires_in") or 300)` on text that is no integer.
-    "console-expires-traceback": (rb"ValueError: invalid literal for int() with base 10: ", ""),
     # `time.localtime` on NaN, after the list's header line.
     "console-stamp-nan-traceback": (rb"ValueError: Invalid value NaN (not a number)", HEADER),
     # `time.localtime` past time_t, after the header.
@@ -95,6 +102,38 @@ def _declared_crash(name: str, marker: bytes, stdout: str):
 
 for _name, (_marker, _stdout) in DECLARED_CRASHES.items():
     _declared_crash(_name, _marker, _stdout)
+
+
+_TERMINAL = re.compile(rb"\ATraceback \(most recent call last\):\r?\n(?:[^\r\n]*\r?\n)*?"
+                       rb"(?P<last>[A-Za-z]+Error: [^\r\n]*\r?\n)\Z")
+
+
+@normalize.rule("console-terminal-traceback")
+def console_terminal_traceback(obs: dict) -> None:
+    """``python-traceback-not-contract``: the oracle dies with an uncaught
+    exception (exit 1) after the sign-in code was minted, and the candidate
+    answers that branch itself. Only the traceback header and frames leave
+    the oracle's stderr; its terminal ``ExceptionType: message`` line, exit,
+    stdout, requests and files stay compared."""
+    if obs.get("arm") != "python" or obs["exit"] != 1:
+        return
+    match = _TERMINAL.match(normalize._get(obs, "stderr"))
+    if match:
+        normalize._put(obs, "stderr", match.group("last"))
+
+
+@normalize.rule("console-deferral-after-read")
+def console_deferral_after_read(obs: dict) -> None:
+    """A declared deferral that comes after ``--unless-signed-in``'s session
+    read and before the sign-in request: the candidate prints its deferral
+    line (exit 1) having sent only that GET. The oracle's observation is
+    replaced by that expectation, keeping its first request."""
+    if obs.get("arm") != "python":
+        return
+    reads = [request for request in obs.get("requests", [])
+             if request.get("target") == "/api/console/sessions"][:1]
+    console_deferral(obs)
+    obs["requests"] = reads
 
 
 def _arm(arm, obs):
@@ -135,36 +174,224 @@ def revoked(flag):
     return {"/api/console/sessions/revoke": json_body({"revoked": flag})}
 
 
+# --- the browser stand-in --------------------------------------------------------
+
+# Every case that reaches ``open_browser`` (a sign-in without ``--no-open``)
+# runs with BROWSER naming this stand-in in the case's own home and a PATH
+# holding only the home's ``bin``: ``webbrowser.get()`` then returns a
+# controller built from BROWSER, and no default launcher (``os.startfile``,
+# ``xdg-open``) can run. The stand-in records its argv, then waits for the
+# release file the ``during`` hook writes once the CLI under test has exited,
+# so ``p.poll() is None`` holds in both arms (a stand-in that exits first
+# would turn ``opened`` into ``printed`` by timing alone). ``_settle`` waits
+# for every started stand-in to finish and leave before the home is
+# snapshotted; only the argv records stay in the compared files.
+STANDIN = """\
+import json, os, sys, time
+home = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+state = os.path.join(home, ".standin")
+os.makedirs(state, exist_ok=True)
+n = 1
+while True:
+    try:
+        fd = os.open(os.path.join(state, "started-%d" % n), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        break
+    except FileExistsError:
+        n += 1
+os.write(fd, str(os.getpid()).encode())
+os.close(fd)
+launched = os.path.join(home, "launched")
+os.makedirs(launched, exist_ok=True)
+with open(os.path.join(launched, "launch-%d.json" % n), "w", encoding="utf-8") as out:
+    json.dump(sys.argv[1:], out)
+deadline = time.monotonic() + 30
+while not os.path.exists(os.path.join(state, "release")) and time.monotonic() < deadline:
+    time.sleep(0.02)
+open(os.path.join(state, "done-%d" % n), "w").close()
+"""
+SEP = "\\" if core.WINDOWS else "/"
+BIN = "{HOME}" + SEP + "bin"
+
+
+def _interpreter() -> str:
+    """The stand-in's interpreter: on Windows the windowless ``pythonw.exe``
+    beside this harness's own (a console interpreter would open a window
+    from the oracle, which runs without one)."""
+    exe = Path(sys.executable)
+    if core.WINDOWS and (exe.parent / "pythonw.exe").is_file():
+        return str(exe.parent / "pythonw.exe")
+    return str(exe)
+
+
+def standin_browser(args: str = "%s") -> str:
+    """A BROWSER value whose controller is a BackgroundBrowser running the
+    stand-in (``-I``: the arm's PYTHON* variables do not reach it)."""
+    return f"'{_interpreter()}' -I '{BIN}{SEP}stand-in.py' {args} &"
+
+
+# Programs ``webbrowser`` may look up; check_programs proves before each arm
+# that none resolves outside the home.
+PROGRAMS = ("xdg-open", "xdg-settings", "gio", "gvfs-open", "x-www-browser", "kfmclient",
+            "firefox", "iceweasel", "seamonkey", "mozilla", "netscape", "konqueror", "kfm",
+            "galeon", "epiphany", "skipstone", "google-chrome", "chrome", "chromium",
+            "chromium-browser", "opera", "mosaic", "grail", "www-browser", "links", "elinks",
+            "lynx", "w3m", "osascript", "open")
+# Variables that select a browser or a display: never inherited from the
+# harness's own environment, so only a case can set them.
+assert not {"BROWSER", "DISPLAY", "WAYLAND_DISPLAY", "TERM", "GNOME_DESKTOP_SESSION_ID",
+            "KDE_FULL_SESSION"} & set(core._INHERIT)
+
+
+def _standin_setup(arm):
+    (arm.home / "bin").mkdir()
+    (arm.home / "bin" / "stand-in.py").write_text(STANDIN, encoding="utf-8")
+
+
+def _release(arm, proc):
+    """Let the stand-ins go once the CLI under test has exited."""
+    while proc.poll() is None:
+        time.sleep(0.02)
+    state = arm.home / ".standin"
+    state.mkdir(exist_ok=True)
+    (state / "release").write_bytes(b"")
+
+
+def _gone(pid: int, deadline: float) -> bool:
+    """Whether process ``pid`` has exited by ``deadline`` (read-only checks:
+    a SYNCHRONIZE handle on Windows, signal 0 and /proc on POSIX)."""
+    if core.WINDOWS:
+        import ctypes  # noqa: PLC0415
+        kernel = ctypes.windll.kernel32
+        handle = kernel.OpenProcess(0x00100000, False, pid)
+        if not handle:
+            return True
+        try:
+            wait = max(0, int((deadline - time.monotonic()) * 1000))
+            return kernel.WaitForSingleObject(handle, wait) == 0
+        finally:
+            kernel.CloseHandle(handle)
+    while time.monotonic() < deadline:
+        try:
+            os.kill(pid, 0)
+            if "\nState:\tZ" in Path(f"/proc/{pid}/status").read_text():
+                return True
+        except (ProcessLookupError, FileNotFoundError):
+            return True
+        time.sleep(0.02)
+    return False
+
+
+def _settle(arm, obs, launches=0):
+    """Before the snapshot: wait for the stand-ins the case starts (the arm
+    can exit before one has written its record), give any other a moment to
+    show, then wait for each started one to finish and exit. The count is
+    ``launches``, which a case declares when the CLI starts the stand-in and
+    then says nothing about it (the oracle dies after ``open_browser``), or
+    one when the CLI reports it opened. An arm that starts fewer waits out
+    the 30 seconds and then differs. A stand-in that never finished leaves
+    ``launched/unfinished-N`` behind, which no arm matches."""
+    _arm(arm, obs)
+    state = arm.home / ".standin"
+    stdout = base64.b64decode(obs["stdout"])
+    opened = b"Opened the Console" in stdout or b'"state": "opened"' in stdout
+    expected = max(launches, 1 if opened else 0)
+    deadline = time.monotonic() + 30
+
+    def started():
+        return sorted(state.glob("started-*")) if state.exists() else []
+
+    while len(started()) < expected and time.monotonic() < deadline:
+        time.sleep(0.02)
+    if core.WINDOWS:
+        time.sleep(0.5)
+    for marker in started():
+        n = marker.name.split("-", 1)[1]
+        done = state / f"done-{n}"
+        while not done.exists() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        pid = int(marker.read_text() or 0)
+        if not done.exists() or not pid or not _gone(pid, deadline):
+            (arm.home / "launched").mkdir(exist_ok=True)
+            (arm.home / "launched" / f"unfinished-{n}").write_bytes(b"")
+    if state.exists():
+        shutil.rmtree(state)
+
+
 # --- cases -----------------------------------------------------------------------
 
-def _opens_no_browser(argv: list[str]) -> bool:
-    """The oracle reaches ``open_browser`` only on the sign-in path without
-    ``--no-open``: rows with a daemon must be off that path."""
+def _reaches_browser(argv: list[str]) -> bool:
+    """The oracle reaches ``open_browser`` only on the sign-in path (no
+    ``--list``, no non-empty ``--revoke``) without ``--no-open``."""
     words = argv[1:]
     if "--list" in words or "--no-open" in words:
-        return True
+        return False
     for index, word in enumerate(words):
         if word == "--revoke" and index + 1 < len(words) and words[index + 1]:
-            return True
+            return False
         if word.startswith("--revoke=") and word != "--revoke=":
-            return True
-    return False
+            return False
+    return True
+
+
+def _check_browser_env(case_id: str, env: dict, served: bool) -> None:
+    """The environment that keeps every default launcher out, asserted when
+    the row loads, before any arm runs: a BROWSER whose first entry decides
+    (``os.startfile`` and the ``xdg-open`` family run only without one),
+    naming as a program only the stand-in's interpreter or a path in the
+    home, and a PATH of the home's ``bin`` alone (so no ``which`` lookup
+    finds a real browser to clone)."""
+    entries = [entry for entry in (env.get("BROWSER") or "").split(os.pathsep) if entry]
+    if not entries or not entries[0].strip():
+        raise AssertionError(f"{case_id}: BROWSER must decide the controller")
+    if served and "%s" in entries[0]:
+        try:
+            words = shlex.split(entries[0])
+        except ValueError:
+            words = [BIN]  # webbrowser.get() raises: nothing starts
+        if words[0] != _interpreter() and not words[0].startswith(BIN):
+            raise AssertionError(f"{case_id}: BROWSER may run only the stand-in")
+    if env.get("PATH") != BIN:
+        raise AssertionError(f"{case_id}: PATH must hold only the home's bin")
+    if env.get("WAYLAND_DISPLAY") is not None:
+        raise AssertionError(f"{case_id}: WAYLAND_DISPLAY must stay unset")
 
 
 def case(case_id: str, argv: list[str], *, routes=None, env=None, rules=(), setup=None,
          platforms=("windows", "linux"), timeout=40.0, tls=False,
-         expect_output=False) -> Case:
+         expect_output=False, during=None, after=_arm, programs=()) -> Case:
     full = ["console", *argv]
-    if routes is not None and not _opens_no_browser(full):
-        raise AssertionError(f"{case_id}: a daemon case must not reach the browser path")
-    return Case(case_id, full, env={**TOKEN, **(env or {})}, rules=rules, setup=setup,
-                after=_arm, platforms=platforms, timeout=timeout, expect_output=expect_output,
+    env = {**TOKEN, **(env or {})}
+    if "BROWSER" in env or (routes is not None and _reaches_browser(full)):
+        _check_browser_env(case_id, env, routes is not None)
+    return Case(case_id, full, env=env, rules=rules, setup=setup, during=during,
+                after=after, platforms=platforms, timeout=timeout,
+                expect_output=expect_output, programs=programs,
                 daemon=factory(routes, tls) if routes is not None else None)
+
+
+def browser_case(case_id: str, argv: list[str], *, browser: str | None = None,
+                 display: bool = True, env=None, launches: int = 0, **kwargs) -> Case:
+    """A case on the path that opens a browser, run with the stand-in's
+    environment. ``display`` sets a DISPLAY nothing serves (Linux's
+    ``has_display`` needs one); no case sets WAYLAND_DISPLAY. ``launches``
+    is how many stand-ins ``_settle`` waits for when the CLI's output does
+    not say one opened."""
+    own = {"BROWSER": standin_browser() if browser is None else browser, "PATH": BIN}
+    if display and not core.WINDOWS:
+        own["DISPLAY"] = ":99"
+    return case(case_id, argv, env={**own, **(env or {})}, setup=_standin_setup,
+                during=_release, after=functools.partial(_settle, launches=launches),
+                programs=PROGRAMS, **kwargs)
 
 
 def deferred(case_id: str, argv: list[str], **kwargs) -> Case:
     # Never a daemon: the oracle answers these on its own path.
     return case(case_id, argv, rules=("console-deferral",), **kwargs)
+
+
+def deferred_browser(case_id: str, argv: list[str], **kwargs) -> Case:
+    # The closed port as well: the oracle makes no link, so opens nothing.
+    return browser_case(case_id, argv, rules=("console-deferral",), **kwargs)
 
 
 def _claude_registration(env: dict):
@@ -208,13 +435,6 @@ def cases() -> list[Case]:
     add(case("to-unicode", ["--list", "--to", "café\t"]))
 
     # Declared deferrals before any request.
-    add(deferred("defer-plain", []))
-    add(deferred("defer-to-board", ["--to", "board"]))
-    add(deferred("defer-json", ["--json"]))
-    add(deferred("defer-unless-signed-in", ["--no-open", "--unless-signed-in"]))
-    add(deferred("defer-unless-signed-in-plain", ["--unless-signed-in"]))
-    add(deferred("defer-empty-revoke", ["--revoke", ""]))
-    add(deferred("defer-empty-revoke-no-open", ["--no-open", "--revoke="]))
     add(deferred("defer-abbreviation", ["--li"]))
     add(deferred("defer-dash-value", ["--to", "-x"]))
     add(deferred("defer-double-dash", ["--"]))
@@ -338,9 +558,29 @@ def cases() -> list[Case]:
     add(case("crash-unhashable-error", ["--no-open"],
              routes={"/api/console/link": json_body({"error": ["x"]}, 403)},
              rules=("console-unhashable-traceback",)))
+    # From the 200 answer on the candidate owns every branch: the oracle's
+    # own crash is reproduced (its terminal line; header and frames are not
+    # compared, python-traceback-not-contract).
     add(case("crash-expires-text", ["--no-open"],
              routes={"/api/console/link": link(lambda _o: {"expires_in": "abc"})},
-             rules=("console-expires-traceback",)))
+             rules=("console-terminal-traceback",)))
+    add(case("crash-expires-list", ["--no-open", "--revoke="],
+             routes={"/api/console/link": link(lambda _o: {"expires_in": {"a": 1}})},
+             rules=("console-terminal-traceback",)))
+    add(case("crash-expires-nan", ["--no-open"],
+             routes={"/api/console/link": link(lambda _o: {"expires_in": float("nan")})},
+             rules=("console-terminal-traceback",)))
+    add(case("crash-surrogate-code", ["--no-open"],
+             routes={"/api/console/link": link(lambda _o: {"code": "\U0001f600\udc80\ud800"})},
+             rules=("console-terminal-traceback",)))
+    add(case("link-expires-digits", ["--no-open"],
+             routes={"/api/console/link": link(lambda _o: {"expires_in": "١_2٠٠ "})}))
+    add(case("link-expires-huge", ["--no-open"],
+             routes={"/api/console/link": link(lambda _o: {"expires_in": 1.5e308})}))
+    add(case("link-surrogate-code-json", ["--no-open", "--json"],
+             routes={"/api/console/link": link(lambda _o: {"code": "\udc80"})}))
+
+    c.extend(browser_cases())
     add(case("crash-stamp-nan", ["--list"],
              routes=sessions(rows=[{"created_at": float("nan")}]),
              rules=("console-stamp-nan-traceback",)))
@@ -353,11 +593,123 @@ def cases() -> list[Case]:
     return c
 
 
+def browser_cases() -> list[Case]:
+    """The sign-in on the path that opens a browser: each arm's stand-in
+    argv (the URL), its text or JSON and its exit compared."""
+    c: list[Case] = []
+    add = c.append
+    signin = {"/api/console/link": link()}
+
+    def signed_in(rows, **extra):
+        return {"/api/console/sessions": json_body({"sessions": rows}), **extra}
+
+    script = f"'{BIN}{SEP}stand-in.py'"
+    interpreter = f"'{_interpreter()}' -I {script}"
+    exe = ".exe" if core.WINDOWS else ""
+
+    # Opened: a BackgroundBrowser from BROWSER (`... %s &`).
+    add(browser_case("open", [], routes=signin))
+    add(browser_case("open-json", ["--json"], routes=signin))
+    add(browser_case("open-to-board", ["--to", "board", "--json"], routes=signin))
+    add(browser_case("open-args", [], routes=signin,
+                     browser=standin_browser("--new-tab --url=%s")))
+    add(browser_case("open-quoted-ampersand", ["--json"], routes=signin,
+                     browser=f"{interpreter} %s '&'"))
+    # The first non-empty entry decides; the others are only registered.
+    add(browser_case("open-first-entry", ["--json"], routes=signin,
+                     browser=os.pathsep + standin_browser() + os.pathsep
+                     + f"'{BIN}{SEP}other{exe}' %s &"))
+    add(browser_case("open-empty-revoke", ["--revoke", ""], routes=signin))
+    add(browser_case("open-unicode-code", [], routes={"/api/console/link": link(
+        lambda _o: {"code": "näme ✓", "expires_in": 7200})}))
+    # open_browser returns False: the link is printed.
+    add(browser_case("open-generic", [], routes=signin, browser=f"{interpreter} %s"))
+    add(browser_case("open-generic-name", ["--json"], routes=signin,
+                     browser=f"{BIN}{SEP}my-browser --flag"))
+    add(browser_case("open-missing-program", [], routes=signin,
+                     browser=f"'{BIN}{SEP}missing{exe}' %s &"))
+    add(browser_case("open-shlex-error", ["--json"], routes=signin,
+                     browser=f"{interpreter} %s & '"))
+    add(browser_case("open-whitespace-entry", [], routes=signin,
+                     browser=standin_browser() + os.pathsep + " "))
+    add(browser_case("open-no-display", ["--json"], routes=signin, display=False,
+                     platforms=("linux",)))
+    add(browser_case("open-no-display-text", [], routes=signin, display=False,
+                     platforms=("linux",)))
+    # An answer that is no safe link, or no answer, starts nothing.
+    add(browser_case("open-unsafe-link", [], routes={"/api/console/link": link(
+        lambda _o: {"url": "http://127.0.0.1:2/ui/#/signin?code=A"})}))
+    add(browser_case("open-file-link", ["--json"], routes={"/api/console/link": link(
+        lambda o: {"url": "file:///etc/passwd", "origin": o})}))
+    add(browser_case("open-refused", [], routes={"/api/console/link": json_body(
+        {"error": "unauthorized"}, 401)}))
+    add(browser_case("open-unreachable", ["--to", "board"]))
+    # The oracle opens the browser, then dies: reproduced, launch included.
+    add(browser_case("open-crash-expires", [], routes={"/api/console/link": link(
+        lambda _o: {"expires_in": "5 minutes"})}, rules=("console-terminal-traceback",),
+        launches=1))
+    add(browser_case("open-crash-surrogate-code", [], routes={"/api/console/link": link(
+        lambda _o: {"code": "a\udc80"})}, rules=("console-terminal-traceback",),
+        launches=1))
+
+    # --unless-signed-in: the session list first (a read), then the sign-in.
+    add(browser_case("unless-signed-in", ["--unless-signed-in"],
+                     routes=signed_in([{"session_id": "s-1"}], **signin)))
+    add(browser_case("unless-signed-in-json", ["--unless-signed-in", "--json"],
+                     routes=signed_in([0], **signin)))
+    add(browser_case("unless-none", ["--unless-signed-in"], routes=signed_in([], **signin)))
+    add(browser_case("unless-none-json", ["--unless-signed-in", "--json"],
+                     routes=signed_in({"a": 1}, **signin)))
+    add(browser_case("unless-refused", ["--unless-signed-in"], routes={
+        "/api/console/sessions": json_body({"error": "unauthorized"}, 401), **signin}))
+    add(browser_case("unless-not-json", ["--unless-signed-in", "--json"], routes={
+        "/api/console/sessions": text("busy"), **signin}))
+    add(browser_case("unless-old-daemon", ["--unless-signed-in"], routes=signin))
+    add(browser_case("unless-unreachable", ["--unless-signed-in", "--json"]))
+    add(case("unless-no-open", ["--no-open", "--unless-signed-in"],
+             routes=signed_in([], **signin)))
+    add(case("unless-no-open-signed-in", ["--no-open", "--unless-signed-in", "--json"],
+             routes=signed_in([1], **signin)))
+    add(case("empty-revoke-no-open", ["--no-open", "--revoke="], routes=signin))
+
+    # Deferred before any request: a launcher this port does not start.
+    add(deferred_browser("defer-browser-standard-name", [], browser="firefox"))
+    add(deferred_browser("defer-browser-clone", ["--json"], browser=f"{BIN}{SEP}Lynx -dump"))
+    # After the session read (a read), before the sign-in request.
+    add(browser_case("defer-browser-unless", ["--unless-signed-in"], browser="w3m",
+                     routes=signed_in([], **signin), rules=("console-deferral-after-read",)))
+    add(deferred_browser("defer-browser-bare-name", [], browser="pythonw.exe -I x %s &",
+                         platforms=("windows",)))
+    add(deferred_browser("defer-browser-batch", [], browser=f"'{BIN}{SEP}b.cmd' %s &",
+                         platforms=("windows",)))
+    return c
+
+
+# No mutant here may route the candidate to a default launcher
+# (os.startfile's ShellExecuteW, xdg-open): each breaks a step after
+# BROWSER has chosen the stand-in, or before any launch.
+BROWSER_FILE = "shim/src/cli/console/browser.rs"
+LAUNCH_FILE = "shim/src/cli/console/launch.rs"
 MUTANTS = [
-    Mutant("console-plain-sign-in-admitted", "console", FILE,
-           "} else if args.no_open && !args.unless_signed_in && args.revoke.is_none() {",
-           "} else if !args.unless_signed_in && args.revoke.is_none() {",
-           ("defer-plain", "defer-to-board")),
+    Mutant("console-exited-counts-as-opened", "console", LAUNCH_FILE,
+           "    matches!(child.try_wait(), Ok(None))",
+           "    matches!(child.try_wait(), Ok(Some(_)))", ("open",)),
+    Mutant("console-unless-skips-the-list", "console", FILE,
+           "            if *unless {", "            if false && *unless {",
+           ("unless-signed-in",)),
+    Mutant("console-unsafe-link-launched", "console", FILE,
+           "let safe = matches!(code, Some(J::Str(_) | J::Wtf(_))) && link_is_safe(url, origin);",
+           "let safe = matches!(code, Some(J::Str(_) | J::Wtf(_)));", ("open-unsafe-link",)),
+    Mutant("console-generic-launched", "console", BROWSER_FILE,
+           'if words.last().map(String::as_str) != Some("&") {',
+           'if words.last().map(String::as_str) == Some("") {', ("open-generic",)),
+    Mutant("console-expiry-crash-swallowed", "console", FILE,
+           "        Err(line) => return Out::crashed(String::new(), line),",
+           '        Err(_) => "5".to_owned(),', ("open-crash-expires",)),
+    # Only Linux gates the browser on a display.
+    Mutant("console-display-ignored", "console", BROWSER_FILE,
+           "    platform != Platform::Posix || display(host)", "    true",
+           ("open-no-display",), platforms=("linux",)),
     Mutant("console-405-not-old", "console", FILE, "if matches!(status, 404 | 405) {",
            "if matches!(status, 404) {", ("refused-405",)),
     Mutant("console-get-without-content-type", "console", "shim/src/cli/hook_http.rs",

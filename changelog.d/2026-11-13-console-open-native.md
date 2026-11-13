@@ -1,0 +1,3 @@
+### Changed (2026-11-13 — the native `console` opens the signed-in Console in a browser itself)
+
+- The Rust CLI candidate (`pseudolife-stdio`) now answers the `console` sign-in that opens a browser, `--unless-signed-in` and an empty `--revoke` itself instead of handing them to Python. It picks the browser exactly as Python's `webbrowser` does (the `BROWSER` variable, the desktop's default handler, `DISPLAY`/`WAYLAND_DISPLAY` on Linux) and passes the sign-in link to it as a single argument, never through a shell. Launchers it does not reproduce yet (the macOS default, the Firefox/Chrome remote-control launchers on Linux, a Windows `BROWSER` program that is not a full `.exe` path) still go to Python before any sign-in code is made.
