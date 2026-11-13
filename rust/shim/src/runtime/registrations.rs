@@ -426,27 +426,41 @@ fn add_registration(
     Ok(())
 }
 pub fn find_registrations() -> Result<Vec<Registration>> {
+    find_selected_registrations(|_| true)
+}
+/// As `find_registrations`, reading only the files of the clients `selected`
+/// admits, so an unreadable configuration of another client cannot block them.
+pub fn find_selected_registrations(selected: impl Fn(&str) -> bool) -> Result<Vec<Registration>> {
     let mut found = Vec::new();
-    let claude = std::env::var_os("CLAUDE_CONFIG_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(home)
-        .join(".claude.json");
-    json_registrations("claude-code", claude, &[SERVER], &mut found)?;
-    for path in desktop_files()? {
+    if selected("claude-code") {
+        let claude = std::env::var_os("CLAUDE_CONFIG_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(home)
+            .join(".claude.json");
+        json_registrations("claude-code", claude, &[SERVER], &mut found)?;
+    }
+    if selected("claude-desktop") {
+        for path in desktop_files()? {
+            json_registrations(
+                "claude-desktop",
+                path,
+                &["pseudolife-desktop", SERVER],
+                &mut found,
+            )?;
+        }
+    }
+    if selected("gemini") {
         json_registrations(
-            "claude-desktop",
-            path,
-            &["pseudolife-desktop", SERVER],
+            "gemini",
+            home().join(".gemini/settings.json"),
+            &[SERVER],
             &mut found,
         )?;
     }
-    json_registrations(
-        "gemini",
-        home().join(".gemini/settings.json"),
-        &[SERVER],
-        &mut found,
-    )?;
     let path = codex_home().join("config.toml");
+    if !selected("codex") {
+        return Ok(found);
+    }
     if let Some(bytes) = read_optional(&path)? {
         let text = std::str::from_utf8(&bytes)
             .map_err(|_| "Codex config is not UTF-8")?

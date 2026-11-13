@@ -37,8 +37,11 @@ def test_the_budget_covers_every_workflow_that_runs_on_pull_requests():
 
 def test_a_full_rust_run_is_what_a_batch_starts():
     workflow = load("rust.yml")
-    assert pull_request_reachable(workflow) == ["scope", "rust", "fixtures", "candidate", "candidate-harness",
-                                                "parity-pool", "parity-checks", "daemon-image", "parity"]
+    # frozen-probes runs only on ordinary PRs, never in a batch, but the
+    # budget cannot read scope's `full`, so it is counted with the rest.
+    assert pull_request_reachable(workflow) == ["scope", "rust", "frozen-probes", "fixtures", "candidate",
+                                                "candidate-harness", "parity-pool", "parity-checks",
+                                                "daemon-image", "parity"]
     names = reachable_names(workflow)
     assert "Parity checks / ubuntu-latest / h5-light" in names
     assert "Parity checks / windows-latest / h5-light" not in names
@@ -112,7 +115,7 @@ def test_an_estimate_counts_until_it_is_measured():
                                                    "Extra / ubuntu-latest", "Extra / windows-latest"])
 
 
-@pytest.mark.parametrize("limit, words", [("jobs", "job count 42 is over its limit"),
+@pytest.mark.parametrize("limit, words", [("jobs", "job count 44 is over its limit"),
                                           ("runner_minutes", "runner-minutes per full run, over the limit"),
                                           ("longest_job_minutes", "limit for one job"),
                                           ("critical_path_minutes", "slowest chain of needs")])
@@ -210,7 +213,7 @@ def test_a_cache_key_has_one_saver():
                     if str(s.get("uses", "")).startswith("Swatinem/rust-cache"))
         step["with"].pop("save-if")
     found = check(workflow, raw)
-    assert any("rust-cache key v0-rust-rust on Windows is saved by 2 runs" in problem for problem in found)
+    assert any("rust-cache key v0-rust-?-rust on Windows is saved by 2 runs" in problem for problem in found)
 
 
 def test_one_matrix_job_saving_one_key_from_many_runs_is_refused():
@@ -222,7 +225,7 @@ def test_one_matrix_job_saving_one_key_from_many_runs_is_refused():
         step["with"].pop("save-if")
     shards = len(workflow["jobs"]["source-mutants"]["strategy"]["matrix"]["shard"])
     assert shards > 1
-    assert any(f"v0-rust-cli-source-mutants-source-mutants on Linux is saved by {shards} runs" in problem
+    assert any(f"v0-rust-?-cli-source-mutants-source-mutants on Linux is saved by {shards} runs" in problem
                for problem in check(workflow, raw))
 
 

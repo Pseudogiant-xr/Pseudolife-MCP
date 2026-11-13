@@ -17,6 +17,7 @@ mod expose;
 mod hook_http;
 mod hook_json;
 mod host_connection;
+mod installer;
 pub mod lease;
 pub mod maintainer;
 mod migrate_flat;
@@ -130,6 +131,11 @@ pub fn dispatch(mode: Option<&str>) -> Option<ExitCode> {
     }
     if mode == "runtime" {
         return Some(ExitCode::from(crate::runtime::run(
+            std::env::args_os().skip(2).collect(),
+        )));
+    }
+    if mode == "installer" {
+        return Some(ExitCode::from(installer::run(
             std::env::args_os().skip(2).collect(),
         )));
     }
