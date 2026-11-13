@@ -121,7 +121,7 @@ provisions them there before its backup.
 To prove the matrix without publication, dispatch `release.yml` on the
 candidate branch. The native build and bundle jobs upload an Actions
 artifact named `native-release-complete`; all publishing jobs are skipped,
-even if the opt-in variables are enabled. A release event builds the same
+even if the Rust image variable is enabled. A release event builds the same
 archives only after `publish` succeeds, then verifies the downloaded `SHA256SUMS` immediately before attaching the
 complete set. Publication requires exactly the six listed archives plus the
 checksum manifest. On a retry, it downloads and verifies every already

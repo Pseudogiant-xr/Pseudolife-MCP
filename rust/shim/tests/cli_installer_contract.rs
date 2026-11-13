@@ -129,6 +129,65 @@ fn refuses_without_the_native_client_and_changes_nothing() {
         "{report}"
     );
     assert_eq!(fs::read(&file).unwrap(), before);
+    assert!(
+        !home.layout().root.exists(),
+        "a refusal created the runtimes directory"
+    );
+}
+
+#[test]
+fn refuses_when_the_launcher_is_not_the_native_binary() {
+    let home = Home::new();
+    home.install_native();
+    // A Python updater rewrote the stable launcher; the native runtime stayed.
+    fs::write(&home.layout().launcher, b"python launcher").unwrap();
+    let pipx = home.venv("pipx-venv", false);
+    let file = home.0.join("claude").join(".claude.json");
+    let before = serde_json::to_vec_pretty(&claude_config(&pipx)).unwrap();
+    fs::write(&file, &before).unwrap();
+    let output = home.run(&["migrate-registrations", "--json"]);
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(report(&output)["state"], "failed");
+    assert_eq!(fs::read(&file).unwrap(), before);
+}
+
+#[test]
+fn a_held_update_lock_refuses_and_changes_nothing() {
+    let home = Home::new();
+    home.install_native();
+    let pipx = home.venv("pipx-venv", false);
+    let file = home.0.join("claude").join(".claude.json");
+    let before = serde_json::to_vec_pretty(&claude_config(&pipx)).unwrap();
+    fs::write(&file, &before).unwrap();
+    let held = UpdateLock::acquire(&home.layout()).unwrap();
+    let output = home.run(&["migrate-registrations", "--json"]);
+    drop(held);
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    assert_eq!(report(&output)["state"], "failed");
+    assert_eq!(fs::read(&file).unwrap(), before);
+}
+
+#[test]
+fn a_self_spawning_registration_is_left_alone() {
+    let home = Home::new();
+    home.install_native();
+    let pipx = home.venv("pipx-venv", false);
+    let file = home.0.join("claude").join(".claude.json");
+    // No PSEUDOLIFE_MCP_NO_SPAWN: this client starts its own daemon.
+    let config = json!({"mcpServers": {"pseudolife-memory": {"command": pipx, "args": []}}});
+    let before = serde_json::to_vec_pretty(&config).unwrap();
+    fs::write(&file, &before).unwrap();
+    let output = home.run(&["migrate-registrations", "--json"]);
+    let moved = report(&output);
+    assert_eq!(output.status.code(), Some(0), "{moved}");
+    assert_eq!(moved["left"][0]["state"], "spawning", "{moved}");
+    assert_eq!(moved["registrations"], json!([]), "{moved}");
+    assert_eq!(fs::read(&file).unwrap(), before);
 }
 
 #[test]
@@ -187,13 +246,24 @@ fn moves_python_registrations_keeps_editable_ones_and_names_the_old_client() {
     );
     assert_eq!(first["left"][0]["client"], "gemini", "{first}");
     assert_eq!(first["left"][0]["state"], "editable", "{first}");
+    let unregistered: Vec<&str> = first["old_unregistered"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p.as_str().unwrap())
+        .collect();
+    assert_eq!(unregistered.len(), 2, "{first}");
     assert!(
-        first["python_runtimes"][0]
-            .as_str()
-            .unwrap()
-            .ends_with("000000"),
+        unregistered.iter().any(|p| p.ends_with("000000")),
         "{first}"
     );
+    assert!(
+        unregistered
+            .iter()
+            .any(|p| Path::new(p) == pipx.parent().unwrap().parent().unwrap()),
+        "{first}"
+    );
+    assert_eq!(first["old_in_use"], json!([]), "{first}");
     let moved: Value = serde_json::from_slice(&fs::read(&claude).unwrap()).unwrap();
     let entry = &moved["mcpServers"]["pseudolife-memory"];
     assert!(runtime::same_path(
@@ -227,8 +297,74 @@ fn moves_python_registrations_keeps_editable_ones_and_names_the_old_client() {
     assert_eq!(text.status.code(), Some(0));
     assert_eq!(
         String::from_utf8_lossy(&text.stdout).trim(),
-        "claude-code, codex already run the native client; nothing changed"
+        format!(
+            "claude-code, codex already run the native client; nothing changed (the old Python client is still on disk, unregistered: {})",
+            layout.root.join("000000").display()
+        )
     );
+    // Unfiltered, the editable Gemini registration joins the same line.
+    let all = home.run(&["migrate-registrations"]);
+    let all = String::from_utf8_lossy(&all.stdout);
+    assert_eq!(all.trim().lines().count(), 1, "{all}");
+    assert!(all.contains("gemini still runs"), "{all}");
+}
+
+#[test]
+fn a_shared_python_install_still_in_use_is_never_called_unregistered() {
+    let home = Home::new();
+    home.install_native();
+    let pipx = home.venv("pipx-venv", false);
+    let claude = home.0.join("claude").join(".claude.json");
+    let claude_before = serde_json::to_vec_pretty(&claude_config(&pipx)).unwrap();
+    fs::write(&claude, &claude_before).unwrap();
+    fs::write(
+        home.0.join("codex").join("config.toml"),
+        format!(
+            "[mcp_servers.pseudolife-memory]
+command = {}
+env = {{ PSEUDOLIFE_MCP_NO_SPAWN = \"1\" }}
+",
+            serde_json::to_string(&pipx).unwrap()
+        ),
+    )
+    .unwrap();
+    let output = home.run(&["migrate-registrations", "--client", "codex", "--json"]);
+    let moved = report(&output);
+    assert_eq!(output.status.code(), Some(0), "{moved}");
+    assert_eq!(moved["registrations"][0]["state"], "migrated", "{moved}");
+    assert_eq!(moved["old_unregistered"], json!([]), "{moved}");
+    assert_eq!(
+        Path::new(moved["old_in_use"][0].as_str().unwrap()),
+        pipx.parent().unwrap().parent().unwrap(),
+        "{moved}"
+    );
+    assert_eq!(fs::read(&claude).unwrap(), claude_before);
+}
+
+#[test]
+fn an_unreadable_unselected_client_does_not_block_the_selected_one() {
+    let home = Home::new();
+    home.install_native();
+    let pipx = home.venv("pipx-venv", false);
+    fs::write(home.0.join("claude").join(".claude.json"), b"{ not json").unwrap();
+    fs::write(
+        home.0.join("codex").join("config.toml"),
+        format!(
+            "[mcp_servers.pseudolife-memory]
+command = {}
+env = {{ PSEUDOLIFE_MCP_NO_SPAWN = \"1\" }}
+",
+            serde_json::to_string(&pipx).unwrap()
+        ),
+    )
+    .unwrap();
+    let output = home.run(&["migrate-registrations", "--client", "codex", "--json"]);
+    let moved = report(&output);
+    assert_eq!(output.status.code(), Some(0), "{moved}");
+    assert_eq!(moved["registrations"][0]["state"], "migrated", "{moved}");
+    // The broken Claude file means nobody can confirm the old install is unused.
+    assert_eq!(moved["old_unconfirmed"], true, "{moved}");
+    assert_eq!(moved["old_unregistered"], json!([]), "{moved}");
 }
 
 #[test]
