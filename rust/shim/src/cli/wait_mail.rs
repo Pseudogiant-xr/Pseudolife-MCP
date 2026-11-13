@@ -415,7 +415,18 @@ fn temporary_with(
             path.extension().unwrap_or_default().to_string_lossy()
         );
         let temp = path.with_file_name(name);
-        let file = match options.open(&temp) {
+        // A private file is owner-only from its creation on Windows: its
+        // folder may be one used as it is, whose inherited entries could let
+        // another account open it before make_private ran (#1538).
+        #[cfg(windows)]
+        let opened = if private {
+            crate::credentials::windows_security::create_owner_only(&temp)
+        } else {
+            options.open(&temp)
+        };
+        #[cfg(not(windows))]
+        let opened = options.open(&temp);
+        let file = match opened {
             Ok(file) => file,
             Err(error)
                 if error.kind() == io::ErrorKind::AlreadyExists

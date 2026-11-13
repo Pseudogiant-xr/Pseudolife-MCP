@@ -374,6 +374,31 @@ pub(crate) unsafe fn marker_distrust(
     dacl: *const Security::ACL,
     user: *mut c_void,
 ) -> Option<MarkerDistrust> {
+    unsafe { access_distrust(owner, dacl, user, false) }
+}
+
+/// FILE_DELETE_CHILD: on a folder, removing any entry in it.
+const FOLDER_DELETE_CHILD: u32 = 0x0040;
+
+/// The trust rule over an owner and DACL. For a file it is the marker rule.
+/// For a folder (`folder`) another principal may also not delete children,
+/// and inherit-only entries count too, because they decide what the files
+/// created in it grant; CREATOR OWNER, which becomes each file's creator, is
+/// trusted there.
+///
+/// # Safety
+/// As [`marker_distrust`].
+unsafe fn access_distrust(
+    owner: *mut c_void,
+    dacl: *const Security::ACL,
+    user: *mut c_void,
+    folder: bool,
+) -> Option<MarkerDistrust> {
+    let rights = if folder {
+        MARKER_WRITE_RIGHTS | FOLDER_DELETE_CHILD
+    } else {
+        MARKER_WRITE_RIGHTS
+    };
     unsafe {
         if !trusted_marker_principal(owner, user)
             || Security::IsWellKnownSid(owner, Security::WinCreatorOwnerRightsSid) != 0
@@ -397,9 +422,11 @@ pub(crate) unsafe fn marker_distrust(
             let Some((header, bytes)) = ace_at(acl, index) else {
                 return unreadable();
             };
-            // An inherit-only entry grants nothing on this file; a deny
-            // entry takes rights away.
-            if header.AceFlags as u32 & Security::INHERIT_ONLY_ACE != 0 || header.AceType == 1 {
+            // An inherit-only entry grants nothing on this file (on a folder
+            // it decides what new files in it grant); a deny entry takes
+            // rights away.
+            let inherit_only = header.AceFlags as u32 & Security::INHERIT_ONLY_ACE != 0;
+            if (inherit_only && !folder) || header.AceType == 1 {
                 continue;
             }
             // Any other allow form (callback, object) is not read here, so
@@ -409,7 +436,7 @@ pub(crate) unsafe fn marker_distrust(
             }
             // ACCESS_ALLOWED_ACE: header (4), mask (4), then the SID.
             let mask = u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]);
-            if mask & MARKER_WRITE_RIGHTS == 0 {
+            if mask & rights == 0 {
                 continue;
             }
             // A SID has an 8-byte header and four bytes per subauthority.
@@ -421,7 +448,11 @@ pub(crate) unsafe fn marker_distrust(
             if Security::IsValidSid(sid) == 0 {
                 return unreadable();
             }
-            if !trusted_marker_principal(sid, user) {
+            // CREATOR OWNER, inherited onto a new file, becomes its creator.
+            let creator = folder
+                && inherit_only
+                && Security::IsWellKnownSid(sid, Security::WinCreatorOwnerSid) != 0;
+            if !(trusted_marker_principal(sid, user) || creator) {
                 return Some(MarkerDistrust::Writer(sid_name(sid)));
             }
         }
@@ -467,6 +498,262 @@ pub(crate) fn marker_distrust_raw(acl: &mut [u32]) -> Option<MarkerDistrust> {
         let token = token_user().expect("token user");
         let user = (*(token.as_ptr().cast::<Security::TOKEN_USER>())).User.Sid;
         marker_distrust(user, acl.as_mut_ptr().cast(), user)
+    }
+}
+
+/// Create `path` as a new file whose DACL is owner-only from the moment it
+/// exists (`CREATE_NEW`, not following a reparse point), opened for the
+/// shim's read, write, attribute and security changes, sharing read and
+/// write. A file created in a folder another account can read would
+/// otherwise inherit that read access until [`make_private`] replaced it,
+/// and a handle opened in that window keeps it (#1538 review); the caller
+/// still applies [`make_private`] to set the owner explicitly.
+pub(crate) fn create_owner_only(path: &Path) -> io::Result<File> {
+    use std::os::windows::io::FromRawHandle;
+    use windows_sys::Win32::{
+        Foundation::INVALID_HANDLE_VALUE,
+        Security::SECURITY_ATTRIBUTES,
+        Storage::FileSystem::{
+            CREATE_NEW, CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_FLAG_OPEN_REPARSE_POINT,
+            FILE_SHARE_READ, FILE_SHARE_WRITE,
+        },
+    };
+    // A verbatim path, as std's own open uses, so a path longer than
+    // MAX_PATH (the rollback sibling of a long target) still opens.
+    const SLASH: u16 = b'\\' as u16;
+    let absolute = std::path::absolute(path)?;
+    let plain: Vec<u16> = absolute.as_os_str().encode_wide().collect();
+    let verbatim = [SLASH, SLASH, b'?' as u16, SLASH];
+    let mut wide: Vec<u16> = if plain.starts_with(&verbatim) {
+        plain
+    } else if plain.starts_with(&[SLASH, SLASH]) {
+        // A share: \\server\share becomes \\?\UNC\server\share.
+        verbatim
+            .iter()
+            .copied()
+            .chain("UNC".encode_utf16())
+            .chain(plain[1..].iter().copied())
+            .collect()
+    } else {
+        verbatim.iter().copied().chain(plain).collect()
+    };
+    if wide.contains(&0) {
+        return Err(io::Error::from(io::ErrorKind::InvalidInput));
+    }
+    wide.push(0);
+    let sddl: Vec<u16> = "D:P(A;;FA;;;OW)".encode_utf16().chain([0]).collect();
+    // SAFETY: live NUL-terminated buffers; the converted descriptor is owned
+    // by its guard and outlives CreateFileW, which copies it; the returned
+    // handle is valid and owned by the File it is moved into exactly once.
+    unsafe {
+        let mut descriptor = ptr::null_mut();
+        if ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            sddl.as_ptr(),
+            1,
+            &mut descriptor,
+            ptr::null_mut(),
+        ) == 0
+        {
+            return Err(io::Error::last_os_error());
+        }
+        let _descriptor = Descriptor(descriptor);
+        let attributes = SECURITY_ATTRIBUTES {
+            nLength: mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+            lpSecurityDescriptor: descriptor,
+            bInheritHandle: 0,
+        };
+        // The access `state::options` asks for on create (read, write,
+        // attributes, READ_CONTROL, WRITE_DAC, WRITE_OWNER).
+        let handle = CreateFileW(
+            wide.as_ptr(),
+            0x0012019f | 0x000c0000,
+            FILE_SHARE_READ | FILE_SHARE_WRITE,
+            &attributes,
+            CREATE_NEW,
+            FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT,
+            ptr::null_mut(),
+        );
+        if handle == INVALID_HANDLE_VALUE {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(File::from_raw_handle(handle as _))
+    }
+}
+
+/// A file's DACL as SDDL, for tests that pin what a creation produced.
+#[cfg(test)]
+pub(crate) fn dacl_sddl(file: &File) -> String {
+    use windows_sys::Win32::Security::Authorization::ConvertSecurityDescriptorToStringSecurityDescriptorW;
+    // SAFETY: the handle is live; both descriptors are freed by their guards
+    // after the string is copied out.
+    unsafe {
+        let (mut dacl, mut descriptor) = (ptr::null_mut(), ptr::null_mut());
+        assert_eq!(
+            GetSecurityInfo(
+                file.as_raw_handle() as HANDLE,
+                SE_FILE_OBJECT,
+                Security::DACL_SECURITY_INFORMATION,
+                ptr::null_mut(),
+                ptr::null_mut(),
+                &mut dacl,
+                ptr::null_mut(),
+                &mut descriptor,
+            ),
+            0
+        );
+        let _descriptor = Descriptor(descriptor);
+        let (mut text, mut length) = (ptr::null_mut(), 0u32);
+        assert!(
+            ConvertSecurityDescriptorToStringSecurityDescriptorW(
+                descriptor,
+                1,
+                Security::DACL_SECURITY_INFORMATION,
+                &mut text,
+                &mut length,
+            ) != 0
+        );
+        let _text = Descriptor(text.cast());
+        let length = (0..).take_while(|&i| *text.add(i) != 0).count();
+        String::from_utf16_lossy(std::slice::from_raw_parts(text, length))
+    }
+}
+
+/// Check a folder this client keeps private state in but did not create
+/// (or that already holds what another client put there): rather than
+/// replacing its DACL, which would leave everything in it that has only
+/// inherited access with none (#1538), it must already be safe. The owner is
+/// this user, SYSTEM or Administrators, and no other principal can add,
+/// delete or replace what is in it. `Ok(None)` trusts it.
+pub(crate) fn validate_folder(directory: &File) -> Result<Option<MarkerDistrust>, CredentialError> {
+    // SAFETY: as validate_marker; the handle is a directory opened with
+    // READ_CONTROL that stays live for the whole call.
+    unsafe {
+        let handle = directory.as_raw_handle() as HANDLE;
+        let mut info: BY_HANDLE_FILE_INFORMATION = mem::zeroed();
+        if GetFileInformationByHandle(handle, &mut info) == 0
+            || info.dwFileAttributes & 0x10 == 0
+            || info.dwFileAttributes & 0x400 != 0
+        {
+            return Err(CredentialError("folder must be a plain folder"));
+        }
+        let mut owner = ptr::null_mut();
+        let mut dacl = ptr::null_mut();
+        let mut descriptor = ptr::null_mut();
+        let result = GetSecurityInfo(
+            handle,
+            SE_FILE_OBJECT,
+            Security::OWNER_SECURITY_INFORMATION | Security::DACL_SECURITY_INFORMATION,
+            &mut owner,
+            ptr::null_mut(),
+            &mut dacl,
+            ptr::null_mut(),
+            &mut descriptor,
+        );
+        let _descriptor = Descriptor(descriptor);
+        if result != 0 || descriptor.is_null() || owner.is_null() {
+            return Err(CredentialError("folder permissions cannot be read"));
+        }
+        let user = token_user().ok_or(CredentialError("folder owner cannot be checked"))?;
+        let user_sid = (*(user.as_ptr().cast::<Security::TOKEN_USER>())).User.Sid;
+        Ok(access_distrust(owner, dacl, user_sid, true))
+    }
+}
+
+/// Whether the folder at `path` has a protected DACL in which no entry is
+/// inherited by what is created in it: the protection that leaves files
+/// that had only inherited access with none (#1538).
+pub(crate) fn protected_without_inheritance(path: &Path) -> bool {
+    use windows_sys::Win32::Security::Authorization::GetNamedSecurityInfoW;
+    let wide: Vec<u16> = path.as_os_str().encode_wide().chain([0]).collect();
+    if wide[..wide.len() - 1].contains(&0) {
+        return false;
+    }
+    // SAFETY: a live NUL-terminated path; the descriptor owns the DACL until
+    // it is freed; every ACE read is bounded by the ACL's own count.
+    unsafe {
+        let mut dacl: *mut Security::ACL = ptr::null_mut();
+        let mut descriptor = ptr::null_mut();
+        if GetNamedSecurityInfoW(
+            wide.as_ptr(),
+            SE_FILE_OBJECT,
+            Security::DACL_SECURITY_INFORMATION,
+            ptr::null_mut(),
+            ptr::null_mut(),
+            &mut dacl,
+            ptr::null_mut(),
+            &mut descriptor,
+        ) != 0
+        {
+            return false;
+        }
+        let _descriptor = Descriptor(descriptor);
+        let (mut control, mut revision) = (0, 0);
+        let Some(acl) = dacl.as_ref() else {
+            return false;
+        };
+        if Security::IsValidAcl(dacl) == 0
+            || Security::GetSecurityDescriptorControl(descriptor, &mut control, &mut revision) == 0
+            || control & Security::SE_DACL_PROTECTED == 0
+        {
+            return false;
+        }
+        for index in 0..acl.AceCount as u32 {
+            let Some((header, _)) = ace_at(acl, index) else {
+                return false;
+            };
+            let flags = header.AceFlags as u32;
+            if flags & (Security::OBJECT_INHERIT_ACE | Security::CONTAINER_INHERIT_ACE) != 0 {
+                return false;
+            }
+        }
+        true
+    }
+}
+
+/// Whether `path` is owned by this user (or Administrators, for an elevated
+/// caller) and has an access list with no entries: what an earlier native client's folder protection left on files
+/// that had only inherited access (#1538). Read with READ_CONTROL alone,
+/// which the owner always has.
+pub(crate) fn empty_dacl_owned(path: &Path) -> bool {
+    use windows_sys::Win32::Security::Authorization::GetNamedSecurityInfoW;
+    let wide: Vec<u16> = path.as_os_str().encode_wide().chain([0]).collect();
+    if wide[..wide.len() - 1].contains(&0) {
+        return false;
+    }
+    // SAFETY: a live NUL-terminated path; the descriptor owns the owner and
+    // DACL pointers until it is freed; the token buffer outlives the
+    // comparison. GetNamedSecurityInfoW asks for READ_CONTROL only, which
+    // the owner keeps however empty the DACL is.
+    unsafe {
+        let mut owner = ptr::null_mut();
+        let mut dacl: *mut Security::ACL = ptr::null_mut();
+        let mut descriptor = ptr::null_mut();
+        let result = GetNamedSecurityInfoW(
+            wide.as_ptr(),
+            SE_FILE_OBJECT,
+            Security::OWNER_SECURITY_INFORMATION | Security::DACL_SECURITY_INFORMATION,
+            &mut owner,
+            ptr::null_mut(),
+            &mut dacl,
+            ptr::null_mut(),
+            &mut descriptor,
+        );
+        let _descriptor = Descriptor(descriptor);
+        let Some(acl) = dacl.as_ref() else {
+            return false;
+        };
+        if result != 0 || owner.is_null() || acl.AceCount != 0 {
+            return false;
+        }
+        let Some(user) = token_user() else {
+            return false;
+        };
+        let user_sid = (*(user.as_ptr().cast::<Security::TOKEN_USER>())).User.Sid;
+        // An elevated process (an installer run as administrator) gives the
+        // files it creates to Administrators; only an elevated caller can
+        // read such a file's owner here at all.
+        Security::EqualSid(owner, user_sid) != 0
+            || Security::IsWellKnownSid(owner, Security::WinBuiltinAdministratorsSid) != 0
     }
 }
 
@@ -533,6 +820,17 @@ pub(crate) fn validate_marker(
 /// as the current user: the rule's tests need no privilege to set an owner.
 #[cfg(test)]
 pub(crate) fn marker_distrust_sddl(sddl: &str, user: Option<&str>) -> Option<MarkerDistrust> {
+    distrust_sddl(sddl, user, false)
+}
+
+/// [`marker_distrust_sddl`] for the folder rule ([`validate_folder`]).
+#[cfg(test)]
+pub(crate) fn folder_distrust_sddl(sddl: &str, user: Option<&str>) -> Option<MarkerDistrust> {
+    distrust_sddl(sddl, user, true)
+}
+
+#[cfg(test)]
+fn distrust_sddl(sddl: &str, user: Option<&str>, folder: bool) -> Option<MarkerDistrust> {
     use windows_sys::Win32::Security::Authorization::ConvertStringSidToSidW;
     // SAFETY: converted descriptors and SIDs are freed by their guards after
     // the rule read them; the token buffer outlives its SID.
@@ -575,7 +873,7 @@ pub(crate) fn marker_distrust_sddl(sddl: &str, user: Option<&str>) -> Option<Mar
             }
             None => (*(token.as_ptr().cast::<Security::TOKEN_USER>())).User.Sid,
         };
-        marker_distrust(owner, dacl, user_sid)
+        access_distrust(owner, dacl, user_sid, folder)
     }
 }
 
