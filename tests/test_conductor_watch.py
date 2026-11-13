@@ -1218,6 +1218,32 @@ def test_a_malformed_state_file_is_a_fresh_baseline(h, body):
     assert lines(h.main("--settle", "0")[1]) == ["PR #2 opened: feat: y"]
 
 
+def test_a_state_file_that_cannot_be_read_is_a_fresh_baseline(h, monkeypatch):
+    """The write check before registering must not need the old contents:
+    a state file that denies reads, in a directory that takes a new file,
+    is replaced with a fresh baseline as a malformed one is (review,
+    2026-11-13: the check refused it with exit 2)."""
+    h.world.prs = [pr(1)]
+    h.state.write_bytes(b"{}")
+    real, denied = Path.read_bytes, [True]
+
+    def read_bytes(self):
+        if denied[0] and self == h.state:
+            raise PermissionError(13, "Permission denied")
+        return real(self)
+
+    monkeypatch.setattr(Path, "read_bytes", read_bytes)
+    code, texts, _ = h.main(max_age="120")
+    denied[0] = False
+    assert code == watch.EXIT_OK and texts == []
+    err = h.capsys.readouterr().err
+    assert "baseline recorded" in err and "Traceback" not in err
+    reset = [line for line in h.ledger() if " reset " in line]
+    assert len(reset) == 1 and "could not be read (Permission denied)" in reset[0]
+    assert "fresh baseline" in reset[0]
+    assert set(json.loads(h.state.read_text(encoding="utf-8"))["prs"]) == {"1"}
+
+
 def test_every_state_the_watcher_writes_passes_its_own_check(h):
     h.world.prs = [pr(1, checks=[run_("a", conclusion="FAILURE")]), pr(2, mergeable="UNKNOWN")]
     h.world.runs = [_run(10, "failure")]

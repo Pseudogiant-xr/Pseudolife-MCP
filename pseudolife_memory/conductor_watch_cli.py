@@ -639,8 +639,10 @@ def _unwritable(label: str, reason: str) -> _Unwritable:
 def _writable(path: Path, label: str) -> None:
     """Raise _Unwritable unless ``_save`` can write ``path``: its
     directory takes a new file, and an existing file can be replaced (it is
-    rewritten with its own bytes, so nothing changes). ``label`` names the
-    file in the refusal."""
+    rewritten with its own bytes, so nothing changes). A file that cannot
+    be read is not replaced here, since its bytes could not be put back:
+    ``load`` reports it and a later write that fails tells the owner.
+    ``label`` names the file in the refusal."""
     tmp = path.with_suffix(path.suffix + ".tmp")
     try:
         if path.is_dir():
@@ -648,10 +650,8 @@ def _writable(path: Path, label: str) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         try:
             body = path.read_bytes()
-        except FileNotFoundError:
+        except OSError:           # missing, or unreadable: only the directory is checked
             body = None
-        except OSError as exc:
-            raise _unwritable(label, f"cannot be read ({exc.strerror or exc})") from None
         tmp.write_bytes(body or b"")
         if body is None:
             tmp.unlink()
