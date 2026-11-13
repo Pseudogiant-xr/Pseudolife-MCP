@@ -172,6 +172,24 @@ pub fn dispatch(mode: Option<&str>) -> Option<ExitCode> {
     if mode == "doorbell-prompt-seen" {
         return Some(doorbell_seen::run());
     }
+    // Ported commands, one block per command in mode order: each answers
+    // natively or returns None, and the mode falls through to the deferral
+    // below. A port adds its own block in order.
+    if matches!(mode, "conductor-watch" | "delegate-watch")
+        && let Some(code) = conductor_watch::run(mode, std::env::args_os().skip(2).collect())
+    {
+        return Some(code);
+    }
+    if mode == "connect"
+        && let Some(code) = connect::run(std::env::args_os().skip(2).collect())
+    {
+        return Some(code);
+    }
+    if mode == "console"
+        && let Some(code) = console::run(std::env::args_os().skip(2).collect())
+    {
+        return Some(code);
+    }
     if mode == "doctor"
         && let Some(code) = doctor::run(std::env::args_os().skip(2).collect())
     {
@@ -179,16 +197,6 @@ pub fn dispatch(mode: Option<&str>) -> Option<ExitCode> {
     }
     if matches!(mode, "export" | "import")
         && let Some(code) = transfer::run(mode, std::env::args_os().skip(2).collect())
-    {
-        return Some(code);
-    }
-    if mode == "test-login"
-        && let Some(code) = test_login::run(std::env::args_os().skip(2).collect())
-    {
-        return Some(code);
-    }
-    if mode == "connect"
-        && let Some(code) = connect::run(std::env::args_os().skip(2).collect())
     {
         return Some(code);
     }
@@ -202,23 +210,18 @@ pub fn dispatch(mode: Option<&str>) -> Option<ExitCode> {
     {
         return Some(ExitCode::from(code));
     }
-    if mode == "tunnel"
-        && let Some(code) = tunnel::run(std::env::args_os().skip(2).collect())
-    {
-        return Some(code);
-    }
     if mode == "restore"
         && let Some(code) = restore_cli::run(std::env::args_os().skip(2).collect())
     {
         return Some(code);
     }
-    if mode == "console"
-        && let Some(code) = console::run(std::env::args_os().skip(2).collect())
+    if mode == "test-login"
+        && let Some(code) = test_login::run(std::env::args_os().skip(2).collect())
     {
         return Some(code);
     }
-    if matches!(mode, "conductor-watch" | "delegate-watch")
-        && let Some(code) = conductor_watch::run(mode, std::env::args_os().skip(2).collect())
+    if mode == "tunnel"
+        && let Some(code) = tunnel::run(std::env::args_os().skip(2).collect())
     {
         return Some(code);
     }
