@@ -23,6 +23,25 @@ The real block is tested in ``test_installer_native_client.py`` and
 """
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+_STANDIN = (Path(__file__).resolve().parent / "native_helper_standin.py").as_posix()
+_PYTHON = Path(sys.executable).as_posix()
+
+# The installers' `native_helper` / `Invoke-NativeHelper` (one installer step
+# of the verified native client), answered by the Python helper each step
+# replaced: see native_helper_standin.py. Included in BASH and POWERSHELL.
+HELPER_SH = f'''
+native_helper() {{ "{_PYTHON}" "{_STANDIN}" "$repo" "$@"; }}
+'''
+HELPER_PS = f'''
+function Invoke-NativeHelper {{
+    if ($MyInvocation.ExpectingInput) {{ $input | & "{_PYTHON}" "{_STANDIN}" $repo @args }}
+    else {{ & "{_PYTHON}" "{_STANDIN}" $repo @args }}
+}}
+'''
+
 # The launcher the stub install writes (POSIX shell).
 LAUNCHER_SH = r'''#!/bin/sh
 printf 'launcher|%s\n' "$*" >>"${CALL_LOG:-/dev/null}"
@@ -150,12 +169,15 @@ def write_release(directory, version: str, launcher_body: str) -> dict[str, str]
     return {"PSEUDOLIFE_NATIVE_ARCHIVE_URL": str(directory), "PSEUDOLIFE_NATIVE_TARGET": RELEASE_TARGET}
 
 
+BASH += HELPER_SH
+POWERSHELL += HELPER_PS
+
 # Harnesses whose fake shim sits in $FIXTURE_SHIM_BIN (test_codex_hooks.py).
 NATIVE_FROM_SHIM_BIN_SH = 'FAKE_LAUNCHER="$FIXTURE_SHIM_BIN/pseudolife-mcp"\nFAKE_KEEP_LAUNCHER=1\n' + BASH
 NATIVE_UNAVAILABLE_SH = (
     'NATIVE_ARCHIVE="the verified fake archive"\n'
     "native_install() { return 1; }\n"
-    "native_installed_launcher() { :; }\n")
+    "native_installed_launcher() { :; }\n" + HELPER_SH)
 NATIVE_FROM_SHIM_BIN_PS = (
     # The fixture's shim-bin holds both names; its tests expect the .exe one
     # on every platform, as the earlier pipx lookup found it first.

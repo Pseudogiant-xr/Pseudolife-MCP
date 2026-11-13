@@ -15,7 +15,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-const USAGE: &str = "usage: pseudolife-mcp installer migrate-registrations [--client claude-code|claude-desktop|codex|gemini]... [--json]\n       pseudolife-mcp installer expose [--json]\n       pseudolife-mcp installer credentials STEP ... (installer credentials --help)\n       pseudolife-mcp installer state ACTION ... | volume-names --repo R --env-file F | engine detect|prepare|accept|choose ...\n       pseudolife-mcp installer json-field FIELD | json-string | connect-report valid|error|plan|manual|handled (JSON on stdin)\n       pseudolife-mcp installer is-loopback URL | pairing-code-valid (code on stdin) | codex-fields credentials|hooks|runtime-defaults (JSON on stdin)";
+const USAGE: &str = "usage: pseudolife-mcp installer migrate-registrations [--client claude-code|claude-desktop|codex|gemini]... [--json]\n       pseudolife-mcp installer expose [--json]\n       pseudolife-mcp installer credentials STEP ... (installer credentials --help)\n       pseudolife-mcp installer state ACTION ... | volume-names --repo R --env-file F | engine detect|prepare|accept|choose ...\n       pseudolife-mcp installer json-field FIELD | json-string | connect-report valid|error|plan|manual|handled (JSON on stdin)\n       pseudolife-mcp installer is-loopback URL | pairing-code-valid (code on stdin) | codex-fields credentials|hooks|runtime-defaults (JSON on stdin)\n       pseudolife-mcp installer plugin-marketplace";
 const CLIENTS: [&str; 4] = ["claude-code", "claude-desktop", "codex", "gemini"];
 
 /// Arguments follow `installer`. Exit 0 when every selected registration
@@ -67,9 +67,12 @@ pub fn run(arguments: Vec<OsString>) -> u8 {
             }
             _ => usage("codex-fields takes credentials, hooks or runtime-defaults"),
         },
+        Some("plugin-marketplace") if arguments.len() == 1 => {
+            helpers::plugin_marketplace(&crate::cli::update::clients::migrate_marketplace())
+        }
         Some("--help" | "-h") => emit(USAGE),
         _ => usage(
-            "expected an installer step: migrate-registrations, expose, credentials, state, volume-names, engine, json-field, json-string, connect-report, is-loopback, pairing-code-valid or codex-fields",
+            "expected an installer step: migrate-registrations, expose, credentials, state, volume-names, engine, json-field, json-string, connect-report, is-loopback, pairing-code-valid, codex-fields or plugin-marketplace",
         ),
     }
 }

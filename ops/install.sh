@@ -2357,14 +2357,14 @@ for selected_client in $CLIENTS; do
                 setup_exit=0
                 if [ -n "$CODEX_CONNECTION_CONFIGURED" ]; then
                     if [ -n "$CODEX_CREDENTIAL_FILE" ]; then
-                        setup_output=$(env -u PSEUDOLIFE_MCP_TOKEN PSEUDOLIFE_MCP_TOKEN_FILE="$CODEX_CREDENTIAL_FILE" PSEUDOLIFE_MCP_DAEMON_URL="$CODEX_CREDENTIAL_URL" "$NATIVE_STAGED" installer "${setup_args[@]}") || setup_exit=$?
+                        setup_output=$(unset PSEUDOLIFE_MCP_TOKEN; export PSEUDOLIFE_MCP_TOKEN_FILE="$CODEX_CREDENTIAL_FILE" PSEUDOLIFE_MCP_DAEMON_URL="$CODEX_CREDENTIAL_URL"; native_helper "${setup_args[@]}") || setup_exit=$?
                     else
-                        setup_output=$(env -u PSEUDOLIFE_MCP_TOKEN -u PSEUDOLIFE_MCP_TOKEN_FILE PSEUDOLIFE_MCP_DAEMON_URL="$CODEX_CREDENTIAL_URL" "$NATIVE_STAGED" installer "${setup_args[@]}") || setup_exit=$?
+                        setup_output=$(unset PSEUDOLIFE_MCP_TOKEN PSEUDOLIFE_MCP_TOKEN_FILE; export PSEUDOLIFE_MCP_DAEMON_URL="$CODEX_CREDENTIAL_URL"; native_helper "${setup_args[@]}") || setup_exit=$?
                     fi
                 elif [ -n "$CODEX_CREDENTIAL_FILE" ]; then
-                    setup_output=$(env -u PSEUDOLIFE_MCP_TOKEN PSEUDOLIFE_MCP_TOKEN_FILE="$CODEX_CREDENTIAL_FILE" PSEUDOLIFE_MCP_DAEMON_URL="$CODEX_CREDENTIAL_URL" "$NATIVE_STAGED" installer "${setup_args[@]}") || setup_exit=$?
+                    setup_output=$(unset PSEUDOLIFE_MCP_TOKEN; export PSEUDOLIFE_MCP_TOKEN_FILE="$CODEX_CREDENTIAL_FILE" PSEUDOLIFE_MCP_DAEMON_URL="$CODEX_CREDENTIAL_URL"; native_helper "${setup_args[@]}") || setup_exit=$?
                 else
-                    setup_output=$("$NATIVE_STAGED" installer "${setup_args[@]}") || setup_exit=$?
+                    setup_output=$(native_helper "${setup_args[@]}") || setup_exit=$?
                 fi
                 # Parse only data, never shell code. A failed helper must leave the
                 # remaining provider setup available and must never imply readiness.

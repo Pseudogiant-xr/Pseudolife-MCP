@@ -206,6 +206,33 @@ fn codex_lines(kind: &str, report: Option<Value>) -> Option<Vec<String>> {
     }
 }
 
+/// `plugin-marketplace` (formerly `ops/plugin_marketplace.py`): one line for
+/// a marketplace moved, current or kept, nothing when none is recorded or
+/// there is no `claude` CLI to move it with (the plugin step says so), exit
+/// 1 only when the move failed.
+pub(super) fn plugin_marketplace(result: &Value) -> u8 {
+    let (line, code) = marketplace_line(result);
+    match line {
+        Some(line) if out(&line) != 0 => 1,
+        _ => code,
+    }
+}
+
+fn marketplace_line(result: &Value) -> (Option<String>, u8) {
+    let state = result["state"].as_str().unwrap_or("failed");
+    let line = (!matches!(state, "absent" | "no-cli")).then(|| {
+        let detail = result["detail"]
+            .as_str()
+            .unwrap_or("the plugin marketplace move did not report a result");
+        let mut chars = detail.chars();
+        match chars.next() {
+            Some(first) => format!("{}{}.", first.to_uppercase(), chars.as_str()),
+            None => ".".to_owned(),
+        }
+    });
+    (line, u8::from(state == "failed"))
+}
+
 /// `is-loopback URL`: exit 10 when the URL names this machine, 11 otherwise.
 pub(super) fn is_loopback(url: &str) -> u8 {
     if crate::daemon_url::is_loopback(url) {
@@ -234,6 +261,24 @@ pub(super) fn pairing_code_valid() -> u8 {
 #[cfg(test)]
 mod tests {
     use serde_json::json;
+
+    #[test]
+    fn marketplace_lines_follow_python_marketplace_main() {
+        let line = |state: &str, detail: &str| {
+            super::marketplace_line(&json!({"state": state, "detail": detail}))
+        };
+        assert_eq!(line("absent", "no marketplace"), (None, 0));
+        assert_eq!(line("no-cli", "the claude CLI is not on PATH"), (None, 0));
+        assert_eq!(
+            line("current", "the x marketplace is on HTTPS"),
+            (Some("The x marketplace is on HTTPS.".into()), 0)
+        );
+        assert_eq!(
+            line("failed", "settings.json is not valid JSON"),
+            (Some("Settings.json is not valid JSON.".into()), 1)
+        );
+        assert_eq!(super::marketplace_line(&json!({})).1, 1);
+    }
 
     #[test]
     fn codex_reports_read_as_the_installers_python_did() {
