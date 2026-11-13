@@ -2,6 +2,7 @@
 pub(super) mod args;
 mod board;
 mod hold;
+pub(crate) use hold::pid_alive;
 mod json;
 pub(crate) mod lock;
 pub mod operator;
