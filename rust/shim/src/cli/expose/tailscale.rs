@@ -17,7 +17,7 @@ use std::{ffi::OsString, process::Stdio, time::Duration};
 const TIMEOUT: Duration = Duration::from_secs(30);
 /// `JSON_DEPTH_LIMIT`: an answer with more brackets open at once is
 /// refused as unreadable (`_too_deep`), in both arms alike.
-pub(super) const DEPTH: usize = 100;
+pub(super) const DEPTH: usize = pyjson::EXPOSE_DEPTH;
 
 /// `CompletedProcess` as the readers use it. `unreadable`: its output was
 /// not UTF-8, so `out` and `err` are empty (`run_tailscale`'s flag).
@@ -153,7 +153,7 @@ fn program_files_base(values: [Option<OsString>; 2]) -> Result<String, ()> {
 }
 
 /// `find_tailscale()`: `Ok(None)` when it is nowhere, `Err` defers.
-pub(super) fn find() -> Result<Option<String>, ()> {
+pub(in crate::cli) fn find() -> Result<Option<String>, ()> {
     if let Some(found) = which(std::env::var_os("PATH"), std::env::var_os("PATHEXT"))? {
         return Ok(Some(found));
     }
@@ -366,33 +366,9 @@ fn split(text: &str) -> Vec<&str> {
 
 // ── the readers ──────────────────────────────────────────────────────────────
 
-/// `_too_deep(text)`: more than `JSON_DEPTH_LIMIT` brackets open at once,
-/// read lexically (`[` and `{` outside strings open, `]` and `}` close),
-/// whether or not the rest is valid JSON.
+/// `_too_deep(text)`.
 fn too_deep(text: &str) -> bool {
-    let mut depth: i64 = 0;
-    let (mut in_string, mut escaped) = (false, false);
-    for byte in text.bytes() {
-        if in_string {
-            if escaped {
-                escaped = false;
-            } else if byte == b'\\' {
-                escaped = true;
-            } else if byte == b'"' {
-                in_string = false;
-            }
-        } else if byte == b'"' {
-            in_string = true;
-        } else if byte == b'[' || byte == b'{' {
-            depth += 1;
-            if depth > DEPTH as i64 {
-                return true;
-            }
-        } else if byte == b']' || byte == b'}' {
-            depth -= 1;
-        }
-    }
-    false
+    pyjson::brackets_past(text, DEPTH)
 }
 
 /// `_json(text)`: `Ok(Some(value))`, `Ok(None)` for text that is not JSON,
@@ -478,7 +454,7 @@ pub(super) async fn serve_config(binary: &str) -> Result<Dict, Fault> {
 
 /// `_is_ipv4(word)`: four dot-separated octets, each `0` or 1 to 3 ASCII
 /// digits without a leading zero, at most 255.
-fn is_ipv4(word: &str) -> bool {
+pub(in crate::cli) fn is_ipv4(word: &str) -> bool {
     let parts: Vec<&str> = word.split('.').collect();
     parts.len() == 4
         && parts.iter().all(|part| {

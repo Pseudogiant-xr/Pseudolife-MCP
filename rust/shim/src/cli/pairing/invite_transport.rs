@@ -50,21 +50,10 @@ fn docker() -> OsString {
 }
 
 pub(super) async fn exposed_url(port: u32) -> Option<String> {
-    let binary = program("tailscale").or_else(|| {
-        let mut paths = Vec::new();
-        if cfg!(windows) {
-            let base = std::env::var_os("ProgramW6432")
-                .or_else(|| std::env::var_os("ProgramFiles"))
-                .map(PathBuf::from)
-                .unwrap_or_else(|| PathBuf::from(r"C:\Program Files"));
-            paths.push(base.join("Tailscale/tailscale.exe"));
-        } else if cfg!(target_os = "macos") {
-            paths.push(PathBuf::from(
-                "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
-            ));
-        }
-        paths.into_iter().find(|p| p.is_file())
-    })?;
+    // `expose_cli.find_tailscale()`, as `expose status` finds it: absolute
+    // PATH directories only, never the current directory. A PATH entry the
+    // lookup cannot classify (UNC, device) that holds it gives no URL here.
+    let binary = PathBuf::from(crate::cli::expose::find_tailscale().ok()??);
     let query = |args: &[&str]| {
         let mut command = vec![binary.clone().into_os_string()];
         command.extend(args.iter().map(|arg| OsString::from(*arg)));
@@ -92,13 +81,7 @@ pub(super) async fn exposed_url(port: u32) -> Option<String> {
     if let Some(own) = status["Self"]["TailscaleIPs"].as_array() {
         ips.extend(own.iter().filter_map(|ip| ip.as_str()));
     }
-    let ip = ips.into_iter().find(|ip| {
-        let parts: Vec<_> = ip.split('.').collect();
-        parts.len() == 4
-            && parts
-                .iter()
-                .all(|p| (1..=3).contains(&p.len()) && p.bytes().all(|b| b.is_ascii_digit()))
-    })?;
+    let ip = ips.into_iter().find(|ip| crate::cli::expose::is_ipv4(ip))?;
     Some(format!("http://{ip}:{port}"))
 }
 
