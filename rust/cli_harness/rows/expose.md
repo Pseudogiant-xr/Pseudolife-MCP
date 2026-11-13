@@ -1,9 +1,10 @@
 # CLI-EXPOSE contract (`expose`, up to the change)
 
 Oracle: `pseudolife_memory/expose_cli.py` (`main`, `_parser`, `_expose`,
-`_off`, `_status`, `_Report`, `fetch_health`, `find_tailscale`,
-`run_tailscale`, `_running`, `_serve_config`, `_tailnet_ipv4`,
-`_port_state`) at this branch's base, CPython 3.11.9 (Windows).
+`_off`, `_status`, `_Report`, `_write`, `fetch_health`, `find_tailscale`
+(`program_lookup.find_program`), `run_tailscale`, `_text`, `_json`,
+`_running`, `_serve_config`, `_tailnet_ipv4`, `_is_ipv4`, `_port_state`),
+CPython 3.11.9 (Windows).
 Candidate: `rust/shim/src/cli/expose/` (argparse subset in `args.rs`, the
 `tailscale` seams and readers in `tailscale.rs`), reusing `cli/pyjson`
 (Python's `json`, `repr()` and `str()`), `cli/hook_http.rs`
@@ -56,9 +57,12 @@ change, in the deferral cases) never leaves the machine.
 3. `tailscale`: `GET 127.0.0.1:<port>/health` (no proxy, no redirect, 3 s);
    a redirect, an unreadable or non-object body is "something else"; no
    answer is "no daemon"; then `status` and `auth is True`.
-4. `find_tailscale`: `shutil.which` (current directory first and `PATHEXT`
-   on Windows, the extension as `PATHEXT` spells it), then the default
-   install location.
+4. `find_tailscale`: `program_lookup.find_program`, which searches only
+   absolute `PATH` entries (whitespace and quotes stripped; empty and
+   relative entries skipped; never the current directory) for `tailscale`
+   plus each `PATHEXT` extension `CreateProcess` starts, in `PATHEXT`'s
+   order and spelling; then the default install location, whose Windows
+   base is the first absolute one of `ProgramW6432` and `ProgramFiles`.
 5. `tailscale status --json` (`BackendState: Running`), `tailscale serve
    status --json`, the port's state (Funnel, a background handler that is
    or is not a plain forward to `127.0.0.1:<port>`, a foreground session's
@@ -74,9 +78,11 @@ change, in the deferral cases) never leaves the machine.
 | `str(OSError)` of a `tailscale` that cannot start: `[WinError N] text` (trailing full stop dropped) / `[Errno N] text: 'path'` | `run_tailscale`, CPython |
 | `_first_line` (`splitlines()` and `strip()` as Python's), `exit N` | `_first_line` |
 | `repr()` of `BackendState` and of the daemon's `status`; `str()` of handler values in descriptions | `_running`, `_expose`, `_describe` |
-| `str.split()` of `ip -4`'s output, `TailscaleIPs` as a list, a dict's keys or a str's characters | `_tailnet_ipv4` |
+| `str.split()` of `ip -4`'s output, then `TailscaleIPs` only as a list; an address is an ASCII dotted quad, octets 0-255 without a leading zero | `_tailnet_ipv4`, `_is_ipv4` |
+| Output that is not UTF-8 (`run_tailscale` decodes it), and JSON with more than 100 brackets open at once, read lexically (`_too_deep`), are refused as "could not read what `tailscale ...` printed"; `ip -4`'s counts as a failed `ip -4`; the daemon's `/health` is "something that is not the daemon" | `_text`, `_json`, `_read`, `fetch_health` |
+| A `--port` holding anything but ASCII is no port | `_port` |
 | The plan lines and the `command` list; the no-terminal refusal (exit 2) | `_expose`, `_off`, `_confirm` |
-| Streams: Python text streams, CRLF on Windows; stderr writes a lone surrogate as `\udXXX` | `print` |
+| Streams: Python text streams, CRLF on Windows; both write a lone surrogate as `\udXXX` | `_write` |
 
 ## Normalization rules
 
@@ -104,25 +110,18 @@ change, in the deferral cases) never leaves the machine.
 - argparse corners: an option before the action, abbreviations, `--`, a
   value starting with `-`, any other `-`-led token, `--yes=V` on `status`,
   a `--port` that `int()` reads but this port does not (a sign, spaces,
-  underscores, non-ASCII digits); help or usage at another width, with
+  underscores); help or usage at another width, with
   colour settings or on a terminal; non-UTF-8 argv.
 - `PYTHONINTMAXSTRDIGITS` set.
-- The lookup: `PATH` unset or not UTF-8, an empty `PATH` entry or a bare
-  drive that finds the program, a Program Files base pathlib would respell.
-- Reads: `tailscale` output that is not UTF-8 (the oracle raises, or on
-  Windows prints a reader thread's traceback); a `status --json` or `serve
-  status --json` answer or a daemon `/health` nested past 100 levels; a
-  timed-out read on POSIX; `TailscaleIPs` an int, float or `True` (the
-  oracle raises); a non-ASCII candidate address before the first match
-  (`\d` matches any decimal digit); a text answer whose stdout would carry
-  a lone surrogate (the oracle raises on strict stdout; `--json` escapes
-  it and is answered).
+- The lookup: `PATH` or `PATHEXT` not UTF-8; a UNC or device `PATH` entry
+  (two leading separators), or such a Program Files base, that holds the
+  program (pathlib's reading of those is not reproduced); a Program Files
+  base pathlib would respell.
+- Reads: a timed-out read on POSIX, or on Windows one whose stdout is not
+  UTF-8 (the oracle decodes it with `replace`).
 
 ## Declared divergences
 
-- Text from `tailscale` is decoded as UTF-8, as the oracle does under
-  UTF-8 mode (the harness pins `PYTHONUTF8=1`); without it the oracle
-  decodes with the locale's encoding.
 - A write to stdout or stderr that fails: before any byte, the candidate
   defers; part-way, it exits 1. Not cased.
 - On Windows, a `tailscale` that times out: both wait for its pipes to

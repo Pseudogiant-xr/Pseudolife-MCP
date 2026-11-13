@@ -2,29 +2,31 @@
 //! (`find_tailscale`: `program_lookup.find_program`, absolute `PATH`
 //! directories only, then the default install locations),
 //! the runner (`run_tailscale`: `subprocess.run(capture_output=True,
-//! text=True, stdin=DEVNULL, timeout=30)`), and what the oracle reads from
-//! it (`_running`, `_serve_config`, `_tailnet_ipv4`, `_port_state`).
+//! stdin=DEVNULL, timeout=30)` decoded by `_text`), and what the oracle
+//! reads from it (`_running`, `_serve_config`, `_tailnet_ipv4`,
+//! `_port_state`).
 //!
 //! Values are `pyjson::J`, so `dict.get`, truthiness, `str()` and `repr()`
-//! are Python's. Text is what `text=True` gives under UTF-8 mode (the
-//! harness pins `PYTHONUTF8=1`): strict UTF-8 with newlines translated.
+//! are Python's. Text is `_text`'s: strict UTF-8 with newlines translated;
+//! output that is not UTF-8 is `unreadable`.
 use super::super::pyjson::{self, Dict, J};
 use super::Fault;
 use std::{ffi::OsString, process::Stdio, time::Duration};
 
 /// `TAILSCALE_TIMEOUT_S`.
 const TIMEOUT: Duration = Duration::from_secs(30);
-/// Answers nested deeper than this defer before any change: the oracle's
-/// own limit (`RecursionError`) on these read paths is not measured, and a
-/// value this deep is later `repr`-ed or re-dumped.
+/// `JSON_DEPTH_LIMIT`: an answer with more brackets open at once is
+/// refused as unreadable (`_too_deep`), in both arms alike.
 pub(super) const DEPTH: usize = 100;
 
-/// `CompletedProcess` as the readers use it.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// `CompletedProcess` as the readers use it. `unreadable`: its output was
+/// not UTF-8, so `out` and `err` are empty (`run_tailscale`'s flag).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(super) struct Proc {
     pub(super) code: i64,
     pub(super) out: String,
     pub(super) err: String,
+    pub(super) unreadable: bool,
 }
 
 // ── the lookup ───────────────────────────────────────────────────────────────
@@ -235,8 +237,8 @@ async fn run_within(binary: &str, args: &[&str], timeout: Duration) -> Result<Pr
         Err(error) => {
             return Ok(Proc {
                 code: 127,
-                out: String::new(),
                 err: spawn_text(&error, binary)?,
+                ..Proc::default()
             });
         }
     };
@@ -267,16 +269,26 @@ async fn run_within(binary: &str, args: &[&str], timeout: Duration) -> Result<Pr
             let status = status.map_err(|_| ())?;
             let out = read_out.ok_or(())?.map_err(|_| ())?;
             let err = read_err.ok_or(())?.map_err(|_| ())?;
-            Ok(Proc {
-                code: returncode(status),
-                out: text(&out).ok_or(())?,
-                err: text(&err).ok_or(())?,
+            let code = returncode(status);
+            Ok(match (text(&out), text(&err)) {
+                (Some(out), Some(err)) => Proc {
+                    code,
+                    out,
+                    err,
+                    unreadable: false,
+                },
+                _ => Proc {
+                    code,
+                    unreadable: true,
+                    ..Proc::default()
+                },
             })
         }
         Err(_) => {
-            // `process.kill()`. POSIX then keeps what was read so far, as
-            // bytes decoded with "replace"; Windows' `communicate()` reads
-            // both pipes to their end and decodes them as text.
+            // `process.kill()`. POSIX then keeps what was read so far;
+            // Windows' `communicate()` reads both pipes to their end. Only
+            // stdout is kept, decoded with "replace": this port answers
+            // when it is UTF-8 and defers otherwise.
             let _ = child.start_kill();
             let _ = child.wait().await;
             let out = if cfg!(windows) {
@@ -285,12 +297,11 @@ async fn run_within(binary: &str, args: &[&str], timeout: Duration) -> Result<Pr
                     None => out.await,
                 }
                 .map_err(|_| ())?;
-                let err = match read_err {
+                match read_err {
                     Some(done) => done,
                     None => err.await,
                 }
                 .map_err(|_| ())?;
-                text(&err).ok_or(())?;
                 text(&out).ok_or(())?
             } else {
                 tokio::task::yield_now().await;
@@ -303,6 +314,7 @@ async fn run_within(binary: &str, args: &[&str], timeout: Duration) -> Result<Pr
                 code: 124,
                 out,
                 err: format!("timed out after {}s", timeout.as_secs()),
+                unreadable: false,
             })
         }
     }
@@ -354,23 +366,74 @@ fn split(text: &str) -> Vec<&str> {
 
 // ── the readers ──────────────────────────────────────────────────────────────
 
-fn parse(text: &str) -> Result<Option<J>, ()> {
-    match pyjson::loads(text, DEPTH) {
-        Ok(value) => Ok(Some(value)),
-        Err(pyjson::Refused::NotJson) => Ok(None),
-        Err(pyjson::Refused::TooDeep) => Err(()),
+/// `_too_deep(text)`: more than `JSON_DEPTH_LIMIT` brackets open at once,
+/// read lexically (`[` and `{` outside strings open, `]` and `}` close),
+/// whether or not the rest is valid JSON.
+fn too_deep(text: &str) -> bool {
+    let mut depth: i64 = 0;
+    let (mut in_string, mut escaped) = (false, false);
+    for byte in text.bytes() {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if byte == b'\\' {
+                escaped = true;
+            } else if byte == b'"' {
+                in_string = false;
+            }
+        } else if byte == b'"' {
+            in_string = true;
+        } else if byte == b'[' || byte == b'{' {
+            depth += 1;
+            if depth > DEPTH as i64 {
+                return true;
+            }
+        } else if byte == b']' || byte == b'}' {
+            depth -= 1;
+        }
     }
+    false
+}
+
+/// `_json(text)`: `Ok(Some(value))`, `Ok(None)` for text that is not JSON,
+/// `Err(why)` for text nested past the bound. Under the bound `loads` never
+/// reports `TooDeep`; if it did, that defers.
+pub(super) fn json(text: &str) -> Result<Result<Option<J>, String>, Fault> {
+    if too_deep(text) {
+        return Ok(Err(format!("it is nested more than {DEPTH} levels deep")));
+    }
+    match pyjson::loads(text, DEPTH) {
+        Ok(value) => Ok(Ok(Some(value))),
+        Err(pyjson::Refused::NotJson) => Ok(Ok(None)),
+        Err(pyjson::Refused::TooDeep) => Err(Fault::Defer),
+    }
+}
+
+/// `_unreadable(binary, args, why)`'s text.
+fn unreadable(binary: &str, args: &[&str], why: &str) -> Fault {
+    Fault::Refused(format!(
+        "could not read what `tailscale {}` printed ({why}): check that {binary} is Tailscale's own CLI, and reinstall Tailscale if it is",
+        args.join(" ")
+    ))
+}
+
+/// `_read(binary, args)`: output that is not UTF-8 is refused.
+async fn read(binary: &str, args: &[&str]) -> Result<Proc, Fault> {
+    let proc = run(binary, args).await.map_err(|()| Fault::Defer)?;
+    if proc.unreadable {
+        return Err(unreadable(binary, args, "it is not UTF-8"));
+    }
+    Ok(proc)
 }
 
 /// `_running(binary)`: the status dict, or the refusal.
 pub(super) async fn running(binary: &str) -> Result<Dict, Fault> {
-    let proc = run(binary, &["status", "--json"])
-        .await
-        .map_err(|()| Fault::Defer)?;
+    let args = ["status", "--json"];
+    let proc = read(binary, &args).await?;
     let status = if pyjson::py_strip(&proc.out).is_empty() {
         None
     } else {
-        parse(&proc.out).map_err(|()| Fault::Defer)?
+        json(&proc.out)?.map_err(|why| unreadable(binary, &args, &why))?
     };
     let Some(J::Dict(status)) = status else {
         return Err(Fault::Refused(format!(
@@ -390,9 +453,8 @@ pub(super) async fn running(binary: &str) -> Result<Dict, Fault> {
 
 /// `_serve_config(binary)`: an empty or `null` answer is an empty config.
 pub(super) async fn serve_config(binary: &str) -> Result<Dict, Fault> {
-    let proc = run(binary, &["serve", "status", "--json"])
-        .await
-        .map_err(|()| Fault::Defer)?;
+    let args = ["serve", "status", "--json"];
+    let proc = read(binary, &args).await?;
     if proc.code != 0 {
         return Err(Fault::Refused(format!(
             "could not read `tailscale serve status --json` ({})",
@@ -403,7 +465,7 @@ pub(super) async fn serve_config(binary: &str) -> Result<Dict, Fault> {
     if text.is_empty() || text == "null" {
         return Ok(Vec::new());
     }
-    match parse(text).map_err(|()| Fault::Defer)? {
+    match json(text)?.map_err(|why| unreadable(binary, &args, &why))? {
         None => Err(Fault::Refused(
             "`tailscale serve status --json` printed something that is not JSON".into(),
         )),
@@ -414,22 +476,25 @@ pub(super) async fn serve_config(binary: &str) -> Result<Dict, Fault> {
     }
 }
 
-/// `re.fullmatch(r"\d{1,3}(?:\.\d{1,3}){3}", ip)` for ASCII text.
-fn ipv4_shaped(ip: &str) -> bool {
-    let parts: Vec<&str> = ip.split('.').collect();
+/// `_is_ipv4(word)`: four dot-separated octets, each `0` or 1 to 3 ASCII
+/// digits without a leading zero, at most 255.
+fn is_ipv4(word: &str) -> bool {
+    let parts: Vec<&str> = word.split('.').collect();
     parts.len() == 4
-        && parts
-            .iter()
-            .all(|part| (1..=3).contains(&part.len()) && part.bytes().all(|b| b.is_ascii_digit()))
+        && parts.iter().all(|part| {
+            (1..=3).contains(&part.len())
+                && part.bytes().all(|b| b.is_ascii_digit())
+                && (*part == "0" || !part.starts_with('0'))
+                && part.parse::<u16>().is_ok_and(|octet| octet <= 255)
+        })
 }
 
-/// `_tailnet_ipv4(binary, status)`: `tailscale ip -4`'s words, then
-/// `Self.TailscaleIPs`; the first IPv4-shaped one. `Err` defers: an
-/// iteration the oracle raises on, or a candidate holding a non-ASCII
-/// character (`\d` matches any decimal digit) before the first match.
+/// `_tailnet_ipv4(binary, status)`: `tailscale ip -4`'s words (unless it
+/// failed or printed something that is not UTF-8), then the strings of
+/// `Self.TailscaleIPs` when it is a list; the first address. `Err` defers.
 pub(super) async fn tailnet_ipv4(binary: &str, status: &Dict) -> Result<Option<String>, ()> {
     let proc = run(binary, &["ip", "-4"]).await?;
-    let mut candidates: Vec<Vec<u16>> = if proc.code == 0 {
+    let mut candidates: Vec<Vec<u16>> = if proc.code == 0 && !proc.unreadable {
         split(&proc.out)
             .into_iter()
             .map(|word| word.encode_utf16().collect())
@@ -441,33 +506,19 @@ pub(super) async fn tailnet_ipv4(binary: &str, status: &Dict) -> Result<Option<S
         Some(J::Dict(own)) => pyjson::get(own, "TailscaleIPs"),
         _ => None,
     };
-    let strings = |values: &mut dyn Iterator<Item = &J>| -> Vec<Vec<u16>> {
-        values
-            .filter(|value| matches!(value, J::Str(_) | J::Wtf(_)))
-            .map(J::py_str_units)
-            .collect()
-    };
-    match own.filter(|value| value.truthy()) {
-        None => {}
-        Some(J::List(values)) => candidates.extend(strings(&mut values.iter())),
-        Some(J::Dict(values)) => candidates.extend(strings(&mut values.iter().map(|(key, _)| key))),
-        // A str iterates as its characters, none of which is an address.
-        Some(J::Str(_) | J::Wtf(_)) => {}
-        // int(), float() and True are not iterable: the oracle raises.
-        Some(_) => return Err(()),
+    if let Some(J::List(values)) = own {
+        candidates.extend(
+            values
+                .iter()
+                .filter(|value| matches!(value, J::Str(_) | J::Wtf(_)))
+                .map(J::py_str_units),
+        );
     }
-    for units in candidates {
-        let Ok(word) = String::from_utf16(&units) else {
-            continue;
-        };
-        if !word.is_ascii() {
-            return Err(());
-        }
-        if ipv4_shaped(&word) {
-            return Ok(Some(word));
-        }
-    }
-    Ok(None)
+    // A word with a lone surrogate is no address.
+    Ok(candidates
+        .into_iter()
+        .filter_map(|units| String::from_utf16(&units).ok())
+        .find(|word| is_ipv4(word)))
 }
 
 // ── the port's state ─────────────────────────────────────────────────────────
@@ -719,8 +770,8 @@ mod tests {
         assert_eq!(
             detail(&Proc {
                 code: 3,
-                out: String::new(),
-                err: " \n".into()
+                err: " \n".into(),
+                ..Proc::default()
             }),
             "exit 3"
         );
@@ -729,7 +780,9 @@ mod tests {
     #[test]
     fn split_and_the_address_shape_are_pythons() {
         assert_eq!(split("x\u{a0}127.0.0.2\u{1c}y\n"), ["x", "127.0.0.2", "y"]);
-        assert!(ipv4_shaped("100.64.0.1"));
+        for word in ["100.64.0.1", "0.0.0.0", "255.255.255.255", "10.0.0.250"] {
+            assert!(is_ipv4(word), "{word}");
+        }
         for word in [
             "1.2.3",
             "1.2.3.4.5",
@@ -737,9 +790,31 @@ mod tests {
             "1..1.1",
             "a.b.c.d",
             "127.0.0.1\n",
+            "256.0.0.1",
+            "999.1.1.1",
+            "010.0.0.1",
+            "1.2.3.04",
+            "\u{661}\u{662}\u{667}.0.0.1",
+            "\u{ff11}.2.3.4",
         ] {
-            assert!(!ipv4_shaped(word), "{word}");
+            assert!(!is_ipv4(word), "{word}");
         }
+    }
+
+    #[test]
+    fn nesting_is_counted_lexically_against_the_bound() {
+        let nest = |depth: usize| format!("{}{}", "[".repeat(depth), "]".repeat(depth));
+        assert!(!too_deep(&nest(DEPTH)));
+        assert!(too_deep(&nest(DEPTH + 1)));
+        assert!(matches!(json(&nest(DEPTH)), Ok(Ok(Some(_)))));
+        assert!(matches!(json(&nest(DEPTH + 1)), Ok(Err(_))));
+        // Invalid text is counted too; brackets inside strings are not.
+        assert!(too_deep(&format!("x{}", "{".repeat(DEPTH + 1))));
+        let quoted = format!("[\"{}\\\"{}\"]", "[".repeat(200), "{".repeat(200));
+        assert!(!too_deep(&quoted));
+        assert!(matches!(json(&quoted), Ok(Ok(Some(_)))));
+        // Closing brackets below zero are counted as Python counts them.
+        assert!(!too_deep(&format!("]]{}", "[".repeat(DEPTH + 1))));
     }
 
     #[test]

@@ -98,8 +98,11 @@ fn a_lone_surrogate_is_escaped_on_stderr_and_in_json() {
             .unwrap()
             .contains("\"error\": \"serves a TCP forward to \\udc80\"")
     );
-    // On stdout without --json it would raise: run() refuses to write it.
+    // On stdout without --json, run() writes it escaped (`_write`).
     let mut text = report(Action::Status, false);
     text.say(&line);
-    assert!(String::from_utf16(&text.finish(EXIT_OK).stdout).is_err());
+    assert_eq!(
+        pyjson::backslashreplace(&text.finish(EXIT_OK).stdout),
+        "serves a TCP forward to \\udc80\n"
+    );
 }

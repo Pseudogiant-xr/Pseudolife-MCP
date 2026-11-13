@@ -124,10 +124,11 @@ const INT_MAX_STR_DIGITS: usize = 4300;
 
 /// `_port(value)`: `Ok(Some(port))`, `Ok(None)` for argparse's
 /// `not a port` error, `Err(())` where `int()` accepts a spelling this port
-/// does not reproduce (a sign, whitespace, underscores, non-ASCII digits).
+/// does not reproduce (a sign, whitespace, underscores). Anything but ASCII
+/// is no port: `_port` refuses it before `int()`.
 pub(super) fn port_value(value: &str) -> Result<Option<u16>, ()> {
     if !value.is_ascii() {
-        return Err(());
+        return Ok(None);
     }
     if !value.is_empty() && value.bytes().all(|b| b.is_ascii_digit()) {
         // int()'s digit limit (4300 unless PYTHONINTMAXSTRDIGITS moves it,
@@ -372,10 +373,13 @@ mod tests {
             "99999999999999999999",
             "1_",
             "_1",
+            "\u{0668}0",
+            "\u{ff18}\u{ff17}\u{ff16}\u{ff15}",
+            "8765\u{a0}",
         ] {
             assert_eq!(port_value(refused), Ok(None), "{refused}");
         }
-        for other in ["+80", "-1", " 80", "8_765", "\u{0668}0"] {
+        for other in ["+80", "-1", " 80", "8_765"] {
             assert_eq!(port_value(other), Err(()), "{other}");
         }
     }

@@ -361,6 +361,8 @@ def cases() -> list[Case]:
     add(case("port-empty-joined", ["tailscale", "--port="]))
     add(case("port-joined-text", ["off", "--port=8x"]))
     add(case("port-quote", ["status", "--port", "it's"]))
+    add(case("port-other-digits", ["status", "--port", "８７６５"]))
+    add(case("port-arabic-digits", ["off", "--port", "٨٧٦٥", "--yes"]))
     add(case("yes-explicit", ["off", "--yes=1"]))
     add(case("json-explicit", ["status", "--json="]))
     add(case("status-yes", ["status", "--yes"]))
@@ -469,20 +471,42 @@ def cases() -> list[Case]:
     add(case("status-ip-self-list", ["status"], scenario_=s(
         serve=OURS, ip4={"code": 1},
         status={"out": '{"BackendState": "Running", "Self": []}'})))
-    # status: declared deferrals (reads only).
-    add(case("defer-status-ip-number", ["status"], rules=("expose-deferral",), scenario_=s(
-        serve=OURS, ip4={"code": 1},
-        status={"out": '{"BackendState": "Running", "Self": {"TailscaleIPs": 7}}'})))
-    add(case("defer-status-ip-digits", ["status"], rules=("expose-deferral",), scenario_=s(
+    # status: TailscaleIPs that is not a list is ignored; only an ASCII
+    # dotted quad with octets 0-255 and no leading zero is an address.
+    for name, own in (("number", "7"), ("float", "2.5"), ("true", "true")):
+        add(case(f"status-ip-{name}", ["status"], scenario_=s(
+            serve=OURS, ip4={"code": 1},
+            status={"out": '{"BackendState": "Running", "Self": {"TailscaleIPs": %s}}' % own})))
+    add(case("status-ip-digits", ["status"], scenario_=s(
         serve=OURS, ip4={"out": "١٢٧.0.0.1\n"})))
-    add(case("defer-status-surrogate-detail", ["status"], rules=("expose-deferral",),
+    add(case("status-ip-fullwidth-json", ["status", "--json"], scenario_=s(
+        serve=OURS, ip4={"out": "１２７.0.0.1\n"},
+        status={"out": '{"BackendState": "Running", "Self": {"TailscaleIPs": ["١.2.3.4"]}}'})))
+    add(case("status-ip-octet", ["status"], scenario_=s(
+        serve=OURS, ip4={"out": "999.1.1.1 256.0.0.1\n"})))
+    add(case("status-ip-leading-zero", ["status", "--json"], scenario_=s(
+        serve=OURS, ip4={"out": "127.0.0.01 0127.0.0.1\n"},
+        status={"out": '{"BackendState": "Running", "Self": {"TailscaleIPs": ["010.0.0.1", "127.0.0.0"]}}'})))
+    add(case("status-ip-undecodable", ["status"], scenario_=s(
+        serve=OURS, ip4={"out_b64": base64.b64encode(b"\xff 10.0.0.1\n").decode()})))
+    # A lone surrogate is printed escaped, as on stderr.
+    add(case("status-surrogate-detail", ["status"],
              scenario_=s(serve='{"TCP": {"{PORT}": {"TCPForward": "\\udc80"}}}')))
     add(case("status-surrogate-detail-json", ["status", "--json"],
              scenario_=s(serve='{"TCP": {"{PORT}": {"TCPForward": "\\udc80"}}}')))
-    add(case("defer-status-deep", ["status"], rules=("expose-deferral",),
-             scenario_=s(status={"out": "[" * 200 + "]" * 200})))
-    add(case("defer-status-undecodable", ["status"], rules=("expose-deferral",),
+    # Output that cannot be read: nested past 100 brackets, or not UTF-8.
+    add(case("status-deep-at-bound", ["status"],
+             scenario_=s(status={"out": "[" * 100 + "]" * 100})))
+    add(case("status-deep", ["status"], scenario_=s(status={"out": "[" * 101 + "]" * 101})))
+    add(case("status-deep-invalid-json", ["status", "--json"],
+             scenario_=s(status={"out": '{"a": "[[[", ' + "{" * 150})))
+    add(case("status-serve-deep", ["status"], scenario_=s(serve="[" * 100_000)))
+    add(case("status-undecodable", ["status"],
              scenario_=s(status={"out_b64": base64.b64encode(b"\xff{}").decode()})))
+    add(case("status-undecodable-stderr-json", ["status", "--json"],
+             scenario_=s(status={"code": 1, "err_b64": base64.b64encode(b"down \xfe\n").decode()})))
+    add(case("status-serve-undecodable", ["status"], scenario_=s(
+        reads=[{"out_b64": base64.b64encode(b'{"TCP": "\xc3("}').decode()}])))
 
     # A tailscale program that cannot start (str(OSError) in the refusal).
     if core.WINDOWS:
@@ -538,8 +562,13 @@ def cases() -> list[Case]:
     deep = lambda: FixtureDaemon({"/health": text(
         '{"status": "ok", "auth": true, "bank": ' + "[" * 200 + "]" * 200 + "}", 200,
         "application/json")})
-    add(case("defer-tailscale-daemon-deep", ["tailscale", *at()], rules=("expose-deferral",),
-             daemon=deep))
+    add(case("tailscale-daemon-deep", ["tailscale", *at()], daemon=deep, scenario_=s()))
+    add(case("tailscale-undecodable-serve", ["tailscale", *at(), "--yes"], daemon=_health(HEALTHY),
+             scenario_=s(reads=[{"out_b64": base64.b64encode(b"\xff").decode()}])))
+    add(case("tailscale-deep-status-json", ["tailscale", *at(), "--json"], daemon=_health(HEALTHY),
+             scenario_=s(status={"out": "{" * 101})))
+    add(case("off-undecodable-status", ["off", "--yes"],
+             scenario_=s(serve=OURS, status={"out_b64": base64.b64encode(b"\x80").decode()})))
     healthy = _health(HEALTHY)
     # tailscale: the CLI and its state.
     add(case("tailscale-not-installed", ["tailscale", *at()], daemon=healthy))

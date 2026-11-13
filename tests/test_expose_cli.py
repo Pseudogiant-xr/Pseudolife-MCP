@@ -44,11 +44,21 @@ _FAKE = textwrap.dedent('''\
             sys.stderr.write(err)
         sys.exit(rc)
 
+    # Raw bytes for a read, before or after the change ("raw" / "raw_after"),
+    # keyed by the argv joined with spaces, as hex.
+    changed = any(c[:2] == ["serve", "--bg"] or c[-1:] == ["off"] for c in state["calls"][:-1])
+    raw = state.get("raw_after" if changed else "raw", {}).get(" ".join(args))
+    if raw is not None:
+        save()
+        sys.stdout.buffer.write(bytes.fromhex(raw))
+        sys.stdout.flush()
+        sys.exit(0)
     if args == ["status", "--json"]:
         if state["backend"] is None:
             done(err="failed to connect to local tailscaled; it doesn't appear to be running\\n", rc=1)
         ips = ([state["ip"]] if state["ip"] else []) + ["fd00::1"]
-        done(json.dumps({"BackendState": state["backend"], "Self": {"TailscaleIPs": ips}}))
+        own = state["own_ips"] if "own_ips" in state else ips
+        done(json.dumps({"BackendState": state["backend"], "Self": {"TailscaleIPs": own}}))
     if args == ["ip", "-4"]:
         if not state["ip"]:
             done(err="no current Tailscale IPv4 address\\n", rc=1)
@@ -764,3 +774,95 @@ def test_a_relative_program_files_base_is_never_used(monkeypatch, tmp_path):
     assert expose_cli.default_locations() == [tmp_path / "pf" / "Tailscale" / "tailscale.exe"]
     monkeypatch.setenv("ProgramFiles", "C:relative")
     assert expose_cli.default_locations() == [Path(r"C:\Program Files") / "Tailscale" / "tailscale.exe"]
+
+
+
+# -- output tailscale printed that cannot be read ---------------------------------
+
+NOT_UTF8 = b"\xff{}".hex()
+DEEP = ("[" * 100_000 + "]" * 100_000).encode().hex()
+
+
+@pytest.mark.parametrize("raw", [NOT_UTF8, DEEP], ids=["not-utf8", "deep"])
+@pytest.mark.parametrize("read", ["status --json", "serve status --json"])
+def test_an_unreadable_read_refuses_before_any_change(tailscale, daemon, capsys, raw, read):
+    tailscale.set(raw={read: raw})
+    code, _out, err = run(capsys, "tailscale", "--port", str(daemon.port), "--yes")
+    assert code == 4
+    assert f"could not read what `tailscale {read}` printed" in err
+    assert tailscale.changing_calls() == []
+    code, report = run_json(capsys, "status", "--port", str(daemon.port))
+    assert code == 0 and report["state"] == "unavailable"
+    assert "could not read" in report["detail"]
+
+
+@pytest.mark.parametrize("raw", [NOT_UTF8, DEEP], ids=["not-utf8", "deep"])
+def test_an_unreadable_read_back_after_the_serve_exits_5_with_how_to_check(tailscale, daemon, capsys,
+                                                                            raw):
+    tailscale.set(raw_after={"serve status --json": raw})
+    code, _out, err = run(capsys, "tailscale", "--port", str(daemon.port), "--yes")
+    assert code == 5
+    assert "could not verify" in err and "tailscale serve status" in err
+    assert f"pseudolife-mcp expose off --port {daemon.port}" in err
+    assert [c for c in tailscale.changing_calls() if c[-1] == "off"] == []
+
+
+@pytest.mark.parametrize("raw", [NOT_UTF8, DEEP], ids=["not-utf8", "deep"])
+def test_an_unreadable_read_back_after_off_exits_5_with_how_to_check(tailscale, daemon, capsys, raw):
+    port = daemon.port
+    tailscale.set(serve=_ours(port), raw_after={"serve status --json": raw})
+    code, _out, err = run(capsys, "off", "--port", str(port), "--yes")
+    assert code == 5
+    assert "could not verify" in err and "tailscale serve status" in err
+    assert f"tailscale serve --tcp={port} off" in err
+
+
+def test_unreadable_serve_output_is_judged_by_its_exit_code(tailscale, daemon, capsys):
+    tailscale.set(raw={"serve --bg --tcp={0} tcp://127.0.0.1:{0}".format(daemon.port): NOT_UTF8})
+    code, _out, _err = run(capsys, "tailscale", "--port", str(daemon.port), "--yes")
+    # The stand-in prints bytes and exits 0 without serving: undone, exit 5.
+    assert code == 5
+
+
+def test_a_deeply_nested_health_answer_is_not_the_daemon(tailscale, capsys):
+    stub = Daemon(raw=(200, [("Content-Type", "application/json")],
+                       b'{"status": "ok", "auth": true, "bank": ' + b"[" * 100_000 + b"]" * 100_000 + b"}"))
+    try:
+        code, _out, err = run(capsys, "tailscale", "--port", str(stub.port), "--yes")
+    finally:
+        stub.close()
+    assert code == 4 and "not the Pseudolife daemon" in err
+    assert tailscale.calls() == []
+
+
+@pytest.mark.parametrize("own", [7, 2.5, True, "127.0.0.1", {"127.0.0.1": 1}])
+def test_tailscale_ips_that_are_not_a_list_are_ignored(tailscale, daemon, capsys, own):
+    tailscale.set(own_ips=own, serve=_ours(daemon.port), raw={"ip -4": b"".hex()})
+    code, report = run_json(capsys, "status", "--port", str(daemon.port))
+    assert code == 0 and report["state"] == "unavailable" and report["url"] is None
+    code, _out, err = run(capsys, "tailscale", "--port", str(daemon.port), "--yes")
+    assert code == 4 and "IPv4" in err
+
+
+@pytest.mark.parametrize("word", ["\u0661\u0662\u0667.0.0.1", "\uff11.2.3.4", "999.1.1.1", "256.0.0.1",
+                                  "010.0.0.1", "1.2.3.04"])
+def test_only_an_ascii_dotted_quad_is_an_address(tailscale, daemon, capsys, word):
+    tailscale.set(serve=_ours(daemon.port), raw={"ip -4": (word + "\n").encode().hex()})
+    code, report = run_json(capsys, "status", "--port", str(daemon.port))
+    # Self.TailscaleIPs still names the stand-in's 127.0.0.1.
+    assert code == 0 and report["url"] == f"http://127.0.0.1:{daemon.port}"
+
+
+def test_a_lone_surrogate_in_tailscale_text_is_printed_escaped(tailscale, daemon, capsys):
+    port = daemon.port
+    tailscale.set(serve_raw='{"TCP": {"%d": {"TCPForward": "\\udc80"}}}' % port)
+    code, out, _err = run(capsys, "status", "--port", str(port))
+    assert code == 0
+    assert out == f"not exposed: tailnet port {port} serves a TCP forward to \\udc80\n"
+
+
+@pytest.mark.parametrize("value", ["\uff18\uff17\uff16\uff15", "\u0668\u0667\u0666\u0665"])
+def test_a_port_in_other_digits_is_a_usage_error(tailscale, capsys, value):
+    assert expose_cli.main(["status", "--port", value]) == 2
+    assert f"not a port: {value!r}" in capsys.readouterr().err
+    assert tailscale.calls() == []

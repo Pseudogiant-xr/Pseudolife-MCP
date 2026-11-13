@@ -59,8 +59,8 @@ struct Context {
     utf8_argv: bool,
 }
 
-/// One answer: the stdout text (code units: a lone surrogate there makes
-/// the oracle's strict stdout raise), the stderr text, the exit code.
+/// One answer: the stdout text (code units, written with a lone surrogate
+/// escaped as `_write` escapes it), the stderr text, the exit code.
 #[derive(Debug, PartialEq, Eq)]
 struct Out {
     stdout: Vec<u16>,
@@ -171,7 +171,8 @@ enum Health {
 }
 
 /// `fetch_health("http://127.0.0.1:<port>", 3)` over a no-proxy,
-/// no-redirect opener. `Err` defers: an answer nested past [`tailscale::DEPTH`].
+/// no-redirect opener; an answer nested past [`tailscale::DEPTH`] is
+/// "other", as `_json` refuses it.
 async fn fetch_health(port: u16) -> Res<Health> {
     let reply = hook_http::get_bounded(
         &format!("http://127.0.0.1:{port}"),
@@ -200,10 +201,10 @@ async fn fetch_health(port: u16) -> Res<Health> {
     let Ok(text) = std::str::from_utf8(&reply.body) else {
         return Ok(Health::Other);
     };
-    Ok(match pyjson::loads(text, tailscale::DEPTH) {
-        Ok(J::Dict(payload)) => Health::Ok(payload),
-        Ok(_) | Err(pyjson::Refused::NotJson) => Health::Other,
-        Err(pyjson::Refused::TooDeep) => return Err(Defer),
+    Ok(match tailscale::json(text).map_err(|_| Defer)? {
+        Ok(Some(J::Dict(payload))) => Health::Ok(payload),
+        // Not an object, not JSON, or nested past the bound.
+        Ok(_) | Err(_) => Health::Other,
     })
 }
 
@@ -532,9 +533,8 @@ pub(super) fn run(values: Vec<OsString>) -> Option<ExitCode> {
         utf8_argv: super::move_cli::utf8_argv(),
     };
     let out = decide(&argv, &context).ok()?;
-    // `print` to the strict UTF-8 stdout raises on a lone surrogate.
-    let stdout = String::from_utf16(&out.stdout).ok()?;
-    let stdout = super::text_bytes(&stdout);
+    // `_write` escapes a lone surrogate as `\udXXX` on stdout too.
+    let stdout = super::text_bytes(&pyjson::backslashreplace(&out.stdout));
     let stderr = super::text_bytes(&out.stderr);
     if !stdout.is_empty() {
         match super::move_cli::emit(&mut io::stdout().lock(), &stdout) {
