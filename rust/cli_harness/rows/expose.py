@@ -38,6 +38,7 @@ DEFERRAL = "pseudolife-stdio: mode 'expose' is deferred in this candidate\n"
 FILE = "shim/src/cli/expose/mod.rs"
 TS_FILE = "shim/src/cli/expose/tailscale.rs"
 ARGS_FILE = "shim/src/cli/expose/args.rs"
+LOOKUP_FILE = "shim/src/cli/program_lookup.rs"
 DEAD_PORT = "9"
 TS_PATH = "{HOME}/bin"
 # The lookup's inputs, pinned: PATH holds only the stand-in's directory, and
@@ -608,7 +609,7 @@ def cases() -> list[Case]:
 MUTANTS = [
     Mutant("expose-funnel-ignored", "expose", TS_FILE,
            "if funnelled(Some(config), port) ||", "if false ||", ("status-funnel",)),
-    Mutant("expose-relative-path-searched", "expose", TS_FILE,
+    Mutant("expose-relative-path-searched", "expose", LOOKUP_FILE,
            "if known == Some(false) {", "if known.is_none() {", ("status-relative-path-skipped",)),
     Mutant("expose-yes-skips-tty-check", "expose", FILE,
            "if !args.yes {", "if false {", ("off-no-terminal",)),
@@ -627,7 +628,7 @@ MUTANTS = [
            "message.trim_end_matches(|c: char| c <= ' ')", ("status-not-a-program",),
            platforms=("windows",)),
     # Only Windows has PATHEXT, whose spelling the lookup reports.
-    Mutant("expose-pathext-lowercased", "expose", TS_FILE,
+    Mutant("expose-pathext-lowercased", "expose", LOOKUP_FILE,
            '.map(|ext| format!("tailscale{ext}"))',
            '.map(|ext| format!("tailscale{}", ext.to_lowercase()))', ("status-none-json",),
            platforms=("windows",)),

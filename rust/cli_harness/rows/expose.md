@@ -131,14 +131,17 @@ change, in the deferral cases) never leaves the machine.
 
 The row runs live on both OSes in the `w1c-connection` shard, and its
 mutants in the `expose-0` source-mutant shard. Every case is built from
-fixed bytes, so all are golden cases. Both goldens bind `f60c12dd` (git),
-whose `pseudolife_memory/` tree is master `e8942898`'s: Windows from this
-checkout (CPython 3.11.9), Linux from a WSL Ubuntu clone of the branch
-(CPython 3.11.15).
+fixed bytes, so all are golden cases. Both goldens bind `c6c3b6d4` (git),
+the commit of the Python fixes of 2026-11-13 (the lookup, unreadable
+output, addresses): Windows from this checkout (CPython 3.11.9), Linux from
+a WSL Ubuntu clone of the branch (CPython 3.11.15).
 
-Local evidence (2026-11-13): Windows workstation, 134/134 live and golden
-and all 7 mutants caught; WSL Ubuntu, 134/134 live and golden and all 5 of
-its mutants caught (`expose-winerror-full-stop` and
-`expose-pathext-lowercased` are Windows-only). Before the port, the row's
-first 133 cases against the deferring binary: 127 differed, and the 6 that
-matched were declared deferrals. Hosted runs are CI's.
+Local evidence (2026-11-13, after the Python fixes): Windows workstation,
+153/153 live and golden and all 8 mutants caught; WSL Ubuntu, 153/153 live
+and golden and all 6 of its mutants caught (`expose-winerror-full-stop` and
+`expose-pathext-lowercased` are Windows-only). The fixes' 26 new or
+converted cases (lookup, unreadable output, addresses, ports) differed in
+25 against the binary built before them; the one that matched is the
+100-bracket boundary. Before the port, the row's first 133 cases against
+the deferring binary: 127 differed, and the 6 that matched were declared
+deferrals. Hosted runs are CI's.

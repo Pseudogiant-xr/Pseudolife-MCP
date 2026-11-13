@@ -53,7 +53,7 @@ pub(super) async fn exposed_url(port: u32) -> Option<String> {
     // `expose_cli.find_tailscale()`, as `expose status` finds it: absolute
     // PATH directories only, never the current directory. A PATH entry the
     // lookup cannot classify (UNC, device) that holds it gives no URL here.
-    let binary = PathBuf::from(crate::cli::expose::find_tailscale().ok()??);
+    let binary = PathBuf::from(crate::cli::program_lookup::find_tailscale().ok()??);
     let query = |args: &[&str]| {
         let mut command = vec![binary.clone().into_os_string()];
         command.extend(args.iter().map(|arg| OsString::from(*arg)));
@@ -81,7 +81,9 @@ pub(super) async fn exposed_url(port: u32) -> Option<String> {
     if let Some(own) = status["Self"]["TailscaleIPs"].as_array() {
         ips.extend(own.iter().filter_map(|ip| ip.as_str()));
     }
-    let ip = ips.into_iter().find(|ip| crate::cli::expose::is_ipv4(ip))?;
+    let ip = ips
+        .into_iter()
+        .find(|ip| crate::cli::program_lookup::is_ipv4(ip))?;
     Some(format!("http://{ip}:{port}"))
 }
 

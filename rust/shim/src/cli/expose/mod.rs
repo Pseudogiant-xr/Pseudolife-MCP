@@ -13,10 +13,6 @@
 mod args;
 mod tailscale;
 
-/// `find_tailscale()` and `_is_ipv4`, which `invite` reads through
-/// `expose status`.
-pub(super) use tailscale::{find as find_tailscale, is_ipv4};
-
 use super::hook_http;
 use super::pyjson::{self, Dict, J};
 use args::{Action, Args, Parsed};
