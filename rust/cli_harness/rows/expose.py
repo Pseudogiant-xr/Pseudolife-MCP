@@ -629,7 +629,7 @@ MUTANTS = [
            platforms=("windows",)),
     # Only Windows has PATHEXT, whose spelling the lookup reports.
     Mutant("expose-pathext-lowercased", "expose", LOOKUP_FILE,
-           '.map(|ext| format!("tailscale{ext}"))',
-           '.map(|ext| format!("tailscale{}", ext.to_lowercase()))', ("status-none-json",),
+           '.map(|ext| format!("{name}{ext}"))',
+           '.map(|ext| format!("{name}{}", ext.to_lowercase()))', ("status-none-json",),
            platforms=("windows",)),
 ]
