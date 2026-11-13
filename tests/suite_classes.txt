@@ -21,11 +21,11 @@ live test_allocator_trim_probe.py
 live test_analyze_stale_policy.py
 frozen test_analyzer_queue_lifecycle.py
 live test_answerability_probe.py
-frozen test_apply_entity_kinds.py
+live test_apply_entity_kinds.py
 live test_assistant_provenance.py
 live test_atlas_currency.py
 frozen test_atomic_weights.py
-frozen test_audit_supersessions.py
+live test_audit_supersessions.py
 live test_backfill_edge_confidence.py
 frozen test_backup_cli.py
 live test_band_ablation_flat.py
@@ -48,7 +48,7 @@ frozen test_board_audit_stats.py
 live test_board_status.py
 frozen test_briefing.py
 frozen test_capacity_guard.py
-frozen test_capture_metrics.py
+live test_capture_metrics.py
 live test_changelog_fragments.py
 frozen test_channel.py
 live test_check_lock_resolves.py
@@ -59,7 +59,7 @@ live test_ci_budget_integration.py
 live test_ci_merge_queue.py
 live test_ci_push_passed.py
 live test_ci_windows_lanes.py
-frozen test_classify_entity_kinds.py
+live test_classify_entity_kinds.py
 live test_claude_md_citations.py
 live test_claude_shim_contract.py
 live test_claude_shim_health.py
@@ -120,7 +120,7 @@ live test_coordination_audit.py
 frozen test_coordination_auth.py
 frozen test_coordination_awareness.py
 live test_coordination_bench.py
-frozen test_coordination_bench_real_pg.py
+live test_coordination_bench_real_pg.py
 live test_coordination_checkin_bench.py
 frozen test_coordination_clock.py
 live test_coordination_console.py
@@ -283,7 +283,7 @@ live test_integrate_script.py
 live test_integrate_snapshot_admission.py
 frozen test_invite_cli.py
 frozen test_judge_agreement.py
-frozen test_judge_ladder_caution.py
+live test_judge_ladder_caution.py
 frozen test_judge_lock_budget.py
 frozen test_judge_thinking_payload.py
 live test_label_pair.py
@@ -459,7 +459,7 @@ frozen test_slot_persistence.py
 frozen test_slot_query_index.py
 frozen test_slots.py
 frozen test_span_gate.py
-frozen test_spawn_serve.py
+live test_spawn_serve.py
 frozen test_stale_policy.py
 frozen test_stance_field.py
 live test_stop_wake_hook.py
@@ -487,7 +487,7 @@ live test_test_login_cli.py
 frozen test_tool_annotations.py
 frozen test_tool_consolidation.py
 frozen test_toolset_tiers.py
-frozen test_trace_invalidations_storage.py
+live test_trace_invalidations_storage.py
 live test_transfer_cli.py
 frozen test_tunnel_bridge.py
 live test_tunnel_cli.py
@@ -515,6 +515,6 @@ frozen test_wiki_page.py
 frozen test_world_cortex.py
 frozen test_write_through.py
 frozen test_writer_context.py
-frozen test_writer_keying.py
+live test_writer_keying.py
 live test_writer_lease.py
 live test_wsl_suite_launcher.py
