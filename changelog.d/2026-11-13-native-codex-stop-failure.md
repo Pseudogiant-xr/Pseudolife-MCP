@@ -7,4 +7,4 @@
   read Codex's runtime as not loaded, and treated a plugin update that only
   added the event as a changed definition to re-approve. The shared Codex
   consent cases now pin the skip for both implementations, and the Python
-  half of that comparison runs in CI again.
+  half of that comparison now runs in CI on Linux and Windows.

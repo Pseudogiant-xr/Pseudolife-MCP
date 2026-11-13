@@ -1,8 +1,0 @@
-{
-  "schema": 1,
-  "workflow": "rust.yml",
-  "job": "rust",
-  "before": "a997568b94cb7b6f",
-  "fingerprint": "12e3fc0402a43f50",
-  "reason": "Adds 13 binary-free harness test files (rust/cli_harness/test_native_runtime_contract.py, issue #1500, and 12 harness unit tests no lane ran) to the existing pytest invocation of 'Check port inventories and producer census'; no new job, step, install or retry. Measured on a Windows desktop 2026-11-13, one file at a time: 36 tests in 0.07s for the contract file and about 28s for the twelve (test_stub_extractor 15.9s, test_recall_mentions_generation 8.3s, the rest under 2.4s each)."
-}
