@@ -5,6 +5,13 @@
     "wake_liveness"
   ],
   "postgres": false,
+  "shim": [
+    "backup",
+    "backup_help.txt",
+    "doctor",
+    "maintainer",
+    "update"
+  ],
   "source_mutants": [
     "doctor-agent-path-unnormalized",
     "doctor-agent-proof-inverted",

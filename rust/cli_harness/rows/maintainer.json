@@ -4,6 +4,9 @@
     "maintainer_cli"
   ],
   "postgres": true,
+  "shim": [
+    "maintainer"
+  ],
   "source_mutants": [
     "maint-class-fallback-dropped",
     "maint-code-ttl",

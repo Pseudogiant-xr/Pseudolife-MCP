@@ -4,6 +4,10 @@
     "backup_cli"
   ],
   "postgres": true,
+  "shim": [
+    "backup",
+    "backup_help.txt"
+  ],
   "source_mutants": [
     "backup-archives-backups-dir",
     "backup-archives-password-file",

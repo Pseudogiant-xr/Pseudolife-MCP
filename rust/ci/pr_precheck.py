@@ -113,7 +113,7 @@ def judges_for(path: str, graph: dict[str, set[str]], owners: dict[str, tuple[st
 def rows_for(path: str, owners: dict[str, tuple[str, ...]]) -> tuple[str, ...]:
     # Match the port's existing Rust command ownership map; unknown shared
     # shim code reaches every row, as it does in the full parity selector.
-    from parity_scope import SHIM_COMMANDS, harness_imports, is_docs, row_of
+    from parity_scope import harness_imports, is_docs, row_of, shim_commands
     parts = PurePosixPath(path).parts
     if not parts or path in ("pyproject.toml", "rust/Cargo.toml", "rust/Cargo.lock"):
         return ROWS
@@ -127,7 +127,7 @@ def rows_for(path: str, owners: dict[str, tuple[str, ...]]) -> tuple[str, ...]:
         return ROWS
     if path.startswith("rust/shim/"):
         if len(parts) > 4 and parts[2:4] == ("src", "cli"):
-            return SHIM_COMMANDS.get(parts[4], ROWS)
+            return shim_commands().get(parts[4], ROWS)
         return ROWS
     if path.startswith("rust/daemon/") and not path.startswith("rust/daemon/harness/"):
         # This row invokes the sibling native daemon to migrate the bank.

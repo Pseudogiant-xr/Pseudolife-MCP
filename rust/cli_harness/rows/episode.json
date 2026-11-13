@@ -4,6 +4,10 @@
     "episode_cli"
   ],
   "postgres": false,
+  "shim": [
+    "episode.rs",
+    "episode_input.rs"
+  ],
   "source_mutants": [
     "episode-body-spacing",
     "episode-default-name",

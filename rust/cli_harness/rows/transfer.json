@@ -4,6 +4,10 @@
     "transfer_cli"
   ],
   "postgres": true,
+  "shim": [
+    "transfer",
+    "transfer.rs"
+  ],
   "source_mutants": [
     "transfer-cast-check",
     "transfer-commit-error-uncertain",

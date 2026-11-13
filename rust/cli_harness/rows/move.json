@@ -4,6 +4,9 @@
     "move_cli"
   ],
   "postgres": false,
+  "shim": [
+    "move_cli.rs"
+  ],
   "source_mutants": [
     "move-checkout-cr",
     "move-dash-value-admitted",

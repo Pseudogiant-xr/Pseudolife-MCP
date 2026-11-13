@@ -4,6 +4,7 @@
     "invite_cli"
   ],
   "postgres": true,
+  "shim": [],
   "source_mutants": [
     "invite-expired-is-pending",
     "invite-keep-owned-lost",

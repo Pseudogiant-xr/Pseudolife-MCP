@@ -4,6 +4,9 @@
     "board_audit_cli"
   ],
   "postgres": true,
+  "shim": [
+    "board_audit"
+  ],
   "source_mutants": [
     "audit-body-reason-swap",
     "audit-broken-exit-3",

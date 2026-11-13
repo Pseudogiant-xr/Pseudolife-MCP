@@ -4,6 +4,7 @@
     "lease_cli"
   ],
   "postgres": true,
+  "shim": [],
   "source_mutants": [
     "lease-hold-status",
     "lease-break-holder",

@@ -8,7 +8,9 @@ import pytest
 import yaml
 
 import parity_scope
-from parity_scope import ALL, FLOOR, ROW_SUITES, SHARDS, SHIM_COMMANDS, SUITES, matrix, reached, select
+from parity_scope import ALL, FLOOR, ROW_SUITES, SHARDS, SUITES, matrix, reached, select, shim_commands
+
+SHIM_COMMANDS = shim_commands()
 from test_workflow import CODE_CHANGES, DOCS_ONLY_CHANGES, W1C_SUITES
 
 ROOT = Path(__file__).resolve().parents[2]

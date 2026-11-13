@@ -4,6 +4,10 @@
     "conductor_watch_cli"
   ],
   "postgres": false,
+  "shim": [
+    "conductor_watch",
+    "move_cli.rs"
+  ],
   "source_mutants": [
     "conductor-watch-age-zero-admitted",
     "conductor-watch-cr-kept",

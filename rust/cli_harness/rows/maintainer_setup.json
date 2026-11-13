@@ -4,6 +4,9 @@
     "maintainer_cli"
   ],
   "postgres": false,
+  "shim": [
+    "maintainer"
+  ],
   "source_mutants": [
     "setup-consent-bypassed"
   ],

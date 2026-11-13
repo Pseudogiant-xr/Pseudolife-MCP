@@ -4,6 +4,10 @@
     "coordination_recovery"
   ],
   "postgres": false,
+  "shim": [
+    "board_audit",
+    "coordination_recovery"
+  ],
   "source_mutants": [
     "recovery-stop-gate-dropped"
   ],

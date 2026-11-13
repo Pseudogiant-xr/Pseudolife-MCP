@@ -4,6 +4,7 @@
     "lease_cli"
   ],
   "postgres": true,
+  "shim": [],
   "source_mutants": [
     "lease-child-status",
     "lease-list-filter",

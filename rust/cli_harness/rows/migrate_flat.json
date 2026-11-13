@@ -4,6 +4,11 @@
     "migrate_flat_cli"
   ],
   "postgres": true,
+  "shim": [
+    "backup",
+    "backup_help.txt",
+    "migrate_flat.rs"
+  ],
   "source_mutants": [
     "migrate-flat-apply-fence"
   ],

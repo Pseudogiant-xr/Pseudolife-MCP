@@ -5,6 +5,10 @@
     "coordination_adapter"
   ],
   "postgres": false,
+  "shim": [
+    "briefing_help.txt",
+    "briefing_hook.rs"
+  ],
   "source_mutants": [
     "hook-briefing-cap-order",
     "hook-cursor-not-saved",

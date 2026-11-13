@@ -150,31 +150,25 @@ SHIM = ("cli", "cli-live", "judges", "w1c-doctor", "w1c-pairing", "w1c-connectio
 # The pseudolife-daemon crate (and its graph and dream contract binaries).
 DAEMON = ("cli", "cli-store", "cli-startup", "cli-live", "eval", "h5-w1a", "h5-background",
           "h5-daemon-mutants", "h5-graph-mutants")
-# rust/shim/src/cli entries whose users are covered by the listed rows;
-# any other shim file reaches the whole binary. Shared
-# helpers (lease, pairing, hook_http, hook_json, doorbell_*) are left out:
-# other commands import them. test_parity_scope.py scans the shim source and
-# fails if another command starts using a mapped entry.
-SHIM_COMMANDS = {
-    # The conservative import scan also sees update's private backup module.
-    # Doctor shares update's Codex hook checks; its dependencies inherit that row,
-    # and console's, which reads doctor's registration search.
-    "backup": ("backup", "migrate_flat", "update", "doctor", "console", "restore"),
-    "backup_help.txt": ("backup", "migrate_flat", "update", "doctor", "console", "restore"),
-    "board_audit": ("audit", "coordination_recovery"),
-    "migrate_flat.rs": ("migrate_flat",),
-    "update": ("update", "doctor", "console"),
-    # console and conductor_watch also read move's argv and stream helpers.
-    "connect": ("connect", "restore"), "doctor": ("doctor", "console"), "console": ("console",),
-    "conductor_watch": ("conductor_watch",),
-    "maintainer": ("maintainer", "maintainer_setup", "update", "doctor", "console"),
-    "coordination_recovery": ("coordination_recovery",),
-    "move_cli.rs": ("move", "console", "conductor_watch"), "test_login": ("test_login",),
-    "transfer": ("transfer",), "transfer.rs": ("transfer",), "tunnel": ("tunnel",),
-    "restore_cli": ("restore",),
-    "episode.rs": ("episode",), "episode_input.rs": ("episode",),
-    "briefing_hook.rs": ("hook",), "briefing_help.txt": ("hook",),
-}
+# rust/shim/src/cli entries whose users are covered by the listed rows
+# (shim_commands()); any other shim file reaches the whole binary. Each row
+# names the entries that reach it in its rust/cli_harness/rows/<row>.json
+# (row_ci.py), so ports name their own command there and nowhere shared.
+# Shared helpers (lease, pairing, hook_http, hook_json, doorbell_*) are left
+# out: other commands import them. test_parity_scope.py scans the shim
+# source and fails if another command starts using a mapped entry. The
+# import scan is conservative: it also sees update's private backup module,
+# doctor shares update's Codex hook checks (so its dependencies, and
+# console's, which reads doctor's registration search, name update), and
+# console and conductor_watch read move's argv and stream helpers.
+@functools.lru_cache(maxsize=None)
+def shim_commands() -> dict[str, tuple[str, ...]]:
+    """Each mapped rust/shim/src/cli entry, with the rows it reaches.
+
+    Read when first needed, not at import: ops/integrate.py loads this file
+    as data from a temporary directory to resolve the matrix."""
+    from row_ci import shim_users
+    return shim_users()
 # The scope step's documentation-only rule, which Python's re cannot take
 # verbatim (its lookbehind is variable-width); tests check both agree.
 CODE_DIRS = re.compile(r"(?i)(rust|evals|pseudolife_memory|plugin|ops|tests|\.github)/")
@@ -227,8 +221,11 @@ def reached(path: str) -> tuple[str, ...]:
             # every shard's PostgreSQL prep import it too.
             return ALL
         if area == "shim":
-            if rest[1:3] == ("src", "cli") and len(rest) > 3 and rest[3] in SHIM_COMMANDS:
-                return tuple(ROW_SUITES[row] for row in SHIM_COMMANDS[rest[3]]) + ("judges",)
+            users = shim_commands().get(rest[3], ()) if rest[1:3] == ("src", "cli") and len(rest) > 3 else ()
+            if users:
+                if any(row not in ROW_SUITES for row in users):
+                    return ALL  # a row with no suite yet: run everything
+                return tuple(ROW_SUITES[row] for row in users) + ("judges",)
             return SHIM
         if area == "daemon":
             # The harness is shared with the CLI rows; the crate is not.

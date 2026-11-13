@@ -4,6 +4,7 @@
     "pair_cli"
   ],
   "postgres": false,
+  "shim": [],
   "source_mutants": [
     "pair-cleanup-error-swallowed",
     "pair-constant-digest",

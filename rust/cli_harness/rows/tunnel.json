@@ -4,6 +4,9 @@
     "tunnel_cli"
   ],
   "postgres": false,
+  "shim": [
+    "tunnel"
+  ],
   "source_mutants": [
     "tunnel-ambiguous-literal-accepted",
     "tunnel-challenge-bound",

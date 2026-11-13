@@ -4,6 +4,9 @@
     "connect_cli"
   ],
   "postgres": false,
+  "shim": [
+    "connect"
+  ],
   "source_mutants": [
     "connect-backup-stamp-millis",
     "connect-cache-url-last",

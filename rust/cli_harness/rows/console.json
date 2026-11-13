@@ -4,6 +4,15 @@
     "console_cli"
   ],
   "postgres": false,
+  "shim": [
+    "backup",
+    "backup_help.txt",
+    "console",
+    "doctor",
+    "maintainer",
+    "move_cli.rs",
+    "update"
+  ],
   "source_mutants": [
     "console-405-not-old",
     "console-code-any-character",

@@ -5,6 +5,12 @@
     "docker_backup_restore"
   ],
   "postgres": false,
+  "shim": [
+    "backup",
+    "backup_help.txt",
+    "connect",
+    "restore_cli"
+  ],
   "source_mutants": [
     "restore-busy-pid-unknown",
     "restore-checkout-unchecked",

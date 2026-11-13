@@ -35,6 +35,12 @@ FIELDS = {
     # Whether the precheck must seed a bank or start the packaged
     # PostgreSQL fixture for this row.
     "postgres": bool,
+    # The rust/shim/src/cli entries (a file or a command directory) whose
+    # change reaches this row: its own command and the entries it imports.
+    # parity_scope.shim_commands() inverts these; an entry no row names
+    # reaches the whole binary. Empty for a row whose command lives in
+    # shared shim code (mail, lease, lease_operator, invite, pair).
+    "shim": list,
     # The row's source mutants (the Mutant(...) ids in rows/<row>.py), in
     # the order coverage_plan cuts them into eight-mutant nightly shards.
     "source_mutants": list,
@@ -66,6 +72,9 @@ def problems(data) -> list[str]:
     roots = data["python_roots"]
     if not roots or any(type(name) is not str or not name.isidentifier() for name in roots):
         found.append("python_roots is not a list of module names")
+    shim = data["shim"]
+    if any(type(name) is not str or not name or "/" in name for name in shim):
+        found.append("shim is not a list of rust/shim/src/cli entries")
     mutants = data["source_mutants"]
     if not mutants or any(type(name) is not str or not name for name in mutants):
         found.append("source_mutants is not a list of mutant ids")
@@ -107,6 +116,15 @@ def rows(root: Path = ROOT) -> tuple[str, ...]:
 def source_mutants(root: Path = ROOT) -> dict[str, list[str]]:
     """Each row's source mutant ids, in its declared order."""
     return {row: list(data["source_mutants"]) for row, data in declarations(root).items()}
+
+
+def shim_users(root: Path = ROOT) -> dict[str, tuple[str, ...]]:
+    """Each rust/shim/src/cli entry any row names, with the rows it reaches."""
+    found = {}
+    for row, data in declarations(root).items():
+        for entry in data["shim"]:
+            found.setdefault(entry, []).append(row)
+    return {entry: tuple(found[entry]) for entry in sorted(found)}
 
 
 def python_roots(root: Path = ROOT) -> dict[str, tuple[str, ...]]:
