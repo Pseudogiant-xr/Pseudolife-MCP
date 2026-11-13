@@ -856,7 +856,7 @@ pub(super) fn execute<D: Docker, H: Host>(docker: &mut D, host: &mut H, cx: &Con
     };
     if let Some(earlier) = &run.earlier {
         let note = format!(
-            "Note: an earlier restore of {} in {} ({}) stopped after it began replacing the bank; its safety backup stays the recovery point.",
+            "Note: an earlier restore of {} in {} ({}) stopped after it began replacing the bank; if this run fails too, both its safety backup and this run's are named.",
             cx.plan.db, cx.plan.pg, earlier.started
         );
         run.host.info(&note);
