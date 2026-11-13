@@ -264,7 +264,7 @@ pub fn parse(values: Vec<OsString>) -> Result<Parsed, String> {
 /// pathlib's spelling of a path, as Python's diagnostics print it:
 /// components rejoined with the native separator, `.` components dropped
 /// (an empty result is `.`), and on POSIX exactly two leading slashes kept.
-pub(super) fn pathlib(path: &Path) -> PathBuf {
+pub(crate) fn pathlib(path: &Path) -> PathBuf {
     let mut spelled: PathBuf = path
         .components()
         .filter(|component| !matches!(component, Component::CurDir))
