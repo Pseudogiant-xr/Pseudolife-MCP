@@ -626,6 +626,17 @@ def _age(text):
     return value
 
 
+def _state_path(text):
+    """A file path whose last component can carry the .pid, .lock and other
+    suffixes: an empty path is ``.``, and ``.`` and ``..`` name directories."""
+    path = Path(text)
+    if path.name in {"", ".", ".."}:
+        raise argparse.ArgumentTypeError(
+            f"{text!r} has no file name; give a file path such as "
+            "~/.pseudolife-mcp/watch/<owner>.json")
+    return path
+
+
 def parser():
     home = Path.home() / ".pseudolife-mcp"
     p = argparse.ArgumentParser(
@@ -652,7 +663,7 @@ def parser():
                    help=f"seconds between polls (default {DEFAULT_INTERVAL:g})")
     p.add_argument("--settle", type=_non_negative, default=DEFAULT_SETTLE,
                    help=f"seconds to keep collecting after the first event (default {DEFAULT_SETTLE:g})")
-    p.add_argument("--state", type=Path,
+    p.add_argument("--state", type=_state_path,
                    help="state file (default: <session digest>.dwatch.json, else "
                         "~/.pseudolife-mcp/watch/<owner>.json); .pid, .lock, .stop, .log and .ledger "
                         "files go beside it")

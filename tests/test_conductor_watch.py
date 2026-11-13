@@ -690,6 +690,23 @@ def test_a_non_ascii_unit_is_not_a_duration(h, age):
     assert f"argument --max-age: not a duration: {age!r}" in err and "Traceback" not in err
 
 
+@pytest.mark.parametrize("state", ["", ".", "..", "dir/.."])
+@pytest.mark.parametrize("stop", [False, True])
+def test_a_state_without_a_file_name_is_a_usage_error(tmp_path, capsys, monkeypatch, state, stop):
+    """``Path("")`` is ``.``, which has no name for ``with_suffix``: an empty
+    --state raised ValueError instead of a usage error naming the option,
+    and ``..`` put its lock and ledger at ``...lock`` beside it."""
+    monkeypatch.chdir(tmp_path)
+    argv = ["--state", state, "--owner", OWNER] + (["--stop"] if stop else [])
+    clock = Clock()
+    with pytest.raises(SystemExit) as exc:
+        watch.main(argv, runner=World(tmp_path), clock=clock, sleep=clock.sleep,
+                   board=FakeBoard(clock), environ={})
+    assert exc.value.code == 2
+    err = capsys.readouterr().err
+    assert "argument --state: " in err and "file name" in err and "Traceback" not in err
+
+
 def test_a_max_age_past_the_clocks_range_is_capped_not_a_crash(h):
     """A max age too large for a float overflowed when the deadline was
     added to the monotonic clock; the deadline is capped, so no sleep is
