@@ -691,6 +691,19 @@ impl Links {
         Ok(Some(current))
     }
 
+    /// Where `name` lands: its directory resolved through the links so
+    /// far, its last component as it is (`None` under a loop).
+    fn place(&mut self, name: &[u8]) -> Result<Option<Vec<u8>>, Escape> {
+        let parts = split(name);
+        let Some((last, dir)) = parts.split_last() else {
+            return Ok(None);
+        };
+        Ok(self.resolve(dir.to_vec(), &[], 1)?.map(|mut place| {
+            place.push(last.clone());
+            place.join(&b'/')
+        }))
+    }
+
     fn check(&mut self, member: &Member) -> Result<(), Escape> {
         let name = normpath(&member.name);
         if name.starts_with(b"/")
@@ -728,25 +741,46 @@ fn check_members(members: &[Member]) -> Result<(), Refusal> {
             .collect(),
         steps: 0,
     };
-    let result = (|| {
-        for member in members {
-            links.check(member)?;
-        }
-        // The transient link graph while members are extracted in order.
-        links.map.clear();
-        for member in members {
-            let name = normpath(&member.name);
-            links.resolve(split(&name), &[], 1)?;
-            if member.is_symlink() {
-                links.map.insert(name, member.linkname.clone());
-            } else {
-                links.map.remove(&name);
+    let unsafe_ = |Escape| Refusal::Unsafe;
+    for member in members {
+        links.check(member).map_err(unsafe_)?;
+    }
+    // The transient link graph while members are extracted in order, and
+    // the type of what stands at each place so far.
+    links.map.clear();
+    let mut kinds: HashMap<Vec<u8>, u8> = HashMap::new();
+    for member in members {
+        let name = normpath(&member.name);
+        links.resolve(split(&name), &[], 1).map_err(unsafe_)?;
+        if member.is_hardlink() {
+            // link(2) does not follow the target's last component: a hard
+            // link to a symlink is a second symlink with the same target
+            // text at the link's own place (probed in the daemon image), so
+            // only a plain file may be linked.
+            let target = links.place(&normpath(&member.linkname)).map_err(unsafe_)?;
+            if !target.is_some_and(|place| matches!(kinds.get(&place), Some(0 | b'0'))) {
+                return Err(Refusal::Unsupported(
+                    "a hard link to something other than a plain file earlier in the archive",
+                ));
             }
-            links.check(member)?;
         }
-        Ok(())
-    })();
-    result.map_err(|Escape| Refusal::Unsafe)
+        if member.is_symlink() {
+            links.map.insert(name.clone(), member.linkname.clone());
+        } else {
+            links.map.remove(&name);
+        }
+        if let Some(place) = links.place(&name).map_err(unsafe_)? {
+            // A hard link is another name for a plain file.
+            let kind = if member.is_hardlink() {
+                b'0'
+            } else {
+                member.kind
+            };
+            kinds.insert(place, kind);
+        }
+        links.check(member).map_err(unsafe_)?;
+    }
+    Ok(())
 }
 
 /// One entry of the extracted tree, as `find -printf '%y\0%D\0%i\0%n\0%P\0%l\0'`
@@ -1673,6 +1707,64 @@ mod tests {
                 .concat()
             ),
             Err("no directory at the staging root".to_owned())
+        );
+    }
+
+    #[test]
+    fn a_hard_link_is_allowed_only_to_a_plain_file_standing_at_its_target() {
+        let reason = Err(Refusal::Unsupported(
+            "a hard link to something other than a plain file earlier in the archive",
+        ));
+        // The probed escape: `h` would be a second `../x` at the top.
+        assert_eq!(
+            verdict(&[
+                header(b"a/", b'5', 0, b""),
+                header(b"a/b/", b'5', 0, b""),
+                header(b"a/b/s", b'2', 0, b"../x"),
+                header(b"h", b'1', 0, b"a/b/s"),
+                END.to_vec()
+            ]),
+            reason
+        );
+        // A plain file replaced by a symlink of the same name before the link.
+        assert_eq!(
+            verdict(&[
+                header(b"f", b'0', 0, b""),
+                header(b"f", b'2', 0, b"g"),
+                header(b"h", b'1', 0, b"f"),
+                END.to_vec()
+            ]),
+            reason
+        );
+        // A directory, and a target not yet extracted.
+        assert_eq!(
+            verdict(&[
+                header(b"d", b'5', 0, b""),
+                header(b"h", b'1', 0, b"d"),
+                END.to_vec()
+            ]),
+            reason
+        );
+        assert_eq!(
+            verdict(&[
+                header(b"h", b'1', 0, b"later"),
+                header(b"later", b'0', 0, b""),
+                END.to_vec()
+            ]),
+            reason
+        );
+        // Second names for plain files, as `tar -C /data .` writes them,
+        // a link to a link included.
+        assert_eq!(
+            verdict(&[
+                header(b"./d/", b'5', 0, b""),
+                header(b"./d/f", b'0', 1, b""),
+                data(b"x"),
+                header(b"./g", b'1', 0, b"./d/f"),
+                header(b"./h", b'1', 0, b"./g"),
+                END.to_vec()
+            ]),
+            Ok(())
         );
     }
 
