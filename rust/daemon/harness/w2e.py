@@ -6761,6 +6761,21 @@ def settle_boot_probes(dsn: str, boots: int, deadline_s: float = 120.0) -> list[
     return []
 
 
+def fixture_extension_versions(state: dict) -> dict:
+    """``state`` with each installed extension's version as fixture metadata.
+
+    The version is the bench server's (``vector`` 0.8.6 on one host, 0.8.7
+    on another, found 2026-11-14 replaying review-propose-list-rationale), not
+    the daemon's behaviour; extension names and schemas stay exact. Only the
+    golden replay path applies this: a live run compares two banks on one
+    server."""
+    catalog = state.get("catalog") or {}
+    if isinstance(catalog.get("extensions"), list):
+        state = {**state, "catalog": {**catalog, "extensions": [
+            [row[0], "<fixture version>", *row[2:]] for row in catalog["extensions"]]}}
+    return state
+
+
 def _ops_key(ops) -> str:
     return json.dumps(list(ops), sort_keys=True)
 
@@ -6874,7 +6889,7 @@ def run_golden(name: str, binary: Path, root: Path, tol: dict, owned: list[str],
                     # oracle recording, ``python``.
                     want = rec["response"] if "response" in rec else rec["python"]
                     row["diffs"] += compare_response(want, row["rust"], tol, stats)
-            got = pack(sr, full=i == 0)
+            got = fixture_extension_versions(pack(sr, full=i == 0))
             if candidate is not None:
                 row["_state"], row["_numeric"] = copy.deepcopy(got), nr
             if rec is not None:
@@ -6883,7 +6898,8 @@ def run_golden(name: str, binary: Path, root: Path, tol: dict, owned: list[str],
                 if i:
                     # Recordings that predate a write table are compared on theirs.
                     got["rows"] = {k: v for k, v in got["rows"].items() if k in rec["state"]["rows"]}
-                row["diffs"] += [f"db {x}" for x in state_and_events_diff(rec["state"], got)]
+                row["diffs"] += [f"db {x}" for x in state_and_events_diff(
+                    fixture_extension_versions(rec["state"]), got)]
             steps.append(row)
     finally:
         d.stop()

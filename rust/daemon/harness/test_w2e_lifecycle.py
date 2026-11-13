@@ -1366,3 +1366,14 @@ def test_record_candidate_flags_belong_to_golden_mode(monkeypatch, tmp_path):
         with pytest.raises(SystemExit) as refused:
             w1a.main()
         assert refused.value.code == 2
+
+
+def test_golden_replay_treats_extension_versions_as_fixture_metadata(harness):
+    recorded = {"rows": {}, "catalog": {"extensions": [["vector", "0.8.7", "public"]]}}
+    here = {"rows": {}, "catalog": {"extensions": [["vector", "0.8.6", "public"]]}}
+    assert harness.state_and_events_diff(recorded, here)  # raw, the server shows
+    assert harness.state_and_events_diff(harness.fixture_extension_versions(recorded),
+                                         harness.fixture_extension_versions(here)) == []
+    moved = {"rows": {}, "catalog": {"extensions": [["vector", "0.8.6", "elsewhere"]]}}
+    assert harness.state_and_events_diff(harness.fixture_extension_versions(recorded),
+                                         harness.fixture_extension_versions(moved))
