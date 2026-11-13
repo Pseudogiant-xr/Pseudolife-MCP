@@ -86,7 +86,8 @@ const JOURNAL: &str = "restore-in-progress";
 const STREAM_INTO: &str = r#"set -C && umask 077 && cat > "$1""#;
 const GUNZIP: &str = r#"set -C && gunzip -c "$1" > "$2""#;
 /// The name every staging directory restore makes in `/data` starts with;
-/// only restore writes it, and the state check refuses it at the top level.
+/// only restore writes it. Backups leave it out and restore never extracts
+/// it, so one a killed run left behind cannot come back.
 pub(super) const STAGE_PREFIX: &str = ".pseudolife-restore-";
 /// Removes the staging directories a killed restore left in `/data`, before
 /// the safety backup could archive them.
@@ -94,12 +95,25 @@ const SWEEP: &str = "rm -rf -- /data/.pseudolife-restore-*";
 
 /// Extracts the archive into the fresh staging directory `dir` (in `/data`,
 /// so the swap is a rename) and lists what was actually extracted, for
-/// `state::judge_extracted`. `move.json` is excluded: the volume's own move
-/// gate stays through the replay.
+/// `state::judge_extracted`, ended by `END` so a cut-short listing is told
+/// from a whole one. `move.json` (at any depth) is excluded: the volume's
+/// own move gate stays through the replay; so is a top-level staging
+/// directory an older backup may hold.
 fn stage_script(dir: &str) -> String {
     format!(
-        r"set -e; S={dir}; mkdir -m 700 -- $S; tar --exclude=move.json --exclude=./move.json -xzf /tmp/pl_state.tgz -C $S; find $S -printf '%y\0%D\0%i\0%n\0%P\0%l\0'"
+        r"set -e; S={dir}; mkdir -m 700 -- $S; tar --exclude=move.json --exclude=./move.json --anchored '--exclude=./.pseudolife-restore-*' '--exclude=.pseudolife-restore-*' -xzf /tmp/pl_state.tgz -C $S; find $S -printf '%y\0%D\0%i\0%n\0%P\0%l\0'; printf 'END\0'"
     )
+}
+
+/// The bytes staging the state archive takes on `/data`'s filesystem: the
+/// archive's copy in the helper (in Docker's storage, often the same
+/// filesystem) and what it unpacks to, at once.
+pub(super) fn staged_bytes(state_size: u128, archive: Option<&Path>) -> u128 {
+    let Some(archive) = archive else {
+        return 0;
+    };
+    let copy = fs::metadata(archive).map_or(0, |meta| u128::from(meta.len()));
+    state_size.saturating_add(copy)
 }
 
 /// Replaces the state with the staged tree: everything but `move.json` and
@@ -594,15 +608,11 @@ impl<'a, 'd, D: Docker, H: Host> Run<'a, 'd, D, H> {
         self.check()?;
         step(self.host.host_space(&plan.safety_dir))?;
         step(self.bank.pg_space(&plan.pg_paths))?;
-        if let Some(archive) = &cx.state_archive {
-            // Staging holds the archive's copy in the helper (in Docker's
-            // storage, often the filesystem `/data` is on) and what it
-            // unpacks to, beside the current state, at once.
-            let copy = fs::metadata(archive).map_or(0, |meta| u128::from(meta.len()));
+        if cx.state_archive.is_some() {
             step(self.bank.state_space(
                 &plan.image,
                 &plan.state_mounts,
-                cx.state_size.saturating_add(copy),
+                staged_bytes(cx.state_size, cx.state_archive.as_deref()),
             ))?;
         }
         let mut swap = None;
@@ -887,6 +897,7 @@ impl<'a, 'd, D: Docker, H: Host> Run<'a, 'd, D, H> {
             Phase::Unchanged | Phase::Stopped => {
                 // Nothing may still write into /data once the daemon runs.
                 let discarded = self.discard_stage();
+                let stuck = self.helpers.clone();
                 let restarted = if !self.stopped {
                     if plan.was_running {
                         "The bank was not changed and the daemon was not stopped.".to_owned()
@@ -896,6 +907,12 @@ impl<'a, 'd, D: Docker, H: Host> Run<'a, 'd, D, H> {
                 } else if self.earlier.is_some() {
                     format!(
                         "The bank was not changed by this run; the daemon {daemon} is left stopped because the earlier restore may have left the bank incomplete."
+                    )
+                } else if !stuck.is_empty() {
+                    format!(
+                        "The bank was not changed, but the daemon {daemon} is left stopped because the helper container {} could not be removed and may still be writing into its /data volume: run docker rm -f {}, then docker start {daemon}.",
+                        stuck.join(", "),
+                        stuck.join(" ")
                     )
                 } else {
                     let ran = self.bank.run(&["start", &daemon], MINUTE * 5);

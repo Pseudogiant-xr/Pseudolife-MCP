@@ -230,7 +230,8 @@ fn locked(args: &args::Args, directory: &Path, state_size: u128) -> ExitCode {
     };
     let mut host = RealHost;
     let run_tag = execute::Host::run_tag(&mut host);
-    let plan = match bank::probe(&mut runner, args, &run_tag, &mut |dir| {
+    let staged = execute::staged_bytes(state_size, args.state_archive.as_deref());
+    let plan = match bank::probe(&mut runner, args, &run_tag, staged, &mut |dir| {
         bank::host_space(dir)
     }) {
         Ok(plan) => plan,

@@ -622,6 +622,7 @@ pub(super) fn probe<D: Docker>(
     docker: &mut D,
     args: &Args,
     run_tag: &str,
+    staged: u128,
     host_space: &mut dyn FnMut(&str) -> Step<()>,
 ) -> Step<Plan> {
     let mut bank = Bank {
@@ -781,7 +782,7 @@ pub(super) fn probe<D: Docker>(
         bank.container_space(path)?;
     }
     if args.state_archive.is_some() {
-        bank.state_space(&image, &state_mounts, 0)?;
+        bank.state_space(&image, &state_mounts, staged)?;
     }
     let was_running = match sub_dict(&running, "State", &daemon_name)? {
         Some(state) => get(state, "Running").is_some_and(truthy),
@@ -1069,52 +1070,55 @@ mod tests {
         let exists = psql_exists("db");
         let exists: Vec<&str> = exists.iter().map(String::as_str).collect();
         let floor = df(FLOOR_KB);
-        let mut script = Script::new(vec![
-            (&["inspect", "d"], ok(&daemon)),
-            (&["inspect", "p"], ok(&pg_mounts)),
-            (&exists, ok("t\n")),
-            (&["exec", "p", "df", "-Pk", "/"], ok(&floor)),
-            (&["exec", "p", "df", "-Pk", "/tmp"], ok(&floor)),
-            (&["inspect", "p"], ok(&pg_mounts)),
-            (
-                &["exec", "p", "sh", "-c", FIND, "_", "/var/run/postgresql"],
-                ok(""),
-            ),
-            (&["exec", "p", "df", "-Pk", "/"], ok(&floor)),
-            (
-                &["exec", "p", "df", "-Pk", "/var/lib/postgresql"],
-                ok(&floor),
-            ),
-            (
-                &[
-                    "create",
-                    "--network",
-                    "none",
-                    "--user",
-                    "0",
-                    "--volumes-from",
-                    "d:ro",
-                    "--log-driver",
-                    "none",
-                    "--label",
-                    "pseudolife.restore-helper=d",
-                    "--entrypoint",
-                    "sh",
-                    "img",
-                    "-c",
-                    "LC_ALL=C df -Pk -- /data",
-                ],
-                ok("h1\n"),
-            ),
-            (&["start", "-a", "h1"], ok(&floor)),
-            (&["rm", "-f", "h1"], ok("")),
-            (
-                &["ps", "-aq", "--filter", "label=pseudolife.restore-helper=d"],
-                ok("old1\nold2\n"),
-            ),
-        ]);
+        let make = || {
+            Script::new(vec![
+                (&["inspect", "d"], ok(&daemon)),
+                (&["inspect", "p"], ok(&pg_mounts)),
+                (&exists, ok("t\n")),
+                (&["exec", "p", "df", "-Pk", "/"], ok(&floor)),
+                (&["exec", "p", "df", "-Pk", "/tmp"], ok(&floor)),
+                (&["inspect", "p"], ok(&pg_mounts)),
+                (
+                    &["exec", "p", "sh", "-c", FIND, "_", "/var/run/postgresql"],
+                    ok(""),
+                ),
+                (&["exec", "p", "df", "-Pk", "/"], ok(&floor)),
+                (
+                    &["exec", "p", "df", "-Pk", "/var/lib/postgresql"],
+                    ok(&floor),
+                ),
+                (
+                    &[
+                        "create",
+                        "--network",
+                        "none",
+                        "--user",
+                        "0",
+                        "--volumes-from",
+                        "d:ro",
+                        "--log-driver",
+                        "none",
+                        "--label",
+                        "pseudolife.restore-helper=d",
+                        "--entrypoint",
+                        "sh",
+                        "img",
+                        "-c",
+                        "LC_ALL=C df -Pk -- /data",
+                    ],
+                    ok("h1\n"),
+                ),
+                (&["start", "-a", "h1"], ok(&floor)),
+                (&["rm", "-f", "h1"], ok("")),
+                (
+                    &["ps", "-aq", "--filter", "label=pseudolife.restore-helper=d"],
+                    ok("old1\nold2\n"),
+                ),
+            ])
+        };
+        let mut script = make();
         let mut measured = Vec::new();
-        let plan = probe(&mut script, &args(&safety), "tag", &mut |dir| {
+        let plan = probe(&mut script, &args(&safety), "tag", 0, &mut |dir| {
             measured.push(dir.to_owned());
             Ok(())
         })
@@ -1131,6 +1135,20 @@ mod tests {
             ("u", "db", 5432)
         );
         let _ = std::fs::remove_dir_all(&safety);
+        // The state archive staged beside the state must fit too, and that
+        // is known before anything is stopped.
+        let mut script = make();
+        let Err(Stop(message, code)) =
+            probe(&mut script, &args(&safety), "tag", 1, &mut |_| Ok(()))
+        else {
+            panic!("refused");
+        };
+        assert_eq!(code, 2);
+        assert!(
+            message.starts_with("less than 8 GiB beyond the 1 GiB that staging the state archive takes (its copy and what it unpacks to) is free on d:/data"),
+            "{message}"
+        );
+        assert!(!script.calls.iter().any(|call| call[0] == "stop"));
     }
 
     /// `--leave-stopped` needs no health port; an absent database is no
@@ -1183,12 +1201,12 @@ mod tests {
                 .collect(),
         };
         let mut script = script_of(calls(&floor));
-        let plan = probe(&mut script, &no_state, "tag", &mut |_| Ok(())).unwrap();
+        let plan = probe(&mut script, &no_state, "tag", 0, &mut |_| Ok(())).unwrap();
         assert_eq!(plan.daemon_url, "");
         assert!(!plan.exists && !plan.was_running && plan.stale_helpers.is_empty());
         let mut script = script_of(calls(&under));
         assert_eq!(
-            probe(&mut script, &no_state, "tag", &mut |_| Ok(())).unwrap_err(),
+            probe(&mut script, &no_state, "tag", 0, &mut |_| Ok(())).unwrap_err(),
             Stop(
                 "less than 8 GiB is free on p:/var/lib/postgresql; free at least 8 GiB there, then retry. Nothing was changed".into(),
                 2

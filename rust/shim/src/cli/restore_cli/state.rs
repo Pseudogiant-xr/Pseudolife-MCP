@@ -418,16 +418,13 @@ impl Reader {
                 // skips an excluded member by its stored size, where this
                 // reader skips none for a link or directory: only a plain
                 // file reads the same both ways.
-                let parts = split(&normpath(&member.name));
-                if parts
-                    .first()
-                    .is_some_and(|top| top.starts_with(super::execute::STAGE_PREFIX.as_bytes()))
-                {
-                    return self.refuse(Refusal::Unsupported(
-                        "a member named like restore's own staging directory (.pseudolife-restore-*)",
-                    ));
-                }
-                let excluded = parts.iter().any(|part| part == b"move.json");
+                // A top-level `.pseudolife-restore-*` (a staging directory
+                // an older backup caught) is excluded from the extract too;
+                // its members stay in the link model, which only makes it
+                // stricter.
+                let excluded = split(&normpath(&member.name))
+                    .iter()
+                    .any(|part| part == b"move.json");
                 if excluded && !matches!(member.kind, b'0' | 0) {
                     return self.refuse(Refusal::Unsupported(
                         "a member named move.json that is not a regular file",
@@ -805,6 +802,8 @@ fn shown(path: &[u8]) -> String {
 }
 
 fn parse_listing(listing: &[u8]) -> Option<Vec<Extracted>> {
+    // The script ends a whole listing with `END`.
+    let listing = listing.strip_suffix(b"END\0")?;
     let mut fields: Vec<&[u8]> = listing.split(|byte| *byte == 0).collect();
     // The listing ends with a NUL, which leaves one empty field after it.
     if fields.pop() != Some(&b""[..]) || !fields.len().is_multiple_of(6) {
@@ -1550,28 +1549,27 @@ mod tests {
     }
 
     #[test]
-    fn a_member_named_like_the_staging_directory_is_refused() {
-        let reason = Refusal::Unsupported(
-            "a member named like restore's own staging directory (.pseudolife-restore-*)",
-        );
+    fn a_member_named_like_the_staging_directory_is_read_as_any_other() {
+        // The extract leaves a top-level one out; the check reads it.
         for name in [
             &b".pseudolife-restore-x"[..],
             b"./.pseudolife-restore-0123/f",
+            b"sub/.pseudolife-restore-x",
         ] {
             assert_eq!(
                 verdict(&[header(name, b'0', 0, b""), END.to_vec()]),
-                Err(reason),
+                Ok(()),
                 "{}",
                 shown(name)
             );
         }
-        // Below the top level it is an ordinary name.
+        // Its links are still judged.
         assert_eq!(
             verdict(&[
-                header(b"sub/.pseudolife-restore-x", b'0', 0, b""),
+                header(b".pseudolife-restore-x/l", b'2', 0, b"../../out"),
                 END.to_vec()
             ]),
-            Ok(())
+            Err(Refusal::Unsafe)
         );
     }
 
@@ -1611,6 +1609,7 @@ mod tests {
         for e in entries {
             out.extend_from_slice(e);
         }
+        out.extend_from_slice(b"END\0");
         out
     }
 
@@ -1630,7 +1629,7 @@ mod tests {
     }
 
     #[test]
-    fn a_hard_link_to_a_symlink_that_points_out_from_its_new_place_is_refused() {
+    fn the_symlink_a_hard_link_to_a_symlink_became_is_judged_at_its_own_place() {
         // What GNU tar 1.34 extracted in the daemon image (probed 14
         // November 2026): `h` is a hard link to `a/b/s -> ../x`, so it is a
         // second symlink `../x`, but at the top, where it leads out.
@@ -1691,26 +1690,31 @@ mod tests {
     #[test]
     fn a_listing_without_a_real_root_directory_is_refused() {
         let unreadable = Err("a listing restore cannot read".to_owned());
+        let end = |listing: &[u8]| [listing, b"END\0"].concat();
         assert_eq!(
-            judge_extracted(b""),
+            judge_extracted(&end(b"")),
             Err("no directory at the staging root".to_owned())
         );
-        assert_eq!(judge_extracted(b"d\x0066"), unreadable);
-        assert_eq!(judge_extracted(b"d\x00x\x001\x002\x00\x00\x00"), unreadable);
+        assert_eq!(judge_extracted(&end(b"d\x0066")), unreadable);
+        assert_eq!(
+            judge_extracted(&end(b"d\x00x\x001\x002\x00\x00\x00")),
+            unreadable
+        );
+        // A listing cut short, even on a record boundary.
+        assert_eq!(judge_extracted(&entry('d', "66", 1, 2, "", "")), unreadable);
+        assert_eq!(judge_extracted(b""), unreadable);
         // The staging root replaced by a symlink.
         assert_eq!(
-            judge_extracted(&entry('l', "66", 1, 1, "", "/")),
+            judge_extracted(&end(&entry('l', "66", 1, 1, "", "/"))),
             Err("no directory at the staging root".to_owned())
         );
         // An entry before the root.
         assert_eq!(
-            judge_extracted(
-                &[
-                    entry('f', "66", 2, 1, "f", ""),
-                    entry('d', "66", 1, 2, "", "")
-                ]
-                .concat()
-            ),
+            judge_extracted(&end(&[
+                entry('f', "66", 2, 1, "f", ""),
+                entry('d', "66", 1, 2, "", "")
+            ]
+            .concat())),
             Err("no directory at the staging root".to_owned())
         );
     }

@@ -9274,8 +9274,7 @@ reads them. Only plain files, links and directories are read (a member
 whose final name ends in `/` is a directory); any other member type, a
 link or directory with a non-zero size, a hard link to anything but a plain
 file before it, an extended header that repeats or empties a name or size,
-a GNU long name over 1 MiB, a top-level name starting with
-`.pseudolife-restore-` (restore's own staging directory), a sparse member,
+a GNU long name over 1 MiB, a sparse member,
 a global extended header that sets a name or size, a damaged header
 anywhere, a `move.json` that is not a plain file, or anything but zeros
 after the end marker is refused, with the reason.
@@ -9290,7 +9289,9 @@ anything outside it; nothing mounted inside it. If that check refuses, the
 staging directory is removed, the daemon starts again and nothing was
 changed. After the replay the old state (except `move.json`) is removed
 and the staged entries are renamed into place. `/data` itself keeps its
-own owner and mode. A lite (embedded PostgreSQL) bank is
+own owner and mode. A top-level `.pseudolife-restore-*` directory (one a
+killed restore left behind) is never part of the state: restore's safety
+backup leaves it out, and restore never extracts one from an archive. A lite (embedded PostgreSQL) bank is
 refused: restore replaces a Docker bank only, so install the Docker bank
 first ([Move a lite bank to Docker](#move-a-lite-bank-to-docker)).
 Restore runs the `docker` it finds on an absolute `PATH` entry (never the
