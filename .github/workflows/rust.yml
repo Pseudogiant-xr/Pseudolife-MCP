@@ -1940,6 +1940,7 @@ jobs:
           - backup-1
           - backup-2
           - conductor_watch-0
+          - conductor_watch-1
           - connect-0
           - connect-1
           - connect-2

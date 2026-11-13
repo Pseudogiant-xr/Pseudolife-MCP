@@ -6064,7 +6064,9 @@ ack=true)`. After 55 quiet minutes (`--quiet-after`) it sends one quiet line,
 unless you are parked `done`. It exits 0 when the owner leaves the board,
 when `--until-lease NAME` names a lease the owner no longer holds, after 14
 days (`--max-age`), or on `--stop`; it exits 2 when `gh` is missing or fails
-five polls in a row (after telling the owner), or when the board refuses it.
+five polls in a row (an answer it cannot read counts as a failure), when its
+state cannot be written (after telling the owner, once it has started), or
+when the board refuses it. A state file it cannot read gets a fresh baseline.
 `--detach` is safe to repeat: it answers that a live watcher is already
 running. The first run records what is already true and reports nothing for
 it; its state, log and a one-line-per-message ledger live beside the
