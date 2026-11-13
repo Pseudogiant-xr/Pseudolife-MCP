@@ -24,3 +24,8 @@
     reason.
   - A pid record out of range or nested too deep names no watcher.
   - On Linux, a `/proc/<pid>/stat` that is not UTF-8 is read as unreadable.
+- The native shim's `conductor-watch` gives the same answers where it
+  answers before the watcher starts: the `--state`, `--settle nan` and
+  `--max-age` refusals, a pid record out of range read as no watcher, and
+  an unwritable `--stop` request refused with exit 2 and the reason. The
+  watch itself and `--detach` still run on Python.
