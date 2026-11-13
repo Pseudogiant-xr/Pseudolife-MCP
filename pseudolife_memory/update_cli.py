@@ -59,6 +59,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import zlib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
@@ -2250,7 +2251,8 @@ def _dump_complete(path: Path) -> bool:
                     in_copy = True
                 elif line == f"-- {_DUMP_MARKER}":
                     complete = True
-    except (OSError, EOFError, ValueError):
+    # zlib.error is a corrupt deflate stream: neither OSError nor EOFError.
+    except (OSError, EOFError, ValueError, zlib.error):
         return False
     return complete
 

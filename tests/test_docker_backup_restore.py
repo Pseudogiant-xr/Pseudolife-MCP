@@ -707,6 +707,66 @@ def test_corrupt_gzip_state_refuses_before_any_mutation(docker_bank, tmp_path, c
     assert len(world.calls) == before
 
 
+# A stored block whose length and complement disagree: zlib raises
+# zlib.error ("invalid stored block lengths"), not OSError or EOFError.
+CORRUPT_DEFLATE = bytes([0x1F, 0x8B, 8, 0, 0, 0, 0, 0, 0, 0xFF, 0x01, 0x05, 0x00, 0x00, 0x00])
+
+
+def test_a_corrupt_deflate_state_archive_is_refused_not_a_traceback(tmp_path):
+    from pseudolife_memory.docker_backup_restore import validate_state
+    state = tmp_path / "bad.tgz"
+    state.write_bytes(CORRUPT_DEFLATE)
+    with pytest.raises(up.UpdateError, match="state archive is unreadable") as caught:
+        validate_state(state)
+    assert caught.value.exit_code == 2
+
+
+@pytest.mark.parametrize("which", ["dump", "state"])
+def test_restore_command_refuses_corrupt_deflate_input_cleanly(tmp_path, monkeypatch, capsys, which):
+    from pseudolife_memory import restore_cli
+    monkeypatch.setattr(up, "run_cli", lambda *a, **kw: pytest.fail("no Docker call for an unreadable input"))
+    dump = _input_dump(tmp_path)
+    argv = ["--backup-file", str(dump), "--yes"]
+    if which == "dump":
+        dump.write_bytes(CORRUPT_DEFLATE)
+        expected = "restore failed: the backup is unreadable or incomplete; use a complete .sql.gz dump. Nothing was restored"
+    else:
+        state = tmp_path / "bad.tgz"
+        state.write_bytes(CORRUPT_DEFLATE)
+        argv += ["--state-archive", str(state)]
+        expected = ("restore failed: the state archive is unreadable or contains unsafe paths; use a complete, "
+                    "unmodified state backup. Nothing was restored")
+    assert restore_cli.main(argv) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err.strip() == expected
+
+
+@pytest.mark.parametrize("which", ["dump", "state"])
+def test_a_corrupt_safety_backup_copy_restarts_the_daemon_and_says_retry(docker_bank, tmp_path, which):
+    bank, world = docker_bank
+    original = world.run
+
+    def corrupt_copy(argv, **kwargs):
+        args = list(map(str, argv[1:]))
+        if args[0] == "cp" and ":" in args[1] and not Path(args[1]).is_file():
+            is_dump = args[1].startswith(world.pg_name + ":")
+            if is_dump == (which == "dump"):
+                world.calls.append(args)
+                Path(args[2]).write_bytes(CORRUPT_DEFLATE)
+                return 0, ""
+        return original(argv, **kwargs)
+
+    # The fixture's copy_from_container stand-in calls world.run.
+    world.run = corrupt_copy
+    with pytest.raises(up.UpdateError, match="retry backup before restoring anything"):
+        bank.restore(_input_dump(tmp_path))
+    assert not any("DROP DATABASE" in " ".join(c) for c in world.calls)
+    assert ["start", up.DAEMON_CONTAINER] in world.calls
+    safety = tmp_path / "home" / ".pseudolife-mcp" / "backups"
+    assert [p.name for p in safety.iterdir() if p.name.endswith(".part")] == []
+
+
 def test_symlink_chain_cannot_escape_through_parent_components(docker_bank, tmp_path):
     bank, world = docker_bank
     state = tmp_path / "chain.tgz"

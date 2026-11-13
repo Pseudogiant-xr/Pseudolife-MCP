@@ -13,6 +13,7 @@ import subprocess
 import tarfile
 import tempfile
 import time
+import zlib
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
 
@@ -80,7 +81,8 @@ def validate_state(path: Path) -> None:
                 else:
                     links.pop(posixpath.normpath(item.name), None)
                 check(item)
-    except (OSError, EOFError, tarfile.TarError, ValueError, RecursionError) as exc:
+    # zlib.error is a corrupt deflate stream: neither OSError nor EOFError.
+    except (OSError, EOFError, zlib.error, tarfile.TarError, ValueError, RecursionError) as exc:
         raise up.UpdateError("the state archive is unreadable or contains unsafe paths; use a complete, "
                              "unmodified state backup. Nothing was restored", 2) from exc
 
@@ -318,7 +320,13 @@ class DockerBank:
             with self.helper(f"tar czf {state_tmp} -C /data .") as helper:
                 self.command("start", "-a", helper)
                 copy_from_container(self.docker, f"{helper}:{state_tmp}", state_part)
-            validate_state(state_part)
+            try:
+                validate_state(state_part)
+            except up.UpdateError as exc:
+                # The archive is this backup's own copy, not an operator's input.
+                raise up.UpdateError("the state backup copied out of Docker is unreadable or contains unsafe "
+                                     "paths; check the daemon's /data volume and free space, then retry backup "
+                                     "before restoring anything") from exc
             if include_database:
                 dump_part.replace(dump)
             state_part.replace(state)
