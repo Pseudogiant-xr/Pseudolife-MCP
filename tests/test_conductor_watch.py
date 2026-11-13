@@ -1185,6 +1185,93 @@ def test_a_stale_stop_file_does_not_stop_a_new_watcher(h):
     assert code == 0 and "exit max age" in h.ledger()[-1]
 
 
+# ── a malformed state, an unwritable state (2026-11-13) ────────────────────
+
+_PR_ENTRY = {"title": "t", "head": "a" * 40, "checks": "none", "failed": [],
+             "mergeable": "MERGEABLE", "merge_state": "clean"}
+
+
+@pytest.mark.parametrize("body", [
+    b"{", b"\xff\xfe{}", b"[]", b'"x"', b"null", b'{"prs": []}', b'{"prs": {"x": {}}}',
+    json.dumps({"prs": {"1": dict(_PR_ENTRY, head=5)}}).encode(),
+    json.dumps({"prs": {"1": dict(_PR_ENTRY, failed="a")}}).encode(),
+    json.dumps({"prs": {"1": {"title": "t"}}}).encode(),
+    b'{"master": {"CI": {"id": "5", "conclusion": "success", "sha": "e"}}}',
+    b'{"master": {"CI": {"id": true, "conclusion": "success", "sha": "e"}}}',
+    b'{"master": []}', b'{"suites": []}', b'{"leases": 3}',
+], ids=lambda b: b.decode("utf-8", "replace")[:40])
+def test_a_malformed_state_file_is_a_fresh_baseline(h, body):
+    """A state an earlier run left that is not the watcher's shape ended
+    the watcher in a traceback (or, unparseable, was dropped without a
+    word); it is treated as no state, with one ledger line saying so."""
+    h.world.prs = [pr(1)]
+    h.state.write_bytes(body)
+    code, texts, _ = h.main(max_age="120")
+    assert code == watch.EXIT_OK and texts == []
+    err = h.capsys.readouterr().err
+    assert "baseline recorded" in err and "Traceback" not in err
+    reset = [line for line in h.ledger() if " reset " in line]
+    assert len(reset) == 1 and str(h.state) in reset[0] and "fresh baseline" in reset[0]
+    assert set(json.loads(h.state.read_text(encoding="utf-8"))["prs"]) == {"1"}
+    h.world.prs = [pr(1), pr(2, title="feat: y")]               # and it watches from there
+    assert lines(h.main("--settle", "0")[1]) == ["PR #2 opened: feat: y"]
+
+
+def test_every_state_the_watcher_writes_passes_its_own_check(h):
+    h.world.prs = [pr(1, checks=[run_("a", conclusion="FAILURE")]), pr(2, mergeable="UNKNOWN")]
+    h.world.runs = [_run(10, "failure")]
+    h.world.leases["full-suite"] = 1
+    h.world.suite("r.json")
+    h.main(max_age="60")
+    h.main("--settle", "0", max_age="60")
+    assert watch._state_problem(json.loads(h.state.read_text(encoding="utf-8"))) is None
+    for partial in ({}, {"prs": None, "master": None}, {"suites": {}, "leases": {}}):
+        assert watch._state_problem(partial) is None
+    for key in ("pr_events", "master_events"):
+        for case in FIXTURE[key]:
+            for side in ("old", "new"):
+                source = "prs" if key == "pr_events" else "master"
+                assert watch._state_problem({source: case[side]}) is None, case["name"]
+
+
+def test_a_state_path_that_is_a_directory_is_refused_before_registering(h):
+    h.state.mkdir()
+    code, _, _ = h.main()
+    assert code == watch.EXIT_SETUP
+    assert h.board.registers == [] and h.board.sent == []
+    err = h.capsys.readouterr().err
+    assert f"state {h.state} is a directory" in err and "pass --state <" in err
+    assert "Traceback" not in err
+
+
+def test_a_pid_path_that_is_a_directory_is_refused_before_registering(h):
+    h.state.with_suffix(".pid").mkdir()
+    code, _, _ = h.main()
+    assert code == watch.EXIT_SETUP and h.board.registers == []
+    assert f"{h.state.with_suffix('.pid')} is a directory" in h.capsys.readouterr().err
+
+
+def test_a_state_under_a_regular_file_names_the_fix(h):
+    (h.tmp / "file").write_text("", encoding="utf-8")
+    code, _, _ = h.main(state=h.tmp / "file" / "state.json")
+    assert code == watch.EXIT_SETUP and h.board.registers == []
+    assert "pass --state <" in h.capsys.readouterr().err
+
+
+def test_a_state_that_cannot_be_written_mid_run_tells_the_owner(h):
+    h.main(max_age="60")
+
+    def between(poll):
+        if poll == 2:
+            h.state.unlink()
+            h.state.mkdir()                                     # what _save replaces is gone
+    code, _, _ = h.main(between=between)
+    assert code == watch.EXIT_SETUP
+    final = h.board.sent[-1]["text"]
+    assert final.startswith(f"conductor-watch stopped: state {h.state} is a directory")
+    assert "Traceback" not in h.capsys.readouterr().err
+
+
 # ── owner resolution ───────────────────────────────────────────────────────
 
 def _session(tmp_path, monkeypatch=None):

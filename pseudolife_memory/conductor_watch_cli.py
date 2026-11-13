@@ -593,6 +593,85 @@ def default_state(environ, owner: str | None = None) -> Path | None:
     return Path.home() / ".pseudolife-mcp" / "watch" / f"{owner}.json"
 
 
+_PR_KEY = re.compile(r"-?[0-9]+")
+_PR_STATE_TYPES = {"title": str, "head": str, "checks": str, "mergeable": str, "merge_state": str}
+_MASTER_STATE_TYPES = {"conclusion": str, "sha": str}
+
+
+def _state_problem(state) -> str | None:
+    """Why ``state`` (a state file's JSON) is not one this watcher wrote,
+    or None. It checks what the classifiers index in an old snapshot; a
+    source that is null or absent is allowed, as after a failed first poll."""
+    if not isinstance(state, dict):
+        return f"holds {_json_kind(state)}, not an object"
+    for key in ("prs", "master", "suites", "leases"):
+        if not isinstance(state.get(key), (dict, type(None))):
+            return f"holds {key} as {_json_kind(state[key])}, not an object"
+    for number, p in (state.get("prs") or {}).items():
+        if not _PR_KEY.fullmatch(number) or not isinstance(p, dict):
+            return f"holds a pull request entry {number!r} it cannot read"
+        if (any(not isinstance(p.get(k), t) for k, t in _PR_STATE_TYPES.items())
+                or not isinstance(p.get("failed"), list)
+                or not all(isinstance(name, str) for name in p["failed"])):
+            return f"holds pull request {number} in a shape it cannot read"
+    for name, r in (state.get("master") or {}).items():
+        if (not isinstance(r, dict) or isinstance(r.get("id"), bool)
+                or not isinstance(r.get("id"), int)
+                or any(not isinstance(r.get(k), t) for k, t in _MASTER_STATE_TYPES.items())):
+            return f"holds master workflow {name!r} in a shape it cannot read"
+    return None
+
+
+class _Unwritable(Exception):
+    """A file the watcher must write cannot be; the message names it and
+    the fix."""
+
+
+STATE_FIX = "pass --state <path to a file in a writable directory>"
+
+
+def _unwritable(label: str, reason: str) -> _Unwritable:
+    return _Unwritable(f"{label} {reason}; {STATE_FIX}")
+
+
+def _writable(path: Path, label: str) -> None:
+    """Raise _Unwritable unless ``_save`` can write ``path``: its
+    directory takes a new file, and an existing file can be replaced (it is
+    rewritten with its own bytes, so nothing changes). ``label`` names the
+    file in the refusal."""
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    try:
+        if path.is_dir():
+            raise _unwritable(label, "is a directory")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            body = path.read_bytes()
+        except FileNotFoundError:
+            body = None
+        except OSError as exc:
+            raise _unwritable(label, f"cannot be read ({exc.strerror or exc})") from None
+        tmp.write_bytes(body or b"")
+        if body is None:
+            tmp.unlink()
+        else:
+            os.replace(tmp, path)
+    except OSError as exc:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        raise _unwritable(label, f"cannot be written ({exc.strerror or exc})") from None
+
+
+def _persist(path: Path, label: str, value) -> None:
+    """``_save``, raising _Unwritable naming ``label`` when it fails."""
+    try:
+        _save(path, value)
+    except OSError as exc:
+        reason = "is a directory" if path.is_dir() else f"cannot be written ({exc.strerror or exc})"
+        raise _unwritable(label, reason) from None
+
+
 def _process_start(pid: int) -> str | None:
     """An opaque token for when ``pid`` started, or None when it cannot be
     read. With the pid it tells a running watcher from a reused pid; stdlib
@@ -904,7 +983,7 @@ def main(argv=None, *, runner=run, clock=time.monotonic, sleep=time.sleep, board
             _say(f"another watcher holds {state}; this one exits")
             return EXIT_OK
     except OSError as exc:
-        _say(f"cannot lock {state.with_suffix('.lock')} ({exc})")
+        _say(f"cannot lock {state.with_suffix('.lock')} ({exc.strerror or exc}); {STATE_FIX}")
         return EXIT_SETUP
     try:
         if board is None:
@@ -947,7 +1026,34 @@ class _Loop:
         if self.project is None:
             self.project = self.watcher.project(self.environ)
         self.board.register(task=self.task, project=self.project, label=LABEL, status="starting")
-        _write_pid(self.state, agent_id=self.board.agent_id, owner=self.owner, nonce=self.args.nonce)
+        pid = self.state.with_suffix(".pid")
+        try:
+            _write_pid(self.state, agent_id=self.board.agent_id, owner=self.owner, nonce=self.args.nonce)
+        except OSError as exc:
+            reason = "is a directory" if pid.is_dir() else f"cannot be written ({exc.strerror or exc})"
+            raise _unwritable(str(pid), reason) from None
+
+    def load(self):
+        """The state an earlier run saved, or None for a fresh baseline: no
+        file, or one that is not this watcher's (said once in the ledger)."""
+        try:
+            state = json.loads(self.state.read_bytes().decode("utf-8"))
+        except FileNotFoundError:
+            return None
+        except OSError as exc:
+            why = f"could not be read ({exc.strerror or exc})"
+        except UnicodeDecodeError:
+            why = "is not UTF-8 text"
+        except (ValueError, RecursionError):
+            why = "is not JSON"
+        else:
+            why = _state_problem(state)
+            if why is None:
+                return state
+        detail = f"state {self.state} {why}; recording a fresh baseline"
+        _say(detail)
+        _ledger(self.state, "reset", detail)
+        return None
 
     def call(self, action):
         """``action()``, registering again once if the daemon forgot this
@@ -1013,23 +1119,35 @@ class _Loop:
     # the loop ────────────────────────────────────────────────────────────
 
     def run(self) -> int:
-        args, stop = self.args, self.state.with_suffix(".stop")
+        stop = self.state.with_suffix(".stop")
         try:
             stop.unlink()                     # a request meant for an earlier watcher
         except OSError:
             pass
         try:
+            # Before registering, so a refusal leaves nothing on the board.
+            _writable(self.state, f"state {self.state}")
+            _writable(self.state.with_suffix(".pid"), str(self.state.with_suffix(".pid")))
             self.register()
+        except _Unwritable as exc:
+            _say(str(exc))
+            _ledger(self.state, "setup", str(exc))
+            return EXIT_SETUP
         except (_Refused, _Transient) as exc:
             _say(f"could not register on the board: {exc}")
             _ledger(self.state, "setup", f"could not register on the board: {exc}")
             return EXIT_SETUP
         print(f"conductor-watch {self.board.agent_id} watching for {self.owner}; "
               f"{_park_hint(self.board.agent_id)}", flush=True)
+        state = self.load()
         try:
-            state = json.loads(self.state.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            state = None
+            return self._watch(state)
+        except _Unwritable as exc:
+            return self.give_up(str(exc))
+
+    def _watch(self, state) -> int:
+        args, stop = self.args, self.state.with_suffix(".stop")
+        label = f"state {self.state}"
         start = self.clock()
         deadline = start + min(args.max_age, MAX_DEADLINE)
         last_sent = start
@@ -1059,7 +1177,7 @@ class _Loop:
             if state is None:
                 if error is None:
                     _say("baseline recorded; reporting changes from now")
-                    _save(self.state, snap)
+                    _persist(self.state, label, snap)
                     state = snap
             else:
                 new = self.watcher.events(state, snap)
@@ -1098,7 +1216,7 @@ class _Loop:
                 _ledger(self.state, "setup", f"board refused: {exc}")
                 return EXIT_SETUP
             if state is not None and not found and pending is None:
-                _save(self.state, state)
+                _persist(self.state, label, state)
             if now >= deadline:
                 unsent = (pending["lines"] if pending else []) + found
                 if unsent:
