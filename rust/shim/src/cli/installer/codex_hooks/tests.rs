@@ -22,7 +22,8 @@ impl Temp {
     fn new() -> Self {
         // Private, as a profile folder is: the shared configuration writer
         // refuses a file another account may write.
-        let path = std::env::temp_dir().join(format!("w7-hooks-{}", uuid::Uuid::new_v4().simple()));
+        let temp = crate::setup::codex::resolved_path(&std::env::temp_dir()).unwrap();
+        let path = temp.join(format!("w7-hooks-{}", uuid::Uuid::new_v4().simple()));
         crate::board::state::private_dir(&path).unwrap();
         let path = crate::setup::codex::resolved_path(&path).unwrap();
         Self(path)
@@ -1241,10 +1242,39 @@ fn more_listed_handlers_than_the_plugin_ships_are_not_a_complete_set() {
     let world = World::new();
     let listed = world.plugin();
     let mut hooks: Vec<Hook> = listed.iter().filter_map(Hook::parse).collect();
-    assert!(manual::complete_set(&hooks.iter().collect::<Vec<_>>(), "plugin"));
-    let mut extra = hooks.iter().find(|h| h.event == "subagentStop").unwrap().clone();
+    assert!(manual::complete_set(
+        &hooks.iter().collect::<Vec<_>>(),
+        "plugin"
+    ));
+    let mut extra = hooks
+        .iter()
+        .find(|h| h.event == "subagentStop")
+        .unwrap()
+        .clone();
     extra.key = "plugin-SubagentStop-9-0".into();
     extra.command = "pwsh -File other.ps1".into();
     hooks.push(extra);
-    assert!(!manual::complete_set(&hooks.iter().collect::<Vec<_>>(), "plugin"));
+    assert!(!manual::complete_set(
+        &hooks.iter().collect::<Vec<_>>(),
+        "plugin"
+    ));
+}
+
+#[test]
+fn a_replacement_refuses_a_file_changed_since_it_was_read() {
+    let temp = Temp::new();
+    let path = temp.0.join("hooks.json");
+    fs::write(&path, b"{\"hooks\": {}}\n").unwrap();
+    let snapshot = fs::read(&path).unwrap();
+    // Another program adds a hook after setup read the file.
+    fs::write(&path, b"{\"hooks\": {\"SessionStart\": []}}\n").unwrap();
+    let result = manual::replace_snapshot(&path, Some(&snapshot), b"{\"ours\": true}\n");
+    assert!(
+        result.is_err(),
+        "a stale snapshot must not overwrite a newer file"
+    );
+    assert_eq!(
+        fs::read(&path).unwrap(),
+        b"{\"hooks\": {\"SessionStart\": []}}\n"
+    );
 }

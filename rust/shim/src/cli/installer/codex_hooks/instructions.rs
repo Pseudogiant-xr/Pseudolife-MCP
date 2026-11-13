@@ -69,8 +69,8 @@ pub fn standing(
             ))
         })?;
     }
-    let backup =
-        crate::runtime::registrations::write_config(&path, &old_bytes, &data).map_err(|error| {
+    let backup = crate::cli::installer::codex_config::write_retrying(&path, &old_bytes, &data)
+        .map_err(|error| {
             Fail::detail(format!(
                 "{} could not be written ({error}); it was left as it was.",
                 path.display()

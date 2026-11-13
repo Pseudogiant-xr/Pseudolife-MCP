@@ -63,6 +63,9 @@ pub fn vet(hooks: &[&Hook], checkout: &Path) -> Result<(), Fail> {
         let spellings = [
             root.to_string_lossy().into_owned(),
             root.to_string_lossy().replace('\\', "/"),
+            // Python's str(Path) spells a Windows root with backslashes
+            // whatever separators Codex reported.
+            root.to_string_lossy().replace('/', "\\"),
         ];
         let handlers = roles.get(event).ok_or_else(|| Fail::new(DIFFERS))?;
         let matches: Vec<usize> = handlers

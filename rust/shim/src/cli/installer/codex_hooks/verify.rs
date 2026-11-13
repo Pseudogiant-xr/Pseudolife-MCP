@@ -49,19 +49,12 @@ pub trait Daemon {
 /// Where the prompt hook saves its cursor; the hooks compute the same
 /// default from their own environment.
 pub fn digest_dir(lookup: &dyn Fn(&str) -> Option<String>) -> PathBuf {
-    if let Some(configured) = lookup("PSEUDOLIFE_DIGEST_DIR").filter(|v| !v.is_empty()) {
-        if let Some(rest) = configured
-            .strip_prefix("~/")
-            .or_else(|| configured.strip_prefix("~\\"))
-        {
-            return dirs::home_dir().unwrap_or_default().join(rest);
-        }
-        return PathBuf::from(configured);
-    }
-    dirs::home_dir()
-        .unwrap_or_default()
-        .join(".pseudolife-mcp")
-        .join("digests")
+    let raw = lookup("PSEUDOLIFE_DIGEST_DIR")
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("~").join(".pseudolife-mcp").join("digests"));
+    // `~` from USERPROFILE / HOME, as the hooks and the Python setup expand it.
+    crate::credentials::expand_user(&raw).unwrap_or(raw)
 }
 
 /// Whether the board check-in should print here: only where the daemon

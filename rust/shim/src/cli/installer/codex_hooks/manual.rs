@@ -319,7 +319,18 @@ fn replace_file(path: &Path, data: &[u8]) -> Result<Option<PathBuf>, Fail> {
     let before = crate::runtime::registrations::read_optional(path).map_err(|error| {
         Fail::detail(format!("{} could not be read ({error}).", path.display()))
     })?;
-    if before.as_deref() == Some(data) {
+    replace_snapshot(path, before.as_deref(), data)
+}
+
+/// [`replace_file`] against the content setup read earlier (`None`: the
+/// file was absent), so an edit another program made since is refused
+/// instead of overwritten.
+pub fn replace_snapshot(
+    path: &Path,
+    before: Option<&[u8]>,
+    data: &[u8],
+) -> Result<Option<PathBuf>, Fail> {
+    if before == Some(data) {
         return Ok(None);
     }
     if before.is_none() {
@@ -335,17 +346,14 @@ fn replace_file(path: &Path, data: &[u8]) -> Result<Option<PathBuf>, Fail> {
             })?;
         }
     }
-    let backup = crate::runtime::registrations::write_config(
-        path,
-        before.as_deref().unwrap_or_default(),
-        data,
-    )
-    .map_err(|error| {
-        Fail::detail(format!(
-            "{} could not be written ({error}); it was left as it was.",
-            path.display()
-        ))
-    })?;
+    let backup =
+        crate::cli::installer::codex_config::write_retrying(path, before.unwrap_or_default(), data)
+            .map_err(|error| {
+                Fail::detail(format!(
+                    "{} could not be written ({error}); it was left as it was.",
+                    path.display()
+                ))
+            })?;
     Ok(before.map(|_| backup))
 }
 
@@ -576,7 +584,7 @@ pub fn install(
     if !unchanged {
         let mut data = python_json(&value);
         data.push('\n');
-        if let Some(backup) = replace_file(&path, data.as_bytes())? {
+        if let Some(backup) = replace_snapshot(&path, original.as_deref(), data.as_bytes())? {
             report.backups.push(backup);
         }
     }

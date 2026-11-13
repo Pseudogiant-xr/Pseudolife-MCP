@@ -13,8 +13,9 @@ impl Dir {
     fn new() -> Self {
         // Private, as a profile folder is: the shared client configuration
         // writer refuses a file another account may write.
-        let path =
-            std::env::temp_dir().join(format!("w7-desktop-{}", uuid::Uuid::new_v4().simple()));
+        let path = crate::setup::codex::resolved_path(&std::env::temp_dir())
+            .unwrap()
+            .join(format!("w7-desktop-{}", uuid::Uuid::new_v4().simple()));
         crate::board::state::private_dir(&path).unwrap();
         Self(path)
     }
@@ -799,4 +800,59 @@ fn options_parse_and_refuse_alternatives_and_repeats() {
     .unwrap();
     assert_eq!(parsed.daemon_url, DEFAULT_DAEMON_URL);
     assert_eq!(parsed.writer_id, "claude-desktop");
+}
+
+#[test]
+fn the_probe_returns_by_its_deadline_when_a_descendant_holds_the_pipes() {
+    let dir = Dir::new();
+    let wrapper = if cfg!(windows) {
+        let path = dir.0.join("lingers.cmd");
+        // The grandchild inherits stdout and outlives the wrapper.
+        fs::write(
+            &path,
+            "@echo off\r\nstart /b \"\" ping -n 15 127.0.0.1\r\necho PSEUDOLIFE_MCP_TOKEN_FILE\r\n",
+        )
+        .unwrap();
+        path
+    } else {
+        let path = dir.0.join("lingers");
+        fs::write(
+            &path,
+            "#!/bin/sh\nsleep 15 &\necho PSEUDOLIFE_MCP_TOKEN_FILE\n",
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        path
+    };
+    let started = Instant::now();
+    let _ = shim_reads_token_file(&wrapper.to_string_lossy(), &[], Duration::from_secs(2));
+    assert!(
+        started.elapsed() < Duration::from_secs(8),
+        "the probe waited {:?}",
+        started.elapsed()
+    );
+}
+
+#[cfg(windows)]
+#[test]
+fn a_refused_config_write_leaves_no_new_token_file_behind() {
+    let dir = Dir::new();
+    // A hard-linked configuration is refused by the shared writer.
+    let before = dir.seed(json!({"mcpServers": {}}));
+    fs::hard_link(dir.config(), dir.0.join("linked.json")).unwrap();
+    let file = dir.token_file().to_string_lossy().into_owned();
+    let outcome = Run::new().env("T", TOKEN).go(
+        &dir,
+        &["--default-token-file", &file, "--token-from-env", "T"],
+    );
+    assert_eq!(outcome.code, EXIT_REFUSED, "{}", text(&outcome));
+    assert_eq!(fs::read(dir.config()).unwrap(), before);
+    assert!(
+        !dir.token_file().exists(),
+        "the token file written for this run was removed"
+    );
 }

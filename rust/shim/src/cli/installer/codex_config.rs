@@ -40,23 +40,48 @@ const TOKEN_LIMIT: usize = 4096;
 /// the frozen Python setup spell it, so commands naming files below it
 /// stay byte for byte what an earlier setup approved.
 pub(super) fn codex_home() -> Result<PathBuf, SetupError> {
-    let home = std::env::var_os("CODEX_HOME")
+    codex_home_from(std::env::var_os("CODEX_HOME").as_deref())
+}
+
+pub(super) fn codex_home_from(value: Option<&std::ffi::OsStr>) -> Result<PathBuf, SetupError> {
+    // An empty value is unset, as for the Python setup; `~` expands from
+    // USERPROFILE on Windows and HOME elsewhere, as Python's expanduser does.
+    let raw = value
         .filter(|value| !value.is_empty())
-        .map(|value| expand_user(Path::new(&value)))
-        .unwrap_or_else(crate::runtime::registrations::codex_home);
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("~").join(".codex"));
+    let home = crate::credentials::expand_user(&raw).map_err(|_| {
+        SetupError(
+            "CODEX_HOME names a home folder that cannot be expanded; set it to an absolute path, then rerun the installer.",
+        )
+    })?;
     codex::resolved_path(&home)
 }
 
-fn expand_user(path: &Path) -> PathBuf {
-    let text = path.to_string_lossy();
-    let user = || dirs::home_dir().unwrap_or_default();
-    if text == "~" {
-        return user();
+/// [`crate::runtime::registrations::write_config`], retried for up to two
+/// seconds while Windows refuses the replacement because another process
+/// (a running hook reading the pointer, a scanner) holds the file open,
+/// as the Python setup retried `os.replace`. Every other refusal returns
+/// at once; the writer itself refuses content that changed since `before`.
+pub(super) fn write_retrying(path: &Path, before: &[u8], after: &[u8]) -> Result<PathBuf, String> {
+    let mut attempts = 0;
+    loop {
+        match crate::runtime::registrations::write_config(path, before, after) {
+            Err(error) if attempts < 40 && held_open(&error) => {
+                attempts += 1;
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            other => return other,
+        }
     }
-    if let Some(rest) = text.strip_prefix("~/").or_else(|| text.strip_prefix("~\\")) {
-        return user().join(rest);
-    }
-    path.to_path_buf()
+}
+
+fn held_open(error: &str) -> bool {
+    // ERROR_ACCESS_DENIED, ERROR_SHARING_VIOLATION, ERROR_LOCK_VIOLATION.
+    cfg!(windows)
+        && ["(os error 5)", "(os error 32)", "(os error 33)"]
+            .iter()
+            .any(|code| error.contains(code))
 }
 
 /// A private scratch directory used as the app-server's working directory,
@@ -64,7 +89,10 @@ fn expand_user(path: &Path) -> PathBuf {
 pub(super) struct Neutral(pub PathBuf);
 impl Neutral {
     pub fn new(prefix: &str) -> Result<Self, SetupError> {
-        let path = std::env::temp_dir().join(format!("{prefix}{}", uuid::Uuid::new_v4().simple()));
+        // Resolved first: macOS's temp folder sits below the /var symlink,
+        // which the private-folder check refuses as a redirect.
+        let temp = codex::resolved_path(&std::env::temp_dir())?;
+        let path = temp.join(format!("{prefix}{}", uuid::Uuid::new_v4().simple()));
         crate::board::state::private_dir(&path).map_err(|_| {
             SetupError("A private temporary directory could not be created for Codex setup.")
         })?;
@@ -444,5 +472,17 @@ mod tests {
             all.iter().map(|(k, _)| *k).collect::<Vec<_>>(),
             ["startup_timeout_sec", "tool_timeout_sec", "required"]
         );
+    }
+}
+
+#[cfg(test)]
+mod home_tests {
+    use super::*;
+
+    #[test]
+    fn the_scratch_folder_is_created_below_a_redirected_temp_path() {
+        // macOS's TMPDIR sits below the /var -> /private/var symlink.
+        let neutral = Neutral::new("w7-neutral-").expect("a scratch folder");
+        assert!(neutral.0.is_dir());
     }
 }
