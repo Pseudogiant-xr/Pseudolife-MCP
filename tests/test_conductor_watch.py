@@ -1301,6 +1301,33 @@ def test_a_pid_record_out_of_range_names_no_watcher(h, capsys, pid):
     assert "no watcher running" in capsys.readouterr().out
 
 
+_STAT_TAIL = b" S" + b"".join(b" %d" % n for n in range(4, 30))       # field 22 is 22
+
+
+@pytest.mark.parametrize(("ps", "expected"), [("", None), ("Thu Nov 13 10:00:00 2026\n",
+                                                           "Thu Nov 13 10:00:00 2026")])
+def test_a_stat_that_is_not_utf8_reads_as_unreadable(tmp_path, monkeypatch, ps, expected):
+    """A process name that is not UTF-8 raised UnicodeDecodeError on Linux;
+    the stat is unreadable, as a missing one is, and ``ps`` is asked."""
+    (tmp_path / "77").mkdir()
+    (tmp_path / "77" / "stat").write_bytes(b"77 (n\x81me)" + _STAT_TAIL)
+    calls = []
+
+    def fake_run(cmd, **kw):
+        calls.append(cmd)
+        return watch.subprocess.CompletedProcess(cmd, 0, ps, "")
+    monkeypatch.setattr(watch.subprocess, "run", fake_run)
+    assert watch._posix_process_start(77, proc=tmp_path) == expected
+    assert calls == [["ps", "-o", "lstart=", "-p", "77"]]
+
+
+def test_a_readable_stat_gives_field_22(tmp_path, monkeypatch):
+    (tmp_path / "77").mkdir()
+    (tmp_path / "77" / "stat").write_bytes(b"77 (a) b) c)" + _STAT_TAIL)
+    monkeypatch.setattr(watch.subprocess, "run", lambda *a, **k: pytest.fail("ps asked"))
+    assert watch._posix_process_start(77, proc=tmp_path) == "22"
+
+
 # ── owner resolution ───────────────────────────────────────────────────────
 
 def _session(tmp_path, monkeypatch=None):
