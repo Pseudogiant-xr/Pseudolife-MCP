@@ -405,15 +405,22 @@ fn atomic_replace(
 /// and with it the state directory, while the board reserves its state file
 /// (#1324: on the Windows dev VM a refused `create_dir` here left a session
 /// without a board address on a first start). A folder that appeared
-/// meanwhile is protected below like one that existed before.
+/// meanwhile is treated like one that existed before the call: `path`
+/// itself is protected, and an ancestor is left as its creator made it.
+/// Protecting that ancestor would cut off what its creator is putting in
+/// it: on Windows the protected DACL has no inheritable entries, so the
+/// cache's `handshake-cache` inside it would be left with none.
 pub fn private_dir(path: &Path) -> Result<()> {
+    private_dir_at(path, true)
+}
+fn private_dir_at(path: &Path, leaf: bool) -> Result<()> {
     crate::credentials::reject_ancestor_redirects(path).map_err(|_| "invalid_state")?;
     if !path.is_dir() {
         if let Some(parent) = path
             .parent()
             .filter(|p| !p.as_os_str().is_empty() && !p.is_dir())
         {
-            private_dir(parent)?;
+            private_dir_at(parent, false)?;
         }
         #[cfg(test)]
         tests::create_meanwhile(path);
@@ -429,7 +436,12 @@ pub fn private_dir(path: &Path) -> Result<()> {
             // Never a symlink: the protection below must not follow one.
             Err(error)
                 if error.kind() == std::io::ErrorKind::AlreadyExists
-                    && fs::symlink_metadata(path).is_ok_and(|meta| meta.is_dir()) => {}
+                    && fs::symlink_metadata(path).is_ok_and(|meta| meta.is_dir()) =>
+            {
+                if !leaf {
+                    return Ok(());
+                }
+            }
             Err(_) => return Err("state_unavailable"),
         }
     }
@@ -694,8 +706,9 @@ mod tests {
 
     pub(super) fn create_meanwhile(path: &Path) {
         if MEANWHILE.with(|folders| folders.borrow().iter().any(|folder| folder == path)) {
-            // As the handshake cache's `create_dir_all` does.
-            fs::create_dir(path).unwrap();
+            // As the handshake cache's `create_dir_all` does: the folder and
+            // its `handshake-cache` child, which it then writes into.
+            fs::create_dir_all(path.join("handshake-cache")).unwrap();
         }
         #[cfg(unix)]
         if let Some((link, target)) = LINKED_MEANWHILE.with(|linked| linked.borrow().clone())
@@ -707,25 +720,31 @@ mod tests {
 
     #[test]
     fn a_state_folder_another_task_creates_meanwhile_is_still_made_private() {
-        let root = Dir::new();
+        // A home that inherits its access, as a user's profile does (a
+        // private root would give everything under it explicit entries).
+        let home =
+            std::env::temp_dir().join(format!("pseudolife-race-{}", uuid::Uuid::new_v4().simple()));
+        let root = Dir(home.clone());
         let state_dir = root.0.join(".pseudolife-mcp").join("agent-state");
         let bound = state_dir.join("0c33202fbddfe6ee6eebb386fea0df74");
         // Each level the reservation creates can be raced; on the Windows
-        // dev VM (#1324) the cache made `agent-state` meanwhile.
+        // dev VM (#1324) the cache made `agent-state` meanwhile, with its
+        // `handshake-cache` child, under a `.pseudolife-mcp` it had made.
         for raced in [&state_dir, &bound] {
-            let _ = fs::remove_dir_all(root.0.join(".pseudolife-mcp"));
+            let _ = fs::remove_dir_all(&home);
+            fs::create_dir_all(root.0.join(".pseudolife-mcp")).unwrap();
             MEANWHILE.with(|folders| *folders.borrow_mut() = vec![raced.clone()]);
             let reserved = Reservation::load_or_reserve(&bound.join("key.json"), "http://x");
             MEANWHILE.with(|folders| folders.borrow_mut().clear());
             let (saved, reservation) =
                 reserved.unwrap_or_else(|code| panic!("{}: {code}", raced.display()));
             assert!(saved.is_none() && reservation.is_some());
-            // The folder that appeared meanwhile was protected too.
+            // The state file's own folder is private, whoever created it.
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
                 assert_eq!(
-                    fs::metadata(raced).unwrap().permissions().mode() & 0o777,
+                    fs::metadata(&bound).unwrap().permissions().mode() & 0o777,
                     0o700
                 );
             }
@@ -735,9 +754,16 @@ mod tests {
                 let directory = OpenOptions::new()
                     .access_mode(0x0002_0000 | 0x80)
                     .custom_flags(0x0200_0000 | 0x0020_0000)
-                    .open(raced)
+                    .open(&bound)
                     .unwrap();
                 crate::credentials::windows_security::validate(&directory).unwrap();
+            }
+            // What the cache made in the state folder still works for it:
+            // protecting that folder on Windows emptied the child's DACL.
+            // (The cache never creates inside the state file's own folder.)
+            if raced == &state_dir {
+                fs::write(raced.join("handshake-cache").join("cache.json"), b"{}")
+                    .unwrap_or_else(|error| panic!("{}: {error}", raced.display()));
             }
         }
     }
