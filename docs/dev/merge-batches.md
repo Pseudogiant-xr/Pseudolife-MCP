@@ -44,9 +44,13 @@ Each change waits for hosted CI once, on its batch:
   remain in a separate runtime and reuse the existing wheel cache.
 
   Covered frozen judge groups are report-only probes using the existing
-  merge-base oracle and source pins. Independent comparisons continue after failures and retain their
+  merge-base oracle and source pins. They run in their own job, `Frozen
+  judge probes (report only)`, which builds the same debug candidate, so
+  a probe that loses its runner cannot fail `Rust` or a `Parity` gate; that
+  job's own check still turns red then. Independent comparisons continue after failures and retain their
   actual failed case IDs; setup/resource failures leave unrun phases
-  visible. The job summary and `pr-parity-precheck-<OS>` artifact contain each
+  visible. Each job's summary and its artifact (`pr-parity-precheck-<OS>`
+  for goldens, `pr-parity-precheck-judges-<OS>` for probes) contain each
   available failed identifier with its phase,
   with raw logs and captures kept outside that upload. Golden replay failures
   fail `Rust` and its `Parity` gate; frozen probe failures leave those checks

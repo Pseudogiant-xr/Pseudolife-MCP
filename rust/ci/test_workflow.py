@@ -1886,8 +1886,9 @@ def test_every_rust_cache_is_saved_on_failure_and_keeps_the_lockfile_hash():
     assert set(jobs) >= {"rust", "fixtures", "candidate", "candidate-harness", "parity-checks", "source-mutants"}
     for name, job in jobs.items():
         cache = next(step for step in job["steps"] if step.get("uses") == "Swatinem/rust-cache@v2")
-        # The fixtures job only reads the Rust job's cache and never saves.
-        if name == "fixtures":
+        # The fixtures and frozen-probes jobs only read the Rust job's cache
+        # and never save.
+        if name in ("fixtures", "frozen-probes"):
             assert cache["with"]["save-if"] is False
             continue
         assert cache["with"]["cache-on-failure"] is True, name
