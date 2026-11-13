@@ -596,10 +596,13 @@ fn release_base_defaults_to_the_github_release_and_honours_an_http_override() {
         "http://",
         "https://host/dir?sig=abc",
         "https://host/dir#part",
+        "https://user:secret@host/dir",
+        "https://user@host/dir",
     ] {
         let error = release_base(Some(refused), "1.2.3").unwrap_err();
         assert!(error.contains("PSEUDOLIFE_NATIVE_ARCHIVE_URL"), "{error}");
         assert!(error.contains("nothing was downloaded"), "{error}");
+        assert!(!error.contains("secret"), "{error}");
     }
 }
 

@@ -515,7 +515,7 @@ pub(crate) fn override_note(detail: String, base: &str, overridden: bool) -> Str
 /// The URL of the directory holding a release's native archives and its
 /// `SHA256SUMS`: the GitHub release `v<version>`, or
 /// `PSEUDOLIFE_NATIVE_ARCHIVE_URL` (an `http(s)://` directory URL with a
-/// host and no query or fragment, for a mirror, a dev-box proof or a test
+/// host and no credentials, query or fragment, for a mirror, a dev-box proof or a test
 /// server). The sums come from the same directory, so they prove integrity
 /// (no truncation or corruption), not who published the files: use plain
 /// `http://` only on loopback or a trusted network.
@@ -536,6 +536,10 @@ pub(crate) fn release_base(configured: Option<&str>, version: &str) -> Result<St
         || url.fragment().is_some()
     {
         return Err(refuse());
+    }
+    // Errors echo the URL, so it may carry no credentials.
+    if !url.username().is_empty() || url.password().is_some() {
+        return Err("PSEUDOLIFE_NATIVE_ARCHIVE_URL must not carry a user name or password; serve the archives without credentials in the URL; nothing was downloaded".into());
     }
     Ok(url.as_str().trim_end_matches('/').to_owned())
 }
