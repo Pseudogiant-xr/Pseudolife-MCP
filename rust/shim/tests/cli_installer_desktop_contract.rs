@@ -13,8 +13,9 @@ const TOKEN: &str = "t0k3n-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
 struct Home(PathBuf);
 impl Home {
     fn new() -> Self {
-        let path =
-            std::env::temp_dir().join(format!("w7-desktop-contract-{}", uuid::Uuid::new_v4()));
+        let path = pseudolife_stdio::setup::codex::resolved_path(&std::env::temp_dir())
+            .unwrap()
+            .join(format!("w7-desktop-contract-{}", uuid::Uuid::new_v4()));
         pseudolife_stdio::board::state::private_dir(&path).unwrap();
         Self(path)
     }

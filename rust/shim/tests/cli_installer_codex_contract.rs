@@ -75,6 +75,9 @@ impl Home {
         }
     }
     fn run(&self, args: &[&str], stdin: Option<&[u8]>) -> Output {
+        self.run_with(args, stdin, &[])
+    }
+    fn run_with(&self, args: &[&str], stdin: Option<&[u8]>, extra: &[(&str, &str)]) -> Output {
         let mut command = Command::new(env!("CARGO_BIN_EXE_pseudolife-stdio"));
         command.env_clear();
         for key in ["SystemRoot", "WINDIR", "TEMP", "TMP", "PATHEXT", "ComSpec"] {
@@ -92,6 +95,7 @@ impl Home {
             .env(STATE, self.0.join("fake-state.json"))
             .env("PATH", self.0.join("empty-path"))
             .env("PSEUDOLIFE_MCP_DAEMON_URL", "http://127.0.0.1:9")
+            .envs(extra.iter().copied())
             .arg("installer")
             .args(args)
             .current_dir(&self.0)
@@ -156,6 +160,29 @@ fn runtime_defaults_configure_then_preserve_then_refuse_unregistered() {
             .unwrap()
             .contains("not registered")
     );
+}
+
+#[test]
+fn an_empty_codex_home_means_the_default_folder_under_the_profile() {
+    let home = Home::new();
+    // The default Codex home is <profile>/.codex: make that the fixture's.
+    let default = home.0.join(".codex");
+    fs::create_dir_all(&default).unwrap();
+    fs::write(
+        default.join("config.toml"),
+        "# fixture
+",
+    )
+    .unwrap();
+    let state = json!({
+        "user": registered(json!({})), "overlay": {}, "version": 1,
+        "file": default.join("config.toml"),
+    });
+    fs::write(home.0.join("fake-state.json"), state.to_string()).unwrap();
+    let output = home.run_with(&["codex-runtime-defaults"], None, &[("CODEX_HOME", "")]);
+    let body = report(&output);
+    assert_eq!(output.status.code(), Some(0), "{body}");
+    assert_eq!(body["runtime_defaults"], "configured");
 }
 
 #[test]

@@ -382,15 +382,20 @@ pub(super) fn shim_reads_token_file(
     let mut child = child.spawn().ok()?;
     let mut stdout = child.stdout.take()?;
     let mut stderr = child.stderr.take()?;
-    let out = std::thread::spawn(move || {
+    // Readers report through channels so the deadline bounds collection
+    // too: a descendant the wrapper started may hold the pipes open long
+    // after the wrapper exited.
+    let (out_tx, out) = std::sync::mpsc::channel();
+    let (err_tx, err) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
         let mut bytes = Vec::new();
         let _ = stdout.by_ref().take(1 << 20).read_to_end(&mut bytes);
-        bytes
+        let _ = out_tx.send(bytes);
     });
-    let err = std::thread::spawn(move || {
+    std::thread::spawn(move || {
         let mut bytes = Vec::new();
         let _ = stderr.by_ref().take(1 << 20).read_to_end(&mut bytes);
-        bytes
+        let _ = err_tx.send(bytes);
     });
     let deadline = Instant::now() + timeout;
     let status = loop {
@@ -404,8 +409,10 @@ pub(super) fn shim_reads_token_file(
             }
         }
     };
-    let mut output = out.join().unwrap_or_default();
-    output.extend(err.join().unwrap_or_default());
+    let left = || deadline.saturating_duration_since(Instant::now());
+    // Past the deadline the output is incomplete: no evidence either way.
+    let mut output = out.recv_timeout(left()).ok()?;
+    output.extend(err.recv_timeout(left()).ok()?);
     let output = String::from_utf8_lossy(&output);
     if !status.success() {
         return output.contains("unknown mode").then_some(false);
@@ -820,6 +827,17 @@ fn register_inner(options: &Options, host: &Host, outcome: &mut Outcome) -> Resu
     }
     let preserve = (existing_file.is_some() && options.token_file.is_none())
         || options.token_file.as_deref().is_some_and(exists);
+    // A token file this run creates is removed again if the configuration
+    // is then refused, so a refusal leaves nothing half-done.
+    let fresh_token = requested
+        .clone()
+        .filter(|file| !options.dry_run && !exists(file));
+    let undo_token = |message: String| -> Refusal {
+        if let Some(file) = &fresh_token {
+            let _ = std::fs::remove_file(file);
+        }
+        Refusal(message)
+    };
     let credential = if preserve {
         plan_credential(
             &existing_env,
@@ -869,7 +887,8 @@ fn register_inner(options: &Options, host: &Host, outcome: &mut Outcome) -> Resu
         &options.daemon_url,
         credential.token_file.as_deref(),
     );
-    let merged = merge_config(&config, &entry, credential.drop_literal)?;
+    let merged = merge_config(&config, &entry, credential.drop_literal)
+        .map_err(|Refusal(message)| undo_token(message))?;
     notes.extend(credential.notes);
     if before.get("args").is_some() {
         notes.push("dropped the entry's stale 'args' list (the client takes none)".into());
@@ -910,14 +929,17 @@ fn register_inner(options: &Options, host: &Host, outcome: &mut Outcome) -> Resu
     }
     let mut text = serde_json::to_string_pretty(&Value::Object(merged)).expect("JSON value");
     text.push('\n');
-    let backup =
-        registrations::write_config(&path, raw.as_deref().unwrap_or_default(), text.as_bytes())
-            .map_err(|error| {
-                Refusal(format!(
-                    "{} could not be written ({error}); the existing file was left as it was",
-                    path.display()
-                ))
-            })?;
+    let backup = super::codex_config::write_retrying(
+        &path,
+        raw.as_deref().unwrap_or_default(),
+        text.as_bytes(),
+    )
+    .map_err(|error| {
+        undo_token(format!(
+            "{} could not be written ({error}); the existing file was left as it was",
+            path.display()
+        ))
+    })?;
     if raw.is_some() {
         let backup = ordinary(backup);
         outcome
