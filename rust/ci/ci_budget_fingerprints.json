@@ -12,14 +12,15 @@
       "test-lite-windows": "200ef2b514faec86"
     },
     "rust.yml": {
-      "candidate": "0930d9d93aaa182c",
-      "candidate-harness": "bd0fa77d268d561a",
+      "candidate": "4ecb836547864d17",
+      "candidate-harness": "a529abf5282ce028",
       "daemon-image": "0c0adfbcb5b53ced",
-      "fixtures": "2c17c5dbf6eed90d",
+      "fixtures": "02c883eba613073a",
+      "frozen-probes": "d300a5394671f24c",
       "parity": "4b13f8c55b6e3de3",
-      "parity-checks": "b280739891b6e09e",
+      "parity-checks": "36dea8536f4db6e2",
       "parity-pool": "743ed0bdc6621552",
-      "rust": "ae533ea0bf5ced90",
+      "rust": "0f464b588183eae9",
       "scope": "1be8245c7953029b"
     }
   }
