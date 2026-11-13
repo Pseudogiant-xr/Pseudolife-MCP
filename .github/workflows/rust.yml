@@ -335,13 +335,19 @@ jobs:
         run: |
           python rust/daemon/harness/gen_schema_sql.py --check
           exit $LASTEXITCODE
+      # rust/cli_harness/test_cli_harness.py is the harness's offline
+      # self-test (no CLI runs; its source-mutant anchor check reads files
+      # only), run here so a pull request's own checks see it rather than
+      # only the batch's cli shard: 182 passed in 25 s on a Windows desktop,
+      # 0.5 min hosted (2026-11-14). Two of its mail-row cases import
+      # pseudolife_memory.coordination_adapter, which needs httpx.
       - name: Check port inventories and producer census
         working-directory: .
         shell: pwsh
         run: |
-          python -m pip install pytest pyyaml "psycopg[binary]" psutil
+          python -m pip install pytest pyyaml "psycopg[binary]" psutil httpx
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python -m pytest -q rust/test_contract_inventory.py rust/test_producer_census.py rust/daemon/harness/test_w2e_lifecycle.py rust/daemon/harness/test_w2e_own_decisions.py rust/daemon/harness/test_w2e_recall_llm.py rust/daemon/harness/test_real_bank_timer_env.py rust/cli_harness/test_native_runtime_contract.py rust/daemon/harness/test_json_fidelity.py rust/daemon/harness/test_schema_clocks.py rust/daemon/harness/test_schema_generation.py rust/daemon/harness/test_schema_guards.py rust/daemon/harness/test_shadow_compare.py rust/daemon/harness/test_startup_ci.py rust/daemon/harness/test_startup_parts.py rust/daemon/harness/test_w2d_rerank_check.py rust/daemon/harness/test_w2d_trace_compare.py rust/cli_harness/test_update_row.py
+          python -m pytest -q rust/test_contract_inventory.py rust/test_producer_census.py rust/cli_harness/test_cli_harness.py rust/daemon/harness/test_w2e_lifecycle.py rust/daemon/harness/test_w2e_own_decisions.py rust/daemon/harness/test_w2e_recall_llm.py rust/daemon/harness/test_real_bank_timer_env.py rust/cli_harness/test_native_runtime_contract.py rust/daemon/harness/test_json_fidelity.py rust/daemon/harness/test_schema_clocks.py rust/daemon/harness/test_schema_generation.py rust/daemon/harness/test_schema_guards.py rust/daemon/harness/test_shadow_compare.py rust/daemon/harness/test_startup_ci.py rust/daemon/harness/test_startup_parts.py rust/daemon/harness/test_w2d_rerank_check.py rust/daemon/harness/test_w2d_trace_compare.py rust/cli_harness/test_update_row.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python rust/producer_census.py --ci-check
           exit $LASTEXITCODE
@@ -406,8 +412,30 @@ jobs:
           }
           rustup toolchain list
           exit $LASTEXITCODE
+      # The Rust caches' key starts with this UTC ISO week (the Rust job's
+      # rust-cache step says why), so its entries are never a week old.
+      - name: Name this week's Rust cache
+        id: cache_week
+        shell: pwsh
+        run: |
+          $now = [DateTime]::UtcNow
+          $week = '{0}-W{1:D2}' -f [System.Globalization.ISOWeek]::GetYear($now), [System.Globalization.ISOWeek]::GetWeekOfYear($now)
+          "week=$week" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "Rust cache week: $week"
+      # A weekly key (2026-11-14, issue #1520): an exact hit never saves
+      # again, so master's entry stayed as saved on 2026-11-03 while master
+      # hit it for ten days; a pull request whose Cargo.lock or member
+      # Cargo.toml differs restores such an entry as a partial match, and
+      # rust-cache then deletes every target file older than a week
+      # (restore.ts, cleanTargetDir(target, [], true)), so on 2026-11-13
+      # those runs rebuilt everything (257 crates in the release override
+      # build). The ISO week in the prefix makes each week's first run per
+      # key cold and saves a fresh entry; every other run that week restores
+      # files under a week old. Every rust-cache step here uses the prefix,
+      # so shared keys still meet.
       - uses: Swatinem/rust-cache@v2
         with:
+          prefix-key: v0-rust-${{ steps.cache_week.outputs.week }}
           workspaces: rust
           # A cold run whose later steps fail still saves what it compiled,
           # so the next run is not cold too. Three cold runs were cancelled
@@ -693,11 +721,22 @@ jobs:
           }
           rustup toolchain list
           exit $LASTEXITCODE
+      # The Rust caches' key starts with this UTC ISO week (the Rust job's
+      # rust-cache step says why), so its entries are never a week old.
+      - name: Name this week's Rust cache
+        id: cache_week
+        shell: pwsh
+        run: |
+          $now = [DateTime]::UtcNow
+          $week = '{0}-W{1:D2}' -f [System.Globalization.ISOWeek]::GetYear($now), [System.Globalization.ISOWeek]::GetWeekOfYear($now)
+          "week=$week" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "Rust cache week: $week"
       # Read-only reuse of the Rust job's cache, as the fixtures job does:
       # shared-key "rust" is the key rust-cache derives for the job id rust.
       - uses: Swatinem/rust-cache@v2
         if: steps.precheck.outputs.judges == 'true'
         with:
+          prefix-key: v0-rust-${{ steps.cache_week.outputs.week }}
           workspaces: rust
           shared-key: rust
           save-if: false
@@ -789,14 +828,26 @@ jobs:
           }
           rustup toolchain list
           exit $LASTEXITCODE
+      # The Rust caches' key starts with this UTC ISO week (the Rust job's
+      # rust-cache step says why), so its entries are never a week old.
+      - name: Name this week's Rust cache
+        id: cache_week
+        shell: pwsh
+        run: |
+          $now = [DateTime]::UtcNow
+          $week = '{0}-W{1:D2}' -f [System.Globalization.ISOWeek]::GetYear($now), [System.Globalization.ISOWeek]::GetWeekOfYear($now)
+          "week=$week" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "Rust cache week: $week"
       # Read-only reuse of the Rust job's cache, which already holds every
       # dev-profile dependency these builds compile: shared-key "rust" is
-      # the key rust-cache derives for the job id rust (v0-rust-rust-<os>-
-      # <arch>-<environment>-<lockfile>, src/config.ts). Saving nothing keeps
+      # the key rust-cache derives for the job id rust (v0-rust-<week>-rust-
+      # <os>-<arch>-<environment>-<lockfile>, src/config.ts), with the same
+      # week prefix. Saving nothing keeps
       # the repository's cache, at its 10 GB limit on 2026-10-24, from
       # holding another copy; a miss only makes this job compile cold.
       - uses: Swatinem/rust-cache@v2
         with:
+          prefix-key: v0-rust-${{ steps.cache_week.outputs.week }}
           workspaces: rust
           shared-key: rust
           save-if: false
@@ -866,8 +917,19 @@ jobs:
           }
           rustup toolchain list
           exit $LASTEXITCODE
+      # The Rust caches' key starts with this UTC ISO week (the Rust job's
+      # rust-cache step says why), so its entries are never a week old.
+      - name: Name this week's Rust cache
+        id: cache_week
+        shell: pwsh
+        run: |
+          $now = [DateTime]::UtcNow
+          $week = '{0}-W{1:D2}' -f [System.Globalization.ISOWeek]::GetYear($now), [System.Globalization.ISOWeek]::GetWeekOfYear($now)
+          "week=$week" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "Rust cache week: $week"
       - uses: Swatinem/rust-cache@v2
         with:
+          prefix-key: v0-rust-${{ steps.cache_week.outputs.week }}
           workspaces: rust
           shared-key: shim-release
           cache-on-failure: true
@@ -937,8 +999,19 @@ jobs:
           }
           rustup toolchain list
           exit $LASTEXITCODE
+      # The Rust caches' key starts with this UTC ISO week (the Rust job's
+      # rust-cache step says why), so its entries are never a week old.
+      - name: Name this week's Rust cache
+        id: cache_week
+        shell: pwsh
+        run: |
+          $now = [DateTime]::UtcNow
+          $week = '{0}-W{1:D2}' -f [System.Globalization.ISOWeek]::GetYear($now), [System.Globalization.ISOWeek]::GetWeekOfYear($now)
+          "week=$week" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "Rust cache week: $week"
       - uses: Swatinem/rust-cache@v2
         with:
+          prefix-key: v0-rust-${{ steps.cache_week.outputs.week }}
           workspaces: rust
           shared-key: shim-harness
           cache-on-failure: true
@@ -1160,6 +1233,16 @@ jobs:
           }
           rustup toolchain list
           exit $LASTEXITCODE
+      # The Rust caches' key starts with this UTC ISO week (the Rust job's
+      # rust-cache step says why), so its entries are never a week old.
+      - name: Name this week's Rust cache
+        id: cache_week
+        shell: pwsh
+        run: |
+          $now = [DateTime]::UtcNow
+          $week = '{0}-W{1:D2}' -f [System.Globalization.ISOWeek]::GetYear($now), [System.Globalization.ISOWeek]::GetWeekOfYear($now)
+          "week=$week" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "Rust cache week: $week"
       # One key per suite. All suites shared one key: the first to save fixed
       # it, and on an exact hit no later suite's compile was ever saved.
       # Only the suites that compile cache (sent-YAML mutants in cli,
@@ -1169,6 +1252,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         if: matrix.suite == 'eval' || matrix.suite == 'cli'
         with:
+          prefix-key: v0-rust-${{ steps.cache_week.outputs.week }}
           workspaces: rust
           key: ${{ matrix.suite }}
           cache-on-failure: true
@@ -2188,11 +2272,22 @@ jobs:
           }
           rustup toolchain list
           exit $LASTEXITCODE
+      # The Rust caches' key starts with this UTC ISO week (the Rust job's
+      # rust-cache step says why), so its entries are never a week old.
+      - name: Name this week's Rust cache
+        id: cache_week
+        shell: pwsh
+        run: |
+          $now = [DateTime]::UtcNow
+          $week = '{0}-W{1:D2}' -f [System.Globalization.ISOWeek]::GetYear($now), [System.Globalization.ISOWeek]::GetWeekOfYear($now)
+          "week=$week" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "Rust cache week: $week"
       # One shard per OS saves the shared mutant target's dependencies; all
       # 37 restore it. Every shard saved under this one key until 2026-10-24,
       # so each nightly that changed it raced 37 uploads for one entry.
       - uses: Swatinem/rust-cache@v2
         with:
+          prefix-key: v0-rust-${{ steps.cache_week.outputs.week }}
           workspaces: rust -> ${{ runner.temp }}/source-mutants-target/mutant
           key: cli-source-mutants
           cache-on-failure: true
@@ -2475,8 +2570,19 @@ jobs:
           }
           rustup toolchain list
           exit $LASTEXITCODE
+      # The Rust caches' key starts with this UTC ISO week (the Rust job's
+      # rust-cache step says why), so its entries are never a week old.
+      - name: Name this week's Rust cache
+        id: cache_week
+        shell: pwsh
+        run: |
+          $now = [DateTime]::UtcNow
+          $week = '{0}-W{1:D2}' -f [System.Globalization.ISOWeek]::GetYear($now), [System.Globalization.ISOWeek]::GetWeekOfYear($now)
+          "week=$week" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "Rust cache week: $week"
       - uses: Swatinem/rust-cache@v2
         with:
+          prefix-key: v0-rust-${{ steps.cache_week.outputs.week }}
           workspaces: rust
           shared-key: stress-tests
           cache-on-failure: true
