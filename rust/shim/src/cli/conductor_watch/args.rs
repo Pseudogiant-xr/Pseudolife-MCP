@@ -9,8 +9,9 @@
 //! there, extras are reported once every option is consumed. Repeats are
 //! argparse's: the last value wins, `--lease` appends. An abbreviation, any
 //! other token starting with `-`, `--`, a value starting with `-` after a
-//! space, an unknown `--word=V` and a number spelling outside plain ASCII
-//! decimal (`inf`, `nan`, `1_0`, spaces, other digits) defer.
+//! space, an unknown `--word=V`, a number spelling outside plain ASCII
+//! decimal, `inf`, `infinity` and `nan` (`1_0`, spaces, other digits) and
+//! a Windows `--state` starting with two separators defer.
 
 /// `parser().format_help()` at `COLUMNS=80` (argparse wraps at 78).
 pub(super) const HELP: &str = include_str!("help.txt");
@@ -50,7 +51,7 @@ const VALUES: [(&str, Kind); 13] = [
     ("--max-age", Kind::Age),
     ("--interval", Kind::Positive),
     ("--settle", Kind::NonNegative),
-    ("--state", Kind::Text),
+    ("--state", Kind::State),
     ("--suite-results", Kind::Text),
     ("--lease", Kind::Text),
     ("--lease-cli", Kind::Text),
@@ -64,6 +65,8 @@ enum Kind {
     Positive,
     NonNegative,
     Age,
+    /// `_state_path`: a path whose pathlib name is a file name.
+    State,
 }
 
 fn kind(option: &str) -> Option<Kind> {
@@ -95,11 +98,19 @@ fn python_float(text: &str) -> Result<Option<f64>, ()> {
         return Err(());
     }
     let unsigned = text.strip_prefix(['+', '-']).unwrap_or(text);
-    if ["inf", "infinity", "nan"]
+    let negative = text.starts_with('-');
+    if unsigned.eq_ignore_ascii_case("nan") {
+        return Ok(Some(f64::NAN));
+    }
+    if ["inf", "infinity"]
         .iter()
         .any(|word| unsigned.eq_ignore_ascii_case(word))
     {
-        return Err(());
+        return Ok(Some(if negative {
+            f64::NEG_INFINITY
+        } else {
+            f64::INFINITY
+        }));
     }
     let (mantissa, exponent) = unsigned
         .split_once(['e', 'E'])
@@ -124,11 +135,9 @@ fn python_float(text: &str) -> Result<Option<f64>, ()> {
 /// (`sys.int_info.str_digits_check_threshold`).
 const INT_LIMIT_FREE: usize = 640;
 
-/// `lease_cli.parse_duration` then `_age`'s check, over ASCII text.
+/// `lease_cli.parse_duration` then `_age`'s check. Its pattern is ASCII
+/// (`re.ASCII`), so a non-ASCII digit or unit letter is no duration.
 fn age(text: &str) -> Result<Result<(), String>, ()> {
-    if !text.is_ascii() {
-        return Err(());
-    }
     let stripped = super::super::pyjson::py_strip(text);
     // Past this length CPython's integer digit limit (4300 by default,
     // moved by PYTHONINTMAXSTRDIGITS) may refuse the count: not decided here.
@@ -165,11 +174,11 @@ fn check(option: &str, kind: Kind, value: &str) -> Result<Option<String>, ()> {
             };
             match python_float(value)? {
                 None => refused(&format!("invalid {name} value: {}", super::py_repr(value))),
-                // Never NaN here: its spellings defer above.
-                Some(number) if kind == Kind::Positive && number <= 0.0 => {
+                // `not value > 0` and `not value >= 0`: NaN fails both.
+                Some(number) if kind == Kind::Positive && (number.is_nan() || number <= 0.0) => {
                     refused("must be above 0")
                 }
-                Some(number) if kind == Kind::NonNegative && number < 0.0 => {
+                Some(number) if kind == Kind::NonNegative && (number.is_nan() || number < 0.0) => {
                     refused("must be 0 or more")
                 }
                 Some(_) => None,
@@ -179,7 +188,38 @@ fn check(option: &str, kind: Kind, value: &str) -> Result<Option<String>, ()> {
             Ok(()) => None,
             Err(message) => refused(&message),
         },
+        Kind::State => match path_name(value)? {
+            "" | "." | ".." => refused(&format!(
+                "{} has no file name; give a file path such as \
+                 ~/.pseudolife-mcp/watch/<owner>.json",
+                super::py_repr(value)
+            )),
+            _ => None,
+        },
     })
+}
+
+/// `Path(text).name` (CPython 3.11 pathlib): the last component after the
+/// drive and root, `""` when there is none. pathlib drops empty and `.`
+/// components. On Windows `/` also separates and `X:` (an ASCII letter) is
+/// a drive; a text starting with two separators (UNC, `\\?\`, `\\.\`) has
+/// drive rules not reproduced here, so it defers.
+fn path_name(text: &str) -> Result<&str, ()> {
+    let separator = |c: char| c == '/' || (cfg!(windows) && c == '\\');
+    let mut rest = text;
+    if cfg!(windows) {
+        if rest.starts_with(separator) && rest[1..].starts_with(separator) {
+            return Err(());
+        }
+        let bytes = rest.as_bytes();
+        if bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
+            rest = &rest[2..];
+        }
+    }
+    Ok(rest
+        .split(separator)
+        .rfind(|part| !part.is_empty() && *part != ".")
+        .unwrap_or(""))
 }
 
 fn store(args: &mut Args, option: &str, value: &str) {
@@ -364,13 +404,120 @@ mod tests {
             })
         );
         assert_eq!(
-            run(&["--detach", "--state", ""]),
+            run(&["--detach", "--state", "a/."]),
             Parsed::Args(Args {
                 detach: true,
-                state: Some(String::new()),
+                state: Some("a/.".into()),
                 ..Args::default()
             })
         );
+    }
+
+    fn no_file_name(text: &str) -> Parsed {
+        error(&format!(
+            "argument --state: {} has no file name; give a file path such as \
+             ~/.pseudolife-mcp/watch/<owner>.json",
+            super::super::py_repr(text)
+        ))
+    }
+
+    #[test]
+    fn a_state_with_no_file_name_is_refused_where_argparse_meets_it() {
+        assert!(matches!(run(&["--state", "x//./"]), Parsed::Args(_)));
+        for text in ["", ".", "..", "/", "a/..", "./."] {
+            assert_eq!(run(&["--state", text]), no_file_name(text), "{text:?}");
+            assert_eq!(
+                run(&[&format!("--state={text}")]),
+                no_file_name(text),
+                "{text:?}"
+            );
+        }
+        // In parse order: before the extras, after an earlier type error.
+        assert_eq!(
+            run(&["--state", "x", "--state", ".", "--bogus"]),
+            no_file_name(".")
+        );
+        assert_eq!(
+            run(&["--settle", "x", "--state", ""]),
+            error("argument --settle: invalid _non_negative value: 'x'")
+        );
+        if cfg!(windows) {
+            for text in ["C:", "C:\\", "c:..\\.", "\\.", "a\\..", "C:x\\..", "x/\\.."] {
+                assert_eq!(run(&["--state", text]), no_file_name(text), "{text:?}");
+            }
+            for text in ["C:x", "1:", "a:b", "C:\\w\\s.json"] {
+                assert!(
+                    matches!(run(&["--state", text]), Parsed::Args(_)),
+                    "{text:?}"
+                );
+            }
+            // UNC and extended forms: pathlib's drive rules, not reproduced.
+            for text in ["\\\\srv\\share", "//srv/share/x", "\\\\?\\C:"] {
+                assert_eq!(run(&["--state", text]), Parsed::Defer, "{text:?}");
+            }
+        } else {
+            for text in ["a\\..", "C:", "//srv/share"] {
+                assert!(
+                    matches!(run(&["--state", text]), Parsed::Args(_)),
+                    "{text:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn nan_and_infinity_are_read_as_float_reads_them() {
+        for argv in [
+            &["--settle", "nan"][..],
+            &["--settle=-NaN"],
+            &["--settle=+nan"],
+        ] {
+            assert_eq!(
+                run(argv),
+                error("argument --settle: must be 0 or more"),
+                "{argv:?}"
+            );
+        }
+        assert_eq!(
+            run(&["--interval", "nan"]),
+            error("argument --interval: must be above 0")
+        );
+        assert_eq!(
+            run(&["--quiet-after=-inf"]),
+            error("argument --quiet-after: must be above 0")
+        );
+        for argv in [
+            &["--settle", "inf"][..],
+            &["--quiet-after", "Infinity"],
+            &["--interval", "+INF"],
+            &["--settle", "1e999"],
+        ] {
+            assert!(matches!(run(argv), Parsed::Args(_)), "{argv:?}");
+        }
+        assert_eq!(
+            run(&["--settle", "nanx"]),
+            error("argument --settle: invalid _non_negative value: 'nanx'")
+        );
+        assert_eq!(run(&["--settle", "nan(1)"]), Parsed::Defer);
+    }
+
+    #[test]
+    fn a_duration_is_ascii_digits_and_an_ascii_unit() {
+        for text in ["5\u{17f}", "\u{665}", "5\u{212a}"] {
+            assert_eq!(
+                run(&["--max-age", text]),
+                error(&format!(
+                    "argument --max-age: not a duration: {} (use 90, 90s, 20m, 2h or 7d)",
+                    super::super::py_repr(text)
+                )),
+                "{text:?}"
+            );
+        }
+        // str.strip() takes Unicode whitespace.
+        assert!(matches!(
+            run(&["--max-age", "\u{a0}5m\u{a0}"]),
+            Parsed::Args(_)
+        ));
     }
 
     #[test]
@@ -465,12 +612,9 @@ mod tests {
             &["--help=x"],
             &["--zz=1"],
             &["--a b"],
-            &["--interval", "inf"],
-            &["--interval=-Infinity"],
-            &["--quiet-after", "nan"],
+            &["--settle", "-nan"],
             &["--settle", "1_0"],
             &["--settle", " 1"],
-            &["--max-age", "5\u{17f}"],
             &["--interval", "\u{661}"],
         ] {
             assert_eq!(run(argv), Parsed::Defer, "{argv:?}");

@@ -1,5 +1,6 @@
 //! `conductor-watch` before its lock, against texts the oracle printed
-//! (`conductor_watch_cli.py` at this branch's base). The decision tests
+//! (`conductor_watch_cli.py` with its conductor-watch defect fixes). The
+//! decision tests
 //! read no process environment: each passes its own variables and a state
 //! under a fresh temporary directory; a "running watcher" is this test
 //! process, dated by `process_start` as the oracle dates one.
@@ -114,9 +115,124 @@ fn record_pids_read_as_int_does() {
         assert_eq!(read(text).ok(), Some(want), "{text}");
     }
     assert_eq!(record_pid(None).ok(), Some(None));
-    for text in ["Infinity", "4294967296", "1e10", "\"1_0\"", "\"\u{661}\""] {
+    for text in ["\"1_0\"", "\"\u{661}\""] {
         assert!(read(text).is_err(), "{text}");
     }
+}
+
+#[test]
+fn record_pids_outside_the_probes_range_name_no_watcher() {
+    // `_running` refuses a pid at or past 2**31 (the probes overflow) and
+    // reads int()'s OverflowError (an infinite pid) as no watcher; anything
+    // at or below 0 is not alive.
+    let read = |text: &str| record_pid(Some(&pyjson::loads(text, DEPTH).unwrap()));
+    for text in [
+        "Infinity",
+        "-Infinity",
+        "2147483648",
+        "4294967296",
+        "-2147483649",
+        "99999999999999999999999",
+        "1e10",
+        "-1e300",
+        "2147483648.5",
+        "\"2147483648\"",
+        "\" -99999999999 \"",
+    ] {
+        assert_eq!(read(text).ok(), Some(None), "{text}");
+    }
+    assert_eq!(read("2147483647").ok(), Some(Some(2_147_483_647)));
+    assert_eq!(read("2147483647.9").ok(), Some(Some(2_147_483_647)));
+}
+
+#[test]
+fn an_unwritable_stop_request_is_refused_with_the_reason() {
+    let scratch = Scratch::new();
+    let stop = scratch.0.join("s.stop");
+    fs::create_dir(&stop).unwrap();
+    let reason = strerror(&write_stop(&stop).unwrap_err()).unwrap();
+    assert_eq!(
+        reason,
+        if cfg!(windows) {
+            "Permission denied"
+        } else {
+            "Is a directory"
+        }
+    );
+    assert_eq!(
+        stop_refusal(&stop, &reason).unwrap(),
+        format!(
+            "cannot write {} ({reason}); nothing changed. Make {} writable, then run --stop again",
+            stop.display(),
+            scratch.0.display()
+        )
+    );
+    // A relative state's directory is pathlib's ".".
+    assert_eq!(
+        stop_refusal(Path::new("s.stop"), "Permission denied").unwrap(),
+        "cannot write s.stop (Permission denied); nothing changed. \
+         Make . writable, then run --stop again"
+    );
+}
+
+#[cfg(windows)]
+#[test]
+fn a_hidden_stop_file_is_refused_as_the_c_runtime_refuses_it() {
+    use std::os::windows::ffi::OsStrExt;
+    #[allow(unsafe_code)]
+    fn set_attributes(path: &Path, attributes: u32) {
+        let wide: Vec<u16> = path.as_os_str().encode_wide().chain([0]).collect();
+        // SAFETY: a NUL-terminated wide path that outlives the call.
+        let done = unsafe {
+            windows_sys::Win32::Storage::FileSystem::SetFileAttributesW(wide.as_ptr(), attributes)
+        };
+        assert_ne!(done, 0);
+    }
+    let scratch = Scratch::new();
+    for attributes in [0x2, 0x4] {
+        let stop = scratch.0.join("s.stop");
+        fs::write(&stop, b"earlier").unwrap();
+        set_attributes(&stop, attributes);
+        let error = write_stop(&stop).unwrap_err();
+        assert_eq!(strerror(&error).as_deref(), Some("Permission denied"));
+        set_attributes(&stop, 0x80);
+        assert_eq!(fs::read(&stop).unwrap(), b"earlier");
+        fs::remove_file(&stop).unwrap();
+    }
+    let stop = scratch.0.join("s.stop");
+    fs::write(&stop, b"earlier").unwrap();
+    write_stop(&stop).unwrap();
+    assert_eq!(fs::read(&stop).unwrap(), b"");
+}
+
+#[test]
+fn stop_errors_read_as_python_reports_them() {
+    let os = io::Error::from_raw_os_error;
+    if cfg!(windows) {
+        // The C runtime's errno for the Win32 code, then its message.
+        for (code, text) in [
+            (2, "No such file or directory"),
+            (3, "No such file or directory"),
+            (5, "Permission denied"),
+            (19, "Permission denied"),
+            (32, "Permission denied"),
+            (36, "Permission denied"),
+            (112, "No space left on device"),
+        ] {
+            assert_eq!(strerror(&os(code)).as_deref(), Some(text), "{code}");
+        }
+        assert_eq!(strerror(&os(1450)), None);
+    } else {
+        assert_eq!(
+            strerror(&os(libc::EACCES)).as_deref(),
+            Some("Permission denied")
+        );
+        assert_eq!(
+            strerror(&os(libc::EISDIR)).as_deref(),
+            Some("Is a directory")
+        );
+    }
+    assert_eq!(strerror(&io::Error::other("x")), None);
 }
 
 #[test]
@@ -267,11 +383,16 @@ fn the_watch_itself_defers_before_any_effect() {
         &["--owner", OWNER, "--state", &state][..],
         &["--owner", OWNER, "--state", &state, "--detach"],
         &["--sto"],
-        &["--stop", "--state", ""],
-        &["--stop", "--interval", "inf", "--state", &state],
+        &["--stop", "--state", &format!("{state}.")],
     ] {
         assert!(decide_with(argv, &[]).is_err(), "{argv:?}");
     }
+    // Refused or answered before any effect now, no longer deferred.
+    assert_eq!(decided(&["--stop", "--state", ""]).code, 2);
+    assert_eq!(
+        decided(&["--stop", "--interval", "inf", "--state", &state]).code,
+        0
+    );
     assert!(decide_with(&["--stop"], &[("PYTHONINTMAXSTRDIGITS", "0")]).is_err());
     assert_eq!(fs::read_dir(&scratch.0).unwrap().count(), 0);
 }

@@ -52,9 +52,13 @@
     "conductor-watch-age-zero-admitted",
     "conductor-watch-cr-kept",
     "conductor-watch-foreign-exit-0",
+    "conductor-watch-pid-limit-deferred",
+    "conductor-watch-settle-nan-admitted",
     "conductor-watch-start-ignored",
+    "conductor-watch-state-parent-admitted",
     "conductor-watch-stop-before-owner",
-    "conductor-watch-stop-file-kept"
+    "conductor-watch-stop-file-kept",
+    "conductor-watch-stop-refusal-exit-0"
   ],
   "connect": [
     "connect-backup-stamp-millis",
@@ -79,12 +83,20 @@
   ],
   "console": [
     "console-405-not-old",
+    "console-code-any-character",
+    "console-code-unchecked",
+    "console-display-ignored",
+    "console-exited-counts-as-opened",
+    "console-expiry-refusal-swallowed",
+    "console-generic-launched",
     "console-get-without-content-type",
     "console-hint-over-message",
+    "console-localtime-refusal-deferred",
     "console-null-cell-empty",
     "console-paired-note-always",
-    "console-plain-sign-in-admitted",
     "console-stamp-rounded",
+    "console-unless-skips-the-list",
+    "console-unsafe-link-launched",
     "console-winerror-full-stop"
   ],
   "coordination_recovery": [
