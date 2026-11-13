@@ -2892,7 +2892,7 @@ foreach ($selectedClient in $clients) {
                 if ((-not $managedRegisteredShim) -and (Test-ShimRegistrationMigrates "codex")) {
                     if ($script:shimMigrated -eq "current") {
                         Step "Codex registration preserved; it already runs the native client."
-                        $mcpState["codex"] = "present"
+                        $mcpState["codex"] = "present-current"
                     } else {
                         Step "Codex registration moved to the shim launcher; the native client is installed."
                         $mcpState["codex"] = "present-migrated"
@@ -2910,7 +2910,7 @@ foreach ($selectedClient in $clients) {
                             } elseif (Test-ShimRegistrationMigrates "codex" $registeredShim) {
                                 if ($script:shimMigrated -eq "current") {
                                     Step "Codex registration preserved; it already runs the native client."
-                                    $mcpState["codex"] = "present"
+                                    $mcpState["codex"] = "present-current"
                                 } else {
                                     Step "Codex registration moved to the shim launcher; the native client is installed."
                                     $mcpState["codex"] = "present-upgraded"
@@ -2922,7 +2922,7 @@ foreach ($selectedClient in $clients) {
                         } elseif (Test-ShimRegistrationMigrates "codex") {
                             if ($script:shimMigrated -eq "current") {
                                 Step "Codex registration preserved; it already runs the native client."
-                                $mcpState["codex"] = "present"
+                                $mcpState["codex"] = "present-current"
                             } else {
                                 Step "Codex registration moved from bare pseudolife-mcp to the shim launcher; the native client is installed."
                                 $mcpState["codex"] = "present-upgraded"
@@ -3020,7 +3020,7 @@ foreach ($selectedClient in $clients) {
                 if ((-not $managedRegisteredShim) -and (Test-ShimRegistrationMigrates "gemini")) {
                     if ($script:shimMigrated -eq "current") {
                         Step "Gemini CLI registration preserved; it already runs the native client."
-                        $mcpState["gemini"] = "present"
+                        $mcpState["gemini"] = "present-current"
                     } else {
                         Step "Gemini CLI registration moved to the shim launcher; the native client is installed."
                         $mcpState["gemini"] = "present-migrated"
@@ -3038,7 +3038,7 @@ foreach ($selectedClient in $clients) {
                             } elseif (Test-ShimRegistrationMigrates "gemini" $registeredShim) {
                                 if ($script:shimMigrated -eq "current") {
                                     Step "Gemini CLI registration preserved; it already runs the native client."
-                                    $mcpState["gemini"] = "present"
+                                    $mcpState["gemini"] = "present-current"
                                 } else {
                                     Step "Gemini CLI registration moved to the shim launcher; the native client is installed."
                                     $mcpState["gemini"] = "present-upgraded"
@@ -3050,7 +3050,7 @@ foreach ($selectedClient in $clients) {
                         } elseif (Test-ShimRegistrationMigrates "gemini") {
                             if ($script:shimMigrated -eq "current") {
                                 Step "Gemini CLI registration preserved; it already runs the native client."
-                                $mcpState["gemini"] = "present"
+                                $mcpState["gemini"] = "present-current"
                             } else {
                                 Step "Gemini CLI registration moved from bare pseudolife-mcp to the shim launcher; the native client is installed."
                                 $mcpState["gemini"] = "present-upgraded"
@@ -3141,7 +3141,7 @@ foreach ($selectedClient in $clients) {
                 if ((-not $managedRegisteredShim) -and (Test-ShimRegistrationMigrates "claude-code")) {
                     if ($script:shimMigrated -eq "current") {
                         Step "Claude Code registration preserved; it already runs the native client."
-                        $mcpState["claude"] = "present"
+                        $mcpState["claude"] = "present-current"
                     } else {
                         Step "Claude Code registration moved to the shim launcher; the native client is installed."
                         $mcpState["claude"] = "present-migrated"
@@ -3159,7 +3159,7 @@ foreach ($selectedClient in $clients) {
                             } elseif (Test-ShimRegistrationMigrates "claude-code" $registeredShim) {
                                 if ($script:shimMigrated -eq "current") {
                                     Step "Claude Code registration preserved; it already runs the native client."
-                                    $mcpState["claude"] = "present"
+                                    $mcpState["claude"] = "present-current"
                                 } else {
                                     Step "Claude Code registration moved to the shim launcher; the native client is installed."
                                     $mcpState["claude"] = "present-upgraded"
@@ -3171,7 +3171,7 @@ foreach ($selectedClient in $clients) {
                         } elseif (Test-ShimRegistrationMigrates "claude-code") {
                             if ($script:shimMigrated -eq "current") {
                                 Step "Claude Code registration preserved; it already runs the native client."
-                                $mcpState["claude"] = "present"
+                                $mcpState["claude"] = "present-current"
                             } else {
                                 Step "Claude Code registration moved from bare pseudolife-mcp to the shim launcher; the native client is installed."
                                 $mcpState["claude"] = "present-upgraded"
@@ -3207,7 +3207,7 @@ foreach ($selectedClient in $clients) {
             # keeping any credential it already has. Anything else gets the
             # manual fix.
             $claudeCredentialOk = $false
-            if (($mcpState["claude"] -in "present-upgraded", "present-migrated") -and $claudeTokenFile) {
+            if (($mcpState["claude"] -in "present-upgraded", "present-migrated", "present-current") -and $claudeTokenFile) {
                 $claudeEnvOutput = & (Get-InstallerPython) (Join-Path $repo "ops/client_credentials.py") registration-env --config $claudeJson --set "PSEUDOLIFE_MCP_TOKEN_FILE=$claudeTokenFile" --set "PSEUDOLIFE_MCP_DAEMON_URL=$clientDaemonUrl" --set "PSEUDOLIFE_AGENT_STATE_DIR=$claudeAgentStateDir"
                 switch ("$(Get-HelperStatus $claudeEnvOutput)") {
                     "updated" {
@@ -3489,6 +3489,7 @@ function Describe-Mcp($state) {
         "shim" { "stdio shim (writer id: daemon default in ops/.env)" }
         "http" { "HTTP (writer id: daemon default in ops/.env)" }
         "present" { "already wired (unchanged)" }
+        "present-current" { "already wired (unchanged; it runs the native client)" }
         "present-upgraded" { "already wired; it runs the native client from this release" }
         "present-migrated" { "already wired; registration moved to the native launcher (old file backed up)" }
         "present-custom" { "already wired with custom command (unchanged)" }
@@ -3497,7 +3498,7 @@ function Describe-Mcp($state) {
     }
 }
 function Get-McpMarker($state) {
-    if ($state -in "shim-env", "shim", "http", "present", "present-upgraded", "present-migrated", "present-custom") { "[x]" } else { "[!]" }
+    if ($state -in "shim-env", "shim", "http", "present", "present-current", "present-upgraded", "present-migrated", "present-custom") { "[x]" } else { "[!]" }
 }
 function Describe-Instr($state) {
     if (-not $state) { return "[-] Standing file        skipped" }

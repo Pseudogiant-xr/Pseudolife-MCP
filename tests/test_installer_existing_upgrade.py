@@ -311,7 +311,7 @@ def test_install_sh_rerun_upgrades_exact_manager_absolute_registration(
     )
     output = proc.stdout.decode(errors="replace")
     assert proc.returncode == 0, proc.stderr.decode(errors="replace")
-    assert "STATE=present\n" in output.replace("\r", "")
+    assert "STATE=present-current\n" in output.replace("\r", "")
     assert "registration preserved; it already runs the native client" in output
     assert "custom registered command" not in output
 
@@ -595,7 +595,7 @@ def test_install_ps1_rerun_upgrades_exact_manager_absolute_registration(
     )
     output = proc.stdout.decode(errors="replace")
     assert proc.returncode == 0, proc.stderr.decode(errors="replace")
-    assert "STATE=present\n" in output.replace("\r", "")
+    assert "STATE=present-current\n" in output.replace("\r", "")
     assert "registration preserved; it already runs the native client" in output
     assert "custom registered command" not in output
 
@@ -709,7 +709,7 @@ def test_install_sh_reports_a_registration_already_on_the_launcher_as_preserved(
     )
     output = (proc.stdout + proc.stderr).decode(errors="replace")
     assert proc.returncode == 0, output
-    assert "STATE=present\n" in output
+    assert "STATE=present-current\n" in output
     assert "registration preserved; it already runs the native client" in output
     assert "registration moved" not in output
 
@@ -725,6 +725,6 @@ def test_install_ps1_reports_a_registration_already_on_the_launcher_as_preserved
     )
     output = (proc.stdout + proc.stderr).decode(errors="replace").replace("\r", "")
     assert proc.returncode == 0, output
-    assert "STATE=present\n" in output
+    assert "STATE=present-current\n" in output
     assert "registration preserved; it already runs the native client" in output
     assert "registration moved" not in output

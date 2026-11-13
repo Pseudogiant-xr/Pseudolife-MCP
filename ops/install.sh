@@ -2928,7 +2928,7 @@ for selected_client in $CLIENTS; do
                 if [ -z "$managed_registered_shim" ] && shim_registration_migrates codex; then
                     if [ "$SHIM_MIGRATED" = current ]; then
                         step "Codex registration preserved; it already runs the native client."
-                        MCP_CODEX=present
+                        MCP_CODEX=present-current
                     else
                         step "Codex registration moved to the shim launcher; the native client is installed."
                         MCP_CODEX=present-migrated
@@ -2947,7 +2947,7 @@ for selected_client in $CLIENTS; do
                             elif shim_registration_migrates codex "$registered_shim"; then
                                 if [ "$SHIM_MIGRATED" = current ]; then
                                     step "Codex registration preserved; it already runs the native client."
-                                    MCP_CODEX=present
+                                    MCP_CODEX=present-current
                                 else
                                     step "Codex registration moved to the shim launcher; the native client is installed."
                                     MCP_CODEX=present-upgraded
@@ -2959,7 +2959,7 @@ for selected_client in $CLIENTS; do
                         elif shim_registration_migrates codex; then
                             if [ "$SHIM_MIGRATED" = current ]; then
                                 step "Codex registration preserved; it already runs the native client."
-                                MCP_CODEX=present
+                                MCP_CODEX=present-current
                             else
                                 step "Codex registration moved from bare pseudolife-mcp to the shim launcher; the native client is installed."
                                 MCP_CODEX=present-upgraded
@@ -3069,7 +3069,7 @@ for selected_client in $CLIENTS; do
                 if [ -z "$managed_registered_shim" ] && shim_registration_migrates gemini; then
                     if [ "$SHIM_MIGRATED" = current ]; then
                         step "Gemini CLI registration preserved; it already runs the native client."
-                        MCP_GEMINI=present
+                        MCP_GEMINI=present-current
                     else
                         step "Gemini CLI registration moved to the shim launcher; the native client is installed."
                         MCP_GEMINI=present-migrated
@@ -3088,7 +3088,7 @@ for selected_client in $CLIENTS; do
                             elif shim_registration_migrates gemini "$registered_shim"; then
                                 if [ "$SHIM_MIGRATED" = current ]; then
                                     step "Gemini CLI registration preserved; it already runs the native client."
-                                    MCP_GEMINI=present
+                                    MCP_GEMINI=present-current
                                 else
                                     step "Gemini CLI registration moved to the shim launcher; the native client is installed."
                                     MCP_GEMINI=present-upgraded
@@ -3100,7 +3100,7 @@ for selected_client in $CLIENTS; do
                         elif shim_registration_migrates gemini; then
                             if [ "$SHIM_MIGRATED" = current ]; then
                                 step "Gemini CLI registration preserved; it already runs the native client."
-                                MCP_GEMINI=present
+                                MCP_GEMINI=present-current
                             else
                                 step "Gemini CLI registration moved from bare pseudolife-mcp to the shim launcher; the native client is installed."
                                 MCP_GEMINI=present-upgraded
@@ -3210,7 +3210,7 @@ for selected_client in $CLIENTS; do
             if [ -z "$managed_registered_shim" ] && shim_registration_migrates claude-code; then
                 if [ "$SHIM_MIGRATED" = current ]; then
                     step "Claude Code registration preserved; it already runs the native client."
-                    MCP_CLAUDE=present
+                    MCP_CLAUDE=present-current
                 else
                     step "Claude Code registration moved to the shim launcher; the native client is installed."
                     MCP_CLAUDE=present-migrated
@@ -3229,7 +3229,7 @@ for selected_client in $CLIENTS; do
                         elif shim_registration_migrates claude-code "$registered_shim"; then
                             if [ "$SHIM_MIGRATED" = current ]; then
                                 step "Claude Code registration preserved; it already runs the native client."
-                                MCP_CLAUDE=present
+                                MCP_CLAUDE=present-current
                             else
                                 step "Claude Code registration moved to the shim launcher; the native client is installed."
                                 MCP_CLAUDE=present-upgraded
@@ -3241,7 +3241,7 @@ for selected_client in $CLIENTS; do
                     elif shim_registration_migrates claude-code; then
                         if [ "$SHIM_MIGRATED" = current ]; then
                             step "Claude Code registration preserved; it already runs the native client."
-                            MCP_CLAUDE=present
+                            MCP_CLAUDE=present-current
                         else
                             step "Claude Code registration moved from bare pseudolife-mcp to the shim launcher; the native client is installed."
                             MCP_CLAUDE=present-upgraded
@@ -3282,7 +3282,7 @@ for selected_client in $CLIENTS; do
         # the registration in place (never a remove and re-add), keeping any
         # credential it already has. Anything else gets the manual fix.
         claude_credential_ok=""
-        if { [ "$MCP_CLAUDE" = present-upgraded ] || [ "$MCP_CLAUDE" = present-migrated ]; } && [ -n "${CLAUDE_TOKEN_FILE:-}" ]; then
+        if { [ "$MCP_CLAUDE" = present-upgraded ] || [ "$MCP_CLAUDE" = present-migrated ] || [ "$MCP_CLAUDE" = present-current ]; } && [ -n "${CLAUDE_TOKEN_FILE:-}" ]; then
             claude_env_output=$("$(installer_python)" "$repo/ops/client_credentials.py" registration-env \
                 --config "$CLAUDE_JSON" \
                 --set "PSEUDOLIFE_MCP_TOKEN_FILE=$CLAUDE_TOKEN_FILE" \
@@ -3685,6 +3685,7 @@ describe_mcp() {  # $1 = state
         shim)     echo "stdio shim (writer id: daemon default in ops/.env)" ;;
         http)     echo "HTTP (writer id: daemon default in ops/.env)" ;;
         present)  echo "already wired (unchanged)" ;;
+        present-current) echo "already wired (unchanged; it runs the native client)" ;;
         present-upgraded) echo "already wired; it runs the native client from this release" ;;
         present-migrated) echo "already wired; registration moved to the native launcher (old file backed up)" ;;
         present-custom) echo "already wired with custom command (unchanged)" ;;

@@ -237,6 +237,7 @@ def test_plugin_hooks_keep_a_token_the_user_environment_supplies(bash, tmp_path)
 
 def _wire(shell: _Shell, client: str, *, token_file: str, existing: str | None = None,
           claude_json: Path | None = None, state_dir: str = "/fixture/claude-code-agents",
+          migrate_exit: int | None = None,
           ) -> tuple[subprocess.CompletedProcess[str], list[str]]:
     """Run the client-wiring loop with fake claude/gemini/pipx CLIs."""
     fake_bin = shell.tmp / "bin"
@@ -266,7 +267,7 @@ def _wire(shell: _Shell, client: str, *, token_file: str, existing: str | None =
     config = ("pseudolife-memory\n" + existing) if existing else ""
     body = f"""PATH='{shell.path(installed_bin)}:{shell.path(fake_bin)}:/usr/bin:/bin'
 export PATH CALL_LOG='{shell.path(call_log)}' FAKE_CONFIG='{_q(config)}'
-export FAKE_LAUNCHER='{shell.path(installed_bin / "pseudolife-mcp")}' FAKE_KEEP_LAUNCHER=1
+export FAKE_LAUNCHER='{shell.path(installed_bin / "pseudolife-mcp")}' {"FAKE_KEEP_LAUNCHER=1" if migrate_exit is None else f"FAKE_MIGRATE_EXIT={migrate_exit}"}
 CLIENTS='{client}'
 TRANSPORT=shim
 CODEX_CREDENTIAL_BOOTSTRAP_FAILED='' CODEX_CONNECTION_CONFIGURED='' CODEX_CREDENTIAL_FILE=''
@@ -355,6 +356,31 @@ def test_existing_claude_code_registration_gains_the_credential_in_place(bash, t
     assert Path(env["PSEUDOLIFE_AGENT_STATE_DIR"]) == state_dir
     assert env["PSEUDOLIFE_MCP_NO_SPAWN"] == "1"
     assert "restart" in proc.stdout.lower()
+
+
+@BASH
+def test_a_registration_already_on_the_native_launcher_still_gains_the_credential(bash, tmp_path):
+    """The native step reports a registration that already runs the launcher
+    as current; the credential repair must still run for it (Codex review,
+    2026-11-14)."""
+    shell = _Shell(bash, tmp_path)
+    claude_json = shell.home / ".claude.json"
+    claude_json.write_text(json.dumps({"mcpServers": {"pseudolife-memory": {
+        "type": "stdio", "command": "/opt/tools/pseudolife-mcp", "args": [],
+        "env": {"PSEUDOLIFE_WRITER_ID": "claude-code", "PSEUDOLIFE_MCP_NO_SPAWN": "1"}}}}),
+        encoding="utf-8")
+    existing = "Type: stdio\nCommand: /opt/tools/pseudolife-mcp\nEnvironment:\n  PSEUDOLIFE_MCP_NO_SPAWN=1"
+    token_file = shell.home / ".pseudolife-mcp" / "claude-code.token"
+    state_dir = shell.home / ".pseudolife-mcp" / "claude-code-agents"
+    proc, calls = _wire(shell, "claude", token_file=shell.path(token_file),
+                        existing=existing, claude_json=claude_json,
+                        state_dir=shell.path(state_dir), migrate_exit=4)
+    assert proc.returncode == 0, proc.stderr
+    assert "STATE=present-current/" in proc.stdout
+    assert "registration preserved; it already runs the native client" in proc.stdout
+    env = json.loads(claude_json.read_text(encoding="utf-8"))["mcpServers"][
+        "pseudolife-memory"]["env"]
+    assert Path(env["PSEUDOLIFE_MCP_TOKEN_FILE"]) == token_file
 
 
 @BASH
