@@ -10,8 +10,9 @@
 //! code is minted (`browser.rs`), so a launcher this port does not
 //! reproduce defers before any effect; once the daemon answers the sign-in
 //! with a 200 object the command answers every branch itself, an oracle
-//! crash included (its terminal exception line on stderr, exit 1). Anything else outside the reproduced domain
-//! that can be decided before a request defers before it
+//! crash included (its terminal exception line on stderr, exit 1).
+//! Anything else outside the reproduced domain that can be decided before a
+//! request defers before it
 //! (`rust/cli_harness/rows/console.md`).
 mod args;
 mod browser;

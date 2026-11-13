@@ -154,7 +154,7 @@ mod posix {
     }
 
     /// [`which`] with `PATH` given.
-    pub(super) fn which_in(name: &str, path: Option<OsString>) -> bool {
+    pub(crate) fn which_in(name: &str, path: Option<OsString>) -> bool {
         let path = path.unwrap_or_else(|| CS_PATH.into());
         if path.is_empty() {
             return false;
@@ -180,7 +180,7 @@ mod posix {
     /// The paths `Popen` tries for `program`: itself when it holds a slash,
     /// else joined to each `os.get_exec_path()` entry (`PATH`, or
     /// `os.defpath` when unset; an empty `PATH` is one empty entry).
-    pub(super) fn candidates(program: &[u8], path: Option<OsString>) -> Vec<Vec<u8>> {
+    pub(crate) fn candidates(program: &[u8], path: Option<OsString>) -> Vec<Vec<u8>> {
         if program.contains(&b'/') {
             return vec![program.to_vec()];
         }
