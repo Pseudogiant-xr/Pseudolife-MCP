@@ -362,19 +362,7 @@ case "$CLIENT_UPDATE_SCHEDULE" in
 esac
 # <<< client update schedule flag <<<
 
-# Both are needed from here on: the client-only mode block asks this
-# checkout's shim code whether a daemon URL is loopback.
 repo="$(cd "$(dirname "$0")/.." && pwd)"
-installer_python() {  # echoes an interpreter >= 3.10, or nothing
-    for candidate in python3 python; do
-        if command -v "$candidate" >/dev/null 2>&1 &&
-            "$candidate" -c 'import sys; sys.exit(sys.version_info < (3, 10))' >/dev/null 2>&1; then
-            echo "$candidate"
-            return 0
-        fi
-    done
-    return 0
-}
 
 compose_file="$repo/ops/docker-compose.yml"
 env_file="$repo/ops/.env"
@@ -388,13 +376,220 @@ LEGACY_SHIM_OVERRIDE_MARKER="# pseudolife-mcp install: managed override (shim-on
 ENV_BEGIN="# >>> pseudolife-mcp install (managed block — installer rewrites between markers) >>>"
 ENV_END="# <<< pseudolife-mcp install <<<"
 
-# >>> recorded choices >>>
-installer_state() {
-    local state_python
-    state_python="$(installer_python)"
-    [ -n "$state_python" ] || { echo "Python >= 3.10 is needed to read recorded installer choices; install it and rerun." >&2; return 1; }
-    "$state_python" "$repo/ops/installer_state.py" "$@"
+# >>> native client >>>
+# The client side (the stdio MCP shim every agent registers, and the
+# pseudolife-mcp CLI) is the native binary published with this checkout's
+# release, so no Python is looked for or installed (docs/dev/native-runtimes.md,
+# docs/dev/release-assets.md). It is fetched, verified against the release's
+# SHA256SUMS and run once from a private staging directory before anything on
+# this host changes; ensure_shim then installs that exact archive with the
+# native runtime installer, which keeps every older runtime a running session
+# uses. PSEUDOLIFE_NATIVE_ARCHIVE_URL replaces the release download URL with
+# another URL or a local directory holding the archive and SHA256SUMS, and
+# PSEUDOLIFE_NATIVE_TARGET names the release target to install.
+NATIVE_VERSION=""
+NATIVE_TARGET=""
+NATIVE_ARCHIVE=""
+NATIVE_SUMS=""
+NATIVE_STAGED=""
+native_target() {  # echoes this host's release target triple, or nothing
+    # PSEUDOLIFE_NATIVE_TARGET picks one of the five release targets instead
+    # (an emulated one, or a test's).
+    case "${PSEUDOLIFE_NATIVE_TARGET:-}" in
+        x86_64-unknown-linux-gnu|aarch64-unknown-linux-gnu|x86_64-apple-darwin|aarch64-apple-darwin|x86_64-pc-windows-msvc)
+            echo "$PSEUDOLIFE_NATIVE_TARGET"; return 0 ;;
+        "") ;;
+        *) return 0 ;;
+    esac
+    case "$(uname -s 2>/dev/null)" in
+        Linux)
+            case "$(uname -m 2>/dev/null)" in
+                x86_64|amd64) echo x86_64-unknown-linux-gnu ;;
+                aarch64|arm64) echo aarch64-unknown-linux-gnu ;;
+            esac ;;
+        Darwin)
+            case "$(uname -m 2>/dev/null)" in
+                x86_64) echo x86_64-apple-darwin ;;
+                arm64|aarch64) echo aarch64-apple-darwin ;;
+            esac ;;
+        MINGW*|MSYS*|CYGWIN*)
+            case "$(uname -m 2>/dev/null)" in
+                x86_64|amd64) echo x86_64-pc-windows-msvc ;;
+            esac ;;
+    esac
 }
+native_sha256() {  # $1 = file; echoes its lowercase SHA-256
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$1" | cut -d' ' -f1
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$1" | cut -d' ' -f1
+    else
+        return 1
+    fi
+}
+native_download() {  # $1 = asset name, $2 = destination file; status 0, 22 (no such file there) or another failure
+    case "$native_base" in
+        http://*|https://*)
+            # A stalled transfer gives up instead of hanging an unattended run.
+            native_curl=0
+            curl -fsSL --retry 2 --connect-timeout 20 --max-time 900 --speed-limit 1024 --speed-time 60 \
+                -o "$2.part" "$native_base/$1" || native_curl=$?
+            if [ "$native_curl" = 0 ]; then mv -f "$2.part" "$2"; else rm -f "$2.part"; fi
+            return "$native_curl" ;;
+        *)
+            [ -f "$native_base/$1" ] || return 22
+            cp "$native_base/$1" "$2" ;;
+    esac
+}
+native_unstage() {  # removes this run's staging directory
+    if [ -n "${native_stage_dir:-}" ] && [ -d "$native_stage_dir" ]; then rm -rf "$native_stage_dir"; fi
+    native_stage_dir=""
+}
+native_refuse() {  # $1 = cause, $2 = fix
+    echo "The native pseudolife-mcp client cannot be installed: $1. $2 Nothing was changed." >&2
+    exit 1
+}
+native_stage() {  # fetch, verify, extract and run the release binary; refuses on any failure
+    NATIVE_VERSION="$(sed -n 's/^version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$repo/pyproject.toml" 2>/dev/null | head -1)" || NATIVE_VERSION=""
+    [ -n "$NATIVE_VERSION" ] || native_refuse "this checkout's pyproject.toml names no version" "Check out a release tag (git checkout v<version>) and rerun."
+    NATIVE_TARGET="$(native_target)"
+    if [ -z "$NATIVE_TARGET" ] && [ -n "${PSEUDOLIFE_NATIVE_TARGET:-}" ]; then
+        native_refuse "PSEUDOLIFE_NATIVE_TARGET names $PSEUDOLIFE_NATIVE_TARGET, which no release publishes" "Set it to one of x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu, x86_64-apple-darwin, aarch64-apple-darwin, x86_64-pc-windows-msvc, or unset it."
+    fi
+    [ -n "$NATIVE_TARGET" ] || native_refuse "no native client is published for this platform ($(uname -s 2>/dev/null) $(uname -m 2>/dev/null)); releases carry Linux x86_64 and aarch64, macOS Intel and Apple silicon, and Windows x86_64" "Run this installer on one of those (a machine there can use a daemon elsewhere with --client-only)."
+    case "$NATIVE_TARGET" in
+        *windows*) native_name="pseudolife-mcp-$NATIVE_VERSION-$NATIVE_TARGET.zip"; native_binary=pseudolife-mcp.exe ;;
+        *) native_name="pseudolife-mcp-$NATIVE_VERSION-$NATIVE_TARGET.tar.gz"; native_binary=pseudolife-mcp ;;
+    esac
+    native_base="${PSEUDOLIFE_NATIVE_ARCHIVE_URL:-https://github.com/Pseudogiant-xr/Pseudolife-MCP/releases/download/v$NATIVE_VERSION}"
+    native_base="${native_base%/}"
+    case "$native_base" in
+        http://*|https://*)
+            native_authority="${native_base#*://}"; native_authority="${native_authority%%/*}"
+            case "$native_authority" in
+                *@*) native_refuse "PSEUDOLIFE_NATIVE_ARCHIVE_URL carries a user name or password, which would be printed with any download error" "Serve the archives without credentials in the URL." ;;
+            esac ;;
+    esac
+    native_dir="$HOME/.pseudolife-mcp/downloads/$NATIVE_VERSION"
+    # Owner-only, but only for the directories this run creates.
+    for native_new in "$HOME/.pseudolife-mcp" "$HOME/.pseudolife-mcp/downloads" "$native_dir"; do
+        [ -d "$native_new" ] || { mkdir -p "$native_new" && chmod 700 "$native_new"; } 2>/dev/null || true
+    done
+    NATIVE_SUMS="$native_dir/SHA256SUMS"
+    NATIVE_ARCHIVE="$native_dir/$native_name"
+    native_sums_status=0
+    native_download SHA256SUMS "$NATIVE_SUMS" || native_sums_status=$?
+    case "$native_sums_status" in
+        0) ;;
+        22) native_refuse "release v$NATIVE_VERSION has no SHA256SUMS at $native_base (releases before the native client carry none)" "Update this checkout to a newer release (git pull, or git checkout of a newer tag) and rerun." ;;
+        *) native_refuse "SHA256SUMS could not be downloaded from $native_base (curl exit $native_sums_status: network, proxy or TLS)" "Check the connection (or PSEUDOLIFE_NATIVE_ARCHIVE_URL) and rerun." ;;
+    esac
+    native_expected="$(grep -E "^[0-9a-f]{64}  $(printf '%s' "$native_name" | sed 's/[.]/[.]/g')$" "$NATIVE_SUMS" | cut -d' ' -f1)" || native_expected=""
+    case "$(printf '%s\n' "$native_expected" | grep -c . || true)" in
+        1) ;;
+        *) native_refuse "SHA256SUMS of release v$NATIVE_VERSION lists $native_name $(printf '%s\n' "$native_expected" | grep -c . || true) times, not once" "Rerun later; if it persists, report it at https://github.com/Pseudogiant-xr/Pseudolife-MCP/issues." ;;
+    esac
+    if [ ! -f "$NATIVE_ARCHIVE" ] || [ "$(native_sha256 "$NATIVE_ARCHIVE" 2>/dev/null)" != "$native_expected" ]; then
+        native_download "$native_name" "$NATIVE_ARCHIVE" ||
+            native_refuse "the download of $native_name from $native_base failed" "Check the network (or PSEUDOLIFE_NATIVE_ARCHIVE_URL) and rerun."
+    fi
+    native_actual="$(native_sha256 "$NATIVE_ARCHIVE")" ||
+        native_refuse "neither sha256sum nor shasum is installed to verify the download" "Install coreutils (sha256sum) and rerun."
+    if [ "$native_actual" != "$native_expected" ]; then
+        rm -f "$NATIVE_ARCHIVE"
+        native_refuse "$native_name does not match the release's SHA256SUMS (the download was removed)" "Rerun to download it again."
+    fi
+    native_stage_dir="$(mktemp -d "${TMPDIR:-/tmp}/pseudolife-native.XXXXXX")" &&
+        chmod 700 "$native_stage_dir" || native_refuse "no private staging directory could be made" "Free space in ${TMPDIR:-/tmp} and rerun."
+    # The staged copy is only for this run; the verified download is kept.
+    trap native_unstage EXIT
+    case "$native_name" in
+        *.zip)
+            if command -v unzip >/dev/null 2>&1; then
+                unzip -q -o "$NATIVE_ARCHIVE" "$native_binary" -d "$native_stage_dir"
+            else
+                powershell.exe -NoProfile -NonInteractive -Command "Expand-Archive -LiteralPath '$(cygpath -w "$NATIVE_ARCHIVE")' -DestinationPath '$(cygpath -w "$native_stage_dir")' -Force"
+            fi ;;
+        *) tar -xzf "$NATIVE_ARCHIVE" -C "$native_stage_dir" "$native_binary" ;;
+    esac || native_refuse "$native_name could not be unpacked" "Rerun; the verified archive is kept in $native_dir."
+    NATIVE_STAGED="$native_stage_dir/$native_binary"
+    chmod 755 "$NATIVE_STAGED" 2>/dev/null || true
+    if ! native_says="$("$NATIVE_STAGED" version 2>&1)"; then
+        case "$NATIVE_TARGET" in
+            *linux*) native_run_fix="The Linux client needs glibc 2.35 or newer (Ubuntu 22.04, Debian 12); run this installer on such a system." ;;
+            *apple*) native_run_fix="The macOS client needs macOS 11 or newer." ;;
+            *) native_run_fix="Check that nothing (an antivirus or an execution policy) blocks it, and rerun." ;;
+        esac
+        native_refuse "the downloaded client does not run on this host ($(printf '%s' "$native_says" | head -1))" "$native_run_fix"
+    fi
+}
+# ensure_shim's install: the verified archive into a new side-by-side runtime
+# behind the stable launcher. Status 0 with SHIM_PATH set, else 1.
+native_install() {
+    [ -n "$NATIVE_STAGED" ] || native_stage
+    native_launcher_before="$(native_installed_launcher)"
+    native_sum_before=""
+    [ -z "$native_launcher_before" ] || native_sum_before="$(native_sha256 "$native_launcher_before" 2>/dev/null || true)"
+    native_launcher="$("$NATIVE_STAGED" runtime install --archive "$NATIVE_ARCHIVE" --sha256sums "$NATIVE_SUMS" --version "$NATIVE_VERSION" | tail -1)" || return 1
+    native_launcher="${native_launcher%$'\r'}"
+    if command -v cygpath >/dev/null 2>&1; then
+        case "$native_launcher" in [A-Za-z]:\\*) native_launcher="$(cygpath -u "$native_launcher")" ;; esac
+    fi
+    [ -n "$native_launcher" ] && [ -f "$native_launcher" ] || return 1
+    SHIM_PATH="$native_launcher"
+    if [ -n "$native_sum_before" ] && [ "$native_sum_before" = "$(native_sha256 "$SHIM_PATH" 2>/dev/null)" ]; then
+        step "Native client $NATIVE_VERSION already installed at $SHIM_PATH; nothing changed"
+    else
+        step "Native client $NATIVE_VERSION installed at $SHIM_PATH (running sessions keep the client they started with)"
+    fi
+    native_expose_line="$("$SHIM_PATH" installer expose 2>/dev/null)" || true
+    case "$native_expose_line" in *"not on PATH"*|*"kept as"*|*"left as it is"*) echo "  $native_expose_line" ;; esac
+    native_user_path
+    return 0
+}
+native_user_path() {  # Git Bash on Windows: the launcher's directory first on the user PATH, as install.ps1 does
+    case "$(uname -s 2>/dev/null)" in MINGW*|MSYS*|CYGWIN*) ;; *) return 0 ;; esac
+    # A test's or a custom layout never touches PATH.
+    [ -z "${PSEUDOLIFE_SHIM_LAUNCHER:-}" ] || return 0
+    native_path_dir="$(cygpath -w "$(dirname "$SHIM_PATH")" 2>/dev/null)" || return 0
+    native_path_state="$(powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$(cygpath -w "$repo/ops/add-user-path.ps1")" -Dir "$native_path_dir" 2>/dev/null | tr -d '\r')" || native_path_state=failed
+    case "$native_path_state" in
+        current) ;;
+        changed) echo "  shim: $native_path_dir is now first on your user PATH; new terminals run pseudolife-mcp from there" ;;
+        *) echo "  shim: the user PATH could not be updated; run $SHIM_PATH by its full path" ;;
+    esac
+    # This run's later steps find the launcher by name too.
+    PATH="$(dirname "$SHIM_PATH"):$PATH"
+    export PATH
+}
+native_installed_launcher() {  # echoes the stable launcher when it is the native client
+    native_candidate="${PSEUDOLIFE_SHIM_LAUNCHER:-${XDG_DATA_HOME:-$HOME/.local/share}/pseudolife-mcp/bin/pseudolife-mcp}"
+    case "$(uname -s 2>/dev/null)" in
+        MINGW*|MSYS*|CYGWIN*)
+            if [ -z "${PSEUDOLIFE_SHIM_LAUNCHER:-}" ] && [ -n "${LOCALAPPDATA:-}" ]; then
+                native_candidate="$(cygpath -u "$LOCALAPPDATA")/pseudolife-mcp/bin/pseudolife-mcp.exe"
+            fi ;;
+    esac
+    [ -f "$native_candidate" ] || return 0
+    native_capability="$("$native_candidate" update --native-capability 2>/dev/null)" || return 0
+    [ "${native_capability%$'\r'}" = "pseudolife-mcp native-update-v1" ] || return 0
+    printf '%s\n' "$native_candidate"
+}
+native_helper() {  # runs one installer step of this run's verified native client
+    # Always the staged copy: a launcher already on this host may be an older
+    # release without these steps, and the staged copy is the exact release
+    # ensure_shim installs. It stays until this run exits.
+    "$NATIVE_STAGED" installer "$@"
+}
+# <<< native client <<<
+# >>> native client stage >>>
+# Fetched and verified before anything here changes: a refusal leaves the
+# host as it was.
+native_stage
+# <<< native client stage <<<
+
+# >>> recorded choices >>>
+installer_state() { native_helper state "$@"; }
 INSTALLER_RERUN=""
 RECORDED_BANK_LOCATION=""
 RECORDED_INSTRUCTIONS_GEMINI=""
@@ -415,7 +610,7 @@ if [ -z "${CLIENT_ONLY:-}${DAEMON_URL:-}${PSEUDOLIFE_MCP_DAEMON_URL:-}" ] && [ -
             INSTRUCTIONS_GENERIC) RECORDED_INSTRUCTIONS_GENERIC="$choice_value" ;;
             GENERIC_TARGET_JSON)
                 case " $EXPLICIT_ARGS " in *" --agents-file "*) ;; *)
-                    AGENTS_FILE="$(printf '%s' "$choice_value" | "$(installer_python)" -c 'import json,sys; sys.stdout.buffer.write(json.load(sys.stdin).encode("utf-8"))')"
+                    AGENTS_FILE="$(printf '%s' "$choice_value" | native_helper json-string)"
                     if command -v cygpath >/dev/null 2>&1; then AGENTS_FILE="$(cygpath -u "$AGENTS_FILE")"; fi ;;
                 esac ;;
             INSTRUCTIONS) case " $EXPLICIT_ARGS " in *" --instructions "*|*" --claude-md "*) ;; *) INSTRUCTIONS="$choice_value" ;; esac ;;
@@ -866,19 +1061,12 @@ daemon_url_host() {  # $1 = URL; echoes its host, lowercased, without brackets
     printf '%s' "$url_host" | tr '[:upper:]' '[:lower:]'
 }
 is_loopback_url() {  # $1 = URL; status 0 when it names this machine
-    # The shim's own answer (daemon_url._is_loopback_url), so the installer
-    # and the shim never disagree on a form such as 127.0.0.01 or
-    # ::ffff:127.0.0.1. Exit 10/11 are its answers; anything else (no Python,
-    # an import that failed) falls back to the host rule below.
-    loopback_py="$(installer_python)"
-    if [ -n "$loopback_py" ]; then
-        loopback_rc=0
-        "$loopback_py" -c 'import sys
-sys.path.insert(0, sys.argv[1])
-from pseudolife_memory.daemon_url import _is_loopback_url
-sys.exit(10 if _is_loopback_url(sys.argv[2]) else 11)' "$repo" "$1" 2>/dev/null || loopback_rc=$?
-        case "$loopback_rc" in 10) return 0 ;; 11) return 1 ;; esac
-    fi
+    # The client's own answer, so the installer and the client never
+    # disagree on a form such as 127.0.0.01 or ::ffff:127.0.0.1. Exit 10/11
+    # are its answers; anything else falls back to the host rule below.
+    loopback_rc=0
+    native_helper is-loopback "$1" 2>/dev/null || loopback_rc=$?
+    case "$loopback_rc" in 10) return 0 ;; 11) return 1 ;; esac
     loopback_host="$(daemon_url_host "$1")"
     case "$loopback_host" in localhost|::1) return 0 ;; esac
     # 127.0.0.0/8 as Python's ipaddress reads it: no leading zeros, <= 255.
@@ -1035,211 +1223,6 @@ fi
 choose_bank_token
 
 # ── 2. preflight ───────────────────────────────────────────────────────────
-# >>> native client >>>
-# The client side (the stdio MCP shim every agent registers, and the
-# pseudolife-mcp CLI) is the native binary published with this checkout's
-# release, so no Python is looked for or installed (docs/dev/native-runtimes.md,
-# docs/dev/release-assets.md). It is fetched, verified against the release's
-# SHA256SUMS and run once from a private staging directory before anything on
-# this host changes; ensure_shim then installs that exact archive with the
-# native runtime installer, which keeps every older runtime a running session
-# uses. PSEUDOLIFE_NATIVE_ARCHIVE_URL replaces the release download URL with
-# another URL or a local directory holding the archive and SHA256SUMS, and
-# PSEUDOLIFE_NATIVE_TARGET names the release target to install.
-NATIVE_VERSION=""
-NATIVE_TARGET=""
-NATIVE_ARCHIVE=""
-NATIVE_SUMS=""
-NATIVE_STAGED=""
-native_target() {  # echoes this host's release target triple, or nothing
-    # PSEUDOLIFE_NATIVE_TARGET picks one of the five release targets instead
-    # (an emulated one, or a test's).
-    case "${PSEUDOLIFE_NATIVE_TARGET:-}" in
-        x86_64-unknown-linux-gnu|aarch64-unknown-linux-gnu|x86_64-apple-darwin|aarch64-apple-darwin|x86_64-pc-windows-msvc)
-            echo "$PSEUDOLIFE_NATIVE_TARGET"; return 0 ;;
-        "") ;;
-        *) return 0 ;;
-    esac
-    case "$(uname -s 2>/dev/null)" in
-        Linux)
-            case "$(uname -m 2>/dev/null)" in
-                x86_64|amd64) echo x86_64-unknown-linux-gnu ;;
-                aarch64|arm64) echo aarch64-unknown-linux-gnu ;;
-            esac ;;
-        Darwin)
-            case "$(uname -m 2>/dev/null)" in
-                x86_64) echo x86_64-apple-darwin ;;
-                arm64|aarch64) echo aarch64-apple-darwin ;;
-            esac ;;
-        MINGW*|MSYS*|CYGWIN*)
-            case "$(uname -m 2>/dev/null)" in
-                x86_64|amd64) echo x86_64-pc-windows-msvc ;;
-            esac ;;
-    esac
-}
-native_sha256() {  # $1 = file; echoes its lowercase SHA-256
-    if command -v sha256sum >/dev/null 2>&1; then
-        sha256sum "$1" | cut -d' ' -f1
-    elif command -v shasum >/dev/null 2>&1; then
-        shasum -a 256 "$1" | cut -d' ' -f1
-    else
-        return 1
-    fi
-}
-native_download() {  # $1 = asset name, $2 = destination file; status 0, 22 (no such file there) or another failure
-    case "$native_base" in
-        http://*|https://*)
-            # A stalled transfer gives up instead of hanging an unattended run.
-            native_curl=0
-            curl -fsSL --retry 2 --connect-timeout 20 --max-time 900 --speed-limit 1024 --speed-time 60 \
-                -o "$2.part" "$native_base/$1" || native_curl=$?
-            if [ "$native_curl" = 0 ]; then mv -f "$2.part" "$2"; else rm -f "$2.part"; fi
-            return "$native_curl" ;;
-        *)
-            [ -f "$native_base/$1" ] || return 22
-            cp "$native_base/$1" "$2" ;;
-    esac
-}
-native_unstage() {  # removes this run's staging directory
-    if [ -n "${native_stage_dir:-}" ] && [ -d "$native_stage_dir" ]; then rm -rf "$native_stage_dir"; fi
-    native_stage_dir=""
-}
-native_refuse() {  # $1 = cause, $2 = fix
-    echo "The native pseudolife-mcp client cannot be installed: $1. $2 Nothing was changed." >&2
-    exit 1
-}
-native_stage() {  # fetch, verify, extract and run the release binary; refuses on any failure
-    NATIVE_VERSION="$(sed -n 's/^version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$repo/pyproject.toml" 2>/dev/null | head -1)" || NATIVE_VERSION=""
-    [ -n "$NATIVE_VERSION" ] || native_refuse "this checkout's pyproject.toml names no version" "Check out a release tag (git checkout v<version>) and rerun."
-    NATIVE_TARGET="$(native_target)"
-    if [ -z "$NATIVE_TARGET" ] && [ -n "${PSEUDOLIFE_NATIVE_TARGET:-}" ]; then
-        native_refuse "PSEUDOLIFE_NATIVE_TARGET names $PSEUDOLIFE_NATIVE_TARGET, which no release publishes" "Set it to one of x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu, x86_64-apple-darwin, aarch64-apple-darwin, x86_64-pc-windows-msvc, or unset it."
-    fi
-    [ -n "$NATIVE_TARGET" ] || native_refuse "no native client is published for this platform ($(uname -s 2>/dev/null) $(uname -m 2>/dev/null)); releases carry Linux x86_64 and aarch64, macOS Intel and Apple silicon, and Windows x86_64" "Run this installer on one of those (a machine there can use a daemon elsewhere with --client-only)."
-    case "$NATIVE_TARGET" in
-        *windows*) native_name="pseudolife-mcp-$NATIVE_VERSION-$NATIVE_TARGET.zip"; native_binary=pseudolife-mcp.exe ;;
-        *) native_name="pseudolife-mcp-$NATIVE_VERSION-$NATIVE_TARGET.tar.gz"; native_binary=pseudolife-mcp ;;
-    esac
-    native_base="${PSEUDOLIFE_NATIVE_ARCHIVE_URL:-https://github.com/Pseudogiant-xr/Pseudolife-MCP/releases/download/v$NATIVE_VERSION}"
-    native_base="${native_base%/}"
-    case "$native_base" in
-        http://*|https://*)
-            native_authority="${native_base#*://}"; native_authority="${native_authority%%/*}"
-            case "$native_authority" in
-                *@*) native_refuse "PSEUDOLIFE_NATIVE_ARCHIVE_URL carries a user name or password, which would be printed with any download error" "Serve the archives without credentials in the URL." ;;
-            esac ;;
-    esac
-    native_dir="$HOME/.pseudolife-mcp/downloads/$NATIVE_VERSION"
-    # Owner-only, but only for the directories this run creates.
-    for native_new in "$HOME/.pseudolife-mcp" "$HOME/.pseudolife-mcp/downloads" "$native_dir"; do
-        [ -d "$native_new" ] || { mkdir -p "$native_new" && chmod 700 "$native_new"; } 2>/dev/null || true
-    done
-    NATIVE_SUMS="$native_dir/SHA256SUMS"
-    NATIVE_ARCHIVE="$native_dir/$native_name"
-    native_sums_status=0
-    native_download SHA256SUMS "$NATIVE_SUMS" || native_sums_status=$?
-    case "$native_sums_status" in
-        0) ;;
-        22) native_refuse "release v$NATIVE_VERSION has no SHA256SUMS at $native_base (releases before the native client carry none)" "Update this checkout to a newer release (git pull, or git checkout of a newer tag) and rerun." ;;
-        *) native_refuse "SHA256SUMS could not be downloaded from $native_base (curl exit $native_sums_status: network, proxy or TLS)" "Check the connection (or PSEUDOLIFE_NATIVE_ARCHIVE_URL) and rerun." ;;
-    esac
-    native_expected="$(grep -E "^[0-9a-f]{64}  $(printf '%s' "$native_name" | sed 's/[.]/[.]/g')$" "$NATIVE_SUMS" | cut -d' ' -f1)" || native_expected=""
-    case "$(printf '%s\n' "$native_expected" | grep -c . || true)" in
-        1) ;;
-        *) native_refuse "SHA256SUMS of release v$NATIVE_VERSION lists $native_name $(printf '%s\n' "$native_expected" | grep -c . || true) times, not once" "Rerun later; if it persists, report it at https://github.com/Pseudogiant-xr/Pseudolife-MCP/issues." ;;
-    esac
-    if [ ! -f "$NATIVE_ARCHIVE" ] || [ "$(native_sha256 "$NATIVE_ARCHIVE" 2>/dev/null)" != "$native_expected" ]; then
-        native_download "$native_name" "$NATIVE_ARCHIVE" ||
-            native_refuse "the download of $native_name from $native_base failed" "Check the network (or PSEUDOLIFE_NATIVE_ARCHIVE_URL) and rerun."
-    fi
-    native_actual="$(native_sha256 "$NATIVE_ARCHIVE")" ||
-        native_refuse "neither sha256sum nor shasum is installed to verify the download" "Install coreutils (sha256sum) and rerun."
-    if [ "$native_actual" != "$native_expected" ]; then
-        rm -f "$NATIVE_ARCHIVE"
-        native_refuse "$native_name does not match the release's SHA256SUMS (the download was removed)" "Rerun to download it again."
-    fi
-    native_stage_dir="$(mktemp -d "${TMPDIR:-/tmp}/pseudolife-native.XXXXXX")" &&
-        chmod 700 "$native_stage_dir" || native_refuse "no private staging directory could be made" "Free space in ${TMPDIR:-/tmp} and rerun."
-    # The staged copy is only for this run; the verified download is kept.
-    trap native_unstage EXIT
-    case "$native_name" in
-        *.zip)
-            if command -v unzip >/dev/null 2>&1; then
-                unzip -q -o "$NATIVE_ARCHIVE" "$native_binary" -d "$native_stage_dir"
-            else
-                powershell.exe -NoProfile -NonInteractive -Command "Expand-Archive -LiteralPath '$(cygpath -w "$NATIVE_ARCHIVE")' -DestinationPath '$(cygpath -w "$native_stage_dir")' -Force"
-            fi ;;
-        *) tar -xzf "$NATIVE_ARCHIVE" -C "$native_stage_dir" "$native_binary" ;;
-    esac || native_refuse "$native_name could not be unpacked" "Rerun; the verified archive is kept in $native_dir."
-    NATIVE_STAGED="$native_stage_dir/$native_binary"
-    chmod 755 "$NATIVE_STAGED" 2>/dev/null || true
-    if ! native_says="$("$NATIVE_STAGED" version 2>&1)"; then
-        case "$NATIVE_TARGET" in
-            *linux*) native_run_fix="The Linux client needs glibc 2.35 or newer (Ubuntu 22.04, Debian 12); run this installer on such a system." ;;
-            *apple*) native_run_fix="The macOS client needs macOS 11 or newer." ;;
-            *) native_run_fix="Check that nothing (an antivirus or an execution policy) blocks it, and rerun." ;;
-        esac
-        native_refuse "the downloaded client does not run on this host ($(printf '%s' "$native_says" | head -1))" "$native_run_fix"
-    fi
-}
-# ensure_shim's install: the verified archive into a new side-by-side runtime
-# behind the stable launcher. Status 0 with SHIM_PATH set, else 1.
-native_install() {
-    [ -n "$NATIVE_STAGED" ] || native_stage
-    native_launcher_before="$(native_installed_launcher)"
-    native_sum_before=""
-    [ -z "$native_launcher_before" ] || native_sum_before="$(native_sha256 "$native_launcher_before" 2>/dev/null || true)"
-    native_launcher="$("$NATIVE_STAGED" runtime install --archive "$NATIVE_ARCHIVE" --sha256sums "$NATIVE_SUMS" --version "$NATIVE_VERSION" | tail -1)" || return 1
-    native_launcher="${native_launcher%$'\r'}"
-    if command -v cygpath >/dev/null 2>&1; then
-        case "$native_launcher" in [A-Za-z]:\\*) native_launcher="$(cygpath -u "$native_launcher")" ;; esac
-    fi
-    [ -n "$native_launcher" ] && [ -f "$native_launcher" ] || return 1
-    SHIM_PATH="$native_launcher"
-    if [ -n "$native_sum_before" ] && [ "$native_sum_before" = "$(native_sha256 "$SHIM_PATH" 2>/dev/null)" ]; then
-        step "Native client $NATIVE_VERSION already installed at $SHIM_PATH; nothing changed"
-    else
-        step "Native client $NATIVE_VERSION installed at $SHIM_PATH (running sessions keep the client they started with)"
-    fi
-    native_expose_line="$("$SHIM_PATH" installer expose 2>/dev/null)" || true
-    case "$native_expose_line" in *"not on PATH"*|*"kept as"*|*"left as it is"*) echo "  $native_expose_line" ;; esac
-    native_user_path
-    return 0
-}
-native_user_path() {  # Git Bash on Windows: the launcher's directory first on the user PATH, as install.ps1 does
-    case "$(uname -s 2>/dev/null)" in MINGW*|MSYS*|CYGWIN*) ;; *) return 0 ;; esac
-    # A test's or a custom layout never touches PATH.
-    [ -z "${PSEUDOLIFE_SHIM_LAUNCHER:-}" ] || return 0
-    native_path_dir="$(cygpath -w "$(dirname "$SHIM_PATH")" 2>/dev/null)" || return 0
-    native_path_state="$(powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$(cygpath -w "$repo/ops/add-user-path.ps1")" -Dir "$native_path_dir" 2>/dev/null | tr -d '\r')" || native_path_state=failed
-    case "$native_path_state" in
-        current) ;;
-        changed) echo "  shim: $native_path_dir is now first on your user PATH; new terminals run pseudolife-mcp from there" ;;
-        *) echo "  shim: the user PATH could not be updated; run $SHIM_PATH by its full path" ;;
-    esac
-    # This run's later steps find the launcher by name too.
-    PATH="$(dirname "$SHIM_PATH"):$PATH"
-    export PATH
-}
-native_installed_launcher() {  # echoes the stable launcher when it is the native client
-    native_candidate="${PSEUDOLIFE_SHIM_LAUNCHER:-${XDG_DATA_HOME:-$HOME/.local/share}/pseudolife-mcp/bin/pseudolife-mcp}"
-    case "$(uname -s 2>/dev/null)" in
-        MINGW*|MSYS*|CYGWIN*)
-            if [ -z "${PSEUDOLIFE_SHIM_LAUNCHER:-}" ] && [ -n "${LOCALAPPDATA:-}" ]; then
-                native_candidate="$(cygpath -u "$LOCALAPPDATA")/pseudolife-mcp/bin/pseudolife-mcp.exe"
-            fi ;;
-    esac
-    [ -f "$native_candidate" ] || return 0
-    native_capability="$("$native_candidate" update --native-capability 2>/dev/null)" || return 0
-    [ "${native_capability%$'\r'}" = "pseudolife-mcp native-update-v1" ] || return 0
-    printf '%s\n' "$native_candidate"
-}
-# <<< native client <<<
-# >>> native client stage >>>
-# Fetched and verified before anything here changes: a refusal leaves the
-# host as it was.
-native_stage
-# <<< native client stage <<<
 
 # >>> client-only preflight >>>
 # Nothing Docker-shaped to check: a client-only install depends on the
@@ -1249,23 +1232,16 @@ native_stage
 # shim's pair creates it after the shim is installed (the client-only pair
 # block), so here it must not exist, and only the daemon is checked.
 is_pairing_code() {  # the value on stdin; status 0 when it is a pairing code
-    # The shim's own rule (principals.normalize_pairing_code), asked with the
-    # value on stdin, never in an argument list. Exit 10/11 are its answers;
+    # The client's own rule, asked with the value on stdin, never in an
+    # argument list. Exit 10/11 are its answers;
     # anything else falls back to the same rule written here: 12 Crockford
     # base32 characters once case, dashes and surrounding whitespace are
     # ignored, O read as 0, and I and L as 1.
     code_value=""
     IFS= read -r code_value || true
-    code_py="$(installer_python)"
-    if [ -n "$code_py" ]; then
-        code_rc=0
-        printf '%s\n' "$code_value" | "$code_py" -c 'import sys
-sys.path.insert(0, sys.argv[1])
-from pseudolife_memory.principals import normalize_pairing_code
-line = sys.stdin.buffer.readline().decode("utf-8", "replace").rstrip("\r\n")
-sys.exit(10 if normalize_pairing_code(line) else 11)' "$repo" 2>/dev/null || code_rc=$?
-        case "$code_rc" in 10) code_value=""; return 0 ;; 11) code_value=""; return 1 ;; esac
-    fi
+    code_rc=0
+    printf '%s\n' "$code_value" | native_helper pairing-code-valid 2>/dev/null || code_rc=$?
+    case "$code_rc" in 10) code_value=""; return 0 ;; 11) code_value=""; return 1 ;; esac
     code_value="$(printf '%s' "$code_value" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/-//g' |
         tr 'abcdefghijklmnopqrstuvwxyz' 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' | tr 'OIL' '011')"
     case "$code_value" in
@@ -1278,7 +1254,7 @@ sys.exit(10 if normalize_pairing_code(line) else 11)' "$repo" 2>/dev/null || cod
 check_client_token_file() {  # the shim's own check of TOKEN_FILE; exits when it cannot use it
     # On every OS: an owner-only regular file (mode bits on POSIX, the ACL
     # on Windows), no link, one well-formed token.
-    token_report=$("$(installer_python)" "$repo/ops/client_credentials.py" check-token-file --path "$TOKEN_FILE") || true
+    token_report=$(native_helper credentials check-token-file --path "$TOKEN_FILE") || true
     case "$token_report" in *'"ready"'*) ;; *)
         token_problem=$(printf '%s' "$token_report" | sed -n 's/.*"recovery": "\([^"]*\)".*/\1/p')
         echo "client-only install: the shim cannot use the token file (${token_problem:-no result}): $TOKEN_FILE. It reads only an owner-only regular file: chmod 600 it on Linux or macOS, or delete it and re-run with --read-token to create it again" >&2
@@ -1295,11 +1271,6 @@ client_only_preflight() {
     if [ -z "$TOKEN_FILE" ]; then
         echo "client-only install: pass --pairing-code <code> (from pseudolife-mcp invite <name> on the daemon's host) to pair this machine, or, as the fallback, --token-file <path> (or set PSEUDOLIFE_MCP_TOKEN_FILE) naming the file that holds the remote daemon's bearer token, with --read-token to create it. The installer never mints one for a remote daemon${CLIENT_ONLY_VIA:-}" >&2
         exit 2
-    fi
-    token_py="$(installer_python)"
-    if [ -z "$token_py" ]; then
-        echo "client-only install: Python 3.10 or newer is needed to check the token file and to install the shim. Install it, then re-run" >&2
-        exit 1
     fi
     if [ -n "${PAIRING_CODE:-}" ]; then
         # pair never replaces a file: refused here, before any code is spent.
@@ -1328,7 +1299,7 @@ client_only_preflight() {
             step "That is a pairing code: the token file $TOKEN_FILE is created by pairing, once the shim is installed."
         else
             token_report=$(printf '%s\n' "$token_value" |
-                "$token_py" "$repo/ops/client_credentials.py" write-token-file --path "$TOKEN_FILE") || true
+                native_helper credentials write-token-file --path "$TOKEN_FILE") || true
             token_value=""
             case "$token_report" in
                 *'"written"'*) step "Wrote the token file $TOKEN_FILE (owner-only; the token is not shown)." ;;
@@ -1594,7 +1565,7 @@ normalize_env_line_endings() {  # $1 = env file; says so when it rewrote it
 
 # ── 4. volumes (respect names overridden in an existing ops/.env) ─────────
 resolve_installer_volumes() {
-    "$(installer_python)" "$repo/ops/preflight.py" --env-file "$env_file" --volume-names
+    native_helper volume-names --repo "$repo" --env-file "$env_file"
 }
 # >>> volumes >>>
 # A trailing CR is dropped here too: a reader placed before stage 3c, or a
@@ -1612,34 +1583,21 @@ fi
 # <<< volumes <<<
 
 # ── 4b. daemon engine ──────────────────────────────────────────────────────
-# >>> shim tooling >>>
-# Whether stage 11 can be expected to install the shim: pipx, or a Python
-# >= 3.10 with pip outside a PEP 668 externally managed environment (where
-# `pip install --user` refuses). The helper needs that Python either way.
-shim_tooling_ready() {
-    [ -n "$(installer_python)" ] || return 1
-    command -v pipx >/dev/null 2>&1 && return 0
-    "$(installer_python)" -c 'import os, sys, sysconfig
-import pip
-marker = os.path.join(sysconfig.get_path("stdlib"), "EXTERNALLY-MANAGED")
-sys.exit(1 if sys.prefix == sys.base_prefix and os.path.exists(marker) else 0)' >/dev/null 2>&1
-}
-# <<< shim tooling <<<
 # >>> daemon engine >>>
-# The bearer stage 5b will have: one already set, or one it can mint
-# (which needs the shim's tooling). Rust is verified with an authenticated read.
+# The bearer stage 5b will have: one already set, or one it mints for the
+# shim transport. Rust is verified with an authenticated read.
 rust_token_expected() {
     [ -n "$RUST_BEARER" ] || return 1
     [ -n "${PSEUDOLIFE_MCP_TOKEN:-}${PSEUDOLIFE_MCP_TOKENS:-}" ] && return 0
     [ -n "$(get_env PSEUDOLIFE_MCP_TOKEN)$(get_env PSEUDOLIFE_MCP_TOKENS)" ] && return 0
-    [ "$TRANSPORT" = shim ] && shim_tooling_ready
+    [ "$TRANSPORT" = shim ]
 }
 # The engine already installed is kept; a new install takes --engine (default
 # rust since G2, python without a bearer or an available Rust image). Naming the other engine on an existing bank switches it after the
 # install through pseudolife-mcp update (backup, rollback tag, health gate).
 # Rust pulls the release's image and provisions its models into their own
 # volume here, before any container starts, so a refusal starts nothing.
-engine_helper() { "$(installer_python)" "$repo/ops/installer_engine.py" "$@"; }
+engine_helper() { native_helper engine "$@"; }
 INSTALLED_ENGINE=""
 COMPOSE_ENGINE=""
 SWITCH_ENGINE=""
@@ -1671,7 +1629,7 @@ if [ -z "$CLIENT_ONLY" ]; then
     esac
     # Before anything is pulled: Rust with no bearer to come refuses here.
     if [ "$COMPOSE_ENGINE" = rust ] && [ -z "${ENGINE_DEFAULTED:-}" ] && ! rust_token_expected; then
-        echo "The Rust daemon needs its bearer token, and this install cannot mint one (no pipx or pip-capable Python >= 3.10 to install the shim): set PSEUDOLIFE_MCP_TOKEN in ops/.env, or install pipx, then rerun; or rerun with --engine python. Nothing was pulled or started." >&2
+        echo "The Rust daemon needs its bearer token, and this install cannot mint one (--no-token, or --transport http, whose registrations cannot carry a token file): set PSEUDOLIFE_MCP_TOKEN in ops/.env, or rerun without --no-token and --transport http; or rerun with --engine python. Nothing was pulled or started." >&2
         exit 2
     fi
     default_args=()
@@ -1796,11 +1754,9 @@ fi
 # A default install mints one, so the board is on; every client wired below
 # then carries it in an owner-only token file. The value is never printed.
 # Open loopback (docs/guide/configuration.md) stays available: --no-token,
-# and --transport http, whose registrations cannot carry a token file. A
-# host that cannot install the shim falls back to HTTP, so it mints none.
+# and --transport http, whose registrations cannot carry a token file.
 # >>> mint token >>>
 TOKEN_STATE=""
-token_py="$(installer_python)"
 # A client-only install never mints: the remote daemon's token is the file
 # the operator supplied. A token already set gates the daemon whatever this
 # run may mint, and the HTTP-registration warning and the board hint depend
@@ -1814,10 +1770,8 @@ elif [ -n "$NO_TOKEN" ]; then
     TOKEN_STATE=opted-out
 elif [ "$TRANSPORT" != shim ]; then
     TOKEN_STATE=http
-elif ! shim_tooling_ready; then
-    TOKEN_STATE=no-shim
 else
-    mint_output=$("$token_py" "$repo/ops/client_credentials.py" mint --env-file "$env_file") || true
+    mint_output=$(native_helper credentials mint --env-file "$env_file") || true
     case "$mint_output" in
         *'"minted"'*)
             TOKEN_STATE=minted
@@ -1832,14 +1786,14 @@ fi
 # >>> engine token >>>
 # The default Rust daemon is verified with an authenticated read, so it
 # follows the bearer this stage actually produced, not the one stage 4b
-# predicted (a host that cannot install the shim mints none).
+# predicted (a mint can still fail).
 if [ "${COMPOSE_ENGINE:-}" = rust ] && [ "$TOKEN_STATE" != minted ] && [ "$TOKEN_STATE" != present ]; then
     if [ -n "${ENGINE_DEFAULTED:-}" ]; then
         COMPOSE_ENGINE=python
         engine_files=()
         step "Daemon engine: python after all (no bearer token for the default Rust daemon: $TOKEN_STATE)"
     else
-        echo "The Rust daemon needs its bearer token, and this install has none ($TOKEN_STATE): set PSEUDOLIFE_MCP_TOKEN in ops/.env, or install pipx or a pip-capable Python >= 3.10 so the installer mints one, then rerun; or rerun with --engine python. The daemon was not started; the Rust image and models stay downloaded for the rerun." >&2
+        echo "The Rust daemon needs its bearer token, and this install has none ($TOKEN_STATE): set PSEUDOLIFE_MCP_TOKEN in ops/.env, or rerun without --no-token and --transport http so the installer mints one; or rerun with --engine python. The daemon was not started; the Rust image and models stay downloaded for the rerun." >&2
         exit 2
     fi
 fi
@@ -1867,7 +1821,7 @@ services:
     profiles: ["disabled"]
 EOF
 )"
-        override_status="$(printf '%s\n' "$override_contents" | "$(installer_python)" "$repo/ops/installer_state.py" write-file --path "$override_file")" || exit 1
+        override_status="$(printf '%s\n' "$override_contents" | installer_state write-file --path "$override_file")" || exit 1
         if [ "$override_status" = unchanged ]; then step "Sidecar override unchanged (disabled)."
         else step "Sidecar disabled via ops/docker-compose.override.yml"; fi
     else
@@ -1910,7 +1864,7 @@ if [ -z "$CLIENT_ONLY" ]; then
         engine_state_args+=(--overlay "$engine_file")
     done
     compose_snapshot_json="$(installer_state plan --snapshot --repo "$repo" --env-file "$env_file" --override "$override_file" ${engine_state_args[@]+"${engine_state_args[@]}"})" || exit 1
-    compose_plan="$(printf '%s' "$compose_snapshot_json" | "$(installer_python)" -c 'import json,sys; sys.stdout.write(json.load(sys.stdin)["action"])')"
+    compose_plan="$(printf '%s' "$compose_snapshot_json" | native_helper json-field action)"
     case "$compose_plan" in
         unchanged) step "Docker stack unchanged; no Compose up or build needed." ;;
         start)
@@ -1957,20 +1911,14 @@ claude_marketplace_https() {
     # Up to 0.16.1 the marketplace was added by the owner/repo shorthand,
     # which Claude Code records as a github source and refreshes over SSH:
     # on a host with no GitHub SSH key the plugin stops updating (2026-10-04).
-    # ops/plugin_marketplace.py moves it to the HTTPS URL through Claude
-    # Code's own CLI (settings.json backed up and edited first), prints one
-    # line, and prints nothing when no marketplace is recorded.
-    mk_py="$(installer_python)"
-    if [ -z "$mk_py" ]; then
-        if grep -A 3 "\"$CLAUDE_PLUGIN_MARKETPLACE\"" "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/known_marketplaces.json" 2>/dev/null | grep -q '"github"'; then
-            echo "WARNING: the $CLAUDE_PLUGIN_MARKETPLACE plugin marketplace is recorded as a github source, which updates over SSH, and there is no Python 3.10+ here to move it to HTTPS; the README's Updating section has the steps" >&2
-        fi
-        return 0
-    fi
-    if mk_out=$("$mk_py" "$repo/ops/plugin_marketplace.py"); then
+    # The native client's plugin-marketplace step moves it to the HTTPS URL
+    # through Claude Code's own CLI (settings.json backed up and edited
+    # first), prints one line, and prints nothing when no marketplace is
+    # recorded.
+    if mk_out=$(native_helper plugin-marketplace); then
         [ -z "$mk_out" ] || step "$mk_out"
     else
-        echo "WARNING: ${mk_out:-ops/plugin_marketplace.py failed}" >&2
+        echo "WARNING: ${mk_out:-the plugin marketplace could not be moved to HTTPS}" >&2
     fi
 }
 install_claude_plugin() {
@@ -2216,39 +2164,9 @@ connect_client_names() {  # the selected clients as connect names them, comma-se
     printf '%s' "$connect_names"
 }
 connect_report_lines() {  # $1 = valid|error|plan|manual|handled; connect's --json report on stdin
-    "$(installer_python)" -c '
-import json, sys
-sys.stdout.reconfigure(encoding="utf-8", newline="\n")
-try:
-    report = json.load(sys.stdin)
-except ValueError:
-    report = None
-# connect'"'"'s report, or nothing to trust: a JSON object with rows and exit.
-valid = isinstance(report, dict) and isinstance(report.get("rows"), list) and "exit" in report
-if sys.argv[1] == "valid":
-    sys.exit(0 if valid else 1)
-if not valid:
-    sys.exit(0)
-if sys.argv[1] == "error":
-    print(report.get("error") or "")
-    sys.exit(0)
-rows = [row for row in report["rows"] if isinstance(row, dict)]
-if sys.argv[1] == "handled":
-    print(" ".join(row["client"] for row in rows if row.get("place") == "registration"
-                   and row.get("state") in ("current", "change")))
-    sys.exit(0)
-for row in rows:
-    # An absent client is for the registrars to create, not a connect action.
-    if row.get("state") == "absent" or (sys.argv[1] == "manual" and row.get("state") != "manual"):
-        continue
-    where = " ".join(part for part in (row.get("file") or "", "[%s]" % row["key"] if row.get("key") else "") if part)
-    print("    %-8s %s %s%s" % (row.get("state"), row.get("client"), row.get("place"), ": " + where if where else ""))
-    for key, change in (row.get("changes") or {}).items():
-        old, new = (list(change) + [None, None])[:2]
-        print("             %s: %s -> %s" % (key, "(unset)" if old is None else old, "(removed)" if new is None else new))
-    if row.get("detail"):
-        print("             " + row["detail"])
-' "$1"
+    # valid: status 0 for connect's report (a JSON object with rows and
+    # exit); the others print its error, its changes or the handled clients.
+    native_helper connect-report "$1"
 }
 connect_existing_registrations() {
     connect_names="$(connect_client_names)"
@@ -2313,16 +2231,7 @@ connect_existing_registrations() {
 # Any failure stops the install: pair's exit 5 keeps the file, which may
 # hold a token the daemon now accepts.
 pair_report_field() {  # $1 = field; pair's --json report on stdin; echoes it when it is text
-    "$(installer_python)" -c '
-import json, sys
-sys.stdout.reconfigure(encoding="utf-8", newline="\n")
-try:
-    report = json.load(sys.stdin)
-except ValueError:
-    report = None
-value = report.get(sys.argv[1]) if isinstance(report, dict) else None
-print(value if isinstance(value, str) else "")
-' "$1"
+    native_helper json-field "$1"
 }
 pair_with_code() {
     ensure_shim
@@ -2396,46 +2305,23 @@ for selected_client in $CLIENTS; do
     if [ "$selected_client" = codex ]; then
         HOOK_CODEX=unavailable
         INSTR_CODEX=skipped
-        CODEX_HOOK_RECOVERY="Install Python 3.10 or newer, then rerun this installer to finish Codex memory setup."
-        codex_python=""
-        for candidate in python3 python; do
-            if command -v "$candidate" >/dev/null 2>&1 &&
-                "$candidate" -c 'import sys; sys.exit(sys.version_info < (3, 10))' >/dev/null 2>&1; then
-                codex_python="$candidate"
-                break
-            fi
-        done
-        if [ -n "$codex_python" ]; then
+        CODEX_HOOK_RECOVERY=""
+        {
             credential_exit=0
             installer_token="$(get_env PSEUDOLIFE_MCP_TOKEN)"
             installer_url="${DAEMON_URL:-$(get_env PSEUDOLIFE_MCP_DAEMON_URL)}"
             installer_url="${installer_url:-http://127.0.0.1:8765}"
-            credential_args=("$repo/ops/setup-codex-coordination.py" --credentials
-                --installer-daemon-url "$installer_url")
             if [ -n "${CLIENT_ONLY:-}" ]; then
                 # The remote daemon's token, from the operator's file on stdin.
-                credential_output=$("$codex_python" "$repo/ops/setup-codex-coordination.py" \
-                    --credentials --installer-token-stdin \
+                credential_output=$(native_helper codex-credentials --installer-token-stdin \
                     --installer-daemon-url "$installer_url" < "$TOKEN_FILE") || credential_exit=$?
             elif [ -n "$installer_token" ]; then
-                credential_output=$("$codex_python" "$repo/ops/setup-codex-coordination.py" \
-                    --credentials --installer-token-stdin \
+                credential_output=$(native_helper codex-credentials --installer-token-stdin \
                     --installer-daemon-url "$installer_url" <<< "$installer_token") || credential_exit=$?
             else
-                credential_output=$("$codex_python" "${credential_args[@]}") || credential_exit=$?
+                credential_output=$(native_helper codex-credentials --installer-daemon-url "$installer_url") || credential_exit=$?
             fi
-            if [ "$credential_exit" -eq 0 ] && credential_fields=$("$codex_python" -c '
-import json, sys
-sys.stdout.reconfigure(encoding="utf-8", newline="\n")
-r = json.load(sys.stdin)
-assert r["status"] in ("ready", "tokenless")
-assert isinstance(r.get("credential_file_configured"), bool)
-assert isinstance(r.get("connection_configured"), bool)
-print("1" if r["credential_file_configured"] else "0")
-print("1" if r["connection_configured"] else "0")
-print(r.get("credential_file_path") or "")
-print(r.get("daemon_url") or "")
-' <<< "$credential_output" 2>/dev/null); then
+            if [ "$credential_exit" -eq 0 ] && credential_fields=$(native_helper codex-fields credentials <<< "$credential_output" 2>/dev/null); then
                 {
                     IFS= read -r credential_configured
                     IFS= read -r CODEX_CONNECTION_CONFIGURED
@@ -2465,33 +2351,24 @@ print(r.get("daemon_url") or "")
                 CODEX_HOOK_RECOVERY="Codex credential setup failed. Repair the configured token file or Codex configuration, then rerun the installer."
             fi
             if [ -z "$CODEX_CREDENTIAL_BOOTSTRAP_FAILED" ]; then
-                setup_args=("$repo/ops/setup-codex-hooks.py" --source "$CODEX_HOOKS"
+                setup_args=(codex-hooks --checkout "$repo" --source "$CODEX_HOOKS"
                     --trust "$CODEX_HOOK_TRUST" --instructions "$instruction_choice")
                 if { [ -n "${INSTALLER_UNATTENDED:-}${INSTALLER_RERUN:-}" ] || [ ! -t 0 ]; }; then setup_args+=(--non-interactive); fi
                 setup_exit=0
                 if [ -n "$CODEX_CONNECTION_CONFIGURED" ]; then
                     if [ -n "$CODEX_CREDENTIAL_FILE" ]; then
-                        setup_output=$(env -u PSEUDOLIFE_MCP_TOKEN PSEUDOLIFE_MCP_TOKEN_FILE="$CODEX_CREDENTIAL_FILE" PSEUDOLIFE_MCP_DAEMON_URL="$CODEX_CREDENTIAL_URL" "$codex_python" "${setup_args[@]}") || setup_exit=$?
+                        setup_output=$(env -u PSEUDOLIFE_MCP_TOKEN PSEUDOLIFE_MCP_TOKEN_FILE="$CODEX_CREDENTIAL_FILE" PSEUDOLIFE_MCP_DAEMON_URL="$CODEX_CREDENTIAL_URL" "$NATIVE_STAGED" installer "${setup_args[@]}") || setup_exit=$?
                     else
-                        setup_output=$(env -u PSEUDOLIFE_MCP_TOKEN -u PSEUDOLIFE_MCP_TOKEN_FILE PSEUDOLIFE_MCP_DAEMON_URL="$CODEX_CREDENTIAL_URL" "$codex_python" "${setup_args[@]}") || setup_exit=$?
+                        setup_output=$(env -u PSEUDOLIFE_MCP_TOKEN -u PSEUDOLIFE_MCP_TOKEN_FILE PSEUDOLIFE_MCP_DAEMON_URL="$CODEX_CREDENTIAL_URL" "$NATIVE_STAGED" installer "${setup_args[@]}") || setup_exit=$?
                     fi
                 elif [ -n "$CODEX_CREDENTIAL_FILE" ]; then
-                    setup_output=$(env -u PSEUDOLIFE_MCP_TOKEN PSEUDOLIFE_MCP_TOKEN_FILE="$CODEX_CREDENTIAL_FILE" PSEUDOLIFE_MCP_DAEMON_URL="$CODEX_CREDENTIAL_URL" "$codex_python" "${setup_args[@]}") || setup_exit=$?
+                    setup_output=$(env -u PSEUDOLIFE_MCP_TOKEN PSEUDOLIFE_MCP_TOKEN_FILE="$CODEX_CREDENTIAL_FILE" PSEUDOLIFE_MCP_DAEMON_URL="$CODEX_CREDENTIAL_URL" "$NATIVE_STAGED" installer "${setup_args[@]}") || setup_exit=$?
                 else
-                    setup_output=$("$codex_python" "${setup_args[@]}") || setup_exit=$?
+                    setup_output=$("$NATIVE_STAGED" installer "${setup_args[@]}") || setup_exit=$?
                 fi
                 # Parse only data, never shell code. A failed helper must leave the
                 # remaining provider setup available and must never imply readiness.
-                if [ "$setup_exit" -le 1 ] && setup_fields=$("$codex_python" -c '
-import json, sys
-sys.stdout.reconfigure(encoding="utf-8", newline="\n")
-r = json.load(sys.stdin)
-assert r["status"] in ("ready", "pending", "unavailable", "skipped")
-assert r["source"] in ("manual", "plugin", "skip")
-assert r["instructions"] in ("present", "appended", "skipped", "covered-by-hooks")
-for key in ("status", "source", "instructions", "recovery"):
-    print(" ".join(str(r.get(key) or "").splitlines()))
-' <<< "$setup_output" 2>/dev/null); then
+                if [ "$setup_exit" -le 1 ] && setup_fields=$(native_helper codex-fields hooks <<< "$setup_output" 2>/dev/null); then
                     {
                         IFS= read -r HOOK_CODEX
                         IFS= read -r CODEX_HOOK_SOURCE
@@ -2500,10 +2377,10 @@ for key in ("status", "source", "instructions", "recovery"):
                     } <<< "$setup_fields"
                     CODEX_SETUP_VALID=1
                 else
-                    CODEX_HOOK_RECOVERY="Codex setup did not return a valid result. Run python3 ops/setup-codex-hooks.py to retry."
+                    CODEX_HOOK_RECOVERY="Codex setup did not return a valid result. Rerun this installer to retry."
                 fi
             fi
-        fi
+        }
         step "Codex hooks: $HOOK_CODEX; standing instructions: $INSTR_CODEX."
         if [ -n "$CODEX_HOOK_RECOVERY" ]; then echo "    $CODEX_HOOK_RECOVERY"; fi
         continue
@@ -2729,28 +2606,15 @@ desktop_tokens_source() {
     get_env PSEUDOLIFE_MCP_TOKENS
 }
 configure_codex_runtime_defaults() {
-    if [ -z "$codex_python" ]; then
-        MCP_CODEX=failed
-        CODEX_RUNTIME_DEFAULTS=failed
-        CODEX_RUNTIME_RECOVERY="Install Python 3.10 or newer, then run python3 ops/setup-codex-coordination.py --runtime-defaults."
-        echo "WARNING: Codex was registered, but its runtime defaults could not be configured because Python 3.10 or newer was not found." >&2
-        return 0
-    fi
     runtime_exit=0
-    runtime_output=$("$codex_python" "$repo/ops/setup-codex-coordination.py" --runtime-defaults) || runtime_exit=$?
-    if [ "$runtime_exit" -eq 0 ] && runtime_state=$("$codex_python" -c '
-import json, sys
-r = json.load(sys.stdin)
-assert r["status"] == "ready"
-assert r["runtime_defaults"] in ("configured", "preserved")
-print(r["runtime_defaults"])
-' <<< "$runtime_output" 2>/dev/null); then
+    runtime_output=$(native_helper codex-runtime-defaults) || runtime_exit=$?
+    if [ "$runtime_exit" -eq 0 ] && runtime_state=$(native_helper codex-fields runtime-defaults <<< "$runtime_output" 2>/dev/null); then
         CODEX_RUNTIME_DEFAULTS="$runtime_state"
         step "Codex runtime defaults ready (startup 240s, tools 240s, required)."
     else
         MCP_CODEX=failed
         CODEX_RUNTIME_DEFAULTS=failed
-        CODEX_RUNTIME_RECOVERY="Run python3 ops/setup-codex-coordination.py --runtime-defaults, then retry the Codex task."
+        CODEX_RUNTIME_RECOVERY="Rerun this installer with --client codex, then retry the Codex task."
         echo "WARNING: Codex was registered, but its runtime defaults were not confirmed. $CODEX_RUNTIME_RECOVERY" >&2
     fi
     return 0
@@ -2769,13 +2633,11 @@ CLAUDE_AGENT_STATE_DIR="$HOME/.pseudolife-mcp/claude-code-agents"
 CLAUDE_JSON="${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json"
 client_token_file() {  # $1 = principal; echoes the token file it wrote or kept, or nothing
     [ "$TRANSPORT" = shim ] || return 0
-    client_py="$(installer_python)"
-    [ -n "$client_py" ] || return 0
     client_target="$HOME/.pseudolife-mcp/$1.token"
     # The value rides process-scoped env vars, never an argument.
     client_output=$(PSEUDOLIFE_INSTALLER_TOKEN="$(desktop_token_source)" \
         PSEUDOLIFE_INSTALLER_TOKENS="$(desktop_tokens_source)" \
-        "$client_py" "$repo/ops/client_credentials.py" token-file \
+        native_helper credentials token-file \
         --principal "$1" --path "$client_target") || true
     case "$client_output" in
         *'"ready"'*) printf '%s\n' "$client_target" ;;
@@ -2796,13 +2658,13 @@ fi
 # A client-only install's settings.json hooks run the host shim, which needs
 # the file and the URL there as much as the plugin's hooks do.
 if { [ "${HOOK_CLAUDE:-}" = plugin ] || [ -n "${CLIENT_ONLY:-}" ]; } && [ -n "$CLAUDE_TOKEN_FILE" ]; then
-    settings_args=("$repo/ops/client_credentials.py" claude-settings-env
+    settings_args=(credentials claude-settings-env
         --settings "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json"
         --token-file "$CLAUDE_TOKEN_FILE" --daemon-url "$CLIENT_DAEMON_URL")
     # A client-only install's hooks must reach the remote daemon with the
     # operator's file, whatever an earlier local install left there.
     [ -z "${CLIENT_ONLY:-}" ] || settings_args+=(--replace)
-    settings_output=$("$(installer_python)" "${settings_args[@]}") || true
+    settings_output=$(native_helper "${settings_args[@]}") || true
     case "$settings_output" in
         *'"updated"'*)
             if [ -n "${CLIENT_ONLY:-}" ]; then
@@ -2820,7 +2682,7 @@ fi
 for selected_client in $CLIENTS; do
     if [ "$selected_client" = claude-desktop ]; then
         # No `mcp add` CLI: the entry is merged into claude_desktop_config.json
-        # by ops/register_claude_desktop.py (absolute shim path — Desktop's
+        # by the native client's installer step (absolute shim path — Desktop's
         # sanitized PATH omits pipx/venv bin dirs; token FILE when gated). It is
         # named pseudolife-desktop so Code-tab sessions keep their own
         # per-session pseudolife-memory server.
@@ -2828,14 +2690,8 @@ for selected_client in $CLIENTS; do
             echo "WARNING: Claude Desktop needs the stdio shim (its connector dialog rejects plain-http URLs) — ignoring --transport http for it." >&2
         fi
         ensure_shim
-        desktop_py="$(installer_python)"
         if [ -z "$SHIM_OK" ] || [ -z "$SHIM_PATH" ]; then
-            echo "WARNING: pseudolife-mcp shim installation did not yield a usable executable — Claude Desktop not wired. Re-run once the native client installs, or register by hand: python3 ops/register_claude_desktop.py --command <absolute path to pseudolife-mcp>" >&2
-            MCP_CLAUDE_DESKTOP=failed
-            continue
-        fi
-        if [ -z "$desktop_py" ]; then
-            echo "WARNING: no python >= 3.10 found to write claude_desktop_config.json — Claude Desktop not wired." >&2
+            echo "WARNING: pseudolife-mcp shim installation did not yield a usable executable — Claude Desktop not wired. Re-run once the native client installs." >&2
             MCP_CLAUDE_DESKTOP=failed
             continue
         fi
@@ -2866,7 +2722,7 @@ for selected_client in $CLIENTS; do
         fi
         if PSEUDOLIFE_DESKTOP_TOKEN_SOURCE="$token_source" \
                 PSEUDOLIFE_DESKTOP_TOKENS_SOURCE="$tokens_source" \
-                "$desktop_py" "$repo/ops/register_claude_desktop.py" "${desktop_args[@]}"; then
+                native_helper claude-desktop "${desktop_args[@]}"; then
             MCP_CLAUDE_DESKTOP=shim-env
         else
             MCP_CLAUDE_DESKTOP=failed
@@ -2901,7 +2757,7 @@ for selected_client in $CLIENTS; do
         elif [ -n "${CLIENT_ONLY:-}" ] && [ -z "$CODEX_CREDENTIAL_FILE" ]; then
             # Without it Codex would reach whatever daemon its defaults name.
             MCP_CODEX=failed
-            echo "WARNING: Codex was not registered: a client-only install points it at $CLIENT_DAEMON_URL through the Codex credential setup, which did not run (it needs Python 3.10 or newer; see above). Fix that, then re-run." >&2
+            echo "WARNING: Codex was not registered: a client-only install points it at $CLIENT_DAEMON_URL through the Codex credential setup, which did not finish (see above). Fix that, then re-run." >&2
             continue
         elif existing_codex=$(codex mcp get pseudolife-memory 2>/dev/null); then
             existing_codex_guard=$(codex mcp get pseudolife-memory --json 2>/dev/null || printf '%s' "$existing_codex")
@@ -3283,7 +3139,7 @@ for selected_client in $CLIENTS; do
         # credential it already has. Anything else gets the manual fix.
         claude_credential_ok=""
         if { [ "$MCP_CLAUDE" = present-upgraded ] || [ "$MCP_CLAUDE" = present-migrated ] || [ "$MCP_CLAUDE" = present-current ]; } && [ -n "${CLAUDE_TOKEN_FILE:-}" ]; then
-            claude_env_output=$("$(installer_python)" "$repo/ops/client_credentials.py" registration-env \
+            claude_env_output=$(native_helper credentials registration-env \
                 --config "$CLAUDE_JSON" \
                 --set "PSEUDOLIFE_MCP_TOKEN_FILE=$CLAUDE_TOKEN_FILE" \
                 --set "PSEUDOLIFE_MCP_DAEMON_URL=$CLIENT_DAEMON_URL" \
@@ -3784,18 +3640,14 @@ board_hint=""
 case "$TOKEN_STATE" in
     opted-out) board_hint=" (installed with --no-token; re-run without it to turn the board on)" ;;
     http)      board_hint=" (--transport http registrations cannot carry a token file)" ;;
-    no-shim)   board_hint=" (no pipx or pip-capable Python >= 3.10 to install the shim, so no token was minted; install one and re-run)" ;;
 esac
 board_file="${CLAUDE_TOKEN_FILE:-${GEMINI_TOKEN_FILE:-${CODEX_CREDENTIAL_FILE:-${TOKEN_FILE:-}}}}"
-board_py="$(installer_python)"
-if [ -z "$board_py" ]; then
-    board_line="unknown - no Python >= 3.10 to ask the daemon"
-elif [ -n "$board_file" ]; then
-    board_line=$("$board_py" "$repo/ops/client_credentials.py" board \
+if [ -n "$board_file" ]; then
+    board_line=$(native_helper credentials board \
         --daemon-url "$CLIENT_DAEMON_URL" --token-file "$board_file") || board_line="unknown"
 else
     board_line=$(PSEUDOLIFE_INSTALLER_TOKEN="$(desktop_token_source)" \
-        "$board_py" "$repo/ops/client_credentials.py" board \
+        native_helper credentials board \
         --daemon-url "$CLIENT_DAEMON_URL") || board_line="unknown"
 fi
 case "$board_line" in

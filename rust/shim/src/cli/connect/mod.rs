@@ -27,11 +27,11 @@ use std::process::ExitCode;
 
 mod args;
 mod discover;
-mod files;
-mod net;
-mod paths;
+pub(in crate::cli) mod files;
+pub(in crate::cli) mod net;
+pub(in crate::cli) mod paths;
 mod procs;
-mod pyjson;
+pub(in crate::cli) mod pyjson;
 mod url;
 
 use discover::{Ctx, Row};

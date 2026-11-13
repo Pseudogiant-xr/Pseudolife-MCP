@@ -118,7 +118,7 @@ fn latin1(bytes: &[u8]) -> String {
 /// `board_status.board_status(url, token)[1]`: a no-redirect opener's GET,
 /// `read(65536)` of a 2xx body; any other status is an `HTTPError` whose
 /// body is never read.
-pub(super) async fn board_line(url: &str, token: Option<&str>) -> String {
+pub(in crate::cli) async fn board_line(url: &str, token: Option<&str>) -> String {
     let Some(token) = token.filter(|t| !t.is_empty()) else {
         return "off - no bearer token, so the daemon has no principal to admit (open-loopback install)"
             .to_owned();

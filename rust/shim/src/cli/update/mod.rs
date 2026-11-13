@@ -3,6 +3,7 @@ mod backup;
 pub(super) mod clients;
 mod disk;
 mod engine;
+pub(crate) mod installer_engine;
 mod options;
 mod release;
 mod seams;

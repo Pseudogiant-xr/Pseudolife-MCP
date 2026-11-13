@@ -2,6 +2,11 @@
 //! `ops/install.sh` and `ops/install.ps1` after they installed the native
 //! client. Not listed in `--help`: people run the installers, not these.
 //! Nothing here starts an interpreter, pip or pipx.
+pub(in crate::cli) mod credentials;
+mod helpers;
+pub(in crate::cli) mod state;
+mod volumes;
+
 use crate::runtime::{self, Layout, registrations};
 use serde_json::{Value, json};
 use std::{
@@ -10,7 +15,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-const USAGE: &str = "usage: pseudolife-mcp installer migrate-registrations [--client claude-code|claude-desktop|codex|gemini]... [--json]\n       pseudolife-mcp installer expose [--json]";
+const USAGE: &str = "usage: pseudolife-mcp installer migrate-registrations [--client claude-code|claude-desktop|codex|gemini]... [--json]\n       pseudolife-mcp installer expose [--json]\n       pseudolife-mcp installer credentials STEP ... (installer credentials --help)\n       pseudolife-mcp installer state ACTION ... | volume-names --repo R --env-file F | engine detect|prepare|accept|choose ...\n       pseudolife-mcp installer json-field FIELD | json-string | connect-report valid|error|plan|manual|handled (JSON on stdin)\n       pseudolife-mcp installer is-loopback URL | pairing-code-valid (code on stdin) | codex-fields credentials|hooks|runtime-defaults (JSON on stdin)";
 const CLIENTS: [&str; 4] = ["claude-code", "claude-desktop", "codex", "gemini"];
 
 /// Arguments follow `installer`. Exit 0 when every selected registration
@@ -36,8 +41,36 @@ pub fn run(arguments: Vec<OsString>) -> u8 {
             [flag] if flag == "--help" || flag == "-h" => emit(USAGE),
             _ => usage("expose takes only --json"),
         },
+        Some("credentials") => credentials::run(&arguments[1..]),
+        Some("state") => state::run(&arguments[1..]),
+        Some("volume-names") => volumes::run(&arguments[1..]),
+        Some("engine") => crate::cli::update::installer_engine::run(&arguments[1..]),
+        Some("json-field") => match &arguments[1..] {
+            [field] => helpers::json_field(field),
+            _ => usage("json-field takes one field name"),
+        },
+        Some("json-string") if arguments.len() == 1 => helpers::json_string(),
+        Some("connect-report") => match &arguments[1..] {
+            [mode] if ["valid", "error", "plan", "manual", "handled"].contains(&mode.as_str()) => {
+                helpers::connect_report(mode)
+            }
+            _ => usage("connect-report takes valid, error, plan, manual or handled"),
+        },
+        Some("is-loopback") => match &arguments[1..] {
+            [url] => helpers::is_loopback(url),
+            _ => usage("is-loopback takes one URL"),
+        },
+        Some("pairing-code-valid") if arguments.len() == 1 => helpers::pairing_code_valid(),
+        Some("codex-fields") => match &arguments[1..] {
+            [kind] if ["credentials", "hooks", "runtime-defaults"].contains(&kind.as_str()) => {
+                helpers::codex_fields(kind)
+            }
+            _ => usage("codex-fields takes credentials, hooks or runtime-defaults"),
+        },
         Some("--help" | "-h") => emit(USAGE),
-        _ => usage("expected an installer step: migrate-registrations or expose"),
+        _ => usage(
+            "expected an installer step: migrate-registrations, expose, credentials, state, volume-names, engine, json-field, json-string, connect-report, is-loopback, pairing-code-valid or codex-fields",
+        ),
     }
 }
 

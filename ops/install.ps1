@@ -185,143 +185,258 @@ if ("$ClientUpdateSchedule" -notmatch '^(ask|yes|no|([01]?[0-9]|2[0-3]):[0-5][0-
 }
 # <<< client update schedule flag <<<
 
-# Needed from here on: the client-only mode block asks this checkout's shim
-# code whether a daemon URL is loopback.
-function Get-InstallerPython {
-    # A python >= 3.10 for the stdlib-only ops helpers. Probe candidates
-    # independently: Store aliases and stale launchers must not block the
-    # next one. Never alters the user's PATH.
-    foreach ($candidate in @("python", "python3", "py")) {
-        if (-not (Get-Command $candidate -ErrorAction SilentlyContinue)) { continue }
-        # Assigned: an if-expression unrolls a one-item array to a string, which
-        # splats as characters (py - 3).
-        $probeArgs = @()
-        if ($candidate -eq "py") { $probeArgs = @("-3") }
-        try {
-            $probe = & $candidate @probeArgs -c 'import sys; sys.exit(1) if sys.version_info < (3, 10) else print(sys.executable)' 2>$null
-            if (($LASTEXITCODE -eq 0) -and $probe) { return "$probe".Trim() }
-        } catch { continue }
-    }
-    return $null
-}
-
-# >>> extractor modes >>>
-# The dream extractor modes, named for the extractor family, and the models
-# the CLI shim modes offer. tests/test_extractor_model_lists.py keeps these
-# lists identical to install.sh's, the Claude shim autostart scripts',
-# docs/guide/dreaming.md's and the Console's. The model lists are the menu,
-# not a gate: a CLI shim mode passes an id it does not list to the shim
-# unchanged, so a model release is usable the day it ships. (-Model has no
-# ValidateSet for that reason.)
-$extractorModes = @("sidecar", "claude-only", "claude-fallback", "openai-only",
-    "openai-fallback", "endpoint", "endpoint-fallback")
-$claudeModels = @("claude-opus-5-5", "claude-opus-5", "claude-sonnet-5-5",
-    "claude-sonnet-5", "claude-haiku-5-5", "claude-haiku-4-5", "claude-fable-5-1",
-    "claude-fable-5")
-$openaiModels = @("gpt-5.6-terra", "gpt-5.6-sol", "gpt-5.6-luna", "gpt-6-sol",
-    "gpt-6-luna", "gpt-6.1-sol")
-# An explicit -Model "" is refused like a whitespace one; an absent -Model
-# picks the menu's default.
-$modelGiven = $PSBoundParameters.ContainsKey("Model")
-# The model-era names (2026-07-14 to 2026-09-28) stay accepted.
-$extractorAliases = @{
-    "sonnet-only" = "claude-only"; "sonnet-fallback" = "claude-fallback"
-    "codex-only" = "openai-only"; "codex-fallback" = "openai-fallback"
-}
-if ($Extractor -and $extractorAliases.ContainsKey($Extractor)) {
-    Write-Host "note: -Extractor $Extractor is a deprecated spelling of -Extractor $($extractorAliases[$Extractor]), which this run uses."
-    $Extractor = $extractorAliases[$Extractor]
-}
-if ($ExtractorUrl.EndsWith("/")) { $ExtractorUrl = $ExtractorUrl.Substring(0, $ExtractorUrl.Length - 1) }
-function Test-ExtractorDisablesSidecar {
-    # $true for the single-extractor modes.
-    return $Extractor -in "claude-only", "openai-only", "endpoint"
-}
-function Test-ModelBlank {
-    # $true for a -Model given empty or all whitespace.
-    return ($modelGiven -or $Model) -and -not "$Model".Trim()
-}
-# What may reach ops/.env (compose expands $ and reads " #" as a comment),
-# a systemd ExecStart line and a Windows task's command line unquoted: model
-# ids and endpoint URLs are held to these characters. Brackets are allowed
-# in a URL only, for an IPv6 host.
-$safeIdPattern = '^[A-Za-z0-9._:/@+-]+$'
-$safeUrlPattern = '^[\[\]A-Za-z0-9._:/@+-]+$'
-function Assert-ExtractorArgs {
-    # The mode, its model and its URL, together.
-    if (Test-ModelBlank) {
-        Write-Host "-Model needs a model id (it was empty)"
-        exit 2
-    }
-    if ($Model -and ($Model -cnotmatch $safeIdPattern)) {
-        Write-Host "-Model '$Model' holds characters the installer cannot write safely; use letters, digits and . _ : / @ + -"
-        exit 2
-    }
-    if ($Extractor -notin $extractorModes) {
-        Write-Host "invalid -Extractor '$Extractor' ($($extractorModes -join '|'))"
-        exit 2
-    }
-    if ($Extractor -in "endpoint", "endpoint-fallback") {
-        # Any server's own model names: none is listed here.
-        if (-not $ExtractorUrl -or -not $Model) {
-            Write-Host "-Extractor $Extractor needs -ExtractorUrl <the server's OpenAI-compatible base URL, e.g. http://127.0.0.1:1234/v1> and -Model <a model name that server serves>"
-            exit 2
-        }
-        # Checked before any other message, which never echoes the URL.
-        $urlAuthority = (($ExtractorUrl -split '://', 2)[-1] -split '/', 2)[0]
-        if ($urlAuthority.Contains("@")) {
-            Write-Host "-ExtractorUrl must not carry credentials (user:password@host); a key the server wants goes in PSEUDOLIFE_DREAM_API_KEY in ops/.env"
-            exit 2
-        }
-        if ($ExtractorUrl -cnotmatch '^https?://.') {
-            Write-Host "invalid -ExtractorUrl: expected the server's http(s) base URL, e.g. http://127.0.0.1:1234/v1"
-            exit 2
-        }
-        if ($ExtractorUrl -cnotmatch $safeUrlPattern) {
-            Write-Host "invalid -ExtractorUrl: it holds characters the installer cannot write safely; use letters, digits and . _ : / @ + - (and [ ] around an IPv6 host)"
-            exit 2
-        }
-    } else {
-        if ($ExtractorUrl) {
-            Write-Host "-ExtractorUrl applies only to -Extractor endpoint or endpoint-fallback"
-            exit 2
-        }
-        # One family rule, the same in install.sh, before any note: a shim
-        # only honours its own family's ids per request.
-        $familyOk = switch -Regex ($Extractor) {
-            '^sidecar$' { $true }
-            '^claude-' { $Model -clike "claude-?*" }
-            '^openai-' { ($Model -clike "gpt-?*") -or ($Model -clike "codex-?*") }
-            default { $true }
-        }
-        if ($Model -and -not $familyOk) {
-            Write-Host "-Model '$Model' does not match extractor mode $($Extractor): a claude-* mode takes a claude-* id, an openai-* mode a gpt-* or codex-* id"
-            exit 2
-        }
-        if ($Model -and ($Model -notin ($claudeModels + $openaiModels))) {
-            if ($Extractor -eq "sidecar") {
-                Write-Host "-Model '$Model' is not one this installer knows, and -Extractor sidecar serves only its bundled model; -Model picks a CLI shim or endpoint mode's model"
-                exit 2
-            }
-            Write-Host "model $Model is not in this installer's known list; passing it to the shim unchanged (add it to the lists when it is a real release)"
-        }
-    }
-}
-if (Test-ModelBlank) {
-    Write-Host "-Model needs a model id (it was empty)"
-    exit 2
-}
 if ($Extractor) { Assert-ExtractorArgs }
 # <<< extractor modes <<<
 
+# >>> native client >>>
+# The client side (the stdio MCP shim every agent registers, and the
+# pseudolife-mcp CLI) is the native binary published with this checkout's
+# release, so no Python is looked for or installed (docs/dev/native-runtimes.md,
+# docs/dev/release-assets.md). It is fetched, verified against the release's
+# SHA256SUMS and run once from a private staging directory before anything on
+# this host changes; Install-ShimOnce then installs that exact archive with the
+# native runtime installer, which keeps every older runtime a running session
+# uses. PSEUDOLIFE_NATIVE_ARCHIVE_URL replaces the release download URL with
+# another http(s) directory URL, or a local directory, holding the archive and
+# SHA256SUMS.
+$script:nativeVersion = $null
+$script:nativeArchive = $null
+$script:nativeSums = $null
+$script:nativeStaged = $null
+$script:nativeStageDir = $null
+$script:nativeHelper = $null
+function Get-NativeTarget {
+    # This host's release target triple, or $null. PSEUDOLIFE_NATIVE_TARGET
+    # picks one of the five release targets instead (an emulated one, or a
+    # test's); any other value is $null.
+    if ($env:PSEUDOLIFE_NATIVE_TARGET) {
+        if ($env:PSEUDOLIFE_NATIVE_TARGET -cin @("x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu", "x86_64-apple-darwin", "aarch64-apple-darwin", "x86_64-pc-windows-msvc")) { return $env:PSEUDOLIFE_NATIVE_TARGET }
+        return $null
+    }
+    if ($IsWindows -or ($null -eq $IsWindows)) {
+        $arch = "$env:PROCESSOR_ARCHITEW6432$env:PROCESSOR_ARCHITECTURE"
+        if ($arch -match '^AMD64') { return "x86_64-pc-windows-msvc" }
+        return $null
+    }
+    $machine = (& uname -m 2>$null)
+    if ($IsLinux) {
+        if ($machine -in @("x86_64", "amd64")) { return "x86_64-unknown-linux-gnu" }
+        if ($machine -in @("aarch64", "arm64")) { return "aarch64-unknown-linux-gnu" }
+    }
+    if ($IsMacOS) {
+        if ($machine -eq "x86_64") { return "x86_64-apple-darwin" }
+        if ($machine -in @("arm64", "aarch64")) { return "aarch64-apple-darwin" }
+    }
+    return $null
+}
+function Stop-NativeInstall([string]$Cause, [string]$Fix) {
+    Remove-NativeStage
+    [Console]::Error.WriteLine("The native pseudolife-mcp client cannot be installed: $Cause. $Fix Nothing was changed.")
+    exit 1
+}
+function Remove-NativeStage {
+    # This run's staging directory; the verified download is kept.
+    if ($script:nativeStageDir -and (Test-Path -LiteralPath $script:nativeStageDir)) {
+        Remove-Item -LiteralPath $script:nativeStageDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    $script:nativeStageDir = $null
+}
+function Get-NativeAsset([string]$Base, [string]$Name, [string]$Destination) {
+    # "ok", "missing" (no such file there: an HTTP 404 or an absent local
+    # file) or the failure's message.
+    try {
+        if ($Base -match '^https?://') {
+            $part = "$Destination.part"
+            try {
+                Invoke-WebRequest -UseBasicParsing -Uri "$Base/$Name" -OutFile $part -TimeoutSec 900 -ErrorAction Stop
+            } catch {
+                Remove-Item -LiteralPath $part -Force -ErrorAction SilentlyContinue
+                $status = $null
+                if ($_.Exception.Response) { $status = [int]$_.Exception.Response.StatusCode }
+                if ($status -eq 404) { return "missing" }
+                return "$($_.Exception.Message)"
+            }
+            Move-Item -LiteralPath $part -Destination $Destination -Force
+        } else {
+            $source = Join-Path $Base $Name
+            if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { return "missing" }
+            Copy-Item -LiteralPath $source -Destination $Destination -Force
+        }
+        return "ok"
+    } catch { return "$($_.Exception.Message)" }
+}
+function Initialize-NativeClient {
+    # Fetch, verify, extract and run the release binary; refuses on any failure.
+    $pyproject = Get-Content -LiteralPath (Join-Path $repo "pyproject.toml") -Raw -ErrorAction SilentlyContinue
+    if ("$pyproject" -notmatch '(?m)^version\s*=\s*"([^"]+)"') {
+        Stop-NativeInstall "this checkout's pyproject.toml names no version" "Check out a release tag (git checkout v<version>) and rerun."
+    }
+    $script:nativeVersion = $Matches[1]
+    $target = Get-NativeTarget
+    if (-not $target) {
+        if ($env:PSEUDOLIFE_NATIVE_TARGET) {
+            Stop-NativeInstall "PSEUDOLIFE_NATIVE_TARGET names $($env:PSEUDOLIFE_NATIVE_TARGET), which no release publishes" "Set it to one of x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu, x86_64-apple-darwin, aarch64-apple-darwin, x86_64-pc-windows-msvc, or unset it."
+        }
+        Stop-NativeInstall "no native client is published for this platform ($env:PROCESSOR_ARCHITECTURE); releases carry Windows x86_64, Linux x86_64 and aarch64, and macOS Intel and Apple silicon" "Run this installer on one of those (a machine there can use a daemon elsewhere with -ClientOnly)."
+    }
+    $isZip = $target -like "*windows*"
+    $name = "pseudolife-mcp-$($script:nativeVersion)-$target." + $(if ($isZip) { "zip" } else { "tar.gz" })
+    $binaryName = if ($isZip) { "pseudolife-mcp.exe" } else { "pseudolife-mcp" }
+    $base = if ($env:PSEUDOLIFE_NATIVE_ARCHIVE_URL) { "$env:PSEUDOLIFE_NATIVE_ARCHIVE_URL".TrimEnd('/') } else { "https://github.com/Pseudogiant-xr/Pseudolife-MCP/releases/download/v$($script:nativeVersion)" }
+    if ($base -match '^https?://([^/]*)') {
+        if ($Matches[1] -like '*@*') {
+            Stop-NativeInstall "PSEUDOLIFE_NATIVE_ARCHIVE_URL carries a user name or password, which would be printed with any download error" "Serve the archives without credentials in the URL."
+        }
+    }
+    $downloads = Join-Path (Join-Path (Join-Path $HOME ".pseudolife-mcp") "downloads") $script:nativeVersion
+    New-Item -ItemType Directory -Force -Path $downloads | Out-Null
+    $script:nativeSums = Join-Path $downloads "SHA256SUMS"
+    $script:nativeArchive = Join-Path $downloads $name
+    $sumsFetch = Get-NativeAsset $base "SHA256SUMS" $script:nativeSums
+    if ($sumsFetch -eq "missing") {
+        Stop-NativeInstall "release v$($script:nativeVersion) has no SHA256SUMS at $base (releases before the native client carry none)" "Update this checkout to a newer release (git pull, or git checkout of a newer tag) and rerun."
+    } elseif ($sumsFetch -ne "ok") {
+        Stop-NativeInstall "SHA256SUMS could not be downloaded from $base ($sumsFetch)" "Check the connection (or PSEUDOLIFE_NATIVE_ARCHIVE_URL) and rerun."
+    }
+    $pattern = '^[0-9a-f]{64}  ' + [regex]::Escape($name) + '$'
+    $lines = @(Get-Content -LiteralPath $script:nativeSums | Where-Object { $_ -cmatch $pattern })
+    if ($lines.Count -ne 1) {
+        Stop-NativeInstall "SHA256SUMS of release v$($script:nativeVersion) lists $name $($lines.Count) times, not once" "Rerun later; if it persists, report it at https://github.com/Pseudogiant-xr/Pseudolife-MCP/issues."
+    }
+    $expected = $lines[0].Substring(0, 64)
+    $have = (Test-Path -LiteralPath $script:nativeArchive -PathType Leaf) -and ((Get-FileHash -LiteralPath $script:nativeArchive -Algorithm SHA256).Hash.ToLowerInvariant() -eq $expected)
+    if (-not $have) {
+        $archiveFetch = Get-NativeAsset $base $name $script:nativeArchive
+        if ($archiveFetch -ne "ok") {
+            Stop-NativeInstall "the download of $name from $base failed ($archiveFetch)" "Check the network (or PSEUDOLIFE_NATIVE_ARCHIVE_URL) and rerun."
+        }
+    }
+    if ((Get-FileHash -LiteralPath $script:nativeArchive -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected) {
+        Remove-Item -LiteralPath $script:nativeArchive -Force
+        Stop-NativeInstall "$name does not match the release's SHA256SUMS (the download was removed)" "Rerun to download it again."
+    }
+    $stage = Join-Path ([System.IO.Path]::GetTempPath()) ("pseudolife-native-" + [guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Directory -Path $stage | Out-Null
+    $script:nativeStageDir = $stage
+    try {
+        if ($isZip) {
+            Expand-Archive -LiteralPath $script:nativeArchive -DestinationPath $stage -Force
+        } else {
+            & tar -xzf $script:nativeArchive -C $stage $binaryName
+            if ($LASTEXITCODE -ne 0) { throw "tar exited $LASTEXITCODE" }
+        }
+    } catch {
+        Stop-NativeInstall "$name could not be unpacked ($($_.Exception.Message))" "Rerun; the verified archive is kept in $downloads."
+    }
+    $script:nativeStaged = Join-Path $stage $binaryName
+    if (-not (Test-Path -LiteralPath $script:nativeStaged -PathType Leaf)) {
+        Stop-NativeInstall "$name holds no $binaryName" "Rerun later; if it persists, report it at https://github.com/Pseudogiant-xr/Pseudolife-MCP/issues."
+    }
+    if (-not $isZip) {
+        # tar keeps the archive's 0755; set it again without a PATH lookup.
+        try { [System.IO.File]::SetUnixFileMode($script:nativeStaged, [System.IO.UnixFileMode]"UserRead, UserWrite, UserExecute, GroupRead, GroupExecute, OtherRead, OtherExecute") } catch { }
+    }
+    try {
+        $says = (& $script:nativeStaged version 2>&1 | Out-String).Trim()
+        $ran = ($LASTEXITCODE -eq 0)
+    } catch { $says = $_.Exception.Message; $ran = $false }
+    if (-not $ran) {
+        $runFix = if ($target -like "*windows*") { "Check that nothing (an antivirus or an execution policy) blocks it, and rerun." } elseif ($target -like "*linux*") { "The Linux client needs glibc 2.35 or newer (Ubuntu 22.04, Debian 12); run this installer on such a system." } else { "The macOS client needs macOS 11 or newer." }
+        Stop-NativeInstall "the downloaded client does not run on this host ($(($says -split "`n")[0]))" $runFix
+    }
+}
+function Get-NativeLauncherPath {
+    # The stable launcher's path, whether or not it exists yet.
+    if ($env:PSEUDOLIFE_SHIM_LAUNCHER) { return $env:PSEUDOLIFE_SHIM_LAUNCHER }
+    if ($IsWindows -or ($null -eq $IsWindows)) { return (Join-Path $env:LOCALAPPDATA "pseudolife-mcp\bin\pseudolife-mcp.exe") }
+    $data = if ($env:XDG_DATA_HOME) { $env:XDG_DATA_HOME } else { Join-Path $HOME ".local/share" }
+    return (Join-Path $data "pseudolife-mcp/bin/pseudolife-mcp")
+}
+function Get-NativeInstalledLauncher {
+    # The stable launcher when it is the native client, else $null.
+    $candidate = Get-NativeLauncherPath
+    if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) { return $null }
+    try {
+        $capability = (& $candidate update --native-capability 2>$null | Select-Object -Last 1)
+    } catch { return $null }
+    if (($LASTEXITCODE -eq 0) -and ("$capability".Trim() -eq "pseudolife-mcp native-update-v1")) { return $candidate }
+    return $null
+}
+function Add-NativeLauncherToUserPath([string]$Launcher) {
+    # The launcher's directory goes first on the user PATH (HKCU\Environment
+    # only, %VAR% entries kept as written; ops/add-user-path.ps1), so
+    # `pseudolife-mcp` in a new terminal reaches it; an older copy further
+    # down is left in place. This run's PATH gets it too. Returns the one
+    # line to show, or $null.
+    if (-not ($IsWindows -or ($null -eq $IsWindows))) { return $null }
+    if ($env:PSEUDOLIFE_SHIM_LAUNCHER) { return $null }
+    $dir = Split-Path -Parent $Launcher
+    $env:PATH = $dir + [IO.Path]::PathSeparator + $env:PATH
+    try {
+        $state = (& (Join-Path $repo "ops/add-user-path.ps1") -Dir $dir | Select-Object -Last 1)
+    } catch {
+        $script:shimPathState = "failed"
+        return "the user PATH could not be updated ($($_.Exception.Message)); run the launcher by its full path"
+    }
+    if ("$state" -eq "current") { return $null }
+    return "$dir is now first on your user PATH; new terminals run pseudolife-mcp from there"
+}
+function Install-NativeClient {
+    # Install-ShimOnce's install: the verified archive into a new side-by-side
+    # runtime behind the stable launcher. Returns the launcher path, or $null.
+    if (-not $script:nativeStaged) { Initialize-NativeClient }
+    $launcherPath = Get-NativeLauncherPath
+    $before = $null
+    if (Get-NativeInstalledLauncher) { $before = (Get-FileHash -LiteralPath $launcherPath -Algorithm SHA256).Hash }
+    # A failed install keeps the staged copy: the installer steps after this
+    # one still run it (Invoke-NativeHelper), and the script's end removes it.
+    try {
+        $launcher = & $script:nativeStaged runtime install --archive $script:nativeArchive --sha256sums $script:nativeSums --version $script:nativeVersion | Select-Object -Last 1
+    } catch { return $null }
+    $installExit = $LASTEXITCODE
+    if (($installExit -ne 0) -or (-not $launcher)) { return $null }
+    $launcher = "$launcher".Trim()
+    if (-not (Test-Path -LiteralPath $launcher -PathType Leaf)) { return $null }
+    # The installer steps now run the launcher just installed: the same
+    # release as the staged copy, which is removed.
+    $script:nativeHelper = $launcher
+    Remove-NativeStage
+    $script:nativeStaged = $null
+    if ($before -and ($before -eq (Get-FileHash -LiteralPath $launcher -Algorithm SHA256).Hash)) {
+        Step "Native client $($script:nativeVersion) already installed at $launcher; nothing changed"
+    } else {
+        Step "Native client $($script:nativeVersion) installed at $launcher (running sessions keep the client they started with)"
+    }
+    $pathNote = Add-NativeLauncherToUserPath $launcher
+    if ($pathNote) {
+        if (-not $script:shimPathState) { $script:shimPathState = "linked" }
+        $script:shimPathNotes = @($pathNote)
+        Write-Host "  shim: $pathNote"
+    }
+    try { & $launcher installer expose 2>$null | Out-Null } catch { }
+    return $launcher
+}
+function Invoke-NativeHelper {
+    # One installer step of this run's verified native client: the staged
+    # copy until Install-NativeClient installs that release, then its
+    # launcher. Never a launcher found on the host, which may be an older
+    # release without these steps. Input piped to this function goes to it.
+    $exe = if ($script:nativeStaged) { $script:nativeStaged } else { $script:nativeHelper }
+    if ($MyInvocation.ExpectingInput) { $input | & $exe installer @args } else { & $exe installer @args }
+}
+# <<< native client <<<
+# >>> native client stage >>>
+# Fetched and verified before anything here changes: a refusal leaves the
+# host as it was.
+Initialize-NativeClient
+# <<< native client stage <<<
+
 # >>> recorded choices >>>
 function Invoke-InstallerState {
-    $statePython = Get-InstallerPython
-    if (-not $statePython) { throw "Python >= 3.10 is needed to read recorded installer choices; install it and rerun." }
     if ($args[0] -in 'write-env', 'write-file', 'started', 'record') {
-        $input | & $statePython (Join-Path $repo "ops/installer_state.py") @args
+        $input | Invoke-NativeHelper state @args
     } else {
-        & $statePython (Join-Path $repo "ops/installer_state.py") @args
+        Invoke-NativeHelper state @args
     }
     if ($LASTEXITCODE -ne 0) { throw "Installer state could not be read or saved; fix the line above and rerun." }
 }
@@ -809,18 +924,14 @@ function Get-DaemonUrlHost([string]$url) {
     return $name.ToLowerInvariant()
 }
 function Test-LoopbackUrl([string]$url) {
-    # The shim's own answer (daemon_url._is_loopback_url), so the installer
-    # and the shim never disagree on a form such as 127.0.0.01 or
-    # ::ffff:127.0.0.1. Exit 10/11 are its answers; anything else (no Python,
-    # an import that failed) falls back to the host rule below.
-    $python = Get-InstallerPython
-    if ($python) {
-        try {
-            & $python -c "import sys; sys.path.insert(0, sys.argv[1]); from pseudolife_memory.daemon_url import _is_loopback_url; sys.exit(10 if _is_loopback_url(sys.argv[2]) else 11)" $repo $url 2>$null | Out-Null
-            if ($LASTEXITCODE -eq 10) { return $true }
-            if ($LASTEXITCODE -eq 11) { return $false }
-        } catch { }
-    }
+    # The client's own answer, so the installer and the client never
+    # disagree on a form such as 127.0.0.01 or ::ffff:127.0.0.1. Exit 10/11
+    # are its answers; anything else falls back to the host rule below.
+    try {
+        Invoke-NativeHelper is-loopback $url 2>$null | Out-Null
+        if ($LASTEXITCODE -eq 10) { return $true }
+        if ($LASTEXITCODE -eq 11) { return $false }
+    } catch { }
     $name = Get-DaemonUrlHost $url
     if ($name -eq "localhost") { return $true }
     # Dotted quads without leading zeros (Python's ipaddress rejects those).
@@ -978,236 +1089,8 @@ if ($interactive -and -not $script:installerRerun) {
 Invoke-BankTokenQuestion
 
 # -- 2. preflight --------------------------------------------------------------
-# >>> native client >>>
-# The client side (the stdio MCP shim every agent registers, and the
-# pseudolife-mcp CLI) is the native binary published with this checkout's
-# release, so no Python is looked for or installed (docs/dev/native-runtimes.md,
-# docs/dev/release-assets.md). It is fetched, verified against the release's
-# SHA256SUMS and run once from a private staging directory before anything on
-# this host changes; Install-ShimOnce then installs that exact archive with the
-# native runtime installer, which keeps every older runtime a running session
-# uses. PSEUDOLIFE_NATIVE_ARCHIVE_URL replaces the release download URL with
-# another http(s) directory URL, or a local directory, holding the archive and
-# SHA256SUMS.
-$script:nativeVersion = $null
-$script:nativeArchive = $null
-$script:nativeSums = $null
-$script:nativeStaged = $null
-$script:nativeStageDir = $null
-function Get-NativeTarget {
-    # This host's release target triple, or $null. PSEUDOLIFE_NATIVE_TARGET
-    # picks one of the five release targets instead (an emulated one, or a
-    # test's); any other value is $null.
-    if ($env:PSEUDOLIFE_NATIVE_TARGET) {
-        if ($env:PSEUDOLIFE_NATIVE_TARGET -cin @("x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu", "x86_64-apple-darwin", "aarch64-apple-darwin", "x86_64-pc-windows-msvc")) { return $env:PSEUDOLIFE_NATIVE_TARGET }
-        return $null
-    }
-    if ($IsWindows -or ($null -eq $IsWindows)) {
-        $arch = "$env:PROCESSOR_ARCHITEW6432$env:PROCESSOR_ARCHITECTURE"
-        if ($arch -match '^AMD64') { return "x86_64-pc-windows-msvc" }
-        return $null
-    }
-    $machine = (& uname -m 2>$null)
-    if ($IsLinux) {
-        if ($machine -in @("x86_64", "amd64")) { return "x86_64-unknown-linux-gnu" }
-        if ($machine -in @("aarch64", "arm64")) { return "aarch64-unknown-linux-gnu" }
-    }
-    if ($IsMacOS) {
-        if ($machine -eq "x86_64") { return "x86_64-apple-darwin" }
-        if ($machine -in @("arm64", "aarch64")) { return "aarch64-apple-darwin" }
-    }
-    return $null
-}
-function Stop-NativeInstall([string]$Cause, [string]$Fix) {
-    Remove-NativeStage
-    [Console]::Error.WriteLine("The native pseudolife-mcp client cannot be installed: $Cause. $Fix Nothing was changed.")
-    exit 1
-}
-function Remove-NativeStage {
-    # This run's staging directory; the verified download is kept.
-    if ($script:nativeStageDir -and (Test-Path -LiteralPath $script:nativeStageDir)) {
-        Remove-Item -LiteralPath $script:nativeStageDir -Recurse -Force -ErrorAction SilentlyContinue
-    }
-    $script:nativeStageDir = $null
-}
-function Get-NativeAsset([string]$Base, [string]$Name, [string]$Destination) {
-    # "ok", "missing" (no such file there: an HTTP 404 or an absent local
-    # file) or the failure's message.
-    try {
-        if ($Base -match '^https?://') {
-            $part = "$Destination.part"
-            try {
-                Invoke-WebRequest -UseBasicParsing -Uri "$Base/$Name" -OutFile $part -TimeoutSec 900 -ErrorAction Stop
-            } catch {
-                Remove-Item -LiteralPath $part -Force -ErrorAction SilentlyContinue
-                $status = $null
-                if ($_.Exception.Response) { $status = [int]$_.Exception.Response.StatusCode }
-                if ($status -eq 404) { return "missing" }
-                return "$($_.Exception.Message)"
-            }
-            Move-Item -LiteralPath $part -Destination $Destination -Force
-        } else {
-            $source = Join-Path $Base $Name
-            if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { return "missing" }
-            Copy-Item -LiteralPath $source -Destination $Destination -Force
-        }
-        return "ok"
-    } catch { return "$($_.Exception.Message)" }
-}
-function Initialize-NativeClient {
-    # Fetch, verify, extract and run the release binary; refuses on any failure.
-    $pyproject = Get-Content -LiteralPath (Join-Path $repo "pyproject.toml") -Raw -ErrorAction SilentlyContinue
-    if ("$pyproject" -notmatch '(?m)^version\s*=\s*"([^"]+)"') {
-        Stop-NativeInstall "this checkout's pyproject.toml names no version" "Check out a release tag (git checkout v<version>) and rerun."
-    }
-    $script:nativeVersion = $Matches[1]
-    $target = Get-NativeTarget
-    if (-not $target) {
-        if ($env:PSEUDOLIFE_NATIVE_TARGET) {
-            Stop-NativeInstall "PSEUDOLIFE_NATIVE_TARGET names $($env:PSEUDOLIFE_NATIVE_TARGET), which no release publishes" "Set it to one of x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu, x86_64-apple-darwin, aarch64-apple-darwin, x86_64-pc-windows-msvc, or unset it."
-        }
-        Stop-NativeInstall "no native client is published for this platform ($env:PROCESSOR_ARCHITECTURE); releases carry Windows x86_64, Linux x86_64 and aarch64, and macOS Intel and Apple silicon" "Run this installer on one of those (a machine there can use a daemon elsewhere with -ClientOnly)."
-    }
-    $isZip = $target -like "*windows*"
-    $name = "pseudolife-mcp-$($script:nativeVersion)-$target." + $(if ($isZip) { "zip" } else { "tar.gz" })
-    $binaryName = if ($isZip) { "pseudolife-mcp.exe" } else { "pseudolife-mcp" }
-    $base = if ($env:PSEUDOLIFE_NATIVE_ARCHIVE_URL) { "$env:PSEUDOLIFE_NATIVE_ARCHIVE_URL".TrimEnd('/') } else { "https://github.com/Pseudogiant-xr/Pseudolife-MCP/releases/download/v$($script:nativeVersion)" }
-    if ($base -match '^https?://([^/]*)') {
-        if ($Matches[1] -like '*@*') {
-            Stop-NativeInstall "PSEUDOLIFE_NATIVE_ARCHIVE_URL carries a user name or password, which would be printed with any download error" "Serve the archives without credentials in the URL."
-        }
-    }
-    $downloads = Join-Path (Join-Path (Join-Path $HOME ".pseudolife-mcp") "downloads") $script:nativeVersion
-    New-Item -ItemType Directory -Force -Path $downloads | Out-Null
-    $script:nativeSums = Join-Path $downloads "SHA256SUMS"
-    $script:nativeArchive = Join-Path $downloads $name
-    $sumsFetch = Get-NativeAsset $base "SHA256SUMS" $script:nativeSums
-    if ($sumsFetch -eq "missing") {
-        Stop-NativeInstall "release v$($script:nativeVersion) has no SHA256SUMS at $base (releases before the native client carry none)" "Update this checkout to a newer release (git pull, or git checkout of a newer tag) and rerun."
-    } elseif ($sumsFetch -ne "ok") {
-        Stop-NativeInstall "SHA256SUMS could not be downloaded from $base ($sumsFetch)" "Check the connection (or PSEUDOLIFE_NATIVE_ARCHIVE_URL) and rerun."
-    }
-    $pattern = '^[0-9a-f]{64}  ' + [regex]::Escape($name) + '$'
-    $lines = @(Get-Content -LiteralPath $script:nativeSums | Where-Object { $_ -cmatch $pattern })
-    if ($lines.Count -ne 1) {
-        Stop-NativeInstall "SHA256SUMS of release v$($script:nativeVersion) lists $name $($lines.Count) times, not once" "Rerun later; if it persists, report it at https://github.com/Pseudogiant-xr/Pseudolife-MCP/issues."
-    }
-    $expected = $lines[0].Substring(0, 64)
-    $have = (Test-Path -LiteralPath $script:nativeArchive -PathType Leaf) -and ((Get-FileHash -LiteralPath $script:nativeArchive -Algorithm SHA256).Hash.ToLowerInvariant() -eq $expected)
-    if (-not $have) {
-        $archiveFetch = Get-NativeAsset $base $name $script:nativeArchive
-        if ($archiveFetch -ne "ok") {
-            Stop-NativeInstall "the download of $name from $base failed ($archiveFetch)" "Check the network (or PSEUDOLIFE_NATIVE_ARCHIVE_URL) and rerun."
-        }
-    }
-    if ((Get-FileHash -LiteralPath $script:nativeArchive -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected) {
-        Remove-Item -LiteralPath $script:nativeArchive -Force
-        Stop-NativeInstall "$name does not match the release's SHA256SUMS (the download was removed)" "Rerun to download it again."
-    }
-    $stage = Join-Path ([System.IO.Path]::GetTempPath()) ("pseudolife-native-" + [guid]::NewGuid().ToString("N"))
-    New-Item -ItemType Directory -Path $stage | Out-Null
-    $script:nativeStageDir = $stage
-    try {
-        if ($isZip) {
-            Expand-Archive -LiteralPath $script:nativeArchive -DestinationPath $stage -Force
-        } else {
-            & tar -xzf $script:nativeArchive -C $stage $binaryName
-            if ($LASTEXITCODE -ne 0) { throw "tar exited $LASTEXITCODE" }
-        }
-    } catch {
-        Stop-NativeInstall "$name could not be unpacked ($($_.Exception.Message))" "Rerun; the verified archive is kept in $downloads."
-    }
-    $script:nativeStaged = Join-Path $stage $binaryName
-    if (-not (Test-Path -LiteralPath $script:nativeStaged -PathType Leaf)) {
-        Stop-NativeInstall "$name holds no $binaryName" "Rerun later; if it persists, report it at https://github.com/Pseudogiant-xr/Pseudolife-MCP/issues."
-    }
-    if (-not $isZip) {
-        # tar keeps the archive's 0755; set it again without a PATH lookup.
-        try { [System.IO.File]::SetUnixFileMode($script:nativeStaged, [System.IO.UnixFileMode]"UserRead, UserWrite, UserExecute, GroupRead, GroupExecute, OtherRead, OtherExecute") } catch { }
-    }
-    try {
-        $says = (& $script:nativeStaged version 2>&1 | Out-String).Trim()
-        $ran = ($LASTEXITCODE -eq 0)
-    } catch { $says = $_.Exception.Message; $ran = $false }
-    if (-not $ran) {
-        $runFix = if ($target -like "*windows*") { "Check that nothing (an antivirus or an execution policy) blocks it, and rerun." } elseif ($target -like "*linux*") { "The Linux client needs glibc 2.35 or newer (Ubuntu 22.04, Debian 12); run this installer on such a system." } else { "The macOS client needs macOS 11 or newer." }
-        Stop-NativeInstall "the downloaded client does not run on this host ($(($says -split "`n")[0]))" $runFix
-    }
-}
-function Get-NativeLauncherPath {
-    # The stable launcher's path, whether or not it exists yet.
-    if ($env:PSEUDOLIFE_SHIM_LAUNCHER) { return $env:PSEUDOLIFE_SHIM_LAUNCHER }
-    if ($IsWindows -or ($null -eq $IsWindows)) { return (Join-Path $env:LOCALAPPDATA "pseudolife-mcp\bin\pseudolife-mcp.exe") }
-    $data = if ($env:XDG_DATA_HOME) { $env:XDG_DATA_HOME } else { Join-Path $HOME ".local/share" }
-    return (Join-Path $data "pseudolife-mcp/bin/pseudolife-mcp")
-}
-function Get-NativeInstalledLauncher {
-    # The stable launcher when it is the native client, else $null.
-    $candidate = Get-NativeLauncherPath
-    if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) { return $null }
-    try {
-        $capability = (& $candidate update --native-capability 2>$null | Select-Object -Last 1)
-    } catch { return $null }
-    if (($LASTEXITCODE -eq 0) -and ("$capability".Trim() -eq "pseudolife-mcp native-update-v1")) { return $candidate }
-    return $null
-}
-function Add-NativeLauncherToUserPath([string]$Launcher) {
-    # The launcher's directory goes first on the user PATH (HKCU\Environment
-    # only, %VAR% entries kept as written; ops/add-user-path.ps1), so
-    # `pseudolife-mcp` in a new terminal reaches it; an older copy further
-    # down is left in place. This run's PATH gets it too. Returns the one
-    # line to show, or $null.
-    if (-not ($IsWindows -or ($null -eq $IsWindows))) { return $null }
-    if ($env:PSEUDOLIFE_SHIM_LAUNCHER) { return $null }
-    $dir = Split-Path -Parent $Launcher
-    $env:PATH = $dir + [IO.Path]::PathSeparator + $env:PATH
-    try {
-        $state = (& (Join-Path $repo "ops/add-user-path.ps1") -Dir $dir | Select-Object -Last 1)
-    } catch {
-        $script:shimPathState = "failed"
-        return "the user PATH could not be updated ($($_.Exception.Message)); run the launcher by its full path"
-    }
-    if ("$state" -eq "current") { return $null }
-    return "$dir is now first on your user PATH; new terminals run pseudolife-mcp from there"
-}
-function Install-NativeClient {
-    # Install-ShimOnce's install: the verified archive into a new side-by-side
-    # runtime behind the stable launcher. Returns the launcher path, or $null.
-    if (-not $script:nativeStaged) { Initialize-NativeClient }
-    $launcherPath = Get-NativeLauncherPath
-    $before = $null
-    if (Get-NativeInstalledLauncher) { $before = (Get-FileHash -LiteralPath $launcherPath -Algorithm SHA256).Hash }
-    try {
-        $launcher = & $script:nativeStaged runtime install --archive $script:nativeArchive --sha256sums $script:nativeSums --version $script:nativeVersion | Select-Object -Last 1
-    } catch { Remove-NativeStage; return $null }
-    $installExit = $LASTEXITCODE
-    Remove-NativeStage
-    $script:nativeStaged = $null
-    if (($installExit -ne 0) -or (-not $launcher)) { return $null }
-    $launcher = "$launcher".Trim()
-    if (-not (Test-Path -LiteralPath $launcher -PathType Leaf)) { return $null }
-    if ($before -and ($before -eq (Get-FileHash -LiteralPath $launcher -Algorithm SHA256).Hash)) {
-        Step "Native client $($script:nativeVersion) already installed at $launcher; nothing changed"
-    } else {
-        Step "Native client $($script:nativeVersion) installed at $launcher (running sessions keep the client they started with)"
-    }
-    $pathNote = Add-NativeLauncherToUserPath $launcher
-    if ($pathNote) {
-        if (-not $script:shimPathState) { $script:shimPathState = "linked" }
-        $script:shimPathNotes = @($pathNote)
-        Write-Host "  shim: $pathNote"
-    }
-    try { & $launcher installer expose 2>$null | Out-Null } catch { }
-    return $launcher
-}
-# <<< native client <<<
-# >>> native client stage >>>
-# Fetched and verified before anything here changes: a refusal leaves the
-# host as it was.
-Initialize-NativeClient
-# <<< native client stage <<<
 
-# The status field of an ops/client_credentials.py JSON report, or $null.
+# The status field of an installer credentials step's JSON report, or $null.
 function Get-HelperStatus($output) {
     try { return [string](($output -join "`n") | ConvertFrom-Json).status } catch { return $null }
 }
@@ -1219,20 +1102,17 @@ function Get-HelperStatus($output) {
 # shim's pair creates it after the shim is installed (the client-only pair
 # block), so here it must not exist, and only the daemon is checked.
 function Test-PairingCode([string]$value) {
-    # The shim's own rule (principals.normalize_pairing_code), asked with the
-    # value on stdin, never in an argument list. Exit 10/11 are its answers;
+    # The client's own rule, asked with the value on stdin, never in an
+    # argument list. Exit 10/11 are its answers;
     # anything else falls back to the same rule written here: 12 Crockford
     # base32 characters once case, dashes and surrounding whitespace are
     # ignored, O read as 0, and I and L as 1.
-    $python = Get-InstallerPython
-    if ($python) {
-        try {
-            $global:LASTEXITCODE = 0
-            "$value" | & $python -c "import sys; sys.path.insert(0, sys.argv[1]); from pseudolife_memory.principals import normalize_pairing_code; line = sys.stdin.buffer.readline().decode('utf-8', 'replace').rstrip(chr(13) + chr(10)); sys.exit(10 if normalize_pairing_code(line) else 11)" $repo 2>$null | Out-Null
-            if ($LASTEXITCODE -eq 10) { return $true }
-            if ($LASTEXITCODE -eq 11) { return $false }
-        } catch { }
-    }
+    try {
+        $global:LASTEXITCODE = 0
+        "$value" | Invoke-NativeHelper pairing-code-valid 2>$null | Out-Null
+        if ($LASTEXITCODE -eq 10) { return $true }
+        if ($LASTEXITCODE -eq 11) { return $false }
+    } catch { }
     $code = ("$value".Trim() -replace '-', '').ToUpperInvariant().Replace('O', '0').Replace('I', '1').Replace('L', '1')
     return ($code -cmatch '^[0-9A-HJKMNP-TV-Z]{12}$')
 }
@@ -1240,7 +1120,7 @@ function Assert-ClientTokenFile {
     # The shim's own check of the token file, on every OS: an owner-only
     # regular file (the ACL on Windows, mode bits on POSIX), no link, one
     # well-formed token. Stops the install when it cannot use it.
-    $tokenReport = & (Get-InstallerPython) (Join-Path $repo "ops/client_credentials.py") check-token-file --path $script:TokenFile
+    $tokenReport = Invoke-NativeHelper credentials check-token-file --path $script:TokenFile
     if ("$(Get-HelperStatus $tokenReport)" -ne "ready") {
         $problem = try { [string](($tokenReport -join "`n") | ConvertFrom-Json).recovery } catch { "no result" }
         throw "client-only install: the shim cannot use the token file ($problem): $($script:TokenFile). It reads only an owner-only regular file: chmod 600 it on Linux or macOS, or delete it and re-run with -ReadToken to create it again"
@@ -1259,11 +1139,6 @@ function Invoke-ClientOnlyPreflight {
         exit 2
     }
     $script:TokenFile = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($script:TokenFile)
-    $tokenPython = Get-InstallerPython
-    if (-not $tokenPython) {
-        throw "client-only install: Python 3.10 or newer is needed to check the token file and to install the shim. Install it, then re-run"
-    }
-    $helper = Join-Path $repo "ops/client_credentials.py"
     if ($script:PairingCode) {
         # pair never replaces a file: refused here, before any code is spent.
         if (Test-Path -LiteralPath $script:TokenFile) {
@@ -1288,7 +1163,7 @@ function Invoke-ClientOnlyPreflight {
             $tokenValue = $null
             Step "That is a pairing code: the token file $($script:TokenFile) is created by pairing, once the shim is installed."
         } else {
-            $tokenReport = "$tokenValue" | & $tokenPython $helper write-token-file --path $script:TokenFile
+            $tokenReport = "$tokenValue" | Invoke-NativeHelper credentials write-token-file --path $script:TokenFile
             $tokenValue = $null
             if ("$(Get-HelperStatus $tokenReport)" -ne "written") {
                 $problem = try { [string](($tokenReport -join "`n") | ConvertFrom-Json).recovery } catch { "no result" }
@@ -1537,8 +1412,7 @@ function Get-EnvValue($name) {
     return $null
 }
 if (-not $ClientOnly) {
-    $volumePython = Get-InstallerPython
-    $resolvedVolumes = @(& $volumePython (Join-Path $repo "ops/preflight.py") --env-file $envFile --volume-names)
+    $resolvedVolumes = @(Invoke-NativeHelper volume-names --repo $repo --env-file $envFile)
     if ($LASTEXITCODE -ne 0 -or $resolvedVolumes.Count -ne 2) { throw "Could not resolve Docker volumes; check ops/.env with ops/preflight.ps1 and rerun." }
     $bankVol, $stateVol = $resolvedVolumes
     $existingVolumes = @(docker volume ls --format '{{.Name}}')
@@ -1549,27 +1423,14 @@ if (-not $ClientOnly) {
 # <<< volumes <<<
 
 # -- 4b. daemon engine -----------------------------------------------------------
-# >>> shim tooling >>>
-# Whether stage 11 can be expected to install the shim: pipx, or a Python
-# >= 3.10 with pip outside a PEP 668 externally managed environment (where
-# `pip install --user` refuses). The helper needs that Python either way.
-function Test-ShimToolingReady($python) {
-    if (-not $python) { return $false }
-    if (Get-Command pipx -ErrorAction SilentlyContinue) { return $true }
-    try {
-        & $python -c "import os, sys, sysconfig, pip; marker = os.path.join(sysconfig.get_path('stdlib'), 'EXTERNALLY-MANAGED'); sys.exit(1 if sys.prefix == sys.base_prefix and os.path.exists(marker) else 0)" 2>$null | Out-Null
-        return ($LASTEXITCODE -eq 0)
-    } catch { return $false }
-}
-# <<< shim tooling <<<
 # >>> daemon engine >>>
-# The bearer stage 5b will have: one already set, or one it can mint
-# (which needs the shim's tooling). Rust is verified with an authenticated read.
+# The bearer stage 5b will have: one already set, or one it mints for the
+# shim transport. Rust is verified with an authenticated read.
 function Test-RustTokenExpected {
     if (-not $rustBearer) { return $false }
     if ($env:PSEUDOLIFE_MCP_TOKEN -or $env:PSEUDOLIFE_MCP_TOKENS -or
             (Get-EnvValue "PSEUDOLIFE_MCP_TOKEN") -or (Get-EnvValue "PSEUDOLIFE_MCP_TOKENS")) { return $true }
-    return ($Transport -eq 'shim' -and (Test-ShimToolingReady (Get-InstallerPython)))
+    return ($Transport -eq 'shim')
 }
 # The engine already installed is kept; a new install takes -Engine (default
 # rust since G2, python without a bearer or an available Rust image). Naming the other engine on an existing bank switches it after the
@@ -1577,7 +1438,7 @@ function Test-RustTokenExpected {
 # Rust pulls the release's image and provisions its models into their own
 # volume here, before any container starts, so a refusal starts nothing.
 function Invoke-EngineHelper {
-    & (Get-InstallerPython) (Join-Path $repo "ops/installer_engine.py") @args
+    Invoke-NativeHelper engine @args
 }
 $installedEngine = ""
 $composeEngine = ""
@@ -1758,10 +1619,8 @@ if ($ClientOnly) {
     $tokenState = "opted-out"
 } elseif ($Transport -ne "shim") {
     $tokenState = "http"
-} elseif (-not (Test-ShimToolingReady ($tokenPython = Get-InstallerPython))) {
-    $tokenState = "no-shim"
 } else {
-    $mintOutput = & $tokenPython (Join-Path $repo "ops/client_credentials.py") mint --env-file $envFile
+    $mintOutput = Invoke-NativeHelper credentials mint --env-file $envFile
     switch ("$(Get-HelperStatus $mintOutput)") {
         "minted" {
             $tokenState = "minted"
@@ -1778,14 +1637,14 @@ if ($ClientOnly) {
 # >>> engine token >>>
 # The default Rust daemon is verified with an authenticated read, so it
 # follows the bearer this stage actually produced, not the one stage 4b
-# predicted (a host that cannot install the shim mints none).
+# predicted (a mint can still fail).
 if ($composeEngine -eq 'rust' -and $tokenState -notin 'minted', 'present') {
     if ($engineDefaulted) {
         $composeEngine = 'python'
         $engineFiles = @()
         Step "Daemon engine: python after all (no bearer token for the default Rust daemon: $tokenState)"
     } else {
-        [Console]::Error.WriteLine("The Rust daemon needs its bearer token, and this install has none ($tokenState): set PSEUDOLIFE_MCP_TOKEN in ops/.env, or install pipx or a pip-capable Python >= 3.10 so the installer mints one, then rerun; or rerun with -Engine python. The daemon was not started; the Rust image and models stay downloaded for the rerun.")
+        [Console]::Error.WriteLine("The Rust daemon needs its bearer token, and this install has none ($tokenState): set PSEUDOLIFE_MCP_TOKEN in ops/.env, or rerun without -NoToken and -Transport http so the installer mints one; or rerun with -Engine python. The daemon was not started; the Rust image and models stay downloaded for the rerun.")
         exit 2
     }
 }
@@ -1809,7 +1668,7 @@ if ($ClientOnly) {
             "  pseudolife-extractor:"
             "    profiles: [`"disabled`"]"
         ) -join "`n")
-        $overrideStatus = $wantedOverride | & (Get-InstallerPython) (Join-Path $repo "ops/installer_state.py") write-file --path $overrideFile
+        $overrideStatus = $wantedOverride | Invoke-NativeHelper state write-file --path $overrideFile
         if ($LASTEXITCODE -ne 0) { throw "Could not write this install's override; fix the line above and rerun." }
         if ($overrideStatus -eq 'unchanged') { Step "Sidecar override unchanged (disabled)." }
         else { Step "Sidecar disabled via ops/docker-compose.override.yml" }
@@ -1906,23 +1765,13 @@ function Move-ClaudeMarketplaceToHttps {
     # Up to 0.16.1 the marketplace was added by the owner/repo shorthand,
     # which Claude Code records as a github source and refreshes over SSH:
     # on a host with no GitHub SSH key the plugin stops updating (2026-10-04).
-    # ops/plugin_marketplace.py moves it to the HTTPS URL through Claude
-    # Code's own CLI (settings.json backed up and edited first), prints one
-    # line, and prints nothing when no marketplace is recorded.
-    $python = Get-InstallerPython
-    if (-not $python) {
-        $configDir = if ($env:CLAUDE_CONFIG_DIR) { $env:CLAUDE_CONFIG_DIR } else { Join-Path $env:USERPROFILE ".claude" }
-        try {
-            $known = Get-Content (Join-Path $configDir "plugins\known_marketplaces.json") -Raw -ErrorAction Stop | ConvertFrom-Json
-            if ($known.$claudePluginMarketplace.source.source -eq "github") {
-                Write-Warning "the $claudePluginMarketplace plugin marketplace is recorded as a github source, which updates over SSH, and there is no Python 3.10+ here to move it to HTTPS; the README's Updating section has the steps"
-            }
-        } catch {}
-        return
-    }
-    $out = [string](& $python (Join-Path $repo "ops\plugin_marketplace.py") | Out-String).Trim()
+    # The native client's plugin-marketplace step moves it to the HTTPS URL
+    # through Claude Code's own CLI (settings.json backed up and edited
+    # first), prints one line, and prints nothing when no marketplace is
+    # recorded.
+    $out = [string](Invoke-NativeHelper plugin-marketplace | Out-String).Trim()
     if ($LASTEXITCODE -ne 0) {
-        Write-Warning $(if ($out) { $out } else { "ops/plugin_marketplace.py failed" })
+        Write-Warning $(if ($out) { $out } else { "the plugin marketplace could not be moved to HTTPS" })
     } elseif ($out) {
         Step $out
     }
@@ -2363,124 +2212,108 @@ foreach ($selectedClient in $clients) {
     if ($selectedClient -eq "codex") {
         $codexSetup = [pscustomobject]@{
             source = "skip"; status = "unavailable"; instructions = "skipped"
-            recovery = "Install Python 3.10 or newer, then rerun this installer to finish Codex memory setup."
+            recovery = $null
         }
-        # Probe real interpreters; Windows Store aliases and old Python versions
-        # must not prevent trying the next candidate. Do not alter the user's PATH.
-        $codexPython = $null
-        foreach ($candidate in @("python", "python3", "py")) {
-            if (-not (Get-Command $candidate -ErrorAction SilentlyContinue)) { continue }
-            # Assigned, as in Get-InstallerPython: an if-expression would splat "- 3".
-            $probeArgs = @()
-            if ($candidate -eq "py") { $probeArgs = @("-3") }
-            try {
-                $probe = & $candidate @probeArgs -c 'import sys; sys.exit(1) if sys.version_info < (3, 10) else print(sys.executable)' 2>$null
-                if (($LASTEXITCODE -eq 0) -and $probe) { $codexPython = "$probe".Trim(); break }
-            } catch { continue }
+        $savedCredentialToken = [Environment]::GetEnvironmentVariable(
+            "PSEUDOLIFE_MCP_TOKEN", "Process")
+        $savedCredentialFile = [Environment]::GetEnvironmentVariable(
+            "PSEUDOLIFE_MCP_TOKEN_FILE", "Process")
+        $savedCredentialUrl = [Environment]::GetEnvironmentVariable(
+            "PSEUDOLIFE_MCP_DAEMON_URL", "Process")
+        # A client-only install: the remote daemon's token, from the
+        # operator's file on stdin, and its URL.
+        $installerToken = if ($ClientOnly) {
+            (Get-Content -LiteralPath $TokenFile -Raw).Trim()
+        } else { Get-EnvValue "PSEUDOLIFE_MCP_TOKEN" }
+        $installerUrl = if ($DaemonUrl) { $DaemonUrl } else { Get-EnvValue "PSEUDOLIFE_MCP_DAEMON_URL" }
+        if (-not $installerUrl) { $installerUrl = "http://127.0.0.1:8765" }
+        try {
+            $credentialArgs = @("codex-credentials")
+            if ($installerToken) {
+                $credentialArgs += "--installer-token-stdin"
+            }
+            $credentialArgs += @("--installer-daemon-url", $installerUrl)
+            $credentialOutput = if ($installerToken) {
+                $installerToken | Invoke-NativeHelper @credentialArgs
+            } else {
+                Invoke-NativeHelper @credentialArgs
+            }
+            $credentialExit = $LASTEXITCODE
+            $credentialResult = ($credentialOutput -join "`n") | ConvertFrom-Json
+            if (($credentialExit -eq 0) -and
+                ($credentialResult.status -in "ready", "tokenless") -and
+                ($credentialResult.credential_file_configured -in $true, $false) -and
+                ($credentialResult.connection_configured -in $true, $false) -and
+                (-not $credentialResult.connection_configured -or
+                 $credentialResult.daemon_url -is [string]) -and
+                (-not $credentialResult.credential_file_configured -or
+                 $credentialResult.credential_file_path -is [string])) {
+                $codexConnectionConfigured = [bool]$credentialResult.connection_configured
+                if ($codexConnectionConfigured) {
+                    $codexCredentialUrl = [string]$credentialResult.daemon_url
+                    $env:PSEUDOLIFE_MCP_DAEMON_URL = $codexCredentialUrl
+                    $env:PSEUDOLIFE_MCP_TOKEN = $null
+                    $env:PSEUDOLIFE_MCP_TOKEN_FILE = $null
+                }
+                if ($credentialResult.credential_file_configured) {
+                    $codexCredentialFile = [string]$credentialResult.credential_file_path
+                    $env:PSEUDOLIFE_MCP_TOKEN_FILE = $codexCredentialFile
+                    Step "Codex credential file ready; future rotations are picked up by new requests."
+                }
+            } else {
+                throw "Invalid credential setup result"
+            }
+        } catch {
+            $codexCredentialBootstrapFailed = $true
+            $codexSetup.recovery = "Codex credential setup failed. Repair the configured token file or Codex configuration, then rerun the installer."
         }
-        if ($codexPython) {
-            $savedCredentialToken = [Environment]::GetEnvironmentVariable(
-                "PSEUDOLIFE_MCP_TOKEN", "Process")
-            $savedCredentialFile = [Environment]::GetEnvironmentVariable(
-                "PSEUDOLIFE_MCP_TOKEN_FILE", "Process")
-            $savedCredentialUrl = [Environment]::GetEnvironmentVariable(
-                "PSEUDOLIFE_MCP_DAEMON_URL", "Process")
-            # A client-only install: the remote daemon's token, from the
-            # operator's file on stdin, and its URL.
-            $installerToken = if ($ClientOnly) {
-                (Get-Content -LiteralPath $TokenFile -Raw).Trim()
-            } else { Get-EnvValue "PSEUDOLIFE_MCP_TOKEN" }
-            $installerUrl = if ($DaemonUrl) { $DaemonUrl } else { Get-EnvValue "PSEUDOLIFE_MCP_DAEMON_URL" }
-            if (-not $installerUrl) { $installerUrl = "http://127.0.0.1:8765" }
+        # pseudolife-mcp connect (the client-only connect block)
+        # re-pointed an existing registration already; one still naming
+        # another daemon is one it could not write, or connect did not
+        # run (a shim from before it).
+        if ($ClientOnly -and -not $codexCredentialBootstrapFailed -and
+            ("$codexCredentialUrl".TrimEnd("/") -ne $DaemonUrl)) {
+            $codexCredentialBootstrapFailed = $true
+            $codexSetup.recovery = if ($script:connectChecked) {
+                "The existing Codex registration names the daemon at $(if ($codexCredentialUrl) { $codexCredentialUrl } else { '(none)' }), not the daemon at $DaemonUrl, and pseudolife-mcp connect did not re-point it (see its lines above for why). Set PSEUDOLIFE_MCP_DAEMON_URL=$DaemonUrl where that Codex configuration sets it, or run pseudolife-mcp connect $DaemonUrl --client codex --token-file $TokenFile, then re-run."
+            } else {
+                "The existing Codex registration names the daemon at $(if ($codexCredentialUrl) { $codexCredentialUrl } else { '(none)' }), not the daemon at $DaemonUrl. Edit it in place in the Codex config.toml: set PSEUDOLIFE_MCP_DAEMON_URL=$DaemonUrl in [mcp_servers.pseudolife-memory.env], then re-run."
+            }
+            [Environment]::SetEnvironmentVariable("PSEUDOLIFE_MCP_TOKEN", $savedCredentialToken, "Process")
+            [Environment]::SetEnvironmentVariable("PSEUDOLIFE_MCP_TOKEN_FILE", $savedCredentialFile, "Process")
+            [Environment]::SetEnvironmentVariable("PSEUDOLIFE_MCP_DAEMON_URL", $savedCredentialUrl, "Process")
+        }
+        if (-not $codexCredentialBootstrapFailed) {
+            $setupArgs = @("codex-hooks", "--checkout", $repo, "--source", $CodexHooks,
+                "--trust", $CodexHookTrust, "--instructions", $instructionChoice)
+            if (-not $interactive -or $script:installerRerun) { $setupArgs += "--non-interactive" }
+            $setupLaunchFailed = $false
             try {
-                $credentialArgs = @((Join-Path $repo "ops/setup-codex-coordination.py"),
-                    "--credentials")
-                if ($installerToken) {
-                    $credentialArgs += "--installer-token-stdin"
-                }
-                $credentialArgs += @("--installer-daemon-url", $installerUrl)
-                $credentialOutput = if ($installerToken) {
-                    $installerToken | & $codexPython @credentialArgs
-                } else {
-                    & $codexPython @credentialArgs
-                }
-                $credentialExit = $LASTEXITCODE
-                $credentialResult = ($credentialOutput -join "`n") | ConvertFrom-Json
-                if (($credentialExit -eq 0) -and
-                    ($credentialResult.status -in "ready", "tokenless") -and
-                    ($credentialResult.credential_file_configured -in $true, $false) -and
-                    ($credentialResult.connection_configured -in $true, $false) -and
-                    (-not $credentialResult.connection_configured -or
-                     $credentialResult.daemon_url -is [string]) -and
-                    (-not $credentialResult.credential_file_configured -or
-                     $credentialResult.credential_file_path -is [string])) {
-                    $codexConnectionConfigured = [bool]$credentialResult.connection_configured
-                    if ($codexConnectionConfigured) {
-                        $codexCredentialUrl = [string]$credentialResult.daemon_url
-                        $env:PSEUDOLIFE_MCP_DAEMON_URL = $codexCredentialUrl
-                        $env:PSEUDOLIFE_MCP_TOKEN = $null
-                        $env:PSEUDOLIFE_MCP_TOKEN_FILE = $null
-                    }
-                    if ($credentialResult.credential_file_configured) {
-                        $codexCredentialFile = [string]$credentialResult.credential_file_path
-                        $env:PSEUDOLIFE_MCP_TOKEN_FILE = $codexCredentialFile
-                        Step "Codex credential file ready; future rotations are picked up by new requests."
-                    }
-                } else {
-                    throw "Invalid credential setup result"
-                }
+                $setupOutput = Invoke-NativeHelper @setupArgs
+                $setupExit = $LASTEXITCODE
             } catch {
-                $codexCredentialBootstrapFailed = $true
-                $codexSetup.recovery = "Codex credential setup failed. Repair the configured token file or Codex configuration, then rerun the installer."
+                $setupLaunchFailed = $true
+            } finally {
+                [Environment]::SetEnvironmentVariable(
+                    "PSEUDOLIFE_MCP_TOKEN", $savedCredentialToken, "Process")
+                [Environment]::SetEnvironmentVariable(
+                    "PSEUDOLIFE_MCP_TOKEN_FILE", $savedCredentialFile, "Process")
+                [Environment]::SetEnvironmentVariable(
+                    "PSEUDOLIFE_MCP_DAEMON_URL", $savedCredentialUrl, "Process")
             }
-            # pseudolife-mcp connect (the client-only connect block)
-            # re-pointed an existing registration already; one still naming
-            # another daemon is one it could not write, or connect did not
-            # run (a shim from before it).
-            if ($ClientOnly -and -not $codexCredentialBootstrapFailed -and
-                ("$codexCredentialUrl".TrimEnd("/") -ne $DaemonUrl)) {
-                $codexCredentialBootstrapFailed = $true
-                $codexSetup.recovery = if ($script:connectChecked) {
-                    "The existing Codex registration names the daemon at $(if ($codexCredentialUrl) { $codexCredentialUrl } else { '(none)' }), not the daemon at $DaemonUrl, and pseudolife-mcp connect did not re-point it (see its lines above for why). Set PSEUDOLIFE_MCP_DAEMON_URL=$DaemonUrl where that Codex configuration sets it, or run pseudolife-mcp connect $DaemonUrl --client codex --token-file $TokenFile, then re-run."
-                } else {
-                    "The existing Codex registration names the daemon at $(if ($codexCredentialUrl) { $codexCredentialUrl } else { '(none)' }), not the daemon at $DaemonUrl. Edit it in place in the Codex config.toml: set PSEUDOLIFE_MCP_DAEMON_URL=$DaemonUrl in [mcp_servers.pseudolife-memory.env], then re-run."
+            try {
+                if ($setupLaunchFailed) { throw "Codex setup launch failed" }
+                $result = ($setupOutput -join "`n") | ConvertFrom-Json
+                if (($setupExit -notin 0, 1) -or
+                    ($result.status -notin "ready", "pending", "unavailable", "skipped") -or
+                    ($result.source -notin "manual", "plugin", "skip") -or
+                    ($result.instructions -notin "present", "appended", "skipped", "covered-by-hooks")) {
+                    throw "Invalid Codex setup result"
                 }
-                [Environment]::SetEnvironmentVariable("PSEUDOLIFE_MCP_TOKEN", $savedCredentialToken, "Process")
-                [Environment]::SetEnvironmentVariable("PSEUDOLIFE_MCP_TOKEN_FILE", $savedCredentialFile, "Process")
-                [Environment]::SetEnvironmentVariable("PSEUDOLIFE_MCP_DAEMON_URL", $savedCredentialUrl, "Process")
-            }
-            if (-not $codexCredentialBootstrapFailed) {
-                $setupArgs = @((Join-Path $repo "ops/setup-codex-hooks.py"), "--source", $CodexHooks,
-                    "--trust", $CodexHookTrust, "--instructions", $instructionChoice)
-                if (-not $interactive -or $script:installerRerun) { $setupArgs += "--non-interactive" }
-                $setupLaunchFailed = $false
-                try {
-                    $setupOutput = & $codexPython @setupArgs
-                    $setupExit = $LASTEXITCODE
-                } catch {
-                    $setupLaunchFailed = $true
-                } finally {
-                    [Environment]::SetEnvironmentVariable(
-                        "PSEUDOLIFE_MCP_TOKEN", $savedCredentialToken, "Process")
-                    [Environment]::SetEnvironmentVariable(
-                        "PSEUDOLIFE_MCP_TOKEN_FILE", $savedCredentialFile, "Process")
-                    [Environment]::SetEnvironmentVariable(
-                        "PSEUDOLIFE_MCP_DAEMON_URL", $savedCredentialUrl, "Process")
-                }
-                try {
-                    if ($setupLaunchFailed) { throw "Codex setup launch failed" }
-                    $result = ($setupOutput -join "`n") | ConvertFrom-Json
-                    if (($setupExit -notin 0, 1) -or
-                        ($result.status -notin "ready", "pending", "unavailable", "skipped") -or
-                        ($result.source -notin "manual", "plugin", "skip") -or
-                        ($result.instructions -notin "present", "appended", "skipped", "covered-by-hooks")) {
-                        throw "Invalid Codex setup result"
-                    }
-                    $codexSetup = $result
-                    $codexSetupValid = $true
-                } catch {
-                    $codexSetup.recovery = "Codex setup did not return a valid result. Run python ops/setup-codex-hooks.py to retry."
-                }
+                $codexSetup = $result
+                $codexSetupValid = $true
+            } catch {
+                $codexSetup.recovery = "Codex setup did not return a valid result. Rerun this installer to retry."
             }
         }
         $hookState["codex"] = $codexSetup.status
@@ -2699,15 +2532,8 @@ function Register-Result($provider, $okState, $okMessage) {
     }
 }
 function Set-CodexRuntimeDefaults {
-    if (-not $codexPython) {
-        $mcpState["codex"] = "failed"
-        $script:codexRuntimeDefaults = "failed"
-        $script:codexRuntimeRecovery = "Install Python 3.10 or newer, then run python ops/setup-codex-coordination.py --runtime-defaults."
-        Write-Warning "Codex was registered, but its runtime defaults could not be configured because Python 3.10 or newer was not found."
-        return
-    }
     try {
-        $runtimeOutput = & $codexPython (Join-Path $repo "ops/setup-codex-coordination.py") --runtime-defaults
+        $runtimeOutput = Invoke-NativeHelper codex-runtime-defaults
         $runtimeExit = $LASTEXITCODE
         $runtimeResult = ($runtimeOutput -join "`n") | ConvertFrom-Json
         if (($runtimeExit -ne 0) -or ($runtimeResult.status -ne "ready") -or
@@ -2719,7 +2545,7 @@ function Set-CodexRuntimeDefaults {
     } catch {
         $mcpState["codex"] = "failed"
         $script:codexRuntimeDefaults = "failed"
-        $script:codexRuntimeRecovery = "Run python ops/setup-codex-coordination.py --runtime-defaults, then retry the Codex task."
+        $script:codexRuntimeRecovery = "Rerun this installer with -Client codex, then retry the Codex task."
         Write-Warning "Codex was registered, but its runtime defaults were not confirmed. $script:codexRuntimeRecovery"
     }
 }
@@ -2739,15 +2565,13 @@ $claudeJson = Join-Path $claudeConfigHome ".claude.json"
 function Get-ClientTokenFile([string]$principal) {
     # The token file it wrote or kept, or $null.
     if ($Transport -ne "shim") { return $null }
-    $clientPython = Get-InstallerPython
-    if (-not $clientPython) { return $null }
     $target = Join-Path $env:USERPROFILE ".pseudolife-mcp\$principal.token"
     # The values ride process-scoped env vars the helper reads by NAME -
     # never a command-line argument, never printed.
     $env:PSEUDOLIFE_INSTALLER_TOKEN = Get-DesktopTokenSource
     $env:PSEUDOLIFE_INSTALLER_TOKENS = Get-DesktopTokensSource
     try {
-        $clientOutput = & $clientPython (Join-Path $repo "ops/client_credentials.py") token-file --principal $principal --path $target
+        $clientOutput = Invoke-NativeHelper credentials token-file --principal $principal --path $target
     } finally {
         $env:PSEUDOLIFE_INSTALLER_TOKEN = $null
         $env:PSEUDOLIFE_INSTALLER_TOKENS = $null
@@ -2768,13 +2592,13 @@ $geminiTokenFile = if ($clients -notcontains "gemini") { $null } elseif ($Client
 # the file and the URL there as much as the plugin's hooks do.
 if ((($hookState["claude"] -eq "plugin") -or $ClientOnly) -and $claudeTokenFile) {
     $claudeSettingsHome = if ($env:CLAUDE_CONFIG_DIR) { $env:CLAUDE_CONFIG_DIR } else { Join-Path $env:USERPROFILE ".claude" }
-    $settingsArgs = @((Join-Path $repo "ops/client_credentials.py"), "claude-settings-env",
+    $settingsArgs = @("credentials", "claude-settings-env",
         "--settings", (Join-Path $claudeSettingsHome "settings.json"),
         "--token-file", $claudeTokenFile, "--daemon-url", $clientDaemonUrl)
     # A client-only install's hooks must reach the remote daemon with the
     # operator's file, whatever an earlier local install left there.
     if ($ClientOnly) { $settingsArgs += "--replace" }
-    $settingsOutput = & (Get-InstallerPython) @settingsArgs
+    $settingsOutput = Invoke-NativeHelper @settingsArgs
     $settingsReport = try { ($settingsOutput -join "`n") | ConvertFrom-Json } catch { $null }
     switch ("$($settingsReport.status)") {
         "updated" {
@@ -2793,7 +2617,7 @@ if ((($hookState["claude"] -eq "plugin") -or $ClientOnly) -and $claudeTokenFile)
 foreach ($selectedClient in $clients) {
     if ($selectedClient -eq "claude-desktop") {
         # No `mcp add` CLI: the entry is merged into claude_desktop_config.json
-        # by ops/register_claude_desktop.py (absolute shim path - Desktop's
+        # by the native client's installer step (absolute shim path - Desktop's
         # sanitized PATH omits pipx/venv bin dirs; token FILE when gated). It is
         # named pseudolife-desktop so Code-tab sessions keep their own
         # per-session pseudolife-memory server.
@@ -2801,14 +2625,8 @@ foreach ($selectedClient in $clients) {
             Write-Warning "Claude Desktop needs the stdio shim (its connector dialog rejects plain-http URLs) - ignoring -Transport http for it."
         }
         $shimReady = Install-ShimOnce
-        $desktopPython = Get-InstallerPython
         if ((-not $shimReady) -or (-not $script:shimInstallPath)) {
-            Write-Warning "pseudolife-mcp shim installation did not yield a usable executable - Claude Desktop not wired. Re-run once the native client installs, or register by hand: python ops\register_claude_desktop.py --command <full path to pseudolife-mcp.exe>"
-            $mcpState["claude-desktop"] = "failed"
-            continue
-        }
-        if (-not $desktopPython) {
-            Write-Warning "No python >= 3.10 found to write claude_desktop_config.json - Claude Desktop not wired."
+            Write-Warning "pseudolife-mcp shim installation did not yield a usable executable - Claude Desktop not wired. Re-run once the native client installs."
             $mcpState["claude-desktop"] = "failed"
             continue
         }
@@ -2835,7 +2653,7 @@ foreach ($selectedClient in $clients) {
                 Write-Warning "The daemon is token-gated but no token source is set (environment or ops\.env) - the registrar can only reuse a credential already in the Desktop entry. If registration fails, configure a singular token or exactly one claude-desktop principal in PSEUDOLIFE_MCP_TOKENS."
             }
         }
-        & $desktopPython (Join-Path $repo "ops\register_claude_desktop.py") @desktopArgs 2>&1 | Out-Host
+        Invoke-NativeHelper claude-desktop @desktopArgs 2>&1 | Out-Host
         $env:PSEUDOLIFE_DESKTOP_TOKEN_SOURCE = $null
         $env:PSEUDOLIFE_DESKTOP_TOKENS_SOURCE = $null
         Register-Result "claude-desktop" "shim-env" "Wired into Claude Desktop as pseudolife-desktop via the pseudolife-mcp shim (claude_desktop_config.json) - fully quit and relaunch Desktop to load it."
@@ -2865,7 +2683,7 @@ foreach ($selectedClient in $clients) {
         if ($ClientOnly -and -not $codexCredentialFile) {
             # Without it Codex would reach whatever daemon its defaults name.
             $mcpState["codex"] = "failed"
-            Write-Warning "Codex was not registered: a client-only install points it at $clientDaemonUrl through the Codex credential setup, which did not run (it needs Python 3.10 or newer; see above). Fix that, then re-run."
+            Write-Warning "Codex was not registered: a client-only install points it at $clientDaemonUrl through the Codex credential setup, which did not finish (see above). Fix that, then re-run."
             continue
         }
         $existingCodex = codex mcp get pseudolife-memory 2>$null | Out-String
@@ -3208,7 +3026,7 @@ foreach ($selectedClient in $clients) {
             # manual fix.
             $claudeCredentialOk = $false
             if (($mcpState["claude"] -in "present-upgraded", "present-migrated", "present-current") -and $claudeTokenFile) {
-                $claudeEnvOutput = & (Get-InstallerPython) (Join-Path $repo "ops/client_credentials.py") registration-env --config $claudeJson --set "PSEUDOLIFE_MCP_TOKEN_FILE=$claudeTokenFile" --set "PSEUDOLIFE_MCP_DAEMON_URL=$clientDaemonUrl" --set "PSEUDOLIFE_AGENT_STATE_DIR=$claudeAgentStateDir"
+                $claudeEnvOutput = Invoke-NativeHelper credentials registration-env --config $claudeJson --set "PSEUDOLIFE_MCP_TOKEN_FILE=$claudeTokenFile" --set "PSEUDOLIFE_MCP_DAEMON_URL=$clientDaemonUrl" --set "PSEUDOLIFE_AGENT_STATE_DIR=$claudeAgentStateDir"
                 switch ("$(Get-HelperStatus $claudeEnvOutput)") {
                     "updated" {
                         $claudeCredentialOk = $true
@@ -3593,29 +3411,23 @@ if ($script:shimPathNotes.Count -gt 0) {
 $boardHint = switch ($tokenState) {
     "opted-out" { " (installed with -NoToken; re-run without it to turn the board on)" }
     "http" { " (-Transport http registrations cannot carry a token file)" }
-    "no-shim" { " (no pipx or pip-capable Python >= 3.10 to install the shim, so no token was minted; install one and re-run)" }
     default { "" }
 }
 $boardFile = @($claudeTokenFile, $geminiTokenFile, $codexCredentialFile, $TokenFile) | Where-Object { $_ } | Select-Object -First 1
-$boardPython = Get-InstallerPython
-if (-not $boardPython) {
-    $boardLine = "unknown - no Python >= 3.10 to ask the daemon"
+$boardArgs = @("credentials", "board", "--daemon-url", $clientDaemonUrl)
+if ($boardFile) {
+    $boardArgs += @("--token-file", $boardFile)
 } else {
-    $boardArgs = @((Join-Path $repo "ops/client_credentials.py"), "board", "--daemon-url", $clientDaemonUrl)
-    if ($boardFile) {
-        $boardArgs += @("--token-file", $boardFile)
-    } else {
-        # The singular token rides a process-scoped env var, never an argument.
-        $env:PSEUDOLIFE_INSTALLER_TOKEN = Get-DesktopTokenSource
-    }
-    try {
-        $boardLine = (& $boardPython @boardArgs) -join " "
-        if (($LASTEXITCODE -ne 0) -or -not $boardLine) { $boardLine = "unknown" }
-    } catch {
-        $boardLine = "unknown"
-    } finally {
-        $env:PSEUDOLIFE_INSTALLER_TOKEN = $null
-    }
+    # The singular token rides a process-scoped env var, never an argument.
+    $env:PSEUDOLIFE_INSTALLER_TOKEN = Get-DesktopTokenSource
+}
+try {
+    $boardLine = (Invoke-NativeHelper @boardArgs) -join " "
+    if (($LASTEXITCODE -ne 0) -or -not $boardLine) { $boardLine = "unknown" }
+} catch {
+    $boardLine = "unknown"
+} finally {
+    $env:PSEUDOLIFE_INSTALLER_TOKEN = $null
 }
 if ($boardLine.StartsWith("on")) {
     Write-Host "  [x] Agent board          $boardLine"
