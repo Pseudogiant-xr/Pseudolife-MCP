@@ -208,6 +208,14 @@ def test_skipped_replay_uses_job_verdict_for_tolerated_setup_failure(integrate, 
     assert integrate._snapshot_state(SHA, rollup, True)[0] == state
 
 
+def _copy_row_declarations(root):
+    """The rows' rust/cli_harness/rows/<row>.json, which the selector reads."""
+    rows = root / "rust/cli_harness/rows"
+    rows.mkdir(parents=True, exist_ok=True)
+    for path in (ROOT / "rust/cli_harness/rows").glob("*.json"):
+        (rows / path.name).write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
+
+
 @pytest.mark.parametrize("files,required", [
     (["docs/guide.md"], False), (["tests/test_feature.py"], False),
     (["docs/guide.md", "tests/test_feature.py", "changelog.d/note.md"], False),
@@ -228,6 +236,7 @@ def test_requirement_uses_frozen_selector_without_importing_member_code(
     (tmp_path / "rust/ci/pr_precheck.py").write_text(
         f"from pathlib import Path\nPath({str(marker)!r}).touch()\nraise RuntimeError('member code')\n")
     (tmp_path / "rust/probe.py").write_text("from tests import test_runtime_seed\n")
+    _copy_row_declarations(tmp_path)
 
     def out(*args):
         if args[0] == "ls-tree":
@@ -432,6 +441,7 @@ def test_already_landed_runtime_edit_does_not_stall_no_row_merge(
     git("config", "commit.gpgsign", "false")
     for path in ("rust/ci/pr_precheck.py", "rust/ci/parity_scope.py"):
         write(path, (ROOT / path).read_text(encoding="utf-8"))
+    _copy_row_declarations(tmp_path)
     write("pseudolife_memory/doctor_cli.py", "old\n")
     write(remainder, "old\n")
     def budget(version):
