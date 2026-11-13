@@ -13,11 +13,17 @@ import os
 from pathlib import Path, PurePosixPath
 import subprocess
 
-import row_ci
+from parity_scope import row_declarations
 
 ROOT = Path(__file__).resolve().parents[2]
-# Each row declares its Python oracle roots in rust/cli_harness/rows/<row>.json.
-PYTHON_ROOTS = row_ci.python_roots(ROOT)
+# Each row declares its Python oracle roots in rust/cli_harness/rows/<row>.json
+# (read through parity_scope: ops/integrate.py runs this file frozen, with
+# only parity_scope importable).
+PYTHON_ROOTS = {row: tuple(data["python_roots"]) for row, data in row_declarations().items()}
+if not PYTHON_ROOTS:
+    # Selecting nothing would skip every row; refuse instead (the scope job
+    # fails, and ops/integrate.py reports the selector failed).
+    raise RuntimeError("no rust/cli_harness/rows/<row>.json declarations found")
 ROWS = tuple(PYTHON_ROOTS)
 JUDGE_ROOTS = {
     "lease-headers": ("lease_cli", "os_lock", "daemon_exec"),
@@ -28,7 +34,7 @@ JUDGE_ROOTS = {
 JUDGES = ("wait-mail-tests", "lease-headers", "cli-argv", "phase1-judges", "phase2-dispatch", "cli-process")
 # These rows need database seeders or the packaged PostgreSQL fixture (each
 # row's "postgres" declaration).
-POSTGRES_ROWS = row_ci.postgres_rows(ROOT)
+POSTGRES_ROWS = tuple(row for row, data in row_declarations().items() if data["postgres"])
 
 
 def import_graph(sources: dict[str, str]) -> dict[str, set[str]]:

@@ -187,13 +187,27 @@ DAEMON = ("cli", "cli-store", "cli-startup", "cli-live", "eval", "h5-w1a", "h5-b
 # console's, which reads doctor's registration search, name update), and
 # console and conductor_watch read move's argv and stream helpers.
 @functools.lru_cache(maxsize=None)
-def shim_commands() -> dict[str, tuple[str, ...]]:
-    """Each mapped rust/shim/src/cli entry, with the rows it reaches.
+def row_declarations() -> dict[str, dict]:
+    """Each row's rust/cli_harness/rows/<row>.json, by row, in name order.
 
-    Read when first needed, not at import: ops/integrate.py loads this file
-    as data from a temporary directory to resolve the matrix."""
-    from row_ci import shim_users
-    return shim_users()
+    Read as data, here and not through row_ci.py (which validates them for
+    the inventory and tests): ops/integrate.py runs this file and
+    pr_precheck.py from its frozen base with only this module importable,
+    and loads this file from a temporary directory to resolve the matrix,
+    so nothing here imports another rust/ci module, and nothing reads the
+    rows at import."""
+    return {path.stem: json.loads(path.read_text(encoding="utf-8"))
+            for path in sorted((ROOT / "rust/cli_harness/rows").glob("*.json"))}
+
+
+@functools.lru_cache(maxsize=None)
+def shim_commands() -> dict[str, tuple[str, ...]]:
+    """Each mapped rust/shim/src/cli entry, with the rows it reaches."""
+    found: dict[str, list[str]] = {}
+    for row, data in row_declarations().items():
+        for entry in data["shim"]:
+            found.setdefault(entry, []).append(row)
+    return {entry: tuple(found[entry]) for entry in sorted(found)}
 # The scope step's documentation-only rule, which Python's re cannot take
 # verbatim (its lookbehind is variable-width); tests check both agree.
 CODE_DIRS = re.compile(r"(?i)(rust|evals|pseudolife_memory|plugin|ops|tests|\.github)/")

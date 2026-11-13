@@ -114,3 +114,14 @@ def test_every_python_root_is_an_oracle_module():
     for row, roots in row_ci.python_roots().items():
         for name in roots:
             assert (ROOT / "pseudolife_memory" / f"{name}.py").is_file(), (row, name)
+
+
+def test_the_scope_and_precheck_readers_agree_with_the_validated_declarations():
+    # parity_scope and pr_precheck read the files themselves, since
+    # ops/integrate.py runs them frozen with no other rust/ci module.
+    import parity_scope
+    import pr_precheck
+    assert parity_scope.row_declarations() == row_ci.declarations()
+    assert parity_scope.shim_commands() == row_ci.shim_users()
+    assert pr_precheck.PYTHON_ROOTS == row_ci.python_roots()
+    assert pr_precheck.POSTGRES_ROWS == row_ci.postgres_rows()
