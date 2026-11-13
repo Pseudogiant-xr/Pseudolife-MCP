@@ -150,14 +150,23 @@ pub(crate) fn version_key(v: &str) -> Option<Vec<u64>> {
     s.split('.').map(|p| p.parse().ok()).collect()
 }
 
+/// The exclusive OS lock on `<data dir>/update.lock`, shared with the Python
+/// updater, held from before a run reads what to change until it exits; the
+/// pid beside it names the holder. A handed-off client run borrows it: when
+/// the holder is the updater that started it, it runs under that hold.
 pub(crate) struct UpdateLock {
-    lock: os_lock::Lock,
-    pid: PathBuf,
+    held: Option<(os_lock::Lock, PathBuf)>,
 }
 impl UpdateLock {
     pub fn acquire() -> Result<Self> {
-        let mut lock = os_lock::Lock::new(data_dir().join("update.lock"));
-        let pid = data_dir().join("update.lock.pid");
+        Self::acquire_in(&data_dir(), None)
+    }
+    pub fn acquire_borrowing(from: Option<&str>) -> Result<Self> {
+        Self::acquire_in(&data_dir(), from)
+    }
+    pub(crate) fn acquire_in(directory: &Path, borrow_from: Option<&str>) -> Result<Self> {
+        let mut lock = os_lock::Lock::new(directory.join("update.lock"));
+        let pid = directory.join("update.lock.pid");
         if !lock.acquire().map_err(|_| {
             UpdateError::usage(
                 "cannot take the update lock; check the data directory's access and retry",
@@ -170,18 +179,32 @@ impl UpdateLock {
                 } else {
                     "unknown"
                 };
+            if holder != "unknown" && borrow_from == Some(holder) {
+                // The holder waits for this run and releases the lock itself;
+                // its pid file stays as it is.
+                return Ok(Self { held: None });
+            }
             return Err(UpdateError::usage(format!(
                 "another pseudolife-mcp update is running (pid {holder}); nothing was changed. Run this again when it has finished"
             )));
         }
-        let _ = fs::write(&pid, format!("{}\n", std::process::id()));
-        Ok(Self { lock, pid })
+        let _ = fs::write(&pid, format!("{}
+", std::process::id()));
+        Ok(Self {
+            held: Some((lock, pid)),
+        })
+    }
+    #[cfg(test)]
+    pub(crate) fn borrowed(&self) -> bool {
+        self.held.is_none()
     }
 }
 impl Drop for UpdateLock {
     fn drop(&mut self) {
-        let _ = fs::remove_file(&self.pid);
-        self.lock.release();
+        if let Some((mut lock, pid)) = self.held.take() {
+            let _ = fs::remove_file(&pid);
+            lock.release();
+        }
     }
 }
 
@@ -335,7 +358,7 @@ impl Update {
         Ok(())
     }
     pub fn run_locked(&mut self) -> Result<()> {
-        let _lock = UpdateLock::acquire()?;
+        let _lock = UpdateLock::acquire_borrowing(self.o.handoff.from.as_deref())?;
         self.update()
     }
     pub fn update(&mut self) -> Result<()> {
@@ -378,7 +401,7 @@ impl Update {
             return self.check(&tier);
         }
         if tier == "client" {
-            let _lock = UpdateLock::acquire()?;
+            let _lock = UpdateLock::acquire_borrowing(self.o.handoff.from.as_deref())?;
             self.update_client_machine()
         } else {
             self.run_locked()?;
@@ -426,6 +449,19 @@ impl Update {
                 self.warn(
                     "could not write the update result file; check its access and free disk space",
                 );
+            }
+        }
+        if let Some(path) = self.o.handoff.report.clone() {
+            // What the updater that handed this run its client steps reads
+            // back as its own result (`clients::handoff::hand_off`).
+            let written = serde_json::to_vec(&self.report)
+                .ok()
+                .is_some_and(|bytes| fs::write(&path, bytes).is_ok());
+            if !written {
+                self.warn(format!(
+                    "could not write the hand-off report {}",
+                    path.display()
+                ));
             }
         }
         if let Some(payload) = panic {
@@ -510,25 +546,119 @@ impl Update {
         args
     }
     pub fn clients(&mut self, repo: Option<&Path>, source: &str, health: Option<&Value>) {
-        self.step("updating the client side (shim, plugin cache, Codex hooks)...");
-        let report = clients::run_steps(
-            &["shim", "plugin", "codex"],
-            repo,
-            source,
-            health.and_then(|h| h["hooks_digest"].as_str()),
-            self.o.reinstall,
-        );
+        use clients::handoff::{self, Note};
+        let own = env!("CARGO_PKG_VERSION");
+        // A handed-off run never hands off again; a checkout deploy already
+        // runs the checkout's own code.
+        let handed = self.o.handoff.from.is_some();
+        if handed {
+            self.step(format!(
+                "continuing the client side with {own}'s own code (shim check, plugin cache, Codex hooks)..."
+            ));
+        } else {
+            self.step("updating the client side (shim, plugin cache, Codex hooks)...");
+        }
+        let digest = health.and_then(|h| h["hooks_digest"].as_str());
+        let reinstall = self.o.reinstall;
+        let mut outcome = None;
+        let mut shim_printed = false;
+        let report = if handoff::hands_off(repo, &self.o.handoff) {
+            let daemon_url = self.o.daemon_url.clone();
+            let retry_program = std::env::current_exe()
+                .map(|exe| seams::quote(&exe.to_string_lossy()))
+                .unwrap_or_else(|_| "pseudolife-mcp".into());
+            let runtime_dir = crate::runtime::default_layout()
+                .ok()
+                .and_then(|layout| crate::runtime::running_runtime(&layout))
+                .map(|runtime| runtime.path);
+            let parent = handoff::Parent {
+                own_version: own,
+                daemon_url: &daemon_url,
+                allow_downgrade: self.o.allow_downgrade,
+                quiet: self.o.as_json,
+                retry_program,
+                pid: std::process::id(),
+                runtime_dir,
+            };
+            let mut after_shim = |shim: &Value| -> Option<Value> {
+                let (ladder, child) = handoff::hand_off(
+                    shim,
+                    &parent,
+                    &clients::NativeRunner,
+                    &handoff::NativeSpawner,
+                    &mut |note| match note {
+                        Note::Step(text) => self.step(text),
+                        Note::Shim(shim) => {
+                            if !self.o.as_json {
+                                print_row("shim", shim);
+                            }
+                            shim_printed = true;
+                        }
+                    },
+                )?;
+                outcome = child;
+                Some(ladder)
+            };
+            clients::run_steps(
+                &["shim", "plugin", "codex"],
+                repo,
+                source,
+                digest,
+                reinstall,
+                Some(&mut after_shim),
+            )
+        } else {
+            clients::run_steps(
+                &["shim", "plugin", "codex"],
+                repo,
+                source,
+                digest,
+                reinstall,
+                None,
+            )
+        };
+        if let Some(outcome) = outcome {
+            // The child printed its own ladder and Codex steps, and its result
+            // is this run's.
+            for step in &outcome.steps {
+                unattended::log_step(step);
+            }
+            self.report.steps.extend(outcome.steps.iter().cloned());
+            if !outcome.codex.is_empty() {
+                self.report.codex_reapproval = outcome.codex.clone();
+            }
+            if report["ok"] != true {
+                self.report.ok = false;
+                // After a daemon deploy the run's code says the client half
+                // failed (5); a clients-only run carries the child's own code.
+                let alone = self.o.clients_only || self.report.tier == "client";
+                self.report.exit_code = if alone && outcome.exit_code != 0 {
+                    outcome.exit_code
+                } else {
+                    handoff::CLIENT_STEP_FAILED
+                };
+                self.warn(format!(
+                    "the client steps in runtime {} ({}) ended with exit {} (see above){}",
+                    outcome.runtime,
+                    outcome.version,
+                    outcome.exit_code,
+                    if alone {
+                        ""
+                    } else {
+                        "; the daemon update itself succeeded"
+                    }
+                ));
+            }
+            self.report.clients = Some(report);
+            return;
+        }
         if !self.o.as_json {
-            for name in ["shim", "plugin", "codex", "autostart", "tunnel"] {
+            for name in ["shim", "handoff", "plugin", "codex", "autostart", "tunnel"] {
+                if name == "shim" && shim_printed {
+                    continue;
+                }
                 if let Some(step) = report.get(name) {
-                    let _ = output(
-                        &format!(
-                            "  {name}: {} — {}\n",
-                            step["state"].as_str().unwrap_or("unknown"),
-                            step["detail"].as_str().unwrap_or("")
-                        ),
-                        false,
-                    );
+                    print_row(name, step);
                 }
             }
         }
@@ -707,6 +837,18 @@ impl Update {
     }
 }
 
+fn print_row(name: &str, step: &Value) {
+    let _ = output(
+        &format!(
+            "  {name}: {} — {}
+",
+            step["state"].as_str().unwrap_or("unknown"),
+            step["detail"].as_str().unwrap_or("")
+        ),
+        false,
+    );
+}
+
 fn ask(question: &str) -> bool {
     use std::io::IsTerminal;
     if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
@@ -720,6 +862,15 @@ fn ask(question: &str) -> bool {
 }
 
 pub(crate) fn run(arguments: Vec<OsString>) -> u8 {
+    // Read once and removed, so nothing this run starts inherits them.
+    let handoff = clients::handoff::take_environment();
+    if arguments == [OsString::from(clients::handoff::PROBE)] {
+        return if output(&clients::handoff::probe_text(), false).is_ok() {
+            0
+        } else {
+            120
+        };
+    }
     if arguments == [OsString::from("--checkout-handover-capability")]
         || (arguments.len() == 3
             && arguments[0] == "--checkout"
@@ -781,7 +932,10 @@ pub(crate) fn run(arguments: Vec<OsString>) -> u8 {
         return if output("usage: pseudolife-mcp update [--checkout REPO] [--tag VERSION] [--engine python|rust] [--shadow]\n       [--all | --daemon-only | --clients-only] [--check] [--reinstall] [--allow-downgrade]\n       [--no-backup] [--rollback-tag SUFFIX] [--force-rollback-tag] [--allow-dirty]\n       [--keep-rollbacks N] [--keep-cache-hours N] [--no-cache-prune] [--no-test-login]\n       [--env-file PATH] [--allow-auth-change] [--daemon-url URL] [--health-retries N] [--health-delay-ms N]\n       [--unattended | --schedule HH:MM | --unschedule] [--allow-no-bearer] [--result-file PATH] [--json]\n       [--python-runtime INTERPRETER] (explicit legacy/lite updater)\n",false).is_ok(){0}else{120};
     }
     match Options::parse(arguments) {
-        Ok(o) => Update::new(o).run(),
+        Ok(mut o) => {
+            o.handoff = handoff;
+            Update::new(o).run()
+        }
         Err(e) => {
             let _ = output(&format!("{}\n", e.message), true);
             e.exit_code
