@@ -1,0 +1,4 @@
+### Changed (2026-11-14 — a release cut is batched alone for its notes, and every stacked pull request needs its own freeze label)
+- `python ops/integrate.py build` no longer cites the Python oracle for batching a release cut alone: it does so because the release is tagged at the batch's merge, so anything beside the cut would ship without being in the release notes. It now also leaves out a cut that would leave a changelog fragment unfolded on the batch head, naming the fragments and the fix.
+- Batch admission judges each member's own change against master, so a stacked parent that changes `pseudolife_memory/` needs the `freeze-exception` label even when its child's merge carries the change; a member whose head carries an unlabelled one is left out.
+- The check for a master that lost the freeze guard uses full history (a guard dropped in a merge resolution still refuses) and refuses on a shallow clone.
