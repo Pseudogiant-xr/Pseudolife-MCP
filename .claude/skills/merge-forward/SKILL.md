@@ -90,6 +90,8 @@ CI runs again on the push to master. That run is the check, and a cancelled
 run is not a pass: a later master push cancels an earlier run
 (`cancel-in-progress`). Watch the first master run that completes on a
 commit containing the merge: `ci.yml` for rule A, both `ci.yml` and
-`rust.yml` for rule B. If it fails, open a revert PR at once (landed as a batch of one), or a fix PR
+`rust.yml` for rule B. A Rust-only change's master push skips `ci.yml`'s
+Python lanes since the Python freeze; for it, the backstop is the next
+nightly's `ci.yml` run on that commit. If it fails, open a revert PR at once (landed as a batch of one), or a fix PR
 when the fix is obvious, and make no more such merges until master is green
 again.

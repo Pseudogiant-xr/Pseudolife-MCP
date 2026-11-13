@@ -339,9 +339,15 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 
 def pytest_ignore_collect(collection_path: Path, config: pytest.Config) -> bool | None:
     """Leave the frozen package's test files out unless --include-frozen."""
-    if (not config.getoption("include_frozen") and collection_path.parent == _TESTS_DIR
-            and collection_path.name in _FROZEN):
-        return True
+    if config.getoption("include_frozen") or collection_path.name not in _FROZEN:
+        return None
+    try:
+        # Resolved: a checkout reached through a junction, subst drive or
+        # symlink must still leave the frozen files out.
+        if collection_path.resolve().parent == _TESTS_DIR:
+            return True
+    except OSError:
+        pass
     return None
 
 

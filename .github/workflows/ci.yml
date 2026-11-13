@@ -33,7 +33,7 @@
 # pins, committed eval evidence). The Rust workflow is that PR's gate. Since
 # the Python freeze (14 November 2026) the master push that merges such a
 # batch skips them too, and the nightly runs them on that commit
-# (ops/ci_push_passed.py --require-job test).
+# (ops/ci_push_passed.py --not-if-job-passed guards).
 #
 # The Python freeze also split tests/ (tests/suite_classes.txt): a run
 # collects only the live files unless pytest gets --include-frozen, and no
@@ -59,7 +59,8 @@
 # that merge each lane below that PASSED on the batch pull request's latest
 # run of this workflow, on that head, is skipped (ops/ci_batch_passed.py;
 # its docstring lists every check, and any failed check or API error skips
-# nothing). A lane the batch skipped (a Rust-only batch's Python lanes) runs.
+# nothing). A lane the batch skipped runs, except that a Rust-only batch's
+# push skips the Python lanes too since the Python freeze (scope, below).
 # The nightly stays the full backstop; no required check reads a push run.
 #
 # Merge queue (docs/specs/2026-10-19-merge-queue.md): `merge_group` runs the
@@ -144,9 +145,10 @@ jobs:
         continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        # A push that skipped `test` (a Rust-only batch's, below) still
-        # concludes success; the nightly runs the Python lanes then.
-        run: python3 -m ops.ci_push_passed --workflow .github/workflows/ci.yml --github-output "$GITHUB_OUTPUT" --require-job test
+        # A push whose scope skipped the Python lanes (a Rust-only batch's,
+        # below) still concludes success; `guards` ran on it exactly then,
+        # and the nightly runs the lanes. A lane the batch passed is covered.
+        run: python3 -m ops.ci_push_passed --workflow .github/workflows/ci.yml --github-output "$GITHUB_OUTPUT" --not-if-job-passed guards
 
       - name: Classify the change
         id: scope
@@ -154,6 +156,7 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           MERGE_GROUP_BASE_REF: ${{ github.event.merge_group.base_ref }}
           HEAD_REF: ${{ github.head_ref }}
+          BEFORE: ${{ github.event.before }}
         shell: bash
         run: |
           case "$EVENT_NAME" in
@@ -162,7 +165,9 @@ jobs:
             # parent is master before it): a Rust-only batch skips the Python
             # lanes on its push too, since the Python freeze (maintainer,
             # 14 November 2026), and the nightly runs them on that commit.
-            push) base=HEAD^1 ;;
+            # github.event.before: the tip master moved from, exact for a
+            # multi-commit push; an unreadable one runs everything below.
+            push) base="${BEFORE:-HEAD^1}" ;;
             merge_group)
               # Master's current tip, not merge_group.base_sha: that may be the
               # queue entry ahead, which need not pass on its own, so every
@@ -618,7 +623,7 @@ jobs:
         # package's own macOS paths left with the Python freeze.
         env:
           PSEUDOLIFE_SUITE_LOCK: "off"
-        run: python -m pytest tests/test_wait_mail_cli.py tests/test_hooks_digest.py tests/test_stop_wake_hook.py tests/test_hook_glob_ranges.py tests/test_coordination_turn_digest.py tests/test_suite_lock.py tests/test_memory_changes_hook.py tests/test_client_install_ux.py tests/test_codex_hooks.py tests/test_subagent_board_guard.py tests/test_codex_hook_setup_edges.py tests/test_installer_lite.py tests/test_installer_legacy_hooks.py tests/test_installer_client_update_schedule.py tests/test_plugin_packaging.py tests/test_tunnel_cli.py tests/test_prune_worktrees.py tests/test_move_cli.py::test_signal_during_target_expose_undoes_serve tests/test_move_cli.py::test_postcommit_signal_records_followups_without_rollback tests/test_move_cli.py::test_signal_after_confirmed_moved_marker_never_rolls_back_the_commit tests/test_move_cli.py::test_signal_between_confirmed_marker_and_commit_record_is_deferred -q -rs
+        run: python -m pytest tests/test_wait_mail_cli.py tests/test_hooks_digest.py tests/test_stop_wake_hook.py tests/test_hook_glob_ranges.py tests/test_coordination_turn_digest.py tests/test_suite_lock.py tests/test_memory_changes_hook.py tests/test_client_install_ux.py tests/test_codex_hooks.py tests/test_subagent_board_guard.py tests/test_codex_hook_setup_edges.py tests/test_installer_lite.py tests/test_lease_cli.py tests/test_installer_legacy_hooks.py tests/test_installer_client_update_schedule.py tests/test_plugin_packaging.py tests/test_tunnel_cli.py tests/test_prune_worktrees.py tests/test_move_cli.py::test_signal_during_target_expose_undoes_serve tests/test_move_cli.py::test_postcommit_signal_records_followups_without_rollback tests/test_move_cli.py::test_signal_after_confirmed_moved_marker_never_rolls_back_the_commit tests/test_move_cli.py::test_signal_between_confirmed_marker_and_commit_record_is_deferred -q -rs
 
   test-windows-nightly:
     # Not a merge gate, and never run for a pull request or merge group: the

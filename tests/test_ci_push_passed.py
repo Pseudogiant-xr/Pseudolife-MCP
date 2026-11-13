@@ -84,7 +84,7 @@ def test_missing_token_writes_an_explicit_false(tmp_path, monkeypatch):
     assert output.read_text() == "passed=false\n"
 
 
-def jobs_decide(runs, jobs, required=("test",)):
+def jobs_decide(runs, jobs, names=("guards",)):
     calls = []
 
     def get(path):
@@ -94,26 +94,26 @@ def jobs_decide(runs, jobs, required=("test",)):
         return {"workflow_runs": runs}
 
     return push.decide(get, repo=REPO, event="schedule", ref="refs/heads/master", sha=SHA,
-                       workflow=".github/workflows/ci.yml", required_jobs=required), calls
+                       workflow=".github/workflows/ci.yml", not_if_passed=names), calls
 
 
 CI_RUN = {**RUN, "path": ".github/workflows/ci.yml"}
 
 
-@pytest.mark.parametrize("conclusion, reused", [("success", True), ("skipped", False), ("failure", False),
-                                                (None, False)])
-def test_a_push_that_skipped_a_required_job_is_not_reused(conclusion, reused):
-    # A Rust-only batch's master push skips the Python lanes since the
-    # Python freeze; its run still succeeds, but the nightly must run them.
-    (passed, reason), calls = jobs_decide([CI_RUN], [{"name": "test", "conclusion": conclusion},
-                                                     {"name": "guards", "conclusion": "success"}])
+@pytest.mark.parametrize("guards, test, reused", [
+    # A Rust-only batch's push: scope skipped the Python lanes, guards ran.
+    ("success", "skipped", False),
+    # An ordinary batch push: test skipped because the batch passed it.
+    ("skipped", "skipped", True),
+    ("skipped", "success", True),
+    # guards failed: the run would not conclude success anyway; never reused.
+    ("failure", "skipped", True),
+])
+def test_only_a_push_that_skipped_the_python_lanes_is_not_reused(guards, test, reused):
+    (passed, reason), calls = jobs_decide([CI_RUN], [{"name": "guards", "conclusion": guards},
+                                                     {"name": "test", "conclusion": test}])
     assert passed is reused, reason
     assert any(path.endswith("/actions/runs/123/jobs?per_page=100") for path in calls)
-
-
-def test_a_push_without_the_required_job_is_not_reused():
-    (passed, reason), _ = jobs_decide([CI_RUN], [{"name": "tests", "conclusion": "success"}])
-    assert passed is False and "test" in reason
 
 
 def test_an_unreadable_job_listing_runs_everything():
@@ -121,10 +121,12 @@ def test_an_unreadable_job_listing_runs_everything():
     assert passed is False
 
 
-def test_ci_yml_asks_for_its_test_job():
+def test_ci_yml_names_the_guards_job():
     jobs = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())["jobs"]
     step = next(s for s in jobs["scope"]["steps"] if s.get("id") == "push")
-    assert step["run"].split()[-2:] == ["--require-job", "test"]
+    assert step["run"].split()[-2:] == ["--not-if-job-passed", "guards"]
+    # guards runs exactly when scope skipped the Python lanes.
+    assert jobs["guards"]["if"] == "needs.scope.outputs.python == 'false'"
 
 
 @pytest.mark.parametrize("workflow,skips,keeps", [

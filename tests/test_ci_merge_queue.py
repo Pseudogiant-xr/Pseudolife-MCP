@@ -127,6 +127,7 @@ def test_only_an_ordinary_pull_request_supersedes_its_own_runs():
 GIT_STUB = r'''
 git() {
   local line="$*" base=HEAD^1
+  if [ "$EVENT_NAME" = push ] && [ -n "$BEFORE" ]; then base="$BEFORE"; fi
   if [ "$EVENT_NAME" = merge_group ]; then
     if [ "$line" = "fetch --no-tags --depth=1 origin refs/heads/master" ]; then
       return "$PL_FETCH_EXIT"
@@ -146,7 +147,7 @@ BATCH_REF = "integrate/2026-10-21-batch-1"
 
 
 def run_scope(tmp_path, event, files, *, base_ref="refs/heads/master", fetch_exit=0, diff_exit=0,
-              head_ref=None):
+              head_ref=None, before=""):
     """Run the scope step as Actions would. `head_ref` is github.head_ref,
     which Actions sets only for pull requests: by default a batch branch's,
     whose pull request is classified by its diff."""
@@ -158,13 +159,14 @@ def run_scope(tmp_path, event, files, *, base_ref="refs/heads/master", fetch_exi
     assert step["shell"] == "bash"
     assert step["env"] == {"EVENT_NAME": "${{ github.event_name }}",
                            "MERGE_GROUP_BASE_REF": "${{ github.event.merge_group.base_ref }}",
-                           "HEAD_REF": "${{ github.head_ref }}"}
+                           "HEAD_REF": "${{ github.head_ref }}",
+                           "BEFORE": "${{ github.event.before }}"}
     output, unexpected = tmp_path / "github_output", tmp_path / "unexpected"
     output.write_text("", encoding="utf-8")
     script = tmp_path / "scope.sh"
     # Actions runs a bash step as `bash -e {0}` (pipefail too: shell: bash).
     script.write_text("set -eo pipefail\n" + GIT_STUB + step["run"], encoding="utf-8", newline="\n")
-    env = dict(os.environ, EVENT_NAME=event, MERGE_GROUP_BASE_REF=base_ref, HEAD_REF=head_ref,
+    env = dict(os.environ, EVENT_NAME=event, MERGE_GROUP_BASE_REF=base_ref, HEAD_REF=head_ref, BEFORE=before,
                GITHUB_OUTPUT=str(output), PL_UNEXPECTED=str(unexpected),
                PL_FILES="\n".join(files), PL_FETCH_EXIT=str(fetch_exit), PL_DIFF_EXIT=str(diff_exit))
     result = subprocess.run([BASH, str(script)], env=env, capture_output=True, text=True, timeout=60)
@@ -203,9 +205,18 @@ def test_other_events_always_run_the_python_lanes(tmp_path, event):
 def test_a_rust_only_master_push_skips_the_python_lanes(tmp_path):
     # Since the Python freeze: the push of a Rust-only batch is classified by
     # its merge, as the batch was; the nightly runs the lanes on that commit
-    # (ops/ci_push_passed.py --require-job test).
+    # (ops/ci_push_passed.py --not-if-job-passed guards).
     assert run_scope(tmp_path, "push", RUST_ONLY) == ["python=false"]
     assert run_scope(tmp_path, "push", PYTHON_CHANGE) == ["python=true"]
+
+
+def test_a_master_push_diffs_from_the_tip_it_moved_from(tmp_path):
+    # github.event.before, exact for a multi-commit push (the stub refuses
+    # any other base); HEAD^1 when Actions gives none.
+    assert run_scope(tmp_path, "push", RUST_ONLY, before="0123abc") == ["python=false"]
+    assert run_scope(tmp_path, "push", PYTHON_CHANGE, before="0123abc") == ["python=true"]
+    # An unreadable before (a missing commit in the shallow clone) runs everything.
+    assert run_scope(tmp_path, "push", RUST_ONLY, before="0123abc", diff_exit=128) == ["python=true"]
 
 
 @pytest.mark.parametrize("base_ref, fetch_exit", [

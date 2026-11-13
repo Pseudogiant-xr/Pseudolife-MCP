@@ -82,8 +82,10 @@ Each change waits for hosted CI once, on its batch:
   cancelled one runs. A Rust-only batch skipped the Python suite lanes, and
   since the Python freeze its master push skips them too (`ci.yml`'s scope
   classifies the push by its merge); the nightly then runs them on that
-  commit, because `ops/ci_push_passed.py --require-job test` reuses only a
-  push whose `test` job ran and passed. Every Python lane runs only the
+  commit, because `ops/ci_push_passed.py --not-if-job-passed guards` does
+  not reuse a push whose `guards` job ran (which it does exactly when scope
+  skipped the Python lanes); a push whose lanes its batch had passed stays
+  reusable. Every Python lane runs only the
   live test files (`tests/suite_classes.txt`): `test-lite-linux`, the
   whole suite on embedded PostgreSQL, left with the lite tier. Anything doubtful skips nothing and logs
   one line saying why: not exactly one merged `integrate/*` pull request

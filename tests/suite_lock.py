@@ -381,8 +381,9 @@ def is_full_run(args, invocation_dir: Path, tests_root: Path, *,
 
     Full: some path argument is ``tests/`` itself or one of its ancestors
     (``pytest`` with no arguments resolves to ``tests`` via testpaths), or
-    the named test files are at least half of ``tests/test_*.py`` (a shell
-    glob such as ``tests/test_*.py`` names them all). Targeted: a few named
+    the named test files are at least half of ``tests/test_*.py`` (live
+    ones only, below; a shell glob such as ``tests/test_*.py`` also names the
+    frozen ones, which conftest refuses, so name ``tests/``). Targeted: a few named
     files or node ids, a ``-k``/``-m`` selection — unless it only excludes
     (``-k "not x"``) — or a run that executes no test (``--collect-only``,
     ``--fixtures``, ``--help``).

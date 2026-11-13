@@ -54,6 +54,9 @@ def frozen(path: Path = CLASSES_FILE) -> frozenset[str]:
 
 
 def refusal(names: list[str]) -> str:
-    return (", ".join(f"tests/{name}" for name in names)
-            + " tests only the frozen Python package (tests/suite_classes.txt), which is not "
-            + f"collected by default since the Python freeze; pass {SWITCH} to run it")
+    shown = names if len(names) <= 5 else [*names[:5], f"and {len(names) - 5} more"]
+    return (", ".join(f"tests/{name}" if name.startswith("test_") else name for name in shown)
+            + " test only the frozen Python package (tests/suite_classes.txt), which a run "
+            + "leaves out since the Python freeze. For the whole live suite name tests/ "
+            + f"(a glob such as tests/test_*.py names frozen files too); pass {SWITCH} to "
+            + "run the frozen ones as well")

@@ -70,13 +70,43 @@ def test_the_switch_collects_a_frozen_file():
     assert f"tests/{frozen}::" in result.stdout
 
 
-def test_a_directory_run_collects_live_files_only():
-    # A light directory: two live files and one frozen, copied in place.
-    live = sorted(name for name, kind in suite_classes.load().items() if kind == "live")
-    result = _collect("tests", "-k", "test_every_test_file_is_classified or test_label_pair")
+def test_a_directory_run_collects_exactly_the_live_files():
+    live = {name for name, kind in suite_classes.load().items() if kind == "live"}
+    result = _collect("tests")
+    assert result.returncode == 0, result.stdout[-2000:] + result.stderr[-2000:]
     collected = {line.split("::", 1)[0].removeprefix("tests/") for line in result.stdout.splitlines()
                  if line.startswith("tests/test_")}
-    assert collected and collected <= set(live), sorted(collected - set(live))
+    # A live file that defines no test (or skips at import) collects nothing.
+    assert collected <= live, sorted(collected - live)
+    assert len(collected) >= len(live) - 5, sorted(live - collected)
+
+
+def test_naming_a_live_file_is_not_refused():
+    result = _collect("tests/test_suite_classes.py")
+    assert result.returncode == 0, result.stdout[-2000:] + result.stderr[-2000:]
+    assert "tests/test_suite_classes.py::" in result.stdout
+
+
+def test_naming_one_node_of_a_frozen_file_is_refused():
+    frozen = sorted(suite_classes.frozen())[0]
+    result = _collect(f"tests/{frozen}::test_anything")
+    assert result.returncode != 0
+    assert f"tests/{frozen}" in result.stderr + result.stdout
+
+
+def test_a_frozen_name_outside_tests_is_not_refused(tmp_path):
+    # Only tests/<frozen file> is frozen; the same basename elsewhere is not.
+    frozen = sorted(suite_classes.frozen())[0]
+    elsewhere = tmp_path / frozen
+    elsewhere.write_text("def test_ok():\n    pass\n", encoding="utf-8")
+    result = _collect("--rootdir", str(ROOT), str(elsewhere))
+    assert suite_classes.SWITCH not in result.stderr + result.stdout
+
+
+def test_the_refusal_points_a_glob_at_the_directory():
+    message = suite_classes.refusal(sorted(suite_classes.frozen()))
+    assert "name tests/" in message and suite_classes.SWITCH in message
+    assert "more" in message and len(message) < 1000
 
 
 def test_ci_and_the_launchers_name_only_live_files():
@@ -86,6 +116,22 @@ def test_ci_and_the_launchers_name_only_live_files():
         named |= set(re.findall(r"tests/(test_[a-z0-9_]+\.py)", workflow.read_text(encoding="utf-8")))
     frozen = sorted(name for name in named if classes.get(name) == "frozen")
     assert frozen == [], f"a workflow names frozen test files (refused at collection): {frozen}"
+
+
+def test_the_eval_lanes_name_only_live_files():
+    """The eval tooling passes these node ids to pytest in this checkout."""
+    import json
+
+    from evals.rust_port import pytest_plugin
+
+    classes = suite_classes.load()
+    manifest = json.loads((ROOT / "evals/rust_port/oracle_tests.json").read_text(encoding="utf-8"))
+    nodes = [*manifest["mapped"], *manifest["unmapped"], *pytest_plugin.CLI_SUBPROCESS_NODES,
+             *pytest_plugin.CLI_HOOK_NODES, *pytest_plugin.CLI_VERSION_NODES]
+    files = {node.split("::", 1)[0].removeprefix("tests/") for node in nodes}
+    assert files, "the eval node sets moved; point this guard at them"
+    frozen = sorted(name for name in files if classes.get(name) == "frozen")
+    assert frozen == [], f"an eval lane names frozen test files (refused at collection): {frozen}"
 
 
 def test_the_suite_lock_counts_a_full_run_against_the_live_files():
