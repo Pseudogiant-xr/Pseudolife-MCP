@@ -1268,17 +1268,39 @@ def _regenerate_budget(plan: Plan, root: Path) -> set[str]:
     return set(serialized)
 
 
-def _frozen_refusal(base_sha: str, m: Member) -> str | None:
+FREEZE_GUARD = "rust/ci/python_freeze.py"
+
+
+def _freeze_module(base_sha: str):
+    """Master's copy of the Python freeze guard, loaded in this process
+    (master's code, never a member's: an earlier member merged into this
+    checkout must not decide a later one's admission). None when master has
+    none yet, so there is nothing to enforce."""
+    shown = git("show", f"{base_sha}:{FREEZE_GUARD}", check=False)
+    if shown.returncode != 0:
+        return None
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "python_freeze.py"
+        path.write_text(shown.stdout, encoding="utf-8")
+        spec = importlib.util.spec_from_file_location("_batch_python_freeze", path)
+        module = importlib.util.module_from_spec(spec)
+        try:
+            spec.loader.exec_module(module)
+        except (Exception, SystemExit) as exc:
+            raise Refusal(f"{BASE}'s own {FREEZE_GUARD} fails to load ({exc!r}); fix it on "
+                          f"{BASE} before building") from None
+    return module
+
+
+def _frozen_refusal(base_sha: str, m: Member, freeze) -> str | None:
     """Why a member's own net change may not join: it touches the frozen
     Python package without the exception label. The `Python freeze` check
     exempts batches because their members were checked, but a member's own
     run can be absent (opened before the guard), queued or cancelled, so the
-    batch applies the same decision (rust/ci/python_freeze.py, read from this
-    checkout) to the member's diff from its merge base."""
-    spec = importlib.util.spec_from_file_location(
-        "python_freeze", Path(__file__).resolve().parents[1] / "rust" / "ci" / "python_freeze.py")
-    freeze = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(freeze)
+    batch applies master's copy of the same decision (`_freeze_module`) to
+    the member's diff from its merge base."""
+    if freeze is None:
+        return None
     common = _out("merge-base", base_sha, m.sha)
     paths = freeze.changed_paths(Path.cwd(), common, m.sha)   # the checkout `build` runs in
     if paths is None:
@@ -1290,6 +1312,7 @@ def _frozen_refusal(base_sha: str, m: Member) -> str | None:
 
 
 def _merge_members(plan: Plan, members: list[Member]) -> None:
+    freeze = _freeze_module(plan.base_sha)
     for m in members:
         reason = _not_ready(m)
         if reason:
@@ -1301,7 +1324,7 @@ def _merge_members(plan: Plan, members: list[Member]) -> None:
                 m, f"head moved from {m.sha[:12]} to {head[:12]} after listing; "
                    "rebuild to include it", comment=False))
             continue
-        frozen = _frozen_refusal(plan.base_sha, m)
+        frozen = _frozen_refusal(plan.base_sha, m, freeze)
         if frozen:
             plan.dropped.append(Dropped(m, frozen))
             print(f"  dropped #{m.number}: {frozen}")

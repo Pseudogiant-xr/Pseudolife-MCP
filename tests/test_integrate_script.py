@@ -3010,6 +3010,11 @@ def test_no_current_job_produces_the_report_only_name():
 # queued or cancelled, so `build` applies the same decision to each member's
 # net change: a frozen path passes only with the freeze-exception label.
 
+def _freeze_on_master(world):
+    world.advance_master({"rust/ci/python_freeze.py":
+                          (ROOT / "rust" / "ci" / "python_freeze.py").read_text(encoding="utf-8")})
+
+
 @pytest.mark.parametrize("labels, path, merged", [
     ([], "pseudolife_memory/update_cli.py", False),
     ([{"name": "freeze-exception"}], "pseudolife_memory/update_cli.py", True),
@@ -3018,6 +3023,7 @@ def test_no_current_job_produces_the_report_only_name():
     ([], "docs/pseudolife_memory_notes.md", True),
 ], ids=["unlabelled", "labelled", "near-miss-label", "console-build", "name-only"])
 def test_a_member_changing_frozen_python_joins_only_with_the_exception_label(world, capsys, labels, path, merged):
+    _freeze_on_master(world)
     sha = world.pr(10, {path: "changed\n"})
     world.gh.add(10, sha, labels=labels)
 
@@ -3027,3 +3033,33 @@ def test_a_member_changing_frozen_python_joins_only_with_the_exception_label(wor
     assert ("merged #10 " in out) is merged, out
     if not merged:
         assert "Python is frozen since 14 November 2026" in out and "freeze-exception" in out
+
+
+def test_an_earlier_member_cannot_switch_the_freeze_off_for_a_later_one(world, capsys):
+    # Codex review of a49c9635: the decision runs master's copy of the
+    # guard, never one a member merged into the batch checkout first.
+    _freeze_on_master(world)
+    opened = (ROOT / "rust" / "ci" / "python_freeze.py").read_text(encoding="utf-8").replace(
+        "    return [path for path in paths if path.startswith(FROZEN) and not path.startswith(EXEMPT)]",
+        "    return []")
+    assert "return []" in opened
+    sha10 = world.pr(10, {"rust/ci/python_freeze.py": opened})
+    sha11 = world.pr(11, {"pseudolife_memory/update_cli.py": "changed\n"})
+    world.gh.add(10, sha10, labeled_at="2026-11-14T00:00:01Z")
+    world.gh.add(11, sha11, labeled_at="2026-11-14T00:00:02Z")
+
+    assert _build() == 0, capsys.readouterr()
+
+    out = capsys.readouterr().out
+    assert "merged #10 " in out and "merged #11 " not in out, out
+    assert "Python is frozen since 14 November 2026" in out
+
+
+def test_a_master_without_the_guard_skips_the_admission_check(world, capsys):
+    # Before the guard reaches master there is nothing to enforce yet.
+    sha = world.pr(10, {"pseudolife_memory/update_cli.py": "changed\n"})
+    world.gh.add(10, sha)
+
+    assert _build() == 0, capsys.readouterr()
+
+    assert "merged #10 " in capsys.readouterr().out
