@@ -463,12 +463,12 @@ pub fn install_source(source: &str, repo: Option<&Path>, layout: &Layout) -> Res
     }
     let version = source.strip_prefix("pseudolife-mcp==").unwrap_or(source);
     let name = archive_name(version)?;
-    let base = release_base(
-        std::env::var("PSEUDOLIFE_NATIVE_ARCHIVE_URL")
-            .ok()
-            .as_deref(),
-        version,
-    )?;
+    let configured = std::env::var("PSEUDOLIFE_NATIVE_ARCHIVE_URL").ok();
+    let base = release_base(configured.as_deref(), version)?;
+    // A forgotten override outlives the test it was set for: every error
+    // below names it, so the cause is visible.
+    let overridden = configured.is_some_and(|v| !v.trim().is_empty());
+    let named = |detail: String| override_note(detail, &base, overridden);
     // A private runtime avoids nested Tokio runtimes in synchronous CLI callers.
     let base_clone = base.clone();
     let name_clone = name.clone();
@@ -495,28 +495,49 @@ pub fn install_source(source: &str, repo: Option<&Path>, layout: &Layout) -> Res
             })
     })
     .join()
-    .map_err(|_| "release download worker failed")??;
-    install_archive(layout, version, source, &archive, &sums)
+    .map_err(|_| "release download worker failed".to_owned())?
+    .map_err(named)?;
+    install_archive(layout, version, source, &archive, &sums).map_err(named)
+}
+
+/// A download, checksum or install error, naming the override when one chose
+/// the source.
+pub(crate) fn override_note(detail: String, base: &str, overridden: bool) -> String {
+    if overridden {
+        format!(
+            "{detail} (from PSEUDOLIFE_NATIVE_ARCHIVE_URL={base}; unset it to use the GitHub release)"
+        )
+    } else {
+        detail
+    }
 }
 
 /// The URL of the directory holding a release's native archives and its
 /// `SHA256SUMS`: the GitHub release `v<version>`, or
-/// `PSEUDOLIFE_NATIVE_ARCHIVE_URL` (an `http(s)://` directory URL, for a
-/// mirror, a dev-box proof or a test server; the installers read the same
-/// variable). The archive is still verified against that directory's sums.
+/// `PSEUDOLIFE_NATIVE_ARCHIVE_URL` (an `http(s)://` directory URL with a
+/// host and no query or fragment, for a mirror, a dev-box proof or a test
+/// server). The sums come from the same directory, so they prove integrity
+/// (no truncation or corruption), not who published the files: use plain
+/// `http://` only on loopback or a trusted network.
 pub(crate) fn release_base(configured: Option<&str>, version: &str) -> Result<String> {
-    match configured.map(str::trim).filter(|value| !value.is_empty()) {
-        None => Ok(format!(
+    let Some(value) = configured.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(format!(
             "https://github.com/Pseudogiant-xr/Pseudolife-MCP/releases/download/v{version}"
-        )),
-        Some(url) if url.starts_with("https://") || url.starts_with("http://") => {
-            Ok(url.trim_end_matches('/').to_owned())
-        }
-        Some(_) => Err(
-            "PSEUDOLIFE_NATIVE_ARCHIVE_URL must be an http:// or https:// URL of the directory holding the archives and SHA256SUMS; unset it to use the GitHub release; nothing was downloaded"
-                .into(),
-        ),
+        ));
+    };
+    let refuse = || {
+        "PSEUDOLIFE_NATIVE_ARCHIVE_URL must be an http:// or https:// URL, with a host and no query or fragment, of the directory holding the archives and SHA256SUMS; unset it to use the GitHub release; nothing was downloaded"
+            .to_owned()
+    };
+    let url = reqwest::Url::parse(value).map_err(|_| refuse())?;
+    if !matches!(url.scheme(), "http" | "https")
+        || url.host_str().is_none_or(str::is_empty)
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
+        return Err(refuse());
     }
+    Ok(url.as_str().trim_end_matches('/').to_owned())
 }
 
 fn ensure_build_space(path: &Path) -> Result<()> {

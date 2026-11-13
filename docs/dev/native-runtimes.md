@@ -105,8 +105,11 @@ shared usage locks remain held for the native child's lifetime.
 
 Release installation downloads the platform release archive and `SHA256SUMS` over
 HTTPS from the GitHub release `v<version>`, or from the directory URL in
-`PSEUDOLIFE_NATIVE_ARCHIVE_URL` (`http://` or `https://`; any other value refuses
-before downloading). The installers read the same variable. The checksum must name the exact versioned asset once, using lowercase
+`PSEUDOLIFE_NATIVE_ARCHIVE_URL` (`http://` or `https://` with a host and no query
+or fragment; any other value refuses before downloading, and every later download
+or checksum error names the variable). Its `SHA256SUMS` comes from the same
+directory, so the check proves integrity, not origin: use `http://` only on
+loopback or a trusted network. The checksum must name the exact versioned asset once, using lowercase
 hex and two spaces. Downloads and decompressed data are bounded. Archives may
 contain exactly one regular root binary; links, traversal, additional files,
 special entries and oversized payloads are refused. A checkout install builds

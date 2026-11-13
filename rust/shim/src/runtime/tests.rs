@@ -585,9 +585,36 @@ fn release_base_defaults_to_the_github_release_and_honours_an_http_override() {
         release_base(Some("https://mirror.example.com/v1.2.3"), "1.2.3").unwrap(),
         "https://mirror.example.com/v1.2.3"
     );
-    for refused in ["/srv/assets", "file:///srv/assets", "ftp://example.com/x"] {
+    assert_eq!(
+        release_base(Some("HTTPS://Mirror.Example.com/dir"), "1.2.3").unwrap(),
+        "https://mirror.example.com/dir"
+    );
+    for refused in [
+        "/srv/assets",
+        "file:///srv/assets",
+        "ftp://example.com/x",
+        "http://",
+        "https://host/dir?sig=abc",
+        "https://host/dir#part",
+    ] {
         let error = release_base(Some(refused), "1.2.3").unwrap_err();
         assert!(error.contains("PSEUDOLIFE_NATIVE_ARCHIVE_URL"), "{error}");
         assert!(error.contains("nothing was downloaded"), "{error}");
     }
+}
+
+#[test]
+fn download_errors_name_the_archive_url_override_only_when_it_is_set() {
+    use super::install::override_note;
+    let detail = "native release download returned 404".to_owned();
+    assert_eq!(
+        override_note(detail.clone(), "https://github.com/x", false),
+        detail
+    );
+    let noted = override_note(detail, "http://127.0.0.1:8000", true);
+    assert!(noted.starts_with("native release download returned 404 (from PSEUDOLIFE_NATIVE_ARCHIVE_URL=http://127.0.0.1:8000;"), "{noted}");
+    assert!(
+        noted.contains("unset it to use the GitHub release"),
+        "{noted}"
+    );
 }

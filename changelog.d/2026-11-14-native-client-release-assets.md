@@ -14,4 +14,5 @@
   disk, unregistered. The installers start using it in a later change.
 - `PSEUDOLIFE_NATIVE_ARCHIVE_URL` points the native client's release
   download at another directory of archives and `SHA256SUMS` (a mirror or
-  a test server); the archive is still verified against those sums.
+  a test server). The archive is checked against that directory's
+  `SHA256SUMS`, which proves it arrived intact, not who published it.
