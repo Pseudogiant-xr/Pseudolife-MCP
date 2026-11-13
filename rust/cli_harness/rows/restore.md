@@ -58,7 +58,7 @@ is answered, before any Docker call, as the oracle answers it.
 | A value after an option may be a negative number (`-1`, `-.5`) or `-`: argparse takes it as the value | `_negative_number_matcher` |
 | Repeated options: the last value wins; `--opt=value` | argparse |
 | Paths are pathlib's spelling (`dump.sql.gz/` and `./dump.sql.gz` name the file, `''` is `.`) | `type=Path` |
-| The dump: every gzip member read as Python's `gzip` reads it (padding, trailing bytes, truncation); lines split on `\n`, `\r\n` and a lone `\r`; the marker counts only outside `COPY ... FROM stdin;` data, with `\S` read as Python's `str.isspace` complement | `_dump_complete`, `gzip._GzipReader` |
+| The dump: every gzip member read as Python's `gzip` reads it (padding, trailing bytes, truncation, a CRC or length mismatch, a deflate error: each a refusal); lines split on `\n`, `\r\n` and a lone `\r`; the marker counts only outside `COPY ... FROM stdin;` data, with `\S` read as Python's `str.isspace` complement | `_dump_complete`, `gzip._GzipReader` |
 | The state archive: the gzip check, then members as CPython 3.11 `tarfile` reads them (`frombuf`, `nti` with Python `int(..., 8)`, both checksums, the ustar prefix, the V7 trailing-slash directory, GNU long names and links (`L`, `K`: each record's data up to its first NUL patches the header after it, a directory losing one trailing slash per record, and any header problem after a record a `ReadError`), a bad or short header after the first ending the archive quietly, a member's data present to the end of its last block, non-regular supported types skipping no data, unknown types skipping theirs), then every `validate_state` check: absolute, `..` or backslash names, devices and FIFOs, absolute or backslash link targets, escaping links through the final and the transient link graph, and a link loop ending the walk | `validate_state` |
 | The confirmation gate: on Windows a character device counts as a terminal (the CRT's `isatty`, so `NUL` does) | `update_cli.interactive` |
 | A held update lock: `another pseudolife-mcp update is running (pid N); nothing was changed. Run this again when it has finished`, exit 2, the pid read from `update.lock.pid` (`unknown` unless digits), no Docker call; otherwise the lock file under `PSEUDOLIFE_MCP_DATA_DIR` or `<USERPROFILE or HOME>/.pseudolife-mcp` stays after a refusal and its pid file does not | `UpdateLock`, `os_lock.OsLock` |
@@ -104,13 +104,6 @@ is answered, before any Docker call, as the oracle answers it.
   `--db-port` value (Python reads Unicode digits and spaces there), any
   error message that would hold non-ASCII text, and help or usage at any
   other wrap width.
-- A deflate error in either file: the oracle's `zlib.error` escapes both
-  checks and it prints a traceback (exit 1).
-- A gzip CRC or length mismatch in either file. The oracle refuses it
-  (`BadGzipFile`), but miniz_oxide, unlike zlib, decodes a back-reference
-  before the start of a member's output, so a stream zlib stops on with a
-  traceback reaches the trailer here with the wrong bytes; this leaf cannot
-  tell the two apart.
 - State archives with PAX headers (`x`, `g`, `X`), sparse members (`S`),
   a negative size on a member that skips data or on a GNU long record, more
   than 32 GNU long records before one header, a link walk deeper than 400
@@ -120,10 +113,15 @@ is answered, before any Docker call, as the oracle answers it.
 ## Declared divergences
 
 - A stream holding a corruption miniz_oxide decodes and zlib rejects (a
-  back-reference before the member's start) that is also cut off before its
-  trailer: the oracle prints its `zlib.error` traceback (exit 1), this leaf
-  refuses the file as incomplete (exit 2). Both stop before any effect. Not
-  in the harness: no fixture is known whose two outcomes are this pair.
+  back-reference before the member's start) whose trailer's CRC and length
+  match miniz_oxide's wrong bytes: the oracle refuses it (`zlib.error`),
+  this leaf reads those bytes, which pass only if they hold the dump's
+  marker or a safe archive. Not in the harness: no such stream is known; a
+  stream that was not built for it fails the CRC check here and is refused
+  (`dump-distance-too-far`).
+- A deflate stream miniz_oxide rejects and zlib accepts, if one exists:
+  this leaf refuses it (exit 2) where the oracle reads it. Not in the
+  harness: none is known.
 - Order of the lock and the read-only calls: the oracle takes the update
   lock first; the candidate makes the read-only calls first. Their
   sequence, the output and the files are the same in every case answered.
@@ -139,11 +137,7 @@ is answered, before any Docker call, as the oracle answers it.
 
 - `restore-declared-deferral`: the oracle answers before any Docker command
   (exit 0 or 2, no docker call, fixtures intact) where this leaf defers by
-  design (including `dump-bad-crc` and `state-bad-crc-gzip`); the
-  expectation becomes the deferral.
-- `restore-zlib-traceback`: the oracle's uncaught `zlib.error` traceback
-  (exit 1, nothing on stdout, last line `zlib.error: Error -3 while
-  decompressing data: ...`, no docker call) becomes the deferral.
+  design; the expectation becomes the deferral.
 - `restore-defer-at-first-change`: a case names how many of the oracle's
   Docker calls precede its first change (`reached`). When the oracle's next
   call is a `stop` or `create`, or it printed the safety step line, and the
@@ -178,7 +172,7 @@ non-test source: only `docker.rs` starts processes, only `mod.rs` writes
 63 source mutants, one per decision the row pins. The gates (27): exit code,
 `--yes`, the state check and its order after the dump check, argparse's error
 order and negative numbers, the 80-column guard, the COPY pattern, lone `\r`,
-gzip padding, the CRC check and its deferral, the zlib deferral, tar header
+gzip padding, the CRC check and its refusal, the deflate error's refusal, tar header
 and data handling, the transient pass, FIFOs, loop handling, the ustar
 prefix, the signed checksum, `int`'s base prefix, and GNU long records (the
 name and link patches, the end block and short read after a record, and the

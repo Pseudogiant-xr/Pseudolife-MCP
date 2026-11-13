@@ -303,7 +303,7 @@
     "restore-checkout-unchecked",
     "restore-confirmed-deferred",
     "restore-copy-loose",
-    "restore-crc-answered",
+    "restore-crc-deferred",
     "restore-data-mount-unchecked",
     "restore-dbname-quoted",
     "restore-desktop-unmapped",
@@ -361,6 +361,6 @@
     "restore-unshared-network-read",
     "restore-unsure-url-read",
     "restore-yes-ignored",
-    "restore-zlib-answered"
+    "restore-zlib-deferred"
   ]
 }
