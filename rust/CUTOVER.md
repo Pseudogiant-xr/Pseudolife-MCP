@@ -1,332 +1,161 @@
-# Rust cutover plan and checklist
+# Rust cutover: where it stands and what is left
 
-The Rust daemon and CLI already serve most of the memory read, write and
-board paths. They run beside the Python daemon, on disposable test banks
-only. This page lists what is left before Rust can become the default and
-Python daemon development can stop. The work is in an order that lets
-independent batches run at the same time, and every decision that is the
-maintainer's to make is named. Nothing here authorizes a default switch, a
-release, an update, a deploy or any live-bank change.
+A Docker install of Pseudolife-MCP runs the Rust daemon. Everything on the
+user's own machine (the stdio shim, the `pseudolife-mcp` command, the
+installers and the updater) still runs Python. This page records what is true
+on master and what is left before Python can be deleted. It replaces the
+October 2026 plan that lived here; that plan's decisions are kept, shortened,
+under "Decision record".
 
-Status audit: master `75a8015e`, rechecked unchanged after merging
-`23432a52` on 2026-11-01, derived from the registries,
-route dispatch, services and workflow commands, not release notes. On
-master `d09094b6` (2026-11-02) the named blockers and their footer, the
-Background duties and Evidence rows of "Where the port stands", the
-Background duties and Install and activation readiness rows (including the
-daemon crate's version) and the B8, B11, B13 and B16 notes were updated for
-#1091, #1113 to #1116 and #1122, and for #1121, which was merging at the
-time; the other counts were not re-derived there. Counts
-mean implemented bodies, not acceptance closure. The ordered plan and its
-2026-10-23 decisions remain the planning baseline; dated notes below identify
-landed work without changing that boundary. The PR contains reproducible
-count commands. Per-item evidence remains in the [parity register](parity/).
+Status audit: master `201311de3`, 14 November 2026, read from the code and
+the workflows, not from release notes. Nothing here authorizes a release, a
+deploy or a live-bank change.
 
-## Decisions this plan rests on
+## Decisions in force
 
-| Date | Decision | Effect on the plan |
+| Date | Decision (maintainer) | Effect |
 |---|---|---|
-| 2026-10-23 | Maintainer adopted the recommendations for D1 to D4 and D6 to D11; each is recorded in the memory bank as the cortex slot `rust-cutover-decision-D<n> / maintainer decision` (D6 and D11 together as `rust-cutover-decision-D6-D11`). | The decision text is in each row of "Maintainer decisions and gates" below, and the batches it changes say so. The gates G1 to G4 are not decided. |
-| 2026-10-19 | Maintainer: "Let's do graph and dream after all". | Reverses the 2026-10-12 deferral recorded in PARITY.md ("Graph traversal deferred by decision"). Graph expansion in recall, `memory_graph` traversal, the deep-dream edge pass and the graph-insight refresh return to scope with the rest of the W3-H graph and dream engine, as tasks M to P (batch B1). Task N2's PR (`memory_recall`'s graph expansion, after #847) updates PARITY.md's decision section, the READ-CORE and GRAPH-REVIEW rows and the matching `daemon/divergences.md` rows together with the traversal code, as agreed with the Rust port session on 2026-10-19. Until then those lines still read "deferred by decision". |
-| 2026-10-19 | Maintainer, relayed by the delegate: graph insight takes **Option B** for task P2b. The Rust daemon computes communities, and the sampled betweenness behind god nodes and surprises, with a deterministic Rust algorithm (no RNG, stable tie-breaking) instead of porting NetworkX's Louvain and Python's Mersenne Twister. | P2b's PR records it in `daemon/divergences.md` as an accepted divergence and compares it structurally, not byte for byte: community count and size distribution, a partition-agreement measure, and the god-node and surprise sets, with the agreement threshold stated in the PR. No NetworkX pin. Betweenness sampling gets the same treatment unless exact betweenness is cheap at bank sizes; the PR states the choice and why. |
-| 2026-10-19 | Maintainer: PRs land in integration batches built by `ops/integrate.py` (#851), because GitHub's merge queue is not available on a user-owned repository. | One CI run per batch instead of one per PR per master move. This is the pace model under "What sets the pace" below. |
-| 2026-10-12 | Maintainer: graph expansion in recall and the deep-dream edge pass are not ported (reaffirmed 2026-10-16). | Superseded by the 2026-10-19 decision. The eval evidence behind it stays recorded in PARITY.md. |
-| 2026-10-09 | Maintainer: documents move from the Chroma reference store to a pgvector table in the bank with exact cosine search, with a one-time migration of existing Chroma documents (not re-ingestion); the Python change lands first as a schema bump, then the Rust port proves it by DB-state equality; Chroma is dropped from the Rust daemon. Recorded as the cortex slot `Pseudolife document store / post-cutover home`. This is D5 below. | The two document tools and the reference pool in search wait for that Python table (batch B7). Schema v56 shipped judge votes (#807), not the table. |
-| 2026-10-09 | Delegate ruling: an MCP tool whose body has not landed answers the declared `not_implemented` stub, as unserved routes answer their declared 501. | Every unserved surface below is a declared stub or 501, never a silent success. |
+| 2026-11-14 | The bar is that the Rust system works and does what its users need. Matching Python exactly is no longer required. | New Rust work carries its own Rust tests. No new differential rows, source mutants or two-OS recordings against Python. The committed goldens stay as regression snapshots of the Rust behaviour and are re-recorded from Rust when behaviour changes on purpose. |
+| 2026-11-14 | Python is hard-frozen. | Nothing under `pseudolife_memory/` changes again, except the Console build output in `pseudolife_memory/web/static/` until it moves. A defect is fixed in Rust only. The one exception is the already finished program-lookup security fix, which lands as the last Python change. This replaces the soft freeze of 2026-10-23 (D10). |
+| 2026-11-14 | The lite tier is dropped. | The embedded PostgreSQL port is not finished and file mode is not ported. A lite bank gets a refusal that names the Docker install, and the partial lite code (`rust/shared/embedded_pg.rs`, `pg_runtime.rs`, `native_provision.rs`) goes with Python. This reverses the lite half of D1. |
+| 2026-11-14 | Banks older than the Rust daemon can open step through 0.23.x. | A bank below schema 57, or one that still keeps counters in `weights.pt` or documents in Chroma, is first updated to 0.23.1, whose Python daemon imports them. Those imports are not ported. |
+| 2026-11-14 | `move` and `tunnel` are rebuilt in Rust as features, after the native client ships. | Until then the native command refuses plainly. Everything else unported is finished or retired first (below). |
+| 2026-11-14 | Two CI trims: the Python lanes do not re-run on the master push of a Rust-only batch, and the source mutants run weekly, not nightly. | Folded into the CI change under "Stop comparing with Python". |
+| 2026-11-07 | G2: Docker installs and updates select the Rust daemon. | Shipped in 0.23.0 (2026-11-11). `DEFAULT_ENGINE` is `"rust"` in `pseudolife_memory/update_engine.py` and `rust/shim/src/cli/update/release.rs`. |
 
-## Where the port stands
+## What runs where today
 
-| Surface | On master `75a8015e` (2026-11-01) | Left to do |
+| Surface | What a release-mode user runs | Python? |
 |---|---|---|
-| MCP tools (38) | 38 served: `mcp/tools.jsonl` has 38 entries; `mcp/dispatch.rs::registry()` registers the body families, with `memory_toolset` handled in `mcp/mod.rs`; `harness/mcp_compare.py::UNSERVED = {}`. | No tool-level stubs. `read/mcp_search.rs` still refuses `explain=true`; other declared argument/behaviour differences and the three acceptance proofs remain. |
-| Console routes (72 `ConsoleRoutes`, plus `POST /api/pair`) | 66 served on master `4d4d6a0a` (2026-11-02; 59 at `75a8015e`, before #1092 served the six signed maintainer actions and #1095 served `POST /api/dream/run`), from the union of the route families' `SERVED` constants intersected with `harness/goldens/routes.json`; pairing redemption is also served by `routes/pair.rs`. | 67 served on `5274b0b9` (2026-11-07): `GET /api/stats` is served by `routes/cli.rs` (B10d). The 5 left are D9's retirements, which answer their declared 501; `routes/console.rs` `unserved_routes_answer_the_declared_501` pins that set. Their deprecation notes shipped in 0.21.0 (#1089) and Python keeps serving them until a later release removes them (B2r). The Console sign-in routes (`/api/console/*`) sit outside `ConsoleRoutes`: blocker 8. |
-| Hook endpoints (8) | All 8 dispatch to bodies in `routes/hook.rs`. | Behaviour details still matter: the memory-changes conductor reminder remains declared missing; registered-client execution proof remains. |
-| Coordination actions (15) | All 15 served in `board/dispatch.rs`; pairing, shared HLC and clock retry are implemented (blockers below). | Captured-epoch timing remains a declared difference, not an open W2F-CLOCK-RETRY blocker. |
-| CLI modes (29) | 9 native, 15 partly native, 5 defer by name ([CLI checklist](parity/cli-mode-acceptance-checklist/)); native mode coverage and sub-row deferrals are distinct from daemon route availability. | B10 remainder and installed-launcher proof; D8's named operator deferrals remain in force. `console` (#1164, after this count) is partly native since CLI-CONSOLE-PRINT (2026-11-12): every shape runs natively, the browser sign-in included (2026-11-13), except the launchers it does not reproduce (the macOS default among them), which defer by name: blocker 8. `restore` (also after this count) is partly native: its gates before Docker answer natively and the Docker restore defers by name. `conductor-watch` / `delegate-watch` are partly native since CLI-CONDUCTOR-WATCH-SETUP (2026-11-13): help, `--stop` and the setup refusals run natively (with the refusals the 2026-11-13 conductor-watch defect fixes added: a `--state` with no file name, `--settle nan`, an unwritable stop request) and the watch itself defers by name. |
-| Background duties | `service.rs::Duties` now saves counters on autosave and clean exit, invokes compaction with slot synchronization, and runs dream/graph sweeps; `fire_session_dream` reaches `dream/ticks.rs`. Writer reconnect/rehydration, pruning, release checking and heap trim are implemented. Since #1091 (merged `023842c8`), `Service::reap` titles nonempty idle roots through `session_close::auto_title` before persisting their close, as explicit close does. | Keep process/restart acceptance and health/release evidence separate from implementation. D2 import from an old `weights.pt` still requires Python before switching (B11). |
-| Evidence | `.github/workflows/rust.yml` invokes MCP wire/binding/toolset and tokenless comparisons (`mcp_ci.py`), HTTP admission/security/static comparisons, pruning, dream cursors, graph store/read, schema/startup/principals and CLI harnesses. These include hosted Windows runtime slices; the old claim of no Windows daemon runtime is false. Since #1116 (`f6224d59`) its non-gating `body-evidence` job (nightly schedule on the self-hosted Linux runners, or a manual `mode=body-evidence` dispatch) runs `w2e.py`, `w2d_search.py` and `board/run.py` of the Rust daemon against the Python oracle through `rust/ci/body_evidence.py` and publishes `evidence.json` naming both heads. Its first run, manual run 41349445284 on branch head `e3de9be8`, compared 227 scenarios and 2,675 cases with 0 differences (w2e 180/1953, search 24/238, board 23/484). Since #1122 (`d09094b6`) the disposable image job also proves offline model reads across image restarts. | That first run was a manual dispatch (`scheduled_master=false`), so it is not yet the scheduled-master run D6 requires; scheduled runs start nightly. Offline harness tests do not substitute for those comparisons. Installed execution must still be linked per surface; this audit does not claim a fresh differential or CI run. Scheduled-master runs now publish (2026-11-07): run 42207145241 at `ae03bddc` (`scheduled_master: true`, artifact `rust-body-evidence-42207145241-1`) reported `fail`. The w2e `console-graph-malformed` case differs in 4 cases (bigint error quoting), and the board `maintainer-*` and `unserved-maintainer-*` scenarios differ because Rust leaves `maintainer_passkeys.signs_in_as` null (G2-E). #1352 (open) raises their retention from 30 to 90 days so rows can link them; under 30 days this artifact expires 2026-12-06. |
-| Declared divergences | 259 entry files under `daemon/divergences/` on master `d09094b6` (2026-11-02; 257 at `75a8015e`; exclude `_section.md`), 260 with the reranker tie-order entry this update adds, plus 9 W2-F table rows in `daemon/spec.md` (not recounted); CLI row/spec declarations remain separate. These are inventory counts, not open blockers: entries include closed and historical obligations. | D7 triage/closure remains open; do not add overlapping declarations into a unique blocker total. Two sent-YAML presentation deferrals are accepted; other behaviour with a caller must close before G2 or receive its required disposition. |
+| Daemon, Docker tier | `ghcr.io/…/pseudolife-daemon-rust:<version>`, the default engine for a new install and for an attended update. Its final image stage is `debian:bookworm-slim` with `pseudolife-daemon` and a native `pseudolife-mcp`; it holds no Python. | No |
+| Daemon on a host that chose Python, or whose bank the Rust daemon cannot open yet | `ghcr.io/…/pseudolife-daemon` (`ops/Dockerfile.daemon`). | Yes |
+| Stdio shim and `pseudolife-mcp` on the user's machine | A Python virtual environment the installers build with `ops/shim_runtime.py`; every client registration points at its launcher. | Yes |
+| Installers (`ops/install.sh`, `ops/install.ps1`) | Shell and PowerShell that call Python helpers: `client_credentials.py` (the bearer token), `installer_state.py`, `installer_engine.py`, `preflight.py`, the Codex setup scripts and the Claude Desktop registrar. | Yes |
+| `pseudolife-mcp update` | The installed Python updater; its client step installs a shim runtime from PyPI. From a checkout, the wrappers (`ops/update.sh`, `update.ps1`, `update.py`) use the native updater only with `--native` or `PSEUDOLIFE_NATIVE_UPDATE=1`, or when no Python 3.10 or newer is found. | Yes |
+| Native client (`rust/shim`, binary `pseudolife-stdio`, installed as `pseudolife-mcp`) | Opt-in through `pseudolife-mcp runtime install --archive`. On a release, `release.yml`'s native-archive job (five targets) runs and publishes only when the repository variable `PSEUDOLIFE_PUBLISH_RUST_ASSETS` is `true`; it is unset, and release 0.23.1 carries no assets. A manual dispatch builds the archives without publishing. | Not installed |
+| Plugin hooks | bash and PowerShell scripts (`plugin/hooks/`). | No |
+| Published packages | The PyPI wheel, the Python daemon image, the PostgreSQL image, the Rust daemon image, and an MCP registry entry (`server.json`) that points at PyPI. | PyPI, the Python image and the registry entry |
 
-### Named cutover blockers
+The native `pseudolife-mcp` never falls back to Python. A shape it has not
+ported prints a deferral on stderr, usually `pseudolife-stdio: mode '<mode>'
+is deferred in this candidate`, and exits 1 (`rust/shim/src/cli.rs`,
+`dispatch`). The day the native client is what the
+installers register, each such shape is a dead end for the user, so each one
+below is either finished or turned into a refusal that says the true cause and
+the fix.
 
-| # | Blocker | Status and code evidence | Remaining batch |
-|---|---|---|---|
-| 1 | Tokenless MCP Host/Origin rebinding | **Closed**: `routes/mcp.rs` mounts tokenless MCP; `mcp/security` checks the allowlist, with legitimate near misses and refusals in route tests and `mcp_ci.py`'s tokenless corpus (#987). | B6 landed |
-| 2 | Reference store/document tools | **Closed**: schema v57 added `reference_chunks` and `cms_counters` (#903); current schema is v58. `documents.rs` serves ingest/search (#934), and `read/search.rs` and stats include references (#939); PDFium parity/provisioning followed in #965/#967. | B7 implementation landed; installed migration proof remains B11 |
-| 3 | W2F-PAIRING-HTTP | **Closed**: `routes/pair.rs` calls `principals::redeem`, publishes the principal, and owns redemption across disconnect, with saturation/refund tests (#1001). | B5 landed |
-| 4 | W2F-CLOCK-RETRY | **Closed**: `board/dispatch.rs` calls `Service::refresh_writer_session` before retry (#1015); `board/clock_retry_tests.rs` covers reconnect and fencing. The forced half-open reprobe outcome remains unproved, and captured-epoch timing remains declared. | B5 landed |
-| 5 | W2F-SHARED-HLC | **Closed**: `board/dispatch.rs::stamp` uses `Ready::tick_hlc`; `board/clock_tests.rs` interleaves board and memory stamps (#993). | B5 landed |
-| 6 | Qwen embedding and reranker artifact provisioning | **Closed**: `pseudolife-daemon provision models` (`model_provision.rs`) installs the public Qwen3-Embedding-0.6B ONNX export and the ms-marco-MiniLM-L-6-v2 reranker, each file pinned by a compiled SHA256 and byte size (#1114). `onnx_artifacts.rs::resolve` takes the Qwen model only from that provisioned root; a missing or tampered embedding refuses readiness, and a bad reranker disables reranking loudly. | B8 landed (D4); installed provisioning through install and release-mode `update` remains B11 |
-| 7 | Image ONNX graph agreement | **Closed**: `Dockerfile.daemon-rust` no longer bakes a graph; its entry point (`ops/provision-daemon-models.sh`) provisions the pinned models at first start into a persistent models directory (#1114). Embedding parity against Python torch fp32: max abs difference 5.886e-7, min cosine 0.99999999999, 30/30 orders. CI's disposable image job proves offline model reads across image restarts (#1122). | B8 landed (D4) |
-| 8 | Console sign-in (divergence `CONSOLE-SIGNIN`) | **Closed** 2026-11-07 for the daemon (added 2026-11-03; the Python side is #1164 and #1166, under D10's 2026-11-02 exception). The link half landed in #1189 and #1220: the session resolver at the opt-in call sites (never hooks, `/mcp` or `/api/coordination/*`), the operator allowlist (a session a paired machine issued is refused), `POST /api/console/link`, the pre-auth `POST /api/console/session`, `GET /api/console/sessions` and `POST /api/console/sessions/revoke`. The passkey half is served by `maintainer_ops/signin.rs` and `routes/signin.rs`: the pre-auth `POST /api/console/passkey-challenge`, the passkey body of `POST /api/console/session`, `POST /api/console/passkey-bind`, `maintainer_passkeys.signs_in_as` written at a Console enrolment, a revoked, cancelled or rebound key's sessions ended in its transaction and dropped from the view (and by the native shim's host `maintainer revoke` and `reset`), and `/health` `console_signin.passkey`. Compared with Python by the `console-signin` and `console-passkey-signin` harness scenarios. The native shim's `console` CLI mode answers natively (CLI-CONSOLE-PRINT, 2026-11-12; the browser sign-in 2026-11-13) and defers only the launchers it does not reproduce (G2-F); it opens the Console from a client, which stays on the Python runtime under the 2026-11-07 G2 scope the conductor relayed, so it does not gate the daemon switch. | B5 |
+## What is left
 
-Blockers 1 to 8 are closed (blocker 8, Console sign-in, on 2026-11-07). That does not close the acceptance
-gates or the remaining Console, CLI, install and recovery work.
+### 1. No Python on a user's machine
 
-### Readiness by surface
+1. The native shim on Windows starts without a board address about half the
+   time on a slow machine (#1324) and refuses the markers the plugin hooks
+   write, so board mail never wakes a session (#1326).
+2. The native updater runs the client steps after the shim step in the old
+   binary (#1308).
+3. The native archives publish with every release.
+4. The installers and `update` install the native client, re-point existing
+   registrations at it, and stop calling Python helpers.
+5. The registered shim can start a local daemon without Python. Today
+   `rust/shim/src/lifecycle.rs` starts one only from `PSEUDOLIFE_MCP_PYTHON`
+   or `PSEUDOLIFE_MCP_SERVE_COMMAND`; with the lite tier dropped this becomes
+   a refusal that names the Docker install.
+6. Each command below works natively or refuses plainly:
 
-The served counts above say how much code has landed, not how close a
-surface is to the switch. A surface is ready when every item on it has all
-three linked proofs (see "Acceptance boundary"): **behaviour** (a recorded
-differential run against the Python oracle; under D6, a published nightly
-run on a master containing the PR's base), **durable state** (the rows and
-files it writes compared with Python's after the same calls, and still
-readable by the older side after a rollback) and **installed execution**
-(reached through the entry point a user's install registers, after a
-restart, not a binary a harness starts by path). This table is the progress measure; the PR total in
-the ordered plan is a planning estimate.
-
-| Surface | Ready means | On `75a8015e` (2026-11-01) |
+| Command | Native today | Left |
 |---|---|---|
-| MCP tools (38) | Every tool serves its body with every documented argument (no `not_implemented` stub, no refused documented argument), with the three proofs. | 38 of 38 bodies served, `memory_search`'s `explain=true` still refused; behaviour proofs are recorded Linux dev-lane runs; no tool has an installed-execution proof. |
-| Console routes (72 plus `/api/pair`) | Every route D9 keeps serves its body behind its gates, retired routes carry their deprecation note, and the Console's own views run against the Rust daemon. | 67 of 72 served on `5274b0b9` (2026-11-07), plus pairing: every retained route. D9's 5 retirements answer their declared 501 and carry their deprecation notes (0.21.0, #1089; B2r). No linked installed proof. |
-| Hook endpoints (8) | Every endpoint serves its body, and the plugin's hooks, run from a registered client, reach the Rust daemon and get the same answers. | 8 bodies served; conductor reminder and registered-client proof remain. |
-| CLI modes (29) | Every mode is native, except D8's three named deferrals, and is invoked through the installed launcher. | 9 native, 15 partly, 5 defer. |
-| Background duties | Each duty runs on its schedule (no scheduled no-op) and its durable effect is checked: autosave writes D2's table, compaction mutates with slot sync, dream and graph-sweep ticks advance their cursors. | Autosave/exit flush persist `cms_counters`, compaction saves slots, and automatic dream/graph sweeps run, and the reaper titles idle sessions (#1091); remaining process-boundary proof stays open. |
-| Install and activation | The installers and release-mode `update` install the Rust daemon and clients with no manual step; the executable every registered client and hook invokes is the one installed; a restart keeps the bank. | No installed Rust path for users: nothing ships a Rust binary or image to them. Checkout-mode `pseudolife-mcp update --engine rust\|python` (#1113) activates the Rust daemon or switches back on the same bank: it backs up first, tags a rollback, rebuilds daemon-only and runs a health gate (version, schema, authenticated read), and the selection persists. `update --engine rust --shadow` starts the read-only shadow beside the untouched Python daemon in one command (first in #1113), and `update --engine python --shadow` removes only the shadow (#1121, merging at the time of this audit). Since G2-A (2026-11-07), release-mode `update --engine rust` pulls the published `pseudolife-daemon-rust:<version>` image (Python and native updaters alike): on a Python host whose bank still keeps its CMS counters in `memory_state/weights.pt` (or is below schema v57) it first updates to the Python daemon at the target, whose startup imports them (G2-K, its own backup, rollback tag and gate, only after the Rust image pulled), stops on Python if the import did not happen, and refuses a Rust host with unimported counters or an unreadable schema; then it provisions the models into the `pseudolife_rust_models` volume at `/models` (outside the backed-up `/data`) before the backup, tags the running image for rollback, recreates behind a candidate overlay and records the accepted selection only after the version, schema and authenticated-read gate; a plain update keeps Rust and `--engine python` switches back. The `rust-image` release job still publishes only when the maintainer sets `PSEUDOLIFE_PUBLISH_RUST_DAEMON=true` for a release. With Rust active, the operator commands that exec Python inside the daemon container (lease, maintainer, invite, board-audit) refuse with a clear fix; a tools-profile service on the Python image is the planned follow-up. Models provision at first start into a persistent models directory (#1114). The disposable opt-in `ops/docker-compose.rust.yml` still keeps its bank and `/data` on tmpfs (only its models volume persists). The daemon crate reports `0.22.0`, matching the shim and package release; none of this is an installed activation proof. |
-| Recovery | Backup and restore run through the Rust entry points on a disposable bank, and a rollback restores the previous executable selection and leaves the bank the newer side wrote readable by the older side. | Pending end-to-end rollback proof. Current Python `schema.py::_refuse_on_future_or_malformed_version` refuses a newer bank before DDL, as Rust does; the old unconditional-downstamp claim is closed for current code. Older Python releases without that guard still need an explicit rollback target and readable-bank proof, including v57 counters/documents. Installed proof ([installed proofs 2026-11-07](../evals/results/g2-installed-proofs-20261107/), master `5274b0b9`): under Rust, `pseudolife-mcp backup` then `restore --backup-file … --state-archive … --yes` returned the bank to the backup-time fingerprint (entries and facts). The update's printed rollback, run verbatim, brought back the original v0.22.1 image on the same bank, and v0.22.1 read and wrote what Rust had written. Same schema (59) on both sides, so the older-release refusal is not exercised there. #1356 (open) addresses the reconnect gap of #909. |
+| `restore` | The checks before any change. | The restore itself: stop the daemon, safety backup, drop, replay, state archive, restart; the confirmation prompt. |
+| `conductor-watch` (`delegate-watch`) | Help, `--stop`, the setup refusals. | The watch loop and `--detach`. |
+| `connect` | Re-pointing existing JSON-file registrations (Claude Code, Claude Desktop, Gemini CLI). | Pairing codes, the Codex configuration, the interactive prompts, a Windows user-scope daemon URL, the unattended-update schedule. |
+| `console` | Every shape except the browser launchers it does not reproduce. | The macOS default launcher and the other launchers Python's `webbrowser` knows. |
+| `serve` | Only a bounded HTTP candidate used in maintainer testing (`sent_serve.rs`), not the daemon. | A refusal that names the Docker install; the daemon is the separate `pseudolife-daemon` binary. |
+| `expose` | Nothing. | The whole command; done on a branch with the program-lookup fix. |
+| `move` | The refusals before any change. | Rebuilt later; until then a plain refusal. |
+| `tunnel` | Status, a pending-only update, and the refusals of `verify` and `setup`. | Rebuilt later; until then a plain refusal. |
+| `embedded` | Nothing. | Retired with file mode; a plain refusal. |
+| `backup`, `export`, `import`, `invite`, `maintainer`, `lease`, `board-audit` on a lite bank | A refusal or a deferral. | One refusal that names the Docker install. |
+| Edge shapes in `doctor`, `console`, `connect`, `invite`, `pair`, `board-audit`, `export`, `import` | Several hundred `Defer` sites that reproduce Python's handling of unusual input. | A sensible native answer; no reproduction of Python quirks. |
 
-## Maintainer decisions and gates
+The release that makes the native client the default is accepted on installed
+proof, not on parity: a fresh install, an update from the previous release, a
+backup and restore, a rollback and a real client session, on Windows, Linux and
+macOS.
 
-Decisions (D) change what gets built; gates (G) are steps only the maintainer
-takes. Each D row states the question, the maintainer's decision with its
-date and where it is recorded (a cortex slot in the memory bank), and the
-batches it changes. G1 was approved on 2026-11-06 for the read-only shadow only; G2 to G4 are not decided.
+### 2. Stop comparing with Python
 
-| ID | Question | Decision | Changes |
-|---|---|---|---|
-| D1 | **Lite and embedded storage tiers: port or retire.** The lite tier (`pip install "pseudolife-mcp[lite]"`, an embedded PostgreSQL 18 through `pg0-embedded`) is the README Quickstart's install. `embedded` mode and file mode are the v0.1 in-process server and `.pt` file storage, an escape hatch with no Postgres. The Rust daemon refuses to start without a DSN. The 2026-08-14 lite-backbone evaluation found that `pg0-embedded` is a thin wrapper over the Rust `postgresql-embedded` crate, and that the file-mode engine (torch tensors and Chroma) has no current install path. | Decided 2026-10-23 (`rust-cutover-decision-D1 / maintainer decision`): port the lite tier (embedded PostgreSQL via `pg0-embedded` / the Rust `postgresql-embedded` crate; re-verify upstream before relying on it); retire embedded in-process mode and `.pt` file mode, keeping a one-time `.pt` import; "the retirement needs a deprecation note in the release". This is the decision rule 6 of PARITY.md's "Internal-only gaps requiring explicit equivalents" asks for. | B9; the lite-tier CLI sub-rows in B10 |
-| D2 | Where counters, surprise history and band weights persist: Python's torch `weights.pt`, a port of that format, or a bank table (a schema change). | Decided 2026-10-23 (`rust-cutover-decision-D2 / maintainer decision`): a bank table, in the same schema bump as B7's document table; a one-time import of an existing `weights.pt` at first start; no Rust port of the torch `.pt` format. | B4 autosave; B7's schema bump |
-| D3 | Accept the tokenless MCP rebinding gate (blocker 1). The divergence register says the gate must be accepted, not just implemented. | Decided 2026-10-23 (`rust-cutover-decision-D3 / maintainer decision`): accepted, on condition the Rust gate is at least as strict as Python's current check and its tests include the near-miss legitimate call. | B6 |
-| D4 | Model provisioning: bake the verified Qwen export into the image or provision it at install; scope of bf16 ONNX. | Decided 2026-10-23 (`rust-cutover-decision-D4 / maintainer decision`): provision the verified Qwen export at install or first start with a pinned checksum, not baked into the image; ship one verified export; bf16 ONNX only after a ladder run measures it. The daemon's checksum pin closes blockers 6 and 7 together. | B8 |
-| D5 | How existing Chroma document stores reach the new table: migrate at upgrade or re-ingest. | Decided 2026-10-09 (`Pseudolife document store / post-cutover home`): a one-time migration of existing Chroma documents into the pgvector table, not re-ingestion; the Python change lands first (schema bump), then the Rust port proves it by DB-state equality; Chroma is dropped from the Rust daemon. | B7 |
-| D6 | Evidence bar for `ported`: is a recorded Linux dev-lane differential run enough, or must hosted CI compare bodies on both OSes? | Decided 2026-10-23 with D11 (`rust-cutover-decision-D6-D11 / maintainer decision`): the bar for `ported` is a published nightly run on a master that contains the PR's base; hosted body comparisons only for surfaces with Windows-specific code paths (the #862 principle). | B13, G2 |
-| D7 | Accept or close each remaining declared divergence, including the two sent-YAML presentation deferrals (OPS-CUTOVER). CUTOVER requires the union to be empty or accepted by the maintainer. | Decided 2026-10-23 (`rust-cutover-decision-D7 / maintainer decision`): the two sent-YAML presentation deferrals are accepted. The remaining declared divergences are bucketed as presentation, behaviour with no caller, or behaviour with a caller; only the behaviour-with-a-caller bucket must close before G2. A row stays open until it is bucketed. The decision puts the buckets in a memo; this plan also records them in `divergences.md` (B14a). Decided 2026-11-07 (`rust-cutover-decision-D7 / maintainer decision 2026-11-07`, relayed by the conductor, from that day's triage of the 120 caller rows): the 67 rows judged harmless are accepted as no caller impact and 8 named refusals or substitutions are accepted (`divergences/README.md`); multi-band presets and retention policies other than balanced refuse Rust startup with a named error pointing to `pseudolife-mcp migrate-flat` (the Rust half of R11's retirement, maintainer 2026-11-02; no relocation is ported); the commit-unknown recovery rows are accepted after a commit-loss fault-injection run shows nothing wrong persists past rehydrate or restart; the shipped Python 3.12 image (Unicode 15) is the oracle contract, so the harness oracle moves to 3.12. | B14a, B14b, G2 |
-| D8 | Port or retire `delegate-watch` and the remaining operator-only CLI modes (`coordination-recovery`, `channel`'s remainder, `maintainer setup`). Retiring a mode removes a supported command. | Decided 2026-10-23 (`rust-cutover-decision-D8 / maintainer decision`): port `coordination-recovery`; defer `delegate-watch`, `channel`'s remainder and `maintainer setup` by name until after the default switch; retire none. | B10e |
-| D9 | **Proposal A: Console scope cut** for the 12 unserved Console routes no Console code calls (below). It removes or narrows public REST routes that the guides document. | Decided 2026-10-23 (`rust-cutover-decision-D9 / maintainer decision`): retire `POST /api/lessons/restore` and `POST /api/world/restore` (duplicated by `memory_graph_review` `restore_slot`) and the three uncalled read-only routes `GET /api/curation/retired`, `GET /api/graph/communities` and `GET /api/graph/proposal-evidence`, each with a deprecation note; port `POST /api/episodes/merge`, `/prune` and `/rename` as one small batch; move `/api/briefing`, `/api/stats`, `/api/episode/start` and `/api/episode/end` to the B10 CLI batches. | B2a, B2b, B2c, new B2e and B2r, B3, B10 |
-| D10 | **Proposal B: a soft Python freeze now** (below). It stops feature work on the daemon users run today. | Decided 2026-10-23 (`rust-cutover-decision-D10 / maintainer decision`): fixes and the B7 document table continue; no new Python tools, routes, hooks or CLI modes; pending schema changes (B7's table, D2's table) land in one schema bump. G4's retirement half stays at stage 4. Exception granted 2026-11-02 for the Console sign-in and owner-scope work only (`docs/specs/2026-11-02-console-owner-signin.md`, #1144): the `/api/console/` routes, the `pseudolife-mcp console` mode and the v59 bump. | Every batch's oracle; B4, B7, B17 |
-| D11 | **Proposal C: nightly dev-box evidence** (below). With D6 it sets the evidence bar for `ported` and for the switch. | Decided 2026-10-23 with D6 (`rust-cutover-decision-D6-D11 / maintainer decision`): `w2e.py`, `w2d_search.py` and `board/run.py` run nightly on a Linux dev box and publish JSON naming both compared heads, instead of body comparisons in hosted CI. | B13's scope, G2 |
-| G1 | Start the live-bank shadow and the soak (B16). Live-bank access. | Approved 2026-11-06 for the read-only shadow only (`rust-cutover-gate-G1 / maintainer decision`): restore the newest backup into a disposable bank and compare reads there, then run the read-only companion (port 8766, SELECT-only role) against the live bank. Python stays the writer. The soak, Rust as the live daemon, is not decided. | B16 |
-| G2 | Switch the default: installers and release-mode `update` select the Rust daemon. | Not decided. | B17 |
-| G3 | Release on the four public surfaces, then deploy. | Not decided. | B17 |
-| G4 | Freeze Python daemon development (fixes only), and later retire the Python oracle, source and packaging. | Not decided as a gate; D10 (2026-10-23) is a soft freeze in its place until G4 (fixes plus B7's and D2's tables, no new Python surfaces), and the retirement half stays here. | B17 |
+CI spends most of its hosted time comparing Rust with a live Python oracle or
+testing Python code that can no longer change. Summed job durations (not
+billed minutes) from single runs of 13 and 14 November 2026: an ordinary pull
+request about 140 to 156 hosted minutes (runs 43433514840, 43392781569,
+43392771163), a Rust-only batch about 445, about 355 of them in the parity
+shards (run 43449162029), and a master push about 230 (runs 43456549508 and
+43456549451).
 
-## Proposals A to C (proposed 2026-10-20, decided 2026-10-23)
+1. A check fails an ordinary pull request that changes `pseudolife_memory/`,
+   other than the Console build output in `pseudolife_memory/web/static/`.
+2. No workflow builds or runs a Python oracle: the judges suite, the frozen
+   judge probes, the live arm of each parity shard, `cli-live`, the nightly
+   body evidence and the wait-mail capture stop. Golden replays stay.
+3. The Python lanes run only the tests that survive Python: the installers and
+   update wrappers, the `ops/` tooling, the plugin hooks, the docs and release
+   guards, and the CI tooling. Tests of the frozen package are not collected
+   by default.
+4. Issue #1378 (the daemon's `w2e.py golden` replay cannot catch a
+   regression) is fixed or that replay is replaced by Rust tests.
 
-These three came out of the 2026-10-19 review of this plan. The maintainer
-decided all three on 2026-10-23 (D9 to D11 above). The analysis below is why
-each was proposed; each ends with what was decided where that differs from
-the proposal.
+What remains after that is the Rust build and test, mostly on Windows.
 
-**Proposal A (D9): cut the Console scope.** A static search of master `2092e7b1`
-(`git grep` over `frontend/src`, `pseudolife_memory`, `plugin`, `rust/shim`,
-`ops`, `evals` and `examples`, excluding tests and `web/routes.py` itself)
-finds no Console caller for 12 of the 69 unserved routes. The 8 below have no
-caller at all outside `routes.py`, their tests and the guides that document
-them (`docs/guide/episodes.md`, `dreaming.md`, `memory-model.md`,
-`configuration.md`, `docs/runbooks/deep-dream.md`). What retiring each would
-leave: the two restores survive as `memory_graph_review(action=
-"restore_slot")`; the community summary survives in `GET /api/graph/digest`
-(the Insight view's source), but per-community detail
-(`/api/graph/communities?id=`) does not; episode merge, prune and rename,
-proposal evidence and the retired-curation listing have no other path
-(`mcp_server.py` has no such actions, and `memory_session_title` renames only
-the caller's own session), so retiring those five removes the capability,
-not just the route. Each is a documented REST API removal and needs a
-deprecation note.
+### 3. Delete Python
 
-- `GET /api/curation/retired`
-- `GET /api/graph/communities`
-- `GET /api/graph/proposal-evidence`
-- `POST /api/episodes/merge`
-- `POST /api/episodes/prune`
-- `POST /api/episodes/rename`
-- `POST /api/lessons/restore`
-- `POST /api/world/restore`
+1. The Console build output moves out of `pseudolife_memory/web/static`
+   (`frontend/vite.config.ts` writes it; `ops/Dockerfile.daemon-rust`,
+   `ops/Dockerfile.daemon` and the static-file tests in
+   `rust/daemon/src/static_files.rs` read it).
+2. Whatever still reads `pseudolife_memory/storage/schema.py` (the schema
+   generator, the native updater's engine switch) reads a Rust source.
+3. A last PyPI release carries a deprecation note; the Python daemon image
+   stops publishing; `server.json` points at what the native install offers.
+4. `pseudolife_memory/`, the tests that only test it, the oracle harness code
+   under `rust/` and `evals/rust_port/`, the partial lite-tier code under
+   `rust/shared/`, and the Python lanes are deleted.
+5. `evals/` is decided separately: about half of its scripts import the
+   package and would have to drive the Rust daemon over HTTP.
+6. Follow-ups that waited for this: #1357 (regenerate the Unicode tables).
 
-The other 4 have CLI, shim and eval-harness callers (`evals/
-coordination_bench.py`, `agent_token_ledger.py`, `memory_policy_bench.py`,
-`taubench_pseudolife`), no Console caller. They stay served. `/api/briefing`
-was B3's; the other three belong to the CLI batches (B10) rather than
-to the Console batches. They could move onto MCP if the maintainer prefers
-one surface, which moves those callers too:
+## Decision record (October and November 2026)
 
-- `GET /api/briefing` (briefing CLI, session hook, shim briefing hook)
-- `GET /api/stats` (`move` CLI, shim `sent` serve)
-- `POST /api/episode/start` and `POST /api/episode/end` (episode CLI,
-  `service.py`, `shim.py`, shim lifecycle)
+These are the decisions the October plan rested on, with their outcome. Code
+comments and parity rows cite them by ID. The full text of each, the batch
+labels B1 to B17, and the sections older comments cite by name ("Ordered
+plan", "Maintainer decisions and gates", "Recovery", "What sets the pace")
+are in the previous version of this file: `git show 201311de3:rust/CUTOVER.md`.
 
-Decided (D9): the two restores and the three read-only routes retire, each
-with a deprecation note (5 routes). The three episode routes are ported, not
-retired, as one small batch (B2e), so their capability stays. The 4
-CLI-called routes move to the B10 CLI batches. B2b therefore loses the five
-episode routes (three to B2e, two to B10) and the two restores, B2a loses
-`/api/stats`, and B2c loses the three read-only routes: 11 routes leave B2a
-to B2c and `/api/briefing` leaves B3, 12 in all, and 5 Python route
-contracts no longer need a Rust match.
+| ID | Question | Outcome |
+|---|---|---|
+| D1 | Lite and embedded tiers: port or retire. | 2026-10-23: port lite, retire embedded and file mode. Lite dropped 2026-11-14. |
+| D2 | Where counters and band weights persist. | A bank table (`cms_counters`, schema 57), with a one-time import of `weights.pt` by the Python daemon. |
+| D3 | Tokenless MCP rebinding gate. | Accepted; implemented (#987). |
+| D4 | Model provisioning. | Provisioned at install or first start with a pinned checksum (#1114), not baked into the image. |
+| D5 | Existing Chroma documents. | Migrated once into the `reference_chunks` table by the Python daemon; Chroma is not in the Rust daemon. |
+| D6, D11 | Evidence bar for a ported surface. | A published nightly differential run. Superseded 2026-11-14: the bar is that it works. |
+| D7 | Declared divergences from Python. | Triaged 2026-11-07; the register under `rust/daemon/divergences/` is now a record, not a gate. |
+| D8 | Operator-only CLI modes. | `coordination-recovery` and `maintainer setup` ported; `conductor-watch` (`delegate-watch`) is in "What is left". |
+| 2026-10-19, Option B | Graph insight: port NetworkX's Louvain or not. | The Rust daemon computes communities and sampled betweenness with its own deterministic algorithm; compared structurally with Python, not byte for byte. |
+| D9 (Proposal A, batch B2r) | Console routes no Console code calls. | Five retired and answered with a declared 501 by the Rust daemon (`routes/console.rs`, `D9_RETIRED`); three episode routes ported. |
+| D10 | Soft Python freeze. | Replaced by the hard freeze of 2026-11-14. |
+| G1 | Read-only shadow on the live bank. | Approved 2026-11-06 and run. |
+| G2 | Rust as the default daemon. | Decided 2026-11-07; shipped in 0.23.0. |
+| G3 | Release and deploy. | 0.23.0 and 0.23.1 released and deployed on the Rust daemon. |
+| G4 | Freeze, then retire Python. | Frozen 2026-11-14; retirement is "What is left". |
 
-**Proposal B (D10): a soft Python freeze now.** Every new Python surface widens the
-oracle the Rust side chases, and every schema bump moves the parity pin and
-the harness goldens on both OSes (the v56 lesson in CLAUDE.md). The proposal
-brings G4's "fixes only" half forward to now: fixes and the document table
-(B7) continue; no new Python tools, routes, hooks or CLI modes; pending
-schema changes (B7's table, D2 if it picks a table) land in one bump. The
-retirement half of G4 stays at stage 4. Decided as proposed (D10); D2 chose
-a table, so the one bump carries both tables.
+The eight named cutover blockers of the October plan (tokenless MCP
+rebinding, the document store, pairing over HTTP, the clock retry, the shared
+clock, model provisioning, image model agreement, Console sign-in) are closed.
 
-**Proposal C (D11): nightly evidence on a Linux dev box instead of hosted
-body comparisons.** B13 as written puts `w2e.py`, `w2d_search.py` and
-`board/run.py` into hosted CI on both OSes through portable goldens or a
-provisioned oracle: 3 to 5 PRs, Windows runners that are already the slowest
-lane, and real-model runs hosted CI cannot afford. The proposal runs the
-three differentials nightly on a Linux dev box against master, publishes the
-JSON (counts, differences, the compared head) where PRs can cite it, and
-keeps hosted CI on what it does now. D6's bar is then "a published nightly
-run on the current master" rather than a hosted job. B13 shrinks to the
-stale tokenless `woke` case, Windows daemon runtime runs if D1 keeps lite,
-and whatever hosted comparison D6 still requires. Decided (D6 and D11): as
-proposed, with the published JSON naming both compared heads, and D6's bar
-set to a published nightly run on a master that contains the PR's base;
-hosted body comparisons stay only for surfaces with Windows-specific code
-paths. D1 ports lite, so B13 keeps the Windows daemon runtime runs.
+## Historical measurement
 
-### Dated reconciliation with the ordered plan (2026-11-01)
-
-B2-0 landed in #930; B5 in #993/#1001/#1015; B6 in #987; and B2e in #936.
-B7's implementation is present (#903/#934/#939, with PDF work #965/#967),
-but migration through installed update remains B11's obligation. B3's
-endpoint bodies landed (#992/#995/#1002), with the declared reminder gap
-still open. B4's autosave, shutdown and compaction work landed
-(#998/#999/#1000); it is not wholly complete. B1's tools and sweep ticks
-are implemented (including #931/#932/#937 and the queue judges), but this
-is not a declaration that all three acceptance proofs have landed.
-The plan's B2d label says seven maintainer POSTs: the challenge is now
-served, leaving six actions (all six served since #1092). B10f's briefing and episode routes landed
-(#1030/#1005); the CLI modes' other deferrals remain. B9's lite lifecycle
-exists (#946/#962/#963), so the historical DSN-only premise is stale;
-its CLI, retirement and installed-path obligations still apply.
-The following plan remains the dated baseline, including its old in-flight
-labels; use the audited status above for completion, not those labels.
-
-## Ordered plan
-
-Sizes are in PRs, from the scope each batch names; they carry real error
-bars and have no dates. Each batch owns the files listed. Two batches whose
-files do not overlap can run in parallel sessions.
-
-Shared hot spots, and how batches share them:
-
-- `rust/daemon/src/http.rs`. B2-0 is the plan's first PR: it moves the route
-  fall-through (the dispatch tail that ends in `not_implemented`), the hook
-  arm, `pair()` and the `/mcp` mount into per-family modules, with no
-  behavior change, so B2a to B2d, B3, B5 and B6 each edit their own module.
-  B3, B5 and B6 start after it rather than serializing on `http.rs`.
-- `rust/daemon/src/mcp/dispatch.rs` (the tool registry) and
-  `daemon/harness/mcp_compare.py` (`UNSERVED`): only B1 and B7 add tools, one
-  PR at a time. B6 also edits `mcp_compare.py` (the tokenless cases) and
-  takes its turn in that queue.
-- `daemon/harness/w2e.py`: B1 and B2b both add scenarios; they serialize on
-  that file or put new scenarios in separate modules it imports.
-- `rust/daemon/src/service.rs`: B1's background ticks and B4 both edit it, so
-  they serialize on that file.
-- `.github/workflows/rust.yml` and `rust/ci/`: B8 (image CI), B10 (harness
-  rows) and B13 (hosted parity) add jobs, one PR at a time.
-- `pseudolife_memory/storage/schema.py` and the Rust schema plan: B7 only;
-  D2's table rides in B7's bump (D10: one bump). Any schema bump serializes
-  with every other.
-- `rust/parity/` and `rust/daemon/divergences/`: each batch edits only
-  its own row files. B14's register-wide pass runs when few batches are open.
-
-A new session takes a batch whose files no open session owns; it does not
-add a second session onto a hot-spot file above, but queues for it.
-
-How a batch cuts its work:
-
-- **Port each service once, then attach its transports.** A behaviour that
-  several surfaces reach (an MCP tool, its Console route, a hook, a CLI mode)
-  is one Rust service with one set of behaviour and state assertions; each
-  transport then adds only what is its own: authentication, argument or body
-  binding, status codes and error envelopes. B2b's routes over bodies MCP
-  already serves are the model. Reuse the Python tests whose assertions an
-  adapter can keep unchanged, and record in the PR which of their assertions
-  survive the move and which were changed or dropped, so that coverage lost
-  in the routing is visible rather than assumed.
-- **One cohesive review unit per PR.** The adapter, the implementation and
-  the harness change that together prove one behaviour go in one PR, so its
-  reviewers see the claim and its proof together; unrelated features stay in
-  separate PRs even inside one batch, so a red one is dropped without the
-  others.
-
-### Stage 1: start now, in parallel
-
-| Batch | Work | Owns | Waits on | Size |
-|---|---|---|---|---|
-| B2-0 | **The first PR of the plan.** Move the Console route fall-through, the hook arm, `pair()` and the `/mcp` mount out of `http.rs` into per-family modules, with no behavior change; the 501 list stays exactly `routes.json`. Open it before any other batch touches `http.rs`. | `http.rs`, new `rust/daemon/src/routes/` modules | none | 1 |
-| B1 | Graph and dream engine, tasks L to P, in flight in the Rust port session. L: `memory_consolidate` (#836, open). M: graph store writes (`memory_graph_relate`, `memory_graph_unrelate`, `memory_alias`, `memory_relation_define`): landed, #842 in batch #866. N: graph reads: N1 `memory_graph` traversal (landed, #847 in batch #882), then N2 `memory_recall` with graph expansion plus the decision record. O: `memory_graph_review` (queue, merge, duplicate and junk proposals, fold direction, vetoes, three-judge path, audit). P: `memory_dream` and deep dream: P1 the consolidation pass (#864, open), the outcome, lesson and digest stages (#867, open), the deep dream (#873, open) and its merge judge in the background sweep (#881, open); P2 edge re-scoring, hard-violation cleanup, link discovery and the graph-insight refresh (P2b under Option B, a structurally compared declared divergence); then the automatic dream and graph-sweep ticks. Also the credential-bearing extractor and recall redirect refusal. | graph, dream and recall modules under `rust/daemon/src/`; `mcp/dispatch.rs`; `daemon/harness/graph_*.py`, `w2e.py` scenarios; PARITY MCP rows; the graph rows of `divergences.md` | none (#833 landed) | 6 to 9 as planned (L 1, M 1, N 1 to 2, O 1 to 2, P 2 to 3); 2 landed, 5 open, 4 of them P's, so P is already past its estimate |
-| B3 | Hooks: `/api/hook/session-start` and `/api/hook/memory-policy` (briefing composition, session-start registration, policy logging, the release offer), the authorized memory-changes note and the session-end close. D9 moves the `/api/briefing` route to the B10 CLI batches. This plan reads that as: the briefing composition the session-start hook needs stays here, and B10 serves the route over it. | the hook arm (`rust/daemon/src/routes/hook.rs` since B2-0), a new briefing module, hook cases in `daemon/harness/run.py` | B2-0 | 2 to 3 |
-| B5 | Board blockers: W2F-SHARED-HLC (board onto `Ready::tick_hlc`), W2F-PAIRING-HTTP (two-slot gate, refunds, disconnect ownership, principal-cache publication; CLI-PAIRING-ENDPOINT), then W2F-CLOCK-RETRY once B4's writer-session refresh lands. Then Console sign-in (blocker 8, `CONSOLE-SIGNIN`): session resolution at the opt-in call sites, the operator allowlist and the sign-in routes, before G2. | `rust/daemon/src/board/`, `hlc.rs`, `principals.rs`, `auth.rs`, the `pair()` handler; board, clock-retry and security harness cases | B2-0; B4 for the clock retry | 3 |
-| B6 | Tokenless MCP Host/Origin rebinding: wire the allowlist into the tokenless mount, then run the rebinding cases with a tokenless daemon pair. | the `/mcp` mount (in `http.rs` until B2-0), `mcp/mod.rs`, `mcp_ci.py`, `mcp_compare.py` (queued with B1), `spec-http-security.md` | B2-0; D3 (accepted 2026-10-23): the Rust gate is at least as strict as Python's current Host/Origin check, and its tests include the near-miss legitimate call beside the refused ones | 1 to 2 |
-| B7 | Documents. Python first: the pgvector document table (a schema bump with the full seven-place checklist and the Rust schema plan regeneration, carrying D2's counters-and-weights table in the same bump under D10), its ingest and search, and the one-time migration of existing Chroma documents (D5, decided 2026-10-09; not re-ingestion). The Rust side proves the table by DB-state equality and drops Chroma. Then Rust: `document_ingest`, `document_search`, the reference pool in `/api/search` and `memory_search`, and the reference counts in `memory_stats`. | `schema.py` and the Python document code; the Rust schema plan; new Rust document modules; `mcp/dispatch.rs` (after B1's current PR) | none (D5 and D2 decided) | 4 to 6 (Python 1 to 2, Rust 3 to 4) |
-| B8 | Models and image, per D4: provision the verified Qwen export (D4: "ship one verified export"; B8's PR states whether that covers the reranker named in blocker 6) at install or first start, checked against a checksum the daemon pins (closing blockers 6 and 7 together), not baked into the image; ONNX-PREREQUISITE; bf16 ONNX only after a ladder run measures it; and an image CI job that proves the graph. Install and update do the provisioning themselves (CLAUDE.md "Install and update experience"). Status (2026-11-02): blockers 6 and 7 closed by #1114 and #1122. The pinned set covers the reranker: `provision models` installs the Qwen export and ms-marco-MiniLM-L-6-v2, each file pinned by compiled SHA256 and byte size, at first start into a persistent models directory; a bad embedding refuses readiness, a bad reranker disables reranking loudly; CI proves offline model reads across image restarts. bf16 remains unmeasured; provisioning through the installers and release-mode `update` is B11's. | `ops/Dockerfile.daemon-rust`, `ops/provision_embedding_models.py`, `onnx_artifacts.rs`, `embed.rs`, `daemon/harness/embedding.py`, `spec-w3j-container.md` | none (D4 decided) | 2 to 3 |
-| B10a-d, B10f | CLI remainder, split by blocker; each mode lives in its own `rust/shim/src/cli/<mode>` and `rust/cli_harness/rows/<row>`, so the five can run in parallel. a: the daemon-container `docker exec` transport (audit, invite, maintainer). b: native `ensure_schema` for import (CLI-TRANSFER-SCHEMA), audit stats and local-zone time parsing. c: `doctor --disposable-proof`, `connect` for Codex and pairing codes. d: `tunnel` runtime, `expose`, and the `move` itself, with `/api/stats`, which `move` calls. f: the other three CLI-called routes D9 moved here, `/api/briefing` (the `briefing` mode), `/api/episode/start` and `/api/episode/end` (the `episode` mode), as one PR. | per-mode CLI modules and harness rows; their PARITY rows; for the four routes, their `rust/daemon/src/routes/` modules | a needs nothing; the lite halves wait on B9; the four routes wait on B2-0, and `/api/briefing` on B3's briefing composition | 9 to 11 (a 1 to 2, b 2, c 2, d 3 to 4, f 1) |
-| B14a | Divergence triage under D7: bucket every declared divergence other than the two accepted sent-YAML deferrals as presentation, behaviour with no caller, or behaviour with a caller (naming the caller), or as closed, as a docs-only PR. Only the behaviour-with-a-caller bucket must close before G2; a row stays open until it is bucketed. | `divergences.md` and the spec divergence tables (row text only) | none | 1 |
-| B15 | Configuration and environment appendix: account for each section, field and variable below, or record an accepted disposition (CONFIG-LOAD). | `rust/daemon/src/config.rs`, the appendices in this file | none | 2 to 3 |
-
-### Stage 2: after the first services land
-
-| Batch | Work | Owns | Waits on | Size |
-|---|---|---|---|---|
-| B2a | Console read projections: 14 of the 15 `w2d-console-projections` GETs (all but `/api/config`, which B2d takes), the standalone canonical-search `/api` shapes, the `/api/agents` default view and the three maintainer GETs. Under D9, `/api/stats` moves to the CLI batches. | `routes/` read modules, `rust/daemon/src/read/`; `w2d_*.py` harness | B2-0 | 3 to 4 |
-| B2b | Console writes over bodies already served on MCP: facts set, resolve and forget, reinforce, delete, supersede, consolidate. Under D9 the five episode routes and the two restores leave this batch: `episodes/merge`, `/prune` and `/rename` go to B2e, `episode/start` and `episode/end` to B10, and the lesson and world restores retire (B2r). | `routes/` write modules; REST scenarios in `w2e.py` | B2-0; #836 for consolidate | 3 to 4 |
-| B2c | Graph, review, curation and dream routes over B1's services: 10 GETs and 15 POSTs (D9 retires `/api/curation/retired`, `/api/graph/communities` and `/api/graph/proposal-evidence`). | `routes/` graph modules | B1's matching task | 3 to 5 |
-| B2d | Maintainer POSTs (7) and `/api/config` GET and POST, behind the operator gate. | `routes/` maintainer and config modules | B2-0 | 2 to 3 |
-| B2e | Episode curation routes, per D9: `POST /api/episodes/merge`, `/prune` and `/rename`, ported as one small batch (no other path offers these). | `routes/` episode module; REST scenarios in `w2e.py` (serialized with B1 and B2b) | B2-0 | 1 |
-| B2r | Route retirements, per D9: `POST /api/lessons/restore`, `POST /api/world/restore` (both duplicated by `memory_graph_review` `restore_slot`), `GET /api/curation/retired`, `GET /api/graph/communities` and `GET /api/graph/proposal-evidence`, each with a deprecation note in the release and in the guides that document it (`docs/guide/dreaming.md`, `memory-model.md`, `configuration.md`, `docs/runbooks/deep-dream.md`). D9 does not say when the Python routes are removed; until then the Rust daemon keeps answering each with its declared 501. Landed: the notes in 0.21.0 (#1089), the parity rows as `retired-by-decision`, and the 501 set pinned in `routes/console.rs` (2026-11-07). | the guides and release notes, the matching PARITY and `divergences.md` rows | none | 1 |
-| B4 | Durability and background: the writer-session probe and reconnect, autosave and the clean-exit flush into D2's bank table (a one-time import of an existing `weights.pt` at first start; no Rust port of the `.pt` format), compaction mutation with slot sync, the reaper's automatic titles, the unemitted `/health` keys (`stall`, `migration_partial`, `capacity_warning` and the rest), and the shutdown deadline. | `service.rs`, `background.rs`, `background_sessions.rs`, `maintenance.rs`, `health.rs`, resident stores | B7's schema bump (it carries D2's table) for autosave; serialize with B1-P on `service.rs` | 3 to 5 |
-| B9 | Storage tiers, per D1 (decided 2026-10-23: port lite, retire embedded and file mode). Lite: native embedded-PostgreSQL lifecycle through `pg0-embedded` / the `postgresql-embedded` crate (re-verify upstream first) (start or attach, first-boot lock, major-version refusal, Windows non-ASCII guard, per-user data dir), the daemon's storage resolution, then the lite halves of CLI-BACKUP-LITE, CLI-TRANSFER-LITE, CLI-AUDIT-TRANSPORT, CLI-PAIRING-CONTAINER, CLI-MAINTAINER-TRANSPORT and the lease's embedded refusal, with native Windows daemon runs (lite runs the daemon on Windows). Embedded in-process mode and `.pt` file mode retire, keeping a one-time `.pt` import; D1: "the retirement needs a deprecation note in the release". | a shared embedded-PG module, daemon startup storage resolution, the CLI transports | none (D1 decided) | 3 to 7 |
-| B10e | Operator CLI modes, per D8: port `coordination-recovery` before the switch. `delegate-watch`, `channel`'s remainder and `maintainer setup` are deferred by name until after the default switch, and none retires. | per-mode CLI modules | none (D8 decided) | 1 before the switch (the deferred three after it) |
-
-### Stage 3: release path
-
-| Batch | Work | Owns | Waits on | Size |
-|---|---|---|---|---|
-| B11 | Ops cutover: every OPS-CUTOVER, OPS-IMAGES, OPS-INSTALL-RESTORE and SHIM-CLIENT-UPDATES item below, each closed with the three linked proofs (see "Acceptance boundary"), installed execution and rollback included. That covers the opt-in Rust compose file, the container contract, release and checkout `update`, the installers, backup and restore, unattended updates, and client runtimes. The shim's `update` mode lands here. Before it switches a host still on a pre-v57 Python release, `update` runs the Python daemon's counters import once, so a `memory_state/weights.pt` lands in `cms_counters`: the Rust daemon never reads that file (D2, as the maintainer confirmed on 2026-10-27) and reports it under `/health` `counters_import_required`. The installers do the whole setup themselves (CLAUDE.md "Install and update experience"). Status (2026-11-02), in part: checkout-mode `update --engine rust\|python` activates or switches back on the same bank behind backup, rollback tag, daemon-only rebuild and health gate, and persists the selection (#1113); `--shadow` adds or removes the read-only shadow (#1121, merging at the time of this audit). Release-mode `update --engine rust\|python` selects the published image and switches back (G2-A, 2026-11-07), running the Python daemon's counters import first on a pre-v57 or unimported bank (G2-K, 2026-11-07; checkout mode still refuses such a bank); the image publishes only once the maintainer sets `PSEUDOLIFE_PUBLISH_RUST_DAEMON=true` for a release. The operator commands that exec Python in the daemon container refuse under Rust until a tools-profile service lands. | `ops/`, `pseudolife_memory/update_cli.py` and the installers, `rust/shim/src/cli/update` | B7, B8 and B9 | 6 to 10 |
-| B13 | Evidence, per D6 and D11: a nightly Linux dev-box run of the body differentials (`w2e.py`, `w2d_search.py`, `board/run.py`) against master, publishing JSON (counts, differences, both compared heads) that PRs cite; `ported` then needs a published nightly run on a master that contains the PR's base. Hosted body comparisons only for surfaces with Windows-specific code paths (the #862 principle). Windows daemon runtime runs (D1 ports lite, which runs the daemon on Windows). Fix the stale tokenless `woke` case in `daemon/harness/run.py` (declared 501, now served). Status (2026-11-02): the nightly, non-gating `body-evidence` job and its manual `mode=body-evidence` dispatch landed in #1116, and the stale `woke` case was removed. Its first run (manual, `scheduled_master=false`) found 0 differences over 227 scenarios and 2,675 cases; it does not count as D6's scheduled-master evidence, which starts with the nightly runs. | the dev-box nightly script and its published results; `.github/workflows/rust.yml` and `rust/ci/` for the Windows-specific comparisons | none (D6 and D11 decided) | 1 to 2 |
-| B14b | Divergence closure for G2 (D7): every behaviour-with-a-caller row from B14a is closed by its batch; the presentation and no-caller rows that remain are listed for the maintainer to accept or close. | `divergences.md` | every other batch | 1 |
-| B12 | Docs cutover: every DOCS-CUTOVER item below, once B11 fixes the installed entry points. | `docs/`, READMEs and translations, `llms*.txt`, atlas | B11 | 2 to 3 |
-
-### Stage 4: shadow, soak, switch and freeze (maintainer-gated)
-
-| Batch | Work | Gate | Size |
-|---|---|---|---|
-| B16 | Shadow and soak on the live bank. First, restore the newest live backup into a disposable bank and replay recorded read traffic (search, fact and lesson reads) through both daemons, comparing answers. The Rust daemon is a writer even when it only serves reads: it takes the bank's writer lease, searches log retrieval events and access counts, and background sweeps prune logs and close idle sessions. Beside the live daemon it starts `not_ready` and keeps retrying (`rust/daemon/src/storage/mod.rs`, `LeaseHeld`; `service.rs`, `ensure_storage`), so it would take the writer lease the moment the live daemon let go of it, for example during a restart or an update. It must not run against the live DSN until a read-only mode exists. A live shadow therefore needs a read-only mode the daemon does not have yet (no lease, no telemetry, no sweeps, a read-only PostgreSQL role); build it, then compare its reads with the Python daemon's on the live bank. Then soak Rust as the maintainer host's live daemon behind a rollback tag, watching health, the board and dreams. Status (2026-11-02): step 1, the read-only mode, landed in #1115: `PSEUDOLIFE_READ_ONLY=1` takes no writer lease and runs no writes or sweeps, reads through the SELECT-only role `pseudolife_shadow` (`ops/sql/shadow_reader_role.sql`) and reports `read_only` in health; `rust/daemon/harness/shadow_compare.py` compares its reads. The disposable proof left 68 tables and sequences unchanged, took no lease, and made 44 comparisons (37 exact, the rest declared or noise, 0 new bugs). `update --engine rust --shadow` starts it beside the untouched Python daemon (#1113, with #1121's removal path). G1 was approved on 2026-11-06 for the read-only shadow only; the soak is not decided. Design (2026-11-06; its decisions taken by the maintainer the same day; not built): a Rust mirror writer on a private bank clone, fed by backup deltas and then a default-off Python request journal, to test writes, dreams, the board and the Console on real data before the soak (`docs/specs/2026-11-06-full-rust-shadow.md`). | G1 | 2 to 3, plus the soak window |
-| B17 | Default switch, release and freeze: installers and release-mode `update` select the Rust daemon (G2); release on the four surfaces (G3); Python daemon development freezes to fixes only (G4; D10's soft freeze, fixes plus B7's and D2's tables, has applied since 2026-10-23). The Python oracle, its tests and the eval harnesses stay until a separate retirement decision. | G2, G3, G4 | 1 to 2 |
-
-Total: about 65 to 95 PRs as planned on 2026-10-20, a planning estimate
-from each batch's scope, not a count of remaining work (the readiness view
-under "Where the port stands" is the progress measure). The 2026-10-23 decisions move it down: D9
-about 1 to 2 fewer, D11 about 2 to 3 fewer, and D8 defers 1 to 2 past the
-switch; B2e, B2r and B10f add 3 small ones. The
-longest chains are B7 (the Python document table, then the Rust document
-tools, then the image), B1 then B2c, and B4 then B5's clock retry. All three
-feed B11 and B13, then B16.
-
-### What sets the pace
-
-Measured with `gh pr list --state merged --search
-'merged:2026-10-24..2026-10-30' --limit 300 --json number,title,mergedAt,headRefName`:
-137 merged PR records over seven UTC calendar days, including 39 with
-`headRefName` beginning `integrate/` and 98 other PRs. This is repository-wide
-throughput, not 137 Rust port slices; member PRs and their integration
-wrappers must not be double-counted as delivered work. The observed average
-is 14 non-batch PRs and about 5.6 batches per day.
-
-As an **estimate**, remaining work will be governed by review, integration
-and the unresolved install/model/recovery dependencies, not the old total
-of 65–95 planned PRs divided by that repository-wide rate. No defensible
-remaining PR count or completion date follows from these observations.
-Stage 4 still adds a maintainer-owned soak window. The older timing study
-below is retained as historical evidence, not a measurement of today's CI.
+This timing study predates the batch-only heavy lanes and is kept because a
+test recomputes its figures from the committed artifact.
 
 Measured per batch, 2026-10-23, over every integration batch opened since
 2026-10-19 ([`evals/results/batch-lifecycle-20261023/`](../evals/results/batch-lifecycle-20261023/README.md),
@@ -344,372 +173,3 @@ ruleset does not require, which no hosted runner had acquired. So the wait
 before a change joins a batch, which includes its review, is the largest
 measured cost; GitHub holds no review event here, so it cannot be split
 further. One post-#890 batch is not a trend; rerun the report as batches land.
-
-## Acceptance checklists
-
-The tables below are the 2026-10-10 draft's acceptance rules. The plan above
-schedules them; it does not change them.
-
-Source audit: `3b4de2c515bee07e97cd35b6e1473ea48511ec77`, 2026-10-10.
-All five scoped rows in [PARITY.md](parity/parity-rows/) are **deferred**.
-Every item below is **pending cutover acceptance**, including items whose
-Python implementation or static guard already exists. A source reference is
-not an execution result. Record later evidence against the actual tested head,
-command, platform, exit code and CI run; do not reuse an older head's proof.
-
-## Acceptance boundary
-
-| Item | State | Evidence needed / current authority |
-|---|---|---|
-| Whole-row closure | Pending | Close every contract item before changing a PARITY row to ported; otherwise add only the evidence actually obtained. |
-| Three linked proofs | Pending | Each closed slice links three proofs, each citing its head, command and result: **behaviour** (the differential run comparing its answers with the Python oracle's), **durable state** (the touched rows and files compared after the same writes, plus the older side reading what the newer side wrote, so a rollback cannot strand data) and **installed execution** (the slice reached through the entry point an install registers: the launcher, client registration or hook a user's setup invokes, after a restart). A slice with one or two of them is not closed. The **installed execution** part for install, update, backup/restore and rollback on the Docker tier: [installed proofs 2026-11-07](../evals/results/g2-installed-proofs-20261107/) (the maintainer's G2 evidence bar of 2026-11-07, cortex slot `rust-cutover-G2-scope / maintainer decision`: these three proofs, the forced real-data run and the 24–48 h live window, from which the rows are filled). |
-| Disposable installed paths | Pending (installed proof recorded) | Fresh install, update and restore through the actual installed Rust entry points; compilation and Python fakes do not establish installed-runtime parity. [Phase 5 gap](parity/per-phase-selection-and/). [installed proofs 2026-11-07](../evals/results/g2-installed-proofs-20261107/): fresh `ops/install.sh` then checkout `ops/update.py --engine rust`; v0.22.1 install updated to Rust; backup, restore and rollback; all reads and writes through the shim command the install registered, including after a restart. Checkout mode only (no installer engine option yet). Default `--engine rust` fails its gate on a fresh host while models provision (3 of 3); the proofs used `--health-retries 1300` (fix pending). |
-| Differential acceptance | Pending | Reuse `daemon/harness/run.py`, `compare.py` and `dbstate.py`: response values and consumer-read headers, touched and potentially touched DB rows after writes, and files in isolated client homes. Retain declared normalizers, raw failures, and caught source mutants. |
-| Platform and hosted gates | Pending | Linux disposable proofs, native Windows evidence for OS-sensitive client/process/file behavior, and completed exact-head Rust/Parity CI on both OSes; required repository guards and current-master integration. |
-| Independent reviews | Pending | Required independent reviews and findings/dispositions in the PR body; a fixed finding receives a covering case and watched passing rerun. |
-| Remaining divergences | Pending | Reconcile all port slices' declared divergences; the union must be empty or explicitly accepted by the maintainer. Under D7 (2026-10-23) every row is bucketed (B14a) and every behaviour-with-a-caller row is closed before G2; the presentation and no-caller rows need not close before G2 and wait for the maintainer's acceptance (B14b). Existing unsupported embedded, document, model and client paths are not silently retired: the retirements D1 and D9 decided carry their deprecation notes. |
-| Maintainer execution | Pending | Default switch, release, update behavior changes, live-bank mutation and deploy remain separate maintainer decisions. Keep the Python oracle until its retirement is explicitly decided. |
-
-## OPS-CUTOVER
-
-Current sources: `ops/Dockerfile.daemon`, both compose files in `ops/` and their
-copies in `pseudolife_memory/compose/`, `pseudolife_memory/update_cli.py`,
-`unattended_update.py`, `runtimes.py`, and `.github/workflows/`.
-
-| Item | State | Evidence needed |
-|---|---|---|
-| CPU image | Pending | Inspect built Rust image/runtime dependencies and execute on CPU with GPU hidden; retain Python CPU guards (`test_daemon_image_is_cpu_only.py`). The Python lock/install assertions alone do not inspect Rust dependencies. Execution on CPU is shown on master `d09094b6`: the image sets `CUDA_VISIBLE_DEVICES=-1` (`test_container.py`), and the disposable image job's probes (`container_probe.py`, `harness/image_model_proof.py`, #1122) require `/health` to report the `onnx` embedder on `cpu`. No job inspects the built image's runtime dependencies yet. |
-| Offline image and models | Pending (offline half met in CI) | Under D4 the Rust daemon's model is provisioned at install or first start, not baked: after provisioning (or from a local provisioned cache), a cold start and an authenticated model-dependent read need no download, and a provisioned artifact whose checksum differs from the daemon's pin is refused. Python bakes Qwen3 and MiniLM; Rust uses a verified Qwen3 ONNX export and dynamic ONNX Runtime (`daemon/src/embed.rs`, `daemon/Cargo.toml`, `daemon/harness/run.py`). Package tokenizer/config/artifacts and library paths; do not treat an ONNX graph as proof of all Python model/fallback contracts. Met in CI on `d09094b6`: `harness/image_model_proof.py` (#1122) runs PostgreSQL and the daemon with `--network none` over a Unix socket and proves an authenticated store, a cold restart and an authenticated `memory_search` with `rerank` on the provisioned models; `embed.rs` verifies every embedding file against `model_provision.rs`'s compiled SHA256 before loading and refuses readiness on a mismatch, and a missing or tampered reranker is disabled (`search_route.rs::missing_or_tampered_reranker_is_disabled_without_loading`) (#1114). Installed provisioning through the installers and release-mode `update` remains B11. |
-| Image ONNX graph agreement | Closed (#1114, #1122) | The image no longer bakes a graph: `ops/provision-daemon-models.sh` provisions at first start, and `model_provision.rs` pins the public export `onnx-community/ONNX_Qwen3-Embedding-0.6B` at `462e5a71e724575c710975d9b79309b690fd22ce` (graph SHA256 `cec22565ec783289a5e51bd94950f70b8cb7ca6c0b7ced255b5e8dbf3c60536b`, every file by compiled SHA256 and byte size). #1114 measured that export against Python torch fp32: max abs difference 5.886e-7, min cosine 0.99999999999, 30/30 orders. The historical prerequisite graph `f5fdee679d0ffb98e1cb0bb178e8ee2b86739ab7ab035a3a9327761d5c6b1f0b` is no longer the Rust selection. #1122's CI image job proves offline model reads across image restarts. The image stays opt-in until G2. |
-| Sent YAML presentation deferrals | Accepted (D7, 2026-10-23) | `sent-quoted-continuation-tab` (both quote styles, continuation starts with a literal tab at column zero) and `sent-anchor-colon-terminator` (`a: &x:y b`, PyYAML names the anchor `x`) are accepted by PyYAML and refused by the native sent loader. Shipped producers use space indentation, escaped tabs and ordinary ASCII anchor names. Preserve these named refusals or obtain an accepted canonical scope disposition before closing the boundary; differential cases are in `daemon/harness/test_sent_yaml.py`. |
-| Container runtime contract | Pending | Compare entry point, runtime user, bind/auth guard, port 8765, `/data` persistence/config, build stamp and health check. `ops/Dockerfile.daemon` has no explicit `USER`; do not invent an existing non-root guarantee. |
-| Compose byte equality | Pending | Preserve `ops/docker-compose.yml` and `docker-compose.ghcr.yml` byte-for-byte against their bundled copies; run `test_update_cli.py::test_bundled_compose_files_match_the_checkouts`. An opt-in Rust file must leave the default stack unchanged. |
-| Compose resources and isolation | Pending | Disposable side-by-side run on a separate port/bank: loopback publication, own project/resources, PostgreSQL healthy dependency, external production volume semantics, `/var/lib/postgresql` PG18 mount, daemon memory/swap cap, log rotation and internal-only extractor. Verify only owned disposable resources are cleaned up. |
-| Backup before update | Pending (installed proof recorded) | Real disposable dump plus state archive, complete-dump marker, failure/refusal before movement, correct checkout/bundled backup selection and original env/volume identity. `test_update_cli.py`, `test_ops_backup_integrity.py`. [installed proofs 2026-11-07](../evals/results/g2-installed-proofs-20261107/): every `--engine` switch dumped the bank and archived `/data` before any change, recorded in `/health last_backup`. The restore proof replayed a `pseudolife-mcp backup` dump with its state archive; an update's own pre-switch dump was not replayed. |
-| Rollback before movement | Pending (installed proof recorded) | Tag the running validated image, preserve collision/refusal rules, demonstrate rollback instructions and disposable recovery after unhealthy or version-mismatched replacement. `test_update_cli.py`, `test_ops_prune_rollbacks.py`. [installed proofs 2026-11-07](../evals/results/g2-installed-proofs-20261107/): the running image was tagged (`pseudolife-daemon-python:0.22.1-pre-update-*`, original image ID) before the recreate. After an unhealthy replacement (the failed gate) the printed rollback restored a healthy Python daemon. Later, the printed rollback from Rust back to v0.22.1 restored it on the same bank, checked by fingerprint. |
-| Daemon-only recreation | Pending | Prove `up -d --no-deps` changes only the daemon, keeping PostgreSQL, extractor and bank/state volumes; preserve checkout build stamp and release pull paths. `test_update_cli.py`, `test_ops_update_wrappers.py`. |
-| Health before clients | Pending | Successful expected-version health gate before client movement; unhealthy/mismatched health exits failure and moves no clients. Exercise the changed authenticated path, not health alone. Health appendix below remains required. |
-| Release versus checkout update | Pending | Preserve newest/pinned release, downgrade/refusal and no-op semantics; checkout clean-tree/build/rollback safeguards and `--all`; `--daemon-only`, `--clients-only`, pip/lite/client-only routing and wrapper exit codes. Preparation changes no updater behavior. |
-| Client completion and failures | Pending | Actual shim runtime, plugin cache and supported hook/client steps; daemon success plus client failure remains a failed client step (current updater exit 5). Preserve consent/ownership and useful next-command diagnostics. `test_client_install_ux.py`, `test_client_credentials_setup.py`, `test_update_cli.py`. |
-| Runtime beside current sessions | Pending | Install/select a complete new runtime while an old session keeps working; next session uses the new runtime; keep running, registered and frozen-tunnel runtimes; fail closed on unreadable process/tunnel evidence. `test_shim_runtimes.py`. |
-| Unattended daemon upgrade policy | Pending | Opt-in knob plus no active board session, readable board and update lock; unavailable/unknown board holds off; idle sessions retain runtimes. Preserve notices/logs and exits 0 updated, 3 current, 4 held, 2 unable to check, 1 failed. `test_unattended_update.py`, `unattended_update.py`. |
-| Unattended client policy | Pending | Opt-in installed-runtime launch, correct daemon release target, one concurrent attempt and retry interval/result persistence; first successful frame and cancellation ownership. `test_update_offer.py`, `test_shim_runtimes.py`; see SHIM-CLIENT-UPDATES. |
-| Fresh install/update UX | Pending | Detect host/tier/provider, finish chosen setup automatically, rerun safely, skip interactive work without hanging when unattended, and refuse before partial mutation. Contributor test-login setup stays confined to selected contributor paths. `CLAUDE.md`, `test_client_install_ux.py`, `test_client_credentials_setup.py`, `test_ops_script_modes.py`. |
-| GitHub release surface | Pending | Future maintainer-controlled release procedure, version/notes/artifacts and release gate; current `.github/workflows/release.yml` and `.claude/skills/release-procedure/SKILL.md` remain authority. No release workflow change or publish in preparation. |
-| PyPI surface | Pending | Future installed package/entry-point proof, version agreement and completed human-approved publisher evidence. Preserve source/packaging inspected by existing guards. |
-| MCP registry surface | Pending | Future `server.json`/package identity/version agreement, registry metadata and served-version verification under the existing release procedure. |
-| Plugin marketplace surface | Pending | Future manifest/marketplace/hooks currency, cache identity/digest and new-session adoption while current sessions retain their installed code. |
-| GHCR image artifacts | Pending | Future maintainer-authorized versioned daemon/PG artifacts and inspectable revision/build metadata; preparation CI builds only and never pushes. GHCR images are additional release artifacts, not a substitute for any of the four public surfaces above. |
-
-## OPS-IMAGES
-
-| Item | State | Evidence needed / current source |
-|---|---|---|
-| Extractor model | Pending | `ops/Dockerfile.extractor`: baked default GGUF, optional `MODEL_URL`, runtime model path `/models/extractor.gguf`; inspect artifact and run disposable CPU/offline serving proof. Preserve default/model currency guards. |
-| Extractor config | Pending | OpenAI-compatible CPU server, bind `0.0.0.0`, internal port 8081, context 8192, Jinja, parallel 1 and idle sleep 300/default override. Dockerfile CMD and compose command stay aligned (`test_extractor_idle_sleep.py`). |
-| Extractor health | Pending | Compose overrides inherited health to `/health` on 8081; health answers while sleeping without waking the model; next completion reloads. Disposable startup/sleep/completion evidence, not model-list guards alone. |
-| PostgreSQL build/runtime | Pending | `ops/Dockerfile.pg`: `pgvector/pgvector:pg18`, OS package updates, PostgreSQL 18 and pgvector availability; disposable init, vector access, persistence/recreate and dump/restore compatibility using intended PG18 mount. |
-| Daemon CPU/offline | Pending | All OPS-CUTOVER image/model/runtime items above, Python image left intact, built Rust image inspection and network-independent execution. `test_daemon_image_is_cpu_only.py`, `test_release_ux.py`. |
-| Compose and image selection | Pending | Byte equality and preserved release/local image semantics; no default Rust image selection. `test_update_cli.py`, `test_extractor_model_lists.py`. |
-| Disposable image CI | Pending | Exact-head no-push build/start, disposable PostgreSQL, healthy `/health`, authenticated read and owned-resource cleanup; retain successful run URL and logs. Existing `.github/workflows/rust.yml` is the integration point. |
-
-## OPS-INSTALL-RESTORE
-
-For each script, preserve its canonical flags, preflight checks, refusal/exit
-codes, rerun behavior, rollback and platform/client ownership. Exercise real
-scripts with disposable homes, banks and stubbed platform registration where
-needed; static assertions and Python fakes remain oracle evidence.
-
-| Script item (`ops/` relative) | State | Evidence needed / guard |
-|---|---|---|
-| `install.sh`, `install.ps1` | Pending (installed proof recorded) | Fresh tier/provider selection, complete setup, noninteractive/rerun behavior, credentials, runtime selection and fallbacks; `test_client_install_ux.py`, `test_client_credentials_setup.py`. `install.sh` only: [installed proofs 2026-11-07](../evals/results/g2-installed-proofs-20261107/) ran `--yes --extractor endpoint --client claude --claude-plugin skip --instructions skip` on two fresh Linux hosts (v0.22.1 and master), exit 0, with the Claude registration recorded by a stand-in CLI and then used. `install.ps1` and the other providers are not covered. |
-| `install-autostart.ps1` | Pending | Selected daemon/interpreter/data/DSN/environment and Windows task ownership/start behavior in an isolated platform fixture. |
-| `install-shim-autostart.sh`, `install-shim-autostart.ps1` | Pending | Claude extractor CLI/interpreter/model/prompt, bind verification, replacement/restart and sibling mode cleanup; `test_client_install_ux.py`, `test_extractor_model_lists.py`. |
-| `install-codex-shim-autostart.sh`, `install-codex-shim-autostart.ps1` | Pending | Codex counterpart model/health/interpreter and sibling cleanup with matching platform behavior; same guards. |
-| `install-hook.sh`, `install-hook.ps1` | Pending | Supported client hook store, prompt/session wiring, trust-review consent and ownership; preserve definitions users approve. `test_client_install_ux.py`. |
-| `restore.sh`, `restore.ps1` | Pending | Disposable rehearsal and explicit apply; safety dump, drop/create failures, close PUBLIC before replay, every-table loss checks, held-dump selection/refusal and no-start semantics. `test_ops_restore_rehearsal.py`, `test_ops_restore_skips_held.py`. Not these scripts: [installed proofs 2026-11-07](../evals/results/g2-installed-proofs-20261107/) exercised the installed `pseudolife-mcp restore` (safety dump, drop/recreate, replay, daemon restart) under Rust. |
-| `restore_from_pt.py` | Pending | Additive same-era snapshot restore, retain existing rows/source backups, stopped-daemon rehydration and dimension refusal before connection/write. Python `.pt` support is not retired by this draft. |
-| `preflight.sh`, `preflight.ps1` | Pending | Selected providers/tier/CLI/pipx checks, official install layouts and useful refusals; `test_client_install_ux.py`. |
-| `migrate-pg18.ps1` | Pending | Disposable dump/restore/verification across source major, target PG18 layout, retained old-volume rollback and failure paths; no live migration. |
-| `backup.sh`, `backup.ps1` | Pending | Complete dump and state tar, marker/integrity checks, row-count manifest/baseline/drop hold, mirror/rotation safety and daemon backup record; `test_ops_backup_integrity.py`. `backup.sh` on Linux: in [installed proofs 2026-11-07](../evals/results/g2-installed-proofs-20261107/), every checkout `--engine` switch ran it before any change: under Python for the switches in proofs 2 and 3, and under Rust for proof 1's rerun (`update_backup_excerpt` and `rerun_excerpt` in its summary). Proof 3's backup under Rust is the installed `pseudolife-mcp backup`, not this script. `backup.ps1` and the manifest, mirror and rotation checks are not covered. |
-| `install-backup-task.ps1` | Pending | Main/script checkout selection with output kept in main backup directory, installing-user task, absolute PowerShell path, missed-run behavior, log/HEAD and nonzero failures; `test_ops_install_backup_task.py`. |
-| `prune-rollbacks.sh`, `prune-rollbacks.ps1` | Pending | Keep newest configured count, deployed/dangling/in-use protection and quiet no-op; `test_ops_prune_rollbacks.py`. |
-| `prune-build-cache.sh`, `prune-build-cache.ps1` | Pending | Age/cap retention, repeated measured progress with budget/no-progress stop, dry-run, safe Docker verbs, optional Docker Desktop trim; `test_ops_prune_build_cache.py`. |
-| `install-cache-retention.ps1` | Pending | Absolute/stable PowerShell executable including MSIX alias, correct encoded script/retention parameters and task scope; `test_ops_install_cache_retention.py`. |
-| `register_claude_desktop.py` | Pending | Own-entry merge/migration, preserve foreign entries/settings, absolute launcher and packaged Windows config path, owner-only token-file handling and capability probe/refusals; `test_register_claude_desktop.py`, client credentials/UX guards. |
-| `setup-codex-coordination.py` | Pending | Effective config/identity authority, opt-in messaging and wake capability, private backup and preserved preexisting settings; real installed client with disposable config. |
-| `update.sh`, `update.ps1`, `update.py` | Pending (installed proof recorded) | Every canonical flag/default maps to the checkout updater, streamed output and exact exit status; `test_ops_update_wrappers.py`, OPS-CUTOVER update sequence. `update.py --engine rust\|python` (and `--health-retries`) on Linux: [installed proofs 2026-11-07](../evals/results/g2-installed-proofs-20261107/), exit codes in its ledgers. The failed gate exits 1 and names no failing check (fix pending). |
-| `update_clients.py` | Pending | Separate runtime/plugin/hook/provider install steps, owned cache/config, effective credentials and failed-step exit; actual installed-runtime proof with old sessions present. |
-| Native runtime provisioning (`pseudolife-daemon provision <runtime>`) | Pending (B11) | Wherever install or release-mode `update` places the Rust daemon, it runs the installed binary's `provision pdfium` (and the lite tier's PostgreSQL step, B9), so a fresh or updated host ingests PDFs with no follow-up step: a rerun prints one line and changes nothing, and an offline run says nothing was installed and names the command. Once it does, the `pdf_engine_unavailable` refusal names `pseudolife-mcp update` instead of the provision command. Until then only `ops/Dockerfile.daemon-rust` provisions PDFium (into `/opt/pdfium`). |
-| Executable script modes | Pending | All tracked `ops/*.sh` retain index mode 100755 for Linux/macOS direct invocation; `test_ops_script_modes.py`. PowerShell has a separate native parse/runtime proof. |
-
-## SHIM-CLIENT-UPDATES
-
-| Item | State | Evidence needed / current source |
-|---|---|---|
-| Installer-backed unattended execution | Pending | Real installed client starts the intended updater after its first successful frame, only under configured policy; captures process ownership, concurrent startup, crash/failure/retry and persisted results. `unattended_update.py`, `client_updates.py`, `shim.py`, `test_update_offer.py`. |
-| Installed runtime selection | Pending | Correct launcher, newest complete runtime marker and dependency closure; incomplete install is not selected, running/registered/tunnel-pinned runtimes survive pruning. `runtimes.py`, `test_shim_runtimes.py`. |
-| Complete client installation | Pending | Actual package install, supported Claude Code/Codex/Claude Desktop/Gemini/generic provider registration, daemon URL, no-spawn and writer settings, plugin/hooks, credentials and next-session handshake. Dependency-light binary compilation alone is insufficient. |
-| Client environment isolation | Pending | Remove inherited credentials/connections before importing test helpers; disposable home and explicit endpoint; owner-only files and Windows ownership/locale behavior. `test_client_environment.py`, `test_client_credentials_setup.py`. |
-| Update offer/defaults | Pending | Check enabled by default, unattended clients/daemon off by default, valid config and release notices, installed command/launcher name and quiet current/unknown behavior. `test_update_offer.py`, `utils/config.py`. |
-| Configuration ownership/recovery | Pending | Backup/preserve unrelated registrations and user credentials; refuse bad input without half-written state, keep current sessions usable and next ordinary operation successful after faults. `test_shim_runtimes.py`, `test_client_install_ux.py`. |
-
-## DOCS-CUTOVER
-
-| Item | State | Evidence needed / current source |
-|---|---|---|
-| Guides | Pending | Reconcile `docs/guide/` install, update, recovery and usage instructions with the accepted installed entry points; links/commands exercised on disposable state. |
-| Providers | Pending | `docs/guide/providers.md` matches installers' supported client/transport/hook capability matrix, effective config, credential and ownership behavior; `test_client_install_ux.py`. |
-| Tunnels | Pending | Guide/current tunnel runtime and CLI agree on forwarding, bridge/runtime pinning, auth, setup/refusals and recovery; named unsupported modes stay visible. |
-| Configuration | Pending | Every section/field/default, missing/null/type validation and YAML/env precedence; all configuration/environment appendix items below accounted for. `utils/config.py`, `docs/guide/configuration.md`. |
-| Schema | Pending | Current code version, README capability table, configuration DSN/history, schema pins/migration assertions, changelog and atlas agree. No schema bump is made here; follow all seven-place requirements if one later lands. `test_release_ux.py`, `test_schema_version.py`, `test_migrate_embeddings.py`. |
-| System Atlas | Pending | Verify actual affected storage/runtime cards before updating metadata; `docs/atlas/atlas.json`, `test_atlas_currency.py`. |
-| READMEs and translations | Pending | Accurate install/default/runtime/schema/capability claims across README and `docs/i18n/README.*.md`; `test_release_ux.py`, `test_i18n_readme.py`. |
-| Defaults and model lists | Pending | Embedding/backend/fallback, extractor modes/models, preset/toolset and unattended defaults agree across source, menus, help and guides; no unmeasured default/recommended promotion. `test_extractor_model_lists.py`, `test_release_ux.py`. |
-| Installed help and manifests | Pending | Actual installed command/help/schema/environment markers, `server.json`, `pyproject.toml` and release manifests describe shipped behavior; retain packaging/source until retirement decision. |
-| LLMS generation | Pending | Regenerate with `python ops/gen_llms_txt.py` after covered doc edits, inspect `llms.txt`/`llms-full.txt` and run `test_llms_txt.py`; generation is not assumed from writing this draft. |
-| Benchmark claim currency | Pending | Claims retain committed artifacts, instrument/version/retirement provenance and appropriate claim guards; no new benchmark or performance claim here. `test_eval_evidence.py`, CLAUDE.md benchmark rules. |
-| Repository/publication guards | Pending | `test_repository_claims.py` remains the named coordination repository-claim guard; run all row-named guards without treating it as benchmark evidence. Inspect actual public diff/metadata and publication guard before publishing. |
-| Oracle retirement | Pending | Explicit maintainer decision after installed/differential acceptance and divergence reconciliation; retain Python oracle tests, source and packaging before that decision. |
-
-## Appendix acceptance dependencies
-
-The configuration and environment inventories below enumerate the current
-PARITY appendix names. They retain the canonical section/reader paths in
-[Configuration sections](parity/configuration-sections/) and
-[Environment variable appendix](parity/environment-variable-appendix/),
-including field-level inventory in `phase1-contract-inventory.json` and reader
-paths in `contract-inventory.json`. Every listed name is pending accounting
-for its installed Rust consumer or an explicit maintainer-accepted disposition;
-this list does not claim that every internal test variable belongs in the image.
-Compare declared fields/reader paths, defaults, validation and missing/YAML/env
-precedence rather than porting arbitrary Python parser behavior.
-
-### Health and HTTP
-
-State: **Pending**. Source: [health/body appendix](parity/health-http-bodies-and-logical/),
-`pseudolife_memory/daemon.py`, `web/api.py`, `rust/daemon/src/health.rs`.
-Prove mandatory `status`, `version`, `schema`, `storage`, `auth`, `bank`,
-`persist_errors`, `memory`; and conditional `build`, `coordination`, `updates`,
-`extractor`, `stall`, `hooks_digest`, `init_refusal`, `not_ready`,
-`migration_partial`, `dream_tracking_error`, `capacity_warning`,
-`lesson_reconciliation_required`, `embedder`, `db`, `last_backup`.
-Preserve 200 for ok/absent status, 503 for other payload status, exception 500,
-the source degradation-versus-warning distinction and null bank fingerprint.
-
-Nested items remain pending individually: `build.{git_sha,dirty,built_at,source}`;
-`embedder.{backend,device,dtype}`; `last_backup.{at,age_hours,rotation}`;
-`coordination.enabled` and `coordination.wake.{per_recipient_per_hour,urgent_per_sender_per_hour,nightly_total,fan_out_stagger_seconds,active_seconds}`;
-`updates.{check_releases,latest_release,checked_at,unattended_clients,unattended_daemon}`;
-`stall.{since,reason,consecutive_failures,last_success_at}`;
-`memory.{source,current_bytes,working_set_bytes,limit_bytes,used_fraction,near_limit,events,anon_bytes,file_bytes,rss_bytes,rss_peak_bytes}`
-with `events.{max,oom,oom_kill}` and absent versus null preserved.
-
-HTTP acceptance remains pending: Console POST 262144 bytes except facts/set,
-consolidate and supersede 4194304; coordination 32768; session-end 16384;
-pair 1024; GET hooks and woke/subagent hooks use query/header inputs;
-`/api/agents?view=coordination` projection, unknown routes and method errors.
-Container health smoke covers only the exercised subset.
-
-### Restore and logical transfer
-
-State: **Pending dependency**, not a new port in this preparation. Physical
-backup/restore and `.pt` recovery must remain distinct from logical transfer.
-The [transfer appendix](parity/health-http-bodies-and-logical/)
-requires every exported/excluded table, `outcome_signals.used_ids`, bank-local
-metadata and target emptiness rule to be preserved. Include them in disposable
-export/import/restore state checks, not just counts.
-
-Every exported table is pending: `meta`, `episodes`, `entries`,
-`entry_reinstatement_decisions`, `entities`, `entity_aliases`, `relations`,
-`edges`, `edge_evidence`, `edge_proposals`, `entity_proposals`, `entity_kinds`,
-`dismissed_pairs`, `facts`, `world_facts`, `lessons`, `outcome_signals`,
-`communities`, `entity_communities`, `memory_traces`,
-`memory_trace_invalidations`, `entity_sources`, `merge_decisions`,
-`chronicle_events`, `curation_judgments`, `store_decisions` (26).
-
-Every exclusion is pending: `dream_runs`, `dream_run_slots`,
-`retrieval_events`, `retrieval_uses`, `slot_reads`, `lesson_search_events`,
-`client_sessions`, `coordination_agents`, `coordination_messages`,
-`coordination_events`, `coordination_leases`, `coordination_lease_waiters`,
-`coordination_wakes`, `principals` (14); `outcome_signals.used_ids`;
-metadata `schema_version`, `active_session_pointer`, `dream_ack_secret_v1`,
-`coordination_hlc_highwater`, `coordination_bank_id`, `writer_lease_epoch`
-and every `*_schema_version` key. Target exported tables must be empty
-except `meta` and builtin `relations`; excluded runtime tables never travel.
-
-Import must delete the target's `curation_listing_spelling_v2` before importing
-exported metadata so the export's value survives. Native closure of these
-dependent rows is required or needs an explicit accepted disposition.
-
-### Configuration inventory
-
-| Section | State | Evidence needed |
-|---|---|---|
-| `EmbeddingConfig` | Pending | 9; see `phase1-contract-inventory.json`; field inventory/default/validation/precedence proof or accepted disposition. |
-| `MIRASBandSpec` | Pending | 6; see `phase1-contract-inventory.json`; field inventory/default/validation/precedence proof or accepted disposition. |
-| `MIRASConfig` | Pending | 2; see `phase1-contract-inventory.json`; field inventory/default/validation/precedence proof or accepted disposition. |
-| `ReferenceConfig` | Pending | 5; see `phase1-contract-inventory.json`; field inventory/default/validation/precedence proof or accepted disposition. |
-| `NLIConfig` | Pending | 4; see `phase1-contract-inventory.json`; field inventory/default/validation/precedence proof or accepted disposition. |
-| `BM25Config` | Pending | 7; see `phase1-contract-inventory.json`; field inventory/default/validation/precedence proof or accepted disposition. |
-| `RerankerConfig` | Pending | 5; see `phase1-contract-inventory.json`; field inventory/default/validation/precedence proof or accepted disposition. |
-| `DreamConfig` | Pending | 41; see `phase1-contract-inventory.json`; field inventory/default/validation/precedence proof or accepted disposition. |
-| `DeepDreamConfig` | Pending | 49; see `phase1-contract-inventory.json`; field inventory/default/validation/precedence proof or accepted disposition. |
-| `CortexConfig` | Pending | 11; see `phase1-contract-inventory.json`; field inventory/default/validation/precedence proof or accepted disposition. |
-| `LessonsConfig` | Pending | 11; see `phase1-contract-inventory.json`; field inventory/default/validation/precedence proof or accepted disposition. |
-| `RetrievalLogConfig` | Pending | 3; see `phase1-contract-inventory.json`; field inventory/default/validation/precedence proof or accepted disposition. |
-| `CompactionConfig` | Pending | 3; see `phase1-contract-inventory.json`; field inventory/default/validation/precedence proof or accepted disposition. |
-| `MetaFilterConfig` | Pending | 1; see `phase1-contract-inventory.json`; field inventory/default/validation/precedence proof or accepted disposition. |
-| `GraphInsightConfig` | Pending | 8; see `phase1-contract-inventory.json`; field inventory/default/validation/precedence proof or accepted disposition. |
-| `TracesConfig` | Pending | 2; see `phase1-contract-inventory.json`; field inventory/default/validation/precedence proof or accepted disposition. |
-| `ScopesConfig` | Pending | 2; see `phase1-contract-inventory.json`; field inventory/default/validation/precedence proof or accepted disposition. |
-| `RecallConfig` | Pending | 12; see `phase1-contract-inventory.json`; field inventory/default/validation/precedence proof or accepted disposition. |
-| `SearchConfig` | Pending | 6; see `phase1-contract-inventory.json`; field inventory/default/validation/precedence proof or accepted disposition. |
-| `McpConfig` | Pending | 2; see `phase1-contract-inventory.json`; field inventory/default/validation/precedence proof or accepted disposition. |
-| `MemoryConfig` | Pending | 29; see `phase1-contract-inventory.json`; field inventory/default/validation/precedence proof or accepted disposition. |
-| `ContextConfig` | Pending | 1; see `phase1-contract-inventory.json`; field inventory/default/validation/precedence proof or accepted disposition. |
-| `TimeConfig` | Pending | 1; see `phase1-contract-inventory.json`; field inventory/default/validation/precedence proof or accepted disposition. |
-| `StorageConfig` | Pending | 1; see `phase1-contract-inventory.json`; field inventory/default/validation/precedence proof or accepted disposition. |
-| `MemoryPolicyConfig` | Pending | 2; see `phase1-contract-inventory.json`; field inventory/default/validation/precedence proof or accepted disposition. |
-| `WakeConfig` | Pending | 6; see `phase1-contract-inventory.json`; field inventory/default/validation/precedence proof or accepted disposition. |
-| `CoordinationConfig` | Pending | 8; see `phase1-contract-inventory.json`; field inventory/default/validation/precedence proof or accepted disposition. |
-| `UpdatesConfig` | Pending | 4; see `phase1-contract-inventory.json`; field inventory/default/validation/precedence proof or accepted disposition. |
-| `AppConfig` | Pending | 8; see `phase1-contract-inventory.json`; field inventory/default/validation/precedence proof or accepted disposition. |
-| `MaintainerConfig` | Pending | 3; see `phase1-contract-inventory.json`; field inventory/default/validation/precedence proof or accepted disposition. |
-
-### Environment inventory
-
-Each variable's reader/reference paths are the corresponding exact row in the
-PARITY environment appendix; no values are copied into this checklist.
-
-| Variable | State | Evidence needed |
-|---|---|---|
-
-| `PSEUDOLIFE_ACTIVE_SESSION_TTL_SECONDS` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_AGENT_COORDINATION` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_AGENT_LABEL` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_AGENT_PROJECT` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_AGENT_STATE` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_AGENT_STATE_DIR` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_AGENT_TASK` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_AGENT_WAKE` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_AGENT_WAKE_HOOK` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_AGENT_WAKE_HOOK_WAIT` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_BACKUP_MIRROR` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_BACKUP_MIRROR_KEEP` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_BANK_VOLUME` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_BENCH_DB` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_BOARD_HARNESS_NAMES` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_BUILD_DIRTY` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_BUILD_GIT_SHA` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_BUILD_SOURCE` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_BUILD_TIME` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_CLAUDE_SHIM_CLI` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_CLAUDE_SHIM_HOST` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_CLAUDE_SHIM_LOG` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_CLAUDE_SHIM_MODEL` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_CLAUDE_SHIM_PORT` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_CLAUDE_SHIM_PROMPT_FILE` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_CLAUDE_SHIM_PYTHON` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_CODEX_BIN` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_CODEX_DOORBELL` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_CODEX_HOOK` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_CODEX_SERVER_TOKEN` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_CODEX_SERVER_URL` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_CODEX_SHIM_CLI` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_CODEX_SHIM_HEALTH_TTL` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_CODEX_SHIM_HOST` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_CODEX_SHIM_LOG` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_CODEX_SHIM_MODEL` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_CODEX_SHIM_PORT` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_CODEX_SHIM_PYTHON` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_DAEMON_EXEC` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_DAEMON_MEM_LIMIT` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_DESKTOP_TOKENS_SOURCE` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_DESKTOP_TOKEN_SOURCE` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_DIGEST_DIR` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_DOCKER` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_DREAM_API_KEY` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_DREAM_BASE_URL` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_DREAM_EXTRACTOR_MODE` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_DREAM_FALLBACK_API_KEY` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_DREAM_FALLBACK_BASE_URL` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_DREAM_FALLBACK_MODEL` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_DREAM_MAX_TOKENS` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_DREAM_MODEL` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_DREAM_TIMEOUT_SECONDS` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_EMBEDDING_CPU_DTYPE` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_EXTRACTOR_SLEEP_IDLE_SECONDS` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_HANDLE_RESUME_SECONDS` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_IMAGE_TAG` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_INSTALLER_TOKEN` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_INSTALLER_TOKENS` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_JUDGE_API_KEY` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_JUDGE_SECOND_API_KEY` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_LEASES_HELD` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_LEASE_LOCK_DIR` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_LEGACY_TRANSPORT_SESSION` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_MALLOC_TRIM_SECONDS` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_MCP_AUTOSAVE_SECONDS` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_MCP_CONFIG` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_MCP_DAEMON_URL` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_MCP_DATABASE_URL` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_MCP_DATA_DIR` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_MCP_HOST` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_MCP_NO_SPAWN` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_MCP_PORT` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_MCP_PROXY_TIMEOUT_SECONDS` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_MCP_SHARED_HOST` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_MCP_STORAGE` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_MCP_TIER_MAP` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_MCP_TOKEN` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_MCP_TOKENS` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_MCP_TOKEN_FILE` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_MCP_TOOLSET` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_MCP_TRUST_BIND` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_MODELS_DIR` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_PLUGIN_DIR` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_PRIVATE_FILE` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_RECALL_DRIVER` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_RELEASE_CHECK` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_REQUIRE_TEST_POSTGRES` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_SESSION_IDLE_SECONDS` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_SESSION_REAP_SECONDS` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_SESSION_RESUME_SECONDS` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_SHIM_CLAUDE_CLI` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_SHIM_CODEX_CLI` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_SHIM_LAUNCHER` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_SHIM_PYTHON` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_SHIM_RUNTIMES` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_SHIM_USER_BIN` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_STATE_VOLUME` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_SUITE_COMMIT` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_SUITE_DISPATCHED` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_SUITE_ENV_FILE` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_SUITE_GIT_COMMON` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_SUITE_KEEP` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_SUITE_PRUNE` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_SUITE_PRUNE_DAYS` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_SUITE_LEASE` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_SUITE_LOCK` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_SUITE_LOCK_DIR` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_SUITE_NAME` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_SUITE_PYTHON` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_SUITE_REMOTE` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_SUITE_RUN_ID` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_SUITE_SLOTS` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_SUITE_VENV` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_SUITE_WHERE` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_SUITE_WINDOWS` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_TEST_CUDA` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_TEST_DATABASE_URL` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_TEST_EMBEDDER` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_TEST_PG_HOST_PORT` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_TEST_PG_LOGIN_FILE` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_TEST_PG_PASSWORD` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_TEST_PG_USER` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_TUNNEL_LAUNCH_PROFILE` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_WRITER_ID` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_WSL_DISTRO` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_WSL_SUITE_SOURCE` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `_PSEUDOLIFE_PRODUCTION_DB` | Pending | Reader/propagation/installed-path proof or accepted disposition. |

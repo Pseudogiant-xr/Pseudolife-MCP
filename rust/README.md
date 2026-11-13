@@ -1,15 +1,23 @@
-# Rust stdio shim candidate
+# Rust workspace
 
-`pseudolife-stdio` is the phase 1 candidate for the Python stdio shim.
-The runtime is under implementation; complete parity is not yet accepted.
-Behaviour and validation state
-are recorded in [PORT-STATE.md](PORT-STATE.md), with the oracle contract in
-[PORTING.md](PORTING.md) and the parity register in [parity/](parity/), one file per row ([PARITY.md](PARITY.md)
-explains the layout).
-Use the [Python-to-Rust review checklist](SEMANTICS-CHECKLIST.md) when reviewing a frozen boundary.
+This workspace holds the Rust implementation of Pseudolife-MCP. Its daemon is
+what a Docker install runs; its client is built and tested but not yet what
+the installers put on a user's machine. [CUTOVER.md](CUTOVER.md) records
+where the move from Python stands and what is left.
+
+| Path | What it is |
+|---|---|
+| `daemon/` | `pseudolife-daemon`, the HTTP service that owns a bank: the MCP tools, the Console and hook routes, the board, dreams and background duties. Published as `pseudolife-daemon-rust` and the default engine for Docker installs since 0.23.0. |
+| `shim/` | The package `pseudolife-stdio`: the stdio MCP bridge to the daemon and the native `pseudolife-mcp` command. The Rust daemon image ships it as `pseudolife-mcp`; on a user's machine it is opt-in (`pseudolife-mcp runtime install`). |
+| `shared/` | Modules both crates include: PostgreSQL runtime and TLS helpers, Windows file-security checks, float formatting, and the unfinished embedded-PostgreSQL (lite tier) lifecycle, which is being removed. |
+| `cli_harness/`, `daemon/harness/`, `extractor_harness/` | Python harnesses that run the Rust binaries and compare them with the live Python implementation and with committed recordings (goldens). Python is frozen since 2026-11-14; once CI stops the live comparisons ([CUTOVER.md](CUTOVER.md), "Stop comparing with Python"), the goldens remain as regression snapshots. |
+| `parity/`, `daemon/divergences/`, [PORT-STATE.md](PORT-STATE.md), [PORTING.md](PORTING.md), [PARITY.md](PARITY.md) | The register of what was ported and where Rust knowingly differs from Python. Since the 2026-11-14 ruling that matching Python is no longer the bar, it is a record of the port; the CI rules that still enforce it are being removed. |
+| `ci/` | Scripts and tests behind `.github/workflows/rust.yml`: scope, budget, stress and timing. |
+
+## Building
 
 Build from this directory so `rust-toolchain.toml` selects Rust 1.94.0, after
-checking the host's full-suite lease:
+checking the host's full-suite lease ([DEV.md](DEV.md) has the local loop):
 
 ```text
 cargo build --locked --jobs 4
@@ -18,57 +26,39 @@ cargo clippy --locked --all-targets --jobs 4 -- -D warnings
 cargo nextest run --locked --jobs 4
 ```
 
-Phase 1 requires builds for `x86_64-pc-windows-msvc` and
-`x86_64-unknown-linux-gnu`. Each platform needs its target toolchain and linker;
-a Windows build alone provides no Linux validation evidence.
+`release.yml`'s native-archive job builds `x86_64-pc-windows-msvc`,
+`x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu` and both macOS
+targets. Each platform needs its target toolchain and linker; a Windows build
+alone is no Linux evidence.
 
-RMCP is pinned to 3.5.0, the prototype's SDK version, so an SDK upgrade does
-not introduce another source of wire differences during the port. The candidate
-must adapt SDK differences to the pinned Python oracle. Reqwest uses rustls
-with default features disabled; each client must refuse redirects. JSON values
-use `serde_json`'s arbitrary precision and ordered dictionary features to preserve
-arbitrary integers and opaque JSON member order.
-Cargo.lock records the resolved dependency versions.
+## Dependencies worth knowing
 
-The stdio differential lane compares retained stdout bytes under the named
-`stdio-raw-compared` policy, stderr under its named-message allowlist, and exact
-process exit codes. Its receipts establish only the recorded cases, platforms
-and oracle pin; they do not establish installation, complete shim parity,
-unmeasured performance, or daemon HTTP parity. The binary remains a harness
-and CI candidate until later installation work is authorized.
+RMCP is pinned to 3.5.0 so that an SDK upgrade is a deliberate change to the
+wire behaviour. Reqwest uses rustls with default features disabled, and each
+client refuses redirects. JSON values use `serde_json`'s arbitrary precision
+and ordered dictionary features, to preserve arbitrary integers and opaque
+JSON member order. `Cargo.lock` records the resolved versions.
 
-The crate denies unsafe Rust by default. Platform modules have narrow,
-documented exceptions: `credentials::windows_security` inspects the owner and
-protected DACL through the live token-file handle, validates ACE/SID bounds and
-keeps OS allocations under RAII until inspection finishes; `lifecycle::posix_session`
-uses an allocation-free, lock-free `setsid` call in the child before exec to
-preserve Python's `start_new_session` behavior. `board::doorbell_windows` owns
-native job, process and thread handles for suspended adoption and cleanup;
-`board::doorbell_posix` registers an execve-only callback after session setup,
-with strings and pointer tables prepared before fork. Their exact invariants
-and validation limits are recorded in [PORTING.md](PORTING.md). These exceptions
-require security review before publication.
+## Unsafe code
 
-The executable accepts no mode, `shim`, or `channel`. It reads the Python shim's
-configuration environment and forwards daemon tool operations over fresh MCP
-HTTP sessions. Local daemon startup requires an explicit
-`PSEUDOLIFE_MCP_PYTHON` interpreter
-or `PSEUDOLIFE_MCP_SERVE_COMMAND` JSON argv; absent both, the candidate uses
-the no-spawn wait and its named stderr explanation. The SDK preflight is
-retired by the 2026-10-05 decision; remote daemon URLs never launch Python.
-The candidate is launched directly from the build output during evaluation.
+The crates deny unsafe Rust by default and allow it only in commented,
+module-local exceptions (`#[allow(unsafe_code)]`) in the shim, the daemon and
+`shared/`: Windows security descriptors, job objects and process handles,
+POSIX session and exec setup, file locks, and the daemon's PDFium, BLAS and
+heap-trim calls. [PORTING.md](PORTING.md), "Unsafe code and dependencies",
+records the main ones and their invariants. Review any change to an
+`allow(unsafe_code)` site as security-sensitive.
 
-Targeted Rust cells cover EOF ownership, session deletion, sanitized transport
-failures, cancellation, cursorless handshake caching, daemon recovery, exact
-integer results and subscription acknowledgement order. They supplement the
-public stdio differential lane; they do not establish complete parity. Board
-and channel acceptance remains subject to their separate implementation and
-validation streams.
+## The shim at runtime
 
-Native lease check/list/run have a [bounded functional candidate and evidence](../evals/results/rust-phase2d-lease-7e6927b7/README.md),
-including both-OS child/status/release and scoped policy checks, Windows Ctrl-C
-and committed debug check/list samples. Final hosted acceptance and review
-remain pending; CLI-LEASE-core is not yet ported. Full mode stays deferred:
-hold/break/delegate/designate return exit 1 with `deferred in this candidate`,
-without Python or silent fallback. This candidate loses them until Phase 4
-and remains uninstalled.
+With no mode, or `shim` or `channel`, the binary is the stdio bridge: it reads
+the client's configuration environment and forwards daemon tool operations
+over fresh MCP HTTP sessions. Remote daemon URLs never start a process. A
+local daemon is started only from an explicit `PSEUDOLIFE_MCP_PYTHON`
+interpreter or a `PSEUDOLIFE_MCP_SERVE_COMMAND` JSON argv; with neither, the
+shim waits for a daemon and says so on stderr.
+
+Every other mode is a `pseudolife-mcp` command. A command or shape that is not
+ported prints a deferral on stderr, usually `pseudolife-stdio: mode '<mode>'
+is deferred in this candidate`, and exits 1; it never runs Python.
+[CUTOVER.md](CUTOVER.md) lists the ones left.
