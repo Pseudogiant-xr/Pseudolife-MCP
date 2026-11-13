@@ -1,4 +1,4 @@
-"""The proposed Rust publisher stays disabled until the maintainer opts in."""
+"""Release gates: the Rust image stays opt-in; the native client archives publish with every approved release."""
 from pathlib import Path
 from fnmatch import fnmatchcase
 
@@ -9,9 +9,9 @@ import pytest
 EXPECTED_GATES = {
     **{name: "github.event_name == 'release'" for name in ("build", "publish", "images", "registry")},
     "rust-image": "github.event_name == 'release' && vars.PSEUDOLIFE_PUBLISH_RUST_DAEMON == 'true'",
-    "rust-assets": "!cancelled() && (github.event_name == 'workflow_dispatch' || (github.event_name == 'release' && needs.publish.result == 'success' && vars.PSEUDOLIFE_PUBLISH_RUST_ASSETS == 'true'))",
+    "rust-assets": "!cancelled() && (github.event_name == 'workflow_dispatch' || (github.event_name == 'release' && needs.publish.result == 'success'))",
     "rust-assets-bundle": "!cancelled() && needs.rust-assets.result == 'success'",
-    "rust-assets-publish": "!cancelled() && github.event_name == 'release' && needs.publish.result == 'success' && needs.rust-assets-bundle.result == 'success' && vars.PSEUDOLIFE_PUBLISH_RUST_ASSETS == 'true'",
+    "rust-assets-publish": "!cancelled() && github.event_name == 'release' && needs.publish.result == 'success' && needs.rust-assets-bundle.result == 'success'",
 }
 
 
