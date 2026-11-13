@@ -445,6 +445,178 @@ def record(row: str, cases: list[core.Case], oracle: core.Target, source: Path,
     return path
 
 
+# A golden's top-level map of the cases recorded from the candidate rather
+# than the oracle: case id -> the checkout and binary it was recorded from.
+# Replay reads only ``cases``, so it never compares this.
+CANDIDATE_PROVENANCE = "recorded_from_candidate"
+# What every native deferral says (rust/shim/src/cli.rs); a recording that
+# snapshots it would assert "not ported" as the expected behaviour.
+DEFERRAL_MARK = b"is deferred in this candidate"
+_OTHER_OS = {"windows": ("linux", "Linux (WSL or the Linux dev box)"),
+             "linux": ("windows", "Windows")}
+
+
+def checkout_provenance(candidate: Path, repo: Path = REPO) -> dict:
+    """Where a candidate recording comes from: this checkout's commit, whether
+    its Rust sources differ from that commit (goldens excluded, since the
+    recording itself rewrites them), the platform and the binary's digest."""
+    head = _git(repo, "rev-parse", "--verify", "HEAD^{commit}")
+    status = _git(repo, "status", "--porcelain", "--", "rust",
+                  ":(exclude)rust/cli_harness/goldens", ":(exclude)rust/daemon/harness/goldens")
+    if head.returncode != 0 or status.returncode != 0:
+        tree = "unknown"
+    else:
+        tree = "modified" if status.stdout.strip() else "clean"
+    digest = hashlib.sha256(candidate.read_bytes()).hexdigest()
+    return {"commit": head.stdout.decode().strip() if head.returncode == 0 else None,
+            "rust_tree": tree, "platform": core.PLATFORM, "candidate_sha256": digest}
+
+
+def _candidate_host_forms(candidate: Path) -> list[tuple[bytes, bytes]]:
+    """Host paths a candidate stream may name, as ``_host_paths`` tokens: the
+    checkout, the binary's directory and the real home."""
+    paths = {str(REPO): "{ORACLE}", str(candidate.resolve().parent): "{CANDIDATE}",
+             str(Path.home()): "{USER_HOME}"}
+    forms: dict[bytes, bytes] = {}
+    for path, token in paths.items():
+        if len(path) < 4:
+            continue
+        for spelling in (path, json.dumps(path)[1:-1]):
+            forms.setdefault(spelling.encode(), token.encode())
+    return sorted(forms.items(), key=lambda item: len(item[0]), reverse=True)
+
+
+def _deferral(obs: dict) -> bool:
+    return any(DEFERRAL_MARK in core.decode(obs, field) for field in ("stdout", "stderr"))
+
+
+def _new_case_view(normal: dict) -> list[str]:
+    """What a new case's snapshot will assert, for review."""
+    lines = [f"exit {normal['exit']}"]
+    for field in ("stdout", "stderr"):
+        text = core.decode(normal, field).decode("utf-8", "backslashreplace")
+        lines.append(f"{field}: {text[:400]!r}" + (" ..." if len(text) > 400 else ""))
+    if normal.get("files"):
+        lines.append(("files: " + ", ".join(sorted(normal["files"])))[:400])
+    for field in ("requests", "db", "listener", "restore", "docker", "unscripted"):
+        if normal.get(field):
+            lines.append(f"{field}: {json.dumps(normal[field])[:400]}")
+    return lines
+
+
+def record_candidate(row: str, loaded: list[core.Case], cases: list[core.Case],
+                     candidate: core.Target, candidate_path: Path, *, write: bool,
+                     allow_deferral: bool = False, whole_row: bool = True) -> dict:
+    """Re-record ``row``'s golden for this platform from the candidate.
+
+    Every selected case runs once on the candidate and is classed against
+    the committed golden by the replay comparison itself: ``unchanged`` when
+    ``--golden`` would pass, ``changed`` (shown with the replay's difference)
+    when it would fail, ``new`` when the golden has no such case. With a
+    whole row, a recorded case the row no longer defines is ``removed``.
+
+    A case to be written is refused when its observation is vacuous, when
+    the candidate printed a deferral (unless ``allow_deferral``), or when its
+    entry would not replay green against the very run it came from (a host
+    path or verifier scrubbed from a compared span). Any refusal writes
+    nothing for the row, and without ``write`` nothing is written at all.
+    Unchanged cases, and cases not selected, keep their committed entry."""
+    path = _golden_path(row)
+    committed = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else None
+    if committed is not None:
+        _validate_golden_acls(committed)
+    old_cases = committed["cases"] if committed else {}
+    forms = _candidate_host_forms(candidate_path)
+    report: dict = {"unchanged": [], "changed": [], "new": [], "removed": [],
+                    "refused": {}, "written": False}
+    updates: dict[str, dict] = {}
+    for case in cases:
+        obs = core.run_arm(case, candidate, core._home_root() / "h")
+        want = old_cases.get(case.id)
+        diffs = (compare.diff(want, obs, case.rules, labels=("golden", "candidate"))
+                 if want is not None else None)
+        if want is not None and not diffs:
+            report["unchanged"].append(case.id)
+            _print(f"  unchanged {_label(case)}", flush=True)
+            continue
+        recording_rules = tuple(name for name in case.rules if name in normalize.RECORD_RULES)
+        normal = normalize.apply(obs, recording_rules, obs["home"])
+        normal["home"] = None
+        normal.pop("daemon_url", None)
+        _scrub(normal, forms)
+        normalize.redact_scram_verifiers(normal)
+        refusal = None
+        if normal.get("vacuous"):
+            refusal = f"its observation is vacuous: {normal['vacuous']}"
+        elif _deferral(obs) and not allow_deferral:
+            refusal = (f"the candidate printed a deferral ({DEFERRAL_MARK.decode()}); pass "
+                       "--allow-deferral only if snapshotting the deferral is intended")
+        else:
+            again = compare.diff(normal, obs, case.rules, labels=("entry", "candidate"))
+            if again:
+                refusal = ("the entry would not replay against the run it came from (a host "
+                           "path or verifier in a compared span?): " + "; ".join(again[:3]))
+        kind = "changed" if want is not None else "new"
+        _print(f"  {'CHANGED' if want is not None else 'new'} {_label(case)}", flush=True)
+        for line in (diffs or _new_case_view(normal)):
+            _print(f"        {line}")
+        if refusal:
+            report["refused"][case.id] = refusal
+            _print(f"        REFUSED: {refusal}", flush=True)
+            continue
+        report[kind].append(case.id)
+        updates[case.id] = normal
+    defined = [c.id for c in loaded]
+    if whole_row:
+        report["removed"] = [cid for cid in old_cases if cid not in defined]
+        for cid in report["removed"]:
+            _print(f"  removed {cid} (recorded, but the row no longer defines it)")
+    ran = {c.id for c in cases}
+    kept = [cid for cid in defined if cid in old_cases and cid not in ran]
+    if kept:
+        _print(f"  kept as recorded (not selected or not run here): {', '.join(kept)}")
+    other, other_name = _OTHER_OS[core.PLATFORM]
+    rerun = "".join(f"--case {c.id} " for c in cases) if not whole_row else ""
+    _print(f"  {row}.{other}.json is not touched; on {other_name} run: python "
+           f"rust/cli_harness --row {row} {rerun}--record-candidate --candidate "
+           "<pseudolife-stdio>", flush=True)
+    if report["refused"]:
+        _print(f"  refused {len(report['refused'])} case(s): nothing written for {row}", flush=True)
+        return report
+    if not (updates or report["removed"]):
+        _print(f"  {path.name}: nothing to change", flush=True)
+        return report
+    if not write:
+        _print(f"  dry run: {path.name} would change ({len(report['changed'])} changed, "
+               f"{len(report['new'])} new, {len(report['removed'])} removed); review the "
+               "differences above, then add --write", flush=True)
+        return report
+    golden = committed if committed is not None else {
+        "row": rows.ROWS[row], "platform": core.PLATFORM, "cases": {}}
+    merged: dict = {}
+    for cid in defined + [cid for cid in old_cases if cid not in defined]:
+        if cid in report["removed"]:
+            continue
+        if cid in updates:
+            merged[cid] = updates[cid]
+        elif cid in old_cases:
+            merged[cid] = old_cases[cid]
+    golden["cases"] = merged
+    provenance = dict(golden.get(CANDIDATE_PROVENANCE) or {})
+    stamp = checkout_provenance(candidate_path)
+    for cid in updates:
+        provenance[cid] = stamp
+    for cid in report["removed"]:
+        provenance.pop(cid, None)
+    golden[CANDIDATE_PROVENANCE] = dict(sorted(provenance.items()))
+    write_golden(path, golden, rows.fixture_login_secrets(row))
+    report["written"] = True
+    _print(f"  wrote {path} ({len(updates)} case(s) from the candidate at "
+           f"{(stamp['commit'] or 'an unknown commit')[:12]}, Rust tree {stamp['rust_tree']})",
+           flush=True)
+    return report
+
+
 def _write_summary(out: Path | None, summary: dict) -> None:
     """Replace ``out`` with ``summary`` in one step, so neither a reader nor
     a crash mid-write leaves a partial file."""
@@ -471,6 +643,14 @@ def main(argv: list[str] | None = None) -> int:
     mode.add_argument("--record", action="store_true", help="write goldens from the oracle")
     mode.add_argument("--golden", action="store_true", help="compare against goldens")
     mode.add_argument("--mutants", action="store_true", help="run the mutant control")
+    mode.add_argument("--record-candidate", action="store_true",
+                      help="re-record this platform's goldens from the candidate (a dry run "
+                           "that shows each case's difference unless --write is given)")
+    parser.add_argument("--write", action="store_true",
+                        help="with --record-candidate: write the changed and new cases")
+    parser.add_argument("--allow-deferral", action="store_true",
+                        help="with --record-candidate: record a case whose candidate output "
+                             "is a deferral")
     parser.add_argument("--mutant", action="append", default=[], help="only these mutants")
     parser.add_argument("--skip-bank", action="store_true",
                         help="skip cases that need real daemons on disposable banks")
@@ -479,7 +659,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--fixture", action="store_true", help="use the offline CPU embedder for real daemon fixtures")
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args(argv)
-    if args.record or args.golden:
+    if (args.write or args.allow_deferral) and not args.record_candidate:
+        parser.error("--write and --allow-deferral need --record-candidate")
+    if args.record or args.golden or args.record_candidate:
         # Record and replay share a baseline; live arms inherit the caller's
         # umask so permission differences remain observable there.
         core.pin_umask()
@@ -528,9 +710,8 @@ def main(argv: list[str] | None = None) -> int:
     failed = 0
     for row in args.row:
         loaded = rows.load(row)
-        cases = _select(loaded, args.case,
-                        bank=not (args.skip_bank or args.golden or args.record),
-                        replay=args.golden or args.record)
+        replay = args.golden or args.record or args.record_candidate
+        cases = _select(loaded, args.case, bank=not (args.skip_bank or replay), replay=replay)
         _print(f"{rows.ROWS[row]} ({len(cases)} cases, {core.PLATFORM})", flush=True)
         if args.record:
             # verify again after the row's arms: its seeders imported oracle
@@ -545,6 +726,18 @@ def main(argv: list[str] | None = None) -> int:
             continue
         if not candidate_path.is_file():
             raise SystemExit(f"candidate binary not found: {candidate_path}")
+        if args.record_candidate:
+            report = record_candidate(row, loaded, cases, core.rust_target(candidate_path),
+                                      candidate_path, write=args.write,
+                                      allow_deferral=args.allow_deferral,
+                                      whole_row=not args.case)
+            would_change = bool(report["changed"] or report["new"] or report["removed"])
+            if report["refused"] or (would_change and not report["written"]):
+                failed += 1
+            summary["rows"][row] = {"parity": rows.ROWS[row], **report}
+            _print(f"  {len(report['unchanged'])}/{len(cases)} unchanged", flush=True)
+            _write_summary(args.out, summary)
+            continue
         golden = (json.loads(_golden_path(row).read_text(encoding="utf-8"))
                   if args.golden else None)
         results = run_row(row, cases, oracle, core.rust_target(candidate_path), golden,
