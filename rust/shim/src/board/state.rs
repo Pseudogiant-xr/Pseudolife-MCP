@@ -200,13 +200,25 @@ pub fn read(path: &Path, limit: usize) -> Result<Vec<u8>> {
 /// group- or world-writable, and is refused with one stderr line naming the
 /// path and the fix otherwise. The other checks of [`open`] hold too: no
 /// redirected ancestor, no symlink, one regular file with a single link.
-/// Windows still applies [`open`]'s protected owner-only DACL rule, which
-/// files written by Git Bash or PowerShell do not meet, so the Windows
-/// native wake stays open (see the SHIM-HOOK-MARKERS parity row).
+/// On Windows the hooks write markers through Git Bash or PowerShell, whose
+/// files carry inherited, unprotected DACLs that [`open`]'s protected
+/// owner-only rule refuses; the same guard is applied instead: the owner is
+/// this user, SYSTEM or Administrators, and no other principal can write it
+/// (`windows_security::validate_marker`).
 pub fn open_marker(path: &Path, write: bool) -> Result<PrivateFile> {
     #[cfg(windows)]
     {
-        open_with_write(path, write)
+        crate::credentials::reject_ancestor_redirects(path).map_err(|_| "invalid_state")?;
+        let file = options(false, write)
+            .open(path)
+            .map_err(|_| "state_unavailable")?;
+        let (identity, distrust) = crate::credentials::windows_security::validate_marker(&file)
+            .map_err(|_| "invalid_state")?;
+        if let Some(distrust) = distrust {
+            report_marker_once(path, &marker_refusal_windows(path, &distrust));
+            return Err("invalid_state");
+        }
+        Ok(PrivateFile { file, identity })
     }
     #[cfg(unix)]
     {
@@ -250,10 +262,39 @@ fn marker_refusal(path: &Path, own: u32, owner: u32, mode: u32) -> Option<String
     }
     None
 }
+/// Why a Windows marker may not be trusted, as the line [`open_marker`]
+/// prints: the path, the cause and the one fix.
+#[cfg(windows)]
+fn marker_refusal_windows(
+    path: &Path,
+    distrust: &crate::credentials::windows_security::MarkerDistrust,
+) -> String {
+    use crate::credentials::windows_security::MarkerDistrust;
+    let shown = path.display();
+    let folder = path
+        .parent()
+        .map(|parent| parent.display().to_string())
+        .unwrap_or_default();
+    match distrust {
+        MarkerDistrust::Owner(owner) => format!(
+            "pseudolife-mcp: ignoring {shown}: it is owned by {owner}, not this user, so it could forge or suppress board wakes for this session. Fix: delete that file; the plugin hooks write it again."
+        ),
+        MarkerDistrust::Writer(writer) => {
+            // Named, not %USERNAME%: Git Bash and PowerShell do not expand it.
+            let me = crate::credentials::windows_security::current_user_name()
+                .unwrap_or_else(|| "<this account>".into());
+            format!(
+                "pseudolife-mcp: ignoring {shown}: {writer} can change or delete it, so it could forge or suppress board wakes for this session. Fix: make {folder} private to this account (icacls \"{folder}\" /inheritance:r /grant:r \"{me}:(OI)(CI)F\"), then delete the file; the plugin hooks write it again."
+            )
+        }
+        MarkerDistrust::NoDacl => format!(
+            "pseudolife-mcp: ignoring {shown}: it has no access list, so every user can write it and it could forge or suppress board wakes for this session. Fix: delete that file; the plugin hooks write it again."
+        ),
+    }
+}
 /// One line per directory and marker kind per process: each Stop-hook run
 /// arms a fresh `<key>.<token>.wake-armed`, so a per-path set would repeat
 /// the same refusal at every turn end.
-#[cfg(unix)]
 fn report_marker_once(path: &Path, line: &str) {
     static REPORTED: LazyLock<StdMutex<std::collections::HashSet<(PathBuf, String)>>> =
         LazyLock::new(Default::default);
@@ -549,6 +590,221 @@ mod tests {
                 && line.contains("Fix: remove it"),
             "{line}"
         );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_marker_rule_trusts_this_user_system_and_administrators_only() {
+        use crate::credentials::windows_security::{MarkerDistrust, marker_distrust_sddl};
+        const ME: &str = "S-1-5-21-100-200-300-1001";
+        // Power Users: a non-admin group, standing in for another account.
+        const OTHER: &str = "S-1-5-32-547";
+        let rule = |sddl: &str| {
+            marker_distrust_sddl(&sddl.replace("ME", ME).replace("OTHER", OTHER), Some(ME))
+        };
+        // What Git Bash and PowerShell leave: inherited, unprotected entries
+        // for this user, SYSTEM and Administrators, a read-only logon SID,
+        // and (Cygwin) a read-control-only Everyone entry.
+        for sddl in [
+            "O:MED:AI(A;ID;FA;;;SY)(A;ID;FA;;;BA)(A;ID;FA;;;ME)",
+            "O:MED:(A;;FA;;;ME)(A;;FA;;;SY)(A;;0x1200a9;;;S-1-5-5-0-123456)",
+            "O:MED:(A;;0x1f019f;;;ME)(A;;0x120080;;;WD)(A;;FR;;;BU)",
+            "O:MED:P(A;;FA;;;OW)",
+            // An elevated token's files are owned by Administrators.
+            "O:BAD:(A;;FA;;;BA)(A;;FA;;;SY)(A;;FA;;;ME)",
+            "O:SYD:(A;;FA;;;SY)",
+            // Entries that grant nothing here: inherit-only, or a denial.
+            "O:MED:(A;;FA;;;ME)(A;OICIIO;FA;;;WD)(D;;FA;;;OTHER)",
+        ] {
+            assert_eq!(rule(sddl), None, "{sddl}");
+        }
+        assert!(
+            matches!(
+                rule("O:OTHERD:(A;;FA;;;OTHER)(A;;FA;;;ME)"),
+                Some(MarkerDistrust::Owner(_))
+            ),
+            "another user's marker"
+        );
+        for (sddl, who) in [
+            ("O:MED:(A;;FA;;;ME)(A;;FW;;;WD)", "Everyone"),
+            (
+                "O:MED:(A;;FA;;;ME)(A;;0x1301bf;;;AU)",
+                "Authenticated Users",
+            ),
+            ("O:MED:(A;;FA;;;ME)(A;;FA;;;BU)", "Users"),
+            ("O:MED:(A;;FA;;;ME)(A;;0x4;;;OTHER)", "Power Users"),
+            ("O:MED:(A;;FA;;;ME)(A;;WD;;;OTHER)", "Power Users"),
+            ("O:MED:(A;;FA;;;ME)(A;;GW;;;OTHER)", "Power Users"),
+            // Deleting or backdating a marker suppresses a wake too.
+            ("O:MED:(A;;FA;;;ME)(A;;SD;;;BU)", "Users"),
+            ("O:MED:(A;;FA;;;ME)(A;;0x100;;;BU)", "Users"),
+        ] {
+            match rule(sddl) {
+                Some(MarkerDistrust::Writer(name)) => assert!(name.contains(who), "{sddl}: {name}"),
+                other => panic!("{sddl}: {other:?}"),
+            }
+        }
+        assert_eq!(
+            rule("O:MED:NO_ACCESS_CONTROL"),
+            Some(MarkerDistrust::NoDacl)
+        );
+        // The real token user is trusted too, not only the synthetic one.
+        assert_eq!(marker_distrust_sddl("O:SYD:(A;;FA;;;SY)", None), None);
+    }
+
+    /// Git Bash, as Claude Code runs the `.sh` hooks on Windows.
+    #[cfg(windows)]
+    fn git_bash() -> PathBuf {
+        let output = std::process::Command::new("git")
+            .arg("--exec-path")
+            .output()
+            .expect("git is on PATH");
+        let exec = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
+        exec.ancestors()
+            .map(|dir| dir.join("bin").join("bash.exe"))
+            .find(|bash| bash.is_file())
+            .unwrap_or_else(|| panic!("no Git Bash beside {}", exec.display()))
+    }
+
+    #[cfg(windows)]
+    fn bash(script: &str, args: &[&Path]) {
+        let status = std::process::Command::new(git_bash())
+            .arg("-c")
+            .arg(script)
+            .arg("hook")
+            .args(
+                args.iter()
+                    .map(|path| path.to_string_lossy().replace('\\', "/")),
+            )
+            .status()
+            .unwrap();
+        assert!(status.success(), "{script}");
+    }
+
+    #[cfg(windows)]
+    fn powershell_write(path: &Path, text: &str) {
+        // `-Command` joins trailing arguments into the script text, so the
+        // values travel in the environment instead.
+        let status = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Command"])
+            .arg("[IO.File]::WriteAllText($env:MARKER_PATH, $env:MARKER_TEXT)")
+            .env("MARKER_PATH", path)
+            .env("MARKER_TEXT", text)
+            .status()
+            .unwrap();
+        assert!(status.success());
+    }
+
+    /// Set a file's or folder's DACL from SDDL, as its owner may.
+    #[cfg(windows)]
+    fn set_dacl(path: &Path, sddl: &str) {
+        crate::credentials::windows_security::set_dacl_sddl(path, sddl).unwrap();
+    }
+
+    #[cfg(windows)]
+    const MARKERS: [&str; 4] = ["k.wake", "k.0123abcd.wake-armed", "k.seen", "k.reprint"];
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_markers_written_by_git_bash_and_powershell_are_read() {
+        let root = Dir::new();
+        // The digest folder as the shim makes it (owner-only), as a hook's
+        // `mkdir -p` under umask 077 makes it, and as plain inheritance from
+        // the user's temporary folder leaves it.
+        let private = root.0.join("private");
+        private_dir(&private).unwrap();
+        let hooked = root.0.join("hooked");
+        bash(r#"umask 077; mkdir -p "$1""#, &[&hooked]);
+        let inherited = std::env::temp_dir().join(format!(
+            "pseudolife-markers-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        fs::create_dir(&inherited).unwrap();
+        let _inherited = Dir(inherited.clone());
+        for folder in [&private, &hooked, &inherited] {
+            for marker in MARKERS {
+                let bashed = folder.join(format!("bash-{marker}"));
+                // stop-wake.sh and coordination-start.sh: umask 077, a
+                // temporary file, then mv -f over the marker.
+                bash(
+                    r#"umask 077; printf '%s\n' 1789 > "$1.$$" && mv -f "$1.$$" "$1""#,
+                    &[&bashed],
+                );
+                // lifecycle.ps1 (Codex on Windows).
+                let shelled = folder.join(format!("ps-{marker}"));
+                powershell_write(&shelled, "1789\n");
+                for path in [&bashed, &shelled] {
+                    assert_eq!(
+                        read_marker(path, 64).as_deref(),
+                        Ok(&b"1789\n"[..]),
+                        "{}",
+                        path.display()
+                    );
+                    // A hook-written marker is also replaced in place.
+                    atomic_write_marker(path, b"1790\n").unwrap();
+                    assert_eq!(read_marker(path, 64).unwrap(), b"1790\n");
+                }
+            }
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_marker_another_principal_can_write_is_refused() {
+        let root = Dir::new();
+        for (index, grant) in ["(A;;FW;;;WD)", "(A;;FA;;;S-1-5-32-547)"]
+            .into_iter()
+            .enumerate()
+        {
+            let path = root.0.join(format!("k{index}.wake"));
+            powershell_write(&path, "1\n");
+            assert!(read_marker(&path, 64).is_ok());
+            set_dacl(&path, &format!("D:(A;;FA;;;OW)(A;;FA;;;SY){grant}"));
+            assert_eq!(read_marker(&path, 64), Err("invalid_state"), "{grant}");
+            // The guard also keeps a forged marker from being adopted on write.
+            assert_eq!(atomic_write_marker(&path, b"2\n"), Err("invalid_state"));
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_marker_refusal_names_the_path_the_writer_and_the_fix() {
+        use crate::credentials::windows_security::MarkerDistrust;
+        let path = Path::new(r"C:\Users\<user>\.pseudolife-mcp\digests\k.wake");
+        let line = marker_refusal_windows(path, &MarkerDistrust::Writer("Everyone".into()));
+        assert!(line.contains(&path.display().to_string()), "{line}");
+        assert!(line.contains("Everyone can change or delete it"), "{line}");
+        assert!(
+            line.contains(r#"icacls "C:\Users\<user>\.pseudolife-mcp\digests" /inheritance:r"#),
+            "{line}"
+        );
+        // The fix names this account: %USERNAME% expands only in cmd, and
+        // agents run the line in Git Bash or PowerShell.
+        let me = crate::credentials::windows_security::current_user_name().unwrap();
+        assert!(
+            line.contains(&format!("/grant:r \"{me}:(OI)(CI)F\"")),
+            "{line}"
+        );
+        assert!(!line.contains('%') && !line.contains("del \""), "{line}");
+        let line = marker_refusal_windows(path, &MarkerDistrust::Owner(r"HOST\other".into()));
+        assert!(
+            line.contains(r"owned by HOST\other, not this user")
+                && line.contains("Fix: delete that file"),
+            "{line}"
+        );
+        let line = marker_refusal_windows(path, &MarkerDistrust::NoDacl);
+        assert!(
+            line.contains("no access list") && line.contains("Fix: delete that file"),
+            "{line}"
+        );
+        for distrust in [
+            MarkerDistrust::Writer("Everyone".into()),
+            MarkerDistrust::Owner("other".into()),
+            MarkerDistrust::NoDacl,
+        ] {
+            let line = marker_refusal_windows(path, &distrust);
+            assert!(!line.contains("  ") && !line.contains('\n'), "{line}");
+        }
     }
 
     struct Dir(PathBuf);
