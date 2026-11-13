@@ -232,7 +232,18 @@ reinstallation. There is no
 `--binary` release bypass. A successful JSON report has `state: "installed"`,
 `runtime`, `version` and `launcher`; installation failures return a
 `state: "failed"` report and exit 1. Invalid/missing/repeated options exit 2
-before filesystem mutation. Setup owns the subsequent registration step.
+before filesystem mutation. Setup owns the subsequent registration step:
+
+```text
+pseudolife-mcp installer migrate-registrations [--client <name>]... [--json]
+```
+
+It refuses (exit 1, nothing changed) until a verified native runtime and the
+stable launcher exist, holds the update lock, and moves `managed` and `legacy`
+registrations (pipx, `pip --user`, a Python runtime venv) with `migrate`
+above. `editable`, `spawning` and unrecognised registrations are reported and
+left alone, and numbered directories holding a Python venv are named as the
+old client left on disk. A rerun that changes nothing prints one line.
 
 ## Recovery and validation
 

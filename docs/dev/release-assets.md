@@ -1,11 +1,11 @@
 # Native release assets
 
 Publishing the native CLI and the Rust daemon image requires the
-existing human-approved `publish` job in `.github/workflows/release.yml`
-and an explicitly enabled repository variable for each. The Rust daemon
-image is the default Docker engine since 0.23.0, so its variable stays
-enabled; the native CLI archives remain opt-in. This contract does not
-authorize a release.
+existing human-approved `publish` job in `.github/workflows/release.yml`.
+The native CLI archives publish with every approved release, because the
+installers download them; the Rust daemon image additionally needs its
+repository variable, which stays enabled since it became the default
+Docker engine in 0.23.0. This contract does not authorize a release.
 
 ## Names and targets
 
@@ -40,7 +40,8 @@ and `pseudolife-compose-<version>.tar.gz`, sorted by basename; it does not
 hash itself. Consumers fetch it and the selected archive from the same
 release, verify the archive before extraction, and refuse missing or
 duplicate entries and digest mismatches. A missing native asset means
-that release did not publish the opt-in native set.
+that release predates the native set (0.23.1 and earlier publish none) or
+its publication job failed.
 
 The compose archive has these six regular files at its root, copied from
 the release's `ops/` directory without rewriting their contents:
@@ -92,13 +93,13 @@ does not imply a daemon image for every target. The runtime installs
 `pseudolife-daemon` and `/usr/local/bin/pseudolife-mcp`; the latter supports
 `docker run --rm <image> pseudolife-mcp version` without provisioning models.
 
-The publication jobs are enabled only by the maintainer setting
-`PSEUDOLIFE_PUBLISH_RUST_DAEMON=true` for the image and
-`PSEUDOLIFE_PUBLISH_RUST_ASSETS=true` for the native asset set. Unset or
-other values disable them. Build-only CI proofs neither attach release
-assets nor push images. Installers and updaters must treat these assets
-as unavailable until an enabled, approved release has actually published
-them; this document defines their contract, not their availability.
+The image job is enabled only by the maintainer setting
+`PSEUDOLIFE_PUBLISH_RUST_DAEMON=true`; unset or other values disable it.
+The native asset set has no variable: it publishes whenever the approved
+`publish` job succeeded. Build-only CI proofs neither attach release
+assets nor push images. Installers and updaters still treat an asset as
+unavailable until the release actually carries it (a 404 or a missing
+`SHA256SUMS` line refuses with nothing changed).
 
 Release-mode `pseudolife-mcp update --engine rust` (both the Python and the
 native updater) pulls `pseudolife-daemon-rust:<target>` with
@@ -121,8 +122,7 @@ To prove the matrix without publication, dispatch `release.yml` on the
 candidate branch. The native build and bundle jobs upload an Actions
 artifact named `native-release-complete`; all publishing jobs are skipped,
 even if the opt-in variables are enabled. A release event builds the same
-archives only after `publish` succeeds and the assets variable is enabled,
-then verifies the downloaded `SHA256SUMS` immediately before attaching the
+archives only after `publish` succeeds, then verifies the downloaded `SHA256SUMS` immediately before attaching the
 complete set. Publication requires exactly the six listed archives plus the
 checksum manifest. On a retry, it downloads and verifies every already
 published asset, including `SHA256SUMS`, before uploading only missing assets;
