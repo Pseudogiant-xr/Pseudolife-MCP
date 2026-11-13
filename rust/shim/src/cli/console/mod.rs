@@ -5,12 +5,12 @@
 //! `has_display`) with CPython 3.11's `webbrowser`. Answered natively: help
 //! and argparse's errors (at `COLUMNS=80`), `--list [--json]`, `--revoke ID
 //! [--json]`, the sign-in (`[--no-open] [--to PAGE] [--json]
-//! [--unless-signed-in]`, an empty `--revoke` included) and every refusal
-//! those reach. Which browser the sign-in would start is decided before the
+//! [--unless-signed-in]`), the empty `--revoke` usage error and every
+//! refusal those reach. Which browser the sign-in would start is decided before the
 //! code is minted (`browser.rs`), so a launcher this port does not
 //! reproduce defers before any effect; once the daemon answers the sign-in
-//! with a 200 object the command answers every branch itself, an oracle
-//! crash included (its terminal exception line on stderr, exit 1).
+//! with a 200 object the command answers every branch itself, each
+//! malformed answer's refusal included.
 //! Anything else outside the reproduced domain that can be decided before a
 //! request defers before it
 //! (`rust/cli_harness/rows/console.md`).
@@ -79,7 +79,15 @@ const REFUSALS: [(&str, Option<&str>); 6] = [
         ),
     ),
 ];
-const NO_LINK: &str = "pseudolife-mcp console: the daemon's answer had no sign-in link";
+const NO_LINK: &str = "the daemon's answer had no sign-in link";
+const MISMATCH: &str = "the daemon's sign-in code does not match its link";
+const BAD_EXPIRY: &str = "the daemon's answer had no usable expiry time (expires_in)";
+const LIST_TEXT: &str =
+    "the daemon's session list had text that cannot be printed (a lone surrogate)";
+const EMPTY_REVOKE: &str = "--revoke takes a session id from --list, not an empty one\n";
+/// `console_cli._CODE_CHARS`: both daemons' pairing-code alphabet
+/// (`principals.PAIRING_CODE_ALPHABET`) and the group separator.
+const CODE_CHARS: &str = "0123456789ABCDEFGHJKMNPQRSTVWXYZ-";
 
 /// Python `repr()` of a str.
 fn py_repr(text: &str) -> String {
@@ -103,11 +111,6 @@ struct Out {
     stdout: bool,
     text: String,
     code: u8,
-    /// An oracle crash after `text` (on stdout): the terminal
-    /// `ExceptionType: message` line it writes to stderr (exit 1). Only its
-    /// traceback header and frames are not reproduced
-    /// (`python-traceback-not-contract`).
-    crash: Option<String>,
 }
 
 impl Out {
@@ -116,7 +119,6 @@ impl Out {
             stdout: true,
             text,
             code,
-            crash: None,
         }
     }
 
@@ -125,17 +127,6 @@ impl Out {
             stdout: false,
             text,
             code,
-            crash: None,
-        }
-    }
-
-    /// What reached stdout, then the uncaught exception.
-    fn crashed(text: String, line: String) -> Self {
-        Self {
-            stdout: true,
-            text,
-            code: 1,
-            crash: Some(line),
         }
     }
 }
@@ -175,6 +166,21 @@ fn emit(out: J, as_json: bool, text: &[u16], code: u8) -> Res<Out> {
     } else {
         Out::stderr(stderr_text(text) + "\n", code)
     })
+}
+
+/// `_bad_answer(detail, as_json)`: an answer this command cannot use,
+/// refused (exit 4) before anything is opened or printed.
+fn bad_answer(detail: &str, as_json: bool) -> Out {
+    if as_json {
+        let out = dict(vec![
+            ("state", J::from("refused")),
+            ("error", J::from("bad_answer")),
+            ("detail", J::from(detail)),
+        ]);
+        Out::stdout(pyjson::dumps_line(&out) + "\n", EXIT_REFUSED)
+    } else {
+        Out::stderr(format!("pseudolife-mcp console: {detail}\n"), EXIT_REFUSED)
+    }
 }
 
 /// `d.get(key)` keeping a JSON null (Python's `None` value) apart from an
@@ -340,8 +346,10 @@ fn plan(argv: &[String], context: &Context) -> Res<Result<Out, (Call, bool)>> {
         args::Parsed::Help | args::Parsed::Error(_) => return Err(Defer),
         args::Parsed::Args(args) => args,
     };
-    // `args.revoke` is tested for truth: an empty id is no revoke.
-    let revoke = args.revoke.clone().filter(|id| !id.is_empty());
+    if args.revoke.as_deref() == Some("") {
+        return Ok(Ok(Out::stderr(EMPTY_REVOKE.to_owned(), EXIT_USAGE)));
+    }
+    let revoke = args.revoke.clone();
     if args.list && revoke.is_some() {
         return Ok(Ok(Out::stderr(
             "--list and --revoke are separate commands; give one\n".to_owned(),
@@ -364,7 +372,6 @@ fn plan(argv: &[String], context: &Context) -> Res<Result<Out, (Call, bool)>> {
     } else if let Some(id) = revoke {
         Call::Revoke(id)
     } else {
-        // `elif args.revoke:` is false for an empty id: the sign-in path.
         Call::Link {
             to: args.to,
             open: !args.no_open,
@@ -479,10 +486,7 @@ async fn request(
 fn refusal(status: u16, payload: Option<&Dict>) -> Res<J> {
     let code = payload.and_then(|payload| pyjson::get(payload, "error"));
     let hint = payload.and_then(|payload| pyjson::get(payload, "hint"));
-    // `code in _REFUSALS` raises TypeError for a list or dict.
-    if matches!(code, Some(J::List(_) | J::Dict(_))) {
-        return Err(Defer);
-    }
+    // Only a str is looked up: a list or dict reads as an unknown code.
     let truthy = |value: Option<&J>| value.filter(|value| value.truthy()).cloned();
     if let Some(name) = code.and_then(J::as_str)
         && let Some((_, message)) = REFUSALS.iter().find(|(key, _)| *key == name)
@@ -519,21 +523,35 @@ fn padded(mut text: Vec<u16>, width: usize) -> Vec<u16> {
     text
 }
 
-/// `_stamp(value)`.
-fn stamp_cell(value: Option<&J>) -> Res<String> {
+/// `_stamp(value)`: the cell, or `Ok(None)` where `time.localtime` raises
+/// (the list's refusal).
+fn stamp_cell(value: Option<&J>) -> Res<Option<String>> {
     let seconds = match value {
         Some(J::Bool(flag)) => i64::from(*flag),
-        Some(J::Int(text)) => text.parse::<i64>().map_err(|_| Defer)?,
+        // Past time_t: OverflowError.
+        Some(J::Int(text)) => match text.parse::<i64>() {
+            Ok(seconds) => seconds,
+            Err(_) => return Ok(None),
+        },
         Some(J::Float(value)) => {
-            // time.localtime floors a float; NaN and the infinities raise.
-            if !value.is_finite() || value.abs() > 1e15 {
-                return Err(Defer);
+            // `_PyTime_ObjectToTime_t` floors a float; NaN raises ValueError,
+            // the infinities and anything past time_t OverflowError (2**63
+            // itself passes its check and casts to a time no localtime takes).
+            let floor = value.floor();
+            if !floor.is_finite()
+                || !(-9.223_372_036_854_776e18..9.223_372_036_854_776e18).contains(&floor)
+            {
+                return Ok(None);
             }
-            value.floor() as i64
+            floor as i64
         }
-        _ => return Ok("-".to_owned()),
+        _ => return Ok(Some("-".to_owned())),
     };
-    stamp::minute(seconds).ok_or(Defer)
+    match stamp::minute(seconds) {
+        stamp::Minute::Shown(text) => Ok(Some(text)),
+        stamp::Minute::Refused => Ok(None),
+        stamp::Minute::Unreproduced => Err(Defer),
+    }
 }
 
 /// `_list(payload, as_json)`.
@@ -565,16 +583,31 @@ fn listed(payload: &Dict, as_json: bool) -> Res<Out> {
             continue;
         };
         let cell = |key: &str| raw(row, key).map(J::py_str_units).unwrap_or_default();
+        let mut stamps = Vec::new();
+        for field in ["created_at", "last_used_at"] {
+            match stamp_cell(raw(row, field))? {
+                Some(text) => stamps.push(units(&text)),
+                None => {
+                    return Ok(bad_answer(
+                        &format!(
+                            "the daemon's session list had a time this machine cannot show ({field})"
+                        ),
+                        false,
+                    ));
+                }
+            }
+        }
         let label = match raw(row, "label") {
             Some(value) if value.truthy() => value.py_str_units(),
             _ => units("-"),
         };
+        let [since, last] = <[Vec<u16>; 2]>::try_from(stamps).map_err(|_| Defer)?;
         for (piece, width) in [
             (cell("session_id"), 17),
             (cell("principal"), 20),
             (cell("method"), 8),
-            (units(&stamp_cell(raw(row, "created_at"))?), 17),
-            (units(&stamp_cell(raw(row, "last_used_at"))?), 17),
+            (since, 17),
+            (last, 17),
         ] {
             text.extend(padded(piece, width));
             text.push(u16::from(b' '));
@@ -587,80 +620,108 @@ fn listed(payload: &Dict, as_json: bool) -> Res<Out> {
             "(Only your own sign-ins are shown: this machine's token is a paired one.)\n",
         ));
     }
-    Ok(Out::stdout(stdout_text(&text)?, EXIT_OK))
+    Ok(match String::from_utf16(&text) {
+        Ok(text) => Out::stdout(text, EXIT_OK),
+        Err(_) => bad_answer(LIST_TEXT, false),
+    })
 }
 
-/// `link_is_safe(url, origin)`. An origin this port cannot split (one
-/// holding a non-ASCII character or a lone surrogate) and a URL holding a
-/// lone surrogate read as unsafe: the link is refused where the oracle
-/// might accept it (a declared, fail-safe divergence; only a daemon that
-/// does not echo the request's ASCII origin answers so).
-fn link_is_safe(url: Option<&J>, origin: Option<&J>) -> bool {
+/// `_ORIGIN.fullmatch(origin)`: `https?://` then a host of `[a-z0-9._~-]`
+/// or a bracketed `[0-9a-f:.]` address, and an optional 1-5 digit port.
+fn origin_is_plain(origin: &str) -> bool {
+    let Some(rest) = origin
+        .strip_prefix("http://")
+        .or_else(|| origin.strip_prefix("https://"))
+    else {
+        return false;
+    };
+    let (host_ok, port) = match rest.strip_prefix('[') {
+        Some(bracketed) => match bracketed.split_once(']') {
+            Some((inner, port)) => (
+                !inner.is_empty()
+                    && inner.bytes().all(|b| {
+                        b.is_ascii_digit() || (b'a'..=b'f').contains(&b) || b == b':' || b == b'.'
+                    }),
+                port,
+            ),
+            None => (false, ""),
+        },
+        None => {
+            let end = rest.find(':').unwrap_or(rest.len());
+            let (host, port) = rest.split_at(end);
+            (
+                !host.is_empty()
+                    && host.bytes().all(|b| {
+                        b.is_ascii_lowercase() || b.is_ascii_digit() || b"._~-".contains(&b)
+                    }),
+                port,
+            )
+        }
+    };
+    host_ok
+        && (port.is_empty()
+            || port.strip_prefix(':').is_some_and(|digits| {
+                (1..=5).contains(&digits.len()) && digits.bytes().all(|b| b.is_ascii_digit())
+            }))
+}
+
+/// `link_is_safe(url, origin, to)`: after `<origin>/ui/#/signin?code=`
+/// only a code of [`CODE_CHARS`] and, when page `to` was asked for, an
+/// optional `&to=<to>`. An origin holding anything but ASCII (the port
+/// cannot split it) fails [`origin_is_plain`] in the oracle too, as does a
+/// URL holding a lone surrogate.
+fn link_is_safe(url: Option<&J>, origin: Option<&J>, to: Option<&str>) -> bool {
     let origin = match origin {
         Some(J::Str(origin)) => normalize_origin(origin).ok().flatten(),
         _ => None,
     };
-    let Some(origin) = origin else {
+    let (Some(origin), Some(J::Str(url))) = (origin, url) else {
         return false;
     };
-    match url {
-        Some(J::Str(url)) => {
-            !url.chars().any(|c| (c as u32) < 33 || c as u32 == 127)
-                && url.starts_with(&format!("{origin}/ui/#/signin?code="))
-        }
-        _ => false,
+    if !origin_is_plain(&origin) {
+        return false;
     }
-}
-
-/// `print(line)` to strict UTF-8 stdout: the line and its newline, or the
-/// `UnicodeEncodeError` line a lone surrogate raises (positions in code
-/// points of the line; a run of surrogates is reported whole).
-fn print_line(out: &mut String, line: &[u16]) -> Result<(), String> {
-    let items: Vec<Result<char, u16>> = char::decode_utf16(line.iter().copied())
-        .map(|item| item.map_err(|error| error.unpaired_surrogate()))
-        .collect();
-    if let Some(start) = items.iter().position(Result::is_err) {
-        let run = items[start..]
-            .iter()
-            .take_while(|item| item.is_err())
-            .count();
-        let what = match items[start] {
-            Err(unit) if run == 1 => format!("character '\\u{unit:04x}' in position {start}"),
-            _ => format!("characters in position {start}-{}", start + run - 1),
-        };
-        return Err(format!(
-            "UnicodeEncodeError: 'utf-8' codec can't encode {what}: surrogates not allowed"
-        ));
-    }
-    out.extend(items.into_iter().flatten());
-    out.push('\n');
-    Ok(())
+    let Some(rest) = url.strip_prefix(&format!("{origin}/ui/#/signin?code=")) else {
+        return false;
+    };
+    let (code, page) = rest.split_at(rest.find('&').unwrap_or(rest.len()));
+    !code.is_empty()
+        && code.chars().all(|c| CODE_CHARS.contains(c))
+        && (page.is_empty() || to.is_some_and(|to| page == format!("&to={to}")))
 }
 
 /// `_opened(payload, args, environ)`. `launch` is `open_browser` when a
 /// browser may open (no `--no-open`, and `has_display`); it runs only once
-/// the link has passed `link_is_safe`, before anything is printed, as in
+/// the answer has passed every check, before anything is printed, as in
 /// the oracle.
-fn opened(payload: &Dict, as_json: bool, launch: Option<&mut dyn FnMut(&str) -> bool>) -> Out {
+fn opened(
+    payload: &Dict,
+    as_json: bool,
+    to: Option<&str>,
+    launch: Option<&mut dyn FnMut(&str) -> bool>,
+) -> Out {
     let url = pyjson::get(payload, "url");
     let code = pyjson::get(payload, "code");
     let origin = pyjson::get(payload, "origin");
-    let safe = matches!(code, Some(J::Str(_) | J::Wtf(_))) && link_is_safe(url, origin);
+    let safe = matches!(code, Some(J::Str(_) | J::Wtf(_))) && link_is_safe(url, origin, to);
     let (true, Some(J::Str(link)), Some(J::Str(at)), Some(code)) = (safe, url, origin, code) else {
-        return if as_json {
-            Out::stdout(
-                "{\"state\": \"refused\", \"error\": \"bad_answer\"}\n".to_owned(),
-                EXIT_REFUSED,
-            )
-        } else {
-            Out::stderr(format!("{NO_LINK}\n"), EXIT_REFUSED)
-        };
+        return bad_answer(NO_LINK, as_json);
+    };
+    let shown = link
+        .split_once("?code=")
+        .map(|(_, rest)| rest.split('&').next().unwrap_or(rest))
+        .unwrap_or_default();
+    if code.as_str() != Some(shown) {
+        return bad_answer(MISMATCH, as_json);
+    }
+    let expires_in = pyjson::get(payload, "expires_in");
+    let Ok(minutes) = pyint::minutes(expires_in) else {
+        return bad_answer(BAD_EXPIRY, as_json);
     };
     let opened = match launch {
         Some(launch) => launch(link),
         None => false,
     };
-    let expires_in = pyjson::get(payload, "expires_in");
     if as_json {
         let out = dict(vec![
             ("state", J::from(if opened { "opened" } else { "printed" })),
@@ -672,27 +733,17 @@ fn opened(payload: &Dict, as_json: bool, launch: Option<&mut dyn FnMut(&str) -> 
         ]);
         return Out::stdout(pyjson::dumps_line(&out) + "\n", EXIT_OK);
     }
-    let minutes = match pyint::minutes(expires_in) {
-        Ok(minutes) => minutes,
-        Err(line) => return Out::crashed(String::new(), line),
-    };
     let lead = if opened {
         "Opened the Console in your browser: confirm the sign-in there."
     } else {
         "Open this link to sign in to the Console:"
     };
-    let mut code_line = units("Or type the code ");
-    code_line.extend(code.py_str_units());
-    code_line.extend(units(&format!(
-        " into the Console's sign-in dialog at {at}/ui/. It works once, within {minutes} minutes."
-    )));
-    let mut text = String::new();
-    for line in [units(lead), units(&format!("  {link}")), code_line] {
-        if let Err(crash) = print_line(&mut text, &line) {
-            return Out::crashed(text, crash);
-        }
-    }
-    Out::stdout(text, EXIT_OK)
+    Out::stdout(
+        format!(
+            "{lead}\n  {link}\nOr type the code {shown} into the Console's sign-in dialog at {at}/ui/. It works once, within {minutes} minutes.\n"
+        ),
+        EXIT_OK,
+    )
 }
 
 /// The `no_daemon` answer: no HTTP answer arrived.
@@ -809,12 +860,13 @@ async fn answer(
                 code,
             )
         }
-        Call::Link { .. } => Ok(match plan {
+        Call::Link { to, .. } => Ok(match plan {
             // `open_browser` returns False without starting anything.
-            None | Some(browser::Plan::Refused) => opened(&payload, as_json, None),
+            None | Some(browser::Plan::Refused) => opened(&payload, as_json, to.as_deref(), None),
             Some(plan) => opened(
                 &payload,
                 as_json,
+                to.as_deref(),
                 Some(&mut |url: &str| launch::open(&plan, url)),
             ),
         }),
@@ -871,11 +923,6 @@ pub(super) fn run(values: Vec<OsString>) -> Option<ExitCode> {
     } else {
         super::move_cli::emit(&mut io::stderr().lock(), &bytes)
     };
-    if let Some(line) = &out.crash {
-        // The uncaught exception's last line, after whatever stdout took.
-        let line = super::text_bytes(&format!("{line}\n"));
-        let _ = super::move_cli::emit(&mut io::stderr().lock(), &line);
-    }
     super::move_cli::settle(out.code, written).map(ExitCode::from)
 }
 

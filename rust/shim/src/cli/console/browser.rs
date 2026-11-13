@@ -9,9 +9,9 @@
 //! `webbrowser.get()` as no browser: both print the link. The reproduced
 //! launchers are a `BackgroundBrowser` (from `BROWSER` or the standard X
 //! list) and, on Windows, `WindowsDefault` (`os.startfile`). Every other
-//! controller (the `UnixBrowser` family, Konqueror, Grail, the macOS
-//! AppleScript launchers) and a clone `_synthesize` could make of one
-//! defers.
+//! controller (the `UnixBrowser` family but Elinks, which `open_browser`
+//! refuses, Konqueror, Grail, the macOS AppleScript launchers) and a clone
+//! `_synthesize` could make of one defers.
 use std::ffi::OsString;
 
 /// Which `sys.platform` branch of `webbrowser` runs.
@@ -154,13 +154,14 @@ fn x_browsers(host: &dyn Host) -> Vec<(&'static str, Controller)> {
 }
 
 /// The console browsers registered when `TERM` is set. `Elinks` is a
-/// `UnixBrowser`, not a `GenericBrowser`, so `open_browser` would run it.
+/// `UnixBrowser`, not a `GenericBrowser`, but `open_browser` refuses it by
+/// name, so it reads as one here.
 fn console_browsers(host: &dyn Host) -> Vec<(&'static str, Controller)> {
-    use Controller::{Generic, Other};
+    use Controller::Generic;
     [
         ("www-browser", Generic),
         ("links", Generic),
-        ("elinks", Other),
+        ("elinks", Generic),
         ("lynx", Generic),
         ("w3m", Generic),
     ]

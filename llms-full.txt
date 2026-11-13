@@ -6282,7 +6282,10 @@ token the way every client command does (`PSEUDOLIFE_MCP_DAEMON_URL`,
 Codex registration `doctor` reads), asks the daemon for a one-time sign-in
 code, and opens `<origin>/ui/#/signin?code=…`. The code lasts 5 minutes,
 works once, and only at the Console address it was made for. The command
-also prints the link and the code. On a machine with no browser, open the
+opens only a link that holds nothing but that address, the code and the
+page asked for, and refuses any other answer (exit 4), so whatever answers
+at the daemon's address cannot hand the browser another address or a
+command. It also prints the link and the code. On a machine with no browser, open the
 link on any device that reaches that address, or type the code into the
 Console's sign-in dialog there. `--no-open` only prints, which is also the
 right choice on a machine other people use, since a browser's command line
