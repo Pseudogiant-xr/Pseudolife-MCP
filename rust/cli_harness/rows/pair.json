@@ -1,0 +1,29 @@
+{
+  "parity": "CLI-PAIRING",
+  "python_roots": [
+    "pair_cli"
+  ],
+  "postgres": false,
+  "shim": [],
+  "source_mutants": [
+    "pair-cleanup-error-swallowed",
+    "pair-constant-digest",
+    "pair-file-kept-on-refusal",
+    "pair-hash-of-wrong-text",
+    "pair-message-token",
+    "pair-mode-not-owner-only",
+    "pair-not-owner-only",
+    "pair-reserved-name-moves",
+    "pair-retry-flipped",
+    "pair-unknown-exit"
+  ],
+  "platform_exclusions": {
+    "linux": {
+      "pair-cleanup-error-swallowed": "Registered only by the Windows pairing source branch.",
+      "pair-not-owner-only": "Registered only by the Windows pairing source branch."
+    },
+    "windows": {
+      "pair-mode-not-owner-only": "Registered only by the POSIX pairing source branch."
+    }
+  }
+}

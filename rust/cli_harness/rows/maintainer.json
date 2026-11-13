@@ -1,0 +1,32 @@
+{
+  "parity": "CLI-MAINTAINER",
+  "python_roots": [
+    "maintainer_cli"
+  ],
+  "postgres": true,
+  "shim": [
+    "maintainer"
+  ],
+  "source_mutants": [
+    "maint-class-fallback-dropped",
+    "maint-code-ttl",
+    "maint-commit-failure-deferred",
+    "maint-confirm-audit-dropped",
+    "maint-ending-error-ignored",
+    "maint-exact-classes-dropped",
+    "maint-host-revoke-keeps-sign-ins",
+    "maint-like-escape-dropped",
+    "maint-list-order-flipped",
+    "maint-redeemed-text",
+    "maint-refusal-token",
+    "maint-reset-without-yes-exit-2",
+    "maint-revoke-rerevokes",
+    "maint-secret-kept",
+    "maint-unused-codes-kept",
+    "maint-waiting-stdout-error-dropped"
+  ],
+  "platform_exclusions": {
+    "linux": {},
+    "windows": {}
+  }
+}

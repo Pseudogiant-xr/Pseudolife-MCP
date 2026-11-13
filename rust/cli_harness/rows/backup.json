@@ -1,0 +1,49 @@
+{
+  "parity": "CLI-BACKUP-DSN",
+  "python_roots": [
+    "backup_cli"
+  ],
+  "postgres": true,
+  "shim": [
+    "backup",
+    "backup_help.txt"
+  ],
+  "source_mutants": [
+    "backup-archives-backups-dir",
+    "backup-archives-password-file",
+    "backup-dotfile-suffix-windows",
+    "backup-dump-keeps-owner",
+    "backup-member-mode-posix",
+    "backup-member-mode-windows",
+    "backup-nested-member-order",
+    "backup-pg-dump-failure-strip",
+    "backup-rotates-dumps-in-file-mode",
+    "backup-rotation-order",
+    "backup-skipped-wording",
+    "backup-stdout-failure-exit",
+    "backup-top-order-windows",
+    "backup-hardlink-identity",
+    "backup-raw-member-name",
+    "backup-omits-fifo",
+    "backup-argparse-repeat-first-wins",
+    "backup-help-ignores-columns",
+    "backup-help-closed-exit-1",
+    "backup-dot-join-keeps-prefix",
+    "backup-discovery-generic-errno-class",
+    "backup-owner-name-windows"
+  ],
+  "platform_exclusions": {
+    "linux": {
+      "backup-dotfile-suffix-windows": "Registered only by the Windows backup source branch.",
+      "backup-member-mode-windows": "Registered only by the Windows backup source branch.",
+      "backup-owner-name-windows": "Declared Windows-only empty archive owner-name witness; POSIX names are resolved through NSS.",
+      "backup-top-order-windows": "Registered only by the Windows backup source branch."
+    },
+    "windows": {
+      "backup-discovery-generic-errno-class": "Declared Linux-only POSIX permission fixtures exercise the Unix errno-to-exception-class table.",
+      "backup-member-mode-posix": "Registered only by the POSIX backup source branch.",
+      "backup-omits-fifo": "Declared Linux-only FIFO member witness.",
+      "backup-raw-member-name": "Declared Linux-only raw-byte member name witness."
+    }
+  }
+}

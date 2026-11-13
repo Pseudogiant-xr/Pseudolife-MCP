@@ -1,0 +1,22 @@
+{
+  "parity": "CLI-PAIRING",
+  "python_roots": [
+    "invite_cli"
+  ],
+  "postgres": true,
+  "shim": [],
+  "source_mutants": [
+    "invite-expired-is-pending",
+    "invite-keep-owned-lost",
+    "invite-keep-tier-lost",
+    "invite-list-order",
+    "invite-message-token",
+    "invite-refusal-exit",
+    "invite-revoke-dropped",
+    "invite-ttl-shortened"
+  ],
+  "platform_exclusions": {
+    "linux": {},
+    "windows": {}
+  }
+}

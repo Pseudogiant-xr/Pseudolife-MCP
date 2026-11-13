@@ -1,0 +1,29 @@
+{
+  "parity": "CLI-HOOK",
+  "python_roots": [
+    "briefing_cli",
+    "coordination_adapter"
+  ],
+  "postgres": false,
+  "shim": [
+    "briefing_help.txt",
+    "briefing_hook.rs"
+  ],
+  "source_mutants": [
+    "hook-briefing-cap-order",
+    "hook-cursor-not-saved",
+    "hook-doorbell-receipt-inverted",
+    "hook-event-name",
+    "hook-first-address-only",
+    "hook-redirect-repeat-limit",
+    "hook-since-dropped",
+    "hook-token-dropped",
+    "hook-whole-reply-budget"
+  ],
+  "platform_exclusions": {
+    "linux": {
+      "hook-first-address-only": "Declared Windows-only resolver witness."
+    },
+    "windows": {}
+  }
+}

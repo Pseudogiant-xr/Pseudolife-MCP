@@ -208,6 +208,40 @@ def test_skipped_replay_uses_job_verdict_for_tolerated_setup_failure(integrate, 
     assert integrate._snapshot_state(SHA, rollup, True)[0] == state
 
 
+def _copy_row_declarations(root):
+    """The rows' rust/cli_harness/rows/<row>.json, which the selector reads."""
+    rows = root / "rust/cli_harness/rows"
+    rows.mkdir(parents=True, exist_ok=True)
+    for path in (ROOT / "rust/cli_harness/rows").glob("*.json"):
+        (rows / path.name).write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
+
+
+def _base_rows():
+    """The row declarations as git shows them at a base: path to text."""
+    return {f"rust/cli_harness/rows/{path.name}": path.read_text(encoding="utf-8")
+            for path in sorted((ROOT / "rust/cli_harness/rows").glob("*.json"))}
+
+
+def _stub_git(root, files, selector, scope, rows):
+    """``integrate._out`` over a base holding these selector, scope and row
+    files, a checkout at ``root`` and a merge diff of ``files``."""
+    def out(*args):
+        if args[0] == "ls-tree":
+            if args[-1] == "rust/cli_harness/rows/":
+                return "\n".join(rows)
+            return "100644 blob selector"
+        if args[0] == "rev-parse":
+            return str(root)
+        if args[0] == "diff":
+            return "\n".join(files)
+        assert args[0] == "show"
+        path = args[1].split(":", 1)[1]
+        if path in rows:
+            return rows[path]
+        return selector if path.endswith("pr_precheck.py") else scope
+    return out
+
+
 @pytest.mark.parametrize("files,required", [
     (["docs/guide.md"], False), (["tests/test_feature.py"], False),
     (["docs/guide.md", "tests/test_feature.py", "changelog.d/note.md"], False),
@@ -229,17 +263,7 @@ def test_requirement_uses_frozen_selector_without_importing_member_code(
         f"from pathlib import Path\nPath({str(marker)!r}).touch()\nraise RuntimeError('member code')\n")
     (tmp_path / "rust/probe.py").write_text("from tests import test_runtime_seed\n")
 
-    def out(*args):
-        if args[0] == "ls-tree":
-            return "100644 blob selector"
-        if args[0] == "rev-parse":
-            return str(tmp_path)
-        if args[0] == "diff":
-            return "\n".join(files)
-        assert args[0] == "show"
-        return selector if args[1].endswith("pr_precheck.py") else scope
-
-    monkeypatch.setattr(integrate, "_out", out)
+    monkeypatch.setattr(integrate, "_out", _stub_git(tmp_path, files, selector, scope, _base_rows()))
     monkeypatch.setattr(integrate, "git", lambda *args, **kwargs:
                         SimpleNamespace(returncode=0, stdout="merged-tree\n"))
     monkeypatch.setattr(integrate, "_fetch_head", lambda number: SHA)
@@ -432,6 +456,7 @@ def test_already_landed_runtime_edit_does_not_stall_no_row_merge(
     git("config", "commit.gpgsign", "false")
     for path in ("rust/ci/pr_precheck.py", "rust/ci/parity_scope.py"):
         write(path, (ROOT / path).read_text(encoding="utf-8"))
+    _copy_row_declarations(tmp_path)
     write("pseudolife_memory/doctor_cli.py", "old\n")
     write(remainder, "old\n")
     def budget(version):
@@ -500,3 +525,88 @@ def test_already_landed_runtime_edit_does_not_stall_no_row_merge(
     value.snapshot_required = required
     value.snapshot, value.snapshot_why = integrate._snapshot_state(sha, [], required)
     assert integrate._not_ready(value) is None
+
+
+def _row_repository(integrate, monkeypatch, tmp_path):
+    """A base commit carrying the selector, scope and row declarations, and a
+    member that changes a runtime file every row's selection reaches."""
+    def git(*args):
+        result = subprocess.run(["git", *args], cwd=tmp_path, capture_output=True,
+                                text=True, encoding="utf-8")
+        assert result.returncode == 0, result.stderr
+        return result.stdout.strip()
+
+    git("init", "-q", "-b", "master")
+    git("config", "user.name", "Test")
+    git("config", "user.email", "test@example.com")
+    git("config", "commit.gpgsign", "false")
+    for path in ("rust/ci/pr_precheck.py", "rust/ci/parity_scope.py"):
+        target = tmp_path / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text((ROOT / path).read_text(encoding="utf-8"), encoding="utf-8")
+    _copy_row_declarations(tmp_path)
+    (tmp_path / "pseudolife_memory").mkdir()
+    (tmp_path / "pseudolife_memory/doctor_cli.py").write_text("old\n", encoding="utf-8")
+    git("add", ".")
+    git("commit", "-qm", "base")
+    base = git("rev-parse", "HEAD")
+    git("checkout", "-qb", "feature")
+    (tmp_path / "pseudolife_memory/doctor_cli.py").write_text("new\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(integrate, "_fetch_head", lambda number: git("rev-parse", "HEAD"))
+    return git, base
+
+
+@pytest.mark.parametrize("change", ["delete", "narrow"])
+def test_a_member_cannot_change_its_own_requirement_through_row_declarations(
+        integrate, monkeypatch, tmp_path, change):
+    # The member's head (checked out, as a build's checkout may hold it)
+    # deletes or narrows the declarations; the base's still decide.
+    git, base = _row_repository(integrate, monkeypatch, tmp_path)
+    rows = sorted((tmp_path / "rust/cli_harness/rows").glob("*.json"))
+    for path in rows:
+        if change == "delete":
+            path.unlink()
+        else:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            data["python_roots"] = ["doctor_cli"] if path.stem == "doctor" else ["unrelated_cli"]
+            path.write_text(json.dumps(data), encoding="utf-8")
+    git("add", "-A")
+    git("commit", "-qm", "feature")
+    value = member(integrate)
+    value.sha = git("rev-parse", "HEAD")
+    assert integrate._snapshot_requirement(value, base) == (True, "")
+
+
+def test_a_checkout_whose_row_files_differ_from_the_base_does_not_change_the_answer(
+        integrate, monkeypatch, tmp_path):
+    git, base = _row_repository(integrate, monkeypatch, tmp_path)
+    git("commit", "-qam", "feature")
+    value = member(integrate)
+    value.sha = git("rev-parse", "HEAD")
+    expected = integrate._snapshot_requirement(value, base)
+    assert expected == (True, "")
+    # An earlier member merged into the build's checkout (left uncommitted
+    # here) removes or rewrites every declaration.
+    for path in sorted((tmp_path / "rust/cli_harness/rows").glob("*.json")):
+        path.write_text("{}" if path.stem == "doctor" else "", encoding="utf-8")
+    assert integrate._snapshot_requirement(value, base) == expected
+
+
+@pytest.mark.parametrize("files,required", [(["docs/guide.md"], False), (["pseudolife_memory/x.py"], True)])
+def test_a_base_from_before_row_declarations_runs_its_selector_unchanged(
+        integrate, monkeypatch, tmp_path, files, required):
+    # A base's selector from before rows/<row>.json: no row_declarations,
+    # and no row files at the base. The interpreter must add nothing.
+    scope = ("import re\n"
+             "def is_docs(path):\n    return path.endswith('.md')\n"
+             "assert 'row_declarations' not in globals()\n")
+    selector = ("from parity_scope import is_docs\n"
+                "import parity_scope\n"
+                "assert not hasattr(parity_scope, 'row_declarations')\n"
+                "def rows_for(path, owners):\n    return () if is_docs(path) else ('mail',)\n")
+    monkeypatch.setattr(integrate, "_out", _stub_git(tmp_path, files, selector, scope, {}))
+    monkeypatch.setattr(integrate, "git", lambda *args, **kwargs:
+                        SimpleNamespace(returncode=0, stdout="merged-tree\n"))
+    monkeypatch.setattr(integrate, "_fetch_head", lambda number: SHA)
+    assert integrate._snapshot_requirement(member(integrate), "base") == (required, "")

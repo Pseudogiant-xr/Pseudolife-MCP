@@ -1,0 +1,24 @@
+{
+  "parity": "CLI-EPISODE",
+  "python_roots": [
+    "episode_cli"
+  ],
+  "postgres": false,
+  "shim": [
+    "episode.rs",
+    "episode_input.rs"
+  ],
+  "source_mutants": [
+    "episode-body-spacing",
+    "episode-default-name",
+    "episode-home-drive-insensitive",
+    "episode-start-path",
+    "episode-system-dir-titled"
+  ],
+  "platform_exclusions": {
+    "linux": {
+      "episode-home-drive-insensitive": "Declared Windows-only drive spelling witness."
+    },
+    "windows": {}
+  }
+}

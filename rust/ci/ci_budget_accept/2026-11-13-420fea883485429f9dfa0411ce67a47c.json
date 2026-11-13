@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "parity-checks",
+  "before": "b280739891b6e09e",
+  "fingerprint": "ab3d906935f11b15",
+  "reason": "rust/ci/parity_scope.py reads the rows' rust/cli_harness/rows/<row>.json itself (row_declarations()) instead of importing row_ci.py, because ops/integrate.py runs it and pr_precheck.py frozen with no other rust/ci module importable. Only the pull-request selection reads those files; the resolved full matrix is unchanged, so the measured minutes still hold."
+}

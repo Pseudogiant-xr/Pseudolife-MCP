@@ -1,0 +1,39 @@
+{
+  "parity": "CLI-TUNNEL-STATUS",
+  "python_roots": [
+    "tunnel_cli"
+  ],
+  "postgres": false,
+  "shim": [
+    "tunnel"
+  ],
+  "source_mutants": [
+    "tunnel-ambiguous-literal-accepted",
+    "tunnel-challenge-bound",
+    "tunnel-codex-registration-ignored",
+    "tunnel-dangling-junction-answered",
+    "tunnel-dir-owner-only-skipped",
+    "tunnel-dispatch-dropped",
+    "tunnel-existing-profile-resumed",
+    "tunnel-expiry-order",
+    "tunnel-key-presence-inverted",
+    "tunnel-near-expiry-day-earlier",
+    "tunnel-near-expiry-window",
+    "tunnel-owner-only-skipped",
+    "tunnel-process-record-ignored",
+    "tunnel-redirect-message",
+    "tunnel-refresh-attention-flipped",
+    "tunnel-reserved-number-key-admitted",
+    "tunnel-saved-url-connect",
+    "tunnel-stdout-refusal-ignored",
+    "tunnel-tunnel-id-class",
+    "tunnel-update-exit-3",
+    "tunnel-verify-message"
+  ],
+  "platform_exclusions": {
+    "linux": {
+      "tunnel-dangling-junction-answered": "Registered only by the Windows junction source branch."
+    },
+    "windows": {}
+  }
+}

@@ -3,8 +3,11 @@
 import json
 from pathlib import Path
 
+import row_ci
+
 HERE = Path(__file__).resolve().parent
-SOURCE_MUTANTS = json.loads((HERE / 'source_mutants.json').read_text(encoding="utf-8"))
+# Each row's ids, from its own rust/cli_harness/rows/<row>.json (row_ci.py).
+SOURCE_MUTANTS = row_ci.source_mutants()
 # Linux 2026-10-11: the slowest eight-control selection took 81s;
 # the first cold compile added 65s. Keep that bound on each parallel job.
 SOURCE_SHARDS = {f'{row}-{index // 8}': (row, ids[index:index + 8])
@@ -150,33 +153,8 @@ COMPOSITES = {
 
 # Platform-specific declarations are pinned separately from observed failures.
 # Host runtime registration must match this roster before a shard can filter.
-PLATFORM_EXCLUSIONS = {
-    'linux': {
-        'backup-dotfile-suffix-windows': 'Registered only by the Windows backup source branch.',
-        'console-winerror-full-stop': 'Declared Windows-only: only FormatMessageW text ends in a full stop.',
-        'restore-desktop-unmapped': "Declared Windows-only: only Windows maps Docker Desktop's host-mount source paths.",
-        'restore-null-device-terminal': "Declared Windows-only: only Windows' CRT isatty() reads the null device as a terminal.",
-        'backup-member-mode-windows': 'Registered only by the Windows backup source branch.',
-        'backup-top-order-windows': 'Registered only by the Windows backup source branch.',
-        'backup-owner-name-windows': 'Declared Windows-only empty archive owner-name witness; POSIX names are resolved through NSS.',
-        'doctor-json-depth-off-by-one': 'Registered only by the Windows doctor source branch.',
-        'doctor-pathlib-keeps-dot-parts': 'Registered only by the Windows doctor source branch.',
-        'doctor-which-skips-cwd': 'Registered only by the Windows doctor source branch.',
-        'episode-home-drive-insensitive': 'Declared Windows-only drive spelling witness.',
-        'hook-first-address-only': 'Declared Windows-only resolver witness.',
-        'pair-cleanup-error-swallowed': 'Registered only by the Windows pairing source branch.',
-        'pair-not-owner-only': 'Registered only by the Windows pairing source branch.',
-        'tunnel-dangling-junction-answered': 'Registered only by the Windows junction source branch.',
-    },
-    'windows': {
-        'backup-member-mode-posix': 'Registered only by the POSIX backup source branch.',
-        'backup-omits-fifo': 'Declared Linux-only FIFO member witness.',
-        'backup-raw-member-name': 'Declared Linux-only raw-byte member name witness.',
-        'backup-discovery-generic-errno-class': 'Declared Linux-only POSIX permission fixtures exercise the Unix errno-to-exception-class table.',
-        'pair-mode-not-owner-only': 'Registered only by the POSIX pairing source branch.',
-        'console-display-ignored': 'Declared Linux-only: only Linux gates the browser on DISPLAY or WAYLAND_DISPLAY.',
-    },
-}
+# Each row declares its own, with reasons, in rust/cli_harness/rows/<row>.json.
+PLATFORM_EXCLUSIONS = row_ci.platform_exclusions()
 # These two controls have no selected OS witness; global gaps cannot arise
 # merely by adding the same platform exception twice.
 UNOBSERVED_CONTROLS = {

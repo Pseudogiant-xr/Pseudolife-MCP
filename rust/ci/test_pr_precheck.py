@@ -4,7 +4,7 @@ import json
 import pytest
 
 import pr_precheck as precheck
-from parity_scope import SHIM_COMMANDS, reached
+from parity_scope import reached, shim_commands
 
 
 def test_transitive_relative_and_function_local_imports_are_owners():
@@ -46,7 +46,7 @@ def test_unknown_runtime_inputs_select_every_row(path):
 
 def test_a_mapped_doctor_source_reaches_its_row():
     assert precheck.rows_for("pseudolife_memory/doctor_cli.py", {"pseudolife_memory/doctor_cli.py": ("doctor",)}) == ("doctor",)
-    assert precheck.rows_for("rust/shim/src/cli/doctor/mod.rs", {}) == ("doctor", "console")
+    assert precheck.rows_for("rust/shim/src/cli/doctor/mod.rs", {}) == ("console", "doctor")
     assert precheck.rows_for("rust/cli_harness/goldens/doctor.windows.json", {}) == ("doctor",)
 
 
@@ -81,7 +81,7 @@ def test_shared_build_inputs_and_test_package_initializer_keep_all_judges(path):
     assert selected["judges"] == list(precheck.JUDGES)
 
 
-@pytest.mark.parametrize("path", [*[f"rust/shim/src/cli/{entry}" for entry in SHIM_COMMANDS],
+@pytest.mark.parametrize("path", [*[f"rust/shim/src/cli/{entry}" for entry in shim_commands()],
     "rust/shim/src/cli/doctor/mod.rs", "rust/shim/src/cli/lease/mod.rs", "rust/shim/src/cli/wait_mail.rs",
     "rust/shim/src/shared.rs", "rust/shim/README.md"])
 def test_shim_precheck_judges_match_batch_ownership(path):

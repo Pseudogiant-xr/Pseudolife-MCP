@@ -1,0 +1,24 @@
+{
+  "parity": "CLI-MAIL",
+  "python_roots": [
+    "briefing_cli",
+    "coordination_adapter"
+  ],
+  "postgres": false,
+  "shim": [],
+  "source_mutants": [
+    "mail-any-decision-rings",
+    "mail-expired-listener",
+    "mail-help-token",
+    "mail-keeps-leading-dot",
+    "mail-ledger-kind",
+    "mail-no-listener",
+    "mail-ring-13-digits",
+    "mail-skip-seen-advance",
+    "mail-timeout-exit-4"
+  ],
+  "platform_exclusions": {
+    "linux": {},
+    "windows": {}
+  }
+}

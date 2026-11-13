@@ -1,0 +1,58 @@
+{
+  "parity": "CLI-DOCTOR",
+  "python_roots": [
+    "doctor_cli",
+    "wake_liveness"
+  ],
+  "postgres": false,
+  "shim": [
+    "backup",
+    "backup_help.txt",
+    "doctor",
+    "maintainer",
+    "update"
+  ],
+  "source_mutants": [
+    "doctor-agent-path-unnormalized",
+    "doctor-agent-proof-inverted",
+    "doctor-board-token",
+    "doctor-board-unbounded-read",
+    "doctor-cache-compact-separator",
+    "doctor-cache-raw-utf8",
+    "doctor-cache-url-last",
+    "doctor-caps-order",
+    "doctor-context-no-encodings",
+    "doctor-context-no-keep-alive",
+    "doctor-drop-final-newline",
+    "doctor-escape-upper-hex",
+    "doctor-exit-code-ok",
+    "doctor-gzip-not-decoded",
+    "doctor-identity-claims-python",
+    "doctor-identity-wrong-path",
+    "doctor-int-digits-at-limit",
+    "doctor-json-depth-off-by-one",
+    "doctor-maintainer-frozen-bearer",
+    "doctor-pathlib-keeps-dot-parts",
+    "doctor-redirect-raise-unreachable",
+    "doctor-redirect-uri-ignored",
+    "doctor-registration-label",
+    "doctor-short-body-fails",
+    "doctor-skip-maintainer",
+    "doctor-toml-bom-accepted",
+    "doctor-tool-count",
+    "doctor-unbounded-body-read",
+    "doctor-unhashable-error-refused",
+    "doctor-version-mismatch-ok",
+    "doctor-wake-hook-flag",
+    "doctor-which-skips-cwd",
+    "doctor-wire-keep-alive"
+  ],
+  "platform_exclusions": {
+    "linux": {
+      "doctor-json-depth-off-by-one": "Registered only by the Windows doctor source branch.",
+      "doctor-pathlib-keeps-dot-parts": "Registered only by the Windows doctor source branch.",
+      "doctor-which-skips-cwd": "Registered only by the Windows doctor source branch."
+    },
+    "windows": {}
+  }
+}

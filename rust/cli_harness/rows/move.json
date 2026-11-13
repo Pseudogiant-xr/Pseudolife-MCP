@@ -1,0 +1,28 @@
+{
+  "parity": "CLI-MOVE-REFUSALS",
+  "python_roots": [
+    "move_cli"
+  ],
+  "postgres": false,
+  "shim": [
+    "move_cli.rs"
+  ],
+  "source_mutants": [
+    "move-checkout-cr",
+    "move-dash-value-admitted",
+    "move-direct-socket",
+    "move-help-any-width",
+    "move-isspace-separators",
+    "move-json-control",
+    "move-refusal-exit",
+    "move-scheme-case-sensitive",
+    "move-unsure-as-valid",
+    "move-url-checked-after-to",
+    "move-url-message",
+    "move-valid-refused"
+  ],
+  "platform_exclusions": {
+    "linux": {},
+    "windows": {}
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "parity": "CLI-COORDINATION-RECOVERY",
+  "python_roots": [
+    "coordination_recovery"
+  ],
+  "postgres": false,
+  "shim": [
+    "board_audit",
+    "coordination_recovery"
+  ],
+  "source_mutants": [
+    "recovery-stop-gate-dropped"
+  ],
+  "platform_exclusions": {
+    "linux": {},
+    "windows": {}
+  }
+}

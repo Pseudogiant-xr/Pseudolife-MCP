@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "parity-checks",
+  "before": "b280739891b6e09e",
+  "fingerprint": "8ba1a8c1e828755e",
+  "reason": "rust/ci/parity_scope.py now reads which rows each rust/shim/src/cli entry reaches from the rows' own rust/cli_harness/rows/<row>.json (shim_commands()) instead of a SHIM_COMMANDS literal. That map only chooses which suites a pull request selects; the resolved full matrix (suites, include entries with every shard's rows, parts and timeouts, excludes) is identical before and after, so every shard runs the same steps and its measured minutes still hold."
+}

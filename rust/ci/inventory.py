@@ -2,7 +2,6 @@
 
 import ast
 from collections import Counter
-import json
 import re
 import sys
 from pathlib import Path
@@ -44,6 +43,12 @@ def cli_controls():
         if ids:
             result[path.stem] = ids
     return result
+
+
+def source_mutant_roster():
+    """The accepted source mutants by row: each row's rows/<row>.json."""
+    import row_ci
+    return {row: list(ids) for row, ids in row_ci.source_mutants().items()}
 
 
 def assigned_list(path, name):
@@ -115,7 +120,7 @@ def check(workflow):
     # pairs its merged batch passed; parity_scope.pruned).
     workflow = resolve(workflow)
     declared = cli_controls()
-    selected = json.loads((ROOT / "rust/ci/source_mutants.json").read_text(encoding="utf-8"))
+    selected = source_mutant_roster()
     assert {row: set(ids) for row, ids in selected.items()} == declared, "source mutant inventory drift"
     exception_reasons(EXCEPTIONS)
     backup_zero_retention_scope(EXCEPTIONS)
@@ -129,7 +134,11 @@ def check(workflow):
     assert all_controls - observed == set(UNOBSERVED_CONTROLS), 'source control without any OS execution or named global exception'
     for row in declared:
         runtime_controls(row, core.PLATFORM)
-    rows = assigned_list("rust/cli_harness/rows/__init__.py", "ROWS")
+    import row_ci
+    from rust.cli_harness import rows as harness_rows
+    assert not row_ci.roster_problems(), ("row roster drift", row_ci.roster_problems())
+    rows = list(row_ci.rows())
+    assert harness_rows.ROWS == {row: data["parity"] for row, data in row_ci.declarations().items()},         "harness rows differ from their declarations"
     assert set(rows) == set(selected), "accepted row without a source-control CI selection"
     # Payloads must retain every declaration before the dispatcher's platform
     # eligibility and named-exception filters, not merely retain shard names.

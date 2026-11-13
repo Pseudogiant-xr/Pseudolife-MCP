@@ -1,0 +1,42 @@
+{
+  "parity": "CLI-CONSOLE-PRINT",
+  "python_roots": [
+    "console_cli"
+  ],
+  "postgres": false,
+  "shim": [
+    "backup",
+    "backup_help.txt",
+    "console",
+    "doctor",
+    "maintainer",
+    "move_cli.rs",
+    "update"
+  ],
+  "source_mutants": [
+    "console-405-not-old",
+    "console-code-any-character",
+    "console-code-unchecked",
+    "console-display-ignored",
+    "console-exited-counts-as-opened",
+    "console-expiry-refusal-swallowed",
+    "console-generic-launched",
+    "console-get-without-content-type",
+    "console-hint-over-message",
+    "console-localtime-refusal-deferred",
+    "console-null-cell-empty",
+    "console-paired-note-always",
+    "console-stamp-rounded",
+    "console-unless-skips-the-list",
+    "console-unsafe-link-launched",
+    "console-winerror-full-stop"
+  ],
+  "platform_exclusions": {
+    "linux": {
+      "console-winerror-full-stop": "Declared Windows-only: only FormatMessageW text ends in a full stop."
+    },
+    "windows": {
+      "console-display-ignored": "Declared Linux-only: only Linux gates the browser on DISPLAY or WAYLAND_DISPLAY."
+    }
+  }
+}

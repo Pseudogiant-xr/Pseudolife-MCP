@@ -363,6 +363,9 @@ def test_old_builder_plan_opens_with_the_new_batch_script(world):
         "ops/integrate.py": "from dataclasses import dataclass\n@dataclass\nclass Member:\n    number: int\n",
         "rust/ci/pr_precheck.py": (ROOT / "rust/ci/pr_precheck.py").read_text(encoding="utf-8"),
         "rust/ci/parity_scope.py": (ROOT / "rust/ci/parity_scope.py").read_text(encoding="utf-8"),
+        # The selector reads each row's declaration from the checkout.
+        **{path.relative_to(ROOT).as_posix(): path.read_text(encoding="utf-8")
+           for path in (ROOT / "rust/cli_harness/rows").glob("*.json")},
     })
     base = _git(world.work, "rev-parse", "HEAD")
     script = (ROOT / "ops/integrate.py").read_text(encoding="utf-8")

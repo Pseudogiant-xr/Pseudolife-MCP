@@ -1,0 +1,17 @@
+{
+  "parity": "CLI-MAINTAINER-SETUP",
+  "python_roots": [
+    "maintainer_cli"
+  ],
+  "postgres": false,
+  "shim": [
+    "maintainer"
+  ],
+  "source_mutants": [
+    "setup-consent-bypassed"
+  ],
+  "platform_exclusions": {
+    "linux": {},
+    "windows": {}
+  }
+}

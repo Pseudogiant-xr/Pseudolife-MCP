@@ -77,14 +77,14 @@ fn recognized_deferred_modes_are_not_reported_as_python_unknown_modes() {
         "--state",
         state,
     ];
-    let cases: [(&str, &[&str]); 5] = [
+    let cases: &[(&str, &[&str])] = &[
         ("maintainer", &[]),
         ("console", &["--help"]),
         ("test-login", &[]),
         ("conductor-watch", &start),
         ("delegate-watch", &start),
     ];
-    for (mode, args) in cases {
+    for &(mode, args) in cases {
         let output = Command::new(env!("CARGO_BIN_EXE_pseudolife-stdio"))
             .arg(mode)
             .args(args)

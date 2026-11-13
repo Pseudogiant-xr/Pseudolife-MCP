@@ -217,16 +217,16 @@ def test_inventory_rejects_each_dropped_named_mutant(monkeypatch):
     import inventory
     from coverage_plan import DAEMON_CONTROLS, SOURCE_MUTANTS, SUITES
     workflow = yaml.safe_load((ROOT / ".github/workflows/rust.yml").read_text(encoding="utf-8"))
-    original_loads = json.loads
+    original_roster = inventory.source_mutant_roster
     for row, mutants in SOURCE_MUTANTS.items():
         for mutant in mutants:
             reduced = copy.deepcopy(SOURCE_MUTANTS)
             reduced[row].remove(mutant)
             with monkeypatch.context() as patch:
-                patch.setattr(inventory.json, "loads", lambda text: reduced)
+                patch.setattr(inventory, "source_mutant_roster", lambda: reduced)
                 with pytest.raises(AssertionError, match="source mutant inventory drift"):
                     inventory.check(workflow)
-    assert json.loads is original_loads
+    assert inventory.source_mutant_roster is original_roster
     for mutant in DAEMON_CONTROLS:
         reduced = [action for action in SUITES['h5-daemon-mutants'] if action['mutant'] != mutant]
         with monkeypatch.context() as patch:

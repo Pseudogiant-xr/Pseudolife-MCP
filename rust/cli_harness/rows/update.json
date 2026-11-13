@@ -1,0 +1,20 @@
+{
+  "parity": "CLI-UPDATE",
+  "python_roots": [
+    "update_cli"
+  ],
+  "postgres": false,
+  "shim": [
+    "backup",
+    "backup_help.txt",
+    "maintainer",
+    "update"
+  ],
+  "source_mutants": [
+    "update-current-exit"
+  ],
+  "platform_exclusions": {
+    "linux": {},
+    "windows": {}
+  }
+}

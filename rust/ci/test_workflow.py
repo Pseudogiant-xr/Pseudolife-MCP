@@ -13,6 +13,8 @@ import sys
 import pytest
 import yaml
 
+import row_ci
+
 
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github/workflows/rust.yml"
@@ -125,9 +127,12 @@ STATIC_EXCLUDE = WINDOWS_LIVE_EXCLUDE + [{"os": "windows-latest", "suite": "h5-l
 
 # The W1-C step passes its rows through PowerShell arrays (@live, @golden), so
 # row_commands() sees no --row there: the row list and how both passes are
-# built from it are pinned here instead.
-W1C_ROWS = ("transfer", "test_login", "doctor", "connect", "maintainer", "invite", "pair",
-            "move", "tunnel", "console", "conductor_watch", "coordination_recovery", "maintainer_setup", "restore")
+# built from it are pinned here instead. The list is every row a
+# rust/cli_harness/rows/<row>.json declares, less the rows the cli and H5
+# steps run by name, so each declared row must sit in exactly one W1-C shard.
+NAMED_ROWS = ("audit", "backup", "episode", "hook", "lease", "lease_operator", "mail", "migrate_flat",
+              "update")
+W1C_ROWS = tuple(row for row in row_ci.rows() if row not in NAMED_ROWS)
 W1C_LINES = (
     "$live = $rows | ForEach-Object { '--row'; $_ }",
     "$replayed = $rows | Where-Object { $_ -ne 'test_login' -or "

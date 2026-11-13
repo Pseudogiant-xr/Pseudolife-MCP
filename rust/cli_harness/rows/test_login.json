@@ -1,0 +1,37 @@
+{
+  "parity": "CLI-TEST-LOGIN",
+  "python_roots": [
+    "test_login_cli"
+  ],
+  "postgres": true,
+  "shim": [
+    "test_login"
+  ],
+  "source_mutants": [
+    "tl-banks-reverse",
+    "tl-closed-token",
+    "tl-container-db-ignored",
+    "tl-file-not-private",
+    "tl-grant-predefined",
+    "tl-json-compact-colon",
+    "tl-keep-staged-on-failure",
+    "tl-no-bom-strip",
+    "tl-reapply-draws-new",
+    "tl-refusal-order",
+    "tl-refused-exit-3",
+    "tl-reuse-flag",
+    "tl-role-config",
+    "tl-scram-iterations",
+    "tl-script-lf",
+    "tl-skip-file-replace",
+    "tl-skip-leftovers",
+    "tl-skip-template1-revoke",
+    "tl-stdout-exit-ignored",
+    "tl-stdout-refusal-ignored",
+    "tl-verify-owner-connect"
+  ],
+  "platform_exclusions": {
+    "linux": {},
+    "windows": {}
+  }
+}

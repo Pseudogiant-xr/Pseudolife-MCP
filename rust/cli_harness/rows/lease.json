@@ -1,0 +1,22 @@
+{
+  "parity": "CLI-LEASE-core",
+  "python_roots": [
+    "lease_cli"
+  ],
+  "postgres": true,
+  "shim": [],
+  "source_mutants": [
+    "lease-child-status",
+    "lease-list-filter",
+    "lease-lock-name",
+    "lease-os-truth",
+    "lease-release-mirror",
+    "lease-stale-mirror",
+    "lease-timeout-status",
+    "lease-gated-refusal"
+  ],
+  "platform_exclusions": {
+    "linux": {},
+    "windows": {}
+  }
+}

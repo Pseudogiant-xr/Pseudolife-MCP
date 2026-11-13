@@ -39,6 +39,14 @@ SUITES = ["eval", "cli", "cli-store", "cli-startup", "cli-live", "judges",
           "h5-audit", "h5-backup", "h5-w1a", "h5-background", "h5-daemon-mutants", "h5-graph-mutants",
           "h5-light"]
 
+def w1c_rows(*rows: str) -> str:
+    """A W1-C shard's rows as the PowerShell list its harness step splices
+    in (``$rows = @(...)``). One row per line in name order, so ports adding
+    rows to one shard touch different lines unless their names sort next to
+    each other."""
+    return ", ".join(f"'{row}'" for row in rows)
+
+
 # Per-suite matrix values (the include list). eval and judges have none and
 # keep the job's 210-minute fallback.
 SHARDS = [
@@ -68,17 +76,32 @@ SHARDS = [
     # Live + golden: doctor 15.3m; pairing 17.6m; connection 20.1m.
     # Add ~2.5m checkout/dependency/PostgreSQL setup, then allow twice the
     # total. Connection also keeps the existing 20m record budget.
-    {"suite": "w1c-doctor", "w1c_rows": "'doctor'", "w1c_timeout": 32, "job_timeout": 36},
-    {"suite": "w1c-pairing", "w1c_rows": "'transfer', 'invite', 'pair'", "w1c_timeout": 36,
-     "job_timeout": 40},
+    {"suite": "w1c-doctor", "w1c_rows": w1c_rows(
+        "doctor",
+    ), "w1c_timeout": 32, "job_timeout": 36},
+    {"suite": "w1c-pairing", "w1c_rows": w1c_rows(
+        "invite",
+        "pair",
+        "transfer",
+    ), "w1c_timeout": 36, "job_timeout": 40},
     # Connection's five rows ran 20.2 min on Windows in batch run
     # 40047950017 (2026-10-24; live + golden: test_login 7.3, connect 6.3,
     # maintainer 3.5, tunnel 1.9, move 1.2), so they split in two: 10.4 and
     # 9.8 min. test_login stays here with its container image and record.
-    {"suite": "w1c-connection", "w1c_rows": "'test_login', 'move', 'tunnel', 'console', 'restore', 'conductor_watch'",
-     "w1c_timeout": 26, "job_timeout": 50},
-    {"suite": "w1c-connect", "w1c_rows": "'connect', 'maintainer', 'coordination_recovery', 'maintainer_setup'", "w1c_timeout": 25,
-     "job_timeout": 29},
+    {"suite": "w1c-connection", "w1c_rows": w1c_rows(
+        "conductor_watch",
+        "console",
+        "move",
+        "restore",
+        "test_login",
+        "tunnel",
+    ), "w1c_timeout": 26, "job_timeout": 50},
+    {"suite": "w1c-connect", "w1c_rows": w1c_rows(
+        "connect",
+        "coordination_recovery",
+        "maintainer",
+        "maintainer_setup",
+    ), "w1c_timeout": 25, "job_timeout": 29},
     # Hosted step timings for rust.yml runs 2026-10-11 to 10-20, about 300
     # successful steps per suite and OS (h5_linux_measurements.json
     # "hosted_step_distribution"). Linux step budgets are five times each
@@ -129,20 +152,22 @@ EVENT_BOUND = ("eval", "judges")
 FLOOR = ("eval", "cli", "cli-store", "cli-startup", "cli-live", "h5-w1a")
 ALL = tuple(SUITES)
 
-# The rust/cli_harness rows outside the floor, by the suite that runs them
-# (the W1-C rows match their shard's w1c_rows; tests pin both).
-ROW_SUITES = {
-    "mail": "cli", "hook": "cli", "episode": "cli", "lease": "cli", "lease_operator": "cli",
+# The rust/cli_harness rows outside the floor, by the suite that runs them:
+# the rows rust.yml's cli and H5 steps name, and each W1-C shard's rows
+# (test_workflow.py pins both against the declared rows).
+NAMED_ROW_SUITES = {
+    "audit": "h5-audit",
+    "backup": "h5-backup",
+    "episode": "cli",
+    "hook": "cli",
+    "lease": "cli",
+    "lease_operator": "cli",
+    "mail": "cli",
+    "migrate_flat": "h5-backup",
     "update": "cli",
-    "doctor": "w1c-doctor",
-    "transfer": "w1c-pairing", "invite": "w1c-pairing", "pair": "w1c-pairing",
-    "test_login": "w1c-connection", "connect": "w1c-connect", "maintainer": "w1c-connect",
-    "coordination_recovery": "w1c-connect", "maintainer_setup": "w1c-connect",
-    "move": "w1c-connection", "tunnel": "w1c-connection", "console": "w1c-connection",
-    "restore": "w1c-connection",
-    "conductor_watch": "w1c-connection",
-    "audit": "h5-audit", "backup": "h5-backup", "migrate_flat": "h5-backup",
 }
+ROW_SUITES = {**NAMED_ROW_SUITES, **{row: shard["suite"] for shard in SHARDS if "w1c_rows" in shard
+                                     for row in re.findall(r"'([a-z_]+)'", shard["w1c_rows"])}}
 # The pseudolife-stdio binary: every CLI row, plus the differential judges,
 # which cover its whole argv, help and version surface.
 SHIM = ("cli", "cli-live", "judges", "w1c-doctor", "w1c-pairing", "w1c-connection", "w1c-connect",
@@ -150,31 +175,39 @@ SHIM = ("cli", "cli-live", "judges", "w1c-doctor", "w1c-pairing", "w1c-connectio
 # The pseudolife-daemon crate (and its graph and dream contract binaries).
 DAEMON = ("cli", "cli-store", "cli-startup", "cli-live", "eval", "h5-w1a", "h5-background",
           "h5-daemon-mutants", "h5-graph-mutants")
-# rust/shim/src/cli entries whose users are covered by the listed rows;
-# any other shim file reaches the whole binary. Shared
-# helpers (lease, pairing, hook_http, hook_json, doorbell_*) are left out:
-# other commands import them. test_parity_scope.py scans the shim source and
-# fails if another command starts using a mapped entry.
-SHIM_COMMANDS = {
-    # The conservative import scan also sees update's private backup module.
-    # Doctor shares update's Codex hook checks; its dependencies inherit that row,
-    # and console's, which reads doctor's registration search.
-    "backup": ("backup", "migrate_flat", "update", "doctor", "console", "restore"),
-    "backup_help.txt": ("backup", "migrate_flat", "update", "doctor", "console", "restore"),
-    "board_audit": ("audit", "coordination_recovery"),
-    "migrate_flat.rs": ("migrate_flat",),
-    "update": ("update", "doctor", "console"),
-    # console and conductor_watch also read move's argv and stream helpers.
-    "connect": ("connect", "restore"), "doctor": ("doctor", "console"), "console": ("console",),
-    "conductor_watch": ("conductor_watch",),
-    "maintainer": ("maintainer", "maintainer_setup", "update", "doctor", "console"),
-    "coordination_recovery": ("coordination_recovery",),
-    "move_cli.rs": ("move", "console", "conductor_watch"), "test_login": ("test_login",),
-    "transfer": ("transfer",), "transfer.rs": ("transfer",), "tunnel": ("tunnel",),
-    "restore_cli": ("restore",),
-    "episode.rs": ("episode",), "episode_input.rs": ("episode",),
-    "briefing_hook.rs": ("hook",), "briefing_help.txt": ("hook",),
-}
+# rust/shim/src/cli entries whose users are covered by the listed rows
+# (shim_commands()); any other shim file reaches the whole binary. Each row
+# names the entries that reach it in its rust/cli_harness/rows/<row>.json
+# (row_ci.py), so ports name their own command there and nowhere shared.
+# Shared helpers (lease, pairing, hook_http, hook_json, doorbell_*) are left
+# out: other commands import them. test_parity_scope.py scans the shim
+# source and fails if another command starts using a mapped entry. The
+# import scan is conservative: it also sees update's private backup module,
+# doctor shares update's Codex hook checks (so its dependencies, and
+# console's, which reads doctor's registration search, name update), and
+# console and conductor_watch read move's argv and stream helpers.
+@functools.lru_cache(maxsize=None)
+def row_declarations() -> dict[str, dict]:
+    """Each row's rust/cli_harness/rows/<row>.json, by row, in name order.
+
+    Read as data, here and not through row_ci.py (which validates them for
+    the inventory and tests): ops/integrate.py runs this file and
+    pr_precheck.py from its frozen base with only this module importable,
+    and loads this file from a temporary directory to resolve the matrix,
+    so nothing here imports another rust/ci module, and nothing reads the
+    rows at import."""
+    return {path.stem: json.loads(path.read_text(encoding="utf-8"))
+            for path in sorted((ROOT / "rust/cli_harness/rows").glob("*.json"))}
+
+
+@functools.lru_cache(maxsize=None)
+def shim_commands() -> dict[str, tuple[str, ...]]:
+    """Each mapped rust/shim/src/cli entry, with the rows it reaches."""
+    found: dict[str, list[str]] = {}
+    for row, data in row_declarations().items():
+        for entry in data["shim"]:
+            found.setdefault(entry, []).append(row)
+    return {entry: tuple(found[entry]) for entry in sorted(found)}
 # The scope step's documentation-only rule, which Python's re cannot take
 # verbatim (its lookbehind is variable-width); tests check both agree.
 CODE_DIRS = re.compile(r"(?i)(rust|evals|pseudolife_memory|plugin|ops|tests|\.github)/")
@@ -227,8 +260,11 @@ def reached(path: str) -> tuple[str, ...]:
             # every shard's PostgreSQL prep import it too.
             return ALL
         if area == "shim":
-            if rest[1:3] == ("src", "cli") and len(rest) > 3 and rest[3] in SHIM_COMMANDS:
-                return tuple(ROW_SUITES[row] for row in SHIM_COMMANDS[rest[3]]) + ("judges",)
+            users = shim_commands().get(rest[3], ()) if rest[1:3] == ("src", "cli") and len(rest) > 3 else ()
+            if users:
+                if any(row not in ROW_SUITES for row in users):
+                    return ALL  # a row with no suite yet: run everything
+                return tuple(ROW_SUITES[row] for row in users) + ("judges",)
             return SHIM
         if area == "daemon":
             # The harness is shared with the CLI rows; the crate is not.
