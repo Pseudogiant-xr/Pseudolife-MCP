@@ -65,6 +65,7 @@ from typing import Callable
 
 from pseudolife_memory import __version__
 from pseudolife_memory import child_python
+from pseudolife_memory.program_lookup import find_program
 
 DAEMON_CONTAINER = "pseudolife-mcp-daemon"
 PG_CONTAINER = "pseudolife-mcp-postgres"
@@ -207,7 +208,9 @@ def _flush_output() -> None:
 
 
 def which(name: str) -> str | None:
-    return shutil.which(name)
+    """A program found only in an absolute PATH directory, never the
+    current directory (``program_lookup.find_program``)."""
+    return find_program(name)
 
 
 def home() -> Path:

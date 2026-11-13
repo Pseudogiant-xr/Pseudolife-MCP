@@ -22,7 +22,6 @@ import json
 import os
 from pathlib import Path
 import queue
-import shutil
 import subprocess
 import threading
 import time
@@ -36,6 +35,7 @@ from pseudolife_memory.credentials import (
     _write_token_file,
 )
 from pseudolife_memory.private_state import PrivateStateError, open_private as _open_state
+from pseudolife_memory.program_lookup import find_program
 
 SERVER = "pseudolife-memory"
 
@@ -175,7 +175,7 @@ def resolve_codex() -> str:
     explicit = os.environ.get("CODEX_CLI_PATH")
     if explicit and Path(explicit).is_file():
         return explicit
-    found = shutil.which("codex")
+    found = find_program("codex")
     if found:
         return found
     if os.name == "nt":

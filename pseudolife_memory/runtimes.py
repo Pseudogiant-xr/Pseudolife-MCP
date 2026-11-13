@@ -318,6 +318,18 @@ class RuntimeInstallError(RuntimeError):
         self.output = output
 
 
+def _find_program(name: str) -> str | None:
+    """``program_lookup.find_program`` (absolute PATH directories only,
+    never the current directory), loaded from beside this file by path:
+    this module stays standalone (see the module docstring)."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "_pseudolife_program_lookup", Path(__file__).with_name("program_lookup.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.find_program(name)
+
+
 def base_interpreter(python: str | None = None) -> str:
     """The interpreter new runtimes are created from: the one given (a
     command name such as ``python3`` or a path), else this process's
@@ -325,8 +337,11 @@ def base_interpreter(python: str | None = None) -> str:
     virtualenv's, since a runtime that depends on someone's ``.venv`` dies
     with it (``pyvenv.cfg`` names the base)."""
     if python:
-        # A command name (the installers probe "python3") as well as a path.
-        resolved = python if os.sep in python or Path(python).is_file() else (shutil.which(python) or python)
+        # A command name (the installers probe "python3") as well as a path;
+        # a bare name is looked up on PATH only, never in the current
+        # directory.
+        named = os.sep in python or bool(os.altsep and os.altsep in python)
+        resolved = python if named else (_find_program(python) or python)
         return _base_of(Path(resolved))
     base = getattr(sys, "_base_executable", None)
     if base and Path(base).is_file():

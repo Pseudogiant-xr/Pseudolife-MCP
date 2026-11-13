@@ -117,3 +117,60 @@ def test_the_default_environment_is_the_process_one(tmp_path, work, monkeypatch)
     real = _plant(tmp_path / "real")
     monkeypatch.setenv("PATH", str(tmp_path / "real"))
     assert _same(find_program("tool"), real)
+
+
+# -- every call site that runs what it finds uses the lookup --------------------
+
+def _decoys(work: Path, name: str) -> None:
+    """The program in the current directory and in a relative entry's."""
+    _plant(work, name)
+    _plant(work / "bin", name)
+
+
+def _site_env(monkeypatch, tmp_path, name: str) -> Path:
+    """PATH: relative and empty entries, then one absolute directory holding
+    the real program; returns the real one."""
+    real = _plant(tmp_path / "real", name)
+    monkeypatch.setenv("PATH", os.pathsep.join(["", ".", "bin", str(tmp_path / "real")]))
+    return real
+
+
+def _sites():
+    from pseudolife_memory import (backup_cli, client_updates, codex_connection, codex_doorbell,
+                                   maintainer_setup, runtimes, update_cli)
+
+    def tunnel(name):
+        from pseudolife_memory import tunnel_runtime
+        return tunnel_runtime.stable_command()[0]
+
+    return {
+        "update_cli.which": ("docker", update_cli.which),
+        "maintainer_setup.which": ("docker", maintainer_setup.which),
+        "client_updates.which": ("claude", client_updates.which),
+        "client_updates._git_executable": ("git", lambda name: client_updates._git_executable()),
+        "codex_doorbell.resolve_codex_command": (
+            "codex", lambda name: codex_doorbell.resolve_codex_command(dict(os.environ))[0]),
+        "codex_connection.resolve_codex": ("codex", lambda name: codex_connection.resolve_codex()),
+        "backup_cli._find_pg_dump": ("pg_dump", None),
+        "runtimes.base_interpreter": ("python3", runtimes.base_interpreter),
+        "tunnel_runtime.stable_command": ("pseudolife-mcp", tunnel),
+    }
+
+
+@pytest.mark.parametrize("site", sorted(_sites()))
+def test_each_call_site_finds_only_the_absolute_path_program(tmp_path, work, monkeypatch, site):
+    from pseudolife_memory import backup_cli, tunnel_runtime
+
+    name, find = _sites()[site]
+    monkeypatch.delenv("PSEUDOLIFE_CODEX_BIN", raising=False)
+    monkeypatch.delenv("CODEX_CLI_PATH", raising=False)
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "no-local"))
+    monkeypatch.setattr(tunnel_runtime, "installed_launcher", lambda: None)
+    monkeypatch.setattr(tunnel_runtime, "checked_path", lambda path: Path(path))
+    if find is None:
+        def find(name):
+            found = backup_cli._find_pg_dump(home=tmp_path / "no-home")
+            return str(found) if found else None
+    _decoys(work, name)
+    real = _site_env(monkeypatch, tmp_path, name)
+    assert _same(find(name), real), site
