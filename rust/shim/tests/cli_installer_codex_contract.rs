@@ -16,7 +16,8 @@ const SERVER: &str = "pseudolife-memory";
 struct Home(PathBuf);
 impl Home {
     fn new() -> Self {
-        let path = std::env::temp_dir().join(format!("w7-installer-codex-{}", uuid::Uuid::new_v4()));
+        let path =
+            std::env::temp_dir().join(format!("w7-installer-codex-{}", uuid::Uuid::new_v4()));
         fs::create_dir_all(path.join("codex")).unwrap();
         let path = fs::canonicalize(&path).unwrap();
         let path = PathBuf::from(
@@ -149,7 +150,12 @@ fn runtime_defaults_configure_then_preserve_then_refuse_unregistered() {
     let body = report(&refused);
     assert_eq!(refused.status.code(), Some(1), "{body}");
     assert_eq!(body["status"], "needs-configuration");
-    assert!(body["recovery"].as_str().unwrap().contains("not registered"));
+    assert!(
+        body["recovery"]
+            .as_str()
+            .unwrap()
+            .contains("not registered")
+    );
 }
 
 #[test]
@@ -157,7 +163,11 @@ fn credentials_without_a_token_record_only_the_connection() {
     let home = Home::new();
     home.seed(json!({}));
     let output = home.run(
-        &["codex-credentials", "--installer-daemon-url", "http://127.0.0.1:9"],
+        &[
+            "codex-credentials",
+            "--installer-daemon-url",
+            "http://127.0.0.1:9",
+        ],
         None,
     );
     let body = report(&output);
@@ -213,6 +223,81 @@ fn credentials_refuse_a_bad_installer_token_and_write_nothing() {
     assert!(usage.stdout.is_empty());
 }
 
+fn checkout() -> String {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .to_string_lossy()
+        .into_owned()
+}
+
+#[test]
+fn hooks_skip_appends_the_memory_block_once_without_starting_codex() {
+    let home = Home::new();
+    // No fake state: a Codex start would fail the run.
+    let checkout = checkout();
+    let args = [
+        "codex-hooks",
+        "--checkout",
+        &checkout,
+        "--source",
+        "skip",
+        "--instructions",
+        "append",
+        "--non-interactive",
+    ];
+    let first = home.run(&args, None);
+    let body = report(&first);
+    assert_eq!(first.status.code(), Some(0), "{body}");
+    assert_eq!(body["status"], "skipped");
+    assert_eq!(body["source"], "skip");
+    assert_eq!(body["instructions"], "appended");
+    let agents = fs::read_to_string(home.codex().join("AGENTS.md")).unwrap();
+    assert!(agents.contains("pseudolife-memory"));
+    let again = home.run(&args, None);
+    assert_eq!(report(&again)["instructions"], "present");
+    assert_eq!(
+        fs::read_to_string(home.codex().join("AGENTS.md")).unwrap(),
+        agents
+    );
+}
+
+#[test]
+fn hooks_without_approval_install_nothing_and_report_pending() {
+    let home = Home::new();
+    home.seed(registered(json!({})));
+    let checkout = checkout();
+    let output = home.run(
+        &[
+            "codex-hooks",
+            "--checkout",
+            &checkout,
+            "--source",
+            "manual",
+            "--trust",
+            "no",
+            "--instructions",
+            "auto",
+            "--non-interactive",
+        ],
+        None,
+    );
+    let body = report(&output);
+    assert_eq!(output.status.code(), Some(1), "{body}");
+    assert_eq!(body["status"], "pending");
+    assert_eq!(body["source"], "manual");
+    assert_eq!(body["instructions"], "skipped");
+    assert!(
+        body["recovery"].as_str().unwrap().contains("not installed"),
+        "{body}"
+    );
+    assert!(!home.codex().join("hooks.json").exists());
+    assert!(!home.codex().join("pseudolife/hooks").exists());
+    // A usage error: exit 2 and no report.
+    let usage = home.run(&["codex-hooks", "--source", "manual"], None);
+    assert_eq!(usage.status.code(), Some(2));
+    assert!(usage.stdout.is_empty());
+}
+
 /// The fake app-server: one JSON-RPC message per line on stdin/stdout,
 /// state in the file `W7_FAKE_CODEX_STATE` names. Without that variable it
 /// is an ordinary (empty) test.
@@ -236,7 +321,11 @@ fn fake_codex_app_server() {
             continue;
         };
         let mut state: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
-        let result = handle(&mut state, message["method"].as_str().unwrap_or(""), &message["params"]);
+        let result = handle(
+            &mut state,
+            message["method"].as_str().unwrap_or(""),
+            &message["params"],
+        );
         fs::write(&path, state.to_string()).unwrap();
         let reply = match result {
             Ok(result) => json!({"id": id, "result": result}),
@@ -270,6 +359,7 @@ fn handle(state: &mut Value, method: &str, params: &Value) -> Result<Value, i64>
             state["version"] = json!(state["version"].as_u64().unwrap() + 1);
             Ok(json!({"status": "ok", "version": format!("v{}", state["version"])}))
         }
+        "hooks/list" => Ok(json!({"data": [{"cwd": "fixture", "hooks": [], "errors": []}]})),
         _ => Err(-32601),
     }
 }
@@ -278,7 +368,9 @@ fn merge(base: &mut Value, overlay: &Value) {
     if let (Some(base), Some(overlay)) = (base.as_object_mut(), overlay.as_object()) {
         for (key, value) in overlay {
             match base.get_mut(key) {
-                Some(existing) if existing.is_object() && value.is_object() => merge(existing, value),
+                Some(existing) if existing.is_object() && value.is_object() => {
+                    merge(existing, value)
+                }
                 _ => {
                     base.insert(key.clone(), value.clone());
                 }
@@ -295,7 +387,11 @@ fn set(root: &mut Value, keys: &[String], value: Value) {
     if keys.len() == 1 {
         map.insert(keys[0].clone(), value);
     } else {
-        set(map.entry(keys[0].clone()).or_insert(json!({})), &keys[1..], value);
+        set(
+            map.entry(keys[0].clone()).or_insert(json!({})),
+            &keys[1..],
+            value,
+        );
     }
 }
 

@@ -12,7 +12,10 @@ const DIFFERS: &str = "Installed PseudoLife hooks differ from this installer. Up
 fn manifest(path: &Path) -> Option<Value> {
     let bytes = std::fs::read(path).ok()?;
     let text = String::from_utf8(bytes).ok()?;
-    serde_json::from_str::<Value>(&text).ok()?.get("hooks").cloned()
+    serde_json::from_str::<Value>(&text)
+        .ok()?
+        .get("hooks")
+        .cloned()
 }
 
 pub fn vet(hooks: &[&Hook], checkout: &Path) -> Result<(), Fail> {
@@ -22,8 +25,12 @@ pub fn vet(hooks: &[&Hook], checkout: &Path) -> Result<(), Fail> {
         ));
     }
     let reference = checkout.join("plugin").join("hooks");
-    let expected = manifest(&reference.join("hooks.json"))
-        .ok_or_else(|| Fail::detail(format!("{} could not be read; pass --checkout with this repository's root.", reference.join("hooks.json").display())))?;
+    let expected = manifest(&reference.join("hooks.json")).ok_or_else(|| {
+        Fail::detail(format!(
+            "{} could not be read; pass --checkout with this repository's root.",
+            reference.join("hooks.json").display()
+        ))
+    })?;
     let reference_scripts = bundle_bytes(&reference, &PLUGIN_SCRIPTS).map_err(Fail::detail)?;
     let roles: BTreeMap<String, Vec<Value>> = expected
         .as_object()
@@ -43,13 +50,20 @@ pub fn vet(hooks: &[&Hook], checkout: &Path) -> Result<(), Fail> {
     for hook in hooks {
         let path = Path::new(&hook.source_path);
         let directory = path.parent().unwrap_or(Path::new(""));
-        let files_match = bundle_bytes(directory, &PLUGIN_SCRIPTS).is_ok_and(|f| f == reference_scripts);
-        if manifest(path).as_ref() != Some(&expected) || !files_match || hook.handler_type != "command" {
+        let files_match =
+            bundle_bytes(directory, &PLUGIN_SCRIPTS).is_ok_and(|f| f == reference_scripts);
+        if manifest(path).as_ref() != Some(&expected)
+            || !files_match
+            || hook.handler_type != "command"
+        {
             return Err(Fail::new(DIFFERS));
         }
         let event = plugin_event(&hook.event).ok_or_else(|| Fail::new(DIFFERS))?;
         let root = directory.parent().unwrap_or(Path::new(""));
-        let spellings = [root.to_string_lossy().into_owned(), root.to_string_lossy().replace('\\', "/")];
+        let spellings = [
+            root.to_string_lossy().into_owned(),
+            root.to_string_lossy().replace('\\', "/"),
+        ];
         let handlers = roles.get(event).ok_or_else(|| Fail::new(DIFFERS))?;
         let matches: Vec<usize> = handlers
             .iter()

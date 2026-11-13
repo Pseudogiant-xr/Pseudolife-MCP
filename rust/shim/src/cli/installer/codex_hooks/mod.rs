@@ -40,8 +40,7 @@ pub use verify::{Codex, Daemon, Session};
 
 pub(super) const USAGE: &str = "usage: pseudolife-mcp installer codex-hooks --checkout DIR [--source auto|manual|plugin|skip] [--trust ask|yes|no] [--instructions auto|append|skip] [--non-interactive]";
 
-const RECOVERY: &str =
-    "Open Codex /hooks to review PseudoLife hooks; rerun the installer after correcting the reported problem.";
+const RECOVERY: &str = "Open Codex /hooks to review PseudoLife hooks; rerun the installer after correcting the reported problem.";
 
 /// A refusal: fixed text and locally chosen paths only, never a credential
 /// or an untrusted response body.
@@ -84,7 +83,14 @@ pub struct Hook {
 
 impl Hook {
     fn parse(value: &Value) -> Option<Self> {
-        for key in ["key", "currentHash", "eventName", "enabled", "trustStatus", "sourcePath"] {
+        for key in [
+            "key",
+            "currentHash",
+            "eventName",
+            "enabled",
+            "trustStatus",
+            "sourcePath",
+        ] {
             value.get(key)?;
         }
         let text = |key: &str| value[key].as_str().unwrap_or_default().to_owned();
@@ -133,8 +139,14 @@ impl Report {
         for (key, value) in [
             ("verified", json!(self.verified)),
             ("mailbox_approval", json!(self.mailbox_approval)),
-            ("mailbox_approval_detail", json!(self.mailbox_approval_detail)),
-            ("mailbox_approval_notice", json!(self.mailbox_approval_notice)),
+            (
+                "mailbox_approval_detail",
+                json!(self.mailbox_approval_detail),
+            ),
+            (
+                "mailbox_approval_notice",
+                json!(self.mailbox_approval_notice),
+            ),
             ("instructions_path", json!(self.instructions_path)),
         ] {
             if !value.is_null() {
@@ -145,7 +157,10 @@ impl Report {
     }
     /// The process exit code the installers expect.
     pub fn exit(&self) -> u8 {
-        u8::from(!(self.status == "ready" || matches!(self.instructions.as_str(), "present" | "appended")))
+        u8::from(
+            !(self.status == "ready"
+                || matches!(self.instructions.as_str(), "present" | "appended")),
+        )
     }
 }
 
@@ -180,7 +195,9 @@ fn parse(arguments: &[String]) -> Result<Option<Options>, String> {
             }
             other => return Err(format!("unknown or repeated option {other:?}")),
         };
-        let value = items.next().ok_or_else(|| format!("{item} needs a value"))?;
+        let value = items
+            .next()
+            .ok_or_else(|| format!("{item} needs a value"))?;
         if !allowed.is_empty() && !allowed.contains(&value.as_str()) {
             return Err(format!("{item} must be one of {}", allowed.join(", ")));
         }
@@ -197,7 +214,12 @@ fn parse(arguments: &[String]) -> Result<Option<Options>, String> {
 
 /// `(approved, fallback_allowed)`, asking only on a terminal; the menu may
 /// turn the run into "instructions only" or "skip both".
-fn consent(options: &mut Options, terminal: bool, input: &mut dyn BufRead, prompt: &mut dyn Write) -> (bool, bool) {
+fn consent(
+    options: &mut Options,
+    terminal: bool,
+    input: &mut dyn BufRead,
+    prompt: &mut dyn Write,
+) -> (bool, bool) {
     if options.source == "skip" {
         return (false, options.instructions == "append");
     }
@@ -247,7 +269,11 @@ pub async fn inventory(client: &mut impl Rpc, cwd: &Path) -> Result<(Value, Vec<
         .await?;
     let result = client.rpc("hooks/list", json!({"cwds": [cwd]})).await?;
     let entries = result["data"].as_array().cloned().unwrap_or_default();
-    if entries.len() != 1 || entries[0]["errors"].as_array().is_some_and(|e| !e.is_empty()) {
+    if entries.len() != 1
+        || entries[0]["errors"]
+            .as_array()
+            .is_some_and(|e| !e.is_empty())
+    {
         return Err(Fail::new("Codex could not load its hook configuration."));
     }
     let unsupported = || Fail::new("This Codex hook-list schema is unsupported; use Codex /hooks.");
@@ -275,21 +301,33 @@ const FILE_KEY: &str = "PSEUDOLIFE_MCP_TOKEN_FILE";
 const TOKEN_KEY: &str = "PSEUDOLIFE_MCP_TOKEN";
 const URL_KEY: &str = "PSEUDOLIFE_MCP_DAEMON_URL";
 
+/// The child environment changes, the daemon URL and the bearer.
+type Connection = (Vec<(String, Option<String>)>, String, Option<String>);
+
 /// The connection the check uses: the credential step's token file and
 /// URL over this process's environment (the hooks Codex starts inherit the
 /// same), and the bearer read from that file.
-fn connection(host: &impl Host, report: &Report) -> Result<(Vec<(String, Option<String>)>, String, Option<String>), Fail> {
+fn connection(host: &impl Host, report: &Report) -> Result<Connection, Fail> {
     let mut environment = Vec::new();
     let mut file = host.var(FILE_KEY).filter(|v| !v.is_empty());
     let mut literal = host.var(TOKEN_KEY).filter(|v| !v.is_empty());
-    if let Some(path) = report.credential.get("credential_file_path").and_then(Value::as_str) {
+    if let Some(path) = report
+        .credential
+        .get("credential_file_path")
+        .and_then(Value::as_str)
+    {
         file = (!path.is_empty()).then(|| path.to_owned());
         environment.push((FILE_KEY.to_owned(), file.clone()));
         environment.push((TOKEN_KEY.to_owned(), None));
         literal = None;
     }
     let mut url = host.var(URL_KEY).filter(|v| !v.is_empty());
-    if let Some(chosen) = report.credential.get("daemon_url").and_then(Value::as_str).filter(|v| !v.is_empty()) {
+    if let Some(chosen) = report
+        .credential
+        .get("daemon_url")
+        .and_then(Value::as_str)
+        .filter(|v| !v.is_empty())
+    {
         url = Some(chosen.to_owned());
         environment.push((URL_KEY.to_owned(), url.clone()));
     }
@@ -313,9 +351,19 @@ fn hooks_disabled(config: &Value) -> bool {
     config["config"]["features"]["hooks"] == false
 }
 
-pub async fn setup<H: Host>(options: &Options, home: &Path, host: &H, approved: bool, fallback_allowed: bool) -> Report {
+pub async fn setup<H: Host>(
+    options: &Options,
+    home: &Path,
+    host: &H,
+    approved: bool,
+    fallback_allowed: bool,
+) -> Report {
     let mut report = Report {
-        source: if options.source == "auto" { "skip".into() } else { options.source.clone() },
+        source: if options.source == "auto" {
+            "skip".into()
+        } else {
+            options.source.clone()
+        },
         status: "pending".into(),
         instructions: "skipped".into(),
         ..Report::default()
@@ -337,7 +385,11 @@ pub async fn setup<H: Host>(options: &Options, home: &Path, host: &H, approved: 
         Ok(state) => report.instructions = state.into(),
         Err(error) => {
             report.instructions = "skipped".into();
-            let lead = report.recovery.take().map(|r| format!("{r} ")).unwrap_or_default();
+            let lead = report
+                .recovery
+                .take()
+                .map(|r| format!("{r} "))
+                .unwrap_or_default();
             report.recovery = Some(format!(
                 "{lead}Standing instructions could not be written: {error}"
             ));
@@ -346,7 +398,13 @@ pub async fn setup<H: Host>(options: &Options, home: &Path, host: &H, approved: 
     report
 }
 
-async fn hook_setup<H: Host>(options: &Options, home: &Path, host: &H, approved: bool, report: &mut Report) -> Result<(), Fail> {
+async fn hook_setup<H: Host>(
+    options: &Options,
+    home: &Path,
+    host: &H,
+    approved: bool,
+    report: &mut Report,
+) -> Result<(), Fail> {
     let legacy = definitions::legacy_commands(&options.checkout).map_err(Fail::detail)?;
     let scripts = options.checkout.join("plugin").join("hooks");
     let neutral = super::codex_config::Neutral::new("pseudolife-hook-check-")?;
@@ -356,8 +414,14 @@ async fn hook_setup<H: Host>(options: &Options, home: &Path, host: &H, approved:
         let mut client = codex.open(&json!({}), &[]).await?;
         let outcome = async {
             let (config, hooks) = inventory(&mut client, &cwd).await?;
-            let credential =
-                crate::setup::codex::configure_credential_file(&mut client, home, &cwd, Some(config.clone()), None).await?;
+            let credential = crate::setup::codex::configure_credential_file(
+                &mut client,
+                home,
+                &cwd,
+                Some(config.clone()),
+                None,
+            )
+            .await?;
             for key in ["backup", "connection_backup"] {
                 if let Some(path) = credential[key].as_str() {
                     report.backups.push(PathBuf::from(path));
@@ -383,7 +447,9 @@ async fn hook_setup<H: Host>(options: &Options, home: &Path, host: &H, approved:
             "Codex hooks are disabled in configuration (features.hooks = false); setup preserves that choice.",
         ));
     }
-    if options.source == "auto" && config["config"]["plugins"][definitions::PLUGIN_ID]["enabled"] == false {
+    if options.source == "auto"
+        && config["config"]["plugins"][definitions::PLUGIN_ID]["enabled"] == false
+    {
         return Err(Fail::new(
             "The PseudoLife plugin is disabled in Codex. Re-enable it if desired, or choose manual hooks (--codex-hooks manual; install.ps1: -CodexHooks manual).",
         ));
@@ -416,12 +482,18 @@ async fn hook_setup<H: Host>(options: &Options, home: &Path, host: &H, approved:
             let (fresh, listed) = inventory(&mut client, &cwd).await?;
             let (_, mine, _) = manual::select(&listed, home, &source, &legacy)?;
             if !manual::complete_set(&mine, &source) {
-                return Err(Fail::new("Codex did not discover the installed PseudoLife hooks."));
+                return Err(Fail::new(
+                    "Codex did not discover the installed PseudoLife hooks.",
+                ));
             }
             vet(&mine, true)?;
             trust::trust_hooks(&mut client, &fresh, &mine, home, &cwd, report).await?;
             trust::mailbox_approval(&fresh, home, report, Some((&mut client, cwd.as_path()))).await;
-            Ok::<_, Fail>((fresh.clone(), listed.clone(), mine.into_iter().cloned().collect::<Vec<_>>()))
+            Ok::<_, Fail>((
+                fresh.clone(),
+                listed.clone(),
+                mine.into_iter().cloned().collect::<Vec<_>>(),
+            ))
         }
         .await;
         client.close().await;
@@ -447,7 +519,11 @@ async fn hook_setup<H: Host>(options: &Options, home: &Path, host: &H, approved:
         let mut client = codex.open(&json!({}), &[]).await?;
         let outcome = async {
             let (config, listed) = inventory(&mut client, &cwd).await?;
-            let mine: Vec<Hook> = manual::select(&listed, home, &source, &legacy)?.1.into_iter().cloned().collect();
+            let mine: Vec<Hook> = manual::select(&listed, home, &source, &legacy)?
+                .1
+                .into_iter()
+                .cloned()
+                .collect();
             Ok::<_, Fail>((config, listed, mine))
         }
         .await;
@@ -527,12 +603,29 @@ pub(super) fn run(arguments: &[String]) -> u8 {
         Err(message) => return super::codex_config::usage(&message, USAGE),
     };
     let terminal = io::stdin().is_terminal();
-    let (approved, fallback_allowed) =
-        consent(&mut options, terminal, &mut io::stdin().lock(), &mut io::stderr().lock());
-    let report = match (super::codex_config::codex_home(), super::codex_config::runtime()) {
-        (Ok(home), Some(runtime)) => runtime.block_on(setup(&options, &home, &RealHost, approved, fallback_allowed)),
+    let (approved, fallback_allowed) = consent(
+        &mut options,
+        terminal,
+        &mut io::stdin().lock(),
+        &mut io::stderr().lock(),
+    );
+    let report = match (
+        super::codex_config::codex_home(),
+        super::codex_config::runtime(),
+    ) {
+        (Ok(home), Some(runtime)) => runtime.block_on(setup(
+            &options,
+            &home,
+            &RealHost,
+            approved,
+            fallback_allowed,
+        )),
         (Err(error), _) => Report {
-            source: if options.source == "auto" { "skip".into() } else { options.source.clone() },
+            source: if options.source == "auto" {
+                "skip".into()
+            } else {
+                options.source.clone()
+            },
             status: "unavailable".into(),
             instructions: "skipped".into(),
             recovery: Some(format!("{error} {RECOVERY}")),

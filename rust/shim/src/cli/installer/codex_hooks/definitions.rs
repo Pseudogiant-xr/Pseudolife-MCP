@@ -255,16 +255,20 @@ pub fn bundle_bytes(directory: &Path, names: &[&str]) -> Result<Vec<(String, Vec
         .iter()
         .map(|name| {
             let path = directory.join(name);
-            let bytes = std::fs::read(&path).map_err(|_| format!("{} could not be read", path.display()))?;
-            let text = String::from_utf8(bytes)
-                .map_err(|_| format!("{} is not UTF-8", path.display()))?;
+            let bytes = std::fs::read(&path)
+                .map_err(|_| format!("{} could not be read", path.display()))?;
+            let text =
+                String::from_utf8(bytes).map_err(|_| format!("{} is not UTF-8", path.display()))?;
             Ok(((*name).to_owned(), text.replace("\r\n", "\n").into_bytes()))
         })
         .collect()
 }
 
 pub fn is_bundle_name(name: &str) -> bool {
-    name.len() == 20 && name.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    name.len() == 20
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
 /// The commands only shipped legacy installers wrote; a substring match
@@ -272,8 +276,12 @@ pub fn is_bundle_name(name: &str) -> bool {
 /// from the checkout's `ops/install-hook.ps1`, as the Python setup does.
 pub fn legacy_commands(checkout: &Path) -> Result<Vec<String>, String> {
     let path = checkout.join("ops").join("install-hook.ps1");
-    let script = std::fs::read_to_string(&path)
-        .map_err(|_| format!("{} could not be read; pass --checkout with this repository's root", path.display()))?;
+    let script = std::fs::read_to_string(&path).map_err(|_| {
+        format!(
+            "{} could not be read; pass --checkout with this repository's root",
+            path.display()
+        )
+    })?;
     let line = |name: &str| -> Result<String, String> {
         let marker = format!("${name} = \"");
         script
@@ -308,7 +316,10 @@ mod tests {
 
     #[test]
     fn shell_quote_matches_python_shlex() {
-        assert_eq!(shell_quote("/home/u/.codex/run.sh"), "/home/u/.codex/run.sh");
+        assert_eq!(
+            shell_quote("/home/u/.codex/run.sh"),
+            "/home/u/.codex/run.sh"
+        );
         assert_eq!(shell_quote(""), "''");
         assert_eq!(shell_quote("a b"), "'a b'");
         assert_eq!(shell_quote("o'brien"), "'o'\"'\"'brien'");
@@ -363,8 +374,17 @@ mod tests {
         // Every event the plugin ships is one setup knows.
         for section in hooks.keys() {
             assert!(
-                ["SessionStart", "UserPromptSubmit", "SessionEnd", "Stop", "StopFailure", "SubagentStart", "SubagentStop", "PreToolUse"]
-                    .contains(&section.as_str()),
+                [
+                    "SessionStart",
+                    "UserPromptSubmit",
+                    "SessionEnd",
+                    "Stop",
+                    "StopFailure",
+                    "SubagentStart",
+                    "SubagentStop",
+                    "PreToolUse"
+                ]
+                .contains(&section.as_str()),
                 "{section}"
             );
         }

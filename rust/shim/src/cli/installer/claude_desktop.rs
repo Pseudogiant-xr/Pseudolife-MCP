@@ -231,7 +231,13 @@ fn refuse<T>(message: impl Into<String>) -> Result<T, Refusal> {
 
 /// The configuration as JSON, `{}` for a missing or blank file. A UTF-8
 /// byte-order mark is accepted on read and never written.
-fn load(path: &Path) -> Result<(Option<Vec<u8>>, Map<String, Value>), Refusal> {
+/// The file's bytes (when it exists) and its JSON object.
+type Loaded = (Option<Vec<u8>>, Map<String, Value>);
+/// The configuration, the notes to print, and whether a foreign legacy
+/// entry is present.
+type Migrated = (Map<String, Value>, Vec<String>, bool);
+
+fn load(path: &Path) -> Result<Loaded, Refusal> {
     let bytes = registrations::read_optional(path).map_err(|error| {
         Refusal(format!(
             "{} could not be read ({error}); fix or move it first",
@@ -241,8 +247,8 @@ fn load(path: &Path) -> Result<(Option<Vec<u8>>, Map<String, Value>), Refusal> {
     let Some(raw) = bytes.clone() else {
         return Ok((None, Map::new()));
     };
-    let text = std::str::from_utf8(raw.strip_prefix(b"\xef\xbb\xbf").unwrap_or(&raw))
-        .map_err(|_| {
+    let text =
+        std::str::from_utf8(raw.strip_prefix(b"\xef\xbb\xbf").unwrap_or(&raw)).map_err(|_| {
             Refusal(format!(
                 "{} is not UTF-8 JSON; fix or move it first",
                 path.display()
@@ -273,10 +279,7 @@ fn written_by_us(entry: &Value) -> bool {
 /// Move an entry this step wrote as `pseudolife-memory` to [`SERVER`]. The
 /// [`SERVER`] entry wins where both set a key; the notes name any dropped
 /// env key, never a value. `foreign` reports an entry someone else wrote.
-fn migrate_legacy(
-    config: &Map<String, Value>,
-    dry_run: bool,
-) -> Result<(Map<String, Value>, Vec<String>, bool), Refusal> {
+fn migrate_legacy(config: &Map<String, Value>, dry_run: bool) -> Result<Migrated, Refusal> {
     let Some(servers) = config.get("mcpServers").and_then(Value::as_object) else {
         return Ok((config.clone(), vec![], false));
     };
@@ -356,7 +359,11 @@ fn foreign_warning(path: &Path) -> String {
 /// exit 0 with no output). The child gets no stdin and no credential
 /// variable, so a wrapper that drops its arguments cannot start a real
 /// client holding the bearer.
-pub(super) fn shim_reads_token_file(command: &str, scrub: &[&str], timeout: Duration) -> Option<bool> {
+pub(super) fn shim_reads_token_file(
+    command: &str,
+    scrub: &[&str],
+    timeout: Duration,
+) -> Option<bool> {
     let mut child = Command::new(command);
     child
         .arg("--help")
@@ -583,8 +590,9 @@ fn write_token_file(path: &str, token: &str) -> Result<(), Refusal> {
     let failed = |cause: String| Refusal(format!("could not write the token file {path}: {cause}"));
     CredentialProvider::new(Some(token.to_owned()), None)
         .map_err(|error| failed(error.to_string()))?;
-    let mut edit = crate::setup::files::PrivateEdit::prepare(Path::new(path), token.as_bytes().to_vec())
-        .map_err(|error| failed(error.to_string()))?;
+    let mut edit =
+        crate::setup::files::PrivateEdit::prepare(Path::new(path), token.as_bytes().to_vec())
+            .map_err(|error| failed(error.to_string()))?;
     edit.commit().map_err(|error| failed(error.to_string()))?;
     if file_token(path).ok().as_deref() != Some(token) {
         return Err(failed("the written file did not validate".into()));
@@ -592,7 +600,12 @@ fn write_token_file(path: &str, token: &str) -> Result<(), Refusal> {
     Ok(())
 }
 
-fn build_entry(command: &str, writer_id: &str, daemon_url: &str, token_file: Option<&str>) -> Value {
+fn build_entry(
+    command: &str,
+    writer_id: &str,
+    daemon_url: &str,
+    token_file: Option<&str>,
+) -> Value {
     let mut env = Map::new();
     env.insert("PSEUDOLIFE_WRITER_ID".into(), json!(writer_id));
     env.insert("PSEUDOLIFE_MCP_NO_SPAWN".into(), json!("1"));
@@ -808,7 +821,13 @@ fn register_inner(options: &Options, host: &Host, outcome: &mut Outcome) -> Resu
     let preserve = (existing_file.is_some() && options.token_file.is_none())
         || options.token_file.as_deref().is_some_and(exists);
     let credential = if preserve {
-        plan_credential(&existing_env, requested.as_deref(), None, options.dry_run, true)?
+        plan_credential(
+            &existing_env,
+            requested.as_deref(),
+            None,
+            options.dry_run,
+            true,
+        )?
     } else {
         let token = match (token, &options.tokens_from_env) {
             (Some(token), _) => Some(token),
@@ -873,9 +892,9 @@ fn register_inner(options: &Options, host: &Host, outcome: &mut Outcome) -> Resu
         outcome
             .lines
             .push("dry run: nothing written. Entry that would be merged:".into());
-        outcome.lines.push(
-            serde_json::to_string_pretty(&json!({SERVER: entry})).expect("JSON value"),
-        );
+        outcome
+            .lines
+            .push(serde_json::to_string_pretty(&json!({SERVER: entry})).expect("JSON value"));
         outcome.lines.extend(notes);
         finish(outcome);
         return Ok(());
@@ -891,13 +910,14 @@ fn register_inner(options: &Options, host: &Host, outcome: &mut Outcome) -> Resu
     }
     let mut text = serde_json::to_string_pretty(&Value::Object(merged)).expect("JSON value");
     text.push('\n');
-    let backup = registrations::write_config(&path, raw.as_deref().unwrap_or_default(), text.as_bytes())
-        .map_err(|error| {
-            Refusal(format!(
-                "{} could not be written ({error}); the existing file was left as it was",
-                path.display()
-            ))
-        })?;
+    let backup =
+        registrations::write_config(&path, raw.as_deref().unwrap_or_default(), text.as_bytes())
+            .map_err(|error| {
+                Refusal(format!(
+                    "{} could not be written ({error}); the existing file was left as it was",
+                    path.display()
+                ))
+            })?;
     if raw.is_some() {
         let backup = ordinary(backup);
         outcome
@@ -906,10 +926,9 @@ fn register_inner(options: &Options, host: &Host, outcome: &mut Outcome) -> Resu
         outcome.backup = Some(backup);
     }
     outcome.state = "written";
-    outcome.lines.push(format!(
-        "entry: written ({SERVER} -> {})",
-        options.command
-    ));
+    outcome
+        .lines
+        .push(format!("entry: written ({SERVER} -> {})", options.command));
     outcome.lines.extend(notes);
     outcome.lines.push(
         "next: fully quit Claude Desktop (tray/menu-bar icon, not just the window) and relaunch it so the new entry loads"
@@ -938,7 +957,8 @@ pub(super) fn run(arguments: &[String]) -> u8 {
         }
     };
     let lookup = |key: &str| std::env::var(key).ok();
-    let probe = |command: &str, scrub: &[&str]| shim_reads_token_file(command, scrub, PROBE_TIMEOUT);
+    let probe =
+        |command: &str, scrub: &[&str]| shim_reads_token_file(command, scrub, PROBE_TIMEOUT);
     let host = Host {
         lookup: &lookup,
         home: dirs::home_dir().unwrap_or_default(),

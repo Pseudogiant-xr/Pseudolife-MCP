@@ -50,7 +50,10 @@ pub trait Daemon {
 /// default from their own environment.
 pub fn digest_dir(lookup: &dyn Fn(&str) -> Option<String>) -> PathBuf {
     if let Some(configured) = lookup("PSEUDOLIFE_DIGEST_DIR").filter(|v| !v.is_empty()) {
-        if let Some(rest) = configured.strip_prefix("~/").or_else(|| configured.strip_prefix("~\\")) {
+        if let Some(rest) = configured
+            .strip_prefix("~/")
+            .or_else(|| configured.strip_prefix("~\\"))
+        {
             return dirs::home_dir().unwrap_or_default().join(rest);
         }
         return PathBuf::from(configured);
@@ -76,12 +79,30 @@ fn overrides(effective: &Value, all: &[Hook], selected: &[&Hook]) -> Result<Valu
     for (key, value) in [
         ("model_provider", json!("pseudolife_hook_fixture")),
         ("model", json!("fixture-model")),
-        ("model_providers.pseudolife_hook_fixture.name", json!("Local hook verification")),
-        ("model_providers.pseudolife_hook_fixture.base_url", json!("http://127.0.0.1:1/v1")),
-        ("model_providers.pseudolife_hook_fixture.wire_api", json!("responses")),
-        ("model_providers.pseudolife_hook_fixture.requires_openai_auth", json!(false)),
-        ("model_providers.pseudolife_hook_fixture.request_max_retries", json!(0)),
-        ("model_providers.pseudolife_hook_fixture.stream_max_retries", json!(0)),
+        (
+            "model_providers.pseudolife_hook_fixture.name",
+            json!("Local hook verification"),
+        ),
+        (
+            "model_providers.pseudolife_hook_fixture.base_url",
+            json!("http://127.0.0.1:1/v1"),
+        ),
+        (
+            "model_providers.pseudolife_hook_fixture.wire_api",
+            json!("responses"),
+        ),
+        (
+            "model_providers.pseudolife_hook_fixture.requires_openai_auth",
+            json!(false),
+        ),
+        (
+            "model_providers.pseudolife_hook_fixture.request_max_retries",
+            json!(0),
+        ),
+        (
+            "model_providers.pseudolife_hook_fixture.stream_max_retries",
+            json!(0),
+        ),
         ("analytics.enabled", json!(false)),
         ("notify", json!([])),
     ] {
@@ -97,8 +118,14 @@ fn overrides(effective: &Value, all: &[Hook], selected: &[&Hook]) -> Result<Valu
                 .collect(),
         )
     };
-    overrides.insert("mcp_servers".into(), disabled(effective["mcp_servers"].as_object(), None));
-    overrides.insert("plugins".into(), disabled(effective["plugins"].as_object(), Some(PLUGIN_ID)));
+    overrides.insert(
+        "mcp_servers".into(),
+        disabled(effective["mcp_servers"].as_object(), None),
+    );
+    overrides.insert(
+        "plugins".into(),
+        disabled(effective["plugins"].as_object(), Some(PLUGIN_ID)),
+    );
     let own: Vec<&str> = selected.iter().map(|h| h.key.as_str()).collect();
     let mut states = Map::new();
     for hook in all.iter().filter(|h| !own.contains(&h.key.as_str())) {
@@ -313,7 +340,11 @@ impl RealDaemon {
         if let Some(token) = &self.token {
             request = request.bearer_auth(token);
         }
-        request.send().await.ok().filter(|r| r.status().is_success())
+        request
+            .send()
+            .await
+            .ok()
+            .filter(|r| r.status().is_success())
     }
 }
 
@@ -335,8 +366,12 @@ impl Daemon for RealDaemon {
     }
     async fn episode_open(&self, thread: &str) -> Result<bool, SetupError> {
         // Exact lookup is bounded by the episode's place in the newest 100.
-        let unavailable = SetupError("The memory daemon did not list its episodes; check daemon access.");
-        let response = self.get("/api/episodes?limit=100").await.ok_or(unavailable.clone())?;
+        let unavailable =
+            SetupError("The memory daemon did not list its episodes; check daemon access.");
+        let response = self
+            .get("/api/episodes?limit=100")
+            .await
+            .ok_or(unavailable.clone())?;
         let value: Value = response.json().await.map_err(|_| unavailable.clone())?;
         let episodes = value["episodes"].as_array().ok_or(unavailable)?;
         Ok(episodes.iter().any(|e| e["session_key"] == thread))

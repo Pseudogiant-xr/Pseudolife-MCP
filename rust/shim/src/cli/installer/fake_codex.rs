@@ -76,14 +76,23 @@ impl FakeCodex {
         if let Some((path, value)) = &self.shadow {
             set(&mut merged, path, value.clone());
         }
-        for (key, value) in self.session_overrides.iter().flat_map(|o| o.as_object()).flatten() {
+        for (key, value) in self
+            .session_overrides
+            .iter()
+            .flat_map(|o| o.as_object())
+            .flatten()
+        {
             let path: Vec<String> = key.split('.').map(str::to_owned).collect();
             let mut node = &mut merged;
             for part in &path {
                 if !node.is_object() {
                     *node = json!({});
                 }
-                node = node.as_object_mut().unwrap().entry(part.clone()).or_insert(Value::Null);
+                node = node
+                    .as_object_mut()
+                    .unwrap()
+                    .entry(part.clone())
+                    .or_insert(Value::Null);
             }
             merge(node, value);
         }
@@ -225,6 +234,14 @@ pub const THREAD: &str = "fixture-thread";
 
 impl Rpc for FakeCodex {
     async fn rpc(&mut self, method: &str, params: Value) -> Result<Value, SetupError> {
+        self.call(method, params)
+    }
+}
+
+impl FakeCodex {
+    /// One request, answered at once (no await, so a shared fake can be
+    /// borrowed for exactly the call).
+    pub fn call(&mut self, method: &str, params: Value) -> Result<Value, SetupError> {
         self.calls.push((method.to_owned(), params.clone()));
         match method {
             "config/read" => Ok(self.read()),

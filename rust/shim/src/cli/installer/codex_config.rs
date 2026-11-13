@@ -43,7 +43,7 @@ pub(super) fn codex_home() -> Result<PathBuf, SetupError> {
     let home = std::env::var_os("CODEX_HOME")
         .filter(|value| !value.is_empty())
         .map(|value| expand_user(Path::new(&value)))
-        .unwrap_or_else(|| crate::runtime::registrations::codex_home());
+        .unwrap_or_else(crate::runtime::registrations::codex_home);
     codex::resolved_path(&home)
 }
 
@@ -317,7 +317,10 @@ mod tests {
 
     #[test]
     fn installer_token_is_one_bounded_valid_line() {
-        assert_eq!(read_token(&b"fixture-token\r\n"[..]).unwrap(), "fixture-token");
+        assert_eq!(
+            read_token(&b"fixture-token\r\n"[..]).unwrap(),
+            "fixture-token"
+        );
         assert_eq!(read_token(&b"fixture-token"[..]).unwrap(), "fixture-token");
         assert!(read_token(&[b'a'; TOKEN_LIMIT + 1][..]).is_err());
         assert!(read_token(&b""[..]).is_err());
@@ -343,8 +346,8 @@ mod tests {
     pub(crate) struct TempHome(pub PathBuf);
     impl TempHome {
         pub fn new() -> Self {
-            let path =
-                std::env::temp_dir().join(format!("w7-codex-home-{}", uuid::Uuid::new_v4().simple()));
+            let path = std::env::temp_dir()
+                .join(format!("w7-codex-home-{}", uuid::Uuid::new_v4().simple()));
             std::fs::create_dir_all(&path).unwrap();
             let path = codex::resolved_path(&path).unwrap();
             std::fs::write(path.join("config.toml"), "# fixture\n").unwrap();
@@ -359,7 +362,10 @@ mod tests {
 
     fn registered(extra: Value) -> Value {
         let mut server = json!({"command":"/opt/pseudolife-mcp","args":[],"env":{}});
-        server.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        server
+            .as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
         json!({"mcp_servers":{SERVER: server}})
     }
 
@@ -429,7 +435,8 @@ mod tests {
 
     #[test]
     fn only_absent_or_null_defaults_are_added() {
-        let server = json!({"command":"x","startup_timeout_sec":null,"tool_timeout_sec":0,"required":false});
+        let server =
+            json!({"command":"x","startup_timeout_sec":null,"tool_timeout_sec":0,"required":false});
         let missing = missing_defaults(server.as_object().unwrap());
         assert_eq!(missing, vec![("startup_timeout_sec", json!(240.0))]);
         let all = missing_defaults(json!({"command":"x"}).as_object().unwrap());

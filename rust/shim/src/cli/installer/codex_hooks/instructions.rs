@@ -4,7 +4,13 @@
 use super::{Fail, Report};
 use std::path::Path;
 
-const MARKERS: [&[u8]; 5] = [b"## Memory", b"pseudolife-memory", b"RECALL", b"CAPTURE", b"REFLECT"];
+const MARKERS: [&[u8]; 5] = [
+    b"## Memory",
+    b"pseudolife-memory",
+    b"RECALL",
+    b"CAPTURE",
+    b"REFLECT",
+];
 
 fn contains(haystack: &[u8], needle: &[u8]) -> bool {
     haystack.windows(needle.len()).any(|w| w == needle)
@@ -26,8 +32,9 @@ pub fn standing(
     } else {
         home.join("AGENTS.md")
     };
-    let old = crate::runtime::registrations::read_optional(&path)
-        .map_err(|error| Fail::detail(format!("{} could not be read ({error}).", path.display())))?;
+    let old = crate::runtime::registrations::read_optional(&path).map_err(|error| {
+        Fail::detail(format!("{} could not be read ({error}).", path.display()))
+    })?;
     let old_bytes = old.clone().unwrap_or_default();
     if MARKERS.iter().all(|m| contains(&old_bytes, m)) {
         return Ok("present");
@@ -55,12 +62,20 @@ pub fn standing(
     }
     data.extend_from_slice(&block);
     if old.is_none() && !home.is_dir() {
-        std::fs::create_dir_all(home)
-            .map_err(|_| Fail::detail(format!("The Codex home {} could not be created.", home.display())))?;
+        std::fs::create_dir_all(home).map_err(|_| {
+            Fail::detail(format!(
+                "The Codex home {} could not be created.",
+                home.display()
+            ))
+        })?;
     }
-    let backup = crate::runtime::registrations::write_config(&path, &old_bytes, &data).map_err(|error| {
-        Fail::detail(format!("{} could not be written ({error}); it was left as it was.", path.display()))
-    })?;
+    let backup =
+        crate::runtime::registrations::write_config(&path, &old_bytes, &data).map_err(|error| {
+            Fail::detail(format!(
+                "{} could not be written ({error}); it was left as it was.",
+                path.display()
+            ))
+        })?;
     if old.is_some() {
         report.backups.push(backup);
     }

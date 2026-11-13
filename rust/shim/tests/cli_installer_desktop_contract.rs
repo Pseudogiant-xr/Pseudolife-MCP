@@ -13,7 +13,8 @@ const TOKEN: &str = "t0k3n-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
 struct Home(PathBuf);
 impl Home {
     fn new() -> Self {
-        let path = std::env::temp_dir().join(format!("w7-desktop-contract-{}", uuid::Uuid::new_v4()));
+        let path =
+            std::env::temp_dir().join(format!("w7-desktop-contract-{}", uuid::Uuid::new_v4()));
         pseudolife_stdio::board::state::private_dir(&path).unwrap();
         Self(path)
     }
@@ -81,7 +82,10 @@ fn registers_itself_with_a_private_token_file_then_reruns_quietly() {
     let first = home.run(&args);
     let text = all_text(&first);
     assert_eq!(first.status.code(), Some(0), "{text}");
-    assert!(text.contains("reads PSEUDOLIFE_MCP_TOKEN_FILE"), "the probe read the real help: {text}");
+    assert!(
+        text.contains("reads PSEUDOLIFE_MCP_TOKEN_FILE"),
+        "the probe read the real help: {text}"
+    );
     assert!(text.contains("entry: written"), "{text}");
     assert!(!text.contains(TOKEN));
     assert_eq!(fs::read(&token_file).unwrap(), TOKEN.as_bytes());

@@ -13,7 +13,8 @@ impl Dir {
     fn new() -> Self {
         // Private, as a profile folder is: the shared client configuration
         // writer refuses a file another account may write.
-        let path = std::env::temp_dir().join(format!("w7-desktop-{}", uuid::Uuid::new_v4().simple()));
+        let path =
+            std::env::temp_dir().join(format!("w7-desktop-{}", uuid::Uuid::new_v4().simple()));
         crate::board::state::private_dir(&path).unwrap();
         Self(path)
     }
@@ -130,7 +131,10 @@ fn windows_prefers_an_existing_msix_package_cache_and_falls_back_to_appdata() {
     let none = |_: &str| None;
     assert_eq!(
         config_candidates(true, false, &none, &dir.0),
-        vec![dir.0.join("AppData/Roaming/Claude/claude_desktop_config.json")]
+        vec![
+            dir.0
+                .join("AppData/Roaming/Claude/claude_desktop_config.json")
+        ]
     );
 }
 
@@ -163,7 +167,10 @@ fn without_config_the_resolved_path_is_used_and_the_other_windows_copy_named() {
     fs::create_dir_all(roaming.join("Claude")).unwrap();
     fs::write(roaming.join("Claude/claude_desktop_config.json"), "{}").unwrap();
     let env = BTreeMap::from([
-        ("LOCALAPPDATA".to_owned(), local.to_string_lossy().into_owned()),
+        (
+            "LOCALAPPDATA".to_owned(),
+            local.to_string_lossy().into_owned(),
+        ),
         ("APPDATA".to_owned(), roaming.to_string_lossy().into_owned()),
     ]);
     let lookup = |key: &str| env.get(key).cloned();
@@ -175,7 +182,9 @@ fn without_config_the_resolved_path_is_used_and_the_other_windows_copy_named() {
         macos: false,
         probe: &probe,
     };
-    let options = parse(&["--command".into(), COMMAND.into()]).unwrap().unwrap();
+    let options = parse(&["--command".into(), COMMAND.into()])
+        .unwrap()
+        .unwrap();
     let outcome = register(&options, &host);
     assert_eq!(outcome.code, EXIT_OK, "{}", text(&outcome));
     assert!(cache.join("claude_desktop_config.json").is_file());
@@ -263,7 +272,10 @@ fn every_other_key_server_and_user_env_is_kept_and_args_dropped() {
     let ours = entry(&config);
     assert!(ours.get("args").is_none());
     assert_eq!(ours["env"]["HTTPS_PROXY"], "http://proxy.example.com");
-    assert_eq!(ours["env"]["PSEUDOLIFE_MCP_DAEMON_URL"], "http://127.0.0.1:8765");
+    assert_eq!(
+        ours["env"]["PSEUDOLIFE_MCP_DAEMON_URL"],
+        "http://127.0.0.1:8765"
+    );
     assert!(text(&outcome).contains("stale 'args'"));
 }
 
@@ -283,7 +295,9 @@ fn a_rerun_changes_nothing_takes_no_backup_and_says_so_in_one_line() {
             .iter()
             .filter(|l| l.starts_with("entry:"))
             .collect::<Vec<_>>(),
-        [&format!("entry: unchanged ({SERVER} already registered this way)")]
+        [&format!(
+            "entry: unchanged ({SERVER} already registered this way)"
+        )]
     );
 }
 
@@ -308,7 +322,11 @@ fn a_change_backs_up_the_displaced_file_privately() {
         "{}",
         backup.display()
     );
-    assert!(!backup.to_string_lossy().starts_with(r"\\?\"), "{}", backup.display());
+    assert!(
+        !backup.to_string_lossy().starts_with(r"\\?\"),
+        "{}",
+        backup.display()
+    );
     assert_eq!(
         fs::canonicalize(folder.parent().unwrap()).unwrap(),
         fs::canonicalize(&dir.0).unwrap()
@@ -334,7 +352,10 @@ fn malformed_non_utf8_and_non_object_configs_are_refused_untouched() {
         fs::write(dir.config(), bytes).unwrap();
         let outcome = Run::new().go(&dir, &[]);
         assert_eq!(outcome.code, EXIT_REFUSED, "{}", text(&outcome));
-        assert!(text(&outcome).contains("fix or move it first") || text(&outcome).contains("not a JSON object"));
+        assert!(
+            text(&outcome).contains("fix or move it first")
+                || text(&outcome).contains("not a JSON object")
+        );
         assert_eq!(fs::read(dir.config()).unwrap(), bytes);
     }
 }
@@ -398,7 +419,9 @@ fn an_owned_legacy_entry_moves_with_its_hand_added_settings() {
 #[test]
 fn an_owned_legacy_literal_token_moves_into_the_file() {
     let dir = Dir::new();
-    dir.seed(json!({"mcpServers": {LEGACY_SERVER: legacy(json!({"PSEUDOLIFE_MCP_TOKEN": TOKEN}))}}));
+    dir.seed(
+        json!({"mcpServers": {LEGACY_SERVER: legacy(json!({"PSEUDOLIFE_MCP_TOKEN": TOKEN}))}}),
+    );
     let file = dir.token_file().to_string_lossy().into_owned();
     let outcome = Run::new().go(&dir, &["--default-token-file", &file]);
     assert_eq!(outcome.code, EXIT_OK, "{}", text(&outcome));
@@ -446,7 +469,8 @@ fn when_both_names_exist_the_desktop_entry_wins_and_the_old_fills_gaps() {
 #[test]
 fn a_refused_run_leaves_the_legacy_entry_in_place() {
     let dir = Dir::new();
-    let before = dir.seed(json!({"mcpServers": {LEGACY_SERVER: legacy(json!({})), SERVER: "not an object"}}));
+    let before = dir
+        .seed(json!({"mcpServers": {LEGACY_SERVER: legacy(json!({})), SERVER: "not an object"}}));
     let outcome = Run::new().go(&dir, &[]);
     assert_eq!(outcome.code, EXIT_REFUSED);
     assert_eq!(fs::read(dir.config()).unwrap(), before);
@@ -461,7 +485,12 @@ fn a_token_from_the_environment_is_written_owner_only_and_never_printed() {
     let run = Run::new().env("PL_TEST_DESKTOP_TOKEN", TOKEN);
     let outcome = run.go(
         &dir,
-        &["--token-file", &file, "--token-from-env", "PL_TEST_DESKTOP_TOKEN"],
+        &[
+            "--token-file",
+            &file,
+            "--token-from-env",
+            "PL_TEST_DESKTOP_TOKEN",
+        ],
     );
     assert_eq!(outcome.code, EXIT_OK, "{}", text(&outcome));
     assert_eq!(fs::read(dir.token_file()).unwrap(), TOKEN.as_bytes());
@@ -536,7 +565,9 @@ fn no_token_anywhere_registers_without_a_credential_and_exits_3() {
 #[test]
 fn a_token_source_without_a_token_file_is_refused() {
     let dir = Dir::new();
-    let outcome = Run::new().env("T", TOKEN).go(&dir, &["--token-from-env", "T"]);
+    let outcome = Run::new()
+        .env("T", TOKEN)
+        .go(&dir, &["--token-from-env", "T"]);
     assert_eq!(outcome.code, EXIT_REFUSED);
     assert!(text(&outcome).contains("no token-file path"));
     assert!(!dir.config().exists());
@@ -564,7 +595,8 @@ fn a_configured_custom_file_is_preserved_validated_and_not_rotated() {
 fn a_missing_configured_or_explicit_file_is_refused_without_rewriting() {
     let dir = Dir::new();
     let gone = dir.0.join("gone.token").to_string_lossy().into_owned();
-    let before = dir.seed(json!({"mcpServers": {SERVER: {"command": "/old", "env": {FILE_KEY: gone}}}}));
+    let before =
+        dir.seed(json!({"mcpServers": {SERVER: {"command": "/old", "env": {FILE_KEY: gone}}}}));
     let outcome = Run::new().go(&dir, &[]);
     assert_eq!(outcome.code, EXIT_REFUSED, "{}", text(&outcome));
     assert!(text(&outcome).contains("configured token file"));
@@ -584,7 +616,11 @@ fn a_validated_existing_file_removes_a_superseded_literal() {
     dir.seed(json!({"mcpServers": {SERVER: {"command": "/old", "env": {FILE_KEY: file, "PSEUDOLIFE_MCP_TOKEN": OTHER}}}}));
     let outcome = Run::new().go(&dir, &[]);
     assert_eq!(outcome.code, EXIT_OK, "{}", text(&outcome));
-    assert!(entry(&dir.read())["env"].get("PSEUDOLIFE_MCP_TOKEN").is_none());
+    assert!(
+        entry(&dir.read())["env"]
+            .get("PSEUDOLIFE_MCP_TOKEN")
+            .is_none()
+    );
     assert_eq!(fs::read(dir.token_file()).unwrap(), TOKEN.as_bytes());
 }
 
@@ -650,10 +686,10 @@ fn a_client_that_cannot_read_a_token_file_is_refused_before_anything_is_written(
     assert!(text.contains("--skip-shim-check"));
     assert!(!text.contains(TOKEN));
     // A dry run reports it too.
-    let dry = Run::new()
-        .env("T", TOKEN)
-        .probe(Some(false))
-        .go(&dir, &["--token-file", &file, "--token-from-env", "T", "--dry-run"]);
+    let dry = Run::new().env("T", TOKEN).probe(Some(false)).go(
+        &dir,
+        &["--token-file", &file, "--token-from-env", "T", "--dry-run"],
+    );
     assert_eq!(dry.code, EXIT_OLD_SHIM);
 }
 
@@ -664,15 +700,21 @@ fn the_probe_runs_only_with_a_token_file_and_no_evidence_is_a_note() {
     assert_eq!(run.go(&dir, &[]).code, EXIT_OK);
     assert!(run.probed.borrow().is_empty(), "no token file, no probe");
     let file = dir.token_file().to_string_lossy().into_owned();
-    let outcome = Run::new()
-        .env("T", TOKEN)
-        .probe(None)
-        .go(&dir, &["--default-token-file", &file, "--token-from-env", "T"]);
+    let outcome = Run::new().env("T", TOKEN).probe(None).go(
+        &dir,
+        &["--default-token-file", &file, "--token-from-env", "T"],
+    );
     assert_eq!(outcome.code, EXIT_OK, "{}", text(&outcome));
     assert!(text(&outcome).contains("could not verify"));
     let skipped = Run::new().env("T", TOKEN).probe(Some(false)).go(
         &dir,
-        &["--token-file", &file, "--token-from-env", "T", "--skip-shim-check"],
+        &[
+            "--token-file",
+            &file,
+            "--token-from-env",
+            "T",
+            "--skip-shim-check",
+        ],
     );
     assert_eq!(skipped.code, EXIT_OK, "{}", text(&skipped));
     assert!(text(&skipped).contains("skipped (--skip-shim-check)"));
@@ -730,20 +772,31 @@ fn the_native_help_advertises_the_token_file_form() {
 
 #[test]
 fn options_parse_and_refuse_alternatives_and_repeats() {
-    let strings = |items: &[&str]| -> Vec<String> { items.iter().map(|s| (*s).to_owned()).collect() };
+    let strings =
+        |items: &[&str]| -> Vec<String> { items.iter().map(|s| (*s).to_owned()).collect() };
     assert!(parse(&strings(&[])).is_err(), "--command is required");
     assert!(
         parse(&strings(&[
-            "--command", COMMAND, "--token-file", "/a", "--default-token-file", "/b"
+            "--command",
+            COMMAND,
+            "--token-file",
+            "/a",
+            "--default-token-file",
+            "/b"
         ]))
         .is_err()
     );
     assert!(parse(&strings(&["--command", COMMAND, "--json", "--json"])).is_err());
     assert!(parse(&strings(&["--command"])).is_err());
     assert_eq!(parse(&strings(&["--help"])), Ok(None));
-    let parsed = parse(&strings(&["--command", COMMAND, "--writer-id", "claude-desktop"]))
-        .unwrap()
-        .unwrap();
+    let parsed = parse(&strings(&[
+        "--command",
+        COMMAND,
+        "--writer-id",
+        "claude-desktop",
+    ]))
+    .unwrap()
+    .unwrap();
     assert_eq!(parsed.daemon_url, DEFAULT_DAEMON_URL);
     assert_eq!(parsed.writer_id, "claude-desktop");
 }

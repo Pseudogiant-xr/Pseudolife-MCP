@@ -34,7 +34,11 @@ fn bundles(home: &Path) -> Vec<PathBuf> {
     found
 }
 
-fn matches_role(hook: &Hook, definitions: &Map<String, Value>, legacy: Option<&Map<String, Value>>) -> bool {
+fn matches_role(
+    hook: &Hook,
+    definitions: &Map<String, Value>,
+    legacy: Option<&Map<String, Value>>,
+) -> bool {
     manual_roles(&hook.event).iter().any(|role| {
         hook.command == command_of(definitions, role, "command")
             || hook.command == command_of(definitions, role, "commandWindows")
@@ -44,7 +48,8 @@ fn matches_role(hook: &Hook, definitions: &Map<String, Value>, legacy: Option<&M
 
 /// Recognize our installed hooks by an exact generated command.
 pub fn owned(hook: &Hook, home: &Path) -> bool {
-    if hook.source == "plugin" || !same_file(Path::new(&hook.source_path), &home.join("hooks.json")) {
+    if hook.source == "plugin" || !same_file(Path::new(&hook.source_path), &home.join("hooks.json"))
+    {
         return false;
     }
     if matches_role(hook, &launcher_definitions(home), None) {
@@ -80,11 +85,15 @@ pub fn select<'a>(
         .filter(|h| h.plugin_id == PLUGIN_ID && (h.enabled || optional_most(&h.event).is_none()))
         .collect();
     let manual: Vec<&Hook> = hooks.iter().filter(|h| owned(h, home)).collect();
-    let old: Vec<&Hook> = hooks.iter().filter(|h| is_legacy(h, home, legacy)).collect();
+    let old: Vec<&Hook> = hooks
+        .iter()
+        .filter(|h| is_legacy(h, home, legacy))
+        .collect();
     let contains = |list: &[&Hook], hook: &Hook| list.iter().any(|h| std::ptr::eq(*h, hook));
-    if hooks.iter().any(|h| {
-        !contains(&old, h) && !contains(&plugin, h) && legacy.contains(&h.command)
-    }) {
+    if hooks
+        .iter()
+        .any(|h| !contains(&old, h) && !contains(&plugin, h) && legacy.contains(&h.command))
+    {
         return Err(fail(
             "Existing PseudoLife hooks use another configuration source; review them in Codex /hooks before migrating.",
         ));
@@ -121,7 +130,9 @@ pub fn complete_set(hooks: &[&Hook], source: &str) -> bool {
         *counts.entry(hook.event.as_str()).or_default() += 1;
     }
     if source == "plugin" {
-        counts.retain(|event, count| optional_most(event).is_none_or(|most| *count < 1 || *count > most));
+        counts.retain(|event, count| {
+            optional_most(event).is_none_or(|most| *count < 1 || *count > most)
+        });
     }
     let required: BTreeMap<&str, usize> = EVENTS
         .iter()
@@ -190,9 +201,9 @@ fn vet_launcher(home: &Path, repairable: bool) -> Result<(), Fail> {
             "The PseudoLife hook pointer is missing or malformed; rerun the installer and approve the Codex hooks to repair it.",
         ));
     };
-    let matches = bundle_bytes(&root.join(&name), &SCRIPTS)
-        .is_ok_and(|files| bundle_digest(&files) == name);
-    if !matches && !(repairable && !root.join(&name).exists()) {
+    let matches =
+        bundle_bytes(&root.join(&name), &SCRIPTS).is_ok_and(|files| bundle_digest(&files) == name);
+    if !(matches || repairable && !root.join(&name).exists()) {
         return Err(fail(
             "An installed PseudoLife script was modified; restore or review it before running verification.",
         ));
@@ -219,7 +230,9 @@ pub fn vet(hooks: &[&Hook], home: &Path, complete: bool) -> Result<(), Fail> {
         .filter(|directory| {
             let current = manual_definitions(directory, true);
             let legacy = manual_definitions(directory, false);
-            hooks.iter().all(|h| matches_role(h, &current, Some(&legacy)))
+            hooks
+                .iter()
+                .all(|h| matches_role(h, &current, Some(&legacy)))
         })
         .collect();
     let [directory] = directories.as_slice() else {
@@ -235,8 +248,15 @@ pub fn vet(hooks: &[&Hook], home: &Path, complete: bool) -> Result<(), Fail> {
     if !matches && !complete {
         // Only an approved upgrade may accept the exact pre-split bundle;
         // its directory name still authenticates the four original files.
-        let entries: Vec<_> = fs::read_dir(directory).into_iter().flatten().filter_map(Result::ok).collect();
-        let mut names: Vec<String> = entries.iter().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+        let entries: Vec<_> = fs::read_dir(directory)
+            .into_iter()
+            .flatten()
+            .filter_map(Result::ok)
+            .collect();
+        let mut names: Vec<String> = entries
+            .iter()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
         names.sort();
         let mut expected: Vec<String> = LEGACY_SCRIPTS.iter().map(|s| (*s).to_owned()).collect();
         expected.sort();
@@ -244,7 +264,8 @@ pub fn vet(hooks: &[&Hook], home: &Path, complete: bool) -> Result<(), Fail> {
             .iter()
             .all(|e| e.file_type().is_ok_and(|t| t.is_file() && !t.is_symlink()));
         if names == expected && plain {
-            matches = bundle_bytes(directory, &LEGACY_SCRIPTS).is_ok_and(|f| bundle_digest(&f) == name);
+            matches =
+                bundle_bytes(directory, &LEGACY_SCRIPTS).is_ok_and(|f| bundle_digest(&f) == name);
         }
     }
     if !matches {
@@ -273,44 +294,78 @@ fn bundles_any(home: &Path) -> Vec<PathBuf> {
 /// Create `path` (owner-only) with `data`; its folder is created private
 /// only when it does not exist yet, never re-protected.
 fn create_file(path: &Path, data: &[u8]) -> Result<(), Fail> {
-    let parent = path.parent().ok_or_else(|| fail("A hook file path has no folder."))?;
+    let parent = path
+        .parent()
+        .ok_or_else(|| fail("A hook file path has no folder."))?;
     if !parent.is_dir() {
-        crate::board::state::private_dir(parent)
-            .map_err(|_| Fail::detail(format!("The Codex hook folder {} could not be created.", parent.display())))?;
+        crate::board::state::private_dir(parent).map_err(|_| {
+            Fail::detail(format!(
+                "The Codex hook folder {} could not be created.",
+                parent.display()
+            ))
+        })?;
     }
-    crate::board::state::atomic_create(path, data)
-        .map_err(|_| Fail::detail(format!("The Codex hook file {} could not be written.", path.display())))
+    crate::board::state::atomic_create(path, data).map_err(|_| {
+        Fail::detail(format!(
+            "The Codex hook file {} could not be written.",
+            path.display()
+        ))
+    })
 }
 
 /// Replace (or create) `path` atomically with `data`, keeping a private
 /// copy of what it displaced; returns that copy's path when a file existed.
 fn replace_file(path: &Path, data: &[u8]) -> Result<Option<PathBuf>, Fail> {
-    let before = crate::runtime::registrations::read_optional(path)
-        .map_err(|error| Fail::detail(format!("{} could not be read ({error}).", path.display())))?;
+    let before = crate::runtime::registrations::read_optional(path).map_err(|error| {
+        Fail::detail(format!("{} could not be read ({error}).", path.display()))
+    })?;
     if before.as_deref() == Some(data) {
         return Ok(None);
     }
     if before.is_none() {
-        let parent = path.parent().ok_or_else(|| fail("A hook file path has no folder."))?;
+        let parent = path
+            .parent()
+            .ok_or_else(|| fail("A hook file path has no folder."))?;
         if !parent.is_dir() {
             crate::board::state::private_dir(parent).map_err(|_| {
-                Fail::detail(format!("The Codex hook folder {} could not be created.", parent.display()))
+                Fail::detail(format!(
+                    "The Codex hook folder {} could not be created.",
+                    parent.display()
+                ))
             })?;
         }
     }
-    let backup = crate::runtime::registrations::write_config(path, before.as_deref().unwrap_or_default(), data)
-        .map_err(|error| Fail::detail(format!("{} could not be written ({error}); it was left as it was.", path.display())))?;
+    let backup = crate::runtime::registrations::write_config(
+        path,
+        before.as_deref().unwrap_or_default(),
+        data,
+    )
+    .map_err(|error| {
+        Fail::detail(format!(
+            "{} could not be written ({error}); it was left as it was.",
+            path.display()
+        ))
+    })?;
     Ok(before.map(|_| backup))
 }
 
 fn launched(root: &Path) -> Vec<String> {
     fs::read_to_string(root.join(LAUNCHED))
-        .map(|text| text.split_whitespace().filter(|n| is_bundle_name(n)).map(str::to_owned).collect())
+        .map(|text| {
+            text.split_whitespace()
+                .filter(|n| is_bundle_name(n))
+                .map(str::to_owned)
+                .collect()
+        })
         .unwrap_or_default()
 }
 
 fn lines(names: &[String]) -> Vec<u8> {
-    names.iter().map(|n| format!("{n}\n")).collect::<String>().into_bytes()
+    names
+        .iter()
+        .map(|n| format!("{n}\n"))
+        .collect::<String>()
+        .into_bytes()
 }
 
 /// Write `files` as their content-addressed bundle. A bundle this call
@@ -369,40 +424,79 @@ fn prune(root: &Path, keep: &str) -> Result<(), Fail> {
 /// legacy ones), replacing handlers setup wrote before and keeping
 /// everything else. Group order is setup's: kept groups, then ours in role
 /// order, so the keys Codex approved stay put.
-pub fn install(home: &Path, report: &mut Report, plugin: bool, scripts: &Path, legacy: &[String]) -> Result<(), Fail> {
+pub fn install(
+    home: &Path,
+    report: &mut Report,
+    plugin: bool,
+    scripts: &Path,
+    legacy: &[String],
+) -> Result<(), Fail> {
     let path = home.join("hooks.json");
-    let original = crate::runtime::registrations::read_optional(&path)
-        .map_err(|error| Fail::detail(format!("{} could not be read ({error}).", path.display())))?;
+    let original = crate::runtime::registrations::read_optional(&path).map_err(|error| {
+        Fail::detail(format!("{} could not be read ({error}).", path.display()))
+    })?;
     let mut object: Map<String, Value> = match &original {
         Some(bytes) if !bytes.is_empty() => serde_json::from_slice::<Value>(bytes)
             .ok()
             .and_then(|v| v.as_object().cloned())
-            .ok_or_else(|| Fail::detail(format!("{} is not a JSON object; fix or move it, then rerun.", path.display())))?,
+            .ok_or_else(|| {
+                Fail::detail(format!(
+                    "{} is not a JSON object; fix or move it, then rerun.",
+                    path.display()
+                ))
+            })?,
         _ => Map::new(),
     };
     let mut known: Vec<String> = legacy.to_vec();
     for directory in bundles(home) {
         for marker in [true, false] {
             for definition in manual_definitions(&directory, marker).values() {
-                known.push(definition["command"].as_str().unwrap_or_default().to_owned());
-                known.push(definition["commandWindows"].as_str().unwrap_or_default().to_owned());
+                known.push(
+                    definition["command"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .to_owned(),
+                );
+                known.push(
+                    definition["commandWindows"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .to_owned(),
+                );
             }
         }
     }
     for definition in launcher_definitions(home).values() {
-        known.push(definition["command"].as_str().unwrap_or_default().to_owned());
-        known.push(definition["commandWindows"].as_str().unwrap_or_default().to_owned());
+        known.push(
+            definition["command"]
+                .as_str()
+                .unwrap_or_default()
+                .to_owned(),
+        );
+        known.push(
+            definition["commandWindows"]
+                .as_str()
+                .unwrap_or_default()
+                .to_owned(),
+        );
     }
     let is_known = |value: &Value| value.as_str().is_some_and(|c| known.iter().any(|k| k == c));
     let hooks = object.entry("hooks").or_insert_with(|| json!({}));
     let Some(hooks) = hooks.as_object_mut() else {
-        return Err(Fail::detail(format!("{} has a hooks value that is not an object; fix it, then rerun.", path.display())));
+        return Err(Fail::detail(format!(
+            "{} has a hooks value that is not an object; fix it, then rerun.",
+            path.display()
+        )));
     };
     for groups in hooks.values().filter_map(Value::as_array) {
         for group in groups {
             let malformed = !group.is_object()
                 || group.get("hooks").is_some_and(|h| !h.is_array())
-                || group["hooks"].as_array().into_iter().flatten().any(|h| !h.is_object());
+                || group["hooks"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .any(|h| !h.is_object());
             if malformed {
                 return Err(Fail::detail(format!(
                     "{} has a hook group that is not an object with a hooks list; fix it, then rerun.",
@@ -412,7 +506,9 @@ pub fn install(home: &Path, report: &mut Report, plugin: bool, scripts: &Path, l
             for handler in group["hooks"].as_array().into_iter().flatten() {
                 let commands = [&handler["command"], &handler["commandWindows"]];
                 if commands.iter().any(|c| is_known(c))
-                    && commands.iter().any(|c| c.as_str().is_some_and(|c| !c.is_empty()) && !is_known(c))
+                    && commands
+                        .iter()
+                        .any(|c| c.as_str().is_some_and(|c| !c.is_empty()) && !is_known(c))
                 {
                     return Err(fail(
                         "A PseudoLife hook has a custom platform command. Review it in Codex /hooks before migration; existing hooks were preserved.",
@@ -425,7 +521,11 @@ pub fn install(home: &Path, report: &mut Report, plugin: bool, scripts: &Path, l
     let mut definitions = Map::new();
     if !plugin {
         let root = hooks_root(home);
-        let files = bundle_bytes(scripts, &SCRIPTS).map_err(|e| Fail::detail(format!("The checkout's hook scripts could not be read: {e}.")))?;
+        let files = bundle_bytes(scripts, &SCRIPTS).map_err(|e| {
+            Fail::detail(format!(
+                "The checkout's hook scripts could not be read: {e}."
+            ))
+        })?;
         let name = write_bundle(&root, &files)?;
         write_launchers(&root)?;
         replace_file(&root.join(POINTER), format!("{name}\n").as_bytes())?;
@@ -434,7 +534,12 @@ pub fn install(home: &Path, report: &mut Report, plugin: bool, scripts: &Path, l
     }
     for (codex_event, section) in EVENTS {
         let mut groups = Vec::new();
-        for group in hooks.get(section).and_then(Value::as_array).cloned().unwrap_or_default() {
+        for group in hooks
+            .get(section)
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+        {
             // An unknown platform override is user customization, even when
             // its other command matches a legacy installer exactly.
             let kept: Vec<Value> = group["hooks"]
@@ -444,7 +549,8 @@ pub fn install(home: &Path, report: &mut Report, plugin: bool, scripts: &Path, l
                 .filter(|h| {
                     h["type"] != "command"
                         || !is_known(&h["command"])
-                        || (h["commandWindows"].as_str().is_some_and(|c| !c.is_empty()) && !is_known(&h["commandWindows"]))
+                        || (h["commandWindows"].as_str().is_some_and(|c| !c.is_empty())
+                            && !is_known(&h["commandWindows"]))
                 })
                 .cloned()
                 .collect();
