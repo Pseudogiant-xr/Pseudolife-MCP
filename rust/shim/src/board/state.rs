@@ -397,6 +397,15 @@ fn atomic_replace(
     let _ = fs::remove_file(&temp);
     result
 }
+/// Create `path` (and missing ancestors) as a folder only this user can
+/// use, or make an existing one so.
+///
+/// Another task may create the same folder between the check and the
+/// create: the shim's handshake cache creates `<state dir>/handshake-cache`,
+/// and with it the state directory, while the board reserves its state file
+/// (#1324: on the Windows dev VM a refused `create_dir` here left a session
+/// without a board address on a first start). A folder that appeared
+/// meanwhile is protected below like one that existed before.
 pub fn private_dir(path: &Path) -> Result<()> {
     crate::credentials::reject_ancestor_redirects(path).map_err(|_| "invalid_state")?;
     if !path.is_dir() {
@@ -406,17 +415,22 @@ pub fn private_dir(path: &Path) -> Result<()> {
         {
             private_dir(parent)?;
         }
+        #[cfg(test)]
+        tests::create_meanwhile(path);
         #[cfg(unix)]
-        {
+        let created = {
             use std::os::unix::fs::DirBuilderExt;
-            fs::DirBuilder::new()
-                .mode(0o700)
-                .create(path)
-                .map_err(|_| "state_unavailable")?;
-        }
+            fs::DirBuilder::new().mode(0o700).create(path)
+        };
         #[cfg(windows)]
-        {
-            fs::create_dir(path).map_err(|_| "state_unavailable")?;
+        let created = fs::create_dir(path);
+        match created {
+            Ok(()) => {}
+            // Never a symlink: the protection below must not follow one.
+            Err(error)
+                if error.kind() == std::io::ErrorKind::AlreadyExists
+                    && fs::symlink_metadata(path).is_ok_and(|meta| meta.is_dir()) => {}
+            Err(_) => return Err("state_unavailable"),
         }
     }
     #[cfg(unix)]
@@ -439,13 +453,97 @@ pub fn private_dir(path: &Path) -> Result<()> {
     }
     Ok(())
 }
+/// Why the private state file at `path` or its folder is refused, when a
+/// fresh look finds a reason: for the one line a stopped registration
+/// prints. `None` when nothing is wrong now, or the cause is not a
+/// permission or redirect one.
+pub fn diagnose(path: &Path) -> Option<String> {
+    if crate::credentials::reject_ancestor_redirects(path).is_err() {
+        return Some(
+            "a folder on its path is a symlink or junction, which private state never follows"
+                .into(),
+        );
+    }
+    let folder = path.parent()?;
+    let meta = fs::symlink_metadata(folder).ok()?;
+    if !meta.is_dir() {
+        return Some(format!("{} is not a plain folder", folder.display()));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let own = rustix::process::getuid().as_raw();
+        if meta.uid() != own {
+            return Some(format!("{} is owned by another user", folder.display()));
+        }
+        let file = fs::symlink_metadata(path).ok()?;
+        if file.uid() != own {
+            return Some("the file is owned by another user".into());
+        }
+        if file.mode() & 0o077 != 0 {
+            return Some(format!(
+                "other users can use the file (mode {:04o})",
+                file.mode() & 0o7777
+            ));
+        }
+        if file.nlink() != 1 || !file.is_file() {
+            return Some("the file is not one plain file".into());
+        }
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        // READ_CONTROL | FILE_READ_ATTRIBUTES, not following a reparse point.
+        let opened = |target: &Path, flags: u32| {
+            OpenOptions::new()
+                .access_mode(0x0002_0000 | 0x80)
+                .share_mode(0x1 | 0x2)
+                .custom_flags(flags | 0x0020_0000)
+                .open(target)
+        };
+        let Ok(directory) = opened(folder, 0x0200_0000) else {
+            return Some(format!(
+                "this user cannot read the permissions of {}",
+                folder.display()
+            ));
+        };
+        if crate::credentials::windows_security::validate(&directory).is_err() {
+            return Some(format!(
+                "the access list of {} is not private to this user (it lets other accounts in, or another account owns it)",
+                folder.display()
+            ));
+        }
+        if exists(path) {
+            let Ok(file) = opened(path, 0) else {
+                return Some("this user cannot read the file's permissions".into());
+            };
+            if crate::credentials::windows_security::validate(&file).is_err() {
+                return Some(
+                    "the file's access list is not private to this user (it lets other accounts in, or another account owns it)"
+                        .into(),
+                );
+            }
+        }
+    }
+    None
+}
 impl Reservation {
     pub fn load_or_reserve(path: &Path, url: &str) -> Result<(Option<Value>, Option<Self>)> {
         if let Some(parent) = path.parent() {
             private_dir(parent)?;
         }
         if !exists(path) {
-            let opened = create(path)?;
+            // Another start of this session may create it between the
+            // check and the create: that start holds the reservation now.
+            #[cfg(test)]
+            tests::create_file_meanwhile(path);
+            let opened = create(path).map_err(|code| {
+                if exists(path) {
+                    "registration_in_progress"
+                } else {
+                    code
+                }
+            })?;
             return Ok((
                 None,
                 Some(Self {
@@ -561,6 +659,136 @@ mod tests {
 
     /// Writes to files named `slow-write*` take this long under test.
     pub(super) const WRITE_DELAY: Duration = Duration::from_millis(300);
+
+    thread_local! {
+        /// Folders another task creates while [`private_dir`] on this
+        /// thread is between its check and its create.
+        static MEANWHILE: std::cell::RefCell<Vec<PathBuf>> =
+            const { std::cell::RefCell::new(Vec::new()) };
+        /// A symlink (path, target) another process plants at that moment.
+        static LINKED_MEANWHILE: std::cell::RefCell<Option<(PathBuf, PathBuf)>> =
+            const { std::cell::RefCell::new(None) };
+    }
+    thread_local! {
+        /// A state file another start creates at that moment.
+        static FILE_MEANWHILE: std::cell::RefCell<Option<PathBuf>> =
+            const { std::cell::RefCell::new(None) };
+    }
+    pub(super) fn create_file_meanwhile(path: &Path) {
+        if FILE_MEANWHILE.with(|file| file.borrow().as_deref() == Some(path)) {
+            drop(create(path).unwrap());
+        }
+    }
+
+    #[test]
+    fn a_state_file_another_start_creates_meanwhile_is_its_reservation() {
+        let root = Dir::new();
+        let path = root.0.join("key.json");
+        FILE_MEANWHILE.with(|file| *file.borrow_mut() = Some(path.clone()));
+        let reserved = Reservation::load_or_reserve(&path, "http://x");
+        FILE_MEANWHILE.with(|file| *file.borrow_mut() = None);
+        // Retried in the background, not a stop (state_unavailable).
+        assert!(matches!(reserved, Err("registration_in_progress")));
+        assert!(exists(&path));
+    }
+
+    pub(super) fn create_meanwhile(path: &Path) {
+        if MEANWHILE.with(|folders| folders.borrow().iter().any(|folder| folder == path)) {
+            // As the handshake cache's `create_dir_all` does.
+            fs::create_dir(path).unwrap();
+        }
+        #[cfg(unix)]
+        if let Some((link, target)) = LINKED_MEANWHILE.with(|linked| linked.borrow().clone())
+            && link == path
+        {
+            std::os::unix::fs::symlink(target, link).unwrap();
+        }
+    }
+
+    #[test]
+    fn a_state_folder_another_task_creates_meanwhile_is_still_made_private() {
+        let root = Dir::new();
+        let state_dir = root.0.join(".pseudolife-mcp").join("agent-state");
+        let bound = state_dir.join("0c33202fbddfe6ee6eebb386fea0df74");
+        // Each level the reservation creates can be raced; on the Windows
+        // dev VM (#1324) the cache made `agent-state` meanwhile.
+        for raced in [&state_dir, &bound] {
+            let _ = fs::remove_dir_all(root.0.join(".pseudolife-mcp"));
+            MEANWHILE.with(|folders| *folders.borrow_mut() = vec![raced.clone()]);
+            let reserved = Reservation::load_or_reserve(&bound.join("key.json"), "http://x");
+            MEANWHILE.with(|folders| folders.borrow_mut().clear());
+            let (saved, reservation) =
+                reserved.unwrap_or_else(|code| panic!("{}: {code}", raced.display()));
+            assert!(saved.is_none() && reservation.is_some());
+            // The folder that appeared meanwhile was protected too.
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                assert_eq!(
+                    fs::metadata(raced).unwrap().permissions().mode() & 0o777,
+                    0o700
+                );
+            }
+            #[cfg(windows)]
+            {
+                use std::os::windows::fs::OpenOptionsExt;
+                let directory = OpenOptions::new()
+                    .access_mode(0x0002_0000 | 0x80)
+                    .custom_flags(0x0200_0000 | 0x0020_0000)
+                    .open(raced)
+                    .unwrap();
+                crate::credentials::windows_security::validate(&directory).unwrap();
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlink_that_appears_meanwhile_is_not_adopted() {
+        let root = Dir::new();
+        let target = root.0.join("elsewhere");
+        fs::create_dir(&target).unwrap();
+        let link = root.0.join("state");
+        // Planted between private_dir's check and its create, where an
+        // existing folder is now accepted: a symlink there is not.
+        LINKED_MEANWHILE.with(|linked| *linked.borrow_mut() = Some((link.clone(), target.clone())));
+        let result = private_dir(&link);
+        LINKED_MEANWHILE.with(|linked| *linked.borrow_mut() = None);
+        assert_eq!(result, Err("state_unavailable"));
+        assert!(
+            fs::symlink_metadata(&link)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+    }
+
+    #[test]
+    fn diagnose_names_a_state_folder_others_can_use() {
+        let root = Dir::new();
+        let file = root.0.join("key.json");
+        assert_eq!(diagnose(&file), None);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::write(&file, b"{}").unwrap();
+            fs::set_permissions(&file, fs::Permissions::from_mode(0o644)).unwrap();
+            assert_eq!(
+                diagnose(&file).as_deref(),
+                Some("other users can use the file (mode 0644)")
+            );
+        }
+        #[cfg(windows)]
+        {
+            set_dacl(&root.0, "D:(A;;FA;;;OW)(A;OICI;FA;;;WD)");
+            let reason = diagnose(&file).unwrap();
+            assert!(
+                reason.contains("is not private to this user")
+                    && reason.contains(&root.0.display().to_string()),
+                "{reason}"
+            );
+        }
+    }
 
     #[cfg(unix)]
     #[test]
