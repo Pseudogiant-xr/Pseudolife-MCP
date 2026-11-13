@@ -286,6 +286,9 @@ SNAPSHOT_WORKFLOW = ".github/workflows/rust.yml"
 SNAPSHOT_JOBS = ("Rust / ubuntu-latest", "Rust / windows-latest")
 SNAPSHOT_STEP = "Replay touched PR goldens"
 SNAPSHOT_SELECTOR = "rust/ci/pr_precheck.py"
+# Each harness row's declarations (rust/ci/row_ci.py), which the frozen
+# selector reads; they are taken from the base too, never the checkout.
+SNAPSHOT_ROWS = "rust/cli_harness/rows"
 
 # Execute only the frozen base's selector code in an isolated interpreter;
 # the checkout's Python files are inputs read as text, never imported.
@@ -296,6 +299,11 @@ scope = types.ModuleType('parity_scope')
 scope.__file__ = str(root / 'rust/ci/parity_scope.py')
 sys.modules['parity_scope'] = scope
 exec(compile(data['scope'], scope.__file__, 'exec'), scope.__dict__)
+if 'row_declarations' in scope.__dict__:
+    # The base's own row declarations. A base from before them has no
+    # row_declarations and reads no row files, so it runs unchanged.
+    rows = {name[:-len('.json')]: json.loads(text) for name, text in sorted(data['rows'].items())}
+    scope.row_declarations = lambda: rows
 selector = types.ModuleType('snapshot_selector')
 selector.__file__ = str(root / 'rust/ci/pr_precheck.py')
 exec(compile(data['selector'], selector.__file__, 'exec'), selector.__dict__)
@@ -304,6 +312,13 @@ docs_only = any(scope.is_docs(path) for path in files) and all(
     scope.is_docs(path) or path == 'rust/producer-census.json' for path in files)
 print(json.dumps(not docs_only and any(selector.rows_for(path, {}) for path in files)))
 """
+
+
+def _base_row_declarations(base: str) -> dict[str, str]:
+    """Each rows/<row>.json at ``base``, by file name, as text."""
+    listing = _out("ls-tree", "--name-only", base, "--", f"{SNAPSHOT_ROWS}/").splitlines()
+    return {path.rsplit("/", 1)[-1]: _out("show", f"{base}:{path}")
+            for path in listing if path.endswith(".json")}
 
 
 def _has_snapshot_selector(base: str) -> bool:
@@ -348,6 +363,7 @@ def _snapshot_requirement(member: Member, base: str) -> tuple[bool | None, str]:
         payload = {"root": _out("rev-parse", "--show-toplevel"),
                    "selector": _out("show", f"{base}:{SNAPSHOT_SELECTOR}"),
                    "scope": _out("show", f"{base}:{CI_SCOPE_CODE}"),
+                   "rows": _base_row_declarations(base),
                    "files": sorted(files)}
         result = _run([sys.executable, "-I", "-c", _SNAPSHOT_INPUTS],
                       input=json.dumps(payload), check=False)
