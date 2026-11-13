@@ -174,3 +174,18 @@ def test_each_call_site_finds_only_the_absolute_path_program(tmp_path, work, mon
     _decoys(work, name)
     real = _site_env(monkeypatch, tmp_path, name)
     assert _same(find(name), real), site
+
+
+@pytest.mark.skipif(not WINDOWS, reason="PATHEXT")
+def test_a_name_that_carries_its_extension_is_that_file(tmp_path, work):
+    """``python.exe`` names one file, as ``shutil.which`` reads it: no
+    extension is added, and it is still found only in an absolute PATH
+    directory."""
+    d = tmp_path / "d"
+    planted = _plant(d, ext=".exe")
+    _plant(work, ext=".exe")
+    assert find_program("tool.exe", _env(d)) == os.path.join(str(d), "tool.exe")
+    assert find_program("TOOL.EXE", _env(d)) == os.path.join(str(d), "TOOL.EXE")
+    assert _same(find_program("tool.exe", _env(d, PATHEXT=".CMD")), planted)
+    assert find_program("tool.exe", _env(".", "")) is None
+    assert find_program("tool.cmd", _env(d)) is None

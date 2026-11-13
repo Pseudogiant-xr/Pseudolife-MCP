@@ -11,10 +11,11 @@ absolute PATH directory:
   and then double quotes removed (Windows lets an entry be quoted). An
   entry that is empty or not absolute (``.``, ``bin``, ``C:bin`` and
   ``\\bin`` on Windows) is skipped. An unset ``PATH`` searches nothing.
-- On Windows the names tried are ``name`` plus each ``PATHEXT`` extension,
-  in ``PATHEXT``'s order and spelling (``.COM;.EXE;.BAT;.CMD`` when it is
-  unset or empty), keeping only those ``CreateProcess`` can start:
-  ``.com``, ``.exe``, ``.bat`` and ``.cmd``.
+- On Windows the names tried are ``name`` with each ``PATHEXT`` extension
+  added, in ``PATHEXT``'s order and spelling (``.COM;.EXE;.BAT;.CMD`` when
+  it is unset or empty), keeping only those ``CreateProcess`` can start:
+  ``.com``, ``.exe``, ``.bat`` and ``.cmd``. A ``name`` that already ends
+  in one of those four is tried as it is and nothing is added.
 - A name that already holds a path separator is not searched for.
 - A candidate counts when it is a regular file (after links) and, outside
   Windows, executable for this user.
@@ -49,6 +50,10 @@ def path_directories(environ: Mapping[str, str] | None = None) -> list[str]:
 def program_names(name: str, environ: Mapping[str, str] | None = None) -> list[str]:
     """The file names ``name`` may have on this OS."""
     if os.name != "nt":
+        return [name]
+    # A name that already carries an extension CreateProcess starts
+    # (``python.exe``) is that one file, as ``shutil.which`` reads it.
+    if name.lower().endswith(WINDOWS_LAUNCHABLE):
         return [name]
     environ = os.environ if environ is None else environ
     pathext = environ.get("PATHEXT") or DEFAULT_PATHEXT
