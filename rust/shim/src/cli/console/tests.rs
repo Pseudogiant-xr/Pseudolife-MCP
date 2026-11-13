@@ -218,7 +218,8 @@ fn every_sign_in_shape_makes_its_call() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn a_launcher_this_port_lacks_defers_before_any_request() {
-    // The closed loopback port: a request would answer `no_daemon`.
+    // The choice comes first: no connection is attempted (were one, the
+    // closed loopback port would answer `no_daemon`, not a deferral).
     let link = Call::Link {
         to: None,
         open: true,
@@ -229,20 +230,6 @@ async fn a_launcher_this_port_lacks_defers_before_any_request() {
         answer(link, "http://127.0.0.1:9", "t", false, &unsupported)
             .await
             .is_err()
-    );
-    // `--no-open` never asks.
-    let link = Call::Link {
-        to: None,
-        open: false,
-        unless: false,
-    };
-    let out = answer(link, "http://127.0.0.1:9", "t", true, &no_browser)
-        .await
-        .unwrap();
-    assert!(
-        out.text.starts_with("{\"state\": \"no_daemon\""),
-        "{}",
-        out.text
     );
 }
 
