@@ -641,14 +641,15 @@ fn shown(setup: &Setup, kind: &str) -> String {
 
 #[test]
 fn a_failure_at_every_step_stops_there_and_names_the_banks_state() {
-    for index in 0..=20 {
+    // Every call of the happy path, cleanup included.
+    for index in 0..HAPPY.len() - 1 {
         check_failure_at(index, false);
     }
 }
 
 #[test]
 fn an_interrupt_at_every_step_stops_there_and_names_the_banks_state() {
-    for index in 0..=20 {
+    for index in 0..HAPPY.len() - 1 {
         check_failure_at(index, true);
     }
 }
@@ -943,22 +944,30 @@ fn an_extracted_state_that_leads_out_is_refused_with_the_bank_unchanged() {
 }
 
 #[test]
-fn the_state_volume_must_hold_the_unpacked_archive_beside_the_state() {
-    // The fake's df reports about 95 GiB free on every mount.
-    let setup = Setup::new(true);
-    setup.state_size.set(90 * 1024 * 1024 * 1024);
-    let mut docker = Fake::default();
-    let mut host = ready_host();
-    assert_eq!(setup.run(&mut docker, &mut host), 2, "{:?}", host.errors);
-    let text = host.errors.join(
-        "
-",
-    );
+fn the_state_volume_must_hold_the_archive_copy_and_what_it_unpacks_to() {
+    // The fake's df reports 99999999 KiB free on every mount; the floor is
+    // 8 GiB; the staged state is the unpacked size plus the archive's copy.
+    let free: u128 = 99_999_999 * 1024;
+    let room = free - 8 * 1024 * 1024 * 1024;
+    let copy = u128::try_from(archive().len()).unwrap();
+    let run = |unpacked: u128| {
+        let setup = Setup::new(true);
+        setup.state_size.set(unpacked);
+        let mut docker = Fake::default();
+        let mut host = ready_host();
+        let code = setup.run(&mut docker, &mut host);
+        let labels: Vec<String> = docker.calls.iter().map(|c| label(c)).collect();
+        (code, host.errors.join("\n"), labels)
+    };
+    let (code, text, _) = run(room - copy);
+    assert_eq!(code, 0, "{text}");
+    // One byte more, which only the copy makes too much.
+    let (code, text, labels) = run(room - copy + 1);
+    assert_eq!(code, 2, "{text}");
     assert!(
-        text.starts_with("restore failed: less than 8 GiB beyond the 90 GiB the state archive unpacks to is free on d:/data;"),
+        text.starts_with("restore failed: less than 8 GiB beyond the 88 GiB that staging the state archive takes (its copy and what it unpacks to) is free on d:/data; free at least 96 GiB there"),
         "{text}"
     );
-    let labels: Vec<String> = docker.calls.iter().map(|c| label(c)).collect();
     assert!(
         !labels.iter().any(|l| l == "create stage-helper"),
         "{labels:?}"

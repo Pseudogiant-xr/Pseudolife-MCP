@@ -594,11 +594,16 @@ impl<'a, 'd, D: Docker, H: Host> Run<'a, 'd, D, H> {
         self.check()?;
         step(self.host.host_space(&plan.safety_dir))?;
         step(self.bank.pg_space(&plan.pg_paths))?;
-        if cx.state_archive.is_some() {
-            step(
-                self.bank
-                    .state_space(&plan.image, &plan.state_mounts, cx.state_size),
-            )?;
+        if let Some(archive) = &cx.state_archive {
+            // Staging holds the archive's copy in the helper (in Docker's
+            // storage, often the filesystem `/data` is on) and what it
+            // unpacks to, beside the current state, at once.
+            let copy = fs::metadata(archive).map_or(0, |meta| u128::from(meta.len()));
+            step(self.bank.state_space(
+                &plan.image,
+                &plan.state_mounts,
+                cx.state_size.saturating_add(copy),
+            ))?;
         }
         let mut swap = None;
         if let Some(archive) = &cx.state_archive {

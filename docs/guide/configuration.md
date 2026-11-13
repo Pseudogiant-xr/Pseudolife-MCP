@@ -4144,8 +4144,9 @@ restore's safety directory), not the system temporary directory, and check
 the floor on that destination before writing anything there; the staging
 files are removed on success, failure or interruption. Restore also checks
 PostgreSQL's writable mounts and, when replacing state, the state mounts;
-`/data` must have 8 GiB free beyond what the state archive unpacks to,
-since the new state is extracted beside the old one.
+`/data` must have 8 GiB free beyond the archive's size plus what it
+unpacks to, since the new state is extracted beside the old one from a copy
+of the archive.
 A low-space refusal says
 `less than 8 GiB is free on <location>; free at least 8 GiB there, then retry. Nothing was changed`.
 Free space on the named filesystem and rerun the same command. These

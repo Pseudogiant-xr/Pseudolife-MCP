@@ -39,8 +39,8 @@
   directories and relative symlinks that stay inside it, no inode shared
   with anything outside it). A refusal there, or a failure or Ctrl-C while
   staging, leaves the bank unchanged; after the replay the staged tree is
-  renamed into place. `/data` must have 8 GiB free beyond the unpacked
-  archive.
+  renamed into place. `/data` must have 8 GiB free beyond the archive's
+  size plus what it unpacks to.
 - A lite bank is refused with a line naming the Docker install; restore
   runs `docker` only from absolute `PATH` entries or `PSEUDOLIFE_DOCKER`'s
   full path; the restarted daemon gets up to ten minutes to report ready.

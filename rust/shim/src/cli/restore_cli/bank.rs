@@ -148,7 +148,7 @@ pub(super) fn require_beyond(free: u128, staged: u128, location: &str) -> Step<(
         let gib = |bytes: u128| bytes.div_ceil(1024 * 1024 * 1024);
         return fail(
             format!(
-                "less than 8 GiB beyond the {} GiB the state archive unpacks to is free on {location}; free at least {} GiB there, then retry. Nothing was changed",
+                "less than 8 GiB beyond the {} GiB that staging the state archive takes (its copy and what it unpacks to) is free on {location}; free at least {} GiB there, then retry. Nothing was changed",
                 gib(staged),
                 gib(MIN_FREE.saturating_add(staged))
             ),
@@ -888,7 +888,7 @@ mod tests {
         assert_eq!(code, 2);
         assert_eq!(
             message,
-            "less than 8 GiB beyond the 2 GiB the state archive unpacks to is free on d:/data; free at least 10 GiB there, then retry. Nothing was changed"
+            "less than 8 GiB beyond the 2 GiB that staging the state archive takes (its copy and what it unpacks to) is free on d:/data; free at least 10 GiB there, then retry. Nothing was changed"
         );
     }
 
