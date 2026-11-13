@@ -2138,7 +2138,15 @@ function Test-ShimRegistrationMigrates($Client, $RegisteredPath = $null) {
     } catch { return $false }
     $script:shimMigrated = $null
     if ($output | Where-Object { "$_" -like "moved $Client to the native client*" }) { $script:shimMigrated = "moved" }
-    elseif ($output | Where-Object { "$_" -like "$Client already runs the native client*" }) { $script:shimMigrated = "current"; return $true }
+    elseif ($output | Where-Object { "$_" -like "$Client already runs the native client*" }) {
+        $script:shimMigrated = "current"
+        # Where the old Python client stays is said even when the
+        # registration needed no edit (it named the stable launcher).
+        foreach ($line in $output) {
+            if ("$line" -match 'old Python client.*\)$') { Write-Host ("  " + ("$line" -replace '^[^(]*\(', '' -replace '\)$', '')) }
+        }
+        return $true
+    }
     foreach ($line in $output) { Write-Host "  $line" }
     return [bool]$script:shimMigrated
 }

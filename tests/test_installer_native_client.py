@@ -262,3 +262,14 @@ def test_no_staged_copy_is_left_behind(tmp_path):
     assert result.returncode == 0, result.stderr
     assert not list((tmp_path / "tmp").glob("pseudolife-native.*"))
     assert (tmp_path / "home/.pseudolife-mcp/downloads" / VERSION / ASSET).is_file()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX modes")
+def test_an_existing_state_directory_keeps_its_mode(tmp_path):
+    state = tmp_path / "home" / ".pseudolife-mcp"
+    state.mkdir(parents=True)
+    state.chmod(0o755)
+    result = _run(tmp_path, "native_stage; ensure_shim")
+    assert result.returncode == 0, result.stderr
+    assert (state.stat().st_mode & 0o777) == 0o755
+    assert ((state / "downloads").stat().st_mode & 0o777) == 0o700

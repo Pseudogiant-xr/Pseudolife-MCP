@@ -1130,7 +1130,10 @@ native_stage() {  # fetch, verify, extract and run the release binary; refuses o
             esac ;;
     esac
     native_dir="$HOME/.pseudolife-mcp/downloads/$NATIVE_VERSION"
-    mkdir -p "$native_dir" && chmod 700 "$HOME/.pseudolife-mcp" "$HOME/.pseudolife-mcp/downloads" "$native_dir" 2>/dev/null || true
+    # Owner-only, but only for the directories this run creates.
+    for native_new in "$HOME/.pseudolife-mcp" "$HOME/.pseudolife-mcp/downloads" "$native_dir"; do
+        [ -d "$native_new" ] || { mkdir -p "$native_new" && chmod 700 "$native_new"; } 2>/dev/null || true
+    done
     NATIVE_SUMS="$native_dir/SHA256SUMS"
     NATIVE_ARCHIVE="$native_dir/$native_name"
     native_sums_status=0
@@ -2147,7 +2150,11 @@ shim_registration_migrates() {  # $1 = client id (claude-code, codex, gemini); s
     migrate_output="$("$SHIM_PATH" installer migrate-registrations --client "$1")" || true
     case "$migrate_output" in
         "moved $1 to the native client"*) SHIM_MIGRATED=moved; printf '%s\n' "$migrate_output" ;;
-        "$1 already runs the native client"*) SHIM_MIGRATED=current ;;
+        "$1 already runs the native client"*)
+            SHIM_MIGRATED=current
+            # Where the old Python client stays is said even when the
+            # registration needed no edit (it named the stable launcher).
+            case "$migrate_output" in *"old Python client"*) echo "  ${migrate_output#*(}" | sed 's/)$//' ;; esac ;;
         *) [ -z "$migrate_output" ] || printf '%s\n' "$migrate_output"; return 1 ;;
     esac
     return 0
