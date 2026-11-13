@@ -467,10 +467,10 @@ class DockerBank:
                 try:
                     stopped, _ = self.command("stop", self.daemon, check=False, timeout=120)
                 except KeyboardInterrupt:
-                    if not interrupted:
-                        raise
-                    stopped = 1  # A second interrupt must not lose the recovery text.
-                argv =["pseudolife-mcp", "restore", "--backup-file", str(safety["dump"] or backup_file)]
+                    # An interrupt while the daemon stops (after a failure,
+                    # or a second one) must not lose the recovery text.
+                    interrupted, stopped = True, 1
+                argv = ["pseudolife-mcp", "restore", "--backup-file", str(safety["dump"] or backup_file)]
                 recovery_state = safety["state"] if safety["dump"] else state_archive
                 if recovery_state:
                     argv += ["--state-archive", str(recovery_state)]
@@ -488,7 +488,9 @@ class DockerBank:
                     # Printed here, before the cleanup below, as restore_cli
                     # prints a failure; the interrupt itself still propagates.
                     print(f"restore failed: {failure}", file=sys.stderr, flush=True)
-                    raise
+                    if isinstance(exc, KeyboardInterrupt):
+                        raise
+                    raise KeyboardInterrupt from exc
                 raise failure from exc
             raise
         finally:

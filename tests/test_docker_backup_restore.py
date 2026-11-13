@@ -573,6 +573,32 @@ def test_a_second_interrupt_during_the_stop_still_prints_the_recovery(docker_ban
                           f"run docker stop {up.DAEMON_CONTAINER} first. Recover with pseudolife-mcp restore ")
 
 
+def test_an_interrupt_while_stopping_after_a_failure_still_prints_the_recovery(docker_bank, tmp_path, monkeypatch,
+                                                                              capsys):
+    """A replay that fails stops the daemon before it reports anything; an
+    interrupt in that silent stop must not lose the recovery command."""
+    bank, world = docker_bank
+    world.fail_replay = True
+    original, replayed = world.run, []
+
+    def run(argv, **kwargs):
+        joined = " ".join(map(str, argv))
+        if "ON_ERROR_STOP=1 -f" in joined:
+            replayed.append(True)
+        elif replayed and f"stop {up.DAEMON_CONTAINER}" in joined:
+            world.calls.append(list(map(str, argv[1:])))
+            raise KeyboardInterrupt
+        return original(argv, **kwargs)
+
+    monkeypatch.setattr(up, "run_cli", run)
+    with pytest.raises(KeyboardInterrupt):
+        bank.restore(_input_dump(tmp_path))
+    err = capsys.readouterr().err
+    assert err.startswith("restore failed: restore failed after database replacement began (")
+    assert f"; run docker stop {up.DAEMON_CONTAINER} first. Recover with pseudolife-mcp restore " in err
+    assert "KeyboardInterrupt" not in err.split(";")[0]          # the reason is the failure, not the interrupt
+
+
 def test_interrupt_before_the_drop_restarts_the_daemon_without_recovery_text(docker_bank, tmp_path, monkeypatch, capsys):
     bank, world = docker_bank
     monkeypatch.setattr(up, "run_cli", _interrupt_at(world, "gunzip -c"))
