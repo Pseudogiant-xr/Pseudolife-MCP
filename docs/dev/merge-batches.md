@@ -55,7 +55,12 @@ Each change waits for hosted CI once, on its batch:
   backup, migrate_flat; `rust/ci/parity_scope.py` `UNREPLAYED_ROWS`) are
   not replayed at all. The precheck never records, and
   `rust/ci/inventory.py` refuses a step that starts a live comparison in
-  any of those jobs.
+  any of those jobs, with one named exception: cli-store's `Daemon
+  security live checks without a Rust test` (the startup bind and
+  token-map refusals, and the 0.0.0.0-bound Host/Origin and bearer cases)
+  keeps its live comparison until Rust tests assert those properties
+  (`LIVE_SECURITY_EXCEPTIONS`). The weekly source mutants still compare
+  with the frozen Python too.
 - **The `Python freeze` check** (its own workflow, `python-freeze.yml`)
   refuses an ordinary pull request whose net change touches
   `pseudolife_memory/` outside `pseudolife_memory/web/static/`, the Console
@@ -63,7 +68,10 @@ Each change waits for hosted CI once, on its batch:
   `freeze-exception`, which marks a change the maintainer ruled an
   exception (the expose security fix, the last release's update bridge);
   it reruns when a label is added or removed. Batches are exempt: their
-  members passed it.
+  members passed it. A version cut that still edits a file under
+  `pseudolife_memory/` (the 0.23.1 cut, #1490, bumped
+  `pseudolife_memory/compose/docker-compose.yml`) carries that label too,
+  and the `release-procedure` skill is the place that must say so.
 - **A pull request that edits CI or dependency inputs**
   (`.github/workflows/`, `pyproject.toml`, a lock file, the Rust toolchain
   pin) is ordinary too, since 2026-10-29 (maintainer: only batches spend

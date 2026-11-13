@@ -70,7 +70,8 @@ them in this order (first done 2026-07-16, v0.8.0; GHCR images added
    header over `[Unreleased]` — one fragile line; the tag↔section guard test
    exists because an adjacent edit once deleted it silently), `pyproject.toml`,
    the daemon image tag in **both** compose files (`ops/docker-compose.yml`
-   and the packaged copy `pseudolife_memory/compose/docker-compose.yml`),
+   and the packaged copy `pseudolife_memory/compose/docker-compose.yml`,
+   which makes the cut PR carry the `freeze-exception` label for the `Python freeze` check),
    **both** version fields in `server.json`,
    `plugin/release.json` (pinned to pyproject by
    `tests/test_plugin_packaging.py`; the release the hooks report for the

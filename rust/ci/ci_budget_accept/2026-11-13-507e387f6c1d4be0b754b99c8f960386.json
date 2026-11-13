@@ -1,8 +1,0 @@
-{
-  "schema": 1,
-  "workflow": "rust.yml",
-  "job": "fixtures",
-  "before": "2c17c5dbf6eed90d",
-  "fingerprint": "02c883eba613073a",
-  "reason": "Python freeze (2026-11-14): only comments changed around the bind fixture and storage test builds; both builds and uploads are as measured."
-}
