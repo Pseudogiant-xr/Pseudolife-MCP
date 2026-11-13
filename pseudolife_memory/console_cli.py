@@ -31,8 +31,10 @@ shim runtime and the installers can run it.
 from __future__ import annotations
 
 import argparse
+import http.client
 import json
 import os
+import re
 import sys
 import time
 import urllib.error
@@ -40,6 +42,7 @@ import urllib.request
 
 from pseudolife_memory.console_sessions import normalize_origin, valid_route_id
 from pseudolife_memory.daemon_url import DEFAULT_URL, _NoRedirectHandler
+from pseudolife_memory.principals import PAIRING_CODE_ALPHABET
 
 EXIT_OK = 0
 EXIT_USAGE = 2
@@ -61,6 +64,15 @@ _REFUSALS = {
     "principals_unavailable": ("the daemon cannot check tokens right now (its bank is "
                                "unreachable); try again in a minute"),
 }
+# What a sign-in link may hold after its fixed prefix: the code as both
+# daemons format it (their pairing-code alphabet in groups joined by '-')
+# and the page the command asked for. Nothing a shell or cmd.exe reads as
+# syntax can pass, since a BROWSER batch file runs through cmd.exe.
+_CODE_CHARS = PAIRING_CODE_ALPHABET + "-"
+_CODE = "[" + re.escape(_CODE_CHARS) + "]+"
+# A normalized origin's host as a sign-in link may hold it: a DNS-style
+# name (lower-cased by urlsplit) or a bracketed IPv6 address without a zone.
+_ORIGIN = re.compile(r"https?://(?:[a-z0-9._~-]+|\[[0-9a-f:.]+\])(?::[0-9]{1,5})?")
 _OLD_DAEMON = ("this daemon does not offer Console sign-in yet (HTTP {status}): update it with "
                "`pseudolife-mcp update`, or open the Console and paste a token under Advanced")
 
@@ -84,6 +96,10 @@ def open_browser(url: str) -> bool:
         return False
     if (isinstance(controller, webbrowser.GenericBrowser)
             and not isinstance(controller, webbrowser.BackgroundBrowser)):
+        return False
+    # Elinks is a UnixBrowser, not a GenericBrowser, and falls back to
+    # running in the terminal when no Elinks instance takes the remote call.
+    if isinstance(controller, getattr(webbrowser, "Elinks", ())):
         return False
     try:
         return bool(controller.open(url, new=2))
@@ -120,7 +136,7 @@ def request(url: str, path: str, token: str, *, body: dict | None = None
             raw = b""
     try:
         payload = json.loads(raw.decode("utf-8"))
-    except (UnicodeDecodeError, ValueError):
+    except (UnicodeDecodeError, ValueError, RecursionError):
         payload = None
     return status, payload if isinstance(payload, dict) else None
 
@@ -182,17 +198,24 @@ def _parser() -> argparse.ArgumentParser:
 def _refusal(status: int, payload: dict | None) -> str:
     code = (payload or {}).get("error")
     hint = (payload or {}).get("hint")
-    if code in _REFUSALS:
+    if isinstance(code, str) and code in _REFUSALS:
         return _REFUSALS[code] or hint or code
     if status in (404, 405):
         return _OLD_DAEMON.format(status=status)
     return hint or f"the daemon answered HTTP {status}" + (f" ({code})" if code else "")
 
 
+class _Unshowable(Exception):
+    """A session-list time this machine's ``localtime`` refuses."""
+
+
 def _stamp(value) -> str:
     if not isinstance(value, (int, float)):
         return "-"
-    return time.strftime("%Y-%m-%d %H:%M", time.localtime(value))
+    try:
+        return time.strftime("%Y-%m-%d %H:%M", time.localtime(value))
+    except (ValueError, OverflowError, OSError) as exc:
+        raise _Unshowable from exc
 
 
 def _emit(out: dict, as_json: bool, text: str | None, code: int) -> int:
@@ -203,8 +226,18 @@ def _emit(out: dict, as_json: bool, text: str | None, code: int) -> int:
     return code
 
 
+def _bad_answer(detail: str, as_json: bool, error: str = "bad_answer") -> int:
+    """An answer from the daemon's address this command cannot use: refused
+    (exit 4) before anything is opened or printed."""
+    return _emit({"state": "refused", "error": error, "detail": detail}, as_json,
+                 f"pseudolife-mcp console: {detail}", EXIT_REFUSED)
+
+
 def main(argv: list[str] | None = None, environ=None) -> int:
     args = _parser().parse_args(argv)
+    if args.revoke == "":
+        print("--revoke takes a session id from --list, not an empty one", file=sys.stderr)
+        return EXIT_USAGE
     if args.list and args.revoke:
         print("--list and --revoke are separate commands; give one", file=sys.stderr)
         return EXIT_USAGE
@@ -218,7 +251,7 @@ def main(argv: list[str] | None = None, environ=None) -> int:
     try:
         if args.list:
             status, payload = request(origin, "/api/console/sessions", token)
-        elif args.revoke:
+        elif args.revoke is not None:
             status, payload = request(origin, "/api/console/sessions/revoke", token,
                                       body={"session_id": args.revoke})
         else:
@@ -238,6 +271,9 @@ def main(argv: list[str] | None = None, environ=None) -> int:
         return _emit({"state": "no_daemon", "error": str(reason)}, args.json,
                      f"pseudolife-mcp console: no daemon answered at {origin} ({reason}); "
                      "check it runs (`pseudolife-mcp doctor`)", EXIT_NO_DAEMON)
+    except http.client.HTTPException as exc:
+        return _bad_answer(f"the daemon's reply at {origin} was not readable HTTP "
+                           f"({type(exc).__name__})", args.json, "bad_reply")
     if status != 200 or payload is None:
         text = _refusal(status, payload)
         return _emit({"state": "refused", "status": status,
@@ -245,7 +281,7 @@ def main(argv: list[str] | None = None, environ=None) -> int:
                      f"pseudolife-mcp console: {text}", EXIT_REFUSED)
     if args.list:
         return _list(payload, args.json)
-    if args.revoke:
+    if args.revoke is not None:
         revoked = bool(payload.get("revoked"))
         text = (f"Signed out {args.revoke}." if revoked else
                 f"No signed-in browser {args.revoke} that you may sign out; see --list.")
@@ -263,37 +299,59 @@ def _list(payload: dict, as_json: bool) -> int:
     if not rows:
         print("No browsers are signed in. `pseudolife-mcp console` signs one in.")
         return EXIT_OK
-    print(f"{'ID':<17} {'SIGNED IN AS':<20} {'HOW':<8} {'SINCE':<17} {'LAST USED':<17} BROWSER")
+    lines = [f"{'ID':<17} {'SIGNED IN AS':<20} {'HOW':<8} {'SINCE':<17} {'LAST USED':<17} "
+             "BROWSER"]
     for row in rows:
         if not isinstance(row, dict):
             continue
-        print(f"{str(row.get('session_id', '')):<17} {str(row.get('principal', '')):<20} "
-              f"{str(row.get('method', '')):<8} {_stamp(row.get('created_at')):<17} "
-              f"{_stamp(row.get('last_used_at')):<17} {row.get('label') or '-'}")
+        stamps = {}
+        for field in ("created_at", "last_used_at"):
+            try:
+                stamps[field] = _stamp(row.get(field))
+            except _Unshowable:
+                return _bad_answer("the daemon's session list had a time this machine cannot "
+                                   f"show ({field})", False)
+        lines.append(f"{str(row.get('session_id', '')):<17} {str(row.get('principal', '')):<20} "
+                     f"{str(row.get('method', '')):<8} {stamps['created_at']:<17} "
+                     f"{stamps['last_used_at']:<17} {row.get('label') or '-'}")
     if payload.get("operator") is False:
-        print("(Only your own sign-ins are shown: this machine's token is a paired one.)")
+        lines.append("(Only your own sign-ins are shown: this machine's token is a paired one.)")
+    text = "\n".join(lines)
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError:
+        return _bad_answer("the daemon's session list had text that cannot be printed "
+                           "(a lone surrogate)", False)
+    print(text)
     return EXIT_OK
 
 
-def link_is_safe(url, origin) -> bool:
-    """Whether ``url`` is a Console sign-in link at ``origin``: the only
-    thing this command hands to the system browser, so an answer from
+def link_is_safe(url, origin, to=None) -> bool:
+    """Whether ``url`` is a Console sign-in link at ``origin``, whole: the
+    only thing this command hands to the system browser, so an answer from
     something else at the daemon's address cannot make it open a file or
-    another program's URL."""
+    another program's URL, or put shell syntax on a batch-file browser's
+    command line. After ``<origin>/ui/#/signin?code=`` it holds only a code
+    in the daemons' alphabet and, when the command asked for page ``to``,
+    an optional ``&to=<to>``."""
     origin = normalize_origin(origin)
-    if origin is None or not isinstance(url, str):
+    if origin is None or not isinstance(url, str) or not _ORIGIN.fullmatch(origin):
         return False
-    if any(ord(ch) < 33 or ord(ch) == 127 for ch in url):
-        return False
-    return url.startswith(origin + "/ui/#/signin?code=")
+    page = "" if to is None else f"(?:&to={re.escape(to)})?"
+    return re.fullmatch(re.escape(origin + "/ui/#/signin?code=") + _CODE + page, url) is not None
 
 
 def _opened(payload: dict, args, environ) -> int:
     url, code = payload.get("url"), payload.get("code")
-    if not isinstance(code, str) or not link_is_safe(url, payload.get("origin")):
-        return _emit({"state": "refused", "error": "bad_answer"}, args.json,
-                     "pseudolife-mcp console: the daemon's answer had no sign-in link",
-                     EXIT_REFUSED)
+    if not isinstance(code, str) or not link_is_safe(url, payload.get("origin"), args.to):
+        return _bad_answer("the daemon's answer had no sign-in link", args.json)
+    if url.split("?code=", 1)[1].split("&", 1)[0] != code:
+        return _bad_answer("the daemon's sign-in code does not match its link", args.json)
+    try:
+        minutes = max(1, int(payload.get("expires_in") or 300) // 60)
+    except (TypeError, ValueError, OverflowError):
+        return _bad_answer("the daemon's answer had no usable expiry time (expires_in)",
+                           args.json)
     opened = False
     if not args.no_open and has_display(environ):
         opened = open_browser(url)
@@ -303,7 +361,6 @@ def _opened(payload: dict, args, environ) -> int:
     if args.json:
         print(json.dumps(out))
         return EXIT_OK
-    minutes = max(1, int(payload.get("expires_in") or 300) // 60)
     lead = ("Opened the Console in your browser: confirm the sign-in there." if opened
             else "Open this link to sign in to the Console:")
     print(lead)

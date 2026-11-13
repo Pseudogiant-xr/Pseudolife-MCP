@@ -187,3 +187,260 @@ def test_a_terminal_browser_is_never_used(monkeypatch):
 
     monkeypatch.setattr(webbrowser, "get", lambda using=None: Firefox("firefox"))
     assert console_cli.open_browser("http://127.0.0.1:8765/ui/") is True and opened
+
+
+def test_elinks_is_never_used(monkeypatch):
+    """Elinks is a ``UnixBrowser``, not a ``GenericBrowser``, and runs in the
+    terminal when no Elinks instance takes the remote call."""
+    import webbrowser
+    opened = []
+
+    class Elinks(webbrowser.Elinks):
+        def open(self, url, new=0, autoraise=True):
+            opened.append(url)
+            return True
+
+    monkeypatch.setattr(webbrowser, "get", lambda using=None: Elinks("elinks"))
+    assert console_cli.open_browser("http://127.0.0.1:8765/ui/") is False and opened == []
+
+
+_REAL_OPEN = console_cli.open_browser
+
+
+# -- refusals of malformed arguments and answers ----------------------------------
+
+def test_an_empty_revoke_is_a_usage_error(daemon, capsys):
+    for argv in (["--revoke", ""], ["--revoke="], ["--list", "--revoke", ""],
+                 ["--no-open", "--revoke", "", "--json"]):
+        assert console_cli.main(argv, environ=ENV) == 2
+        assert capsys.readouterr().err == (
+            "--revoke takes a session id from --list, not an empty one\n")
+    assert daemon["calls"] == [] and daemon["opened"] == []
+
+
+@pytest.mark.parametrize("error", [["x"], {"a": 1}])
+def test_an_error_that_is_a_list_or_object_is_a_refusal(daemon, capsys, error):
+    daemon["answer"] = (403, {"error": error})
+    assert console_cli.main(["--no-open"], environ=ENV) == 4
+    assert capsys.readouterr().err == (
+        f"pseudolife-mcp console: the daemon answered HTTP 403 ({error})\n")
+
+
+def test_an_unhashable_error_with_a_hint_shows_the_hint(daemon, capsys):
+    daemon["answer"] = (403, {"error": [], "hint": "try later"})
+    assert console_cli.main(["--no-open", "--json"], environ=ENV) == 4
+    assert json.loads(capsys.readouterr().out) == {
+        "state": "refused", "status": 403, "error": [], "detail": "try later"}
+
+
+BAD_EXPIRY = "the daemon's answer had no usable expiry time (expires_in)"
+
+
+@pytest.mark.parametrize("value", ["abc", "5 minutes", {"a": 1}, [1], float("nan"),
+                                   float("inf"), "1" * 4301])
+def test_an_expiry_int_refuses_is_a_refusal_before_the_browser_opens(daemon, capsys, value):
+    daemon["answer"] = (200, {**LINK, "expires_in": value})
+    assert console_cli.main([], environ=ENV) == 4
+    captured = capsys.readouterr()
+    assert captured.out == "" and captured.err == f"pseudolife-mcp console: {BAD_EXPIRY}\n"
+    assert console_cli.main(["--json"], environ=ENV) == 4
+    assert json.loads(capsys.readouterr().out) == {
+        "state": "refused", "error": "bad_answer", "detail": BAD_EXPIRY}
+    assert daemon["opened"] == []
+
+
+@pytest.mark.parametrize("value", [59.9, "300", True, None, 0, -600, 1.5e308, " ١_2٠٠ "])
+def test_an_expiry_int_accepts_still_signs_in(daemon, value):
+    daemon["answer"] = (200, {**LINK, "expires_in": value})
+    assert console_cli.main([], environ=ENV) == 0
+    assert daemon["opened"] == [LINK["url"]]
+
+
+MISMATCH = "the daemon's sign-in code does not match its link"
+
+
+@pytest.mark.parametrize("code", ["a\udc80", "\udc80", "ABCD-EFGH-JKMX", "\x1b[2J", "näme"])
+def test_a_code_other_than_the_links_is_a_refusal(daemon, capsys, code):
+    daemon["answer"] = (200, {**LINK, "code": code})
+    assert console_cli.main([], environ=ENV) == 4
+    captured = capsys.readouterr()
+    assert daemon["opened"] == [] and captured.out == ""
+    assert captured.err == f"pseudolife-mcp console: {MISMATCH}\n"
+    assert console_cli.main(["--json", "--no-open"], environ=ENV) == 4
+    assert json.loads(capsys.readouterr().out) == {
+        "state": "refused", "error": "bad_answer", "detail": MISMATCH}
+
+
+def test_a_link_with_no_code_still_names_the_link(daemon, capsys):
+    daemon["answer"] = (200, {**LINK, "code": None})
+    assert console_cli.main(["--json"], environ=ENV) == 4
+    assert json.loads(capsys.readouterr().out) == {
+        "state": "refused", "error": "bad_answer",
+        "detail": "the daemon's answer had no sign-in link"}
+
+
+BAD_STAMPS = [float("nan"), float("inf"), float("-inf"), 1e20, 10 ** 30, -(10 ** 30), 2 ** 63]
+
+
+@pytest.mark.parametrize("field", ["created_at", "last_used_at"])
+@pytest.mark.parametrize("stamp", BAD_STAMPS)
+def test_a_stamp_this_machine_cannot_show_is_a_refusal(daemon, capsys, field, stamp):
+    daemon["answer"] = (200, {"operator": True, "sessions": [
+        {"session_id": "s-1", "created_at": 1.0}, {"session_id": "s-2", field: stamp}]})
+    assert console_cli.main(["--list"], environ=ENV) == 4
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ("pseudolife-mcp console: the daemon's session list had a time "
+                            f"this machine cannot show ({field})\n")
+
+
+def test_a_negative_stamp_is_refused_only_where_localtime_refuses_it(daemon, capsys):
+    daemon["answer"] = (200, {"operator": True, "sessions": [{"created_at": -5}]})
+    code = console_cli.main(["--list"], environ=ENV)
+    captured = capsys.readouterr()
+    if console_cli.sys.platform == "win32":
+        assert code == 4 and "cannot show (created_at)" in captured.err
+    else:
+        assert code == 0 and captured.err == ""
+
+
+@pytest.mark.parametrize("row", [{"label": "\udc80"}, {"session_id": "a\udc80b"},
+                                 {"principal": "x\ud800"}, {"method": "\udfff"}])
+def test_a_lone_surrogate_in_the_list_is_a_refusal(daemon, capsys, row):
+    daemon["answer"] = (200, {"operator": True, "sessions": [{"session_id": "s-1"}, row]})
+    assert console_cli.main(["--list"], environ=ENV) == 4
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ("pseudolife-mcp console: the daemon's session list had text "
+                            "that cannot be printed (a lone surrogate)\n")
+
+
+def test_a_lone_surrogate_in_the_json_list_still_prints(daemon, capsys):
+    daemon["answer"] = (200, {"operator": True, "sessions": [{"label": "\udc80"}]})
+    assert console_cli.main(["--list", "--json"], environ=ENV) == 0
+    assert json.loads(capsys.readouterr().out)["sessions"] == [{"label": "\udc80"}]
+
+
+def test_an_answer_nested_past_the_parsers_limit_is_no_json(monkeypatch):
+    import io
+
+    class Reply(io.BytesIO):
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    class Opener:
+        def open(self, req, timeout):
+            return Reply(b"[" * 100000 + b"]" * 100000)
+
+    monkeypatch.setattr(console_cli, "_opener", lambda: Opener())
+    assert console_cli.request("http://127.0.0.1:1", "/api/console/sessions", TOKEN) == (
+        200, None)
+
+
+def test_a_reply_that_is_not_http_is_a_refusal(daemon, capsys):
+    import http.client
+    daemon["answer"] = http.client.BadStatusLine("garbage")
+    assert console_cli.main(["--list"], environ=ENV) == 4
+    assert capsys.readouterr().err == (
+        "pseudolife-mcp console: the daemon's reply at http://127.0.0.1:8765 was not "
+        "readable HTTP (BadStatusLine)\n")
+    daemon["answer"] = http.client.IncompleteRead(b"x")
+    assert console_cli.main(["--list", "--json"], environ=ENV) == 4
+    assert json.loads(capsys.readouterr().out) == {
+        "state": "refused", "error": "bad_reply",
+        "detail": "the daemon's reply at http://127.0.0.1:8765 was not readable HTTP "
+                  "(IncompleteRead)"}
+
+
+# -- the link handed to the browser ------------------------------------------------
+
+@pytest.mark.parametrize("tail", [
+    "ABCD&calc", "ABCD|calc", "ABCD^calc", 'ABCD"calc', "ABCD%PATH%", "ABCD>out", "ABCD<in",
+    "ABCD(x)", "ABCD!x!", "abcd", "ABCI", "ABCL", "ABCO", "ABCU", "", "ABCD&to=Board",
+    "ABCD&to=board&x", "ABCD&to=", "ABCD٠", "ABCD#x", "ABCD?x", "ABCD/x",
+])
+def test_a_link_holding_more_than_a_code_is_refused(tail):
+    origin = "http://127.0.0.1:8765"
+    assert not console_cli.link_is_safe(f"{origin}/ui/#/signin?code={tail}", origin, "board")
+
+
+@pytest.mark.parametrize("origin", [
+    "http://a&calc:8765", "http://a|b", "http://a^b", 'http://a"b', "http://a%25b",
+    "http://[fe80::1%25eth0]:8765", "http://é.example", "http://a!b", "http://a$b",
+    "http://a'b", "http://a(b)", "http://a*b", "http://a,b", "http://a;b", "http://a=b",
+    "http://a<b", "http://a>b", "http://a`b", "http://a{b}",
+])
+def test_an_origin_holding_a_shell_character_is_refused(origin):
+    normalized = console_cli.normalize_origin(origin)
+    assert normalized is not None, origin  # normalize_origin alone lets it through
+    assert not console_cli.link_is_safe(f"{normalized}/ui/#/signin?code=ABCD", origin)
+
+
+@pytest.mark.parametrize("origin,to", [
+    ("http://127.0.0.1:8765", None), ("http://localhost:8765", None),
+    ("http://[::1]:8765", None), ("https://console.example.com", None),
+    ("HTTPS://Console.Example.COM:443/", None), ("https://my_host.example:8443", "board"),
+    ("http://127.0.0.1:8765", "a-b-1"), ("http://[::ffff:127.0.0.1]:8765", None),
+])
+def test_a_real_link_is_safe(origin, to):
+    stored = console_cli.normalize_origin(origin)
+    suffix = f"&to={to}" if to else ""
+    for code in ("0123-4567-89AB", "CDEF-GHJK-MNPQ", "RSTV-WXYZ-0000"):
+        assert console_cli.link_is_safe(f"{stored}/ui/#/signin?code={code}{suffix}", origin, to)
+
+
+def test_a_page_in_the_link_must_be_the_one_asked_for():
+    origin = "http://127.0.0.1:8765"
+    url = f"{origin}/ui/#/signin?code=ABCD&to=board"
+    assert console_cli.link_is_safe(url, origin, "board")
+    assert not console_cli.link_is_safe(url, origin, None)
+    assert not console_cli.link_is_safe(url, origin, "settings")
+    # An older daemon that ignores the page answers without it.
+    assert console_cli.link_is_safe(f"{origin}/ui/#/signin?code=ABCD", origin, "board")
+
+
+def test_the_code_alphabet_is_the_daemons():
+    from pseudolife_memory.principals import PAIRING_CODE_ALPHABET
+    assert console_cli._CODE_CHARS == PAIRING_CODE_ALPHABET + "-"
+
+
+def test_to_board_is_signed_in_with_the_daemons_link(daemon):
+    daemon["answer"] = (200, {**LINK, "url": LINK["url"] + "&to=board"})
+    assert console_cli.main(["--to", "board"], environ=ENV) == 0
+    assert daemon["opened"] == [LINK["url"] + "&to=board"]
+
+
+def test_a_page_the_command_did_not_ask_for_is_refused(daemon, capsys):
+    daemon["answer"] = (200, {**LINK, "url": LINK["url"] + "&to=board"})
+    assert console_cli.main([], environ=ENV) == 4
+    assert daemon["opened"] == []
+    assert "no sign-in link" in capsys.readouterr().err
+
+
+@pytest.mark.skipif(console_cli.sys.platform != "win32", reason="cmd.exe runs a batch file")
+def test_a_batch_file_browser_never_sees_a_shell_character(daemon, monkeypatch, tmp_path):
+    """A BROWSER naming a .cmd file starts it through cmd.exe, which reads
+    ``&`` in the URL as a second command. The fake daemon's answer holds
+    one; the real ``open_browser`` runs, against a stand-in batch file."""
+    import time
+    import webbrowser
+    standin = tmp_path / "browser.cmd"
+    standin.write_text('@echo off\r\necho %*>"%~dp0argv.txt"\r\n', encoding="ascii")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("BROWSER", f"'{standin}' %s &")
+    monkeypatch.setattr(webbrowser, "_tryorder", None)
+    monkeypatch.setattr(webbrowser, "_browsers", {})
+    controller = webbrowser.get()
+    # Nothing but the stand-in can start.
+    assert type(controller) is webbrowser.BackgroundBrowser
+    assert controller.name == str(standin) and controller.args == ["%s"]
+    monkeypatch.setattr(console_cli, "open_browser", _REAL_OPEN)
+    daemon["answer"] = (200, {**LINK, "url": LINK["url"] + "&echo.>injected"})
+    assert console_cli.main([], environ=ENV) == 4
+    time.sleep(1.0)
+    assert not (tmp_path / "injected").exists() and not (tmp_path / "argv.txt").exists()
