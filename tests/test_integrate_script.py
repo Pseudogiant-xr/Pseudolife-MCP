@@ -3519,3 +3519,36 @@ def test_open_refuses_a_contained_member_whose_label_was_removed(world, capsys):
     err = capsys.readouterr().err
     assert "#10" in err and "freeze-exception" in err
     assert not world.gh.bodies("create")
+
+
+def test_a_ready_child_carrying_a_waiting_parents_python_change_is_left_out(world, capsys):
+    # Security review of the stacked-member rule: the parent is listed but
+    # not ready (its CI is failing), so it never merges; its unlabelled
+    # Python change must not land under its ready, labelled child.
+    sha10 = world.pr(10, {"pseudolife_memory/core.py": "parent\n"})
+    sha11 = world.pr(11, {"c.txt": "c\n"}, base="pr-10")
+    world.gh.add(10, sha10, labeled_at="2026-11-14T00:00:01Z",
+                 statusCheckRollup=[{"status": "COMPLETED", "conclusion": "FAILURE"}])
+    world.gh.add(11, sha11, labeled_at="2026-11-14T00:00:02Z", labels=[{"name": "freeze-exception"}])
+
+    assert _build() == 0, capsys.readouterr()
+
+    out = capsys.readouterr().out
+    assert "merged #11 " not in out and "carries #10's change to the frozen Python package" in out, out
+    assert not (world.work / "pseudolife_memory" / "core.py").exists()
+
+
+def test_a_second_cut_is_still_batched_alone_when_the_first_leaves_a_fragment_unfolded(world, capsys):
+    world.advance_master({"pyproject.toml": _cut("0.19.0"), FRAGMENT_A: "### Added (a)\n"})
+    sha10 = _fold_cut(world, 10, "0.19.1")                       # folds nothing
+    sha11 = _fold_cut(world, 11, "0.20.0", fold=(FRAGMENT_A,))
+    sha12 = world.pr(12, {"b.txt": "b\n"})
+    world.gh.add(10, sha10, labeled_at="2026-10-19T09:00:00Z")
+    world.gh.add(11, sha11, labeled_at="2026-10-19T09:10:00Z")
+    world.gh.add(12, sha12, labeled_at="2026-10-19T09:20:00Z")
+
+    assert _build() == 0, capsys.readouterr()
+
+    out = capsys.readouterr().out
+    assert "merged #10 " not in out and "merged #11 " in out and "merged #12 " not in out, out
+    assert "#11 is a release cut; it is batched alone" in out

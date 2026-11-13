@@ -1081,7 +1081,8 @@ def _release_cut_alone(plan: Plan, members: list[Member]) -> list[Member]:
                       "rerun the cut's pinned tests, then re-apply the label")
             plan.dropped.append(Dropped(m, reason))
             print(f"  dropped #{m.number}: {reason}")
-            return [other for other in members if other is not m]
+            # Another cut among the rest is still batched alone.
+            return _release_cut_alone(plan, [other for other in members if other is not m])
         for other in members:
             if other is not m:
                 plan.dropped.append(Dropped(
@@ -1485,13 +1486,12 @@ def _own_frozen_refusal(freeze, base_sha: str, m: Member, labels) -> str | None:
 
 def _merge_members(plan: Plan, members: list[Member]) -> None:
     freeze = _freeze_module(plan.base_sha, members)
-    # Every ready member's own change is judged before anything merges, so a
-    # member whose head carries a refused one (a stacked child) is left out
-    # too, whichever order they were labelled in.
+    # Every listed member's own change is judged before anything merges,
+    # ready or not, so a member whose head carries a refused one (a stacked
+    # child over a parent still waiting on its CI, say) is left out too,
+    # whichever order they were labelled in.
     own: dict[str, tuple[Member, str]] = {}
     for m in members:
-        if _not_ready(m):
-            continue
         if git("cat-file", "-e", f"{m.sha}^{{commit}}", check=False).returncode != 0:
             git("fetch", "-q", REMOTE, f"pull/{m.number}/head", check=False)
         refused = _own_frozen_refusal(freeze, plan.base_sha, m, m.labels)
